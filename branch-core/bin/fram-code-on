@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# ============================================================================
+# fram-code-on — build and serve a native code corpus for a directory.
+#   fram-code-on <dir> [port] --space-id <id> [--src <subdir>]
+# --src scopes ingest+corpus to the SOURCE subtree (default: <dir>) while .fram/
+# and .mcp.json stay at <dir> — repos whose tree also holds build artifacts /
+# vendored copies (gjoa: gitignored engine/ mirrors src/) must not ingest those.
+# Does the whole incantation in one shot:
+#   1. ingest <dir> -> .fram/code.log (native FRAMLOG)
+#   2. boot the native server on that log
+#   3. wire the public Fram data MCP to that SpaceId
+# Graph-control authoring is a separate sealed service and is not enabled here.
+# Turn OFF: fram-code-off <dir>  (stops the server; remove .mcp.json).
+# ============================================================================
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"          # fram repo root
+BEAGLE_HOME="${BEAGLE_HOME:-$HOME/code/beagle/main}"
+BEAGLE_HOME="$(cd "$BEAGLE_HOME" && pwd)"
+DIR="${1:?usage: fram-code-on <dir> [port] --space-id <id> [--src <subdir>]}"; DIR="$(cd "$DIR" && pwd)"; shift
+PORT="" SRC="$DIR" SPACE_ID=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --src) SRC="${2:?--src needs a dir}"; shift 2;;
+    --space-id) SPACE_ID="${2:?--space-id needs an id}"; shift 2;;
+    --*) echo "fram-code-on: unknown option $1" >&2; exit 2;;
+    *)
+      if [[ -n "$PORT" ]]; then
+        echo "fram-code-on: unexpected argument $1" >&2
+        exit 2
+      fi
+      PORT="$1"; shift;;
+  esac
+done
+[[ -n "$SPACE_ID" ]] || {
+  echo "fram-code-on: --space-id is required and must be nonempty" >&2
+  exit 2
+}
+SRC="$(cd "$SRC" && pwd)"
+PORT="${PORT:-$(( (RANDOM % 20000) + 30000 ))}"
+CODE_LOG="$DIR/.fram/code.log"
+mkdir -p "$DIR/.fram"
+
+echo "fram-code-on: $DIR (space $SPACE_ID; port $PORT; src $SRC)"
+
+native_status_line() {
+  FRAM_SERVER_PORT="$PORT" FRAM_SPACE_ID="$SPACE_ID" FRAM_LOG="$CODE_LOG" \
+    timeout 5 "$HERE/bin/fram" status 2>/dev/null
+}
+
+verify_native_server() {
+  local status
+  status="$(native_status_line || true)"
+  if [[ ! "$status" =~ ^up\|[0-9]+\|[0-9]+\|ready\|jvm$ ]]; then
+    echo "        native :rpc/status check FAILED: ${status:-no native response}" >&2
+    echo "        expected SpaceId $SPACE_ID on :$PORT" >&2
+    return 1
+  fi
+  printf '%s\n' "$status"
+}
+
+# 1. ingest the code into propositions (deterministic, no LLM) — recurse for any live Beagle source.
+#    The parsed AST is target-independent, so ingest is too.
+#    fram-ingest-code is non-recursive, so we find + feed it every Beagle file here.
+#
+#    EXCLUDE docs/private/, vendored copies, tests, and fuzz repros: none are
+#    members of the authoring corpus.
+if pgrep -f "server.clj serve [0-9]+ $CODE_LOG( |$)" >/dev/null 2>&1; then
+  echo "fram-code-on: a server already owns $CODE_LOG; run fram-code-off first" >&2
+  exit 1
+fi
+if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
+  echo "fram-code-on: port $PORT is already in use" >&2
+  exit 1
+fi
+
+echo "  [1/3] ingesting code -> native FRAMLOG …"
+mapfile -t SRCS < <(find "$SRC" -regextype posix-extended -regex '.*\.b(clj|js|nix|gl)$' -not -path '*/.fram/*' -not -path '*/docs/private/*' -not -path '*/test/*' -not -path '*/tests/*' | sort)
+[ "${#SRCS[@]}" -eq 0 ] && { echo "        no live Beagle source under $SRC"; exit 1; }
+( cd "$HERE" && BEAGLE_HOME="$BEAGLE_HOME" bin/fram-ingest-code "${SRCS[@]}" \
+    --root "$SRC" --out "$CODE_LOG" --space-id "$SPACE_ID" ) \
+  && echo "        ${#SRCS[@]} module transactions -> $CODE_LOG"
+
+# 1b. resolve AST -> reference graph (corpus) for REASONING. code.log is the editing
+#     AST (tree); the corpus is the resolved who-calls/blast-radius GRAPH (callgraph needs it).
+CORPUS="$DIR/.fram/corpus.facts"
+echo "  [1b]  resolving -> reference graph (for who-calls/blast-radius) …"
+( cd "$HERE/codegraph" && BEAGLE_HOME="$BEAGLE_HOME" bin/emit-corpus "$SRC" "$CORPUS" >/dev/null 2>&1 ) \
+  && echo "        corpus: $(wc -l <"$CORPUS" 2>/dev/null) reference rows -> $CORPUS" \
+  || echo "        (reference corpus skipped — native AST corpus is still available)"
+
+# 2. boot the native server (detached — survives this shell)
+echo "  [2/3] booting native server on :$PORT …"
+( cd "$HERE" && exec env -u FRAM_TELEMETRY_LOG \
+  BEAGLE_HOME="$BEAGLE_HOME" \
+  setsid nohup bin/fram-server serve "$PORT" "$CODE_LOG" "$SPACE_ID" \
+    >"$DIR/.fram/server-$PORT.log" 2>&1 ) &
+SERVER_PID=$!
+for _ in $(seq 1 2400); do
+  sleep 0.5
+  grep -q "listening on" "$DIR/.fram/server-$PORT.log" 2>/dev/null && break
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "        FAILED to boot — server exited; see $DIR/.fram/server-$PORT.log" >&2
+    tail -n 8 "$DIR/.fram/server-$PORT.log" >&2 || true
+    exit 1
+  fi
+done
+if grep -q "listening on" "$DIR/.fram/server-$PORT.log" 2>/dev/null; then
+  if NATIVE_STATUS="$(verify_native_server)"; then
+    echo "        server up ($NATIVE_STATUS)"
+  else
+    kill "$SERVER_PID" 2>/dev/null || true
+    exit 1
+  fi
+else
+  echo "        FAILED to boot — see $DIR/.fram/server-$PORT.log"
+  kill "$SERVER_PID" 2>/dev/null || true
+  exit 1
+fi
+
+# 3. write .mcp.json (Claude Code) + .codex/config.toml [mcp_servers.fram] (Codex)
+#    so BOTH pick up the public Fram data MCP for this corpus. MERGE, never clobber —
+#    an existing .mcp.json / config.toml may carry unrelated servers/projects.
+echo "  [3/3] wiring $DIR/.mcp.json + $DIR/.codex/config.toml …"
+FRAM_SERVER_JSON=$(cat <<JSON
+{
+  "command": "$HERE/bin/fram-mcp",
+  "args": [],
+  "env": {
+    "FRAM_SPACE_ID": "$SPACE_ID",
+    "FRAM_SERVER_PORT": "$PORT",
+    "FRAM_SERVER_READ_TIMEOUT_MS": "180000",
+    "FRAM_LOG": "$CODE_LOG"
+  }
+}
+JSON
+)
+"$HERE/bin/fram-code-wire" on "$DIR" "$FRAM_SERVER_JSON"
+
+# The transport wiring and server boot are separate steps. Prove the
+# user-visible native stack is complete before reporting success. Level 3 stays
+# reserved for the separate graph-control plane.
+STACK_STATUS="$("$HERE/bin/fram-code-status" "$DIR")"
+if [[ ! "$STACK_STATUS" =~ ^level=2\  ]] || \
+   [[ "$STACK_STATUS" != *"mcp=present space=$SPACE_ID port=$PORT server=alive"* ]] || \
+   ! grep -q '^\[mcp_servers\.fram\]$' "$DIR/.codex/config.toml"; then
+  echo "fram-code-on: FAILED final native stack postcondition: $STACK_STATUS" >&2
+  exit 1
+fi
+
+cat <<EOF
+
+=== NATIVE CODE CORPUS ON ===
+FRAMLOG + server: $NATIVE_STATUS
+The public Fram data MCP is wired to SpaceId $SPACE_ID.
+Graph-control authoring is not enabled here; that is the separate N2.6b seam.
+Reason over the code graph (blast-radius / who-calls), any time:
+  bb -cp $HERE/out $HERE/out/callgraph.clj $CORPUS
+Or race it vs grep on any function:
+  $HERE/../after-text/experiments/authoring-bakeoff/race/reason-race.sh <fn>
+Turn OFF: $HERE/bin/fram-code-off $DIR
+EOF

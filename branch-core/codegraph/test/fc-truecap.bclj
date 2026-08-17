@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fc.truecap)
+(def src Int 5)
+(defn f [(pair Any)] Int
+  (let [[[dst b] {:keys [c]}] pair]
+    (+ dst src)))

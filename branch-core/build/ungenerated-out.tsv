@@ -1,0 +1,10 @@
+# Committed out/ files that build.sh does NOT generate, and why.
+#
+# A file listed here is hand-maintained: out/ is its authority, no source
+# regenerates it, and editing src/ will not change it. build.sh prints this
+# list on every run so a green build is never read as "out/ is in sync".
+# Every committed out/*.clj must appear here or in generated-targets.d/;
+# build.sh fails when one appears in neither.
+#
+# path	reason
+out/resolve.clj	hand-written babashka entrypoint (has its own shebang); no src/ source exists

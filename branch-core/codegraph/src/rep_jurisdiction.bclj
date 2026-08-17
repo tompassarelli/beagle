@@ -1,0 +1,173 @@
+#lang beagle/clj
+
+;; ============================================================================
+;; rep_jurisdiction — the compiler's REPRESENTATION JUDGMENT as a queryable fact.
+;; ============================================================================
+;; Beagle's emit-js decides, per allocation site, native-JS-coll vs $$bc HAMT.
+;; Today that judgment escapes only as a per-MODULE comment (// collection-rep).
+;; A per-DEF CNF fact projection carries it instead:
+;;
+;;   [<id> "form-kind" "rep-def"]  [<id> "name" "<def>"]
+;;   [<id> "rep-regime" "native"|"hamt"|"mixed"]
+;;   [<id> "native-sites" N] [<id> "hamt-sites" M] [<id> "module" "<ns>"]
+;;
+;; This loads that stream into a REAL Fram store and answers jurisdiction queries
+;; the grep-the-comment incumbent structurally CANNOT:
+;;
+;;   Q1. Which defs ship the HAMT (pull persistent runtime)?      — a regime filter
+;;   Q2. Which defs are 100% native (zero persistent-runtime cost)?
+;;   Q3. Which defs are MIXED (a rep boundary lives inside them)?
+;;   Q4. CROSS-MODULE BLAST: which defs transitively CALL a HAMT-shipping def?
+;;       (join rep-regime against the scope-correct call graph — the payoff a
+;;        per-module comment can't reach: "who is downstream of the HAMT?")
+;;
+;; Run:
+;;   bb -cp ~/code/fram/out:~/code/fram -m rep-jurisdiction <rep.facts> [<callgraph.facts>]
+;;
+;; <rep.facts>       : a per-def rep-fact stream (see the shape above)
+;; <callgraph.facts> : OPTIONAL — output of `beagle-facts <src>...`; when given,
+;;                      Q4 derives the transitive HAMT blast radius over the call graph.
+;; ============================================================================
+(ns rep-jurisdiction)
+
+(require fram.store :as c)
+
+(require fram.datalog :as d)
+
+(require fram.types :as t)
+
+(require callgraph :as cg)
+
+(require clojure.edn :as edn)
+
+(require clojure.string :as str)
+
+(def space-id String "codegraph")
+
+(def regime-pred String "rep-regime")
+
+(def calls-pred String "calls")
+
+(def hamt-pred String "ships-hamt")
+
+(def hamt-mark String "yes")
+
+(defn parse-rep-blocks [(path String)] (Vec (Map Keyword Any))
+  (let [lines (str/split-lines (slurp path)) acc (reduce (fn
+                                                           [(st (Map Keyword Any))
+                                                            (l String)]
+                                                           (Map Keyword Any)
+                                                           (if (str/starts-with? l "@file ") {:cur {:file (subs l 6) :triples []} :out (if (empty? (get st :cur)) (get st :out) (conj (vec (get st :out)) (get st :cur)))} (if (str/starts-with? l "[") (assoc st :cur (assoc (get st :cur) :triples (conj (vec (get (get st :cur) :triples)) (edn/read-string l)))) st))) {:cur {} :out []} lines)]
+    (if (empty? (get acc :cur))
+      (vec (get acc :out))
+      (conj (vec (get acc :out)) (get acc :cur)))))
+
+(defn block->defs [(block (Map Keyword Any))] (Vec (Map Keyword Any))
+  (let [ts (vec (get block :triples)) by-subj (group-by (fn [(t Any)] Any (nth t 0)) ts) ms (mapv (fn
+                                                                                                    [(s Any)]
+                                                                                                    (Map Any Any)
+                                                                                                    (into {} (mapv (fn
+                                                                                                                     [(t Any)]
+                                                                                                                     (Vec Any)
+                                                                                                                     [(nth t 1) (nth t 2)]) (vec (get by-subj s))))) (vec (keys by-subj)))]
+    (mapv (fn [(m (Map Any Any))] (Map Keyword Any) {:name (get m "name") :regime (get m "rep-regime") :native (get m "native-sites") :hamt (get m "hamt-sites") :module (get m "module")})
+      (filterv (fn [(m (Map Any Any))] Bool (= "rep-def" (get m "form-kind")))
+        ms))))
+
+;; A def's NAME is its node term: the kernel takes any Atom, so the identity a
+;; query answers with is the identity the corpus already names.
+(defn regime-operations [(rep-defs (Vec (Map Keyword Any)))] (Vec Any)
+  (mapv (fn [(dd (Map Keyword Any))] Any
+          (c/assert-operation (t/triple (get dd :name) regime-pred (get dd :regime))))
+    (filterv (fn [(dd (Map Keyword Any))] Bool
+               (and (not (nil? (get dd :name))) (not (nil? (get dd :regime)))))
+      rep-defs)))
+
+(defn defs-with-regime [(ctx Any) (reg String)] (Vec Any)
+  (vec (sort (mapv (fn [(p Any)] Any (t/triple-t1 p))
+               (filterv (fn [(p Any)] Bool
+                          (and (= regime-pred (t/triple-t2 p)) (= reg (t/triple-t3 p))))
+                 (c/live-propositions ctx))))))
+
+(defn q4! [(rep-defs (Vec (Map Keyword Any))) (cg-path String)] Nil
+  (let [(cg-blocks (Vec Any)) (cg/parse-corpus! cg-path)
+        (graph (Map Keyword Any)) (cg/build-graph cg-blocks)
+        (defns (Vec Any)) (vec (get graph :defns))
+        (edges (Vec Any)) (vec (get graph :edges))
+        (key->name (Map Any Any)) (into {} (mapv (fn [(dd Any)] (Vec Any)
+                                                  [(get dd :key) (get dd :name)]) defns))
+        (name-edges (Vec Any)) (vec (distinct (filterv (fn [(x Any)] Bool (not (nil? x)))
+                                               (mapv (fn [(e Any)] Any
+                                                       (let [an (get key->name (nth e 0))
+                                                             bn (get key->name (nth e 1))]
+                                                         (if (and (not (nil? an)) (not (nil? bn)))
+                                                           [an bn]
+                                                           nil)))
+                                                 edges))))
+        (hamt-names (Set Any)) (set (mapv (fn [(dd Any)] Any (get dd :name))
+                                    (filterv (fn [(dd Any)] Bool
+                                               (and (not (nil? (get dd :name)))
+                                                 (contains? #{"mixed" "hamt"} (get dd :regime))))
+                                      rep-defs)))
+        (gctx Any) (c/new-term-store space-id)
+        (operations (Vec Any)) (vec (concat (mapv (fn [(e Any)] Any
+                                                   (c/assert-operation
+                                                     (t/triple (nth e 0) calls-pred (nth e 1))))
+                                             name-edges)
+                                     (mapv (fn [(nm Any)] Any
+                                             (c/assert-operation
+                                               (t/triple nm hamt-pred hamt-mark)))
+                                       (vec hamt-names))))
+        (_load Any) (when (pos? (count operations)) (c/commit-transaction! gctx operations))
+        (db Any) (d/run-rules! (c/live-propositions gctx)
+                  [(d/rule "forces"
+                     [(d/variable "x")]
+                     [(d/relation-literal d/triple-relation
+                        [(d/variable "x") (d/constant calls-pred) (d/variable "y")])
+                      (d/relation-literal d/triple-relation
+                        [(d/variable "y") (d/constant hamt-pred) (d/constant hamt-mark)])])
+                   (d/rule "forces"
+                     [(d/variable "x")]
+                     [(d/relation-literal d/triple-relation
+                        [(d/variable "x") (d/constant calls-pred) (d/variable "y")])
+                      (d/relation-literal "forces" [(d/variable "y")])])])
+        (forced (Vec Any)) (vec (distinct (vec (sort (filterv (fn [(x Any)] Bool (not (nil? x)))
+                                                      (mapv (fn [(row Any)] Any (nth row 0))
+                                                        (d/facts db "forces")))))))]
+    (if (pos? (count forced))
+      (doseq [nm forced] (println "  forces-HAMT" nm))
+      (println "  (no caller transitively reaches a HAMT def in this corpus)"))
+    (println (format "\nHAMT-shipping defs: %d ; defs that FORCE a HAMT downstream: %d" (count hamt-names) (count forced)))
+    (println "  ^ THIS is the query grep-the-comment cannot answer: the comment is")
+    (println "    per-module and disconnected from the call graph; the fact is a")
+    (println "    graph node you JOIN against scope-correct edges — blast radius of a")
+    (println "    rep decision, across module boundaries, in one fixpoint.")))
+
+(defn -main [& args] Nil
+  (let [argv (vec args) rep-path (str (nth argv 0)) cg-path (if (> (count argv) 1) (str (nth argv 1)) nil) blocks (parse-rep-blocks rep-path) rep-defs (vec (mapcat (fn
+                                                                                                                                                                      [(b (Map Keyword Any))]
+                                                                                                                                                                      (Vec Any)
+                                                                                                                                                                      (block->defs b)) blocks))]
+    (println "================ REP JURISDICTION — compiler judgment as facts =================")
+    (println "rep corpus:" rep-path)
+    (println "rep-def facts:"
+      (count rep-defs)
+      " across"
+      (count (distinct (mapv (fn [(dd Any)] Any (get dd :module)) rep-defs)))
+      "module(s)")
+    (let [(ctx Any) (c/new-term-store space-id)
+          (operations (Vec Any)) (regime-operations rep-defs)
+          (_load Any) (when (pos? (count operations)) (c/commit-transaction! ctx operations))]
+      (println "\n---- Q1. defs that SHIP THE HAMT (pull persistent runtime) ----")
+      (doseq [nm (defs-with-regime ctx "hamt")]
+        (println "  HAMT  " nm))
+      (println "\n---- Q2. defs that are 100% NATIVE (zero persistent runtime) ----")
+      (doseq [nm (defs-with-regime ctx "native")]
+        (println "  native" nm))
+      (println "\n---- Q3. defs that are MIXED (a rep boundary lives inside) ----")
+      (doseq [nm (defs-with-regime ctx "mixed")]
+        (println "  mixed " nm)))
+    (if (nil? cg-path)
+      nil
+      (let [_h1 (println "\n---- Q4. transitive HAMT blast: defs DOWNSTREAM of any HAMT/mixed def ----") _h2 (println "(scope-correct call graph; a caller \"forces\" a HAMT if it reaches one)")]
+        (q4! rep-defs (str cg-path))))))

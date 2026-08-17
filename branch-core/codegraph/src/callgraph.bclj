@@ -1,0 +1,164 @@
+#lang beagle/clj
+
+;; ============================================================================
+;; callgraph — the SCOPE-CORRECT call-graph engine (Layer 2, on Fram).
+;; ============================================================================
+;; Derives the scope-correct call graph of a beagle source tree from its CNF
+;; fact projection, with the transitive blast radius computed by Fram Datalog.
+;; A call binds the defn in its OWN module (module-local lexical scope; else a
+;; unique global; else ambiguous/external -> dropped), so same-named functions
+;; across modules never collide — the failure mode of bare-symbol text matching.
+;;
+;; This is the CNF-projection call-graph core, used by codegraph.bclj's gjoa BENCHMARK.
+;; LIMITATION: the CNF projection (beagle-facts) does not emit require/:as info, so a
+;; QUALIFIED cross-module call (a/f, fully-qualified m/f) cannot be resolved here and is
+;; dropped (under-counting cross-module blast). The PRODUCTION call graph (beagle-callgraph
+;; / cascade) does NOT use this — it derives the graph from resolve.clj's converged
+;; `refers_to` (the `callgraph` mode), which resolves qualified cross-module calls correctly.
+;; This module remains for the gjoa CNF benchmark (mostly unqualified) where its scope-
+;; correct-vs-bare-symbol point still holds; reprojecting gjoa to the AST is a follow-up.
+;; Requirable as a library; runnable as a CLI:
+;;
+;;   bb -cp <fram/out>:<fram-root> -m callgraph <facts-file>   ; -> JSON on stdout
+;;
+;; NOTE: the fact stream's Racket ~s escapes (\e, \a, ...) are EDN-unreadable in a few
+;; LEAF literal objects (never the call-graph predicates name/calls/child/form-kind), so
+;; parse-corpus skips-and-counts them; the call graph is unaffected.
+;; ============================================================================
+(ns callgraph)
+
+(require clojure.edn :as edn)
+
+(require clojure.string :as str)
+
+(require cheshire.core :as json)
+
+(require resolve :as rsv)
+
+(defn parse-corpus! [(path String)] (Vec (Map Keyword Any))
+  (let [(skips (Atom Int)) (atom 0) (lines (Vec String)) (str/split-lines (slurp path)) (acc (Map Keyword Any)) (reduce (fn
+                                                                                                                          [(st (Map Keyword Any))
+                                                                                                                           (l String)]
+                                                                                                                          (Map Keyword Any)
+                                                                                                                          (if (str/starts-with? l "@file ") {:cur {:file (subs l 6) :triples []} :out (if (empty? (get st :cur)) (get st :out) (conj (vec (get st :out)) (get st :cur)))} (if (str/starts-with? l "[") (let [t (try (edn/read-string l) (catch (e Exception) nil))] (if (nil? t) (let [_ (swap! skips (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                        [(n Int)]
+                                                                                                                                                                                                                                                                                                                                                                                                                        Int
+                                                                                                                                                                                                                                                                                                                                                                                                                        (inc n)))] st) (assoc st :cur (assoc (get st :cur) :triples (conj (vec (get (get st :cur) :triples)) t))))) st))) {:cur {} :out []} lines) (blocks (Vec (Map Keyword Any))) (if (empty? (get acc :cur)) (vec (get acc :out)) (conj (vec (get acc :out)) (get acc :cur)))]
+    (if (pos? (deref skips))
+      (binding [*out* *err*]
+        (println "  (skipped" (deref skips) "EDN-unparseable leaf literals)"))
+      nil)
+    (vec blocks)))
+
+(defn index-by [(pred String) (triples (Vec Any))] (Map Any Any)
+  (reduce (fn [(m (Map Any Any)) (t Any)] (Map Any Any) (if (= pred (nth t 1)) (assoc m (nth t 0) (nth t 2)) m))
+    {}
+    triples))
+
+(defn module-of [(file String)] String
+  (let [parts (str/split file (re-pattern "/"))]
+    (str/replace (str (nth parts (dec (count parts))))
+      (re-pattern "\\.[^.]+$")
+      "")))
+
+(defn derive-block [(block (Map Keyword Any))] (Map Keyword Any)
+  (let [ts (vec (get block :triples)) file (str (get block :file)) fk (index-by "form-kind" ts) names (index-by "name" ts) calls (index-by "calls" ts) kids (reduce (fn
+                                                                                                                                                                      [(m (Map Any Any))
+                                                                                                                                                                       (t Any)]
+                                                                                                                                                                      (Map Any Any)
+                                                                                                                                                                      (if (= "child" (nth t 1)) (assoc m (nth t 0) (conj (vec (get m (nth t 0) [])) (nth t 2))) m)) {} ts) childset (reduce (fn
+                                                                                                                                                                                                                                                                                              [(s (Set Any))
+                                                                                                                                                                                                                                                                                               (t Any)]
+                                                                                                                                                                                                                                                                                              (Set Any)
+                                                                                                                                                                                                                                                                                              (if (= "child" (nth t 1)) (conj s (nth t 2)) s)) #{} ts) ordered-keys (vec (sort (set (keys fk)))) roots (filterv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                  [(k Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                  Bool
+                                                                                                                                                                                                                                                                                                                                                                                                                  (not (contains? childset k))) ordered-keys) defns (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                            [(s Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                            (Map Keyword Any)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                            {:key [file s] :name (get names s) :file file :module (module-of file)}) (filterv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                [(s Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                Bool
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                (= "defn" (get fk s))) ordered-keys)) mentions (loop [(stack (Vec (Vec Any))) (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      [(r Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      (Vec Any)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      [r nil]) roots) (ms (Vec Any)) []] (if (empty? stack) ms (let [top (peek stack) st (pop stack) node (nth top 0) cd (nth top 1) cd2 (if (= "defn" (get fk node)) node cd) ms2 (if (and (= "call" (get fk node)) (and (not (nil? cd2)) (not (nil? (get calls node))))) (conj ms [[file cd2] (get calls node)]) ms)] (recur (into st (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                [(k Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                (Vec Any)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                [k cd2]) (vec (get kids node [])))) ms2))))]
+    {:file file :defns defns :mentions mentions}))
+
+(defn resolve-call [(by-name Any) (caller-key (Vec Any)) (callname Any)] Any
+  (let [cands (vec (get by-name callname [])) cfile (nth caller-key 0) same (filterv (fn
+                                                                                       [(d Any)]
+                                                                                       Bool
+                                                                                       (= cfile (nth (get d :key) 0))) cands)]
+    (if (pos? (count same))
+      (get (nth same 0) :key)
+      (if (= 1 (count cands)) (get (nth cands 0) :key) nil))))
+
+(defn build-graph [(blocks (Vec (Map Keyword Any)))] (Map Keyword Any)
+  (let [derived (mapv (fn [(b (Map Keyword Any))] (Map Keyword Any) (derive-block b)) blocks) defns (vec (mapcat (fn
+                                                                                                                   [(d (Map Keyword Any))]
+                                                                                                                   (Vec Any)
+                                                                                                                   (vec (get d :defns))) derived)) by-name (group-by (fn
+                                                                                                                                                                       [(d Any)]
+                                                                                                                                                                       Any
+                                                                                                                                                                       (get d :name)) defns) mentions (vec (mapcat (fn
+                                                                                                                                                                                                                     [(d (Map Keyword Any))]
+                                                                                                                                                                                                                     (Vec Any)
+                                                                                                                                                                                                                     (vec (get d :mentions))) derived)) edges (vec (distinct (filterv (fn
+                                                                                                                                                                                                                                                                                        [(x Any)]
+                                                                                                                                                                                                                                                                                        Bool
+                                                                                                                                                                                                                                                                                        (not (nil? x))) (mapv (fn
+                                                                                                                                                                                                                                                                                                                [(m Any)]
+                                                                                                                                                                                                                                                                                                                Any
+                                                                                                                                                                                                                                                                                                                (let [ck (nth m 0) nm (nth m 1) callee (resolve-call by-name ck nm)] (if (nil? callee) nil (if (not= ck callee) [ck callee] nil)))) mentions))))]
+    {:defns defns :by-name by-name :edges edges}))
+
+(defn key->str [(k Any)] String (str (nth k 0) "#" (nth k 1)))
+
+;; A defn key is a [file leaf] pair, which is not a Term; resolve's closure runs
+;; on Terms, so edges cross that seam in their "<file>#<leaf>" spelling and the
+;; answer is mapped back to keys here — callers never see the wire form. That
+;; mapping is only sound because leaf is an integer, which makes the spelling
+;; injective.
+(defn key-index [(edges Any)] (Map String Any)
+  (reduce (fn [(m (Map String Any)) (e Any)] (Map String Any)
+            (assoc (assoc m (key->str (nth e 0)) (nth e 0))
+              (key->str (nth e 1)) (nth e 1)))
+    {}
+    (vec edges)))
+
+(defn blast-radius [(edges Any)] Any
+  (let [(key-of (Map String Any)) (key-index edges)
+        (closure Any) (rsv/blast-closure
+                       (mapv (fn [(e Any)] (Vec String)
+                               [(key->str (nth e 0)) (key->str (nth e 1))])
+                         (vec edges)))]
+    {:reaches (set (mapv (fn [(r Any)] (Vec Any)
+                           [(get key-of (nth r 0)) (get key-of (nth r 1))])
+                     (vec (get closure :reaches))))
+     :blast (reduce (fn [(m (Map Any Any)) (kv Any)] (Map Any Any)
+                      (assoc m (get key-of (nth kv 0))
+                        (set (mapv (fn [(x Any)] Any (get key-of x)) (vec (nth kv 1))))))
+              {}
+              (vec (get closure :blast)))}))
+
+(defn -main [& args] Nil
+  (let [facts-path (str (nth (vec args) 0)) blocks (parse-corpus! facts-path) graph (build-graph blocks) defns (vec (get graph :defns)) edges (vec (get graph :edges)) closure (blast-radius edges) blast (get closure :blast) reaches (get closure :reaches) defns-out (mapv (fn
+                                                                                                                                                                                                                                                                                [(dd Any)]
+                                                                                                                                                                                                                                                                                (Map Keyword Any)
+                                                                                                                                                                                                                                                                                {:key (key->str (get dd :key)) :file (get dd :file) :module (get dd :module) :name (get dd :name)}) defns) edges-out (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                             [(e Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                             (Vec String)
+                                                                                                                                                                                                                                                                                                                                                                                                             [(key->str (nth e 0)) (key->str (nth e 1))]) edges) blast-out (into {} (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            [(kv Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            (Vec Any)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            [(key->str (nth kv 0)) (mapv (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           [(x Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           String
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           (key->str x)) (vec (nth kv 1)))]) (vec blast)))]
+    (binding [*out* *err*]
+      (println (format "callgraph: %d defns, %d scope-correct edges, %d transitive reaches-pairs (Fram Datalog closure)" (count defns) (count edges) (count reaches))))
+    (println (json/generate-string {:defns defns-out :edges edges-out :blast blast-out}))))

@@ -1,0 +1,942 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semver tag to publish (for example, v0.4.1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fram-release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  # The full native server is built in publish with the pinned Beagle checkout
+  # and musl compiler. This job gates the bb suite, cc-only smokes, and all four
+  # normalized release envelopes before any release can exist.
+  gate:
+    name: Gate the tag, smokes, and reproducible release receipts
+    runs-on: ubuntu-latest
+    env:
+      BEAGLE_HOME: ${{ github.workspace }}/.beagle
+      FRAM_BEAGLE: ${{ github.workspace }}/.beagle/bin/beagle
+      FRAM_SERVER_RUNTIME: jvm-dev
+    steps:
+      - name: Check out the exact release candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
+          fetch-depth: 0
+
+      - name: Bind this gate to the exact release candidate
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RELEASE_TAG" ]]; then
+            [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || {
+              echo "preflight checkout is not the triggering main commit" >&2
+              exit 1
+            }
+            exit 0
+          fi
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "release tag must be vMAJOR.MINOR.PATCH: $RELEASE_TAG" >&2
+            exit 2
+          }
+          [[ "$(git rev-parse HEAD)" == "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" ]] || {
+            echo "checked-out source is not the requested tag commit" >&2
+            exit 1
+          }
+          tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          [[ "$(git cat-file -t "$tag_object")" == tag ]] || {
+            echo "release tag must be an annotated tag object: $RELEASE_TAG" >&2
+            exit 1
+          }
+
+      - name: Verify authored release notes
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$RELEASE_TAG" ]]; then
+            bash scripts/check-release-notes.sh "$RELEASE_TAG"
+            exit 0
+          fi
+          mapfile -d '' notes_files < <(
+            find .github/release-notes -maxdepth 1 -type f \
+              -name 'v[0-9]*.[0-9]*.[0-9]*.md' -print0 | sort -z
+          )
+          [[ "${#notes_files[@]}" -gt 0 ]] || {
+            echo "no authored release notes are committed" >&2
+            exit 1
+          }
+          for notes_file in "${notes_files[@]}"; do
+            notes_tag="$(basename "$notes_file" .md)"
+            bash scripts/check-release-notes.sh "$notes_tag"
+          done
+
+      # The release receipts name beagle-pin.txt's revision, so this job checks
+      # out that exact Beagle and its Racket runtime and proves the pin matches
+      # before any envelope is sealed. This workflow is the whole gate: no other
+      # workflow installs a toolchain for it.
+      - name: Checkout beagle
+        uses: actions/checkout@v4
+        with:
+          repository: tompassarelli/beagle
+          # Pin matches flake.nix's beagle.url rev; keep them in sync.
+          ref: b4f3081420a3be73d730802d2f4608d78d0c6cf4
+          path: .beagle
+
+      - name: Verify the checked-out Beagle compiler pin
+        run: |
+          test "$(cat beagle-pin.txt)" = \
+            "$(git -C "$BEAGLE_HOME" rev-parse 'HEAD^{commit}')"
+
+      - name: Install Racket (Beagle graph-authoring runtime)
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Link checked-out Beagle packages with pinned Racket
+        run: |
+          _BEAGLE_RACKET="$(command -v racket)"
+          export _BEAGLE_RACKET
+          # Link first: sourcing _beagle-racket runs a raco-make gate that
+          # cannot resolve the beagle collection until these links exist.
+          "$(dirname "$_BEAGLE_RACKET")/raco" pkg install --auto --link \
+            "$BEAGLE_HOME/beagle-lib/" \
+            "$BEAGLE_HOME/beagle-test/" \
+            "$BEAGLE_HOME/beagle/"
+          source "$BEAGLE_HOME/bin/_beagle-racket"
+          echo "FRAM_RACKET=$RACKET" >> "$GITHUB_ENV"
+          echo "_BEAGLE_RACKET=$RACKET" >> "$GITHUB_ENV"
+
+      - name: Install babashka
+        run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
+
+      # out/ is committed, so the revision-identity suite needs only babashka.
+      # It runs before the heavier toolchains because it covers the identity
+      # contract this release is named for.
+      - name: Prove branch revision identity
+        run: |
+          bb -cp out tests/framref_codec_test.clj
+          bb -cp out tests/framlog_fork_test.clj
+
+      - name: Install Clojure CLI
+        run: |
+          curl -L -O https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh
+          chmod +x linux-install.sh
+          sudo ./linux-install.sh
+          clojure --version
+
+      - name: Warm JVM deps (cheshire) so the server boots fast
+        run: clojure -P
+
+      - name: Install pinned Bun for the client release gate
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.13
+
+      - name: Verify pinned Bun
+        run: test "$(bun --version)" = "1.3.13"
+
+      - name: Prove the Bun release package and declaration closure
+        run: |
+          bash tests/bun_release_artifact_test.sh
+          bun test tests/bun_package_types_test.mjs
+
+      - name: Prove the Cloudflare release envelopes
+        run: |
+          bash tests/cloudflare_do_release_artifact_test.sh
+          bash tests/cloudflare_wasm_release_artifact_test.sh
+
+      - name: Install static musl compiler for the release receipt gate
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+
+      - name: Prove the normalized native release is cross-workdir reproducible
+        env:
+          CC: musl-gcc
+        run: bash tests/native_release_artifact_test.sh
+
+  publish:
+    name: Publish the tagged release
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    needs: gate
+    runs-on: ubuntu-latest
+    env:
+      BEAGLE_HOME: ${{ github.workspace }}/.beagle
+      FRAM_BEAGLE: ${{ github.workspace }}/.beagle/bin/beagle
+    steps:
+      - name: Check out the requested release tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          fetch-depth: 0
+
+      - name: Bind this run to one immutable release commit
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "release tag must be vMAJOR.MINOR.PATCH: $RELEASE_TAG" >&2
+            exit 2
+          }
+          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          head_commit="$(git rev-parse HEAD)"
+          [[ "$head_commit" == "$tag_commit" ]] || {
+            echo "checked-out source is not the requested tag commit" >&2
+            exit 1
+          }
+          [[ "$(git cat-file -t "$tag_object")" == tag ]] || {
+            echo "release tag must be an annotated tag object: $RELEASE_TAG" >&2
+            exit 1
+          }
+          echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
+          echo "tag-object=$tag_object" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Beagle at FRAM's pinned native compiler revision
+        uses: actions/checkout@v4
+        with:
+          repository: tompassarelli/beagle
+          # Pin matches flake.nix's beagle.url rev; keep them in sync.
+          ref: b4f3081420a3be73d730802d2f4608d78d0c6cf4
+          path: .beagle
+
+      - name: Verify the checked-out Beagle compiler pin
+        run: |
+          test "$(cat beagle-pin.txt)" = \
+            "$(git -C "$BEAGLE_HOME" rev-parse 'HEAD^{commit}')"
+
+      - name: Install Racket for the pinned Beagle compiler
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Link the checked-out Beagle packages
+        run: |
+          _BEAGLE_RACKET="$(command -v racket)"
+          export _BEAGLE_RACKET
+          "$(dirname "$_BEAGLE_RACKET")/raco" pkg install --auto --link \
+            "$BEAGLE_HOME/beagle-lib/" \
+            "$BEAGLE_HOME/beagle-test/" \
+            "$BEAGLE_HOME/beagle/"
+          source "$BEAGLE_HOME/bin/_beagle-racket"
+          echo "FRAM_RACKET=$RACKET" >> "$GITHUB_ENV"
+          echo "_BEAGLE_RACKET=$RACKET" >> "$GITHUB_ENV"
+
+      - name: Install babashka
+        run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
+
+      - name: Install the static musl release compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+
+      - name: Install pinned Bun for the client artifact and shipped FRAMRPC smoke
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.13
+
+      - name: Verify pinned Bun
+        run: test "$(bun --version)" = "1.3.13"
+
+      - name: Install the pinned Nix release toolchain resolver
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+
+      - name: Resolve and authorize the locked Fram development shell
+        run: |
+          set -euo pipefail
+          direnv_root="$(nix build --no-link --print-out-paths \
+            --inputs-from . nixpkgs#direnv)"
+          direnv_bin="$direnv_root/bin/direnv"
+          [[ -x "$direnv_bin" ]]
+          "$direnv_bin" allow "$GITHUB_WORKSPACE"
+          echo "DIRENV_BIN=$direnv_bin" >> "$GITHUB_ENV"
+
+      - name: Prepare two clean release source roots
+        id: source_roots
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+        run: |
+          set -euo pipefail
+          # Nested toolchain checkouts and direnv state make the Actions
+          # workspace unsuitable for packagers whose clean-tree check includes
+          # untracked paths. Both release inputs therefore come from fresh Git
+          # roots, at different path depths, with the exact tag object retained.
+          source_a="$RUNNER_TEMP/fram-release-source-a"
+          source_b="$RUNNER_TEMP/different/depth/fram-release-source-b"
+          mkdir -p "$(dirname "$source_b")"
+          git clone --quiet --no-local "$GITHUB_WORKSPACE" "$source_a"
+          git clone --quiet --no-local "$GITHUB_WORKSPACE" "$source_b"
+          for source_root in "$source_a" "$source_b"; do
+            git -C "$source_root" checkout --quiet --detach "$RELEASE_COMMIT"
+            [[ -z "$(git -C "$source_root" status --porcelain=v1 --untracked-files=all)" ]]
+            [[ "$(git -C "$source_root" rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == \
+              "$RELEASE_COMMIT" ]]
+            [[ "$(git -C "$source_root" rev-parse "refs/tags/$RELEASE_TAG")" == \
+              "$RELEASE_TAG_OBJECT" ]]
+          done
+          echo "first=$source_a" >> "$GITHUB_OUTPUT"
+          echo "second=$source_b" >> "$GITHUB_OUTPUT"
+
+      - name: Build twice and seal the reproducible Bun client package
+        id: bun_client
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+        run: |
+          set -euo pipefail
+          mapfile -t package_files < <(
+            scripts/package-bun-release.sh \
+              --source-root "$GITHUB_WORKSPACE" \
+              --output "$RUNNER_TEMP/fram-bun-release" \
+              --version "$RELEASE_TAG"
+          )
+          [[ "${#package_files[@]}" == 2 ]] || {
+            echo "Bun release packager returned ${#package_files[@]} paths" >&2
+            exit 1
+          }
+
+          second_source="$RUNNER_TEMP/fram-bun-release-source-b"
+          git clone --quiet --no-local "$GITHUB_WORKSPACE" "$second_source"
+          git -C "$second_source" checkout --quiet --detach "$RELEASE_COMMIT"
+          mapfile -t second_package_files < <(
+            scripts/package-bun-release.sh \
+              --source-root "$second_source" \
+              --output "$RUNNER_TEMP/fram-bun-release-b" \
+              --version "$RELEASE_TAG"
+          )
+          [[ "${#second_package_files[@]}" == 2 ]] || {
+            echo "second Bun release packager returned ${#second_package_files[@]} paths" >&2
+            exit 1
+          }
+          cmp -s "${package_files[0]}" "${second_package_files[0]}" || {
+            echo "Bun package archive differs across source workdirs" >&2
+            exit 1
+          }
+          cmp -s "${package_files[1]}" "${second_package_files[1]}" || {
+            echo "Bun package receipt differs across source workdirs" >&2
+            exit 1
+          }
+          grep -Fxq "source-commit $RELEASE_COMMIT" "${package_files[1]}" || {
+            echo "Bun package receipt is not bound to $RELEASE_COMMIT" >&2
+            exit 1
+          }
+          grep -Fxq "release-tag-object $RELEASE_TAG_OBJECT" "${package_files[1]}" || {
+            echo "Bun package receipt is not bound to $RELEASE_TAG_OBJECT" >&2
+            exit 1
+          }
+          echo "archive=${package_files[0]}" >> "$GITHUB_OUTPUT"
+          echo "receipt=${package_files[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Build twice and seal the reproducible Cloudflare adapter package
+        id: cloudflare_do
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+          SOURCE_A: ${{ steps.source_roots.outputs.first }}
+          SOURCE_B: ${{ steps.source_roots.outputs.second }}
+        run: |
+          set -euo pipefail
+          mapfile -t package_files < <(
+            "$SOURCE_A/scripts/package-cloudflare-do-release.sh" \
+              --source-root "$SOURCE_A" \
+              --output "$RUNNER_TEMP/fram-cloudflare-do-release" \
+              --version "$RELEASE_TAG"
+          )
+          mapfile -t second_package_files < <(
+            "$SOURCE_B/scripts/package-cloudflare-do-release.sh" \
+              --source-root "$SOURCE_B" \
+              --output "$RUNNER_TEMP/fram-cloudflare-do-release-b" \
+              --version "$RELEASE_TAG"
+          )
+          [[ "${#package_files[@]}" == 2 && \
+            "${#second_package_files[@]}" == 2 ]] || {
+            echo "Cloudflare adapter packager did not return two files per source" >&2
+            exit 1
+          }
+          cmp -s "${package_files[0]}" "${second_package_files[0]}" || {
+            echo "Cloudflare adapter archive differs across source workdirs" >&2
+            exit 1
+          }
+          cmp -s "${package_files[1]}" "${second_package_files[1]}" || {
+            echo "Cloudflare adapter receipt differs across source workdirs" >&2
+            exit 1
+          }
+          grep -Fxq "source-commit $RELEASE_COMMIT" "${package_files[1]}"
+          grep -Fxq "release-tag $RELEASE_TAG" "${package_files[1]}"
+          grep -Fxq "release-tag-object $RELEASE_TAG_OBJECT" "${package_files[1]}"
+          echo "archive=${package_files[0]}" >> "$GITHUB_OUTPUT"
+          echo "receipt=${package_files[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore content-addressed Cloudflare Wasm build cache
+        id: cloudflare_wasm_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/fram-cloudflare-wasm-cache
+          key: fram-cloudflare-wasm-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+          restore-keys: |
+            fram-cloudflare-wasm-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-
+
+      - name: Build once, verify source identity, and seal the Cloudflare Wasm release
+        id: cloudflare_wasm
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+          SOURCE_A: ${{ steps.source_roots.outputs.first }}
+          SOURCE_B: ${{ steps.source_roots.outputs.second }}
+        run: |
+          set -euo pipefail
+          "$DIRENV_BIN" exec "$GITHUB_WORKSPACE" bash -euo pipefail <<'RELEASE'
+          build_wasm() {
+            local source_root="$1" cache_root="$2"
+            local -a sources
+            mapfile -t sources < <(
+              sed "s#^#$source_root/#" "$source_root/native/core_closure_sources.txt"
+            )
+            [[ "${#sources[@]}" -gt 0 ]] || {
+              echo "$source_root/native/core_closure_sources.txt is empty" >&2
+              return 1
+            }
+            FRAM_NATIVE_CACHE="$cache_root" \
+              "$source_root/bin/fram-native-build" \
+                --host wasm-embed --abi wasm32 "${sources[@]}"
+          }
+
+          cache="$RUNNER_TEMP/fram-cloudflare-wasm-cache"
+          artifact_a="$(build_wasm "$SOURCE_A" "$cache")"
+          artifact_b="$(build_wasm "$SOURCE_B" "$cache")"
+          [[ "$artifact_b" == "$artifact_a" ]] || {
+            echo "Cloudflare Wasm cache identity differs across source workdirs" >&2
+            exit 1
+          }
+
+          mapfile -t release_files < <(
+            "$SOURCE_A/scripts/package-cloudflare-wasm-release.sh" \
+              --source-root "$SOURCE_A" --artifact "$artifact_a" \
+              --output "$RUNNER_TEMP/fram-cloudflare-wasm-release" \
+              --version "$RELEASE_TAG"
+          )
+          mapfile -t second_release_files < <(
+            "$SOURCE_B/scripts/package-cloudflare-wasm-release.sh" \
+              --source-root "$SOURCE_B" --artifact "$artifact_b" \
+              --output "$RUNNER_TEMP/fram-cloudflare-wasm-release-b" \
+              --version "$RELEASE_TAG"
+          )
+          [[ "${#release_files[@]}" == 2 && \
+            "${#second_release_files[@]}" == 2 ]] || {
+            echo "Cloudflare Wasm packager did not return two files per source" >&2
+            exit 1
+          }
+          cmp -s "${release_files[0]}" "${second_release_files[0]}" || {
+            echo "Cloudflare Wasm archive differs across source workdirs" >&2
+            exit 1
+          }
+          cmp -s "${release_files[1]}" "${second_release_files[1]}" || {
+            echo "Cloudflare Wasm receipt differs across source workdirs" >&2
+            exit 1
+          }
+          grep -Fxq "source-commit $RELEASE_COMMIT" "${release_files[1]}"
+          grep -Fxq "release-tag $RELEASE_TAG" "${release_files[1]}"
+          grep -Fxq "release-tag-object $RELEASE_TAG_OBJECT" "${release_files[1]}"
+          echo "archive=${release_files[0]}" >> "$GITHUB_OUTPUT"
+          echo "receipt=${release_files[1]}" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact_a" >> "$GITHUB_OUTPUT"
+          RELEASE
+
+      - name: Save content-addressed Cloudflare Wasm build cache
+        if: success() && steps.cloudflare_wasm_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/fram-cloudflare-wasm-cache
+          key: fram-cloudflare-wasm-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+
+      - name: Restore content-addressed native build cache
+        id: native_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/fram-native-release-cache
+          key: fram-native-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+          restore-keys: |
+            fram-native-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-
+
+      - name: Build once, verify source identity, and seal the native release archive
+        id: native
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          build_native() {
+            local source_root="$1" cache_root="$2"
+            local -a sources
+            mapfile -t sources < <(
+              sed "s#^#$source_root/#" "$source_root/native/core_closure_sources.txt"
+            )
+            [[ "${#sources[@]}" -gt 0 ]] || {
+              echo "$source_root/native/core_closure_sources.txt is empty" >&2
+              return 1
+            }
+            FRAM_NATIVE_CC="$(command -v musl-gcc)" \
+              FRAM_NATIVE_STATIC=1 \
+              FRAM_NATIVE_CACHE="$cache_root" \
+              "$source_root/bin/fram-native-build" --host server "${sources[@]}"
+          }
+
+          cache="$RUNNER_TEMP/fram-native-release-cache"
+          artifact="$(build_native "$GITHUB_WORKSPACE" "$cache")"
+          mapfile -t release_files < <(
+            scripts/package-native-release.sh \
+              --source-root "$GITHUB_WORKSPACE" \
+              --artifact "$artifact" \
+              --output "$RUNNER_TEMP/fram-native-release" \
+              --version "$RELEASE_TAG" \
+              --target x86_64-linux-musl
+          )
+          [[ "${#release_files[@]}" == 2 ]] || {
+            echo "native release packager returned ${#release_files[@]} paths" >&2
+            exit 1
+          }
+
+          second_source="$RUNNER_TEMP/fram-native-release-source-b"
+          git clone --quiet --no-local "$GITHUB_WORKSPACE" "$second_source"
+          git -C "$second_source" checkout --quiet --detach "$RELEASE_COMMIT"
+          second_artifact="$(build_native "$second_source" "$cache")"
+          [[ "$second_artifact" == "$artifact" ]] || {
+            echo "native cache identity differs across source workdirs" >&2
+            exit 1
+          }
+          mapfile -t second_release_files < <(
+            scripts/package-native-release.sh \
+              --source-root "$second_source" \
+              --artifact "$second_artifact" \
+              --output "$RUNNER_TEMP/fram-native-release-b" \
+              --version "$RELEASE_TAG" \
+              --target x86_64-linux-musl
+          )
+          [[ "${#second_release_files[@]}" == 2 ]] || {
+            echo "second native release packager returned ${#second_release_files[@]} paths" >&2
+            exit 1
+          }
+          cmp -s "${release_files[0]}" "${second_release_files[0]}" || {
+            echo "normalized native archive differs across source workdirs" >&2
+            exit 1
+          }
+          cmp -s "${release_files[1]}" "${second_release_files[1]}" || {
+            echo "native release receipt differs across source workdirs" >&2
+            exit 1
+          }
+          grep -Fxq "source-commit $RELEASE_COMMIT" "${release_files[1]}" || {
+            echo "native release receipt is not bound to $RELEASE_COMMIT" >&2
+            exit 1
+          }
+          echo "archive=${release_files[0]}" >> "$GITHUB_OUTPUT"
+          echo "receipt=${release_files[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Save content-addressed native build cache
+        if: success() && steps.native_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/fram-native-release-cache
+          key: fram-native-${{ runner.os }}-${{ hashFiles('beagle-pin.txt') }}-${{ steps.release.outputs.commit }}
+
+      - name: Revalidate and install the shipped Bun package before upload
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+          PACKAGE_ARCHIVE: ${{ steps.bun_client.outputs.archive }}
+          PACKAGE_RECEIPT: ${{ steps.bun_client.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          [[ "$(wc -l < "$PACKAGE_RECEIPT")" == 10 ]] || {
+            echo "Bun package receipt must contain exactly ten lines" >&2
+            exit 1
+          }
+          expected_keys=$'fram-bun-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\npackage-name\npackage-version\npackage-json-sha256\narchive-name\narchive-sha256'
+          observed_keys="$(awk 'NR == 1 { print; next } { print $1 }' "$PACKAGE_RECEIPT")"
+          [[ "$observed_keys" == "$expected_keys" ]] || {
+            echo "Bun package receipt schema is not closed or ordered" >&2
+            exit 1
+          }
+          receipt_value() {
+            local key="$1"
+            awk -v key="$key" '$1 == key && NF == 2 { print $2 }' "$PACKAGE_RECEIPT"
+          }
+          package_version="$(receipt_value package-version)"
+          expected_archive="tompassarelli-framrpc-${package_version}.tgz"
+          [[ "$(receipt_value source-commit)" == "$RELEASE_COMMIT" ]]
+          [[ "$(receipt_value release-tag)" == "$RELEASE_TAG" ]]
+          [[ "$(receipt_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
+          [[ "$(receipt_value package-name)" == @tompassarelli/framrpc ]]
+          [[ "$(receipt_value archive-name)" == "$expected_archive" ]]
+          [[ "$(basename "$PACKAGE_ARCHIVE")" == "$expected_archive" ]]
+          [[ "$(sha256sum "$PACKAGE_ARCHIVE" | awk '{print $1}')" == \
+            "$(receipt_value archive-sha256)" ]] || {
+            echo "Bun package archive hash does not match its receipt" >&2
+            exit 1
+          }
+
+          verify_root="$RUNNER_TEMP/fram-bun-release-upload-verify"
+          mkdir -p "$verify_root"
+          tar -xzf "$PACKAGE_ARCHIVE" -C "$verify_root"
+          [[ "$(sha256sum "$verify_root/package/package.json" | awk '{print $1}')" == \
+            "$(receipt_value package-json-sha256)" ]] || {
+            echo "packed manifest hash does not match its receipt" >&2
+            exit 1
+          }
+
+          consumer="$RUNNER_TEMP/fram-bun-release-consumer"
+          mkdir -p "$consumer/empty-cache"
+          printf '%s\n' \
+            '{"name":"framrpc-release-consumer","private":true,"type":"module"}' \
+            > "$consumer/package.json"
+          (
+            cd "$consumer"
+            bun add --offline --cache-dir "$consumer/empty-cache" \
+              --registry http://127.0.0.1:9 --ignore-scripts --exact \
+              "$PACKAGE_ARCHIVE"
+            bun -e '
+              import assert from "node:assert/strict";
+              import { framClient } from "@tompassarelli/framrpc";
+              import { schemaClient } from "@tompassarelli/framrpc/schema";
+              const client = framClient({ space: "release-package-smoke" });
+              assert.equal("raw" in client, false);
+              assert.equal("checkpoint" in client, false);
+              assert.equal("framNativeCheckpoint" in client, false);
+              assert.equal(typeof schemaClient, "function");
+            '
+          )
+
+      - name: Revalidate the shipped Cloudflare adapter and Wasm before upload
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+          ADAPTER_ARCHIVE: ${{ steps.cloudflare_do.outputs.archive }}
+          ADAPTER_RECEIPT: ${{ steps.cloudflare_do.outputs.receipt }}
+          WASM_ARCHIVE: ${{ steps.cloudflare_wasm.outputs.archive }}
+          WASM_RECEIPT: ${{ steps.cloudflare_wasm.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          [[ "$(wc -l < "$ADAPTER_RECEIPT")" == 10 ]] || {
+            echo "Cloudflare adapter receipt must contain exactly ten lines" >&2
+            exit 1
+          }
+          adapter_keys=$'fram-cloudflare-do-release-receipt/v1\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\npackage-name\npackage-version\npackage-json-sha256\narchive-name\narchive-sha256'
+          [[ "$(awk 'NR == 1 { print; next } { print $1 }' "$ADAPTER_RECEIPT")" == \
+            "$adapter_keys" ]] || {
+            echo "Cloudflare adapter receipt schema is not closed or ordered" >&2
+            exit 1
+          }
+          adapter_value() {
+            local key="$1"
+            awk -v key="$key" '$1 == key && NF == 2 { print $2 }' \
+              "$ADAPTER_RECEIPT"
+          }
+          [[ "$(adapter_value source-commit)" == "$RELEASE_COMMIT" ]]
+          [[ "$(adapter_value release-tag)" == "$RELEASE_TAG" ]]
+          [[ "$(adapter_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
+          [[ "$(adapter_value package-name)" == @tompassarelli/fram-cloudflare-do ]]
+          [[ "$(adapter_value package-version)" == 0.3.0 ]]
+          adapter_name="tompassarelli-fram-cloudflare-do-0.3.0.tgz"
+          [[ "$(adapter_value archive-name)" == "$adapter_name" ]]
+          [[ "$(basename "$ADAPTER_ARCHIVE")" == "$adapter_name" ]]
+          [[ "$(sha256sum "$ADAPTER_ARCHIVE" | awk '{print $1}')" == \
+            "$(adapter_value archive-sha256)" ]] || {
+            echo "Cloudflare adapter archive hash does not match its receipt" >&2
+            exit 1
+          }
+          adapter_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/src/adapter.d.ts\npackage/src/adapter.mjs\npackage/src/seams.d.ts\npackage/src/seams.mjs'
+          [[ "$(tar -tzf "$ADAPTER_ARCHIVE")" == "$adapter_entries" ]] || {
+            echo "Cloudflare adapter archive member set is not closed" >&2
+            exit 1
+          }
+          tar --numeric-owner -tvzf "$ADAPTER_ARCHIVE" |
+            awk '$1 != "-rw-r--r--" { exit 1 }'
+
+          adapter_verify="$RUNNER_TEMP/fram-cloudflare-do-upload-verify"
+          mkdir -p "$adapter_verify"
+          tar -xzf "$ADAPTER_ARCHIVE" -C "$adapter_verify"
+          [[ "$(sha256sum "$adapter_verify/package/package.json" | awk '{print $1}')" == \
+            "$(adapter_value package-json-sha256)" ]] || {
+            echo "Cloudflare adapter manifest hash does not match its receipt" >&2
+            exit 1
+          }
+
+          [[ "$(wc -l < "$WASM_RECEIPT")" == 20 ]] || {
+            echo "Cloudflare Wasm receipt must contain exactly twenty lines" >&2
+            exit 1
+          }
+          wasm_keys=$'fram-cloudflare-wasm-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\ntarget\nnative-build-closure-sha256\nbeagle-revision\nnative-provenance-sha256\nwasm-path\nwasm-bytes\nwasm-sha256\nseams-path\nseams-sha256\nunicode-license-sha256\nwasi-toolchain-licenses-sha256\nffc-license-sha256\nffc-provenance-sha256\narchive-name\narchive-sha256'
+          [[ "$(awk 'NR == 1 { print; next } { print $1 }' "$WASM_RECEIPT")" == \
+            "$wasm_keys" ]] || {
+            echo "Cloudflare Wasm receipt schema is not closed or ordered" >&2
+            exit 1
+          }
+          wasm_value() {
+            local key="$1"
+            awk -v key="$key" '$1 == key && NF == 2 { print $2 }' "$WASM_RECEIPT"
+          }
+          release_root="fram-$RELEASE_TAG-wasm32-wasm-embed"
+          wasm_name="$release_root.tar.gz"
+          [[ "$(wasm_value source-commit)" == "$RELEASE_COMMIT" ]]
+          [[ "$(wasm_value release-tag)" == "$RELEASE_TAG" ]]
+          [[ "$(wasm_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
+          [[ "$(wasm_value target)" == wasm32-wasm-embed ]]
+          [[ "$(wasm_value beagle-revision)" == "$(cat beagle-pin.txt)" ]]
+          [[ "$(wasm_value native-build-closure-sha256)" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$(wasm_value wasm-path)" == "$release_root/lib/libfram.wasm" ]]
+          [[ "$(wasm_value seams-path)" == "$release_root/wasm-embed.seams" ]]
+          [[ "$(wasm_value archive-name)" == "$wasm_name" ]]
+          [[ "$(basename "$WASM_ARCHIVE")" == "$wasm_name" ]]
+          [[ "$(sha256sum "$WASM_ARCHIVE" | awk '{print $1}')" == \
+            "$(wasm_value archive-sha256)" ]] || {
+            echo "Cloudflare Wasm archive hash does not match its receipt" >&2
+            exit 1
+          }
+
+          wasm_entries="$release_root/
+          $release_root/LICENSE
+          $release_root/LICENSE-APACHE
+          $release_root/LICENSE-MIT
+          $release_root/THIRD-PARTY/
+          $release_root/THIRD-PARTY/UNICODE-LICENSE.txt
+          $release_root/THIRD-PARTY/WASI-TOOLCHAIN-LICENSES.txt
+          $release_root/THIRD-PARTY/ffc/
+          $release_root/THIRD-PARTY/ffc/LICENSE-MIT
+          $release_root/THIRD-PARTY/ffc/PROVENANCE
+          $release_root/lib/
+          $release_root/lib/libfram.wasm
+          $release_root/native-provenance.manifest
+          $release_root/wasm-embed.seams"
+          [[ "$(tar -tzf "$WASM_ARCHIVE")" == "$wasm_entries" ]] || {
+            echo "Cloudflare Wasm archive member set is not closed" >&2
+            exit 1
+          }
+          tar -tvzf "$WASM_ARCHIVE" |
+            awk 'substr($0, 1, 1) != "-" && substr($0, 1, 1) != "d" { exit 1 }'
+
+          wasm_verify="$RUNNER_TEMP/fram-cloudflare-wasm-upload-verify"
+          mkdir -p "$wasm_verify"
+          tar -xzf "$WASM_ARCHIVE" -C "$wasm_verify"
+          shipped_root="$wasm_verify/$release_root"
+          shipped_wasm="$shipped_root/lib/libfram.wasm"
+          [[ "$(wc -c < "$shipped_wasm" | tr -d '[:space:]')" == \
+            "$(wasm_value wasm-bytes)" ]]
+          [[ "$(sha256sum "$shipped_wasm" | awk '{print $1}')" == \
+            "$(wasm_value wasm-sha256)" ]]
+          [[ "$(sha256sum "$shipped_root/wasm-embed.seams" | awk '{print $1}')" == \
+            "$(wasm_value seams-sha256)" ]]
+          [[ "$(sha256sum "$shipped_root/native-provenance.manifest" | awk '{print $1}')" == \
+            "$(wasm_value native-provenance-sha256)" ]]
+          [[ "$(sha256sum "$shipped_root/THIRD-PARTY/UNICODE-LICENSE.txt" | awk '{print $1}')" == \
+            "$(wasm_value unicode-license-sha256)" ]]
+          [[ "$(sha256sum "$shipped_root/THIRD-PARTY/WASI-TOOLCHAIN-LICENSES.txt" | awk '{print $1}')" == \
+            "$(wasm_value wasi-toolchain-licenses-sha256)" ]]
+          [[ "$(sha256sum "$shipped_root/THIRD-PARTY/ffc/LICENSE-MIT" | awk '{print $1}')" == \
+            "$(wasm_value ffc-license-sha256)" ]]
+          [[ "$(sha256sum "$shipped_root/THIRD-PARTY/ffc/PROVENANCE" | awk '{print $1}')" == \
+            "$(wasm_value ffc-provenance-sha256)" ]]
+
+          consumer="$RUNNER_TEMP/fram-cloudflare-release-consumer"
+          mkdir -p "$consumer/empty-cache"
+          printf '%s\n' \
+            '{"name":"fram-cloudflare-release-consumer","private":true,"type":"module"}' \
+            > "$consumer/package.json"
+          (
+            cd "$consumer"
+            bun add --offline --cache-dir "$consumer/empty-cache" \
+              --registry http://127.0.0.1:9 --ignore-scripts --exact \
+              "$ADAPTER_ARCHIVE"
+            bun -e '
+              import assert from "node:assert/strict";
+              import {
+                FramDurableObjectBase,
+                framAdminEntrypoint,
+                framDataPlaneEntrypoint,
+              } from "@tompassarelli/fram-cloudflare-do";
+              import {
+                assertSeams,
+                seamImports,
+              } from "@tompassarelli/fram-cloudflare-do/seams";
+              const wasmPath = Bun.argv.at(-1);
+              const module = await WebAssembly.compile(
+                await Bun.file(wasmPath).arrayBuffer(),
+              );
+              const imports = {};
+              for (const entry of seamImports()) {
+                imports[entry.module] ??= {};
+                imports[entry.module][entry.name] = () => 0;
+              }
+              assertSeams(module, imports);
+              assert.equal(typeof FramDurableObjectBase, "function");
+              assert.equal(typeof framDataPlaneEntrypoint, "function");
+              assert.equal(typeof framAdminEntrypoint, "function");
+            ' "$shipped_wasm"
+          )
+
+      - name: Revalidate and run the shipped executable before upload
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+          RELEASE_ARCHIVE: ${{ steps.native.outputs.archive }}
+          RELEASE_RECEIPT: ${{ steps.native.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          expected_root="fram-${RELEASE_TAG}-x86_64-linux-musl"
+          expected_executable="$expected_root/bin/fram-server-native"
+          expected_archive="$expected_root.tar.gz"
+          [[ "$(wc -l < "$RELEASE_RECEIPT")" == 12 ]] || {
+            echo "native release receipt must contain exactly twelve lines" >&2
+            exit 1
+          }
+          expected_keys=$'fram-native-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\ntarget\nnative-build-closure-sha256\nbeagle-revision\nexecutable-path\nexecutable-sha256\narchive-name\narchive-sha256'
+          observed_keys="$(awk 'NR == 1 { print; next } { print $1 }' "$RELEASE_RECEIPT")"
+          [[ "$observed_keys" == "$expected_keys" ]] || {
+            echo "native release receipt schema is not closed or ordered" >&2
+            exit 1
+          }
+          receipt_value() {
+            local key="$1"
+            awk -v key="$key" '$1 == key && NF == 2 { print $2 }' "$RELEASE_RECEIPT"
+          }
+          [[ "$(receipt_value source-commit)" == "$RELEASE_COMMIT" ]]
+          [[ "$(receipt_value release-tag)" == "$RELEASE_TAG" ]]
+          [[ "$(receipt_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
+          [[ "$(receipt_value target)" == x86_64-linux-musl ]]
+          [[ "$(receipt_value beagle-revision)" == "$(cat beagle-pin.txt)" ]]
+          [[ "$(receipt_value native-build-closure-sha256)" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$(receipt_value executable-path)" == "$expected_executable" ]]
+          [[ "$(receipt_value archive-name)" == "$expected_archive" ]]
+          [[ "$(basename "$RELEASE_ARCHIVE")" == "$expected_archive" ]]
+          [[ "$(sha256sum "$RELEASE_ARCHIVE" | awk '{print $1}')" == \
+            "$(receipt_value archive-sha256)" ]] || {
+            echo "release archive hash does not match its receipt" >&2
+            exit 1
+          }
+
+          verify_root="$RUNNER_TEMP/fram-native-release-upload-verify"
+          mkdir -p "$verify_root"
+          tar -xzf "$RELEASE_ARCHIVE" -C "$verify_root"
+          shipped_server="$verify_root/$expected_executable"
+          [[ -f "$shipped_server" && -x "$shipped_server" && ! -L "$shipped_server" ]]
+          [[ "$(sha256sum "$shipped_server" | awk '{print $1}')" == \
+            "$(receipt_value executable-sha256)" ]] || {
+            echo "shipped executable hash does not match its receipt" >&2
+            exit 1
+          }
+
+          port="$(bun -e '
+            const server = Bun.serve({
+              hostname: "127.0.0.1",
+              port: 0,
+              fetch() { return new Response(); },
+            });
+            console.log(server.port);
+            server.stop(true);
+          ')"
+          smoke_log="$RUNNER_TEMP/fram-native-release-smoke.framlog"
+          smoke_output="$RUNNER_TEMP/fram-native-release-smoke.stderr"
+          FRAM_BIND=127.0.0.1 "$shipped_server" \
+            serve "$port" "$smoke_log" release-smoke \
+            >"$smoke_output" 2>&1 &
+          smoke_pid=$!
+          cleanup_smoke() {
+            if kill -0 "$smoke_pid" 2>/dev/null; then
+              kill -TERM "$smoke_pid" 2>/dev/null || true
+              wait "$smoke_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup_smoke EXIT INT TERM
+          smoke_ok=0
+          for _attempt in $(seq 1 100); do
+            if bun -e '
+              const [clientPath, portText] = Bun.argv.slice(-2);
+              const { framClient } = await import(Bun.pathToFileURL(clientPath).href);
+              const response = await framClient({
+                host: "127.0.0.1",
+                port: Number(portText),
+                space: "release-smoke",
+                requestTimeoutMs: 1000,
+              }).version();
+              if (response.operation !== "rpc/version" || response.servedVersion !== 0n) {
+                throw new Error("unexpected rpc/version response");
+              }
+            ' "$GITHUB_WORKSPACE/clients/bun/framrpc.mjs" "$port" \
+                >/dev/null 2>&1; then
+              smoke_ok=1
+              break
+            fi
+            kill -0 "$smoke_pid" 2>/dev/null || break
+            sleep 0.1
+          done
+          [[ "$smoke_ok" == 1 ]] || {
+            echo "shipped executable failed its rpc/version smoke" >&2
+            sed -n '1,160p' "$smoke_output" >&2
+            exit 1
+          }
+          kill -TERM "$smoke_pid"
+          wait "$smoke_pid"
+          trap - EXIT INT TERM
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG_OBJECT: ${{ steps.release.outputs['tag-object'] }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          notes_file=".github/release-notes/${RELEASE_TAG}.md"
+          bash scripts/check-release-notes.sh "$RELEASE_TAG"
+          gh release create "$RELEASE_TAG" --verify-tag \
+            --title "$RELEASE_TAG" --notes-file "$notes_file" \
+            "${{ steps.bun_client.outputs.archive }}" \
+            "${{ steps.bun_client.outputs.receipt }}" \
+            "${{ steps.cloudflare_do.outputs.archive }}" \
+            "${{ steps.cloudflare_do.outputs.receipt }}" \
+            "${{ steps.cloudflare_wasm.outputs.archive }}" \
+            "${{ steps.cloudflare_wasm.outputs.receipt }}" \
+            "${{ steps.native.outputs.archive }}" \
+            "${{ steps.native.outputs.receipt }}"
+
+          [[ "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" == \
+            "$RELEASE_TAG" ]]
+          remote_tag_type="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.type)"
+          remote_tag_object="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          [[ "$remote_tag_type" == tag ]]
+          [[ "$remote_tag_object" == "$RELEASE_TAG_OBJECT" ]]
+          [[ "$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/tags/$remote_tag_object" \
+            --jq .object.sha)" == "$RELEASE_COMMIT" ]]

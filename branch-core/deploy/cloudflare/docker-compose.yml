@@ -1,0 +1,43 @@
+# Fram server + auth shim for Cloudflare Workers clients.
+# Run from THIS directory (the shim build context points at the repo root ../..):
+#   export FRAM_SERVER_IMAGE="$(./build-native-image.sh)"
+#   SHIM_TOKEN=$(openssl rand -hex 32) docker compose up -d --build
+#
+# Topology: the Worker fetches the shim (bearer token, HTTP); the shim speaks
+# FRAMRPC v2 to the Fram server over the private network.
+# The Fram server's port 7977 is NEVER published — the wire protocol is
+# unauthenticated by design and must stay behind the shim.
+services:
+  server:
+    # Content-addressed by its native artifact: compose consumes a tag, never builds one.
+    image: ${FRAM_SERVER_IMAGE:?set FRAM_SERVER_IMAGE from ./build-native-image.sh}
+    volumes:
+      - fram-data:/data              # the durable fact log survives restarts
+    networks: [framnet]
+    restart: unless-stopped
+    environment:
+      FRAM_SPACE_ID: ${FRAM_SPACE_ID:-cloudflare}
+    # no ports: — private network only
+
+  shim:
+    build:
+      context: ../..
+      dockerfile: deploy/cloudflare/Dockerfile.shim
+    environment:
+      FRAM_SERVER_CONNECT: server
+      FRAM_SERVER_PORT: "7977"
+      SHIM_PORT: "8787"
+      SHIM_TOKEN: ${SHIM_TOKEN:?set SHIM_TOKEN (e.g. openssl rand -hex 32)}
+      FRAM_SPACE_ID: ${FRAM_SPACE_ID:-cloudflare}
+    ports:
+      - "8080:8787"                  # the ONE public ingress; front with TLS in prod
+    networks: [framnet]
+    depends_on:
+      - server
+    restart: unless-stopped
+
+networks:
+  framnet: {}                        # private bridge network
+
+volumes:
+  fram-data: {}

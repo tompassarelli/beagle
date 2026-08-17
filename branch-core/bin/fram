@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Fram CLI. Public data commands require FRAM_SPACE_ID and speak FRAMRPC.
+# Legacy migration/projection commands retain their explicit local-file setup.
+HERE="${BASH_SOURCE[0]%/*}/.."
+
+usage() {
+  printf '%s\n' \
+    'fram usage:' \
+    '  tell <subject> <slot> <value>' \
+    '  retract <subject> <slot> <value>' \
+    '  tell-existing <subject> <slot> <value>' \
+    '  retract-existing <subject> <slot> <value>' \
+    '  show <subject>' \
+    '  query <edn>' \
+    '  scan <t1|_> <t2|_> <t3|_>' \
+    '  occurrences' \
+    '  version | status | validate' \
+    '  selfcheck --deep'
+}
+
+case "${1:-}" in
+  ""|-h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+# Deep server/recovery selfcheck is a bash-orchestrated command (boots isolated
+# scratch coordinators with trap-based cleanup) — dispatch before the bb exec.
+if [[ "${1:-}" == "selfcheck" ]]; then
+  shift
+  exec "$HERE/bin/fram-selfcheck" "$@"
+fi
+
+case "${1:-}" in
+  show|query|tell|retract|tell-existing|retract-existing|version|status|validate|scan|occurrences)
+    if [[ -z "${FRAM_SPACE_ID:-}" ]]; then
+      echo "fram: FRAM_SPACE_ID is required for data commands" >&2
+      exit 2
+    fi
+    exec bb -cp "$HERE/out" "$HERE/bin/fram-fast.clj" "$@"
+    ;;
+esac
+
+# The remaining commands are local migration/projection/admin surfaces.
+if [[ "${FRAM_PACKAGED:-0}" == "1" ]]; then
+  # Explicit corpus paths are a complete configuration. Resolve the user-state
+  # default only for a value that is actually missing, so hermetic/service
+  # launches do not need HOME merely to use FRAM_LOG + FRAM_THREADS.
+  if [[ -z "${FRAM_LOG:-}" || -z "${FRAM_THREADS:-}" ]]; then
+    if [[ -n "${FRAM_STATE_DIR:-}" ]]; then
+      state_dir="$FRAM_STATE_DIR"
+    elif [[ -n "${XDG_STATE_HOME:-}" ]]; then
+      state_dir="$XDG_STATE_HOME/fram"
+    elif [[ -n "${HOME:-}" ]]; then
+      state_dir="$HOME/.local/state/fram"
+    else
+      echo "fram: set FRAM_LOG + FRAM_THREADS, FRAM_STATE_DIR, XDG_STATE_HOME, or HOME" >&2
+      exit 2
+    fi
+  fi
+  [[ -n "${FRAM_THREADS:-}" ]] || FRAM_THREADS="$state_dir/threads"
+  [[ -n "${FRAM_LOG:-}" ]] || FRAM_LOG="$state_dir/coordination.log"
+else
+  FRAM_THREADS="${FRAM_THREADS:-$HERE/threads}"
+  FRAM_LOG="${FRAM_LOG:-$HERE/coordination.log}"
+fi
+export FRAM_THREADS FRAM_LOG
+log_parent="${FRAM_LOG%/*}"
+[[ "$log_parent" != "$FRAM_LOG" ]] || log_parent=.
+if [[ ! -d "$FRAM_THREADS" || ! -d "$log_parent" ]]; then
+  mkdir -p "$FRAM_THREADS" "$log_parent"
+fi
+exec bb -cp "$HERE/out" -m fram.main "$@"

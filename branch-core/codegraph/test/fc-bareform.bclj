@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fc.bareform)
+;; a comment-only line mentioning helper
+(def helper Int 7)
+(println (+ helper 1))
+(def total Int (+ helper 2))

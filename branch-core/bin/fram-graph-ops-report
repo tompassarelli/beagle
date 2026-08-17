@@ -1,0 +1,139 @@
+#!/usr/bin/env bb
+(require '[cheshire.core :as json]
+         '[clojure.java.io :as io]
+         '[clojure.string :as str])
+
+(def disabled-values #{"0" "off" "false" "disabled"})
+
+(defn default-path []
+  (let [configured (System/getenv "FRAM_GRAPH_OPS_LOG")]
+    (cond
+      (and configured (contains? disabled-values (str/lower-case configured))) nil
+      (and configured (not (str/blank? configured))) configured
+      :else (str (or (System/getenv "XDG_STATE_HOME")
+                     (str (or (System/getenv "HOME")
+                              (System/getProperty "user.home"))
+                          "/.local/state"))
+                 "/fram/graph-ops.jsonl"))))
+
+(defn die [& xs]
+  (binding [*out* *err*] (apply println xs))
+  (System/exit 1))
+
+(defn read-records [path]
+  (with-open [reader (io/reader path)]
+    (->> (line-seq reader)
+         (map-indexed vector)
+         (keep (fn [[index line]]
+                 (when-not (str/blank? line)
+                   (try
+                     (json/parse-string line true)
+                     (catch Throwable t
+                       (binding [*out* *err*]
+                         (println "fram-graph-ops-report: skipping invalid JSONL line"
+                                  (inc index) "-" (.getMessage t)))
+                       nil)))))
+         doall)))
+
+(defn percentile [values q]
+  (when (seq values)
+    (let [sorted (vec (sort values))
+          index (dec (long (Math/ceil (* q (count sorted)))))]
+      (nth sorted (max 0 index)))))
+
+(defn fmt-number [n]
+  (if (nil? n)
+    "-"
+    (let [s (format "%.3f" (double n))]
+      (str/replace s #"\.?0+$" ""))))
+
+(defn fmt-rate [n total]
+  (format "%.1f%%" (if (zero? total) 0.0 (* 100.0 (/ n total)))))
+
+(defn clean [v]
+  (-> (if (nil? v) "-" (str v))
+      (str/replace #"[\t\r\n]+" " ")))
+
+(defn module-bucket [bytes]
+  (cond
+    (nil? bytes) "unknown"
+    (< bytes 16384) "lt16k"
+    (< bytes 65536) "16k-64k"
+    (< bytes 262144) "64k-256k"
+    :else "ge256k"))
+
+(defn emit-section [title header rows]
+  (println title)
+  (println (str/join "\t" header))
+  (doseq [row rows]
+    (println (str/join "\t" (map clean row))))
+  (println))
+
+(defn slow-rows [records]
+  (->> records
+       (group-by (fn [r] [(:op r) (module-bucket (:module_bytes r))]))
+       (map (fn [[[op bucket] rs]]
+              {:op op :bucket bucket :n (count rs)
+               :p50 (percentile (map :wall_ms rs) 0.50)
+               :p95 (percentile (map :wall_ms rs) 0.95)}))
+       (sort-by (juxt (comp - :p95) (comp - :p50) :op :bucket))
+       (map (fn [{:keys [op bucket n p50 p95]}]
+              [op bucket n (fmt-number p50) (fmt-number p95)]))))
+
+(defn reject-rows [records]
+  (let [attempts (frequencies (map :op records))]
+    (->> records
+         (remove :accepted)
+         (group-by (juxt :op #(or (:reject_reason %) "unknown rejection")))
+         (map (fn [[[op reason] rs]]
+                {:op op :reason reason :attempts (get attempts op)
+                 :rejects (count rs)}))
+         (sort-by (juxt :op (comp - :rejects) :reason))
+         (map (fn [{:keys [op reason attempts rejects]}]
+                [op reason attempts rejects (fmt-rate rejects attempts)])))))
+
+(defn retry-rows [records]
+  (->> records
+       (group-by (juxt :module :def))
+       (map (fn [[[module definition] rs]]
+              (let [retries (count (filter #(pos? (long (or (:retry_seq %) 0))) rs))]
+                {:module module :definition definition :attempts (count rs)
+                 :retries retries
+                 :max-retry (apply max 0 (map #(long (or (:retry_seq %) 0)) rs))
+                 :total-wall (reduce + 0 (map :wall_ms rs))})))
+       (filter #(pos? (:retries %)))
+       (sort-by (juxt (comp - :retries) (comp - :max-retry)
+                      (comp - :total-wall) :module :definition))
+       (map (fn [{:keys [module definition attempts retries max-retry total-wall]}]
+              [module definition attempts retries max-retry (fmt-number total-wall)]))))
+
+(defn daily-rows [records]
+  (->> records
+       (group-by #(subs (str (:ts %)) 0 (min 10 (count (str (:ts %))))))
+       (sort-by key)
+       (map (fn [[day rs]]
+              (let [accepted (count (filter :accepted rs))
+                    rejects (- (count rs) accepted)
+                    walls (map :wall_ms rs)]
+                [day (count rs) accepted rejects (fmt-rate rejects (count rs))
+                 (fmt-number (percentile walls 0.50))
+                 (fmt-number (percentile walls 0.95))])))))
+
+(let [path (or (first *command-line-args*) (default-path))]
+  (when-not path
+    (die "fram-graph-ops-report: FRAM_GRAPH_OPS_LOG disables telemetry; pass a JSONL path"))
+  (when-not (.isFile (io/file path))
+    (die "fram-graph-ops-report: no telemetry file at" path))
+  (let [records (read-records path)]
+    (emit-section "SLOWEST_OP_SHAPES"
+                  ["op" "module_size_bucket" "n" "p50_ms" "p95_ms"]
+                  (slow-rows records))
+    (emit-section "REJECT_RATE"
+                  ["op" "reject_reason" "attempts" "rejects" "reject_rate"]
+                  (reject-rows records))
+    (emit-section "RETRY_HEAVY_DEFS"
+                  ["module" "def" "attempts" "retries" "max_retry_seq" "total_wall_ms"]
+                  (retry-rows records))
+    (emit-section "DAILY_TREND"
+                  ["day" "attempts" "accepted" "rejects" "reject_rate" "p50_ms" "p95_ms"]
+                  (daily-rows records))))

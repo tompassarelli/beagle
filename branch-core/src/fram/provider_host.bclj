@@ -1,0 +1,299 @@
+#lang beagle/clj
+
+;; Author substantive forms through the sealed graph-edit channel.
+;; The provider host is application-side; the substrate keeps its closed wire.
+(ns fram.provider-host (:require [fram.types :as t]))
+
+
+(require fram.rt :as rt)
+
+(declare-extern fram.rt/native-request-to!
+  (Fn [String Int t/RpcRequest] t/RpcResponse))
+
+(defrecord ProviderDescriptor
+  [(identity t/Triple)
+   (capability t/Triple)
+   (contract t/Triple)
+   (imports (Vec t/Triple))
+   (boot-result Keyword)])
+
+(defrecord ProviderViolation
+  [(code Keyword) (capability t/Triple) (identity t/Triple) (detail t/Triple)])
+
+(defrecord ProviderStage
+  [(capability t/Triple) (stage Keyword) (result Keyword)])
+
+(defrecord ProviderBoot
+  [(providers (Vec ProviderDescriptor))
+   (violations (Vec ProviderViolation))
+   (stages (Vec ProviderStage))])
+
+(defrecord ProviderAction
+  [(operation Keyword) (proposition t/Triple) (policy Keyword)])
+
+(defrecord ProviderBatch
+  [(space String) (expected-version Int) (actions (Vec ProviderAction))])
+
+(defrecord ProviderPlan
+  [(accepted Bool)
+   (code Keyword)
+   (result t/Triple)
+   (expected-version Int)
+   (actions (Vec ProviderAction))
+   (stages (Vec ProviderStage))])
+
+(defn capability [(domain String) (major Int)] t/Triple
+  (if (and (pos? (count domain)) (pos? major))
+    (t/triple :provider/capability domain major)
+    (throw (ex-info "provider capability requires a non-empty domain and positive major" {:type :provider/invalid-capability}))))
+
+(defn provider-identity
+  [(capability-value t/Triple) (implementation String)] t/Triple
+  (if (pos? (count implementation))
+    (t/triple capability-value :provider/implementation implementation)
+    (throw (ex-info "provider identity requires a non-empty implementation" {:type :provider/invalid-identity}))))
+
+(defn provider-contract [(capability-value t/Triple) (major Int)] t/Triple
+  (if (pos? major)
+    (t/triple capability-value :provider/contract major)
+    (throw (ex-info "provider contract major must be positive" {:type :provider/invalid-contract}))))
+
+(defn descriptor
+  [(identity t/Triple)
+   (capability-value t/Triple)
+   (contract t/Triple)
+   (imports (Vec t/Triple))
+   (boot-result Keyword)]
+  ProviderDescriptor
+  (->ProviderDescriptor identity capability-value contract imports boot-result))
+
+(defn providers-for
+  [(descriptors (Vec ProviderDescriptor))
+   (capability-value t/Triple)]
+  (Vec ProviderDescriptor)
+  (filterv (fn [(value ProviderDescriptor)] Bool (= capability-value (providerdescriptor-capability value)))
+    descriptors))
+
+(defn identity-count
+  [(descriptors (Vec ProviderDescriptor)) (identity t/Triple)] Int
+  (count (filterv (fn [(value ProviderDescriptor)] Bool (= identity (providerdescriptor-identity value))) descriptors)))
+
+(defn capability-enabled?
+  [(enabled (Vec t/Triple)) (capability-value t/Triple)] Bool
+  (boolean (some (fn [(value t/Triple)] Bool (= capability-value value)) enabled)))
+
+(defn violation
+  [(code Keyword)
+   (descriptor-value ProviderDescriptor)
+   (detail t/Triple)]
+  ProviderViolation
+  (->ProviderViolation code
+    (providerdescriptor-capability descriptor-value)
+    (providerdescriptor-identity descriptor-value)
+    detail))
+
+(defn contract-valid? [(descriptor-value ProviderDescriptor)] Bool
+  (let [(contract t/Triple) (providerdescriptor-contract descriptor-value)]
+    (and (= (providerdescriptor-capability descriptor-value) (t/triple-t1 contract))
+      (and (= :provider/contract (t/triple-t2 contract))
+        (and (integer? (t/triple-t3 contract))
+          (pos? (t/triple-t3 contract)))))))
+
+(defn import-violations
+  [(descriptor-value ProviderDescriptor)
+   (selected (Vec ProviderDescriptor))]
+  (Vec ProviderViolation)
+  (reduce (fn
+            [(violations (Vec ProviderViolation))
+             (imported t/Triple)]
+            (Vec ProviderViolation)
+            (if (= 1 (count (providers-for selected imported))) violations (conj violations (violation :provider/import-unavailable descriptor-value (t/triple imported :provider/required-by (providerdescriptor-identity descriptor-value))))))
+    []
+    (providerdescriptor-imports descriptor-value)))
+
+(defn descriptor-violations
+  [(descriptor-value ProviderDescriptor)
+   (selected (Vec ProviderDescriptor))]
+  (Vec ProviderViolation)
+  (let [(v0 (Vec ProviderViolation)) [] (v1 (Vec ProviderViolation)) (if (= 1 (identity-count selected (providerdescriptor-identity descriptor-value))) v0 (conj v0 (violation :provider/duplicate-identity descriptor-value (t/triple (providerdescriptor-identity descriptor-value) :provider/count (identity-count selected (providerdescriptor-identity descriptor-value)))))) (v2 (Vec ProviderViolation)) (if (contract-valid? descriptor-value) v1 (conj v1 (violation :provider/invalid-contract descriptor-value (providerdescriptor-contract descriptor-value)))) (v3 (Vec ProviderViolation)) (if (= :provider/ready (providerdescriptor-boot-result descriptor-value)) v2 (conj v2 (violation :provider/boot-rejected descriptor-value (t/triple (providerdescriptor-identity descriptor-value) :provider/boot-result (providerdescriptor-boot-result descriptor-value)))))]
+    (into v3 (import-violations descriptor-value selected))))
+
+(defn selection-violations
+  [(descriptors (Vec ProviderDescriptor))
+   (enabled (Vec t/Triple))]
+  (Vec ProviderViolation)
+  (reduce (fn
+            [(violations (Vec ProviderViolation))
+             (capability-value t/Triple)]
+            (Vec ProviderViolation)
+            (let [(matches (Vec ProviderDescriptor)) (providers-for descriptors capability-value)] (if (= 1 (count matches)) violations (conj violations (->ProviderViolation :provider/capability-cardinality capability-value (provider-identity capability-value "selection") (t/triple capability-value :provider/count (count matches)))))))
+    []
+    enabled))
+
+(defn selected-providers
+  [(descriptors (Vec ProviderDescriptor))
+   (enabled (Vec t/Triple))]
+  (Vec ProviderDescriptor)
+  (reduce (fn
+            [(selected (Vec ProviderDescriptor))
+             (capability-value t/Triple)]
+            (Vec ProviderDescriptor)
+            (let [(matches (Vec ProviderDescriptor)) (providers-for descriptors capability-value)] (if (= 1 (count matches)) (conj selected (first matches)) selected)))
+    []
+    enabled))
+
+(defn boot-providers
+  [(descriptors (Vec ProviderDescriptor)) (enabled (Vec t/Triple))] ProviderBoot
+  (let [(selected (Vec ProviderDescriptor)) (selected-providers descriptors enabled) (initial (Vec ProviderViolation)) (selection-violations descriptors enabled) (violations (Vec ProviderViolation)) (reduce (fn
+                                                                                                                                                                                                                 [(current (Vec ProviderViolation))
+                                                                                                                                                                                                                  (descriptor-value ProviderDescriptor)]
+                                                                                                                                                                                                                 (Vec ProviderViolation)
+                                                                                                                                                                                                                 (into current (descriptor-violations descriptor-value selected))) initial selected) (stages (Vec ProviderStage)) (mapv (fn
+                                                                                                                                                                                                                                                                                                                                          [(capability-value t/Triple)]
+                                                                                                                                                                                                                                                                                                                                          ProviderStage
+                                                                                                                                                                                                                                                                                                                                          (->ProviderStage capability-value :provider/boot (if (empty? violations) :provider/ready :provider/rejected))) enabled)]
+    (->ProviderBoot (if (empty? violations) selected []) violations stages)))
+
+(defn boot-ok? [(boot ProviderBoot)] Bool
+  (empty? (providerboot-violations boot)))
+
+(defn provider-for
+  [(boot ProviderBoot) (capability-value t/Triple)] ProviderDescriptor
+  (let [(matches (Vec ProviderDescriptor)) (providers-for (providerboot-providers boot) capability-value)]
+    (if (and (boot-ok? boot) (= 1 (count matches)))
+      (first matches)
+      (throw (ex-info "provider capability was not selected at boot" {:type :provider/not-selected})))))
+
+(defn provider-action
+  [(operation Keyword) (proposition t/Triple) (policy Keyword)] ProviderAction
+  (if (and (or (= operation :rpc/assert) (= operation :rpc/retract)) (or (= policy :rpc/subject-any) (= policy :rpc/subject-existing)))
+    (->ProviderAction operation proposition policy)
+    (throw (ex-info "provider action is outside the FRAMRPC mutation seam" {:type :provider/invalid-action}))))
+
+(defn provider-stage
+  [(capability-value t/Triple) (stage Keyword) (result Keyword)] ProviderStage
+  (->ProviderStage capability-value stage result))
+
+(defn accepted-plan
+  [(result t/Triple)
+   (expected-version Int)
+   (actions (Vec ProviderAction))
+   (stages (Vec ProviderStage))]
+  ProviderPlan
+  (if (and (>= expected-version 0) (pos? (count actions)))
+    (->ProviderPlan true
+      :provider/accepted
+      result
+      expected-version
+      actions
+      stages)
+    (throw (ex-info "accepted provider plan requires an expected version and actions" {:type :provider/invalid-plan}))))
+
+(defn rejected-plan
+  [(code Keyword)
+   (result t/Triple)
+   (expected-version Int)
+   (stages (Vec ProviderStage))]
+  ProviderPlan
+  (->ProviderPlan false code result expected-version [] stages))
+
+(defn provider-batch
+  [(space String)
+   (expected-version Int)
+   (actions (Vec ProviderAction))]
+  ProviderBatch
+  (if (and (pos? (count space)) (and (>= expected-version 0) (pos? (count actions))))
+    (->ProviderBatch space expected-version actions)
+    (throw (ex-info "provider batch requires space, expected version, and actions" {:type :provider/invalid-batch}))))
+
+(defn rpc-list-term [(values (Vec Any))] Any
+  (reduce (fn [(tail Any) (value Any)] Any (if (t/term? value) (t/triple :rpc/list value tail) (throw (ex-info "provider RPC list contains a value outside Term" {:type :provider/invalid-rpc-term}))))
+    :rpc/list-end
+    (reverse values)))
+
+(defn rpc-record-term [(tag Keyword) (fields (Vec Any))] t/Triple
+  (t/triple tag (rpc-list-term fields) :rpc/record))
+
+(defn action-term [(action ProviderAction)] t/Triple
+  (rpc-record-term :rpc/action
+    [(provideraction-operation action)
+     (provideraction-proposition action)
+     (provideraction-policy action)]))
+
+(defn batch-payload [(batch ProviderBatch)] t/Triple
+  (let [(actions (Vec Any)) (mapv (fn [(action ProviderAction)] Any (action-term action)) (providerbatch-actions batch))]
+    (rpc-record-term :rpc/batch [(rpc-list-term actions) :rpc/none])))
+
+(defn batch-request [(batch ProviderBatch)] t/RpcRequest
+  (t/->RpcRequest (providerbatch-space batch)
+    :rpc/batch
+    (providerbatch-expected-version batch)
+    nil
+    nil
+    (batch-payload batch)))
+
+(defn plan-batch [(space String) (plan ProviderPlan)] ProviderBatch?
+  (if (providerplan-accepted plan)
+    (provider-batch space
+      (providerplan-expected-version plan)
+      (providerplan-actions plan))
+    nil))
+
+(defn plan-request [(space String) (plan ProviderPlan)] t/RpcRequest?
+  (let [batch (plan-batch space plan)] (if batch (batch-request batch) nil)))
+
+(defrecord ProviderInvocation
+  [(descriptor ProviderDescriptor)
+   (request t/RpcRequest)
+   (response t/RpcResponse)])
+
+(defn plan-capability? [(plan ProviderPlan) (capability-value t/Triple)] Bool
+  (let [(stages (Vec ProviderStage)) (providerplan-stages plan)]
+    (and (pos? (count stages))
+      (every? (fn [(stage ProviderStage)] Bool (= capability-value (providerstage-capability stage)))
+        stages))))
+
+(defn response-matches-request?
+  [(request t/RpcRequest) (response t/RpcResponse)] Bool
+  (and (= (t/rpcrequest-space request) (t/rpcresponse-space response))
+    (= (t/rpcrequest-op request) (t/rpcresponse-op response))))
+
+(defn invoke-plan-with!
+  [(descriptors (Vec ProviderDescriptor))
+   (enabled (Vec t/Triple))
+   (capability-value t/Triple)
+   (space String)
+   (plan ProviderPlan)
+   (executor (Fn [t/RpcRequest] t/RpcResponse))]
+  ProviderInvocation
+  (let [(boot ProviderBoot) (boot-providers descriptors enabled) (descriptor-value ProviderDescriptor) (provider-for boot capability-value)]
+    (cond
+      [(not (providerplan-accepted plan))
+       (throw (ex-info "provider invocation refuses a rejected plan" {:type :provider/plan-rejected}))]
+      [(not (plan-capability? plan capability-value))
+       (throw (ex-info "provider plan capability does not match the boot-selected provider" {:type :provider/capability-mismatch}))]
+      [:else
+       (let [request (plan-request space plan)]
+         (if request
+           (let [(response t/RpcResponse) (executor request)]
+             (if (and (t/rpc-response? response) (response-matches-request? request response))
+               (->ProviderInvocation descriptor-value request response)
+               (throw (ex-info "provider executor returned a mismatched FRAMRPC response" {:type :provider/response-mismatch}))))
+           (throw (ex-info "accepted provider plan did not lower to FRAMRPC" {:type :provider/request-missing}))))])))
+
+(defn invoke-plan-to!
+  [(descriptors (Vec ProviderDescriptor))
+   (enabled (Vec t/Triple))
+   (capability-value t/Triple)
+   (address String)
+   (port Int)
+   (space String)
+   (plan ProviderPlan)]
+  ProviderInvocation
+  (invoke-plan-with! descriptors
+    enabled
+    capability-value
+    space
+    plan
+    (fn [(request t/RpcRequest)] t/RpcResponse
+      (rt/native-request-to! address port request))))

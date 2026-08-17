@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# fram-code-off <dir> — stop the native code server serving this dir's
+# code.log + unwire the Fram MCP entry from BOTH Claude Code
+# (.mcp.json) and Codex (.codex/config.toml). Inverse of fram-code-on.
+# Only the fram wiring is touched — unrelated mcpServers/[mcp_servers.*]/
+# [projects.*] entries in either file are left byte-identical.
+set -uo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+DIR="${1:?usage: fram-code-off <dir>}"; DIR="$(cd "$DIR" && pwd)"
+CODE_LOG="$DIR/.fram/code.log"
+# Stop the server that serves THIS code.log (matched precisely, not by port).
+pkill -f "server.clj serve [0-9]+ $CODE_LOG( |$)" 2>/dev/null && echo "server stopped" || echo "no server running for $CODE_LOG"
+"$HERE/bin/fram-code-wire" off "$DIR"
+echo "fram-code-off: $DIR — fram MCP entry removed from .mcp.json / .codex/config.toml. (code.log kept at $CODE_LOG; delete .fram/ to fully reset.)"

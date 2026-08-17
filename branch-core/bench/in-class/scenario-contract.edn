@@ -1,0 +1,27 @@
+{:contract-version 1
+ :corpus-size-unit :live-triples
+ :default-corpus-sizes [3000 30000]
+ :default-runs 2
+ :workload
+ {:warmup-writes 30
+  :warmup-reads 10
+  :measured-writes 1200
+  :mixed-cycles 40
+  :mixed-reads-per-cycle 3}
+ :scenarios
+ [{:id :boot-to-serving
+   :measure :boot-to-serving-ms
+   :definition "Open the durable corpus and reach the adapter-ready probe."}
+  {:id :cold-start-query
+   :measure :cold-start-query-ms
+   :definition "First two-literal kind+title join after boot, before warmup."}
+  {:id :sustained-write-under-read
+   :measure :write-under-read-ops-s
+   :definition "One sole writer commits distinct triples while concurrent readers repeat the same join."}
+  {:id :mixed-read-write
+   :measure :mixed-ops-s
+   :definition "Fixed one-write/three-read cycles after warmup."}]
+ :required-result-keys
+ [:adapter :run :corpus-triples :boot-to-serving-ms
+  :cold-start-query-ms :cold-query-rows :write-under-read-ops-s
+  :concurrent-read-ops :mixed-ops-s :mixed-read-p50-ms :errors]}

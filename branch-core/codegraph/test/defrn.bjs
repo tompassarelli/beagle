@@ -1,0 +1,3 @@
+#lang beagle/js
+(def log Any 1)
+(defn f [] Any (log))

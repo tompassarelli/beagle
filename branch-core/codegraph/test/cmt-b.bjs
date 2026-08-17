@@ -1,0 +1,4 @@
+#lang beagle/js
+;; module b has its own red — mention red here, must stay red
+(defn red [(y Int)] Int (+ y 1))
+(defn use-b [] Int (red 7))

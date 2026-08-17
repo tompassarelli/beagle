@@ -1,0 +1,4 @@
+#lang beagle/js
+(ns app.z)
+(defn red [(w Any)] Any w)
+(defn use-z [] Any (red 2))

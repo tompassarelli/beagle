@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# fram-code-status <dir> — flip-level detection for the graceful ladder (L0-L3).
+# Prints ONE machine-readable line on stdout and always exits 0. It uses the
+# FRAMLOG header and a bounded native :rpc/status request; it never parses rows.
+#
+# The ladder (documented in ~/code/STACK.md, announced by the session-start hook):
+#   level=3  native corpus + sealed graph-control authoring (N2.6b)
+#   level=2  native corpus + public data MCP; server= reports server liveness
+#   level=1  Beagle sources present, not flipped (fram-code-on turns it on)
+#   level=0  no Beagle sources
+#
+# Output line (key=value, stable order):
+#   level=N src=<beagle file count> log=<code.log|-> triples=<n|->
+#   mcp=present|absent space=<id|-> port=<n|-> server=alive|dead|-
+#   canonical=<adopted graph-upstream files under dir>
+set -uo pipefail
+
+fallback() { echo "level=0 src=0 log=- triples=0 mcp=absent space=- port=- server=- canonical=0"; exit 0; }
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+DIR="${1:-$PWD}"
+DIR="$(cd "$DIR" 2>/dev/null && pwd)" || fallback
+[ -n "$DIR" ] || fallback
+
+# --- Beagle sources (same extension set fram-code-on ingests) ----------------
+# In a git repo, ls-files (tracked + untracked-unignored) is the honest count:
+# it excludes gitignored build mirrors (gjoa: 515k-file engine/) and answers in
+# ms from the index. Elsewhere, a timeout-capped pruned find — a pathological
+# dir (/tmp, $HOME) must not blow the <100ms budget; a partial count still
+# detects L1 correctly.
+BEAGLE_EXT_RE='\.b(clj|js|nix|gl)$'
+SOURCE_FILES=()
+if git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  REPO_ROOT="$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null)" || REPO_ROOT="$DIR"
+  mapfile -t SOURCE_FILES < <(
+    timeout 0.5 git -C "$DIR" ls-files --cached --others --exclude-standard 2>/dev/null \
+      | grep -E "$BEAGLE_EXT_RE" \
+      | sed "s|^|$REPO_ROOT/|"
+  )
+else
+  mapfile -t SOURCE_FILES < <(timeout 0.5 find "$DIR" \
+    \( -name .git -o -name .fram -o -name .beagle -o -name .cache -o -name node_modules \
+       -o -name .direnv -o -name result \) -prune \
+    -o -type f -print 2>/dev/null | grep -E "$BEAGLE_EXT_RE")
+fi
+SRC_COUNT="${#SOURCE_FILES[@]}"
+
+# --- flip artifacts -----------------------------------------------------------
+CODE_LOG="$DIR/.fram/code.log"
+LOG="-" TRIPLES=0 NATIVE_LOG=false
+if [ -f "$CODE_LOG" ] && \
+   [ "$(od -An -tx1 -N8 "$CODE_LOG" 2>/dev/null | tr -d ' \n')" = "4652414d4c4f4700" ]; then
+  LOG="$CODE_LOG"
+  TRIPLES="-"
+  NATIVE_LOG=true
+fi
+MCP=absent
+# .mcp.json counts only if it actually wires the Fram server.
+[ -f "$DIR/.mcp.json" ] && grep -q '"fram"' "$DIR/.mcp.json" 2>/dev/null && MCP=present
+
+# --- server port + liveness (probe only; no connection state kept) -------
+SPACE_ID="-" PORT="-" SERVER="-"
+if [ "$MCP" = present ]; then
+  SPACE_ID="$(grep -oE '"FRAM_SPACE_ID"[^\"]*"[^\"]+"' "$DIR/.mcp.json" 2>/dev/null \
+              | sed -E 's/.*"([^\"]+)"$/\1/' | head -1)" || true
+  [ -n "${SPACE_ID:-}" ] || SPACE_ID="-"
+  PORT="$(grep -oE '"FRAM_SERVER_PORT"[^0-9]*[0-9]+' "$DIR/.mcp.json" 2>/dev/null \
+          | grep -oE '[0-9]+$' | head -1)" || true
+  [ -n "${PORT:-}" ] || PORT="-"
+fi
+if [ "$NATIVE_LOG" = true ]; then
+  SERVER=dead
+  if [ "$PORT" != "-" ] && [ "$SPACE_ID" != "-" ]; then
+    # Same budget fram-code-on's postcondition uses: a corpus-sized store answers
+    # :rpc/status in ~2s, so a tighter cap reports a live server as dead.
+    STATUS="$(FRAM_SERVER_PORT="$PORT" FRAM_SPACE_ID="$SPACE_ID" FRAM_LOG="$CODE_LOG" \
+      timeout 5 "$HERE/bin/fram" status 2>/dev/null)" || STATUS=""
+    if [[ "$STATUS" =~ ^up\|[0-9]+\|([0-9]+)\|ready\|jvm$ ]]; then
+      SERVER=alive
+      TRIPLES="${BASH_REMATCH[1]}"
+    fi
+  fi
+fi
+
+# --- sealed graph-control preflight -----------------------------------------
+# A configured stdio MCP cannot be probed through the client-owned process.
+# Launch its exact sealed command in preflight mode instead; Level 3 requires
+# that it reach this corpus, find every module root, and pass the real checker.
+GRAPH_CONTROL=false
+if [ "$NATIVE_LOG" = true ] && [ "$MCP" = present ] && [ "$SERVER" = alive ] && \
+   [ -f "$DIR/.mcp.json" ]; then
+  if timeout 75 python3 - "$DIR/.mcp.json" "$DIR" "$CODE_LOG" "$PORT" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+config_path, checkout, code_log, port = sys.argv[1:]
+try:
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    server = config.get("mcpServers", {}).get("fram-graph-control")
+    if not isinstance(server, dict):
+        raise ValueError("graph-control MCP is absent")
+    command = server.get("command")
+    args = server.get("args")
+    configured_env = server.get("env")
+    if (not isinstance(command, str) or not os.path.isabs(command)
+            or not os.access(command, os.X_OK) or args != ["mcp"]
+            or not isinstance(configured_env, dict)
+            or not all(isinstance(k, str) and isinstance(v, str)
+                       for k, v in configured_env.items())):
+        raise ValueError("graph-control MCP launch shape is not sealed")
+    if (os.path.realpath(configured_env.get("NORTH_FRAM_CHECKOUT_ROOT", ""))
+            != os.path.realpath(checkout)
+            or os.path.realpath(configured_env.get("NORTH_FRAM_CODE_LOG", ""))
+            != os.path.realpath(code_log)
+            or configured_env.get("NORTH_FRAM_CODE_PORT") != port):
+        raise ValueError("graph-control MCP is bound to another corpus")
+    environment = os.environ.copy()
+    environment.update(configured_env)
+    result = subprocess.run(
+        [command, "preflight"], stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, env=environment, timeout=70,
+        check=False)
+    payload = json.loads(result.stdout)
+    if (result.returncode != 0
+            or payload.get("contractVersion") != "fram.graph-control-preflight/v1"
+            or payload.get("ok") is not True
+            or payload.get("service", {}).get("server") != "reachable"
+            or payload.get("corpus", {}).get("rootsPresent") is not True
+            or payload.get("corpus", {}).get("moduleCount", 0) < 1
+            or payload.get("check", {}).get("green") is not True):
+        raise ValueError("graph-control preflight did not prove Level 3")
+except Exception:
+    raise SystemExit(1)
+PY
+  then
+    GRAPH_CONTROL=true
+  fi
+fi
+
+# --- graph-upstream adoption under this dir --------------------------------
+# The guard recognizes either a registry row or an in-band leading-comment
+# sentinel. Count that same contract only over source files present in this tree.
+REG="${GRAPH_UPSTREAM_REGISTRY:-$HOME/.config/fram/graph-upstream-files}"
+CANON=0
+CANON="$(python3 - "$REG" "${SOURCE_FILES[@]}" <<'PY'
+import os
+import shutil
+import subprocess
+import sys
+
+registry_path = sys.argv[1]
+sources = [os.path.abspath(path) for path in sys.argv[2:]]
+
+git_bin = shutil.which("git")
+repo_cache = []
+
+def git_provenance(path):
+    real = os.path.realpath(path)
+    directory = os.path.dirname(real) or "."
+    for root, common in repo_cache:
+        if directory == root or directory.startswith(root + os.sep):
+            return common, os.path.relpath(real, root).replace(os.sep, "/")
+    if git_bin is None or not os.path.isdir(directory):
+        return None
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_")}
+    env.update({"GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_SYSTEM": os.devnull,
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_TERMINAL_PROMPT": "0"})
+    try:
+        result = subprocess.run(
+            [git_bin, "-C", directory, "rev-parse",
+             "--show-toplevel", "--git-common-dir"],
+            capture_output=True, text=True, timeout=1, env=env)
+    except Exception:
+        return None
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or len(lines) != 2:
+        return None
+    root = os.path.realpath(lines[0])
+    common = os.path.realpath(os.path.join(directory, lines[1]))
+    repo_cache.append((root, common))
+    return common, os.path.relpath(real, root).replace(os.sep, "/")
+
+registry = set()
+registry_provenance = set()
+try:
+    with open(registry_path, "r", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                entry = os.path.expanduser(line)
+                registry.add(os.path.realpath(entry))
+                provenance = git_provenance(entry)
+                if provenance is not None:
+                    registry_provenance.add(provenance)
+except OSError:
+    pass
+
+print(sum(1 for path in sources
+          if (os.path.realpath(path) in registry
+              or git_provenance(path) in registry_provenance)))
+PY
+)" || CANON=0
+
+# --- level --------------------------------------------------------------------
+LEVEL=0
+if [ "$GRAPH_CONTROL" = true ]; then
+  LEVEL=3
+elif [ "$NATIVE_LOG" = true ] && [ "$MCP" = present ]; then
+  LEVEL=2
+elif [ "${SRC_COUNT:-0}" -gt 0 ]; then
+  LEVEL=1
+fi
+
+echo "level=$LEVEL src=$SRC_COUNT log=$LOG triples=$TRIPLES mcp=$MCP space=$SPACE_ID port=$PORT server=$SERVER canonical=$CANON"
+exit 0

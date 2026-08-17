@@ -1,0 +1,205 @@
+#lang beagle
+;; Structural Triple operations. Domain roles and view policy live above this
+;; neutral position-addressed boundary.
+(ns fram.kernel)
+(require fram.types :as t)
+(require clojure.string :as str)
+
+;; This is the one bootstrap door. Everything reachable through its t3
+;; profile header remains ordinary relational vocabulary.
+(def profile-anchor Keyword :kernel/profile)
+(def relational-profile-kind String "relational")
+(def observe-profile-mode String "observe")
+(def profile-includes String "includes")
+(def profile-violation String "violates")
+(def relational-profile-rules (Vec String) ["R1" "R2" "R3" "R4"])
+;; R5 is opt-in: it binds only where a profile lists it, so every space
+;; declared before it keeps its R1-R4 verdicts unchanged.
+(def vocabulary-profile-rule String "R5")
+(def vocabulary-membership Keyword :member_of)
+(def kernel-vocabulary-prefix String ":kernel/")
+
+(defn profile-header [(profile-id Any) (kind String) (mode String)] t/Triple
+  (t/triple profile-id kind mode))
+
+(defn relational-profile-declaration
+  [(space-id String) (profile-id Any)] t/Triple
+  (t/triple space-id profile-anchor
+            (profile-header profile-id relational-profile-kind
+                            observe-profile-mode)))
+
+(defn profile-rule [(profile-id Any) (rule String)] t/Triple
+  (t/triple profile-id profile-includes rule))
+
+(defn- profile-anchor? [(value t/Triple)] Bool
+  (= profile-anchor (t/triple-t2 value)))
+
+(defn- profile-has-rule?
+  [(triples (Vec t/Triple)) (profile-id Any) (rule String)] Bool
+  (not (empty?
+        (filterv (fn [(value t/Triple)] Bool
+                   (and (= profile-id (t/triple-t1 value))
+                        (and (= profile-includes (t/triple-t2 value))
+                             (= rule (t/triple-t3 value)))))
+                 triples))))
+
+(defn declared-relational-profile?
+  [(triples (Vec t/Triple)) (space-id String)] Bool
+  (not
+   (empty?
+    (filterv
+     (fn [(value t/Triple)] Bool
+       (let [(header Any) (t/triple-t3 value)]
+         (and (= space-id (t/triple-t1 value))
+              (and (profile-anchor? value)
+                   (and (t/triple? header)
+                        (and (= relational-profile-kind
+                                (t/triple-t2 header))
+                             (and (= observe-profile-mode
+                                     (t/triple-t3 header))
+                                  (every?
+                                   (fn [(rule String)] Bool
+                                     (profile-has-rule?
+                                      triples (t/triple-t1 header) rule))
+                                   relational-profile-rules))))))))
+     triples))))
+
+(defn- space-profile-ids [(triples (Vec t/Triple)) (space-id String)] (Vec Any)
+  (mapv (fn [(value t/Triple)] Any (t/triple-t1 (t/triple-t3 value)))
+        (filterv (fn [(value t/Triple)] Bool
+                   (and (= space-id (t/triple-t1 value))
+                        (and (profile-anchor? value)
+                             (t/triple? (t/triple-t3 value)))))
+                 triples)))
+
+(defn declared-vocabulary-rule?
+  [(triples (Vec t/Triple)) (space-id String)] Bool
+  (not (empty?
+        (filterv (fn [(profile-id Any)] Bool
+                   (profile-has-rule? triples profile-id
+                                      vocabulary-profile-rule))
+                 (space-profile-ids triples space-id)))))
+
+;; The engine's own occurrence vocabulary is primitive-exempt; :rpc/* is wire
+;; syntax and never reaches a stored proposition.
+(defn- namespaced-vocabulary? [(value Any)] Bool
+  (if (keyword? value)
+    (let [(keyword-value Keyword) value
+          (spelling String) (str keyword-value)]
+      (and (str/includes? spelling "/")
+           (not (str/starts-with? spelling kernel-vocabulary-prefix))))
+    false))
+
+(defn- vocabulary-member? [(triples (Vec t/Triple)) (term Any)] Bool
+  (not (empty?
+        (filterv (fn [(value t/Triple)] Bool
+                   (and (= term (t/triple-t1 value))
+                        (= vocabulary-membership (t/triple-t2 value))))
+                 triples))))
+
+;; R5 reads the whole space, so it cannot join R1-R4's per-proposition verdict:
+;; the membership that licenses a spelling lives in a sibling proposition.
+(defn vocabulary-lint-errors
+  [(triples (Vec t/Triple)) (proposition t/Triple)] (Vec String)
+  (let [(t2 Any) (t/triple-t2 proposition)]
+    (if (and (namespaced-vocabulary? t2)
+             (not (vocabulary-member? triples t2)))
+      [vocabulary-profile-rule]
+      [])))
+
+(defn- nonblank-string-or-keyword? [(value Any)] Bool
+  (or (keyword? value)
+      (and (string? value) (> (count value) 0))))
+
+;; Observe commits must not call this prospective verdict.
+(defn relational-admission-errors [(proposition t/Triple)] (Vec String)
+  (let [(t1 Any) (t/triple-t1 proposition)
+        (t2 Any) (t/triple-t2 proposition)
+        (t3 Any) (t/triple-t3 proposition)]
+    (cond-> []
+      (not (and (t/atom? t1)
+                (and (t/atom? t2) (t/atom? t3))))
+      (conj "R1")
+      (not (nonblank-string-or-keyword? t1))
+      (conj "R2")
+      (not (nonblank-string-or-keyword? t2))
+      (conj "R3")
+      (not (t/atom? t3))
+      (conj "R4"))))
+
+;; P3 requires an independent expression rather than a shared verdict helper.
+(defn relational-lint-errors [(proposition t/Triple)] (Vec String)
+  (let [(t1 Any) (t/triple-t1 proposition)
+        (t2 Any) (t/triple-t2 proposition)
+        (t3 Any) (t/triple-t3 proposition)
+        (r1 Bool) (and (t/atom? t1)
+                      (and (t/atom? t2) (t/atom? t3)))
+        (r2 Bool) (or (keyword? t1)
+                     (and (string? t1) (not (= "" t1))))
+        (r3 Bool) (or (keyword? t2)
+                     (and (string? t2) (not (= "" t2))))
+        (r4 Bool) (t/atom? t3)
+        (errors0 (Vec String)) []
+        (errors1 (Vec String)) (if r1 errors0 (conj errors0 "R1"))
+        (errors2 (Vec String)) (if r2 errors1 (conj errors1 "R2"))
+        (errors3 (Vec String)) (if r3 errors2 (conj errors2 "R3"))]
+    (if r4 errors3 (conj errors3 "R4"))))
+
+(defn lint-declared-profile
+  [(triples (Vec t/Triple)) (space-id String)] (Vec t/Triple)
+  (if (not (declared-relational-profile? triples space-id))
+    []
+    (let [(vocabulary? Bool) (declared-vocabulary-rule? triples space-id)]
+      (reduce
+       (fn [(violations (Vec t/Triple)) (proposition t/Triple)] (Vec t/Triple)
+         (if (profile-anchor? proposition)
+           violations
+           (let [(relational (Vec String)) (relational-lint-errors proposition)
+                 (rules (Vec String))
+                 (if vocabulary?
+                   (into relational
+                         (vocabulary-lint-errors triples proposition))
+                   relational)]
+             (reduce
+              (fn [(rows (Vec t/Triple)) (rule String)] (Vec t/Triple)
+                (conj rows (t/triple proposition profile-violation rule)))
+              violations
+              rules))))
+       []
+       triples))))
+
+(defn triple-eq? [(left t/Triple) (right t/Triple)] Bool
+  (= left right))
+
+(defn by-t1 [(triples (Vec t/Triple)) (term Any)] (Vec t/Triple)
+  (filterv (fn [(value t/Triple)] Bool
+             (= term (t/triple-t1 value)))
+           triples))
+
+(defn by-t2 [(triples (Vec t/Triple)) (term Any)] (Vec t/Triple)
+  (filterv (fn [(value t/Triple)] Bool
+             (= term (t/triple-t2 value)))
+           triples))
+
+(defn by-t3 [(triples (Vec t/Triple)) (term Any)] (Vec t/Triple)
+  (filterv (fn [(value t/Triple)] Bool
+             (= term (t/triple-t3 value)))
+           triples))
+
+(defn by-t12 [(triples (Vec t/Triple)) (t1 Any) (t2 Any)] (Vec t/Triple)
+  (filterv (fn [(value t/Triple)] Bool
+             (and (= t1 (t/triple-t1 value))
+                  (= t2 (t/triple-t2 value))))
+           triples))
+
+(defn by-t23 [(triples (Vec t/Triple)) (t2 Any) (t3 Any)] (Vec t/Triple)
+  (filterv (fn [(value t/Triple)] Bool
+             (and (= t2 (t/triple-t2 value))
+                  (= t3 (t/triple-t3 value))))
+           triples))
+
+(defn by-t13 [(triples (Vec t/Triple)) (t1 Any) (t3 Any)] (Vec t/Triple)
+  (filterv (fn [(value t/Triple)] Bool
+             (and (= t1 (t/triple-t1 value))
+                  (= t3 (t/triple-t3 value))))
+           triples))

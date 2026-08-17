@@ -1,0 +1,2 @@
+# kind	source	destination
+beagle	src/fram/provider_host.bclj	out/fram/provider_host.clj

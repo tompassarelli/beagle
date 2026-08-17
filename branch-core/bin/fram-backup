@@ -1,0 +1,13 @@
+#!/usr/bin/env bun
+import { FramBackupError, runCli } from '../clients/bun/backup.mjs';
+
+try {
+  await runCli();
+} catch (error) {
+  if (error instanceof FramBackupError) {
+    console.error(`fram-backup: ${error.code}: ${error.message}`);
+    process.exit(error.code === 'usage' ? 2 : 1);
+  }
+  console.error(`fram-backup: internal: ${error?.message ?? String(error)}`);
+  process.exit(1);
+}

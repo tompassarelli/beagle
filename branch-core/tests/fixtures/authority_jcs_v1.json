@@ -1,0 +1,43 @@
+{
+  "fixtureVersion": "fram.jcs-no-number-no-null/v1",
+  "vectors": [
+    {
+      "name": "booleans-array",
+      "value": [true, false, "x"],
+      "canonical": "[true,false,\"x\"]",
+      "sha256": "sha256:075ae67d8716cc7dd6a9e2464ff5e091fda1b5139ff3058524bbbb8e0ad5124d"
+    },
+    {
+      "name": "object-order",
+      "value": {"b": "2", "a": "1"},
+      "canonical": "{\"a\":\"1\",\"b\":\"2\"}",
+      "sha256": "sha256:21f76dfbfe6dfe21f762080ef484112cf2952974cef30741fd1931e1c6d92112"
+    },
+    {
+      "name": "control-escapes",
+      "value": "\b\t\n\f\r\u0000\"\\/",
+      "canonical": "\"\\b\\t\\n\\f\\r\\u0000\\\"\\\\/\"",
+      "sha256": "sha256:0ef2f651f279cc808259ff9641c325599e878511a93f89714113077418da6e5f"
+    },
+    {
+      "name": "unicode-order",
+      "value": {
+        "€": "Euro Sign",
+        "\r": "Carriage Return",
+        "דּ": "Hebrew Letter Dalet With Dagesh",
+        "1": "One",
+        "😀": "Emoji: Grinning Face",
+        "\u0080": "Control",
+        "ö": "Latin Small Letter O With Diaeresis"
+      },
+      "canonical": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\u0080\":\"Control\",\"ö\":\"Latin Small Letter O With Diaeresis\",\"€\":\"Euro Sign\",\"😀\":\"Emoji: Grinning Face\",\"דּ\":\"Hebrew Letter Dalet With Dagesh\"}",
+      "sha256": "sha256:5e321556d22018a9656991a9e94f77ec175fa193e52a2429d312f8419ec8b08c"
+    },
+    {
+      "name": "nfc-preserved",
+      "value": "é",
+      "canonical": "\"é\"",
+      "sha256": "sha256:f2886017e9c7abacf804b54d64787dce2b611c9544ba21f3affdd126a6e50086"
+    }
+  ]
+}

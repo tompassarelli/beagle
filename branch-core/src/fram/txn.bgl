@@ -1,0 +1,110 @@
+#lang beagle
+
+;; The authoritative transaction builder: one pinned transaction coordinate, one
+;; monotonic mint-ordinal allocator, and the single-cardinality update compiler.
+;; A minted identity is the coordinate Term (tx-coordinate :mint-ordinal n);
+;; ordinary propositions say what it represents. Commit is OCC-guarded on the
+;; pinned sequence, so a coordinate minted here can never name another frame.
+(ns fram.txn)
+
+
+(require fram.types :as t)
+
+(require fram.store :as store)
+
+(require fram.rotation :as rot)
+
+;; Deliberately unnamespaced: minting is a domain coordinate, not kernel vocabulary.
+(def mint-ordinal Keyword :mint-ordinal)
+
+(defrecord Builder
+  [(coordinate t/Triple) (operations (Vec t/CommitOperation)) (minted Int)])
+
+(def empty-operations (Vec t/CommitOperation) [])
+
+(defn open [(ctx (Atom t/TermStore))] (Atom Builder)
+  (atom (->Builder (t/transaction-coordinate (store/space-id ctx) (store/next-sequence ctx)) empty-operations 0)))
+
+(defn coordinate [(builder (Atom Builder))] t/Triple
+  (builder-coordinate (deref builder)))
+
+(defn sequence-of [(builder (Atom Builder))] Int
+  (t/triple-t3 (coordinate builder)))
+
+(defn operations [(builder (Atom Builder))] (Vec t/CommitOperation)
+  (builder-operations (deref builder)))
+
+(defn operation-count [(builder (Atom Builder))] Int
+  (count (operations builder)))
+
+(defn minted-count [(builder (Atom Builder))] Int
+  (builder-minted (deref builder)))
+
+(defn mint-coordinate [(transaction t/Triple) (ordinal Int)] t/Triple
+  (if (and (t/transaction-coordinate? transaction) (>= ordinal 0))
+    (t/triple transaction mint-ordinal ordinal)
+    (throw (ex-info "fram: a mint coordinate requires a transaction coordinate and non-negative ordinal" {:type :invalid-mint-coordinate}))))
+
+(defn mint-coordinate? [(value Any)] Bool
+  (and (t/triple? value)
+    (and (t/transaction-coordinate? (t/triple-t1 value))
+      (and (= mint-ordinal (t/triple-t2 value))
+        (and (integer? (t/triple-t3 value)) (>= (t/triple-t3 value) 0))))))
+
+(defn mint! [(builder (Atom Builder))] t/Triple
+  (let [(before Builder) (deref builder) (ordinal Int) (builder-minted before)]
+    (do
+      (swap! builder assoc :minted (inc ordinal))
+      (mint-coordinate (builder-coordinate before) ordinal))))
+
+;; Returns the occurrence coordinate the LAST appended operation will carry —
+;; deterministic because the transaction coordinate is pinned at open.
+(defn- append!
+  [(builder (Atom Builder)) (appended (Vec t/CommitOperation))] t/Triple
+  (if (empty? appended)
+    (throw (ex-info "fram: an empty operation vector has no write identity" {:type :empty-operation-vector}))
+    (let [(before Builder) (deref builder) (start Int) (count (builder-operations before))]
+      (do
+        (swap! builder
+          assoc
+          :operations
+          (vec (concat (builder-operations before) appended)))
+        (t/occurrence-coordinate (builder-coordinate before)
+          (+ start (dec (count appended))))))))
+
+(defn assert! [(builder (Atom Builder)) (proposition t/Triple)] t/Triple
+  (append! builder [(store/assert-operation proposition)]))
+
+(defn retract! [(builder (Atom Builder)) (proposition t/Triple)] t/Triple
+  (append! builder [(store/retract-operation proposition)]))
+
+;; One live (subject, predicate, *) occurrence -> one retraction, NEWEST FIRST
+;; (the order store withdrawal already follows), including duplicate equal
+;; propositions; the new assertion is last. Same-value updates still retract and
+;; re-assert: preserving the act boundary is the point, an idempotent ensure
+;; would be a different verb.
+(defn compile-single-update
+  [(view rot/Rotation)
+   (subject Any)
+   (predicate Any)
+   (value Any)]
+  (Vec t/CommitOperation)
+  (conj (mapv (fn [(event t/OperationOccurrence)] t/CommitOperation (store/retract-operation (rot/proposition-of event))) (rot/newest-first (rot/by-t12 view subject predicate)))
+    (store/assert-operation (t/triple subject predicate value))))
+
+(defn update-single!
+  [(builder (Atom Builder))
+   (view rot/Rotation)
+   (subject Any)
+   (predicate Any)
+   (value Any)]
+  t/Triple
+  (append! builder (compile-single-update view subject predicate value)))
+
+(defn commit! [(ctx (Atom t/TermStore)) (builder (Atom Builder))] t/Triple
+  (let [(current Builder) (deref builder) (pinned t/Triple) (builder-coordinate current)]
+    (if (not (= (t/triple-t1 pinned) (store/space-id ctx)))
+      (throw (ex-info "fram: transaction belongs to a different space" {:type :transaction-space-mismatch}))
+      (if (not (= (t/triple-t3 pinned) (store/next-sequence ctx)))
+        (throw (ex-info "fram: the store advanced under this transaction" {:type :transaction-sequence-drift :pinned (t/triple-t3 pinned) :observed (store/next-sequence ctx)}))
+        (store/commit-transaction! ctx (builder-operations current))))))

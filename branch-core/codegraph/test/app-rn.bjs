@@ -1,0 +1,3 @@
+#lang beagle/js
+(ns app.rn (:require [app.x :refer [red] :rename {red rouge}]))
+(defn use-rn [] Any (rouge 1))

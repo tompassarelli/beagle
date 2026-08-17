@@ -1,0 +1,4 @@
+#lang beagle/js
+;; the red path is hot — keep red fast (not red-zone, not "red")
+(defn red [(x Int)] Int (* x 2))
+(defn use-a [] Int (red 21))

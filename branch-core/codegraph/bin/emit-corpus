@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# emit-corpus: project a beagle source tree into a CNF fact stream.
+#   bin/emit-corpus <src-dir> [out.facts]
+# Defaults to gjoa src -> build/gjoa.facts.
+set -o pipefail
+BEAGLE="${BEAGLE:-$HOME/code/beagle/main}"
+src="${1:-$HOME/code/gjoa/src/gjoa}"
+out="${2:-$(dirname "$0")/../build/gjoa.facts}"
+mkdir -p "$(dirname "$out")"
+"$BEAGLE/bin/beagle-facts" "$src" > "$out"
+echo "emit-corpus: $(grep -c '^@file' "$out") files, $(grep -c '^\[' "$out") facts -> $out" >&2

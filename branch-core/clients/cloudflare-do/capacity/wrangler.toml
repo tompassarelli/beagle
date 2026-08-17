@@ -1,0 +1,18 @@
+name = "fram-cloudflare-capacity"
+main = "worker.mjs"
+compatibility_date = "2026-08-01"
+workers_dev = false
+preview_urls = false
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
+[[durable_objects.bindings]]
+name = "FRAM"
+class_name = "CapacityFram"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CapacityFram"]

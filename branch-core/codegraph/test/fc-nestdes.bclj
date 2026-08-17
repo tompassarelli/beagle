@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns fc.nestdes)
+(defn first-of [(pair Any)] Any
+  (let [[[a b] {:keys [c]}] pair]
+    (vector a b c)))

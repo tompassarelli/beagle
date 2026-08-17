@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Ensure the Fram server is running. Idempotent: if a server is
+# already up it's a no-op; otherwise it starts one (detached) on the canonical
+# log and waits until it answers.
+#
+#   FRAM_SERVER_PORT / FRAM_LOG / FRAM_SPACE_ID select the listener and identity.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+export FRAM_SERVER_PORT="${FRAM_SERVER_PORT:-7977}"
+LOG="${FRAM_LOG:-$PWD/history.framlog}"
+if [[ -z "${FRAM_SPACE_ID:-}" ]]; then
+  echo "ERROR: FRAM_SPACE_ID is required" >&2
+  exit 2
+fi
+export FRAM_SPACE_ID
+STARTUP_TIMEOUT_SECONDS="${FRAM_STARTUP_TIMEOUT_SECONDS:-240}"
+RESTART=0; [ "$1" = "--restart" ] && RESTART=1
+
+if [[ ! "$STARTUP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] ||
+   (( STARTUP_TIMEOUT_SECONDS > 3600 )); then
+  echo "ERROR: FRAM_STARTUP_TIMEOUT_SECONDS must be an integer from 1 to 3600" >&2
+  exit 2
+fi
+
+# PIDs listening on the port. fuser/lsof are NOT always installed (e.g. NixOS),
+# and when they're missing the old kill silently no-opped, leaving a zombie that
+# squatted the port — the new server then failed to bind and `up` falsely
+# reported success because the zombie answered the readiness probe. ss (iproute2) is
+# reliably present; kill by the listener PID and VERIFY the port frees.
+port_pids() { ss -tlnpH "sport = :$FRAM_SERVER_PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u; }
+
+# Readiness is one identity-bound native version roundtrip.
+server_ready() {
+  local port="$1"
+  local space="$2"
+  local classpath="$3"
+  FRAM_PROBE_PORT="$port" FRAM_SPACE_ID="$space" \
+    bb -cp "$classpath" -e '
+      (require (quote [fram.rt :as rt]) (quote [framrpc :as wire]))
+      (let [port (Integer/parseInt (System/getenv "FRAM_PROBE_PORT"))
+            response (rt/native-call! port :rpc/version wire/rpc-unit)]
+        (System/exit
+         (cond
+           (nil? (rt/native-error response)) 0
+           (= :rpc/space-mismatch (rt/native-error-code response)) 42
+           :else 1)))'
+}
+
+if [ "$RESTART" = 1 ]; then
+  echo "stopping any server on :$FRAM_SERVER_PORT"
+  for p in $(port_pids); do kill "$p" 2>/dev/null || true; done
+  for _ in $(seq 20); do [ -z "$(port_pids)" ] && break; sleep 0.1; done
+  for p in $(port_pids); do kill -9 "$p" 2>/dev/null || true; done
+  for _ in $(seq 20); do [ -z "$(port_pids)" ] && break; sleep 0.1; done
+  if [ -n "$(port_pids)" ]; then
+    echo "ERROR: :$FRAM_SERVER_PORT still held by PID(s) $(port_pids | tr '\n' ' ')after SIGKILL — kill manually." >&2
+    exit 1
+  fi
+else
+  server_ready "$FRAM_SERVER_PORT" "$FRAM_SPACE_ID" "$HERE/../out" 2>/dev/null
+  probe_rc=$?
+  if [[ $probe_rc -eq 0 ]]; then
+    echo "server already up on :$FRAM_SERVER_PORT (use \`up --restart\` to reload it)"
+    exit 0
+  fi
+  if [[ $probe_rc -eq 42 ]]; then
+    echo "ERROR: :$FRAM_SERVER_PORT serves a different FRAM_SPACE_ID; refusing to start a second server" >&2
+    exit 1
+  fi
+fi
+
+echo "starting server on :$FRAM_SERVER_PORT  (log: $LOG)"
+# Snapshot boot rides every revive: without this, an auto-revive silently boots
+# flag-off and refolds the whole log (the 2026-07-03 activation race). Explicit
+setsid "$HERE/fram-server" "$FRAM_SERVER_PORT" "$LOG" >"/tmp/fram-server-$FRAM_SERVER_PORT.log" 2>&1 &
+disown 2>/dev/null || true
+
+# The selected server may read the whole fact log at startup, so give it room.
+# GNU timeout supplies one monotonic deadline for the complete poll loop; probe
+# runtime no longer shortens the configured startup window.
+export -f server_ready
+if timeout --foreground "${STARTUP_TIMEOUT_SECONDS}s" \
+    bash -c '
+      until server_ready "$1" "$2" "$3" 2>/dev/null; do
+        sleep 0.25
+      done
+    ' _ "$FRAM_SERVER_PORT" "$FRAM_SPACE_ID" "$HERE/../out"; then
+  echo "server up on :$FRAM_SERVER_PORT"
+  exit 0
+fi
+echo "ERROR: server did not come up within ${STARTUP_TIMEOUT_SECONDS}s — see /tmp/fram-server-$FRAM_SERVER_PORT.log" >&2
+exit 1

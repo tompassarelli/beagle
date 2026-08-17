@@ -1,0 +1,987 @@
+{
+  "reflection": [
+    {
+      "type": "clojure.lang.AFunction"
+    },
+    {
+      "type": "clojure.lang.APersistentMap"
+    },
+    {
+      "type": "clojure.lang.APersistentMap$KeySeq"
+    },
+    {
+      "type": "clojure.lang.APersistentMap$ValSeq"
+    },
+    {
+      "type": "clojure.lang.ASeq"
+    },
+    {
+      "type": "clojure.lang.Associative"
+    },
+    {
+      "type": "clojure.lang.BigInt"
+    },
+    {
+      "type": "clojure.lang.ChunkBuffer"
+    },
+    {
+      "type": "clojure.lang.Compiler"
+    },
+    {
+      "type": "clojure.lang.Compiler$CompilerException"
+    },
+    {
+      "type": "clojure.lang.DynamicClassLoader"
+    },
+    {
+      "type": "clojure.lang.ExceptionInfo"
+    },
+    {
+      "type": "clojure.lang.Fn"
+    },
+    {
+      "type": "clojure.lang.IChunk"
+    },
+    {
+      "type": "clojure.lang.IChunkedSeq"
+    },
+    {
+      "type": "clojure.lang.IDeref"
+    },
+    {
+      "type": "clojure.lang.IExceptionInfo"
+    },
+    {
+      "type": "clojure.lang.IFn"
+    },
+    {
+      "type": "clojure.lang.IHashEq"
+    },
+    {
+      "type": "clojure.lang.IKVReduce"
+    },
+    {
+      "type": "clojure.lang.IKeywordLookup"
+    },
+    {
+      "type": "clojure.lang.ILookup"
+    },
+    {
+      "type": "clojure.lang.ILookupThunk"
+    },
+    {
+      "type": "clojure.lang.IObj"
+    },
+    {
+      "type": "clojure.lang.IPersistentCollection"
+    },
+    {
+      "type": "clojure.lang.IPersistentList"
+    },
+    {
+      "type": "clojure.lang.IPersistentMap"
+    },
+    {
+      "type": "clojure.lang.IPersistentSet"
+    },
+    {
+      "type": "clojure.lang.IPersistentVector"
+    },
+    {
+      "type": "clojure.lang.IProxy"
+    },
+    {
+      "type": "clojure.lang.IRecord"
+    },
+    {
+      "type": "clojure.lang.IReduceInit"
+    },
+    {
+      "type": "clojure.lang.ISeq"
+    },
+    {
+      "type": "clojure.lang.Keyword"
+    },
+    {
+      "type": "clojure.lang.LazilyPersistentVector"
+    },
+    {
+      "type": "clojure.lang.LazySeq"
+    },
+    {
+      "type": "clojure.lang.LineNumberingPushbackReader"
+    },
+    {
+      "type": "clojure.lang.LispReader$ReaderException"
+    },
+    {
+      "type": "clojure.lang.LockingTransaction"
+    },
+    {
+      "type": "clojure.lang.MapEntry"
+    },
+    {
+      "type": "clojure.lang.MapEquivalence"
+    },
+    {
+      "type": "clojure.lang.MethodImplCache"
+    },
+    {
+      "type": "clojure.lang.Murmur3"
+    },
+    {
+      "type": "clojure.lang.Namespace"
+    },
+    {
+      "type": "clojure.lang.Numbers",
+      "methods": [
+        {
+          "name": "max",
+          "parameterTypes": [
+            "long",
+            "java.lang.Object"
+          ]
+        },
+        {
+          "name": "minus",
+          "parameterTypes": [
+            "java.lang.Object",
+            "long"
+          ]
+        },
+        {
+          "name": "multiply",
+          "parameterTypes": [
+            "long",
+            "long"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "clojure.lang.PersistentArrayMap"
+    },
+    {
+      "type": "clojure.lang.PersistentHashMap"
+    },
+    {
+      "type": "clojure.lang.PersistentHashSet"
+    },
+    {
+      "type": "clojure.lang.PersistentVector"
+    },
+    {
+      "type": "clojure.lang.RT",
+      "methods": [
+        {
+          "name": "aget",
+          "parameterTypes": [
+            "byte[]",
+            "int"
+          ]
+        },
+        {
+          "name": "alength",
+          "parameterTypes": [
+            "byte[]"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "clojure.lang.Ratio"
+    },
+    {
+      "type": "clojure.lang.ReaderConditional"
+    },
+    {
+      "type": "clojure.lang.RecordIterator"
+    },
+    {
+      "type": "clojure.lang.Reflector"
+    },
+    {
+      "type": "clojure.lang.SeqIterator"
+    },
+    {
+      "type": "clojure.lang.Sequential"
+    },
+    {
+      "type": "clojure.lang.StringSeq"
+    },
+    {
+      "type": "clojure.lang.Symbol"
+    },
+    {
+      "type": "clojure.lang.TaggedLiteral"
+    },
+    {
+      "type": "clojure.lang.Util",
+      "methods": [
+        {
+          "name": "equiv",
+          "parameterTypes": [
+            "java.lang.Object",
+            "java.lang.Object"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "clojure.lang.Var"
+    },
+    {
+      "type": "clojure.lang.Volatile"
+    },
+    {
+      "type": "java.io.BufferedInputStream"
+    },
+    {
+      "type": "java.io.BufferedOutputStream"
+    },
+    {
+      "type": "java.io.BufferedReader"
+    },
+    {
+      "type": "java.io.BufferedWriter"
+    },
+    {
+      "type": "java.io.ByteArrayInputStream"
+    },
+    {
+      "type": "java.io.ByteArrayOutputStream",
+      "methods": [
+        {
+          "name": "write",
+          "parameterTypes": [
+            "int"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.io.CharArrayReader"
+    },
+    {
+      "type": "java.io.Closeable"
+    },
+    {
+      "type": "java.io.DataInputStream"
+    },
+    {
+      "type": "java.io.DataOutputStream"
+    },
+    {
+      "type": "java.io.File",
+      "methods": [
+        {
+          "name": "isFile",
+          "parameterTypes": []
+        },
+        {
+          "name": "listFiles",
+          "parameterTypes": []
+        },
+        {
+          "name": "toPath",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "java.io.FileInputStream",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "java.io.File"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.io.FileOutputStream",
+      "methods": [
+        {
+          "name": "write",
+          "parameterTypes": [
+            "byte[]"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.io.FileWriter"
+    },
+    {
+      "type": "java.io.File[]"
+    },
+    {
+      "type": "java.io.FilterOutputStream",
+      "methods": [
+        {
+          "name": "write",
+          "parameterTypes": [
+            "byte[]"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.io.InputStream",
+      "methods": [
+        {
+          "name": "read",
+          "parameterTypes": [
+            "byte[]",
+            "int",
+            "int"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.io.InputStreamReader"
+    },
+    {
+      "type": "java.io.NotSerializableException"
+    },
+    {
+      "type": "java.io.OutputStream",
+      "methods": [
+        {
+          "name": "flush",
+          "parameterTypes": []
+        },
+        {
+          "name": "write",
+          "parameterTypes": [
+            "byte[]"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.io.OutputStreamWriter"
+    },
+    {
+      "type": "java.io.PrintStream"
+    },
+    {
+      "type": "java.io.PrintWriter"
+    },
+    {
+      "type": "java.io.PushbackReader"
+    },
+    {
+      "type": "java.io.RandomAccessFile"
+    },
+    {
+      "type": "java.io.Reader"
+    },
+    {
+      "type": "java.io.Serializable"
+    },
+    {
+      "type": "java.io.StringReader"
+    },
+    {
+      "type": "java.io.StringWriter"
+    },
+    {
+      "type": "java.io.Writer"
+    },
+    {
+      "type": "java.lang.Boolean",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "getBoolean",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.lang.Byte"
+    },
+    {
+      "type": "java.lang.Character"
+    },
+    {
+      "type": "java.lang.Class"
+    },
+    {
+      "type": "java.lang.Double"
+    },
+    {
+      "type": "java.lang.Exception"
+    },
+    {
+      "type": "java.lang.Float"
+    },
+    {
+      "type": "java.lang.IllegalArgumentException"
+    },
+    {
+      "type": "java.lang.Integer"
+    },
+    {
+      "type": "java.lang.Iterable"
+    },
+    {
+      "type": "java.lang.Long"
+    },
+    {
+      "type": "java.lang.Number"
+    },
+    {
+      "type": "java.lang.Object",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "java.lang.Object[]"
+    },
+    {
+      "type": "java.lang.Runtime"
+    },
+    {
+      "type": "java.lang.Short"
+    },
+    {
+      "type": "java.lang.StackTraceElement"
+    },
+    {
+      "type": "java.lang.StackTraceElement[]"
+    },
+    {
+      "type": "java.lang.String",
+      "methods": [
+        {
+          "name": "getBytes",
+          "parameterTypes": [
+            "java.nio.charset.Charset"
+          ]
+        },
+        {
+          "name": "toLowerCase",
+          "parameterTypes": [
+            "java.util.Locale"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.lang.StringBuilder"
+    },
+    {
+      "type": "java.lang.System",
+      "methods": [
+        {
+          "name": "getProperty",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        },
+        {
+          "name": "getenv",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.lang.Thread"
+    },
+    {
+      "type": "java.lang.ThreadLocal"
+    },
+    {
+      "type": "java.lang.Throwable"
+    },
+    {
+      "type": "java.lang.UnsupportedOperationException"
+    },
+    {
+      "type": "java.lang.annotation.Annotation"
+    },
+    {
+      "type": "java.lang.annotation.Retention"
+    },
+    {
+      "type": "java.lang.reflect.Array"
+    },
+    {
+      "type": "java.lang.reflect.Constructor"
+    },
+    {
+      "type": "java.lang.reflect.Field"
+    },
+    {
+      "type": "java.lang.reflect.Method",
+      "methods": [
+        {
+          "name": "canAccess",
+          "parameterTypes": [
+            "java.lang.Object"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.lang.reflect.Modifier"
+    },
+    {
+      "type": "java.math.BigDecimal"
+    },
+    {
+      "type": "java.math.BigInteger"
+    },
+    {
+      "type": "java.net.InetAddress"
+    },
+    {
+      "type": "java.net.InetSocketAddress"
+    },
+    {
+      "type": "java.net.MalformedURLException"
+    },
+    {
+      "type": "java.net.ServerSocket"
+    },
+    {
+      "type": "java.net.Socket",
+      "methods": [
+        {
+          "name": "close",
+          "parameterTypes": []
+        },
+        {
+          "name": "getInputStream",
+          "parameterTypes": []
+        },
+        {
+          "name": "getOutputStream",
+          "parameterTypes": []
+        },
+        {
+          "name": "setSoTimeout",
+          "parameterTypes": [
+            "int"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.net.Socket$SocketInputStream"
+    },
+    {
+      "type": "java.net.Socket$SocketOutputStream"
+    },
+    {
+      "type": "java.net.SocketException"
+    },
+    {
+      "type": "java.net.SocketTimeoutException"
+    },
+    {
+      "type": "java.net.URI"
+    },
+    {
+      "type": "java.net.URL"
+    },
+    {
+      "type": "java.net.URLDecoder"
+    },
+    {
+      "type": "java.net.URLEncoder"
+    },
+    {
+      "type": "java.nio.Buffer",
+      "methods": [
+        {
+          "name": "remaining",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "java.nio.ByteBuffer",
+      "methods": [
+        {
+          "name": "get",
+          "parameterTypes": [
+            "byte[]"
+          ]
+        },
+        {
+          "name": "getInt",
+          "parameterTypes": []
+        },
+        {
+          "name": "getLong",
+          "parameterTypes": []
+        },
+        {
+          "name": "getShort",
+          "parameterTypes": []
+        },
+        {
+          "name": "order",
+          "parameterTypes": [
+            "java.nio.ByteOrder"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.nio.ByteOrder"
+    },
+    {
+      "type": "java.nio.CharBuffer"
+    },
+    {
+      "type": "java.nio.HeapByteBuffer"
+    },
+    {
+      "type": "java.nio.channels.FileChannel"
+    },
+    {
+      "type": "java.nio.charset.CharacterCodingException"
+    },
+    {
+      "type": "java.nio.charset.Charset"
+    },
+    {
+      "type": "java.nio.charset.CharsetDecoder"
+    },
+    {
+      "type": "java.nio.charset.CharsetEncoder"
+    },
+    {
+      "type": "java.nio.charset.CodingErrorAction"
+    },
+    {
+      "type": "java.nio.charset.StandardCharsets",
+      "fields": [
+        {
+          "name": "UTF_8"
+        }
+      ]
+    },
+    {
+      "type": "java.nio.file.CopyOption"
+    },
+    {
+      "type": "java.nio.file.CopyOption[]"
+    },
+    {
+      "type": "java.nio.file.FileAlreadyExistsException"
+    },
+    {
+      "type": "java.nio.file.Files",
+      "methods": [
+        {
+          "name": "createTempDirectory",
+          "parameterTypes": [
+            "java.lang.String",
+            "java.nio.file.attribute.FileAttribute[]"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.nio.file.LinkOption"
+    },
+    {
+      "type": "java.nio.file.LinkOption[]"
+    },
+    {
+      "type": "java.nio.file.OpenOption"
+    },
+    {
+      "type": "java.nio.file.OpenOption[]"
+    },
+    {
+      "type": "java.nio.file.Path",
+      "methods": [
+        {
+          "name": "toFile",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "java.nio.file.StandardCopyOption"
+    },
+    {
+      "type": "java.nio.file.StandardCopyOption[]"
+    },
+    {
+      "type": "java.nio.file.StandardOpenOption"
+    },
+    {
+      "type": "java.nio.file.attribute.BasicFileAttributes"
+    },
+    {
+      "type": "java.nio.file.attribute.FileAttribute"
+    },
+    {
+      "type": "java.nio.file.attribute.FileAttribute[]"
+    },
+    {
+      "type": "java.nio.file.attribute.FileTime"
+    },
+    {
+      "type": "java.nio.file.attribute.PosixFilePermission",
+      "fields": [
+        {
+          "name": "GROUP_EXECUTE"
+        },
+        {
+          "name": "GROUP_READ"
+        },
+        {
+          "name": "GROUP_WRITE"
+        },
+        {
+          "name": "OTHERS_EXECUTE"
+        },
+        {
+          "name": "OTHERS_READ"
+        },
+        {
+          "name": "OTHERS_WRITE"
+        },
+        {
+          "name": "OWNER_EXECUTE"
+        },
+        {
+          "name": "OWNER_READ"
+        },
+        {
+          "name": "OWNER_WRITE"
+        }
+      ]
+    },
+    {
+      "type": "java.security.KeyStore"
+    },
+    {
+      "type": "java.security.MessageDigest"
+    },
+    {
+      "type": "java.sql.Timestamp"
+    },
+    {
+      "type": "java.text.SimpleDateFormat"
+    },
+    {
+      "type": "java.time.DayOfWeek"
+    },
+    {
+      "type": "java.time.Instant"
+    },
+    {
+      "type": "java.time.LocalDate"
+    },
+    {
+      "type": "java.time.LocalDateTime"
+    },
+    {
+      "type": "java.time.OffsetDateTime"
+    },
+    {
+      "type": "java.time.ZoneId"
+    },
+    {
+      "type": "java.time.ZonedDateTime"
+    },
+    {
+      "type": "java.time.format.DateTimeFormatter"
+    },
+    {
+      "type": "java.time.format.DateTimeParseException"
+    },
+    {
+      "type": "java.util.Arrays",
+      "methods": [
+        {
+          "name": "copyOfRange",
+          "parameterTypes": [
+            "byte[]",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "equals",
+          "parameterTypes": [
+            "byte[]",
+            "byte[]"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.util.Base64"
+    },
+    {
+      "type": "java.util.Base64$Decoder"
+    },
+    {
+      "type": "java.util.Base64$Encoder"
+    },
+    {
+      "type": "java.util.Calendar"
+    },
+    {
+      "type": "java.util.Collection"
+    },
+    {
+      "type": "java.util.Date"
+    },
+    {
+      "type": "java.util.GregorianCalendar"
+    },
+    {
+      "type": "java.util.HashSet"
+    },
+    {
+      "type": "java.util.HexFormat"
+    },
+    {
+      "type": "java.util.List"
+    },
+    {
+      "type": "java.util.Locale"
+    },
+    {
+      "type": "java.util.Map"
+    },
+    {
+      "type": "java.util.Properties"
+    },
+    {
+      "type": "java.util.RandomAccess"
+    },
+    {
+      "type": "java.util.Set"
+    },
+    {
+      "type": "java.util.SimpleTimeZone"
+    },
+    {
+      "type": "java.util.TimeZone"
+    },
+    {
+      "type": "java.util.UUID"
+    },
+    {
+      "type": "java.util.concurrent.ArrayBlockingQueue"
+    },
+    {
+      "type": "java.util.concurrent.BlockingQueue"
+    },
+    {
+      "type": "java.util.concurrent.LinkedBlockingQueue"
+    },
+    {
+      "type": "java.util.concurrent.ThreadPoolExecutor",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "int",
+            "int",
+            "long",
+            "java.util.concurrent.TimeUnit",
+            "java.util.concurrent.BlockingQueue",
+            "java.util.concurrent.ThreadFactory"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.util.concurrent.TimeUnit"
+    },
+    {
+      "type": "java.util.concurrent.atomic.AtomicLong",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "long"
+          ]
+        },
+        {
+          "name": "incrementAndGet",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "java.util.concurrent.locks.ReentrantLock"
+    },
+    {
+      "type": "java.util.regex.Matcher"
+    },
+    {
+      "type": "java.util.regex.Pattern"
+    },
+    {
+      "type": "java.util.zip.CRC32"
+    },
+    {
+      "type": "javax.net.ssl.KeyManagerFactory"
+    },
+    {
+      "type": "javax.net.ssl.SSLContext"
+    },
+    {
+      "type": "javax.net.ssl.TrustManagerFactory"
+    },
+    {
+      "type": "sun.security.provider.NativePRNG",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "java.security.SecureRandomParameters"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.security.provider.SHA",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "sun.security.provider.SHA2$SHA256",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "sun.text.resources.cldr.FormatData"
+    },
+    {
+      "type": "sun.text.resources.cldr.FormatData_en"
+    }
+  ]
+}

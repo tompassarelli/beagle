@@ -1,0 +1,39 @@
+#lang beagle/clj
+;; Public FRI2 facade. FRI is a rebuildable cache, never semantic authority.
+(ns fri
+  (:require [fri-port :as fp]))
+
+
+(def MAGIC String fp/MAGIC)
+(def FMT Int fp/FMT)
+(defn source-binding
+  [(space-id String) (fingerprint String) (valid-bytes Int)] Any
+  (fp/source-binding space-id fingerprint valid-bytes))
+(defn write-fri! [(dump Any) (path String) (source Any)] Any
+  (fp/write-fri! dump path source))
+(defn open-fri! [(path String) (source Any)] Any (fp/open-fri! path source))
+(defn close-fri! [(image Any)] Nil (fp/close-fri! image))
+(defn restore-store! [(image Any) (target Any)] Any
+  (fp/restore-store! image target))
+(defn space-id [(image Any)] String (fp/space-id image))
+(defn source-fingerprint [(image Any)] String (fp/source-fingerprint image))
+(defn source-position [(image Any)] Int (fp/source-position image))
+(defn transaction-count [(image Any)] Int (fp/transaction-count image))
+(defn operation-count [(image Any)] Int (fp/operation-count image))
+(defn occurrences [(image Any)] Any (fp/occurrences image))
+(defn withdrawals [(image Any)] Any (fp/withdrawals image))
+(defn live-occurrences [(image Any)] Any (fp/live-occurrences image))
+(defn live-propositions [(image Any)] Any (fp/live-propositions image))
+(defn by-t1 [(image Any) (term Any)] Any (fp/by-t1 image term))
+(defn by-t2 [(image Any) (term Any)] Any (fp/by-t2 image term))
+(defn by-t3 [(image Any) (term Any)] Any (fp/by-t3 image term))
+(defn by-t12 [(image Any) (t1 Any) (t2 Any)] Any
+  (fp/by-t12 image t1 t2))
+(defn by-t23 [(image Any) (t2 Any) (t3 Any)] Any
+  (fp/by-t23 image t2 t3))
+(defn by-t13 [(image Any) (t1 Any) (t3 Any)] Any
+  (fp/by-t13 image t1 t3))
+(defn live-occurrences-as-of [(image Any) (sequence Int)] Any
+  (fp/live-occurrences-as-of image sequence))
+(defn live-propositions-as-of [(image Any) (sequence Int)] Any
+  (fp/live-propositions-as-of image sequence))

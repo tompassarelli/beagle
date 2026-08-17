@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Sealed graph-edit authority launcher. This source is package-only: the Nix
+# wrapper supplies every FRAM_GRAPH_EDIT_SEALED_* path with --set, so caller
+# environment and project files cannot select runtime code or helpers.
+set -euo pipefail
+IFS=$' \t\n'
+umask 077
+
+die() {
+  printf 'fram-graph-edit-runtime: %s\n' "$*" >&2
+  exit 2
+}
+
+required_internal=(
+  FRAM_GRAPH_EDIT_SEALED_BASH
+  FRAM_GRAPH_EDIT_SEALED_BB
+  FRAM_GRAPH_EDIT_SEALED_BEAGLE
+  FRAM_GRAPH_EDIT_SEALED_BEAGLE_CLI
+  FRAM_GRAPH_EDIT_SEALED_BUILD_ALL
+  FRAM_GRAPH_EDIT_SEALED_CAT
+  FRAM_GRAPH_EDIT_SEALED_CHECK_EMIT
+  FRAM_GRAPH_EDIT_SEALED_EDIT_VERIFIER
+  FRAM_GRAPH_EDIT_SEALED_EMPTY_THREADS
+  FRAM_GRAPH_EDIT_SEALED_ENV
+  FRAM_GRAPH_EDIT_SEALED_FRAM
+  FRAM_GRAPH_EDIT_SEALED_JAVA
+  FRAM_GRAPH_EDIT_SEALED_MANIFEST
+  FRAM_GRAPH_EDIT_SEALED_OVERLAY_CHECK
+  FRAM_GRAPH_EDIT_SEALED_PATH
+  FRAM_GRAPH_EDIT_SEALED_RACKET
+  FRAM_GRAPH_EDIT_SEALED_REALPATH
+  FRAM_GRAPH_EDIT_SEALED_RESOLVE
+)
+for name in "${required_internal[@]}"; do
+  [[ -n "${!name:-}" ]] || die "package-only entrypoint; missing sealed binding $name"
+done
+
+for path in \
+  "$FRAM_GRAPH_EDIT_SEALED_BASH" \
+  "$FRAM_GRAPH_EDIT_SEALED_BB" \
+  "$FRAM_GRAPH_EDIT_SEALED_BEAGLE" \
+  "$FRAM_GRAPH_EDIT_SEALED_BEAGLE_CLI" \
+  "$FRAM_GRAPH_EDIT_SEALED_BUILD_ALL" \
+  "$FRAM_GRAPH_EDIT_SEALED_CAT" \
+  "$FRAM_GRAPH_EDIT_SEALED_CHECK_EMIT" \
+  "$FRAM_GRAPH_EDIT_SEALED_EDIT_VERIFIER" \
+  "$FRAM_GRAPH_EDIT_SEALED_EMPTY_THREADS" \
+  "$FRAM_GRAPH_EDIT_SEALED_ENV" \
+  "$FRAM_GRAPH_EDIT_SEALED_FRAM" \
+  "$FRAM_GRAPH_EDIT_SEALED_JAVA" \
+  "$FRAM_GRAPH_EDIT_SEALED_MANIFEST" \
+  "$FRAM_GRAPH_EDIT_SEALED_OVERLAY_CHECK" \
+  "$FRAM_GRAPH_EDIT_SEALED_RACKET" \
+  "$FRAM_GRAPH_EDIT_SEALED_REALPATH" \
+  "$FRAM_GRAPH_EDIT_SEALED_RESOLVE"; do
+  [[ "$path" == /nix/store/* ]] || die "sealed binding escaped /nix/store: $path"
+done
+[[ -x "$FRAM_GRAPH_EDIT_SEALED_EDIT_VERIFIER" ]] || \
+  die "sealed edit verifier is not executable"
+[[ -f "$FRAM_GRAPH_EDIT_SEALED_OVERLAY_CHECK" ]] || \
+  die "sealed module-overlay checker is not a regular file"
+
+# The public ELF wrapper always removes this marker and starts Bash in
+# privileged mode, which ignores exported functions and startup hooks. Re-enter
+# once under env -i so the authority driver itself sees only this closed set of
+# package bindings plus the eight North launch fields it is allowed to accept.
+if [[ "${FRAM_GRAPH_EDIT_SEALED_ENVIRONMENT_STAGE:-}" != "sealed-v1" ]]; then
+  exec "$FRAM_GRAPH_EDIT_SEALED_ENV" -i \
+    HOME=/homeless-shelter \
+    LANG=C \
+    LC_ALL=C \
+    PATH="$FRAM_GRAPH_EDIT_SEALED_PATH" \
+    FRAM_GRAPH_EDIT_SEALED_ENVIRONMENT_STAGE=sealed-v1 \
+    FRAM_GRAPH_EDIT_SEALED_BASH="$FRAM_GRAPH_EDIT_SEALED_BASH" \
+    FRAM_GRAPH_EDIT_SEALED_BB="$FRAM_GRAPH_EDIT_SEALED_BB" \
+    FRAM_GRAPH_EDIT_SEALED_BEAGLE="$FRAM_GRAPH_EDIT_SEALED_BEAGLE" \
+    FRAM_GRAPH_EDIT_SEALED_BEAGLE_CLI="$FRAM_GRAPH_EDIT_SEALED_BEAGLE_CLI" \
+    FRAM_GRAPH_EDIT_SEALED_BUILD_ALL="$FRAM_GRAPH_EDIT_SEALED_BUILD_ALL" \
+    FRAM_GRAPH_EDIT_SEALED_CAT="$FRAM_GRAPH_EDIT_SEALED_CAT" \
+    FRAM_GRAPH_EDIT_SEALED_CHECK_EMIT="$FRAM_GRAPH_EDIT_SEALED_CHECK_EMIT" \
+    FRAM_GRAPH_EDIT_SEALED_EDIT_VERIFIER="$FRAM_GRAPH_EDIT_SEALED_EDIT_VERIFIER" \
+    FRAM_GRAPH_EDIT_SEALED_EMPTY_THREADS="$FRAM_GRAPH_EDIT_SEALED_EMPTY_THREADS" \
+    FRAM_GRAPH_EDIT_SEALED_ENV="$FRAM_GRAPH_EDIT_SEALED_ENV" \
+    FRAM_GRAPH_EDIT_SEALED_FRAM="$FRAM_GRAPH_EDIT_SEALED_FRAM" \
+    FRAM_GRAPH_EDIT_SEALED_JAVA="$FRAM_GRAPH_EDIT_SEALED_JAVA" \
+    FRAM_GRAPH_EDIT_SEALED_MANIFEST="$FRAM_GRAPH_EDIT_SEALED_MANIFEST" \
+    FRAM_GRAPH_EDIT_SEALED_PATH="$FRAM_GRAPH_EDIT_SEALED_PATH" \
+    FRAM_GRAPH_EDIT_SEALED_RACKET="$FRAM_GRAPH_EDIT_SEALED_RACKET" \
+    FRAM_GRAPH_EDIT_SEALED_REALPATH="$FRAM_GRAPH_EDIT_SEALED_REALPATH" \
+    FRAM_GRAPH_EDIT_SEALED_RESOLVE="$FRAM_GRAPH_EDIT_SEALED_RESOLVE" \
+    FRAM_GRAPH_EDIT_SEALED_OVERLAY_CHECK="$FRAM_GRAPH_EDIT_SEALED_OVERLAY_CHECK" \
+    NORTH_FRAM_AUTHORITY_INSTANCE_ID="${NORTH_FRAM_AUTHORITY_INSTANCE_ID:-}" \
+    NORTH_FRAM_AUTHORITY_LEASE_ID="${NORTH_FRAM_AUTHORITY_LEASE_ID:-}" \
+    NORTH_FRAM_AUTHORITY_LEASE_EPOCH="${NORTH_FRAM_AUTHORITY_LEASE_EPOCH:-}" \
+    NORTH_FRAM_RUNTIME_CLOSURE_DIGEST="${NORTH_FRAM_RUNTIME_CLOSURE_DIGEST:-}" \
+    NORTH_FRAM_CHECKOUT_ROOT="${NORTH_FRAM_CHECKOUT_ROOT:-}" \
+    NORTH_FRAM_SOURCE_ROOT="${NORTH_FRAM_SOURCE_ROOT:-}" \
+    NORTH_FRAM_CODE_LOG="${NORTH_FRAM_CODE_LOG:-}" \
+    NORTH_FRAM_CODE_PORT="${NORTH_FRAM_CODE_PORT:-}" \
+    "$FRAM_GRAPH_EDIT_SEALED_BASH" -p "$0" "$@"
+fi
+
+command_name="${1:-}"
+case "$command_name" in
+  manifest)
+    exec "$FRAM_GRAPH_EDIT_SEALED_CAT" "$FRAM_GRAPH_EDIT_SEALED_MANIFEST"
+    ;;
+  preflight|mcp) ;;
+  "")
+    die "authority runtime is dark by default; use manifest, preflight, or mcp"
+    ;;
+  *)
+    die "unknown command '$command_name'; expected manifest, preflight, or mcp"
+    ;;
+esac
+shift
+[[ $# -eq 0 ]] || die "$command_name accepts no positional arguments"
+
+# NORTH_FRAM_* values are launch bindings supplied and authenticated by North.
+# This runtime validates their shape and binds them to the child; it does NOT
+# claim that echoing NORTH_FRAM_RUNTIME_CLOSURE_DIGEST establishes trust.
+required_launch=(
+  NORTH_FRAM_AUTHORITY_INSTANCE_ID
+  NORTH_FRAM_AUTHORITY_LEASE_ID
+  NORTH_FRAM_AUTHORITY_LEASE_EPOCH
+  NORTH_FRAM_RUNTIME_CLOSURE_DIGEST
+  NORTH_FRAM_CHECKOUT_ROOT
+  NORTH_FRAM_SOURCE_ROOT
+  NORTH_FRAM_CODE_LOG
+  NORTH_FRAM_CODE_PORT
+)
+for name in "${required_launch[@]}"; do
+  [[ -n "${!name:-}" ]] || die "missing required North launch binding $name"
+done
+
+instance_id="$NORTH_FRAM_AUTHORITY_INSTANCE_ID"
+lease_id="$NORTH_FRAM_AUTHORITY_LEASE_ID"
+lease_epoch="$NORTH_FRAM_AUTHORITY_LEASE_EPOCH"
+runtime_digest="$NORTH_FRAM_RUNTIME_CLOSURE_DIGEST"
+checkout_root="$NORTH_FRAM_CHECKOUT_ROOT"
+source_root="$NORTH_FRAM_SOURCE_ROOT"
+code_log="$NORTH_FRAM_CODE_LOG"
+code_port="$NORTH_FRAM_CODE_PORT"
+
+uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+[[ "$instance_id" =~ $uuid_re ]] || die "NORTH_FRAM_AUTHORITY_INSTANCE_ID must be a lowercase RFC 4122 UUID"
+[[ "$lease_id" =~ $uuid_re ]] || die "NORTH_FRAM_AUTHORITY_LEASE_ID must be a lowercase RFC 4122 UUID"
+[[ "$lease_epoch" =~ ^(0|[1-9][0-9]*)$ ]] || die "NORTH_FRAM_AUTHORITY_LEASE_EPOCH must be a canonical decimal string"
+[[ "$runtime_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || die "NORTH_FRAM_RUNTIME_CLOSURE_DIGEST must be sha256:<64 lowercase hex>"
+[[ "$code_port" =~ ^[1-9][0-9]*$ ]] || die "NORTH_FRAM_CODE_PORT must be a decimal TCP port"
+(( code_port >= 1 && code_port <= 65535 )) || die "NORTH_FRAM_CODE_PORT must be between 1 and 65535"
+
+canonical_existing() {
+  local label="$1" path="$2" kind="$3" canonical
+  [[ "$path" == /* ]] || die "$label must be absolute"
+  canonical="$($FRAM_GRAPH_EDIT_SEALED_REALPATH -e -- "$path" 2>/dev/null)" || die "$label does not exist"
+  [[ "$canonical" == "$path" ]] || die "$label must be canonical (got $path, canonical $canonical)"
+  case "$kind" in
+    dir) [[ -d "$path" ]] || die "$label must be a directory" ;;
+    file) [[ -f "$path" ]] || die "$label must be a regular file" ;;
+    *) die "internal path-kind error: $kind" ;;
+  esac
+}
+
+canonical_existing NORTH_FRAM_CHECKOUT_ROOT "$checkout_root" dir
+canonical_existing NORTH_FRAM_SOURCE_ROOT "$source_root" dir
+canonical_existing NORTH_FRAM_CODE_LOG "$code_log" file
+case "$source_root" in
+  "$checkout_root"|"$checkout_root"/*) ;;
+  *) die "NORTH_FRAM_SOURCE_ROOT must be inside NORTH_FRAM_CHECKOUT_ROOT" ;;
+esac
+[[ "$code_log" == "$checkout_root/.fram/code.log" ]] || \
+  die "NORTH_FRAM_CODE_LOG must be the canonical checkout log $checkout_root/.fram/code.log"
+
+cd "$FRAM_GRAPH_EDIT_SEALED_FRAM"
+exec "$FRAM_GRAPH_EDIT_SEALED_ENV" -i \
+  HOME=/homeless-shelter \
+  LANG=C \
+  LC_ALL=C \
+  PATH="$FRAM_GRAPH_EDIT_SEALED_PATH" \
+  TMPDIR=/tmp \
+  BABASHKA_CLASSPATH="$FRAM_GRAPH_EDIT_SEALED_FRAM/out" \
+  BEAGLE_HOME="$FRAM_GRAPH_EDIT_SEALED_BEAGLE" \
+  FRAM_BEAGLE="$FRAM_GRAPH_EDIT_SEALED_BEAGLE_CLI" \
+  FRAM_AUTHORITY_INSTANCE_ID="$instance_id" \
+  FRAM_AUTHORITY_LEASE_ID="$lease_id" \
+  FRAM_AUTHORITY_LEASE_EPOCH="$lease_epoch" \
+  FRAM_AUTHORITY_EXPECTED_RUNTIME_CLOSURE_DIGEST="$runtime_digest" \
+  FRAM_AUTHORITY_CORE_MANIFEST="$FRAM_GRAPH_EDIT_SEALED_MANIFEST" \
+  FRAM_AUTHORITY_LAUNCH_CONTRACT=1 \
+  FRAM_BIN="$FRAM_GRAPH_EDIT_SEALED_FRAM/bin" \
+  FRAM_BUILD_ALL="$FRAM_GRAPH_EDIT_SEALED_BUILD_ALL" \
+  FRAM_CHECKOUT_ROOT="$checkout_root" \
+  FRAM_CHECK_EMIT="$FRAM_GRAPH_EDIT_SEALED_CHECK_EMIT" \
+  FRAM_CODE_LOG="$code_log" \
+  FRAM_CODE_PORT="$code_port" \
+  FRAM_EDIT_VERIFIER="$FRAM_GRAPH_EDIT_SEALED_EDIT_VERIFIER" \
+  FRAM_EDIT_VERIFIER_RACKET="$FRAM_GRAPH_EDIT_SEALED_RACKET" \
+  FRAM_EDIT_VERIFIER_OVERLAY_CHECK="$FRAM_GRAPH_EDIT_SEALED_OVERLAY_CHECK" \
+  FRAM_FLIP=1 \
+  FRAM_GRAPH_EDIT=1 \
+  FRAM_HOME="$FRAM_GRAPH_EDIT_SEALED_FRAM" \
+  FRAM_JAVA="$FRAM_GRAPH_EDIT_SEALED_JAVA" \
+  FRAM_LOG=/dev/null \
+  FRAM_OUT="$FRAM_GRAPH_EDIT_SEALED_FRAM/out" \
+  FRAM_PACKAGED=1 \
+  FRAM_SERVER_PORT="$code_port" \
+  FRAM_RACKET="$FRAM_GRAPH_EDIT_SEALED_RACKET" \
+  FRAM_RESOLVE="$FRAM_GRAPH_EDIT_SEALED_RESOLVE" \
+  FRAM_SOURCE_ROOT="$source_root" \
+  FRAM_SRC="$source_root" \
+  FRAM_THREADS="$FRAM_GRAPH_EDIT_SEALED_EMPTY_THREADS" \
+  "$FRAM_GRAPH_EDIT_SEALED_BB" -cp "$FRAM_GRAPH_EDIT_SEALED_FRAM/out" \
+    -m fram.graph-control-mcp "$command_name"

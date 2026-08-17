@@ -1,0 +1,305 @@
+{
+  "fixtureVersion": "fram.authority/raw-json-no-number-no-null/v1",
+  "vectors": [
+    {
+      "name": "accept-true",
+      "raw": "true",
+      "expected": true
+    },
+    {
+      "name": "accept-false-with-whitespace",
+      "raw": " \t\r\nfalse ",
+      "expected": false
+    },
+    {
+      "name": "accept-empty-string",
+      "raw": "\"\"",
+      "expected": ""
+    },
+    {
+      "name": "accept-plain-string",
+      "raw": "\"plain text\"",
+      "expected": "plain text"
+    },
+    {
+      "name": "accept-string-escapes",
+      "raw": "\"line\\nquote:\\\" slash:\\/ backslash:\\\\ tab:\\t nul:\\u0000 controls:\\b\\f\\r\"",
+      "expected": "line\nquote:\" slash:/ backslash:\\ tab:\t nul:\u0000 controls:\b\f\r"
+    },
+    {
+      "name": "accept-bmp-unicode-escapes",
+      "raw": "\"A\\u00e9\\u20AC\"",
+      "expected": "Aé€"
+    },
+    {
+      "name": "accept-valid-surrogate-pair-escape",
+      "raw": "\"\\uD83D\\uDE00\"",
+      "expected": "😀"
+    },
+    {
+      "name": "accept-valid-surrogate-pair-literal",
+      "raw": "\"😀\"",
+      "expected": "😀"
+    },
+    {
+      "name": "accept-empty-array-and-object",
+      "raw": "[[],{}]",
+      "expected": [[], {}]
+    },
+    {
+      "name": "accept-nested-domain",
+      "raw": "{\"z\":[true,{\"inner\":[\"text\",false]}],\"empty\":{},\"list\":[]}",
+      "expected": {
+        "z": [true, {"inner": ["text", false]}],
+        "empty": {},
+        "list": []
+      }
+    },
+    {
+      "name": "accept-escaped-object-keys",
+      "raw": "{\"\\u0061\":\"letter\",\"quote\\\"key\":true,\"slash\\\\key\":false,\"\\u20ac\":\"euro\"}",
+      "expected": {
+        "a": "letter",
+        "quote\"key": true,
+        "slash\\key": false,
+        "€": "euro"
+      }
+    },
+    {
+      "name": "accept-same-key-in-distinct-scopes",
+      "raw": "{\"left\":{\"x\":true},\"right\":{\"x\":false}}",
+      "expected": {
+        "left": {"x": true},
+        "right": {"x": false}
+      }
+    },
+    {
+      "name": "accept-structural-whitespace",
+      "raw": "\n { \"a\" : [ true , false ] , \"b\" : { } } \t",
+      "expected": {
+        "a": [true, false],
+        "b": {}
+      }
+    },
+    {
+      "name": "accept-non-ascii-literal-key",
+      "raw": "{\"é😀\":\"ok\"}",
+      "expected": {"é😀": "ok"}
+    },
+    {
+      "name": "reject-empty-input",
+      "raw": "",
+      "reject": true
+    },
+    {
+      "name": "reject-whitespace-only",
+      "raw": " \t\r\n",
+      "reject": true
+    },
+    {
+      "name": "reject-unknown-token",
+      "raw": "undefined",
+      "reject": true
+    },
+    {
+      "name": "reject-truncated-keyword",
+      "raw": "tru",
+      "reject": true
+    },
+    {
+      "name": "reject-trailing-value",
+      "raw": "true false",
+      "reject": true
+    },
+    {
+      "name": "reject-bom-prefix",
+      "raw": "\ufefftrue",
+      "reject": true
+    },
+    {
+      "name": "reject-non-json-whitespace",
+      "raw": "true\f",
+      "reject": true
+    },
+    {
+      "name": "reject-unterminated-string",
+      "raw": "\"unterminated",
+      "reject": true
+    },
+    {
+      "name": "reject-invalid-string-escape",
+      "raw": "\"\\x\"",
+      "reject": true
+    },
+    {
+      "name": "reject-truncated-unicode-escape",
+      "raw": "\"\\u12\"",
+      "reject": true
+    },
+    {
+      "name": "reject-nonhex-unicode-escape",
+      "raw": "\"\\u12G4\"",
+      "reject": true
+    },
+    {
+      "name": "reject-raw-newline-in-string",
+      "raw": "\"line\nbreak\"",
+      "reject": true
+    },
+    {
+      "name": "reject-raw-tab-in-string",
+      "raw": "\"left\tright\"",
+      "reject": true
+    },
+    {
+      "name": "reject-raw-nul-in-string",
+      "raw": "\"left\u0000right\"",
+      "reject": true
+    },
+    {
+      "name": "reject-raw-unit-separator-in-string",
+      "raw": "\"left\u001fright\"",
+      "reject": true
+    },
+    {
+      "name": "reject-array-missing-comma",
+      "raw": "[true false]",
+      "reject": true
+    },
+    {
+      "name": "reject-array-trailing-comma",
+      "raw": "[true,]",
+      "reject": true
+    },
+    {
+      "name": "reject-array-unclosed",
+      "raw": "[true,false",
+      "reject": true
+    },
+    {
+      "name": "reject-object-nonstring-key",
+      "raw": "{true:false}",
+      "reject": true
+    },
+    {
+      "name": "reject-object-missing-colon",
+      "raw": "{\"a\" true}",
+      "reject": true
+    },
+    {
+      "name": "reject-object-missing-comma",
+      "raw": "{\"a\":true \"b\":false}",
+      "reject": true
+    },
+    {
+      "name": "reject-object-trailing-comma",
+      "raw": "{\"a\":true,}",
+      "reject": true
+    },
+    {
+      "name": "reject-object-unclosed",
+      "raw": "{\"a\":true",
+      "reject": true
+    },
+    {
+      "name": "reject-top-level-number",
+      "raw": "0",
+      "reject": true
+    },
+    {
+      "name": "reject-top-level-null",
+      "raw": "null",
+      "reject": true
+    },
+    {
+      "name": "reject-number-in-array",
+      "raw": "[true,-1.5e2]",
+      "reject": true
+    },
+    {
+      "name": "reject-null-in-object",
+      "raw": "{\"bad\":null}",
+      "reject": true
+    },
+    {
+      "name": "reject-number-deeply-nested",
+      "raw": "{\"outer\":[{\"inner\":[false,7]}]}",
+      "reject": true
+    },
+    {
+      "name": "reject-null-deeply-nested",
+      "raw": "[{\"outer\":{\"inner\":[null]}}]",
+      "reject": true
+    },
+    {
+      "name": "reject-escaped-lone-high-surrogate",
+      "raw": "\"\\uD83D\"",
+      "reject": true
+    },
+    {
+      "name": "reject-escaped-lone-low-surrogate",
+      "raw": "\"\\uDE00\"",
+      "reject": true
+    },
+    {
+      "name": "reject-escaped-high-followed-by-bmp",
+      "raw": "\"\\uD83D\\u0041\"",
+      "reject": true
+    },
+    {
+      "name": "reject-escaped-high-followed-by-literal",
+      "raw": "\"\\uD83Dx\"",
+      "reject": true
+    },
+    {
+      "name": "reject-reversed-surrogate-pair",
+      "raw": "\"\\uDE00\\uD83D\"",
+      "reject": true
+    },
+    {
+      "name": "reject-two-high-surrogates",
+      "raw": "\"\\uD83D\\uD83D\"",
+      "reject": true
+    },
+    {
+      "name": "reject-lone-surrogate-object-key",
+      "raw": "{\"\\uD83D\":true}",
+      "reject": true
+    },
+    {
+      "name": "reject-duplicate-top-level-key",
+      "raw": "{\"a\":true,\"a\":false}",
+      "reject": true
+    },
+    {
+      "name": "reject-duplicate-escaped-vs-literal-key",
+      "raw": "{\"a\":true,\"\\u0061\":false}",
+      "reject": true
+    },
+    {
+      "name": "reject-duplicate-equivalent-quote-key",
+      "raw": "{\"a\\\"b\":true,\"a\\u0022b\":false}",
+      "reject": true
+    },
+    {
+      "name": "reject-duplicate-empty-key",
+      "raw": "{\"\":true,\"\":false}",
+      "reject": true
+    },
+    {
+      "name": "reject-duplicate-key-in-nested-object",
+      "raw": "{\"outer\":{\"x\":true,\"x\":false}}",
+      "reject": true
+    },
+    {
+      "name": "reject-duplicate-key-in-array-object",
+      "raw": "[{\"x\":true,\"x\":false}]",
+      "reject": true
+    },
+    {
+      "name": "reject-duplicate-equivalent-key-deeply-nested",
+      "raw": "{\"outer\":[{\"deep\":true,\"\\u0064eep\":false}]}",
+      "reject": true
+    }
+  ]
+}

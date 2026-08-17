@@ -1,0 +1,7 @@
+t 30-batch-bulk-a.bin 16478 :rpc/batch
+t 30-batch-bulk-b.bin 16580 :rpc/batch
+t 30-batch-bulk-c.bin 9744 :rpc/batch
+q 40-query-bulk-at-limit.bin 1323 :rpc/query
+t 41-batch-bulk-over-limit.bin 339 :rpc/batch
+q 42-query-bulk-over-limit.bin 1323 :rpc/query
+q 43-query-bulk-paged.bin 1328 :rpc/query

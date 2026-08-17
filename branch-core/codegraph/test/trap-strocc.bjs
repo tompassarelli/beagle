@@ -1,0 +1,4 @@
+#lang beagle/js
+(defn red [(x Any)] Any x)
+(def banner Any "crimson")
+(defn use [] Any (red banner))

@@ -1,0 +1,6 @@
+q 01-version.bin 78 :rpc/version
+q 02-status.bin 77 :rpc/status
+q 07-query-all.bin 1323 :rpc/query
+s 10-occurrences.bin 82 :rpc/occurrences
+q 20-query-all-final.bin 1323 :rpc/query
+s 22-occurrences-since2-final.bin 1471 :rpc/query

@@ -1,0 +1,3 @@
+{:paths ["out" "." "native/src" "native/classes"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.4"}
+        com.github.clj-easy/graal-build-time {:mvn/version "1.0.6"}}}

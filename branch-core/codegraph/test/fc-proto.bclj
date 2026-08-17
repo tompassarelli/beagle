@@ -1,0 +1,9 @@
+#lang beagle/clj
+(ns fc.proto)
+(defrecord Dollars [(amount Int)])
+(defprotocol Show
+  (render [(self Any)] String))
+(extend-type Dollars Show
+  (render [(self Any)] String
+    (str "$" (dollars-amount self))))
+(defn label [(d Dollars)] String (render d))

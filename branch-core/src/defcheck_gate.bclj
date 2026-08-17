@@ -1,0 +1,606 @@
+#lang beagle/clj
+
+;; generated view. Author substantive forms only through the Fram graph-edit
+;; verbs. SEEDED 2026-07-27 for core-port M2 wave 3.
+;; ============================================================================
+;; fram.defcheck — incremental typed and untyped definition checks.
+;; ============================================================================
+(ns fram.defcheck
+  (:require [clojure.java.io :as io]
+    [clojure.string :as str]
+    [clojure.edn :as edn]
+    [cheshire.core :as json]))
+
+
+(def BEAGLE-MESSAGE-RE Any (re-pattern "^beagle:\\s*"))
+
+(def BEAGLE-SOURCE-RE Any
+  (re-pattern "(?m)^#lang[ \\t]+beagle(?:[/ \\t]|$)"))
+
+(def DOT-RE Any (re-pattern "\\."))
+
+(def ANON-ARG-RE Any (re-pattern "%\\d*|%&"))
+
+(def CLASS-LIKE-RE Any (re-pattern "[A-Z].*"))
+
+(defn- env-int [(k String) (d Int)] Int
+  (or (some-> (System/getenv k) Integer/parseInt) d))
+
+(defrecord DefcheckState
+  [(server-port Int)
+   (sidecar-port Int)
+   (gwdir Any)
+   (autostart? Bool)
+   (render-fn Any)
+   (modules-fn Any)
+   (arity-check? Bool)])
+
+(def beagle-home String
+  (or (System/getenv "BEAGLE_HOME")
+    (str (System/getProperty "user.home") "/code/beagle")))
+
+(def repo-root String
+  (or (System/getenv "FRAM_HOME") (System/getProperty "user.dir")))
+
+(defn- rpc [(port Int) (line String)] Any
+  (with-open [s (java.net.Socket.)]
+    (.connect s (java.net.InetSocketAddress. "127.0.0.1" (int port)) 3000)
+    (let [w (io/writer (.getOutputStream s)) r (io/reader (.getInputStream s))]
+      (.write w (str line "\n"))
+      (.flush w)
+      (.readLine r))))
+
+(defn server-with-state [(state DefcheckState) (req Any)] Any
+  (edn/read-string (rpc (:server-port state) (pr-str req))))
+
+(defn sidecar-with-state [(state DefcheckState) (line String)] Any
+  (json/parse-string (rpc (:sidecar-port state) line) true))
+
+(defn sidecar-up-with-state? [(state DefcheckState)] Bool
+  (try (:ok (sidecar-with-state state "ping")) (catch (_ Exception) false)))
+
+(defn ensure-sidecar-with-state! "Ping the warm checker; if down and *autostart?*, launch bin/fram-defcheck and\n  block (≤30s) until it announces ready. Idempotent. Returns true when up."
+  [(state DefcheckState)] Bool
+  (or (sidecar-up-with-state? state)
+    (when (:autostart? state)
+      (let [launcher (str repo-root "/bin/fram-defcheck")]
+        (let [pb (ProcessBuilder. ["setsid" launcher (str (:sidecar-port state))])]
+          (.redirectOutput pb (java.io.File. "/dev/null"))
+          (.redirectError pb (java.io.File. "/dev/null"))
+          (.start pb))
+        (loop [n 0]
+          (cond
+            (sidecar-up-with-state? state)
+            true
+            (>= n 60)
+            (throw (ex-info "fram-defcheck sidecar failed to start" {:port (:sidecar-port state)}))
+            :else
+            (do (Thread/sleep 500) (recur (inc n)))))))))
+
+(defn gwdir-with-state [(state DefcheckState)] String
+  (or (:gwdir state)
+    (str (System/getProperty "java.io.tmpdir")
+      "/fram-defcheck-gw-"
+      (:server-port state))))
+
+(defn src-path-with-state [(state DefcheckState) (module String)] String
+  (str (gwdir-with-state state) "/" module ".bclj"))
+
+(defn edn-path-with-state [(state DefcheckState) (module String)] String
+  (str (gwdir-with-state state) "/.edn/" module ".edn"))
+
+(defn live-modules-with-state "The live module set. Uses *modules-fn* if bound (in-process); else reads the\n  stable :srcs the server attaches to a render-miss (`:index` is A1's WIP)."
+  [(state DefcheckState)] (Vec String)
+  (if (:modules-fn state)
+    (vec ((:modules-fn state)))
+    (let [r (server-with-state state {:op :render :module "__nonexistent__"})]
+      (vec (or (:srcs r) [])))))
+
+(defn render-edn-with-state! "Render module -> triples string, written to edn-path. Returns the path. Uses\n  *render-fn* if bound (the server's in-process render), else server :render."
+  [(state DefcheckState) (module String)] String
+  (let [edn (if (:render-fn state) ((:render-fn state) module) (let [resp (server-with-state state {:op :render :module module})] (when (:error resp) (throw (ex-info (str "render failed for " module ": " (:error resp)) {:module module}))) (:edn resp)))]
+    (when (str/blank? (str edn))
+      (throw (ex-info (str "render returned no source for " module) {:module module})))
+    (let [p (edn-path-with-state state module)]
+      (io/make-parents (io/file p))
+      (spit p edn)
+      p)))
+
+(defn refresh-sibling-with-state! "Render `module` fresh (server :render) to its EDN, and warm EDN->text via the\n  sidecar to <gwdir>/<module>.bclj — so OTHER modules resolve this module's\n  CURRENT signatures on their next check. Returns the EDN path. The .bclj write\n  is best-effort (a stale sibling only weakens cross-module fidelity, never\n  corrupts a check)."
+  [(state DefcheckState) (module String)] String
+  (let [epath (render-edn-with-state! state module)]
+    (io/make-parents (io/file (src-path-with-state state module)))
+    (try
+      (sidecar-with-state state
+        (str "render " epath " " (src-path-with-state state module)))
+      (catch (_ Exception) nil))
+    epath))
+
+(defn prime-gwdir-with-state! "Populate <gwdir> with a .bclj for every live module (warm, via the sidecar).\n  Idempotent + cheap to repeat. Call once when an arena's server comes up\n  (and internally by whole-tree-check, so cross-refs resolve current text)."
+  [(state DefcheckState)] String
+  (ensure-sidecar-with-state! state)
+  (doseq [m (live-modules-with-state state)]
+    (try (refresh-sibling-with-state! state m) (catch (_ Exception) nil)))
+  (gwdir-with-state state))
+
+(def parse-kinds (Set String)
+  #{"parse-error" "reader" "structural" "syntax" "read-error"})
+
+(defn- diag->error [(module String) (diag Any)] Any
+  (let [kind (:kind diag) stage (if (contains? parse-kinds (str kind)) :parse :type) def-name (:name diag) line (or (:error-line diag) (:line diag)) expected (:expected diag) got (:actual diag) msg (str/replace (str (:message diag)) BEAGLE-MESSAGE-RE "") fix (:fix_plan diag) suggestion (cond (map? fix) (or (:suggestion fix) (:message fix) (:summary fix)) (string? fix) fix (and expected got) (str "make it a " expected " (currently " got ")")) nearest (:nearest diag)]
+    (let [at0 {:module module} at1 (if def-name (assoc at0 :def def-name) at0) at2 (if line (assoc at1 :line line) at1) e0 {:ok false :stage stage :at at2 :message msg} e1 (if expected (assoc e0 :expected expected) e0) e2 (if got (assoc e1 :got got) e1) e3 (if suggestion (assoc e2 :suggestion suggestion) e2) e4 (if (seq nearest) (assoc e3 :nearest (vec nearest)) e3) e5 (if kind (assoc e4 :kind kind) e4)]
+      (if (:error-code diag) (assoc e5 :error-code (:error-code diag)) e5))))
+
+(defn- pick-primary "The error to surface as the single return value: prefer one on the def just\n  written, else the first. Full list travels in :errors."
+  [(name Any) (errs (Vec Any))] Any
+  (or (first (filter (fn [(e Any)] Bool (= name (get-in e [:at :def]))) errs))
+    (first errs)))
+
+(defn check-module-errors-with-state! "Render `module` fresh and type-check it against the primed sibling gwdir.\n  Returns a vector of ERROR-shape maps (empty when clean). Refreshes this\n  module's own sibling text so later cross-module checks see it."
+  [(state DefcheckState) (module String)] (Vec Any)
+  (let [epath (refresh-sibling-with-state! state module) resp (sidecar-with-state state (str "check " epath " " (src-path-with-state state module)))]
+    (if-not (:ok resp)
+      [{:ok
+        false
+        :stage
+        :type
+        :at
+        {:module module}
+        :message
+        (str "def-check infra error: " (:error resp))}]
+      (mapv (fn [(e Any)] Any (diag->error module e)) (:errors resp)))))
+
+(defn- beagle-source? [(src String)] Bool
+  (boolean (re-find BEAGLE-SOURCE-RE (str src))))
+
+(defn- untyped-mode? [(src String)] Bool
+  (let [mode (or (System/getenv "FRAM_DEFCHECK_MODE") "auto")]
+    (cond
+      (= mode "typed")
+      false
+      (= mode "untyped")
+      true
+      :else
+      (not (beagle-source? src)))))
+
+(defn module-src-text-with-state! "Refresh `module`'s sibling .bclj (warm EDN->text) and return its text."
+  [(state DefcheckState) (module String)] String
+  (refresh-sibling-with-state! state module)
+  (slurp (src-path-with-state state module)))
+
+(defn- read-forms "Read every top-level form from `src`. Returns {:forms [...] :read-error msg?}.\n  Permissive: reader conditionals allowed (:clj branch), unknown tagged literals\n  pass their value through, read-eval disabled. A mid-stream read failure stops\n  and reports (the target def, if unreadable, is a real check-1 failure)."
+  [(src String)] Any
+  (let [rdr (java.io.PushbackReader. (java.io.StringReader. (str src))) opts {:read-cond :allow :features #{:clj} :eof :fram.defcheck/eof}]
+    (binding [*read-eval* false *default-data-reader-fn* (fn
+                                                           [(_tag Any)
+                                                            (v Any)]
+                                                           Any
+                                                           v)]
+      (loop [acc []]
+        (let [f (try (read opts rdr) (catch (t Throwable) {:fram.defcheck/read-error (or (.getMessage t) (str (class t)))}))]
+          (cond
+            (and (map? f) (:fram.defcheck/read-error f))
+            {:forms acc :read-error (:fram.defcheck/read-error f)}
+            (= f :fram.defcheck/eof)
+            {:forms acc}
+            :else
+            (recur (conj acc f))))))))
+
+(def special-forms (Set Any)
+  (set (map symbol ["def" "if" "do" "let" "let*" "fn" "fn*" "loop" "loop*" "recur" "throw" "try" "catch" "finally" "quote" "var" "monitor-enter" "monitor-exit" "new" "set!" "." "&" "deftype*" "reify*" "case*" "letfn*" "import*" "clojure.core/import*" "unquote" "unquote-splicing"])))
+
+(def core-names Any
+  (delay (set (map (comp symbol name) (keys (ns-publics (quote clojure.core)))))))
+
+(def def-heads (Set Any)
+  (set (map symbol ["def" "defn" "defn-" "defonce" "def-" "defmacro" "definline" "defmulti" "defmethod" "deftype" "defrecord" "defprotocol" "declare" "defstruct" "extend-type" "extend-protocol" "extend"])))
+
+(def thread-heads (Set Any)
+  (set (map symbol ["->" "->>" "some->" "some->>" "cond->" "cond->>" "as->" "doto"])))
+
+(def binding-vec-heads (Set Any)
+  (set (map symbol ["let" "let*" "loop" "loop*" "binding" "when-let" "if-let" "when-some" "if-some" "when-first" "with-open" "with-local-vars" "with-redefs" "dotimes"])))
+
+(defn- pattern-locals [(pat Any)] (Set Any)
+  (cond
+    (symbol? pat)
+    (if (= pat (quote &)) #{} #{pat})
+    (vector? pat)
+    (set (mapcat pattern-locals pat))
+    (map? pat)
+    (reduce-kv (fn [(acc (Set Any)) (k Any) (v Any)] (Set Any) (cond (= k :keys) (into acc (map (comp symbol name) v)) (= k :strs) (into acc (map (comp symbol name) v)) (= k :syms) (into acc (map (comp symbol name) v)) (= k :as) (conj acc v) (= k :or) acc (keyword? k) (into acc (pattern-locals k)) :else (into acc (pattern-locals k))))
+      #{}
+      pat)
+    :else
+    #{}))
+
+(defn- arglist-locals [(params Any)] (Set Any)
+  (set (mapcat pattern-locals (remove (fn [(x Any)] Bool (= x (quote &))) params))))
+
+(defn- fn-arities "Given a defn/fn tail (after the name), return {:fixed #{n…} :variadic min|nil}."
+  [(tail Any)] Any
+  (let [tail (if (string? (first tail)) (drop 1 tail) tail) tail (if (map? (first tail)) (drop 1 tail) tail) bodies (cond (vector? (first tail)) [(first tail)] (and (seq? (first tail)) (vector? (ffirst tail))) (map first tail) :else nil)]
+    (when (seq bodies)
+      (reduce (fn [(acc Any) (params Any)] Any (let [amp (.indexOf (vec params) (quote &)) fixed (if (neg? amp) (count params) amp)] (if (neg? amp) (update acc :fixed conj fixed) (update acc :variadic (fnil min fixed) fixed))))
+        {:fixed #{} :variadic nil}
+        bodies))))
+
+(defn- collect-defs "Walk top-level forms → {:names #{sym…} :arities {sym {:fixed.. :variadic..}}}.\n  Names cover def/defn/deftype/defrecord (+ ->Ctor/map->Ctor/Ctor.), defprotocol\n  method names, declare, defmulti. Arities only for fn-shaped defs."
+  [(forms Any)] Any
+  (reduce (fn [(acc Any) (form Any)] Any (if-not (and (seq? form) (symbol? (first form))) acc (let [h (first form) nm (when (>= (count form) 2) (first (rest form))) base (fn
+                                                                                                                                                                            [(a Any)
+                                                                                                                                                                             (s Any)]
+                                                                                                                                                                            Any
+                                                                                                                                                                            (if (symbol? s) (update a :names conj (symbol (name s))) a))] (cond (or (= h (quote defn)) (= h (quote defn-)) (= h (quote defmacro)) (= h (quote definline))) (let [nm* (symbol (name nm))] (assoc-in (base acc nm) [:arities nm*] (fn-arities (drop 2 form)))) (or (= h (quote def)) (= h (quote defonce)) (= h (quote def-)) (= h (quote defstruct)) (= h (quote defmulti))) (base acc nm) (= (quote declare) h) (reduce base acc (rest form)) (or (= h (quote deftype)) (= h (quote defrecord))) (update (base acc nm) :names into (when (symbol? nm) [(symbol (str "->" (name nm))) (symbol (str "map->" (name nm))) (symbol (str (name nm) "."))])) (= (quote defprotocol) h) (reduce (fn
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          [(a Any)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           (sig Any)]
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          Any
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          (if (and (seq? sig) (symbol? (first sig))) (base a (first sig)) a)) (base acc nm) (drop 2 form)) :else acc))))
+    {:names #{} :arities {}}
+    forms))
+
+(defn- parse-require-spec [(acc Any) (spec Any)] Any
+  (cond
+    (symbol? spec)
+    (update acc :ns-names conj spec)
+    (vector? spec)
+    (let [nsym (first spec) opts (when (and (keyword? (second spec)) (even? (count (rest spec)))) (apply hash-map (rest spec)))]
+      (let [a0 (update acc :ns-names conj nsym) a1 (if (get opts :as) (update a0 :aliases conj (get opts :as)) a0) a2 (if (get opts :as-alias) (update a1 :aliases conj (get opts :as-alias)) a1) a3 (if (= :all (get opts :refer)) (assoc a2 :refer-all? true) a2)]
+        (if (sequential? (get opts :refer))
+          (update a3 :refers into (get opts :refer))
+          a3)))
+    :else
+    acc))
+
+(defn- parse-ns-env "Extract {:aliases #{} :refers #{} :ns-names #{} :imports #{class-syms}\n  :refer-all? bool} from the module's forms (ns form + top-level require/use/import)."
+  [(forms Any)] Any
+  (let [empty' {:aliases #{} :refers #{} :ns-names #{} :imports #{} :refer-all? false} add-import (fn
+                                                                                                    [(acc Any)
+                                                                                                     (spec Any)]
+                                                                                                    Any
+                                                                                                    (cond (symbol? spec) (update acc :imports conj (symbol (peek (str/split (name spec) DOT-RE)))) (sequential? spec) (update acc :imports into (map (fn* [%1] (symbol (name %1))) (rest spec))) :else acc)) handle-clause (fn
+                                                                                                                                                                                                                                                                                                                             [(acc Any)
+                                                                                                                                                                                                                                                                                                                              (clause Any)]
+                                                                                                                                                                                                                                                                                                                             Any
+                                                                                                                                                                                                                                                                                                                             (if-not (seq? clause) acc (let [k (first clause)] (cond (contains? #{:require :require-macros} k) (reduce parse-require-spec acc (rest clause)) (= :use k) (assoc acc :refer-all? true) (= :import k) (reduce add-import acc (rest clause)) :else acc))))]
+    (reduce (fn [(acc Any) (form Any)] Any (if-not (and (seq? form) (symbol? (first form))) acc (let [head (first form)] (cond (= head (quote ns)) (reduce handle-clause acc (drop 2 form)) (= head (quote require)) (reduce parse-require-spec acc (map (fn
+                                                                                                                                                                                                                                                           [(x Any)]
+                                                                                                                                                                                                                                                           Any
+                                                                                                                                                                                                                                                           (if (and (seq? x) (= (quote quote) (first x))) (second x) x)) (rest form))) (= head (quote use)) (assoc acc :refer-all? true) (= head (quote import)) (reduce add-import acc (rest form)) :else acc))))
+      empty'
+      forms)))
+
+(defn- lev [(a Any) (b Any)] Int
+  (let [a (str a) b (str b) m (count a) n (count b)]
+    (if (or (zero? m) (zero? n))
+      (max m n)
+      (loop [i 1 prev (vec (range (inc n)))]
+        (if (> i m)
+          (peek prev)
+          (recur (inc i)
+            (reduce (fn [(cur (Vec Int)) (j Int)] (Vec Int) (conj cur (if (= (.charAt a (dec i)) (.charAt b (dec j))) (nth prev (dec j)) (inc (min (nth prev j) (peek cur) (nth prev (dec j)))))))
+              [i]
+              (range 1 (inc n)))))))))
+
+(defn- nearest [(sym Any) (candidates Any)] (Vec String)
+  (let [s (name sym) thr (max 2 (quot (count s) 3))]
+    (mapv (comp str first)
+      (take 2
+        (sort-by second
+          (filter (fn [(pair Any)] Bool (<= (nth pair 1) thr))
+            (map (fn [(c Any)] Any [c (lev s (name c))]) candidates)))))))
+
+(defn- anon-arg? [(s Any)] Bool (boolean (re-matches ANON-ARG-RE (name s))))
+
+(defn- interop-sym? [(s Any)] Bool
+  (let [n (name s)]
+    (or (str/starts-with? n ".")
+      (str/ends-with? n ".")
+      (str/includes? n "/")
+      (str/includes? n "."))))
+
+(defn- class-like? [(s Any)] Bool
+  (boolean (re-matches CLASS-LIKE-RE (name s))))
+
+(defn- qualifier-known? [(env Any) (s Any)] Bool
+  (let [q (namespace s)]
+    (or (nil? q)
+      (contains? (:aliases env) (symbol q))
+      (contains? (:ns-names env) (symbol q))
+      (contains? (:imports env) (symbol q))
+      (str/includes? q ".")
+      (re-matches CLASS-LIKE-RE q))))
+
+(defn- resolved-sym? [(env Any) (defs Any) (locals Any) (s Any)] Bool
+  (or (contains? locals s)
+    (= s (quote &))
+    (anon-arg? s)
+    (if (namespace s)
+      (qualifier-known? env s)
+      (let [n (symbol (name s))]
+        (or (contains? special-forms n)
+          (contains? (:names defs) n)
+          (contains? (:refers env) n)
+          (contains? (clojure.core/deref core-names) n)
+          (interop-sym? s)
+          (class-like? s))))))
+
+(defn- unresolved-error
+  [(module String) (def-name Any) (env Any) (defs Any) (s Any)] Any
+  (let [cands (into (vec (:names defs)) (:refers env))]
+    {:ok
+     false
+     :stage
+     :type
+     :at
+     (if def-name {:module module :def def-name} {:module module})
+     :message
+     (str "unresolved symbol `"
+       s
+       "` in "
+       def-name
+       " — not a local, an own def, a :require refer/alias, clojure.core, or interop")
+     :got
+     (str s)
+     :suggestion
+     "define it, require/refer it, or fix the name"
+     :nearest
+     (nearest s cands)
+     :kind
+     "unresolved-symbol"}))
+
+(defn- arity-error
+  [(module String) (def-name Any) (f Any) (n Int) (arities Any)] Any
+  (let [{:keys [fixed variadic]} arities]
+    {:nearest
+     [(str f)]
+     :stage
+     :type
+     :suggestion
+     (str "call `" f "` with " (str/join " or " (sort fixed)) " argument(s)")
+     :got
+     (str n)
+     :ok
+     false
+     :kind
+     "arity-mismatch"
+     :at
+     (if def-name {:module module :def def-name} {:module module})
+     :expected
+     (str/join "/" (sort fixed))
+     :message
+     (str "arity mismatch: `"
+       f
+       "` called with "
+       n
+       " arg(s), but is defined for "
+       (str/join "/" (sort fixed))
+       (when variadic (str " (or " variadic "+)")))}))
+
+(defn- walk-fn-tail "Walk a fn/defn tail (`([params] body…)` or `(([p] b)…)`), seeding each arity's\n  params as locals. `rec` recurses a subform, `ls0` is the enclosing scope."
+  [(rec Any) (ls0 Any) (tail Any)] Any
+  (let [tail (if (string? (first tail)) (rest tail) tail) tail (if (map? (first tail)) (rest tail) tail)]
+    (cond
+      (vector? (first tail))
+      (let [ls (into ls0 (arglist-locals (first tail)))]
+        (doseq [b (rest tail)] (rec b ls)))
+      :else
+      (doseq [a tail :when (and (seq? a) (vector? (first a)))]
+        (let [ls (into ls0 (arglist-locals (first a)))]
+          (doseq [b (rest a)] (rec b ls)))))))
+
+(defn walk-body-with-state! "Analyze `form` for free-symbol + arity errors, threading lexical `locals`.\n  Appends ERROR maps to the `errs` atom. Conservative: unknown binding forms\n  over-collect locals (suppress, never false-flag)."
+  [(arity-check? Bool)
+   (module String)
+   (def-name Any)
+   (env Any)
+   (defs Any)
+   (errs (Atom Any))
+   (form Any)
+   (locals Any)]
+  Any
+  (let [rec (fn [(f Any) (ls Any)] Any (walk-body-with-state! arity-check? module def-name env defs errs f ls)) rec-no-arity (fn
+                                                                                                                               [(f Any)
+                                                                                                                                (ls Any)]
+                                                                                                                               Any
+                                                                                                                               (walk-body-with-state! false module def-name env defs errs f ls)) emit (fn
+                                                                                                                                                                                                        [(e Any)]
+                                                                                                                                                                                                        Any
+                                                                                                                                                                                                        (swap! errs conj e)) classify (fn
+                                                                                                                                                                                                                                        [(s Any)
+                                                                                                                                                                                                                                         (ls Any)]
+                                                                                                                                                                                                                                        Any
+                                                                                                                                                                                                                                        (when (and (symbol? s) (not (:refer-all? env)) (not (resolved-sym? env defs ls s))) (emit (unresolved-error module def-name env defs s))))]
+    (cond
+      (symbol? form)
+      (classify form locals)
+      (or (vector? form) (set? form))
+      (doseq [x form] (rec x locals))
+      (map? form)
+      (doseq [x (mapcat identity form)] (rec x locals))
+      (seq? form)
+      (let [h (first form)]
+        (cond
+          (empty? form)
+          nil
+          (= (quote quote) h)
+          nil
+          (= (quote var) h)
+          nil
+          (= (quote as->) h)
+          (do
+            (rec-no-arity (second form) locals)
+            (let [ls (into locals (when (symbol? (nth form 2 nil)) [(nth form 2)]))]
+              (doseq [b (drop 3 form)] (rec-no-arity b ls))))
+          (contains? thread-heads h)
+          (doseq [x (rest form)] (rec-no-arity x locals))
+          (or (= h (quote defn))
+            (= h (quote defn-))
+            (= h (quote defmacro))
+            (= h (quote definline)))
+          (walk-fn-tail rec locals (drop 2 form))
+          (or (= h (quote def)) (= h (quote defonce)) (= h (quote def-)))
+          (doseq [b (drop 2 form)] (rec b locals))
+          (or (= h (quote defmulti))
+            (= h (quote defstruct))
+            (= h (quote declare)))
+          nil
+          (or (= h (quote fn)) (= h (quote fn*)))
+          (let [named? (symbol? (second form)) ls0 (into locals (when named? [(second form)])) tail (if named? (drop 2 form) (drop 1 form))]
+            (walk-fn-tail rec ls0 tail))
+          (contains? binding-vec-heads h)
+          (let [bvec (second form) [ls _] (reduce (fn
+                                                    [(pair Any)
+                                                     (binding-pair Any)]
+                                                    Any
+                                                    (let [ls (nth pair 0) pat (nth binding-pair 0) e (nth binding-pair 1)] (rec e ls) [(into ls (pattern-locals pat)) nil])) [locals nil] (partition 2 (if (vector? bvec) bvec [])))]
+            (doseq [b (drop 2 form)] (rec b ls)))
+          (or (= h (quote for)) (= h (quote doseq)))
+          (let [bvec (if (vector? (second form)) (second form) []) ls (loop [pairs (partition 2 bvec) ls locals] (if-let [[k v] (first pairs)] (cond (= k :let) (recur (rest pairs) (reduce (fn
+                                                                                                                                                                                              [(l Any)
+                                                                                                                                                                                               (pair Any)]
+                                                                                                                                                                                              Any
+                                                                                                                                                                                              (let [p (nth pair 0) e (nth pair 1)] (rec e l) (into l (pattern-locals p)))) ls (partition 2 (if (vector? v) v [])))) (contains? #{:when :while} k) (do (rec v ls) (recur (rest pairs) ls)) :else (do (rec v ls) (recur (rest pairs) (into ls (pattern-locals k))))) ls))]
+            (doseq [b (drop 2 form)] (rec b ls)))
+          (= (quote letfn) h)
+          (let [fspecs (if (vector? (second form)) (second form) []) fnames (into #{} (keep (fn
+                                                                                              [(x Any)]
+                                                                                              Any
+                                                                                              (when (and (seq? x) (symbol? (first x))) (first x))) fspecs)) ls0 (into locals fnames)]
+            (doseq [fs fspecs]
+              (when (and (seq? fs) (vector? (second fs)))
+                (let [ls (into ls0 (arglist-locals (second fs)))]
+                  (doseq [b (drop 2 fs)] (rec b ls)))))
+            (doseq [b (drop 2 form)] (rec b ls0)))
+          (= (quote catch) h)
+          (let [ls (into locals (when (symbol? (nth form 2 nil)) [(nth form 2)]))]
+            (doseq [b (drop 3 form)] (rec b ls)))
+          (or (= h (quote new))
+            (= h (quote .))
+            (= h (quote ..))
+            (= h (quote set!))
+            (= h (quote monitor-enter))
+            (= h (quote monitor-exit)))
+          (doseq [x (rest form)] (when-not (symbol? x) (rec x locals)))
+          (= (quote defmethod) h)
+          (let [after (drop 2 form)]
+            (rec (first after) locals)
+            (let [pv (second after)]
+              (when (vector? pv)
+                (let [ls (into locals (arglist-locals pv))]
+                  (doseq [b (drop 2 after)] (rec b ls))))))
+          (or (= h (quote deftype))
+            (= h (quote defrecord))
+            (= h (quote reify))
+            (= h (quote extend-type))
+            (= h (quote extend-protocol))
+            (= h (quote proxy))
+            (= h (quote definterface)))
+          (let [fields (nth form 2 nil) base (into locals (when (and (or (= h (quote deftype)) (= h (quote defrecord))) (vector? fields)) (arglist-locals fields)))]
+            (doseq [x (rest form)]
+              (cond
+                (and (seq? x) (vector? (second x)))
+                (let [ls (into base (arglist-locals (second x)))]
+                  (doseq [b (drop 2 x)] (rec b ls)))
+                (vector? x)
+                (doseq [e x] (when (coll? e) (rec e base)))
+                :else
+                nil)))
+          :else
+          (do
+            (when (symbol? h)
+              (classify h locals)
+              (when-let [ar (and (not (contains? locals h)) (get-in defs [:arities (symbol (name h))]))]
+                (let [n (count (rest form)) {:keys [fixed variadic]} ar]
+                  (when (and arity-check? (seq fixed) (not (contains? fixed n)) (or (nil? variadic) (< n variadic)))
+                    (emit (arity-error module def-name h n ar))))))
+            (let [child-locals (into locals (mapcat (fn [(x Any)] Any (when (vector? x) (arglist-locals x))) (rest form)))]
+              (doseq [x (rest form)] (rec x child-locals))))))
+      :else
+      nil)))
+
+(defn- def-target-name [(form Any)] Any
+  (when (and (seq? form) (>= (count form) 2))
+    (let [nm (first (rest form))]
+      (cond
+        (symbol? nm)
+        (symbol (name nm))
+        (and (seq? nm) (symbol? (second nm)))
+        (symbol (name (second nm)))
+        :else
+        nil))))
+
+(defn analyze-untyped-module-with-state! "In-process untyped def-check for `module` from rendered Clojure `src`.\n  Returns a vector of ERROR-shape maps (empty when clean)."
+  [(arity-check? Bool) (module String) (src String)] (Vec Any)
+  (let [{:keys [forms read-error]} (read-forms src)]
+    (if read-error
+      [{:ok
+        false
+        :stage
+        :parse
+        :at
+        {:module module}
+        :message
+        (str "module did not read as Clojure: " read-error)
+        :kind
+        "read-error"
+        :suggestion
+        "fix the malformed form so the module parses"}]
+      (let [(env Any) (parse-ns-env forms) (defs Any) (collect-defs forms) (errs (Atom Any)) (atom [])]
+        (doseq [form forms :when (and (seq? form) (symbol? (first form)) (contains? def-heads (first form)))]
+          (walk-body-with-state! arity-check?
+            module
+            (def-target-name form)
+            env
+            defs
+            errs
+            form
+            #{}))
+        (clojure.core/deref errs)))))
+
+(defn check-module-errors-any-with-state! "Render `module` to text once; route a `#lang beagle...` source to the typed\n  sidecar and other Clojure source to the in-process analyzer, unless the env\n  explicitly forces a mode. Returns a vector of ERROR-shape maps."
+  [(state DefcheckState) (module String)] (Vec Any)
+  (let [src (module-src-text-with-state! state module)]
+    (if (untyped-mode? src)
+      (analyze-untyped-module-with-state! (:arity-check? state) module src)
+      (check-module-errors-with-state! state module))))
+
+(defn check-def-with-state! "Incremental def-level type check. Returns nil when `module` type-checks\n  against its cached sibling environment, else the adapter-v2 ERROR shape for\n  the offending def (preferring `name`), with the full diagnostic list under\n  :errors. Never throws for a type error — only for infra faults (server or\n  sidecar unreachable), which surface as {:ok false :stage :type :message …}.\n\n  AUTHORITY: catches errors IN `module` (the edited def + its use of siblings).\n  A sibling in ANOTHER module that calls a now-broken `name` is NOT re-checked\n  here — that is whole-tree-check's job (adapter-v2 spec gap 3, deliverable 4b)."
+  [(module String) (name Any) (ensure-sidecar-fn Any) (check-errors-fn Any)] Any
+  (try
+    (ensure-sidecar-fn)
+    (let [errs (check-errors-fn module)]
+      (when (seq errs) (assoc (pick-primary name errs) :errors errs)))
+    (catch (e Exception)
+      {:ok
+       false
+       :stage
+       :type
+       :at
+       {:module module :def name}
+       :message
+       (str "def-check unavailable: " (.getMessage e))})))
+
+(defn whole-tree-check-with-state! "Type-check EVERY live module against the whole (refreshed) tree and aggregate.\n  nil when the tree is clean, else {:ok false :stage :gate …} with the first\n  offending diagnostic promoted to the top level and ALL diagnostics under\n  :errors (each tagged :stage :gate). This is where a def that checks alone but\n  breaks a caller in another module is caught — the authoritative pre-promotion\n  gate the S-profile `check {}` verb calls. Still warm (N × ~50ms), because it\n  reuses the persistent checker; the harness's build-all remains the final\n  byte-level acceptance oracle at commit."
+  [(ensure-sidecar-fn Any)
+   (prime-gwdir-fn Any)
+   (live-modules-fn Any)
+   (check-errors-fn Any)]
+  Any
+  (try
+    (ensure-sidecar-fn)
+    (prime-gwdir-fn)
+    (let [all (vec (mapcat check-errors-fn (live-modules-fn)))]
+      (when (seq all)
+        (assoc (first all)
+          :stage
+          :gate
+          :errors
+          (mapv (fn [(e Any)] Any (assoc e :stage :gate)) all))))
+    (catch (e Exception)
+      {:ok
+       false
+       :stage
+       :gate
+       :message
+       (str "whole-tree-check unavailable: " (.getMessage e))})))

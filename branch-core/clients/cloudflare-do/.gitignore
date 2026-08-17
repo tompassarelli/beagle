@@ -1,0 +1,8 @@
+# Build outputs: the wasm is copied out of a content-addressed artifact by
+# scripts/build-wasm.sh, which writes provenance.json beside it.
+lib/
+node_modules/
+test/bundle/
+test/out/
+package-lock.json
+capacity/out/

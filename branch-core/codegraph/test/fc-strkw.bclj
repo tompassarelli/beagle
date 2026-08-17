@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fc.strkw)
+(def red Int 1)
+(def note String "red is a color")
+(def tag Keyword :red)
+(defn use-red [] Int red)

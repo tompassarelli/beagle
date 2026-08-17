@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# rename-demo: graph-native, scope-correct rename, end to end.
+#   bin/rename-demo <old> <new> <target-substr> <src.bjs> ...
+# Renames the symbol `old`->`new` in modules matching <target-substr> by editing
+# claims in a Fram store, then projects each module's source back out. Other
+# modules' identically-named symbol is left untouched — by construction.
+set -o pipefail
+BEAGLE="${BEAGLE:-$HOME/code/beagle/main}"
+FRAM="${FRAM:-$(cd "$(dirname "$0")/../.." && pwd)}"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+old="$1"; new="$2"; target="$3"; shift 3
+
+edns=()
+for f in "$@"; do
+    e="/tmp/rd-$(basename "$f").edn"
+    "$BEAGLE/bin/beagle-roundtrip" --emit-edn "$f" > "$e" 2>/dev/null
+    edns+=("$e")
+done
+
+bb -cp "$FRAM/out" -m rename "$old" "$new" "$target" "${edns[@]}"
+echo
+for f in "$@"; do
+    echo "----- projected source: $(basename "$f") -----"
+    "$BEAGLE/bin/beagle-roundtrip" --render "/tmp/mutated-$(basename "$f").edn" 2>/dev/null | head -40
+    echo
+done

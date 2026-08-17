@@ -1,0 +1,3 @@
+#lang beagle/js
+(defn red [(x Any)] Any x)
+(def tmpl Any `(red ,(red 1)))
