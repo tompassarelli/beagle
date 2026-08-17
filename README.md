@@ -145,7 +145,7 @@ punctuation is needed:
 ```
 
 The optional third element is a statically known, synchronous unary predicate
-of type `[T -> Bool]`, where `T` is the declared binding type. Its signature may
+of type `(Fn [T] Bool)`, where `T` is the declared binding type. Its signature may
 not contain `Any`, take extra/rest arguments, return a non-`Bool`, or perform
 asynchronous work. Call-produced predicates are accepted only when the callee
 publishes an explicit positive returned-callable synchronization proof;
