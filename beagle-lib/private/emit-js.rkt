@@ -8,32 +8,12 @@
          racket/list
          racket/set
          "types.rkt"          ; type-prim?/type-prim-name for scalar-=== dispatch
-         (except-in "parse.rkt"
-                    call-form-fn
-                    static-call-class+method
-                    pat-record-type-name)
-         (only-in "parse.rkt"
-                  [call-form-fn raw-call-form-fn]
-                  [static-call-class+method raw-static-call-class+method]
-                  [pat-record-type-name raw-pat-record-type-name])
+         "parse.rkt"
          "emit-dispatch.rkt"
          "js-capabilities.rkt"
          "js-emit-utils.rkt"
          "emit-jst.rkt"
          "emit-js-quote.rkt")
-
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
-
-(define (static-call-class+method form)
-  (define ref (raw-static-call-class+method form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
-
-(define (pat-record-type-name pattern)
-  (define ref (raw-pat-record-type-name pattern))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 (define current-js-semantic-contracts (make-parameter #f))
 
@@ -800,6 +780,49 @@
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
 (define current-js-module-bindings (make-parameter (hasheq)))
+
+(define (qualified-ref-same-binding? left right)
+  (and (qualified-ref? left)
+       (qualified-ref? right)
+       (eq? (qualified-ref-qualifier left)
+            (qualified-ref-qualifier right))
+       (eq? (qualified-ref-name left) (qualified-ref-name right))
+       (or (not (qualified-ref-provider-id left))
+           (not (qualified-ref-provider-id right))
+           (eq? (qualified-ref-provider-id left)
+                (qualified-ref-provider-id right)))))
+
+(define (qualified-member-constructor? ref)
+  (string-prefix? (symbol->string (qualified-ref-name ref)) "->"))
+
+(define (qualified-runtime-member ref constructor?)
+  (define member (symbol->string (qualified-ref-name ref)))
+  (if (and constructor? (string-prefix? member "->"))
+      (substring member 2)
+      member))
+
+(define (qualified-module-binding ref)
+  (define bindings (current-js-module-bindings))
+  (or (and (qualified-ref-provider-id ref)
+           (hash-ref bindings (qualified-ref-provider-id ref) #f))
+      (hash-ref bindings (qualified-ref-qualifier ref) #f)))
+
+(define (emit-qualified-reference ref #:constructor? [constructor? #f])
+  (define member
+    (mangle-str (qualified-runtime-member ref constructor?)))
+  (cond
+    [(eq? (qualified-ref-qualifier ref) 'js) member]
+    [(qualified-module-binding ref)
+     => (lambda (binding) (string-append binding "." member))]
+    [else
+     (string-append
+      (mangle-name (qualified-ref-qualifier ref)) "." member)]))
+
+(define (qualified-set-member? values value)
+  (or (set-member? values value)
+      (and (qualified-ref? value)
+           (for/or ([candidate (in-set values)])
+             (qualified-ref-same-binding? candidate value)))))
 ;; The active loop's source bindings paired with their mutable aggregate slots.
 ;; `recur` is a fresh binding operation, so constraints validate its temporary
 ;; values before any loop slot is reassigned.
@@ -1150,8 +1173,11 @@
 (define current-rename-env (make-parameter (hash)))
 (define current-binder-types (make-parameter #f))
 
-(define (resolved-name sym)
-  (hash-ref (current-rename-env) sym (lambda () (mangle-name sym))))
+(define (resolved-name name)
+  (if (qualified-ref? name)
+      (emit-qualified-reference name)
+      (hash-ref (current-rename-env) name
+                (lambda () (mangle-name name)))))
 
 ;; Typed-JS operators live in emit-jst.rkt, but their operands share this
 ;; emitter's lexical rename environment with every ordinary expression.
@@ -1272,8 +1298,45 @@
            (define fields (hash-ref (deferror-form-member-fields f) m '()))
            (hash-set h2 m (map (lambda (p) (symbol->string (param-name p))) fields)))]
         [else h])))
-  (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
-    (hash-set h rec-name field-names)))
+  (define with-legacy-type-names
+    (for/fold ([h local])
+              ([(rec-name field-names)
+                (in-hash (program-imported-record-field-order prog))])
+      (hash-set h rec-name field-names)))
+  (for*/fold ([table with-legacy-type-names])
+             ([import (in-list (program-imported-module-interfaces prog))]
+              [entry
+               (in-value
+                (let ([interface (module-import-interface import)])
+                  (list interface
+                        (module-import-prefix import)
+                        (module-interface-namespace interface)
+                        (module-import-refer import))))]
+              [(record-name contract)
+               (in-hash
+                (module-interface-record-contracts (car entry)))])
+    (define fields
+      (for/list ([field (in-list
+                         (interface-record-contract-fields contract))])
+        (symbol->string (param-name field))))
+    (define prefix-ref
+      (qualified-ref (cadr entry) record-name (caddr entry)))
+    (define namespace-ref
+      (qualified-ref (caddr entry) record-name (caddr entry)))
+    (define next
+      (hash-set (hash-set table prefix-ref fields) namespace-ref fields))
+    (if (and (cadddr entry) (memq record-name (cadddr entry)))
+        (hash-set next record-name fields)
+        next)))
+
+(define (record-fields-ref table name [fallback #f])
+  (or (hash-ref table name #f)
+      (and (qualified-ref? name)
+           (for/first ([(candidate fields) (in-hash table)]
+                       #:when
+                       (qualified-ref-same-binding? candidate name))
+             fields))
+      fallback))
 
 (define (build-record-field-binding-table prog)
   (for/fold ([table (hasheq)]) ([raw (in-list (program-forms prog))])
@@ -1300,43 +1363,55 @@
 ;; from the authoritative module interface; never turn a namespace string into
 ;; an identifier and hope it matches the runtime import.
 (define (build-record-validator-reference-table prog)
-  (for*/fold ([table (hasheq)])
-             ([import (in-list (program-imported-module-interfaces prog))]
-              [entry
-               (in-value
-                (let ([interface (module-import-interface import)])
-                  (list interface
-                        (module-import-prefix import)
-                        (module-interface-namespace interface)
-                        (module-import-refer import))))]
-              [(record-name contract)
-               (in-hash
-                (module-interface-record-contracts (car entry)))]
-              #:when (interface-record-contract-validator-symbol contract))
-    (define prefix (cadr entry))
-    (define namespace (caddr entry))
-    (define refer (cadddr entry))
+  (for/fold ([table (hasheq)])
+            ([contract (in-hash-values (program-semantic-contracts prog))]
+             #:when
+             (and (record-update-contract? contract)
+                  (record-update-contract-validator-symbol contract)))
+    (define record-name (record-update-contract-record-name contract))
+    (define resolved-contract
+      (program-record-contract-ref prog record-name #f))
     (define validator
-      (interface-record-contract-validator-symbol contract))
-    (define referred?
-      (and refer
-           (or (memq record-name refer)
-               (memq
-                (string->symbol (format "->~a" record-name))
-                refer))))
-    (define runtime-ref
-      (if referred?
-          validator
-          (qualified-binding prefix validator)))
-    (define qualified-record
-      (qualified-binding namespace record-name))
-    (define prefixed-record
-      (qualified-binding prefix record-name))
-    (define next
-      (hash-set
-       (hash-set table qualified-record runtime-ref)
-       prefixed-record runtime-ref))
-    (if referred? (hash-set next record-name runtime-ref) next)))
+      (and resolved-contract
+           (interface-record-contract-validator-symbol resolved-contract)))
+    (define namespace
+      (hash-ref (program-imported-record-ns prog) record-name #f))
+    (define import
+      (and namespace
+           (for/first
+               ([candidate
+                 (in-list (program-imported-module-interfaces prog))]
+                #:when
+                (eq? (module-interface-namespace
+                      (module-import-interface candidate))
+                     namespace))
+             candidate)))
+    (define interface (and import (module-import-interface import)))
+    (define imported-record-name
+      (and interface
+           (for/first
+               ([(candidate-name candidate-contract)
+                 (in-hash (module-interface-record-contracts interface))]
+                #:when
+                (equal? candidate-contract resolved-contract))
+             candidate-name)))
+    (cond
+      [(not imported-record-name) table]
+      [else
+       (define refer (module-import-refer import))
+       (define referred?
+         (and refer
+              (or (memq imported-record-name refer)
+                  (memq
+                   (string->symbol (format "->~a" imported-record-name))
+                   refer))))
+       (hash-set
+        table
+        record-name
+        (if referred?
+            validator
+            (qualified-ref
+             (module-import-prefix import) validator namespace)))])))
 
 (define (record-update-runtime-validator contract)
   (define validator (record-update-contract-validator-symbol contract))
@@ -1347,7 +1422,11 @@
       (record-update-contract-record-name contract)
       #f)
      => values]
-    [(not (string-contains? (symbol->string validator) "/")) validator]
+    [(not
+      (hash-has-key?
+       (current-js-record-ns)
+       (record-update-contract-record-name contract)))
+     validator]
     [else
      (error
       'beagle-js
@@ -1356,10 +1435,6 @@
 
 (define RECORD-CONSTRUCTOR-KINDS
   '(record-constructor union-constructor error-constructor))
-
-(define (qualified-binding prefix name)
-  (string->symbol
-   (string-append (symbol->string prefix) "/" (symbol->string name))))
 
 (define (record-constructor-kind? kind)
   (and (memq kind RECORD-CONSTRUCTOR-KINDS) #t))
@@ -1411,40 +1486,10 @@
         (set-add next
                  (string->symbol (string-append "->" (symbol->string name)))))))
   (for/fold ([constructors local]) ([entry (in-list (program-requires prog))])
-    (define prefix (require-prefix entry))
-    (define namespace (require-entry-ns entry))
-    (define import (require-module-import prog entry))
-    (define names
-      (if import
-          (for/list ([(name binding)
-                      (in-hash
-                       (module-interface-bindings
-                        (module-import-interface import)))]
-                     #:when (record-constructor-kind?
-                             (interface-binding-kind binding)))
-            name)
-          '()))
-    (define qualified
-      (for/fold ([next constructors]) ([name (in-list names)])
-        (set-add (set-add next (qualified-binding prefix name))
-                 (qualified-binding namespace name))))
-    (for/fold ([next qualified])
+    (for/fold ([next constructors])
               ([name (in-list (or (require-entry-refer entry) '()))]
                #:when (record-constructor-import? prog entry name))
       (set-add next name))))
-
-(define (scalar-constructor-type-name constructor)
-  (define authored (symbol->string constructor))
-  (define slash
-    (for/fold ([last #f]) ([index (in-range (string-length authored))]
-                           #:when (char=? (string-ref authored index) #\/))
-      index))
-  (define leaf (if slash (substring authored (add1 slash)) authored))
-  (and (string-prefix? leaf "->")
-       (string->symbol
-        (string-append
-         (if slash (substring authored 0 (add1 slash)) "")
-         (substring leaf 2)))))
 
 (define (build-scalar-fns prog)
   (define predicated
@@ -1466,14 +1511,40 @@
                 (set-add s accessor)
                 (set-add (set-add s ctor) accessor)))
           s)))
-  (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))]
-                         #:unless
-                         (let ([scalar-name (scalar-constructor-type-name sym)])
-                           (and scalar-name
-                                (hash-has-key?
-                                 (program-imported-scalar-preds prog)
-                                 scalar-name))))
-    (set-add s sym)))
+  (for*/fold ([values local])
+             ([import (in-list (program-imported-module-interfaces prog))]
+              [(type-name declaration)
+               (in-hash
+                (module-interface-type-declarations
+                 (module-import-interface import)))]
+              [runtime-name
+               (in-list
+                (match (interface-type-declaration-details declaration)
+                  [`(backing ,_ predicates ,predicates)
+                   (define name-string (symbol->string type-name))
+                   (define accessor
+                     (string->symbol
+                      (string-append
+                       (string-downcase name-string) "-value")))
+                   (if (null? predicates)
+                       (list
+                        (string->symbol
+                         (string-append "->" name-string))
+                        accessor)
+                       (list accessor))]
+                  [_ '()]))])
+    (define namespace
+      (module-interface-namespace (module-import-interface import)))
+    (define with-qualified
+      (set-add
+       (set-add
+        values
+        (qualified-ref (module-import-prefix import) runtime-name namespace))
+       (qualified-ref namespace runtime-name namespace)))
+    (if (and (module-import-refer import)
+             (memq runtime-name (module-import-refer import)))
+        (set-add with-qualified runtime-name)
+        with-qualified)))
 
 (define (validate-js-target! prog)
   (unless (null? (program-imports prog))
@@ -1511,8 +1582,7 @@
 ;; there, while the qualified `state/f` symbol does not equal `state`.
 (define (tree-contains-symbol? node target)
   (cond
-    [(qualified-ref? node)
-     (tree-contains-symbol? (qualified-ref->symbol node) target)]
+    [(qualified-ref? node) #f]
     [(symbol? node) (eq? node target)]
     [(pair? node)
      (or (tree-contains-symbol? (car node) target)
@@ -1548,23 +1618,6 @@
 (define (js-module-binding-name prefix)
   (hash-ref (current-js-module-bindings) prefix
             (lambda () (mangle-name prefix))))
-
-(define (qualified-import-reference name #:constructor? [constructor? #f])
-  (define authored (symbol->string name))
-  (define slash
-    (for/fold ([last #f]) ([index (in-range (string-length authored))]
-                           #:when (char=? (string-ref authored index) #\/))
-      index))
-  (and slash
-       (let* ([prefix (string->symbol (substring authored 0 slash))]
-              [binding (hash-ref (current-js-module-bindings) prefix #f)]
-              [member (substring authored (add1 slash))]
-              [runtime-member
-               (if (and constructor? (string-prefix? member "->"))
-                   (substring member 2)
-                   member)])
-         (and binding
-              (string-append binding "." (mangle-str runtime-member))))))
 
 (define (exported-binding? name [private? #f])
   (define names (current-js-export-names))
@@ -1710,11 +1763,8 @@
               #:when
               (and (record-update-contract? contract)
                    (record-update-runtime-validator contract)
-                   (not
-                    (string-contains?
-                     (symbol->string
-                      (record-update-runtime-validator contract))
-                     "/"))))
+                   (symbol?
+                    (record-update-runtime-validator contract))))
       (record-update-runtime-validator contract)))
   (define (referred-record-validators entry refer)
     (define import (require-module-import prog entry))
@@ -1992,7 +2042,7 @@
 
 (define (emit-expr-core e)
   (cond
-    [(qualified-ref? e) (emit-expr-core (qualified-ref->symbol e))]
+    [(qualified-ref? e) (emit-qualified-reference e)]
     [(block-string? e)  (emit-js-block-string (block-string-text e))]
     [(string? e)        (js-string-lit e)]
     [(boolean? e)       (if e "true" "false")]
@@ -2004,20 +2054,9 @@
      (cond
        [(eq? e 'nil) "null"]
        [(keyword-symbol? e) (~v (kw->prop e))]
-       [(qualified-import-reference e) => values]
-       ;; Slash-bearing names dot even when bound — JS parses `m/x` as division.
-       [(and (js-bound? e) (not (string-contains? (resolved-name e) "/")))
-        (resolved-name e)]
+       [(js-bound? e) (resolved-name e)]
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
-       [else
-        (let ([m (mangle-name e)])
-          (cond
-            [(and (string-contains? m "/")
-                  (string-prefix? (symbol->string e) "js/"))
-             (mangle-str (substring (symbol->string e) 3))]
-            [(string-contains? m "/")
-             (string-replace m "/" ".")]
-            [else m]))])]
+       [else (mangle-name e)])]
     [(quoted? e)        (emit-quoted (quoted-datum e))]
     [(regex-lit? e)
      (define pat (escape-js-regex-slash (regex-lit-pattern e)))
@@ -2504,21 +2543,10 @@
                 #:async? has-await))))]
 
     [(static-call? e)
-     (define s (symbol->string (static-call-class+method e)))
-     (define slash-pos (let loop ([i 0])
-                         (cond [(= i (string-length s)) #f]
-                               [(char=? (string-ref s i) #\/) i]
-                               [else (loop (+ i 1))])))
-     (define dotted
-       (cond
-         [(and slash-pos (string=? (substring s 0 slash-pos) "js"))
-          (substring s (+ slash-pos 1))]
-         [(and slash-pos
-               (> (string-length s) (+ slash-pos 3))
-               (string=? (substring s (+ slash-pos 1) (+ slash-pos 3)) "->"))
-          (string-append (substring s 0 slash-pos) "." (substring s (+ slash-pos 3)))]
-         [else (string-replace s "/" ".")]))
-     (format "~a(~a)" (mangle-str dotted)
+     (define ref (static-call-class+method e))
+     (format "~a(~a)"
+             (emit-qualified-reference
+              ref #:constructor? (qualified-member-constructor? ref))
              (string-join (map emit-expr (static-call-args e)) ", "))]
 
     [(dynamic-var? e)
@@ -2696,13 +2724,16 @@
      (define fn-sym (call-form-fn e))
      (define args (call-form-args e))
      (cond
-       [(and (set-member? (current-js-scalar-fns) fn-sym)
+       [(and (qualified-set-member? (current-js-scalar-fns) fn-sym)
              (= 1 (length args)))
         (emit-expr (car args))]
        ;; `bgl/promote` copies a value into an older epoch's arena. JS has one
        ;; GC-owned heap and no epochs, so the value already outlives every
        ;; scope that could name it: the form erases.
-       [(and (eq? fn-sym 'bgl/promote) (= 1 (length args)))
+       [(and (qualified-ref? fn-sym)
+             (eq? (qualified-ref-qualifier fn-sym) 'bgl)
+             (eq? (qualified-ref-name fn-sym) 'promote)
+             (= 1 (length args)))
         (emit-expr (car args))]
        ;; Value-equality family routes to the runtime $$bc$equiv (Clojure =
        ;; semantics: structural, recursive over vectors/sets/maps/records).
@@ -2755,7 +2786,8 @@
        [(and (current-js-semantic-contracts)
              (hash-ref (current-js-semantic-contracts) e #f)
              (= (length args) 3)
-             (regexp-match? #rx"/replace$" (symbol->string fn-sym)))
+             (qualified-ref? fn-sym)
+             (eq? (qualified-ref-name fn-sym) 'replace))
         (format
          "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"g\" : \"gu\"); return ~a.replace(new RegExp(_r.source, _f), ~a); })()"
          (emit-expr (cadr args))
@@ -2764,12 +2796,19 @@
        [(and (current-js-semantic-contracts)
              (hash-ref (current-js-semantic-contracts) e #f)
              (= (length args) 2)
-             (regexp-match? #rx"/split$" (symbol->string fn-sym)))
+             (qualified-ref? fn-sym)
+             (eq? (qualified-ref-name fn-sym) 'split))
         (format
          "(() => { const _s = ~a, _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"g\" : \"gu\"), _out = []; let _last = 0; for (const _m of _s.matchAll(new RegExp(_r.source, _f))) { _out.push(_s.slice(_last, _m.index)); _last = _m.index + _m[0].length; if (_m[0].length === 0 && _last < _s.length) _last += Array.from(_s.slice(_last))[0].length; } _out.push(_s.slice(_last)); while (_out.length > 0 && _out[_out.length - 1] === \"\") _out.pop(); return _out; })()"
          (emit-expr (car args))
          (emit-expr (cadr args)))]
-       [(emit-core-call fn-sym args) => values]
+       [(and (symbol? fn-sym) (emit-core-call fn-sym args)) => values]
+       [(qualified-ref? fn-sym)
+        (format "~a(~a)"
+                (emit-qualified-reference
+                 fn-sym
+                 #:constructor? (qualified-member-constructor? fn-sym))
+                (string-join (map emit-expr args) ", "))]
        [(not (symbol? fn-sym))
         ;; higher-order call: the callee is an arbitrary expression — e.g.
         ;; ((get o :k) a) — which parse.rkt emits as a call-form with a
@@ -2780,37 +2819,18 @@
                 (string-join (map emit-expr args) ", "))]
        [else
         (define fn-str (symbol->string fn-sym))
-        (define imported-qualified
-          (qualified-import-reference
-           fn-sym
-           #:constructor?
-           (and (string-contains? fn-str "/->")
-                (or (set-member? (current-js-record-constructors) fn-sym)
-                    (not (js-bound? fn-sym))))))
         (define mangled
           (cond
-            [imported-qualified imported-qualified]
             [(and (string-prefix? fn-str "->")
                   (set-member? (current-js-record-constructors) fn-sym))
              (mangle-str (substring fn-str 2))]
-            [(and (string-contains? fn-str "/->")
-                  (or (set-member? (current-js-record-constructors) fn-sym)
-                      (not (js-bound? fn-sym))))
-             (let ([parts (string-split fn-str "/->")])
-               (string-append (mangle-name (string->symbol (car parts)))
-                              "." (mangle-str (cadr parts))))]
             [else (mangle-name fn-sym)]))
         (define qualified
           (let ([mod-prefix (hash-ref (current-js-symbol-ns) fn-sym #f)])
             (cond
-              ;; A local binding never carries a namespace prefix, so a
-              ;; slash-bearing name must still be dotted even when the imported
-              ;; interface makes it known.
-              [(and (js-bound? fn-sym) (not (string-contains? mangled "/"))) mangled]
-              [(and mod-prefix (not (string-contains? mangled "/")))
+              [(js-bound? fn-sym) mangled]
+              [mod-prefix
                (string-append (js-module-binding-name mod-prefix) "." mangled)]
-              [(string-contains? mangled "/")
-               (string-replace mangled "/" ".")]
               [else mangled])))
         (format "~a(~a)"
                 qualified
@@ -3118,8 +3138,13 @@
     [(pat-record? pat)
      (define rec-name (pat-record-type-name pat))
      (define bindings (pat-record-bindings pat))
-     (define fields (hash-ref (current-js-record-fields) rec-name #f))
-     (define test (format "~a._tag === ~v" tmp (symbol->string rec-name)))
+     (define fields
+       (record-fields-ref (current-js-record-fields) rec-name))
+     (define tag-name
+       (if (qualified-ref? rec-name)
+           (qualified-ref-name rec-name)
+           rec-name))
+     (define test (format "~a._tag === ~v" tmp (symbol->string tag-name)))
      (cond
        [(or (null? bindings) (not fields))
         (format "if (~a) { ~a } else" test (make-body-str))]

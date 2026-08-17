@@ -13,6 +13,7 @@
 (define (emit-jst-expr e)
   (cond
     [(eq? e 'nil) "null"]
+    [(qualified-ref? e) (jst-resolved-name e)]
     [(symbol? e) (jst-resolved-name e)]
     [(string? e) (~v e)]
     [(boolean? e) (if e "true" "false")]
@@ -100,18 +101,25 @@
                         (param-name binding))))))]))
 
 (define current-jst-rename-env (make-parameter (hash)))
+(define (jst-default-resolve-name name)
+  (cond
+    [(qualified-ref? name)
+     (define member (mangle-name (qualified-ref-name name)))
+     (if (eq? (qualified-ref-qualifier name) 'js)
+         member
+         (string-append
+          (mangle-name (qualified-ref-qualifier name)) "." member))]
+    [else (mangle-name name)]))
 (define current-jst-resolve-name
-  (make-parameter mangle-name))
+  (make-parameter jst-default-resolve-name))
 (define current-jst-with-binding-env
   (make-parameter (lambda (_names _rename-env thunk) (thunk))))
 
 (define (jst-resolved-name name)
-  (define resolved
-    (hash-ref (current-jst-rename-env) name
-              (lambda () ((current-jst-resolve-name) name))))
-  (if (string-contains? resolved "/")
-      (string-replace resolved "/" ".")
-      resolved))
+  (if (qualified-ref? name)
+      ((current-jst-resolve-name) name)
+      (hash-ref (current-jst-rename-env) name
+                (lambda () ((current-jst-resolve-name) name)))))
 
 (define (jst-binding-names binding)
   (binding-target-bound-names (param-binding-target binding)))
@@ -279,8 +287,7 @@
 
 (define (jst-postfix-base? e)
   (or (symbol? e)
-      (and (qualified-ref? e)
-           (symbol? (qualified-ref->symbol e)))
+      (qualified-ref? e)
       (string? e)
       (boolean? e)
       (char? e)
@@ -330,8 +337,7 @@
 
 (define (jst-constructor-reference? e)
   (or (symbol? e)
-      (and (qualified-ref? e)
-           (symbol? (qualified-ref->symbol e)))
+      (qualified-ref? e)
       (jst-dot? e)
       (jst-get? e)))
 
