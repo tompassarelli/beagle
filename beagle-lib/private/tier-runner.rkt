@@ -2,8 +2,10 @@
 
 ;; Tiered test runner backend for `bin/beagle-test`.
 ;;
-;; Reads beagle-test/tiers.rktd, runs active + demoted tiers via `raco test`
-;; per-file, classifies output, prints tier-grouped summary.
+;; Reads beagle-test/tiers.rktd, expands each tier's files into SCHEDULING
+;; UNITS (one per file, except that a phase-declaring file expands into one
+;; unit per phase), runs each unit via `raco test`, classifies output, prints
+;; a tier-grouped summary.
 ;;
 ;; Exit code: 0 if all active tests pass, 1 if any active failure.
 
@@ -14,7 +16,8 @@
          racket/match
          racket/port
          racket/string
-         racket/system)
+         racket/system
+         file/sha1)
 
 ;; --- paths -----------------------------------------------------------------
 
@@ -38,12 +41,17 @@
 (define tests-dir      (build-path beagle-root "beagle-test" "tests"))
 
 ;; Content-keyed result cache (bin/_gate-cache-run). When present, each eligible
-;; per-file raco-test child runs through it: a stored green result whose whole
+;; per-unit raco-test child runs through it: a stored green result whose whole
 ;; traced input closure is byte-identical is replayed instead of re-run, and
 ;; its first stdout line is a "beagle-gate-cache: cached-green ..." marker.
 ;; The wrapper itself decides every bypass (BEAGLE_GATE_NO_CACHE=1, nested
 ;; tracing, missing strace), so the runner's only job is to route through it
 ;; and surface cached-vs-ran in the report.
+;;
+;; The cache id is the UNIT label, not the file name, and the wrapper folds
+;; every BEAGLE_* environment variable into the identity — so a per-phase run
+;; is keyed on both its own id and its own phase selection, and a phase whose
+;; name changed can never be served another phase's proof.
 (define gate-cache-wrapper (build-path beagle-root "bin" "_gate-cache-run"))
 
 (define (gate-cache-available?)
@@ -75,9 +83,204 @@
 (define (files-in tier classification)
   (hash-ref classification tier '()))
 
-;; --- per-file test invocation ---------------------------------------------
+;; --- scheduling units, and sharding a file by phase -------------------------
+;;
+;; A unit is what the scheduler claims, what `raco test` is invoked for, what
+;; the cache is keyed on, and what the report prints one line for. Ordinarily
+;; one unit IS one file. wasm-materializer.rkt is the exception that motivated
+;; the abstraction: it runs several minutes where every other active file
+;; finishes in well under one, so at any worker count the whole gate waits on
+;; that one file — an Amdahl bind no amount of parallelism removes. It already
+;; names its work in `phase-test` blocks, so each block becomes its own unit.
+;;
+;; The invariant that makes this legal: the union of the per-phase runs must
+;; equal exactly what the unfiltered file asserts. Nothing here may be a
+;; hand-maintained copy of the phase list, so the list is DERIVED from the
+;; source and then re-proved by the file itself at run time:
+;;
+;;   1. `top-level-forms` reads the test file as data and `scan-top-level`
+;;      classifies every top-level form: a literal `(phase-test "name" ...)`
+;;      is a phase; a binding form (define/require/struct/module+/...) is
+;;      structural and executes no assertion at load; anything else that
+;;      mentions a test form is RESIDUAL.
+;;   2. Residual code fails the gate. A top-level expression runs in EVERY
+;;      shard, so its assertions would be counted once per phase and the union
+;;      would no longer equal the file. The fix is to move it into a
+;;      phase-test; the refusal names the offending form.
+;;   3. Every derived phase is scheduled exactly once (duplicate phase names
+;;      and colliding scheduling ids are refusals, not silent merges), plus
+;;      one `#residual` unit that selects NO phase. That unit is the home for
+;;      the module's out-of-phase load-time work, and it carries the scheduled
+;;      set to the file in BEAGLE_WASM_TEST_EXPECT_PHASES.
+;;   4. The file errors if its own phase registry disagrees with that set, and
+;;      errors if a selected phase name does not exist. So a phase-test the
+;;      static scan cannot see — nested inside another form, or named by a
+;;      computed string — fails the gate instead of quietly going unrun, and a
+;;      stale phase name fails instead of reporting a green that ran nothing.
 
-(struct file-result (name status passed total stderr-lines cached?) #:transparent)
+(struct shard-spec (phases-env expect-env) #:transparent)
+
+;; Which files are sharded, and the environment contract each one reads.
+;; The phase LIST is never written here — only the knob it is delivered on.
+(define sharded-files
+  (hash "wasm-materializer.rkt"
+        (shard-spec #"BEAGLE_WASM_TEST_PHASES" #"BEAGLE_WASM_TEST_EXPECT_PHASES")))
+
+;; label  — display name AND gate-cache id; unique across a tier.
+;; file   — the test file this unit invokes.
+;; phase  — #f for the whole file, a phase name string for one phase, or
+;;          'residual for "select no phase".
+;; expect — the full scheduled phase list, carried by the residual unit only.
+(struct unit (label file phase expect) #:transparent)
+
+(define (whole-file-unit fname) (unit fname fname #f #f))
+
+;; Top-level forms of a test file, read as data. #f when the file cannot be
+;; read as such — the caller then falls back to running it whole, which is
+;; always correct and only forfeits the speedup.
+(define (top-level-forms path)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (call-with-input-file path
+      (lambda (in)
+        (define lang-line (read-line in))
+        (unless (and (string? lang-line) (regexp-match? #rx"^#lang " lang-line))
+          (error 'tier-runner "expected a #lang line"))
+        (let loop ([acc '()])
+          (define d (read in))
+          (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
+
+;; Heads that BIND rather than execute: their bodies run only when something
+;; calls them, so a check form inside one is a helper, not a stray assertion.
+(define structural-heads
+  '(require provide define define-values define-syntax define-syntaxes
+    define-syntax-rule define-runtime-path define-runtime-paths
+    define-struct struct module module* module+ begin-for-syntax))
+
+;; Does this datum mention a test form at all? Deliberately syntactic: it
+;; decides only whether an unrecognized top-level form is worth refusing, so a
+;; top-level `(printf ...)` stays allowed while a top-level `(when ... (check
+;; ...))` or a nested `phase-test` does not.
+(define (test-bearing? datum)
+  (let loop ([d datum])
+    (cond
+      [(symbol? d)
+       (define s (symbol->string d))
+       (or (regexp-match? #rx"^check" s)
+           (regexp-match? #rx"^test-" s)
+           (eq? d 'phase-test)
+           (eq? d 'fail))]
+      [(pair? d) (or (loop (car d)) (loop (cdr d)))]
+      [(vector? d) (for/or ([x (in-vector d)]) (loop x))]
+      [else #f])))
+
+;; -> (values phase-names residual-descriptions)
+(define (scan-top-level forms)
+  (for/fold ([phases '()] [residual '()]
+             #:result (values (reverse phases) (reverse residual)))
+            ([f (in-list forms)] [i (in-naturals)])
+    (cond
+      [(and (pair? f) (eq? (car f) 'phase-test)
+            (pair? (cdr f)) (string? (cadr f)))
+       (values (cons (cadr f) phases) residual)]
+      [(and (pair? f) (symbol? (car f)) (memq (car f) structural-heads))
+       (values phases residual)]
+      [(test-bearing? f)
+       (values phases
+               (cons (format "form ~a (~a)" i (if (pair? f) (car f) f)) residual))]
+      [else (values phases residual)])))
+
+;; A phase's scheduling id: a readable slug of the name for the report, plus a
+;; digest of the FULL name so a rename or a reorder yields a different id
+;; instead of silently inheriting another phase's cached proof.
+(define (phase-slug name)
+  (define dashed (regexp-replace* #px"[^a-z0-9]+" (string-downcase name) "-"))
+  (define trimmed (regexp-replace* #px"^-+|-+$" dashed ""))
+  (define short
+    (regexp-replace* #px"-+$"
+                     (if (> (string-length trimmed) 24)
+                         (substring trimmed 0 24)
+                         trimmed)
+                     ""))
+  (string-append short "-" (substring (sha1 (open-input-string name)) 0 6)))
+
+;; One manifest file -> (values units refusals). A non-empty refusal list
+;; fails the gate before any unit runs.
+(define (file->units fname)
+  (define spec (hash-ref sharded-files fname #f))
+  (define (unsharded why)
+    (when why
+      (eprintf "tier-runner: ~a — running it unsharded.\n" why))
+    (values (list (whole-file-unit fname)) '()))
+  (cond
+    [(not spec) (unsharded #f)]
+    [else
+     (define forms (top-level-forms (build-path tests-dir fname)))
+     (cond
+       [(not forms) (unsharded (format "~a is not statically readable" fname))]
+       [else
+        (define-values (phases residual) (scan-top-level forms))
+        (define dup (check-duplicates phases))
+        (define labels
+          (for/list ([p (in-list phases)]) (format "~a#~a" fname (phase-slug p))))
+        (define dup-label (check-duplicates labels))
+        (cond
+          [(null? phases)
+           (unsharded (format "~a declares no phase-test block" fname))]
+          [(pair? residual)
+           (values
+            '()
+            (list (format
+                   (string-append
+                    "~a: ~a top-level form(s) assert outside every phase-test block"
+                    " (~a). Such a form runs in EVERY shard, so the union of the"
+                    " shards would no longer equal the file — move it into a"
+                    " phase-test block.")
+                   fname (length residual) (string-join residual "; "))))]
+          [dup
+           (values '()
+                   (list (format
+                          "~a: duplicate phase name — a phase name is its scheduling id: ~s"
+                          fname dup)))]
+          [dup-label
+           (values '()
+                   (list (format "~a: two phases share one scheduling id: ~s"
+                                 fname dup-label)))]
+          [else
+           (values (append
+                    (for/list ([p (in-list phases)] [l (in-list labels)])
+                      (unit l fname p #f))
+                    (list (unit (format "~a#residual" fname) fname 'residual phases)))
+                   '())])])]))
+
+;; A tier's manifest file list -> (values units refusals), units in manifest
+;; order with each file's own units contiguous.
+(define (expand-units files)
+  (for/fold ([units '()] [refusals '()]
+             #:result (values (reverse units) (reverse refusals)))
+            ([f (in-list files)])
+    (define-values (u r) (file->units f))
+    (values (append (reverse u) units) (append (reverse r) refusals))))
+
+;; The environment additions this unit's child needs, as (name . value) byte
+;; pairs. Empty for every unsharded unit, so the ordinary path is unchanged.
+(define (unit-child-env u)
+  (define spec (hash-ref sharded-files (unit-file u) #f))
+  (define phase (unit-phase u))
+  (cond
+    [(not spec) '()]
+    [(eq? phase 'residual)
+     ;; Empty selection => no phase runs; the expectation is what the file
+     ;; proves its own registry against.
+     (list (cons (shard-spec-phases-env spec) #"")
+           (cons (shard-spec-expect-env spec)
+                 (string->bytes/utf-8 (string-join (unit-expect u) "\n"))))]
+    [(string? phase)
+     (list (cons (shard-spec-phases-env spec) (string->bytes/utf-8 phase)))]
+    [else '()]))
+
+;; --- per-unit test invocation ----------------------------------------------
+
+(struct unit-result (label status passed total stderr-lines cached?) #:transparent)
 ;; status ∈ '(pass fail error skip); cached? = green replayed from the
 ;; gate-result cache (the same proof, not a new run)
 
@@ -140,14 +343,18 @@
 ;; child by process group; `teardown!` does so before deleting the root.
 (define child-custodian (make-custodian))
 
-;; A private environment copy with TMPDIR/TMP/TEMP pointed at `dir`. Copying
-;; leaves (current-environment-variables) — and thus the caller's environment —
-;; untouched; all other inherited variables are carried through verbatim.
-(define (env-with-tmpdir dir)
+;; A private environment copy with TMPDIR/TMP/TEMP pointed at `dir` (when given)
+;; and `extra` applied on top. Copying leaves (current-environment-variables) —
+;; and thus the caller's environment — untouched; all other inherited variables
+;; are carried through verbatim.
+(define (env-with-tmpdir dir [extra '()])
   (define ev (environment-variables-copy (current-environment-variables)))
-  (define val (path->bytes (path->directory-path dir)))
-  (for ([name (in-list '(#"TMPDIR" #"TMP" #"TEMP"))])
-    (environment-variables-set! ev name val))
+  (when dir
+    (define val (path->bytes (path->directory-path dir)))
+    (for ([name (in-list '(#"TMPDIR" #"TMP" #"TEMP"))])
+      (environment-variables-set! ev name val)))
+  (for ([pair (in-list extra)])
+    (environment-variables-set! ev (car pair) (cdr pair)))
   ev)
 
 ;; Concurrently drain a child's stdout and stderr to EOF, then reap it.
@@ -185,11 +392,12 @@
       (close-input-port stdout)
       (close-input-port stderr))))
 
-(define (run-test-file fname)
+(define (run-test-unit u)
+  (define fname (unit-file u))
   (define full-path (build-path tests-dir fname))
   (cond
     [(not (file-exists? full-path))
-     (file-result fname 'skip 0 0 (list (format "MISSING: ~a" full-path)) #f)]
+     (unit-result (unit-label u) 'skip 0 0 (list (format "MISSING: ~a" full-path)) #f)]
     [else
      ;; Per-child temp subdir under the runner-owned root, exported to the child
      ;; via TMPDIR/TMP/TEMP so all its make-temporary-* scratch is contained
@@ -198,17 +406,18 @@
      (define root (unbox run-temp-root))
      (define child-tmp
        (and root (make-temporary-directory "child-~a" #:base-dir root)))
+     (define extra (unit-child-env u))
      (define raco (find-executable-path "raco"))
      (define argv
        (if (and (gate-cache-available?) (gate-cache-eligible-file? fname))
            (list gate-cache-wrapper
-                 "--domain" "raco-test" "--id" fname "--"
+                 "--domain" "raco-test" "--id" (unit-label u) "--"
                  raco "test" (path->string full-path))
            (list raco "test" (path->string full-path))))
      (define-values (sp stdout stdin stderr)
        (parameterize ([current-environment-variables
-                       (if child-tmp
-                           (env-with-tmpdir child-tmp)
+                       (if (or child-tmp (pair? extra))
+                           (env-with-tmpdir child-tmp extra)
                            (current-environment-variables))])
          (apply subprocess #f #f #f argv)))
      (close-output-port stdin)
@@ -227,18 +436,18 @@
          [(pass) (if (zero? code) 'pass 'fail)]
          [(fail) 'fail]
          [(unknown) (if (zero? code) 'pass 'fail)]))
-     (file-result fname status (cadr summary) (caddr summary)
+     (unit-result (unit-label u) status (cadr summary) (caddr summary)
                   (if (eq? status 'fail) all-lines '())
                   (and cached? (eq? status 'pass)))]))
 
 ;; --- bounded parallel scheduling -------------------------------------------
 ;;
-;; jobs=1 IS the exact legacy path: (map run-test-file files), one raco-test
+;; jobs=1 IS the exact legacy path: (map run-test-unit units), one raco-test
 ;; subprocess at a time in manifest order.
 ;;
-;; jobs>1 runs a bounded K-worker queue over the SAME per-file raco-test
-;; subprocesses. Files are LAUNCHED heavy-first (the few stragglers whose
-;; single-file wall dominates the tier go out first, so the queue never ends
+;; jobs>1 runs a bounded K-worker queue over the SAME per-unit raco-test
+;; subprocesses. Units are LAUNCHED heavy-first (the few stragglers whose
+;; single-unit wall dominates the tier go out first, so the queue never ends
 ;; up blocked on a straggler that started last), but each result is COLLECTED
 ;; into a vector BY MANIFEST INDEX. The print phase is unchanged and reads that
 ;; vector in manifest order, so the report is byte-identical to the sequential
@@ -263,29 +472,35 @@
         (and e (pos (string->number e))))
       default-jobs))
 
-;; The stragglers (measured): a single-file wall that dominates the tier.
+;; The stragglers (measured): a single-unit wall that dominates the tier.
 ;; Launching them first shrinks the parallel tail. Absent files are ignored.
-(define heavy-first-files '("conformance.rkt" "facts-render-roundtrip.rkt"))
+;; Named by FILE, so a sharded file sends all of its phase units out first —
+;; which is also the right order for that file when it runs unsharded.
+(define heavy-first-files
+  '("wasm-materializer.rkt"
+    "native-simd.rkt"
+    "native-c17-parallel.rkt"
+    "check-all-nix.rkt"))
 
-;; Indices into `files`: heavy stragglers first (in listed order), then the
-;; remainder in manifest order.
-(define (launch-order files)
-  (define n (length files))
+;; Indices into `units`: units of the heavy files first (in listed order), then
+;; the remainder in manifest order.
+(define (launch-order units)
+  (define n (length units))
   (define heavy
     (append-map
      (lambda (h)
-       (for/list ([f (in-list files)] [i (in-naturals)]
-                  #:when (string=? f h))
+       (for/list ([u (in-list units)] [i (in-naturals)]
+                  #:when (string=? (unit-file u) h))
          i))
      heavy-first-files))
   (append heavy
           (for/list ([i (in-range n)] #:unless (memv i heavy)) i)))
 
-(define (run-files-parallel files k)
-  (define vec (list->vector files))
+(define (run-units-parallel units k)
+  (define vec (list->vector units))
   (define n (vector-length vec))
   (define results (make-vector n #f))
-  (define pending (box (launch-order files)))   ; shared claim queue
+  (define pending (box (launch-order units)))   ; shared claim queue
   (define lock (make-semaphore 1))
   (define (claim!)
     (call-with-semaphore lock
@@ -301,18 +516,18 @@
          (let loop ()
            (define idx (claim!))
            (when idx
-             (vector-set! results idx (run-test-file (vector-ref vec idx)))
+             (vector-set! results idx (run-test-unit (vector-ref vec idx)))
              (loop)))))))
   (for-each thread-wait workers)
   (vector->list results))
 
-;; Run a tier's files, returning results in MANIFEST order regardless of K.
-(define (run-test-files files)
-  (define n (length files))
+;; Run a tier's units, returning results in MANIFEST order regardless of K.
+(define (run-test-units units)
+  (define n (length units))
   (define k (min (resolve-jobs) (max 1 n)))
   (cond
-    [(<= k 1) (map run-test-file files)]   ; exact legacy sequential path
-    [else (run-files-parallel files k)]))
+    [(<= k 1) (map run-test-unit units)]   ; exact legacy sequential path
+    [else (run-units-parallel units k)]))
 
 ;; --- debt file -------------------------------------------------------------
 
@@ -325,22 +540,29 @@
     [(skip) "—"]
     [else "?"]))
 
+;; Sharded unit labels are longer than a file name, so the name column widens
+;; to fit them (bounded, so one pathological label cannot deform the report).
+(define (label-column results)
+  (for/fold ([w 32]) ([r (in-list results)])
+    (max w (min 56 (string-length (unit-result-label r))))))
+
 (define (print-tier-section label results)
   (printf "~a:\n" label)
+  (define width (label-column results))
   (for ([r (in-list results)])
     (printf "  ~a ~a   ~a/~a~a\n"
-            (status->glyph (file-result-status r))
-            (~truncate (file-result-name r) 32)
-            (file-result-passed r)
-            (file-result-total r)
-            (if (file-result-cached? r) "  (cached)" "")))
+            (status->glyph (unit-result-status r))
+            (~truncate (unit-result-label r) width)
+            (unit-result-passed r)
+            (unit-result-total r)
+            (if (unit-result-cached? r) "  (cached)" "")))
   (define failures
-    (filter (lambda (r) (eq? (file-result-status r) 'fail)) results))
+    (filter (lambda (r) (eq? (unit-result-status r) 'fail)) results))
   (define cached
-    (filter file-result-cached? results))
+    (filter unit-result-cached? results))
   (printf "  TOTAL: ~a/~a (~a ~a~a)\n\n"
-          (apply + (map file-result-passed results))
-          (apply + (map file-result-total results))
+          (apply + (map unit-result-passed results))
+          (apply + (map unit-result-total results))
           (length failures)
           (if (= 1 (length failures)) "failure" "failures")
           (if (null? cached)
@@ -419,13 +641,26 @@
 
   (printf "=== Beagle tiered test runner ===\n\n")
 
-  (define active-results  (run-test-files active-files))
+  ;; Expand every tier BEFORE running anything: a shard refusal means the units
+  ;; would not cover the file, so it fails the gate instead of running a
+  ;; partial set and reporting green.
+  (define-values (active-units active-refusals) (expand-units active-files))
+  (define-values (demoted-units demoted-refusals) (expand-units demoted-files))
+  (define-values (gated-units gated-refusals) (expand-units gated-files))
+  (define refusals (append active-refusals demoted-refusals gated-refusals))
+  (unless (null? refusals)
+    (printf "=== SHARD COVERAGE REFUSED ===\n\n")
+    (for ([r (in-list refusals)]) (printf "  ~a\n" r))
+    (printf "\nBUILD FAILED — the scheduled units would not cover every test.\n")
+    (exit 1))
+
+  (define active-results  (run-test-units active-units))
   (print-tier-section "ACTIVE TIER (blocks iteration)" active-results)
 
   (define demoted-results
     (cond
       [(active-only?) '()]
-      [else (run-test-files demoted-files)]))
+      [else (run-test-units demoted-units)]))
 
   (cond
     [(active-only?)
@@ -435,7 +670,7 @@
 
   (define gated-results
     (cond
-      [(include-gated?) (run-test-files gated-files)]
+      [(include-gated?) (run-test-units gated-units)]
       [else '()]))
 
   (cond
@@ -448,9 +683,9 @@
      (newline)])
 
   (define active-failures
-    (filter (lambda (r) (eq? (file-result-status r) 'fail)) active-results))
+    (filter (lambda (r) (eq? (unit-result-status r) 'fail)) active-results))
   (define demoted-failures
-    (filter (lambda (r) (eq? (file-result-status r) 'fail)) demoted-results))
+    (filter (lambda (r) (eq? (unit-result-status r) 'fail)) demoted-results))
 
   ;; Debt visibility: surface BOTH this-run new failures AND total accumulated.
   (cond
@@ -458,20 +693,20 @@
      (printf "Demoted failures this run: ~a (in ~a)\n\n"
              (length demoted-failures)
              (string-join
-              (map (lambda (r) (file-result-name r)) demoted-failures)
+              (map (lambda (r) (unit-result-label r)) demoted-failures)
               ", "))]
     [else
      (printf "Demoted failures this run: 0\n\n")])
 
-  ;; Active failure detail (failing files only)
+  ;; Active failure detail (failing units only)
   (cond
     [(positive? (length active-failures))
      (printf "=== ACTIVE FAILURE DETAIL ===\n\n")
      (for ([r (in-list active-failures)])
-       (printf "--- ~a ---\n" (file-result-name r))
-       (for ([line (in-list (file-result-stderr-lines r))]
+       (printf "--- ~a ---\n" (unit-result-label r))
+       (for ([line (in-list (unit-result-stderr-lines r))]
              [_ (in-naturals)]
-             #:break (>= _ 40))   ; cap per-file detail
+             #:break (>= _ 40))   ; cap per-unit detail
          (when (positive? (string-length line))
            (printf "  ~a\n" line)))
        (newline))])
@@ -507,40 +742,53 @@
    (run)))
 
 ;; --- scheduler invariants (unit) -------------------------------------------
-;; These exercise the pure scheduling logic — launch order and manifest-index
-;; collection — WITHOUT spawning subprocesses, so they are fast and hermetic.
-;; The report-ordering / exit / 1658-total / interrupt guarantees are proven
-;; by the end-to-end runs recorded on the D4 thread.
+;; These exercise the pure scheduling logic — unit expansion, shard coverage,
+;; launch order and manifest-index collection — WITHOUT spawning subprocesses,
+;; so they are fast and hermetic. The report-ordering / exit / total-count /
+;; interrupt guarantees are proven by the end-to-end runs recorded on the D4
+;; thread; the union-equals-the-file count is proven by the end-to-end sharded
+;; run recorded on EXEC-30.
 (module+ test
   (require rackunit)
 
   (define manifest
-    (list "a.rkt" "b.rkt" "conformance.rkt" "c.rkt"
-          "facts-render-roundtrip.rkt" "d.rkt"))
+    (list "a.rkt" "b.rkt" "native-simd.rkt" "c.rkt"
+          "check-all-nix.rkt" "d.rkt"))
 
-  ;; launch-order is a permutation of the indices (every file launched once).
-  (check-equal? (sort (launch-order manifest) <)
-                (build-list (length manifest) values)
-                "launch-order is a permutation — no file dropped or duplicated")
+  (define (u f) (whole-file-unit f))
+  (define manifest-units (map u manifest))
+
+  ;; launch-order is a permutation of the indices (every unit launched once).
+  (check-equal? (sort (launch-order manifest-units) <)
+                (build-list (length manifest-units) values)
+                "launch-order is a permutation — no unit dropped or duplicated")
 
   ;; heavy stragglers launch first, in the declared order.
-  (check-equal? (take (launch-order manifest) 2) (list 2 4)
-                "conformance then facts-render-roundtrip go out first")
+  (check-equal? (take (launch-order manifest-units) 2) (list 2 4)
+                "native-simd then check-all-nix go out first")
 
   ;; the remainder keeps manifest order.
-  (check-equal? (drop (launch-order manifest) 2) (list 0 1 3 5)
-                "non-heavy files stay in manifest order")
+  (check-equal? (drop (launch-order manifest-units) 2) (list 0 1 3 5)
+                "non-heavy units stay in manifest order")
 
   ;; a manifest with no heavy files => identity order.
-  (check-equal? (launch-order (list "x.rkt" "y.rkt" "z.rkt")) (list 0 1 2)
+  (check-equal? (launch-order (map u (list "x.rkt" "y.rkt" "z.rkt"))) (list 0 1 2)
                 "no straggler => manifest order unchanged")
+
+  ;; every unit of a sharded heavy file goes out before anything else.
+  (let* ([units (list (u "a.rkt")
+                      (unit "w.rkt#one" "wasm-materializer.rkt" "one" #f)
+                      (unit "w.rkt#two" "wasm-materializer.rkt" "two" #f)
+                      (u "b.rkt"))])
+    (check-equal? (take (launch-order units) 2) (list 1 2)
+                  "all phase units of the heaviest file launch first"))
 
   ;; THE core invariant: whatever the launch order, writing each result into a
   ;; vector by its manifest index and reading the vector back yields manifest
-  ;; order. This is exactly what run-files-parallel does with real results.
-  (let* ([n (length manifest)]
+  ;; order. This is exactly what run-units-parallel does with real results.
+  (let* ([n (length manifest-units)]
          [results (make-vector n #f)])
-    (for ([idx (in-list (launch-order manifest))])
+    (for ([idx (in-list (launch-order manifest-units))])
       (vector-set! results idx (format "result:~a" (list-ref manifest idx))))
     (check-equal? (vector->list results)
                   (map (lambda (f) (format "result:~a" f)) manifest)
@@ -560,6 +808,88 @@
   (check-true (gate-cache-eligible-file? "parse.rkt")
               "ordinary filesystem-closed tests remain cacheable")
 
+  ;; --- shard expansion and the coverage guard ------------------------------
+
+  ;; An unsharded file is exactly one unit, with no environment additions —
+  ;; the ordinary path is untouched.
+  (let-values ([(units refusals) (file->units "parse.rkt")])
+    (check-equal? refusals '() "an ordinary file raises no refusal")
+    (check-equal? (map unit-label units) (list "parse.rkt") "one file, one unit")
+    (check-equal? (unit-child-env (car units)) '()
+                  "an unsharded unit adds nothing to the child environment"))
+
+  ;; The real sharded file: every phase-test block it declares becomes exactly
+  ;; one unit, plus one residual unit, and the phase list is DERIVED from the
+  ;; source rather than restated here.
+  (let*-values ([(forms) (top-level-forms (build-path tests-dir "wasm-materializer.rkt"))]
+                [(phases residual) (scan-top-level forms)]
+                [(units refusals) (file->units "wasm-materializer.rkt")])
+    (check-pred list? forms "the sharded test file reads as data")
+    (check-equal? refusals '() "the sharded file covers every phase")
+    (check-equal? residual '() "no asserting form sits outside a phase-test block")
+    (check-true (> (length phases) 1) "the sharded file declares several phases")
+    (check-equal? (length units) (add1 (length phases))
+                  "one unit per phase, plus the residual unit")
+    (check-equal? (length (remove-duplicates (map unit-label units))) (length units)
+                  "every scheduling id is unique")
+    ;; Each phase is scheduled exactly once, and each phase unit selects
+    ;; exactly its own phase.
+    (check-equal? (sort (filter string? (map unit-phase units)) string<?)
+                  (sort phases string<?)
+                  "every declared phase is scheduled exactly once")
+    (for ([un (in-list units)] #:when (string? (unit-phase un)))
+      (check-equal? (unit-child-env un)
+                    (list (cons #"BEAGLE_WASM_TEST_PHASES"
+                                (string->bytes/utf-8 (unit-phase un))))
+                    "a phase unit selects exactly its own phase"))
+    ;; The residual unit selects nothing and carries the scheduled set, which
+    ;; is what the test file proves its own registry against.
+    (let ([res (findf (lambda (un) (eq? (unit-phase un) 'residual)) units)])
+      (check-true (unit? res) "a residual unit is always scheduled")
+      (check-equal? (unit-child-env res)
+                    (list (cons #"BEAGLE_WASM_TEST_PHASES" #"")
+                          (cons #"BEAGLE_WASM_TEST_EXPECT_PHASES"
+                                (string->bytes/utf-8 (string-join phases "\n"))))
+                    "the residual unit selects no phase and declares the scheduled set")))
+
+  ;; A phase name may contain a comma, so the selection knob is newline-
+  ;; separated; no scheduled value may contain a newline of its own.
+  (let-values ([(units _) (file->units "wasm-materializer.rkt")])
+    (for ([un (in-list units)] #:when (string? (unit-phase un)))
+      (check-false (regexp-match? #rx"\n" (unit-phase un))
+                   "a phase name never contains the separator")))
+
+  ;; scan-top-level classification: bindings are structural even when their
+  ;; bodies mention check forms; an asserting top-level expression is residual.
+  (let-values ([(phases residual)
+                (scan-top-level
+                 '((require rackunit)
+                   (define (helper) (check-equal? 1 1))
+                   (phase-test "one" (lambda () (check-true #t)))
+                   (printf "chatter\n")))])
+    (check-equal? phases (list "one") "a literal phase-test block is a phase")
+    (check-equal? residual '()
+                  "a helper definition and a bare printf are not residual assertions"))
+
+  (let-values ([(phases residual)
+                (scan-top-level
+                 '((phase-test "one" (lambda () (check-true #t)))
+                   (when #t (phase-test "hidden" (lambda () (check-true #t))))))])
+    (check-equal? phases (list "one") "only top-level phase-test blocks are phases")
+    (check-equal? (length residual) 1
+                  "a phase-test the scan cannot see is residual, not silently dropped"))
+
+  ;; phase-slug: stable, readable, and keyed on the WHOLE name.
+  (check-equal? (phase-slug "compiler timeout owns and reaps the compiler process group")
+                (phase-slug "compiler timeout owns and reaps the compiler process group")
+                "the same phase name always yields the same scheduling id")
+  (check-not-equal? (phase-slug "compiler timeout owns and reaps the compiler process group")
+                    (phase-slug "compiler timeout owns and reaps the runtime process group")
+                    "names sharing a slug prefix still get different ids")
+  (check-regexp-match #px"^[a-z0-9-]+-[0-9a-f]{6}$"
+                      (phase-slug "Wasm bootstrap emits a repeatable reactor, digest, and honest report")
+                      "a scheduling id is a readable slug plus a digest")
+
   ;; --- runner-owned temp containment ---------------------------------------
 
   ;; env-with-tmpdir redirects TMPDIR/TMP/TEMP, preserves every other inherited
@@ -578,6 +908,15 @@
     (check-equal? (environment-variables-ref (current-environment-variables) #"TMPDIR")
                   caller-tmpdir-before
                   "caller environment is not mutated")
+    ;; the phase selection rides the same private copy
+    (let ([ev2 (env-with-tmpdir probe (list (cons #"BEAGLE_WASM_TEST_PHASES" #"one")))])
+      (check-equal? (environment-variables-ref ev2 #"BEAGLE_WASM_TEST_PHASES") #"one"
+                    "a unit's extra variables land in the child env")
+      (check-equal? (environment-variables-ref ev2 #"TMPDIR") want
+                    "extra variables do not disturb the temp containment")
+      (check-false (environment-variables-ref (current-environment-variables)
+                                              #"BEAGLE_WASM_TEST_PHASES")
+                   "the caller environment still is not mutated"))
     (delete-directory/files probe))
 
   ;; --- concurrent drain: pipe-fill deadlock + cleanup ----------------------
