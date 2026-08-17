@@ -17,6 +17,15 @@
 # `raco test` bypasses tier logic and will block on demoted failures.
 
 set -uo pipefail
+
+if [[ "${BEAGLE_TEST_LOCKED:-0}" != 1 ]]; then
+    BEAGLE_TEST_LOCK="${TMPDIR:-/tmp}/beagle-gate.lock"
+    if ! flock -n "$BEAGLE_TEST_LOCK" -c ':'; then
+        echo "beagle-test: waiting for concurrent gate to finish" >&2
+    fi
+    exec env BEAGLE_TEST_LOCKED=1 flock "$BEAGLE_TEST_LOCK" "$0" "$@"
+fi
+
 source "$(dirname "$0")/_beagle-racket"
 
 BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
