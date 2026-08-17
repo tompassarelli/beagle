@@ -6313,7 +6313,7 @@
             declared)]
        [(memq 'other classes) declared]
        [(memq 'float classes) (type-prim 'Float)]
-       [(memq 'number classes) (type-prim 'Number)]
+       [(memq 'number classes) ((hash-ref BUILTIN-UNION-ALIASES 'Number))]
        [else (type-prim 'Int)])]))
 
 ;; G5 — enum-aware equality. `=`/`not=` are typed (Any Any -> Bool), so the

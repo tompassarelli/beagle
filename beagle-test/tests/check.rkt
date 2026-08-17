@@ -192,6 +192,9 @@
 (check-ok "known builtin call type-checks"
   '(def x Int (+ 1 1)))
 
+(check-module-ok "Number arithmetic satisfies a declared Number return"
+  "(defn c [(x Number)] Number (+ x 1))")
+
 ;; The `(claim NAME TYPE)` env-pre-pass tests have been removed entirely:
 ;; the claim form was deleted under the Zero-users rule. The check
 ;; behavior that the pre-pass exercised (env-bind from a type carrier,
