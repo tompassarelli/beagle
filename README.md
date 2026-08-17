@@ -71,7 +71,7 @@ artifacts below are the authoritative answers.
 | Need | Go to |
 |---|---|
 | Full command list and current flags | `beagle help` |
-| Current source profiles, extensions, domains, and pipeline | `beagle langs` (or `beagle langs --json`) |
+| Current source profiles, extensions, domains, and pipeline | <!-- beagle:langs names -->Beagle Native Core, Clojure, JavaScript, and Nix<!-- /beagle:langs -->; query `beagle langs` (or `beagle langs --json`) |
 | Parse, form, and syntax questions | `beagle syntax FILE`; [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) |
 | A function's signature or a record's fields | `beagle sig NAME FILE...`; `beagle fields RECORD FILE` |
 | Callers, exports, and change impact | `beagle callers FN FILE...`; `beagle provides FILE`; `beagle impact FN FILE...` |
@@ -99,6 +99,5 @@ project status is volatile. The names remain useful orientation, while
 Beagle is pre-1.0 and its surface may change through hard breaks. The
 repository gates correctness, not speed, and publishes no performance numbers.
 
-Dual-licensed under the [MIT License](LICENSE-MIT) or the [Apache License,
-Version 2.0](LICENSE-APACHE), at your option. See [`LICENSE`](LICENSE) for the
+Dual-licensed under the [MIT License](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your option. See [`LICENSE`](LICENSE) for the
 chooser.
