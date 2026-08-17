@@ -32,6 +32,9 @@
 
 (def NODE-REFERENCE-PREDICATE-RE Any (re-pattern "(?:seg|comment)\\d+"))
 
+(def COMPILER-LEXICAL-REFERENCE-PREDICATES (Set String)
+  #{"bindingIdent" "occurrenceIdent" "refersTo"})
+
 ;; GAP: Beagle cannot name the heterogeneous module tables or the host callbacks
 ;; that mutate resolve.clj's thread-local dynamic bindings more precisely than
 ;; Any. Store, tx, predicate ids, source vectors, and the binding atom remain
@@ -264,8 +267,50 @@
   (and (string? predicate)
     (or (= "child" predicate)
       (= "tail" predicate)
+      (contains? COMPILER-LEXICAL-REFERENCE-PREDICATES predicate)
       (rc/ord-pos? predicate)
       (boolean (re-matches NODE-REFERENCE-PREDICATE-RE predicate)))))
+
+(defn- compiler-lexical-binding-tables [(rows (Vec Any))] Any
+  (reduce (fn [(tables Any) (row Any)] Any
+            (let [[subject predicate object] row]
+              (if (= "bindingId" predicate)
+                (let [node-by-id (:node-by-id tables)
+                      existing (get node-by-id object)]
+                  (do
+                    (when (and (some? existing) (not= existing subject))
+                      (throw (ex-info "resolve: compiler bindingId names multiple binding nodes"
+                               {:bindingId object
+                                :first-node existing
+                                :second-node subject})))
+                    {:id-by-node (assoc (:id-by-node tables) subject object)
+                     :node-by-id (assoc node-by-id object subject)}))
+                tables)))
+    {:id-by-node {} :node-by-id {}}
+    rows))
+
+(defn- install-compiler-lexical-edges!
+  [(builder Any) (ent Any) (rows (Vec Any))]
+  Any
+  (let [tables (compiler-lexical-binding-tables rows)
+        id-by-node (:id-by-node tables)
+        node-by-id (:node-by-id tables)]
+    (doseq [row rows]
+      (let [[occurrence predicate compiler-target] row]
+        (when (= "refersTo" predicate)
+          (let [binding-id (get id-by-node compiler-target)
+                binding-node (get node-by-id binding-id)]
+            (when (nil? binding-id)
+              (throw (ex-info "resolve: compiler refersTo target has no bindingId"
+                       {:occurrence occurrence :target compiler-target})))
+            (when (nil? binding-node)
+              (throw (ex-info "resolve: compiler bindingId has no binding node"
+                       {:occurrence occurrence :bindingId binding-id})))
+            (let [occurrence-entity (ent occurrence)
+                  binding-entity (ent binding-node)]
+              (do
+                (ri/assert-on! builder occurrence-entity "bound_to" binding-entity)
+                (ri/assert-on! builder occurrence-entity "refers_to" binding-entity)))))))))
 
 (defn- structural-reader-rows [(rows (Vec Any))] (Vec Any)
   (let [symbol-nodes (reduce (fn [(nodes (Set Any)) (row Any)] (Set Any)
@@ -314,5 +359,6 @@
                 (throw (ex-info "resolve: structural edge target must be a local integer id"
                          {:predicate p :target o})))
               (ri/literal! o)))))
+      (install-compiler-lexical-edges! builder ent rows)
       (ri/commit! ctx builder)
       src)))

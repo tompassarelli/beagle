@@ -10,6 +10,8 @@
 
 (def NODE-REFERENCE-PREDICATE-RE (re-pattern "(?:seg|comment)\\d+"))
 
+(def COMPILER-LEXICAL-REFERENCE-PREDICATES #{"bindingIdent" "occurrenceIdent" "refersTo"})
+
 (defrecord CorpusState [ctx view KIND BOUND REFERS file-ents corpus-cache corpus-scope resolve-walk? srcs install-srcs install-tables install-warm run-all run-over profile])
 
 (defn corpusstate-ctx [r] (:ctx r))
@@ -191,7 +193,35 @@
   corpus-predicates)
 
 (defn- ^Boolean node-reference-predicate? [predicate]
-  (and (string? predicate) (or (= "child" predicate) (= "tail" predicate) (rc/ord-pos? predicate) (boolean (re-matches NODE-REFERENCE-PREDICATE-RE predicate)))))
+  (and (string? predicate) (or (= "child" predicate) (= "tail" predicate) (contains? COMPILER-LEXICAL-REFERENCE-PREDICATES predicate) (rc/ord-pos? predicate) (boolean (re-matches NODE-REFERENCE-PREDICATE-RE predicate)))))
+
+(defn- compiler-lexical-binding-tables [rows]
+  (reduce (fn [tables row] (let [[subject predicate object] row]
+  (if (= "bindingId" predicate) (let [node-by-id (:node-by-id tables)
+   existing (get node-by-id object)]
+  (do
+  (if (and (some? existing) (not= existing subject)) (do
+  (throw (ex-info "resolve: compiler bindingId names multiple binding nodes" {:bindingId object :first-node existing :second-node subject}))))
+  {:id-by-node (assoc (:id-by-node tables) subject object) :node-by-id (assoc node-by-id object subject)})) tables))) {:id-by-node {} :node-by-id {}} rows))
+
+(defn- install-compiler-lexical-edges! [builder ent rows]
+  (let [tables (compiler-lexical-binding-tables rows)
+   id-by-node (:id-by-node tables)
+   node-by-id (:node-by-id tables)]
+  (doseq [row rows]
+  (let [[occurrence predicate compiler-target] row]
+  (if (= "refersTo" predicate) (do
+  (let [binding-id (get id-by-node compiler-target)
+   binding-node (get node-by-id binding-id)]
+  (if (nil? binding-id) (do
+  (throw (ex-info "resolve: compiler refersTo target has no bindingId" {:occurrence occurrence :target compiler-target}))))
+  (if (nil? binding-node) (do
+  (throw (ex-info "resolve: compiler bindingId has no binding node" {:occurrence occurrence :bindingId binding-id}))))
+  (let [occurrence-entity (ent occurrence)
+   binding-entity (ent binding-node)]
+  (do
+  (ri/assert-on! builder occurrence-entity "bound_to" binding-entity)
+  (ri/assert-on! builder occurrence-entity "refers_to" binding-entity))))))))))
 
 (defn- structural-reader-rows [rows]
   (let [symbol-nodes (reduce (fn [nodes row] (if (and (= "kind" (nth row 1 nil)) (= "symbol" (nth row 2 nil))) (conj nodes (nth row 0)) nodes)) #{} rows)]
@@ -218,5 +248,6 @@
   (doseq [row rows]
   (let [[s p o] row]
   (ri/assert-on! builder (ent s) p (if (node-reference-predicate? p) (if (integer? o) (ent o) (throw (ex-info "resolve: structural edge target must be a local integer id" {:predicate p :target o}))) (ri/literal! o)))))
+  (install-compiler-lexical-edges! builder ent rows)
   (ri/commit! ctx builder)
   src)))
