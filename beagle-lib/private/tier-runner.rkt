@@ -284,12 +284,15 @@
 ;; status ∈ '(pass fail error skip); cached? = green replayed from the
 ;; gate-result cache (the same proof, not a new run)
 
+;; "1 test passed" is singular. Before sharding, no unit ever ran exactly one
+;; test, so a plural-only pattern went unnoticed; every one-test shard would
+;; otherwise report 0/0 and silently drop its assertion from the tier total.
 (define raco-tail-rx
-  #px"^([0-9]+) tests passed$|^([0-9]+)/([0-9]+) test failures$|^([0-9]+) success\\(es\\) ([0-9]+) failure\\(s\\) ([0-9]+) error\\(s\\) ([0-9]+) test\\(s\\) run$")
+  #px"^([0-9]+) tests? passed$|^([0-9]+)/([0-9]+) tests? failures?$|^([0-9]+) success\\(es\\) ([0-9]+) failure\\(s\\) ([0-9]+) error\\(s\\) ([0-9]+) test\\(s\\) run$")
 
 (define (parse-raco-summary lines)
   ;; raco test prints one of:
-  ;;   "N tests passed"
+  ;;   "N test(s) passed"
   ;;   "N/M test failures"
   ;;   "N success(es) M failure(s) K error(s) T test(s) run"  (rackunit-style)
   ;; Pick whichever matches; default to (#f 0 0) if neither found.
@@ -496,6 +499,56 @@
   (append heavy
           (for/list ([i (in-range n)] #:unless (memv i heavy)) i)))
 
+;; --- CI shards --------------------------------------------------------------
+;;
+;; `--shard i/n` splits a tier across n CI machines. The split is taken over
+;; the heavy-first LAUNCH ORDER, not the manifest: launch position p goes to
+;; shard (p mod n), so the stragglers — which lead that order — are dealt one
+;; per shard instead of piling onto one machine.
+;;
+;; Completeness is structural, not incidental. `launch-order` is a permutation
+;; of every unit index, `modulo` puts each position in exactly one residue
+;; class, and the classes cover all of them, so the n shards partition the
+;; schedule: every unit runs in exactly one shard and none runs twice. That is
+;; why the split happens here, over units, rather than over manifest files —
+;; a sharded file's phase units are ordinary units and therefore shard
+;; independently, with no separate rule.
+;;
+;; The subset comes back in MANIFEST order, so a per-shard report reads exactly
+;; like the corresponding slice of an unsharded one.
+
+;; #f => run everything. (cons i n) => this shard only.
+(define ci-shard (make-parameter #f))
+
+;; "i/n" -> (cons i n). Anything that would not partition is refused here,
+;; before a shard can silently run the wrong slice or no slice at all.
+(define (parse-shard-spec s)
+  (define m (regexp-match #px"^([0-9]+)/([0-9]+)$" s))
+  (unless m
+    (raise-user-error 'beagle-test "--shard expects i/n, got: ~a" s))
+  (define i (string->number (cadr m)))
+  (define n (string->number (caddr m)))
+  (unless (positive? n)
+    (raise-user-error 'beagle-test "--shard needs n > 0, got: ~a" s))
+  (unless (< i n)
+    (raise-user-error 'beagle-test "--shard needs 0 <= i < n, got: ~a" s))
+  (cons i n))
+
+(define (units-for-shard units spec)
+  (cond
+    [(not spec) units]
+    [else
+     (define i (car spec))
+     (define n (cdr spec))
+     (define keep (make-vector (length units) #f))
+     (for ([idx (in-list (launch-order units))]
+           [p (in-naturals)]
+           #:when (= (modulo p n) i))
+       (vector-set! keep idx #t))
+     (for/list ([u (in-list units)] [idx (in-naturals)]
+                #:when (vector-ref keep idx))
+       u)]))
+
 (define (run-units-parallel units k)
   (define vec (list->vector units))
   (define n (vector-length vec))
@@ -644,15 +697,29 @@
   ;; Expand every tier BEFORE running anything: a shard refusal means the units
   ;; would not cover the file, so it fails the gate instead of running a
   ;; partial set and reporting green.
-  (define-values (active-units active-refusals) (expand-units active-files))
-  (define-values (demoted-units demoted-refusals) (expand-units demoted-files))
-  (define-values (gated-units gated-refusals) (expand-units gated-files))
+  (define-values (all-active-units active-refusals) (expand-units active-files))
+  (define-values (all-demoted-units demoted-refusals) (expand-units demoted-files))
+  (define-values (all-gated-units gated-refusals) (expand-units gated-files))
   (define refusals (append active-refusals demoted-refusals gated-refusals))
   (unless (null? refusals)
     (printf "=== SHARD COVERAGE REFUSED ===\n\n")
     (for ([r (in-list refusals)]) (printf "  ~a\n" r))
     (printf "\nBUILD FAILED — the scheduled units would not cover every test.\n")
     (exit 1))
+
+  ;; Every tier shards, so demoted and gated content is split without a second
+  ;; rule. Refusals above are computed over the WHOLE expansion, so a coverage
+  ;; break fails every shard, not only the one that happened to own the file.
+  (define active-units  (units-for-shard all-active-units (ci-shard)))
+  (define demoted-units (units-for-shard all-demoted-units (ci-shard)))
+  (define gated-units   (units-for-shard all-gated-units (ci-shard)))
+  (when (ci-shard)
+    (printf "CI shard ~a of ~a — launch position p runs here when (p mod n) = i.\n"
+            (car (ci-shard)) (cdr (ci-shard)))
+    (printf "  active ~a/~a units, demoted ~a/~a, gated ~a/~a\n\n"
+            (length active-units) (length all-active-units)
+            (length demoted-units) (length all-demoted-units)
+            (length gated-units) (length all-gated-units)))
 
   (define active-results  (run-test-units active-units))
   (print-tier-section "ACTIVE TIER (blocks iteration)" active-results)
@@ -734,8 +801,13 @@
         (raise-user-error 'beagle-test "--jobs expects a positive integer, got: ~a" n))
       (jobs v))]
    [("--active-only") "Run active tier only (skip demoted)" (active-only? #t)]
-   [("--full") "Run active + demoted (overrides CI/BEAGLE_FULL_SUITE check)"
+   ;; Full-suite semantics stated on the command line rather than inferred from
+   ;; CI=true / BEAGLE_FULL_SUITE, so a CI invocation reads what it runs.
+   [("--full") "Run active + demoted (same as the ambient CI/BEAGLE_FULL_SUITE path)"
                (active-only? #f)]
+   [("--shard") spec
+    "Run CI shard i/n of every tier, split over the heavy-first launch order"
+    (ci-shard (parse-shard-spec spec))]
    [("--include-gated") "Also run gated tier (requires env vars)"
                         (include-gated? #t)]
    #:args ()
@@ -878,6 +950,62 @@
     (check-equal? phases (list "one") "only top-level phase-test blocks are phases")
     (check-equal? (length residual) 1
                   "a phase-test the scan cannot see is residual, not silently dropped"))
+
+  ;; --- raco summary parsing ------------------------------------------------
+  ;; "1 test passed" is SINGULAR. Every sharded phase unit runs exactly one
+  ;; test, so a plural-only pattern reported 0/0 for each of them and quietly
+  ;; dropped them from the tier total.
+  (check-equal? (parse-raco-summary '("1 test passed")) (list 'pass 1 1)
+                "a one-test unit is counted, not silently reported as 0/0")
+  (check-equal? (parse-raco-summary '("19 tests passed")) (list 'pass 19 19)
+                "the plural form still parses")
+  (check-equal? (parse-raco-summary '("1/1 test failures")) (list 'fail 0 1)
+                "a one-test failure still parses")
+  (check-equal? (parse-raco-summary '("raco test: (file \"x.rkt\")")) (list 'unknown 0 0)
+                "a unit that printed no summary reports nothing rather than guessing")
+
+  ;; --- CI shards: the n shards partition the schedule ----------------------
+
+  (check-equal? (parse-shard-spec "0/4") (cons 0 4) "i/n parses")
+  (check-equal? (parse-shard-spec "3/4") (cons 3 4) "the last shard parses")
+  (for ([bad (in-list '("4/4" "0/0" "1" "a/b" "-1/4" "1/2/3" ""))])
+    (check-exn exn:fail? (lambda () (parse-shard-spec bad))
+               (format "--shard refuses ~s rather than running a wrong slice" bad)))
+
+  ;; The real active manifest, expanded — so the proof covers the sharded file's
+  ;; phase units, which shard as ordinary units with no separate rule.
+  (let*-values ([(classification) (read-manifest)]
+                [(active-files) (files-in 'active classification)]
+                [(all-units refusals) (expand-units active-files)])
+    (check-equal? refusals '() "the active tier expands without a coverage refusal")
+    (check-true (> (length all-units) (length active-files))
+                "expansion adds units — the sharded file contributed phases")
+    (check-equal? (units-for-shard all-units #f) all-units
+                  "no --shard runs the whole schedule")
+    (for ([n (in-list '(1 2 3 4 7))])
+      (define shards
+        (for/list ([i (in-range n)]) (units-for-shard all-units (cons i n))))
+      ;; each shard is a manifest-ordered subsequence of the schedule
+      (for ([s (in-list shards)] [i (in-naturals)])
+        (check-equal? s (filter (lambda (x) (memq x s)) all-units)
+                      (format "shard ~a/~a keeps manifest order" i n)))
+      ;; the union is EXACTLY the schedule — same units, none missing, none twice
+      (define union (append* shards))
+      (check-equal? (length union) (length all-units)
+                    (format "n=~a: no unit lands in two shards" n))
+      (check-equal? (sort union string<? #:key unit-label)
+                    (sort all-units string<? #:key unit-label)
+                    (format "n=~a: the union of shards 0..n-1 is the unsharded schedule" n))
+      ;; and every phase of the sharded file is still covered exactly once
+      (check-equal? (sort (filter string? (map unit-phase union)) string<?)
+                    (sort (filter string? (map unit-phase all-units)) string<?)
+                    (format "n=~a: every phase unit is dealt to exactly one shard" n))))
+
+  ;; A shard count larger than the schedule leaves empty shards, not lost units.
+  (let* ([units (map u (list "a.rkt" "b.rkt"))]
+         [shards (for/list ([i (in-range 5)]) (units-for-shard units (cons i 5)))])
+    (check-equal? (append* shards) units
+                  "n greater than the unit count still partitions exactly"))
 
   ;; phase-slug: stable, readable, and keyed on the WHOLE name.
   (check-equal? (phase-slug "compiler timeout owns and reaps the compiler process group")
