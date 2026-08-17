@@ -63,9 +63,86 @@
 (defn ^Boolean keyword-sym? [^String sym]
   (and (> (count sym) 1) (= (char-at sym 0) ":")))
 
+(declare beagle-syntax? syntax-contract-error! structural-name?)
+
+(def SCOPE-COUNTER (atom 0))
+
+(defn reset-scope-counter! []
+  (reset! SCOPE-COUNTER 0)
+  nil)
+
+(defn fresh-scope-id! [^String scope-kind]
+  (let [serial (deref SCOPE-COUNTER)]
+  (swap! SCOPE-COUNTER inc)
+  {"kind" "scope-id" "serial" serial "scopeKind" scope-kind}))
+
+(defn ^Boolean scope-id? [value]
+  (and (map? value) (= (get value "kind") "scope-id") (int? (get value "serial")) (string? (get value "scopeKind"))))
+
 (def EMPTY-SCOPE-SET [])
 
-(declare beagle-syntax?)
+(defn ^Boolean scope-set? [value]
+  (and (vector? value) (every? scope-id? value)))
+
+(defn ^Boolean scope-set-member? [scopes scope]
+  (contains? (set scopes) scope))
+
+(defn scope-set-add [scopes scope]
+  (if (scope-set-member? scopes scope) scopes (conj (vec scopes) scope)))
+
+(defn scope-set-remove [scopes scope]
+  (filterv (fn [candidate] (not= candidate scope)) scopes))
+
+(defn scope-set-flip [scopes scope]
+  (if (scope-set-member? scopes scope) (scope-set-remove scopes scope) (scope-set-add scopes scope)))
+
+(defn ^Boolean scope-set-subset? [left right]
+  (every? (fn [scope] (scope-set-member? right scope)) left))
+
+(defn make-binding-id! [^String stable]
+  {"kind" "binding-id" "stable" stable})
+
+(defn ^Boolean binding-id? [value]
+  (and (map? value) (= (get value "kind") "binding-id") (string? (get value "stable"))))
+
+(defn ^String binding-id-stable [value]
+  (get value "stable"))
+
+(defn make-scope-binding! [id name scopes ^String binding-kind]
+  (if (not (binding-id? id)) (do
+  (syntax-contract-error! "make-scope-binding" "id must be a binding id")))
+  (if (not (structural-name? name)) (do
+  (syntax-contract-error! "make-scope-binding" "name must be a structural name")))
+  (if (not (scope-set? scopes)) (do
+  (syntax-contract-error! "make-scope-binding" "scopes must be a scope set")))
+  {"kind" "scope-binding" "id" id "name" name "scopes" scopes "bindingKind" binding-kind})
+
+(def EMPTY-BINDING-TABLE {})
+
+(defn binding-table-bindings-for [table name]
+  (or (get table name) []))
+
+(defn binding-table-add! [table binding]
+  (let [name (get binding "name")
+   scopes (get binding "scopes")
+   existing (binding-table-bindings-for table name)
+   duplicate (first (filterv (fn [candidate] (= (get candidate "scopes") scopes)) existing))]
+  (if (some? duplicate) (do
+  (syntax-contract-error! "binding-table-add" "duplicate binding for the same structural name and scope set")))
+  (assoc table name (conj (vec existing) binding))))
+
+(defn- ^Boolean proper-scope-subset? [left right]
+  (and (scope-set-subset? left right) (not= left right)))
+
+(defn resolve-scoped-identifier! [table identifier]
+  (let [name (get identifier "payload")
+   use-scopes (get identifier "scopes")
+   applicable (filterv (fn [candidate] (scope-set-subset? (get candidate "scopes") use-scopes)) (binding-table-bindings-for table name))
+   maxima (filterv (fn [candidate] (not (some (fn [other] (proper-scope-subset? (get candidate "scopes") (get other "scopes"))) applicable))) applicable)]
+  (cond
+  (= (count maxima) 0) {"status" "unbound" "name" name}
+  (= (count maxima) 1) {"status" "resolved" "bindingId" (get (nth maxima 0) "id")}
+  :else {"status" "ambiguous" "name" name "bindingIds" (set (mapv (fn [entry] (get entry "id")) maxima))})))
 
 (defn- syntax-contract-error! [^String who ^String message]
   (throw (ex-info (str who ": " message) {})))
@@ -106,8 +183,8 @@
 (defn- ensure-syntax-context! [^String who span scopes origin properties]
   (if (and (some? span) (not (source-span? span))) (do
   (syntax-contract-error! who "span must be a source span")))
-  (if (not (vector? scopes)) (do
-  (syntax-contract-error! who "scope set must be a persistent vector")))
+  (if (not (scope-set? scopes)) (do
+  (syntax-contract-error! who "scope set must contain only scope identities")))
   (if (and (some? origin) (not (= (get origin "kind") "expansion-origin"))) (do
   (syntax-contract-error! who "origin must be an expansion origin")))
   (if (not (map? properties)) (do
@@ -159,6 +236,12 @@
 (defn beagle-syntax-property [value ^String key]
   (get (beagle-syntax-properties value) key))
 
+(defn beagle-syntax-scopes [value]
+  (get value "scopes"))
+
+(defn beagle-syntax-binding-id [value]
+  (beagle-syntax-property value "binding-id"))
+
 (defn syntax-children [value]
   (let [variant (get value "variant")]
   (if (or (= variant "list") (= variant "vector")) (get value "payload") [])))
@@ -192,6 +275,71 @@
   (= variant "unquote") ["unquote" (beagle-syntax->datum! payload)]
   (= variant "unquote-splicing") ["unquote-splicing" (beagle-syntax->datum! payload)]
   :else (syntax-contract-error! "beagle-syntax->datum" "unknown syntax variant"))))
+
+(defn- restored-syntax [restorations value]
+  (if (nil? restorations) nil (loop [entries (deref restorations)]
+  (if (= (count entries) 0) nil (let [entry (nth entries 0)]
+  (if (identical? (get entry "flipped") value) (get entry "original") (recur (subvec (vec entries) 1))))))))
+
+(defn beagle-syntax-flip-scope! [value scope restorations ^Boolean record-original]
+  (let [restored (if record-original nil (restored-syntax restorations value))]
+  (if (some? restored) restored (let [variant (get value "variant")
+   payload (get value "payload")
+   span (beagle-syntax-span value)
+   scopes (scope-set-flip (beagle-syntax-scopes value) scope)
+   origin (beagle-syntax-origin value)
+   properties (beagle-syntax-properties value)
+   rebuilt (cond
+  (= variant "atom") (make-syntax-atom! payload span scopes origin properties)
+  (= variant "ident") (make-syntax-ident! payload span scopes origin properties)
+  (= variant "list") (make-syntax-list! (mapv (fn [child] (beagle-syntax-flip-scope! child scope restorations record-original)) payload) span scopes origin properties)
+  (= variant "vector") (make-syntax-vector! (mapv (fn [child] (beagle-syntax-flip-scope! child scope restorations record-original)) payload) span scopes origin properties)
+  (= variant "quote") (make-syntax-quote! payload span scopes origin properties)
+  (= variant "unquote") (make-syntax-unquote! (beagle-syntax-flip-scope! payload scope restorations record-original) false span scopes origin properties)
+  (= variant "unquote-splicing") (make-syntax-unquote! (beagle-syntax-flip-scope! payload scope restorations record-original) true span scopes origin properties)
+  :else value)]
+  (if (and (some? restorations) record-original) (do
+  (swap! restorations conj {"flipped" rebuilt "original" value})))
+  rebuilt))))
+
+(defn ^Boolean introduced-binding-id? [id]
+  (and (string? id) (str/starts-with? id "introduced-")))
+
+(defn ^String binding-id-output-name [id ^String authored-name]
+  (if (not (introduced-binding-id? id)) authored-name (let [parts (str/split id #":")
+   reversed (vec (reverse parts))
+   path (if (> (count reversed) 1) (nth reversed 1) "0")
+   position (if (> (count reversed) 2) (nth reversed 2) "0")
+   clean-path (str/replace path #"[^0-9]+" "_")]
+  (str authored-name "__scope_" position "_" clean-path))))
+
+(defn lower-binding-target-output [target identities]
+  (cond
+  (string? target) (binding-id-output-name (get identities target) target)
+  (not (map? target)) target
+  (= (get target "type") "map-destructure") (let [lower-name (fn [name] (if (string? name) (binding-id-output-name (get identities name) name) name))]
+  (assoc (assoc (assoc target "keys" (mapv lower-name (get target "keys"))) "as" (lower-name (get target "as"))) "or" (mapv (fn [entry] (assoc entry "key" (lower-name (get entry "key")))) (get target "or"))))
+  (= (get target "type") "seq-destructure") (assoc (assoc target "names" (mapv (fn [name] (lower-binding-target-output name identities)) (get target "names"))) "rest" (lower-binding-target-output (get target "rest") identities))
+  :else target))
+
+(defn lower-binding-output-identities [value]
+  (cond
+  (vector? value) (mapv lower-binding-output-identities value)
+  (not (map? value)) value
+  :else (let [lowered (reduce (fn [out key] (assoc out key (lower-binding-output-identities (get value key)))) {} (keys value))
+   direct (get lowered "bindingId")
+   identities (get lowered "bindingIds")
+   node (get lowered "node")
+   kind (get lowered "type")]
+  (cond
+  (and (= node "ref") (string? (get lowered "refersTo"))) (assoc lowered "name" (binding-id-output-name (get lowered "refersTo") (get lowered "name")))
+  (and (string? direct) (string? (get lowered "name"))) (assoc lowered "name" (binding-id-output-name direct (get lowered "name")))
+  (and (string? direct) (string? (get lowered "err"))) (assoc lowered "err" (binding-id-output-name direct (get lowered "err")))
+  (not (map? identities)) lowered
+  (= kind "record") (assoc lowered "bindings" (mapv (fn [binding] (assoc binding "name" (binding-id-output-name (get identities (get binding "name")) (get binding "name")))) (get lowered "bindings")))
+  (= kind "map") (assoc lowered "entries" (mapv (fn [entry] (assoc entry "name" (binding-id-output-name (get identities (get entry "name")) (get entry "name")))) (get lowered "entries")))
+  (contains? lowered "name") (assoc lowered "name" (lower-binding-target-output (get lowered "name") identities))
+  :else lowered))))
 
 (defn make-ns-decl [^String name]
   {"node" "ns" "name" name})
@@ -501,6 +649,30 @@
   false
   (catch Exception problem
     (str/includes? (ex-message problem) "structural name"))))
+  (reset-scope-counter!)
+  (let [outer-scope (fresh-scope-id! "lexical")
+   inner-scope (fresh-scope-id! "lexical")
+   name (make-structural-name! nil "value" nil)
+   outer-id (make-binding-id! "lexical:test:1:0:value")
+   inner-id (make-binding-id! "lexical:test:2:1:value")
+   table (binding-table-add! (binding-table-add! EMPTY-BINDING-TABLE (make-scope-binding! outer-id name [outer-scope] "lexical")) (make-scope-binding! inner-id name [outer-scope inner-scope] "lexical"))
+   use (make-syntax-ident! name nil [outer-scope inner-scope] nil {})
+   resolved (resolve-scoped-identifier! table use)]
+  (expect! "scope resolver chooses the unique maximal subset" (and (= (get resolved "status") "resolved") (= (get resolved "bindingId") inner-id))))
+  (let [left (fresh-scope-id! "lexical")
+   right (fresh-scope-id! "lexical")
+   name (make-structural-name! nil "value" nil)
+   table (binding-table-add! (binding-table-add! EMPTY-BINDING-TABLE (make-scope-binding! (make-binding-id! "left") name [left] "lexical")) (make-scope-binding! (make-binding-id! "right") name [right] "lexical"))
+   use (make-syntax-ident! name nil [left right] nil {})]
+  (expect! "scope resolver reports incomparable maximal bindings" (= (get (resolve-scoped-identifier! table use) "status") "ambiguous")))
+  (let [scope (fresh-scope-id! "macro-introduction")
+   caller (datum->beagle-syntax! "caller" nil EMPTY-SCOPE-SET nil {})
+   restorations (atom [])
+   flipped (beagle-syntax-flip-scope! caller scope restorations true)
+   output (make-syntax-list! [flipped] nil EMPTY-SCOPE-SET nil {})
+   restored-output (beagle-syntax-flip-scope! output scope restorations false)]
+  (expect! "macro scope flip restores exact caller syntax by identity" (identical? (nth (syntax-children restored-output) 0) caller)))
+  (expect! "only introduced binding identities alpha-lower" (and (= (binding-id-output-name "introduced-lexical:test:7:1.2:tmp" "tmp") "tmp__scope_7_1_2") (= (binding-id-output-name "lexical:test:7:1.2:tmp" "tmp") "tmp")))
   (let [node (make-def "x" nil (make-literal "number" 42))]
   (expect! "make-def node type" (= (get node "node") "def"))
   (expect! "make-def name" (= (get node "name") "x"))

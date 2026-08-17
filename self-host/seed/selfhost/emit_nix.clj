@@ -1,5 +1,6 @@
 (ns selfhost.emit-nix
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [selfhost.ast :as syntax]))
 
 (def emit-expr-ref (atom nil))
 
@@ -1074,6 +1075,7 @@
   (assoc with-default alias runtime-prefix))) {} requires))
 
 (defn ^String emit-program! [prog]
+  (let [prog (syntax/lower-binding-output-identities prog)]
   (reset! emit-expr-ref emit-expr!)
   (reset! recur-name-ref nil)
   (reset! nix-require-prefixes-ref (build-nix-require-prefixes (get prog "requires")))
@@ -1091,7 +1093,7 @@
   (str "  " (mangle-name alias) " = import ./" (str/replace ns0 "." "/") ".nix;"))) requires)) "\n"))
    def-strs (mapv (fn [d] (emit-top-def d 1)) defs)
    body-str (emit-body body-exprs 0)]
-  (if (and (= 0 (count defs)) (= 0 (count requires))) (str body-str "\n") (str "let\n" import-str (str/join "\n" def-strs) "\n" "in\n" body-str "\n"))))
+  (if (and (= 0 (count defs)) (= 0 (count requires))) (str body-str "\n") (str "let\n" import-str (str/join "\n" def-strs) "\n" "in\n" body-str "\n")))))
 
 (def passes (atom []))
 

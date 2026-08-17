@@ -1,5 +1,6 @@
 (ns selfhost.emit-js
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [selfhost.ast :as syntax]))
 
 (def record-fields (atom {}))
 
@@ -1632,6 +1633,7 @@
   nil)
 
 (defn ^String emit-program! [prog]
+  (let [prog (syntax/lower-binding-output-identities prog)]
   (install-refs!)
   (reset! record-fields (structuralize-reference-table (get prog "importedRecordFieldOrder" {})))
   (reset! record-field-bindings {})
@@ -1656,7 +1658,7 @@
    header (emit-module-header prog)
    runtime-bindings (into (if (some? (str/index-of body "$$bc$equiv")) ["equivV as $$bc$equiv"] []) (if (deref bc-get-used) ["get as $$bc$get"] []))
    runtime-import (if (= 0 (count runtime-bindings)) "" (str "import { " (str/join ", " runtime-bindings) " } from 'beagle/core.js';\n"))]
-  (str header runtime-import "\n" body "\n"))))
+  (str header runtime-import "\n" body "\n")))))
 
 (def passes (atom []))
 

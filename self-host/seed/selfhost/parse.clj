@@ -288,18 +288,64 @@
 
 (reset! PARSE-TYPE-CELL parse-type!)
 
+(def BINDER-ID-QUEUES (atom {}))
+
+(def REFERENCE-ID-QUEUES (atom {}))
+
+(def ^String INTERNAL-RESOLVED-REF-TAG "#%resolved-ref")
+
+(defn- consume-identity! [queues ^String name]
+  (let [queue (get (deref queues) name)]
+  (if (and (vector? queue) (> (count queue) 0)) (do
+  (swap! queues assoc name (subvec queue 1))
+  (nth queue 0)) nil)))
+
+(defn- consume-binder-id! [^String name]
+  (consume-identity! BINDER-ID-QUEUES name))
+
+(defn- peek-binder-id [^String name]
+  (let [queue (get (deref BINDER-ID-QUEUES) name)]
+  (if (and (vector? queue) (> (count queue) 0)) (nth queue 0) nil)))
+
+(defn- consume-reference-id! [^String name]
+  (consume-identity! REFERENCE-ID-QUEUES name))
+
+(defn- binder-target-names [target]
+  (let [kind (if (map? target) (get target "type") nil)]
+  (cond
+  (string? target) [target]
+  (= kind "param") (binder-target-names (get target "name"))
+  (= kind "map-destructure") (let [as-name (get target "as")]
+  (into (vec (get target "keys")) (if (or (nil? as-name) (false? as-name)) [] [as-name])))
+  (= kind "seq-destructure") (let [fixed (vec (apply concat (mapv binder-target-names (get target "names"))))
+   rest-name (get target "rest")]
+  (into fixed (if (or (nil? rest-name) (false? rest-name)) [] [rest-name])))
+  :else [])))
+
+(defn- decorate-binder-identities! [owner target]
+  (let [identities (reduce (fn [out ^String name] (let [id (consume-binder-id! name)]
+  (if (nil? id) out (assoc out name id)))) {} (binder-target-names target))]
+  (cond
+  (= (count identities) 0) owner
+  (and (string? target) (some? (get identities target))) (assoc owner "bindingId" (get identities target))
+  :else (assoc owner "bindingIds" identities))))
+
 (defn make-literal [^String kind value]
   (if (= kind "nil") {"node" "literal" "kind" "nil"} {"node" "literal" "kind" kind "value" value}))
 
-(defn make-ref [^String name]
-  {"node" "ref" "name" name})
+(defn make-ref! [^String name]
+  (let [id (consume-reference-id! name)
+   base {"node" "ref" "name" name}]
+  (if (nil? id) base (assoc (assoc base "providerId" nil) "refersTo" id))))
 
-(defn make-qualified-ref [^String qualifier ^String name provider-id]
-  {"node" "ref" "qualifier" qualifier "name" name "providerId" provider-id})
+(defn make-qualified-ref! [^String qualifier ^String name provider-id]
+  (let [id (consume-reference-id! (str qualifier "/" name))
+   base {"node" "ref" "qualifier" qualifier "name" name "providerId" provider-id}]
+  (if (nil? id) base (assoc base "refersTo" id))))
 
-(defn lower-qualified-reference [^String sym]
+(defn lower-qualified-reference! [^String sym]
   (let [slash-pos (str-index-of sym "/")]
-  (if (and (not (keyword-sym? sym)) (> slash-pos 0) (< (+ slash-pos 1) (count sym))) (make-qualified-ref (subs sym 0 slash-pos) (subs sym (+ slash-pos 1)) nil) nil)))
+  (if (and (not (keyword-sym? sym)) (> slash-pos 0) (< (+ slash-pos 1) (count sym))) (make-qualified-ref! (subs sym 0 slash-pos) (subs sym (+ slash-pos 1)) nil) nil)))
 
 (def NIL-LITERAL {"node" "literal" "kind" "nil"})
 
@@ -497,8 +543,8 @@
 (defn make-dynamic-var [^String name]
   {"node" "dynamic-var" "name" name})
 
-(defn make-param [name ann constraint]
-  {"type" "param" "name" name "ann" ann "constraint" constraint})
+(defn make-param! [name ann constraint]
+  (decorate-binder-identities! {"type" "param" "name" name "ann" ann "constraint" constraint} name))
 
 (defn make-map-destructure [keys as-name or-defaults]
   {"type" "map-destructure" "keys" keys "as" (if (nil? as-name) false as-name) "or" or-defaults})
@@ -506,8 +552,11 @@
 (defn make-seq-destructure [names rest-name]
   {"type" "seq-destructure" "names" names "rest" (if (nil? rest-name) false rest-name)})
 
-(defn make-let-binding [name ann constraint value]
-  {"name" name "ann" ann "constraint" constraint "value" value})
+(defn make-let-binding! [name ann constraint value]
+  (decorate-binder-identities! {"name" name "ann" ann "constraint" constraint "value" value} name))
+
+(defn make-for-binding! [name ann constraint expr]
+  (decorate-binder-identities! {"type" "binding" "name" name "ann" ann "constraint" constraint "expr" expr} name))
 
 (defn make-pat-wildcard []
   {"type" "wildcard"})
@@ -515,14 +564,16 @@
 (defn make-pat-literal [value]
   {"type" "literal" "value" value})
 
-(defn make-pat-record [type-name bindings]
-  (if (qualified-ref? type-name) {"type" "record" "qualifier" (get type-name "qualifier") "name" (get type-name "name") "providerId" (get type-name "providerId") "bindings" bindings} {"type" "record" "name" type-name "bindings" bindings}))
+(defn make-pat-record! [type-name bindings]
+  (let [wire (if (qualified-ref? type-name) {"type" "record" "qualifier" (get type-name "qualifier") "name" (get type-name "name") "providerId" (get type-name "providerId") "bindings" bindings} {"type" "record" "name" type-name "bindings" bindings})
+   names (mapv (fn [binding] (get binding "name")) bindings)]
+  (decorate-binder-identities! wire (make-seq-destructure names false))))
 
-(defn make-pat-map [entries]
-  {"type" "map" "entries" entries})
+(defn make-pat-map! [entries]
+  (decorate-binder-identities! {"type" "map" "entries" entries} (make-seq-destructure (mapv (fn [entry] (get entry "name")) entries) false)))
 
-(defn make-pat-var [^String name]
-  {"type" "var" "name" name})
+(defn make-pat-var! [^String name]
+  (decorate-binder-identities! {"type" "var" "name" name} name))
 
 (defn- ^String fresh-lowered-sym! [^String base]
   (mac/fresh-lowered-sym! base))
@@ -580,6 +631,312 @@
   (if (and (vector? queue) (> (count queue) 0)) (do
   (swap! PROGRAM-SYNTAX-QUEUES assoc datum (subvec queue 1))
   (nth queue 0)) (syntax/datum->beagle-syntax! datum nil syntax/EMPTY-SCOPE-SET nil {}))))
+
+(def SCOPE-WALK-CELL (atom nil))
+
+(defn- scope-walk* [value table path ctx]
+  (apply (deref SCOPE-WALK-CELL) [value table path ctx]))
+
+(defn- scope-syntax-datum! [value]
+  (if (syntax/beagle-syntax? value) (syntax/beagle-syntax->datum! value) nil))
+
+(defn- scope-sequence-children [value]
+  (if (and (syntax/beagle-syntax? value) (or (= (get value "variant") "list") (= (get value "variant") "vector"))) (get value "payload") nil))
+
+(defn- rebuild-scope-sequence! [value children]
+  (cond
+  (= (get value "variant") "list") (syntax/make-syntax-list! (vec children) (syntax/beagle-syntax-span value) (syntax/beagle-syntax-scopes value) (syntax/beagle-syntax-origin value) (syntax/beagle-syntax-properties value))
+  (= (get value "variant") "vector") (syntax/make-syntax-vector! (vec children) (syntax/beagle-syntax-span value) (syntax/beagle-syntax-scopes value) (syntax/beagle-syntax-origin value) (syntax/beagle-syntax-properties value))
+  :else value))
+
+(defn- syntax-add-scope! [value scope]
+  (let [variant (get value "variant")
+   payload (get value "payload")
+   span (syntax/beagle-syntax-span value)
+   scopes (syntax/scope-set-add (syntax/beagle-syntax-scopes value) scope)
+   origin (syntax/beagle-syntax-origin value)
+   properties (syntax/beagle-syntax-properties value)]
+  (cond
+  (= variant "ident") (syntax/make-syntax-ident! payload span scopes origin properties)
+  (= variant "list") (syntax/make-syntax-list! (mapv (fn [child] (syntax-add-scope! child scope)) payload) span scopes origin properties)
+  (= variant "vector") (syntax/make-syntax-vector! (mapv (fn [child] (syntax-add-scope! child scope)) payload) span scopes origin properties)
+  (= variant "unquote") (syntax/make-syntax-unquote! (syntax-add-scope! payload scope) false span scopes origin properties)
+  (= variant "unquote-splicing") (syntax/make-syntax-unquote! (syntax-add-scope! payload scope) true span scopes origin properties)
+  (= variant "quote") (syntax/make-syntax-quote! payload span scopes origin properties)
+  :else (syntax/make-syntax-atom! payload span scopes origin properties))))
+
+(defn- syntax-add-scopes! [value scopes]
+  (reduce (fn [result scope] (syntax-add-scope! result scope)) value scopes))
+
+(defn- ^String path->text [path]
+  (str/join "." (mapv str path)))
+
+(defn- stable-binding-id! [identifier path ^String binding-kind]
+  (let [span (syntax/beagle-syntax-span identifier)
+   name (syntax/structural-name->symbol (get identifier "payload"))
+   introduced (some? (syntax/beagle-syntax-origin identifier))
+   source (if (nil? span) "generated" (let [value (get span "source")]
+  (if (nil? value) "generated" (str value))))
+   position (if (nil? span) 0 (+ (int (get span "start")) 1))]
+  (syntax/make-binding-id! (str (if introduced (str "introduced-" binding-kind) binding-kind) ":" source ":" position ":" (path->text path) ":" name))))
+
+(defn- syntax-ident-with-binding! [identifier id ^String role]
+  (syntax/make-syntax-ident! (get identifier "payload") (syntax/beagle-syntax-span identifier) (syntax/beagle-syntax-scopes identifier) (syntax/beagle-syntax-origin identifier) (assoc (assoc (syntax/beagle-syntax-properties identifier) "binding-id" id) "binding-role" role)))
+
+(defn- bind-identifier! [identifier table ^String binding-kind path]
+  (let [id (stable-binding-id! identifier path binding-kind)
+   bound (syntax-ident-with-binding! identifier id "binder")
+   binding (syntax/make-scope-binding! id (get bound "payload") (get bound "scopes") binding-kind)]
+  {"value" bound "table" (syntax/binding-table-add! table binding) "identities" {(get (get bound "payload") "leaf") id}}))
+
+(defn- merge-identities! [left right]
+  (reduce (fn [result name] (if (contains? result name) (do
+  (err! (str "binding target repeats a name: " name))
+  result) (assoc result name (get right name)))) left (keys right)))
+
+(defn- scope-bind-target! [value table scope ^String binding-kind path]
+  (let [scoped (syntax-add-scope! value scope)
+   variant (get scoped "variant")
+   children (scope-sequence-children scoped)]
+  (cond
+  (= variant "ident") (if (= (get (get scoped "payload") "leaf") "&") {"value" scoped "table" table "identities" {}} (bind-identifier! scoped table binding-kind path))
+  (= variant "vector") (let [state (reduce (fn [current index] (let [child (nth children index)
+   datum (scope-syntax-datum! child)]
+  (if (= datum "&") (assoc current "children" (conj (get current "children") child)) (let [bound (scope-bind-target! child (get current "table") scope binding-kind (conj (vec path) index))]
+  {"children" (conj (get current "children") (get bound "value")) "table" (get bound "table") "identities" (merge-identities! (get current "identities") (get bound "identities"))})))) {"children" [] "table" table "identities" {}} (range (count children)))]
+  {"value" (rebuild-scope-sequence! scoped (get state "children")) "table" (get state "table") "identities" (get state "identities")})
+  (and (= variant "list") (> (count children) 0) (= (scope-syntax-datum! (nth children 0)) MAP-TAG)) (let [state (loop [index 1
+   rendered [(nth children 0)]
+   current table
+   identities {}]
+  (if (>= index (count children)) {"children" rendered "table" current "identities" identities} (let [head (scope-syntax-datum! (nth children index))]
+  (cond
+  (and (has-item? [":keys" ":as"] head) (< (+ index 1) (count children))) (let [bound (scope-bind-target! (nth children (+ index 1)) current scope binding-kind (conj (vec path) (+ index 1)))]
+  (recur (+ index 2) (conj (conj rendered (nth children index)) (get bound "value")) (get bound "table") (merge-identities! identities (get bound "identities"))))
+  (and (= head ":or") (< (+ index 1) (count children))) (recur (+ index 2) (conj (conj rendered (nth children index)) (scope-walk* (nth children (+ index 1)) current (conj (vec path) (+ index 1)) nil)) current identities)
+  :else (recur (+ index 1) (conj rendered (nth children index)) current identities)))))]
+  {"value" (rebuild-scope-sequence! scoped (get state "children")) "table" (get state "table") "identities" (get state "identities")})
+  :else {"value" scoped "table" table "identities" {}})))
+
+(defn- ^Boolean scope-typed-declaration?! [value]
+  (let [datum (scope-syntax-datum! value)
+   children (scope-sequence-children value)]
+  (and (= (get value "variant") "list") (vector? datum) (or (= (count datum) 2) (= (count datum) 3)) (> (count children) 0) (not (has-item? [BRACKET-TAG MAP-TAG SET-TAG] (nth datum 0))) (or (string? (nth datum 0)) (and (vector? (nth datum 0)) (> (count (nth datum 0)) 0) (has-item? [BRACKET-TAG MAP-TAG] (nth (nth datum 0) 0)))))))
+
+(defn- scope-bind-declaration! [value table scope ^String binding-kind path]
+  (if (scope-typed-declaration?! value) (let [children (scope-sequence-children value)
+   bound (scope-bind-target! (nth children 0) table scope binding-kind (conj (vec path) 0))
+   constraint (if (= (count children) 3) (scope-walk* (nth children 2) table (conj (vec path) 2) nil) nil)
+   rendered (into [(get bound "value") (nth children 1)] (if (nil? constraint) [] [constraint]))]
+  {"value" (rebuild-scope-sequence! value rendered) "table" (get bound "table") "identities" (get bound "identities")}) (scope-bind-target! value table scope binding-kind path)))
+
+(defn- resolve-syntax-identifier! [identifier table]
+  (let [resolution (syntax/resolve-scoped-identifier! table identifier)
+   status (get resolution "status")]
+  (cond
+  (= status "resolved") (syntax-ident-with-binding! identifier (get resolution "bindingId") "reference")
+  (= status "unbound") identifier
+  :else (do
+  (err! (str "ambiguous lexical reference " (syntax/structural-name->symbol (get identifier "payload"))))
+  identifier))))
+
+(defn- scope-walk-generic! [value table path ctx]
+  (let [children (scope-sequence-children value)]
+  (rebuild-scope-sequence! value (mapv (fn [index] (scope-walk* (nth children index) table (conj (vec path) index) ctx)) (range (count children))))))
+
+(defn- scope-walk-sequential-bindings! [vector-value table path ctx]
+  (let [items (scope-sequence-children vector-value)]
+  (loop [index 0
+   out []
+   current table
+   region-scopes []]
+  (cond
+  (>= index (count items)) {"value" (rebuild-scope-sequence! vector-value out) "table" current "scopes" region-scopes}
+  (= (+ index 1) (count items)) {"value" (rebuild-scope-sequence! vector-value (conj out (scope-walk* (syntax-add-scopes! (nth items index) region-scopes) current (conj (vec path) index) ctx))) "table" current "scopes" region-scopes}
+  :else (let [declaration (syntax-add-scopes! (nth items index) region-scopes)
+   rhs (scope-walk* (syntax-add-scopes! (nth items (+ index 1)) region-scopes) current (conj (vec path) (+ index 1)) ctx)
+   scope (syntax/fresh-scope-id! "lexical")
+   bound (scope-bind-declaration! declaration current scope "lexical" (conj (vec path) index))]
+  (recur (+ index 2) (conj (conj out (get bound "value")) rhs) (get bound "table") (conj region-scopes scope)))))))
+
+(defn- scope-walk-let-like! [value table path ctx]
+  (let [children (scope-sequence-children value)
+   scoped-bindings (scope-walk-sequential-bindings! (nth children 1) table (conj (vec path) 1) ctx)
+   body (mapv (fn [index] (scope-walk* (syntax-add-scopes! (nth children index) (get scoped-bindings "scopes")) (get scoped-bindings "table") (conj (vec path) index) ctx)) (range 2 (count children)))]
+  (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) (get scoped-bindings "value")] body))))
+
+(defn- scope-walk-params! [params table path ctx]
+  (let [scope (syntax/fresh-scope-id! "parameter")
+   children (scope-sequence-children params)
+   state (reduce (fn [current index] (let [item (nth children index)]
+  (if (= (scope-syntax-datum! item) "&") (assoc current "children" (conj (get current "children") item)) (let [bound (scope-bind-declaration! item (get current "table") scope "parameter" (conj (vec path) index))]
+  {"children" (conj (get current "children") (get bound "value")) "table" (get bound "table") "identities" (merge-identities! (get current "identities") (get bound "identities"))})))) {"children" [] "table" table "identities" {}} (range (count children)))]
+  {"value" (rebuild-scope-sequence! params (get state "children")) "table" (get state "table") "scope" scope "identities" (get state "identities")}))
+
+(defn- scope-walk-function-clause! [clause table path ctx]
+  (let [children (scope-sequence-children clause)]
+  (if (and (vector? children) (> (count children) 0) (= (get (nth children 0) "variant") "vector")) (let [params (scope-walk-params! (nth children 0) table (conj (vec path) 0) ctx)]
+  (rebuild-scope-sequence! clause (mapv (fn [index] (cond
+  (= index 0) (get params "value")
+  (= index 1) (nth children index)
+  :else (scope-walk* (syntax-add-scope! (nth children index) (get params "scope")) (get params "table") (conj (vec path) index) ctx))) (range (count children))))) (scope-walk-generic! clause table path ctx))))
+
+(defn- scope-walk-function! [value table path ctx name-index]
+  (let [children (scope-sequence-children value)
+   params-index (+ (if (nil? name-index) 0 (int name-index)) 1)]
+  (cond
+  (or (>= params-index (count children)) (nil? (scope-sequence-children (nth children params-index)))) (scope-walk-generic! value table path ctx)
+  (and (= (get (nth children params-index) "variant") "list") (every? (fn [clause] (let [clause-children (scope-sequence-children clause)]
+  (and (= (get clause "variant") "list") (vector? clause-children) (> (count clause-children) 0) (= (get (nth clause-children 0) "variant") "vector")))) (subvec (vec children) params-index))) (rebuild-scope-sequence! value (mapv (fn [index] (if (>= index params-index) (scope-walk-function-clause! (nth children index) table (conj (vec path) index) ctx) (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))
+  :else (let [params (scope-walk-params! (nth children params-index) table (conj (vec path) params-index) ctx)
+   return-index (+ params-index 1)]
+  (rebuild-scope-sequence! value (mapv (fn [index] (cond
+  (= index params-index) (get params "value")
+  (= index return-index) (nth children index)
+  (> index return-index) (scope-walk* (syntax-add-scope! (nth children index) (get params "scope")) (get params "table") (conj (vec path) index) ctx)
+  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))))))
+
+(defn- scope-walk-letfn! [value table path ctx]
+  (let [children (scope-sequence-children value)
+   functions (nth children 1)
+   fn-values (scope-sequence-children functions)
+   scope (syntax/fresh-scope-id! "letfn")
+   named (reduce (fn [state index] (let [fn-value (nth fn-values index)
+   fn-children (scope-sequence-children fn-value)
+   bound (scope-bind-target! (nth fn-children 0) (get state "table") scope "letfn" (conj (vec path) 1 index 0))]
+  {"values" (conj (get state "values") (rebuild-scope-sequence! fn-value (into [(get bound "value")] (subvec (vec fn-children) 1)))) "table" (get bound "table")})) {"values" [] "table" table} (range (count fn-values)))
+   rendered-functions (rebuild-scope-sequence! functions (mapv (fn [index] (scope-walk-function! (syntax-add-scope! (nth (get named "values") index) scope) (get named "table") (conj (vec path) 1 index) ctx 0)) (range (count (get named "values")))))
+   body (mapv (fn [index] (scope-walk* (syntax-add-scope! (nth children index) scope) (get named "table") (conj (vec path) index) ctx)) (range 2 (count children)))]
+  (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) rendered-functions] body))))
+
+(defn- scope-walk-for-like! [value table path ctx]
+  (let [children (scope-sequence-children value)
+   clauses (nth children 1)
+   items (scope-sequence-children clauses)
+   state (loop [index 0
+   out []
+   current table
+   region-scopes []]
+  (cond
+  (>= index (count items)) {"children" out "table" current "scopes" region-scopes}
+  (and (has-item? [":when" ":while"] (scope-syntax-datum! (nth items index))) (< (+ index 1) (count items))) (recur (+ index 2) (conj (conj out (nth items index)) (scope-walk* (syntax-add-scopes! (nth items (+ index 1)) region-scopes) current (conj (vec path) 1 (+ index 1)) ctx)) current region-scopes)
+  (and (= (scope-syntax-datum! (nth items index)) ":let") (< (+ index 1) (count items)) (= (get (nth items (+ index 1)) "variant") "vector")) (let [nested (syntax-add-scopes! (nth items (+ index 1)) region-scopes)
+   bindings (scope-walk-sequential-bindings! nested current (conj (vec path) 1 (+ index 1)) ctx)]
+  (recur (+ index 2) (conj (conj out (nth items index)) (get bindings "value")) (get bindings "table") (into region-scopes (get bindings "scopes"))))
+  (< (+ index 1) (count items)) (let [declaration (syntax-add-scopes! (nth items index) region-scopes)
+   rhs (scope-walk* (syntax-add-scopes! (nth items (+ index 1)) region-scopes) current (conj (vec path) 1 (+ index 1)) ctx)
+   scope (syntax/fresh-scope-id! "comprehension")
+   bound (scope-bind-declaration! declaration current scope "comprehension" (conj (vec path) 1 index))]
+  (recur (+ index 2) (conj (conj out (get bound "value")) rhs) (get bound "table") (conj region-scopes scope)))
+  :else {"children" (into out (subvec (vec items) index)) "table" current "scopes" region-scopes}))
+   body (mapv (fn [index] (scope-walk* (syntax-add-scopes! (nth children index) (get state "scopes")) (get state "table") (conj (vec path) index) ctx)) (range 2 (count children)))]
+  (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) (rebuild-scope-sequence! clauses (get state "children"))] body))))
+
+(defn- scope-walk-conditional-binding! [value table path ctx]
+  (let [children (scope-sequence-children value)
+   bindings (scope-walk-sequential-bindings! (nth children 1) table (conj (vec path) 1) ctx)
+   head (scope-syntax-datum! (nth children 0))]
+  (rebuild-scope-sequence! value (mapv (fn [index] (cond
+  (= index 1) (get bindings "value")
+  (and (>= index 2) (or (has-item? ["when-let" "when-some"] head) (= index 2))) (scope-walk* (syntax-add-scopes! (nth children index) (get bindings "scopes")) (get bindings "table") (conj (vec path) index) ctx)
+  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))))
+
+(defn- scope-walk-single-binder! [value table path ctx binder-index body-start ^String binding-kind]
+  (let [children (scope-sequence-children value)
+   scope (syntax/fresh-scope-id! binding-kind)
+   bound (scope-bind-declaration! (nth children binder-index) table scope binding-kind (conj (vec path) binder-index))]
+  (rebuild-scope-sequence! value (mapv (fn [index] (cond
+  (= index binder-index) (get bound "value")
+  (>= index body-start) (scope-walk* (syntax-add-scope! (nth children index) scope) (get bound "table") (conj (vec path) index) ctx)
+  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))))
+
+(defn- scope-walk-pattern! [pattern table scope path]
+  (let [variant (get pattern "variant")]
+  (cond
+  (= variant "ident") (if (= (get (get pattern "payload") "leaf") "_") {"value" pattern "table" table} (let [bound (scope-bind-target! pattern table scope "pattern" path)]
+  {"value" (get bound "value") "table" (get bound "table")}))
+  (= variant "list") (let [children (scope-sequence-children pattern)
+   head (if (> (count children) 0) (scope-syntax-datum! (nth children 0)) nil)]
+  (if (= head "or") {"value" pattern "table" table} (let [state (reduce (fn [current index] (let [bound (scope-walk-pattern! (nth children index) (get current "table") scope (conj (vec path) index))]
+  {"children" (conj (get current "children") (get bound "value")) "table" (get bound "table")})) {"children" (if (> (count children) 0) [(nth children 0)] []) "table" table} (range 1 (count children)))]
+  {"value" (rebuild-scope-sequence! pattern (get state "children")) "table" (get state "table")})))
+  :else {"value" pattern "table" table})))
+
+(defn- scope-walk-match! [value table path ctx]
+  (let [children (scope-sequence-children value)
+   clauses (mapv (fn [index] (let [clause (nth children index)
+   clause-children (scope-sequence-children clause)
+   scope (syntax/fresh-scope-id! "pattern")
+   pattern (scope-walk-pattern! (nth clause-children 0) table scope (conj (vec path) index 0))]
+  (rebuild-scope-sequence! clause (into [(get pattern "value")] (mapv (fn [body-index] (scope-walk* (syntax-add-scope! (nth clause-children body-index) scope) (get pattern "table") (conj (vec path) index body-index) ctx)) (range 1 (count clause-children))))))) (range 2 (count children)))]
+  (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) (scope-walk* (nth children 1) table (conj (vec path) 1) ctx)] clauses))))
+
+(defn scope-walk! [value table path ctx]
+  (let [variant (get value "variant")]
+  (cond
+  (= variant "ident") (resolve-syntax-identifier! value table)
+  (= variant "quote") value
+  (= variant "unquote") (syntax/make-syntax-unquote! (scope-walk* (get value "payload") table (conj (vec path) 0) ctx) false (syntax/beagle-syntax-span value) (syntax/beagle-syntax-scopes value) (syntax/beagle-syntax-origin value) (syntax/beagle-syntax-properties value))
+  (= variant "unquote-splicing") (syntax/make-syntax-unquote! (scope-walk* (get value "payload") table (conj (vec path) 0) ctx) true (syntax/beagle-syntax-span value) (syntax/beagle-syntax-scopes value) (syntax/beagle-syntax-origin value) (syntax/beagle-syntax-properties value))
+  (= variant "vector") (scope-walk-generic! value table path ctx)
+  (= variant "list") (let [raw (scope-syntax-datum! value)
+   head (if (and (vector? raw) (> (count raw) 0)) (nth raw 0) nil)]
+  (cond
+  (and (string? head) (some? (mac/lookup-macro (deref CURRENT-REGISTRY-CELL) head))) (let [next-ctx (if (nil? ctx) (mac/make-root-ctx! head value) (mac/push-ctx! ctx head value))
+   expanded (mac/expand-macro! (deref CURRENT-REGISTRY-CELL) head (subvec (vec (scope-sequence-children value)) 1) next-ctx)]
+  (scope-walk* expanded table path next-ctx))
+  (has-item? ["let" "loop" "with-open"] head) (scope-walk-let-like! value table path ctx)
+  (= head "letfn") (scope-walk-letfn! value table path ctx)
+  (has-item? ["for" "doseq"] head) (scope-walk-for-like! value table path ctx)
+  (has-item? ["when-let" "if-let" "when-some" "if-some"] head) (scope-walk-conditional-binding! value table path ctx)
+  (= head "fn") (scope-walk-function! value table path ctx nil)
+  (has-item? ["defn" "defn-"] head) (scope-walk-function! value table path ctx 1)
+  (= head "catch") (scope-walk-single-binder! value table path ctx 1 2 "catch")
+  (and (= head "rescue") (= (count raw) 4)) (scope-walk-single-binder! value table path ctx 2 3 "rescue")
+  (and (= head "as->") (>= (count raw) 4)) (scope-walk-single-binder! value table path ctx 2 3 "as-thread")
+  (= head "match") (scope-walk-match! value table path ctx)
+  :else (scope-walk-generic! value table path ctx)))
+  :else value)))
+
+(reset! SCOPE-WALK-CELL scope-walk!)
+
+(defn- ^Boolean scope-meta-syntax?! [value]
+  (let [datum (scope-syntax-datum! value)]
+  (and (vector? datum) (> (count datum) 0) (has-item? META-FORMS (nth datum 0)))))
+
+(defn- expand-and-resolve-program-syntax! [syntaxes]
+  (let [module-scope (syntax/fresh-scope-id! "module")]
+  (mapv (fn [index] (let [value (nth syntaxes index)]
+  (if (scope-meta-syntax?! value) value (scope-walk* (syntax-add-scope! value module-scope) syntax/EMPTY-BINDING-TABLE [index] nil)))) (range (count syntaxes)))))
+
+(defn- enqueue-identity! [queues ^String name ^String id]
+  (let [queue (or (get (deref queues) name) [])]
+  (swap! queues assoc name (conj (vec queue) id)))
+  nil)
+
+(defn- index-resolved-identities! [value]
+  (if (syntax/beagle-syntax? value) (do
+  (let [variant (get value "variant")
+   properties (syntax/beagle-syntax-properties value)
+   id (get properties "binding-id")
+   role (get properties "binding-role")]
+  (if (and (= variant "ident") (syntax/binding-id? id)) (do
+  (let [name (syntax/structural-name->symbol (get value "payload"))
+   stable (syntax/binding-id-stable id)]
+  (if (= role "binder") (enqueue-identity! BINDER-ID-QUEUES name stable) (enqueue-identity! REFERENCE-ID-QUEUES name stable)))))
+  (if (or (= variant "list") (= variant "vector")) (do
+  (doseq [child (get value "payload")]
+  (index-resolved-identities! child))))
+  (if (or (= variant "unquote") (= variant "unquote-splicing")) (do
+  (index-resolved-identities! (get value "payload")))))))
+  nil)
+
+(defn- install-resolved-identities! [syntaxes]
+  (reset! BINDER-ID-QUEUES {})
+  (reset! REFERENCE-ID-QUEUES {})
+  (doseq [value syntaxes]
+  (index-resolved-identities! value))
+  nil)
 
 (defn datum->json [d]
   (cond
@@ -675,9 +1032,9 @@
   (cond
   (and (= (count after) 1) (string? (nth after 0))) (do
   (validate-identifier! (nth after 0) "rest parameter")
-  (make-param (nth after 0) nil nil))
+  (make-param! (nth after 0) nil nil))
   (and (= (count after) 1) (structured-binding? (nth after 0))) (let [binding (parse-structured-binding! (nth after 0) "rest parameter")]
-  (if (string? (get binding "name")) (make-param (get binding "name") (get binding "ann") (get binding "constraint")) (do
+  (if (string? (get binding "name")) (make-param! (get binding "name") (get binding "ann") (get binding "constraint")) (do
   (err! "rest parameter must bind one name, not a destructuring pattern")
   nil)))
   :else (do
@@ -710,7 +1067,7 @@
   :else (let [item (nth items i)]
   (cond
   (structured-binding? item) (let [binding (parse-structured-binding! item "parameter")]
-  (recur (+ i 1) (conj fixed (make-param (get binding "name") (get binding "ann") (get binding "constraint"))) rest-param))
+  (recur (+ i 1) (conj fixed (make-param! (get binding "name") (get binding "ann") (get binding "constraint"))) rest-param))
   (bracketed? item) (do
   (err! "destructured parameter requires an aggregate type — write `([pattern ...] Type)`")
   (recur (+ i 1) fixed rest-param))
@@ -720,7 +1077,7 @@
   (string? item) (do
   (validate-identifier! item "parameter")
   (note-capitalized-binding! item "parameter")
-  (recur (+ i 1) (conj fixed (make-param item nil nil)) rest-param))
+  (recur (+ i 1) (conj fixed (make-param! item nil nil)) rest-param))
   :else (do
   (err! (str "bad parameter: " (str item) " — expected name, (binding-form Type), or (binding-form Type constraint)"))
   (recur (+ i 1) fixed rest-param))))))
@@ -740,13 +1097,13 @@
    acc []]
   (cond
   (>= i n) acc
-  (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-map-destructure! (nth items i)) nil nil (parse-expr* (nth items (+ i 1))))))
-  (and (< (+ i 1) n) (bracketed? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-seq-destructure! (nth items i)) nil nil (parse-expr* (nth items (+ i 1))))))
+  (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding! (parse-map-destructure! (nth items i)) nil nil (parse-expr* (nth items (+ i 1))))))
+  (and (< (+ i 1) n) (bracketed? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding! (parse-seq-destructure! (nth items i)) nil nil (parse-expr* (nth items (+ i 1))))))
   (and (< (+ i 1) n) (structured-binding? (nth items i))) (let [binding (parse-structured-binding! (nth items i) "let binding")]
-  (recur (+ i 2) (conj acc (make-let-binding (get binding "name") (get binding "ann") (get binding "constraint") (parse-expr* (nth items (+ i 1)))))))
+  (recur (+ i 2) (conj acc (make-let-binding! (get binding "name") (get binding "ann") (get binding "constraint") (parse-expr* (nth items (+ i 1)))))))
   (and (< (+ i 1) n) (string? (nth items i))) (do
   (note-capitalized-binding! (nth items i) "let binding")
-  (recur (+ i 2) (conj acc (make-let-binding (nth items i) nil nil (parse-expr* (nth items (+ i 1)))))))
+  (recur (+ i 2) (conj acc (make-let-binding! (nth items i) nil nil (parse-expr* (nth items (+ i 1)))))))
   :else (do
   (err! (str "bad let bindings at: " (str (nth items i))))
   acc)))]
@@ -771,20 +1128,20 @@
   (err! (str "defrecord field needs a type — use [(name Type) " "(name2 Type2 validator) ...], got: " (str (nth items i))))
   (recur (+ i 1) acc))))))
 
-(defn- parse-cond-test [test-datum]
-  (if (or (= test-datum ":else") (= test-datum "else")) (make-ref "else") (parse-expr* test-datum)))
+(defn- parse-cond-test! [test-datum]
+  (if (or (= test-datum ":else") (= test-datum "else")) (make-ref! "else") (parse-expr* test-datum)))
 
-(defn parse-cond-clauses [clauses]
+(defn parse-cond-clauses! [clauses]
   (cond
   (= (count clauses) 0) []
   (bracketed? (nth clauses 0)) (mapv (fn [c] (let [items (if (bracketed? c) (bracket-body c) c)]
-  (if (and (vector? items) (> (count items) 1)) {"test" (parse-cond-test (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"test" (parse-cond-test c) "body" []}))) clauses)
+  (if (and (vector? items) (> (count items) 1)) {"test" (parse-cond-test! (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"test" (parse-cond-test! c) "body" []}))) clauses)
   :else (let [n (count clauses)]
   (loop [i 0
    acc []]
   (cond
   (>= i n) acc
-  (< (+ i 1) n) (recur (+ i 2) (conj acc {"test" (parse-cond-test (nth clauses i)) "body" [(parse-expr* (nth clauses (+ i 1)))]}))
+  (< (+ i 1) n) (recur (+ i 2) (conj acc {"test" (parse-cond-test! (nth clauses i)) "body" [(parse-expr* (nth clauses (+ i 1)))]}))
   :else acc)))))
 
 (defn parse-for-clauses! [b]
@@ -796,11 +1153,13 @@
   (>= i n) acc
   (and (< (+ i 1) n) (= (nth items i) ":when")) (recur (+ i 2) (conj acc {"type" "when" "test" (parse-expr* (nth items (+ i 1)))}))
   (and (< (+ i 1) n) (= (nth items i) ":let")) (recur (+ i 2) (conj acc {"type" "let" "bindings" (parse-let-bindings! (nth items (+ i 1)))}))
-  (and (< (+ i 1) n) (bracketed? (nth items i))) (recur (+ i 2) (conj acc {"type" "binding" "name" (parse-seq-destructure! (nth items i)) "ann" nil "constraint" nil "expr" (parse-expr* (nth items (+ i 1)))}))
-  (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (recur (+ i 2) (conj acc {"type" "binding" "name" (parse-map-destructure! (nth items i)) "ann" nil "constraint" nil "expr" (parse-expr* (nth items (+ i 1)))}))
+  (and (< (+ i 1) n) (bracketed? (nth items i))) (let [target (parse-seq-destructure! (nth items i))]
+  (recur (+ i 2) (conj acc (make-for-binding! target nil nil (parse-expr* (nth items (+ i 1)))))))
+  (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (let [target (parse-map-destructure! (nth items i))]
+  (recur (+ i 2) (conj acc (make-for-binding! target nil nil (parse-expr* (nth items (+ i 1)))))))
   (and (< (+ i 1) n) (structured-binding? (nth items i))) (let [binding (parse-structured-binding! (nth items i) "for/doseq binding")]
-  (recur (+ i 2) (conj acc {"type" "binding" "name" (get binding "name") "ann" (get binding "ann") "constraint" (get binding "constraint") "expr" (parse-expr* (nth items (+ i 1)))})))
-  (and (< (+ i 1) n) (string? (nth items i))) (recur (+ i 2) (conj acc {"type" "binding" "name" (nth items i) "ann" nil "constraint" nil "expr" (parse-expr* (nth items (+ i 1)))}))
+  (recur (+ i 2) (conj acc (make-for-binding! (get binding "name") (get binding "ann") (get binding "constraint") (parse-expr* (nth items (+ i 1)))))))
+  (and (< (+ i 1) n) (string? (nth items i))) (recur (+ i 2) (conj acc (make-for-binding! (nth items i) nil nil (parse-expr* (nth items (+ i 1))))))
   :else (do
   (err! (str "bad for/doseq clause at: " (binding-datum->src (nth items i))))
   (recur (+ i 1) acc))))))
@@ -820,7 +1179,8 @@
   (if (>= i n) (make-try body catches finally-body) (let [item (nth rest-items i)]
   (cond
   (catch-clause? item) (if (and (>= (count item) 3) (structured-binding? (nth item 1)) (= (count (nth item 1)) 2)) (let [binding (parse-structured-binding! (nth item 1) "catch binding")]
-  (if (string? (get binding "name")) (recur (+ i 1) body (conj catches {"type" (nth (nth item 1) 1) "name" (get binding "name") "body" (mapv parse-expr* (subvec item 2))}) finally-body) (do
+  (if (string? (get binding "name")) (let [catch-owner (decorate-binder-identities! {"type" (nth (nth item 1) 1) "name" (get binding "name") "body" (mapv parse-expr* (subvec item 2))} (get binding "name"))]
+  (recur (+ i 1) body (conj catches catch-owner) finally-body)) (do
   (err! "catch binding must bind one name, not a destructuring pattern")
   (recur (+ i 1) body catches finally-body)))) (do
   (err! (str "catch clause needs (catch (name ExType) body...), got: " (binding-datum->src item)))
@@ -829,17 +1189,17 @@
   (and (= (count catches) 0) (nil? finally-body)) (recur (+ i 1) (conj body (parse-expr* item)) catches finally-body)
   :else (recur (+ i 1) body catches finally-body)))))))
 
-(defn parse-map-pattern [entries]
+(defn parse-map-pattern! [entries]
   (let [n (count entries)]
   (loop [i 0
    acc []]
   (cond
-  (>= i n) (make-pat-map acc)
+  (>= i n) (make-pat-map! acc)
   (and (< (+ i 1) n) (string? (nth entries i)) (keyword-sym? (nth entries i))) (recur (+ i 2) (conj acc {"key" (datum->json (nth entries i)) "name" (nth entries (+ i 1))}))
   :else (recur (+ i 1) acc)))))
 
-(defn parse-pattern [p]
-  (let [record-head (if (and (vector? p) (not (bracketed? p)) (> (count p) 0) (string? (nth p 0))) (let [lowered (lower-qualified-reference (nth p 0))]
+(defn parse-pattern! [p]
+  (let [record-head (if (and (vector? p) (not (bracketed? p)) (> (count p) 0) (string? (nth p 0))) (let [lowered (lower-qualified-reference! (nth p 0))]
   (if (nil? lowered) (nth p 0) lowered)) nil)
    record-name (if (qualified-ref? record-head) (get record-head "name") record-head)]
   (cond
@@ -849,14 +1209,14 @@
   (number? p) (make-pat-literal p)
   (boolean? p) (make-pat-literal p)
   (string-datum? p) (make-pat-literal (extract-string p))
-  (and (vector? p) (> (count p) 0) (= (nth p 0) MAP-TAG)) (parse-map-pattern (subvec p 1))
-  (and (string? record-name) (upper-case-start? record-name)) (make-pat-record record-head (mapv (fn [b] {"name" b}) (subvec p 1)))
-  (string? p) (make-pat-var p)
+  (and (vector? p) (> (count p) 0) (= (nth p 0) MAP-TAG)) (parse-map-pattern! (subvec p 1))
+  (and (string? record-name) (upper-case-start? record-name)) (make-pat-record! record-head (mapv (fn [b] {"name" b}) (subvec p 1)))
+  (string? p) (make-pat-var! p)
   :else (make-pat-literal (datum->json p)))))
 
-(defn parse-match-form [target-datum clauses]
+(defn parse-match-form! [target-datum clauses]
   (make-match (parse-expr* target-datum) (mapv (fn [c] (let [items (if (bracketed? c) (bracket-body c) c)]
-  (if (and (vector? items) (>= (count items) 2)) {"pattern" (parse-pattern (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"pattern" (parse-pattern c) "body" []}))) clauses)))
+  (if (and (vector? items) (>= (count items) 2)) {"pattern" (parse-pattern! (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"pattern" (parse-pattern! c) "body" []}))) clauses)))
 
 (defn parse-with-form [target-datum updates]
   (make-with (parse-expr* target-datum) (mapv (fn [u] (if (and (bracketed? u) (>= (count (bracket-body u)) 2)) (let [items (bracket-body u)]
@@ -901,9 +1261,11 @@
 (defn parse-letfn-fns! [form]
   (let [items (unwrap-items form)]
   (mapv (fn [item] (if (and (vector? item) (>= (count item) 4) (string? (nth item 0)) (bracketed? (nth item 1))) (let [name (nth item 0)
+   binding-id (consume-binder-id! name)
    parsed-params (parse-params! (nth item 1))
-   rp (get parsed-params "rest-param")]
-  {"name" name "params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type* (nth item 2)) "body" (mapv parse-expr* (subvec item 3))}) (do
+   rp (get parsed-params "rest-param")
+   owner {"name" name "params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type* (nth item 2)) "body" (mapv parse-expr* (subvec item 3))}]
+  (if (nil? binding-id) owner (assoc owner "bindingId" binding-id))) (do
   (err! (str "letfn function needs (name [params] ReturnType body...), got: " (binding-datum->src item)))
   nil))) items)))
 
@@ -966,10 +1328,10 @@
 (defn ^Boolean receiver-first-js-thread-head? [head]
   (and (string? head) (or (= head "js/get") (= head "js/call") (= head "js/set!") (= head "js/delete!") (= head "js/in?"))))
 
-(defn parse-thread-surface-expr [form]
+(defn parse-thread-surface-expr! [form]
   (if (and (vector? form) (> (count form) 0) (receiver-first-js-thread-head? (nth form 0))) (let [head (nth form 0)
-   ref (lower-qualified-reference head)]
-  (make-call (if (nil? ref) (make-ref head) ref) (mapv parse-expr* (subvec form 1)))) (parse-expr* form)))
+   ref (lower-qualified-reference! head)]
+  (make-call (if (nil? ref) (make-ref! head) ref) (mapv parse-expr* (subvec form 1)))) (parse-expr* form)))
 
 (defn expand-thread-first [init steps]
   (reduce (fn [acc step] (thread-step-insert acc step "first")) init steps))
@@ -1025,8 +1387,10 @@
    binder-part (subvec items 0 (- (count items) 1))
    if-form? (or (= head "if-let") (= head "if-some"))]
   (if (and (= (count binder-part) 1) (string? (nth binder-part 0))) (let [name (nth binder-part 0)
+   binding-id (peek-binder-id name)
+   test-ref (if (string? binding-id) [INTERNAL-RESOLVED-REF-TAG name binding-id] name)
    binding [BRACKET-TAG name value]
-   test (binding-cond-test head name)]
+   test (binding-cond-test head test-ref)]
   (if if-form? ["let" binding ["if" test (nth rest-items 0) (nth rest-items 1)]] ["let" binding ["if" test (vec (concat ["do"] rest-items))]])) (let [g (fresh-lowered-sym! "bind")
    inner (vec (concat [BRACKET-TAG] binder-part [g]))
    test (binding-cond-test head g)]
@@ -1517,10 +1881,10 @@
   (and (= head "if-some") (= (count rest-items) 3)) (parse-expr* (lower-binding-cond! "if-some" (nth rest-items 0) (subvec rest-items 1)))
   (= head "comment") NIL-LITERAL
   (= head "do") (make-do (mapv parse-expr* rest-items))
-  (= head "cond") (make-cond (parse-cond-clauses rest-items))
+  (= head "cond") (make-cond (parse-cond-clauses! rest-items))
   (and (= head "condp") (>= (count rest-items) 2)) (parse-condp-form (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2))
   (= head "try") (parse-try-form! rest-items)
-  (and (= head "match") (>= (count rest-items) 1)) (parse-match-form (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "match") (>= (count rest-items) 1)) (parse-match-form! (nth rest-items 0) (subvec rest-items 1))
   (= head "case") (err! "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")
   (= head "target-case") (parse-target-case! rest-items)
   (and (= head "doseq") (>= (count rest-items) 1)) (make-doseq (parse-for-clauses! (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
@@ -1556,7 +1920,7 @@
   (make-nix-fn-set (get fl "formals") false (get fl "at-name") (parse-expr* (nth rest-items 1))))
   (and (= head "nix/overlay") (= (count rest-items) 2)) (let [fl (parse-nix-fn-set-formals! (nth rest-items 0))
    formals (get fl "formals")]
-  (if (not= (count formals) 2) (err! "nix/overlay: expected exactly two formals [final prev]") (make-fn (mapv (fn [f] (make-param (get f "name") nil nil)) formals) nil nil [(parse-expr* (nth rest-items 1))])))
+  (if (not= (count formals) 2) (err! "nix/overlay: expected exactly two formals [final prev]") (make-fn (mapv (fn [f] (make-param! (get f "name") nil nil)) formals) nil nil [(parse-expr* (nth rest-items 1))])))
   (and (= head "nix/with-cfg") (= (count rest-items) 2)) (make-nix-with-cfg (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)))
   (and (= head "nix/derivation") (= (count rest-items) 1)) (make-nix-derivation (parse-expr* (nth rest-items 0)))
   (and (= head "nix/flake") (= (count rest-items) 1)) (make-nix-flake (parse-expr* (nth rest-items 0)))
@@ -1568,19 +1932,19 @@
   (and (= head "flake") (= (count rest-items) 1)) (err! "(flake ...) — bare `flake` is not supported. Use `(nix/flake ATTRS)`.")
   (and (= head "fn-set") (= (count rest-items) 2)) (err! "(fn-set ...) — bare `fn-set` is not supported. Use `(nix/fn-set FORMALS BODY)`.")
   (and (= head "module") (= (count rest-items) 2)) (err! "(module ...) — bare `module` is not supported. Use `(nix/module FORMALS BODY)`.")
-  (and (= head "->") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr rest-items)]
+  (and (= head "->") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr! rest-items)]
   (make-threading "->" args (parse-expr* (expand-thread-first (nth rest-items 0) (subvec rest-items 1)))))
-  (and (= head "->>") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr rest-items)]
+  (and (= head "->>") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr! rest-items)]
   (make-threading "->>" args (parse-expr* (expand-thread-last (nth rest-items 0) (subvec rest-items 1)))))
-  (and (= head "cond->") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr rest-items)]
+  (and (= head "cond->") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr! rest-items)]
   (make-threading "cond->" args (parse-expr* (expand-cond-thread! "cond->" (nth rest-items 0) (subvec rest-items 1)))))
-  (and (= head "cond->>") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr rest-items)]
+  (and (= head "cond->>") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr! rest-items)]
   (make-threading "cond->>" args (parse-expr* (expand-cond-thread! "cond->>" (nth rest-items 0) (subvec rest-items 1)))))
-  (and (= head "some->") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr rest-items)]
+  (and (= head "some->") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr! rest-items)]
   (make-threading "some->" args (parse-expr* (expand-some-thread! "some->" (nth rest-items 0) (subvec rest-items 1)))))
-  (and (= head "some->>") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr rest-items)]
+  (and (= head "some->>") (>= (count rest-items) 1)) (let [args (mapv parse-thread-surface-expr! rest-items)]
   (make-threading "some->>" args (parse-expr* (expand-some-thread! "some->>" (nth rest-items 0) (subvec rest-items 1)))))
-  (and (= head "as->") (>= (count rest-items) 2) (string? (nth rest-items 1))) (let [args (mapv parse-thread-surface-expr rest-items)]
+  (and (= head "as->") (>= (count rest-items) 2) (string? (nth rest-items 1))) (let [args (mapv parse-thread-surface-expr! rest-items)]
   (make-threading "as->" args (parse-expr* (expand-as-thread (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2)))))
   (and (= head "as->") (>= (count rest-items) 2)) (err! "as-> expects a symbol placeholder: (as-> init name steps...)")
   (and (= head "get") (= (count rest-items) 2) (string? (nth rest-items 1)) (keyword-sym? (nth rest-items 1))) (make-kw-access (nth rest-items 1) (parse-expr* (nth rest-items 0)) nil)
@@ -1588,20 +1952,21 @@
   (and (string? head) (constructor-sym? head)) (make-new head (mapv parse-expr* rest-items))
   (and (string? head) (keyword-sym? head) (>= (count rest-items) 1)) (make-kw-access head (parse-expr* (nth rest-items 0)) (if (>= (count rest-items) 2) (parse-expr* (nth rest-items 1)) nil))
   (and (string? head) (dot-method-sym? head) (>= (count rest-items) 1)) (make-method-call head (parse-expr* (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
-  (string? head) (let [ref (lower-qualified-reference head)
+  (string? head) (let [ref (lower-qualified-reference! head)
    parsed-args (mapv parse-expr* rest-items)]
-  (if (and (not (nil? ref)) (static-method-ref? ref)) (make-static-call ref parsed-args) (make-call (if (nil? ref) (make-ref head) ref) parsed-args)))
+  (if (and (not (nil? ref)) (static-method-ref? ref)) (make-static-call ref parsed-args) (make-call (if (nil? ref) (make-ref! head) ref) parsed-args)))
   (vector? head) (make-call (parse-expr* head) (mapv parse-expr* rest-items))
   :else NIL-LITERAL)))
 
 (defn parse-expr! [d]
   (cond
   (nil? d) NIL-LITERAL
-  (boolean? d) (make-ref (if d "true" "false"))
+  (boolean? d) (make-ref! (if d "true" "false"))
   (and (number? d) (int? d)) (make-literal "number" d)
   (number? d) (make-literal "float" d)
   (and (vector? d) (= (count d) 2) (= (nth d 0) CHAR-TAG)) (make-literal "char" (nth d 1))
   (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string")) (make-literal "string" (nth d 1))
+  (and (vector? d) (= (count d) 3) (= (nth d 0) INTERNAL-RESOLVED-REF-TAG) (string? (nth d 1)) (string? (nth d 2))) {"node" "ref" "name" (nth d 1) "providerId" nil "refersTo" (nth d 2)}
   (and (string? d) (= d "nil")) NIL-LITERAL
   (and (string? d) (keyword-sym? d)) (make-literal "keyword" (subs d 1))
   (and (string? d) (dynamic-var-sym? d)) (do
@@ -1609,8 +1974,8 @@
   (make-dynamic-var d))
   (string? d) (do
   (validate-identifier! d "identifier")
-  (let [ref (lower-qualified-reference d)]
-  (if (nil? ref) (make-ref d) ref)))
+  (let [ref (lower-qualified-reference! d)]
+  (if (nil? ref) (make-ref! d) ref)))
   (and (vector? d) (= (count d) 2) (= (nth d 0) "#%regex")) (make-regex (nth d 1))
   (bracketed? d) (make-vec (mapv parse-expr* (bracket-body d)))
   (map-tagged? d) (parse-map-literal! (map-body d))
@@ -1691,6 +2056,7 @@
 (defn parse-program! [datums]
   (reset-errors!)
   (mac/reset-lowering-counter!)
+  (syntax/reset-scope-counter!)
   (install-program-syntaxes! datums)
   (reset! CURRENT-REGISTRY-CELL (mac/make-macro-registry))
   (reset! USER-PARAMETRIC-ARITIES (deref PRELOADED-PARAMETRIC-ARITIES))
@@ -1783,29 +2149,22 @@
   (= head "import") (doseq [spec (subvec d 1)]
   (swap! imports into (parse-import-spec! spec "import")))
   :else nil)))))
-  (install-macro-call-syntaxes! (deref CURRENT-REGISTRY-CELL))
-  (let [hygiene-capable (has-item? ["clj" "nix" "js"] (deref target))
-   def-names (if hygiene-capable (reduce (fn [acc dd] (if (and (vector? dd) (not (bracketed? dd)) (>= (count dd) 2) (has-item? ["def" "defn" "defonce"] (nth dd 0)) (string? (nth dd 1))) (assoc acc (nth dd 1) true) acc)) {} datums) nil)]
-  (mac/set-hygiene-context! def-names))
-  (doseq [d datums]
+  (let [resolved-syntaxes (expand-and-resolve-program-syntax! (deref PROGRAM-SYNTAXES))
+   resolved-datums (mapv mac/macro-datum resolved-syntaxes)]
+  (install-resolved-identities! resolved-syntaxes)
+  (doseq [index (range (count datums))]
+  (let [d (nth datums index)
+   expanded (nth resolved-datums index)
+   from-macro (mac/macro-application? (deref CURRENT-REGISTRY-CELL) d)]
   (if (not (meta-form? d)) (do
-  (let [reg (deref CURRENT-REGISTRY-CELL)
-   from-macro (mac/macro-application? reg d)
-   expanded-value (if from-macro (mac/expand-fully! reg (syntax-for-datum! d) 0 nil) d)
-   expanded (mac/macro-datum expanded-value)]
   (cond
   (and from-macro (vector? expanded) (> (count expanded) 0) (= (nth expanded 0) "do")) (doseq [f (subvec expanded 1)]
   (swap! forms conj (parse-expr* f)))
   (and (vector? expanded) (> (count expanded) 0) (= (nth expanded 0) "#%splice-forms")) (doseq [f (subvec expanded 1)]
   (swap! forms conj (parse-expr* f)))
-  :else (swap! forms conj (parse-expr* expanded)))))))
-  (let [aliases (mac/hygiene-aliases)]
-  (if (> (count aliases) 0) (do
-  (reset! forms (reduce (fn [acc f] (let [node (get f "node")
-   nm (if (has-item? ["def" "defn" "defonce" "defn-multi"] node) (get f "name") nil)
-   alias (if (string? nm) (get aliases nm) nil)]
-  (if (some? alias) (conj acc f (make-def (str alias) nil (make-ref (str nm)) nil false)) (conj acc f)))) [] (deref forms))))))
-  (mac/set-hygiene-context! nil)
+  :else (swap! forms conj (parse-expr* expanded))))))))
+  (reset! BINDER-ID-QUEUES {})
+  (reset! REFERENCE-ID-QUEUES {})
   (reset! CURRENT-REGISTRY-CELL nil)
   {"namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires) "imports" (deref imports)}))
 
@@ -2042,6 +2401,7 @@
   (expect! "literal: keyword" (= (parse-expr* ":name") {"node" "literal" "kind" "keyword" "value" "name"}))
   (expect! "literal: string datum" (= (parse-expr* ["#%string" "hi"]) {"node" "literal" "kind" "string" "value" "hi"}))
   (expect! "ref: symbol" (= (parse-expr* "x") {"node" "ref" "name" "x"}))
+  (expect! "resolved unqualified ref carries null provider (ast-json parity)" (= (parse-expr* [INTERNAL-RESOLVED-REF-TAG "x" "lexical:test:1:0:x"]) {"node" "ref" "name" "x" "providerId" nil "refersTo" "lexical:test:1:0:x"}))
   (expect! "ref: hyphenated" (= (parse-expr* "my-var") {"node" "ref" "name" "my-var"}))
   (expect! "ref: qualified lowercase lowers structurally" (= (parse-expr* "k/single?") {"node" "ref" "qualifier" "k" "name" "single?" "providerId" nil}))
   (expect! "ref: qualified odd leaf lowers exactly once" (= (parse-expr* "odd.ns/->thing?!") {"node" "ref" "qualifier" "odd.ns" "name" "->thing?!" "providerId" nil}))
@@ -2355,6 +2715,29 @@
   (and (= (count errors) 1) (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
   (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
   (and (= (get prog "namespace") "my.app") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "scope resolution separates macro, caller, and nested capture zones" (let [prog (parse-program! [["defmacro" "around" [BRACKET-TAG "body"] ["quasiquote" ["let" [BRACKET-TAG "tmp" 1] ["do" "tmp" ["unquote" "body"]]]]] ["defn" "capture" [BRACKET-TAG ["tmp" "Int"]] "Int" ["around" ["do" "tmp" ["let" [BRACKET-TAG "tmp" 2] "tmp"]]]]])
+   form (nth (get prog "forms") 0)
+   param (nth (get form "params") 0)
+   outer (nth (get form "body") 0)
+   outer-binding (nth (get outer "bindings") 0)
+   outer-do (nth (get outer "body") 0)
+   outer-use (nth (get outer-do "body") 0)
+   caller-do (nth (get outer-do "body") 1)
+   caller-use (nth (get caller-do "body") 0)
+   inner (nth (get caller-do "body") 1)
+   inner-binding (nth (get inner "bindings") 0)
+   inner-use (nth (get inner "body") 0)
+   param-id (get param "bindingId")
+   outer-id (get outer-binding "bindingId")
+   inner-id (get inner-binding "bindingId")]
+  (and (string? param-id) (string? outer-id) (string? inner-id) (not= param-id outer-id) (not= outer-id inner-id) (not= param-id inner-id) (str/starts-with? outer-id "introduced-") (contains? outer-use "providerId") (nil? (get outer-use "providerId")) (contains? caller-use "providerId") (nil? (get caller-use "providerId")) (contains? inner-use "providerId") (nil? (get inner-use "providerId")) (= (get outer-use "refersTo") outer-id) (= (get caller-use "refersTo") param-id) (= (get inner-use "refersTo") inner-id))))
+  (expect! "binding-conditional synthesized test preserves the lexical edge" (let [prog (parse-program! [["defn" "keep" [BRACKET-TAG] "Int" ["if-let" [BRACKET-TAG "x" 1] "x" 0]]])
+   form (nth (get prog "forms") 0)
+   outer (nth (get form "body") 0)
+   binding (nth (get outer "bindings") 0)
+   conditional (nth (get outer "body") 0)
+   binding-id (get binding "bindingId")]
+  (and (string? binding-id) (= (get (get conditional "cond") "refersTo") binding-id) (= (get (get conditional "then") "refersTo") binding-id))))
   (expect! "parse-program syntax membrane expands a nested caller form" (let [datums [["defmacro" "identity" [BRACKET-TAG "form"] "form"] ["def" "out" ["identity" ["+" 1 2]]]]
    syntaxes (mapv (fn [datum] (syntax/datum->beagle-syntax! datum nil syntax/EMPTY-SCOPE-SET nil {})) datums)
    prog (parse-program-with-syntax! datums syntaxes)
