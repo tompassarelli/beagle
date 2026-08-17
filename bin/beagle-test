@@ -30,6 +30,25 @@ source "$(dirname "$0")/_beagle-racket"
 
 BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# The parity driver runs this exact control path against a tiny hermetic gate
+# tree.  The override is deliberately double-keyed and test-only; ordinary and
+# fact-shadow invocations continue to resolve every command from this checkout.
+if [[ -n "${BEAGLE_GATE_FACT_TEST_ROOT:-}" ]]; then
+    if [[ "${BEAGLE_GATE_FACT_TEST_MODE:-0}" != 1 ]]; then
+        echo "beagle-test: BEAGLE_GATE_FACT_TEST_ROOT requires BEAGLE_GATE_FACT_TEST_MODE=1" >&2
+        exit 2
+    fi
+    BEAGLE_ROOT="$(cd "$BEAGLE_GATE_FACT_TEST_ROOT" && pwd)"
+fi
+
+BEAGLE_GATE_FACT_OBSERVATION_DIR="${BEAGLE_GATE_FACT_OBSERVATION_DIR:-}"
+if [[ -n "$BEAGLE_GATE_FACT_OBSERVATION_DIR" ]]; then
+    if ! mkdir -p "$BEAGLE_GATE_FACT_OBSERVATION_DIR"; then
+        echo "beagle-test: fact observation directory is unavailable: $BEAGLE_GATE_FACT_OBSERVATION_DIR" >&2
+    fi
+    export BEAGLE_GATE_FACT_UNIT_OBSERVATIONS="$BEAGLE_GATE_FACT_OBSERVATION_DIR/tier-units.rktd"
+fi
+
 # Each phase has its own deadline and log. run-bounded.rkt is the accountable
 # process supervisor: it owns the phase subtree, publishes START/END/TIMEOUT
 # progress, and reaps descendants before returning. These budgets originate
@@ -71,6 +90,95 @@ beagle_test_slug() {
     printf '%s' "$1" | tr '[:upper:] /' '[:lower:]__' | tr -cd '[:alnum:]_-'
 }
 
+# These files are raw observations at the old gate boundaries, not admitted
+# facts.  Observation failure is visible to the shadow maintainer but never
+# suppresses or reclassifies the authoritative command that follows.
+beagle_test_fact_write_claim() {
+    [[ -n "$BEAGLE_GATE_FACT_OBSERVATION_DIR" ]] || return 0
+    local label="$1"
+    local deadline="$2"
+    local slug="$3"
+    shift 3
+    local digest target temporary
+    digest="$(printf '%s\0' "$@" | sha256sum | cut -d' ' -f1)"
+    target="$BEAGLE_GATE_FACT_OBSERVATION_DIR/phase-$slug.claim"
+    temporary="$(mktemp "$BEAGLE_GATE_FACT_OBSERVATION_DIR/.phase-claim.XXXXXX")" || return 1
+    if printf '%s\n' \
+        'beagle-gate-phase-claim-v1' \
+        "label=$label" \
+        "deadline-seconds=$deadline" \
+        "command-sha256=$digest" >"$temporary" &&
+       mv -f "$temporary" "$target"; then
+        return 0
+    fi
+    rm -f -- "$temporary"
+    return 1
+}
+
+beagle_test_fact_write_observation() {
+    [[ -n "$BEAGLE_GATE_FACT_OBSERVATION_DIR" ]] || return 0
+    local label="$1"
+    local slug="$2"
+    local status="$3"
+    local log="$4"
+    local receipt="$5"
+    local completion log_digest receipt_digest target temporary
+    if [[ "$status" -eq 124 ]]; then
+        completion="timeout"
+    else
+        completion="exit"
+    fi
+    if [[ -f "$log" ]]; then
+        log_digest="$(sha256sum "$log" | cut -d' ' -f1)"
+    else
+        log_digest=missing
+    fi
+    if [[ -f "$receipt" ]]; then
+        receipt_digest="$(sha256sum "$receipt" | cut -d' ' -f1)"
+    else
+        receipt_digest=missing
+    fi
+    target="$BEAGLE_GATE_FACT_OBSERVATION_DIR/phase-$slug.observation"
+    temporary="$(mktemp "$BEAGLE_GATE_FACT_OBSERVATION_DIR/.phase-observation.XXXXXX")" || return 1
+    if printf '%s\n' \
+        'beagle-gate-phase-observation-v1' \
+        "label=$label" \
+        "completion=$completion" \
+        "exit-code=$status" \
+        "log-sha256=$log_digest" \
+        "receipt-sha256=$receipt_digest" >"$temporary" &&
+       mv -f "$temporary" "$target"; then
+        return 0
+    fi
+    rm -f -- "$temporary"
+    return 1
+}
+
+beagle_test_fact_write_shard_receipt() {
+    [[ -n "$BEAGLE_GATE_FACT_OBSERVATION_DIR" ]] || return 0
+    local workers="$1"
+    local worker_root="$2"
+    local target="$3"
+    local temporary i value
+    temporary="$(mktemp "$BEAGLE_GATE_FACT_OBSERVATION_DIR/.tier-receipt.XXXXXX")" || return 1
+    {
+        printf '%s\n' 'beagle-tier-shard-receipts-v1' "workers=$workers"
+        for ((i = 0; i < workers; i++)); do
+            if [[ -f "$worker_root/worker-$i.receipt" ]]; then
+                value="$(<"$worker_root/worker-$i.receipt")"
+            else
+                value=missing
+            fi
+            printf 'worker-%s=%s\n' "$i" "$value"
+        done
+    } >"$temporary"
+    if mv -f "$temporary" "$target"; then
+        return 0
+    fi
+    rm -f -- "$temporary"
+    return 1
+}
+
 run_beagle_test_phase() {
     local label="$1"
     local deadline="$2"
@@ -80,6 +188,10 @@ run_beagle_test_phase() {
     slug="$(beagle_test_slug "$label")"
     log="$BEAGLE_TEST_LOG_ROOT/$slug.log"
     receipt="$BEAGLE_TEST_LOG_ROOT/$slug.receipt"
+
+    if ! beagle_test_fact_write_claim "$label" "$deadline" "$slug" "$@"; then
+        echo "beagle-test: fact claim observation write failed for $label" >&2
+    fi
 
     echo "beagle-test: phase $label START deadline=${deadline}s log=$log receipt=$receipt" >&2
     set +e
@@ -103,6 +215,9 @@ run_beagle_test_phase() {
     else
         echo "beagle-test: phase $label END status=0" >&2
     fi
+    if ! beagle_test_fact_write_observation "$label" "$slug" "$status" "$log" "$receipt"; then
+        echo "beagle-test: fact result observation write failed for $label" >&2
+    fi
     return "$status"
 }
 
@@ -112,10 +227,15 @@ run_beagle_test_shards() {
     local runner="$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt"
     local worker_root="$BEAGLE_TEST_LOG_ROOT/tier-workers"
     local workers count_status i pid completed_pid status receipt expected
-    local aggregate_log merge_status tee_status terminal_status started_seconds wall_seconds
+    local aggregate_log aggregate_receipt merge_status tee_status terminal_status started_seconds wall_seconds
     local -a live next_live pipeline_status
     local -A worker_by_pid
 
+    aggregate_log="$BEAGLE_TEST_LOG_ROOT/tier-runner.log"
+    aggregate_receipt="$BEAGLE_TEST_LOG_ROOT/tier-runner.receipt"
+    if ! beagle_test_fact_write_claim "tier-runner" "$deadline" "tier-runner" "$runner" "$@"; then
+        echo "beagle-test: fact claim observation write failed for tier-runner" >&2
+    fi
     mkdir -p "$worker_root"
     set +e
     workers="$("$RACKET" "$runner" "$@" --print-worker-count)"
@@ -124,6 +244,8 @@ run_beagle_test_shards() {
     if [[ "$count_status" -ne 0 || ! "$workers" =~ ^[1-9][0-9]*$ ]]; then
         BEAGLE_TEST_KEEP_LOGS=1
         echo "beagle-test: tier-runner worker-count resolution failed" >&2
+        beagle_test_fact_write_observation \
+            "tier-runner" "tier-runner" 2 "$aggregate_log" "$aggregate_receipt" || true
         return 2
     fi
 
@@ -199,13 +321,20 @@ run_beagle_test_shards() {
                 sed "s/^/  [shard $i] /" "$worker_root/worker-$i.log" >&2
             fi
         done
+        beagle_test_fact_write_shard_receipt \
+            "$workers" "$worker_root" "$aggregate_receipt" || true
         wall_seconds=$((SECONDS - started_seconds))
         echo "beagle-test: phase tier-runner FAILED status=$terminal_status wall=${wall_seconds}s; stopping gate" >&2
+        beagle_test_fact_write_observation \
+            "tier-runner" "tier-runner" "$terminal_status" "$aggregate_log" "$aggregate_receipt" || true
         return "$terminal_status"
     fi
     BEAGLE_TEST_SHARD_PIDS=()
+    if ! beagle_test_fact_write_shard_receipt \
+        "$workers" "$worker_root" "$aggregate_receipt"; then
+        echo "beagle-test: fact shard receipt write failed for tier-runner" >&2
+    fi
 
-    aggregate_log="$BEAGLE_TEST_LOG_ROOT/tier-runner.log"
     set +e
     "$RACKET" "$runner" "$@" --merge-worker-results "$worker_root" 2>&1 |
         tee "$aggregate_log"
@@ -221,8 +350,47 @@ run_beagle_test_shards() {
         BEAGLE_TEST_KEEP_LOGS=1
         echo "beagle-test: phase tier-runner FAILED status=$merge_status wall=${wall_seconds}s; stopping gate" >&2
     fi
+    if ! beagle_test_fact_write_observation \
+        "tier-runner" "tier-runner" "$merge_status" "$aggregate_log" "$aggregate_receipt"; then
+        echo "beagle-test: fact result observation write failed for tier-runner" >&2
+    fi
     return "$merge_status"
 }
+
+beagle_test_fact_write_declared_claims() {
+    local runner="$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt"
+    beagle_test_fact_write_claim \
+        "racket-scope" 70 "racket-scope" \
+        "$BEAGLE_ROOT/bin/test/racket-scope/run.sh" || return 1
+    beagle_test_fact_write_claim \
+        "checkout-first" 5 "checkout-first" \
+        "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || return 1
+    beagle_test_fact_write_claim \
+        "qualified-ref-scaffold" 2 "qualified-ref-scaffold" \
+        "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || return 1
+    beagle_test_fact_write_claim \
+        "consumer-smoke" 100 "consumer-smoke" \
+        "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || return 1
+    beagle_test_fact_write_claim \
+        "tier-runner" 420 "tier-runner" "$runner" "$@" || return 1
+    "$RACKET" "$runner" "$@" \
+        --write-fact-claims "$BEAGLE_GATE_FACT_OBSERVATION_DIR/tier-claims.rktd"
+}
+
+# Fact preparation needs the complete predeclared claim set before the old
+# gate starts.  This mode derives that plan through the same tier expansion but
+# executes no gate phase and is never used by an ordinary invocation.
+if [[ "${BEAGLE_GATE_FACT_PLAN_ONLY:-0}" == 1 ]]; then
+    if [[ -z "$BEAGLE_GATE_FACT_OBSERVATION_DIR" ]]; then
+        echo "beagle-test: BEAGLE_GATE_FACT_PLAN_ONLY requires BEAGLE_GATE_FACT_OBSERVATION_DIR" >&2
+        exit 2
+    fi
+    if ! beagle_test_fact_write_declared_claims "$@"; then
+        echo "beagle-test: could not write the fact claim plan" >&2
+        exit 2
+    fi
+    exit 0
+fi
 
 # A deterministic, opt-in probe for the release-bar timeout contract. It is
 # not part of any normal tier; it leaves the child PID in the preserved log

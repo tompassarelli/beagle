@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Shadow fact maintainer for the existing Beagle gate.  Once durable
+# preparation succeeds it always executes bin/beagle-test and returns that
+# gate's decision; it never starts an unrecorded fallback.
+
+set -uo pipefail
+
+# Hold the same gate lock across planning, durable miss recording, fallback,
+# and cold finalization.  The nested authoritative gate sees the inherited
+# lock marker and does not release the lock between those boundaries.
+if [[ "${BEAGLE_TEST_LOCKED:-0}" != 1 ]]; then
+    BEAGLE_FACTS_LOCK="${TMPDIR:-/tmp}/beagle-gate.lock"
+    if ! flock -n "$BEAGLE_FACTS_LOCK" -c ':'; then
+        echo "beagle-test-facts: waiting for concurrent gate to finish" >&2
+    fi
+    exec env BEAGLE_TEST_LOCKED=1 flock "$BEAGLE_FACTS_LOCK" "$0" "$@"
+fi
+
+BEAGLE_FACTS_BIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$BEAGLE_FACTS_BIN_ROOT/bin/_beagle-racket"
+
+BEAGLE_FACTS_GATE="$BEAGLE_FACTS_BIN_ROOT/bin/beagle-test"
+BEAGLE_FACTS_MAINTAINER="$BEAGLE_FACTS_BIN_ROOT/beagle-lib/private/gate-fact-maintainer.rkt"
+BEAGLE_FACTS_REPO_ROOT="${BEAGLE_GATE_FACT_REPO_ROOT:-$BEAGLE_FACTS_BIN_ROOT}"
+BEAGLE_FACTS_BASE_COMMIT="${BEAGLE_GATE_FACT_BASE_COMMIT:-}"
+BEAGLE_FACTS_POLICY="${BEAGLE_GATE_FACT_POLICY:-beagle-gate-policy-v1}"
+BEAGLE_FACTS_VERIFIER="${BEAGLE_GATE_FACT_VERIFIER:-bin/beagle-test-v1}"
+BEAGLE_FACTS_STORE="${BEAGLE_GATE_FACT_STORE:-$BEAGLE_FACTS_REPO_ROOT/.beagle/gate-facts-shadow.framlog}"
+BEAGLE_FACTS_QUERY_STORE="${BEAGLE_GATE_FACT_QUERY_STORE:-$BEAGLE_FACTS_STORE}"
+BEAGLE_FACTS_OWNS_OBSERVATIONS=0
+
+if [[ -z "$BEAGLE_FACTS_BASE_COMMIT" ]]; then
+    BEAGLE_FACTS_BASE_COMMIT="$(git -C "$BEAGLE_FACTS_REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+fi
+
+if [[ -n "${BEAGLE_GATE_FACT_OBSERVATION_DIR:-}" ]]; then
+    BEAGLE_FACTS_OBSERVATIONS="$BEAGLE_GATE_FACT_OBSERVATION_DIR"
+    mkdir -p "$BEAGLE_FACTS_OBSERVATIONS"
+else
+    BEAGLE_FACTS_OBSERVATIONS="$(mktemp -d "${TMPDIR:-/tmp}/beagle-test-facts.XXXXXX")"
+    BEAGLE_FACTS_OWNS_OBSERVATIONS=1
+fi
+
+beagle_facts_cleanup() {
+    local status=$?
+    if [[ "$BEAGLE_FACTS_OWNS_OBSERVATIONS" == 1 ]]; then
+        rm -rf -- "${BEAGLE_FACTS_OBSERVATIONS:?}"
+    elif [[ "${BEAGLE_GATE_FACT_KEEP_OBSERVATIONS:-0}" == 1 ]]; then
+        echo "beagle-test-facts: preserved raw observations at $BEAGLE_FACTS_OBSERVATIONS" >&2
+    fi
+    exit "$status"
+}
+trap beagle_facts_cleanup EXIT
+
+if [[ ! "$BEAGLE_FACTS_BASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "beagle-test-facts: exact 40-hex base commit is required" >&2
+    exit 2
+fi
+
+# Ask the existing gate to derive its complete selected claim plan without
+# executing a phase.  Without that plan the maintainer cannot durably name a
+# miss, so the fact entry point stops before fallback; bin/beagle-test remains
+# the unchanged explicit rollback path.
+plan_status=0
+env BEAGLE_GATE_FACT_PLAN_ONLY=1 \
+    BEAGLE_GATE_FACT_OBSERVATION_DIR="$BEAGLE_FACTS_OBSERVATIONS" \
+    "$BEAGLE_FACTS_GATE" "$@" || plan_status=$?
+if [[ "$plan_status" -ne 0 ]]; then
+    echo "beagle-test-facts: claim preparation failed status=$plan_status; old gate not started" >&2
+    exit "$plan_status"
+fi
+
+# shadow-prepare cold-opens the requested route and durably records every miss
+# before this process starts fallback work.  A fact hit is diagnostic only: the
+# old gate still runs, with its result cache disabled so every command executes.
+prepare_status=0
+"$RACKET" "$BEAGLE_FACTS_MAINTAINER" shadow-prepare \
+    "$BEAGLE_FACTS_STORE" \
+    "$BEAGLE_FACTS_QUERY_STORE" \
+    "$BEAGLE_FACTS_BASE_COMMIT" \
+    "$BEAGLE_FACTS_REPO_ROOT" \
+    "$BEAGLE_FACTS_POLICY" \
+    "$BEAGLE_FACTS_VERIFIER" \
+    "$BEAGLE_FACTS_OBSERVATIONS" || prepare_status=$?
+if [[ "$prepare_status" -ne 0 ]]; then
+    echo "beagle-test-facts: durable shadow preparation failed status=$prepare_status; old gate not started" >&2
+    exit "$prepare_status"
+fi
+
+gate_status=0
+env -u BEAGLE_GATE_FACT_PLAN_ONLY \
+    BEAGLE_GATE_NO_CACHE=1 \
+    BEAGLE_GATE_FACT_OBSERVATION_DIR="$BEAGLE_FACTS_OBSERVATIONS" \
+    "$BEAGLE_FACTS_GATE" "$@" || gate_status=$?
+
+finish_status=0
+"$RACKET" "$BEAGLE_FACTS_MAINTAINER" shadow-finish \
+    "$BEAGLE_FACTS_STORE" \
+    "$BEAGLE_FACTS_BASE_COMMIT" \
+    "$BEAGLE_FACTS_REPO_ROOT" \
+    "$BEAGLE_FACTS_POLICY" \
+    "$BEAGLE_FACTS_VERIFIER" \
+    "$BEAGLE_FACTS_OBSERVATIONS" \
+    "$gate_status" || finish_status=$?
+if [[ "$finish_status" -ne 0 ]]; then
+    echo "beagle-test-facts: shadow finalization unavailable status=$finish_status; old gate remains authoritative" >&2
+fi
+
+exit "$gate_status"

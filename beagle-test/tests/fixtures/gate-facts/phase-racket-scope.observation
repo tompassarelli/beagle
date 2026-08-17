@@ -1,0 +1,6 @@
+beagle-gate-phase-observation-v1
+label=racket-scope
+completion=exit
+exit-code=0
+log-sha256=sha256:phase-log
+receipt-sha256=sha256:phase-receipt

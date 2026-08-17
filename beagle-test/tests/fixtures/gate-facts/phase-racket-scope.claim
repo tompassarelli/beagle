@@ -1,0 +1,4 @@
+beagle-gate-phase-claim-v1
+label=racket-scope
+deadline-seconds=70
+command-sha256=sha256:phase-command

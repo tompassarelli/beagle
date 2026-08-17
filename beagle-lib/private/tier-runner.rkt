@@ -15,6 +15,7 @@
          racket/format
          racket/list
          racket/match
+         racket/path
          racket/port
          racket/promise
          racket/string
@@ -807,6 +808,7 @@
 (define worker-result-path (make-parameter #f))
 (define merge-worker-root (make-parameter #f))
 (define print-worker-count? (make-parameter #f))
+(define fact-claim-output-path (make-parameter #f))
 
 (struct worker-output (index count active-only? include-gated?
                              active demoted gated)
@@ -822,6 +824,55 @@
         (unit-result-stderr-lines r)
         (unit-result-cached? r)
         (unit-result-wall-seconds r)))
+
+;; The fact maintainer is an opt-in observer of the existing runner.  Keep its
+;; input deliberately below the fact vocabulary: this is the runner's exact
+;; claim/result boundary, written as plain data for the maintainer to import.
+;; In particular, emitting it cannot change scheduling or classification.
+(define fact-unit-observations-environment
+  "BEAGLE_GATE_FACT_UNIT_OBSERVATIONS")
+
+(define (unit-result->fact-observation r)
+  (vector (unit-result-label r)
+          (unit-result-status r)
+          (unit-result-passed r)
+          (unit-result-total r)
+          (unit-result-cached? r)))
+
+(define (tier-fact-observation label expected results)
+  (vector label
+          (list->vector (map unit-label expected))
+          (list->vector (map unit-result->fact-observation results))))
+
+(define (write-fact-unit-observations plan active-results demoted-results gated-results)
+  (define destination (getenv fact-unit-observations-environment))
+  (when destination
+    ;; Observation loss makes fact coverage ineligible, but it must not change
+    ;; the old gate verdict.  The fact wrapper treats an absent/malformed file
+    ;; as a miss after the authoritative commands have still run.
+    (with-handlers ([exn:fail?
+                     (lambda (e)
+                       (eprintf "beagle-test: fact unit observation write failed: ~a\n"
+                                (exn-message e)))])
+      (define parent (path-only (path->complete-path destination)))
+      (when parent (make-directory* parent))
+      (call-with-output-file destination #:exists 'truncate/replace
+        (lambda (out)
+          (write
+           (vector
+            'beagle-tier-observations-v1
+            (tier-fact-observation
+             'active (tier-plan-active-units plan) active-results)
+            (tier-fact-observation
+             'demoted
+             (if (active-only?) '() (tier-plan-demoted-units plan))
+             demoted-results)
+            (tier-fact-observation
+             'gated
+             (if (include-gated?) (tier-plan-gated-units plan) '())
+             gated-results))
+           out)
+          (newline out))))))
 
 (define (datum->unit-result d path)
   (match d
@@ -1061,6 +1112,31 @@
              all-active-units all-demoted-units all-gated-units
              active-units demoted-units gated-units))
 
+(define (unit->fact-claim u)
+  (vector (unit-label u) (unit-file u) (unit-phase u)))
+
+(define (fact-tier-claim-section label units)
+  (vector label (list->vector (map unit->fact-claim units))))
+
+(define (write-fact-tier-claims plan)
+  (define destination (fact-claim-output-path))
+  (define parent (path-only (path->complete-path destination)))
+  (when parent (make-directory* parent))
+  (call-with-output-file destination #:exists 'truncate/replace
+    (lambda (out)
+      (write
+       (vector
+        'beagle-tier-claims-v1
+        (fact-tier-claim-section 'active (tier-plan-active-units plan))
+        (fact-tier-claim-section
+         'demoted
+         (if (active-only?) '() (tier-plan-demoted-units plan)))
+        (fact-tier-claim-section
+         'gated
+         (if (include-gated?) (tier-plan-gated-units plan) '())))
+       out)
+      (newline out))))
+
 (define (print-plan-header plan)
   (printf "=== Beagle tiered test runner ===\n\n")
   (when (ci-shard)
@@ -1075,6 +1151,8 @@
             (length (tier-plan-all-gated-units plan)))))
 
 (define (report-results plan active-results demoted-results gated-results)
+  (write-fact-unit-observations
+   plan active-results demoted-results gated-results)
   (print-plan-header plan)
   (print-tier-section "ACTIVE TIER (blocks iteration)" active-results)
   (cond
@@ -1241,9 +1319,13 @@
    [("--print-worker-count")
     "Internal: print the resolved local process worker count"
     (print-worker-count? #t)]
+   [("--write-fact-claims") path
+    "Internal: write the selected tier-unit claim plan without running tests"
+    (fact-claim-output-path path)]
    #:args ()
    (cond
      [(print-worker-count?) (printf "~a\n" (resolve-jobs))]
+     [(fact-claim-output-path) (write-fact-tier-claims (load-tier-plan))]
      [(merge-worker-root) (merge-workers (load-tier-plan))]
      [else (run)])))
 
