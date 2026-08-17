@@ -142,6 +142,21 @@
     (when (re-matches #"[0-9]+" suffix)
       (Long/parseLong suffix))))
 
+(defn- render-reader-rows [rows]
+  (let [properties (reduce (fn [index [subject predicate object]]
+                             (assoc-in index [subject predicate] object))
+                           {}
+                           rows)]
+    (keep (fn [[subject predicate object :as row]]
+            (let [kind (get-in properties [subject "kind"])
+                  qualifier (get-in properties [subject "qualifier"])]
+              (cond
+                (= predicate "qualifier") nil
+                (and (= kind "symbol") (= predicate "name"))
+                [subject "v" (if qualifier (str qualifier "/" object) object)]
+                :else row)))
+          rows)))
+
 (defn project-module-edn
   "Project a native module snapshot into Beagle facts-roundtrip EDN."
   [{:keys [module snapshot triples]}]
@@ -159,6 +174,7 @@
                         (t/triple-t2 triple)
                         (or (local-node-id module (t/triple-t3 triple))
                             (t/triple-t3 triple))])))
+             render-reader-rows
              (sort-by (fn [[subject predicate object]]
                         [subject (str predicate) (pr-str object)])))]
     (str "@file " (:root snapshot) "\n"

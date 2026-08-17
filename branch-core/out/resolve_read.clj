@@ -47,8 +47,12 @@
 (defn kind-of [ctx view e]
   (pred-val ctx view e "kind"))
 
+(defn sym-qualifier [ctx view e]
+  (if (= "symbol" (kind-of ctx view e)) (pred-val ctx view e "qualifier") nil))
+
 (defn sym-val [ctx view e]
-  (if (= "symbol" (kind-of ctx view e)) (pred-val ctx view e "v") nil))
+  (if (= "symbol" (kind-of ctx view e)) (let [name (pred-val ctx view e "name")]
+  (if (some? name) name (pred-val ctx view e "v"))) nil))
 
 (defn ordered-children [ctx e]
   (if (or (nil? ctx) (nil? e)) [] (let [pairs (reduce (fn [acc cid] (let [k (rc/ord-parse (ri/predicate-at ctx cid))
@@ -64,7 +68,8 @@
   (mapv (fn [^SegPair pr] (:child pr)) (sort-by (fn [^SegPair pr] (:idx pr)) pairs)))))
 
 (defn head-sym [ctx view e]
-  (if (= "list" (kind-of ctx view e)) (sym-val ctx view (first (ordered-children ctx e))) nil))
+  (if (= "list" (kind-of ctx view e)) (let [head (first (ordered-children ctx e))]
+  (if (nil? (sym-qualifier ctx view head)) (sym-val ctx view head) nil)) nil))
 
 (defn unwrap-meta [ctx view e]
   (loop [e e

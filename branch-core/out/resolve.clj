@@ -38,6 +38,7 @@
   (and (string? predicate)
        (or (= "child" predicate)
            (= "tail" predicate)
+           (rc/ord-pos? predicate)
            (boolean (re-matches #"(?:f|seg|comment)\d+" predicate)))))
 
 (when-not (ns-resolve 'resolve-corpus 'node-reference-predicate?)
@@ -105,25 +106,7 @@
 (def ^:dynamic file->ents (atom {}))
 
 (defn load-edn [path]
-  (let [lines (str/split-lines (slurp path))
-        src (subs (first (filter #(str/starts-with? % "@file") lines)) 6)
-        local (atom {})
-        ent (fn [lid]
-              (or (get @local lid)
-                  (let [e (rr/mint! rctx)]
-                    (swap! local assoc lid e)
-                    (swap! file->ents update src (fnil conj []) e)
-                    e)))]
-    (doseq [line lines :when (str/starts-with? line "[")]
-      (let [[s p o] (edn/read-string line)]
-        (rr/assert! rctx (ent s) p
-                    (if (node-reference-predicate? p)
-                      (if (integer? o)
-                        (ent o)
-                        (throw (ex-info "resolve: structural edge target must be a local integer id"
-                                        {:predicate p :target o})))
-                      o))))
-    src))
+  (rco/load-edn! rctx file->ents path))
 
 ;; --- fact-graph accessors --------------------------------------------------
 ;; render-mode marker predicate value-ids — DYNAMIC, rebound (recomputed against

@@ -1,5 +1,8 @@
 (require '[resolve-ident :as ri]
-         '[resolve-mint :as rmi])
+         '[resolve-mint :as rmi]
+         '[resolve-read :as rr]
+         '[resolve-render :as rv]
+         '[resolve-corpus :as rco])
 
 (def failures (atom 0))
 
@@ -20,6 +23,9 @@
 (def REFERS "refers_to")
 (def FIXED "keep_spelling")
 (def QUALIFIER "qualifier")
+(def NAME "name")
+(def ents (atom {}))
+(def mint (rmi/->Mint ctx KIND Vp ents nil BOUND REFERS FIXED))
 
 (defn- symbol! [spelling]
   (let [b (ri/open ctx)
@@ -38,21 +44,55 @@
 (def emit
   (rmi/->Emit ctx nil BOUND REFERS FIXED {} identity identity #{} #{}))
 (def emit-line! (ns-resolve 'resolve-mint 'emit-line!))
+(def structural-reader-rows
+  (ns-resolve 'resolve-corpus 'structural-reader-rows))
 
-(let [[leaf v-cid] (symbol! "posix/getenv")
+(let [leaf (rmi/mint-datum! mint "runtime" 'posix/getenv)
+      name-cid (first (ri/by-subject-predicate ctx leaf NAME))
       external-target (node!)]
   (ri/assert! ctx leaf REFERS external-target)
-  (ri/assert! ctx leaf QUALIFIER "must-not-prefix")
-  (check! "unresolved external target preserves the quoted leaf spelling"
+  (check! "qualified mint has no compound v fact"
+          []
+          (ri/by-subject-predicate ctx leaf Vp))
+  (check! "qualified mint stores the authored qualifier"
+          "posix"
+          (rr/pred-val ctx nil leaf QUALIFIER))
+  (check! "qualified mint stores the leaf name"
+          "getenv"
+          (rr/pred-val ctx nil leaf NAME))
+  (check! "unresolved external target renders from structural facts"
+          "posix/getenv"
+          (rv/render-sym ctx nil BOUND REFERS FIXED leaf))
+  (check! "projection joins structural facts only at its render boundary"
           (str "[" (ri/ordinal! ctx leaf) " \"v\" \"posix/getenv\"]")
-          (emit-line! emit nil leaf v-cid)))
+          (emit-line! emit nil leaf name-cid)))
 
-(let [[leaf v-cid] (symbol! "old-name")
+(let [leaf (rmi/mint-datum! mint "runtime" 'posix/getenv)
+      name-cid (first (ri/by-subject-predicate ctx leaf NAME))
       [binding _] (symbol! "renamed-name")]
   (ri/assert! ctx leaf REFERS binding)
-  (check! "resolved binding identity still projects its renamed spelling"
-          (str "[" (ri/ordinal! ctx leaf) " \"v\" \"renamed-name\"]")
-          (emit-line! emit nil leaf v-cid)))
+  (check! "resolved structural reference projects its renamed leaf"
+          (str "[" (ri/ordinal! ctx leaf) " \"v\" \"posix/renamed-name\"]")
+          (emit-line! emit nil leaf name-cid)))
+
+(let [binding (node!)
+      xresolve (rco/make-xresolve
+                ctx nil {} {"posix" {"getenv" binding}} {} {} "runtime")]
+  (check! "cross-module resolution consumes qualifier and leaf separately"
+          binding
+          (:target (xresolve "posix" "getenv"))))
+
+(check! "reader-fact ingress lowers qualification once"
+        [[1 "kind" "symbol"]
+         [1 "qualifier" "posix"]
+         [1 "name" "getenv"]
+         [2 "kind" "symbol"]
+         [2 "v" "plain"]]
+        (structural-reader-rows
+         [[1 "kind" "symbol"]
+          [1 "v" "posix/getenv"]
+          [2 "kind" "symbol"]
+          [2 "v" "plain"]]))
 
 ;; A projection integer is a view coordinate, never a node identity.
 (let [[leaf _] (symbol! "shape-probe")]

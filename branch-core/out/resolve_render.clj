@@ -15,10 +15,11 @@
   (rr/sym-val ctx view (ultimate ctx view BOUND REFERS B)))
 
 (defn render-sym [ctx view BOUND REFERS FIXED e]
-  (let [v (rr/pred-val ctx view e "v")
+  (let [leaf (rr/sym-val ctx view e)
+   qual (rr/sym-qualifier ctx view e)
+   authored (if (some? qual) (str (str qual) "/" (str leaf)) leaf)
    D (rr/refers-target ctx view BOUND REFERS e)]
-  (if (nil? D) v (let [fixed? (and (some? ctx) (some? FIXED) (some? e) (not (empty? (ri/by-subject-predicate ctx e FIXED))))
-   qual (rr/pred-val ctx view e "qualifier")
+  (if (nil? D) authored (let [fixed? (and (some? ctx) (some? FIXED) (some? e) (not (empty? (ri/by-subject-predicate ctx e FIXED))))
    cpfx (rr/pred-val ctx view e "ctor_prefix")
    afield (rr/pred-val ctx view e "accessor_field")
    nm0 (binding-name ctx view BOUND REFERS D)
@@ -27,7 +28,8 @@
   (some? afield) (str (str/lower-case (str nm0)) "-" (str afield))
   :else nm0)]
   (cond
-  fixed? v
+  (nil? nm0) authored
+  fixed? authored
   (some? qual) (str (str qual) "/" (str nm))
   :else nm)))))
 
