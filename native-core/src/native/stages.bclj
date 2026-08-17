@@ -394,3 +394,362 @@
        (mapv (fn [(artifact core/ArtifactHashV0)] String
                (encode-artifact-hash artifact))
          (buildmanifestv0-artifacts manifest)))]))
+
+
+;; The legacy native-stage-v0 encoding above is a content identity.  It omits
+;; program fields that materializers consume, so it must not be used as a
+;; persistence format.  This separate wire contract preserves the complete
+;; generated record graph while retaining the legacy encoding and digest.
+(defrecord NativeWirePartV1 [(value String) (next-offset Int)])
+
+(defrecord NativeWireRecordV1 [(tag String) (fields (Vec String))])
+
+(defrecord F64AtomBitsWireV1 [(key String) (bits Int)])
+
+(defn native-wire-decimal-digit? [(character String)] Bool
+  (or (= character "0") (= character "1") (= character "2")
+    (= character "3") (= character "4") (= character "5")
+    (= character "6") (= character "7") (= character "8")
+    (= character "9")))
+
+(defn native-wire-unsigned-decimal? [(value String)] Bool
+  (and (> (count value) 0)
+    (or (= (count value) 1) (not= "0" (subs value 0 1)))
+    (every?
+      (fn [(character Any)] Bool
+        (native-wire-decimal-digit? (str character)))
+      (vec value))))
+
+(defn native-wire-signed-decimal? [(value String)] Bool
+  (if (and (> (count value) 0) (= "-" (subs value 0 1)))
+    (and (> (count value) 1)
+      (not= "0" (subs value 1 (count value)))
+      (native-wire-unsigned-decimal? (subs value 1 (count value))))
+    (native-wire-unsigned-decimal? value)))
+
+(defn native-wire-colon-offset [(text String) (offset Int)] Int
+  (loop [(position Int) offset]
+    (cond
+      (>= position (count text)) -1
+      (= ":" (subs text position (+ position 1))) position
+      :else (recur (+ position 1)))))
+
+(defn read-native-wire-part
+  [(text String) (offset Int)] (U NativeWirePartV1 Nil)
+  (let [(colon Int) (native-wire-colon-offset text offset)]
+    (if (< colon offset)
+      nil
+      (let [(length-text String) (subs text offset colon)
+            (size (U Int Nil))
+            (if (native-wire-unsigned-decimal? length-text)
+              (parse-long length-text) nil)
+            (start Int) (+ colon 1)]
+        (if (or (nil? size) (> size (- (count text) start)))
+          nil
+          (->NativeWirePartV1
+            (subs text start (+ start size)) (+ start size)))))))
+
+(defn parse-native-wire-record [(text String)] (U NativeWireRecordV1 Nil)
+  (let [(tag-part (U NativeWirePartV1 Nil)) (read-native-wire-part text 0)]
+    (if (nil? tag-part)
+      nil
+      (let [(separator Int) (nativewirepartv1-next-offset tag-part)]
+        (if (or (>= separator (count text))
+              (not= ":" (subs text separator (+ separator 1))))
+          nil
+          (loop [(offset Int) (+ separator 1)
+                 (fields (Vec String)) []]
+            (cond
+              (= offset (count text))
+              (->NativeWireRecordV1
+                (nativewirepartv1-value tag-part) fields)
+
+              (> offset (count text)) nil
+
+              :else
+              (let [(field (U NativeWirePartV1 Nil))
+                    (read-native-wire-part text offset)]
+                (if (nil? field)
+                  nil
+                  (recur (nativewirepartv1-next-offset field)
+                    (conj fields (nativewirepartv1-value field))))))))))))
+
+(defn required-native-wire-record
+  [(text String) (tag String) (field-count Int)] (U NativeWireRecordV1 Nil)
+  (let [(record (U NativeWireRecordV1 Nil))
+        (parse-native-wire-record text)]
+    (if (and (some? record)
+          (= tag (nativewirerecordv1-tag record))
+          (= field-count (count (nativewirerecordv1-fields record))))
+      record nil)))
+
+(defn native-wire-prefix-at? [(text String) (offset Int) (prefix String)] Bool
+  (and (<= (+ offset (count prefix)) (count text))
+    (= prefix (subs text offset (+ offset (count prefix))))))
+
+;; read-string is used only for generated records and never with reader eval.
+;; Reject every dispatch macro except generated record tags and printed IEEE
+;; special values before the reader sees the cache payload.
+(defn native-wire-edn-safe? [(text String)] Bool
+  (let [(units (Vec Any)) (vec text)
+        (size Int) (count units)]
+    (loop [(index Int) 0 (in-string Bool) false (escaped Bool) false]
+      (if (>= index size)
+        (and (not in-string) (not escaped))
+        (let [(character String) (str (nth units index))]
+          (cond
+            in-string
+            (cond
+              escaped (recur (+ index 1) true false)
+              (= character "\\") (recur (+ index 1) true true)
+              (= character "\"") (recur (+ index 1) false false)
+              :else (recur (+ index 1) true false))
+
+            (= character "\"")
+            (recur (+ index 1) true false)
+
+            (= character "#")
+            (cond
+              (native-wire-prefix-at? text index "#native.core.")
+              (recur (+ index 13) false false)
+
+              (native-wire-prefix-at? text index "#native.stages.")
+              (recur (+ index 15) false false)
+
+              (native-wire-prefix-at? text index "##NaN")
+              (recur (+ index 5) false false)
+
+              (native-wire-prefix-at? text index "##Inf")
+              (recur (+ index 5) false false)
+
+              (native-wire-prefix-at? text index "##-Inf")
+              (recur (+ index 6) false false)
+
+              :else false)
+
+            :else (recur (+ index 1) false false)))))))
+
+;; Record construction and record reading can expose different persistent-map
+;; iteration orders.  Normalize once through the non-evaluating reader so wire
+;; bytes never depend on which route produced an otherwise equal record.
+(defn native-wire-pr-str [(value Any)] String
+  (pr-str
+    (binding [*read-eval* false]
+      (read-string (pr-str value)))))
+
+(defn f64-atom-wire-key
+  [(function-id core/NativeId)
+   (block-id core/NativeId)
+   (result-id core/NativeId)]
+  String
+  (canonical-record "f64-atom-key-v1"
+    [(encode-id function-id) (encode-id block-id) (encode-id result-id)]))
+
+(defn block-f64-atom-bit-rows
+  [(function-id core/NativeId) (block core/BasicBlock)] (Vec String)
+  (loop [(position Int) 0 (rows (Vec String)) []]
+    (if (>= position (count (core/basicblock-instructions block)))
+      rows
+      (let [(instruction core/Instruction)
+            (nth (core/basicblock-instructions block) position)]
+        (if (instance? native.core.AtomInstruction instruction)
+          (let [(atom core/NativeAtom) (core/atominstruction-atom instruction)]
+            (if (instance? native.core.F64Atom atom)
+              (recur (+ position 1)
+                (conj rows
+                  (canonical-record "f64-atom-bits-v1"
+                    [(f64-atom-wire-key function-id
+                       (core/basicblock-id block)
+                       (core/ssavaluev0-id
+                         (core/atominstruction-result instruction)))
+                     (encode-int
+                       (Double/doubleToRawLongBits
+                         (core/f64atom-value atom)))])))
+              (recur (+ position 1) rows)))
+          (recur (+ position 1) rows))))))
+
+(defn function-f64-atom-bit-rows [(function core/FunctionDef)] (Vec String)
+  (loop [(position Int) 0 (rows (Vec String)) []]
+    (if (>= position (count (core/functiondef-blocks function)))
+      rows
+      (recur (+ position 1)
+        (vec (concat rows
+          (block-f64-atom-bit-rows (core/functiondef-id function)
+            (nth (core/functiondef-blocks function) position))))))))
+
+(defn native-program-f64-atom-bit-rows
+  [(program core/NativeCoreProgram)] (Vec String)
+  (loop [(position Int) 0 (rows (Vec String)) []]
+    (if (>= position (count (core/nativecoreprogram-functions program)))
+      rows
+      (recur (+ position 1)
+        (vec (concat rows
+          (function-f64-atom-bit-rows
+            (nth (core/nativecoreprogram-functions program) position))))))))
+
+(defn encode-native-program-f64-atoms [(program core/NativeCoreProgram)] String
+  (canonical-vector "native-program-f64-atoms-v1"
+    (native-program-f64-atom-bit-rows program)))
+
+(defn decode-f64-atom-bits-wire-v1 [(encoding String)] (U F64AtomBitsWireV1 Nil)
+  (let [(record (U NativeWireRecordV1 Nil))
+        (required-native-wire-record encoding "f64-atom-bits-v1" 2)]
+    (if (nil? record)
+      nil
+      (let [(fields (Vec String)) (nativewirerecordv1-fields record)
+            (integer-record (U NativeWireRecordV1 Nil))
+            (required-native-wire-record (nth fields 1) "int" 1)]
+        (if (nil? integer-record)
+          nil
+          (let [(value String)
+                (nth (nativewirerecordv1-fields integer-record) 0)
+                (bits (U Int Nil))
+                (if (native-wire-signed-decimal? value)
+                  (parse-long value) nil)]
+            (if (nil? bits)
+              nil
+              (->F64AtomBitsWireV1 (nth fields 0) bits))))))))
+
+(defn decode-native-program-f64-atoms
+  [(encoding String)] (U (Map String Int) Nil)
+  (let [(record (U NativeWireRecordV1 Nil))
+        (parse-native-wire-record encoding)]
+    (if (or (nil? record)
+          (not= "native-program-f64-atoms-v1"
+            (nativewirerecordv1-tag record)))
+      nil
+      (loop [(position Int) 0
+             (fields (Vec String)) (nativewirerecordv1-fields record)
+             (bits (Map String Int)) {}]
+        (if (>= position (count fields))
+          bits
+          (let [(entry (U F64AtomBitsWireV1 Nil))
+                (decode-f64-atom-bits-wire-v1 (nth fields position))]
+            (if (or (nil? entry)
+                  (contains? bits (f64atombitswirev1-key entry)))
+              nil
+              (recur (+ position 1) fields
+                (assoc bits (f64atombitswirev1-key entry)
+                  (f64atombitswirev1-bits entry))))))))))
+
+(defn restore-instruction-f64-atom
+  [(function-id core/NativeId)
+   (block-id core/NativeId)
+   (bits (Map String Int))
+   (instruction core/Instruction)]
+  core/Instruction
+  (if (instance? native.core.AtomInstruction instruction)
+    (let [(atom core/NativeAtom) (core/atominstruction-atom instruction)]
+      (if (instance? native.core.F64Atom atom)
+        (let [(key String)
+              (f64-atom-wire-key function-id block-id
+                (core/ssavaluev0-id
+                  (core/atominstruction-result instruction)))
+              (raw (U Int Nil)) (get bits key nil)]
+          (if (nil? raw)
+            instruction
+            (core/->AtomInstruction
+              (core/atominstruction-result instruction)
+              (core/->F64Atom (Double/longBitsToDouble raw)))))
+        instruction))
+    instruction))
+
+(defn restore-block-f64-atoms
+  [(function-id core/NativeId)
+   (bits (Map String Int))
+   (block core/BasicBlock)]
+  core/BasicBlock
+  (with block
+    [:instructions
+     (mapv
+       (fn [(instruction core/Instruction)] core/Instruction
+         (restore-instruction-f64-atom function-id
+           (core/basicblock-id block) bits instruction))
+       (core/basicblock-instructions block))]))
+
+(defn restore-function-f64-atoms
+  [(bits (Map String Int)) (function core/FunctionDef)] core/FunctionDef
+  (with function
+    [:blocks
+     (mapv
+       (fn [(block core/BasicBlock)] core/BasicBlock
+         (restore-block-f64-atoms (core/functiondef-id function) bits block))
+       (core/functiondef-blocks function))]))
+
+(defn restore-native-program-f64-atoms
+  [(bits (Map String Int))
+   (program core/NativeCoreProgram)]
+  core/NativeCoreProgram
+  (with program
+    [:functions
+     (mapv
+       (fn [(function core/FunctionDef)] core/FunctionDef
+         (restore-function-f64-atoms bits function))
+       (core/nativecoreprogram-functions program))]))
+
+(defn encode-native-core-program-wire-v1
+  [(program core/NativeCoreProgram)] String
+  (canonical-record "native-core-program-wire-v1"
+    [(native-wire-pr-str program) (encode-native-program-f64-atoms program)]))
+
+(defn decode-native-core-program-wire-v1
+  [(encoding String)] (U core/NativeCoreProgram Nil)
+  (let [(record (U NativeWireRecordV1 Nil))
+        (required-native-wire-record encoding "native-core-program-wire-v1" 2)]
+    (if (nil? record)
+      nil
+      (let [(fields (Vec String)) (nativewirerecordv1-fields record)
+            (printed String) (nth fields 0)
+            (bits (U (Map String Int) Nil))
+            (decode-native-program-f64-atoms (nth fields 1))]
+        (if (or (nil? bits) (not (native-wire-edn-safe? printed)))
+          nil
+          (let [(decoded Any)
+                (binding [*read-eval* false] (read-string printed))]
+            (if (instance? native.core.NativeCoreProgram decoded)
+              (let [(program core/NativeCoreProgram)
+                    (restore-native-program-f64-atoms bits decoded)]
+                (if (= encoding (encode-native-core-program-wire-v1 program))
+                  program nil))
+              nil)))))))
+
+(defn encode-frozen-native-stage-wire-v1 [(frozen FrozenNativeStageV0)] String
+  (let [(program core/NativeCoreProgram)
+        (nativestagev0-program (frozennativestagev0-stage frozen))]
+    (canonical-record "frozen-native-stage-wire-v1"
+      [(native-wire-pr-str frozen) (encode-native-program-f64-atoms program)])))
+
+(defn restore-frozen-native-stage-f64-atoms
+  [(bits (Map String Int)) (frozen FrozenNativeStageV0)] FrozenNativeStageV0
+  (let [(stage NativeStageV0) (frozennativestagev0-stage frozen)
+        (program core/NativeCoreProgram)
+        (restore-native-program-f64-atoms bits (nativestagev0-program stage))]
+    (with frozen [:stage (with stage [:program program])])))
+
+(defn decode-frozen-native-stage-wire-v1
+  [(encoding String)] (U FrozenNativeStageV0 Nil)
+  (let [(record (U NativeWireRecordV1 Nil))
+        (required-native-wire-record encoding "frozen-native-stage-wire-v1" 2)]
+    (if (nil? record)
+      nil
+      (let [(fields (Vec String)) (nativewirerecordv1-fields record)
+            (printed String) (nth fields 0)
+            (bits (U (Map String Int) Nil))
+            (decode-native-program-f64-atoms (nth fields 1))]
+        (if (or (nil? bits) (not (native-wire-edn-safe? printed)))
+          nil
+          (let [(decoded Any)
+                (binding [*read-eval* false] (read-string printed))]
+            (if (instance? native.stages.FrozenNativeStageV0 decoded)
+              (let [(frozen FrozenNativeStageV0)
+                    (restore-frozen-native-stage-f64-atoms bits decoded)
+                    (stage NativeStageV0) (frozennativestagev0-stage frozen)
+                    (legacy-encoding String) (encode-native-stage stage)]
+                (if (and
+                      (= legacy-encoding
+                        (frozennativestagev0-encoding frozen))
+                      (= (content-digest legacy-encoding)
+                        (frozennativestagev0-digest frozen))
+                      (= encoding (encode-frozen-native-stage-wire-v1 frozen)))
+                  frozen nil))
+              nil)))))))
