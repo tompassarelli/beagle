@@ -3,12 +3,14 @@
 # C17 projection of the record ABI its signatures close over.
 #
 #   beagle-ast -> source facts -> frozen source program -> typed program
-#     -> native program -> 7 obligations -> native.c11 emitters
+#     -> native program -> Native obligations -> native.c11 emitters
 #
 # store.bgl declares no record of its own: every type in its signatures comes
-# from fram.types, so both ASTs are projected into one source program.
+# from fram.types, whose slot-table alias closes over fram.slots. The compiler
+# resolves that complete source closure before the two explicit ASTs are
+# projected into one source program.
 #
-# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_CHECKOUT.
+# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -16,33 +18,45 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-}"
-fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
+fram_checkout="$repo/branch-core"
 src="$fram_checkout/src/fram/store.bgl"
 dep="$fram_checkout/src/fram/types.bgl"
+slots="$fram_checkout/src/fram/slots.bgl"
+module_root="branch-core/src=$fram_checkout/src"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-store.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 mkdir -p "$art"
 
-for upstream in "$dep" "$src"; do
+for upstream in "$slots" "$dep" "$src"; do
   [[ -f "$upstream" ]] && continue
   echo "drive.sh: upstream Fram source is missing: $upstream" >&2
   exit 1
 done
-"$repo/bin/beagle-ast" "$dep" >"$scratch/types.ast.json"
-"$repo/bin/beagle-ast" "$src" >"$scratch/store.ast.json"
+"$repo/bin/beagle-ast" --module-root "$module_root" \
+  --interface-sha256-out "$scratch/types.interface.sha256" \
+  "$dep" >"$scratch/types.ast.json"
+"$repo/bin/beagle-ast" --module-root "$module_root" \
+  --interface-sha256-out "$scratch/store.interface.sha256" \
+  "$src" >"$scratch/store.ast.json"
 store_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/store.ast.json")"
-bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/store.ast.json" \
+types_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
+  "$scratch/types.ast.json")"
+bb "$here/ast-facts.clj" \
+  "$scratch/types.ast.json=$types_logical=$scratch/types.interface.sha256" \
+  "$scratch/store.ast.json=$store_logical=$scratch/store.interface.sha256" \
   "$scratch/store.facts"
 cp "$scratch/store.facts" "$art/store.facts"
-{ sha256sum "$dep"; sha256sum "$src"; } | cut -d' ' -f1 >"$art/source.sha256"
+{ sha256sum "$slots"; sha256sum "$dep"; sha256sum "$src"; } \
+  | cut -d' ' -f1 >"$art/source.sha256"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   --out "$scratch/out" >"$scratch/build.log" 2>&1 || { sed -n '1,200p' "$scratch/build.log" >&2; exit 1; }
@@ -71,6 +85,7 @@ bb -Xmx4g -cp "$scratch/out" -e "
     \"$store_logical\" \"$art\" \"native-slice-store-v0\" \"$abi\"))"
 
 cat "$art/report.txt"
+cp "$here/main.c" "$art/main.c"
 
 # The driver is fail-closed on its own C: a projection that no longer compiles
 # under both frontends must not leave a stale passing artifact behind.

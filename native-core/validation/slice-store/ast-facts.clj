@@ -2,7 +2,10 @@
 ;; Columns: subject TAB predicate TAB ("t" text | "n" node) TAB object.
 ;; Takes several ASTs: store.bgl declares no record, so its annotations only
 ;; close over Native Core types when its declared dependency is projected first.
-(require '[cheshire.core :as json])
+;; Each input is AST=LOGICAL-PATH=INTERFACE-SHA256-FILE so source-freeze sees
+;; the compiler-owned module identity rather than a synthetic legacy root.
+(require '[cheshire.core :as json]
+         '[clojure.string :as string])
 
 (load-file
   (.getCanonicalPath
@@ -49,6 +52,9 @@
       (row! n (str "f" i) "n" (emit-one it)))
     n))
 
+(defn emit-node-seq [items]
+  (emit-seq items identity))
+
 (defn emit-ann [a]
   (let [n (nid)]
     (case (get a "kind")
@@ -81,14 +87,60 @@
       nil)
     n))
 
+(defn emit-import [required]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "import")
+    (row! n "namespace" "t" (get required "ns"))
+    (row! n "alias" "t" (or (get required "alias") ""))
+    (row! n "refer" "t" (str (boolean (get required "refer"))))
+    n))
+
+(defn parse-input-spec [spec]
+  (let [[path relative-path interface-path] (string/split spec #"=" 3)]
+    (when-not (and (not-empty path)
+                   (not-empty relative-path)
+                   (not-empty interface-path))
+      (throw (ex-info "expected AST=LOGICAL-PATH=INTERFACE-SHA256-FILE"
+                      {:spec spec})))
+    [path relative-path interface-path]))
+
+(defn emit-module [input-spec]
+  (let [[in relative-path interface-path] (parse-input-spec input-spec)
+        ast (require-unconstrained-checked-program!
+              (json/parse-string (slurp in)) relative-path)
+        interface-sha256 (string/trim (slurp interface-path))
+        definitions (mapv emit-form
+                      (filter #(or (= "record" (get % "node"))
+                                   (= "defn" (get % "node")))
+                        (get ast "forms")))
+        imports (mapv emit-import (get ast "requires"))
+        root (nid)]
+    (when-not (= relative-path (get ast "sourceId"))
+      (throw (ex-info "checked projection sourceId does not match logical path"
+                      {:expected relative-path :actual (get ast "sourceId")})))
+    (doseq [[field digest]
+            [["sourceSha256" (get ast "sourceSha256")]
+             ["projectionSha256" (get ast "projectionSha256")]
+             ["interfaceSha256" interface-sha256]]]
+      (when-not (re-matches #"sha256:[0-9a-f]{64}" (or digest ""))
+        (throw (ex-info "module identity carries a malformed SHA-256 digest"
+                        {:field field :digest digest
+                         :relative-path relative-path}))))
+    (row! root "form-kind" "t" "module-root")
+    (row! root "namespace" "t" (get ast "namespace"))
+    (row! root "relative-path" "t" relative-path)
+    (row! root "source-sha256" "t" (get ast "sourceSha256"))
+    (row! root "checked-projection-sha256" "t" (get ast "projectionSha256"))
+    (row! root "interface-sha256" "t" interface-sha256)
+    (row! root "definitions" "n" (emit-node-seq definitions))
+    (row! root "imports" "n" (emit-node-seq imports))
+    root))
+
 (let [args *command-line-args*
       out (last args)
       inputs (butlast args)]
-  (doseq [in inputs
-          :let [ast (require-unconstrained-checked-program!
-                      (json/parse-string (slurp in)) in)]
-          f (get ast "forms")]
-    (when (#{"record" "defn"} (get f "node")) (emit-form f)))
-  (row! "0" "form-kind" "t" "module-root")
+  (let [modules (mapv emit-module inputs)]
+    (row! "0" "form-kind" "t" "program-root")
+    (row! "0" "modules" "n" (emit-node-seq modules)))
   (spit out (apply str (for [[s p k o] (persistent! @rows)]
                          (str s "\t" p "\t" k "\t" o "\n")))))
