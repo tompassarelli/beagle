@@ -15,14 +15,34 @@
 
 (require rackunit
          racket/runtime-path
+         beagle/private/module-overlay-check
+         beagle/private/module-source-root
          beagle/private/parse
          beagle/private/check)
 
 (define-runtime-path fixtures-dir "fixtures/dynvar-xmodule")
 
+(define fixture-root
+  (make-module-source-root-v0 "fixtures/dynvar-xmodule" fixtures-dir))
+
+(define (fixture-program name)
+  (define source-id (string-append "fixtures/dynvar-xmodule/" name))
+  (define closure
+    (resolve-module-source-closure
+     (list (module-source-input source-id (build-path fixtures-dir name)))
+     (list fixture-root)))
+  (define checked (check-module-source-closure closure #:emit? #f))
+  (unless (overlay-check-result-ok? checked)
+    (error 'beagle "~a"
+           (overlay-diagnostic-message
+            (car (overlay-check-result-diagnostics checked)))))
+  (checked-overlay-module-program
+   (for/first ([module (in-list (overlay-check-result-modules checked))]
+               #:when (equal? (checked-overlay-module-source module) source-id))
+     module)))
+
 (define (check-file name)
-  (define src (build-path fixtures-dir name))
-  (type-check! (parse-program (read-beagle-syntax src) #:source-path src)))
+  (fixture-program name))
 
 (test-case "a requiring module can `binding` an imported ^:dynamic var (G-A, matches Clojure)"
   (check-not-exn (lambda () (check-file "ok.bclj"))))
