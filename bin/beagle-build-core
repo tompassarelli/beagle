@@ -304,6 +304,7 @@ marker_pending="$out/.build.manifest.sha256.pending.$$"
 build_committed=0
 commit_started=0
 work_cleaned=0
+core_result_staging=""
 cleanup() {
     local rc=$?
     if [[ "$commit_started" == "1" && "$build_committed" != "1" ]]; then
@@ -315,6 +316,9 @@ cleanup() {
     fi
     if [[ "$build_committed" != "1" ]]; then
         rm -f -- "$marker_pending"
+        if [[ -n "$core_result_staging" && -d "$core_result_staging" ]]; then
+            rm -rf -- "${core_result_staging:?}"
+        fi
         if [[ "$work_cleaned" != "1" ]]; then
             rm -rf "${work:?}"
         fi
@@ -370,9 +374,270 @@ for ((closure_index = 0; closure_index < ${#closure_fields[@]}; closure_index +=
         die "module source root resolver returned a missing source: $source"
     normalized_sources+=("$source")
     source_ids+=("$source_id")
-    source_digest_befores+=("$(sha256sum "$source" | awk '{print $1}')")
+    source_digest="$(sha256sum "$source" | awk '{print $1}')"
+    source_digest_befores+=("$source_digest")
+    source_snapshot_paths+=("$source")
+    source_snapshot_digests+=("$source_digest")
 done
 
+core_modules=(
+    native-core/src/native/core.bclj
+    native-core/src/native/stages.bclj
+    native-core/src/native/simd.bclj
+    native-core/src/native/lower.bclj
+    native-core/src/native/obligations.bclj
+    native-core/src/native/c11.bclj
+    native-core/src/native/slice.bclj
+    native-core/src/native/fold_c17.bclj
+    native-core/src/native/body_c17.bclj
+    native-core/src/native/body_slice.bclj
+    native-core/src/native/qbe.bclj
+)
+
+# The hosted Core compiler projection is content-addressed separately from a
+# program result. A result key below names the exact generated projection bytes
+# as well as these source inputs, so a damaged or differently-generated
+# projection can never hit a result produced by another compiler executable.
+cache_key_material() {
+    local relative
+    for relative in "${core_modules[@]}" \
+                    bin/beagle-build-core \
+                    bin/beagle-build-all \
+                    bin/beagle-build \
+                    bin/_beagle-racket \
+                    share/targets.sh; do
+        printf '%s %s\n' "$relative" \
+            "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
+    done
+    find "$BEAGLE_DIR/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
+        LC_ALL=C sort -z |
+        xargs -0 sha256sum |
+        awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+}
+
+cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/build-core}"
+compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
+cache_entry="$cache_root/$compiler_source_digest"
+compiled="$cache_entry/compiled"
+
+if [[ ! -f "$cache_entry/.complete" ]]; then
+    compiled="$work/compiled"
+    mkdir -p "$compiled"
+    build_all_args=()
+    for relative in "${core_modules[@]}"; do
+        build_all_args+=("$BEAGLE_DIR/$relative")
+    done
+    run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
+        "$BIN/beagle-build-all" "${build_all_args[@]}" \
+        --out "$compiled" >"$work/build.log" 2>&1 || {
+            sed -n '1,200p' "$work/build.log" >&2
+            exit 1
+        }
+
+    # Generated Clojure needs provider records referred and imported until the
+    # emitter qualifies cross-module union patterns itself.
+    core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
+        "$compiled/native/core.clj" | tr '\n' ' ')"
+    for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+        generated="$compiled/native/$module.clj"
+        [[ -f "$generated" ]] || continue
+        sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
+        awk -v imp="(import '[native.core $core_records])" \
+            '!seen && /^$/ { print imp; seen = 1 } { print }' \
+            "$generated" >"$generated.tmp"
+        mv "$generated.tmp" "$generated"
+    done
+
+    # Publish by renaming a fully-populated staging dir, so a reader never sees
+    # a half-written entry and a lost race just keeps this run's own copy.
+    if mkdir -p "$cache_root" 2>/dev/null &&
+       staging="$(mktemp -d "$cache_root/.staging.XXXXXX" 2>/dev/null)"; then
+        if cp -a "$compiled" "$staging/compiled" 2>/dev/null &&
+           : >"$staging/.complete" 2>/dev/null &&
+           mv -T "$staging" "$cache_entry" 2>/dev/null; then
+            compiled="$cache_entry/compiled"
+            find "$cache_root" -regextype posix-extended -mindepth 1 -maxdepth 1 \
+                -type d -regex '.*/[0-9a-f]{64}' -mtime +14 \
+                -exec rm -rf -- '{}' + 2>/dev/null || true
+        else
+            rm -rf -- "${staging:?}"
+        fi
+    fi
+else
+    touch -c "$cache_entry" 2>/dev/null || true
+fi
+
+compiled_digest="$(
+    cd "$compiled"
+    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum |
+        sha256sum | awk '{print $1}'
+)"
+
+compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
+core_result_cache_enabled=1
+if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]] ||
+   ! git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- ||
+   ! git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules --; then
+    core_result_cache_enabled=0
+fi
+if $wasm_selected; then
+    # A Wasm hit still needs the checked AST paths consumed by the external
+    # materializer. Keep that route uncached until those inputs have their own
+    # verified cache boundary; C17 and QBE cover the latency-critical route.
+    core_result_cache_enabled=0
+fi
+
+write_core_result_input_manifest() {
+    local destination="$1" index tool_path bb_path racket_path
+    bb_path="$(realpath "$(command -v bb)")"
+    racket_path="$(realpath "$RACKET")"
+    {
+        printf 'beagle-core-result-input/v1\n'
+        printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
+        printf 'compiler-projection-sha256 %s\n' "$compiled_digest"
+        printf 'compiler-commit %s\n' "$compiler_commit"
+        printf 'abi %q\nsimd %s\n' "$abi" "$simd_required"
+        for tool_path in "$PROJECTOR" "$AST_VERIFIER" \
+                         "$MODULE_SOURCE_ROOT_CLI" "$BIN/beagle-ast"; do
+            printf 'tool %q %s\n' "${tool_path#"$BEAGLE_DIR/"}" \
+                "$(sha256sum "$tool_path" | awk '{print $1}')"
+        done
+        printf 'racket %q\n' "$($RACKET --version 2>&1 | sed -n '1p')"
+        printf 'racket-bin-sha256 %s\n' \
+            "$(sha256sum "$racket_path" | awk '{print $1}')"
+        printf 'bb %q\n' "$(bb --version 2>&1 | sed -n '1p')"
+        printf 'bb-bin-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
+        for index in "${!module_roots[@]}"; do
+            printf 'module-root %06d %q\n' "$index" "${module_roots[$index]}"
+        done
+        for index in "${!source_ids[@]}"; do
+            printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
+                "${source_digest_befores[$index]}"
+        done
+        for index in "${!entries[@]}"; do
+            printf 'entry %06d %q\n' "$index" "${entries[$index]}"
+        done
+        for index in "${!materializers[@]}"; do
+            printf 'materializer %06d %q\n' "$index" "${materializers[$index]}"
+        done
+    } >"$destination"
+}
+
+validate_core_result_input_closure() {
+    local expected_input="$1" current_input="$2" source_index current_digest
+    for source_index in "${!source_snapshot_paths[@]}"; do
+        current_digest="$(sha256sum "${source_snapshot_paths[$source_index]}" |
+            awk '{print $1}')"
+        [[ "$current_digest" == "${source_snapshot_digests[$source_index]}" ]] ||
+            return 1
+    done
+    [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
+       "$compiler_commit" ]] || return 1
+    git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- || return 1
+    git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules -- || return 1
+    [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
+       "$compiler_source_digest" ]] || return 1
+    current_digest="$(
+        cd "$compiled"
+        find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum |
+            sha256sum | awk '{print $1}'
+    )"
+    [[ "$current_digest" == "$compiled_digest" ]] || return 1
+    write_core_result_input_manifest "$current_input"
+    cmp -s "$expected_input" "$current_input"
+}
+
+write_core_result_artifact_manifest() {
+    local artifacts_dir="$1" destination="$2"
+    (
+        cd "$artifacts_dir"
+        find . -mindepth 1 -maxdepth 1 -type f -printf '%P\0' |
+            LC_ALL=C sort -z |
+            xargs -0 -r sha256sum
+    ) >"$destination"
+}
+
+validate_core_result_entry() {
+    local entry="$1" expected_input="$2" expected_key="$3"
+    local artifact_manifest_digest expected_names actual_names required
+    [[ -d "$entry" && ! -L "$entry" &&
+       -f "$entry/input.manifest" && ! -L "$entry/input.manifest" &&
+       -f "$entry/artifacts.sha256" && ! -L "$entry/artifacts.sha256" &&
+       -f "$entry/READY" && ! -L "$entry/READY" &&
+       -d "$entry/artifacts" && ! -L "$entry/artifacts" ]] || return 1
+    cmp -s "$expected_input" "$entry/input.manifest" || return 1
+    if find "$entry/artifacts" -mindepth 1 -maxdepth 1 ! -type f -print -quit |
+        grep -q .; then
+        return 1
+    fi
+    expected_names="$(awk '{ print $2 }' "$entry/artifacts.sha256" | LC_ALL=C sort)"
+    actual_names="$(find "$entry/artifacts" -mindepth 1 -maxdepth 1 -type f \
+        -printf '%f\n' | LC_ALL=C sort)"
+    [[ -n "$expected_names" && "$expected_names" == "$actual_names" ]] || return 1
+    (
+        cd "$entry/artifacts"
+        sha256sum --check --strict ../artifacts.sha256 >/dev/null 2>&1
+    ) || return 1
+    for required in source.facts report.txt module.native-program \
+                    native.receipts native.entry-map; do
+        [[ -f "$entry/artifacts/$required" ]] || return 1
+    done
+    if [[ -n "${seen_materializers[c17]:-}" ||
+          -n "${seen_materializers[wasm]:-}" ]]; then
+        for required in module_0.h module_0.c c17.receipt; do
+            [[ -f "$entry/artifacts/$required" ]] || return 1
+        done
+    fi
+    if [[ -n "${seen_materializers[qbe]:-}" ]]; then
+        [[ -f "$entry/artifacts/module_0.ssa" ]] || return 1
+    fi
+    if [[ "$simd_required" == 1 ]]; then
+        [[ -f "$entry/artifacts/module.simd-plan-v0" ]] || return 1
+    fi
+    artifact_manifest_digest="$(sha256sum "$entry/artifacts.sha256" | awk '{print $1}')"
+    [[ "$(<"$entry/READY")" == \
+       "beagle-core-result/v1 $expected_key $artifact_manifest_digest" ]]
+}
+
+core_result_input="$work/core-result-input.manifest"
+write_core_result_input_manifest "$core_result_input"
+core_result_key="$(sha256sum "$core_result_input" | awk '{print $1}')"
+core_result_root="$cache_root/results"
+core_result_entry="$core_result_root/$core_result_key"
+core_result_cache_hit=0
+core_result_publish_pending=0
+if [[ "$core_result_cache_enabled" == 1 ]]; then
+    mkdir -p "$core_result_root" "$cache_root/.result-locks" \
+        "$cache_root/.result-tmp"
+    exec {core_result_lock_fd}>"$cache_root/.result-locks/$core_result_key.lock"
+    run_phase_leaf core-result-cache-lock \
+        "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        "$core_result_lock_fd" || die "timed out acquiring the Core result cache lock"
+    validate_core_result_input_closure "$core_result_input" \
+        "$work/core-result-input.lookup" ||
+        die "Core result input closure changed before cache lookup"
+    if [[ -e "$core_result_entry" ]]; then
+        if validate_core_result_entry "$core_result_entry" "$core_result_input" \
+            "$core_result_key"; then
+            cp -a "$core_result_entry/artifacts/." "$work/artifacts/"
+            core_result_cache_hit=1
+            echo "beagle build: core-result-cache HIT $core_result_key" >&2
+        else
+            corrupt_entry="$cache_root/.result-tmp/corrupt.$core_result_key.$$"
+            echo "beagle build: core-result-cache CORRUPT $core_result_key; retiring" >&2
+            mv "$core_result_entry" "$corrupt_entry"
+            rm -rf -- "${corrupt_entry:?}"
+        fi
+    fi
+    if [[ "$core_result_cache_hit" != 1 ]]; then
+        echo "beagle build: core-result-cache MISS $core_result_key" >&2
+    fi
+else
+    echo "beagle build: core-result-cache BYPASS untrusted-or-wasm-compiler" >&2
+fi
+
+if [[ "$core_result_cache_hit" != 1 ]]; then
 bundle_ast="$work/source_bundle.ast.json"
 run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
     "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
@@ -442,101 +707,10 @@ for source in "${normalized_sources[@]}"; do
     if $wasm_selected; then
         wasm_checked_sources+=(--checked-source "$source" "$ast")
     fi
-    source_snapshot_paths+=("$source")
-    source_snapshot_digests+=("$source_digest_after")
     source_index=$((source_index + 1))
 done
 run_phase source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
     bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
-
-core_modules=(
-    native-core/src/native/core.bclj
-    native-core/src/native/stages.bclj
-    native-core/src/native/simd.bclj
-    native-core/src/native/lower.bclj
-    native-core/src/native/obligations.bclj
-    native-core/src/native/c11.bclj
-    native-core/src/native/slice.bclj
-    native-core/src/native/fold_c17.bclj
-    native-core/src/native/body_c17.bclj
-    native-core/src/native/body_slice.bclj
-    native-core/src/native/qbe.bclj
-)
-
-# The compiled projection is a pure function of the ten Core modules, the Racket
-# emitter that lowers them, and the fixup applied below — so the key covers
-# exactly those and nothing else. Keys are built from repo-RELATIVE paths so a
-# worktree and its main checkout share entries. A key that is too coarse costs
-# one rebuild; a key that is too narrow serves a stale compiler, so anything
-# whose bytes can change the emitted .clj is hashed in.
-cache_key_material() {
-    local relative
-    for relative in "${core_modules[@]}" \
-                    bin/beagle-build-core \
-                    bin/beagle-build-all \
-                    bin/beagle-build \
-                    bin/_beagle-racket \
-                    share/targets.sh; do
-        printf '%s %s\n' "$relative" \
-            "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
-    done
-    find "$BEAGLE_DIR/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
-        LC_ALL=C sort -z |
-        xargs -0 sha256sum |
-        awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
-}
-
-cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/build-core}"
-cache_entry="$cache_root/$(cache_key_material | sha256sum | awk '{print $1}')"
-compiled="$cache_entry/compiled"
-
-if [[ ! -f "$cache_entry/.complete" ]]; then
-    compiled="$work/compiled"
-    mkdir -p "$compiled"
-    build_all_args=()
-    for relative in "${core_modules[@]}"; do
-        build_all_args+=("$BEAGLE_DIR/$relative")
-    done
-    run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
-        "$BIN/beagle-build-all" "${build_all_args[@]}" \
-        --out "$compiled" >"$work/build.log" 2>&1 || {
-            sed -n '1,200p' "$work/build.log" >&2
-            exit 1
-        }
-
-    # Generated Clojure needs provider records referred and imported until the
-    # emitter qualifies cross-module union patterns itself.
-    core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
-        "$compiled/native/core.clj" | tr '\n' ' ')"
-    for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
-        generated="$compiled/native/$module.clj"
-        [[ -f "$generated" ]] || continue
-        sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
-        awk -v imp="(import '[native.core $core_records])" \
-            '!seen && /^$/ { print imp; seen = 1 } { print }' \
-            "$generated" >"$generated.tmp"
-        mv "$generated.tmp" "$generated"
-    done
-
-    # Publish by renaming a fully-populated staging dir, so a reader never sees
-    # a half-written entry and a lost race just keeps this run's own copy.
-    if mkdir -p "$cache_root" 2>/dev/null &&
-       staging="$(mktemp -d "$cache_root/.staging.XXXXXX" 2>/dev/null)"; then
-        if cp -a "$compiled" "$staging/compiled" 2>/dev/null &&
-           : >"$staging/.complete" 2>/dev/null &&
-           mv -T "$staging" "$cache_entry" 2>/dev/null; then
-            compiled="$cache_entry/compiled"
-            find "$cache_root" -mindepth 1 -maxdepth 1 -type d -mtime +14 \
-                -exec rm -rf -- '{}' + 2>/dev/null || true
-        else
-            rm -rf -- "${staging:?}"
-        fi
-    fi
-else
-    touch -c "$cache_entry" 2>/dev/null || true
-fi
-
-compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
 export BEAGLE_CORE_FACTS="$facts"
 export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
@@ -1088,7 +1262,7 @@ bb -cp "$compiled" -e '
     (spit (str artifacts-dir "/native.receipts") encoding)))
 
 (defn native-report-head
-  [rows entries source program projected native-program epoch-result abi]
+  [rows entries source program projected native-program epoch-result abi verdicts]
   (str (apply str (map #(str "source-entry " % "\n") entries))
        "stage source-freeze ACCEPTED\n"
        "stage source-to-typed ACCEPTED\n"
@@ -1112,8 +1286,8 @@ bb -cp "$compiled" -e '
        (body-slice/function-report (core/nativecoreprogram-functions projected))
        (parallel-plan-report projected)
        (c11-parallel-refusal-report projected)
-       (slice/obligation-report "obligation-projection" projected abi)
-       (body-slice/failing-obligations projected abi)))
+       (body-slice/obligation-report "obligation-projection" verdicts)
+       (body-slice/failing-obligation-verdicts verdicts)))
 
 (defn emit-c17-materialization!
   [result artifacts-dir stage-name report-name report input-digest
@@ -1356,7 +1530,7 @@ bb -cp "$compiled" -e '
                         verdicts (obligations/validate-native-core-program projected abi)
                         head (str
                               (native-report-head rows entries source program projected
-                                                  native-program epoch-result abi)
+                                                  native-program epoch-result abi verdicts)
                               (native-provenance-report
                                source-receipt frozen-source typing-result frozen-typed
                                native-result native-frozen epoch-result frozen-native
@@ -1465,6 +1639,19 @@ if $wasm_selected || [[ -n "${seen_materializers[c17]:-}" ]]; then
         [[ -f "$work/artifacts/$required" ]] ||
             die "successful Core runner omitted $required"
     done
+fi
+
+fi
+
+if [[ "$core_result_cache_enabled" == 1 ]]; then
+    validate_core_result_input_closure "$core_result_input" \
+        "$work/core-result-input.before-finalize" ||
+        die "Core result input closure changed before finalization"
+    if [[ "$core_result_cache_hit" != 1 ]]; then
+        mkdir "$work/core-result-artifacts"
+        cp -a "$work/artifacts/." "$work/core-result-artifacts/"
+        core_result_publish_pending=1
+    fi
 fi
 
 run_phase native-receipts "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
@@ -1676,6 +1863,32 @@ mapfile -t locked_manifest_digests <"$work/locked-manifest.digest"
 [[ ${#locked_manifest_digests[@]} -eq 1 &&
    "${locked_manifest_digests[0]}" == "$marker_digest" ]] ||
     die "staged manifest identity changed before publication"
+
+if [[ "$core_result_cache_enabled" == 1 ]]; then
+    validate_core_result_input_closure "$core_result_input" \
+        "$work/core-result-input.before-cache-publish" ||
+        die "Core result input closure changed before cache publication"
+fi
+if [[ "$core_result_publish_pending" == 1 ]]; then
+    core_result_staging="$(mktemp -d \
+        "$cache_root/.result-tmp/$core_result_key.XXXXXX")"
+    cp -- "$core_result_input" "$core_result_staging/input.manifest"
+    mkdir "$core_result_staging/artifacts"
+    cp -a "$work/core-result-artifacts/." "$core_result_staging/artifacts/"
+    write_core_result_artifact_manifest "$core_result_staging/artifacts" \
+        "$core_result_staging/artifacts.sha256"
+    artifact_manifest_digest="$(sha256sum \
+        "$core_result_staging/artifacts.sha256" | awk '{print $1}')"
+    printf 'beagle-core-result/v1 %s %s\n' "$core_result_key" \
+        "$artifact_manifest_digest" >"$core_result_staging/READY"
+    validate_core_result_entry "$core_result_staging" "$core_result_input" \
+        "$core_result_key" || die "new Core result cache entry failed validation"
+    [[ ! -e "$core_result_entry" ]] ||
+        die "Core result cache entry appeared while its lock was held"
+    mv "$core_result_staging" "$core_result_entry"
+    core_result_staging=""
+    core_result_publish_pending=0
+fi
 
 commit_started=1
 rm -f -- "$out/build.manifest.sha256"
