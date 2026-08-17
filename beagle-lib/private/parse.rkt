@@ -1134,15 +1134,22 @@
      (lower-qualified-reference (car datum))]
     [else #f]))
 
+(define (qualified-type-name ref)
+  (register-qualified-type-name!
+   (qualify-name
+    (qualified-ref-qualifier ref)
+    (qualified-ref-name ref))
+   (qualified-ref-name ref)))
+
 (define (resolve-candidate-qualified-type datum)
   (define ref (qualified-type-head datum))
-  (define prefix
-    (and ref (symbol->string (qualified-ref-qualifier ref))))
+  (define prefix (and ref (qualified-ref-qualifier ref)))
+  (define written-name (and ref (qualified-type-name ref)))
   (define bindings (current-candidate-type-bindings))
   (define prefixes (current-candidate-type-prefixes))
   (cond
     [(or (not ref) (not prefix) (not bindings) (not prefixes)) #f]
-    [(hash-ref bindings (qualified-ref->symbol ref) #f)
+    [(hash-ref bindings ref #f)
      =>
      (lambda (entry)
        (define interface (car entry))
@@ -1153,14 +1160,14 @@
           (module-interface-namespace interface)
           (interface-type-export-name export)
           (module-interface-namespace interface)))
-       (define canonical-name (qualified-ref->symbol canonical-ref))
+       (define canonical-name (qualified-type-name canonical-ref))
        (cond
          [(symbol? datum)
           (when (positive? arity)
             (raise-parse-error
              'type-application
              "type ~a expects ~a argument~a, got 0"
-             (qualified-ref->symbol ref)
+             written-name
              arity
              (if (= arity 1) "" "s")))
           (or (interface-type-export-expansion export)
@@ -1172,14 +1179,14 @@
             (raise-parse-error
              'type-application
              "type ~a exported by ~a is not parametric and cannot be applied"
-             (qualified-ref->symbol ref)
+             written-name
              (module-interface-namespace interface)))
           (unless
               (= (length args) arity)
             (raise-parse-error
              'type-application
              "type ~a expects ~a argument~a, got ~a"
-             (qualified-ref->symbol ref)
+             written-name
              arity
              (if (= arity 1) "" "s")
              (length args)))
@@ -1195,7 +1202,7 @@
            "required Beagle module ~a does not export type ~a (referenced as ~a); update the provider and consumer in the same candidate overlay, or fix the annotation"
            (module-interface-namespace provider)
            (qualified-ref-name ref)
-           (qualified-ref->symbol ref))]
+           written-name)]
          [else
          ;; Bootstrap pass: the candidate namespace is known, but its
          ;; canonical interface is not built yet.  Admit an opaque shape so
@@ -1204,9 +1211,9 @@
          ;; proves the exact export before checking/emission.  Canonicalize
          ;; immediately to the provider namespace: otherwise a module that
          ;; re-exports `(defalias A (local/T ...))` leaks its private require
-         ;; prefix into A's public expansion.
+          ;; prefix into A's public expansion.
           (define canonical-name
-            (qualified-ref->symbol
+            (qualified-type-name
              (qualified-ref provider (qualified-ref-name ref) provider)))
           (if (symbol? datum)
               (type-prim canonical-name)
@@ -1234,8 +1241,8 @@
                  ;; otherwise unknown type in the next module.
                  [current-user-parametric-arities (hasheq)]
                  [current-type-aliases (hasheq)]
-                 [current-candidate-type-bindings (make-hasheq)]
-                 [current-candidate-type-prefixes (make-hash)]
+                 [current-candidate-type-bindings (make-hash)]
+                 [current-candidate-type-prefixes (make-hasheq)]
                  [current-qualified-type-resolver
                   resolve-candidate-qualified-type]
                  [current-type-surface-error
@@ -1426,15 +1433,19 @@
     (define namespace (module-interface-namespace interface))
     (define prefixes (current-candidate-type-prefixes))
     (define bindings (current-candidate-type-bindings))
-    (hash-set! prefixes (symbol->string prefix) interface)
-    (hash-set! prefixes (symbol->string namespace) interface)
+    (hash-set! prefixes prefix interface)
+    (hash-set! prefixes namespace interface)
     (for ([(name export)
            (in-hash (module-interface-type-exports interface))])
       (validate-interface-type-export! interface name export)
       (define visible-names
         (interface-spellings interface prefix refer-syms name))
       (for ([visible-name (in-list visible-names)])
-        (hash-set! bindings visible-name (cons interface export))
+        (define visible-ref (lower-qualified-reference visible-name))
+        (when visible-ref (qualified-type-name visible-ref))
+        (hash-set! bindings
+                   (or visible-ref visible-name)
+                   (cons interface export))
         (when (interface-type-export-expansion export)
           (current-type-aliases
            (hash-set (current-type-aliases)
@@ -1676,8 +1687,8 @@
        ;; Bootstrap knows the namespace but has not minted its semantic
        ;; interface yet. Qualified types remain opaque until the next round.
        (define prefixes (current-candidate-type-prefixes))
-       (hash-set! prefixes (symbol->string prefix) rn)
-       (hash-set! prefixes (symbol->string rn) rn)]
+       (hash-set! prefixes prefix rn)
+       (hash-set! prefixes rn rn)]
       [else (void)]))
 
   (define (register-require! rn alias refer-syms)
@@ -1706,8 +1717,8 @@
        (import-interface! interface prefix refer-syms)]
       [candidate
        (define prefixes (current-candidate-type-prefixes))
-       (hash-set! prefixes (symbol->string prefix) rn)
-       (hash-set! prefixes (symbol->string rn) rn)
+       (hash-set! prefixes prefix rn)
+       (hash-set! prefixes rn rn)
        ;; A parse-only bootstrap round may see referred values before their
        ;; interface exists. They are deliberately imprecise and never checked.
        (for ([name (in-list (or refer-syms '()))])

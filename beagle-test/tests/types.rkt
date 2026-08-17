@@ -234,18 +234,25 @@
 
 ;; --- qualified type names ---------------------------------------------------
 
-(test-case "parse qualified type names (mod/Type)"
+(test-case "parse structurally registered qualified type names"
+  (register-qualified-type-name! 'cat/ProductId 'ProductId)
   (define t (parse-type 'cat/ProductId))
   (check-true (type-prim? t))
   (check-eq? (type-prim-name t) 'cat/ProductId))
 
 (test-case "qualified and unqualified scalar types are compatible"
+  (register-qualified-type-name! 'cat/ProductId 'ProductId)
+  (register-qualified-type-name! 'ord/Amount 'Amount)
   (check-true (type-compatible? (type-prim 'cat/ProductId) (type-prim 'ProductId)))
   (check-true (type-compatible? (type-prim 'ProductId) (type-prim 'cat/ProductId)))
   (check-true (type-compatible? (type-prim 'ord/Amount) (type-prim 'Amount)))
   ;; Different base names are NOT compatible
   (check-false (type-compatible? (type-prim 'cat/ProductId) (type-prim 'CategoryId)))
-  (check-false (type-compatible? (type-prim 'ord/Amount) (type-prim 'Timestamp))))
+  (check-false (type-compatible? (type-prim 'ord/Amount) (type-prim 'Timestamp)))
+  ;; types.rkt no longer interprets slash-bearing symbols independently.
+  (check-false
+   (type-compatible? (type-prim 'unregistered/ProductId)
+                     (type-prim 'ProductId))))
 
 ;; --- Promise type ----------------------------------------------------------
 

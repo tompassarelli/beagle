@@ -122,14 +122,21 @@
   (hash-set! TYPE-ALIAS-DISPLAYS type name)
   type)
 
-(define (qualified-type-symbol? value)
-  (and
-   (symbol? value)
-   (let* ([spelling (symbol->string value)]
-          [slash (regexp-match-positions #rx"/" spelling)])
-     (and slash
-          (> (caar slash) 0)
-          (< (cdar slash) (string-length spelling))))))
+;; ast.rkt depends on this module, so types cannot import qualified-ref without
+;; creating a cycle.  The parser records the structural leaf when it renders a
+;; qualified reference into the type AST's established symbol boundary.
+(define QUALIFIED-TYPE-NAME-LEAVES (make-hasheq))
+(define (register-qualified-type-name! qualified-name leaf-name)
+  (unless (symbol? qualified-name)
+    (raise-argument-error 'register-qualified-type-name! "symbol?" qualified-name))
+  (unless (symbol? leaf-name)
+    (raise-argument-error 'register-qualified-type-name! "symbol?" leaf-name))
+  (hash-set! QUALIFIED-TYPE-NAME-LEAVES qualified-name leaf-name)
+  qualified-name)
+
+(define (qualified-type-name? value)
+  (and (symbol? value)
+       (hash-has-key? QUALIFIED-TYPE-NAME-LEAVES value)))
 
 ;; --- parsing types from source datums --------------------------------------
 
@@ -222,7 +229,6 @@
     ;; The resolver proves the provider exports a parametric type, validates
     ;; its arity, and recursively parses its arguments.
     [(and (pair? t)
-          (qualified-type-symbol? (car t))
           ((current-qualified-type-resolver) t))
      => (lambda (resolved) resolved)]
 
@@ -283,8 +289,7 @@
     ;; external qualifiers return #f and retain the legacy uppercase/JVM
     ;; admission below; a qualifier backed by a candidate interface is
     ;; authoritative and therefore fails closed on a missing export.
-    [(and (qualified-type-symbol? t)
-          ((current-qualified-type-resolver) t))
+    [((current-qualified-type-resolver) t)
      => (lambda (resolved) resolved)]
 
     ;; A declared constructor is not a type until all of its parameters are
@@ -322,10 +327,12 @@
      (unless (or (member canonical PRIMITIVES)
                  (and (positive? (string-length s))
                       (char-upper-case? (string-ref s 0)))
-                 (let ([slash (regexp-match-positions #rx"/" s)])
-                   (and slash
-                        (< (cdar slash) (string-length s))
-                        (char-upper-case? (string-ref s (cdar slash)))))
+                 (and (qualified-type-name? canonical)
+                      (let ([leaf
+                             (hash-ref QUALIFIED-TYPE-NAME-LEAVES canonical)])
+                        (define leaf-spelling (symbol->string leaf))
+                        (and (positive? (string-length leaf-spelling))
+                             (char-upper-case? (string-ref leaf-spelling 0)))))
                  ;; JVM fully-qualified class name: a dotted path ending in a
                  ;; capitalized class segment (java.io.FileOutputStream). Admitted
                  ;; as a class nominal (type-prim with the FQCN); resolution against
@@ -359,12 +366,8 @@
 
 ;; --- compatibility ---------------------------------------------------------
 
-(define (unqualify-type-name sym)
-  (define s (symbol->string sym))
-  (define i (regexp-match-positions #rx"/" s))
-  (if i
-      (string->symbol (substring s (cdar i)))
-      sym))
+(define (unqualify-type-name name)
+  (hash-ref QUALIFIED-TYPE-NAME-LEAVES name (lambda () name)))
 
 ;; G2 — structural type equality for INVARIANT positions (the Atom element). Unlike
 ;; type-compatible?, this is symmetric and does NOT treat Any as a wildcard (Any ≡ Any
@@ -1141,6 +1144,7 @@
  current-user-parametric-arities
  current-type-aliases
  current-qualified-type-resolver
+ register-qualified-type-name!
  current-type-surface-error
  register-type-alias-display!
  type?
