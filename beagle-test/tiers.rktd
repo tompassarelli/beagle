@@ -87,6 +87,7 @@
              "license-metadata.rkt"       ; root license files and package metadata stay in sync
              "lsp-effective-signatures.rkt" ; finalized inferred signatures on the public LSP surface
              "macro-hygiene.rkt"
+             "scope-resolve-spike.rkt"
              "parse.rkt"
              "annotation-parse.rkt"   ; structural typed bindings and fixed return slots
              "annotation-printer.rkt" ; glue/no-break/round-trip across all four beagle-source writers

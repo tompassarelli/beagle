@@ -145,15 +145,175 @@
 (struct syntax-quote (datum span scopes origin properties) #:transparent)
 (struct syntax-unquote (child splicing? span scopes origin properties) #:transparent)
 
-(define empty-scope-set (set))
+;; Scope identities are compilation-local and opaque.  The serial is only a
+;; diagnostic aid; stable lexical identity is carried separately by BindingId.
+(struct scope-id (serial kind))
+
+(define scope-counter (make-parameter (box 0)))
+
+(define (fresh-scope-id [kind 'lexical])
+  (unless (symbol? kind)
+    (raise-argument-error 'fresh-scope-id "symbol?" kind))
+  (define counter (scope-counter))
+  (define serial (unbox counter))
+  (set-box! counter (add1 serial))
+  (scope-id serial kind))
+
+(define (scope-id-debug-id value)
+  (unless (scope-id? value)
+    (raise-argument-error 'scope-id-debug-id "scope-id?" value))
+  (scope-id-serial value))
+
+;; ScopeSet is immutable and identity-based.  Two scopes with equal debug
+;; kinds remain distinct keys.
+(define empty-scope-set (seteq))
+
+(define (scope-set? value)
+  (and (set? value)
+       (set-eq? value)
+       (not (set-mutable? value))
+       (for/and ([member (in-set value)])
+         (scope-id? member))))
+
+(define (check-scope-set who value)
+  (unless (scope-set? value)
+    (raise-argument-error who "scope-set?" value)))
+
+(define (check-scope-id who value)
+  (unless (scope-id? value)
+    (raise-argument-error who "scope-id?" value)))
+
+(define (scope-set . scopes)
+  (for/fold ([result empty-scope-set])
+            ([scope (in-list scopes)])
+    (check-scope-id 'scope-set scope)
+    (set-add result scope)))
+
+(define (scope-set-add scopes scope)
+  (check-scope-set 'scope-set-add scopes)
+  (check-scope-id 'scope-set-add scope)
+  (set-add scopes scope))
+
+(define (scope-set-remove scopes scope)
+  (check-scope-set 'scope-set-remove scopes)
+  (check-scope-id 'scope-set-remove scope)
+  (set-remove scopes scope))
+
+(define (scope-set-flip scopes scope)
+  (check-scope-set 'scope-set-flip scopes)
+  (check-scope-id 'scope-set-flip scope)
+  (if (set-member? scopes scope)
+      (set-remove scopes scope)
+      (set-add scopes scope)))
+
+(define (scope-set-member? scopes scope)
+  (check-scope-set 'scope-set-member? scopes)
+  (check-scope-id 'scope-set-member? scope)
+  (set-member? scopes scope))
+
+(define (scope-set-subset? left right)
+  (check-scope-set 'scope-set-subset? left)
+  (check-scope-set 'scope-set-subset? right)
+  (subset? left right))
+
+;; BindingId crosses checked-AST and store boundaries, so unlike ScopeId it is
+;; stable data supplied by the lexical pass (source path plus syntax path).
+(struct binding-id (stable) #:transparent)
+
+(define (make-binding-id stable)
+  (unless (or (string? stable) (symbol? stable))
+    (raise-argument-error 'make-binding-id "(or/c string? symbol?)" stable))
+  (binding-id (if (symbol? stable) (symbol->string stable) stable)))
+
+(struct scope-binding (id name scopes kind)
+  #:transparent
+  #:guard
+  (lambda (id name scopes kind type-name)
+    (unless (binding-id? id)
+      (raise-argument-error type-name "binding-id?" id))
+    (unless (structural-name? name)
+      (raise-argument-error type-name "structural-name?" name))
+    (check-scope-set type-name scopes)
+    (unless (symbol? kind)
+      (raise-argument-error type-name "symbol?" kind))
+    (values id name scopes kind)))
+
+;; Map StructuralName (Map ScopeSet Binding).  The outer equal?-hash is
+;; intentional: separately allocated, structurally equal qualified names share
+;; a bucket without rendering or reparsing provider identity.
+(struct binding-table (by-name) #:transparent)
+
+(define empty-binding-table (binding-table (hash)))
+
+(define (binding-table-bindings-for table name)
+  (unless (binding-table? table)
+    (raise-argument-error
+     'binding-table-bindings-for "binding-table?" table))
+  (hash-values (hash-ref (binding-table-by-name table) name (hash))))
+
+(define (binding-table-add table new-binding)
+  (unless (binding-table? table)
+    (raise-argument-error 'binding-table-add "binding-table?" table))
+  (unless (scope-binding? new-binding)
+    (raise-argument-error 'binding-table-add "scope-binding?" new-binding))
+  (define name (scope-binding-name new-binding))
+  (define scopes (scope-binding-scopes new-binding))
+  (define by-name (binding-table-by-name table))
+  (define by-scopes (hash-ref by-name name (hash)))
+  (when (hash-has-key? by-scopes scopes)
+    (raise-arguments-error
+     'binding-table-add
+     "duplicate binding for the same structural name and scope set"
+     "name" name
+     "scope-count" (set-count scopes)))
+  (binding-table
+   (hash-set by-name name (hash-set by-scopes scopes new-binding))))
+
+(struct resolution-resolved (binding-id) #:transparent)
+(struct resolution-unbound (name) #:transparent)
+(struct resolution-ambiguous (name binding-ids) #:transparent)
+
+(define (proper-scope-subset? left right)
+  (and (subset? left right) (not (set=? left right))))
+
+(define (resolve-scoped-identifier table identifier)
+  (unless (binding-table? table)
+    (raise-argument-error
+     'resolve-scoped-identifier "binding-table?" table))
+  (unless (syntax-ident? identifier)
+    (raise-argument-error
+     'resolve-scoped-identifier "syntax-ident?" identifier))
+  (define name (syntax-ident-name identifier))
+  (define use-scopes (syntax-ident-scopes identifier))
+  (define applicable
+    (filter
+     (lambda (candidate)
+       (subset? (scope-binding-scopes candidate) use-scopes))
+     (binding-table-bindings-for table name)))
+  (define maxima
+    (for/list ([candidate (in-list applicable)]
+               #:unless
+               (for/or ([other (in-list applicable)])
+                 (proper-scope-subset?
+                  (scope-binding-scopes candidate)
+                  (scope-binding-scopes other))))
+      candidate))
+  (cond
+    [(null? maxima) (resolution-unbound name)]
+    [(null? (cdr maxima))
+     (resolution-resolved (scope-binding-id (car maxima)))]
+    [else
+     (resolution-ambiguous
+      name
+      (for/set ([candidate (in-list maxima)])
+        (scope-binding-id candidate)))]))
 
 (define (ensure-syntax-span who value)
   (unless (or (src-loc? value) (not value))
     (raise-argument-error who "(or/c src-loc? #f)" value)))
 
 (define (ensure-syntax-scopes who value)
-  (unless (and (set? value) (not (set-mutable? value)))
-    (raise-argument-error who "immutable-set?" value)))
+  (check-scope-set who value))
 
 (define (ensure-syntax-origin who value)
   (unless (or (expansion-origin? value) (not value))
@@ -1053,7 +1213,18 @@
  (struct-out syntax-vector)
  (struct-out syntax-quote)
  (struct-out syntax-unquote)
+ scope-id? scope-id-kind scope-id-debug-id scope-counter fresh-scope-id
  empty-scope-set
+ scope-set scope-set? scope-set-add scope-set-remove scope-set-flip
+ scope-set-member? scope-set-subset?
+ (struct-out binding-id) make-binding-id
+ (struct-out scope-binding)
+ (struct-out binding-table) empty-binding-table binding-table-add
+ binding-table-bindings-for
+ (struct-out resolution-resolved)
+ (struct-out resolution-unbound)
+ (struct-out resolution-ambiguous)
+ resolve-scoped-identifier
  make-structural-name structural-name->symbol symbol->structural-name
  qualified-ref->structural-name structural-name->qualified-ref
  make-expansion-origin
