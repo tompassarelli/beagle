@@ -24,8 +24,8 @@
                               #:source-path source-path))
   (type-check! prog))
 
-(define (check-mathlib . forms)
-  (define root (make-temporary-file "beagle-check-mathlib-~a" 'directory))
+(define (check-module-fixture . forms)
+  (define root (make-temporary-file "beagle-check-module-fixture-~a" 'directory))
   (dynamic-wind
     void
     (lambda ()
@@ -34,7 +34,9 @@
         (lambda (out)
           (display "#lang beagle/clj\n(ns check.consumer)\n" out)
           (for ([form (in-list forms)])
-            (fprintf out "~s\n" form)))
+            (if (string? form)
+                (fprintf out "~a\n" form)
+                (fprintf out "~s\n" form))))
         #:exists 'truncate/replace)
       (define result
         (check-module-source-closure
@@ -43,7 +45,9 @@
           (list (make-module-source-root-v0 "fixtures" module-fixtures-dir)))
          #:emit? #f))
       (unless (overlay-check-result-ok? result)
-        (error 'check-mathlib "~a" (overlay-check-result-diagnostics result))))
+        (error 'check-module-fixture
+               "~a"
+               (overlay-check-result-diagnostics result))))
     (lambda () (delete-directory/files root))))
 
 (define (br . xs) (cons BRACKET-TAG xs))
@@ -72,6 +76,18 @@
 
 (define-syntax-rule (check-err/source/rx name rx source form ...)
   (test-case name (check-exn rx (lambda () (check-prog/source source form ...)))))
+
+(define-syntax-rule (check-module-ok name form ...)
+  (test-case name
+    (check-not-exn (lambda () (check-module-fixture form ...)))))
+
+(define-syntax-rule (check-module-err name form ...)
+  (test-case name
+    (check-exn exn:fail? (lambda () (check-module-fixture form ...)))))
+
+(define-syntax-rule (check-module-err/rx name rx form ...)
+  (test-case name
+    (check-exn rx (lambda () (check-module-fixture form ...)))))
 
 (define-syntax-rule (check-warns name rx form ...)
   (test-case name
@@ -411,43 +427,32 @@
 ;; Tests — cross-file type imports
 ;; =============================================================================
 
-(define fixture-source
-  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (build-path dir "fixtures" "app.bclj")))
+(check-module-ok "cross-file import: typed defn callable with prefix"
+  '(require mathlib)
+  '(def x Int (mathlib/add 1 2)))
 
-(test-case "cross-file import: typed defn callable with prefix"
-  (check-not-exn
-   (lambda ()
-     (check-mathlib
-      '(require mathlib)
-      '(def x Int (mathlib/add 1 2))))))
+(check-module-ok "cross-file import: typed def accessible with prefix"
+  '(require mathlib)
+  '(def x Float mathlib/pi))
 
-(test-case "cross-file import: typed def accessible with prefix"
-  (check-not-exn
-   (lambda ()
-     (check-mathlib
-      '(require mathlib)
-      '(def x Float mathlib/pi)))))
-
-(check-err/source "cross-file import: type error caught across files" fixture-source
+(check-module-err "cross-file import: type error caught across files"
   '(require mathlib)
   '(def x Int (mathlib/greet "tom")))
 
-(check-err/source "cross-file import: arg type error caught" fixture-source
+(check-module-err "cross-file import: arg type error caught"
   '(require mathlib)
   '(def x Int (mathlib/add "one" 2)))
 
-(check-ok/source "cross-file import with :as alias" fixture-source
+(check-module-ok "cross-file import with :as alias"
   '(require mathlib :as m)
   '(def x Int (m/add 1 2)))
 
-(check-err/source "cross-file import: untyped defn still has arity" fixture-source
+(check-module-err "cross-file import: untyped defn still has arity"
   '(require mathlib)
   '(def x (mathlib/untyped-inc 1 2 3)))
 
-(check-err/source/rx "cross-file import: missing module is rejected"
+(check-module-err/rx "cross-file import: missing module is rejected"
   #rx"required namespace nonexistent\\.module could not be resolved"
-  fixture-source
   '(require nonexistent.module)
   '(def x 42))
 
@@ -455,37 +460,33 @@
 ;; Tests — cross-file defrecord imports
 ;; =============================================================================
 
-(define shapes-fixture-source
-  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (build-path dir "fixtures" "shapes.bclj")))
-
-(check-ok/source "cross-file defrecord: constructor callable with prefix" shapes-fixture-source
+(check-module-ok "cross-file defrecord: constructor callable with prefix"
   '(require shapes)
   '(def c (shapes/->Circle 5)))
 
-(check-ok/source "cross-file defrecord: accessor returns correct type" shapes-fixture-source
+(check-module-ok "cross-file defrecord: accessor returns correct type"
   '(require shapes)
   '(def c (shapes/->Circle 5))
   '(def r Int (shapes/circle-radius c)))
 
-(check-ok/source "cross-file defrecord: multi-field constructor" shapes-fixture-source
+(check-module-ok "cross-file defrecord: multi-field constructor"
   '(require shapes)
   '(def r (shapes/->Rect 10 20)))
 
-(check-ok/source "cross-file defrecord: cross-module function uses imported record" shapes-fixture-source
+(check-module-ok "cross-file defrecord: cross-module function uses imported record"
   '(require shapes)
   '(def c (shapes/->Circle 5))
   '(def a Int (shapes/circle-area c)))
 
-(check-err/source "cross-file defrecord: constructor wrong arg type errors" shapes-fixture-source
+(check-module-err "cross-file defrecord: constructor wrong arg type errors"
   '(require shapes)
   '(def c (shapes/->Circle "five")))
 
-(check-err/source "cross-file defrecord: constructor wrong arity errors" shapes-fixture-source
+(check-module-err "cross-file defrecord: constructor wrong arity errors"
   '(require shapes)
   '(def c (shapes/->Circle 1 2)))
 
-(check-err/source "cross-file defrecord: accessor wrong return type errors" shapes-fixture-source
+(check-module-err "cross-file defrecord: accessor wrong return type errors"
   '(require shapes)
   '(def c (shapes/->Circle 5))
   '(def r String (shapes/circle-radius c)))
@@ -583,7 +584,7 @@
 ;; =============================================================================
 
 (check-ok "try/catch passes type check"
-  '(def x (try (/ 1 0) (catch (e Exception) (str e)))))
+  '(def x Any (try (/ 1 0) (catch (e Exception) (str e)))))
 
 (check-ok "try/catch/finally passes type check"
   '(def x (try (+ 1 1) (catch (e Exception) "err") (finally (println "done")))))
@@ -1108,38 +1109,37 @@
   "result-match-missing.bclj")
 
 ;; Cross-module Result import
-(define result-fixture-source
-  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (build-path dir "fixtures" "result.bclj")))
-
-(check-ok/source "cross-file Result: constructor callable with prefix" result-fixture-source
+(check-module-ok "cross-file Result: constructor callable with prefix"
   '(require result)
   '(def ok-val (result/->Ok 42)))
 
-(check-ok/source "cross-file Result: Err constructor callable" result-fixture-source
+(check-module-ok "cross-file Result: Err constructor callable"
   '(require result)
   '(def err-val (result/->Err "something went wrong")))
 
-(check-ok/source "cross-file Result: accessor returns correct type" result-fixture-source
+(check-module-ok "cross-file Result: accessor returns correct type"
   '(require result)
   '(def e (result/->Err "fail"))
   '(def msg String (result/err-error e)))
 
-(test-case "cross-file Result: exhaustive match on imported union passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source result-fixture-source
-                        `(require result :refer ,(br 'Result))
-                        `(defn handle ,(br (list 'r '(Result String String))) String
-                           (match r
-                             ,(br '(Ok v) "ok")
-                             ,(br '(Err e) 'e)))))))
+(check-module-ok "cross-file Result: exhaustive match on imported union passes"
+  "(require result :as p)"
+  #<<BEAGLE
+(defn handle [(r (p/Result String String))] String
+  (match r
+    [(Ok v) "ok"]
+    [(Err e) e]))
+BEAGLE
+  )
 
-(check-err/source "cross-file Result: non-exhaustive match on imported union errors" result-fixture-source
-  `(require result :refer ,(br 'Result))
-  `(defn handle ,(br (list 'r '(Result String String))) String
-     (match r
-       ,(br '(Ok v) "ok"))))
+(check-module-err "cross-file Result: non-exhaustive match on imported union errors"
+  "(require result :as p)"
+  #<<BEAGLE
+(defn handle [(r (p/Result String String))] String
+  (match r
+    [(Ok v) "ok"]))
+BEAGLE
+  )
 
 ;; =============================================================================
 ;; Tests — defscalar (fixtures)
