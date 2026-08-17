@@ -61,7 +61,7 @@
      (kind bash-array)
      (source "web/bin/wake-compile")
      (array-name "modules")
-     (template "web/compiler/{}.bjs")
+     (template "web/wake/{}.bjs")
      (shape-markers ("modules=("))))))
 
  (consumer
