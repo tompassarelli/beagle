@@ -909,14 +909,26 @@
 
 ;; binding-name -> rep tag (set at let/param scopes); default 'native
 (define current-rep-env (make-parameter (hasheq)))
-(define (rep-of-binding sym) (hash-ref (current-rep-env) sym 'native))
+(define (binding-env-ref env name fallback)
+  (if (resolved-ref? name)
+      (hash-ref
+       env
+       (resolved-ref-binding-id name)
+       (lambda ()
+         (hash-ref env
+                   (structural-name->symbol (resolved-ref-name name))
+                   fallback)))
+      (hash-ref env name fallback)))
+(define (rep-of-binding name)
+  (binding-env-ref (current-rep-env) name 'native))
 
 ;; binding-name -> declared/inferred TYPE (set at let/param scopes). Resolves the
 ;; var-ref type gap: a bare symbol is excluded from the per-node type table
 ;; (interned-leaf), so a var used as a key/elem arg has no node-type — this env
 ;; supplies it from the param `:-` annotation or the let value's inferred type.
 (define current-type-env (make-parameter (hasheq)))
-(define (type-of-binding sym) (hash-ref (current-type-env) sym #f))
+(define (type-of-binding name)
+  (binding-env-ref (current-type-env) name #f))
 
 ;; Type of an argument NODE. Scalar LITERALS are interned leaves excluded from the
 ;; per-node type table, so resolve them by datum form (a keyword literal `:b` is a
@@ -972,7 +984,7 @@
 ;; other typed expr -> its type's read-rep.
 (define (classify-rep e)
   (cond
-    [(symbol? e)
+    [(or (symbol? e) (resolved-ref? e))
      (define re (rep-of-binding e))
      (if (eq? re 'native) (type-read-rep (type-of-binding e)) re)]
     [(and (map-form? e) (null? (map-form-pairs e))) 'native] ; empty map: assoc coerces if upgraded
@@ -2318,9 +2330,10 @@
          (define rename-env*
            (if constrained-loop?
                (for/fold ([next rename-env]) ([name (in-list names)])
-                 (hash-set next name
-                           (format "$beagle$loop$~a$~a"
-                                   i (mangle-name name))))
+                 (rename-env-set-binder
+                  next binding name
+                  (format "$beagle$loop$~a$~a"
+                          i (mangle-name name))))
                rename-env))
          (values (append rename-envs (list rename-env))
                  (append bound-envs (list bound))
@@ -2359,9 +2372,10 @@
                      (set-union bound (list->set names)))
                    (define rename-env*
                      (for/fold ([next rename-env]) ([name (in-list names)])
-                       (hash-set next name
-                                 (format "$beagle$loop$init$~a$~a"
-                                         i (mangle-name name)))))
+                       (rename-env-set-binder
+                        next binding name
+                        (format "$beagle$loop$init$~a$~a"
+                                i (mangle-name name)))))
                    (define target (let-binding-name binding))
                    (define installs
                      (parameterize ([current-js-bound bound*]
@@ -2436,9 +2450,10 @@
                       (set-union bound (list->set names)))
                     (define rename-env*
                       (for/fold ([next rename-env]) ([name (in-list names)])
-                        (hash-set next name
-                                  (format "$beagle$recur$~a$~a"
-                                          i (mangle-name name)))))
+                        (rename-env-set-binder
+                         next binding name
+                         (format "$beagle$recur$~a$~a"
+                                 i (mangle-name name)))))
                     (define-values (type-env* rep-env*)
                       (extend-binding-type-envs
                        (list (let-binding-name binding)) type-env rep-env))
@@ -3229,8 +3244,8 @@
   (define names (names-from-binding-target binding))
   (define rename-env*
     (for/fold ([next rename-env]) ([name (in-list names)])
-      (hash-set
-       next name
+      (rename-env-set-binder
+       next binding name
        (if (binding-constraint binding)
            (format "$beagle$~a$~a$~a" prefix index (mangle-name name))
            (mangle-name name)))))
