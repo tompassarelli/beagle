@@ -34,15 +34,46 @@
   (file-or-directory-permissions path #o755))
 
 (define base-fixture #f)
-(define phase-filter
-  (let ([raw (getenv "BEAGLE_WASM_TEST_PHASES")])
+
+;; --- phases, and the shard contract with the tier runner --------------------
+;;
+;; This file runs several minutes where every other active-tier file finishes
+;; in well under one, so the tier runner schedules each `phase-test` block
+;; below as its OWN gate unit and selects it through BEAGLE_WASM_TEST_PHASES.
+;; That is only sound while the union of the per-phase runs equals exactly what
+;; an unfiltered run asserts, and two directions of that are checkable only
+;; here, because only this module knows which phases actually exist:
+;;
+;;   - every SELECTED phase must exist. A stale or misspelled name would
+;;     otherwise select nothing and report a green that ran no test at all.
+;;   - when the runner declares the phase set it scheduled (via
+;;     BEAGLE_WASM_TEST_EXPECT_PHASES), the registry built below must equal it.
+;;     A phase-test the runner's static scan cannot see — nested inside another
+;;     form, or named by a computed string — would otherwise be covered by no
+;;     unit. Both are enforced by the last form in this module, once every
+;;     phase-test has registered.
+;;
+;; Names are NEWLINE-separated, not comma-separated: a phase name may contain a
+;; comma, and one below does.
+
+(define (env-phase-names name)
+  (let ([raw (getenv name)])
     (and raw (filter (lambda (item) (not (string=? item "")))
-                     (string-split raw ",")))))
+                     (string-split raw "\n")))))
+
+(define phase-filter (env-phase-names "BEAGLE_WASM_TEST_PHASES"))
+(define expected-phases (env-phase-names "BEAGLE_WASM_TEST_EXPECT_PHASES"))
+
+(define registered-phases '())          ; reverse registration order
 
 (define (selected-phase? name)
-  (or (not phase-filter) (member name phase-filter)))
+  (or (not phase-filter) (and (member name phase-filter) #t)))
 
 (define (phase-test name thunk)
+  (when (member name registered-phases)
+    (error 'wasm-materializer-test
+           "duplicate phase name — a phase name is its scheduling id: ~s" name))
+  (set! registered-phases (cons name registered-phases))
   (when (selected-phase? name)
     (eprintf "wasm-materializer-test: phase ~a START\n" name)
     (flush-output (current-error-port))
@@ -1562,3 +1593,29 @@ JS
       (lambda () (delete-directory/files scratch)))]))
 
 )
+
+;; --- shard coverage --------------------------------------------------------
+;; The last form in the module: every phase-test above has registered by now,
+;; so `registered-phases` is this file's authoritative phase list. Both
+;; failures below raise rather than assert, so a shard that covers nothing
+;; cannot be mistaken for a shard that passed, and neither adds an assertion to
+;; the count the union has to match.
+(let ([phases (reverse registered-phases)])
+  (when phase-filter
+    (let ([unknown (filter (lambda (n) (not (member n phases))) phase-filter)])
+      (unless (null? unknown)
+        (error 'wasm-materializer-test
+               "BEAGLE_WASM_TEST_PHASES selects ~a phase(s) this file does not define: ~s"
+               (length unknown) unknown))))
+  (when expected-phases
+    (let ([unscheduled (filter (lambda (n) (not (member n expected-phases))) phases)]
+          [phantom (filter (lambda (n) (not (member n phases))) expected-phases)])
+      (unless (and (null? unscheduled)
+                   (null? phantom)
+                   (= (length phases) (length expected-phases)))
+        (error 'wasm-materializer-test
+               (string-append
+                "phase coverage mismatch — this file defines ~a phase(s) and the"
+                " runner scheduled ~a. Defined but unscheduled: ~s."
+                " Scheduled but undefined: ~s.")
+               (length phases) (length expected-phases) unscheduled phantom)))))
