@@ -236,6 +236,22 @@
   (string->symbol
    (string-append (symbol->string prefix-sym) "/" (symbol->string name-sym))))
 
+;; The sole source-token decomposition for semantic qualified references.
+;; Reader data remains ordinary symbols so quote and macro data stay literal;
+;; expression/type/pattern parsing calls this at the first semantic boundary.
+(define (lower-qualified-reference sym)
+  (and (symbol? sym)
+       (not (keyword-sym? sym))
+       (let* ([spelling (symbol->string sym)]
+              [slash (regexp-match-positions #rx"/" spelling)])
+         (and slash
+              (positive? (caar slash))
+              (< (cdar slash) (string-length spelling))
+              (qualified-ref
+               (string->symbol (substring spelling 0 (caar slash)))
+               (string->symbol (substring spelling (cdar slash)))
+               #f)))))
+
 (define (strip-target-export d)
   (match d
     [(list (or 'js/export 'js/export-default) inner) (strip-target-export inner)]
@@ -1113,47 +1129,38 @@
 
 (define (qualified-type-head datum)
   (cond
-    [(symbol? datum) datum]
-    [(and (pair? datum) (symbol? (car datum))) (car datum)]
+    [(symbol? datum) (lower-qualified-reference datum)]
+    [(and (pair? datum) (symbol? (car datum)))
+     (lower-qualified-reference (car datum))]
     [else #f]))
 
-(define (qualified-type-prefix name)
-  (and
-   name
-   (let* ([spelling (symbol->string name)]
-          [slash (regexp-match-positions #rx"/" spelling)])
-     (and slash (substring spelling 0 (caar slash))))))
-
-(define (qualified-type-member name)
-  (define spelling (symbol->string name))
-  (define slash (regexp-match-positions #rx"/" spelling))
-  (and slash
-       (string->symbol (substring spelling (cdar slash)))))
-
 (define (resolve-candidate-qualified-type datum)
-  (define name (qualified-type-head datum))
-  (define prefix (qualified-type-prefix name))
+  (define ref (qualified-type-head datum))
+  (define prefix
+    (and ref (symbol->string (qualified-ref-qualifier ref))))
   (define bindings (current-candidate-type-bindings))
   (define prefixes (current-candidate-type-prefixes))
   (cond
-    [(or (not name) (not prefix) (not bindings) (not prefixes)) #f]
-    [(hash-ref bindings name #f)
+    [(or (not ref) (not prefix) (not bindings) (not prefixes)) #f]
+    [(hash-ref bindings (qualified-ref->symbol ref) #f)
      =>
      (lambda (entry)
        (define interface (car entry))
        (define export (cdr entry))
        (define arity (interface-type-export-arity export))
-       (define canonical-name
-         (qualify-name
+       (define canonical-ref
+         (qualified-ref
           (module-interface-namespace interface)
-          (interface-type-export-name export)))
+          (interface-type-export-name export)
+          (module-interface-namespace interface)))
+       (define canonical-name (qualified-ref->symbol canonical-ref))
        (cond
          [(symbol? datum)
           (when (positive? arity)
             (raise-parse-error
              'type-application
              "type ~a expects ~a argument~a, got 0"
-             name
+             (qualified-ref->symbol ref)
              arity
              (if (= arity 1) "" "s")))
           (or (interface-type-export-expansion export)
@@ -1165,14 +1172,14 @@
             (raise-parse-error
              'type-application
              "type ~a exported by ~a is not parametric and cannot be applied"
-             name
+             (qualified-ref->symbol ref)
              (module-interface-namespace interface)))
           (unless
               (= (length args) arity)
             (raise-parse-error
              'type-application
              "type ~a expects ~a argument~a, got ~a"
-             name
+             (qualified-ref->symbol ref)
              arity
              (if (= arity 1) "" "s")
              (length args)))
@@ -1187,8 +1194,8 @@
            'missing-type-export
            "required Beagle module ~a does not export type ~a (referenced as ~a); update the provider and consumer in the same candidate overlay, or fix the annotation"
            (module-interface-namespace provider)
-           (qualified-type-member name)
-           name)]
+           (qualified-ref-name ref)
+           (qualified-ref->symbol ref))]
          [else
          ;; Bootstrap pass: the candidate namespace is known, but its
          ;; canonical interface is not built yet.  Admit an opaque shape so
@@ -1199,7 +1206,8 @@
          ;; re-exports `(defalias A (local/T ...))` leaks its private require
          ;; prefix into A's public expansion.
           (define canonical-name
-            (qualify-name provider (qualified-type-member name)))
+            (qualified-ref->symbol
+             (qualified-ref provider (qualified-ref-name ref) provider)))
           (if (symbol? datum)
               (type-prim canonical-name)
               (type-app
@@ -2182,7 +2190,7 @@
      (parse-expr (list 'deref (string->symbol (substring (symbol->string d) 1))))]
     [(symbol? d)
      (validate-identifier! d)
-     d]
+     (or (lower-qualified-reference d) d)]
     [(and (pair? d) (eq? (car d) '#%regex) (= (length d) 2) (string? (cadr d)))
      (regex-lit (cadr d))]
     [(bracketed? d)
@@ -2565,7 +2573,7 @@
   (define subs (stx-subs form))
   (if (and (pair? d) (memq (car d) JS-RECEIVER-THREAD-HEADS))
       (store-src!
-       (call-form (car d)
+       (call-form (or (lower-qualified-reference (car d)) (car d))
                   (map parse-expr (or (stx-tail subs 1) (cdr d))))
        (and (syntax? form) (stx->src-loc form)))
       (parse-expr form)))
@@ -4297,9 +4305,6 @@
      (method-call m (parse-expr (or (stx-ref subs 1) target))
                     (map parse-expr (or (stx-tail subs 2) args)))]
 
-    [(list (? static-method-sym? cm) args ...)
-     (static-call cm (map parse-expr (or (stx-tail subs 1) args)))]
-
     ;; `fmt` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; Clojure threading family — all parse-time rewrites to ordinary
@@ -4434,7 +4439,11 @@
 
     [(list (? symbol? f) args ...)
      (validate-identifier! f "call target")
-     (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
+     (define ref (lower-qualified-reference f))
+     (define parsed-args (map parse-expr (or (stx-tail subs 1) args)))
+     (if (and ref (static-method-ref? ref))
+         (static-call ref parsed-args)
+         (call-form (or ref f) parsed-args))]
 
     ;; Higher-order call: function position is an expression, not a
     ;; bare symbol. Common in Nix where `(get target :attr)` returns
@@ -4729,14 +4738,22 @@
                 (map parse-expr (cdr items))))
 
 (define (record-pattern-name? value)
-  (and (symbol? value)
-       (let* ([spelling (symbol->string value)]
-              [local-name (last (string-split spelling "/"))])
-         (and (positive? (string-length local-name))
-              (char-upper-case? (string-ref local-name 0))))))
+  (define name
+    (cond
+      [(qualified-ref? value) (qualified-ref-name value)]
+      [(symbol? value) value]
+      [else #f]))
+  (and name
+       (let ([spelling (symbol->string name)])
+         (and (positive? (string-length spelling))
+              (char-upper-case? (string-ref spelling 0))))))
 
 (define (parse-pattern p)
   (define d (if (syntax? p) (syntax->datum p) p))
+  (define record-head
+    (and (pair? d)
+         (symbol? (car d))
+         (or (lower-qualified-reference (car d)) (car d))))
   (cond
     [(eq? d '_)         (pat-wildcard)]
     [(eq? d 'nil)       (pat-literal 'nil)]
@@ -4754,8 +4771,8 @@
      (when (null? (cdr d))
        (error 'beagle "or-pattern requires at least one alternative"))
      (pat-or (map parse-pattern (cdr d)))]
-    [(and (pair? d) (record-pattern-name? (car d)))
-     (pat-record (car d) (cdr d))]
+    [(and record-head (record-pattern-name? record-head))
+     (pat-record record-head (cdr d))]
     [(symbol? d)        (pat-var d)]
     [else (error 'beagle "unsupported match pattern: ~v" d)]))
 

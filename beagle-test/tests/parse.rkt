@@ -890,13 +890,34 @@
 (test-case "static method call parses as static-call"
   (define f (car (parse-one '(System/getProperty "user.home"))))
   (check-true (static-call? f))
-  (check-eq? (static-call-class+method f) 'System/getProperty)
+  (define ref (static-call-class+method f))
+  (check-true (qualified-ref? ref))
+  (check-eq? (qualified-ref-qualifier ref) 'System)
+  (check-eq? (qualified-ref-name ref) 'getProperty)
+  (check-false (qualified-ref-provider-id ref))
   (check-equal? (length (static-call-args f)) 1))
 
 (test-case "require-alias call stays as call-form"
   (define f (car (parse-one '(str/upper-case "hi"))))
   (check-true (call-form? f))
-  (check-eq? (call-form-fn f) 'str/upper-case))
+  (define ref (call-form-fn f))
+  (check-true (qualified-ref? ref))
+  (check-eq? (qualified-ref-qualifier ref) 'str)
+  (check-eq? (qualified-ref-name ref) 'upper-case)
+  (check-eq? (qualified-ref->symbol ref) 'str/upper-case))
+
+(test-case "qualified reference lowers once and preserves odd leaf characters"
+  (define ref (car (parse-one 'odd.ns/->thing?!)))
+  (check-true (qualified-ref? ref))
+  (check-eq? (qualified-ref-qualifier ref) 'odd.ns)
+  (check-eq? (qualified-ref-name ref) '->thing?!)
+  (check-false (qualified-ref-provider-id ref))
+  (check-false (qualified-ref? (qualified-ref-name ref))))
+
+(test-case "quoted qualified symbol remains literal data"
+  (define value (car (parse-one '(quote odd.ns/->thing?!))))
+  (check-true (quoted? value))
+  (check-eq? (quoted-datum value) 'odd.ns/->thing?!))
 
 (test-case "dynamic var parses as dynamic-var"
   (define f (car (parse-one '*command-line-args*)))
@@ -1145,6 +1166,16 @@
 (parse-err/rx "or-pattern with zero alternatives errors"
   #rx"or-pattern requires at least one"
   `(match x ,(br '(or) "x")))
+
+(test-case "qualified record pattern consumes structural type name"
+  (define f (car (parse-one `(match value
+                              ,(br '(models/Widget item) 'item)))))
+  (define pat (match-clause-pattern (car (match-form-clauses f))))
+  (check-true (pat-record? pat))
+  (define ref (pat-record-type-name pat))
+  (check-true (qualified-ref? ref))
+  (check-eq? (qualified-ref-qualifier ref) 'models)
+  (check-eq? (qualified-ref-name ref) 'Widget))
 
 ;; --- defprotocol -----------------------------------------------------------
 

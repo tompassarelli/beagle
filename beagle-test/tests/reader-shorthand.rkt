@@ -7,7 +7,8 @@
 ;; not disturb.
 
 (require rackunit
-         beagle/lang/reader-impl)
+         beagle/lang/reader-impl
+         (only-in beagle/private/tags MAP-TAG SET-TAG))
 
 (define (rd s) (beagle-read (open-input-string s)))
 
@@ -48,6 +49,15 @@
 (test-case "#?() reader conditional still reads"
   (check-equal? (rd "#?(:clj 1 :nix 2)")
                 '(reader-conditional :clj 1 :nix 2)))
+
+(test-case "reader leaves qualified symbols intact for semantic parse lowering"
+  (check-eq? (rd "odd.ns/->thing?!") 'odd.ns/->thing?!))
+
+(test-case "well-known map and set tags remain phase-stable symbols"
+  (check-eq? (car (rd "{}")) MAP-TAG)
+  (check-eq? (car (rd "#{}")) SET-TAG)
+  (check-eq? MAP-TAG '#%map)
+  (check-eq? SET-TAG '#%set))
 
 ;; --- ^ metadata reader (added for dynamic vars) --------------------------
 ;; `^META FORM` → (#%meta META FORM), matching Clojure's metadata reader.

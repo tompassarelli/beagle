@@ -295,19 +295,12 @@
          (and (> (string-length s) 1)
               (char=? (string-ref s 0) #\.)))))
 
-(define (static-method-sym? sym)
-  (and (symbol? sym)
-       (let ([s (symbol->string sym)])
-         (define slash-pos
-           (let loop ([i 0])
-             (cond [(= i (string-length s)) #f]
-                   [(char=? (string-ref s i) #\/) i]
-                   [else (loop (+ i 1))])))
-         (and slash-pos
-              (> slash-pos 0)
-              (< (+ slash-pos 1) (string-length s))
-              (or (char-upper-case? (string-ref s 0))
-                  (string=? (substring s 0 (min 3 (string-length s))) "js/"))))))
+(define (static-method-ref? ref)
+  (and (qualified-ref? ref)
+       (let ([qualifier (symbol->string (qualified-ref-qualifier ref))])
+         (and (positive? (string-length qualifier))
+              (or (char-upper-case? (string-ref qualifier 0))
+                  (string=? qualifier "js"))))))
 
 (define (dynamic-var-sym? sym)
   (and (symbol? sym)
@@ -688,7 +681,7 @@
  program-returns-synchronous-callable-table
  program-returns-synchronous-callable?
  ;; Symbol predicates
- dot-method-sym? static-method-sym? dynamic-var-sym? constructor-sym? keyword-sym?
+ dot-method-sym? static-method-ref? dynamic-var-sym? constructor-sym? keyword-sym?
  ;; Parse injection
  current-parse-expr current-parse-params
  ;; Constants
