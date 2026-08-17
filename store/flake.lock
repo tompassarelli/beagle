@@ -11,19 +11,14 @@
         ]
       },
       "locked": {
-        "lastModified": 1786802785,
-        "narHash": "sha256-1NhkDpjnU/jrQpJuzvgBwM6Xt3RftU9wWgMjqJSFe7s=",
-        "owner": "tompassarelli",
-        "repo": "beagle",
-        "rev": "b4f3081420a3be73d730802d2f4608d78d0c6cf4",
-        "type": "github"
+        "path": "..",
+        "type": "path"
       },
       "original": {
-        "owner": "tompassarelli",
-        "repo": "beagle",
-        "rev": "b4f3081420a3be73d730802d2f4608d78d0c6cf4",
-        "type": "github"
-      }
+        "path": "..",
+        "type": "path"
+      },
+      "parent": []
     },
     "clj-nix": {
       "inputs": {

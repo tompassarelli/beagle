@@ -10,10 +10,10 @@
     clj-nix.url = "github:jlesquembre/clj-nix/2b1290ee56e9bbd50e9b5874c985d34ad2f1b458";
     clj-nix.inputs.nixpkgs.follows = "nixpkgs";
 
-    # Graph-edit authoring is sealed against one published Beagle source. Its
+    # Graph-edit authoring is sealed against this checkout's parent Beagle source. Its
     # nixpkgs follows this flake so the packaged .zo files and the Racket that
     # loads them are built from the exact same package set.
-    beagle.url = "github:tompassarelli/beagle/b4f3081420a3be73d730802d2f4608d78d0c6cf4";
+    beagle.url = "path:..";
     beagle.inputs.clj-nix.follows = "clj-nix";
     beagle.inputs.nixpkgs.follows = "nixpkgs";
   };
