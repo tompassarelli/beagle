@@ -271,6 +271,23 @@
   (define table (program-returns-synchronous-callable-table prog))
   (if table (hash-ref table name fallback) fallback))
 
+;; --- qualified references -------------------------------------------------
+
+;; Authored qualification stays distinct from resolver identity: QUALIFIER is
+;; the source spelling, NAME is the leaf, and PROVIDER-ID is #f until the
+;; resolver attaches the canonical provider identity.
+(struct qualified-ref (qualifier name provider-id) #:transparent)
+
+;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
+;; Unconverted consumers call this only at their legacy-symbol boundary.
+(define (qualified-ref->symbol ref)
+  (unless (qualified-ref? ref)
+    (raise-argument-error 'qualified-ref->symbol "qualified-ref?" ref))
+  (string->symbol
+   (string-append (symbol->string (qualified-ref-qualifier ref))
+                  "/"
+                  (symbol->string (qualified-ref-name ref)))))
+
 ;; --- symbol predicates -----------------------------------------------------
 (define (dot-method-sym? sym)
   (and (symbol? sym)
@@ -677,6 +694,7 @@
  ;; Constants
  DEFAULT-TARGET DEFAULT-NAMESPACE
  ;; Core AST
+ (struct-out qualified-ref) qualified-ref->symbol
  (struct-out ns-decl)
  (struct-out def-form) (struct-out defn-form) (struct-out fn-form)
  (struct-out let-form) (struct-out binding-form) (struct-out if-form) (struct-out cond-form) (struct-out cond-clause)
