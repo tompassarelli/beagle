@@ -39,9 +39,24 @@ BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BEAGLE_TEST_SUPERVISOR="$BEAGLE_ROOT/native-core/bin/run-bounded.rkt"
 BEAGLE_TEST_LOG_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/beagle-test-phase.XXXXXX")"
 BEAGLE_TEST_KEEP_LOGS=0
+BEAGLE_TEST_SHARD_PIDS=()
+
+beagle_test_stop_shards() {
+    local pid
+    for pid in "${BEAGLE_TEST_SHARD_PIDS[@]:-}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
+    for pid in "${BEAGLE_TEST_SHARD_PIDS[@]:-}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+    BEAGLE_TEST_SHARD_PIDS=()
+}
 
 beagle_test_cleanup() {
     local status=$?
+    beagle_test_stop_shards
     if [[ "$BEAGLE_TEST_KEEP_LOGS" == 1 ]]; then
         echo "beagle-test: preserved phase logs at $BEAGLE_TEST_LOG_ROOT" >&2
     else
@@ -90,6 +105,124 @@ run_beagle_test_phase() {
     return "$status"
 }
 
+run_beagle_test_shards() {
+    local deadline="$1"
+    shift
+    local runner="$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt"
+    local worker_root="$BEAGLE_TEST_LOG_ROOT/tier-workers"
+    local workers count_status i pid completed_pid status receipt expected
+    local aggregate_log merge_status tee_status terminal_status started_seconds wall_seconds
+    local -a live next_live pipeline_status
+    local -A worker_by_pid
+
+    mkdir -p "$worker_root"
+    set +e
+    workers="$("$RACKET" "$runner" "$@" --print-worker-count)"
+    count_status=$?
+    set -e
+    if [[ "$count_status" -ne 0 || ! "$workers" =~ ^[1-9][0-9]*$ ]]; then
+        BEAGLE_TEST_KEEP_LOGS=1
+        echo "beagle-test: tier-runner worker-count resolution failed" >&2
+        return 2
+    fi
+
+    started_seconds=$SECONDS
+    echo "beagle-test: phase tier-runner START deadline=${deadline}s workers=$workers" >&2
+    for ((i = 0; i < workers; i++)); do
+        local log="$worker_root/worker-$i.log"
+        local result="$worker_root/worker-$i.rktd"
+        local shard_receipt="$worker_root/worker-$i.receipt"
+        rm -f "$result" "$shard_receipt"
+        echo "beagle-test: shard tier-runner[$i/$workers] START deadline=${deadline}s log=$log receipt=$shard_receipt" >&2
+        BEAGLE_BOUNDED_COMPLETION_RECEIPT="$shard_receipt" \
+            "$RACKET" "$BEAGLE_TEST_SUPERVISOR" "$deadline" 5 -- \
+            "$RACKET" "$runner" "$@" \
+            --worker-shard "$i/$workers" --worker-result "$result" \
+            >"$log" 2>&1 &
+        pid=$!
+        BEAGLE_TEST_SHARD_PIDS+=("$pid")
+        live+=("$pid")
+        worker_by_pid["$pid"]="$i"
+    done
+
+    terminal_status=0
+    while ((${#live[@]} > 0)); do
+        completed_pid=""
+        set +e
+        wait -n -p completed_pid "${live[@]}"
+        status=$?
+        set -e
+        if [[ -z "$completed_pid" || -z "${worker_by_pid[$completed_pid]+set}" ]]; then
+            terminal_status=2
+            echo "beagle-test: shard supervisor wait contract failed" >&2
+            break
+        fi
+        i="${worker_by_pid[$completed_pid]}"
+        next_live=()
+        for pid in "${live[@]}"; do
+            [[ "$pid" == "$completed_pid" ]] || next_live+=("$pid")
+        done
+        live=("${next_live[@]}")
+
+        receipt=""
+        [[ -f "$worker_root/worker-$i.receipt" ]] && \
+            receipt="$(<"$worker_root/worker-$i.receipt")"
+        if [[ "$status" -eq 124 ]]; then
+            expected="subtree-reaped-v0 timeout status=124"
+        else
+            expected="subtree-reaped-v0 exit status=$status"
+        fi
+        if [[ "$receipt" != "$expected" ]]; then
+            echo "beagle-test: shard tier-runner[$i/$workers] receipt mismatch status=$status receipt=${receipt:-missing}" >&2
+            status=2
+        fi
+
+        if [[ "$status" -eq 0 ]]; then
+            echo "beagle-test: shard tier-runner[$i/$workers] END status=0" >&2
+        elif [[ "$status" -eq 1 && -f "$worker_root/worker-$i.rktd" ]]; then
+            echo "beagle-test: shard tier-runner[$i/$workers] END status=1 (test failure recorded for merge)" >&2
+        elif [[ "$status" -eq 124 ]]; then
+            echo "beagle-test: shard tier-runner[$i/$workers] TIMEOUT status=124" >&2
+            terminal_status=124
+        else
+            echo "beagle-test: shard tier-runner[$i/$workers] FAILED status=$status" >&2
+            [[ "$terminal_status" -eq 124 ]] || terminal_status="$status"
+        fi
+    done
+
+    if [[ "$terminal_status" -ne 0 ]]; then
+        BEAGLE_TEST_KEEP_LOGS=1
+        beagle_test_stop_shards
+        for ((i = 0; i < workers; i++)); do
+            if [[ ! -f "$worker_root/worker-$i.rktd" && -s "$worker_root/worker-$i.log" ]]; then
+                sed "s/^/  [shard $i] /" "$worker_root/worker-$i.log" >&2
+            fi
+        done
+        wall_seconds=$((SECONDS - started_seconds))
+        echo "beagle-test: phase tier-runner FAILED status=$terminal_status wall=${wall_seconds}s; stopping gate" >&2
+        return "$terminal_status"
+    fi
+    BEAGLE_TEST_SHARD_PIDS=()
+
+    aggregate_log="$BEAGLE_TEST_LOG_ROOT/tier-runner.log"
+    set +e
+    "$RACKET" "$runner" "$@" --merge-worker-results "$worker_root" 2>&1 |
+        tee "$aggregate_log"
+    pipeline_status=("${PIPESTATUS[@]}")
+    merge_status="${pipeline_status[0]}"
+    tee_status="${pipeline_status[1]}"
+    set -e
+    [[ "$tee_status" -eq 0 ]] || merge_status="$tee_status"
+    wall_seconds=$((SECONDS - started_seconds))
+    if [[ "$merge_status" -eq 0 ]]; then
+        echo "beagle-test: phase tier-runner END status=0 wall=${wall_seconds}s" >&2
+    else
+        BEAGLE_TEST_KEEP_LOGS=1
+        echo "beagle-test: phase tier-runner FAILED status=$merge_status wall=${wall_seconds}s; stopping gate" >&2
+    fi
+    return "$merge_status"
+}
+
 # A deterministic, opt-in probe for the release-bar timeout contract. It is
 # not part of any normal tier; it leaves the child PID in the preserved log
 # directory so a caller can prove that the supervisor reaped it.
@@ -110,5 +243,4 @@ run_beagle_test_phase "qualified-ref-scaffold" 2 \
     "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit 1
 run_beagle_test_phase "consumer-smoke" 100 \
     "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit 1
-run_beagle_test_phase "tier-runner" 420 \
-    "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt" "$@" || exit 1
+run_beagle_test_shards 420 "$@" || exit $?
