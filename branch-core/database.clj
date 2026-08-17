@@ -1140,6 +1140,236 @@
                 {:path path :lock (writer-authority/authority-path path)}))))
    [] paths))
 
+(def ^:private retention-root-kinds
+  {:pin "pins" :checkpoint "checkpoints" :session "sessions"})
+
+(defn- require-retention-root-kind! [kind]
+  (if-let [directory (get retention-root-kinds kind)]
+    directory
+    (fail! :invalid-retention-root-kind
+           "retention root kind must be :pin, :checkpoint, or :session"
+           {:kind kind})))
+
+(defn- require-retention-root-name! [root-name]
+  (if (and (string? root-name) (branch/valid-branch-name? root-name))
+    root-name
+    (fail! :invalid-retention-root-name
+           "retention root name is not a usable durable file name"
+           {:name root-name})))
+
+(defn- retention-roots-directory [store]
+  (str store ".roots"))
+
+(defn- retention-kind-directory [store kind]
+  (str (retention-roots-directory store) "/"
+       (require-retention-root-kind! kind)))
+
+(defn- retention-root-path [store kind root-name]
+  (str (retention-kind-directory store kind) "/"
+       (require-retention-root-name! root-name)))
+
+(defn- directory-entries! [path label]
+  (let [directory (java.io.File. (str path))]
+    (cond
+      (not (.exists directory)) []
+      (not (.isDirectory directory))
+      (fail! :invalid-retention-layout
+             (str label " is not a directory")
+             {:path (.getPath directory)})
+      :else
+      (let [entries (.listFiles directory)]
+        (when (nil? entries)
+          (fail! :retention-io-failure
+                 (str label " could not be enumerated")
+                 {:path (.getPath directory)}))
+        (vec entries)))))
+
+(defn- regular-document-files! [path label]
+  (let [entries (directory-entries! path label)]
+    (doseq [^java.io.File entry entries]
+      (when-not (.isFile entry)
+        (fail! :invalid-retention-layout
+               (str label " contains a non-document entry")
+               {:path (.getPath entry)})))
+    (vec (sort-by #(.getName ^java.io.File %) entries))))
+
+(defn- read-ref-document-file! [^java.io.File file label]
+  (branch/parse-ref
+   (strict-utf8-string (java.nio.file.Files/readAllBytes (.toPath file))
+                       label)))
+
+(defn- require-sealed-document! [store store-space source document]
+  (when-not (= store-space (branch/refdocument-space-id document))
+    (fail! :space-mismatch
+           "retention root belongs to a different SpaceId"
+           {:path source :expected store-space
+            :actual (branch/refdocument-space-id document)}))
+  (loop [index 0 expected-next 1
+         segments (branch/refdocument-segments document)]
+    (when-let [segment (first segments)]
+      (let [segment-source
+            (read-chain-source!
+             (branch/segment-path
+              store (branch/segmentrecord-sha256 segment)) true)
+            member (:member segment-source)
+            fault
+            (chain-rules/sealed-member-fault
+             index store-space (branch/chainmember-space-id member)
+             (branch/segmentrecord-start-sequence segment)
+             (branch/chainmember-start-sequence member)
+             (branch/segmentrecord-end-sequence segment)
+             (branch/chainmember-end-sequence member)
+             (branch/segmentrecord-byte-count segment)
+             (branch/chainmember-byte-count member)
+             (branch/chainmember-continuation member)
+             (branch/chainmember-torn member)
+             expected-next)]
+        (when fault
+          (fail! :invalid-retention-root fault
+                 {:path source
+                  :segment (branch/segmentrecord-sha256 segment)}))
+        (require-segment-identity! segment segment-source)
+        (recur (inc index)
+               (chain-rules/next-expected
+                (branch/chainmember-end-sequence member) expected-next)
+               (next segments)))))
+  document)
+
+(defn- store-space-id! [store]
+  (:space-id (:parsed (read-chain-source! store true))))
+
+(defn- with-retention-authority [store operation]
+  (let [held (acquire-fork-authority! [store])]
+    (try
+      (let [held-control (acquire-branch-control! store)]
+        (try
+          (operation)
+          (finally
+            (writer-authority/release! held-control))))
+      (finally
+        (doseq [handle held] (writer-authority/release! handle))))))
+
+(defn retain-branch-root!
+  "Durably retain every sealed segment named by DOCUMENT as a pin, checkpoint,
+   or active session root. The root stores canonical framref/v1 facts rather
+   than a pointer to mutable branch routing."
+  [store-path kind root-name document]
+  (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
+        selected-kind (keyword kind)
+        selected-name (require-retention-root-name! root-name)]
+    (with-retention-authority
+      store
+      (fn []
+        (require-no-pending-fork! store)
+        (let [root-path (retention-root-path
+                         store selected-kind selected-name)
+              store-space (store-space-id! store)
+              canonical
+              (branch/parse-ref (branch/print-ref document))
+              verified
+              (require-sealed-document!
+               store store-space root-path canonical)]
+          (ensure-directory! (retention-kind-directory store selected-kind))
+          (write-text-durable! root-path (branch/print-ref verified))
+          {:kind selected-kind
+           :name selected-name
+           :ref-identity (branch/ref-identity verified)
+           :segments
+           (mapv branch/segmentrecord-sha256
+                 (branch/refdocument-segments verified))})))))
+
+(defn release-branch-root!
+  "Release one named durable pin, checkpoint, or active session root. Segments
+   become reclaimable only after a later reachability collection proves that no
+   remaining root names them."
+  [store-path kind root-name]
+  (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
+        selected-kind (keyword kind)
+        selected-name (require-retention-root-name! root-name)]
+    (with-retention-authority
+      store
+      (fn []
+        (require-no-pending-fork! store)
+        {:kind selected-kind
+         :name selected-name
+         :released?
+         (boolean
+          (delete-file!
+           (retention-root-path store selected-kind selected-name)))}))))
+
+(defn- reachability-documents! [store]
+  (let [heads
+        (mapv (fn [^java.io.File file]
+                (branch/require-branch-name! (.getName file))
+                [(.getPath file)
+                 (read-ref-document-file! file "branch head")])
+              (regular-document-files!
+               (branch/refs-directory store) "branch refs directory"))
+        roots-directory (retention-roots-directory store)
+        root-entries (directory-entries!
+                      roots-directory "retention roots directory")
+        known-directories (set (vals retention-root-kinds))]
+    (doseq [^java.io.File entry root-entries]
+      (when-not (and (.isDirectory entry)
+                     (contains? known-directories (.getName entry)))
+        (fail! :invalid-retention-layout
+               "retention roots directory contains an unknown entry"
+               {:path (.getPath entry)})))
+    (into
+     heads
+     (mapcat
+      (fn [[kind directory]]
+        (mapv (fn [^java.io.File file]
+                (require-retention-root-name! (.getName file))
+                [(.getPath file)
+                 (read-ref-document-file!
+                  file (str (name kind) " retention root"))])
+              (regular-document-files!
+               (str roots-directory "/" directory)
+               (str (name kind) " retention roots directory"))))
+      (sort-by (comp str key) retention-root-kinds)))))
+
+(defn collect-unreachable-segments!
+  "Delete content-addressed segment objects unreachable from every current
+   branch head, durable pin, checkpoint, and active session root. Every root
+   document and every segment it names is parsed and verified before the first
+   deletion. Files outside the 64-hex segment namespace are never collected."
+  [store-path]
+  (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))]
+    (with-retention-authority
+      store
+      (fn []
+        (require-no-pending-fork! store)
+        (let [store-space (store-space-id! store)
+              documents (reachability-documents! store)
+              verified
+              (mapv (fn [[source document]]
+                      (require-sealed-document!
+                       store store-space source document))
+                    documents)
+              reachable
+              (->> verified
+                   (mapcat branch/refdocument-segments)
+                   (map branch/segmentrecord-sha256)
+                   set)
+              segment-files
+              (->> (directory-entries!
+                    (branch/segments-directory store) "segments directory")
+                   (filter #(.isFile ^java.io.File %))
+                   (filter #(branch/valid-segment-name?
+                             (.getName ^java.io.File %)))
+                   (sort-by #(.getName ^java.io.File %))
+                   vec)
+              collected
+              (->> segment-files
+                   (remove #(contains? reachable (.getName ^java.io.File %)))
+                   (mapv #(.getName ^java.io.File %)))]
+          (doseq [segment collected]
+            (delete-file! (branch/segment-path store segment)))
+          {:reachable (vec (sort reachable))
+           :collected collected
+           :retained (count reachable)})))))
+
 (defn- combined-history-bytes [sources]
   (let [first-source (first sources)
         first-parsed (:parsed first-source)
