@@ -172,6 +172,9 @@
   (let [body (str ref-format "\n" "space " (refdocument-space-id document) "\n" (apply str (mapv (fn [^SegmentRecord segment] (segment-line segment)) (refdocument-segments document))))]
   (str body "crc " (format "%08x" (crc32-of body)) "\n")))
 
+(defn ^String ref-identity [^RefDocument document]
+  (str "sha256:" (sha256-hex (.getBytes (print-ref document) StandardCharsets/UTF_8))))
+
 (defn- parse-count [^String value ^String label]
   (if (some? (re-matches #"(?:0|[1-9][0-9]{0,17})" value)) (Long/parseLong value) (fail (str "branch ref " label " is not a decimal count: " value) :invalid-branch-ref)))
 

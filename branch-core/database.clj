@@ -532,6 +532,22 @@
       (.force (.getChannel file-out) true))
     (move-atomically! temporary path)))
 
+(defn- branch-control-path [store]
+  (str store ".branch-control"))
+
+(defn- acquire-branch-control! [store]
+  (let [deadline (+ (System/nanoTime) 2000000000)]
+    (loop []
+      (if-let [held (writer-authority/try-acquire! (branch-control-path store))]
+        held
+        (if (>= (System/nanoTime) deadline)
+          (fail! :writer-authority-held
+                 "another branch operation holds this store"
+                 {:path store
+                  :lock (writer-authority/authority-path
+                         (branch-control-path store))})
+          (do (Thread/sleep 1) (recur)))))))
+
 (defn read-branch-ref
   "Read a branch ref, or nil when the branch has no sealed chain on disk."
   [store-path branch]
@@ -540,6 +556,12 @@
       (branch/parse-ref
        (strict-utf8-string (java.nio.file.Files/readAllBytes (.toPath file))
                            "branch ref")))))
+
+(defn branch-ref-identity
+  "Name the exact canonical bytes of a branch's current ref document."
+  [store-path branch-name]
+  (when-let [document (read-branch-ref store-path branch-name)]
+    (branch/ref-identity document)))
 
 (defn- chain-member [parsed byte-count]
   (branch/->ChainMember
@@ -574,6 +596,66 @@
       (fail! :segment-digest-mismatch
              "sealed FRAMLOG segment does not match its content address"
              {:path (:path source) :expected expected :actual actual}))))
+
+(defn- require-ref-chain! [store selected document]
+  (let [segments (branch/refdocument-segments document)
+        sealed
+        (mapv (fn [segment]
+                [segment
+                 (read-chain-source!
+                  (branch/segment-path
+                   store (branch/segmentrecord-sha256 segment))
+                  true)])
+              segments)
+        tail (read-chain-source!
+              (branch/branch-tail-path! store selected) true)
+        fault (branch/chain-fault
+               document (mapv (comp :member second) sealed) (:member tail))]
+    (when fault
+      (fail! :invalid-branch-chain fault
+             {:branch selected :path (:path tail)
+              :ref (branch/ref-path! store selected)}))
+    (doseq [[segment source] sealed]
+      (require-segment-identity! segment source))
+    {:sealed sealed :tail tail}))
+
+(defn compare-and-set-branch-ref!
+  "Replace one branch ref only when EXPECTED-IDENTITY still names its exact
+   canonical bytes. CANDIDATE is verified against every content-addressed
+   segment and the branch's current tail before the durable ref replacement."
+  [store-path branch-name expected-identity candidate]
+  (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
+        selected (branch/require-branch-name! branch-name)
+        held (acquire-branch-control! store)]
+    (try
+      (require-no-pending-fork! store)
+      (let [current (read-branch-ref store selected)]
+        (when (nil? current)
+          (fail! :branch-missing "branch has no ref"
+                 {:branch selected :path (branch/ref-path! store selected)}))
+        (let [current-identity (branch/ref-identity current)]
+          (if (not= expected-identity current-identity)
+            {:swapped? false
+             :expected expected-identity
+             :current current-identity}
+            (do
+              (when (not= (branch/refdocument-space-id current)
+                          (branch/refdocument-space-id candidate))
+                (fail! :space-mismatch
+                       "candidate branch ref belongs to a different SpaceId"
+                       {:expected (branch/refdocument-space-id current)
+                        :actual (branch/refdocument-space-id candidate)
+                        :branch selected}))
+              (require-ref-chain! store selected candidate)
+              (let [candidate-identity (branch/ref-identity candidate)]
+                (write-text-durable! (branch/ref-path! store selected)
+                                     (branch/print-ref candidate))
+                {:swapped? true
+                 :expected expected-identity
+                 :previous current-identity
+                 :current candidate-identity})))))
+      (finally
+        (writer-authority/release! held)))))
 
 (defn branch-revision!
   "Name one exact committed point on a branch from durable history. The branch

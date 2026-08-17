@@ -205,6 +205,13 @@
                           (refdocument-segments document))))]
     (str body "crc " (format "%08x" (crc32-of body)) "\n")))
 
+;; The ref identity binds the exact canonical ref bytes, including their CRC.
+;; It names mutable-routing state for compare-and-set; it is not a durable
+;; branch revision and therefore may change when physical segments are resealed.
+(defn ref-identity [(document RefDocument)] String
+  (str "sha256:"
+       (sha256-hex (.getBytes (print-ref document) StandardCharsets/UTF_8))))
+
 (defn- parse-count [(value String) (label String)] Int
   (if (some? (re-matches #"(?:0|[1-9][0-9]{0,17})" value))
     (Long/parseLong value)
