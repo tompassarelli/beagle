@@ -47,6 +47,69 @@
 
 (define (br . xs) (cons BRACKET-TAG xs))
 
+(define CAPTURE-MATRIX-SOURCE-ID "capture-matrix.bclj")
+
+(define CAPTURE-MATRIX-SOURCE
+  (string-append
+   "#lang beagle/clj\n"
+   "(ns capture.matrix)\n"
+   "(defmacro around [body]\n"
+   "  `(let [tmp 1]\n"
+   "     (do tmp ~body)))\n"
+   "(defn capture-matrix [(tmp Int)] Int\n"
+   "  (around (do tmp (let [tmp 2] tmp))))\n"))
+
+(define (capture-matrix)
+  (define source-bytes (string->bytes/utf-8 CAPTURE-MATRIX-SOURCE))
+  (define program
+    (parse-source-text CAPTURE-MATRIX-SOURCE-ID CAPTURE-MATRIX-SOURCE))
+  (define reader-forms
+    (read-beagle-syntax/bytes
+     CAPTURE-MATRIX-SOURCE-ID
+     source-bytes
+     #:source-id CAPTURE-MATRIX-SOURCE-ID))
+  (define reader-function
+    (for/first ([form (in-list reader-forms)]
+                #:when (equal? (car (syntax->datum form)) 'defn))
+      form))
+  (define reader-call (stx-ref (stx-subs reader-function) 4))
+  (define reader-call-syntax
+    (racket-syntax->beagle-syntax reader-call source-bytes))
+  (define caller-body (cadr (syntax-list-children reader-call-syntax)))
+  (define expanded
+    (expand-fully (program-macros program) reader-call-syntax))
+  (define expanded-children (syntax-list-children expanded))
+  (define expanded-binding-children
+    (syntax-vector-children (cadr expanded-children)))
+  (define introduced-syntax-binder (car expanded-binding-children))
+  (define expanded-do (caddr expanded-children))
+  (define expanded-do-children (syntax-list-children expanded-do))
+  (define introduced-syntax-use (cadr expanded-do-children))
+  (define antiquoted-caller (caddr expanded-do-children))
+  (define function (car (program-forms program)))
+  (define parameter (car (defn-form-params function)))
+  (define introduced-let (car (defn-form-body function)))
+  (define introduced-binding (car (let-form-bindings introduced-let)))
+  (define introduced-do (car (let-form-body introduced-let)))
+  (define introduced-use (car (do-form-body introduced-do)))
+  (define caller-do (cadr (do-form-body introduced-do)))
+  (define caller-use (car (do-form-body caller-do)))
+  (define nested-let (cadr (do-form-body caller-do)))
+  (define nested-binding (car (let-form-bindings nested-let)))
+  (define nested-use (car (let-form-body nested-let)))
+  (hasheq
+   'caller-body caller-body
+   'antiquoted-caller antiquoted-caller
+   'introduced-syntax-binder introduced-syntax-binder
+   'introduced-syntax-use introduced-syntax-use
+   'function function
+   'parameter-id (binder-binding-id parameter 'tmp)
+   'introduced-id (binder-binding-id introduced-binding 'tmp)
+   'nested-id (binder-binding-id nested-binding 'tmp)
+   'introduced-use introduced-use
+   'caller-use caller-use
+   'nested-use nested-use))
+
 (test-case "syntax membrane: nested expansion records call-site origin chain"
   (define reg (make-macro-registry))
   (register-macro!
@@ -119,42 +182,58 @@
    (expand-fully reg '(with-tmp))
    (list 'let (br 'tmp 1) 'tmp)))
 
+(test-case "scope hygiene: antiquoted caller identity and scopes cannot be captured"
+  (define matrix (capture-matrix))
+  (define caller-body (hash-ref matrix 'caller-body))
+  (define antiquoted-caller (hash-ref matrix 'antiquoted-caller))
+  (define introduced-syntax-binder
+    (hash-ref matrix 'introduced-syntax-binder))
+  (check-eq? antiquoted-caller caller-body)
+  (check-true
+   (scope-set-subset?
+    (beagle-syntax-scopes antiquoted-caller)
+    (beagle-syntax-scopes introduced-syntax-binder)))
+  (check-not-equal? (beagle-syntax-scopes introduced-syntax-binder)
+                    (beagle-syntax-scopes antiquoted-caller)))
+
+(test-case "scope hygiene: caller tmp resolves to parameter BindingId"
+  (define matrix (capture-matrix))
+  (define parameter-id (hash-ref matrix 'parameter-id))
+  (check-true (binding-id? parameter-id))
+  (check-equal?
+   (resolved-ref-binding-id (hash-ref matrix 'caller-use))
+   parameter-id))
+
+(test-case "scope hygiene: introduced tmp resolves to introduced BindingId"
+  (define matrix (capture-matrix))
+  (define introduced-id (hash-ref matrix 'introduced-id))
+  (check-true (binding-id? introduced-id))
+  (check-equal?
+   (resolved-ref-binding-id (hash-ref matrix 'introduced-use))
+   introduced-id))
+
+(test-case "scope hygiene: nested tmp resolves to nested let BindingId"
+  (define matrix (capture-matrix))
+  (define nested-id (hash-ref matrix 'nested-id))
+  (check-true (binding-id? nested-id))
+  (check-equal?
+   (resolved-ref-binding-id (hash-ref matrix 'nested-use))
+   nested-id))
+
 (test-case "scope hygiene: real source keeps caller, introduced, and nested tmp edges distinct"
-  (define source-id "capture-matrix.bclj")
-  (define source
-    (string-append
-     "#lang beagle/clj\n"
-     "(ns capture.matrix)\n"
-     "(defmacro around [body]\n"
-     "  `(let [tmp 1]\n"
-     "     (do tmp ~body)))\n"
-     "(defn capture-matrix [(tmp Int)] Int\n"
-     "  (around (do tmp (let [tmp 2] tmp))))\n"))
-  (define source-bytes (string->bytes/utf-8 source))
-  (define program (parse-source-text source-id source))
-  ;; Expand the invocation that the real reader produced.  This keeps the
-  ;; scope assertion on Syntax while the AST assertions below cover its
-  ;; BindingId/refersTo projection.
-  (define reader-forms
-    (read-beagle-syntax/bytes source-id source-bytes #:source-id source-id))
-  (define reader-function
-    (for/first ([form (in-list reader-forms)]
-                #:when (equal? (car (syntax->datum form)) 'defn))
-      form))
-  (define reader-call (stx-ref (stx-subs reader-function) 4))
-  (define reader-call-syntax
-    (racket-syntax->beagle-syntax reader-call source-bytes))
-  (define caller-body (cadr (syntax-list-children reader-call-syntax)))
-  (define expanded
-    (expand-fully (program-macros program) reader-call-syntax))
-  (define expanded-children (syntax-list-children expanded))
-  (define expanded-binding-children
-    (syntax-vector-children (cadr expanded-children)))
-  (define introduced-syntax-binder (car expanded-binding-children))
-  (define expanded-do (caddr expanded-children))
-  (define expanded-do-children (syntax-list-children expanded-do))
-  (define introduced-syntax-use (cadr expanded-do-children))
-  (define antiquoted-caller (caddr expanded-do-children))
+  (define matrix (capture-matrix))
+  (define caller-body (hash-ref matrix 'caller-body))
+  (define antiquoted-caller (hash-ref matrix 'antiquoted-caller))
+  (define introduced-syntax-binder
+    (hash-ref matrix 'introduced-syntax-binder))
+  (define introduced-syntax-use (hash-ref matrix 'introduced-syntax-use))
+  (define function (hash-ref matrix 'function))
+  (define parameter-id (hash-ref matrix 'parameter-id))
+  (define introduced-id (hash-ref matrix 'introduced-id))
+  (define nested-id (hash-ref matrix 'nested-id))
+  (define introduced-use (hash-ref matrix 'introduced-use))
+  (define caller-use (hash-ref matrix 'caller-use))
+  (define nested-use (hash-ref matrix 'nested-use))
   (check-eq? antiquoted-caller caller-body)
   (check-equal? (beagle-syntax-scopes introduced-syntax-binder)
                 (beagle-syntax-scopes introduced-syntax-use))
@@ -164,20 +243,6 @@
     (beagle-syntax-scopes introduced-syntax-binder)))
   (check-not-equal? (beagle-syntax-scopes introduced-syntax-binder)
                     (beagle-syntax-scopes antiquoted-caller))
-  (define function (car (program-forms program)))
-  (define parameter (car (defn-form-params function)))
-  (define introduced-let (car (defn-form-body function)))
-  (define introduced-binding (car (let-form-bindings introduced-let)))
-  (define introduced-do (car (let-form-body introduced-let)))
-  (define introduced-use (car (do-form-body introduced-do)))
-  (define caller-do (cadr (do-form-body introduced-do)))
-  (define caller-use (car (do-form-body caller-do)))
-  (define nested-let (cadr (do-form-body caller-do)))
-  (define nested-binding (car (let-form-bindings nested-let)))
-  (define nested-use (car (let-form-body nested-let)))
-  (define parameter-id (binder-binding-id parameter 'tmp))
-  (define introduced-id (binder-binding-id introduced-binding 'tmp))
-  (define nested-id (binder-binding-id nested-binding 'tmp))
   (check-true (and (binding-id? parameter-id)
                    (binding-id? introduced-id)
                    (binding-id? nested-id)))
