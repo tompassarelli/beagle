@@ -444,61 +444,53 @@ if [[ -d "$domain_dir" ]]; then
     done
 fi
 
-# --- run for real, traced ----------------------------------------------------
-
-child_tmp="$scratch/tmp"
-mkdir -p "$child_tmp"
-trace="$scratch/trace"
-out_f="$scratch/stdout"
-err_f="$scratch/stderr"
-
-# stdout streams live through tee; stderr goes to a file and is replayed after
-# the run. A process substitution on strace's stderr would deadlock: the tee
-# forked before exec becomes strace's own child, strace waits for all its
-# children at exit, and the tee waits for EOF on the fd strace still holds.
-start_ts=$(date +%s)
-set +e
-TMPDIR="$child_tmp" TMP="$child_tmp" TEMP="$child_tmp" \
-BEAGLE_GATE_CACHE_INNER=1 \
-strace -f -qq -s 500 --decode-fds=path -e trace=%file,%process,fchdir \
-    -o "$trace" -- "${cmd[@]}" 2> "$err_f" | tee "$out_f"
-status=${PIPESTATUS[0]}
-set -e
-cat "$err_f" >&2
-duration=$(( $(date +%s) - start_ts ))
-
-if [[ "$status" -ne 0 ]] &&
-   grep -q "does not work under ptrace" "$out_f" "$err_f" 2>/dev/null; then
-    mkdir -p "$domain_dir" 2>/dev/null || true
-    touch "$untraceable_flag" 2>/dev/null || true
-    echo "beagle-gate-cache: $domain/$id is untraceable (sanitizer refuses ptrace); rerunning direct" >&2
-    rm -rf "${scratch:?}"
-    trap - EXIT
-    export BEAGLE_GATE_CACHE_INNER=1
-    exec "${cmd[@]}"
-fi
-
-[[ "$status" -eq 0 ]] || exit "$status"
-
-# --- derive the input closure from the trace ---------------------------------
+# --- the classifier: a trace line in, one closure record out -----------------
 # awk emits "CLASS<TAB>abs-path": W written, L dir-listed, R read, A absent,
-# plus U<TAB>relative-path for an access that cannot be placed at all.
+# plus U<TAB>relative-path for an access that cannot be placed at all. One
+# record per path, aggregated in flight with precedence U > W > L > R > A: U
+# outranks everything, because an access nobody could place must not be masked
+# by one that could. (U paths are the only relative ones, so they can never
+# collide with a class path and are carried in their own array.)
+#
+# It runs AS A STREAM, off the critical path: strace pipes the trace straight
+# into it (`-o |CMD`) instead of materializing a file the wrapper then re-reads.
+# The heavy tier file traced 2.4M lines / 584 MB, and classifying it afterwards
+# was >=150s of single-threaded work AFTER the test had already finished — time
+# no meta duration_s ever counted. Streaming spends it inside the run instead,
+# and nothing lands on disk.
+#
+# strace's own `-o |CMD` is the mechanism, not a process substitution: strace
+# creates the consumer itself, and closes and REAPS it before exiting, so the
+# records are whole by the time the wrapper looks. The shell-side alternative
+# deadlocks, and the reason is worth keeping — a consumer forked by the shell
+# before the exec becomes strace's own child, strace waits for all its children
+# at exit, and the consumer waits for EOF on the fd strace still holds.
+#
+# --decode-fds=path is load-bearing and stays. Without it strace prints a bare
+# `AT_FDCWD` with no path, which is exactly the kernel-truth cwd this
+# classifier resolves every *at syscall against; dropping it would make every
+# relative access class U and every traced run uncacheable.
+#
 # AT_FDCWD</cwd> decorations carry the kernel-truth cwd per call, so every *at
-# syscall resolves against the kernel'"'"'s own answer. Success return values may
+# syscall resolves against the kernel's own answer. Success return values may
 # be decorated too ("= 3</path>").
 #
 # A path with no such decoration — execve above all, which takes no dirfd — can
-# only be resolved against the calling pid'"'"'s cwd, and a forked child has none
+# only be resolved against the calling pid's cwd, and a forked child has none
 # of its own until it chdirs or issues a decorated call. Resolving those against
 # the LAUNCH cwd is a guess, and a guess that lands on a real file is the worst
 # outcome available: `( cd "$build"; ./probe )` would key the entry on whatever
 # ./probe names at the launch cwd while the file actually executed went
 # unrecorded — a green replayed from the wrong proof. So an unplaceable access
 # is not resolved and not dropped: it is class U, and it makes the whole run
-# uncacheable. The first pid IS launch_cwd (strace'"'"'s direct child, and the
+# uncacheable. The first pid IS launch_cwd (strace's direct child, and the
 # wrapper never chdirs), which is knowledge, not a guess, so it is seeded.
 
-awk -v launch_cwd="$launch_cwd" -v rkpfx="$racket_prefix" '
+classifier="$scratch/classify.awk"
+records="$scratch/records.agg"
+classifier_log="$scratch/classify.err"
+
+cat > "$classifier" <<'CLASSIFY'
     function resolve(p, base) {
         if (p ~ /^\//) return p
         if (base == "") { unplaceable[p] = 1; return "" }
@@ -506,7 +498,7 @@ awk -v launch_cwd="$launch_cwd" -v rkpfx="$racket_prefix" '
     }
     # fd decorations for pipes/sockets/anon inodes are not filesystem paths;
     # one leaking into path position must never key (or de-key) a result.
-    function emit(c, p) {
+    function emit(c, p,   rank) {
         if (p == "") return
         if (p ~ /(pipe|socket|anon_inode|memfd):/) return
         # Every access inside the pinned Racket install is stated once, by the
@@ -515,7 +507,8 @@ awk -v launch_cwd="$launch_cwd" -v rkpfx="$racket_prefix" '
         if (rkpfx != "" && (p == rkpfx || index(p, rkslash) == 1)) {
             rkseen = 1; return
         }
-        print c "\t" p
+        rank = (c == "W") ? 4 : (c == "L") ? 3 : (c == "R") ? 2 : 1
+        if (rank > best[p]) { best[p] = rank; cls[p] = c }
     }
     BEGIN { if (rkpfx != "") rkslash = rkpfx "/" }
     {
@@ -587,17 +580,59 @@ awk -v launch_cwd="$launch_cwd" -v rkpfx="$racket_prefix" '
     }
     END {
         if (rkseen) print "R\t" rkpfx
+        for (p in cls) print cls[p] "\t" p
         for (p in unplaceable) print "U\t" p
     }
-' "$trace" | sort -u > "$scratch/records.raw"
+CLASSIFY
 
-# Aggregate with precedence U > W > L > R > A per path. U outranks everything:
-# an access nobody could place must not be masked by one that could.
-awk -F'\t' '
-    { rank = ($1 == "U") ? 5 : ($1 == "W") ? 4 : ($1 == "L") ? 3 : ($1 == "R") ? 2 : 1
-      if (rank > best[$2]) { best[$2] = rank; cls[$2] = $1 } }
-    END { for (p in cls) print cls[p] "\t" p }
-' "$scratch/records.raw" > "$scratch/records.agg"
+# --- run for real, traced ----------------------------------------------------
+
+child_tmp="$scratch/tmp"
+mkdir -p "$child_tmp"
+out_f="$scratch/stdout"
+err_f="$scratch/stderr"
+
+# stdout streams live through tee; stderr goes to a file and is replayed after
+# the run. The classifier's arguments travel as environment: strace hands the
+# `-o |CMD` string to `sh -c` with its own environment, so `sh` expands them and
+# no path has to survive being spelled inside a nested quoting level.
+start_ts=$(date +%s)
+set +e
+TMPDIR="$child_tmp" TMP="$child_tmp" TEMP="$child_tmp" \
+BEAGLE_GATE_CACHE_INNER=1 \
+_GC_LAUNCH_CWD="$launch_cwd" _GC_RACKET_PREFIX="$racket_prefix" \
+_GC_CLASSIFIER="$classifier" _GC_RECORDS="$records" _GC_CLASSIFY_LOG="$classifier_log" \
+strace -f -qq -s 500 --decode-fds=path -e trace=%file,%process,fchdir \
+    -o '|exec awk -v launch_cwd="$_GC_LAUNCH_CWD" -v rkpfx="$_GC_RACKET_PREFIX" -f "$_GC_CLASSIFIER" >"$_GC_RECORDS" 2>"$_GC_CLASSIFY_LOG"' \
+    -- "${cmd[@]}" 2> "$err_f" | tee "$out_f"
+status=${PIPESTATUS[0]}
+set -e
+cat "$err_f" >&2
+duration=$(( $(date +%s) - start_ts ))
+
+if [[ "$status" -ne 0 ]] &&
+   grep -q "does not work under ptrace" "$out_f" "$err_f" 2>/dev/null; then
+    mkdir -p "$domain_dir" 2>/dev/null || true
+    touch "$untraceable_flag" 2>/dev/null || true
+    echo "beagle-gate-cache: $domain/$id is untraceable (sanitizer refuses ptrace); rerunning direct" >&2
+    rm -rf "${scratch:?}"
+    trap - EXIT
+    export BEAGLE_GATE_CACHE_INNER=1
+    exec "${cmd[@]}"
+fi
+
+[[ "$status" -eq 0 ]] || exit "$status"
+
+# --- derive the input closure from the trace ---------------------------------
+# The classifier is finished here — strace reaps it before exiting — so a
+# missing, empty, or complaining classifier means the closure was never
+# derived. An empty record set would revalidate against nothing and replay
+# green forever, so it is refused as loudly as a crash: doubt re-runs.
+if [[ ! -s "$records" || -s "$classifier_log" ]]; then
+    [[ -s "$classifier_log" ]] && sed -n '1,5p' "$classifier_log" >&2
+    echo "beagle-gate-cache: ran-green $domain/$id (not cached: trace classifier produced no closure)" >&2
+    exit 0
+fi
 
 # Lexical cleanup only (realpath -s never follows symlinks: a final-component
 # symlink must keep its own identity so a repoint invalidates), and never for
@@ -614,7 +649,7 @@ awk -F'\t' '
 : > "$scratch/records.verbatim"
 awk -F'\t' -v keep="$scratch/records.verbatim" \
     '$1 == "A" || $1 == "U" { print > keep; next } { print }' \
-    "$scratch/records.agg" > "$scratch/records.present"
+    "$records" > "$scratch/records.present"
 cut -f2 "$scratch/records.present" > "$scratch/records.p"
 if xargs -r -d '\n' realpath -smq -- < "$scratch/records.p" > "$scratch/records.norm" 2>/dev/null &&
    [[ "$(wc -l < "$scratch/records.norm")" == "$(wc -l < "$scratch/records.p")" ]]; then
