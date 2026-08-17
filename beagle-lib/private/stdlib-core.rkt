@@ -3,8 +3,12 @@
 ;; Native Core-only source bindings. Their qualified names keep target-specific
 ;; concepts out of the portable Clojure-shaped namespace.
 
-(require "types.rkt"
+(require "ast.rkt"
+         "types.rkt"
          "stdlib-helpers.rkt")
+
+(define (q qualifier name)
+  (qualified-ref qualifier name #f))
 
 (define STDLIB-CORE
   (hash
@@ -34,7 +38,7 @@
    ;; Bulk-synchronous Native Core surface. The policy operands are literals at
    ;; lowering time; the function type keeps the statically named tile kernel
    ;; exact at source checking too.
-   'native/tiled-step!
+   (q 'native 'tiled-step!)
    (type-fn
     (list (type-app 'Buffer (list (p 'Float)))
           (type-app 'Buffer (list (p 'Float)))
@@ -47,12 +51,12 @@
            (p 'Nil)))
     #f
     (p 'Bool))
-   'native/f64-buffer-sum
+   (q 'native 'f64-buffer-sum)
    (type-fn
     (list (type-app 'Buffer (list (p 'Float))) (p 'Int))
     #f
     (p 'Float))
-   'native.bytes/from-ints-bounded
+   (q 'native.bytes 'from-ints-bounded)
    (type-fn
     (list (type-app 'Vec (list (p 'Int))) (p 'Int))
     #f
@@ -62,32 +66,32 @@
     (list (p 'String))
     #f
     (type-union (list (p 'Int) (p 'Nil))))
-   'host.fs/path-kind
+   (q 'host.fs 'path-kind)
    (type-fn
     (list (p 'String))
     #f
     (p 'host.fs/PathKindResult))
-   'host.fs/read-text-bounded
+   (q 'host.fs 'read-text-bounded)
    (type-fn
     (list (p 'String) (p 'Int))
     #f
     (p 'host.fs/ReadTextBoundedResult))
-   'host.fs/list-directory-bounded
+   (q 'host.fs 'list-directory-bounded)
    (type-fn
     (list (p 'String) (p 'Int))
     #f
     (p 'host.fs/ListDirectoryBoundedResult))
-   'host.fs/write-text-atomic
+   (q 'host.fs 'write-text-atomic)
    (type-fn
     (list (p 'String) (p 'String))
     #f
     (p 'host.fs/WriteTextAtomicResult))
-   'host.fs/make-parent-directories
+   (q 'host.fs 'make-parent-directories)
    (type-fn
     (list (p 'String))
     #f
     (p 'host.fs/MakeParentDirectoriesResult))
-   'host.fs/append-text
+   (q 'host.fs 'append-text)
    (type-fn
     (list (p 'String) (p 'String))
     #f
@@ -95,47 +99,47 @@
    ;; lock-exclusive transfers one descriptor holding a non-blocking exclusive
    ;; lease on the path's open file description; unlock consumes it. The kernel
    ;; releases the lease on close or on process death. Contention is EAGAIN.
-   'host.fs/lock-exclusive
+   (q 'host.fs 'lock-exclusive)
    (type-fn
     (list (p 'String))
     #f
     (p 'host.fs/LockExclusiveResult))
-   'host.fs/unlock
+   (q 'host.fs 'unlock)
    (type-fn
     (list (p 'Int))
     #f
     (p 'host.fs/UnlockResult))
-   'host.clock/wall-nanoseconds
+   (q 'host.clock 'wall-nanoseconds)
    (type-fn '() #f (p 'Int))
-   'host.clock/format-iso8601
+   (q 'host.clock 'format-iso8601)
    (type-fn
     (list (p 'Int))
     #f
     (p 'host.clock/FormatIso8601Result))
-   'host.time/sleep-milliseconds
+   (q 'host.time 'sleep-milliseconds)
    (type-fn
     (list (p 'Int))
     #f
     (p 'Int))
-   'host.system/hostname
+   (q 'host.system 'hostname)
    (type-fn '() #f (p 'host.system/HostnameResult))
-   'host.system/platform
+   (q 'host.system 'platform)
    (type-fn '() #f (p 'String))
-   'host.terminal/stdout-tty?
+   (q 'host.terminal 'stdout-tty?)
    (type-fn '() #f (p 'Bool))
    ;; Native process execution takes an already-tokenized argv vector. The
    ;; result encodes exit 0..255, signal 256+signal, or spawn/wait -errno.
-   'host.process/run-inherit
+   (q 'host.process 'run-inherit)
    (type-fn
     (list (type-app 'Vec (list (p 'String))))
     #f
     (p 'Int))
-   'host.process/exec-replace
+   (q 'host.process 'exec-replace)
    (type-fn
     (list (type-app 'Vec (list (p 'String))))
     #f
     (p 'Int))
-   'host.process/run-capture
+   (q 'host.process 'run-capture)
    (type-fn
     (list (type-app 'Vec (list (p 'String)))
           (p 'String)
@@ -146,64 +150,64 @@
    ;; caller. wait consumes the child relationship; close consumes the
    ;; descriptor. read-line-bounded borrows the descriptor and bounds one
    ;; decoded UTF-8 line in bytes.
-   'host.process/spawn-stdout
+   (q 'host.process 'spawn-stdout)
    (type-fn
     (list (type-app 'Vec (list (p 'String))))
     #f
     (p 'host.process/SpawnStdoutResult))
-   'host.process/read-line-bounded
+   (q 'host.process 'read-line-bounded)
    (type-fn
     (list (p 'Int) (p 'Int))
     #f
     (p 'host.process/ReadLineResult))
-   'host.process/read-line-deadline
+   (q 'host.process 'read-line-deadline)
    (type-fn
     (list (p 'Int) (p 'Int) (p 'Int))
     #f
     (p 'host.process/ReadLineResult))
-   'host.process/fifo-create
+   (q 'host.process 'fifo-create)
    (type-fn
     (list (p 'String))
     #f
     (p 'Int))
-   'host.process/fifo-open-read
+   (q 'host.process 'fifo-open-read)
    (type-fn
     (list (p 'String))
     #f
     (p 'Int))
-   'host.process/fifo-write-deadline
+   (q 'host.process 'fifo-write-deadline)
    (type-fn
     (list (p 'String) (p 'String) (p 'Int))
     #f
     (p 'Int))
-   'host.process/poll-readable
+   (q 'host.process 'poll-readable)
    (type-fn
     (list (type-app 'Vec (list (p 'Int))) (p 'Int))
     #f
     (p 'Int))
-   'host.process/current-pid
+   (q 'host.process 'current-pid)
    (type-fn '() #f (p 'Int))
-   'host.process/alive?
+   (q 'host.process 'alive?)
    (type-fn
     (list (p 'Int))
     #f
     (p 'Bool))
-   'host.process/signal
+   (q 'host.process 'signal)
    (type-fn
     (list (p 'Int) (p 'Int))
     #f
     (p 'Int))
-   'host.process/wait-not-alive
+   (q 'host.process 'wait-not-alive)
    (type-fn
     (list (p 'Int) (p 'Int))
     #f
     (p 'Int))
-   'host.process/wait
+   (q 'host.process 'wait)
    (type-fn
     (list (p 'Int))
     #f
     (p 'Int))
-   'host.process/close
+   (q 'host.process 'close)
    (type-fn
     (list (p 'Int))
     #f

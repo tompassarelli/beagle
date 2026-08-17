@@ -5,8 +5,12 @@
 ;;
 ;; Split from stdlib-types.rkt as part of multi-target support.
 
-(require "types.rkt"
+(require "ast.rkt"
+         "types.rkt"
          "stdlib-helpers.rkt")
+
+(define (q qualifier name)
+  (qualified-ref qualifier name #f))
 
 (define STDLIB-PORTABLE
   (hash
@@ -175,7 +179,7 @@
    ;; Core as a descriptor-driven copy, every GC-hosted target as the identity
    ;; the host heap already gives it. `bgl/` because it is a Beagle original
    ;; with no Clojure namesake and no single owning target.
-   'bgl/promote (poly-fn '(A) (list (tv 'A)) (tv 'A))
+   (q 'bgl 'promote) (poly-fn '(A) (list (tv 'A)) (tv 'A))
    ;; --- sequence generators / iteration ------------------------------------
    ;; (range), (range n), (range a b), (range a b step). Every yielded value
    ;; is an Int when the authored bounds/step are Int; target representations

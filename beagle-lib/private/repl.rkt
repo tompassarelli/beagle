@@ -40,7 +40,8 @@
 ;; hand-maintained approximations.  Declarations in the current input win.
 (define (merge-repl-externs! prog)
   (define externs (program-externs prog))
-  (for ([(name type) (in-hash repl-env)])
+  (for ([(name type) (in-hash repl-env)]
+        #:unless (hash-has-key? repl-stdlib name))
     (unless (hash-has-key? externs name)
       (hash-set! externs name type)))
   prog)
@@ -220,7 +221,8 @@
       [(string-prefix? (string-trim line) ":sig ")
        (define name (string-trim (substring (string-trim line) 5)))
        (define sym (string->symbol name))
-       (define t (hash-ref repl-env sym #f))
+       (define t
+         (hash-ref repl-env ((current-parse-expr) sym) #f))
        (cond
          [t (printf "~a : ~a\n" sym (type->string t))]
          [else

@@ -291,7 +291,8 @@
     (when (null? results)
       (define file-target (or (expected-target-for-extension path) 'clj))
       (define stdlib (stdlib-for-target file-target))
-      (define stdlib-type (hash-ref stdlib target #f))
+      (define stdlib-type
+        (hash-ref stdlib ((current-parse-expr) target) #f))
       (when stdlib-type
         (set! results
               (list (format "```\n~a : ~a  (stdlib)\n```"
@@ -637,7 +638,12 @@
   (define file-target (or (expected-target-for-extension path) 'clj))
   (define stdlib (stdlib-for-target file-target))
   (for ([(k v) (in-hash stdlib)])
-    (define name (symbol->string k))
+    (define name
+      (cond
+        [(qualified-ref? k)
+         (format "~a/~a" (qualified-ref-qualifier k)
+                 (qualified-ref-name k))]
+        [else (symbol->string k)]))
     (when (string-prefix? name prefix)
       (set! items
             (cons (hasheq 'label name

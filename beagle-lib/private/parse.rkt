@@ -216,15 +216,24 @@
   (hash-ref!
    host-namespace-cache target
    (lambda ()
-     (for*/set ([key (in-hash-keys (stdlib-for-target target))]
-                [text (in-value (symbol->string key))]
-                [slash (in-value (let loop ([i 0])
-                                   (cond
-                                     [(= i (string-length text)) #f]
-                                     [(char=? (string-ref text i) #\/) i]
-                                     [else (loop (+ i 1))])))]
-                #:when (and slash (> slash 0)))
-       (substring text 0 slash)))))
+     (for/fold ([names (set)])
+               ([key (in-hash-keys (stdlib-for-target target))])
+       (cond
+         [(qualified-ref? key)
+          (set-add names
+                   (symbol->string (qualified-ref-qualifier key)))]
+         [(symbol? key)
+          (define text (symbol->string key))
+          (define slash
+            (let loop ([i 0])
+              (cond
+                [(= i (string-length text)) #f]
+                [(char=? (string-ref text i) #\/) i]
+                [else (loop (+ i 1))])))
+          (if (and slash (> slash 0))
+              (set-add names (substring text 0 slash))
+              names)]
+         [else names])))))
 
 (define (host-namespace? ns-sym target)
   (define text (symbol->string ns-sym))

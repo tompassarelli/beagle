@@ -29,6 +29,9 @@
    program name
    (lambda () (error 'definition-inference "missing signature: ~a" name))))
 
+(define (q qualifier name)
+  (qualified-ref qualifier name #f))
+
 (test-case "mandatory return constrains a bare identity parameter"
   (define program (checked "(defn identity [x] Int x)"))
   (check-equal? (type->string (signature program 'identity)) "(Fn [Int] Int)")
@@ -238,7 +241,7 @@
 
 (test-case "stdlib compound union signatures are canonical and solver-safe"
   (define replace-type
-    (hash-ref (stdlib-for-target 'clj) 'clojure.string/replace))
+    (hash-ref (stdlib-for-target 'clj) (q 'clojure.string 'replace)))
   (define pattern-type (cadr (type-fn-params replace-type)))
   (check-true (type-union? pattern-type))
   (check-equal? (map type-prim-name (type-union-alts pattern-type))
@@ -249,3 +252,18 @@
    (lambda ()
      (checked
       "(require clojure.string :as str)\n(defn clean [(s String)] String (str/replace s \"-\" \"_\"))"))))
+
+(test-case "qualified stdlib catalog keys are structural"
+  (check-true
+   (type? (hash-ref STDLIB-CLJ (q 'clojure.string 'replace))))
+  (check-true (type? (hash-ref STDLIB-JS (q 'Math 'abs))))
+  (check-true (type? (hash-ref STDLIB-NIX (q 'builtins 'map))))
+  (check-true (type? (hash-ref STDLIB-PORTABLE (q 'bgl 'promote))))
+  (check-true (type? (hash-ref STDLIB-CORE (q 'host.system 'hostname))))
+  (for ([catalog (in-list
+                  (list STDLIB-CLJ STDLIB-JS STDLIB-NIX
+                        STDLIB-PORTABLE STDLIB-CORE))])
+    (check-false
+     (for/or ([key (in-hash-keys catalog)])
+       (and (symbol? key)
+            (regexp-match? #rx".+/.+" (symbol->string key)))))))

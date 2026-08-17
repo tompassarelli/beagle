@@ -39,6 +39,11 @@
   (define ref (raw-pat-record-type-name pattern))
   (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
+(define (call-form-env-ref env form [fallback #f])
+  (define ref (raw-call-form-fn form))
+  (or (hash-ref env ref #f)
+      (hash-ref env (call-form-fn form) fallback)))
+
 (define (builtin-env-for-target target)
   (stdlib-for-target target))
 
@@ -451,7 +456,7 @@
     [(and (call-form? arg)
           (symbol? (call-form-fn arg)))
      (define fn-sym (call-form-fn arg))
-     (define fn-type (hash-ref env fn-sym #f))
+     (define fn-type (call-form-env-ref env arg))
      (cond
        [(and fn-type (type-fn? fn-type)
              (= (length (type-fn-params fn-type)) 1)
@@ -1761,17 +1766,25 @@
   (for ([r (in-list (program-requires prog))])
     (define alias (require-entry-alias r))
     (when (and alias (not (eq? alias (require-entry-ns r))))
-      (define ns-prefix (string-append (symbol->string (require-entry-ns r)) "/"))
+      (define namespace (require-entry-ns r))
+      (define ns-prefix (string-append (symbol->string namespace) "/"))
       (define alias-prefix (string-append (symbol->string alias) "/"))
       (define additions
         (for/list ([(k t) (in-hash env)]
-                   #:when (and (symbol? k)
-                               (string-prefix? (symbol->string k) ns-prefix)))
-          (cons (string->symbol
-                 (string-append alias-prefix
-                                (substring (symbol->string k)
-                                           (string-length ns-prefix))))
-                t)))
+                   #:when
+                   (or (and (qualified-ref? k)
+                            (eq? (qualified-ref-qualifier k) namespace))
+                       (and (symbol? k)
+                            (string-prefix? (symbol->string k) ns-prefix))))
+          (cons
+           (if (qualified-ref? k)
+               (qualified-ref alias (qualified-ref-name k)
+                              (qualified-ref-provider-id k))
+               (string->symbol
+                (string-append alias-prefix
+                               (substring (symbol->string k)
+                                          (string-length ns-prefix)))))
+           t)))
       (for ([kv (in-list additions)])
         (unless (hash-has-key? env (car kv))
           (hash-set! env (car kv) (cdr kv))))))
@@ -2332,9 +2345,9 @@
            (and (jst-method? value) (jst-method-async? value)))
        #f]
       [(call-form? value)
-       (define callee (call-form-fn value))
+       (define callee (raw-call-form-fn value))
        (and
-        (if (symbol? callee)
+        (if (or (symbol? callee) (qualified-ref? callee))
             (hash-ref callable-proofs callee unknown-call-synchronous?)
             (walk callee))
         (all-sync? (call-form-args value)))]
@@ -2358,6 +2371,10 @@
        ;; higher-order arguments around a known-negative local/imported
        ;; predicate. Ordinary data symbols are absent from CALLABLE-PROOFS and
        ;; remain inert; unknown call heads still fail in the call-form arm.
+       (if (hash-has-key? callable-proofs value)
+           (and (hash-ref callable-proofs value #f) #t)
+           #t)]
+      [(qualified-ref? value)
        (if (hash-has-key? callable-proofs value)
            (and (hash-ref callable-proofs value #f) #t)
            #t)]
@@ -2523,9 +2540,9 @@
         (constraint-expression-synchronous? current callable-proofs #f)
         'inline-function)]
       [(call-form? current)
-       (define callee (call-form-fn current))
+       (define callee (raw-call-form-fn current))
        (and
-        (symbol? callee)
+        (or (symbol? callee) (qualified-ref? callee))
         (hash-ref return-proofs callee #f)
         (constraint-expression-synchronous? current callable-proofs #f)
         (hash-ref return-proofs callee))]
@@ -4705,10 +4722,17 @@
   (when (and excludes (set-member? excludes sym))
     (define src (src-for node))
     (define tgt (current-check-target))
+    (define display-name
+      (if (qualified-ref? sym)
+          (format "~a/~a" (qualified-ref-qualifier sym)
+                  (qualified-ref-name sym))
+          sym))
     (define msg
       (case tgt
-        [(js) (format "warning: ~a has no JS translation and will fail at runtime" sym)]
-        [else (format "warning: ~a is JVM-only and unavailable in ~a target" sym tgt)]))
+        [(js) (format "warning: ~a has no JS translation and will fail at runtime"
+                      display-name)]
+        [else (format "warning: ~a is JVM-only and unavailable in ~a target"
+                      display-name tgt)]))
     (fprintf (current-error-port)
              "~a~a\n" msg
              (if src (format " at ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
@@ -4863,9 +4887,7 @@
 ;; is a no-op when no table is bound (the normal check path), so this adds
 ;; nothing to ordinary type-checking. The real cond body is infer-expr*.
 (define (infer-expr e env)
-  (define legacy-e
-    (if (qualified-ref? e) (qualified-ref->symbol e) e))
-  (define t (infer-expr* legacy-e env))
+  (define t (infer-expr* e env))
   (store-type! e t)
   t)
 
@@ -4880,6 +4902,8 @@
          (hash-ref env (canonicalize-qualified-sym e) #f)
          (schema-type-for-config-sym e)
          ANY)]
+    [(qualified-ref? e)
+     (hash-ref env e ANY)]
     [(quoted? e) ANY]
     [(regex-lit? e)
      (regex-construction-contract e)
@@ -5361,6 +5385,7 @@
            (for ([a (in-list (method-call-args e))]) (infer-expr a env))
            ANY])])]
     [(static-call? e)
+     (define ref (raw-static-call-class+method e))
      (define sym (static-call-class+method e))
      (warn-target-exclude sym e)
      ;; Typed JVM static: if Class (after import-canonicalization) is a known
@@ -5393,7 +5418,9 @@
                         #:src (src-for (car args)))))
         (resolve-jvm-call 'method cls member methods args env e)]
        [else
-        (define raw-type (hash-ref env sym ANY))
+        (define raw-type
+          (or (and (qualified-ref? ref) (hash-ref env ref #f))
+              (hash-ref env sym ANY)))
         (define fn-type
           (if (type-poly? raw-type)
             (resolve-poly-call raw-type (static-call-args e) env)
@@ -5729,8 +5756,9 @@
      (if nullable-tuple? (nullable-type selected) selected)]
 
     [(call-form? e)
-     (warn-target-exclude (call-form-fn e) e)
+     (warn-target-exclude (raw-call-form-fn e) e)
      (check-collection-order-use! e env)
+     (define ref (raw-call-form-fn e))
      (define fn (call-form-fn e))
      (when (and (eq? (current-check-target) 'js)
                 (symbol? fn)
@@ -5747,9 +5775,13 @@
                 'suggestion (and suggestion (symbol->string suggestion)))
         #:src (src-for e)))
      (define raw-type
-       (if (symbol? (call-form-fn e))
-           (hash-ref env (call-form-fn e) ANY)
-           (infer-expr (call-form-fn e) env)))
+       (cond
+         [(qualified-ref? ref)
+          (or (hash-ref env ref #f)
+              (and (symbol? fn) (hash-ref env fn #f))
+              ANY)]
+         [(symbol? fn) (hash-ref env fn ANY)]
+         [else (infer-expr ref env)]))
      (define call-name
        (if (symbol? (call-form-fn e)) (call-form-fn e) '<function>))
      (define fn-type
@@ -6201,7 +6233,7 @@
   (when (and (symbol? bname) (call-form? value) (symbol? (call-form-fn value)))
     (define fn-sym (call-form-fn value))
     (define fn-str (symbol->string fn-sym))
-    (define fn-type (hash-ref env fn-sym #f))
+    (define fn-type (call-form-env-ref env value))
     (when (and fn-type (type-fn? fn-type)
                (= (length (type-fn-params fn-type)) 1)
                (type-prim? (car (type-fn-params fn-type))))
@@ -6554,7 +6586,7 @@
         [else #f]))
     (define arg-sig
       (and (call-form? arg)
-           (let ([ft (hash-ref env (call-form-fn arg) #f)])
+           (let ([ft (call-form-env-ref env arg)])
              (and ft (type-fn? ft)
                   (format "~a : ~a" (call-form-fn arg) (type->string ft))))))
     (define arg-src (src-for arg))
@@ -8733,12 +8765,13 @@
   (define (go e [loc #f])
     (define l (loc-of e loc))
     (cond
-      [(qualified-ref? e) (visit! (qualified-ref->symbol e) l)]
+      [(qualified-ref? e) (visit! e l)]
       [(symbol? e) (visit! e l)]
       [(call-form? e)
-       (if (symbol? (call-form-fn e))
-           (visit! (call-form-fn e) l)
-           (go (call-form-fn e) l))
+       (define fn (raw-call-form-fn e))
+       (if (or (qualified-ref? fn) (symbol? fn))
+           (visit! fn l)
+           (go fn l))
        (go-body (call-form-args e) l)]
       [(threading-marker? e) (go (threading-marker-desugared e) l)]
       [(let-form? e) (go-bindings (let-form-bindings e) l)
@@ -8911,23 +8944,31 @@
                  (symbol->string (module-interface-namespace interface))
                  interface))
     (define violations '())
-    (define (visit! sym loc)
-      (define spelling (symbol->string sym))
-      (define slash
-        (for/first ([index (in-range (string-length spelling))]
-                    #:when (char=? (string-ref spelling index) #\/))
-          index))
-      (when (and slash
-                 (> slash 0)
-                 (< slash (sub1 (string-length spelling))))
-        (define prefix (substring spelling 0 slash))
-        (define member
-          (string->symbol (substring spelling (add1 slash))))
+    (define (visit! ref loc)
+      (define-values (spelling prefix member)
+        (cond
+          [(qualified-ref? ref)
+           (values
+            (format "~a/~a" (qualified-ref-qualifier ref)
+                    (qualified-ref-name ref))
+            (symbol->string (qualified-ref-qualifier ref))
+            (qualified-ref-name ref))]
+          [else
+           (define raw (symbol->string ref))
+           (define slash
+             (for/first ([index (in-range (string-length raw))]
+                         #:when (char=? (string-ref raw index) #\/))
+               index))
+           (if (and slash (> slash 0) (< slash (sub1 (string-length raw))))
+               (values raw (substring raw 0 slash)
+                       (string->symbol (substring raw (add1 slash))))
+               (values raw #f #f))]))
+      (when prefix
         (define interface (hash-ref prefix->interface prefix #f))
         (when (and interface
                    (not (module-interface-export? interface member)))
           (set! violations
-                (cons (list sym member interface loc) violations)))))
+                (cons (list spelling member interface loc) violations)))))
     (for ([form (in-list (program-forms prog))])
       (walk-exprs-for-syms form (program-src-table prog) visit!))
     (when (pair? violations)
@@ -8960,7 +9001,7 @@
         'count (length ordered)
         'references
         (map (lambda (violation)
-               (symbol->string (car violation)))
+               (car violation))
              ordered))
        #:src (cadddr (car ordered))))))
 
@@ -8987,40 +9028,70 @@
                     ns)]))
     ;; catalog: ns-string → member-strings, from qualified stdlib keys.
     (define catalog (make-hash))
+    (define (catalog-add! qualifier name)
+      (define qualifier-string (symbol->string qualifier))
+      (define name-string (symbol->string name))
+      (when (and (positive? (string-length qualifier-string))
+                 (char-alphabetic? (string-ref qualifier-string 0))
+                 (char-lower-case? (string-ref qualifier-string 0)))
+        (hash-update! catalog qualifier-string
+                      (lambda (members) (cons name-string members))
+                      '())))
     (when clj-target?
       (for ([(k _) (in-hash (builtin-env-for-target target))])
-        (define s (symbol->string k))
-        (define idx (let loop ([i 0])
-                      (cond [(= i (string-length s)) #f]
-                            [(char=? (string-ref s i) #\/) i]
-                            [else (loop (+ i 1))])))
-        (when (and idx (> idx 0)
-                   (char-alphabetic? (string-ref s 0))
-                   (char-lower-case? (string-ref s 0)))
-          (hash-update! catalog (substring s 0 idx)
-                        (lambda (ms) (cons (substring s (+ idx 1)) ms))
-                        '()))))
+        (cond
+          [(qualified-ref? k)
+           (catalog-add! (qualified-ref-qualifier k)
+                         (qualified-ref-name k))]
+          [(symbol? k)
+           (define s (symbol->string k))
+           (define idx (let loop ([i 0])
+                         (cond [(= i (string-length s)) #f]
+                               [(char=? (string-ref s i) #\/) i]
+                               [else (loop (+ i 1))])))
+           (when (and idx (> idx 0) (< idx (sub1 (string-length s))))
+             (catalog-add! (string->symbol (substring s 0 idx))
+                           (string->symbol (substring s (add1 idx)))))])))
     ;; sibling beagle modules register under their alias prefix.
     (define module-prefixes
       (for/set ([(_ p) (in-hash (program-imported-symbol-ns prog))])
         (symbol->string p)))
     (define noted-ns (mutable-set))
     (define violations '())
-    (define (visit! sym loc)
-      (define s (symbol->string sym))
-      (define idx (let loop ([i 0])
-                    (cond [(>= i (string-length s)) #f]
-                          [(char=? (string-ref s i) #\/) i]
-                          [else (loop (+ i 1))])))
-      (when (and idx (> idx 0) (< idx (sub1 (string-length s)))
+    (define (visit! ref loc)
+      (define-values (s p member qualified?)
+        (cond
+          [(qualified-ref? ref)
+           (define qualifier (symbol->string (qualified-ref-qualifier ref)))
+           (define leaf (symbol->string (qualified-ref-name ref)))
+           (values (string-append qualifier "/" leaf)
+                   qualifier leaf #t)]
+          [else
+           (define spelling (symbol->string ref))
+           (define idx
+             (let loop ([i 0])
+               (cond [(>= i (string-length spelling)) #f]
+                     [(char=? (string-ref spelling i) #\/) i]
+                     [else (loop (+ i 1))])))
+           (if (and idx (> idx 0) (< idx (sub1 (string-length spelling))))
+               (values spelling (substring spelling 0 idx)
+                       (substring spelling (add1 idx)) #t)
+               (values spelling #f #f #f))]))
+      (define resolved-in-env?
+        (or (hash-has-key? env ref)
+            (and (qualified-ref? ref)
+                 (hash-has-key?
+                  env
+                  (qualified-interface-name
+                   (qualified-ref-qualifier ref)
+                   (qualified-ref-name ref))))))
+      (when (and qualified?
                  (char-alphabetic? (string-ref s 0))
                  (or (not clj-target?)
                      (char-lower-case? (string-ref s 0)))
                  (or (not clj-target?)
                      (not (string-prefix? s "clojure.")))
-                 (not (hash-has-key? env sym)))
-        (define p (substring s 0 idx))
-        (define member (substring s (+ idx 1)))
+                 (not resolved-in-env?))
         (define ns (hash-ref required p #f))
         (cond
           [ns
@@ -9050,7 +9121,7 @@
                            "note: ~a has no typed catalog entries — its calls type as Any (unchecked)\n  (add entries to stdlib-bb.rkt when worth checking)\n"
                            ns-str))]))]
           [else
-           (set! violations (cons (list sym p loc) violations))])))
+           (set! violations (cons (list s p loc) violations))])))
     (for ([form (in-list (program-forms prog))])
       (walk-exprs-for-syms form src-table visit!))
     (when (pair? violations)
@@ -9062,7 +9133,6 @@
           ns-str))
       (define lines
         (for/list ([v (in-list vs)])
-          (define sym (car v))
           (define p (cadr v))
           (define loc (caddr v))
           (define sugg (suggest-for p))

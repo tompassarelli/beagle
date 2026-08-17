@@ -5,9 +5,13 @@
 ;; Combined with the portable and Babashka catalogs by `(stdlib-for-target
 ;; 'clj)`; kept separate so the CLJS pipeline can exclude cleanly.
 
-(require "types.rkt"
+(require "ast.rkt"
+         "types.rkt"
          "stdlib-helpers.rkt"
          racket/set)
+
+(define (q qualifier name)
+  (qualified-ref qualifier name #f))
 
 (define STDLIB-CLJ
   (hash
@@ -66,122 +70,122 @@
    ;; --- string: CLJ-specific -----------------------------------------------
    'char-escape-string (fn-of '(Any) 'Any)
    ;; --- clojure.string -----------------------------------------------------
-   'clojure.string/join     (fn-of '(Any) 'String #:rest 'Any)
+   (q 'clojure.string 'join)     (fn-of '(Any) 'String #:rest 'Any)
    ;; (split s re) and (split s re limit) — Clojure's 3-arg form takes an Int
    ;; limit (-1 keeps trailing empties). Optional 3rd arg via a rest Int.
-   'clojure.string/split    (type-fn (list (p 'String) (p 'Regex)) (p 'Int)
+   (q 'clojure.string 'split)    (type-fn (list (p 'String) (p 'Regex)) (p 'Int)
                                      (type-app 'Vec (list (p 'String))))
-   'clojure.string/replace  (fn-of '(String (U String Regex) String) 'String)
-   'clojure.string/trim     (fn-of '(String) 'String)
-   'clojure.string/triml    (fn-of '(String) 'String)
-   'clojure.string/trimr    (fn-of '(String) 'String)
-   'clojure.string/upper-case (fn-of '(String) 'String)
-   'clojure.string/lower-case (fn-of '(String) 'String)
-   'clojure.string/capitalize (fn-of '(String) 'String)
-   'clojure.string/blank?   (fn-of '(Any) 'Bool)
-   'clojure.string/includes? (fn-of '(String String) 'Bool)
-   'clojure.string/starts-with? (fn-of '(String String) 'Bool)
-   'clojure.string/ends-with? (fn-of '(String String) 'Bool)
-   'clojure.string/reverse  (fn-of '(String) 'String)
-   'clojure.string/escape   (fn-of '(String Any) 'String)
-   'clojure.string/re-quote-replacement (fn-of '(String) 'String)
+   (q 'clojure.string 'replace)  (fn-of '(String (U String Regex) String) 'String)
+   (q 'clojure.string 'trim)     (fn-of '(String) 'String)
+   (q 'clojure.string 'triml)    (fn-of '(String) 'String)
+   (q 'clojure.string 'trimr)    (fn-of '(String) 'String)
+   (q 'clojure.string 'upper-case) (fn-of '(String) 'String)
+   (q 'clojure.string 'lower-case) (fn-of '(String) 'String)
+   (q 'clojure.string 'capitalize) (fn-of '(String) 'String)
+   (q 'clojure.string 'blank?)   (fn-of '(Any) 'Bool)
+   (q 'clojure.string 'includes?) (fn-of '(String String) 'Bool)
+   (q 'clojure.string 'starts-with?) (fn-of '(String String) 'Bool)
+   (q 'clojure.string 'ends-with?) (fn-of '(String String) 'Bool)
+   (q 'clojure.string 'reverse)  (fn-of '(String) 'String)
+   (q 'clojure.string 'escape)   (fn-of '(String Any) 'String)
+   (q 'clojure.string 're-quote-replacement) (fn-of '(String) 'String)
    ;; Nullable-honest returns: no match → nil. Ergonomic now that
    ;; nil-narrowing flows through if/when/if-let/and/or/cond guards.
    ;; 3rd arg = optional from-index (Int); Clojure supports (index-of s v from-index).
-   'clojure.string/index-of (type-fn (list (p 'String) (p 'Any)) (p 'Int)
+   (q 'clojure.string 'index-of) (type-fn (list (p 'String) (p 'Any)) (p 'Int)
                                      (type-union (list (p 'Int) (p 'Nil))))
-   'clojure.string/last-index-of (type-fn (list (p 'String) (p 'Any)) (p 'Int)
+   (q 'clojure.string 'last-index-of) (type-fn (list (p 'String) (p 'Any)) (p 'Int)
                                           (type-union (list (p 'Int) (p 'Nil))))
-   'clojure.string/split-lines (type-fn (list (p 'String)) #f
+   (q 'clojure.string 'split-lines) (type-fn (list (p 'String)) #f
                                         (type-app 'Vec (list (p 'String))))
-   'clojure.string/replace-first (fn-of '(String Any Any) 'String)
+   (q 'clojure.string 'replace-first) (fn-of '(String Any Any) 'String)
    ;; --- clojure.set -------------------------------------------------------
-   'clojure.set/union       (fn-of '() 'Any #:rest 'Any)
-   'clojure.set/intersection (fn-of '(Any) 'Any #:rest 'Any)
-   'clojure.set/difference  (fn-of '(Any) 'Any #:rest 'Any)
-   'clojure.set/select      (fn-of '(Any Any) 'Any)
-   'clojure.set/project     (fn-of '(Any Any) 'Any)
-   'clojure.set/rename       (fn-of '(Any Any) 'Any)
-   'clojure.set/join        (fn-of '(Any Any) 'Any #:rest 'Any)
-   'clojure.set/map-invert  (fn-of '(Any) 'Any)
-   'clojure.set/index       (fn-of '(Any Any) 'Any)
-   'clojure.set/subset?     (fn-of '(Any Any) 'Bool)
-   'clojure.set/superset?   (fn-of '(Any Any) 'Bool)
+   (q 'clojure.set 'union)       (fn-of '() 'Any #:rest 'Any)
+   (q 'clojure.set 'intersection) (fn-of '(Any) 'Any #:rest 'Any)
+   (q 'clojure.set 'difference)  (fn-of '(Any) 'Any #:rest 'Any)
+   (q 'clojure.set 'select)      (fn-of '(Any Any) 'Any)
+   (q 'clojure.set 'project)     (fn-of '(Any Any) 'Any)
+   (q 'clojure.set 'rename)       (fn-of '(Any Any) 'Any)
+   (q 'clojure.set 'join)        (fn-of '(Any Any) 'Any #:rest 'Any)
+   (q 'clojure.set 'map-invert)  (fn-of '(Any) 'Any)
+   (q 'clojure.set 'index)       (fn-of '(Any Any) 'Any)
+   (q 'clojure.set 'subset?)     (fn-of '(Any Any) 'Bool)
+   (q 'clojure.set 'superset?)   (fn-of '(Any Any) 'Bool)
    ;; --- clojure.walk -------------------------------------------------------
-   'clojure.walk/walk       (fn-of '(Any Any Any) 'Any)
-   'clojure.walk/postwalk   (fn-of '(Any Any) 'Any)
-   'clojure.walk/prewalk    (fn-of '(Any Any) 'Any)
-   'clojure.walk/postwalk-replace (fn-of '(Any Any) 'Any)
-   'clojure.walk/prewalk-replace  (fn-of '(Any Any) 'Any)
-   'clojure.walk/stringify-keys   (fn-of '(Any) 'Any)
-   'clojure.walk/keywordize-keys  (fn-of '(Any) 'Any)
+   (q 'clojure.walk 'walk)       (fn-of '(Any Any Any) 'Any)
+   (q 'clojure.walk 'postwalk)   (fn-of '(Any Any) 'Any)
+   (q 'clojure.walk 'prewalk)    (fn-of '(Any Any) 'Any)
+   (q 'clojure.walk 'postwalk-replace) (fn-of '(Any Any) 'Any)
+   (q 'clojure.walk 'prewalk-replace)  (fn-of '(Any Any) 'Any)
+   (q 'clojure.walk 'stringify-keys)   (fn-of '(Any) 'Any)
+   (q 'clojure.walk 'keywordize-keys)  (fn-of '(Any) 'Any)
    ;; --- clojure.java.io ----------------------------------------------------
-   'clojure.java.io/file          (fn-of '(String) 'Any #:rest 'String)
-   'clojure.java.io/reader        (fn-of '(Any) 'Any)
-   'clojure.java.io/writer        (fn-of '(Any) 'Any)
-   'clojure.java.io/input-stream  (fn-of '(Any) 'Any)
-   'clojure.java.io/output-stream (fn-of '(Any) 'Any)
-   'clojure.java.io/resource      (fn-of '(String) 'Any)
-   'clojure.java.io/copy          (fn-of '(Any Any) 'Any)
-   'clojure.java.io/delete-file   (fn-of '(Any) 'Bool #:rest 'Any)
-   'clojure.java.io/make-parents  (fn-of '(Any) 'Bool)
+   (q 'clojure.java.io 'file)          (fn-of '(String) 'Any #:rest 'String)
+   (q 'clojure.java.io 'reader)        (fn-of '(Any) 'Any)
+   (q 'clojure.java.io 'writer)        (fn-of '(Any) 'Any)
+   (q 'clojure.java.io 'input-stream)  (fn-of '(Any) 'Any)
+   (q 'clojure.java.io 'output-stream) (fn-of '(Any) 'Any)
+   (q 'clojure.java.io 'resource)      (fn-of '(String) 'Any)
+   (q 'clojure.java.io 'copy)          (fn-of '(Any Any) 'Any)
+   (q 'clojure.java.io 'delete-file)   (fn-of '(Any) 'Bool #:rest 'Any)
+   (q 'clojure.java.io 'make-parents)  (fn-of '(Any) 'Bool)
    ;; --- clojure.pprint ------------------------------------------------------
-   'clojure.pprint/pprint       (fn-of '(Any) 'Nil #:rest 'Any)
-   'clojure.pprint/cl-format    (fn-of '(Any String) 'Any #:rest 'Any)
-   'clojure.pprint/print-table  (fn-of '(Any) 'Nil #:rest 'Any)
+   (q 'clojure.pprint 'pprint)       (fn-of '(Any) 'Nil #:rest 'Any)
+   (q 'clojure.pprint 'cl-format)    (fn-of '(Any String) 'Any #:rest 'Any)
+   (q 'clojure.pprint 'print-table)  (fn-of '(Any) 'Nil #:rest 'Any)
    ;; --- clojure.edn -------------------------------------------------------
-   'clojure.edn/read-string (fn-of '(String) 'Any)
-   'clojure.edn/read        (fn-of '(Any) 'Any)
+   (q 'clojure.edn 'read-string) (fn-of '(String) 'Any)
+   (q 'clojure.edn 'read)        (fn-of '(Any) 'Any)
    ;; --- clojure.data -------------------------------------------------------
    ;; (diff returns [in-a-only in-b-only in-both])
-   'clojure.data/diff       (fn-of '(Any Any) 'Any)
+   (q 'clojure.data 'diff)       (fn-of '(Any Any) 'Any)
    ;; --- clojure.repl -------------------------------------------------------
    ;; (interactive help/debug functions; return Nil for printing-only)
-   'clojure.repl/doc        (fn-of '(Any) 'Nil)
-   'clojure.repl/source     (fn-of '(Any) 'Nil)
-   'clojure.repl/dir        (fn-of '(Any) 'Nil)
-   'clojure.repl/pst        (fn-of '() 'Nil #:rest 'Any)
-   'clojure.repl/apropos    (fn-of '(Any) 'Any)
-   'clojure.repl/find-doc   (fn-of '(Any) 'Nil)
-   'clojure.repl/demunge    (fn-of '(String) 'String)
+   (q 'clojure.repl 'doc)        (fn-of '(Any) 'Nil)
+   (q 'clojure.repl 'source)     (fn-of '(Any) 'Nil)
+   (q 'clojure.repl 'dir)        (fn-of '(Any) 'Nil)
+   (q 'clojure.repl 'pst)        (fn-of '() 'Nil #:rest 'Any)
+   (q 'clojure.repl 'apropos)    (fn-of '(Any) 'Any)
+   (q 'clojure.repl 'find-doc)   (fn-of '(Any) 'Nil)
+   (q 'clojure.repl 'demunge)    (fn-of '(String) 'String)
    ;; --- clojure.test -------------------------------------------------------
    ;; (test runner — `is`, `are`, `testing` are macros; `run-tests` returns a map)
-   'clojure.test/run-tests       (fn-of '() 'Any #:rest 'Any)
-   'clojure.test/run-all-tests   (fn-of '() 'Any #:rest 'Any)
-   'clojure.test/successful?     (fn-of '(Any) 'Bool)
-   'clojure.test/test-var        (fn-of '(Any) 'Any)
-   'clojure.test/test-vars       (fn-of '(Any) 'Any)
-   'clojure.test/test-ns         (fn-of '(Any) 'Any)
+   (q 'clojure.test 'run-tests)       (fn-of '() 'Any #:rest 'Any)
+   (q 'clojure.test 'run-all-tests)   (fn-of '() 'Any #:rest 'Any)
+   (q 'clojure.test 'successful?)     (fn-of '(Any) 'Bool)
+   (q 'clojure.test 'test-var)        (fn-of '(Any) 'Any)
+   (q 'clojure.test 'test-vars)       (fn-of '(Any) 'Any)
+   (q 'clojure.test 'test-ns)         (fn-of '(Any) 'Any)
    ;; --- clojure.zip --------------------------------------------------------
    ;; (zipper navigation; locs are opaque)
-   'clojure.zip/zipper           (fn-of '(Any Any Any Any) 'Any)
-   'clojure.zip/seq-zip          (fn-of '(Any) 'Any)
-   'clojure.zip/vector-zip       (fn-of '(Any) 'Any)
-   'clojure.zip/xml-zip          (fn-of '(Any) 'Any)
-   'clojure.zip/node             (fn-of '(Any) 'Any)
-   'clojure.zip/branch?          (fn-of '(Any) 'Bool)
-   'clojure.zip/children         (fn-of '(Any) 'Any)
-   'clojure.zip/make-node        (fn-of '(Any Any Any) 'Any)
-   'clojure.zip/path             (fn-of '(Any) 'Any)
-   'clojure.zip/lefts            (fn-of '(Any) 'Any)
-   'clojure.zip/rights           (fn-of '(Any) 'Any)
-   'clojure.zip/down             (fn-of '(Any) 'Any)
-   'clojure.zip/up               (fn-of '(Any) 'Any)
-   'clojure.zip/root             (fn-of '(Any) 'Any)
-   'clojure.zip/right            (fn-of '(Any) 'Any)
-   'clojure.zip/rightmost        (fn-of '(Any) 'Any)
-   'clojure.zip/left             (fn-of '(Any) 'Any)
-   'clojure.zip/leftmost         (fn-of '(Any) 'Any)
-   'clojure.zip/insert-left      (fn-of '(Any Any) 'Any)
-   'clojure.zip/insert-right     (fn-of '(Any Any) 'Any)
-   'clojure.zip/replace          (fn-of '(Any Any) 'Any)
-   'clojure.zip/edit             (fn-of '(Any Any) 'Any #:rest 'Any)
-   'clojure.zip/insert-child     (fn-of '(Any Any) 'Any)
-   'clojure.zip/append-child     (fn-of '(Any Any) 'Any)
-   'clojure.zip/next             (fn-of '(Any) 'Any)
-   'clojure.zip/prev             (fn-of '(Any) 'Any)
-   'clojure.zip/end?             (fn-of '(Any) 'Bool)
-   'clojure.zip/remove           (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'zipper)           (fn-of '(Any Any Any Any) 'Any)
+   (q 'clojure.zip 'seq-zip)          (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'vector-zip)       (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'xml-zip)          (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'node)             (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'branch?)          (fn-of '(Any) 'Bool)
+   (q 'clojure.zip 'children)         (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'make-node)        (fn-of '(Any Any Any) 'Any)
+   (q 'clojure.zip 'path)             (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'lefts)            (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'rights)           (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'down)             (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'up)               (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'root)             (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'right)            (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'rightmost)        (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'left)             (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'leftmost)         (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'insert-left)      (fn-of '(Any Any) 'Any)
+   (q 'clojure.zip 'insert-right)     (fn-of '(Any Any) 'Any)
+   (q 'clojure.zip 'replace)          (fn-of '(Any Any) 'Any)
+   (q 'clojure.zip 'edit)             (fn-of '(Any Any) 'Any #:rest 'Any)
+   (q 'clojure.zip 'insert-child)     (fn-of '(Any Any) 'Any)
+   (q 'clojure.zip 'append-child)     (fn-of '(Any Any) 'Any)
+   (q 'clojure.zip 'next)             (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'prev)             (fn-of '(Any) 'Any)
+   (q 'clojure.zip 'end?)             (fn-of '(Any) 'Bool)
+   (q 'clojure.zip 'remove)           (fn-of '(Any) 'Any)
    ;; --- namespace / var inspection: CLJ-specific --------------------------
    'type       (fn-of '(Any) 'Any)
    'class      (fn-of '(Any) 'Any)
@@ -257,70 +261,70 @@
    '.toPath        (fn-of '(Any) 'Any)
    '.close         (fn-of '(Any) 'Nil)
    ;; --- Java interop: static methods --------------------------------------
-   'Boolean/parseBoolean (fn-of '(String) 'Bool)
-   'Boolean/valueOf      (fn-of '(Any) 'Bool)
-   'Integer/valueOf      (fn-of '(Any) 'Int)
-   'Long/valueOf         (fn-of '(Any) 'Int)
-   'Double/valueOf       (fn-of '(Any) 'Float)
-   'Float/parseFloat     (fn-of '(String) 'Float)
-   'String/valueOf       (fn-of '(Any) 'String)
-   'String/format        (fn-of '(String) 'String #:rest 'Any)
-   'Math/PI              (p 'Float)
-   'Math/E               (p 'Float)
-   'Math/sin             (fn-of '(Float) 'Float)
-   'Math/cos             (fn-of '(Float) 'Float)
-   'Math/tan             (fn-of '(Float) 'Float)
-   'Math/asin            (fn-of '(Float) 'Float)
-   'Math/acos            (fn-of '(Float) 'Float)
-   'Math/atan            (fn-of '(Float) 'Float)
-   'Math/atan2           (fn-of '(Float Float) 'Float)
-   'Math/log             (fn-of '(Float) 'Float)
-   'Math/log10           (fn-of '(Float) 'Float)
-   'Math/exp             (fn-of '(Float) 'Float)
-   'Math/random          (fn-of '() 'Float)
-   'Math/signum          (fn-of '(Float) 'Float)
-   'Math/toRadians       (fn-of '(Float) 'Float)
-   'Math/toDegrees       (fn-of '(Float) 'Float)
-   'Math/cbrt            (fn-of '(Float) 'Float)
-   'Math/hypot           (fn-of '(Float Float) 'Float)
-   'Math/IEEEremainder   (fn-of '(Float Float) 'Float)
-   'Math/floorMod        (fn-of '(Int Int) 'Int)
-   'Math/floorDiv        (fn-of '(Int Int) 'Int)
-   'Math/addExact        (fn-of '(Int Int) 'Int)
-   'Math/subtractExact   (fn-of '(Int Int) 'Int)
-   'Math/multiplyExact   (fn-of '(Int Int) 'Int)
-   'Math/incrementExact  (fn-of '(Int) 'Int)
-   'Math/decrementExact  (fn-of '(Int) 'Int)
-   'Math/negateExact     (fn-of '(Int) 'Int)
-   'Math/toIntExact      (fn-of '(Int) 'Int)
-   'Collections/unmodifiableList (fn-of '(Any) 'Any)
-   'Collections/unmodifiableMap  (fn-of '(Any) 'Any)
-   'Collections/sort     (fn-of '(Any) 'Nil #:rest 'Any)
-   'Arrays/asList        (fn-of '(Any) 'Any)
-   'Arrays/sort          (fn-of '(Any) 'Nil #:rest 'Any)
-   'Objects/requireNonNull (fn-of '(Any) 'Any #:rest 'Any)
-   'Thread/sleep         (fn-of '(Int) 'Nil)
-   'Instant/now          (fn-of '() 'Any)
-   'Instant/parse        (fn-of '(Any) 'Any)
-   'UUID/randomUUID      (fn-of '() 'Any)
-   'UUID/fromString      (fn-of '(String) 'Any)
-   'Math/abs      (fn-of '(Int) 'Int)
-   'Math/max      (fn-of '(Int Int) 'Int)
-   'Math/min      (fn-of '(Int Int) 'Int)
-   'Math/round    (fn-of '(Float) 'Int)
-   'Math/floor    (fn-of '(Float) 'Float)
-   'Math/ceil     (fn-of '(Float) 'Float)
-   'Math/pow      (fn-of '(Float Float) 'Float)
-   'Math/sqrt     (fn-of '(Float) 'Float)
-   'Integer/parseInt   (fn-of '(String) 'Int)
-   'Long/parseLong     (fn-of '(String) 'Int)
-   'Double/parseDouble (fn-of '(String) 'Float)
-   'Double/doubleToRawLongBits (fn-of '(Float) 'Int)
-   'System/getProperty       (fn-of '(String) 'String)
-   'System/getenv            (type-fn (list (p 'String)) #f
+   (q 'Boolean 'parseBoolean) (fn-of '(String) 'Bool)
+   (q 'Boolean 'valueOf)      (fn-of '(Any) 'Bool)
+   (q 'Integer 'valueOf)      (fn-of '(Any) 'Int)
+   (q 'Long 'valueOf)         (fn-of '(Any) 'Int)
+   (q 'Double 'valueOf)       (fn-of '(Any) 'Float)
+   (q 'Float 'parseFloat)     (fn-of '(String) 'Float)
+   (q 'String 'valueOf)       (fn-of '(Any) 'String)
+   (q 'String 'format)        (fn-of '(String) 'String #:rest 'Any)
+   (q 'Math 'PI)              (p 'Float)
+   (q 'Math 'E)               (p 'Float)
+   (q 'Math 'sin)             (fn-of '(Float) 'Float)
+   (q 'Math 'cos)             (fn-of '(Float) 'Float)
+   (q 'Math 'tan)             (fn-of '(Float) 'Float)
+   (q 'Math 'asin)            (fn-of '(Float) 'Float)
+   (q 'Math 'acos)            (fn-of '(Float) 'Float)
+   (q 'Math 'atan)            (fn-of '(Float) 'Float)
+   (q 'Math 'atan2)           (fn-of '(Float Float) 'Float)
+   (q 'Math 'log)             (fn-of '(Float) 'Float)
+   (q 'Math 'log10)           (fn-of '(Float) 'Float)
+   (q 'Math 'exp)             (fn-of '(Float) 'Float)
+   (q 'Math 'random)          (fn-of '() 'Float)
+   (q 'Math 'signum)          (fn-of '(Float) 'Float)
+   (q 'Math 'toRadians)       (fn-of '(Float) 'Float)
+   (q 'Math 'toDegrees)       (fn-of '(Float) 'Float)
+   (q 'Math 'cbrt)            (fn-of '(Float) 'Float)
+   (q 'Math 'hypot)           (fn-of '(Float Float) 'Float)
+   (q 'Math 'IEEEremainder)   (fn-of '(Float Float) 'Float)
+   (q 'Math 'floorMod)        (fn-of '(Int Int) 'Int)
+   (q 'Math 'floorDiv)        (fn-of '(Int Int) 'Int)
+   (q 'Math 'addExact)        (fn-of '(Int Int) 'Int)
+   (q 'Math 'subtractExact)   (fn-of '(Int Int) 'Int)
+   (q 'Math 'multiplyExact)   (fn-of '(Int Int) 'Int)
+   (q 'Math 'incrementExact)  (fn-of '(Int) 'Int)
+   (q 'Math 'decrementExact)  (fn-of '(Int) 'Int)
+   (q 'Math 'negateExact)     (fn-of '(Int) 'Int)
+   (q 'Math 'toIntExact)      (fn-of '(Int) 'Int)
+   (q 'Collections 'unmodifiableList) (fn-of '(Any) 'Any)
+   (q 'Collections 'unmodifiableMap)  (fn-of '(Any) 'Any)
+   (q 'Collections 'sort)     (fn-of '(Any) 'Nil #:rest 'Any)
+   (q 'Arrays 'asList)        (fn-of '(Any) 'Any)
+   (q 'Arrays 'sort)          (fn-of '(Any) 'Nil #:rest 'Any)
+   (q 'Objects 'requireNonNull) (fn-of '(Any) 'Any #:rest 'Any)
+   (q 'Thread 'sleep)         (fn-of '(Int) 'Nil)
+   (q 'Instant 'now)          (fn-of '() 'Any)
+   (q 'Instant 'parse)        (fn-of '(Any) 'Any)
+   (q 'UUID 'randomUUID)      (fn-of '() 'Any)
+   (q 'UUID 'fromString)      (fn-of '(String) 'Any)
+   (q 'Math 'abs)      (fn-of '(Int) 'Int)
+   (q 'Math 'max)      (fn-of '(Int Int) 'Int)
+   (q 'Math 'min)      (fn-of '(Int Int) 'Int)
+   (q 'Math 'round)    (fn-of '(Float) 'Int)
+   (q 'Math 'floor)    (fn-of '(Float) 'Float)
+   (q 'Math 'ceil)     (fn-of '(Float) 'Float)
+   (q 'Math 'pow)      (fn-of '(Float Float) 'Float)
+   (q 'Math 'sqrt)     (fn-of '(Float) 'Float)
+   (q 'Integer 'parseInt)   (fn-of '(String) 'Int)
+   (q 'Long 'parseLong)     (fn-of '(String) 'Int)
+   (q 'Double 'parseDouble) (fn-of '(String) 'Float)
+   (q 'Double 'doubleToRawLongBits) (fn-of '(Float) 'Int)
+   (q 'System 'getProperty)       (fn-of '(String) 'String)
+   (q 'System 'getenv)            (type-fn (list (p 'String)) #f
                                       (type-union (list (p 'String) (p 'Nil))))
-   'System/currentTimeMillis (fn-of '() 'Int)
-   'System/exit              (fn-of '(Int) 'Nil)
+   (q 'System 'currentTimeMillis) (fn-of '() 'Int)
+   (q 'System 'exit)              (fn-of '(Int) 'Nil)
    ;; --- Java interop: dynamic vars ----------------------------------------
    '*command-line-args* (type-app 'Vec (list (p 'String)))
    ;; =========================================================================
@@ -507,24 +511,24 @@
    '.isDirectory '.isFile '.delete '.canRead '.canWrite '.lastModified
    '.toPath '.close
    ;; Java static methods
-   'System/getProperty 'System/getenv 'System/exit 'System/currentTimeMillis
-   'System/nanoTime
-   'Math/abs 'Math/floor 'Math/ceil 'Math/round 'Math/max 'Math/min
-   'Math/pow 'Math/sqrt 'Math/random 'Math/log 'Math/sin 'Math/cos
-   'Math/tan 'Math/PI 'Math/E
-   'Integer/parseInt 'Integer/valueOf 'Integer/MAX_VALUE 'Integer/MIN_VALUE
-   'Long/parseLong 'Long/valueOf 'Long/MAX_VALUE 'Long/MIN_VALUE
-   'Double/parseDouble 'Double/doubleToRawLongBits
-   'Double/valueOf 'Double/NaN 'Double/POSITIVE_INFINITY
-   'Double/NEGATIVE_INFINITY 'Double/isNaN 'Double/isInfinite
-   'Float/parseFloat 'Float/valueOf
-   'Boolean/parseBoolean 'Boolean/valueOf
-   'String/format 'String/valueOf 'String/join
-   'Character/isDigit 'Character/isLetter 'Character/isWhitespace
-   'Class/forName
-   'Thread/sleep 'Thread/currentThread
-   'Runtime/getRuntime
-   'UUID/randomUUID 'UUID/fromString
+   (q 'System 'getProperty) 'System/getenv 'System/exit 'System/currentTimeMillis
+   (q 'System 'nanoTime)
+   (q 'Math 'abs) 'Math/floor 'Math/ceil 'Math/round 'Math/max 'Math/min
+   (q 'Math 'pow) 'Math/sqrt 'Math/random 'Math/log 'Math/sin 'Math/cos
+   (q 'Math 'tan) 'Math/PI 'Math/E
+   (q 'Integer 'parseInt) 'Integer/valueOf 'Integer/MAX_VALUE 'Integer/MIN_VALUE
+   (q 'Long 'parseLong) 'Long/valueOf 'Long/MAX_VALUE 'Long/MIN_VALUE
+   (q 'Double 'parseDouble) 'Double/doubleToRawLongBits
+   (q 'Double 'valueOf) 'Double/NaN 'Double/POSITIVE_INFINITY
+   (q 'Double 'NEGATIVE_INFINITY) 'Double/isNaN 'Double/isInfinite
+   (q 'Float 'parseFloat) 'Float/valueOf
+   (q 'Boolean 'parseBoolean) 'Boolean/valueOf
+   (q 'String 'format) 'String/valueOf 'String/join
+   (q 'Character 'isDigit) 'Character/isLetter 'Character/isWhitespace
+   (q 'Class 'forName)
+   (q 'Thread 'sleep) 'Thread/currentThread
+   (q 'Runtime 'getRuntime)
+   (q 'UUID 'randomUUID) 'UUID/fromString
    ;; JVM dynamic vars
    '*command-line-args*
    ;; JVM-only core functions
@@ -533,18 +537,18 @@
    'promise 'deliver 'realized?
    'agent 'send 'send-off 'await 'shutdown-agents
    ;; clojure.repl: REPL/JVM-only — no CLJS port
-   'clojure.repl/doc 'clojure.repl/source 'clojure.repl/dir 'clojure.repl/pst
-   'clojure.repl/apropos 'clojure.repl/find-doc 'clojure.repl/demunge
+   (q 'clojure.repl 'doc) 'clojure.repl/source 'clojure.repl/dir 'clojure.repl/pst
+   (q 'clojure.repl 'apropos) 'clojure.repl/find-doc 'clojure.repl/demunge
    ;; clojure.zip: `clojure.zip` ns is JVM-only —
    ;; excluded to surface ns mismatches at type time
-   'clojure.zip/zipper 'clojure.zip/seq-zip 'clojure.zip/vector-zip 'clojure.zip/xml-zip
-   'clojure.zip/node 'clojure.zip/branch? 'clojure.zip/children 'clojure.zip/make-node
-   'clojure.zip/path 'clojure.zip/lefts 'clojure.zip/rights
-   'clojure.zip/down 'clojure.zip/up 'clojure.zip/root
-   'clojure.zip/right 'clojure.zip/rightmost 'clojure.zip/left 'clojure.zip/leftmost
-   'clojure.zip/insert-left 'clojure.zip/insert-right
-   'clojure.zip/replace 'clojure.zip/edit
-   'clojure.zip/insert-child 'clojure.zip/append-child
-   'clojure.zip/next 'clojure.zip/prev 'clojure.zip/end? 'clojure.zip/remove))
+   (q 'clojure.zip 'zipper) 'clojure.zip/seq-zip 'clojure.zip/vector-zip 'clojure.zip/xml-zip
+   (q 'clojure.zip 'node) 'clojure.zip/branch? 'clojure.zip/children 'clojure.zip/make-node
+   (q 'clojure.zip 'path) 'clojure.zip/lefts 'clojure.zip/rights
+   (q 'clojure.zip 'down) 'clojure.zip/up 'clojure.zip/root
+   (q 'clojure.zip 'right) 'clojure.zip/rightmost 'clojure.zip/left 'clojure.zip/leftmost
+   (q 'clojure.zip 'insert-left) 'clojure.zip/insert-right
+   (q 'clojure.zip 'replace) 'clojure.zip/edit
+   (q 'clojure.zip 'insert-child) 'clojure.zip/append-child
+   (q 'clojure.zip 'next) 'clojure.zip/prev 'clojure.zip/end? 'clojure.zip/remove))
 
 (provide STDLIB-CLJ CLJ-EXCLUDE)

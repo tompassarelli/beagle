@@ -1,86 +1,90 @@
 #lang racket/base
 
-;; JS-native stdlib type declarations. Maps `JS-NAMESPACE/name` symbols to
+;; JS-native stdlib type declarations. Maps structural qualified references to
 ;; their Beagle types so beagle-check can verify use of the JS standard
 ;; library (JSON, Math, Promise, Object, Array, console, timers, fetch).
 ;;
-;; Naming: `Namespace/member` mirrors the JS `Namespace.member` access form;
-;; the JS emitter translates the `/` back to `.`. Member-of-instance methods
-;; use `js/call` and are not declared in this table.
+;; Qualifier/member identity mirrors the JS `Namespace.member` access form;
+;; the JS emitter joins it only at output. Member-of-instance methods use
+;; `js/call` and are not declared in this table.
 
 (require racket/set
+         "ast.rkt"
          "types.rkt"
          "stdlib-helpers.rkt"
          "stdlib-portable.rkt"
          "js-capabilities.rkt")
 
+(define (q qualifier name)
+  (qualified-ref qualifier name #f))
+
 (define STDLIB-JS
   (hash
    ;; --- JSON ------------------------------------------------------------------
-   'JSON/parse        (fn-of '(String) 'Any #:rest 'Any)
-   'JSON/stringify    (fn-of '(Any) 'String #:rest 'Any)
+   (q 'JSON 'parse)        (fn-of '(String) 'Any #:rest 'Any)
+   (q 'JSON 'stringify)    (fn-of '(Any) 'String #:rest 'Any)
 
    ;; --- Math (statics) --------------------------------------------------------
-   'Math/floor        (fn-of '(Number) 'Int)
-   'Math/ceil         (fn-of '(Number) 'Int)
-   'Math/round        (fn-of '(Number) 'Int)
-   'Math/trunc        (fn-of '(Any) 'Int)
-   'Math/sqrt         (fn-of '(Number) 'Float)
-   'Math/cbrt         (fn-of '(Any) 'Float)
-   'Math/pow          (fn-of '(Number Number) 'Float)
-   'Math/exp          (fn-of '(Number) 'Float)
-   'Math/random       (fn-of '() 'Float)
-   'Math/abs          (poly-fn '(A) (list (tv 'A)) (tv 'A)
+   (q 'Math 'floor)        (fn-of '(Number) 'Int)
+   (q 'Math 'ceil)         (fn-of '(Number) 'Int)
+   (q 'Math 'round)        (fn-of '(Number) 'Int)
+   (q 'Math 'trunc)        (fn-of '(Any) 'Int)
+   (q 'Math 'sqrt)         (fn-of '(Number) 'Float)
+   (q 'Math 'cbrt)         (fn-of '(Any) 'Float)
+   (q 'Math 'pow)          (fn-of '(Number Number) 'Float)
+   (q 'Math 'exp)          (fn-of '(Number) 'Float)
+   (q 'Math 'random)       (fn-of '() 'Float)
+   (q 'Math 'abs)          (poly-fn '(A) (list (tv 'A)) (tv 'A)
                               #:bounds (hasheq 'A (p 'Number)))
-   'Math/sign         (fn-of '(Any) 'Int)
-   'Math/min          (poly-fn '(A) '() (tv 'A) #:rest (tv 'A)
+   (q 'Math 'sign)         (fn-of '(Any) 'Int)
+   (q 'Math 'min)          (poly-fn '(A) '() (tv 'A) #:rest (tv 'A)
                               #:bounds (hasheq 'A (p 'Number)))
-   'Math/max          (poly-fn '(A) '() (tv 'A) #:rest (tv 'A)
+   (q 'Math 'max)          (poly-fn '(A) '() (tv 'A) #:rest (tv 'A)
                               #:bounds (hasheq 'A (p 'Number)))
-   'Math/hypot        (fn-of '() 'Float #:rest 'Any)
-   'Math/log          (fn-of '(Any) 'Float)
-   'Math/log2         (fn-of '(Any) 'Float)
-   'Math/log10        (fn-of '(Any) 'Float)
-   'Math/sin          (fn-of '(Number) 'Float)
-   'Math/cos          (fn-of '(Number) 'Float)
-   'Math/tan          (fn-of '(Number) 'Float)
-   'Math/asin         (fn-of '(Any) 'Float)
-   'Math/acos         (fn-of '(Any) 'Float)
-   'Math/atan         (fn-of '(Number) 'Float)
-   'Math/atan2        (fn-of '(Number Number) 'Float)
+   (q 'Math 'hypot)        (fn-of '() 'Float #:rest 'Any)
+   (q 'Math 'log)          (fn-of '(Any) 'Float)
+   (q 'Math 'log2)         (fn-of '(Any) 'Float)
+   (q 'Math 'log10)        (fn-of '(Any) 'Float)
+   (q 'Math 'sin)          (fn-of '(Number) 'Float)
+   (q 'Math 'cos)          (fn-of '(Number) 'Float)
+   (q 'Math 'tan)          (fn-of '(Number) 'Float)
+   (q 'Math 'asin)         (fn-of '(Any) 'Float)
+   (q 'Math 'acos)         (fn-of '(Any) 'Float)
+   (q 'Math 'atan)         (fn-of '(Number) 'Float)
+   (q 'Math 'atan2)        (fn-of '(Number Number) 'Float)
 
    ;; --- Math (constants) ------------------------------------------------------
-   'Math/PI           (p 'Float)
-   'Math/E            (p 'Float)
-   'Math/LN2          (p 'Float)
-   'Math/LN10         (p 'Float)
-   'Math/LOG2E        (p 'Float)
-   'Math/LOG10E       (p 'Float)
-   'Math/SQRT2        (p 'Float)
+   (q 'Math 'PI)           (p 'Float)
+   (q 'Math 'E)            (p 'Float)
+   (q 'Math 'LN2)          (p 'Float)
+   (q 'Math 'LN10)         (p 'Float)
+   (q 'Math 'LOG2E)        (p 'Float)
+   (q 'Math 'LOG10E)       (p 'Float)
+   (q 'Math 'SQRT2)        (p 'Float)
 
    ;; --- Number (statics + predicates) ----------------------------------------
-   'Number/isInteger        (fn-of '(Any) 'Bool)
-   'Number/isFinite         (fn-of '(Any) 'Bool)
-   'Number/isNaN            (fn-of '(Any) 'Bool)
-   'Number/isSafeInteger    (fn-of '(Any) 'Bool)
-   'Number/parseInt         (fn-of '(String) 'Int #:rest 'Int)
-   'Number/parseFloat       (fn-of '(String) 'Float)
-   'Number/MAX_SAFE_INTEGER (p 'Int)
-   'Number/MIN_SAFE_INTEGER (p 'Int)
-   'Number/MAX_VALUE        (p 'Float)
-   'Number/MIN_VALUE        (p 'Float)
-   'Number/EPSILON          (p 'Float)
-   'Number/POSITIVE_INFINITY (p 'Float)
-   'Number/NEGATIVE_INFINITY (p 'Float)
-   'Number/NaN              (p 'Float)
+   (q 'Number 'isInteger)        (fn-of '(Any) 'Bool)
+   (q 'Number 'isFinite)         (fn-of '(Any) 'Bool)
+   (q 'Number 'isNaN)            (fn-of '(Any) 'Bool)
+   (q 'Number 'isSafeInteger)    (fn-of '(Any) 'Bool)
+   (q 'Number 'parseInt)         (fn-of '(String) 'Int #:rest 'Int)
+   (q 'Number 'parseFloat)       (fn-of '(String) 'Float)
+   (q 'Number 'MAX_SAFE_INTEGER) (p 'Int)
+   (q 'Number 'MIN_SAFE_INTEGER) (p 'Int)
+   (q 'Number 'MAX_VALUE)        (p 'Float)
+   (q 'Number 'MIN_VALUE)        (p 'Float)
+   (q 'Number 'EPSILON)          (p 'Float)
+   (q 'Number 'POSITIVE_INFINITY) (p 'Float)
+   (q 'Number 'NEGATIVE_INFINITY) (p 'Float)
+   (q 'Number 'NaN)              (p 'Float)
 
    ;; --- Promise ---------------------------------------------------------------
-   'Promise/resolve      (fn-of '(Any) 'Any)
-   'Promise/reject       (fn-of '(Any) 'Any)
-   'Promise/all          (fn-of '(Any) 'Any)
-   'Promise/allSettled   (fn-of '(Any) 'Any)
-   'Promise/race         (fn-of '(Any) 'Any)
-   'Promise/any          (fn-of '(Any) 'Any)
+   (q 'Promise 'resolve)      (fn-of '(Any) 'Any)
+   (q 'Promise 'reject)       (fn-of '(Any) 'Any)
+   (q 'Promise 'all)          (fn-of '(Any) 'Any)
+   (q 'Promise 'allSettled)   (fn-of '(Any) 'Any)
+   (q 'Promise 'race)         (fn-of '(Any) 'Any)
+   (q 'Promise 'any)          (fn-of '(Any) 'Any)
 
    ;; --- timers / scheduling --------------------------------------------------
    'setTimeout       (fn-of '(Any Int) 'Int #:rest 'Any)
@@ -101,50 +105,50 @@
    'decodeURI        (fn-of '(String) 'String)
 
    ;; --- Object (statics) -----------------------------------------------------
-   'Object/keys          (fn-of '(Any) 'Any)
-   'Object/values        (fn-of '(Any) 'Any)
-   'Object/entries       (fn-of '(Any) 'Any)
-   'Object/fromEntries   (fn-of '(Any) 'Any)
-   'Object/assign        (fn-of '(Any) 'Any #:rest 'Any)
-   'Object/freeze        (fn-of '(Any) 'Any)
-   'Object/isFrozen      (fn-of '(Any) 'Bool)
-   'Object/create        (fn-of '(Any) 'Any #:rest 'Any)
-   'Object/getPrototypeOf (fn-of '(Any) 'Any)
-   'Object/setPrototypeOf (fn-of '(Any Any) 'Any)
-   'Object/getOwnPropertyNames (fn-of '(Any) 'Any)
-   'Object/defineProperty (fn-of '(Any String Any) 'Any)
+   (q 'Object 'keys)          (fn-of '(Any) 'Any)
+   (q 'Object 'values)        (fn-of '(Any) 'Any)
+   (q 'Object 'entries)       (fn-of '(Any) 'Any)
+   (q 'Object 'fromEntries)   (fn-of '(Any) 'Any)
+   (q 'Object 'assign)        (fn-of '(Any) 'Any #:rest 'Any)
+   (q 'Object 'freeze)        (fn-of '(Any) 'Any)
+   (q 'Object 'isFrozen)      (fn-of '(Any) 'Bool)
+   (q 'Object 'create)        (fn-of '(Any) 'Any #:rest 'Any)
+   (q 'Object 'getPrototypeOf) (fn-of '(Any) 'Any)
+   (q 'Object 'setPrototypeOf) (fn-of '(Any Any) 'Any)
+   (q 'Object 'getOwnPropertyNames) (fn-of '(Any) 'Any)
+   (q 'Object 'defineProperty) (fn-of '(Any String Any) 'Any)
 
    ;; --- Array (statics) ------------------------------------------------------
-   'Array/isArray    (fn-of '(Any) 'Bool)
-   'Array/from       (fn-of '(Any) 'Any #:rest 'Any)
-   'Array/of         (fn-of '() 'Any #:rest 'Any)
+   (q 'Array 'isArray)    (fn-of '(Any) 'Bool)
+   (q 'Array 'from)       (fn-of '(Any) 'Any #:rest 'Any)
+   (q 'Array 'of)         (fn-of '() 'Any #:rest 'Any)
 
    ;; --- String (statics) -----------------------------------------------------
-   'String/fromCharCode   (fn-of '() 'String #:rest 'Int)
-   'String/fromCodePoint  (fn-of '() 'String #:rest 'Int)
-   'String/raw            (fn-of '(Any) 'String #:rest 'Any)
+   (q 'String 'fromCharCode)   (fn-of '() 'String #:rest 'Int)
+   (q 'String 'fromCodePoint)  (fn-of '() 'String #:rest 'Int)
+   (q 'String 'raw)            (fn-of '(Any) 'String #:rest 'Any)
 
    ;; --- networking ------------------------------------------------------------
    'fetch            (fn-of '(String) 'Any #:rest 'Any)
    'AbortController  (fn-of '() 'Any)
 
    ;; --- console ---------------------------------------------------------------
-   'console/log      (fn-of '() 'Nil #:rest 'Any)
-   'console/info     (fn-of '() 'Nil #:rest 'Any)
-   'console/warn     (fn-of '() 'Nil #:rest 'Any)
-   'console/error    (fn-of '() 'Nil #:rest 'Any)
-   'console/debug    (fn-of '() 'Nil #:rest 'Any)
-   'console/trace    (fn-of '() 'Nil #:rest 'Any)
-   'console/table    (fn-of '(Any) 'Nil #:rest 'Any)
-   'console/group    (fn-of '() 'Nil #:rest 'Any)
-   'console/groupEnd (fn-of '() 'Nil)
-   'console/time     (fn-of '(String) 'Nil)
-   'console/timeEnd  (fn-of '(String) 'Nil)
+   (q 'console 'log)      (fn-of '() 'Nil #:rest 'Any)
+   (q 'console 'info)     (fn-of '() 'Nil #:rest 'Any)
+   (q 'console 'warn)     (fn-of '() 'Nil #:rest 'Any)
+   (q 'console 'error)    (fn-of '() 'Nil #:rest 'Any)
+   (q 'console 'debug)    (fn-of '() 'Nil #:rest 'Any)
+   (q 'console 'trace)    (fn-of '() 'Nil #:rest 'Any)
+   (q 'console 'table)    (fn-of '(Any) 'Nil #:rest 'Any)
+   (q 'console 'group)    (fn-of '() 'Nil #:rest 'Any)
+   (q 'console 'groupEnd) (fn-of '() 'Nil)
+   (q 'console 'time)     (fn-of '(String) 'Nil)
+   (q 'console 'timeEnd)  (fn-of '(String) 'Nil)
 
    ;; --- Date (statics) -------------------------------------------------------
-   'Date/now         (fn-of '() 'Int)
-   'Date/parse       (fn-of '(String) 'Int)
-   'Date/UTC         (fn-of '(Int Int) 'Int #:rest 'Int)
+   (q 'Date 'now)         (fn-of '() 'Int)
+   (q 'Date 'parse)       (fn-of '(String) 'Int)
+   (q 'Date 'UTC)         (fn-of '(Int Int) 'Int #:rest 'Int)
 
    ;; --- atom / ref ----------------------------------------------------------
    ;; JS lowers these to `{value, watches}` cells.  Override the portable Any
@@ -206,25 +210,25 @@
    (hasheq 'vars '()
            'members
            (hasheq
-            'sqrt (hash-ref STDLIB-JS 'Math/sqrt)
-            'pow (hash-ref STDLIB-JS 'Math/pow)
-            'floor (hash-ref STDLIB-JS 'Math/floor)
-            'ceil (hash-ref STDLIB-JS 'Math/ceil)
-            'round (hash-ref STDLIB-JS 'Math/round)
-            'abs (hash-ref STDLIB-JS 'Math/abs)
-            'atan (hash-ref STDLIB-JS 'Math/atan)
-            'atan2 (hash-ref STDLIB-JS 'Math/atan2)
-            'exp (hash-ref STDLIB-JS 'Math/exp)
-            'min (hash-ref STDLIB-JS 'Math/min)
-            'max (hash-ref STDLIB-JS 'Math/max)
-            'PI (hash-ref STDLIB-JS 'Math/PI)
-            'sin (hash-ref STDLIB-JS 'Math/sin)
-            'cos (hash-ref STDLIB-JS 'Math/cos)
-            'tan (hash-ref STDLIB-JS 'Math/tan)))
+            'sqrt (hash-ref STDLIB-JS (q 'Math 'sqrt))
+            'pow (hash-ref STDLIB-JS (q 'Math 'pow))
+            'floor (hash-ref STDLIB-JS (q 'Math 'floor))
+            'ceil (hash-ref STDLIB-JS (q 'Math 'ceil))
+            'round (hash-ref STDLIB-JS (q 'Math 'round))
+            'abs (hash-ref STDLIB-JS (q 'Math 'abs))
+            'atan (hash-ref STDLIB-JS (q 'Math 'atan))
+            'atan2 (hash-ref STDLIB-JS (q 'Math 'atan2))
+            'exp (hash-ref STDLIB-JS (q 'Math 'exp))
+            'min (hash-ref STDLIB-JS (q 'Math 'min))
+            'max (hash-ref STDLIB-JS (q 'Math 'max))
+            'PI (hash-ref STDLIB-JS (q 'Math 'PI))
+            'sin (hash-ref STDLIB-JS (q 'Math 'sin))
+            'cos (hash-ref STDLIB-JS (q 'Math 'cos))
+            'tan (hash-ref STDLIB-JS (q 'Math 'tan))))
    'JsDate
    (hasheq 'vars '()
            'members
-           (hasheq 'now (hash-ref STDLIB-JS 'Date/now)))
+           (hasheq 'now (hash-ref STDLIB-JS (q 'Date 'now))))
    'JsPerformance
    (hasheq 'vars '()
            'members

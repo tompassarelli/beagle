@@ -38,7 +38,15 @@
       (check-not-false completion)
       (check-equal? (hash-ref completion 'detail) "(Fn [Int] Int)")
       (check-false
-       (regexp-match? #rx"Any|\\?[0-9]+" (hash-ref completion 'detail))))
+       (regexp-match? #rx"Any|\\?[0-9]+" (hash-ref completion 'detail)))
+      (define stdlib-hover
+        (lookup-symbol-info (path->string path) "clojure.string/replace"))
+      (check-true (string? stdlib-hover))
+      (check-true (regexp-match? #rx"stdlib" stdlib-hover))
+      (check-not-false
+       (completion-by-label
+        (collect-completions (path->string path) "clojure.string/repl")
+        "clojure.string/replace")))
     (lambda () (delete-file path))))
 
 (test-case "LSP signature views fail closed on a rejected program"
