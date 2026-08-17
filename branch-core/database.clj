@@ -5,7 +5,8 @@
 ;; codegraph remain downstream projections; none may restore the removed
 ;; fact-object store beneath this boundary.
 (ns database
-  (:require [framrpc :as framrpc]
+  (:require [clojure.string :as str]
+            [framrpc :as framrpc]
             [fram.branch :as branch]
             [fram.store :as term-store]
             [fram.types :as t]))
@@ -535,6 +536,157 @@
 (defn- branch-control-path [store]
   (str store ".branch-control"))
 
+(def ^:private branch-watch-format "framwatch/v1")
+
+(defn- branch-watch-path [store branch-name]
+  (str store ".watches/" (branch/require-branch-name! branch-name)))
+
+(defn- valid-ref-identity? [value]
+  (and (string? value)
+       (some? (re-matches #"sha256:[0-9a-f]{64}" value))))
+
+(defn- watch-head [document]
+  (if-let [event (last (:events document))]
+    (:current event)
+    (:anchor document)))
+
+(defn- watch-line [kind event]
+  (str kind " " (:cursor event) " " (:previous event) " "
+       (:current event) "\n"))
+
+(defn- print-watch-document [document]
+  (let [body (str branch-watch-format "\n"
+                  "anchor " (:anchor document) "\n"
+                  (apply str (map #(watch-line "event" %)
+                                  (:events document)))
+                  (when-let [pending (:pending document)]
+                    (watch-line "pending" pending)))]
+    (str body "sha256 " (sha256-hex (strict-utf8-bytes body "branch watch"))
+         "\n")))
+
+(defn- parse-watch-cursor [value]
+  (when-not (some? (re-matches #"(?:0|[1-9][0-9]{0,17})" value))
+    (fail! :invalid-branch-watch "branch watch cursor is not canonical"
+           {:cursor value}))
+  (Long/parseLong value))
+
+(defn- parse-watch-transition [line expected-kind]
+  (let [fields (vec (str/split line #" "))]
+    (when-not (and (= 4 (count fields))
+                   (= expected-kind (nth fields 0)))
+      (fail! :invalid-branch-watch "branch watch transition is malformed"
+             {:line line}))
+    (let [event {:cursor (parse-watch-cursor (nth fields 1))
+                 :previous (nth fields 2)
+                 :current (nth fields 3)}]
+      (when-not (and (valid-ref-identity? (:previous event))
+                     (valid-ref-identity? (:current event))
+                     (not= (:previous event) (:current event)))
+        (fail! :invalid-branch-watch
+               "branch watch transition identities are invalid"
+               {:line line}))
+      event)))
+
+(defn- parse-watch-document [text]
+  (let [lines (vec (str/split-lines text))]
+    (when (< (count lines) 3)
+      (fail! :invalid-branch-watch "branch watch document is incomplete" {}))
+    (when-not (= branch-watch-format (first lines))
+      (fail! :unsupported-branch-watch-version
+             "branch watch document version is unsupported"
+             {:format (first lines)}))
+    (when-not (str/starts-with? (nth lines 1) "anchor ")
+      (fail! :invalid-branch-watch "branch watch document has no anchor" {}))
+    (let [anchor (subs (nth lines 1) 7)
+          digest-line (last lines)
+          content-lines (subvec lines 2 (dec (count lines)))
+          body (apply str (map #(str % "\n") (butlast lines)))]
+      (when-not (valid-ref-identity? anchor)
+        (fail! :invalid-branch-watch "branch watch anchor is invalid"
+               {:anchor anchor}))
+      (when-not (= digest-line
+                   (str "sha256 "
+                        (sha256-hex
+                         (strict-utf8-bytes body "branch watch"))))
+        (fail! :invalid-branch-watch "branch watch digest does not match" {}))
+      (loop [remaining content-lines
+             previous anchor
+             cursor 0
+             events []]
+        (if (empty? remaining)
+          {:anchor anchor :events events :pending nil}
+          (let [line (first remaining)
+                pending? (str/starts-with? line "pending ")
+                event (parse-watch-transition
+                       line (if pending? "pending" "event"))]
+            (when-not (and (= (:cursor event) (inc cursor))
+                           (= (:previous event) previous))
+              (fail! :invalid-branch-watch
+                     "branch watch transitions are not contiguous"
+                     {:cursor (:cursor event) :previous (:previous event)}))
+            (if pending?
+              (if (next remaining)
+                (fail! :invalid-branch-watch
+                       "branch watch pending transition is not last" {})
+                {:anchor anchor :events events :pending event})
+              (recur (next remaining) (:current event) (:cursor event)
+                     (conj events event)))))))))
+
+(defn- read-watch-document [store branch-name]
+  (let [path (branch-watch-path store branch-name)
+        file (java.io.File. path)]
+    (when (.isFile file)
+      (parse-watch-document
+       (strict-utf8-string (java.nio.file.Files/readAllBytes (.toPath file))
+                           "branch watch")))))
+
+(defn- write-watch-document! [store branch-name document]
+  (ensure-directory! (str store ".watches"))
+  (write-text-durable! (branch-watch-path store branch-name)
+                       (print-watch-document document))
+  document)
+
+(defn- reconcile-watch! [store branch-name current-identity]
+  (let [stored (read-watch-document store branch-name)
+        document (or stored {:anchor current-identity :events [] :pending nil})
+        pending (:pending document)
+        resolved
+        (cond
+          (nil? pending) document
+          (= current-identity (:current pending))
+          (-> document
+              (update :events conj pending)
+              (assoc :pending nil))
+          (= current-identity (:previous pending))
+          (assoc document :pending nil)
+          :else
+          (fail! :invalid-branch-watch
+                 "branch ref matches neither side of its pending watch transition"
+                 {:branch branch-name :current current-identity
+                  :pending pending}))
+        head (watch-head resolved)
+        reconciled
+        (if (= head current-identity)
+          resolved
+          (update resolved :events conj
+                  {:cursor (inc (long (or (:cursor (last (:events resolved))) 0)))
+                   :previous head
+                   :current current-identity}))]
+    (if (= stored reconciled)
+      reconciled
+      (write-watch-document! store branch-name reconciled))))
+
+(defn- prepare-watch-transition! [store branch-name current candidate]
+  (let [document (reconcile-watch! store branch-name current)]
+    (if (= current candidate)
+      document
+      (write-watch-document!
+       store branch-name
+       (assoc document :pending
+              {:cursor (inc (long (or (:cursor (last (:events document))) 0)))
+               :previous current
+               :current candidate})))))
+
 (defn- acquire-branch-control! [store]
   (let [deadline (+ (System/nanoTime) 2000000000)]
     (loop []
@@ -562,6 +714,51 @@
   [store-path branch-name]
   (when-let [document (read-branch-ref store-path branch-name)]
     (branch/ref-identity document)))
+
+(defn branch-transitions-since!
+  "Read durable ref transitions after CURSOR. A missing journal is anchored at
+   the current ref; a prepared transition becomes visible only after its ref is
+   durable. The returned cursor may be supplied unchanged to resume without a
+   gap or duplicate."
+  [store-path branch-name cursor]
+  (when-not (and (integer? cursor) (<= 0 cursor Long/MAX_VALUE))
+    (fail! :invalid-watch-cursor "branch watch cursor must be non-negative"
+           {:cursor cursor}))
+  (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
+        selected (branch/require-branch-name! branch-name)
+        held (acquire-branch-control! store)]
+    (try
+      (require-no-pending-fork! store)
+      (let [current (branch-ref-identity store selected)]
+        (when (nil? current)
+          (fail! :branch-missing "branch has no ref"
+                 {:branch selected :path (branch/ref-path! store selected)}))
+        (let [document (reconcile-watch! store selected current)
+              head-cursor (long (or (:cursor (last (:events document))) 0))]
+          (when (> cursor head-cursor)
+            (fail! :watch-cursor-ahead
+                   "branch watch cursor is ahead of durable history"
+                   {:cursor cursor :head head-cursor}))
+          {:cursor head-cursor
+           :transitions (vec (filter #(> (:cursor %) cursor)
+                                     (:events document)))}))
+      (finally
+        (writer-authority/release! held)))))
+
+(defn watch-branch!
+  "Wait up to TIMEOUT-MS for at least one durable transition after CURSOR."
+  [store-path branch-name cursor timeout-ms]
+  (when-not (and (integer? timeout-ms) (<= 0 timeout-ms 60000))
+    (fail! :invalid-watch-timeout
+           "branch watch timeout must be between zero and 60000 milliseconds"
+           {:timeout-ms timeout-ms}))
+  (let [deadline (+ (System/nanoTime) (* (long timeout-ms) 1000000))]
+    (loop []
+      (let [result (branch-transitions-since! store-path branch-name cursor)]
+        (if (or (seq (:transitions result))
+                (>= (System/nanoTime) deadline))
+          result
+          (do (Thread/sleep 5) (recur)))))))
 
 (defn- chain-member [parsed byte-count]
   (branch/->ChainMember
@@ -648,8 +845,11 @@
                         :branch selected}))
               (require-ref-chain! store selected candidate)
               (let [candidate-identity (branch/ref-identity candidate)]
+                (prepare-watch-transition! store selected current-identity
+                                           candidate-identity)
                 (write-text-durable! (branch/ref-path! store selected)
                                      (branch/print-ref candidate))
+                (reconcile-watch! store selected candidate-identity)
                 {:swapped? true
                  :expected expected-identity
                  :previous current-identity
