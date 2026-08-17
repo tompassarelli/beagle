@@ -26,6 +26,7 @@
 (provide macro-eval
          macro-eval-body
          make-macro-env
+         validate-syntax-pattern
          (struct-out exn:fail:macro-source))
 
 ;; --- Closures ----------------------------------------------------------------
