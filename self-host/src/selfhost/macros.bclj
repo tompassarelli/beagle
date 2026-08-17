@@ -701,7 +701,7 @@
     (macro-eval-fail! "syntax-error-at expected a collection and index")
     (let [collection (nth args 0)
           items (macro-seq! collection "syntax-error-at")
-          index (nth args 1)]
+          index (macro-datum (nth args 1))]
       (if (not (and (int? index) (>= index 0) (< index (count items))))
         (macro-eval-fail!
           (str "syntax-error-at: index " (str index)
@@ -1339,10 +1339,12 @@
            (= (macro-syntax-constraint! map-binding) "valid-point?"))))
 
   (let [collection [BRACKET-TAG ["id" "String"] "valid-id-wire?"]
+        syntax-index
+          (ast/make-syntax-atom! 1 nil ast/EMPTY-SCOPE-SET nil {})
         rejected
           (try
             (macro-syntax-error-at!
-              [collection 1 [STRING-TAG "Invalid field declaration"]])
+              [collection syntax-index [STRING-TAG "Invalid field declaration"]])
             false
             (catch (problem Exception)
               (let [data (ex-data problem)]

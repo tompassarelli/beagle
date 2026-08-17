@@ -336,12 +336,13 @@
 
 ;; Macros also use partition for ordinary flat data unrelated to bindings.
 (define (macro-partition n lst)
-  (unless (and (exact-integer? n) (positive? n))
-    (error 'macro-eval "partition: size must be a positive integer, got: ~v" n))
+  (define size (macro-datum n))
+  (unless (and (exact-integer? size) (positive? size))
+    (error 'macro-eval "partition: size must be a positive integer, got: ~v" size))
   (let loop ([items (macro-seq lst "partition")])
     (cond
-      [(< (length items) n) '()]
-      [else (cons (take items n) (loop (drop items n)))])))
+      [(< (length items) size) '()]
+      [else (cons (take items size) (loop (drop items size)))])))
 
 ;; Positional codegen — a wire slot, an argument index — needs the position of
 ;; each field, which plain `map` cannot supply.
@@ -352,15 +353,17 @@
     (g i item)))
 
 (define (macro-range n)
-  (unless (and (exact-integer? n) (>= n 0))
-    (error 'macro-eval "range: expected a non-negative integer, got: ~v" n))
-  (build-list n values))
+  (define end (macro-datum n))
+  (unless (and (exact-integer? end) (>= end 0))
+    (error 'macro-eval "range: expected a non-negative integer, got: ~v" end))
+  (build-list end values))
 
 (define (macro-nth lst i)
   (define items (macro-seq lst "nth"))
-  (unless (and (exact-integer? i) (>= i 0) (< i (length items)))
-    (error 'macro-eval "nth: index ~v out of range for a list of ~a" i (length items)))
-  (list-ref items i))
+  (define index (macro-datum i))
+  (unless (and (exact-integer? index) (>= index 0) (< index (length items)))
+    (error 'macro-eval "nth: index ~v out of range for a list of ~a" index (length items)))
+  (list-ref items index))
 
 (define (macro-first xs) (car (macro-seq xs "first")))
 (define (macro-second xs) (cadr (macro-seq xs "second")))
@@ -391,14 +394,15 @@
 ;; without reconstructing or repartitioning adjacent tokens.
 (define (macro-syntax-error-at collection index . parts)
   (define items (macro-seq collection "syntax-error-at"))
-  (unless (and (exact-integer? index)
-               (>= index 0)
-               (< index (length items)))
+  (define datum-index (macro-datum index))
+  (unless (and (exact-integer? datum-index)
+               (>= datum-index 0)
+               (< datum-index (length items)))
     (error 'macro-eval
            "syntax-error-at: index ~v out of range for a collection of ~a item(s)"
-           index
+           datum-index
            (length items)))
-  (define form (list-ref items index))
+  (define form (list-ref items datum-index))
   (define message
     (if (null? parts)
         (format "Invalid syntax: ~a" (beagle-datum->src form))
@@ -408,7 +412,7 @@
     message
     (current-continuation-marks)
     collection
-    index
+    datum-index
     form
     #f)))
 

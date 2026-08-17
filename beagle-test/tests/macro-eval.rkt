@@ -9,6 +9,7 @@
                   beagle-syntax-span
                   empty-scope-set
                   make-structural-name
+                  make-syntax-atom
                   make-syntax-ident
                   reader-metadata
                   src-loc)
@@ -16,6 +17,9 @@
          beagle/private/macro-eval)
 
 (define (ev expr) (macro-eval expr (make-macro-env)))
+
+(define (syntax-integer n)
+  (make-syntax-atom n #f empty-scope-set #f (hasheq)))
 
 ;; `let` is macro-eval's only binder, so a test seeds values by wrapping.
 (define (ev-let bindings expr)
@@ -156,8 +160,8 @@
           (check-regexp-match #rx"Invalid field declaration"
                               (exn-message e)))])
     (macro-eval
-     `(syntax-error-at (quote ,fields) 1 "Invalid field declaration")
-     (make-macro-env))
+     `(syntax-error-at (quote ,fields) index "Invalid field declaration")
+     (hash-set (make-macro-env) 'index (syntax-integer 1)))
     (fail "syntax-error-at unexpectedly returned")))
 
 (test-case "syntax-error-at renders tagged declarations with source delimiters"
@@ -223,7 +227,20 @@
 
 (test-case "range builds the index list"
   (check-equal? (ev '(range 3)) '(0 1 2))
-  (check-equal? (ev '(range 0)) '()))
+  (check-equal? (ev '(range 0)) '())
+  (check-equal?
+   (macro-eval '(range end)
+               (hash-set (make-macro-env) 'end (syntax-integer 3)))
+   '(0 1 2)))
+
+(test-case "integer-position primitives read syntax datums"
+  (define env
+    (hash-set* (make-macro-env)
+               'size (syntax-integer 2)
+               'index (syntax-integer 1)))
+  (check-equal? (macro-eval '(partition size (list 1 2 3 4)) env)
+                '((1 2) (3 4)))
+  (check-equal? (macro-eval '(nth (list 10 20 30) index) env) 20))
 
 (test-case "nth reads a positional slot and refuses to run off the end"
   (check-equal? (ev '(nth (list 10 20 30) 1)) 20)
