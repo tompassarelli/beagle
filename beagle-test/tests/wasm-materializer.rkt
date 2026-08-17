@@ -689,6 +689,44 @@ SH
                   #"FAKE_RUNTIME_MARKER"
                   (string->bytes/utf-8 (path->string runtime-marker)))))
 
+(define wasm-generation-fixture #f)
+
+(define (canonical-wasm-generation)
+  ;; The publication and splice phases both need the same successful Core-to-
+  ;; Wasm generation. Build and verify it once under the shared fixture lock;
+  ;; each phase copies the immutable result before exercising destructive
+  ;; failure paths.
+  (unless wasm-generation-fixture
+    (define base (canonical-base-fixture))
+    (set! wasm-generation-fixture
+          (shared-fixture
+           "full-wasm" base-fixture-source "wasm wasm32; fake toolchain"
+           '(("generation" "build.manifest.sha256")
+             ("generation" "report.txt")
+             ("generation" "module.native-program")
+             ("generation" "native.receipts")
+             ("generation" "c17.receipt")
+             ("generation" "wasm.receipt")
+             ("generation" "module_0.wasm")
+             ("generation" "module_0.wasm.sha256"))
+           (lambda (root)
+             (define tools (build-path root "tools"))
+             (define generation (build-path root "generation"))
+             (define-values (cc ld runtime env) (make-fake-toolchain tools))
+             (check-equal?
+              (run-core-wasm (fixture-path base 'source)
+                             generation cc ld runtime env)
+              0 "canonical full Wasm fixture build failed")
+             (check-equal?
+              (verify-generation generation (fixture-path base 'compiled))
+              0 "canonical full Wasm fixture verification failed"))
+           (lambda (root)
+             (hasheq 'root root
+                     'generation (build-path root "generation")
+                     'compiled (fixture-path base 'compiled)
+                     'source (fixture-path base 'source))))))
+  wasm-generation-fixture)
+
 (define (assert-no-published-generation artifacts)
   ;; A receipt is the commit marker. No data artifact may survive if the
   ;; marker is absent, including after an intentional kill between renames.
@@ -1160,12 +1198,12 @@ SH
   (dynamic-wind
    void
    (lambda ()
-     (define base (canonical-base-fixture))
+     (define base (canonical-wasm-generation))
      (define source (fixture-path base 'source))
      (define compiled (fixture-path base 'compiled))
      (define seeded (build-path scratch "seeded"))
      (define-values (cc ld runtime env) (make-fake-toolchain scratch))
-     (check-equal? (run-core-wasm source seeded cc ld runtime env) 0)
+     (copy-directory/files (fixture-path base 'generation) seeded)
      (check-equal? (verify-generation seeded compiled) 0)
      (define old-marker (file->string (build-path seeded "build.manifest.sha256")))
 
@@ -1205,12 +1243,10 @@ SH
   (dynamic-wind
    void
    (lambda ()
-     (define base (canonical-base-fixture))
-     (define source (fixture-path base 'source))
+     (define base (canonical-wasm-generation))
      (define compiled (fixture-path base 'compiled))
      (define seed (build-path scratch "seed"))
-     (define-values (cc ld runtime env) (make-fake-toolchain scratch))
-     (check-equal? (run-core-wasm source seed cc ld runtime env) 0)
+     (copy-directory/files (fixture-path base 'generation) seed)
      (check-equal? (verify-generation seed compiled) 0)
      (for ([case (in-list
                   (list (cons "wasm receipt" "wasm.receipt")
