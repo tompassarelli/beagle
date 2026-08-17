@@ -21,24 +21,33 @@
 (define (named-reference? ref)
   (or (symbol? ref) (qualified-ref? ref)))
 
-(define (qualified-reference-same-binding? left right)
-  (and (qualified-ref? left)
-       (qualified-ref? right)
-       (eq? (qualified-ref-qualifier left)
-            (qualified-ref-qualifier right))
-       (eq? (qualified-ref-name left) (qualified-ref-name right))
-       (or (not (qualified-ref-provider-id left))
-           (not (qualified-ref-provider-id right))
-           (eq? (qualified-ref-provider-id left)
-                (qualified-ref-provider-id right)))))
-
 (define (reference-hash-ref table ref [fallback #f])
   (or (hash-ref table ref #f)
       (and (qualified-ref? ref)
-           (for/or ([candidate (in-hash-keys table)]
-                    #:when (qualified-reference-same-binding? candidate ref))
-             (hash-ref table candidate)))
+           (qualified-ref-provider-id ref)
+           (hash-ref
+            table
+            (qualified-ref
+             (qualified-ref-qualifier ref)
+             (qualified-ref-name ref)
+             #f)
+            #f))
       fallback))
+
+(define (reference-hash-set! table ref value)
+  (hash-set! table ref value)
+  (cond
+    [(and (qualified-ref? ref) (qualified-ref-provider-id ref))
+     (hash-set!
+      table
+      (qualified-ref
+       (qualified-ref-qualifier ref)
+       (qualified-ref-name ref)
+       #f)
+      value)]
+    [(symbol-qualified-reference ref)
+     => (lambda (structural-ref)
+          (hash-set! table structural-ref value))]))
 
 (define (reference->string ref)
   (cond
@@ -1802,8 +1811,10 @@
     (for ([(name binding) (in-hash (module-interface-bindings interface))]
           #:unless (eq? (interface-binding-kind binding) 'macro))
       (define binding-type (interface-binding-type binding))
-      (hash-set! env (qualified-ref prefix name namespace) binding-type)
-      (hash-set! env (qualified-ref namespace name namespace) binding-type)))
+      (reference-hash-set!
+       env (qualified-ref prefix name namespace) binding-type)
+      (reference-hash-set!
+       env (qualified-ref namespace name namespace) binding-type)))
   ;; Alias-qualified stdlib/extern access: (require babashka.fs :as fs)
   ;; makes fs/exists? resolve to the babashka.fs/exists? entry. Pre-populate
   ;; alias-prefixed bindings for every env key under the required namespace
@@ -2086,19 +2097,23 @@
     (define m-lower (string-downcase m-str))
     ;; Constructor: ->Ok is polymorphic (Fn [T] Ok) (forall over union's type params)
     (define ctor-fn (type-fn (map param-type fields) #f m-type))
-    (hash-set! env (string->symbol (string-append "->" m-str))
-               (if (null? type-params)
-                 ctor-fn
-                 (type-poly type-params ctor-fn #f)))
+    (reference-hash-set!
+     env
+     (string->symbol (string-append "->" m-str))
+     (if (null? type-params)
+         ctor-fn
+         (type-poly type-params ctor-fn #f)))
     ;; Accessors: ok-value is (Fn [Ok] T)
     (define field-map (make-hash))
     (for ([f (in-list fields)])
       (define acc-fn (type-fn (list m-type) #f (param-type f)))
-      (hash-set! env
-                 (string->symbol (string-append m-lower "-" (symbol->string (param-name f))))
-                 (if (null? type-params)
-                   acc-fn
-                   (type-poly type-params acc-fn #f)))
+      (reference-hash-set!
+       env
+       (string->symbol
+        (string-append m-lower "-" (symbol->string (param-name f))))
+       (if (null? type-params)
+           acc-fn
+           (type-poly type-params acc-fn #f)))
       (hash-set! field-map
                  (string->symbol (string-append ":" (symbol->string (param-name f))))
                  (param-type f)))
@@ -2108,9 +2123,7 @@
                     fields))))
 
 (define (mut-copy h)
-  (define out (make-hash))
-  (for ([(k v) (in-hash h)]) (hash-set! out k v))
-  out)
+  (hash-copy h))
 
 (define (binding-target->string target)
   (cond
@@ -6470,8 +6483,9 @@
   (define rest-t  (type-fn-rest-type fn-type))
   (define n-fixed (length fixed))
   (define n-args  (length args))
+  (define fn-display (reference->string fn-name))
   (define (signature-string)
-    (format "~a : ~a" fn-name (type->string fn-type)))
+    (format "~a : ~a" fn-display (type->string fn-type)))
   (define call-src (src-for call-node))
   (when (and (memq fn-name '(= not=)) (= n-args 2))
     (check-enum-comparison args env call-src))
@@ -6484,7 +6498,7 @@
            (format "arg ~a: ~a" i (type->string p))))
        (raise-diag 'arity
                     (format "call to ~a: expected at least ~a arg(s), got ~a"
-                            fn-name n-fixed n-args)
+                            fn-display n-fixed n-args)
                     (hasheq 'function (reference->string fn-name)
                             'signature (signature-string)
                             'expected-arity n-fixed
@@ -6517,7 +6531,7 @@
                            (add-between missing-types ", ")))]))
        (raise-diag 'arity
                     (format "call to ~a: expected ~a arg(s), got ~a"
-                            fn-name n-fixed n-args)
+                            fn-display n-fixed n-args)
                     (hasheq 'function (reference->string fn-name)
                             'signature (signature-string)
                             'expected-arity n-fixed
@@ -6573,6 +6587,7 @@
       (record-constructor-operation? fn-name)))
 
 (define (check-one-arg fn-name fn-type i expected-type arg env call-src)
+  (define fn-display (reference->string fn-name))
   (define a-type
     (parameterize
         ([current-order-killing-consumer?
@@ -6594,7 +6609,7 @@
     (dynamic-contract-error
      arg
      (format "call to ~a cannot consume ~a without narrowing to a declared alternative"
-             fn-name (type->string a-type))
+             fn-display (type->string a-type))
      (hasheq 'function (reference->string fn-name)
              'declared (type->string a-type)
              'repair "guard the value with a type predicate before this operation")))
@@ -6622,11 +6637,12 @@
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
               (check-atom-ctor arg expected-type env call-src)
               compatible?)
-    (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
+    (define sig-str (format "~a : ~a" fn-display (type->string fn-type)))
     (define suggestions (find-accessor-suggestions arg expected-type a-type env))
     (define arg-expr-str
       (cond
-        [(call-form? arg) (format "(~a ...)" (call-form-fn arg))]
+        [(call-form? arg)
+         (format "(~a ...)" (reference->string (call-form-fn arg)))]
         [(symbol? arg) (symbol->string arg)]
         [(string? arg) (format "~s" arg)]
         [(number? arg) (format "~a" arg)]
@@ -6637,7 +6653,9 @@
       (and (call-form? arg)
            (let ([ft (call-form-env-ref env arg)])
              (and ft (type-fn? ft)
-                  (format "~a : ~a" (call-form-fn arg) (type->string ft))))))
+                  (format "~a : ~a"
+                          (reference->string (call-form-fn arg))
+                          (type->string ft))))))
     (define arg-src (src-for arg))
     ;; Prefer the call site (the callee that demands the expected type)
     ;; as the diagnostic blame line. The arg's own srcloc is recorded in
@@ -6647,7 +6665,9 @@
     ;; not the intermediate sub-expression.
     (raise-diag 'type-mismatch
                 (format "call to ~a: arg ~a expected ~a, got ~a"
-                        fn-name i (type->string expected-type) (type->string a-type))
+                        fn-display i
+                        (type->string expected-type)
+                        (type->string a-type))
                 (hash-set* (type-mismatch-details expected-type a-type)
                         'function (reference->string fn-name)
                         'signature sig-str

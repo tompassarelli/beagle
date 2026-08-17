@@ -794,12 +794,16 @@
              (string->symbol (format "~a/Box" expected-type-prefix)))
   (define ctor-call (def-form-value generated))
   (check-true (call-form? ctor-call))
-  (check-eq? (call-form-fn ctor-call)
-             (string->symbol (format "~a/->Box" expected-prefix)))
+  (define ctor-ref (call-form-fn ctor-call))
+  (check-true (qualified-ref? ctor-ref))
+  (check-eq? (qualified-ref-qualifier ctor-ref) expected-prefix)
+  (check-eq? (qualified-ref-name ctor-ref) '->Box)
   (define helper-call (car (call-form-args ctor-call)))
   (check-true (call-form? helper-call))
-  (check-eq? (call-form-fn helper-call)
-             (string->symbol (format "~a/normalize" expected-prefix))))
+  (define helper-ref (call-form-fn helper-call))
+  (check-true (qualified-ref? helper-ref))
+  (check-eq? (qualified-ref-qualifier helper-ref) expected-prefix)
+  (check-eq? (qualified-ref-name helper-ref) 'normalize))
 
 (test-case "cross-file defmacro: qualified name works"
   (check-not-exn
