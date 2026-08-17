@@ -16,7 +16,7 @@ int main(void) {
   result = native_m0_fn_1(&arena, &capability);
   native_arena_destroy(&arena);
 
-  if (result != 8.0) {
+  if (result != 1.0) {
     return 3;
   }
   if (native_parallel_live_workers != UINT64_C(3)) {

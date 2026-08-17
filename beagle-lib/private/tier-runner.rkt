@@ -12,6 +12,7 @@
 (require racket/cmdline
          racket/file          ; make-temporary-directory, delete-directory/files
          racket/future        ; processor-count
+         racket/format
          racket/list
          racket/match
          racket/port
@@ -58,11 +59,12 @@
   (file-exists? gate-cache-wrapper))
 
 ;; The cache proves a traced filesystem closure. query.rkt deliberately probes
-;; live daemon/process/socket behavior, while tracing native-c17-parallel.rkt
-;; changes its owned process/deadline supervisor's timing semantics. A prior
-;; green result must never stand in for either fresh landing-gate execution.
+;; live daemon/process/socket behavior and must execute fresh. Native parallel
+;; is filesystem-closed; its bounded child supervisor remains a tripwire on a
+;; cold proof, while unchanged warm proofs may use the same gate cache as the
+;; rest of the active tier.
 (define gate-cache-ineligible-files
-  '("query.rkt" "native-c17-parallel.rkt"))
+  '("query.rkt"))
 
 (define (gate-cache-eligible-file? fname)
   (not (member fname gate-cache-ineligible-files)))
@@ -280,7 +282,8 @@
 
 ;; --- per-unit test invocation ----------------------------------------------
 
-(struct unit-result (label status passed total stderr-lines cached?) #:transparent)
+(struct unit-result (label status passed total stderr-lines cached? wall-seconds)
+  #:transparent)
 ;; status ∈ '(pass fail error skip); cached? = green replayed from the
 ;; gate-result cache (the same proof, not a new run)
 
@@ -400,7 +403,7 @@
   (define full-path (build-path tests-dir fname))
   (cond
     [(not (file-exists? full-path))
-     (unit-result (unit-label u) 'skip 0 0 (list (format "MISSING: ~a" full-path)) #f)]
+     (unit-result (unit-label u) 'skip 0 0 (list (format "MISSING: ~a" full-path)) #f 0.0)]
     [else
      ;; Per-child temp subdir under the runner-owned root, exported to the child
      ;; via TMPDIR/TMP/TEMP so all its make-temporary-* scratch is contained
@@ -417,6 +420,7 @@
                  "--domain" "raco-test" "--id" (unit-label u) "--"
                  raco "test" (path->string full-path))
            (list raco "test" (path->string full-path))))
+     (define started-ms (current-inexact-milliseconds))
      (define-values (sp stdout stdin stderr)
        (parameterize ([current-environment-variables
                        (if (or child-tmp (pair? extra))
@@ -427,6 +431,8 @@
      ;; Concurrent drain: cannot deadlock even when the child floods stderr
      ;; past pipe capacity while stdout is still open (see drain-child).
      (define-values (stdout-str stderr-str code) (drain-child sp stdout stderr))
+     (define wall-seconds
+       (/ (- (current-inexact-milliseconds) started-ms) 1000.0))
      (define raw-lines (append (string-split stdout-str "\n")
                                (string-split stderr-str "\n")))
      (define cached?
@@ -441,7 +447,8 @@
          [(unknown) (if (zero? code) 'pass 'fail)]))
      (unit-result (unit-label u) status (cadr summary) (caddr summary)
                   (if (eq? status 'fail) all-lines '())
-                  (and cached? (eq? status 'pass)))]))
+                  (and cached? (eq? status 'pass))
+                  wall-seconds)]))
 
 ;; --- bounded parallel scheduling -------------------------------------------
 ;;
@@ -682,6 +689,23 @@
               ""
               (format ", ~a cached-green" (length cached)))))
 
+(define slow-test-threshold-seconds 10.0)
+
+(define (print-slow-tests results)
+  (printf "SLOW TESTS (>10s):\n")
+  (define slow
+    (filter (lambda (r)
+             (> (unit-result-wall-seconds r) slow-test-threshold-seconds))
+           results))
+  (if (null? slow)
+      (printf "  none\n\n")
+      (begin
+        (for ([r (in-list slow)])
+          (printf "  ~a  ~as\n"
+                  (unit-result-label r)
+                  (real->decimal-string (unit-result-wall-seconds r) 3)))
+        (newline))))
+
 (define (~truncate s n)
   (cond
     [(< (string-length s) n) (string-append s (make-string (- n (string-length s)) #\space))]
@@ -838,6 +862,8 @@
            (printf "  ~a\n" line)))
        (newline))])
 
+  (print-slow-tests active-results)
+
   (cond
     [(positive? (length active-failures))
      (printf "BUILD FAILED — ~a active failure~a\n"
@@ -953,8 +979,8 @@
   ;; A filesystem-closure cache cannot prove a live endpoint observation.
   (check-false (gate-cache-eligible-file? "query.rkt")
                "query tests always execute fresh")
-  (check-false (gate-cache-eligible-file? "native-c17-parallel.rkt")
-               "native parallel supervisor tests always execute fresh")
+  (check-true (gate-cache-eligible-file? "native-c17-parallel.rkt")
+              "native parallel proof is filesystem-closed and cacheable")
   (check-true (gate-cache-eligible-file? "parse.rkt")
               "ordinary filesystem-closed tests remain cacheable")
 

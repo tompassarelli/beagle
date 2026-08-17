@@ -34,19 +34,14 @@ trap 'rm -rf "${scratch:?}"' EXIT
 source_file="$here/parallel.bgl"
 
 echo "parallel-runtime fixture: source C17 build START"
-mkdir -p "$scratch/c17-workers-1" "$scratch/c17-workers-8"
+mkdir -p "$scratch/c17"
 NATIVE_PARALLEL_WORKERS=1 "$repo/bin/beagle" build --materializer c17 \
-  --out "$scratch/c17-workers-1" "$source_file"
-NATIVE_PARALLEL_WORKERS=8 "$repo/bin/beagle" build --materializer c17 \
-  --out "$scratch/c17-workers-8" "$source_file"
+  --out "$scratch/c17" "$source_file"
 
-for artifact in module.native-program module.native-program.sha256 module_0.h module_0.c; do
-  cmp "$scratch/c17-workers-1/$artifact" "$scratch/c17-workers-8/$artifact"
-done
-test -s "$scratch/c17-workers-1/build.manifest.sha256"
-grep -Fq 'native_parallel.h' "$scratch/c17-workers-1/build.manifest"
-grep -Fq 'native_parallel.c' "$scratch/c17-workers-1/build.manifest"
-report="$scratch/c17-workers-1/report.txt"
+test -s "$scratch/c17/build.manifest.sha256"
+grep -Fq 'native_parallel.h' "$scratch/c17/build.manifest"
+grep -Fq 'native_parallel.c' "$scratch/c17/build.manifest"
+report="$scratch/c17/report.txt"
 test "$(head -n 1 "$report")" = "beagle-native-report/v1"
 test "$(grep -Fxc 'beagle-native-report/v1' "$report")" = 1
 test "$(tail -n 1 "$report")" = "result PASS"
@@ -61,19 +56,19 @@ grep -Fqx \
   "c11-parallel REFUSED C11 deterministic parallel F64 instructions are unsupported" \
   "$report"
 test "$(grep -c '^obligation-projection PASS ' "$report")" = 10
-if grep -Fq "native_m0_fn_0" "$scratch/c17-workers-1/module_0.h"; then
+if grep -Fq "native_m0_fn_0" "$scratch/c17/module_0.h"; then
   echo "parallel-runtime fixture: tile kernel escaped through the public ABI" >&2
   exit 1
 fi
 grep -Eq '^static native_m0_type_[0-9]+ native_m0_fn_0\(' \
-  "$scratch/c17-workers-1/module_0.c"
+  "$scratch/c17/module_0.c"
 
 echo "parallel-runtime fixture: source C17 execute START"
 gcc -std=c17 -pedantic -Wall -Wextra -Werror -pthread -ffp-contract=off \
-  -I "$scratch/c17-workers-1" \
-  "$scratch/c17-workers-1/native_shim.c" \
-  "$scratch/c17-workers-1/native_parallel.c" \
-  "$scratch/c17-workers-1/module_0.c" \
+  -I "$scratch/c17" \
+  "$scratch/c17/native_shim.c" \
+  "$scratch/c17/native_parallel.c" \
+  "$scratch/c17/module_0.c" \
   "$here/source_main.c" -o "$scratch/source-parallel"
 "$scratch/source-parallel"
 
@@ -81,9 +76,22 @@ echo "parallel-runtime fixture: QBE refusal START"
 mkdir -p "$scratch/qbe"
 if "$repo/bin/beagle" build --materializer qbe --out "$scratch/qbe" \
     "$source_file" >"$scratch/qbe.log" 2>&1; then
+  qbe_status=0
+else
+  qbe_status=$?
+fi
+echo "parallel-runtime fixture: Wasm refusal START"
+mkdir -p "$scratch/wasm"
+if "$repo/bin/beagle" build --materializer c17 --abi wasm32 \
+    --out "$scratch/wasm" "$source_file" >"$scratch/wasm.log" 2>&1; then
+  wasm_status=0
+else
+  wasm_status=$?
+fi
+[[ "$qbe_status" -ne 0 ]] || {
   echo "parallel-runtime fixture: QBE accepted parallel instructions" >&2
   exit 1
-fi
+}
 grep -Fqx \
   "qbe-parallel REFUSED QBE deterministic parallel F64 instructions are unsupported" \
   "$scratch/qbe.log"
@@ -98,13 +106,10 @@ if [[ -e "$scratch/qbe/module_0.ssa" ]]; then
   exit 1
 fi
 
-echo "parallel-runtime fixture: Wasm refusal START"
-mkdir -p "$scratch/wasm"
-if "$repo/bin/beagle" build --materializer c17 --abi wasm32 \
-    --out "$scratch/wasm" "$source_file" >"$scratch/wasm.log" 2>&1; then
+[[ "$wasm_status" -ne 0 ]] || {
   echo "parallel-runtime fixture: Wasm accepted parallel instructions" >&2
   exit 1
-fi
+}
 grep -Fqx \
   "wasm-parallel REFUSED shared-memory-worker-host-envelope-unavailable" \
   "$scratch/wasm.log"

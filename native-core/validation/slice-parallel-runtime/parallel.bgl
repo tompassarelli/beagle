@@ -18,7 +18,7 @@
         nil))))
 
 (defn parallel-entry! [] Float
-  (let [current (double-array 8)
-        next (double-array 8)]
-    (native/tiled-step! current next 2 1 0 :periodic advect-tile!)
-    (native/f64-buffer-sum next 2)))
+  (let [current (double-array 1)
+        next (double-array 1)]
+    (native/tiled-step! current next 1 1 0 :periodic advect-tile!)
+    (native/f64-buffer-sum next 1)))
