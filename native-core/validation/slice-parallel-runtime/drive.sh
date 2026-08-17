@@ -76,16 +76,21 @@ gcc -std=c17 -pedantic -Wall -Wextra -Werror -pthread -ffp-contract=off \
 
 echo "parallel-runtime fixture: QBE refusal START"
 mkdir -p "$scratch/qbe"
-if "$repo/bin/beagle" build --materializer qbe --out "$scratch/qbe" \
-    "$source_file" >"$scratch/qbe.log" 2>&1; then
+"$repo/bin/beagle" build --materializer qbe --out "$scratch/qbe" \
+    "$source_file" >"$scratch/qbe.log" 2>&1 &
+qbe_pid=$!
+echo "parallel-runtime fixture: Wasm refusal START"
+mkdir -p "$scratch/wasm"
+"$repo/bin/beagle" build --materializer c17 --abi wasm32 \
+    --out "$scratch/wasm" "$source_file" >"$scratch/wasm.log" 2>&1 &
+wasm_pid=$!
+
+if wait "$qbe_pid"; then
   qbe_status=0
 else
   qbe_status=$?
 fi
-echo "parallel-runtime fixture: Wasm refusal START"
-mkdir -p "$scratch/wasm"
-if "$repo/bin/beagle" build --materializer c17 --abi wasm32 \
-    --out "$scratch/wasm" "$source_file" >"$scratch/wasm.log" 2>&1; then
+if wait "$wasm_pid"; then
   wasm_status=0
 else
   wasm_status=$?
