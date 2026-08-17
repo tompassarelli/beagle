@@ -138,6 +138,20 @@
   (define out (compile '(def y (add 1 2))))
   (check-true (matches? #rx"\\(add 1 2\\)" out)))
 
+(test-case "qualified value reference prints from structural qualification"
+  (define out (compile '(def upper str/upper-case)))
+  (check-true (matches? #rx"\\(def upper str/upper-case\\)" out)))
+
+(test-case "imported bare call becomes structural before printing"
+  (define parsed
+    (parse-program
+     (list (datum->syntax #f '(def y (upper-case "hi"))))))
+  (define prog
+    (struct-copy program parsed
+                 [imported-symbol-ns (hasheq 'upper-case 'str)]))
+  (define out (emit-program prog))
+  (check-true (matches? #rx"\\(str/upper-case \"hi\"\\)" out)))
+
 (test-case "monotonic clock primitive emits the JVM monotonic clock"
   (define out (compile '(defn now [] Int (monotonic-nanoseconds))))
   (check-true (matches? #rx"\\(System/nanoTime\\)" out)))
@@ -861,6 +875,33 @@
                 (with p ,(br ':x '(+ (p-x p) 1)) ,(br ':y '(+ (p-y p) 1))))))
   (check-true (matches? #rx"\\(assoc p :x" out))
   (check-true (matches? #rx":y \\(\\+ \\(p-y p\\)" out)))
+
+(test-case "qualified record validator prints from structural qualification"
+  (define parsed
+    (parse-program
+     (list
+      (datum->syntax #f `(def updated (with score ,(br ':value 2)))))))
+  (define update
+    (def-form-value (car (program-forms parsed))))
+  (define validator
+    (qualified-ref 'records '$beagle$record$Score$validate
+                   'constraints.records))
+  (define prog
+    (struct-copy
+     program
+     parsed
+     [semantic-contracts
+      (hasheq
+       update
+       (record-update-contract
+        (qualified-ref 'records 'Score 'constraints.records)
+        validator
+        '(:value)))]))
+  (define out (emit-program prog))
+  (check-true
+   (matches?
+    #rx"\\(records/\\$beagle\\$record\\$Score\\$validate \\$beagle\\$record\\$update\\$candidate\\)"
+    out)))
 
 ;; --- defenum ---------------------------------------------------------------
 

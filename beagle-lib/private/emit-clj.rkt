@@ -59,29 +59,30 @@
          racket/format
          racket/set
          racket/list
-         (except-in "parse.rkt"
-                    call-form-fn
-                    static-call-class+method
-                    pat-record-type-name)
-         (only-in "parse.rkt"
-                  [call-form-fn raw-call-form-fn]
-                  [static-call-class+method raw-static-call-class+method]
-                  [pat-record-type-name raw-pat-record-type-name])
+         "parse.rkt"
          "types.rkt"
          "emit-dispatch.rkt")
 
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (reference-key ref)
+  (if (qualified-ref? ref)
+      (cons (qualified-ref-qualifier ref) (qualified-ref-name ref))
+      ref))
 
-(define (static-call-class+method form)
-  (define ref (raw-static-call-class+method form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (qualified-ref->clj ref)
+  (string-append (symbol->string (qualified-ref-qualifier ref))
+                 "/"
+                 (symbol->string (qualified-ref-name ref))))
 
-(define (pat-record-type-name pattern)
-  (define ref (raw-pat-record-type-name pattern))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
+(define (reference->clj ref)
+  (cond
+    [(qualified-ref? ref) (qualified-ref->clj ref)]
+    [(symbol? ref) (symbol->string ref)]
+    [else (emit-expr ref)]))
+
+(define (qualified-reference=? ref qualifier name)
+  (and (qualified-ref? ref)
+       (eq? (qualified-ref-qualifier ref) qualifier)
+       (eq? (qualified-ref-name ref) name)))
 
 ;; --- special float values ---------------------------------------------------
 
@@ -187,7 +188,7 @@ CLJ
 
 (define (build-record-field-table prog)
   (define local
-    (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (for/fold ([h (hash)]) ([f (in-list (program-forms prog))])
       (cond
         [(record-form? f)
          (hash-set h (record-form-name f)
@@ -202,8 +203,54 @@ CLJ
            (define fields (hash-ref (deferror-form-member-fields f) m '()))
            (hash-set h2 m (map (lambda (p) (symbol->string (param-name p))) fields)))]
         [else h])))
-  (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
-    (hash-set h rec-name field-names)))
+  (define legacy-imported
+    (for/fold ([h local])
+              ([(rec-name field-names)
+                (in-hash (program-imported-record-field-order prog))])
+      (hash-set h rec-name field-names)))
+  (for*/fold ([h legacy-imported])
+             ([import (in-list (program-imported-module-interfaces prog))]
+              [(name contract)
+               (in-hash
+                (module-interface-record-contracts
+                 (module-import-interface import)))]
+              [qualifier
+               (in-list
+                (remove-duplicates
+                 (list
+                  (module-import-prefix import)
+                  (module-interface-namespace
+                   (module-import-interface import)))
+                 eq?))])
+    (hash-set
+     h
+     (reference-key (qualified-ref qualifier name #f))
+     (map (lambda (field) (symbol->string (param-name field)))
+          (interface-record-contract-fields contract)))))
+
+(define (build-record-ns-table prog)
+  (define legacy-imported
+    (for/fold ([h (hash)])
+              ([(name namespace) (in-hash (program-imported-record-ns prog))])
+      (hash-set h name namespace)))
+  (for*/fold ([h legacy-imported])
+             ([import (in-list (program-imported-module-interfaces prog))]
+              [name
+               (in-hash-keys
+                (module-interface-record-contracts
+                 (module-import-interface import)))]
+              [qualifier
+               (in-list
+                (remove-duplicates
+                 (list
+                  (module-import-prefix import)
+                  (module-interface-namespace
+                   (module-import-interface import)))
+                 eq?))])
+    (hash-set
+     h
+     (reference-key (qualified-ref qualifier name #f))
+     (module-interface-namespace (module-import-interface import)))))
 
 (define (build-scalar-fns prog)
   (define predicated
@@ -223,8 +270,39 @@ CLJ
                 (set-add s accessor)
                 (set-add (set-add s ctor) accessor)))
           s)))
-  (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))])
-    (set-add s sym)))
+  (define legacy-imported
+    (for/fold ([s local])
+              ([sym (in-list (program-imported-scalar-fns prog))])
+      (set-add s sym)))
+  (for*/fold ([s legacy-imported])
+             ([import (in-list (program-imported-module-interfaces prog))]
+              [(name declaration)
+               (in-hash
+                (module-interface-type-declarations
+                 (module-import-interface import)))]
+              [runtime-name
+               (in-list
+                (match (interface-type-declaration-details declaration)
+                  [`(backing ,_ predicates ,_)
+                   (define name-string (symbol->string name))
+                   (list
+                    (string->symbol (string-append "->" name-string))
+                    (string->symbol
+                     (string-append
+                      (string-downcase name-string)
+                      "-value")))]
+                  [_ '()]))]
+              [qualifier
+               (in-list
+                (remove-duplicates
+                 (list
+                  (module-import-prefix import)
+                  (module-interface-namespace
+                   (module-import-interface import)))
+                 eq?))])
+    (set-add
+     s
+     (reference-key (qualified-ref qualifier runtime-name #f)))))
 
 (define (build-local-names prog)
   (for/fold ([names (set)]) ([form (in-list (program-forms prog))])
@@ -292,7 +370,7 @@ CLJ
   (parameterize ([current-emit-src-table (program-src-table prog)]
                  [current-type-table (program-type-table prog)]
                  [current-emit-record-fields (build-record-field-table prog)]
-                 [current-emit-record-ns (program-imported-record-ns prog)]
+                 [current-emit-record-ns (build-record-ns-table prog)]
                  [current-emit-target (program-target prog)]
                  [current-clj-semantic-contracts
                   (program-semantic-contracts prog)]
@@ -361,8 +439,7 @@ CLJ
       [else (loop (- i 1))])))
 
 (define (qualified-binding prefix name)
-  (string->symbol
-   (string-append (symbol->string prefix) "/" (symbol->string name))))
+  (qualified-ref prefix name #f))
 
 (define (require-prefix entry)
   (or (require-entry-alias entry)
@@ -382,12 +459,8 @@ CLJ
              (in-hash (program-semantic-contracts prog))]
             #:when
             (and (record-update-contract? contract)
-                 (record-update-contract-validator-symbol contract)
-                 (not
-                  (string-contains?
-                   (symbol->string
-                    (record-update-contract-validator-symbol contract))
-                   "/"))))
+                 (symbol?
+                  (record-update-contract-validator-symbol contract))))
     (record-update-contract-validator-symbol contract)))
 
 (define (referred-record-validators prog entry refer)
@@ -627,7 +700,7 @@ CLJ
 
 (define (emit-expr-core e)
   (cond
-    [(qualified-ref? e) (emit-expr-core (qualified-ref->symbol e))]
+    [(qualified-ref? e) (qualified-ref->clj e)]
     [(string? e)        (emit-clj-string e)]
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]
@@ -809,7 +882,7 @@ CLJ
              (emit-args (method-call-args e)))]
     [(static-call? e)
      (format "(~a~a)"
-             (symbol->string (static-call-class+method e))
+             (reference->clj (static-call-class+method e))
              (emit-args (static-call-args e)))]
     [(dynamic-var? e)
      (symbol->string (dynamic-var-name e))]
@@ -925,39 +998,40 @@ CLJ
     [(with-form? e)
      (emit-with e)]
     [(call-form? e)
-     (define fn-sym (call-form-fn e))
+     (define fn-ref (call-form-fn e))
+     (define fn-key (reference-key fn-ref))
      (cond
        ;; Scalar constructors/accessors erase to identity (zero runtime cost)
-       [(and (set-member? (current-emit-scalar-fns) fn-sym)
+       [(and (set-member? (current-emit-scalar-fns) fn-key)
              (= 1 (length (call-form-args e))))
         (emit-expr (car (call-form-args e)))]
        ;; `bgl/promote` copies a value into an older epoch's arena. A hosted
        ;; target has one GC-owned heap and no epochs, so the value already
        ;; outlives every scope that could name it: the form erases, the same
        ;; way a type annotation does.
-       [(and (eq? fn-sym 'bgl/promote)
+       [(and (qualified-reference=? fn-ref 'bgl 'promote)
              (= 1 (length (call-form-args e))))
         (emit-expr (car (call-form-args e)))]
-       [(and (eq? fn-sym 'sha256-bytes)
+       [(and (eq? fn-ref 'sha256-bytes)
              (= 1 (length (call-form-args e)))
-             (not (set-member? (current-emit-local-names) fn-sym)))
+             (not (set-member? (current-emit-local-names) fn-ref)))
         (format "(beagle$sha256_bytes_v0 ~a)"
                 (emit-expr (car (call-form-args e))))]
-       [(and (eq? fn-sym 'monotonic-nanoseconds)
+       [(and (eq? fn-ref 'monotonic-nanoseconds)
              (= 0 (length (call-form-args e)))
-             (not (set-member? (current-emit-local-names) fn-sym)))
+             (not (set-member? (current-emit-local-names) fn-ref)))
         "(System/nanoTime)"]
        [else
-        (define qualified-str
-          (if (symbol? fn-sym)
-              (let* ([sym-str (symbol->string fn-sym)]
-                     [mod-prefix (hash-ref (current-emit-symbol-ns) fn-sym #f)])
-                (if (and mod-prefix (not (string-contains? sym-str "/")))
-                    (string-append (symbol->string mod-prefix) "/" sym-str)
-                    sym-str))
-              (emit-expr fn-sym)))
+        (define output-ref
+          (if (symbol? fn-ref)
+              (let ([mod-prefix
+                     (hash-ref (current-emit-symbol-ns) fn-ref #f)])
+                (if mod-prefix
+                    (qualified-binding mod-prefix fn-ref)
+                    fn-ref))
+              fn-ref))
         (format "(~a~a)"
-                qualified-str
+                (reference->clj output-ref)
                 (emit-args (call-form-args e)))])]
     [(set!-form? e)
      (define target (set!-form-target e))
@@ -1126,7 +1200,7 @@ CLJ
     [(record-update-contract? contract)
      (define record-name (record-update-contract-record-name contract))
      (define field-order (record-update-contract-field-order contract))
-     (unless (and (symbol? record-name)
+     (unless (and (or (symbol? record-name) (qualified-ref? record-name))
                   (list? field-order)
                   (andmap
                    (lambda (field)
@@ -1147,7 +1221,7 @@ CLJ
          (format
           "(let [$beagle$record$update$candidate ~a]\n  (~a $beagle$record$update$candidate))"
           updated
-          (symbol->string validator))
+          (reference->clj validator))
          updated)]
     [(eq? contract missing-contract)
      ;; Direct emitter-unit callers historically omit the checker entirely.
@@ -1384,17 +1458,29 @@ CLJ
                         alt)])))
      (format "(or ~a) ~a" (string-join tests " ") body-str)]
     [(pat-record? pat)
-     (define rec-name (pat-record-type-name pat))
+     (define rec-ref (pat-record-type-name pat))
+     (define rec-key (reference-key rec-ref))
+     (define rec-name
+       (if (qualified-ref? rec-ref)
+           (qualified-ref-name rec-ref)
+           rec-ref))
      (define bindings (pat-record-bindings pat))
      (define direct-fields
-       (hash-ref (current-emit-record-fields) rec-name #f))
-     (define direct-ns (hash-ref (current-emit-record-ns) rec-name #f))
+       (hash-ref (current-emit-record-fields) rec-key #f))
+     (define direct-ns
+       (or (hash-ref (current-emit-record-ns) rec-key #f)
+           (and (qualified-ref? rec-ref)
+                (qualified-ref-provider-id rec-ref))))
      (define candidates
        (if direct-fields
            '()
            (for/list ([candidate
                        (in-hash-keys (current-emit-record-fields))]
-                      #:when (eq? (unqualify-type-name candidate) rec-name))
+                      #:when
+                      (eq? (if (pair? candidate)
+                               (cdr candidate)
+                               (unqualify-type-name candidate))
+                           rec-name))
              (cons
               (hash-ref (current-emit-record-fields) candidate)
               (hash-ref (current-emit-record-ns) candidate #f)))))
@@ -1406,8 +1492,8 @@ CLJ
      (define rec-ns (or direct-ns (and resolved (cdr resolved))))
      (define qualified-name
        (if rec-ns
-         (format "~a.~a" rec-ns (unqualify-type-name rec-name))
-         (symbol->string rec-name)))
+         (format "~a.~a" rec-ns rec-name)
+         (reference->clj rec-ref)))
      (define test (format "(instance? ~a ~a)" qualified-name target-sym))
      (cond
        [(or (null? bindings) (not fields))

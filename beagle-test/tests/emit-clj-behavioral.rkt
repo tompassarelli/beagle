@@ -1074,6 +1074,24 @@
      "       (catch Exception error (println (.getMessage error)))))")
     "8\nBinding constraint failed: value")
 
+   (check-linked-clj-output
+    "qualified record pattern resolves structural provider identity"
+    'models.widgets
+    (list '(defrecord Widget [(label String)]))
+    'models.widget-user
+    (list
+     '(require models.widgets :as models)
+     `(defn label-of [(value Any)] Any
+        (match value
+          ,(br '(models/Widget label) 'label)
+          ,(br '_ 'nil))))
+    (string-append
+     "(require '[models.widgets :as models])\n"
+     "(require '[models.widget-user :as user])\n"
+     "(println (user/label-of (models/->Widget \"ready\")))\n"
+     "(println (user/label-of 0))")
+    "ready\nnil")
+
    (check-clj-output "defrecord + extend-type with multiple methods"
      (list `(defprotocol Shape
               (area ,(br '(self Shape)) Int)
