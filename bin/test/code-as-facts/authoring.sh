@@ -11,7 +11,7 @@
 #     {op rename, old O, new N, scope S}  -> the one engine (resolve.clj): scope-correct
 #                                            across collision + shadowing + cross-module
 #
-# Needs racket + bb + fram out/ + chartroom (resolve.clj). Self-gates with a worked
+# Needs racket + bb + store out/ + chartroom (resolve.clj). Self-gates with a worked
 # NL→edit example (valid commits + recompiles; invalid fails closed).
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
@@ -20,10 +20,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 source "$ROOT/bin/_beagle-racket"
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
-FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
-CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
-source "$ROOT/bin/_fram-resolver"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
+source "$ROOT/bin/_store-resolver"
 fail=0
 
 # apply <outdir> <corpus> <op> <args...> -> prints COMMITTED | REJECTED
@@ -36,11 +36,11 @@ apply_edit() {
   for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done
   case "$op" in
     rename)  # the one engine: scope-correct across collision + shadowing + cross-module
-      bb -cp "$FRAM_OUT" "$RES" rename "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 \
+      bb -cp "$BEAGLE_STORE_OUT" "$RES" rename "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
       for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     delete)  # the second verb: remove a def IFF no reference would orphan, else refuse (fail closed)
-      bb -cp "$FRAM_OUT" "$RES" delete "$1" "$2" "${edns[@]}" >/dev/null 2>&1 \
+      bb -cp "$BEAGLE_STORE_OUT" "$RES" delete "$1" "$2" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
       for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     *) echo REJECTED; rm -rf "$W"; return ;;
@@ -52,8 +52,8 @@ apply_edit() {
 }
 
 echo "================ NL → edit authoring layer (recompile-gated, agent-driven) ================"
-[ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-RES="$(find_fram_resolver)" || exit 3
+[ -d "$BEAGLE_STORE_OUT" ] || { echo "  (need BEAGLE_STORE_OUT)"; exit 3; }
+RES="$(find_store_resolver)" || exit 3
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 
 echo '--- NL: "rename the helper function to add-one" -> the agent emits a structured edit ---'

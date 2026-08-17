@@ -1,12 +1,12 @@
 #lang beagle/clj
 
-;; Vec-vocabulary leaves over the real fram.types record shapes; every real fram
+;; Vec-vocabulary leaves over the real store.types record shapes; every real store
 ;; count/nth/conj site also reaches a loop or arithmetic callee, so the C probe
 ;; calls these while those tiers land separately.
-(ns fram.vec-probe)
+(ns store.vec-probe)
 
 
-(require fram.types :as t)
+(require store.types :as t)
 
 (defn bucket-size [(bucket t/ActiveBucket)] Int
   (count (t/activebucket-positions bucket)))

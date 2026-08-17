@@ -1,4 +1,4 @@
-/* Probe for the lowered fram.types bodies. Hand-written; the module under it is
+/* Probe for the lowered store.types bodies. Hand-written; the module under it is
    generated. "trap" and "overflow" take a trapping path instead, which aborts.
    fn_0 instant?  fn_1 instant  fn_2 instant-shift-seconds
    fn_3 instant-seconds-between  fn_4 triple?
@@ -9,9 +9,9 @@
    Every generated TYPE is named through a macro drive.sh resolves out of the
    emitted header: the emitter numbers its type table in collection order, so
    an ordinal spelled here would silently mean a different type the next time
-   fram.types gains or loses a shape. Any TAGS stay spelled out below on
+   store.types gains or loses a shape. Any TAGS stay spelled out below on
    purpose — reading a tag back out of the predicate that tests it would make
-   the predicate assertions tautological. A tag that moves under fram must
+   the predicate assertions tautological. A tag that moves under store must
    surface as this probe's numbered exit, and be re-read from the source. */
 #include "module_0.h"
 
@@ -45,7 +45,7 @@ typedef SLICE_INSTANT_TYPE slice_instant;
 typedef SLICE_OPERATION_OCCURRENCE_TYPE slice_operation_occurrence;
 typedef SLICE_WITHDRAWAL_TYPE slice_withdrawal;
 
-/* Any variant tags, in fram.types collection order. */
+/* Any variant tags, in store.types collection order. */
 #define ANY_TAG_BOOL INT64_C(0)
 #define ANY_TAG_I64 INT64_C(1)
 #define ANY_TAG_F64 INT64_C(2)
@@ -58,7 +58,7 @@ typedef SLICE_WITHDRAWAL_TYPE slice_withdrawal;
 #define ANY_TAG_OPERATION_OCCURRENCE INT64_C(23)
 #define ANY_TAG_WITHDRAWAL INT64_C(24)
 
-/* Term variant tags, in fram.types collection order. */
+/* Term variant tags, in store.types collection order. */
 #define TERM_TAG_TEXT INT64_C(0)
 #define TERM_TAG_I64 INT64_C(1)
 #define TERM_TAG_KEYWORD INT64_C(4)
@@ -373,7 +373,7 @@ int main(int argc, char **argv) {
     return 29;
   }
 
-  /* Current Fram keeps assertion/retraction history out of Term. */
+  /* Current Beagle Store keeps assertion/retraction history out of Term. */
   slice_triple later =
     native_m0_fn_26(&arena, &capability, tx, INT64_C(4));
   slice_triple recorded =

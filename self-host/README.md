@@ -87,10 +87,10 @@ A `(require ...)` resolves only through what the invocation declares; nothing
 walks ancestor directories or guesses filenames:
 
 ```sh
-# explicit repeated module roots: ns fram.store -> ROOT/fram/store.bclj
+# explicit repeated module roots: ns store.store -> ROOT/store/store.bclj
 #   (`-` maps to `_`, `.` to `/`; extension = the importer's extension)
 bb -cp self-host/seed -m selfhost.main emit \
-    --module-root fram=$FRAM_REPO/src $FRAM_REPO/src/fram/fold.bclj
+    --module-root store=$BEAGLE_STORE_REPO/src $BEAGLE_STORE_REPO/src/store/fold.bclj
 
 # explicit closed bundle: members resolve by declared (ns ...), so
 #   dash-named files need no rename
@@ -112,7 +112,7 @@ if one ever does, port the catalog set rather than widening a prefix.
 
 ## Lossless source/fact interface
 
-Fram should depend on the repository CLI, not the self-host namespace or seed
+Beagle Store should depend on the repository CLI, not the self-host namespace or seed
 layout:
 
 ```sh
@@ -122,7 +122,7 @@ bin/beagle facts-roundtrip --render module.edn > FILE.bclj
 
 The subcommand runs the self-hosted implementation. Its output is certified
 byte-for-byte against the pinned-Racket original by
-`bin/beagle-certify-facts-roundtrip certify`; the Fram-side adoption is a
+`bin/beagle-certify-facts-roundtrip certify`; the Beagle Store-side adoption is a
 separate follow-up cut.
 
 Every structural child uses one CRDT order predicate,
@@ -165,7 +165,7 @@ absolute checkout paths and remain byte-stable across machines.
   `check-qualified-resolution!`: a qualified ref whose prefix was never
   required → exit 1). The parse stage stays PURE — all IO lives in the
   driver (`selfhost.rt` `file-exists?`/`slurp-file`/`abs-path`). Verified by
-  `verify-selfhost.sh` rungs 6/7 and the fram corpus (byte-identical emit +
+  `verify-selfhost.sh` rungs 6/7 and the store corpus (byte-identical emit +
   externs parity). Externs are compared as a SET: `ast-json.rkt` serializes
   the oracle's externs in hash order, so byte order is not reproducible.
   Checked providers also publish record field order, field types, and their

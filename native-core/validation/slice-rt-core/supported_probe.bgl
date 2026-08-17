@@ -1,6 +1,6 @@
 #lang beagle
 ;; Beagle-owned executable witness for the supported rt-core-shaped C17 path.
-;; The real Fram projection is audited separately and keeps its one unsupported
+;; The real Beagle Store projection is audited separately and keeps its one unsupported
 ;; union-equality function pending; this fixture must not impersonate it.
 (ns native.rt-core-supported-probe
   (:require [clojure.string :as str]))
@@ -16,6 +16,6 @@
 (defn probe [] Int
   (if (and (= (fmt-id "20260815123456") "2026-08-15-123456")
         (= (bounded-lower "BEAGLE") "beagl")
-        (= (bounded-lower "FRAM") "fram"))
+        (= (bounded-lower "STORE") "store"))
     0
     1))

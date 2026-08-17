@@ -2,7 +2,7 @@
 # beagle-roundtrip: the facts source-of-truth gate.
 #
 #   bin/beagle-roundtrip <file-or-dir> ...      # datum<->facts gate + text-is-a-view
-#   bin/beagle-roundtrip --emit-edn <file>      # reader-level facts as EDN (for Fram)
+#   bin/beagle-roundtrip --emit-edn <file>      # reader-level facts as EDN (for Beagle Store)
 #   bin/beagle-roundtrip --verify <edn> <src>   # verify EDN reconstructs <src>
 #
 # Proves a beagle program round-trips through its store-layer occurrence projection losslessly:

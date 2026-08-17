@@ -1,6 +1,6 @@
 #lang beagle/clj
 ;; Restricted C17 materializer widened past native.c11 to the shapes a whole
-;; Fram module reaches: closed unions, vector descriptors, references, text
+;; Beagle Store module reaches: closed unions, vector descriptors, references, text
 ;; atoms, and by-value declaration ordering.
 (ns native.fold-c17)
 

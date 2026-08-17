@@ -70,17 +70,17 @@
      (write-file! (build-path repo "build.sh")
                   "for m in types store kernel; do build $m.bclj; done\n")
      (for ([m '("types" "store" "kernel")])
-       (write-file! (build-path repo "src" "fram" (string-append m ".bclj")) ";;\n"))
+       (write-file! (build-path repo "src" "store" (string-append m ".bclj")) ";;\n"))
      (define r (derive-consumer
-                (consumer-spec "fram-fix" repo
+                (consumer-spec "store-fix" repo
                                '((enumerator (kind bash-for-list)
                                              (source "build.sh")
                                              (loop-var "m")
-                                             (template "src/fram/{}.bclj")
+                                             (template "src/store/{}.bclj")
                                              (shape-markers ("for m in")))))))
      (check-equal? (consumer-result-count r) 3)
      (check-equal? (consumer-result-relpaths r)
-                   '("src/fram/kernel.bclj" "src/fram/store.bclj" "src/fram/types.bclj")))))
+                   '("src/store/kernel.bclj" "src/store/store.bclj" "src/store/types.bclj")))))
 
 (test-case "glob extraction walks the root and applies skips"
   (with-fixture-repo
@@ -280,11 +280,11 @@
                   "while read m; do build $m; done\n") ; no `for m in`
      (check-exn exn:fail:drift?
                 (lambda () (derive-consumer
-                            (consumer-spec "fram-drift" repo
+                            (consumer-spec "store-drift" repo
                                            '((enumerator (kind bash-for-list)
                                                          (source "build.sh")
                                                          (loop-var "m")
-                                                         (template "src/fram/{}.bclj")
+                                                         (template "src/store/{}.bclj")
                                                          (shape-markers ("for m in")))))))))))
 
 (test-case "find-exclude drift: firn-build find/skip shape changed trips the guard"
@@ -329,7 +329,7 @@
   (define consumers (load-consumers))
   (check-equal? (length consumers) 5 "registry names exactly five consumers")
   (check-equal? (sort (map consumer-name consumers) string<?)
-                '("fram" "gjoa" "nixos-config" "north" "wake"))
+                '("store" "gjoa" "nixos-config" "north" "wake"))
   (cond
     [(andmap (lambda (c) (directory-exists? (consumer-repo-path c))) consumers)
      (define run1 (derive-all))

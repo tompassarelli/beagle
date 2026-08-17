@@ -118,7 +118,7 @@
    #:exists 'truncate/replace))
 
 (define (run-overlay-cli . args)
-  ;; Stay on the exact runtime driving this test (Fram pins Racket 9.1).  Using
+  ;; Stay on the exact runtime driving this test (Beagle Store pins Racket 9.1).  Using
   ;; PATH here can accidentally spawn a newer system Racket and create
   ;; incompatible compiled linklets.
   (define racket-exe
@@ -543,10 +543,10 @@
       selected-edn
       "graph.fixture.selected"
       "#lang beagle/clj\n(def answer Int 42)\n")
-     ;; Match the stable IDs of the post-commit Fram regression so the old
+     ;; Match the stable IDs of the post-commit Beagle Store regression so the old
      ;; hash-order root heuristic deterministically selects an orphan body.
      (shift-edn-node-ids! selected-edn 1543)
-     ;; Fram can retain old list bodies after the authoritative order slot moves.
+     ;; Beagle Store can retain old list bodies after the authoritative order slot moves.
      ;; They are harmless unreachable facts, but
      ;; they must not outrank the explicit beagle-file wrapper as EDN root.
      (append-edn-lines!

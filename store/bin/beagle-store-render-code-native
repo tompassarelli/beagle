@@ -1,0 +1,240 @@
+#!/usr/bin/env bb
+;; beagle-store-render-code-native — render a module from a native CODE corpus.
+;;
+;; INVARIANT: this entry point loads the read closure ONLY (store.code-reader ->
+;; store.rt -> rpc/fold/kernel/rt-core/types/store). It must never
+;; require store.schema or the resolve* family — it is the instrument the store
+;; migration's later stages are measured with, so it cannot depend on what they
+;; are repairing. `--require-graph` reports the observed closure.
+;;
+;; USAGE:
+;;   bin/beagle-store-render-code-native <module> --space-id <id> (--port <P> | --log <f>) [--root <d>] [--out <f>]
+;;   bin/beagle-store-render-code-native --modules a,b,c --space-id <id> --verify [...]
+;;   bin/beagle-store-render-code-native --require-graph [--log <f> | --port <P>]
+;;
+;;   <module>       module NAME as ingested (e.g. store.store, store.text_index)
+;;   --space-id     SpaceId of the corpus (required; no default is safe)
+;;   --port         render off an ALREADY RUNNING server (minimal closure)
+;;   --log          render off a corpus file by booting an EPHEMERAL read-only
+;;                  in-process server on a free port; adds server.clj
+;;                  to the loaded closure (reported by --require-graph)
+;;   --modules      comma-separated names, all selected from ONE pinned corpus
+;;                  drain (a per-module drain is O(corpus) per module)
+;;   --verify       compare each render with the file its own root fact cites;
+;;                  prints sha256 pairs, exits 1 on any mismatch
+;;   --out-dir      with --modules, also write each render to <dir>/<module>.bclj
+;;   --root         checkout root used to resolve a relative module root path
+;;                  (default $PWD)
+;;   --out          write here instead of stdout (single-module mode)
+;;   --page-limit   FRAMRPC scan page rows; capped by the 256 Term-depth bound
+;;   --require-graph  print the OBSERVED loaded-namespace closure and exit
+;;
+;; Env: BEAGLE_STORE_BEAGLE / BEAGLE_HOME (Beagle CLI), BEAGLE_STORE_HOME (repo root).
+(require '[clojure.java.io :as io]
+         '[clojure.string :as str]
+         '[babashka.classpath :as cp]
+         '[babashka.process :as proc])
+
+;; store.rt's 15s default socket read timeout is env-only and a cold scan page can
+;; exceed it; raise it once and re-exec rather than fail a drain intermittently.
+(when (str/blank? (System/getenv "BEAGLE_STORE_SERVER_READ_TIMEOUT_MS"))
+  (let [r (apply proc/shell
+                 {:extra-env {"BEAGLE_STORE_SERVER_READ_TIMEOUT_MS" "300000"} :continue true}
+                 (str *file*) *command-line-args*)]
+    (System/exit (:exit r))))
+
+(defn- die [& xs] (binding [*out* *err*] (apply println xs)) (System/exit 1))
+(defn- log! [& xs] (binding [*out* *err*] (apply println xs)))
+
+(def ^:private home (System/getProperty "user.home"))
+(def ^:private store-home
+  (or (System/getenv "BEAGLE_STORE_HOME")
+      (.getCanonicalPath (.getParentFile (.getParentFile (io/file *file*))))))
+(cp/add-classpath (str store-home java.io.File/pathSeparator
+                       (io/file store-home "out")))
+
+(def ^:private beagle-bin
+  (or (System/getenv "BEAGLE_STORE_BEAGLE")
+      (let [bh (System/getenv "BEAGLE_HOME")]
+        (when-not (str/blank? bh) (str bh "/bin/beagle")))
+      ;; the primary checkout is a CONTAINER; the CLI lives in main/
+      (str home "/code/beagle/main/bin/beagle")))
+
+(defn- parse-args [args]
+  (loop [a args, opts {:modules [] :space nil :port nil :log nil :root nil
+                       :out nil :out-dir nil :page-limit 200
+                       :verify false :require-graph false}]
+    (cond
+      (empty? a) opts
+      (= "--require-graph" (first a)) (recur (rest a) (assoc opts :require-graph true))
+      (= "--verify" (first a)) (recur (rest a) (assoc opts :verify true))
+      (= "--space-id" (first a)) (recur (drop 2 a) (assoc opts :space (second a)))
+      (= "--port" (first a)) (recur (drop 2 a) (assoc opts :port (Integer/parseInt (second a))))
+      (= "--log" (first a)) (recur (drop 2 a) (assoc opts :log (second a)))
+      (= "--root" (first a)) (recur (drop 2 a) (assoc opts :root (second a)))
+      (= "--out" (first a)) (recur (drop 2 a) (assoc opts :out (second a)))
+      (= "--out-dir" (first a)) (recur (drop 2 a) (assoc opts :out-dir (second a)))
+      (= "--page-limit" (first a)) (recur (drop 2 a) (assoc opts :page-limit (Integer/parseInt (second a))))
+      (= "--modules" (first a))
+      (recur (drop 2 a) (update opts :modules into (remove str/blank? (str/split (second a) #","))))
+      (str/starts-with? (first a) "--") (die "unknown flag" (first a))
+      :else (recur (rest a) (update opts :modules conj (first a))))))
+
+(def opts (parse-args *command-line-args*))
+
+;; ---- the read closure. Nothing below this line loads the authoring stack. ----
+(require '[store.code-reader :as code-reader]
+         '[store.rt :as rt]
+         '[store.rpc])
+
+;; namespaces this repo provides, so --require-graph can separate repo closure
+;; from the babashka/clojure ambient. Derived from the classpath, never listed.
+(defn- repo-namespaces []
+  (into (sorted-set)
+        (for [dir [(io/file store-home) (io/file store-home "out")]
+              f (when (.isDirectory dir) (.listFiles dir))
+              :when (and (.isFile f) (str/ends-with? (.getName f) ".clj"))
+              :let [m (re-find #"(?m)^\(ns\s+([A-Za-z0-9!?*<>=_.+-]+)" (slurp f))]
+              :when m]
+          (second m))))
+
+(defn- store-subdir-namespaces []
+  (into (sorted-set)
+        (for [f (.listFiles (io/file store-home "out" "store"))
+              :when (and (.isFile f) (str/ends-with? (.getName f) ".clj"))
+              :let [m (re-find #"(?m)^\(ns\s+([A-Za-z0-9!?*<>=_.+-]+)" (slurp f))]
+              :when m]
+          (second m))))
+
+(defn- print-require-graph! []
+  (let [provided (into (repo-namespaces) (store-subdir-namespaces))
+        loaded (into (sorted-set) (map (comp str ns-name)) (all-ns))
+        repo-loaded (filterv provided loaded)]
+    (println "; OBSERVED loaded namespaces provided by this repo")
+    (doseq [n repo-loaded] (println n))
+    (println)
+    (println "; repo namespaces NOT loaded:" (count (remove (set repo-loaded) provided)))
+    (println "; ambient (clojure/babashka) namespaces loaded:"
+             (count (remove provided loaded)))))
+
+(defn- free-port []
+  (with-open [s (java.net.ServerSocket. 0)] (.getLocalPort s)))
+
+;; a cold server replays every proposition before it listens, so the budget
+;; scales with corpus size, not with round-trip latency.
+(def ^:private boot-timeout-ms
+  (let [v (System/getenv "BEAGLE_STORE_RENDER_BOOT_TIMEOUT_MS")]
+    (if (str/blank? v) 600000 (Long/parseLong v))))
+
+(defn- await-server! [port space server]
+  (let [deadline (+ (System/currentTimeMillis) boot-timeout-ms)]
+    (loop []
+      (let [ok (try (rt/native-call! port space :rpc/version
+                                     rpc/rpc-unit nil nil nil)
+                    (catch Throwable _ nil))]
+        (cond
+          ok ok
+          (and server (realized? server))
+          (die "server exited before serving:" (pr-str (try @server (catch Throwable e (ex-message e)))))
+          (> (System/currentTimeMillis) deadline)
+          (die "server on port" port "space" space "never answered :rpc/version within"
+               boot-timeout-ms "ms (raise BEAGLE_STORE_RENDER_BOOT_TIMEOUT_MS)")
+          :else (do (Thread/sleep 50) (recur)))))))
+
+(defn- sha256 [^String s]
+  (->> (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                (.getBytes s "UTF-8"))
+       (map #(format "%02x" %))
+       (apply str)))
+
+(defn- render-all!
+  "Render every requested module out of ONE pinned corpus drain."
+  [{:keys [modules space port root out out-dir page-limit verify]}]
+  (let [checkout-root (.getCanonicalPath (io/file (or root (System/getProperty "user.dir"))))
+        corpus (code-reader/read-corpus-snapshot! port space page-limit)
+        _ (log! "beagle-store-render-code-native: drained corpus version"
+                (:version corpus) "-" (count (:triples corpus)) "triples in"
+                (:pages corpus) "pages")
+        results
+        (for [m modules]
+          (let [snapshot (code-reader/module-snapshot-from-corpus! checkout-root m corpus)
+                rendered (code-reader/render-module! beagle-bin snapshot)
+                citation (:snapshot rendered)
+                source (:source rendered)
+                path (cond out-dir (str (io/file out-dir (str m ".bclj")))
+                           (= 1 (count modules)) out)]
+            (if path
+              (do (io/make-parents path)
+                  (spit path source)
+                  (log! "beagle-store-render-code-native: rendered" m "->" path
+                        (str "(" (count source) " bytes; version "
+                             (:version citation) ")")))
+              (when-not verify (print source)))
+            {:module m :citation citation :source source :path path}))]
+    (doall results)))
+
+(defn- verify! [results]
+  (let [rows (for [{:keys [module citation source]} results
+                   :let [committed (slurp (:root citation))]]
+               {:module module
+                :root (:root citation)
+                :version (:version citation)
+                :rendered (sha256 source)
+                :committed (sha256 committed)
+                :ok (= source committed)})]
+    (doseq [{:keys [module root version rendered committed ok]} rows]
+      (println (format "%-7s %-22s version=%s rendered=%s committed=%s %s"
+                       (if ok "IDENTIC" "DIFFERS") module version
+                       rendered committed root)))
+    (let [bad (remove :ok rows)]
+      (println (format "\ns0 render verify: %d/%d byte-identical"
+                       (- (count rows) (count bad)) (count rows)))
+      (when (seq bad) (System/exit 1)))))
+
+(defn- run! [o]
+  (let [results (render-all! o)]
+    (when (:verify o) (verify! results))
+    (flush)))
+
+(let [{:keys [modules space port log require-graph]} opts]
+  (when (and (not require-graph) (empty? modules))
+    (die "usage: bin/beagle-store-render-code-native <module> --space-id <id> (--port <P> | --log <f>) [--root <dir>] [--out <f>]"))
+  (when (and (not require-graph) (str/blank? space))
+    (die "--space-id is required: a render must name the corpus it read"))
+  (when (and (not require-graph) (nil? port) (nil? log))
+    (die "give exactly one of --port <P> (running server) or --log <code.framlog>"))
+  (when (and port log)
+    (die "--port and --log are mutually exclusive"))
+  (when-not (.canExecute (io/file beagle-bin))
+    (when-not require-graph
+      (die "missing executable Beagle CLI at" beagle-bin "(set BEAGLE_STORE_BEAGLE / BEAGLE_HOME)")))
+
+  ;; --port is a TOP-LEVEL early exit: the --log branch below references
+  ;; server/serve!, which only exists after its load-file runs, and bb/SCI
+  ;; analyses a whole top-level form before running it.
+  (when port
+    (await-server! port space nil)
+    (when require-graph (print-require-graph!) (System/exit 0))
+    (run! opts)
+    (System/exit 0))
+  (when (and require-graph (nil? log))
+    (print-require-graph!)
+    (System/exit 0))
+  (when-not (.exists (io/file log)) (die "no code corpus at" log)))
+
+;; --log: boot one ephemeral read-only server over the corpus file.
+;; server.clj self-dispatches -main on a nonempty *command-line-args*.
+(binding [*command-line-args* nil]
+  (load-file (str (io/file store-home "server.clj"))))
+
+(let [{:keys [space log require-graph]} opts
+      p (free-port)
+      ;; stdout is the rendered module; the server's own chatter is stderr.
+      server (future (binding [*out* *err*] (server/serve! p log space :active)))]
+  (try
+    (await-server! p space server)
+    (if require-graph
+      (print-require-graph!)
+      (run! (assoc opts :port p)))
+    (finally (future-cancel server)))
+  (System/exit 0))

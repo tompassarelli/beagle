@@ -3,6 +3,6 @@
 
 int main(void) {
   const native_capability capability = { UINT64_C(1) };
-  (void)FRAM_MAIN(&capability);
+  (void)BEAGLE_STORE_MAIN(&capability);
   return 0;
 }

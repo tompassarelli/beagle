@@ -2,7 +2,7 @@
 ;; facts-check-emit — THE GATE CORE: facts -> AST -> type-check -> emit clj.
 ;; Fail-closed: any type error -> diagnostics to stderr + exit 1, NO emit.
 ;; Replaces the per-edit `.bclj render + beagle-build-all` round-trip in the FLIP
-;; recompile-gate (tests/fram_mcp.clj). beagle's checker is per-file
+;; recompile-gate (tests/store_mcp.clj). beagle's checker is per-file
 ;; (check-all.rkt: read -> parse-program -> type-check-with-locs!), so the gate
 ;; only needs to re-check+emit the EDITED module — not rebuild the whole tree.
 ;;   racket facts-check-emit.rkt <module.edn>   ; <module.edn> = `--emit-edn` output

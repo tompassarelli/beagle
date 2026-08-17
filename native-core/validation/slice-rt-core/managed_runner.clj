@@ -1,5 +1,5 @@
 (require '[clojure.string :as str]
-         '[fram.rt-core :as rt])
+         '[store.rt-core :as rt])
 
 (defn pass! [kind subject case-name actual expected]
   (when-not (= expected actual)
@@ -23,21 +23,21 @@
 (def digest-b (apply str (repeat 64 "b")))
 
 (def valid-envelope
-  {:fram-edit-envelope 1
-   :fram-edit-log "coord.log"
-   :fram-edit-candidate "batch-7"
-   :fram-edit-batch "batch-7"
-   :fram-edit-module "fram.rt-core"
-   :fram-edit-path "src/fram/rt_core.bclj"
-   :fram-edit-base-version 4
-   :fram-edit-final-version 7
-   :fram-edit-ops 3
-   :fram-edit-installed 3
-   :fram-edit-ops-digest digest-a
-   :fram-edit-edn-digest digest-b
-   :fram-edit-line-count 3
-   :fram-edit-batch-sha digest-a
-   :fram-edit-seal-sha digest-b})
+  {:store-edit-envelope 1
+   :store-edit-log "coord.log"
+   :store-edit-candidate "batch-7"
+   :store-edit-batch "batch-7"
+   :store-edit-module "store.rt-core"
+   :store-edit-path "src/store/rt_core.bclj"
+   :store-edit-base-version 4
+   :store-edit-final-version 7
+   :store-edit-ops 3
+   :store-edit-installed 3
+   :store-edit-ops-digest digest-a
+   :store-edit-edn-digest digest-b
+   :store-edit-line-count 3
+   :store-edit-batch-sha digest-a
+   :store-edit-seal-sha digest-b})
 
 (pass! "rt-core" "str-index-of" "found" (rt/str-index-of "abcabc" "bc") 1)
 (pass! "rt-core" "str-index-of" "absent" (rt/str-index-of "abc" "z") nil)
@@ -65,7 +65,7 @@
 (pass! "rt-core" "repeat-str" "positive" (rt/repeat-str "ab" 3) "ababab")
 (pass! "rt-core" "repeat-str" "negative" (rt/repeat-str "ab" -2) "")
 (pass! "rt-core" "edit-batch-envelope-marker?" "present"
-  (rt/edit-batch-envelope-marker? {:fram-edit-envelope 1}) true)
+  (rt/edit-batch-envelope-marker? {:store-edit-envelope 1}) true)
 (pass! "rt-core" "edit-batch-envelope-marker?" "absent"
   (rt/edit-batch-envelope-marker? {}) false)
 (pass! "rt-core" "digest?" "valid" (rt/digest? digest-a) true)
@@ -135,13 +135,13 @@
 (pass! "rt-core" "server-status-response" "incompatible"
   (rt/server-status-response 7788 {:error "unknown op"})
   (str "server INCOMPATIBLE on 127.0.0.1:7788 — server lacks required "
-    "log-fence protocol; restart it with current Fram"))
+    "log-fence protocol; restart it with current Beagle Store"))
 (pass! "rt-core" "server-status-response" "unusable"
   (rt/server-status-response 7788 {:error "broken"})
   "server UNUSABLE on 127.0.0.1:7788 — {:error \"broken\"}")
 (pass! "rt-core" "server-status-down" "down"
   (rt/server-status-down 7788)
-  "server DOWN on 127.0.0.1:7788 — start it with bin/fram-up")
+  "server DOWN on 127.0.0.1:7788 — start it with bin/beagle-store-up")
 (pass! "rt-core" "warm-read-response" "unknown"
   (rt/warm-read-response {:error "unknown op"}) nil)
 (pass! "rt-core" "warm-read-response" "value"
@@ -172,10 +172,10 @@
   rt/EDIT-BATCH-ENVELOPE-KEYS (set (keys valid-envelope)))
 (pass! "rt-core-def" "EDIT-BATCH-ENVELOPE-SEAL-FIELDS" "value"
   rt/EDIT-BATCH-ENVELOPE-SEAL-FIELDS
-  [:fram-edit-envelope :fram-edit-log :fram-edit-candidate :fram-edit-batch
-   :fram-edit-module :fram-edit-path :fram-edit-base-version
-   :fram-edit-final-version :fram-edit-ops :fram-edit-installed
-   :fram-edit-ops-digest :fram-edit-edn-digest :fram-edit-line-count
-   :fram-edit-batch-sha])
+  [:store-edit-envelope :store-edit-log :store-edit-candidate :store-edit-batch
+   :store-edit-module :store-edit-path :store-edit-base-version
+   :store-edit-final-version :store-edit-ops :store-edit-installed
+   :store-edit-ops-digest :store-edit-edn-digest :store-edit-line-count
+   :store-edit-batch-sha])
 (pass! "rt-core-error" "RewriteCrashError" "variant"
   (:doctor-refusal (rt/->RewriteCrash "message" "path" true)) true)

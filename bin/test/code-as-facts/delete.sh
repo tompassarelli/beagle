@@ -10,31 +10,31 @@
 #     recompiles.
 #   - UNSAFE (a reference would be orphaned, in THIS module or a CONSUMER via alias):
 #     refuse, mutate nothing (fail closed).
-# Needs racket + bb + fram out/ + chartroom resolve.clj.
+# Needs racket + bb + store out/ + chartroom resolve.clj.
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
-FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
-CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
 source "$ROOT/bin/_beagle-racket"
-source "$ROOT/bin/_fram-resolver"
+source "$ROOT/bin/_store-resolver"
 CORP="$HERE/delete-corpus"
 fail=0
 
 echo "================ delete as a graph op — no-orphaned-references invariant ================"
-[ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-RES="$(find_fram_resolver)" || exit 3
+[ -d "$BEAGLE_STORE_OUT" ] || { echo "  (need BEAGLE_STORE_OUT)"; exit 3; }
+RES="$(find_store_resolver)" || exit 3
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
 W="$(mktemp -d)"; trap 'rm -rf "${W:?}" "${RESOLVE_OUT:?}"' EXIT
 
 # --- 1. SAFE delete: remove an unreferenced def; before/after forms survive --------
 echo "--- 1. safe delete (unreferenced 'dead'; 'before'/'after' survive, recompiles) ---"
 "$RACKET" "$RT" --emit-edn "$CORP/del_unused.bclj" 2>/dev/null > "$W/u.edn"
-bb -cp "$FRAM_OUT" "$RES" delete dead unused "$W/u.edn" 2>/dev/null
+bb -cp "$BEAGLE_STORE_OUT" "$RES" delete dead unused "$W/u.edn" 2>/dev/null
 du="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-del_unused.bclj.edn 2>/dev/null)"
 chk "'dead' def removed"                "! grep -q 'defn dead' <<<\"\$du\""
 chk "'before' SURVIVES (no truncation)" "grep -q 'defn before' <<<\"\$du\""
@@ -45,7 +45,7 @@ chk "deleted result recompiles"         "\"$ROOT/bin/beagle-build-all\" '$W/rege
 # --- 2. UNSAFE same-module: 'helper' is called by 'caller' -> refuse ----------------
 echo "--- 2. same-module reference -> refuse (orphan) ---"
 "$RACKET" "$RT" --emit-edn "$CORP/del_used.bclj" 2>/dev/null > "$W/d.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete helper used "$W/d.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete helper used "$W/d.edn" >/dev/null 2>&1; then
   echo "  FAIL  same-module orphan NOT refused"; fail=1
 else echo "  PASS  same-module reference refuses delete (no-orphaned-refs)"; fi
 
@@ -53,7 +53,7 @@ else echo "  PASS  same-module reference refuses delete (no-orphaned-refs)"; fi
 echo "--- 3. cross-module reference (l/shared) -> refuse (orphan) ---"
 "$RACKET" "$RT" --emit-edn "$CORP/del_lib.bclj" 2>/dev/null > "$W/lib.edn"
 "$RACKET" "$RT" --emit-edn "$CORP/del_consumer.bclj" 2>/dev/null > "$W/con.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete shared lib "$W/lib.edn" "$W/con.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete shared lib "$W/lib.edn" "$W/con.edn" >/dev/null 2>&1; then
   echo "  FAIL  cross-module orphan NOT refused"; fail=1
 else echo "  PASS  cross-module reference refuses delete (no-orphaned-refs)"; fi
 
@@ -66,7 +66,7 @@ cat > "$W/uni.bclj" <<'EOF'
 (defn mk [(r Float)] Shape (Circle r))
 EOF
 "$RACKET" "$RT" --emit-edn "$W/uni.bclj" 2>/dev/null > "$W/uni.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete Sq uni "$W/uni.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete Sq uni "$W/uni.edn" >/dev/null 2>&1; then
   echo "  FAIL  variant delete reported success on unchanged tree"; fail=1
 else echo "  PASS  defunion variant delete refused (not a top-level form)"; fi
 
@@ -80,7 +80,7 @@ cat > "$W/doc.bclj" <<'EOF'
 (defn keep-me [(y Int)] Int y)
 EOF
 "$RACKET" "$RT" --emit-edn "$W/doc.bclj" 2>/dev/null > "$W/doc.edn"
-bb -cp "$FRAM_OUT" "$RES" delete dead doc "$W/doc.edn" 2>/dev/null
+bb -cp "$BEAGLE_STORE_OUT" "$RES" delete dead doc "$W/doc.edn" 2>/dev/null
 dd="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-doc.bclj.edn 2>/dev/null)"
 chk "self-doc def 'dead' removed (not blocked by its own comment)" "! grep -q 'defn dead' <<<\"\$dd\""
 chk "its doc comment removed too"                                  "! grep -q 'doc mentioning dead' <<<\"\$dd\""
@@ -96,7 +96,7 @@ cat > "$W/var.bclj" <<'EOF'
 (def thing Maybe (Some 7))
 EOF
 "$RACKET" "$RT" --emit-edn "$W/var.bclj" 2>/dev/null > "$W/var.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete Maybe var "$W/var.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete Maybe var "$W/var.edn" >/dev/null 2>&1; then
   echo "  FAIL  union delete left a variant-ctor ref orphaned"; fail=1
 else echo "  PASS  union delete refused (a variant-ctor ref would orphan)"; fi
 
@@ -109,7 +109,7 @@ cat > "$W/par.bclj" <<'EOF'
 (defn keep-me [(x Int)] Int x)
 EOF
 "$RACKET" "$RT" --emit-edn "$W/par.bclj" 2>/dev/null > "$W/par.edn"
-bb -cp "$FRAM_OUT" "$RES" delete Opt par "$W/par.edn" 2>/dev/null
+bb -cp "$BEAGLE_STORE_OUT" "$RES" delete Opt par "$W/par.edn" 2>/dev/null
 pr="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-par.bclj.edn 2>/dev/null)"
 chk "parameterized union (Opt A) removed"  "! grep -q 'defunion' <<<\"\$pr\""
 chk "'keep-me' survives"                   "grep -q 'defn keep-me' <<<\"\$pr\""
@@ -125,7 +125,7 @@ cat > "$W/ma.bclj" <<'EOF'
   ([(x Int) (y Int)] Int (+ x y base)))
 EOF
 "$RACKET" "$RT" --emit-edn "$W/ma.bclj" 2>/dev/null > "$W/ma.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete base ma "$W/ma.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete base ma "$W/ma.edn" >/dev/null 2>&1; then
   echo "  FAIL  multi-arity body ref not seen (delete wrongly succeeded)"; fail=1
 else echo "  PASS  multi-arity body reference blocks delete"; fi
 cat > "$W/ct.bclj" <<'EOF'
@@ -135,7 +135,7 @@ cat > "$W/ct.bclj" <<'EOF'
 (defn mk [] Point (->Point 1))
 EOF
 "$RACKET" "$RT" --emit-edn "$W/ct.bclj" 2>/dev/null > "$W/ct.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete Point ct "$W/ct.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete Point ct "$W/ct.edn" >/dev/null 2>&1; then
   echo "  FAIL  ->ctor ref not seen (delete wrongly succeeded)"; fail=1
 else echo "  PASS  ->constructor reference blocks delete"; fi
 
@@ -150,7 +150,7 @@ cat > "$W/mt.bclj" <<'EOF'
 (defn f [(r Result)] Int (match r [(Ok v) v] [(Err e) e]))
 EOF
 "$RACKET" "$RT" --emit-edn "$W/mt.bclj" 2>/dev/null > "$W/mt.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete Ok mt "$W/mt.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete Ok mt "$W/mt.edn" >/dev/null 2>&1; then
   echo "  FAIL  match-pattern ctor ref not seen (delete wrongly succeeded)"; fail=1
 else echo "  PASS  match-pattern ctor reference blocks delete"; fi
 cat > "$W/fa.bclj" <<'EOF'
@@ -160,7 +160,7 @@ cat > "$W/fa.bclj" <<'EOF'
 (defn a [(p Point)] Int (point-x p))
 EOF
 "$RACKET" "$RT" --emit-edn "$W/fa.bclj" 2>/dev/null > "$W/fa.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete Point fa "$W/fa.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete Point fa "$W/fa.edn" >/dev/null 2>&1; then
   echo "  FAIL  field-accessor ref not seen (delete wrongly succeeded)"; fail=1
 else echo "  PASS  field-accessor reference blocks delete"; fi
 
@@ -179,7 +179,7 @@ cat > "$W/fqc.bclj" <<'EOF'
 EOF
 "$RACKET" "$RT" --emit-edn "$W/fqp.bclj" 2>/dev/null > "$W/fqp.edn"
 "$RACKET" "$RT" --emit-edn "$W/fqc.bclj" 2>/dev/null > "$W/fqc.edn"
-if bb -cp "$FRAM_OUT" "$RES" delete Box fqp "$W/fqp.edn" "$W/fqc.edn" >/dev/null 2>&1; then
+if bb -cp "$BEAGLE_STORE_OUT" "$RES" delete Box fqp "$W/fqp.edn" "$W/fqc.edn" >/dev/null 2>&1; then
   echo "  FAIL  fully-qualified consumer ref not seen (delete wrongly succeeded)"; fail=1
 else echo "  PASS  fully-qualified consumer reference blocks delete"; fi
 

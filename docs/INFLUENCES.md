@@ -94,19 +94,19 @@ the failures the authoring loop is best at — a missing match arm or a bound
 violation is structured, located, and machine-fixable in a way an untyped
 runtime error never is.
 
-## Unison — names versus identity, realized as FRAM stable binding identity
+## Unison — names versus identity, realized as Beagle Store stable binding identity
 
 Unison's core insight is that a definition's *name* and its *identity*
 (content hash) are separate concerns — you can rename freely without
 breaking a reference, because references bind to identity, not to a string.
-Beagle (via FRAM) borrows that **separation**, not Unison's runtime:
+Beagle (via Beagle Store) borrows that **separation**, not Unison's runtime:
 
-- **Stable binding identity.** A binding's identity in FRAM survives rename —
+- **Stable binding identity.** A binding's identity in Beagle Store survives rename —
   callers, the projected code graph of recursive triples, and the authoring loop
   track *what a definition is*, not the string that currently labels it.
 - **Not content-addressed code.** Beagle does not adopt Unison's
   content-addressed storage, its hash-as-filename codebase model, or its
-  structural-diff-as-deployment story. FRAM's identity is a stable binding
+  structural-diff-as-deployment story. Beagle Store's identity is a stable binding
   key inside the ordinary compiler pipeline, not a replacement runtime or
   storage substrate.
 
@@ -115,14 +115,14 @@ skeletons, tree splices). A fix that survives a rename — because it targets
 identity, not a name string — is a fix that doesn't shatter the next time
 someone edits nearby.
 
-## Datalog — recursive, stratified derivations, scoped to FRAM's graph
+## Datalog — recursive, stratified derivations, scoped to Beagle Store's graph
 
 Datalog contributes a narrow, specific borrowing: recursive and stratified
-derivation over FRAM's Triple store — the way FRAM computes transitive closures
+derivation over Beagle Store's Triple store — the way Beagle Store computes transitive closures
 (callers-of-callers, blast radius, leverage) as a fixpoint over the live base
 relations, not as hand-written recursive traversal code.
 
-- **Scoped to FRAM's graph layer.** This is how the *coordination and
+- **Scoped to Beagle Store's graph layer.** This is how the *coordination and
   code-graph substrate* answers relational questions (`codegraph`'s "who
   calls X, transitively"), not a claim that Beagle's ordinary compiled
   programs execute as Datalog or that logic programming is a language
@@ -172,8 +172,8 @@ scoped to a specific concern rather than an adopted surface or runtime:
 | Lean | diagnostics discipline | giving the loop something *precise* to repair |
 | Kernel | combiner uniformity | making the whole surface analyzable as one thing → one IR |
 | ML family | type semantics (ADTs, exhaustiveness, explicit/bounded polymorphism, variance, heterogeneous positional types) — not ML's grammar, no full-HM claim | generating diagnoses (types) that are structured and machine-fixable, without importing a second concrete syntax |
-| Unison | names-vs-identity separation, realized as FRAM stable binding identity — not content-addressed code | letting a repair (rename, splice) target *what a binding is*, so it survives edits instead of shattering on the next rename |
-| Datalog | recursive/stratified derivation inside FRAM's graph — not Beagle's ordinary computation | answering the graph-shaped questions ("what breaks if this changes") the authoring loop's diagnoses depend on |
+| Unison | names-vs-identity separation, realized as Beagle Store stable binding identity — not content-addressed code | letting a repair (rename, splice) target *what a binding is*, so it survives edits instead of shattering on the next rename |
+| Datalog | recursive/stratified derivation inside Beagle Store's graph — not Beagle's ordinary computation | answering the graph-shaped questions ("what breaks if this changes") the authoring loop's diagnoses depend on |
 | Lisp/Clojure/EDN | one small structural authoring surface — the family, not Clojure's exact grammar | making the medium itself machine-editable, so fixes are tree splices instead of textual guesses |
 
 On top of that foundation sits the part with no upstream analogue: the

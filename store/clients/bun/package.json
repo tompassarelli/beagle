@@ -1,0 +1,44 @@
+{
+  "name": "@tompassarelli/beagle-store-rpc",
+  "version": "0.5.0",
+  "description": "Official FRAMRPC v2 client with portable codec and Bun TCP binding",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./store-rpc.d.ts",
+      "import": "./store-rpc.mjs"
+    },
+    "./core": {
+      "types": "./store-rpc-core.d.ts",
+      "import": "./store-rpc-core.mjs"
+    },
+    "./schema": {
+      "types": "./schema.d.ts",
+      "import": "./schema.mjs"
+    }
+  },
+  "types": "./store-rpc.d.ts",
+  "files": [
+    "LICENSE",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "store-rpc.mjs",
+    "store-rpc-core.mjs",
+    "store-rpc-core.d.ts",
+    "store-rpc.d.ts",
+    "backup.mjs",
+    "schema.mjs",
+    "schema.d.ts",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "bun": ">=1.3.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tompassarelli/beagle.git",
+    "directory": "clients/bun"
+  },
+  "license": "MIT OR Apache-2.0"
+}

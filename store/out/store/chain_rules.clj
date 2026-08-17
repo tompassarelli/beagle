@@ -1,0 +1,24 @@
+(ns store.chain-rules)
+
+(defn sealed-member-fault [index ^String expected-space ^String actual-space recorded-start actual-start recorded-end actual-end recorded-bytes actual-bytes ^Boolean continuation ^Boolean torn expected-next]
+  (cond
+  (not= expected-space actual-space) "FRAMLOG segment belongs to a different SpaceId"
+  (not= recorded-bytes actual-bytes) "FRAMLOG segment size does not match its branch ref record"
+  (not= recorded-start actual-start) "FRAMLOG segment does not begin at its recorded transaction sequence"
+  (not= recorded-end actual-end) "FRAMLOG segment does not end at its recorded transaction sequence"
+  torn "FRAMLOG segment ends inside a transaction frame"
+  (and (pos? index) (not continuation)) "FRAMLOG chain segment after the base segment must carry the continuation flag"
+  (and (zero? index) continuation) "FRAMLOG base chain segment must not carry the continuation flag"
+  (and (pos? actual-start) (not= expected-next actual-start)) "FRAMLOG chain segment does not continue the previous transaction sequence"
+  :else nil))
+
+(defn tail-member-fault [sealed-count ^String expected-space ^String actual-space actual-start ^Boolean continuation expected-next]
+  (cond
+  (not= expected-space actual-space) "FRAMLOG tail belongs to a different SpaceId"
+  (and (pos? sealed-count) (not continuation)) "FRAMLOG branch tail must carry the continuation flag"
+  (and (zero? sealed-count) continuation) "FRAMLOG version or flags are unsupported"
+  (and (pos? actual-start) (not= expected-next actual-start)) "FRAMLOG branch tail does not continue the sealed chain"
+  :else nil))
+
+(defn next-expected [actual-end expected-next]
+  (if (pos? actual-end) (inc actual-end) expected-next))

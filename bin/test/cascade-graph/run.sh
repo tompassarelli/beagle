@@ -17,15 +17,15 @@ mkdir -p "$RESOLVER_PROBE/out" "$RESOLVER_PROBE/chartroom"
 touch "$RESOLVER_PROBE/out/resolve.clj"
 resolver_status=0
 (
-  FRAM_OUT="$RESOLVER_PROBE/out"
+  BEAGLE_STORE_OUT="$RESOLVER_PROBE/out"
   CHARTROOM="$RESOLVER_PROBE/chartroom"
-  source "$BIN/_fram-resolver"
-  resolved="$(find_fram_resolver)" || exit 1
-  [[ "$resolved" == "$FRAM_OUT/resolve.clj" ]]
+  source "$BIN/_store-resolver"
+  resolved="$(find_store_resolver)" || exit 1
+  [[ "$resolved" == "$BEAGLE_STORE_OUT/resolve.clj" ]]
 ) || resolver_status=$?
 rm -rf "${RESOLVER_PROBE:?}"
 if [[ "$resolver_status" -ne 0 ]]; then
-  echo "cascade-graph: resolver did not honor FRAM_OUT/resolve.clj" >&2
+  echo "cascade-graph: resolver did not honor BEAGLE_STORE_OUT/resolve.clj" >&2
   exit 1
 fi
 

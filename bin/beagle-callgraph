@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # beagle-callgraph: emit the SCOPE-CORRECT call graph of a beagle source tree as
-# JSON, with the transitive blast radius computed by Fram Datalog.
+# JSON, with the transitive blast radius computed by Beagle Store Datalog.
 #
 # Derived from chartroom's CONVERGED lexical resolver (resolve.clj `refers_to`) — the
 # SAME resolution that powers scope-correct rename/delete. A call is resolved by binding
@@ -14,7 +14,7 @@
 #           "blast":{callee:[transitive-callers]}}   on stdout (JSON)
 #          a one-line summary on stderr.
 #
-# Rents Fram's Layer-2 engine (resolve.clj). Set FRAM_OUT / CHARTROOM to override.
+# Rents Beagle Store's Layer-2 engine (resolve.clj). Set BEAGLE_STORE_OUT / CHARTROOM to override.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -25,18 +25,18 @@ fi
 DIR="$(cd "$1" && pwd)"
 BIN="$(cd "$(dirname "$0")" && pwd)"
 RT="$BIN/../beagle-lib/private/facts-roundtrip.rkt"
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
-FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
-# Fram engine (resolve.clj). beagle's tooling RENTS it. CHARTROOM remains the legacy override.
-CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
+# Beagle Store engine (resolve.clj). beagle's tooling RENTS it. CHARTROOM remains the legacy override.
+CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
 source "$BIN/_beagle-racket"
-source "$BIN/_fram-resolver"
-RES="$(find_fram_resolver)" || exit 3
+source "$BIN/_store-resolver"
+RES="$(find_store_resolver)" || exit 3
 
-if [[ ! -d "$FRAM_OUT" ]]; then
-    echo "beagle-callgraph: Fram classpath not found at $FRAM_OUT" >&2
-    echo "  (graph-native repair runs on the Fram engine — build fram/out or set FRAM_OUT)" >&2
+if [[ ! -d "$BEAGLE_STORE_OUT" ]]; then
+    echo "beagle-callgraph: Beagle Store classpath not found at $BEAGLE_STORE_OUT" >&2
+    echo "  (graph-native repair runs on the Beagle Store engine — build store/out or set BEAGLE_STORE_OUT)" >&2
     exit 3
 fi
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
@@ -54,4 +54,4 @@ if [[ ${#EDNS[@]} -eq 0 ]]; then
     exit 2
 fi
 
-exec bb -cp "$FRAM_OUT" "$RES" callgraph "${EDNS[@]}"
+exec bb -cp "$BEAGLE_STORE_OUT" "$RES" callgraph "${EDNS[@]}"

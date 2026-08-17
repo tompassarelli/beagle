@@ -63,7 +63,7 @@
              "native-simd.rkt"          ; deterministic SIMD plan + scalar tail/refusal execution
              "native-c17-parallel.rkt" ; explicit C17 export boundary + optional parallel artifacts finalize atomically
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
-             "code-as-facts-rename.rkt" ; hermetic recursive-fact edit/reconstruction floor; Fram owns scope resolution
+             "code-as-facts-rename.rkt" ; hermetic recursive-fact edit/reconstruction floor; Beagle Store owns scope resolution
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
              "export-xmodule.rkt"       ; a js/export'd definition keeps its signature across modules + on the query surface
              "ts-externs.rkt"           ; TypeScript declarations -> typed beagle wrappers (beagle ts-externs)

@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Thin process boundary for Fram's atomic graph transaction gate.
+;; Thin process boundary for Beagle Store's atomic graph transaction gate.
 ;;
 ;; Success writes exactly one JSON receipt containing all checked candidates.
 ;; Emission is the default atomic publication gate; --check-only retains the

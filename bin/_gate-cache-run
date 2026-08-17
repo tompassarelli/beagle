@@ -267,7 +267,7 @@ normalize_content() {
 
 env_material() {
     env | LC_ALL=C sort | grep -E \
-        '^(BEAGLE_[A-Z0-9_]+|_BEAGLE_RACKET|PLT[A-Z0-9_]*|NATIVE_[A-Z0-9_]+|FRAM_[A-Z0-9_]+|WASI[A-Z0-9_]*|WASMTIME|QBE[A-Z0-9_]*|CI|NIXOS_[A-Z0-9_]+|LANG|LC_[A-Z]+)=' |
+        '^(BEAGLE_[A-Z0-9_]+|_BEAGLE_RACKET|PLT[A-Z0-9_]*|NATIVE_[A-Z0-9_]+|BEAGLE_STORE_[A-Z0-9_]+|WASI[A-Z0-9_]*|WASMTIME|QBE[A-Z0-9_]*|CI|NIXOS_[A-Z0-9_]+|LANG|LC_[A-Z]+)=' |
         grep -v '^BEAGLE_GATE_' | normalize
     return 0
 }

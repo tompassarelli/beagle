@@ -1,18 +1,18 @@
 #lang beagle/clj
 ;; The coercion rule's own fixture: the smallest module in which widening into
 ;; the closure of Any and narrowing back out of it are both reachable from C.
-;; fram.types has no unguarded narrowing, so its slice cannot fire the trap.
+;; store.types has no unguarded narrowing, so its slice cannot fire the trap.
 (ns fixture.union)
 
 (require clojure.string :as str)
 
 (defrecord Pair [(left Int) (right Int)])
 
-;; Fram's slot hash accepts Any in a program that also declares mutable index
+;; Beagle Store's slot hash accepts Any in a program that also declares mutable index
 ;; records. Those unrelated record alternatives must not make every dynamic
 ;; SliceValue hash site unlowerable; the active union tag still selects the
 ;; descriptor walked at runtime.
-(defrecord FramIndex [(cells (Vec (Atom (Vec Int))))])
+(defrecord StoreIndex [(cells (Vec (Atom (Vec Int))))])
 
 ;; A finite recursive value repeats the SliceValue descriptor at different
 ;; addresses. Active-path validation must not confuse that with a value cycle.

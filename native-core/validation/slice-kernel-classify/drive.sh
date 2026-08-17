@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves the complete fram.kernel-classify native program against its current
+# Proves the complete store.kernel-classify native program against its current
 # managed execution through full C17 and a direct QBE projection.
 set -euo pipefail
 
@@ -8,9 +8,9 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-}"
-fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
-source_file="$fram_checkout/src/fram/kernel_classify.bgl"
-managed_out="$fram_checkout/out"
+store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
+source_file="$store_checkout/src/store/kernel_classify.bgl"
+managed_out="$store_checkout/out"
 probe_file="$here/kernel_classify_probe.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-kernel-classify.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"
@@ -88,7 +88,7 @@ bb -cp "$scratch/out" -e "
 (spit \"$scratch/generated/report.txt\"
   (native.body-slice/emit-dual-slice!
     \"$scratch/generated/kernel_classify.facts\"
-    \"fram.kernel-classify\"
+    \"store.kernel-classify\"
     \"$source_logical\"
     \"$scratch/generated\"
     \"native-kernel-classify-v0\"

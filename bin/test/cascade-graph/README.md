@@ -1,7 +1,7 @@
 # Graph-native cascade scope check
 
 `beagle-cascade` predicts the blast radius of a code change from recursive
-triples in Fram's store. Calls bind to definitions in their own module, and the
+triples in Beagle Store's store. Calls bind to definitions in their own module, and the
 blast radius comes from a transitive `reaches(_, X)` query.
 
 The fixture defines `helper` in both `mod_a` and `mod_b`, each with its own
@@ -14,6 +14,6 @@ Run:
 bin/test/cascade-graph/run.sh
 ```
 
-The check requires the Fram engine (`FRAM_OUT`, default
-`~/code/fram/main/out`). It proves module-local call-graph scope; the type
+The check requires the Beagle Store engine (`BEAGLE_STORE_OUT`, default
+`~/code/store/main/out`). It proves module-local call-graph scope; the type
 checker remains the Racket leaf that checks one node.

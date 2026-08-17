@@ -90,7 +90,7 @@ if ( cd "$build" && ulimit -c 0 && ./probe_gcc reference ) 2>/dev/null; then
 fi
 echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + refusal traps ok"
 
-# fram.text-ops is the one corpus module whose escape closure leaves an
+# store.text-ops is the one corpus module whose escape closure leaves an
 # interior allocation, so its C opens and destroys a real epoch arena. An
 # epoch close is a free(), which only a sanitizer can hold to account: the
 # clean (non-refusal) run therefore also runs under ASan + UBSan.

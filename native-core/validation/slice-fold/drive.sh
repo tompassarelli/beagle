@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerates the fram.fold Native Core C17 slice into NATIVE_SLICE_ARTIFACTS.
+# Regenerates the store.fold Native Core C17 slice into NATIVE_SLICE_ARTIFACTS.
 # Compilation stays in a temp dir so it never touches the byte-compared artifacts.
 set -euo pipefail
 

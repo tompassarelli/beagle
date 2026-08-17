@@ -201,7 +201,7 @@ is_beagle() {
   return 1
 }
 
-# No Fram command may run before the cheap project-context gate. SessionStart
+# No Beagle Store command may run before the cheap project-context gate. SessionStart
 # is global, so an ordinary non-Beagle checkout must remain a pure no-op.
 is_beagle || exit 0
 

@@ -110,15 +110,15 @@ EOF
 assert_run "manifest-growth" 3 yes "$REG"
 
 # --- drift class 4: enumerated source vanished -> exit 3 ---------------------
-R="$BASE/fram"; mkdir -p "$R/src/fram"
+R="$BASE/store"; mkdir -p "$R/src/store"
 printf 'for m in types store; do build $m; done\n' > "$R/build.sh"
-printf ';;\n' > "$R/src/fram/types.bclj"                  # store.bclj MISSING
+printf ';;\n' > "$R/src/store/types.bclj"                  # store.bclj MISSING
 mk_repo "$R"
 REG="$BASE/reg-vanished.rktd"
 cat > "$REG" <<EOF
-((consumer (name "fram") (repo-env "DRIFT_FRAM") (repo-default "$R") (target "clj")
+((consumer (name "store") (repo-env "DRIFT_FRAM") (repo-default "$R") (target "clj")
   (enumerators ((enumerator (kind bash-for-list) (source "build.sh") (loop-var "m")
-                (template "src/fram/{}.bclj") (shape-markers ("for m in")))))))
+                (template "src/store/{}.bclj") (shape-markers ("for m in")))))))
 EOF
 assert_run "vanished-source" 3 yes "$REG"
 

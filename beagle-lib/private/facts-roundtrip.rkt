@@ -13,7 +13,7 @@
 ;; Every datum node is minted (leaves carry kind+value; lists/vectors carry CRDT
 ;; ordered slots plus an optional improper `tail`). That is the
 ;; deliberate trade: this projection is VERBOSE but LOSSLESS, where the query
-;; projection is COMPACT but lossy — two views of one source, like Fram's fact vs
+;; projection is COMPACT but lossy — two views of one source, like Beagle Store's fact vs
 ;; markdown views of a thread.
 
 (require racket/list
@@ -42,12 +42,12 @@
       [else      (values (reverse acc) d)])))
 
 ;; --- CRDT order keys: every child slot is "f<path>~<tie>" --------------------
-;; Fram's chartroom verbs (insert-form / upsert-form) position children with a
+;; Beagle Store's chartroom verbs (insert-form / upsert-form) position children with a
 ;; logoot order key: pred "f<path>~<tie>", path = dot-separated ints (dense — a key
 ;; strictly between any two always exists), tie = the child node's atomic id (so
 ;; concurrent same-gap inserts get distinct keys → both land → commute). Initial
 ;; projections use path ((N+1)*ORD-STEP) and the minted child id as tie. Rendering
-;; accepts this one current spelling and sorts by (path,tie), matching Fram.
+;; accepts this one current spelling and sorts by (path,tie), matching Beagle Store.
 (define ORD-STEP 65536)
 (define (slot-predicate index child-id)
   (format "f~a~~~a" (* (add1 index) ORD-STEP) child-id))
@@ -263,7 +263,7 @@
     (max m (if (exact-integer? (car t)) (car t) 0))))
 
 ;; reconstruct a datum from EDN triples (each a list (subj pred obj)) ---------
-;; root = the one subject never referenced as a child — robust even after Fram
+;; root = the one subject never referenced as a child — robust even after Beagle Store
 ;; re-mints all ids on its way through the store.
 ;; A predicate naming a structural child ref (CRDT order slot or improper tail) — the only
 ;; numeric-valued facts that are node REFS. srcloc facts (line/col/pos/span) are
@@ -1052,13 +1052,13 @@
 ;; #33 slice-3: a strict SUPERSET of --emit-edn — the full slice-2 datum+comment
 ;; projection PLUS the TYPED layer: each checked node's inferred type as a DERIVED
 ;; `[node "type" T]` fact. Same id space, so the type subjects ARE the durable
-;; datum node-ids and fram just extracts the [id "type" T] lines for its warm
-;; overlay (no re-join fram-side). The join key is (pos,span): check's type-table
+;; datum node-ids and store just extracts the [id "type" T] lines for its warm
+;; overlay (no re-join store-side). The join key is (pos,span): check's type-table
 ;; is keyed by AST-node, the datum facts by int node-id, and both carry a source
 ;; (pos,span) — so a type attaches to the datum node sharing its span. Types are
 ;; ADDITIVE + DERIVED (re-derive == re-check, zero staleness) — the build path
 ;; ignores them (string-valued, not an order slot/tail), so a typed dump still builds
-;; byte-identically (consume = re-check, per fram-2 Q4).
+;; byte-identically (consume = re-check, per store-2 Q4).
 (define (emit-edn-typed-file path)
   (define-values (stxs _root _triples props lines) (file->datum-projection path))
   ;; (pos . span) -> datum node-id; pos-precedence on exact-span collision
@@ -1087,7 +1087,7 @@
     (displayln (format "[~a \"type\" ~a]" id (edn-string (hash-ref typed id))))))
 
 ;; render: reconstruct from EDN reader-facts and print idiomatic source. The EDN
-;; may have come straight out of a (mutated) Fram store — this is the "project
+;; may have come straight out of a (mutated) Beagle Store store — this is the "project
 ;; source from the graph" half of graph-native authoring.
 (define (render-edn edn-path)
   (define props (triples->props (read-edn-triples edn-path)))
@@ -1125,18 +1125,18 @@
   (display (if lang-line (string-append lang-line "\n\n" rendered) rendered))
   (newline))
 
-;; verify: reconstruct from (post-Fram) EDN, compare to the original source.
+;; verify: reconstruct from (post-Beagle Store) EDN, compare to the original source.
 (define (verify edn-path orig-path)
   (define wrapped (edn-triples->datum (read-edn-triples edn-path)))
   (define forms (cdr wrapped))
   (define orig (map syntax->datum (read-beagle-syntax orig-path)))
   (define same (equal? forms orig))
-  (printf "================ PHASE 3 — round-trip THROUGH a Fram store ==================\n")
+  (printf "================ PHASE 3 — round-trip THROUGH a Beagle Store store ==================\n")
   (printf "source: ~a\n" orig-path)
-  (printf "forms reconstructed from Fram: ~a   original: ~a\n" (length forms) (length orig))
+  (printf "forms reconstructed from Beagle Store: ~a   original: ~a\n" (length forms) (length orig))
   (printf "DATUM IDENTITY through the persisted fact store: ~a\n"
           (if same "PASS — program reconstructs datum-identically" "FAIL"))
-  ;; render the Fram-sourced program back to text and re-read it (text is a view).
+  ;; render the Beagle Store-sourced program back to text and re-read it (text is a view).
   ;; the `#lang` line round-trips as the leading (define-target ...) form already in
   ;; `forms`, so we do NOT re-prepend it (that would double the target declaration).
   (define txt (string-join (map datum->src forms) "\n\n"))
@@ -1149,7 +1149,7 @@
                 [(equal? reread orig) "PASS — re-reads to the identical program"]
                 [else "re-read diverged"]))
   (printf "rendered program written to: ~a\n" tmp)
-  (unless same (printf "  first divergence:\n   orig=~.s\n   fram=~.s\n"
+  (unless same (printf "  first divergence:\n   orig=~.s\n   store=~.s\n"
                        (for/first ([a orig] [b forms] #:unless (equal? a b)) a)
                        (for/first ([a orig] [b forms] #:unless (equal? a b)) b))))
 

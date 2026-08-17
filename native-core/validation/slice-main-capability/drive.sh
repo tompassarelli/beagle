@@ -87,7 +87,7 @@ for line in \
   fi
 done
 rg -n '^lowered fn_[0-9]+ -main ' "$report" >/dev/null \
-  || die "fram.main/-main did not lower"
+  || die "store.main/-main did not lower"
 obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects epoch-soundness leak-freedom)
 for obligation in "${obligations[@]}"; do
   rg -Fx "obligation-main PASS $obligation" "$report" >/dev/null \
@@ -103,7 +103,7 @@ printf '%s\n' \
   '#ifndef NATIVE_MAIN_CAPABILITY_FUNCTION_MAP_H' \
   '#define NATIVE_MAIN_CAPABILITY_FUNCTION_MAP_H' \
   '' \
-  "#define FRAM_MAIN native_m0_fn_$index" \
+  "#define BEAGLE_STORE_MAIN native_m0_fn_$index" \
   '' \
   '#endif' >"$map"
 
@@ -152,9 +152,9 @@ strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 (cd "$build" && gcc "${strict[@]}" -o probe_gcc \
   module_0.c native_shim.c main.c)
 (cd "$build" && ./probe_gcc >actual.out)
-expected='fram usage: validate | tell <subject> <slot> <value> | retract <subject> <slot> <value> (alias: untell) | query <edn> | selfcheck --deep'
+expected='store usage: validate | tell <subject> <slot> <value> | retract <subject> <slot> <value> (alias: untell) | query <edn> | selfcheck --deep'
 [[ "$(<"$build/actual.out")" == "$expected" ]] \
-  || die "gcc binary stdout did not match fram.main"
+  || die "gcc binary stdout did not match store.main"
 echo "slice-main-capability: gcc $(gcc -dumpversion) strict compile + run ok"
 
 if command -v clang >/dev/null 2>&1; then

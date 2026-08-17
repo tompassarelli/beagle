@@ -1,5 +1,5 @@
 (require '[clojure.string :as str])
-(require '[fram.kernel-classify :as k])
+(require '[store.kernel-classify :as k])
 (import '[java.nio.charset StandardCharsets])
 
 (def ^String hex-digits "0123456789abcdef")

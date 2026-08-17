@@ -2,7 +2,7 @@
 # Build a native beagle-selfhost binary from the blessed seed (../seed) — the
 # self-hosted compiler's own emitted Clojure. selfhost.main is the entry
 # (beagle emits its (:gen-class)).
-# Run under GraalVM CE (same mechanism as fram/native/build.sh):
+# Run under GraalVM CE (same mechanism as store/native/build.sh):
 #   nix shell nixpkgs#graalvmPackages.graalvm-ce -c ./build.sh
 # Deps are clojure core + cheshire (JSON for the ast/emit-from-ast commands).
 # Zero reflection config: no tracing agent, no reflection JSON.

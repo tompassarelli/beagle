@@ -15,6 +15,20 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, clj-nix }:
+    let
+      storeDefinition = import ./store/flake.nix;
+      storeSelf =
+        (storeDefinition.outputs {
+          self = storeSelf;
+          inherit nixpkgs clj-nix;
+          beagle = self;
+        }) // {
+          outPath = ./store;
+          lastModifiedDate = self.lastModifiedDate or "00000000000000";
+          rev = self.rev or "dirty";
+          shortRev = self.shortRev or "dirty";
+        };
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -53,6 +67,9 @@
         runtimeDeps = [
           racket
           pkgs.babashka
+          pkgs.bun
+          pkgs.clojure
+          pkgs.jdk
           pkgs.python3
           pkgs.bash
           pkgs.coreutils
@@ -90,12 +107,14 @@
             cp -r beagle-lib "$out/beagle-lib"
             cp -r bin "$out/bin"
             cp -r native-core "$out/native-core"
+            cp -r store "$out/store"
             # bin/test/ is the test-harness DIRECTORY, not an executable — if it
             # lands on PATH it shadows POSIX `test` system-wide (root shell-outs
             # exec a directory -> EACCES; broke nixos-rebuild 2026-07-09).
             rm -rf "$out/bin/test"
             if [ -d share ]; then cp -r share "$out/share"; fi
-            chmod -R u+w "$out/beagle-lib" "$out/bin" "$out/native-core"
+            chmod -R u+w "$out/beagle-lib" "$out/bin" "$out/native-core" \
+              "$out/store"
 
             # Collection link: racket resolves a collection by directory NAME on
             # the search path. The collection is named "beagle" but the dir is
@@ -167,6 +186,10 @@
               wrapProgram "$f" \
                 --set _BEAGLE_RACKET "${racket}/bin/racket" \
                 --set PLTCOLLECTS ":$out/share/racket-collects" \
+                --set BEAGLE_STORE_HOME "$out/store" \
+                --set BEAGLE_STORE_BIN "$out/store/bin" \
+                --set BEAGLE_STORE_OUT "$out/store/out" \
+                --set BEAGLE_STORE_JAVA "${pkgs.jdk}/bin/java" \
                 --prefix PATH : "${runtimePath}"
             done
 
@@ -196,6 +219,7 @@
       {
         packages.default = beagle;
         packages.beagle = beagle;
+        packages.store = storeSelf.packages.${system}.default;
 
         # --- STAGE0 NATIVE COMPILER -----------------------------------------
         # The canonical Beagle builder: a GraalVM native-image of the blessed
@@ -236,6 +260,12 @@
           beagle-syntax = mkApp "beagle-syntax";
           beagle-check = mkApp "beagle-check";
           beagle-schema = mkApp "beagle-schema";
+          store = {
+            type = "app";
+            program = "${pkgs.writeShellScript "beagle-store-app" ''
+              exec ${beagle}/bin/beagle store "$@"
+            ''}";
+          };
         };
 
         devShells.default = pkgs.mkShell {

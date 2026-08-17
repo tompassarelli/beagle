@@ -2,7 +2,7 @@
 # move 3 — code can be fact-canonical.
 #
 # Proves the loop
-#   .bclj --import--> lossless facts --(through a Fram store)--> facts --export--> .bclj'
+#   .bclj --import--> lossless facts --(through a Beagle Store store)--> facts --export--> .bclj'
 # is both:
 #   (a) DATUM-IDENTICAL through the engine   (the program survives the canonical store)
 #   (b) RECOMPILE-IDENTICAL                   (beagle build of the regenerated tree ==
@@ -10,22 +10,22 @@
 # (b) is the killer proof: a Beagle program can live as canonical facts and the
 # regenerated text compiles to the IDENTICAL program — facts-canonical loses
 # nothing for the compiler. Import = facts-roundtrip --emit-edn; the canonical
-# store = Fram's real roundtrip-fram module; export = byte-stable datum->pretty
-# (--render). Needs racket + bb + fram's classpath (FRAM_OUT).
+# store = Beagle Store's real roundtrip-store module; export = byte-stable datum->pretty
+# (--render). Needs racket + bb + store's classpath (BEAGLE_STORE_OUT).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 source "$ROOT/bin/_beagle-racket"
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
-FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
-SRC="${CODE_AS_FACTS_CORPUS:-$FRAM_REPO/src}"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+SRC="${CODE_AS_FACTS_CORPUS:-$BEAGLE_STORE_REPO/src}"
 fail=0
 
 echo "================ move 3 — code as canonical facts ================"
 echo "corpus: $SRC"
-if [ ! -d "$FRAM_OUT" ]; then echo "  (need FRAM_OUT — fram classpath)"; exit 3; fi
+if [ ! -d "$BEAGLE_STORE_OUT" ]; then echo "  (need BEAGLE_STORE_OUT — store classpath)"; exit 3; fi
 
 WORK="$(mktemp -d)"; REGEN="$WORK/regen"; mkdir -p "$REGEN"
 trap 'rm -rf "${WORK:?}"' EXIT
@@ -52,7 +52,7 @@ for f in "${COMPILE_SOURCES[@]}"; do
   fi
 done
 
-# 1. import -> through Fram -> export, per file, into a mirrored tree.
+# 1. import -> through Beagle Store -> export, per file, into a mirrored tree.
 n=0; rtfail=0
 for f in "${SOURCES[@]}"; do
   rel="${f#"$SRC"/}"
@@ -60,8 +60,8 @@ for f in "${SOURCES[@]}"; do
   if ! "$RACKET" "$RT" --emit-edn "$f" > "$WORK/a.edn"; then
     echo "  IMPORT FAIL: $rel" >&2; exit 1
   fi
-  if ! bb -cp "$FRAM_OUT" -m roundtrip-fram "$WORK/a.edn" > "$WORK/b.edn"; then
-    echo "  FRAM STORE FAIL: $rel" >&2; exit 1
+  if ! bb -cp "$BEAGLE_STORE_OUT" -m roundtrip-store "$WORK/a.edn" > "$WORK/b.edn"; then
+    echo "  Beagle Store STORE FAIL: $rel" >&2; exit 1
   fi
   if ! "$RACKET" "$RT" --render "$WORK/b.edn" > "$REGEN/$rel"; then
     echo "  EXPORT FAIL: $rel" >&2; exit 1
@@ -71,7 +71,7 @@ for f in "${SOURCES[@]}"; do
   fi
   n=$((n+1))
 done
-echo "--- $n files imported→(Fram)→exported; datum round-trip failures: $rtfail ---"
+echo "--- $n files imported→(Beagle Store)→exported; datum round-trip failures: $rtfail ---"
 
 # Bonus, the strongest possible result: is the regenerated SOURCE byte-identical?
 srcid=0; srctot=0
@@ -118,7 +118,7 @@ echo "  modules byte-compared: $total (all of them)"
 
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — code is losslessly fact-canonical (datum-identical through the Fram store + recompile-identical)."
+  echo "RESULT: PASS — code is losslessly fact-canonical (datum-identical through the Beagle Store store + recompile-identical)."
 else
   echo "RESULT: FAIL"; exit 1
 fi

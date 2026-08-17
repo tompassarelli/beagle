@@ -14409,7 +14409,7 @@
                 (source-ref-named? index (nth args 0) "str")
                 (source-call-named? index (nth args 1) "repeat"))))
             (fail-result state
-              "TODO-NATIVE-APPLY: no frozen Fram function requires dynamic argument spreading")
+              "TODO-NATIVE-APPLY: no frozen Beagle Store function requires dynamic argument spreading")
 
             (and (= "assoc" callee) (> (count args) 0)
               (or (source-ref-record? env state (nth args 0))
@@ -23799,7 +23799,7 @@
       [])))
 
 ;; This fold-only insurance program is the empty-input specialization of
-;; fram.fold/max-sequence; the full vector loop remains outside the v0 C17 subset.
+;; store.fold/max-sequence; the full vector loop remains outside the v0 C17 subset.
 (def fold-empty-source-program stages/SourceStageV1
   (let [(root core/NativeId) (fixture-id "fold" "root")
         (function core/NativeId) (fixture-id "fold" "max-sequence")
@@ -23808,7 +23808,7 @@
         (text-values (Vec String))
         ["form-kind" "name" "params" "ret" "native-op" "abi-symbol"
          "source-node-v0" "defn" "seq" "type-prim" "Int"
-         "max-sequence" "const-zero-i64" "fram_fold_max_sequence_empty"]
+         "max-sequence" "const-zero-i64" "store_fold_max_sequence_empty"]
         (text-nodes (Vec stages/TermNodeV0))
         (mapv (fn [(value String)] stages/TermNodeV0
                 (stages/->TermNodeV0
@@ -23838,7 +23838,7 @@
          (fact 2 function "params" parameters)
          (fact 3 function "ret" int-type)
          (fact 4 function "native-op" (text-id "const-zero-i64"))
-         (fact 5 function "abi-symbol" (text-id "fram_fold_max_sequence_empty"))
+         (fact 5 function "abi-symbol" (text-id "store_fold_max_sequence_empty"))
          (fact 6 parameters "form-kind" (text-id "seq"))
          (fact 7 int-type "form-kind" (text-id "type-prim"))
          (fact 8 int-type "name" (text-id "Int"))]
@@ -23848,8 +23848,8 @@
       (stages/->TermGraphV0 root nodes)
       [(stages/->SourceModuleV1
          (fixture-id "fold" "module")
-         "fram.fold"
-         "src/fram/fold.bclj"
+         "store.fold"
+         "src/store/fold.bclj"
          "sha256:0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2"
          "sha256:1c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2"
          "fold-empty-max-sequence-v0"
@@ -24111,7 +24111,7 @@
         verdicts))))
 
 ;; The nested-arena-operand shape the stage admits: an interior text-builtin
-;; allocation whose arena operand travels inside the builtin record (the fram
+;; allocation whose arena operand travels inside the builtin record (the store
 ;; substring-needle-result / str-trim shape). The stage must resolve the
 ;; nested operand, retarget it into the minted epoch alongside the top-level
 ;; TextConcat, insert the close, and keep all nine obligations green.

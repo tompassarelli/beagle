@@ -1,0 +1,26 @@
+#lang beagle
+
+(ns store.branch-chain-parity-probe
+  (:require [store.log-codec :as log]))
+
+(def empty-chain-pieces (Vec log/ChainPiece) [])
+
+(defn branch-chain-verdict!
+  [(configured-space String)
+   (has-segment Bool)
+   (segment-bytes ByteSource)
+   (segment-start Int)
+   (segment-end Int)
+   (segment-byte-count Int)
+   (tail-bytes ByteSource)]
+  Int
+  (let [(segments (Vec log/ChainPiece))
+        (if has-segment
+          [(log/->ChainPiece segment-bytes segment-start segment-end
+                             segment-byte-count)]
+          empty-chain-pieces)
+        result
+        (log/boot-framlog-chain!
+         configured-space segments
+         (log/->ChainPiece tail-bytes 0 0 (count tail-bytes)))]
+    (if (= log/status-ok (log/bootresult-status result)) 0 1)))

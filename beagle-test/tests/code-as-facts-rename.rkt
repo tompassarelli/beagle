@@ -9,7 +9,7 @@
 ;; The active tier owns the cheap structural floor: selected symbol leaves can
 ;; change while the recursive fact graph and every unrelated graph remain
 ;; intact. Scope resolution and qualified-reader selection stay in the focused
-;; Fram-backed shell gate; duplicating that engine here would test a substitute.
+;; Beagle Store-backed shell gate; duplicating that engine here would test a substitute.
 (define (rename-symbol-facts triples replacements)
   (define changed 0)
   (define renamed

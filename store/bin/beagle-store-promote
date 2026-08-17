@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Promote the exact clean checkout commit into the long-running Beagle Store server.
+# This is deliberately a project-local development action: Nix remains the
+# packaged release baseline, and no system generation is built or switched.
+set -euo pipefail
+
+if (( $# != 0 )); then
+  echo "usage: bin/beagle-store-promote" >&2
+  exit 2
+fi
+
+script_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+checkout_root="$(git -C "$script_root" rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "beagle-store-promote: $script_root is not inside a git checkout" >&2
+  exit 2
+}
+checkout_root="$(cd "$checkout_root" && pwd -P)"
+
+if [[ "$checkout_root" != "$script_root" ]]; then
+  echo "beagle-store-promote: expected repository root $script_root, got $checkout_root" >&2
+  exit 2
+fi
+
+dirty="$(git -C "$checkout_root" status --porcelain=v1 --untracked-files=normal)"
+if [[ -n "$dirty" ]]; then
+  echo "beagle-store-promote: refusing dirty checkout; commit or remove these changes:" >&2
+  printf '%s\n' "$dirty" >&2
+  exit 1
+fi
+
+revision="$(git -C "$checkout_root" rev-parse --verify 'HEAD^{commit}')"
+restart="$checkout_root/bin/beagle-store-up"
+if [[ ! -x "$restart" ]]; then
+  echo "beagle-store-promote: checkout restart command is not executable: $restart" >&2
+  exit 2
+fi
+
+export BEAGLE_STORE_PROMOTED_CHECKOUT="$checkout_root"
+export BEAGLE_STORE_PROMOTED_REV="$revision"
+(cd "$checkout_root" && "$restart" --restart)
+
+printf 'store: promoted %s from %s; NixOS generation unchanged\n' \
+  "$revision" "$checkout_root"

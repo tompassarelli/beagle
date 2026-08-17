@@ -3,6 +3,7 @@ set -euo pipefail
 
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
+STORE_DIR="${BEAGLE_STORE_HOME:-$BEAGLE_DIR/store}"
 
 # Pin racket for the whole dispatch tree (incl. bare-shebang racket scripts like
 # beagle-syntax) so `beagle <cmd>` is robust outside the direnv shell.
@@ -78,10 +79,129 @@ Project / loop:
   rejection-stats DIR       Diagnostics by cause-class
   lsp | repl                LSP server / typed REPL
 
+Store:
+  store tell SUBJECT SLOT VALUE
+  store retract SUBJECT SLOT VALUE
+  store show SUBJECT
+  store query EDN
+  store scan T1|_ T2|_ T3|_
+  store occurrences
+  store version|status|validate
+  store doctor --deep
+  store backup create|verify ...
+  store code on|off|status ...
+  store up [--restart]
+  store serve ...
+
 Deeper dev tools stay as bin/beagle-* (blame, specfix, trace, cascade,
 oracle, proptest, muttest, dtrace, smap).
 EOF
     exit 1
+}
+
+store_usage() {
+    cat <<'EOF'
+Usage: beagle store <command> [args...]
+
+Data:
+  tell SUBJECT SLOT VALUE
+  retract SUBJECT SLOT VALUE
+  show SUBJECT
+  query EDN
+  scan T1|_ T2|_ T3|_
+  occurrences
+  version | status | validate
+
+Operator:
+  doctor --deep
+  backup create|verify ...
+  code on|off|status ...
+  up [--restart]
+  serve ...
+EOF
+}
+
+store_prepare_local_state() {
+    if [[ "${BEAGLE_STORE_PACKAGED:-0}" == "1" ]]; then
+        if [[ -z "${BEAGLE_STORE_LOG:-}" ||
+              -z "${BEAGLE_STORE_THREADS:-}" ]]; then
+            if [[ -n "${BEAGLE_STORE_STATE_DIR:-}" ]]; then
+                state_dir="$BEAGLE_STORE_STATE_DIR"
+            elif [[ -n "${XDG_STATE_HOME:-}" ]]; then
+                state_dir="$XDG_STATE_HOME/beagle-store"
+            elif [[ -n "${HOME:-}" ]]; then
+                state_dir="$HOME/.local/state/beagle-store"
+            else
+                echo "beagle store: set BEAGLE_STORE_LOG + BEAGLE_STORE_THREADS, BEAGLE_STORE_STATE_DIR, XDG_STATE_HOME, or HOME" >&2
+                exit 2
+            fi
+        fi
+        [[ -n "${BEAGLE_STORE_THREADS:-}" ]] ||
+            BEAGLE_STORE_THREADS="$state_dir/threads"
+        [[ -n "${BEAGLE_STORE_LOG:-}" ]] ||
+            BEAGLE_STORE_LOG="$state_dir/coordination.log"
+    else
+        BEAGLE_STORE_THREADS="${BEAGLE_STORE_THREADS:-$STORE_DIR/threads}"
+        BEAGLE_STORE_LOG="${BEAGLE_STORE_LOG:-$STORE_DIR/coordination.log}"
+    fi
+    export BEAGLE_STORE_THREADS BEAGLE_STORE_LOG
+
+    local log_parent="${BEAGLE_STORE_LOG%/*}"
+    [[ "$log_parent" != "$BEAGLE_STORE_LOG" ]] || log_parent=.
+    if [[ ! -d "$BEAGLE_STORE_THREADS" || ! -d "$log_parent" ]]; then
+        mkdir -p "$BEAGLE_STORE_THREADS" "$log_parent"
+    fi
+}
+
+store_dispatch() {
+    local command="${1:-}"
+    case "$command" in
+        ""|help|-h|--help)
+            store_usage
+            return 0
+            ;;
+        doctor)
+            shift
+            exec "$STORE_DIR/bin/beagle-store-doctor" "$@"
+            ;;
+        backup)
+            shift
+            exec "$STORE_DIR/bin/beagle-store-backup" "$@"
+            ;;
+        code)
+            local code_command="${2:-}"
+            case "$code_command" in
+                on|off|status)
+                    shift 2
+                    exec "$STORE_DIR/bin/beagle-store-code-$code_command" "$@"
+                    ;;
+                *)
+                    echo "beagle store code: expected on, off, or status" >&2
+                    return 2
+                    ;;
+            esac
+            ;;
+        up)
+            shift
+            exec "$STORE_DIR/bin/beagle-store-up" "$@"
+            ;;
+        serve)
+            shift
+            exec "$STORE_DIR/bin/beagle-store-server" "$@"
+            ;;
+        tell|retract|tell-existing|retract-existing|show|query|scan|occurrences|version|status|validate)
+            if [[ -z "${BEAGLE_STORE_SPACE_ID:-}" ]]; then
+                echo "beagle store: BEAGLE_STORE_SPACE_ID is required for data commands" >&2
+                return 2
+            fi
+            exec bb -cp "$STORE_DIR/out" \
+                "$STORE_DIR/bin/beagle-store-cli.clj" "$@"
+            ;;
+        *)
+            store_prepare_local_state
+            exec bb -cp "$STORE_DIR/out" -m store.main "$@"
+            ;;
+    esac
 }
 
 [[ $# -eq 0 ]] && usage
@@ -89,6 +209,9 @@ EOF
 cmd="$1"; shift
 
 case "$cmd" in
+    store)
+        store_dispatch "$@"
+        ;;
     check)
         # Count non-flag args to decide single-file vs batch.
         # Value-taking options do not contribute source-file arguments.

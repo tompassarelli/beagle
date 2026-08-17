@@ -1,5 +1,5 @@
 #lang beagle/clj
-;; Source-program projection of fram:src/fram/fold.bclj plus the fram.types
+;; Source-program projection of store:src/store/fold.bclj plus the store.types
 ;; declarations its signatures name, driven freeze -> typed -> native -> C17.
 (ns native.fold-slice-corpus)
 
@@ -10,19 +10,19 @@
 (require native.obligations :as obligations)
 (require native.fold-c17 :as c17)
 
-(def module-name String "fram.fold")
-(def module-path String "src/fram/fold.bclj")
-(def compiler-commit String "fram-fold-slice-v0")
+(def module-name String "store.fold")
+(def module-path String "src/store/fold.bclj")
+(def compiler-commit String "store-fold-slice-v0")
 
 (def configuration (Vec String)
-  ["profile=3" "target=native-core" "module=fram.fold"])
+  ["profile=3" "target=native-core" "module=store.fold"])
 
 ;; Receipt provenance only; layout numbers, not this string, partition programs.
 (defn configuration-for [(abi core/AbiProfileV0)] (Vec String)
   (conj configuration (str "abi=" (core/abiprofilev0-id abi))))
 
 (defn slice-id [(kind String) (label String)] core/NativeId
-  (core/canonical-id "fram-fold-slice-v0" [kind label]))
+  (core/canonical-id "store-fold-slice-v0" [kind label]))
 
 (defn text-id [(value String)] core/NativeId (slice-id "text" value))
 
@@ -171,7 +171,7 @@
    (->AppSpecV0 "ty-VecTransactionFrame" "Vec" ["ty-TransactionFrame"])
    (->AppSpecV0 "ty-AtomTermStore" "Atom" ["ty-TermStore"])])
 
-;; `T?` in the Fram source is a two-arm optional; the source projection carries
+;; `T?` in the Beagle Store source is a two-arm optional; the source projection carries
 ;; it as the closed union it desugars to.
 (def optional-specs (Vec UnionSpecV0)
   [(->UnionSpecV0 "ty-StringOpt" ["ty-String" "ty-Nil"])
@@ -379,9 +379,9 @@
        (slice-id "module" module-name)
        module-name
        module-path
-       "fram-fold-source-v0"
-       "fram-fold-projection-v0"
-       "fram-fold-interface-v0"
+       "store-fold-source-v0"
+       "store-fold-projection-v0"
+       "store-fold-interface-v0"
        (node-id module-name))]
     []
     []
@@ -406,7 +406,7 @@
   [(result lower/SourceFreezeResultV0)] lower/SourceFreezeAcceptedV0
   (if (instance? native.lower.SourceFreezeAcceptedV0 result)
     result
-    (throw (ex-info "fram.fold source program was rejected at freeze" {}))))
+    (throw (ex-info "store.fold source program was rejected at freeze" {}))))
 
 (defn typing-result [(abi core/AbiProfileV0)] lower/TypingResultV0
   (lower/lower-typed-stage
@@ -425,7 +425,7 @@
   [(result lower/TypingResultV0)] lower/TypingAcceptedV0
   (if (instance? native.lower.TypingAcceptedV0 result)
     result
-    (throw (ex-info "fram.fold annotations did not close over Native Core types" {}))))
+    (throw (ex-info "store.fold annotations did not close over Native Core types" {}))))
 
 (defn native-frozen
   [(result lower/NativeLoweringResultV0)] stages/FrozenNativeStageV0
@@ -579,8 +579,8 @@
 
 (defn slice-report-text [(state SliceStateV0) (abi core/AbiProfileV0)] String
   (let [(program core/NativeCoreProgram) (slicestatev0-program state)]
-    (str "fram.fold Native Core slice\n"
-      "source: fram:" module-path "\n"
+    (str "store.fold Native Core slice\n"
+      "source: store:" module-path "\n"
       "types: " (count (core/nativecoreprogram-types program)) "\n"
       "layouts: " (count (core/nativecoreprogram-layouts program)) "\n"
       "functions: " (count (core/nativecoreprogram-functions program)) "\n"

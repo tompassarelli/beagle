@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Beagle Store MCP server — the AI-facing edge of one instance. Speaks MCP (JSON-RPC 2.0
+# over stdio) and advertises exactly five public data tools: tell, retract, show,
+# ask, and validate. Public calls use FRAMRPC; graph authoring is a separate
+# sealed-control surface and is refused here.
+# Point a model's MCP client at this command.
+#
+#   BEAGLE_STORE_SPACE_ID selects the database identity. BEAGLE_STORE_SERVER_PORT selects its server.
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -z "${BEAGLE_STORE_SPACE_ID:-}" ]]; then
+  echo "beagle-store-mcp: BEAGLE_STORE_SPACE_ID is required" >&2
+  exit 2
+fi
+cd "$HERE" && exec bb -cp out tests/store_mcp.clj

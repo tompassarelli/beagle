@@ -1291,11 +1291,11 @@
                         (when (= :defn (:kind res))
                           (swap! handlers assoc [(:ns res) (:name res)]
                                  {:of [ns- dn]}))))))))))))
-    ;; fram-vocabulary dispatch entries (boundary v2): a defn named by the
+    ;; store-vocabulary dispatch entries (boundary v2): a defn named by the
     ;; dispatch vocabulary that takes the request record type and returns the
     ;; response record type is a dispatch root even when its discriminant
     ;; cond is nested beyond the keyword-cond detector's reach
-    ;; (fram.native-dispatch/dispatch!, native-server/dispatch-request!,
+    ;; (store.native-dispatch/dispatch!, native-server/dispatch-request!,
     ;;  server-store-dispatch!, commit-mutation!, native-query-ops/
     ;;  dispatch-read! are the shapes this names).
     (let [base (fn [ann]
@@ -1422,10 +1422,10 @@
                           @found))]
          [ns- dn])))
 
-;; --- fram-vocabulary bracket pairs (boundary v2) ---
-;; fram's real epoch brackets, read from its own sources:
-;;   fram.store/open-fold!  … fram.store/close-fold!   (store.bgl:438/:443)
-;;   fram.txn/open          … fram.txn/commit!         (txn.bgl:28/:106)
+;; --- store-vocabulary bracket pairs (boundary v2) ---
+;; store's real epoch brackets, read from its own sources:
+;;   store.store/open-fold!  … store.store/close-fold!   (store.bgl:438/:443)
+;;   store.txn/open          … store.txn/commit!         (txn.bgl:28/:106)
 ;; The rule is the vocabulary shape, not a hardcoded module list: an
 ;; open/close pair is two defns in the SAME module named open-X!/close-X!
 ;; (or open-X/close-X), or open/commit! (the transaction-builder shape).
@@ -1527,9 +1527,9 @@
             called-defns (get direct-calls [ns- dn] #{})
             bracket-calls
             (set (for [k called-defns :when (contains? brackets k)] (second k)))
-            ;; detector V: this defn reaches BOTH members of a fram-vocabulary
+            ;; detector V: this defn reaches BOTH members of a store-vocabulary
             ;; open/close pair through direct calls or ONE level of callee
-            ;; (fram's close bracket routinely sits behind a local wrapper —
+            ;; (store's close bracket routinely sits behind a local wrapper —
             ;; schema/commit! wraps txn/commit!, successful-boot! wraps
             ;; close-fold!) — the defn IS an epoch (fold/transaction).
             called+1
@@ -1549,7 +1549,7 @@
           vocab-hit
           (swap! out assoc [ns- dn]
                  {:regions [] :whole? true
-                  :why (str "fram-vocabulary bracket "
+                  :why (str "store-vocabulary bracket "
                             (:module vocab-hit) "/" (:open vocab-hit)
                             " … " (:close vocab-hit)
                             " (detector V, whole-defn)")})
@@ -1899,12 +1899,12 @@
 ;; domain-identity verdict against the declared type table below.
 
 ;; Domain vocabulary modules: records/unions DECLARED here are domain
-;; identities (fram: triples/store/transaction/query/rotation/datalog
+;; identities (store: triples/store/transaction/query/rotation/datalog
 ;; records; compiler: native-core program + stage records). The `.types`
-;; suffix rule mirrors fram.types being the shared vocabulary module.
+;; suffix rule mirrors store.types being the shared vocabulary module.
 (def domain-namespaces
-  #{"fram.types" "fram.txn" "fram.store" "fram.query" "fram.rotation"
-    "fram.datalog" "fram.schema" "native.core" "native.stages"})
+  #{"store.types" "store.txn" "store.store" "store.query" "store.rotation"
+    "store.datalog" "store.schema" "native.core" "native.stages"})
 ;; Stage products declared outside those modules.
 (def domain-extra-records
   #{"C11Artifact" "C11Materialization" "QbeArtifact" "SliceMaterializedV0"

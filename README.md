@@ -86,13 +86,13 @@ artifacts below are the authoritative answers.
 | Distilled lineage and thesis | [`docs/INFLUENCES.md`](docs/INFLUENCES.md) |
 | Stable product boundaries | [`docs/design-rationale.md`](docs/design-rationale.md) |
 | Historical dogfood findings | [`docs/dogfood-codegen-findings.md`](docs/dogfood-codegen-findings.md) |
-| Fram's in-repo Native Core consumer | [`branch-core/README.md`](branch-core/README.md) |
+| Beagle Store's in-repo Native Core consumer | [`store/README.md`](store/README.md) |
 | Surface policy and contribution anchor | [`CLAUDE.md`](CLAUDE.md) |
 
 The external consumer roster previously listed here (firn, gjoa, wake, and
 north) is intentionally not repeated as a maintained inventory; external
 project status is volatile. The names remain useful orientation, while
-`branch-core/README.md` is the in-repo consumer reference.
+`store/README.md` is the in-repo consumer reference.
 
 ## Status and license
 

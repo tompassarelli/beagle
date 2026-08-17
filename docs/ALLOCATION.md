@@ -255,24 +255,24 @@ that leads to it.
 The durable side begins by refusing to confuse semantic values with physical
 storage. The branch kernel's public value grammar is `Term := Atom | Triple`;
 the recursive `Triple` is the semantic value, while integer handles and rows are
-private (`beagle:branch-core/src/fram/types.bgl:27-32`,
-`beagle:branch-core/src/fram/types.bgl:82-108`). A `TermStore` interns atoms and
+private (`beagle:store/src/store/types.bgl:27-32`,
+`beagle:store/src/store/types.bgl:82-108`). A `TermStore` interns atoms and
 triples in append-only vectors and keeps mutable slot tables as indexes
-(`beagle:branch-core/src/fram/types.bgl:111-137`). Slot lookup hashes to a
+(`beagle:store/src/store/types.bgl:111-137`). Slot lookup hashes to a
 bucket but confirms the complete row, and table growth builds fresh slots rather
 than changing the semantic value
-(`beagle:branch-core/src/fram/slots.bgl:3-29`,
-`beagle:branch-core/src/fram/store.bgl:197-247`). The even/odd handles are only
+(`beagle:store/src/store/slots.bgl:3-29`,
+`beagle:store/src/store/store.bgl:197-247`). The even/odd handles are only
 positions; recursive interning and resolution turn them back into structural
-terms (`beagle:branch-core/src/fram/store.bgl:249-304`).
+terms (`beagle:store/src/store/store.bgl:249-304`).
 
 That separation is the key to “reachability over facts, not pointers.” The
 architecture document explicitly says rows, handles, and index rotations are
 private mechanics rather than semantic identity, while binary FRAMLOG is the
 authority from which liveness and indexes are replayed
-(`beagle:branch-core/docs/architecture.md:36-49`). The live store exposes
+(`beagle:store/docs/architecture.md:36-49`). The live store exposes
 structural propositions by resolving private handles
-(`beagle:branch-core/src/fram/store.bgl:945-982`). Therefore a native address
+(`beagle:store/src/store/store.bgl:945-982`). Therefore a native address
 cannot be the durable reason to retain state. Addresses belong to a current
 materialization; facts, revisions, and named roots belong to history.
 
@@ -288,7 +288,7 @@ Applying that razor to Beagle itself found a violation; it did not certify a
 finished shave. The qualified-symbol audit found that `x/y` survives as one
 opaque symbol or string through the reader, AST, checked JSON, and
 `source.facts`, then gets split or pattern-matched again in checker, emitter,
-self-host, and branch-core paths
+self-host, and store paths
 (an internal audit (2026-08-17) found this at lines 8-19 and 23-39). The
 remedy is designed, not landed: lower authored qualification once into
 structural qualifier/name/provider identity, carry those fields through facts,
@@ -324,11 +324,11 @@ is how persistence, concurrency control, compaction, and reclamation would
 become operations over one visible model.
 
 This is also where the thesis is falsifiable. The format on Beagle main still
-caps chains at 64 segments (`beagle:branch-core/src/fram/branch.bclj:12-26`,
-`beagle:branch-core/src/fram/branch.bclj:281-284`,
-`beagle:branch-core/src/fram/branch.bclj:342-366`), and its v1 revision preimage
+caps chains at 64 segments (`beagle:store/src/store/branch.bclj:12-26`,
+`beagle:store/src/store/branch.bclj:281-284`,
+`beagle:store/src/store/branch.bclj:342-366`), and its v1 revision preimage
 includes the ordered physical segment identities
-(`beagle:branch-core/src/fram/branch.bclj:132-151`).
+(`beagle:store/src/store/branch.bclj:132-151`).
 Resealing that list while preserving revision identity is therefore impossible
 under the current preimage; the local S0 analysis names the required forward
 identity decision rather than hiding it

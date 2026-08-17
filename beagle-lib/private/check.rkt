@@ -3788,8 +3788,9 @@
 (define (fresh-value-compatible? value expected env)
   (cond
     [(type-union? expected)
-     (for/or ([alt (in-list (type-union-alts expected))])
-       (fresh-value-compatible? value alt env))]
+     (or (type-compatible? (infer-expr value env) expected)
+         (for/or ([alt (in-list (type-union-alts expected))])
+           (fresh-value-compatible? value alt env)))]
     [(and (type-app? expected) (eq? (type-app-ctor expected) 'HVec)
           (vec-form? value))
      (define items (vec-form-items value))
@@ -5420,7 +5421,7 @@
            ;; noise. Only a method that's in NEITHER the class nor the flat table
            ;; (a typo, or a wrong-receiver method like .force on a non-channel)
            ;; is rejected — that keeps the unknown/wrong-method guard intact while
-           ;; not false-rejecting fram on common methods.
+           ;; not false-rejecting store on common methods.
            (define raw-type (hash-ref env method-sym ANY))
            (define all-args (cons (method-call-target e) (method-call-args e)))
            (define fn-type

@@ -23,7 +23,7 @@
   (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
         (configuration (Vec String)) ["profile=3"]
         (source stages/SourceStageV1)
-        (slice/source-program rows "fram.main"
+        (slice/source-program rows "store.main"
           "native-core/validation/slice-main-capability/main_fixture.bgl")
         (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage source compiler-commit configuration)]

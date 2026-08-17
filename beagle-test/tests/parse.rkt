@@ -1909,7 +1909,7 @@
 ;; → check --agent / build / authoring loop / hooks), SEPARATE from reader-impl's
 ;; (#lang module loading). The `^` metadata macro was first added only to
 ;; reader-impl, so `^:dynamic` read as a bare symbol here → "malformed def" on
-;; every dynamic-var file under --agent/build (fram-2 #18). Both readtables must
+;; every dynamic-var file under --agent/build (store-2 #18). Both readtables must
 ;; read `^META FORM` → (#%meta META FORM). This drives the EXACT broken path.
 (test-case "read-beagle-syntax reads ^:dynamic (typed) via the parse.rkt readtable"
   (define tmp (make-temporary-file "beagle-dynread-~a.bclj"))

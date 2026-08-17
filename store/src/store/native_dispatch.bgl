@@ -1,0 +1,794 @@
+#lang beagle
+
+(ns store.native-dispatch
+  (:require [commit-plan :as plan]
+            [store.native-lease-ops :as lease]
+            [store.native-query-ops :as query-ops]
+            [store.native-wire-codec :as native-wire]
+            [store.rotation :as rot]
+            [store.rpc-limits :as limits]
+            [store.schema :as schema]
+            [store.store :as store]
+            [store.types :as t]))
+
+
+(def effective-page-limit Int 200)
+(def max-list-values Int 65536)
+
+(defrecord ValuesResult [(ok Bool) (values (Vec Any)) (message String?)])
+
+(defrecord OptionResult [(ok Bool) (present Bool) (value Any) (message String?)])
+
+(defrecord Action
+  [(index Int) (operation Keyword) (proposition t/Triple) (policy Keyword)])
+
+(defrecord ActionResult
+  [(ok Bool) (action Action?) (code Keyword?) (message String?)])
+
+(defrecord ActionPlan
+  [(ok Bool) (actions (Vec Action)) (code Keyword?) (message String?)])
+
+(defrecord Decision [(index Int) (changed Bool)])
+
+(defrecord PreparedMutation
+  [(ok Bool)
+   (operations (Vec t/CommitOperation))
+   (decisions (Vec Decision))
+   (code Keyword?)
+   (message String?)])
+
+(defrecord Removal [(values (Vec t/Triple)) (changed Bool)])
+
+(defrecord FenceResult
+  [(ok Bool)
+   (present Bool)
+   (resource Any)
+   (holder Any)
+   (epoch Int)
+   (code Keyword?)
+   (message String?)])
+
+(defrecord LeaseState [(found Bool) (holder Any) (expires-ms Int) (epoch Int)])
+
+(defrecord PatternResult
+  [(ok Bool)
+   (t1 OptionResult)
+   (t2 OptionResult)
+   (t3 OptionResult)
+   (message String?)])
+
+(defrecord ScanCursorResult
+  [(ok Bool) (version Int) (ordinal Int) (offset Int) (message String?)])
+
+(def empty-operations (Vec t/CommitOperation) [])
+(def empty-decisions (Vec Decision) [])
+(def empty-live (Vec t/Triple) [])
+
+(defn values-ok [(values (Vec Any))] ValuesResult
+  (->ValuesResult true values nil))
+
+(defn values-error [(message String)] ValuesResult
+  (->ValuesResult false [] message))
+
+(defn rpc-list [(values (Vec Any))] Any
+  (reduce
+   (fn [(tail Any) (value Any)] Any
+     (t/triple :rpc/list value tail))
+   :rpc/list-end
+   (reverse values)))
+
+(defn rpc-record [(tag Keyword) (fields (Vec Any))] t/Triple
+  (t/triple tag (rpc-list fields) :rpc/record))
+
+(defn rpc-triple-list [(values (Vec t/Triple))] Any
+  (reduce
+   (fn [(tail Any) (value t/Triple)] Any
+     (t/triple :rpc/list value tail))
+   :rpc/list-end
+   (reverse values)))
+
+(defn rpc-action-result
+  [(input-index Int) (changed Bool) (occurrence t/Triple)] t/Triple
+  (rpc-record :rpc/action-result [input-index changed occurrence]))
+
+(defn rpc-mutation-result [(results (Vec t/Triple))] t/Triple
+  (rpc-record :rpc/mutation-result [(rpc-triple-list results)]))
+
+(defn rpc-triples [(values (Vec t/Triple))] t/Triple
+  (rpc-record :rpc/triples [(rpc-triple-list values)]))
+
+(defn rpc-int-list [(values (Vec Int))] Any
+  (reduce
+   (fn [(tail Any) (value Int)] Any
+     (t/triple :rpc/list value tail))
+   :rpc/list-end
+   (reverse values)))
+
+(defn rpc-status [(live-count Int) (cache-stats (Vec Int))] t/Triple
+  (let [(cache-record t/Triple)
+        (t/triple :rpc/result-cache
+                  (rpc-int-list cache-stats)
+                  :rpc/record)]
+    (t/triple
+     :rpc/status
+     (t/triple
+      :rpc/list :ready
+      (t/triple
+       :rpc/list live-count
+       (t/triple
+        :rpc/list :rpc/native
+        (t/triple :rpc/list cache-record :rpc/list-end))))
+     :rpc/record)))
+
+(defn read-list [(value Any)] ValuesResult
+  (loop [(cursor Any) value (values (Vec Any)) [] (count-value Int) 0]
+    (cond
+      [(= cursor :rpc/list-end) (values-ok values)]
+      [(>= count-value max-list-values)
+       (values-error "RPC list exceeds the Term node bound")]
+      [(and (t/triple? cursor) (= :rpc/list (t/triple-t1 cursor)))
+       (recur (t/triple-t3 cursor)
+              (conj values (t/triple-t2 cursor))
+              (inc count-value))]
+      [:else (values-error "RPC list must end with :rpc/list-end")])))
+
+(defn read-record [(value Any) (tag Keyword) (field-count Int)] ValuesResult
+  (if (and (t/triple? value)
+           (and (= tag (t/triple-t1 value))
+                (= :rpc/record (t/triple-t3 value))))
+    (let [(result ValuesResult) (read-list (t/triple-t2 value))]
+      (if (and (valuesresult-ok result)
+               (= field-count (count (valuesresult-values result))))
+        result
+        (if (valuesresult-ok result)
+          (values-error "RPC record contains the wrong number of fields")
+          result)))
+    (values-error "RPC record tag or marker is invalid")))
+
+(defn read-option [(value Any)] OptionResult
+  (cond
+    [(= value :rpc/none) (->OptionResult true false nil nil)]
+    [(and (t/triple? value)
+          (and (= :rpc/some (t/triple-t1 value))
+               (= :rpc/option (t/triple-t3 value))))
+     (->OptionResult true true (t/triple-t2 value) nil)]
+    [:else
+     (->OptionResult false false nil
+                     "RPC option must be :rpc/none or a :rpc/some record")]))
+
+(defn response
+  [(request t/RpcRequest) (served-version Int) (payload t/Term)] t/RpcResponse
+  (t/->RpcResponse (t/rpcrequest-space request)
+                   (t/rpcrequest-op request)
+                   served-version nil nil payload))
+
+(defn paged-response
+  [(request t/RpcRequest)
+   (served-version Int)
+   (page t/RpcPageResponse)
+   (payload t/Term)]
+  t/RpcResponse
+  (t/->RpcResponse (t/rpcrequest-space request)
+                   (t/rpcrequest-op request)
+                   served-version page nil payload))
+
+(defn error-response
+  [(request t/RpcRequest)
+   (served-version Int)
+   (code Keyword)
+   (retryable Bool)
+   (message String)]
+  t/RpcResponse
+  (t/->RpcResponse
+   (t/rpcrequest-space request)
+   (t/rpcrequest-op request)
+   served-version nil
+   (t/->RpcError code retryable message nil)
+   nil))
+
+(defn expected-version-matches?
+  [(served-version Int) (expected-version Int?)] Bool
+  (and (not (plan/version-conflict? true served-version expected-version))
+       (or (nil? expected-version) (= served-version expected-version))))
+
+(defn unit-response
+  [(request t/RpcRequest) (served-version Int) (payload t/Term)] t/RpcResponse
+  (if (= :rpc/unit (t/rpc-request-payload-value request))
+    (response request served-version payload)
+    (error-response request served-version :rpc-invalid-payload false
+                    "operation payload must be :rpc/unit")))
+
+(defn parse-pattern [(payload Any)] PatternResult
+  (let [(fields ValuesResult) (read-record payload :rpc/triple-pattern 3)]
+    (if (not (valuesresult-ok fields))
+      (->PatternResult false
+                       (->OptionResult false false nil nil)
+                       (->OptionResult false false nil nil)
+                       (->OptionResult false false nil nil)
+                       (or (valuesresult-message fields)
+                           "scan pattern is malformed"))
+      (let [(values (Vec Any)) (valuesresult-values fields)
+            (t1 OptionResult) (read-option (nth values 0))
+            (t2 OptionResult) (read-option (nth values 1))
+            (t3 OptionResult) (read-option (nth values 2))]
+        (if (and (optionresult-ok t1)
+                 (and (optionresult-ok t2) (optionresult-ok t3)))
+          (->PatternResult true t1 t2 t3 nil)
+          (->PatternResult false t1 t2 t3
+                           "scan pattern contains a malformed option"))))))
+
+(defn scan-rows [(rotation rot/Rotation) (pattern PatternResult)] (Vec t/Triple)
+  (let [(t1 OptionResult) (patternresult-t1 pattern)
+        (t2 OptionResult) (patternresult-t2 pattern)
+        (t3 OptionResult) (patternresult-t3 pattern)
+        (events (Vec t/OperationOccurrence))
+        (rot/matching
+         rotation
+         (if (optionresult-present t1) (optionresult-value t1) nil)
+         (if (optionresult-present t2) (optionresult-value t2) nil)
+         (if (optionresult-present t3) (optionresult-value t3) nil))]
+    (mapv
+     (fn [(event t/OperationOccurrence)] t/Triple (rot/proposition-of event))
+     events)))
+
+(defn scan-cursor
+  [(space String)
+   (version Int)
+   (ordinal Int)
+   (offset Int)
+   (pattern Any)]
+  t/Triple
+  (rpc-record :rpc/native-scan-cursor
+              [space version ordinal offset pattern]))
+
+(defn parse-scan-cursor
+  [(cursor Any) (space String) (pattern Any)] ScanCursorResult
+  (let [(fields ValuesResult)
+        (read-record cursor :rpc/native-scan-cursor 5)]
+    (if (not (valuesresult-ok fields))
+      (->ScanCursorResult false 0 0 0
+                          "scan cursor record is malformed")
+      (let [(values (Vec Any)) (valuesresult-values fields)
+            (cursor-space Any) (nth values 0)
+            (version Any) (nth values 1)
+            (ordinal Any) (nth values 2)
+            (offset Any) (nth values 3)
+            (cursor-pattern Any) (nth values 4)]
+        (if (not (and (string? cursor-space)
+                      (and (integer? version)
+                           (and (integer? ordinal) (integer? offset)))))
+          (->ScanCursorResult false 0 0 0
+                              "scan cursor fields have invalid types")
+          (cond
+            [(not (= space cursor-space))
+             (->ScanCursorResult false 0 0 0
+                                 "scan cursor belongs to another SpaceId")]
+            [(not (= pattern cursor-pattern))
+             (->ScanCursorResult false 0 0 0
+                                 "scan cursor belongs to another pattern")]
+            [(or (< version 0) (or (< ordinal 0) (< offset 0)))
+             (->ScanCursorResult false 0 0 0
+                                 "scan cursor positions must be non-negative")]
+            [:else
+             (->ScanCursorResult true version ordinal offset nil)]))))))
+
+(defn historical-root!
+  [(root (Atom t/TermStore)) (version Int)] (Atom t/TermStore)
+  (if (= version (store/current-sequence root))
+    root
+    (let [(copy (Atom t/TermStore)) (store/new-term-store (store/space-id root))
+          (frames (Vec t/TransactionFrame))
+          (store/transaction-frames-between (deref root) 0 version)]
+      (do
+        (doseq [frame frames] (store/replay-transaction! copy frame))
+        copy))))
+
+(defn scan-rotation! [(session schema/Session) (version Int)] rot/Rotation
+  (let [root (schema/store-of session)]
+    (if (= version (store/current-sequence root))
+      (schema/view session)
+      (rot/project! (historical-root! root version)))))
+
+(defn scan-response!
+  [(session schema/Session)
+   (request t/RpcRequest)
+   (current-version Int)]
+  t/RpcResponse
+  (let [(payload Any) (t/rpc-request-payload-value request)
+        (pattern PatternResult) (parse-pattern payload)]
+    (if (not (patternresult-ok pattern))
+      (error-response request current-version :rpc-invalid-payload false
+                      (or (patternresult-message pattern)
+                          "scan pattern is malformed"))
+      (let [page (t/rpcrequest-page request)]
+        (if (nil? page)
+          (let [(rows (Vec t/Triple))
+                (scan-rows (schema/view session) pattern)]
+            (if (> (count rows) effective-page-limit)
+              (error-response
+               request current-version :rpc/native-page-required false
+               "native scan result exceeds the unpaged response limit")
+              (response request current-version (rpc-triples rows))))
+          (let [limit (t/rpcpagerequest-limit page)
+                cursor-value (t/rpc-page-request-cursor-value page)]
+            (if (or (< limit 1) (> limit effective-page-limit))
+              (error-response
+               request current-version :query-page-limit false
+               "native scan page limit must be from 1 through 200")
+              (let [(cursor ScanCursorResult)
+                    (if cursor-value
+                      (parse-scan-cursor cursor-value
+                                         (t/rpcrequest-space request)
+                                         payload)
+                      (->ScanCursorResult true current-version 0 0 nil))]
+                (cond
+                  [(not (scancursorresult-ok cursor))
+                   (error-response
+                    request current-version :query-cursor-mismatch false
+                    (or (scancursorresult-message cursor)
+                        "scan cursor is invalid"))]
+                  [(> (scancursorresult-version cursor) current-version)
+                   (error-response
+                    request current-version :query-cursor-mismatch false
+                    "scan cursor names a future store version")]
+                  [:else
+                   (let [(snapshot-version Int) (scancursorresult-version cursor)
+                         (digest-result native-wire/TermDigestResult)
+                         (native-wire/canonical-term-sha256-result! payload)]
+                     (if (not (native-wire/termdigestresult-ok digest-result))
+                       (error-response
+                        request snapshot-version :rpc-invalid-payload false
+                        (native-wire/termdigestresult-message digest-result))
+                       (let [(digest String)
+                             (native-wire/termdigestresult-digest digest-result)
+                             (key schema/OrderedResultKey)
+                             (query-ops/result-cache-key
+                              session snapshot-version -1 :rpc/scan digest)
+                             (cached query-ops/ResultCacheLookup)
+                             (query-ops/result-cache-lookup! session key)
+                             (rows (Vec t/Triple))
+                             (if (query-ops/resultcachelookup-found cached)
+                               (query-ops/resultcachelookup-triple-rows cached)
+                               (let [(built (Vec t/Triple))
+                                     (scan-rows
+                                      (scan-rotation! session snapshot-version)
+                                      pattern)]
+                                 (do
+                                   (query-ops/retain-triple-result!
+                                    session key built)
+                                   built)))
+                             (offset Int) (scancursorresult-offset cursor)]
+                         (if (> offset (count rows))
+                           (error-response
+                            request snapshot-version :query-cursor-mismatch false
+                            "scan cursor offset is past the result")
+                           (let [(end Int) (min (count rows) (+ offset limit))
+                                 (selected (Vec t/Triple))
+                                 (subvec rows offset end)
+                                 (done Bool) (= end (count rows))
+                                 (ordinal Int) (scancursorresult-ordinal cursor)
+                                 (page-response t/RpcPageResponse)
+                                 (if done
+                                   (t/->RpcPageResponse ordinal nil true)
+                                   (let [(next-cursor t/Term)
+                                         (scan-cursor
+                                          (t/rpcrequest-space request)
+                                          snapshot-version
+                                          (inc ordinal)
+                                          end
+                                          payload)]
+                                     (t/->RpcPageResponse
+                                      ordinal next-cursor false)))]
+                             (paged-response
+                              request snapshot-version page-response
+                              (rpc-triples selected)))))))])))))))))
+
+(defn action-error [(code Keyword) (message String)] ActionResult
+  (->ActionResult false nil code message))
+
+(defn parse-action [(value Any) (index Int)] ActionResult
+  (let [(fields ValuesResult) (read-record value :rpc/action 3)]
+    (if (not (valuesresult-ok fields))
+      (action-error :rpc-invalid-payload "mutation contains a malformed action")
+      (let [(parts (Vec Any)) (valuesresult-values fields)
+            (operation Any) (nth parts 0)
+            (proposition Any) (nth parts 1)
+            (policy Any) (nth parts 2)]
+        (cond
+          [(not (or (= :rpc/assert operation) (= :rpc/retract operation)))
+           (action-error :rpc-invalid-action
+                         "action operation is unsupported")]
+          [(not (t/triple? proposition))
+           (action-error :rpc-invalid-payload
+                         "action proposition must be a Triple")]
+          [(not (or (= :rpc/subject-any policy)
+                    (= :rpc/subject-existing policy)))
+           (action-error :rpc-invalid-policy
+                         "subject policy is unsupported")]
+          [:else
+           (->ActionResult true
+                           (->Action index operation proposition policy)
+                           nil nil)])))))
+
+(defn actions-error [(code Keyword) (message String)] ActionPlan
+  (->ActionPlan false [] code message))
+
+(defn parse-actions [(values (Vec Any))] ActionPlan
+  (cond
+    [(empty? values)
+     (actions-error :rpc-invalid-action "batch requires at least one action")]
+    [(> (count values) limits/rpc-v2-max-batch-actions)
+     (actions-error
+      :term-depth-exceeded
+      "batch action count exceeds the TermCodecV1 depth bound")]
+    [:else
+     (loop [(remaining (Vec Any)) values (index Int) 0 (actions (Vec Action)) []]
+       (if (empty? remaining)
+         (->ActionPlan true actions nil nil)
+         (let [(parsed ActionResult) (parse-action (first remaining) index)
+               (action Action?) (actionresult-action parsed)]
+           (if (and (actionresult-ok parsed) action)
+             (let [(present-action Action) action]
+               (recur (vec (rest remaining)) (inc index)
+                      (conj actions present-action)))
+             (actions-error
+              (or (actionresult-code parsed) :rpc-invalid-payload)
+              (or (actionresult-message parsed)
+                  "mutation action is invalid"))))))]))
+
+(defn subject-known? [(propositions (Vec t/Triple)) (proposition t/Triple)] Bool
+  (let [subject (t/triple-t1 proposition)]
+    (boolean
+     (some
+      (fn [(known t/Triple)] Bool
+        (= subject (t/triple-t1 known)))
+      propositions))))
+
+(defn remove-last-equal [(values (Vec t/Triple)) (target t/Triple)] Removal
+  (loop [index (dec (count values))]
+    (if (< index 0)
+      (->Removal values false)
+      (if (= target (nth values index))
+        (->Removal
+         (into (subvec values 0 index) (subvec values (inc index))) true)
+        (recur (dec index))))))
+
+(defn prepared-error [(code Keyword) (message String)] PreparedMutation
+  (->PreparedMutation false empty-operations empty-decisions code message))
+
+;; prepare-actions reads its live vector only through subject-known? (behind
+;; the subject-existing policy) and remove-last-equal (behind a retract), so a
+;; plan with neither may simulate over an empty vector without changing any
+;; operation or decision it produces. Materializing every live proposition is
+;; an O(store) walk per mutation; it must not run for plans that cannot read it.
+(defn plan-reads-live? [(actions (Vec Action))] Bool
+  (loop [(index Int) 0]
+    (if (>= index (count actions))
+      false
+      (let [(action Action) (nth actions index)]
+        (if (or (= :rpc/retract (action-operation action))
+                (= :rpc/subject-existing (action-policy action)))
+          true
+          (recur (inc index)))))))
+
+(defn prepare-actions
+  [(live (Vec t/Triple)) (actions (Vec Action))] PreparedMutation
+  (loop [(remaining (Vec Action)) actions
+         (simulated (Vec t/Triple)) live
+         (operations (Vec t/CommitOperation)) []
+         (decisions (Vec Decision)) []]
+    (if (empty? remaining)
+      (->PreparedMutation true operations decisions nil nil)
+      (let [(action Action) (first remaining)
+            (proposition t/Triple) (action-proposition action)]
+        (if (and (= :rpc/subject-existing (action-policy action))
+                 (not (subject-known? simulated proposition)))
+          (prepared-error
+           :rpc/subject-not-found
+           "subject-existing policy requires a live t1")
+          (if (= :rpc/assert (action-operation action))
+            (recur (vec (rest remaining))
+                   (conj simulated proposition)
+                   (conj operations (store/assert-operation proposition))
+                   (conj decisions (->Decision (action-index action) true)))
+            (let [(removed Removal) (remove-last-equal simulated proposition)]
+              (recur
+               (vec (rest remaining))
+               (removal-values removed)
+               (conj operations (store/retract-operation proposition))
+               (conj decisions
+                     (->Decision (action-index action)
+                                 (removal-changed removed)))))))))))
+
+(defn fence-error [(code Keyword) (message String)] FenceResult
+  (->FenceResult false false nil nil 0 code message))
+
+(defn parse-fence [(option OptionResult)] FenceResult
+  (if (not (optionresult-ok option))
+    (fence-error :rpc-invalid-payload "mutation fence option is malformed")
+    (if (not (optionresult-present option))
+      (->FenceResult true false nil nil 0 nil nil)
+      (let [(fields ValuesResult)
+            (read-record (optionresult-value option) :rpc/fence 3)]
+        (if (not (valuesresult-ok fields))
+          (fence-error :rpc-invalid-payload "mutation fence is malformed")
+          (let [(values (Vec Any)) (valuesresult-values fields)
+                (resource Any) (nth values 0)
+                (holder Any) (nth values 1)
+                (epoch Any) (nth values 2)]
+            (if (not (and (t/term? resource)
+                          (and (t/term? holder) (integer? epoch))))
+              (fence-error :rpc-invalid-payload
+                           "mutation fence fields are invalid")
+              (->FenceResult true true resource holder epoch nil nil))))))))
+
+(defn occurrence-sequence [(occurrence Any)] Int
+  (if (and (t/occurrence-coordinate? occurrence)
+           (t/transaction-coordinate? (t/triple-t1 occurrence)))
+    ;; The coordinate predicate does not narrow t3 to Int for the native join.
+    (let [sequence (t/triple-t3 (t/triple-t1 occurrence))]
+      (if (integer? sequence) sequence 0))
+    0))
+
+(defn lease-event? [(event t/OperationOccurrence)] Bool
+  (let [proposition (t/operationoccurrence-proposition event)]
+    (and (t/triple? proposition)
+         (let [value (t/triple-t3 proposition)]
+           (and (= :kernel/lease (t/triple-t2 proposition))
+                (and (t/triple? value)
+                     (and (= :kernel/expires-at (t/triple-t2 value))
+                          (integer? (t/triple-t3 value)))))))))
+
+(defn current-lease [(root (Atom t/TermStore)) (resource Any)] LeaseState
+  (reduce
+   (fn [(known LeaseState) (event t/OperationOccurrence)] LeaseState
+     (if (lease-event? event)
+       (let [(proposition t/Triple) (t/operationoccurrence-proposition event)
+             (value t/Triple) (t/triple-t3 proposition)]
+         (if (= resource (t/triple-t1 proposition))
+           (->LeaseState true
+                         (t/triple-t1 value)
+                         (t/triple-t3 value)
+                         (occurrence-sequence
+                          (t/operationoccurrence-coordinate event)))
+           known))
+       known))
+   (->LeaseState false nil 0 0)
+   (store/live-occurrences root)))
+
+(defn fence-valid?
+  [(root (Atom t/TermStore)) (fence FenceResult) (now-ms Int)] Bool
+  (if (not (fenceresult-present fence))
+    true
+    (let [(lease LeaseState)
+          (current-lease root (fenceresult-resource fence))]
+      (and (leasestate-found lease)
+           (and (= (fenceresult-holder fence) (leasestate-holder lease))
+                (and (= (fenceresult-epoch fence) (leasestate-epoch lease))
+                     (> (leasestate-expires-ms lease) now-ms)))))))
+
+(defn mutation-results
+  [(transaction t/Triple?) (decisions (Vec Decision))] t/Triple
+  (if transaction
+    (let [(present-transaction t/Triple) transaction
+          (results (Vec t/Triple))
+          (loop [(remaining (Vec Decision)) decisions
+                 (ordinal Int) 0
+                 (values (Vec t/Triple)) []]
+            (if (empty? remaining)
+              values
+              (let [(decision Decision) (first remaining)]
+                (recur
+                 (vec (rest remaining))
+                 (inc ordinal)
+                 (conj
+                  values
+                  (rpc-action-result
+                   (decision-index decision)
+                   (decision-changed decision)
+                   (t/occurrence-coordinate present-transaction ordinal)))))))]
+      (rpc-mutation-result results))
+    (throw (ex-info "mutation receipt requires a transaction coordinate"
+                    {:type :rpc-invalid-mutation-receipt}))))
+
+(defn mutation-response-encode-error! [(candidate t/RpcResponse)] String?
+  (let [encoded
+        (native-wire/encode-response-bytes!
+         (t/->RpcFrameV2 :response 0 0 nil candidate))]
+    (native-wire/encoderesult-error encoded)))
+
+(defn commit-mutation!
+  [(session schema/Session)
+   (request t/RpcRequest)
+   (prepared PreparedMutation)
+   (served-version Int)]
+  t/RpcResponse
+  (if (not (preparedmutation-ok prepared))
+    (error-response
+     request served-version
+     (or (preparedmutation-code prepared) :rpc-invalid-payload)
+     false
+     (or (preparedmutation-message prepared) "mutation is invalid"))
+    (let [(operations (Vec t/CommitOperation))
+          (preparedmutation-operations prepared)
+          (root (Atom t/TermStore)) (schema/store-of session)]
+      (let [(changed Bool) (not (empty? operations))
+            (predicted-version Int)
+            (if changed (store/next-sequence root) served-version)
+            (transaction t/Triple?)
+            (if changed
+              (t/transaction-coordinate (store/space-id root)
+                                        predicted-version)
+              nil)
+            (candidate t/RpcResponse)
+            (response request predicted-version
+                      (mutation-results
+                       transaction
+                       (preparedmutation-decisions prepared)))
+            (encode-error String?)
+            (mutation-response-encode-error! candidate)]
+        (if encode-error
+          (error-response
+           request served-version
+           (native-wire/response-encode-error-code encode-error) false
+           "mutation response exceeds FRAMRPC v2 encode limits")
+          (if changed
+            (do
+              (store/commit-transaction! root operations)
+              (schema/refresh! session)
+              candidate)
+            candidate))))))
+
+(defn execute-actions!
+  [(session schema/Session)
+   (request t/RpcRequest)
+   (plan ActionPlan)
+   (fence FenceResult)
+   (now-ms Int)
+   (served-version Int)]
+  t/RpcResponse
+  (cond
+    [(not (actionplan-ok plan))
+     (error-response request served-version
+                     (or (actionplan-code plan) :rpc-invalid-payload)
+                     false
+                     (or (actionplan-message plan)
+                         "mutation action set is invalid"))]
+    [(not (fenceresult-ok fence))
+     (error-response request served-version
+                     (or (fenceresult-code fence) :rpc-invalid-payload)
+                     false
+                     (or (fenceresult-message fence)
+                         "mutation fence is invalid"))]
+    [(not (fence-valid? (schema/store-of session) fence now-ms))
+     (error-response request served-version
+                     :rpc/lease-fence-mismatch false
+                     "lease fence is not current and unexpired")]
+    [:else
+     (commit-mutation!
+      session request
+      (prepare-actions
+       (if (plan-reads-live? (actionplan-actions plan))
+         (store/live-propositions (schema/store-of session))
+         empty-live)
+       (actionplan-actions plan))
+      served-version)]))
+
+(defn write-response!
+  [(session schema/Session)
+   (request t/RpcRequest)
+   (now-ms Int)
+   (served-version Int)]
+  t/RpcResponse
+  (let [(fields ValuesResult)
+        (read-record (t/rpc-request-payload-value request) :rpc/write 3)]
+    (if (not (valuesresult-ok fields))
+      (error-response request served-version :rpc-invalid-payload false
+                      (or (valuesresult-message fields)
+                          "write payload is malformed"))
+      (let [(values (Vec Any)) (valuesresult-values fields)
+            (parsed ActionResult)
+            (parse-action
+             (rpc-record :rpc/action
+                         [(t/rpcrequest-op request)
+                          (nth values 0) (nth values 1)])
+             0)
+            (action Action?) (actionresult-action parsed)
+            (fence FenceResult) (parse-fence (read-option (nth values 2)))]
+        (if (and (actionresult-ok parsed) action)
+          (let [(present-action Action) action
+                (actions (Vec Action)) [present-action]]
+            (execute-actions!
+             session request (->ActionPlan true actions nil nil)
+             fence now-ms served-version))
+          (error-response
+           request served-version
+           (or (actionresult-code parsed) :rpc-invalid-payload)
+           false
+           (or (actionresult-message parsed) "write action is invalid")))))))
+
+(defn batch-response!
+  [(session schema/Session)
+   (request t/RpcRequest)
+   (now-ms Int)
+   (served-version Int)]
+  t/RpcResponse
+  (let [(fields ValuesResult)
+        (read-record (t/rpc-request-payload-value request) :rpc/batch 2)]
+    (if (not (valuesresult-ok fields))
+      (error-response request served-version :rpc-invalid-payload false
+                      (or (valuesresult-message fields)
+                          "batch payload is malformed"))
+      (let [(values (Vec Any)) (valuesresult-values fields)
+            (action-values ValuesResult) (read-list (nth values 0))
+            (fence FenceResult) (parse-fence (read-option (nth values 1)))]
+        (if (not (valuesresult-ok action-values))
+          (error-response request served-version :rpc-invalid-payload false
+                          (or (valuesresult-message action-values)
+                              "batch action list is malformed"))
+          (execute-actions!
+           session request
+           (parse-actions (valuesresult-values action-values))
+           fence now-ms served-version))))))
+
+(defn mutation-request? [(operation Keyword)] Bool
+  (or (= :rpc/assert operation)
+      (or (= :rpc/retract operation) (= :rpc/batch operation))))
+
+(defn dispatch!
+  [(session schema/Session) (request t/RpcRequest) (now-ms Int)] t/RpcResponse
+  (let [root (schema/store-of session)
+        served-version (store/current-sequence root)
+        operation (t/rpcrequest-op request)]
+    (cond
+      [(not (= (store/space-id root) (t/rpcrequest-space request)))
+       (error-response request served-version :rpc/space-mismatch false
+                       "request SpaceId does not match the served store")]
+      [(not (expected-version-matches?
+             served-version (t/rpcrequest-expected-version request)))
+       (error-response request served-version :rpc/conflict true
+                       "expected-version does not match the served version")]
+      [:else
+       (let [(read-result query-ops/NativeReadResult)
+             (query-ops/dispatch-read! session request)]
+         (if (query-ops/nativereadresult-handled read-result)
+           (let [read-response (query-ops/nativereadresult-response read-result)]
+             (if read-response
+               (let [(present-response t/RpcResponse) read-response]
+                 present-response)
+               (error-response
+                request served-version :rpc/native-query-failed false
+                "native read route returned no response")))
+           (cond
+             [(t/rpcrequest-timeout-ms request)
+              (error-response request served-version :rpc/unexpected-timeout false
+                              "timeout-ms is supported only by rpc/query")]
+             [(and (mutation-request? operation) (t/rpcrequest-page request))
+              (error-response request served-version :rpc/unexpected-page false
+                              "mutation operations do not support paging")]
+             [(= :rpc/version operation)
+              (if (t/rpcrequest-page request)
+                (error-response request served-version :rpc/unexpected-page false
+                                "rpc/version does not support paging")
+                (unit-response request served-version :rpc/unit))]
+             [(= :rpc/status operation)
+              (if (t/rpcrequest-page request)
+                (error-response request served-version :rpc/unexpected-page false
+                                "rpc/status does not support paging")
+                (unit-response
+                 request served-version
+                 (rpc-status
+                  (count (store/live-propositions root))
+                  (query-ops/result-cache-stats session))))]
+             [(= :rpc/scan operation)
+              (scan-response! session request served-version)]
+             [(or (= :rpc/assert operation) (= :rpc/retract operation))
+              (write-response! session request now-ms served-version)]
+             [(= :rpc/batch operation)
+              (batch-response! session request now-ms served-version)]
+             [(lease/lease-operation? operation)
+              (lease/dispatch! session request now-ms)]
+             [:else
+              (error-response
+               request served-version :rpc/native-operation-unavailable false
+               "FRAMRPC operation has no typed native server route")])))])))

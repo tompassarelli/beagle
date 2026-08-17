@@ -1,6 +1,6 @@
 #lang beagle/clj
 
-(ns fram.sequence-probe)
+(ns store.sequence-probe)
 
 
 (defn first-value [(values (Vec Int))] Int

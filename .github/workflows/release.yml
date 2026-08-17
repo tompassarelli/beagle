@@ -29,8 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BEAGLE_HOME: ${{ github.workspace }}
-      FRAM_BEAGLE: ${{ github.workspace }}/bin/beagle
-      FRAM_SERVER_RUNTIME: jvm-dev
+      BEAGLE_STORE_BEAGLE: ${{ github.workspace }}/bin/beagle
+      BEAGLE_STORE_SERVER_RUNTIME: jvm-dev
     steps:
       - name: Check out the exact release candidate
         uses: actions/checkout@v5
@@ -86,7 +86,7 @@ jobs:
             bash scripts/check-release-notes.sh "$notes_tag"
           done
 
-      # The branch-core npm packages keep independent artifact versions; only
+      # The store npm packages keep independent artifact versions; only
       # Beagle's three product-version literals must match the release tag.
       - name: Verify release tag matches declared versions (tags only)
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
@@ -111,7 +111,7 @@ jobs:
           "$(dirname "$_BEAGLE_RACKET")/raco" pkg install --auto --link \
             beagle-lib/ beagle-test/ beagle/
           source "$BEAGLE_HOME/bin/_beagle-racket"
-          echo "FRAM_RACKET=$RACKET" >> "$GITHUB_ENV"
+          echo "BEAGLE_STORE_RACKET=$RACKET" >> "$GITHUB_ENV"
           echo "_BEAGLE_RACKET=$RACKET" >> "$GITHUB_ENV"
 
       - name: Install babashka
@@ -124,8 +124,8 @@ jobs:
       # contract this release is named for.
       - name: Prove branch revision identity
         run: |
-          bb -cp branch-core/out branch-core/tests/framref_codec_test.clj
-          bb -cp branch-core/out branch-core/tests/framlog_fork_test.clj
+          bb -cp store/out store/tests/framref_codec_test.clj
+          bb -cp store/out store/tests/framlog_fork_test.clj
 
       - name: Install Clojure CLI
         run: |
@@ -135,7 +135,7 @@ jobs:
           clojure --version
 
       - name: Warm JVM deps (cheshire) so the server boots fast
-        working-directory: branch-core
+        working-directory: store
         run: clojure -P
 
       - name: Install pinned Bun for the client release gate
@@ -148,13 +148,13 @@ jobs:
 
       - name: Prove the Bun release package and declaration closure
         run: |
-          bash branch-core/tests/bun_release_artifact_test.sh
-          bun test branch-core/tests/bun_package_types_test.mjs
+          bash store/tests/bun_release_artifact_test.sh
+          bun test store/tests/bun_package_types_test.mjs
 
       - name: Prove the Cloudflare release envelopes
         run: |
-          bash branch-core/tests/cloudflare_do_release_artifact_test.sh
-          bash branch-core/tests/cloudflare_wasm_release_artifact_test.sh
+          bash store/tests/cloudflare_do_release_artifact_test.sh
+          bash store/tests/cloudflare_wasm_release_artifact_test.sh
 
       - name: Install static musl compiler for the release receipt gate
         run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
@@ -162,7 +162,7 @@ jobs:
       - name: Prove the normalized native release is cross-workdir reproducible
         env:
           CC: musl-gcc
-        run: bash branch-core/tests/native_release_artifact_test.sh
+        run: bash store/tests/native_release_artifact_test.sh
 
   publish:
     name: Publish the tagged release
@@ -171,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BEAGLE_HOME: ${{ github.workspace }}
-      FRAM_BEAGLE: ${{ github.workspace }}/bin/beagle
+      BEAGLE_STORE_BEAGLE: ${{ github.workspace }}/bin/beagle
     steps:
       - name: Check out the requested release tag
         uses: actions/checkout@v5
@@ -218,7 +218,7 @@ jobs:
           "$(dirname "$_BEAGLE_RACKET")/raco" pkg install --auto --link \
             beagle-lib/ beagle-test/ beagle/
           source "$BEAGLE_HOME/bin/_beagle-racket"
-          echo "FRAM_RACKET=$RACKET" >> "$GITHUB_ENV"
+          echo "BEAGLE_STORE_RACKET=$RACKET" >> "$GITHUB_ENV"
           echo "_BEAGLE_RACKET=$RACKET" >> "$GITHUB_ENV"
 
       - name: Install babashka
@@ -252,10 +252,10 @@ jobs:
         run: |
           _BEAGLE_RACKET="$(which racket)" \
             self-host/native/verify-native.sh \
-              branch-core/src/fram/*.bclj \
+              store/src/store/*.bclj \
               self-host/fixtures/lowering-temps.bclj
 
-      - name: Resolve and authorize the locked Fram development shell
+      - name: Resolve and authorize the locked Beagle Store development shell
         run: |
           set -euo pipefail
           direnv_root="$(nix build --no-link --print-out-paths \
@@ -277,8 +277,8 @@ jobs:
           # workspace unsuitable for packagers whose clean-tree check includes
           # untracked paths. Both release inputs therefore come from fresh Git
           # roots, at different path depths, with the exact tag object retained.
-          source_a="$RUNNER_TEMP/fram-release-source-a"
-          source_b="$RUNNER_TEMP/different/depth/fram-release-source-b"
+          source_a="$RUNNER_TEMP/store-release-source-a"
+          source_b="$RUNNER_TEMP/different/depth/store-release-source-b"
           mkdir -p "$(dirname "$source_b")"
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$source_a"
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$source_b"
@@ -290,8 +290,8 @@ jobs:
             [[ "$(git -C "$repo_root" rev-parse "refs/tags/$RELEASE_TAG")" == \
               "$RELEASE_TAG_OBJECT" ]]
           done
-          echo "first=$source_a/branch-core" >> "$GITHUB_OUTPUT"
-          echo "second=$source_b/branch-core" >> "$GITHUB_OUTPUT"
+          echo "first=$source_a/store" >> "$GITHUB_OUTPUT"
+          echo "second=$source_b/store" >> "$GITHUB_OUTPUT"
 
       - name: Build twice and seal the reproducible Bun client package
         id: bun_client
@@ -302,9 +302,9 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t package_files < <(
-            branch-core/scripts/package-bun-release.sh \
-              --source-root "$GITHUB_WORKSPACE/branch-core" \
-              --output "$RUNNER_TEMP/fram-bun-release" \
+            store/scripts/package-bun-release.sh \
+              --source-root "$GITHUB_WORKSPACE/store" \
+              --output "$RUNNER_TEMP/store-bun-release" \
               --version "$RELEASE_TAG"
           )
           [[ "${#package_files[@]}" == 2 ]] || {
@@ -312,13 +312,13 @@ jobs:
             exit 1
           }
 
-          second_source="$RUNNER_TEMP/fram-bun-release-source-b"
+          second_source="$RUNNER_TEMP/store-bun-release-source-b"
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$second_source"
           git -C "$second_source" checkout --quiet --detach "$RELEASE_COMMIT"
           mapfile -t second_package_files < <(
-            "$second_source/branch-core/scripts/package-bun-release.sh" \
-              --source-root "$second_source/branch-core" \
-              --output "$RUNNER_TEMP/fram-bun-release-b" \
+            "$second_source/store/scripts/package-bun-release.sh" \
+              --source-root "$second_source/store" \
+              --output "$RUNNER_TEMP/store-bun-release-b" \
               --version "$RELEASE_TAG"
           )
           [[ "${#second_package_files[@]}" == 2 ]] || {
@@ -357,13 +357,13 @@ jobs:
           mapfile -t package_files < <(
             "$SOURCE_A/scripts/package-cloudflare-do-release.sh" \
               --source-root "$SOURCE_A" \
-              --output "$RUNNER_TEMP/fram-cloudflare-do-release" \
+              --output "$RUNNER_TEMP/store-cloudflare-do-release" \
               --version "$RELEASE_TAG"
           )
           mapfile -t second_package_files < <(
             "$SOURCE_B/scripts/package-cloudflare-do-release.sh" \
               --source-root "$SOURCE_B" \
-              --output "$RUNNER_TEMP/fram-cloudflare-do-release-b" \
+              --output "$RUNNER_TEMP/store-cloudflare-do-release-b" \
               --version "$RELEASE_TAG"
           )
           [[ "${#package_files[@]}" == 2 && \
@@ -389,10 +389,10 @@ jobs:
         id: cloudflare_wasm_cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/fram-cloudflare-wasm-cache
-          key: fram-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
+          path: ${{ runner.temp }}/store-cloudflare-wasm-cache
+          key: store-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
           restore-keys: |
-            fram-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-
+            store-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-
 
       - name: Build once, verify source identity, and seal the Cloudflare Wasm release
         id: cloudflare_wasm
@@ -415,12 +415,12 @@ jobs:
               echo "$source_root/native/core_closure_sources.txt is empty" >&2
               return 1
             }
-            FRAM_NATIVE_CACHE="$cache_root" \
-              "$source_root/bin/fram-native-build" \
+            BEAGLE_STORE_NATIVE_CACHE="$cache_root" \
+              "$source_root/bin/beagle-store-native-build" \
                 --host wasm-embed --abi wasm32 "${sources[@]}"
           }
 
-          cache="$RUNNER_TEMP/fram-cloudflare-wasm-cache"
+          cache="$RUNNER_TEMP/store-cloudflare-wasm-cache"
           artifact_a="$(build_wasm "$SOURCE_A" "$cache")"
           artifact_b="$(build_wasm "$SOURCE_B" "$cache")"
           [[ "$artifact_b" == "$artifact_a" ]] || {
@@ -431,13 +431,13 @@ jobs:
           mapfile -t release_files < <(
             "$SOURCE_A/scripts/package-cloudflare-wasm-release.sh" \
               --source-root "$SOURCE_A" --artifact "$artifact_a" \
-              --output "$RUNNER_TEMP/fram-cloudflare-wasm-release" \
+              --output "$RUNNER_TEMP/store-cloudflare-wasm-release" \
               --version "$RELEASE_TAG"
           )
           mapfile -t second_release_files < <(
             "$SOURCE_B/scripts/package-cloudflare-wasm-release.sh" \
               --source-root "$SOURCE_B" --artifact "$artifact_b" \
-              --output "$RUNNER_TEMP/fram-cloudflare-wasm-release-b" \
+              --output "$RUNNER_TEMP/store-cloudflare-wasm-release-b" \
               --version "$RELEASE_TAG"
           )
           [[ "${#release_files[@]}" == 2 && \
@@ -465,17 +465,17 @@ jobs:
         if: success() && steps.cloudflare_wasm_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ runner.temp }}/fram-cloudflare-wasm-cache
-          key: fram-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
+          path: ${{ runner.temp }}/store-cloudflare-wasm-cache
+          key: store-cloudflare-wasm-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
 
       - name: Restore content-addressed native build cache
         id: native_cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/fram-native-release-cache
-          key: fram-native-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
+          path: ${{ runner.temp }}/store-native-release-cache
+          key: store-native-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
           restore-keys: |
-            fram-native-${{ runner.os }}-${{ github.sha }}-
+            store-native-${{ runner.os }}-${{ github.sha }}-
 
       - name: Build once, verify source identity, and seal the native release archive
         id: native
@@ -494,19 +494,19 @@ jobs:
               echo "$source_root/native/core_closure_sources.txt is empty" >&2
               return 1
             }
-            FRAM_NATIVE_CC="$(command -v musl-gcc)" \
-              FRAM_NATIVE_STATIC=1 \
-              FRAM_NATIVE_CACHE="$cache_root" \
-              "$source_root/bin/fram-native-build" --host server "${sources[@]}"
+            BEAGLE_STORE_NATIVE_CC="$(command -v musl-gcc)" \
+              BEAGLE_STORE_NATIVE_STATIC=1 \
+              BEAGLE_STORE_NATIVE_CACHE="$cache_root" \
+              "$source_root/bin/beagle-store-native-build" --host server "${sources[@]}"
           }
 
-          cache="$RUNNER_TEMP/fram-native-release-cache"
-          artifact="$(build_native "$GITHUB_WORKSPACE/branch-core" "$cache")"
+          cache="$RUNNER_TEMP/store-native-release-cache"
+          artifact="$(build_native "$GITHUB_WORKSPACE/store" "$cache")"
           mapfile -t release_files < <(
-            branch-core/scripts/package-native-release.sh \
-              --source-root "$GITHUB_WORKSPACE/branch-core" \
+            store/scripts/package-native-release.sh \
+              --source-root "$GITHUB_WORKSPACE/store" \
               --artifact "$artifact" \
-              --output "$RUNNER_TEMP/fram-native-release" \
+              --output "$RUNNER_TEMP/store-native-release" \
               --version "$RELEASE_TAG" \
               --target x86_64-linux-musl
           )
@@ -515,19 +515,19 @@ jobs:
             exit 1
           }
 
-          second_source="$RUNNER_TEMP/fram-native-release-source-b"
+          second_source="$RUNNER_TEMP/store-native-release-source-b"
           git clone --quiet --no-local "$GITHUB_WORKSPACE" "$second_source"
           git -C "$second_source" checkout --quiet --detach "$RELEASE_COMMIT"
-          second_artifact="$(build_native "$second_source/branch-core" "$cache")"
+          second_artifact="$(build_native "$second_source/store" "$cache")"
           [[ "$second_artifact" == "$artifact" ]] || {
             echo "native cache identity differs across source workdirs" >&2
             exit 1
           }
           mapfile -t second_release_files < <(
-            "$second_source/branch-core/scripts/package-native-release.sh" \
-              --source-root "$second_source/branch-core" \
+            "$second_source/store/scripts/package-native-release.sh" \
+              --source-root "$second_source/store" \
               --artifact "$second_artifact" \
-              --output "$RUNNER_TEMP/fram-native-release-b" \
+              --output "$RUNNER_TEMP/store-native-release-b" \
               --version "$RELEASE_TAG" \
               --target x86_64-linux-musl
           )
@@ -554,8 +554,8 @@ jobs:
         if: success() && steps.native_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ runner.temp }}/fram-native-release-cache
-          key: fram-native-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
+          path: ${{ runner.temp }}/store-native-release-cache
+          key: store-native-${{ runner.os }}-${{ github.sha }}-${{ steps.release.outputs.commit }}
 
       - name: Revalidate and install the shipped Bun package before upload
         env:
@@ -570,7 +570,7 @@ jobs:
             echo "Bun package receipt must contain exactly ten lines" >&2
             exit 1
           }
-          expected_keys=$'fram-bun-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\npackage-name\npackage-version\npackage-json-sha256\narchive-name\narchive-sha256'
+          expected_keys=$'store-bun-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\npackage-name\npackage-version\npackage-json-sha256\narchive-name\narchive-sha256'
           observed_keys="$(awk 'NR == 1 { print; next } { print $1 }' "$PACKAGE_RECEIPT")"
           [[ "$observed_keys" == "$expected_keys" ]] || {
             echo "Bun package receipt schema is not closed or ordered" >&2
@@ -581,11 +581,11 @@ jobs:
             awk -v key="$key" '$1 == key && NF == 2 { print $2 }' "$PACKAGE_RECEIPT"
           }
           package_version="$(receipt_value package-version)"
-          expected_archive="tompassarelli-framrpc-${package_version}.tgz"
+          expected_archive="tompassarelli-beagle-store-rpc-${package_version}.tgz"
           [[ "$(receipt_value source-commit)" == "$RELEASE_COMMIT" ]]
           [[ "$(receipt_value release-tag)" == "$RELEASE_TAG" ]]
           [[ "$(receipt_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
-          [[ "$(receipt_value package-name)" == @tompassarelli/framrpc ]]
+          [[ "$(receipt_value package-name)" == @tompassarelli/beagle-store-rpc ]]
           [[ "$(receipt_value archive-name)" == "$expected_archive" ]]
           [[ "$(basename "$PACKAGE_ARCHIVE")" == "$expected_archive" ]]
           [[ "$(sha256sum "$PACKAGE_ARCHIVE" | awk '{print $1}')" == \
@@ -594,7 +594,7 @@ jobs:
             exit 1
           }
 
-          verify_root="$RUNNER_TEMP/fram-bun-release-upload-verify"
+          verify_root="$RUNNER_TEMP/store-bun-release-upload-verify"
           mkdir -p "$verify_root"
           tar -xzf "$PACKAGE_ARCHIVE" -C "$verify_root"
           [[ "$(sha256sum "$verify_root/package/package.json" | awk '{print $1}')" == \
@@ -603,7 +603,7 @@ jobs:
             exit 1
           }
 
-          consumer="$RUNNER_TEMP/fram-bun-release-consumer"
+          consumer="$RUNNER_TEMP/store-bun-release-consumer"
           mkdir -p "$consumer/empty-cache"
           printf '%s\n' \
             '{"name":"framrpc-release-consumer","private":true,"type":"module"}' \
@@ -615,12 +615,12 @@ jobs:
               "$PACKAGE_ARCHIVE"
             bun -e '
               import assert from "node:assert/strict";
-              import { framClient } from "@tompassarelli/framrpc";
-              import { schemaClient } from "@tompassarelli/framrpc/schema";
-              const client = framClient({ space: "release-package-smoke" });
+              import { storeClient } from "@tompassarelli/beagle-store-rpc";
+              import { schemaClient } from "@tompassarelli/beagle-store-rpc/schema";
+              const client = storeClient({ space: "release-package-smoke" });
               assert.equal("raw" in client, false);
               assert.equal("checkpoint" in client, false);
-              assert.equal("framNativeCheckpoint" in client, false);
+              assert.equal("storeNativeCheckpoint" in client, false);
               assert.equal(typeof schemaClient, "function");
             '
           )
@@ -640,7 +640,7 @@ jobs:
             echo "Cloudflare adapter receipt must contain exactly ten lines" >&2
             exit 1
           }
-          adapter_keys=$'fram-cloudflare-do-release-receipt/v1\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\npackage-name\npackage-version\npackage-json-sha256\narchive-name\narchive-sha256'
+          adapter_keys=$'store-cloudflare-do-release-receipt/v1\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\npackage-name\npackage-version\npackage-json-sha256\narchive-name\narchive-sha256'
           [[ "$(awk 'NR == 1 { print; next } { print $1 }' "$ADAPTER_RECEIPT")" == \
             "$adapter_keys" ]] || {
             echo "Cloudflare adapter receipt schema is not closed or ordered" >&2
@@ -654,9 +654,9 @@ jobs:
           [[ "$(adapter_value source-commit)" == "$RELEASE_COMMIT" ]]
           [[ "$(adapter_value release-tag)" == "$RELEASE_TAG" ]]
           [[ "$(adapter_value release-tag-object)" == "$RELEASE_TAG_OBJECT" ]]
-          [[ "$(adapter_value package-name)" == @tompassarelli/fram-cloudflare-do ]]
+          [[ "$(adapter_value package-name)" == @tompassarelli/store-cloudflare-do ]]
           [[ "$(adapter_value package-version)" == 0.3.0 ]]
-          adapter_name="tompassarelli-fram-cloudflare-do-0.3.0.tgz"
+          adapter_name="tompassarelli-store-cloudflare-do-0.3.0.tgz"
           [[ "$(adapter_value archive-name)" == "$adapter_name" ]]
           [[ "$(basename "$ADAPTER_ARCHIVE")" == "$adapter_name" ]]
           [[ "$(sha256sum "$ADAPTER_ARCHIVE" | awk '{print $1}')" == \
@@ -672,7 +672,7 @@ jobs:
           tar --numeric-owner -tvzf "$ADAPTER_ARCHIVE" |
             awk '$1 != "-rw-r--r--" { exit 1 }'
 
-          adapter_verify="$RUNNER_TEMP/fram-cloudflare-do-upload-verify"
+          adapter_verify="$RUNNER_TEMP/store-cloudflare-do-upload-verify"
           mkdir -p "$adapter_verify"
           tar -xzf "$ADAPTER_ARCHIVE" -C "$adapter_verify"
           [[ "$(sha256sum "$adapter_verify/package/package.json" | awk '{print $1}')" == \
@@ -685,7 +685,7 @@ jobs:
             echo "Cloudflare Wasm receipt must contain exactly twenty lines" >&2
             exit 1
           }
-          wasm_keys=$'fram-cloudflare-wasm-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\ntarget\nnative-build-closure-sha256\nbeagle-revision\nnative-provenance-sha256\nwasm-path\nwasm-bytes\nwasm-sha256\nseams-path\nseams-sha256\nunicode-license-sha256\nwasi-toolchain-licenses-sha256\nffc-license-sha256\nffc-provenance-sha256\narchive-name\narchive-sha256'
+          wasm_keys=$'store-cloudflare-wasm-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\ntarget\nnative-build-closure-sha256\nbeagle-revision\nnative-provenance-sha256\nwasm-path\nwasm-bytes\nwasm-sha256\nseams-path\nseams-sha256\nunicode-license-sha256\nwasi-toolchain-licenses-sha256\nffc-license-sha256\nffc-provenance-sha256\narchive-name\narchive-sha256'
           [[ "$(awk 'NR == 1 { print; next } { print $1 }' "$WASM_RECEIPT")" == \
             "$wasm_keys" ]] || {
             echo "Cloudflare Wasm receipt schema is not closed or ordered" >&2
@@ -695,7 +695,7 @@ jobs:
             local key="$1"
             awk -v key="$key" '$1 == key && NF == 2 { print $2 }' "$WASM_RECEIPT"
           }
-          release_root="fram-$RELEASE_TAG-wasm32-wasm-embed"
+          release_root="store-$RELEASE_TAG-wasm32-wasm-embed"
           wasm_name="$release_root.tar.gz"
           [[ "$(wasm_value source-commit)" == "$RELEASE_COMMIT" ]]
           [[ "$(wasm_value release-tag)" == "$RELEASE_TAG" ]]
@@ -703,7 +703,7 @@ jobs:
           [[ "$(wasm_value target)" == wasm32-wasm-embed ]]
           [[ "$(wasm_value beagle-revision)" == "$RELEASE_COMMIT" ]]
           [[ "$(wasm_value native-build-closure-sha256)" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$(wasm_value wasm-path)" == "$release_root/lib/libfram.wasm" ]]
+          [[ "$(wasm_value wasm-path)" == "$release_root/lib/libstore.wasm" ]]
           [[ "$(wasm_value seams-path)" == "$release_root/wasm-embed.seams" ]]
           [[ "$(wasm_value archive-name)" == "$wasm_name" ]]
           [[ "$(basename "$WASM_ARCHIVE")" == "$wasm_name" ]]
@@ -724,7 +724,7 @@ jobs:
           $release_root/THIRD-PARTY/ffc/LICENSE-MIT
           $release_root/THIRD-PARTY/ffc/PROVENANCE
           $release_root/lib/
-          $release_root/lib/libfram.wasm
+          $release_root/lib/libstore.wasm
           $release_root/native-provenance.manifest
           $release_root/wasm-embed.seams"
           [[ "$(tar -tzf "$WASM_ARCHIVE")" == "$wasm_entries" ]] || {
@@ -734,11 +734,11 @@ jobs:
           tar -tvzf "$WASM_ARCHIVE" |
             awk 'substr($0, 1, 1) != "-" && substr($0, 1, 1) != "d" { exit 1 }'
 
-          wasm_verify="$RUNNER_TEMP/fram-cloudflare-wasm-upload-verify"
+          wasm_verify="$RUNNER_TEMP/store-cloudflare-wasm-upload-verify"
           mkdir -p "$wasm_verify"
           tar -xzf "$WASM_ARCHIVE" -C "$wasm_verify"
           shipped_root="$wasm_verify/$release_root"
-          shipped_wasm="$shipped_root/lib/libfram.wasm"
+          shipped_wasm="$shipped_root/lib/libstore.wasm"
           [[ "$(wc -c < "$shipped_wasm" | tr -d '[:space:]')" == \
             "$(wasm_value wasm-bytes)" ]]
           [[ "$(sha256sum "$shipped_wasm" | awk '{print $1}')" == \
@@ -756,10 +756,10 @@ jobs:
           [[ "$(sha256sum "$shipped_root/THIRD-PARTY/ffc/PROVENANCE" | awk '{print $1}')" == \
             "$(wasm_value ffc-provenance-sha256)" ]]
 
-          consumer="$RUNNER_TEMP/fram-cloudflare-release-consumer"
+          consumer="$RUNNER_TEMP/store-cloudflare-release-consumer"
           mkdir -p "$consumer/empty-cache"
           printf '%s\n' \
-            '{"name":"fram-cloudflare-release-consumer","private":true,"type":"module"}' \
+            '{"name":"store-cloudflare-release-consumer","private":true,"type":"module"}' \
             > "$consumer/package.json"
           (
             cd "$consumer"
@@ -769,14 +769,14 @@ jobs:
             bun -e '
               import assert from "node:assert/strict";
               import {
-                FramDurableObjectBase,
-                framAdminEntrypoint,
-                framDataPlaneEntrypoint,
-              } from "@tompassarelli/fram-cloudflare-do";
+                StoreDurableObjectBase,
+                storeAdminEntrypoint,
+                storeDataPlaneEntrypoint,
+              } from "@tompassarelli/store-cloudflare-do";
               import {
                 assertSeams,
                 seamImports,
-              } from "@tompassarelli/fram-cloudflare-do/seams";
+              } from "@tompassarelli/store-cloudflare-do/seams";
               const wasmPath = Bun.argv.at(-1);
               const module = await WebAssembly.compile(
                 await Bun.file(wasmPath).arrayBuffer(),
@@ -787,9 +787,9 @@ jobs:
                 imports[entry.module][entry.name] = () => 0;
               }
               assertSeams(module, imports);
-              assert.equal(typeof FramDurableObjectBase, "function");
-              assert.equal(typeof framDataPlaneEntrypoint, "function");
-              assert.equal(typeof framAdminEntrypoint, "function");
+              assert.equal(typeof StoreDurableObjectBase, "function");
+              assert.equal(typeof storeDataPlaneEntrypoint, "function");
+              assert.equal(typeof storeAdminEntrypoint, "function");
             ' "$shipped_wasm"
           )
 
@@ -802,14 +802,14 @@ jobs:
           RELEASE_RECEIPT: ${{ steps.native.outputs.receipt }}
         run: |
           set -euo pipefail
-          expected_root="fram-${RELEASE_TAG}-x86_64-linux-musl"
-          expected_executable="$expected_root/bin/fram-server-native"
+          expected_root="store-${RELEASE_TAG}-x86_64-linux-musl"
+          expected_executable="$expected_root/bin/beagle-store-server-native"
           expected_archive="$expected_root.tar.gz"
           [[ "$(wc -l < "$RELEASE_RECEIPT")" == 12 ]] || {
             echo "native release receipt must contain exactly twelve lines" >&2
             exit 1
           }
-          expected_keys=$'fram-native-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\ntarget\nnative-build-closure-sha256\nbeagle-revision\nexecutable-path\nexecutable-sha256\narchive-name\narchive-sha256'
+          expected_keys=$'store-native-release-receipt/v2\nsource-commit\nsource-date-epoch\nrelease-tag\nrelease-tag-object\ntarget\nnative-build-closure-sha256\nbeagle-revision\nexecutable-path\nexecutable-sha256\narchive-name\narchive-sha256'
           observed_keys="$(awk 'NR == 1 { print; next } { print $1 }' "$RELEASE_RECEIPT")"
           [[ "$observed_keys" == "$expected_keys" ]] || {
             echo "native release receipt schema is not closed or ordered" >&2
@@ -834,7 +834,7 @@ jobs:
             exit 1
           }
 
-          verify_root="$RUNNER_TEMP/fram-native-release-upload-verify"
+          verify_root="$RUNNER_TEMP/store-native-release-upload-verify"
           mkdir -p "$verify_root"
           tar -xzf "$RELEASE_ARCHIVE" -C "$verify_root"
           shipped_server="$verify_root/$expected_executable"
@@ -854,9 +854,9 @@ jobs:
             console.log(server.port);
             server.stop(true);
           ')"
-          smoke_log="$RUNNER_TEMP/fram-native-release-smoke.framlog"
-          smoke_output="$RUNNER_TEMP/fram-native-release-smoke.stderr"
-          FRAM_BIND=127.0.0.1 "$shipped_server" \
+          smoke_log="$RUNNER_TEMP/store-native-release-smoke.framlog"
+          smoke_output="$RUNNER_TEMP/store-native-release-smoke.stderr"
+          BEAGLE_STORE_BIND=127.0.0.1 "$shipped_server" \
             serve "$port" "$smoke_log" release-smoke \
             >"$smoke_output" 2>&1 &
           smoke_pid=$!
@@ -871,8 +871,8 @@ jobs:
           for _attempt in $(seq 1 100); do
             if bun -e '
               const [clientPath, portText] = Bun.argv.slice(-2);
-              const { framClient } = await import(Bun.pathToFileURL(clientPath).href);
-              const response = await framClient({
+              const { storeClient } = await import(Bun.pathToFileURL(clientPath).href);
+              const response = await storeClient({
                 host: "127.0.0.1",
                 port: Number(portText),
                 space: "release-smoke",
@@ -881,7 +881,7 @@ jobs:
               if (response.operation !== "rpc/version" || response.servedVersion !== 0n) {
                 throw new Error("unexpected rpc/version response");
               }
-            ' "$GITHUB_WORKSPACE/branch-core/clients/bun/framrpc.mjs" "$port" \
+            ' "$GITHUB_WORKSPACE/store/clients/bun/store-rpc.mjs" "$port" \
                 >/dev/null 2>&1; then
               smoke_ok=1
               break

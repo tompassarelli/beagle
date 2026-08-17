@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # beagle-cascade: cross-module impact propagation and predictive blame — GRAPH-NATIVE.
 #
-# The call graph is derived from the Fram occurrence store (via beagle-callgraph):
+# The call graph is derived from the Beagle Store occurrence store (via beagle-callgraph):
 # every call binds the defn in its OWN module (scope-correct), so same-named
 # functions across modules never collide. This replaces the old regex call-graph
 # scraping, which was structurally incapable of telling two `helper`s apart — it
 # matched the bare text and merged them, corrupting blast radius across modules.
 #
 # Given a set of modified functions, predicts which assertions will fail by walking
-# the call graph transitively (closure computed by Fram Datalog). Also identifies
+# the call graph transitively (closure computed by Beagle Store Datalog). Also identifies
 # cascade patterns where fixing one root bug eliminates multiple downstream failures.
 #
 # Usage:
@@ -46,7 +46,7 @@ WORK_DIR="$(mktemp -d /tmp/beagle-cascade.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 # ---------------------------------------------------------------------------
-# Phase 1: Build the call graph — from the Fram occurrence store, not text.
+# Phase 1: Build the call graph — from the Beagle Store occurrence store, not text.
 # ---------------------------------------------------------------------------
 echo "─── Phase 1: Building call graph (graph-native, scope-correct) ───" >&2
 GRAPH_JSON="$WORK_DIR/callgraph.json"
@@ -65,9 +65,9 @@ from_failures    = sys.argv[6] == 'true'
 graph_path       = sys.argv[7]
 
 # ---------------------------------------------------------------------------
-# The call graph, scope-correct, straight off the Fram occurrence store.
+# The call graph, scope-correct, straight off the Beagle Store occurrence store.
 #   defns: [{key, file, module, name}]          edges: [[caller_key, callee_key]]
-#   blast: {callee_key: [transitive caller keys]}   (closure by Fram Datalog)
+#   blast: {callee_key: [transitive caller keys]}   (closure by Beagle Store Datalog)
 # ---------------------------------------------------------------------------
 with open(graph_path) as f:
     G = json.load(f)
@@ -94,7 +94,7 @@ def label_of(key):
     return f"{m['module']}/{m['name']}" if m else key
 
 def impact(key):
-    """Transitive callers (blast radius) — already closed by Fram Datalog."""
+    """Transitive callers (blast radius) — already closed by Beagle Store Datalog."""
     return set(blast.get(key, []))
 
 modules = sorted({d['module'] for d in defns})

@@ -1,0 +1,7 @@
+#lang beagle/clj
+(ns store.main
+  "Fallback help for commands not routed by bin/beagle store."
+  (:gen-class))
+
+(defn -main [& _] Nil
+  (println "store usage: validate | tell <subject> <slot> <value> | retract <subject> <slot> <value> | query <edn> | selfcheck --deep"))

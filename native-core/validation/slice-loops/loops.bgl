@@ -1,7 +1,7 @@
 #lang beagle
 ;; Loop/recur on the operands the v0 native subset carries without the
 ;; arithmetic arm: every accumulator is a Bool, a record, or an Int carried
-;; across the back edge unchanged. The counted fram shapes live in counted/.
+;; across the back edge unchanged. The counted store shapes live in counted/.
 (ns native.loops)
 
 (defrecord Tally [(flag Bool) (mark Int)])

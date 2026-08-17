@@ -78,9 +78,9 @@
      (shape-markers ("for m in"))))))
 
  (consumer
-  (name "fram")
-  (repo-env "FRAM_REPO")
-  (repo-default "~/code/fram/main")
+  (name "store")
+  (repo-env "BEAGLE_STORE_REPO")
+  (repo-default "~/code/store/main")
   (target "clj")
   (enumerators
    ((enumerator

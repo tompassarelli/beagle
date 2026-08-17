@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# safe-rename: a rename GATED by a type ORACLE (beagle check).
+#
+#   bin/safe-rename <old> <new> <target-substr> <src.bjs> ...
+#
+# HONEST SCOPE — read this before trusting the green:
+#   This DELEGATES type-safety to `beagle check`. The claim graph does NOT
+#   understand types; types are transported, not understood. The server
+#   *consults* a type oracle and refuses what the oracle DEFINITIVELY rejects.
+#   Its guarantee is therefore PARTIAL and exactly as strong as beagle check:
+#     - It refuses an edit that introduces a NEW diagnostic.
+#     - It ADMITS any edit beagle check does not flag — including ill-typed ones
+#       beagle is too lenient (notes-not-errors) or too partial to catch.
+#     - If the oracle is UNAVAILABLE, it FAILS CLOSED (refuses the unverified edit)
+#       rather than admit something it could not check.
+#   This is "refuses what check definitively rejects", NOT "refuses ill-typed
+#   refactors". The hole is wherever beagle check's hole is.
+set -o pipefail
+BEAGLE="${BEAGLE:-$HOME/code/beagle/main}"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+BEAGLE_STORE="${BEAGLE_STORE:-$(cd "$HERE/.." && pwd)}"
+old="$1"; new="$2"; target="$3"; shift 3
+RR="$BEAGLE/bin/beagle-roundtrip"
+
+# 0. ORACLE AVAILABILITY — fail closed (the load-bearing property: a partial oracle
+# that is *absent* must REFUSE, not silently admit an unverified edit).
+if [[ ! -x "$BEAGLE/bin/beagle" ]]; then
+    echo "REFUSED — type oracle (beagle check) UNAVAILABLE. Fail-closed: no unverified edit applied." >&2
+    exit 4
+fi
+
+# a checkable file = the original's #lang line + the projection minus its define-target
+# (the projector emits (define-target js); beagle check wants the #lang module header).
+LANG_LINE="$(head -1 "$1" 2>/dev/null)"; [[ "$LANG_LINE" == \#lang* ]] || LANG_LINE='#lang beagle/js'
+checkable(){ { echo "$LANG_LINE"; "$RR" --render "$1" 2>/dev/null | grep -v '^(define-target'; } > "$2"; }
+diags(){ "$BEAGLE/bin/beagle" check "$1" 2>&1 | grep -E 'note:|error|expected' | grep -vc '\[lint\]'; }
+
+edns=(); for f in "$@"; do e="/tmp/sr-$(basename "$f").edn"; "$RR" --emit-edn "$f" > "$e" 2>/dev/null; edns+=("$e"); done
+
+# 1. BASELINE = check(render(no-rename)) — isolates the edit from projection normalization.
+bb -cp "$BEAGLE_STORE/out" "$BEAGLE_STORE/out/resolve.clj" resolve "${edns[@]}" >/dev/null 2>&1
+declare -A base
+for f in "$@"; do
+    checkable "/tmp/resolved-$(basename "$f").edn" "/tmp/sr-base-$(basename "$f").bjs"
+    base["$f"]=$(diags "/tmp/sr-base-$(basename "$f").bjs")
+done
+
+# 2. AFTER = check(render(rename)). (structural collision already refuses inside resolve.clj)
+out=$(bb -cp "$BEAGLE_STORE/out" "$BEAGLE_STORE/out/resolve.clj" rename "$old" "$new" "$target" "${edns[@]}" 2>&1)
+if echo "$out" | grep -q REJECTED; then echo "$out" >&2; exit 3; fi
+
+worse=0
+for f in "$@"; do
+    checkable "/tmp/resolved-$(basename "$f").edn" "/tmp/sr-after-$(basename "$f").bjs"
+    n=$(diags "/tmp/sr-after-$(basename "$f").bjs")
+    if (( n > ${base["$f"]} )); then
+        echo "  $(basename "$f"): type-oracle diagnostics ${base["$f"]} -> $n  (NEW)" >&2
+        "$BEAGLE/bin/beagle" check "/tmp/sr-after-$(basename "$f").bjs" 2>&1 | grep -E 'note:|error|expected' | grep -v '\[lint\]' | head -2 | sed 's/^/      /' >&2
+        worse=1
+    fi
+done
+
+if (( worse )); then
+    echo "REFUSED — projection introduces NEW type-oracle diagnostics; edit not applied." >&2
+    exit 3
+else
+    echo "ACCEPTED — type oracle reports no new diagnostics (consulted beagle check on every target)." >&2
+    for f in "$@"; do echo "  projected: /tmp/sr-after-$(basename "$f").bjs"; done >&2
+fi

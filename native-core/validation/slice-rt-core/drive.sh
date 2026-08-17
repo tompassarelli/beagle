@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Accounts for every fram.rt-core function at the native projection boundary.
-# The real Fram source stays authoritative: 24 supported functions must lower,
+# Accounts for every store.rt-core function at the native projection boundary.
+# The real Beagle Store source stays authoritative: 24 supported functions must lower,
 # while server-status-response remains the one named semantic frontier. A
 # separate Beagle-owned fixture proves the supported C17 execution path without
-# pretending to be a complete Fram module.
+# pretending to be a complete Beagle Store module.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 artifacts="${NATIVE_SLICE_ARTIFACTS:-}"
 native_repo="${NATIVE_RT_CORE_NATIVE_REPO:-$repo}"
-fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
-source_file="$fram_checkout/src/fram/rt_core.bgl"
+store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
+source_file="$store_checkout/src/store/rt_core.bgl"
 supported_probe="$here/supported_probe.bgl"
-managed_out="$fram_checkout/out"
+managed_out="$store_checkout/out"
 native_shim="$native_repo/native-core/shim"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-rt-core.XXXXXX")"
 generated="$scratch/generated"
@@ -31,8 +31,8 @@ for command in awk bb cut gcc jq pkg-config rg sed sha256sum sort; do
 done
 [[ -f "$source_file" ]] || die "source is unavailable: $source_file"
 [[ -f "$supported_probe" ]] || die "supported probe is unavailable: $supported_probe"
-[[ -f "$managed_out/fram/rt_core.clj" ]] \
-  || die "managed projection is unavailable: $managed_out/fram/rt_core.clj"
+[[ -f "$managed_out/store/rt_core.clj" ]] \
+  || die "managed projection is unavailable: $managed_out/store/rt_core.clj"
 [[ -d "$native_repo/native-core/src/native" ]] \
   || die "native source root is unavailable: $native_repo/native-core/src/native"
 [[ -f "$native_shim/native_shim.c" &&

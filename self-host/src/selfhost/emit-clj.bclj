@@ -1622,10 +1622,10 @@
            "value")
          "(instance? provider.models.Account value) (let [id (:id value)] id)")))
 
-  (expect! "require: alias" (= (emit-require {"ns" "fram.kernel" "alias" "k" "refer" nil})
-                              "[fram.kernel :as k]"))
+  (expect! "require: alias" (= (emit-require {"ns" "store.kernel" "alias" "k" "refer" nil})
+                              "[store.kernel :as k]"))
   (expect! "require: default alias"
-    (= (emit-require {"ns" "fram.rt" "alias" nil "refer" nil}) "[fram.rt :as rt]"))
+    (= (emit-require {"ns" "store.rt" "alias" nil "refer" nil}) "[store.rt :as rt]"))
   (expect! "require: refer"
     (= (emit-require {"ns" "x.y" "alias" nil "refer" ["a" "b"]}) "[x.y :refer [a b]]"))
   (expect! "import: qualified class"

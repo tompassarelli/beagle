@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Drive fram:src/fram/types.bgl function BODIES through the native pipeline:
+# Drive store:src/store/types.bgl function BODIES through the native pipeline:
 #   beagle-ast -> source facts (signatures + bodies) -> frozen source program
 #     -> typed program -> native program with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 # Re-runnable: the projection and tracked artifacts are rebuilt from the
-# selected current Fram source.
+# selected current Beagle Store source.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -12,8 +12,8 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-}"
-fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
-src="$fram_checkout/src/fram/types.bgl"
+store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
+src="$store_checkout/src/store/types.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-bodies.XXXXXX")"
 generated="$scratch/generated"
 [[ -n "$art" ]] || art="$scratch/artifacts"
@@ -22,7 +22,7 @@ mkdir -p "$generated" "$art"
 
 logical=""
 if [[ ! -f "$src" ]]; then
-  echo "drive.sh: selected Fram source is missing: $src" >&2
+  echo "drive.sh: selected Beagle Store source is missing: $src" >&2
   exit 1
 fi
 "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
@@ -64,7 +64,7 @@ done
 bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$generated/report.txt\"
-  (native.body-slice/emit-slice! \"$generated/types.facts\" \"fram.types\"
+  (native.body-slice/emit-slice! \"$generated/types.facts\" \"store.types\"
     \"$logical\"
     \"$generated\" \"native-slice-bodies-v0\" \"$abi\"))"
 
@@ -98,7 +98,7 @@ cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h"
 
 # The emitter numbers its type table in collection order, so the probe names
 # every generated type through a macro resolved here instead of spelling an
-# ordinal that an unrelated fram.types change silently repoints.
+# ordinal that an unrelated store.types change silently repoints.
 return_type_of() { # <fn-index>
   sed -nE "s/^(native_m0_type_[0-9]+) native_m0_fn_$1\(.*/\1/p" "$generated/module_0.h"
 }

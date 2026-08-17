@@ -4,7 +4,7 @@
 ;; header from the leading `(define-target X)` form (read-beagle-syntax
 ;; canonicalizes `#lang beagle/X` -> that form). A rendered module that led with
 ;; `(define-target …)` instead of `#lang` was rejected by bin/beagle check's
-;; module loader ("expected a `module' declaration") — blocking fram's schema.bclj
+;; module loader ("expected a `module' declaration") — blocking store's schema.bclj
 ;; flip-view (self-host 12/12). This drives source -> EDN -> render and asserts the
 ;; rendered output is a real #lang module AND re-reads to the identical forms.
 ;;

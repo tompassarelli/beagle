@@ -37,7 +37,7 @@ exit 99
 EOF
 
 chmod +x "$project/bin/"* "$forbidden/reject"
-for name in firn nixos-rebuild systemctl north fram; do
+for name in firn nixos-rebuild systemctl north store; do
     ln -s reject "$forbidden/$name"
 done
 

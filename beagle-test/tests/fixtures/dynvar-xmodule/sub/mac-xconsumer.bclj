@@ -1,7 +1,7 @@
 #lang beagle/clj
 
 ;; Cross-DIRECTORY + via-MACRO binding of an imported ^:dynamic var — the exact
-;; shape fram-2's G-A repro hit (resolver-woven handlers bind imported dynvars
+;; shape store-2's G-A repro hit (resolver-woven handlers bind imported dynvars
 ;; through a macro, from a module in another directory). prov.bclj lives in the
 ;; PARENT dir (resolved via the module-path walk-up) AND the `binding` is produced
 ;; by macro expansion: `with-v` syntax-quotes (binding [p/*v* …] …). The expander

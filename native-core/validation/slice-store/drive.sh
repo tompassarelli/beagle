@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Drive fram:src/fram/store.bgl through the whole native pipeline and emit the
+# Drive store:src/store/store.bgl through the whole native pipeline and emit the
 # C17 projection of the record ABI its signatures close over.
 #
 #   beagle-ast -> source facts -> frozen source program -> typed program
 #     -> native program -> Native obligations -> native.c11 emitters
 #
 # store.bgl declares no record of its own: every type in its signatures comes
-# from fram.types, whose slot-table alias closes over fram.slots. The compiler
+# from store.types, whose slot-table alias closes over store.slots. The compiler
 # resolves that complete source closure before the two explicit ASTs are
 # projected into one source program.
 #
@@ -18,11 +18,11 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-}"
-fram_checkout="$repo/branch-core"
-src="$fram_checkout/src/fram/store.bgl"
-dep="$fram_checkout/src/fram/types.bgl"
-slots="$fram_checkout/src/fram/slots.bgl"
-module_root="branch-core/src=$fram_checkout/src"
+store_checkout="$repo/store"
+src="$store_checkout/src/store/store.bgl"
+dep="$store_checkout/src/store/types.bgl"
+slots="$store_checkout/src/store/slots.bgl"
+module_root="store/src=$store_checkout/src"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-store.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
@@ -30,7 +30,7 @@ mkdir -p "$art"
 
 for upstream in "$slots" "$dep" "$src"; do
   [[ -f "$upstream" ]] && continue
-  echo "drive.sh: upstream Fram source is missing: $upstream" >&2
+  echo "drive.sh: upstream Beagle Store source is missing: $upstream" >&2
   exit 1
 done
 "$repo/bin/beagle-ast" --module-root "$module_root" \
@@ -81,7 +81,7 @@ done
 bb -Xmx4g -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
-  (native.slice/emit-slice! \"$scratch/store.facts\" \"fram.store\"
+  (native.slice/emit-slice! \"$scratch/store.facts\" \"store.store\"
     \"$store_logical\" \"$art\" \"native-slice-store-v0\" \"$abi\"))"
 
 cat "$art/report.txt"

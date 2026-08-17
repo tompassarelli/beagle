@@ -1,0 +1,8 @@
+;; Dependencies for bin/beagle-store-server's explicit jvm-oracle and jvm-dev routes.
+;; They retain the differential/development runtime with full Java threads and
+;; javax.net.ssl.SSLServerSocket. The native launcher never selects them
+;; implicitly. The CLI + MCP stay on babashka; cheshire is declared here because
+;; the engine's rt.clj uses it and the JVM needs it on the classpath.
+{:paths ["out"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.4"}
+        cheshire/cheshire {:mvn/version "5.13.0"}}}

@@ -1,0 +1,37 @@
+# The Beagle Store server deployment image. Its build context is one READY
+# beagle-store-native-build artifact directory, never the Beagle Store checkout:
+#   bin/beagle-store-cloudflare-native-image --artifact /abs/<closure-hash> --tag store-native
+
+FROM alpine:3.22 AS verify
+
+ARG BEAGLE_STORE_NATIVE_ARTIFACT_HASH
+COPY READY /store-artifact/READY
+COPY bin/beagle-store-server-native /store-artifact/beagle-store-server-native
+
+RUN test "$BEAGLE_STORE_NATIVE_ARTIFACT_HASH" != "" \
+    && test "$(cat /store-artifact/READY)" = "beagle-store-native-build/v1 $BEAGLE_STORE_NATIVE_ARTIFACT_HASH" \
+    && test -x /store-artifact/beagle-store-server-native
+
+# scratch has no passwd db, so /data ownership must be baked in from a stage that has `install`.
+RUN install -d -o 65534 -g 65534 /store-data-init
+
+FROM scratch
+
+ARG BEAGLE_STORE_NATIVE_ARTIFACT_HASH
+LABEL org.store.native-artifact="$BEAGLE_STORE_NATIVE_ARTIFACT_HASH"
+COPY --from=verify /store-artifact/READY /usr/local/share/store/READY
+COPY --from=verify /store-artifact/beagle-store-server-native /usr/local/bin/beagle-store-server-native
+COPY --from=verify --chown=65534:65534 /store-data-init /data
+
+# Loopback inside the container netns is unreachable through -p; docker
+# networking owns publication.
+ENV BEAGLE_STORE_SERVER_PORT=7977 \
+    BEAGLE_STORE_LOG=/data/history.framlog \
+    BEAGLE_STORE_SPACE_ID=cloudflare \
+    BEAGLE_STORE_BIND=0.0.0.0
+
+VOLUME /data
+EXPOSE 7977
+USER 65534:65534
+ENTRYPOINT ["/usr/local/bin/beagle-store-server-native"]
+CMD ["serve", "7977", "/data/history.framlog"]

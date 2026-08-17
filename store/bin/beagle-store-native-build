@@ -1,0 +1,1431 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LC_ALL=C
+umask 022
+export BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS="${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-1800}"
+export BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-2100}"
+
+die() {
+  echo "beagle-store-native-build: $*" >&2
+  exit 2
+}
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  beagle-store-native-build --host server [--adapter FILE] SOURCE.bgl...
+  beagle-store-native-build --host embed [--adapter FILE] SOURCE.bgl...
+  beagle-store-native-build --host wasm-embed --abi wasm32 [--adapter FILE] SOURCE.bgl...
+  beagle-store-native-build --host wasm-embed --abi wasm32 --regen-wasm-seams SOURCE.bgl...
+  beagle-store-native-build --host program [--abi ID] [--entry NS/NAME]... SOURCE.bgl...
+  beagle-store-native-build --host program --regen-qbe-frontier [--entry NS/NAME]... SOURCE.bgl...
+
+Prints the absolute immutable artifact directory on success.
+Set BEAGLE_STORE_BEAGLE (or BEAGLE_HOME), BEAGLE_STORE_NATIVE_CACHE, BEAGLE_STORE_NATIVE_CC,
+BEAGLE_STORE_NATIVE_STATIC=1 (server host: link -static), BEAGLE_STORE_NATIVE_AR,
+BEAGLE_STORE_WASI_CC (or WASI_CC), BEAGLE_STORE_QBE_FRONTIER_LEDGER, and
+BEAGLE_STORE_WASM_SEAMS_LEDGER as needed.
+Set BEAGLE_STORE_ALLOW_UNPINNED_BEAGLE=1 only for an intentional local compiler-pin
+bump; release builds never permit it.
+
+Native hosts default to native/server_generated.c beside this script. The
+embed host emits include/store.h, lib/libbeagle_store.a, and lib/libbeagle_store.so. The
+wasm-embed host emits include/store.h and lib/libstore.wasm: a reactor whose
+store_host_v1 table is built from nine named wasm imports, so an external
+engine embedder supplies storage, clock, and allocation as host functions. The
+program host stops at the frozen native program and its C17 projection, emits no C
+host, and is how a source slice narrower than the server ABI is taken through
+the same release gate.
+
+--abi names the Beagle ABI profile the program is frozen at (default lp64;
+Beagle owns the registry and refuses an unknown id by name). server and embed
+link their projection with the native compiler and stay at lp64; wasm-embed
+requires wasm32. Each profile gets its own native program cache entry and its own
+QBE frontier scope.
+
+RELEASE GATE
+  REQUIRED (build fails)  complete C17 materialization, all ten obligation
+                          projections PASS, no pending lowering work, and for
+                          server/embed/wasm-embed a clean C17 host link.
+  RATCHETED (build fails) the QBE frontier: an unrecorded refusal fails, and a
+                          recorded refusal that no longer reproduces fails
+                          until its native/qbe-frontier.ledger line is deleted.
+                          An ABI outside QBE's producer-declared support uses
+                          that declaration directly instead of compiling a
+                          guaranteed refusal. --regen-qbe-frontier rewrites
+                          this scope's line.
+  PINNED (build fails)    the wasm-embed seam ledger: every import and export
+                          of libstore.wasm must equal native/wasm-embed.seams.
+                          --regen-wasm-seams rewrites that fixture.
+USAGE
+}
+
+host=""
+adapter=""
+sources=()
+entries=()
+regen_qbe_frontier=0
+regen_wasm_seams=0
+default_abi=lp64
+wasm_abi=wasm32
+native_report_format=beagle-native-report/v1
+abi="$default_abi"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      [[ $# -ge 2 && -z "$host" ]] || die "--host needs one host name"
+      host="$2"
+      shift 2
+      ;;
+    --abi)
+      [[ $# -ge 2 ]] || die "--abi needs one profile id"
+      abi="$2"
+      shift 2
+      ;;
+    --adapter)
+      [[ $# -ge 2 && -z "$adapter" ]] || die "--adapter needs one source path"
+      adapter="$2"
+      shift 2
+      ;;
+    --entry)
+      [[ $# -ge 2 ]] || die "--entry needs one NS/NAME"
+      entries+=("$2")
+      shift 2
+      ;;
+    --regen-qbe-frontier)
+      regen_qbe_frontier=1
+      shift
+      ;;
+    --regen-wasm-seams)
+      regen_wasm_seams=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      sources+=("$@")
+      break
+      ;;
+    -*) die "unknown option: $1" ;;
+    *) sources+=("$1"); shift ;;
+  esac
+done
+case "$host" in
+  server|embed|wasm-embed|program) ;;
+  "") die "--host must be server, embed, wasm-embed, or program" ;;
+  *) die "unsupported host: $host" ;;
+esac
+[[ ${#sources[@]} -gt 0 ]] || die "provide the dependency-first source closure"
+# Beagle owns the profile registry; the shape check is ours because the id
+# enters both the cache manifest and the tab-separated frontier scope.
+[[ "$abi" =~ ^[A-Za-z0-9_.-]+$ ]] || die "--abi takes a bare profile id: $abi"
+case "$host" in
+  program) ;;
+  wasm-embed)
+    [[ "$abi" == "$wasm_abi" ]] ||
+      die "--host wasm-embed needs --abi $wasm_abi; its reactor is a $wasm_abi module" ;;
+  *)
+    [[ "$abi" == "$default_abi" ]] ||
+      die "--abi $abi needs --host program; the $host host links its C17 projection with the native compiler" ;;
+esac
+[[ ${#entries[@]} -eq 0 || "$host" == "program" ]] ||
+  die "--entry overrides the server ABI entry set and needs --host program"
+[[ "$regen_qbe_frontier" == 0 || "$host" == "program" ]] ||
+  die "--regen-qbe-frontier needs --host program"
+[[ "$regen_wasm_seams" == 0 || "$host" == "wasm-embed" ]] ||
+  die "--regen-wasm-seams needs --host wasm-embed"
+
+for command in awk cmp diff flock git grep mktemp realpath sed sha256sum tail; do
+  command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
+done
+
+home="${HOME:-}"
+beagle_candidate="${BEAGLE_STORE_BEAGLE:-${BEAGLE_HOME:+$BEAGLE_HOME/bin/beagle}}"
+beagle_candidate="${beagle_candidate:-${home:+$home/code/beagle/main/bin/beagle}}"
+beagle="$(command -v "$beagle_candidate" 2>/dev/null || true)"
+[[ -n "$beagle" && -x "$beagle" ]] || die "set BEAGLE_STORE_BEAGLE to an executable CLI"
+beagle="$(realpath "$beagle")"
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+# A checkout-owned input has one logical name in every worktree. Keep external
+# inputs path-bound: without a root that can be re-anchored, sharing them by
+# basename or content alone would turn an uncertain equivalence into a cache hit.
+checkout_relative_path() {
+  local path="$1"
+  if [[ "$path" == "$repo" ]]; then
+    printf '.\n'
+  elif [[ "$path" == "$repo/"* ]]; then
+    printf '%s\n' "${path#"$repo/"}"
+  else
+    return 1
+  fi
+}
+
+cache_input_name() {
+  local path="$1" relative
+  if relative="$(checkout_relative_path "$path")"; then
+    printf 'repo:%s\n' "$relative"
+  else
+    printf 'path:%s\n' "$path"
+  fi
+}
+
+compiler_input_name() {
+  local path="$1" relative
+  if relative="$(checkout_relative_path "$path")"; then
+    printf '%s\n' "$relative"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+host_source=""
+host_header=""
+adapter_header=""
+wasm_host_source=""
+host_source_name=""
+host_header_name=""
+adapter_header_name=""
+adapter_name=""
+wasm_host_source_name=""
+host_source_arg=""
+host_include_arg=""
+adapter_arg=""
+wasm_host_source_arg=""
+if [[ "$host" != "program" ]]; then
+  if [[ "$host" == "server" ]]; then
+    host_source="$repo/native/server_host.c"
+    host_header="$repo/native/server_host.h"
+  else
+    host_source="$repo/native/store_embed.c"
+    host_header="$repo/native/store.h"
+    adapter_header="$repo/native/server_host.h"
+  fi
+  adapter="${adapter:-$repo/native/server_generated.c}"
+  [[ -f "$host_source" ]] || die "$host host source is unavailable: $host_source"
+  [[ -f "$host_header" ]] || die "$host host header is unavailable: $host_header"
+  [[ -z "$adapter_header" || -f "$adapter_header" ]] ||
+    die "embed adapter header is unavailable: $adapter_header"
+  [[ -f "$adapter" ]] || die "server generated adapter is unavailable: $adapter"
+  host_source="$(realpath "$host_source")"
+  host_header="$(realpath "$host_header")"
+  [[ -z "$adapter_header" ]] || adapter_header="$(realpath "$adapter_header")"
+  adapter="$(realpath "$adapter")"
+  if [[ "$host" == "wasm-embed" ]]; then
+    wasm_host_source="$repo/native/store_wasm_host.c"
+    [[ -f "$wasm_host_source" ]] ||
+      die "wasm host-import source is unavailable: $wasm_host_source"
+    wasm_host_source="$(realpath "$wasm_host_source")"
+  fi
+  host_source_name="$(cache_input_name "$host_source")"
+  host_header_name="$(cache_input_name "$host_header")"
+  [[ -z "$adapter_header" ]] ||
+    adapter_header_name="$(cache_input_name "$adapter_header")"
+  adapter_name="$(cache_input_name "$adapter")"
+  [[ -z "$wasm_host_source" ]] ||
+    wasm_host_source_name="$(cache_input_name "$wasm_host_source")"
+  host_source_arg="$(compiler_input_name "$host_source")"
+  host_include_arg="$(compiler_input_name "$(dirname "$host_header")")"
+  adapter_arg="$(compiler_input_name "$adapter")"
+  [[ -z "$wasm_host_source" ]] ||
+    wasm_host_source_arg="$(compiler_input_name "$wasm_host_source")"
+fi
+
+if [[ "$host" == "wasm-embed" ]]; then
+  # Refusal-visible: the wasi toolchain is never inferred from the native one.
+  cc_candidate="${BEAGLE_STORE_WASI_CC:-${WASI_CC:-}}"
+  [[ -n "$cc_candidate" ]] ||
+    die "set BEAGLE_STORE_WASI_CC to an executable wasi C17 compiler for --host wasm-embed"
+else
+  cc_candidate="${BEAGLE_STORE_NATIVE_CC:-${CC:-cc}}"
+fi
+cc="$(command -v "$cc_candidate" 2>/dev/null || true)"
+[[ -n "$cc" && -x "$cc" ]] || die "C17 compiler is not executable: $cc_candidate"
+cc="$(realpath "$cc")"
+wasm_tools=""
+wasi_notices=""
+if [[ "$host" == "wasm-embed" ]]; then
+  wasm_tools="$(command -v wasm-tools 2>/dev/null || true)"
+  [[ -n "$wasm_tools" && -x "$wasm_tools" ]] ||
+    die "wasm-tools is required for --host wasm-embed; the seam ledger reads the linked module"
+  wasm_tools="$(realpath "$wasm_tools")"
+  wasi_notices="${BEAGLE_STORE_WASI_NOTICES:-}"
+  [[ -n "$wasi_notices" ]] ||
+    die "set BEAGLE_STORE_WASI_NOTICES to the wasi toolchain license bundle for --host wasm-embed"
+  [[ -f "$wasi_notices" && ! -L "$wasi_notices" ]] ||
+    die "wasi toolchain license bundle is unavailable or symlinked: $wasi_notices"
+  wasi_notices="$(realpath "$wasi_notices")"
+fi
+case "${BEAGLE_STORE_NATIVE_STATIC:-}" in
+  "") link_mode=dynamic ;;
+  1) link_mode=static ;;
+  *) die "BEAGLE_STORE_NATIVE_STATIC must be 1 or unset" ;;
+esac
+# -static is server-host-only: embed emits -fPIC objects and a .so.
+[[ "$link_mode" == dynamic || "$host" == server ]] ||
+  die "BEAGLE_STORE_NATIVE_STATIC=1 needs --host server"
+ar=""
+if [[ "$host" == "embed" ]]; then
+  ar_candidate="${BEAGLE_STORE_NATIVE_AR:-ar}"
+  ar="$(command -v "$ar_candidate" 2>/dev/null || true)"
+  [[ -n "$ar" && -x "$ar" ]] || die "archive tool is not executable: $ar_candidate"
+  ar="$(realpath "$ar")"
+fi
+
+cache_root="${BEAGLE_STORE_NATIVE_CACHE:-${XDG_CACHE_HOME:-${home:+$home/.cache}}}"
+[[ -n "$cache_root" ]] || die "set BEAGLE_STORE_NATIVE_CACHE, XDG_CACHE_HOME, or HOME"
+[[ -n "${BEAGLE_STORE_NATIVE_CACHE:-}" ]] || cache_root="$cache_root/store/native-build"
+mkdir -p "$cache_root/.locks" "$cache_root/.tmp" \
+  "$cache_root/.programs/.locks" "$cache_root/.programs/.tmp"
+cache_root="$(cd "$cache_root" && pwd -P)"
+program_cache="$cache_root/.programs"
+
+normalized_sources=()
+for source in "${sources[@]}"; do
+  [[ -f "$source" ]] || die "source file not found: $source"
+  [[ "$source" == *.bgl ]] ||
+    die "Native Core accepts canonical .bgl sources only: $source"
+  first_line="$(sed -n '1p' "$source")"
+  [[ "$first_line" =~ ^#lang[[:space:]]+beagle[[:space:]]*$ ]] ||
+    die "$source must begin with bare #lang beagle"
+  normalized_sources+=("$(realpath "$source")")
+done
+
+beagle_home="$(cd "$(dirname "$beagle")/.." && pwd -P)"
+beagle_targets="$beagle_home/share/targets.sh"
+[[ -f "$beagle_targets" && ! -L "$beagle_targets" ]] ||
+  die "Beagle target metadata is unavailable or symlinked: $beagle_targets"
+# Generated Beagle metadata is the producer-owned authority for whether a
+# materializer can accept an ABI. In particular, wasm32 must not spend a full
+# compiler pass asking the lp64-only QBE materializer to repeat that fact.
+source "$beagle_targets"
+[[ "$(declare -p BEAGLE_MATERIALIZER_ABIS 2>/dev/null || true)" == \
+  "declare -A "* ]] ||
+  die "Beagle target metadata omitted BEAGLE_MATERIALIZER_ABIS"
+
+materializer_supports_abi() {
+  local materializer="$1" requested_abi="$2" supported_abi
+  [[ -v "BEAGLE_MATERIALIZER_ABIS[$materializer]" ]] ||
+    die "Beagle target metadata omitted ABI support for $materializer"
+  for supported_abi in ${BEAGLE_MATERIALIZER_ABIS[$materializer]}; do
+    [[ "$supported_abi" != "$requested_abi" ]] || return 0
+  done
+  return 1
+}
+
+materializer_supports_abi c17 "$abi" ||
+  die "Beagle C17 materializer does not support ABI profile $abi"
+qbe_supports_abi=0
+materializer_supports_abi qbe "$abi" && qbe_supports_abi=1
+
+beagle_root="$(git -C "$beagle_home" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$beagle_root" ]]; then
+  git -C "$beagle_root" diff --quiet --ignore-submodules -- ||
+    die "Beagle has tracked changes: $beagle_root"
+  git -C "$beagle_root" diff --cached --quiet --ignore-submodules -- ||
+    die "Beagle has staged changes: $beagle_root"
+fi
+beagle_pin_file="$repo/beagle-pin.txt"
+[[ -f "$beagle_pin_file" && ! -L "$beagle_pin_file" ]] ||
+  die "tracked Beagle pin is unavailable or symlinked: $beagle_pin_file"
+mapfile -t beagle_pin_lines <"$beagle_pin_file"
+[[ "${#beagle_pin_lines[@]}" == 1 &&
+  "${beagle_pin_lines[0]}" =~ ^[0-9a-f]{40}$ ]] ||
+  die "beagle-pin.txt must contain exactly one lowercase 40-hex revision"
+beagle_pin="${beagle_pin_lines[0]}"
+if [[ -n "$beagle_root" ]]; then
+  beagle_revision="$(git -C "$beagle_root" rev-parse 'HEAD^{commit}')"
+else
+  beagle_revision_file="$beagle_home/BEAGLE_REVISION"
+  [[ -f "$beagle_revision_file" && ! -L "$beagle_revision_file" ]] ||
+    die "packaged Beagle revision marker is unavailable or symlinked: $beagle_revision_file"
+  beagle_revision="$(<"$beagle_revision_file")"
+fi
+[[ "$beagle_revision" =~ ^[0-9a-f]{40}$ ]] ||
+  die "Beagle revision is not a lowercase 40-hex commit: $beagle_revision"
+case "${BEAGLE_STORE_ALLOW_UNPINNED_BEAGLE:-}" in
+  "") ;;
+  1) ;;
+  *) die "BEAGLE_STORE_ALLOW_UNPINNED_BEAGLE must be 1 or unset" ;;
+esac
+if [[ "$beagle_revision" != "$beagle_pin" &&
+  "${BEAGLE_STORE_ALLOW_UNPINNED_BEAGLE:-}" != 1 ]]; then
+  die "Beagle revision $beagle_revision differs from pinned revision $beagle_pin"
+fi
+ffc_notice_root="$beagle_home/native-core/shim/third_party/ffc"
+[[ -d "$ffc_notice_root" && ! -L "$ffc_notice_root" &&
+  "$(realpath "$ffc_notice_root")" == "$ffc_notice_root" ]] ||
+  die "Beagle ffc notice directory is unavailable or symlinked: $ffc_notice_root"
+for notice in LICENSE-MIT PROVENANCE; do
+  [[ -f "$ffc_notice_root/$notice" && ! -L "$ffc_notice_root/$notice" ]] ||
+    die "Beagle ffc notice is unavailable or symlinked: $ffc_notice_root/$notice"
+done
+
+# Every file a `beagle build --materializer` run reads out of the Beagle tree,
+# listed as `sha256  repo-relative-path`. Verified against an strace of a
+# materializer build: bin/* drives it, share/targets.sh is the generated target
+# table, beagle-lib holds the reader/checker/emitter Racket sources, and
+# native-core contributes the source-fact projector, the C shim copied verbatim
+# into every artifact, and the ten Core compiler modules.
+#
+# Keyed on CONTENT, never on a Beagle commit: a commit hash makes docs, tests,
+# and validation-fixture edits invalidate a compiler whose output is identical.
+# Pruned only where irrelevance is provable -- `compiled/` is Racket bytecode
+# derived from the .rkt beside it, bin/test holds fixtures, and *_corpus.bclj
+# are validation corpora that beagle-build-core never compiles. Everything else
+# under these roots is hashed even if today's chain does not read it: a spurious
+# rebuild costs time once, a missing input serves a stale compiler forever.
+beagle_compiler_inputs() {
+  find "$beagle_home/bin" "$beagle_home/share" "$beagle_home/beagle-lib" \
+       "$beagle_home/native-core/bin" "$beagle_home/native-core/shim" \
+       "$beagle_home/native-core/src" \
+       \( -name compiled -o -name __pycache__ -o -path "$beagle_home/bin/test" \) \
+       -prune -o -type f ! -name '*_corpus.bclj' -print0 |
+    LC_ALL=C sort -z |
+    xargs -0 -r sha256sum |
+    sed "s|  $beagle_home/|  |"
+}
+beagle_compiler_input_list="$(beagle_compiler_inputs)"
+# An empty sweep still hashes -- to the digest of nothing. Refuse it by name
+# rather than key every build in the world to e3b0c442.
+[[ "$(printf '%s\n' "$beagle_compiler_input_list" | wc -l)" -ge 100 ]] ||
+  die "Beagle compiler input sweep found too few files; is $beagle_home a Beagle tree?"
+beagle_identity="content:$(printf '%s\n' "$beagle_compiler_input_list" |
+  sha256sum | sed 's/ .*//')"
+cc_identity="$cc:$($cc --version 2>&1 | sed -n '1p')"
+[[ -z "$ar" ]] || cc_identity+=":ar=$ar:$($ar --version 2>&1 | sed -n '1p')"
+[[ -z "$wasm_tools" ]] ||
+  cc_identity+=":wasm-tools=$wasm_tools:$($wasm_tools --version 2>&1 | sed -n '1p')"
+builder_identity="$(sha256sum "${BASH_SOURCE[0]}" | sed 's/ .*//')"
+
+input_manifest=""
+program_input_manifest=""
+stage=""
+program_stage=""
+source_snapshot_root=""
+cleanup() {
+  [[ -z "$stage" || ! -d "$stage" ]] || rm -rf "${stage:?}"
+  [[ -z "$program_stage" || ! -d "$program_stage" ]] || rm -rf "${program_stage:?}"
+  [[ -z "$source_snapshot_root" || ! -d "$source_snapshot_root" ]] ||
+    rm -rf "${source_snapshot_root:?}"
+  [[ -z "$input_manifest" || ! -f "$input_manifest" ]] || rm -f "${input_manifest:?}"
+  [[ -z "$program_input_manifest" || ! -f "$program_input_manifest" ]] ||
+    rm -f "${program_input_manifest:?}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# A native program build can invoke Beagle more than once: a QBE refusal is
+# followed by a C17-only recovery pass. Capture the declared dependency-first
+# closure once so every pass sees the same bytes even when its worktree moves.
+# Relative argv preserves the closure's layout for Beagle's import resolver and
+# keeps the private staging path out of source identities.
+source_common_root="$(dirname "${normalized_sources[0]}")"
+for source in "${normalized_sources[@]}"; do
+  while [[ "$source_common_root" != "/" &&
+    "$source" != "$source_common_root/"* ]]; do
+    source_common_root="$(dirname "$source_common_root")"
+  done
+done
+source_snapshot_root="$(mktemp -d "$cache_root/.tmp/sources.XXXXXX")"
+source_logical_paths=()
+source_digests=()
+for index in "${!normalized_sources[@]}"; do
+  source="${normalized_sources[$index]}"
+  source_logical_path="$(realpath --relative-to="$source_common_root" "$source")"
+  [[ "$source_logical_path" != /* && "$source_logical_path" != ../* ]] ||
+    die "cannot place source inside its closure snapshot: $source"
+  snapshot_source="$source_snapshot_root/$source_logical_path"
+  mkdir -p "$(dirname "$snapshot_source")"
+  source_digest_before="$(sha256sum "$source" | sed 's/ .*//')"
+  cp -- "$source" "$snapshot_source"
+  snapshot_digest="$(sha256sum "$snapshot_source" | sed 's/ .*//')"
+  source_digest_after="$(sha256sum "$source" | sed 's/ .*//')"
+  [[ "$source_digest_before" == "$snapshot_digest" &&
+    "$snapshot_digest" == "$source_digest_after" ]] ||
+    die "source changed while its launch snapshot was captured: $source"
+  chmod a-w "$snapshot_source"
+  source_logical_paths+=("$source_logical_path")
+  source_digests+=("$snapshot_digest")
+done
+
+validate_ffc_notices() {
+  local artifact_root="$1" notice destination
+  for notice in LICENSE-MIT PROVENANCE; do
+    destination="$artifact_root/THIRD-PARTY/ffc/$notice"
+    [[ -f "$destination" && ! -L "$destination" ]] ||
+      die "native artifact omitted its ffc notice: $destination"
+    cmp -s "$ffc_notice_root/$notice" "$destination" ||
+      die "native artifact ffc notice differs from the Beagle source: $destination"
+  done
+}
+
+copy_ffc_notices() {
+  local artifact_root="$1" notice
+  mkdir -p "$artifact_root/THIRD-PARTY/ffc"
+  for notice in LICENSE-MIT PROVENANCE; do
+    cp "$ffc_notice_root/$notice" "$artifact_root/THIRD-PARTY/ffc/$notice"
+  done
+  validate_ffc_notices "$artifact_root"
+}
+
+validate_wasi_notices() {
+  local artifact_root="$1"
+  local destination="$artifact_root/THIRD-PARTY/WASI-TOOLCHAIN-LICENSES.txt"
+  [[ -f "$destination" && ! -L "$destination" ]] ||
+    die "wasm artifact omitted its wasi toolchain license bundle: $destination"
+  cmp -s "$wasi_notices" "$destination" ||
+    die "wasm artifact wasi toolchain license bundle differs from its build input: $destination"
+}
+
+copy_wasi_notices() {
+  local artifact_root="$1"
+  mkdir -p "$artifact_root/THIRD-PARTY"
+  cp "$wasi_notices" "$artifact_root/THIRD-PARTY/WASI-TOOLCHAIN-LICENSES.txt"
+  validate_wasi_notices "$artifact_root"
+}
+
+native_server_entries=(
+  store.native-server/server-generated-abi
+  store.native-server/server-store-boot!
+  store.native-server/server-store-dispatch!
+  store.native-server/server-store-shutdown
+  store.native-server/server-codec-read-request!
+  store.native-server/server-codec-write-response!
+  store.native-server/server-codec-release-request
+  store.native-server/server-codec-release-response
+)
+# The QBE frontier ledger is keyed by the entry set, because that is what
+# selects the native program QBE judges; the default set gets a stable short name.
+if [[ ${#entries[@]} -eq 0 ]]; then
+  program_entries=("${native_server_entries[@]}")
+  program_scope="store-native-server"
+else
+  mapfile -t program_entries < <(printf '%s\n' "${entries[@]}" | LC_ALL=C sort -u)
+  program_scope="$(IFS='+'; printf '%s' "${program_entries[*]}")"
+fi
+# QBE judges each ABI profile separately, so each gets its own scope; lp64 keeps
+# the bare name so every recorded ledger line stays addressed as it was written.
+[[ "$abi" == "$default_abi" ]] || program_scope+="@$abi"
+[[ "$program_scope" != *[[:space:]]* ]] ||
+  die "entry names must not contain whitespace: $program_scope"
+native_server_entry_args=()
+for native_server_entry in "${program_entries[@]}"; do
+  native_server_entry_args+=(--entry "$native_server_entry")
+done
+
+qbe_ledger="$(realpath -m "${BEAGLE_STORE_QBE_FRONTIER_LEDGER:-$repo/native/qbe-frontier.ledger}")"
+wasm_seams_ledger="$(realpath -m "${BEAGLE_STORE_WASM_SEAMS_LEDGER:-$repo/native/wasm-embed.seams}")"
+wasm_seams_name="$(cache_input_name "$wasm_seams_ledger")"
+# The public ABI plus the two staging allocators an external embedder needs to
+# place a request frame, its options, and its error struct in guest memory.
+wasm_exports=(
+  store_abi_version
+  store_open
+  store_transact
+  store_query
+  store_snapshot
+  store_buffer_release
+  store_close
+  store_wasm_alloc
+  store_wasm_free
+)
+
+write_program_input_manifest() {
+  local destination="$1" index
+  {
+    # v3 gives each launch snapshot a checkout-independent logical source name.
+    # The version rides in the hashed bytes, so no path-bound /v2 entry can be
+    # looked up or interpreted under this vocabulary.
+    printf 'store-native-program-input/v3\n%s\n%s\nconfiguration=profile=3\n' \
+      "$builder_identity" "$beagle_identity"
+    # Mirrors the ABI profile Beagle freezes into the program configuration; without
+    # it two profiles over one closure would collide on a single cache entry.
+    printf 'abi=%s\n' "$abi"
+    printf 'scope=%s\n' "$program_scope"
+    for native_server_entry in "${program_entries[@]}"; do
+      printf 'entry=%s\n' "$native_server_entry"
+    done
+    for index in "${!normalized_sources[@]}"; do
+      printf '%06d %q %s\n' "$index" "${source_logical_paths[$index]}" \
+        "${source_digests[$index]}"
+    done
+  } >"$destination"
+}
+
+write_input_manifest() {
+  local destination="$1"
+  {
+    printf 'beagle-store-native-build-input/v3\n%s\nhost=%s\nprogram=%s\nnative-program=%s\n%s\n' \
+      "$builder_identity" "$host" "$program_closure_hash" \
+      "$native_program_digest" "$cc_identity"
+    printf 'link=%s\n' "$link_mode"
+    printf 'host-source %q %s\n' "$host_source_name" \
+      "$(sha256sum "$host_source" | sed 's/ .*//')"
+    printf 'host-header %q %s\n' "$host_header_name" \
+      "$(sha256sum "$host_header" | sed 's/ .*//')"
+    if [[ -n "$adapter_header" ]]; then
+      printf 'adapter-header %q %s\n' "$adapter_header_name" \
+        "$(sha256sum "$adapter_header" | sed 's/ .*//')"
+    fi
+    printf 'adapter %q %s\n' "$adapter_name" \
+      "$(sha256sum "$adapter" | sed 's/ .*//')"
+    if [[ "$host" == "wasm-embed" ]]; then
+      printf 'wasi-notices-sha256 %s\n' \
+        "$(sha256sum "$wasi_notices" | sed 's/ .*//')"
+      printf 'wasm-host-source %q %s\n' "$wasm_host_source_name" \
+        "$(sha256sum "$wasm_host_source" | sed 's/ .*//')"
+      # The pinned seam set is part of the artifact's identity: editing the
+      # fixture must produce a different artifact, never a stale cache hit.
+      printf 'wasm-seams %q %s\n' "$wasm_seams_name" \
+        "$(sha256sum "$wasm_seams_ledger" 2>/dev/null | sed 's/ .*//' || true)"
+      printf 'wasm-export %s\n' "${wasm_exports[@]}"
+    fi
+  } >"$destination"
+}
+
+# Release provenance deliberately excludes paths. The v3 cache identity uses
+# logical names for checkout-owned inputs and absolute names only for external
+# inputs; this manifest names only content affecting wasm32-wasm-embed bytes.
+write_wasm_provenance() {
+  local destination="$1" index source version_line
+  version_line="$($cc --version 2>&1 | sed -n '1p')"
+  {
+    printf 'beagle-store-native-build-provenance/v2\n'
+    printf 'builder-sha256 %s\n' "$builder_identity"
+    printf 'beagle-compiler-inputs-sha256 %s\n' "${beagle_identity#content:}"
+    printf 'beagle-revision %s\n' "$beagle_revision"
+    printf 'abi %s\n' "$abi"
+    printf 'host %s\n' "$host"
+    printf 'native-program-sha256 %s\n' "$native_program_digest"
+    for index in "${!normalized_sources[@]}"; do
+      printf 'source-sha256 %06d %s\n' "$index" "${source_digests[$index]}"
+    done
+    printf 'host-source-sha256 %s\n' "$(sha256sum "$host_source" | sed 's/ .*//')"
+    printf 'host-header-sha256 %s\n' "$(sha256sum "$host_header" | sed 's/ .*//')"
+    printf 'adapter-header-sha256 %s\n' "$(sha256sum "$adapter_header" | sed 's/ .*//')"
+    printf 'adapter-sha256 %s\n' "$(sha256sum "$adapter" | sed 's/ .*//')"
+    printf 'wasm-host-source-sha256 %s\n' "$(sha256sum "$wasm_host_source" | sed 's/ .*//')"
+    printf 'wasm-seams-sha256 %s\n' "$(sha256sum "$wasm_seams_ledger" | sed 's/ .*//')"
+    printf 'wasi-cc-sha256 %s\n' "$(sha256sum "$cc" | sed 's/ .*//')"
+    printf 'wasi-cc-version-sha256 %s\n' \
+      "$(printf '%s\n' "$version_line" | sha256sum | sed 's/ .*//')"
+    version_line="$($wasm_tools --version 2>&1 | sed -n '1p')"
+    printf 'wasm-tools-sha256 %s\n' "$(sha256sum "$wasm_tools" | sed 's/ .*//')"
+    printf 'wasm-tools-version-sha256 %s\n' \
+      "$(printf '%s\n' "$version_line" | sha256sum | sed 's/ .*//')"
+    printf 'wasi-toolchain-licenses-sha256 %s\n' \
+      "$(sha256sum "$wasi_notices" | sed 's/ .*//')"
+    printf 'ffc-license-sha256 %s\n' \
+      "$(sha256sum "$ffc_notice_root/LICENSE-MIT" | sed 's/ .*//')"
+    printf 'ffc-provenance-sha256 %s\n' \
+      "$(sha256sum "$ffc_notice_root/PROVENANCE" | sed 's/ .*//')"
+  } >"$destination"
+}
+
+# Failed Beagle generations publish no artifacts; their complete Native report
+# remains in the captured stderr so a recorded QBE refusal can be recovered.
+extract_failed_native_report() {
+  local log_path="$1" destination="$2"
+  awk '
+    !capturing && /^beagle-native-report\/v[0-9]+$/ { capturing = 1 }
+    capturing { print }
+    capturing && /^result FAIL materialization$/ { complete = 1; exit }
+    END { if (!complete) exit 1 }
+  ' "$log_path" >"$destination"
+}
+
+validate_native_report_schema() {
+  local report_path="$1" first_line=""
+  [[ -f "$report_path" ]] || die "native build omitted $report_path"
+  IFS= read -r first_line <"$report_path" ||
+    die "Beagle native report is empty: $report_path"
+  [[ "$first_line" == "$native_report_format" ]] ||
+    die "unsupported Beagle native report format: $first_line (required $native_report_format)"
+  [[ "$(grep -Fxc -- "$native_report_format" "$report_path" || true)" == "1" ]] ||
+    die "Beagle native report must contain exactly one $native_report_format marker"
+}
+
+native_report_epoch_digest() {
+  local report_path="$1"
+  local -a digests=()
+  mapfile -t digests < <(
+    sed -n 's/^native-provenance-v0 epoch sha256:\([0-9a-f]\{64\}\)$/\1/p' \
+      "$report_path"
+  )
+  [[ ${#digests[@]} -eq 1 ]] ||
+    die "native report must carry exactly one epoch program digest (found ${#digests[@]})"
+  printf '%s\n' "${digests[0]}"
+}
+
+# The release requirement: C17 completeness plus all ten obligations, which
+# carry the target-neutrality contract (valid-ssa, closed-layouts, legal-abi)
+# and the arena-lifetime contract (epoch-soundness, leak-freedom). The epoch
+# stage is where the second pair is earned, so the report must show the
+# program the C17 materializer saw crossed it.
+validate_native_report() {
+  local report_path="$1" line
+  local -a required_lines=(
+    "stage source-freeze ACCEPTED"
+    "stage source-to-typed ACCEPTED"
+    "stage typed-to-native COMPLETE"
+    "native-lowering-result NativeLoweringCompleteV0"
+    "result PASS"
+    "obligation-projection PASS valid-ssa"
+    "obligation-projection PASS exhaustive-matches"
+    "obligation-projection PASS closed-layouts"
+    "obligation-projection PASS checked-arithmetic"
+    "obligation-projection PASS legal-abi"
+    "obligation-projection PASS discharged-tokens"
+    "obligation-projection PASS bounded-effects"
+    "obligation-projection PASS epoch-soundness"
+    "obligation-projection PASS leak-freedom"
+    "obligation-projection PASS deterministic-parallelism"
+    "materialize-c17 OK module_0.h module_0.c"
+  )
+  validate_native_report_schema "$report_path"
+  for line in "${required_lines[@]}"; do
+    [[ "$(grep -Fxc -- "$line" "$report_path" || true)" == "1" ]] ||
+      die "native report must contain exactly once: $line"
+  done
+  [[ "$(grep -c '^obligation-projection ' "$report_path" || true)" == "10" &&
+     "$(grep -c '^obligation-projection PASS ' "$report_path" || true)" == "10" ]] ||
+    die "native report must contain exactly ten passing obligations"
+  [[ "$(grep -c '^stage native-to-epoch ' "$report_path" || true)" == "1" ]] ||
+    die "native report must name the epoch stage the materializer crossed"
+  ! grep -q '^pending ' "$report_path" ||
+    die "native report contains pending lowering work"
+}
+
+# Keys must name the refused construct, never anything that churns per build.
+classify_qbe_refusal() {
+  local detail="$1"
+  case "$detail" in
+    "abi profile "*": qbe materializes lp64 only")
+      detail="${detail#abi profile }"
+      printf 'abi-profile\t%s\n' "${detail%%:*}" ;;
+    "unsupported native value-semantics op: "*)
+      printf 'unsupported-value-semantics\t%s\n' "${detail#unsupported native value-semantics op: }" ;;
+    "QBE codec primitive is unsupported: "*)
+      printf 'codec-primitive\t%s\n' "${detail#QBE codec primitive is unsupported: }" ;;
+    "QBE Unicode text primitive is unsupported: "*)
+      printf 'unicode-primitive\t%s\n' "${detail#QBE Unicode text primitive is unsupported: }" ;;
+    "QBE checked integer division is unsupported: "*)
+      printf 'checked-division\t%s\n' "${detail#QBE checked integer division is unsupported: }" ;;
+    "QBE socket extern ABI is unsupported:"*) printf 'socket-extern\t-\n' ;;
+    "QBE monotonic clock extern ABI is unsupported:"*) printf 'clock-extern\t-\n' ;;
+    "QBE stdout extern ABI is unsupported:"*) printf 'stdout-extern\t-\n' ;;
+    "QBE host extern ABI is unsupported:"*) printf 'host-extern\t-\n' ;;
+    "QBE vector sort is unsupported:"*) printf 'vector-sort\t-\n' ;;
+    "native program uses a shape outside the QBE materializer's slice")
+      printf 'shape-outside-slice\t-\n' ;;
+    "native program contains a Text or Keyword literal outside the QBE literal slice")
+      printf 'literal-outside-slice\t-\n' ;;
+    "native program is not frozen: validation obligations failed")
+      printf 'program-not-frozen\t-\n' ;;
+    "module index must be nonnegative") printf 'module-index\t-\n' ;;
+    # Unrecognised refusals key on their own text so they fail the ratchet.
+    *) printf 'unclassified\t%s\n' "$detail" ;;
+  esac
+}
+
+write_qbe_frontier() {
+  local report_path="$1" destination="$2"
+  local -a qbe_lines=()
+  local detail key class
+  mapfile -t qbe_lines < <(grep '^materialize-qbe ' "$report_path" || true)
+  [[ ${#qbe_lines[@]} -eq 1 ]] ||
+    die "native report must carry exactly one materialize-qbe line when QBE supports the selected ABI (found ${#qbe_lines[@]})"
+  case "${qbe_lines[0]}" in
+    "materialize-qbe OK module_0.ssa")
+      printf 'qbe-frontier/v1\nscope\t%s\nstatus\tOK\n' "$program_scope" \
+        >"$destination"
+      ;;
+    "materialize-qbe REFUSED "*)
+      detail="${qbe_lines[0]#materialize-qbe REFUSED }"
+      key="$(classify_qbe_refusal "$detail")"
+      class="${key%%$'\t'*}"
+      printf 'qbe-frontier/v1\nscope\t%s\nstatus\tREFUSED\nkey\t%s\ndetail\t%s\n' \
+        "$program_scope" "$key" "$detail" >"$destination"
+      [[ -n "$class" ]] || die "QBE refusal classified to an empty key"
+      ;;
+    *)
+      die "unreadable materialize-qbe line: ${qbe_lines[0]}"
+      ;;
+  esac
+}
+
+# QBE stays visible in the host receipt; an invisible QBE is worse than a red one.
+write_qbe_frontier_receipt() {
+  local status key
+  status="$(awk -F'\t' '$1 == "status" { print $2 }' "$stage/qbe-frontier.txt")"
+  key="$(awk -F'\t' '$1 == "key" { print $2 "/" $3 }' "$stage/qbe-frontier.txt")"
+  printf 'native-qbe-frontier %s scope=%s ledger=%s\n' \
+    "$status" "$program_scope" "${key:-clean}"
+}
+
+# Two-sided and shrink-only: a new refusal fails, a stale one fails until deleted.
+check_qbe_frontier() {
+  local frontier_path="$1" status observed recorded
+  local -a recorded_rows=()
+  status="$(awk -F'\t' '$1 == "status" { print $2 }' "$frontier_path")"
+  observed="$(awk -F'\t' '$1 == "key" { print $2 "\t" $3 }' "$frontier_path")"
+  [[ -f "$qbe_ledger" ]] ||
+    die "QBE frontier ledger is unavailable: $qbe_ledger"
+  mapfile -t recorded_rows < <(
+    awk -F'\t' -v scope="$program_scope" \
+      '/^[^#]/ && NF >= 3 && $1 == scope { print $2 "\t" $3 }' "$qbe_ledger"
+  )
+  [[ ${#recorded_rows[@]} -le 1 ]] ||
+    die "QBE frontier ledger records ${#recorded_rows[@]} refusals for scope $program_scope; QBE reports at most one per program"
+  recorded="${recorded_rows[0]:-}"
+
+  if [[ "$regen_qbe_frontier" == 1 ]]; then
+    local regenerated
+    regenerated="$(mktemp "$cache_root/.tmp/ledger.XXXXXX")"
+    awk -F'\t' -v scope="$program_scope" \
+      '/^#/ || NF < 3 || $1 != scope' "$qbe_ledger" >"$regenerated"
+    [[ "$status" != "REFUSED" ]] ||
+      printf '%s\t%s\n' "$program_scope" "$observed" >>"$regenerated"
+    cat "$regenerated" >"$qbe_ledger"
+    rm -f "${regenerated:?}"
+    if [[ "$status" == "REFUSED" ]]; then
+      echo "qbe frontier: recorded $program_scope -> $observed" >&2
+    else
+      echo "qbe frontier: cleared $program_scope (QBE materializes it)" >&2
+    fi
+    return 0
+  fi
+
+  if [[ "$status" == "OK" ]]; then
+    [[ -z "$recorded" ]] || die "$(printf '%s\n%s\n%s' \
+      "QBE frontier ledger is STALE for scope $program_scope: QBE now materializes it." \
+      "  recorded: $recorded" \
+      "  delete that line from $qbe_ledger (or rerun with --regen-qbe-frontier).")"
+    return 0
+  fi
+  [[ -n "$recorded" ]] || die "$(printf '%s\n%s\n%s\n%s' \
+    "QBE frontier GREW for scope $program_scope: an unrecorded QBE refusal." \
+    "  observed: $observed" \
+    "  QBE is the anti-C-capture check; a new refusal means this program left" \
+    "  QBE's slice. Fix it, or record it in $qbe_ledger with a justification.")"
+  [[ "$recorded" == "$observed" ]] || die "$(printf '%s\n%s\n%s' \
+    "QBE frontier MOVED for scope $program_scope." \
+    "  recorded: $recorded" \
+    "  observed: $observed")"
+}
+
+# The seam set an external embedder actually faces: every import with its
+# resolved wasm signature, every export with its kind. Type indices are
+# resolved here because the printed import only carries the index.
+write_wasm_seams() {
+  local module_path="$1" destination="$2"
+  {
+    printf 'store-wasm-embed-seams/v1\n'
+    "$wasm_tools" print "$module_path" |
+      awk '
+        function signature(line,   params, results) {
+          params = ""
+          results = ""
+          if (match(line, /\(param [^)]*\)/)) {
+            params = substr(line, RSTART + 7, RLENGTH - 8)
+          }
+          if (match(line, /\(result [^)]*\)/)) {
+            results = substr(line, RSTART + 8, RLENGTH - 9)
+          }
+          return "(" params ") -> (" results ")"
+        }
+        /^ *\(type \(;[0-9]+;\) \(func/ {
+          index_text = $2
+          gsub(/[^0-9]/, "", index_text)
+          types[index_text] = signature($0)
+          next
+        }
+        /^ *\(import "/ {
+          split($0, quoted, "\"")
+          if ($0 ~ /\(func /) {
+            type_index = $0
+            sub(/.*\(type /, "", type_index)
+            gsub(/[^0-9]/, "", type_index)
+            printf "import %s %s %s\n", quoted[2], quoted[4], types[type_index]
+          } else {
+            kind = $0
+            sub(/.*\(/, "", kind)
+            split(kind, kind_fields, " ")
+            printf "import %s %s %s\n", quoted[2], quoted[4], kind_fields[1]
+          }
+          next
+        }
+        /^ *\(export "/ {
+          split($0, quoted, "\"")
+          kind = $0
+          sub(/.*\(export "[^"]*" \(/, "", kind)
+          split(kind, kind_fields, " ")
+          printf "export %s %s\n", quoted[2], kind_fields[1]
+        }
+      ' | LC_ALL=C sort
+  } >"$destination"
+}
+
+# Exact and shrink-only by hand: the fixture never widens itself, so a new
+# import (a new capability the embedder must satisfy) fails the build.
+check_wasm_seams() {
+  local observed="$1" expected="$2"
+  if [[ "$regen_wasm_seams" == 1 ]]; then
+    # Justification comments survive regeneration; the seam set does not.
+    { [[ ! -f "$wasm_seams_ledger" ]] ||
+        sed -n '/^[[:space:]]*#/p' "$wasm_seams_ledger"
+      cat "$observed"; } >"$expected"
+    cat "$expected" >"$wasm_seams_ledger"
+    echo "wasm seams: recorded $(grep -c '^import ' "$observed") imports and $(grep -c '^export ' "$observed") exports in $wasm_seams_ledger" >&2
+    return 0
+  fi
+  [[ -f "$wasm_seams_ledger" ]] ||
+    die "wasm-embed seam ledger is unavailable: $wasm_seams_ledger"
+  # Comment lines carry the justification a ledgered seam needs; they are not
+  # part of the compared set.
+  grep -v '^[[:space:]]*#' "$wasm_seams_ledger" | grep -v '^[[:space:]]*$' \
+    >"$expected" || true
+  cmp -s "$expected" "$observed" || die "$(printf '%s\n%s\n%s' \
+    "wasm-embed seams MOVED against $wasm_seams_ledger:" \
+    "$(diff "$expected" "$observed" || true)" \
+    "  fix it at the referencing site, or rerun with --regen-wasm-seams.")"
+}
+
+write_server_symbols() {
+  local report_path="$1" module_header="$2" destination="$3"
+  local logical symbol suffix prototype prototype_regex return_type parameters
+  local parameter parameter_regex source_index existing index
+  local has_arena has_capability call_parameters call_arguments
+  local -a report_rows=() prototypes=() raw_parameters=() source_types=()
+  local -a symbols=() return_types=() arena_prefixes=() capability_prefixes=()
+  local -A argument_types=()
+  local -a logical_names=(
+    server-generated-abi
+    server-store-boot!
+    server-store-dispatch!
+    server-store-shutdown
+    server-codec-read-request!
+    server-codec-write-response!
+    server-codec-release-request
+    server-codec-release-response
+  )
+  local -a suffixes=(
+    generated_abi
+    store_boot
+    store_dispatch
+    store_shutdown
+    codec_read_request
+    codec_write_response
+    codec_release_request
+    codec_release_response
+  )
+  local -a macro_suffixes=(
+    GENERATED_ABI
+    STORE_BOOT
+    STORE_DISPATCH
+    STORE_SHUTDOWN
+    CODEC_READ_REQUEST
+    CODEC_WRITE_RESPONSE
+    CODEC_RELEASE_REQUEST
+    CODEC_RELEASE_RESPONSE
+  )
+  local -a source_arities=(0 4 3 1 1 1 1 1)
+
+  [[ -f "$module_header" ]] || die "C17 materializer omitted module_0.h"
+  for index in "${!logical_names[@]}"; do
+    logical="${logical_names[$index]}"
+    mapfile -t report_rows < <(
+      awk -v name="$logical" '$1 == "lowered" && $3 == name { print $2 }' \
+        "$report_path"
+    )
+    [[ ${#report_rows[@]} -eq 1 ]] ||
+      die "native report must contain exactly one lowered row for $logical (found ${#report_rows[@]})"
+    [[ "${report_rows[0]}" =~ ^fn_([0-9]+)$ ]] ||
+      die "native report has an invalid function id for $logical: ${report_rows[0]}"
+    symbol="native_m0_fn_${BASH_REMATCH[1]}"
+    for existing in "${symbols[@]}"; do
+      [[ "$existing" != "$symbol" ]] ||
+        die "native report maps multiple server exports to $symbol"
+    done
+    symbols+=("$symbol")
+
+    mapfile -t prototypes < <(
+      grep -E "^[A-Za-z_][A-Za-z0-9_]* ${symbol}\\(.*\\);$" \
+        "$module_header" || true
+    )
+    [[ ${#prototypes[@]} -eq 1 ]] ||
+      die "module_0.h must contain exactly one prototype for $logical ($symbol)"
+    prototype="${prototypes[0]}"
+    prototype_regex="^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+${symbol}\\((.*)\\);$"
+    [[ "$prototype" =~ $prototype_regex ]] ||
+      die "cannot parse generated prototype for $logical: $prototype"
+    return_type="${BASH_REMATCH[1]}"
+    parameters="${BASH_REMATCH[2]}"
+    return_types+=("$return_type")
+
+    raw_parameters=()
+    if [[ "$parameters" == "void" ]]; then
+      :
+    elif [[ -n "$parameters" ]]; then
+      IFS=',' read -r -a raw_parameters <<<"$parameters"
+      for source_index in "${!raw_parameters[@]}"; do
+        parameter="${raw_parameters[$source_index]}"
+        parameter="$(sed -E \
+          's/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]+/ /g' \
+          <<<"$parameter")"
+        raw_parameters[source_index]="$parameter"
+      done
+    else
+      die "generated prototype uses an unspecified parameter list for $logical"
+    fi
+
+    has_arena=0
+    has_capability=0
+    source_index=0
+    if [[ ${#raw_parameters[@]} -gt "$source_index" &&
+      "${raw_parameters[$source_index]}" == "native_arena *arena" ]]; then
+      has_arena=1
+      source_index=$((source_index + 1))
+    fi
+    if [[ ${#raw_parameters[@]} -gt "$source_index" &&
+      "${raw_parameters[$source_index]}" == "const native_capability *capability" ]]; then
+      has_capability=1
+      source_index=$((source_index + 1))
+    fi
+    arena_prefixes+=("$has_arena")
+    capability_prefixes+=("$has_capability")
+
+    source_types=()
+    parameter_regex='^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+native_v_([0-9]+)$'
+    while [[ "$source_index" -lt ${#raw_parameters[@]} ]]; do
+      parameter="${raw_parameters[$source_index]}"
+      [[ "$parameter" =~ $parameter_regex ]] ||
+        die "cannot parse source parameter in prototype for $logical: $parameter"
+      [[ "${BASH_REMATCH[2]}" == "${#source_types[@]}" ]] ||
+        die "generated source parameters are out of order for $logical"
+      source_types+=("${BASH_REMATCH[1]}")
+      source_index=$((source_index + 1))
+    done
+    [[ ${#source_types[@]} -eq "${source_arities[$index]}" ]] ||
+      die "generated prototype for $logical has ${#source_types[@]} source arguments; expected ${source_arities[$index]}"
+    for source_index in "${!source_types[@]}"; do
+      argument_types["$index:$source_index"]="${source_types[$source_index]}"
+    done
+  done
+
+  {
+    printf '%s\n' \
+      '#ifndef BEAGLE_STORE_SERVER_SYMBOLS_H' \
+      '#define BEAGLE_STORE_SERVER_SYMBOLS_H' \
+      '' \
+      '#include "module_0.h"' \
+      ''
+    for index in "${!logical_names[@]}"; do
+      suffix="${suffixes[$index]}"
+      printf 'typedef %s store_server_%s_return;\n' \
+        "${return_types[$index]}" "$suffix"
+      for ((source_index = 0; source_index < source_arities[index]; source_index += 1)); do
+        printf 'typedef %s store_server_%s_arg_%d;\n' \
+          "${argument_types["$index:$source_index"]}" "$suffix" "$source_index"
+      done
+      printf '#define BEAGLE_STORE_SERVER_SYMBOL_%s %s\n' \
+        "${macro_suffixes[$index]}" "${symbols[$index]}"
+
+      call_parameters='arena, capability'
+      call_arguments=''
+      if [[ "${arena_prefixes[$index]}" == "1" ]]; then
+        call_arguments='(arena)'
+      fi
+      if [[ "${capability_prefixes[$index]}" == "1" ]]; then
+        [[ -z "$call_arguments" ]] || call_arguments+=', '
+        call_arguments+='(capability)'
+      fi
+      for ((source_index = 0; source_index < source_arities[index]; source_index += 1)); do
+        call_parameters+=", arg_$source_index"
+        [[ -z "$call_arguments" ]] || call_arguments+=', '
+        call_arguments+="(arg_$source_index)"
+      done
+      printf '#define BEAGLE_STORE_SERVER_CALL_%s(%s) BEAGLE_STORE_SERVER_SYMBOL_%s(%s)\n' \
+        "${macro_suffixes[$index]}" "$call_parameters" \
+        "${macro_suffixes[$index]}" "$call_arguments"
+      printf '\n'
+    done
+    printf '%s\n' '#endif'
+  } >"$destination"
+}
+
+program_input_manifest="$(mktemp "$program_cache/.tmp/input.XXXXXX")"
+write_program_input_manifest "$program_input_manifest"
+program_closure_hash="$(sha256sum "$program_input_manifest" | sed 's/ .*//')"
+program_dir="$program_cache/$program_closure_hash"
+
+exec {program_lock_fd}>"$program_cache/.locks/$program_closure_hash.lock"
+flock "$program_lock_fd"
+if [[ ! -e "$program_dir" ]]; then
+  program_stage="$(mktemp -d "$program_cache/.tmp/$program_closure_hash.XXXXXX")"
+  cp "$program_input_manifest" "$program_stage/input.manifest"
+  # The manifest carries only the rolled-up digest; this is the per-file listing
+  # behind it, so a cache miss can be explained by diffing two entries.
+  printf '%s\n' "$beagle_compiler_input_list" >"$program_stage/compiler-inputs.txt"
+  materializer_args=(--materializer c17)
+  [[ "$qbe_supports_abi" == 0 ]] || materializer_args+=(--materializer qbe)
+  combined_status=0
+  (
+    cd "$source_snapshot_root"
+    "$beagle" build "${materializer_args[@]}" \
+        --out "$program_stage" --abi "$abi" \
+        "${native_server_entry_args[@]}" \
+        -- \
+        "${source_logical_paths[@]}"
+  ) >"$program_stage/materialize.log" 2>&1 || combined_status=$?
+  combined_program_digest=""
+  if [[ "$qbe_supports_abi" == 0 ]]; then
+    [[ "$combined_status" == 0 && -f "$program_stage/report.txt" &&
+      -f "$program_stage/module.native-program" ]] || {
+      tail -n 240 -- "$program_stage/materialize.log" >&2
+      die "Beagle C17 native program materialization failed"
+    }
+    combined_program_digest="$(sha256sum \
+      "$program_stage/module.native-program" | sed 's/ .*//')"
+    printf 'qbe-profile-boundary/v1\nmaterializer\tqbe\nabi\t%s\nstatus\tUNSUPPORTED\nsupported-abis\t%s\n' \
+      "$abi" "${BEAGLE_MATERIALIZER_ABIS[qbe]}" \
+      >"$program_stage/qbe-probe.report.txt"
+  elif [[ -f "$program_stage/report.txt" ]]; then
+    cp "$program_stage/report.txt" "$program_stage/qbe-probe.report.txt"
+    validate_native_report_schema "$program_stage/qbe-probe.report.txt"
+    if [[ -f "$program_stage/module.native-program" ]]; then
+      combined_program_digest="$(sha256sum "$program_stage/module.native-program" | sed 's/ .*//')"
+    else
+      combined_program_digest="$(native_report_epoch_digest \
+        "$program_stage/qbe-probe.report.txt")"
+    fi
+  elif [[ "$combined_status" -ne 0 ]] &&
+    extract_failed_native_report "$program_stage/materialize.log" \
+      "$program_stage/qbe-probe.report.txt"; then
+    validate_native_report_schema "$program_stage/qbe-probe.report.txt"
+    combined_program_digest="$(native_report_epoch_digest \
+      "$program_stage/qbe-probe.report.txt")"
+  else
+    tail -n 240 -- "$program_stage/materialize.log" >&2
+    die "Beagle native program materialization produced no report"
+  fi
+  if [[ "$qbe_supports_abi" == 1 && "$combined_status" -ne 0 ]]; then
+    # Recover C17's output from the sibling refusal; any other failure is fatal.
+    grep -Fxq 'materialize-c17 OK module_0.h module_0.c' \
+      "$program_stage/qbe-probe.report.txt" &&
+      grep -Fxq 'result FAIL materialization' \
+        "$program_stage/qbe-probe.report.txt" &&
+      grep -q '^materialize-qbe REFUSED ' "$program_stage/qbe-probe.report.txt" || {
+        tail -n 240 -- "$program_stage/materialize.log" >&2
+        die "Beagle native program materialization failed"
+      }
+    (
+      cd "$source_snapshot_root"
+      "$beagle" build --materializer c17 \
+          --out "$program_stage" --abi "$abi" \
+          "${native_server_entry_args[@]}" \
+          -- \
+          "${source_logical_paths[@]}"
+    ) >"$program_stage/materialize.log" 2>&1 || {
+      tail -n 240 -- "$program_stage/materialize.log" >&2
+      die "C17 recovery materialization failed after a QBE refusal"
+    }
+  fi
+  if [[ "$qbe_supports_abi" == 1 ]]; then
+    write_qbe_frontier "$program_stage/qbe-probe.report.txt" \
+      "$program_stage/qbe-frontier.txt"
+  else
+    printf 'qbe-frontier/v1\nscope\t%s\nstatus\tREFUSED\nkey\tabi-profile\t%s\ndetail\tmaterializer metadata does not declare this ABI\n' \
+      "$program_scope" "$abi" >"$program_stage/qbe-frontier.txt"
+  fi
+  for artifact in source.facts module.native-program module.native-program.sha256 \
+      module_0.h module_0.c native_shim.h native_shim.c \
+      native_unicode15_data.h UNICODE-LICENSE.txt report.txt; do
+    [[ -f "$program_stage/$artifact" ]] ||
+      die "C17 materialization omitted $artifact"
+  done
+  validate_native_report "$program_stage/report.txt"
+  [[ "$host" == "program" ]] ||
+    { write_server_symbols "$program_stage/report.txt" "$program_stage/module_0.h" \
+        "$program_stage/server_symbols.validate"
+      rm -f "$program_stage/server_symbols.validate"; }
+  native_program_digest="$(sha256sum "$program_stage/module.native-program" | sed 's/ .*//')"
+  # The frontier receipt only attributes anything if QBE judged this program.
+  [[ "$combined_program_digest" == "$native_program_digest" ]] ||
+    die "QBE and C17 materialized different native programs; the frontier receipt cannot be attributed"
+  if [[ "$(awk -F'\t' '$1 == "status" { print $2 }' "$program_stage/qbe-frontier.txt")" == "OK" ]]; then
+    [[ -f "$program_stage/module_0.ssa" ]] ||
+      die "QBE reported OK but omitted module_0.ssa"
+  else
+    rm -f "$program_stage/module_0.ssa"
+  fi
+  check_qbe_frontier "$program_stage/qbe-frontier.txt"
+  [[ "$(<"$program_stage/module.native-program.sha256")" == "$native_program_digest" ]] ||
+    die "materializer native program digest does not match its bytes"
+  copy_ffc_notices "$program_stage"
+  write_program_input_manifest "$program_stage/input.after"
+  cmp -s "$program_input_manifest" "$program_stage/input.after" ||
+    die "source/compiler/config closure changed during native program build"
+  rm -f "$program_stage/input.after"
+  printf 'store-native-program/v1 %s %s\n' \
+    "$program_closure_hash" "$native_program_digest" >"$program_stage/READY"
+  mv "$program_stage" "$program_dir"
+  program_stage=""
+fi
+
+[[ -f "$program_dir/READY" && -f "$program_dir/input.manifest" &&
+  -f "$program_dir/module.native-program" &&
+  -f "$program_dir/module.native-program.sha256" ]] ||
+  die "native program cache entry is incomplete: $program_dir"
+validate_ffc_notices "$program_dir"
+cmp -s "$program_input_manifest" "$program_dir/input.manifest" ||
+  die "native program cache identity does not match its input closure"
+native_program_digest="$(sha256sum "$program_dir/module.native-program" | sed 's/ .*//')"
+[[ "$(<"$program_dir/module.native-program.sha256")" == "$native_program_digest" &&
+  "$(<"$program_dir/READY")" == \
+    "store-native-program/v1 $program_closure_hash $native_program_digest" ]] ||
+  die "native program cache entry failed its digest receipt: $program_dir"
+validate_native_report "$program_dir/report.txt"
+[[ -f "$program_dir/qbe-frontier.txt" && -f "$program_dir/qbe-probe.report.txt" ]] ||
+  die "native program cache entry omitted its QBE frontier receipt: $program_dir"
+check_qbe_frontier "$program_dir/qbe-frontier.txt"
+[[ "$regen_qbe_frontier" == 0 ]] || exit 0
+
+if [[ "$host" == "program" ]]; then
+  printf '%s\n' "$program_dir"
+  exit 0
+fi
+
+input_manifest="$(mktemp "$cache_root/.tmp/input.XXXXXX")"
+write_input_manifest "$input_manifest"
+closure_hash="$(sha256sum "$input_manifest" | sed 's/ .*//')"
+artifact_dir="$cache_root/$closure_hash"
+
+exec {lock_fd}>"$cache_root/.locks/$closure_hash.lock"
+flock "$lock_fd"
+if [[ -e "$artifact_dir" ]]; then
+  ready=""
+  [[ ! -f "$artifact_dir/READY" ]] || ready="$(<"$artifact_dir/READY")"
+  [[ "$ready" == "beagle-store-native-build/v1 $closure_hash" &&
+    -f "$artifact_dir/input.manifest" ]] ||
+    die "cache entry exists but is not READY: $artifact_dir"
+  cmp -s "$input_manifest" "$artifact_dir/input.manifest" ||
+    die "cache entry identity does not match its input closure: $artifact_dir"
+  [[ -f "$artifact_dir/beagle-revision.txt" &&
+    ! -L "$artifact_dir/beagle-revision.txt" ]] ||
+    die "cache entry omitted its Beagle revision provenance: $artifact_dir"
+  cached_beagle_revision="$(<"$artifact_dir/beagle-revision.txt")"
+  [[ "$cached_beagle_revision" =~ ^[0-9a-f]{40}$ ]] ||
+    die "cache entry has invalid Beagle revision provenance: $artifact_dir"
+  validate_ffc_notices "$artifact_dir"
+  if [[ "$host" == "wasm-embed" ]]; then
+    validate_wasi_notices "$artifact_dir"
+    [[ -f "$artifact_dir/include/store.h" &&
+      -f "$artifact_dir/lib/libstore.wasm" &&
+      -f "$artifact_dir/provenance.manifest" &&
+      ! -L "$artifact_dir/provenance.manifest" ]] ||
+      die "wasm-embed cache entry omitted its reactor: $artifact_dir"
+    provenance_validate="$(mktemp "$cache_root/.tmp/provenance.XXXXXX")"
+    write_wasm_provenance "$provenance_validate"
+    provenance_beagle_revision="$(awk '$1 == "beagle-revision" { print $2 }' \
+      "$artifact_dir/provenance.manifest")"
+    [[ "$(grep -c '^beagle-revision ' "$artifact_dir/provenance.manifest" || true)" == 1 &&
+      "$provenance_beagle_revision" =~ ^[0-9a-f]{40}$ ]] ||
+      die "wasm-embed cache entry has invalid Beagle revision provenance: $artifact_dir"
+    [[ "$provenance_beagle_revision" == "$cached_beagle_revision" ]] ||
+      die "wasm-embed cache entry Beagle revision provenance disagrees: $artifact_dir"
+    cmp -s \
+      <(grep -v '^beagle-revision ' "$provenance_validate") \
+      <(grep -v '^beagle-revision ' "$artifact_dir/provenance.manifest") ||
+      die "wasm-embed cache entry provenance differs from its build inputs: $artifact_dir"
+    rm -f "${provenance_validate:?}"
+  elif [[ "$host" == "embed" ]]; then
+    [[ -f "$artifact_dir/include/store.h" &&
+      -f "$artifact_dir/lib/libbeagle_store.a" &&
+      -f "$artifact_dir/lib/libbeagle_store.so" ]] ||
+      die "embed cache entry omitted its public libraries: $artifact_dir"
+  else
+    [[ -x "$artifact_dir/bin/beagle-store-server-native" ]] ||
+      die "native cache entry omitted its executable: $artifact_dir"
+  fi
+  printf '%s\n' "$artifact_dir"
+  exit 0
+fi
+
+stage="$(mktemp -d "$cache_root/.tmp/$closure_hash.XXXXXX")"
+mkdir -p "$stage/bin" "$stage/include" "$stage/lib"
+cp "$input_manifest" "$stage/input.manifest"
+printf '%s\n' "$beagle_revision" >"$stage/beagle-revision.txt"
+copy_ffc_notices "$stage"
+[[ "$host" != "wasm-embed" ]] || copy_wasi_notices "$stage"
+for artifact in source.facts module.native-program module.native-program.sha256 \
+    module_0.h module_0.c native_shim.h native_shim.c \
+    native_unicode15_data.h UNICODE-LICENSE.txt report.txt \
+    qbe-frontier.txt qbe-probe.report.txt materialize.log; do
+  [[ -f "$program_dir/$artifact" ]] ||
+    die "native program cache entry omitted $artifact"
+  cp "$program_dir/$artifact" "$stage/$artifact"
+done
+[[ ! -f "$program_dir/module_0.ssa" ]] ||
+  cp "$program_dir/module_0.ssa" "$stage/module_0.ssa"
+
+report="$stage/report.txt"
+
+[[ -f "$stage/native_shim.c" && -f "$stage/native_shim.h" ]] ||
+  die "C17 materializer omitted the native shim"
+write_server_symbols "$report" "$stage/module_0.h" \
+  "$stage/server_symbols.h"
+shopt -s nullglob
+module_sources=("$stage"/module_*.c)
+shopt -u nullglob
+[[ ${#module_sources[@]} -gt 0 ]] || die "C17 materializer omitted module_*.c"
+if [[ "$host" == "server" ]]; then
+  link_flags=()
+  [[ "$link_mode" != static ]] || link_flags+=(-static)
+  if ! (
+    cd "$repo"
+    "$cc" -std=c17 -pedantic -Wall -Wextra -Werror -pthread \
+        "${link_flags[@]}" \
+        -I"$stage" -I"$host_include_arg" \
+        "${module_sources[@]}" \
+        "$stage/native_shim.c" \
+        "$host_source_arg" \
+        "$adapter_arg" \
+        -o "$stage/bin/beagle-store-server-native"
+  ) >"$stage/native-host.log" 2>&1; then
+    sed -n '1,240p' "$stage/native-host.log" >&2
+    die "server native host link failed"
+  fi
+  {
+    printf 'native-host-c17 PASS compiler=%s output=%s\n' \
+      "$cc" "$stage/bin/beagle-store-server-native"
+    printf 'native-host-abi PASS host=server exports=8\n'
+    write_qbe_frontier_receipt
+  } >"$stage/native-host.report.txt"
+elif [[ "$host" == "wasm-embed" ]]; then
+  mkdir -p "$stage/objects"
+  wasm_sources=("${module_sources[@]}" "$stage/native_shim.c" \
+    "$adapter_arg" "$host_source_arg" "$wasm_host_source_arg")
+  wasm_objects=()
+  for index in "${!wasm_sources[@]}"; do
+    object="$stage/objects/$index.o"
+    # -O2 keeps the reactor's frames inside its default linear stack; there is
+    # no -pthread, wasip1 being single-threaded.
+    if ! (
+      cd "$repo"
+      "$cc" -std=c17 -pedantic -Wall -Wextra -Werror -O2 \
+          -DBEAGLE_STORE_WASM_HOST_IMPORTS=1 \
+          -I"$stage" -I"$host_include_arg" -c "${wasm_sources[$index]}" \
+          -o "$object"
+    ) >>"$stage/native-host.log" 2>&1; then
+      sed -n '1,240p' "$stage/native-host.log" >&2
+      die "wasm-embed object compilation failed"
+    fi
+    wasm_objects+=("$object")
+  done
+  wasm_export_flags=()
+  for wasm_export in "${wasm_exports[@]}"; do
+    wasm_export_flags+=("-Wl,--export=$wasm_export")
+  done
+  # --stack-first puts the shadow stack below every static, so an overflow
+  # traps at address zero instead of quietly overwriting allocator statics.
+  # 4 MiB is a control value the certification pass revisits.
+  if ! "$cc" -mexec-model=reactor -O2 "${wasm_objects[@]}" \
+      -Wl,--stack-first -Wl,-z,stack-size=4194304 \
+      "${wasm_export_flags[@]}" -o "$stage/lib/libstore.wasm" \
+      >>"$stage/native-host.log" 2>&1; then
+    sed -n '1,240p' "$stage/native-host.log" >&2
+    die "wasm-embed reactor link failed"
+  fi
+  cp "$host_header" "$stage/include/store.h"
+  write_wasm_seams "$stage/lib/libstore.wasm" "$stage/wasm-embed.seams"
+  check_wasm_seams "$stage/wasm-embed.seams" "$stage/wasm-embed.seams.expected"
+  rm -f "$stage/wasm-embed.seams.expected"
+  # Regeneration authors the fixture and stops: the artifact identity includes
+  # that fixture, so publishing here would seal a stale manifest.
+  [[ "$regen_wasm_seams" == 0 ]] || exit 0
+  {
+    printf 'native-host-c17 PASS compiler=%s output=%s\n' \
+      "$cc" "$stage/lib/libstore.wasm"
+    printf 'native-host-abi PASS host=wasm-embed exports=%d version=%d\n' \
+      "${#wasm_exports[@]}" 1
+    printf 'native-wasm-seams PASS ledger=%s\n' "${wasm_seams_ledger#"$repo"/}"
+    write_qbe_frontier_receipt
+  } >"$stage/native-host.report.txt"
+  write_wasm_provenance "$stage/provenance.manifest"
+else
+  mkdir -p "$stage/objects"
+  embed_sources=("${module_sources[@]}" "$stage/native_shim.c" \
+    "$adapter_arg" "$host_source_arg")
+  embed_objects=()
+  for index in "${!embed_sources[@]}"; do
+    object="$stage/objects/$index.o"
+    if ! (
+      cd "$repo"
+      "$cc" -std=c17 -pedantic -Wall -Wextra -Werror -pthread \
+          -fPIC -fvisibility=hidden -DBEAGLE_STORE_BUILDING_SHARED \
+          -I"$stage" -I"$host_include_arg" -c "${embed_sources[$index]}" \
+          -o "$object"
+    ) >>"$stage/native-host.log" 2>&1; then
+      sed -n '1,240p' "$stage/native-host.log" >&2
+      die "embed native object compilation failed"
+    fi
+    embed_objects+=("$object")
+  done
+  if ! "$ar" rcs "$stage/lib/libbeagle_store.a" "${embed_objects[@]}" \
+      >>"$stage/native-host.log" 2>&1 ||
+     ! "$cc" -shared -pthread "${embed_objects[@]}" \
+      -o "$stage/lib/libbeagle_store.so" >>"$stage/native-host.log" 2>&1; then
+    sed -n '1,240p' "$stage/native-host.log" >&2
+    die "embed native library link failed"
+  fi
+  cp "$host_header" "$stage/include/store.h"
+  if command -v nm >/dev/null 2>&1; then
+    nm -D --defined-only "$stage/lib/libbeagle_store.so" \
+      | awk '{print $3}' | sed -n '/^store_/p' | sort \
+      >"$stage/embed.exports"
+    printf '%s\n' store_abi_version store_buffer_release store_close store_open \
+      store_query store_snapshot store_transact | sort >"$stage/embed.expected"
+    cmp -s "$stage/embed.expected" "$stage/embed.exports" ||
+      die "embed shared library exports do not match the public ABI"
+    rm -f "$stage/embed.expected"
+  fi
+  {
+    printf 'native-host-c17 PASS compiler=%s output=%s\n' \
+      "$cc" "$stage/lib/libbeagle_store.so"
+    printf 'native-host-static PASS archiver=%s output=%s\n' \
+      "$ar" "$stage/lib/libbeagle_store.a"
+    printf 'native-host-abi PASS host=embed exports=7 version=1\n'
+    write_qbe_frontier_receipt
+  } >"$stage/native-host.report.txt"
+fi
+if [[ "$host" == "wasm-embed" ]]; then
+  [[ -f "$stage/include/store.h" && -f "$stage/lib/libstore.wasm" ]] ||
+    die "wasm-embed reactor is missing"
+elif [[ "$host" == "embed" ]]; then
+  [[ -f "$stage/include/store.h" && -f "$stage/lib/libbeagle_store.a" &&
+    -f "$stage/lib/libbeagle_store.so" ]] || die "native embed libraries are missing"
+else
+  [[ -x "$stage/bin/beagle-store-server-native" ]] || die "native executable is missing"
+fi
+
+program_after_manifest="$stage/program-input.after"
+write_program_input_manifest "$program_after_manifest"
+cmp -s "$program_input_manifest" "$program_after_manifest" ||
+  die "source/compiler/config closure changed during host packaging"
+rm -f "${program_after_manifest:?}"
+after_manifest="$stage/input.after"
+write_input_manifest "$after_manifest"
+cmp -s "$input_manifest" "$after_manifest" ||
+  die "host packaging closure changed during build"
+rm -f "${after_manifest:?}"
+printf 'beagle-store-native-build/v1 %s\n' "$closure_hash" >"$stage/READY"
+mv "$stage" "$artifact_dir"
+stage=""
+printf '%s\n' "$artifact_dir"

@@ -11,7 +11,7 @@
 ;; method, arg-mismatch, and unknown class all become compile errors instead of
 ;; bailing to Any.
 ;;
-;; Seed = fram's daemon interop inventory (cnf_coord_daemon.clj + rt.clj), per
+;; Seed = store's daemon interop inventory (cnf_coord_daemon.clj + rt.clj), per
 ;; .scratch/p1-manifest-seed.md. Hand-curated; deliberate-Any positions (byte[]
 ;; and the generic-array construction sites) are gap-listed as (Arr Any), not a
 ;; silent bail. Expand by hand or via the offline reflection generator (later).

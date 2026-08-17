@@ -6,7 +6,7 @@
 #   (b) the Racket compiler's emit (the oracle).
 #
 # Usage: self-host/native/verify-native.sh [MODULE.bclj ...]
-#   default corpus: $FRAM_REPO/src/fram/*.bclj + self-host/fixtures/lowering-temps.bclj
+#   default corpus: $BEAGLE_STORE_REPO/src/store/*.bclj + self-host/fixtures/lowering-temps.bclj
 # Requires: self-host/native/beagle-selfhost (run build.sh first), bb, the
 # checkout's pinned racket (resolved via bin/_beagle-racket).
 # BEAGLE_NATIVE_BIN overrides the binary under test (e.g. a nix-built result).
@@ -23,10 +23,10 @@ mkdir -p "$LAB"
 
 [ -x "$NATIVE" ] || { echo "verify-native: $NATIVE missing — run self-host/native/build.sh" >&2; exit 1; }
 
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
-    MODULES=("$FRAM_REPO"/src/fram/*.bclj self-host/fixtures/lowering-temps.bclj)
+    MODULES=("$BEAGLE_STORE_REPO"/src/store/*.bclj self-host/fixtures/lowering-temps.bclj)
 fi
 
 # Pinned racket for the oracle mint (worktree-safe collection routing, as in beagle-remint).
@@ -46,9 +46,9 @@ CORE_EXT=".${BEAGLE_TARGET_SRC_EXT[core]}"
 # mirrored by self-host/src/selfhost/main.bclj). A Beagle Core provider is
 # therefore unreachable from a hosted importer through this one-file
 # invocation, in every leg — Racket oracle, bb seed, and native binary alike.
-# Fram moved fram.types/store/schema/... to Core, so those corpus modules
+# Beagle Store moved store.types/store/schema/... to Core, so those corpus modules
 # cannot be byte-compared here; the same rule already selects
-# self-host/verify-selfhost.sh's fram corpus. Read off disk rather than
+# self-host/verify-selfhost.sh's store corpus. Read off disk rather than
 # hand-listed, so a corpus that moves a provider back to hosted source
 # re-enters this gate by itself.
 core_required_by() {           # <src> -> prints "NAMESPACE -> PATH", or fails

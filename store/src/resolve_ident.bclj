@@ -1,0 +1,182 @@
+#lang beagle/clj
+
+;; resolve-ident — node identity for the authoring path, and the handle it reads
+;; and writes the recursive-Term store through.
+;;
+;; A node identity is the minted coordinate `(tx-coordinate :mint-ordinal n)`.
+;; `minted-node-id?` is the total shape test that answers "reference or
+;; literal?"; `literal!` enforces its complement at the write boundary, so no
+;; stored value is ever node-shaped.
+;;
+;; Integers in the `[subject predicate object]` EDN projection are VIEW
+;; coordinates handed out by `ordinal!`, never identity; `load-edn!` lifts them
+;; back into fresh coordinates.
+;;
+;; A Graph carries the store root with the rotation built from it (store.schema's
+;; Session rule) plus the writer attribution the Term store does not record. A
+;; fact is named by its assertion occurrence coordinate. `mint!` emits no
+;; operation, so a whole subtree or corpus file shares one frame and every
+;; coordinate in it is durable on that frame's own assertions.
+(ns resolve-ident)
+
+
+(require store.types :as t)
+
+(require store.store :as c)
+
+(require store.rotation :as rot)
+
+(require store.txn :as txn)
+
+(def no-occurrences (Vec Any) [])
+
+(def no-ordinals (Map Any Int) {})
+
+;; ---------------------------------------------------------------- identity ---
+
+(defn minted-node-id? [(x Any)] Bool (txn/mint-coordinate? x))
+
+(defn literal? [(x Any)] Bool (not (minted-node-id? x)))
+
+;; The write-boundary half of the minted-node-id? invariant.
+(defn literal! [(x Any)] Any
+  (if (minted-node-id? x)
+    (throw (ex-info "resolve: a code-graph literal may not be shaped like a node identity" {:type :ambiguous-code-literal :value x}))
+    x))
+
+;; ------------------------------------------------------------------ handle ---
+
+(defrecord Graph
+  [(store (Atom t/TermStore))
+   (view (Atom rot/Rotation))
+   (writers Any)
+   (ordinals (Atom (Map Any Int)))])
+
+(defn graph! [(store (Atom t/TermStore)) (writers Any)] Graph
+  (->Graph store (atom (rot/project! store)) writers (atom no-ordinals)))
+
+(defn new-graph! [(space-id String)] Graph
+  (graph! (c/new-term-store space-id) {}))
+
+(defn store-of [(g Graph)] (Atom t/TermStore) (graph-store g))
+
+(defn writers-of [(g Graph)] Any (graph-writers g))
+
+(defn view [(g Graph)] rot/Rotation (deref (graph-view g)))
+
+(defn refresh! [(g Graph)] Graph
+  (do (reset! (graph-view g) (rot/refresh! (view g) (graph-store g))) g))
+
+;; An explicitly supplied view: the staging layer publishes a committed
+;; rotation plus its uncommitted overlay here.
+(defn with-view! [(g Graph) (rotation rot/Rotation)] Graph
+  (do (reset! (graph-view g) rotation) g))
+
+;; --------------------------------------------------------------- view keys ---
+
+;; The projection's dense integer for a node, assigned on first sight in mint
+;; order: a coordinate inside one emitted EDN file, never read back as identity.
+(defn ordinal! [(g Graph) (node Any)] Int
+  (let [(book (Map Any Int)) (deref (graph-ordinals g)) (hit Int?) (get book node)]
+    (if (some? hit)
+      hit
+      (let [(n Int) (+ 1 (count book))]
+        (do (swap! (graph-ordinals g) assoc node n) n)))))
+
+;; ------------------------------------------------------------------- reads ---
+
+(defn by-subject [(g Graph) (subject Any)] (Vec Any)
+  (rot/occurrences (rot/by-t1 (view g) subject)))
+
+(defn by-subject-predicate [(g Graph) (subject Any) (predicate Any)] (Vec Any)
+  (rot/occurrences (rot/by-t12 (view g) subject predicate)))
+
+(defn by-predicate [(g Graph) (predicate Any)] (Vec Any)
+  (rot/occurrences (rot/by-t2 (view g) predicate)))
+
+(defn by-predicate-value [(g Graph) (predicate Any) (value Any)] (Vec Any)
+  (rot/occurrences (rot/by-t23 (view g) predicate value)))
+
+(defn proposition-at [(g Graph) (occurrence Any)] Any
+  (let [(event t/OperationOccurrence?) (rot/event-at (view g) occurrence)]
+    (if (nil? event)
+      nil
+      (t/operationoccurrence-proposition event))))
+
+(defn subject-at [(g Graph) (occurrence Any)] Any
+  (let [(p Any) (proposition-at g occurrence)]
+    (if (nil? p) nil (t/triple-t1 p))))
+
+(defn predicate-at [(g Graph) (occurrence Any)] Any
+  (let [(p Any) (proposition-at g occurrence)]
+    (if (nil? p) nil (t/triple-t2 p))))
+
+(defn value-at [(g Graph) (occurrence Any)] Any
+  (let [(p Any) (proposition-at g occurrence)]
+    (if (nil? p) nil (t/triple-t3 p))))
+
+;; The value slot as a node reference; nil when it holds a literal.
+(defn target-at [(g Graph) (occurrence Any)] Any
+  (let [(r Any) (if (nil? occurrence) nil (value-at g occurrence))]
+    (if (minted-node-id? r) r nil)))
+
+(defn live-propositions [(g Graph)] (Vec t/Triple)
+  (rot/propositions (rot/all-occurrences (view g))))
+
+(defn live? [(g Graph) (occurrence Any)] Bool
+  (rot/live-occurrence? (view g) occurrence))
+
+;; Total order on occurrences within one space: sequence, then ordinal.
+(defn occurrence-order [(occurrence Any)] (Vec Any)
+  (if (t/occurrence-coordinate? occurrence)
+    [(t/triple-t3 (t/triple-t1 occurrence)) (t/triple-t3 occurrence)]
+    (throw (ex-info "resolve: occurrence coordinate required" {:type :invalid-occurrence-coordinate :value occurrence}))))
+
+;; The Term store records no writer (S1), so attribution rides on the handle's
+;; writers map; an unattributed transaction reads "".
+(defn writer-of [(g Graph) (occurrence Any)] String
+  (if (t/occurrence-coordinate? occurrence)
+    (let [(hit Any) (get (graph-writers g) (t/triple-t1 occurrence))]
+      (if (nil? hit) "" (str hit)))
+    (throw (ex-info "resolve: occurrence coordinate required" {:type :invalid-occurrence-coordinate :value occurrence}))))
+
+;; ------------------------------------------------------------------ writes ---
+
+(defn minted-count [(g Graph)] Int (count (deref (graph-ordinals g))))
+
+;; Withdrawals are the successor of the old superseded list: one per retired
+;; assertion, so an edit's supersede count is still directly observable.
+(defn withdrawal-count [(g Graph)] Int
+  (count (c/withdrawals (graph-store g))))
+
+(defn open [(g Graph)] (Atom txn/Builder) (txn/open (graph-store g)))
+
+;; Emits no operation: an ordinal against the builder's pinned transaction
+;; coordinate, durable as soon as that transaction commits anything else.
+(defn mint! [(g Graph) (b (Atom txn/Builder))] Any
+  (let [(node t/Triple) (txn/mint! b)] (do (ordinal! g node) node)))
+
+(defn assert-on!
+  [(b (Atom txn/Builder)) (subject Any) (predicate Any) (value Any)] Any
+  (txn/assert! b (t/triple subject predicate value)))
+
+(defn retract-on! [(g Graph) (b (Atom txn/Builder)) (occurrence Any)] Any
+  (let [(p Any) (proposition-at g occurrence)]
+    (if (nil? p) nil (txn/retract! b p))))
+
+(defn commit! [(g Graph) (b (Atom txn/Builder))] Graph
+  (do
+    (when (pos? (txn/operation-count b)) (txn/commit! (graph-store g) b))
+    (refresh! g)))
+
+(defn assert! [(g Graph) (subject Any) (predicate Any) (value Any)] Any
+  (let [(b (Atom txn/Builder)) (open g) (occurrence Any) (assert-on! b subject predicate value)]
+    (do (commit! g b) occurrence)))
+
+;; Retire one live assertion: the withdrawal the old supersedes edge stood for.
+;; A retraction withdraws the NEWEST live occurrence of its proposition, so
+;; retiring one of several EQUAL duplicates withdraws the newest rather than the
+;; named one — the choice store.rotation and store/apply-operation-state make.
+(defn retire! [(g Graph) (occurrence Any)] Any
+  (let [(b (Atom txn/Builder)) (open g) (target Any) (retract-on! g b occurrence)]
+    (do (commit! g b) target)))

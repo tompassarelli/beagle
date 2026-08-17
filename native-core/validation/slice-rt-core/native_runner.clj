@@ -8,7 +8,7 @@
 (defn qbe-report [facts-path source-id artifacts-dir compiler-commit abi]
   (let [rows (slice/parse-facts (slurp facts-path))
         configuration ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        source (slice/source-program rows "fram.rt-core" source-id)
+        source (slice/source-program rows "store.rt-core" source-id)
         freeze-result (lower/freeze-source-stage source compiler-commit configuration)]
     (cond
       (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
@@ -49,7 +49,7 @@
       {})))
   (let [abi-id (or (System/getenv "NATIVE_SLICE_ABI") "lp64")
         abi (core/abi-profile-for abi-id)
-        c-report (body-slice/emit-slice! facts-path "fram.rt-core"
+        c-report (body-slice/emit-slice! facts-path "store.rt-core"
                    source-id artifacts-dir compiler-commit
                    abi-id)
         backend-report (try

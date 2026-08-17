@@ -51,7 +51,7 @@ for pass in one two; do
 (spit \"$artifacts/report.txt\"
   (native.body-slice/emit-dual-slice!
     \"$sequence_scratch/fixture.facts\"
-    \"fram.sequence-probe\"
+    \"store.sequence-probe\"
     \"beagle:native-core/validation/slice-sequence-primitives/fixture.bclj\"
     \"$artifacts\"
     \"sequence-primitives-v0\"

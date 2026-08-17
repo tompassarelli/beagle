@@ -4,7 +4,7 @@
 # loop, one back-edge Jump per recur) -> 7 obligations -> native.body-c17 ->
 # gcc/clang -std=c17 -> probe main.
 # Two programs: loops.bgl must pass all ten obligations; counted/ carries the
-# fram counted shapes and refuses checked-arithmetic on its interim add-i64.
+# store counted shapes and refuses checked-arithmetic on its interim add-i64.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"

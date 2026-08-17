@@ -4386,11 +4386,11 @@
              errors))
         3)))
   (expect! "parse-program! require :as (fold shape)"
-    (let [prog (parse-program! [["ns" "fram.fold"] ["require" "fram.kernel" ":as" "k"]])]
-      (= (get prog "requires") [{"ns" "fram.kernel" "alias" "k" "refer" false}])))
+    (let [prog (parse-program! [["ns" "store.fold"] ["require" "store.kernel" ":as" "k"]])]
+      (= (get prog "requires") [{"ns" "store.kernel" "alias" "k" "refer" false}])))
   (expect! "parse-program! ns docstring dropped"
-    (let [prog (parse-program! [["ns" "fram.fold" ["#%string" "Replay the log."]]])]
-      (and (= (get prog "namespace") "fram.fold")
+    (let [prog (parse-program! [["ns" "store.fold" ["#%string" "Replay the log."]]])]
+      (and (= (get prog "namespace") "store.fold")
         (= (count (get prog "forms")) 0))))
   (expect! "parse-program! ns (:require [lib :as a])"
     (let [prog (parse-program! [["ns" "my.app" [":require" ["#%brackets" "clojure.string" ":as" "str"]]]])]
@@ -4418,7 +4418,7 @@
       (and (= (get prog "target") "clj")
         (= (get prog "gen-class") false))))
   (expect! "parse-program! (:gen-class) sets program flag"
-    (let [prog (parse-program! [["ns" "fram.main" [":gen-class"]]])]
+    (let [prog (parse-program! [["ns" "store.main" [":gen-class"]]])]
       (= (get prog "gen-class") true)))
   (expect! "nix: (s ...) interpolated-string — literal parts are text, others expr"
     (let [node (parse-expr* ["s" ["#%string" "#!"] "pkgs.bash" ["#%string" "/bin"]])]

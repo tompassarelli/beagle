@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Drive fram:src/fram/types.bgl through the whole native pipeline and emit the
+# Drive store:src/store/types.bgl through the whole native pipeline and emit the
 # C17 projection of its record ABI.
 #
 #   beagle-ast -> source facts -> frozen source program -> typed program
 #     -> native program -> 7 obligations -> native.c11 emitters
 #
 # Re-runnable and byte-stable: every input is regenerated from the selected
-# current Fram source.
+# current Beagle Store source.
 #
-# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, FRAM_CHECKOUT.
+# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, BEAGLE_STORE_CHECKOUT.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"
@@ -16,15 +16,15 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-}"
-fram_checkout="$("$repo/native-core/validation/fram-checkout.sh")"
-src="$fram_checkout/src/fram/types.bgl"
+store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
+src="$store_checkout/src/store/types.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types-full.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 mkdir -p "$art"
 
 if [[ ! -f "$src" ]]; then
-  echo "drive.sh: upstream Fram source is missing: $src" >&2
+  echo "drive.sh: upstream Beagle Store source is missing: $src" >&2
   exit 1
 fi
 "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
@@ -48,7 +48,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
 bb -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
-  (native.slice/emit-slice! \"$scratch/types.facts\" \"fram.types\"
+  (native.slice/emit-slice! \"$scratch/types.facts\" \"store.types\"
     \"$logical\" \"$art\" \"native-slice-types-full-v0\" \"$abi\"))"
 
 cat "$art/report.txt"

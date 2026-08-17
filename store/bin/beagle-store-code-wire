@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# beagle-store-code-wire on|off <dir> [server-json]  —  shared MERGE/UNWIRE logic for
+# beagle-store-code-on / beagle-store-code-off. Writes/removes the store MCP server entry in:
+#   <dir>/.mcp.json                    (Claude Code, JSON  mcpServers.store)
+#   <dir>/.codex/config.toml           (Codex, TOML [mcp_servers.beagle-store] + [.env])
+# NEVER clobbers unrelated keys/sections already present in either file.
+set -euo pipefail
+MODE="${1:?usage: beagle-store-code-wire on|off <dir> [server-json]}"
+DIR="${2:?usage: beagle-store-code-wire on|off <dir> [server-json]}"
+SERVER_JSON="${3:-}"
+MCP_JSON="$DIR/.mcp.json"
+CODEX_TOML="$DIR/.codex/config.toml"
+
+case "$MODE" in
+  on)
+    [ -n "$SERVER_JSON" ] || { echo "beagle-store-code-wire on: needs server-json" >&2; exit 1; }
+    # --- .mcp.json: deep-merge {mcpServers.store: SERVER_JSON} into existing file ---
+    EXISTING="{}"
+    [ -f "$MCP_JSON" ] && EXISTING="$(cat "$MCP_JSON")"
+    jq --argjson srv "$SERVER_JSON" '.mcpServers = ((.mcpServers // {}) + {store: $srv})' \
+      <<<"$EXISTING" > "$MCP_JSON.tmp" && mv "$MCP_JSON.tmp" "$MCP_JSON"
+    # --- .codex/config.toml: replace/insert the [mcp_servers.beagle-store] block only ---
+    mkdir -p "$DIR/.codex"
+    python3 "$(dirname "$0")/beagle-store-code-wire-toml.py" set "$CODEX_TOML" "$SERVER_JSON"
+    ;;
+  off)
+    if [ -f "$MCP_JSON" ]; then
+      # drop mcpServers.store; if that empties mcpServers, drop the key
+      # itself too rather than leaving a dangling {} — but keep any other
+      # unrelated root keys intact.
+      jq '(.mcpServers // {} | del(.store)) as $s
+          | if ($s | length) == 0 then del(.mcpServers) else .mcpServers = $s end' \
+        "$MCP_JSON" > "$MCP_JSON.tmp"
+      if [ "$(jq 'keys | length' "$MCP_JSON.tmp")" = "0" ]; then
+        rm -f "${MCP_JSON:?}.tmp" "${MCP_JSON:?}"
+      else
+        mv "$MCP_JSON.tmp" "$MCP_JSON"
+      fi
+    fi
+    if [ -f "$CODEX_TOML" ]; then
+      python3 "$(dirname "$0")/beagle-store-code-wire-toml.py" unset "$CODEX_TOML"
+    fi
+    ;;
+  *) echo "beagle-store-code-wire: unknown mode $MODE (want on|off)" >&2; exit 1;;
+esac

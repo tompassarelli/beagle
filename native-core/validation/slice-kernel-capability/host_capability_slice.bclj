@@ -57,7 +57,7 @@
   (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
         (configuration (Vec String)) ["profile=3"]
         (source stages/SourceStageV1)
-        (slice/source-program rows "fram.kernel" source-logical-id)
+        (slice/source-program rows "store.kernel" source-logical-id)
         (freeze-result lower/SourceFreezeResultV0)
         (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))

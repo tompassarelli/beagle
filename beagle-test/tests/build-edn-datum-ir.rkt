@@ -133,7 +133,7 @@
 
 ;; --- CRDT slot ordering — verb-authored forms must NOT be dropped --------------
 ;; Every projected and verb-authored child uses the same LOGOOT predicate
-;; "f<path>~<tie>". `--build-edn` consumes that form straight from Fram and sorts
+;; "f<path>~<tie>". `--build-edn` consumes that form straight from Beagle Store and sorts
 ;; by (path,tie), independent of fact emission order.
 (define (manual-triples-build lines)
   (edn-triples->datum (map (lambda (l) (read (open-input-string l))) lines)))

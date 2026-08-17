@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Sealed graph-edit authority launcher. This source is package-only: the Nix
+# wrapper supplies every BEAGLE_STORE_GRAPH_EDIT_SEALED_* path with --set, so caller
+# environment and project files cannot select runtime code or helpers.
+set -euo pipefail
+IFS=$' \t\n'
+umask 077
+
+die() {
+  printf 'beagle-store-graph-edit-runtime: %s\n' "$*" >&2
+  exit 2
+}
+
+required_internal=(
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_BASH
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_BB
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE_CLI
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_BUILD_ALL
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_CAT
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_CHECK_EMIT
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_EDIT_VERIFIER
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_EMPTY_THREADS
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_ENV
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_JAVA
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_MANIFEST
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_OVERLAY_CHECK
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_PATH
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_RACKET
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_REALPATH
+  BEAGLE_STORE_GRAPH_EDIT_SEALED_RESOLVE
+)
+for name in "${required_internal[@]}"; do
+  [[ -n "${!name:-}" ]] || die "package-only entrypoint; missing sealed binding $name"
+done
+
+for path in \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_BASH" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_BB" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE_CLI" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_BUILD_ALL" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_CAT" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_CHECK_EMIT" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_EDIT_VERIFIER" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_EMPTY_THREADS" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_ENV" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_JAVA" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_MANIFEST" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_OVERLAY_CHECK" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_RACKET" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_REALPATH" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_RESOLVE"; do
+  [[ "$path" == /nix/store/* ]] || die "sealed binding escaped /nix/store: $path"
+done
+[[ -x "$BEAGLE_STORE_GRAPH_EDIT_SEALED_EDIT_VERIFIER" ]] || \
+  die "sealed edit verifier is not executable"
+[[ -f "$BEAGLE_STORE_GRAPH_EDIT_SEALED_OVERLAY_CHECK" ]] || \
+  die "sealed module-overlay checker is not a regular file"
+
+# The public ELF wrapper always removes this marker and starts Bash in
+# privileged mode, which ignores exported functions and startup hooks. Re-enter
+# once under env -i so the authority driver itself sees only this closed set of
+# package bindings plus the eight North launch fields it is allowed to accept.
+if [[ "${BEAGLE_STORE_GRAPH_EDIT_SEALED_ENVIRONMENT_STAGE:-}" != "sealed-v1" ]]; then
+  exec "$BEAGLE_STORE_GRAPH_EDIT_SEALED_ENV" -i \
+    HOME=/homeless-shelter \
+    LANG=C \
+    LC_ALL=C \
+    PATH="$BEAGLE_STORE_GRAPH_EDIT_SEALED_PATH" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_ENVIRONMENT_STAGE=sealed-v1 \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_BASH="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BASH" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_BB="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BB" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE_CLI="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE_CLI" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_BUILD_ALL="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BUILD_ALL" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_CAT="$BEAGLE_STORE_GRAPH_EDIT_SEALED_CAT" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_CHECK_EMIT="$BEAGLE_STORE_GRAPH_EDIT_SEALED_CHECK_EMIT" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_EDIT_VERIFIER="$BEAGLE_STORE_GRAPH_EDIT_SEALED_EDIT_VERIFIER" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_EMPTY_THREADS="$BEAGLE_STORE_GRAPH_EDIT_SEALED_EMPTY_THREADS" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_ENV="$BEAGLE_STORE_GRAPH_EDIT_SEALED_ENV" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM="$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_JAVA="$BEAGLE_STORE_GRAPH_EDIT_SEALED_JAVA" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_MANIFEST="$BEAGLE_STORE_GRAPH_EDIT_SEALED_MANIFEST" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_PATH="$BEAGLE_STORE_GRAPH_EDIT_SEALED_PATH" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_RACKET="$BEAGLE_STORE_GRAPH_EDIT_SEALED_RACKET" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_REALPATH="$BEAGLE_STORE_GRAPH_EDIT_SEALED_REALPATH" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_RESOLVE="$BEAGLE_STORE_GRAPH_EDIT_SEALED_RESOLVE" \
+    BEAGLE_STORE_GRAPH_EDIT_SEALED_OVERLAY_CHECK="$BEAGLE_STORE_GRAPH_EDIT_SEALED_OVERLAY_CHECK" \
+    NORTH_STORE_AUTHORITY_INSTANCE_ID="${NORTH_STORE_AUTHORITY_INSTANCE_ID:-}" \
+    NORTH_STORE_AUTHORITY_LEASE_ID="${NORTH_STORE_AUTHORITY_LEASE_ID:-}" \
+    NORTH_STORE_AUTHORITY_LEASE_EPOCH="${NORTH_STORE_AUTHORITY_LEASE_EPOCH:-}" \
+    NORTH_STORE_RUNTIME_CLOSURE_DIGEST="${NORTH_STORE_RUNTIME_CLOSURE_DIGEST:-}" \
+    NORTH_STORE_CHECKOUT_ROOT="${NORTH_STORE_CHECKOUT_ROOT:-}" \
+    NORTH_STORE_SOURCE_ROOT="${NORTH_STORE_SOURCE_ROOT:-}" \
+    NORTH_STORE_CODE_LOG="${NORTH_STORE_CODE_LOG:-}" \
+    NORTH_STORE_CODE_PORT="${NORTH_STORE_CODE_PORT:-}" \
+    "$BEAGLE_STORE_GRAPH_EDIT_SEALED_BASH" -p "$0" "$@"
+fi
+
+command_name="${1:-}"
+case "$command_name" in
+  manifest)
+    exec "$BEAGLE_STORE_GRAPH_EDIT_SEALED_CAT" "$BEAGLE_STORE_GRAPH_EDIT_SEALED_MANIFEST"
+    ;;
+  preflight|mcp) ;;
+  "")
+    die "authority runtime is dark by default; use manifest, preflight, or mcp"
+    ;;
+  *)
+    die "unknown command '$command_name'; expected manifest, preflight, or mcp"
+    ;;
+esac
+shift
+[[ $# -eq 0 ]] || die "$command_name accepts no positional arguments"
+
+# NORTH_STORE_* values are launch bindings supplied and authenticated by North.
+# This runtime validates their shape and binds them to the child; it does NOT
+# claim that echoing NORTH_STORE_RUNTIME_CLOSURE_DIGEST establishes trust.
+required_launch=(
+  NORTH_STORE_AUTHORITY_INSTANCE_ID
+  NORTH_STORE_AUTHORITY_LEASE_ID
+  NORTH_STORE_AUTHORITY_LEASE_EPOCH
+  NORTH_STORE_RUNTIME_CLOSURE_DIGEST
+  NORTH_STORE_CHECKOUT_ROOT
+  NORTH_STORE_SOURCE_ROOT
+  NORTH_STORE_CODE_LOG
+  NORTH_STORE_CODE_PORT
+)
+for name in "${required_launch[@]}"; do
+  [[ -n "${!name:-}" ]] || die "missing required North launch binding $name"
+done
+
+instance_id="$NORTH_STORE_AUTHORITY_INSTANCE_ID"
+lease_id="$NORTH_STORE_AUTHORITY_LEASE_ID"
+lease_epoch="$NORTH_STORE_AUTHORITY_LEASE_EPOCH"
+runtime_digest="$NORTH_STORE_RUNTIME_CLOSURE_DIGEST"
+checkout_root="$NORTH_STORE_CHECKOUT_ROOT"
+source_root="$NORTH_STORE_SOURCE_ROOT"
+code_log="$NORTH_STORE_CODE_LOG"
+code_port="$NORTH_STORE_CODE_PORT"
+
+uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+[[ "$instance_id" =~ $uuid_re ]] || die "NORTH_STORE_AUTHORITY_INSTANCE_ID must be a lowercase RFC 4122 UUID"
+[[ "$lease_id" =~ $uuid_re ]] || die "NORTH_STORE_AUTHORITY_LEASE_ID must be a lowercase RFC 4122 UUID"
+[[ "$lease_epoch" =~ ^(0|[1-9][0-9]*)$ ]] || die "NORTH_STORE_AUTHORITY_LEASE_EPOCH must be a canonical decimal string"
+[[ "$runtime_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || die "NORTH_STORE_RUNTIME_CLOSURE_DIGEST must be sha256:<64 lowercase hex>"
+[[ "$code_port" =~ ^[1-9][0-9]*$ ]] || die "NORTH_STORE_CODE_PORT must be a decimal TCP port"
+(( code_port >= 1 && code_port <= 65535 )) || die "NORTH_STORE_CODE_PORT must be between 1 and 65535"
+
+canonical_existing() {
+  local label="$1" path="$2" kind="$3" canonical
+  [[ "$path" == /* ]] || die "$label must be absolute"
+  canonical="$($BEAGLE_STORE_GRAPH_EDIT_SEALED_REALPATH -e -- "$path" 2>/dev/null)" || die "$label does not exist"
+  [[ "$canonical" == "$path" ]] || die "$label must be canonical (got $path, canonical $canonical)"
+  case "$kind" in
+    dir) [[ -d "$path" ]] || die "$label must be a directory" ;;
+    file) [[ -f "$path" ]] || die "$label must be a regular file" ;;
+    *) die "internal path-kind error: $kind" ;;
+  esac
+}
+
+canonical_existing NORTH_STORE_CHECKOUT_ROOT "$checkout_root" dir
+canonical_existing NORTH_STORE_SOURCE_ROOT "$source_root" dir
+canonical_existing NORTH_STORE_CODE_LOG "$code_log" file
+case "$source_root" in
+  "$checkout_root"|"$checkout_root"/*) ;;
+  *) die "NORTH_STORE_SOURCE_ROOT must be inside NORTH_STORE_CHECKOUT_ROOT" ;;
+esac
+[[ "$code_log" == "$checkout_root/.store/code.log" ]] || \
+  die "NORTH_STORE_CODE_LOG must be the canonical checkout log $checkout_root/.store/code.log"
+
+cd "$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM"
+exec "$BEAGLE_STORE_GRAPH_EDIT_SEALED_ENV" -i \
+  HOME=/homeless-shelter \
+  LANG=C \
+  LC_ALL=C \
+  PATH="$BEAGLE_STORE_GRAPH_EDIT_SEALED_PATH" \
+  TMPDIR=/tmp \
+  BABASHKA_CLASSPATH="$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM/out" \
+  BEAGLE_HOME="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE" \
+  BEAGLE_STORE_BEAGLE="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BEAGLE_CLI" \
+  BEAGLE_STORE_AUTHORITY_INSTANCE_ID="$instance_id" \
+  BEAGLE_STORE_AUTHORITY_LEASE_ID="$lease_id" \
+  BEAGLE_STORE_AUTHORITY_LEASE_EPOCH="$lease_epoch" \
+  BEAGLE_STORE_AUTHORITY_EXPECTED_RUNTIME_CLOSURE_DIGEST="$runtime_digest" \
+  BEAGLE_STORE_AUTHORITY_CORE_MANIFEST="$BEAGLE_STORE_GRAPH_EDIT_SEALED_MANIFEST" \
+  BEAGLE_STORE_AUTHORITY_LAUNCH_CONTRACT=1 \
+  BEAGLE_STORE_BIN="$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM/bin" \
+  BEAGLE_STORE_BUILD_ALL="$BEAGLE_STORE_GRAPH_EDIT_SEALED_BUILD_ALL" \
+  BEAGLE_STORE_CHECKOUT_ROOT="$checkout_root" \
+  BEAGLE_STORE_CHECK_EMIT="$BEAGLE_STORE_GRAPH_EDIT_SEALED_CHECK_EMIT" \
+  BEAGLE_STORE_CODE_LOG="$code_log" \
+  BEAGLE_STORE_CODE_PORT="$code_port" \
+  BEAGLE_STORE_EDIT_VERIFIER="$BEAGLE_STORE_GRAPH_EDIT_SEALED_EDIT_VERIFIER" \
+  BEAGLE_STORE_EDIT_VERIFIER_RACKET="$BEAGLE_STORE_GRAPH_EDIT_SEALED_RACKET" \
+  BEAGLE_STORE_EDIT_VERIFIER_OVERLAY_CHECK="$BEAGLE_STORE_GRAPH_EDIT_SEALED_OVERLAY_CHECK" \
+  BEAGLE_STORE_FLIP=1 \
+  BEAGLE_STORE_GRAPH_EDIT=1 \
+  BEAGLE_STORE_HOME="$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM" \
+  BEAGLE_STORE_JAVA="$BEAGLE_STORE_GRAPH_EDIT_SEALED_JAVA" \
+  BEAGLE_STORE_LOG=/dev/null \
+  BEAGLE_STORE_OUT="$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM/out" \
+  BEAGLE_STORE_PACKAGED=1 \
+  BEAGLE_STORE_SERVER_PORT="$code_port" \
+  BEAGLE_STORE_RACKET="$BEAGLE_STORE_GRAPH_EDIT_SEALED_RACKET" \
+  BEAGLE_STORE_RESOLVE="$BEAGLE_STORE_GRAPH_EDIT_SEALED_RESOLVE" \
+  BEAGLE_STORE_SOURCE_ROOT="$source_root" \
+  BEAGLE_STORE_SRC="$source_root" \
+  BEAGLE_STORE_THREADS="$BEAGLE_STORE_GRAPH_EDIT_SEALED_EMPTY_THREADS" \
+  "$BEAGLE_STORE_GRAPH_EDIT_SEALED_BB" -cp "$BEAGLE_STORE_GRAPH_EDIT_SEALED_FRAM/out" \
+    -m store.graph-control-mcp "$command_name"

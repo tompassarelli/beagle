@@ -1,7 +1,7 @@
 #lang racket/base
 ;; Gate C2 red/green: the hermetic compile runner compiles each consumer's
 ;; derived roster into EXTERNAL scratch, is byte-clean by construction, records
-;; diagnostics on failure, honors the fram-before-north resolve staging, and
+;; diagnostics on failure, honors the store-before-north resolve staging, and
 ;; emits a schema-versioned receipt.
 ;;
 ;; All fixtures are throwaway git repos under a temp dir — no real consumer is
@@ -163,20 +163,20 @@
                 (lambda () (run-consumers consumers scratch #:jobs 4 #:timeout 120)))))
   (delete-directory/files base))
 
-;; --- STAGING + ORDERING: north resolves fram via external scratch link -------
-;; Exercises stage-consumer! (the north-specific fram injection) and the
-;; fram-before-north scheduler edge at jobs=1 (must not deadlock). north's
-;; module `(require fram.thing)` type-checks ONLY because fram's sources are
+;; --- STAGING + ORDERING: north resolves store via external scratch link -------
+;; Exercises stage-consumer! (the north-specific store injection) and the
+;; store-before-north scheduler edge at jobs=1 (must not deadlock). north's
+;; module `(require store.thing)` type-checks ONLY because store's sources are
 ;; linked as a sibling in scratch — never into north's tree.
-(test-case "staging: north compiles against fram on the scratch resolve path"
+(test-case "staging: north compiles against store on the scratch resolve path"
   (define base (make-temporary-file "c2-stage-~a" 'directory))
-  (define fram-repo (build-path base "fram"))
+  (define store-repo (build-path base "store"))
   (define north-repo (build-path base "north"))
-  (write-file! (build-path fram-repo "src" "fram" "thing.bclj")
-               "#lang beagle/clj\n(ns fram.thing)\n(defn double [(x Int)] Int (* x 2))\n")
-  (init-repo! fram-repo)
+  (write-file! (build-path store-repo "src" "store" "thing.bclj")
+               "#lang beagle/clj\n(ns store.thing)\n(defn double [(x Int)] Int (* x 2))\n")
+  (init-repo! store-repo)
   (write-file! (build-path north-repo "src" "north" "main.bclj")
-               "#lang beagle/clj\n(ns north.main)\n(require fram.thing :as t)\n(defn go [] Int (t/double 21))\n")
+               "#lang beagle/clj\n(ns north.main)\n(require store.thing :as t)\n(defn go [] Int (t/double 21))\n")
   (init-repo! north-repo)
   (check-false (directory-exists? (build-path north-repo "web-bjs"))
                "CLI/MCP-only North fixture has no retired web source tree")
@@ -188,15 +188,15 @@
                (enumerators ((enumerator (kind glob) (source #f) (root "src/north")
                               (ext ".bclj") (recursive #t) (skip-basenames ())
                               (skip-suffixes ()) (skip-prefixes ()) (shape-markers ()))))))
-  (define fram-spec (glob-consumer "fram" fram-repo "src/fram" ".bclj"))
+  (define store-spec (glob-consumer "store" store-repo "src/store" ".bclj"))
   (with-scratch
    (lambda (scratch)
-     ;; order [north fram] with jobs=1 forces the dependency wait to resolve
-     (define results (run-consumers (list north-spec fram-spec) scratch
+     ;; order [north store] with jobs=1 forces the dependency wait to resolve
+     (define results (run-consumers (list north-spec store-spec) scratch
                                     #:jobs 1 #:timeout 180))
-     (check-equal? (run-result-status (result-named results "fram")) "pass")
+     (check-equal? (run-result-status (result-named results "store")) "pass")
      (check-equal? (run-result-status (result-named results "north")) "pass"
-                   "north's (require fram.thing) resolved via the scratch link")
+                   "north's (require store.thing) resolved via the scratch link")
      (check-true (run-result-byteclean? (result-named results "north")))
-     (check-true (run-result-byteclean? (result-named results "fram")))))
+     (check-true (run-result-byteclean? (result-named results "store")))))
   (delete-directory/files base))

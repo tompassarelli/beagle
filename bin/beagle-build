@@ -82,11 +82,6 @@ if [[ -n "$target" ]] && ! beagle_known_hosted_target "$target"; then
     exit 2
 fi
 
-if [[ -n "$target" && ${#module_root_args[@]} -gt 0 ]]; then
-    echo "beagle-build: --module-root cannot be combined with --target" >&2
-    exit 2
-fi
-
 if [[ ${#positionals[@]} -lt 1 || ${#positionals[@]} -gt 2 ]]; then
     echo "usage: beagle-build [--target TARGET] [--module-root LOGICAL=PHYSICAL]... SOURCE [OUTPUT]" >&2
     exit 2
@@ -148,8 +143,12 @@ mkdir -p "$(dirname "$out")"
 tmp="$(mktemp "${out}.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 if [[ -n "$target" ]]; then
-    "$RACKET" "$beagle_root/beagle-lib/private/retarget-cli.rkt" \
-        "$target" "$src" > "$tmp"
+    src_abs="$(realpath "$src")"
+    source_id="$(beagle_source_id "$src_abs")"
+    source_id="${source_id%.*}.${BEAGLE_TARGET_SRC_EXT[$target]}"
+    "$RACKET" "$beagle_root/beagle-lib/private/build-one-cli.rkt" \
+        "${module_root_args[@]}" \
+        --source "$src_abs" "$source_id" > "$tmp"
 else
     src_abs="$(realpath "$src")"
     source_id="$(beagle_source_id "$src_abs")"

@@ -11,7 +11,7 @@
 #   set-body    : replace a defn's BODY (supersede its post-params slots -> a fresh body)
 #
 # The structured edit spec the agent emits is data, not text: an EDN datum (the new
-# form / body) minted into the SAME Fram store as kind/v/order-slot facts. For each verb the
+# form / body) minted into the SAME Beagle Store store as kind/v/order-slot facts. For each verb the
 # gate runs the full loop and HARD-ASSERTS:
 #   1. project .bclj -> facts          (facts-roundtrip --emit-edn)
 #   2. apply the edit AS A FACT OP      (resolve.clj upsert-form / set-body)
@@ -22,7 +22,7 @@
 #      was a FACT OP not a text splice (the EDN delta shows freshly-minted node ids
 #      carrying kind/v/order-slot facts + a re-pointed wrapper/body slot).
 #
-# Needs racket + bb + fram out/ + chartroom (resolve.clj). Fail-closed: an edit the
+# Needs racket + bb + store out/ + chartroom (resolve.clj). Fail-closed: an edit the
 # engine refuses, or that does not recompile, is REJECTED with no tree written.
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
@@ -30,11 +30,11 @@ export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
-FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
-CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
 source "$ROOT/bin/_beagle-racket"
-source "$ROOT/bin/_fram-resolver"
+source "$ROOT/bin/_store-resolver"
 fail=0
 
 # author <outdir> <corpus> <op> <args...> -> prints COMMITTED | REJECTED
@@ -48,11 +48,11 @@ author() {
   for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done
   case "$op" in
     upsert-form)  # add a new top-level def, or replace an existing one by name
-      bb -cp "$FRAM_OUT" "$RESOLVE" upsert-form "$1" "$2" "${edns[@]}" >/dev/null 2>&1 \
+      bb -cp "$BEAGLE_STORE_OUT" "$RESOLVE" upsert-form "$1" "$2" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
       for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     set-body)     # replace a defn's body
-      bb -cp "$FRAM_OUT" "$RESOLVE" set-body "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 \
+      bb -cp "$BEAGLE_STORE_OUT" "$RESOLVE" set-body "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
       for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     *) echo REJECTED; rm -rf "$W"; return ;;
@@ -75,8 +75,8 @@ fact_node_growth() {
     [ -z "$first_edn" ] && first_edn="$E/$b.edn"; done
   local edns=("$E"/*.edn)
   case "$op" in
-    upsert-form) bb -cp "$FRAM_OUT" "$RESOLVE" upsert-form "$1" "$2" "${edns[@]}" >/dev/null 2>&1 ;;
-    set-body)    bb -cp "$FRAM_OUT" "$RESOLVE" set-body "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 ;;
+    upsert-form) bb -cp "$BEAGLE_STORE_OUT" "$RESOLVE" upsert-form "$1" "$2" "${edns[@]}" >/dev/null 2>&1 ;;
+    set-body)    bb -cp "$BEAGLE_STORE_OUT" "$RESOLVE" set-body "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 ;;
   esac
   local proj="$RESOLVE_OUT/resolved-$(basename "$first_edn" .edn).edn"   # $RESOLVE_OUT/resolved-<file>.edn
   local o p
@@ -86,8 +86,8 @@ fact_node_growth() {
 }
 
 echo "================ AUTHORING-as-facts gate (upsert-form + set-body) ================"
-[ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-RESOLVE="$(find_fram_resolver)" || exit 3
+[ -d "$BEAGLE_STORE_OUT" ] || { echo "  (need BEAGLE_STORE_OUT)"; exit 3; }
+RESOLVE="$(find_store_resolver)" || exit 3
 CORPUS="$HERE/authoring-corpus"
 MINT_CORPUS="$HERE/mint-render-corpus"
 [ -d "$CORPUS" ]   || { echo "  (need authoring-corpus)"; exit 3; }
@@ -116,7 +116,7 @@ BODY1="$T/body_base.edn"; printf '(* x 10)' > "$BODY1"
 # capture the projected EDN to prove the new body's leaves entered the store as v-facts
 PROJSAVE="$T/setb.proj.edn"
 "$RACKET" "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/setb.orig.edn"
-bb -cp "$FRAM_OUT" "$RESOLVE" set-body base authmod "$BODY1" "$T/setb.orig.edn" >/dev/null 2>&1
+bb -cp "$BEAGLE_STORE_OUT" "$RESOLVE" set-body base authmod "$BODY1" "$T/setb.orig.edn" >/dev/null 2>&1
 cp "$RESOLVE_OUT/resolved-authmod.bclj.edn" "$PROJSAVE" 2>/dev/null || true
 rm -f $RESOLVE_OUT/resolved-*.edn 2>/dev/null || true
 r="$(author "$T/setb" "$CORPUS" set-body base authmod "$BODY1")"
@@ -146,10 +146,10 @@ echo '    (proves add-two`s `base` call carries a real refers_to identity edge i
 # author add-two into the corpus, render, then rename base->renamed-base on the AUTHORED tree.
 "$RACKET" "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/sc.edn"
 SPEC3="$T/spec_sc.edn"; printf '(defn add-two [(x Int)] Int (base (+ x 2)))' > "$SPEC3"
-bb -cp "$FRAM_OUT" "$RESOLVE" upsert-form authmod "$SPEC3" "$T/sc.edn" >/dev/null 2>&1
+bb -cp "$BEAGLE_STORE_OUT" "$RESOLVE" upsert-form authmod "$SPEC3" "$T/sc.edn" >/dev/null 2>&1
 "$RACKET" "$RT" --render $RESOLVE_OUT/resolved-authmod.bclj.edn 2>/dev/null > "$T/sc_authored.bclj"; rm -f $RESOLVE_OUT/resolved-*.edn
 "$RACKET" "$RT" --emit-edn "$T/sc_authored.bclj" 2>/dev/null > "$T/sc_authored.edn"
-bb -cp "$FRAM_OUT" "$RESOLVE" rename base renamed-base sc_authored "$T/sc_authored.edn" >/dev/null 2>&1 \
+bb -cp "$BEAGLE_STORE_OUT" "$RESOLVE" rename base renamed-base sc_authored "$T/sc_authored.edn" >/dev/null 2>&1 \
   && "$RACKET" "$RT" --render $RESOLVE_OUT/resolved-sc_authored.bclj.edn 2>/dev/null > "$T/sc_renamed.bclj"
 if grep -q '(defn add-two \[(x Int)\] Int (renamed-base (+ x 2)))' "$T/sc_renamed.bclj" 2>/dev/null \
    && grep -q '(defn renamed-base ' "$T/sc_renamed.bclj"; then

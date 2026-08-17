@@ -9,7 +9,7 @@
 #                                (the property determinism does NOT give for free)
 #   4. comment-preserving       — comments survive the facts->source render
 #
-# Racket-only (no fram, no bb). Gates in CI.
+# Racket-only (no store, no bb). Gates in CI.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -1,0 +1,37 @@
+# wrangler.example.toml — the deployment shape a Durable Object needs to carry
+# a Beagle Store engine. Copy it next to your own worker and edit the names.
+#
+#   scripts/build-wasm.sh          # produces lib/libstore.wasm + provenance.json
+#   wrangler deploy
+name = "store-do"
+main = "src/worker.mjs"
+# ctx.id.name is load-bearing for SpaceId/object identity and became available
+# on 2026-03-15. Do not move this date earlier.
+compatibility_date = "2026-03-15"
+compatibility_flags = ["nodejs_compat"]
+
+# The engine ships as a module in the bundle, not as a fetched asset: a Worker
+# cannot compile wasm at runtime.
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
+# One Durable Object owns one FRAMLOG and its snapshot image. Beagle Store assumes a
+# single writer for the whole open-to-close lifetime, which is exactly what a
+# Durable Object already guarantees.
+[[durable_objects.bindings]]
+name = "BEAGLE_STORE"
+class_name = "StoreLog"
+
+# SQLite-backed storage is what gives the object a transactional KV; the two
+# chunked key ranges (framlog/, framimage/) are published in one transaction.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["StoreLog"]
+
+[vars]
+# The backend Worker derives the raw stub only with getByName(BEAGLE_STORE_SPACE_ID).
+# Never bind the Beagle Store namespace into the public application Worker; bind only
+# its exchange-only WorkerEntrypoint service facade.
+BEAGLE_STORE_SPACE_ID = "cloudflare-do"

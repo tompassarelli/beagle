@@ -1,0 +1,12 @@
+{
+  "schema": "store-wiki-capacity-corpus/v1",
+  "profile": "wiki-shaped-256x3-2k-v1",
+  "interpretation": "fixed structural workload, not a traffic forecast",
+  "decision": "launch-blocking capacity floor",
+  "articles": 256,
+  "revisionsPerArticle": 3,
+  "linksPerRevision": 4,
+  "bodyBytes": 2048,
+  "actionsPerBatch": 240,
+  "expectedFacts": 6912
+}

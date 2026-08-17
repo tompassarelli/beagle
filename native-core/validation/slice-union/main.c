@@ -7,7 +7,7 @@
    fn_32..43 numeric scalar probes; fn_44..46 vector predicates;
    fn_47 text suffix.
    Any tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil, 6 Pair,
-   7 FramIndex, 8 RecursiveValue, 9 OpaqueIndex, 10 LateUnsafe,
+   7 StoreIndex, 8 RecursiveValue, 9 OpaqueIndex, 10 LateUnsafe,
    11 ValueRow, 12 TaggedValue. */
 #include <math.h>
 #include "module_0.h"
@@ -41,7 +41,7 @@ struct slice_text_blob {
   uint8_t bytes[3];
 };
 
-struct slice_fram_index {
+struct slice_store_index {
   native_vec *cells;
 };
 
@@ -98,7 +98,7 @@ static slice_any slice_pair(void *target) {
   return value;
 }
 
-static slice_any slice_fram_index(void *target) {
+static slice_any slice_store_index(void *target) {
   slice_any value;
   value.tag = INT64_C(7);
   value.payload.variant_7 = target;
@@ -196,8 +196,8 @@ int main(int argc, char **argv) {
   struct slice_recursive_value recursive[RECURSIVE_DEPTH];
   struct slice_recursive_value equal_recursive[RECURSIVE_DEPTH];
   struct slice_recursive_value recursive_cycle;
-  struct slice_fram_index unsafe_index;
-  struct slice_fram_index null_vector_index = { NULL };
+  struct slice_store_index unsafe_index;
+  struct slice_store_index null_vector_index = { NULL };
   struct slice_opaque_index opaque_index = { NULL };
   struct slice_late_unsafe late_left;
   struct slice_late_unsafe late_right;
@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
   slice_any late_unsafe_right;
   slice_any null_text = slice_text(NULL);
   slice_any null_keyword = slice_keyword(NULL);
-  slice_any null_vector = slice_fram_index(&null_vector_index);
+  slice_any null_vector = slice_store_index(&null_vector_index);
   native_vec *vector_cycle;
   native_vec *vector_cycle_element;
   size_t depth;
@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
   cells = native_vec_push(&arena, cells, &cell, (int64_t)sizeof cell,
                           _Alignof(native_atom *));
   unsafe_index.cells = cells;
-  unsupported = slice_fram_index(&unsafe_index);
+  unsupported = slice_store_index(&unsafe_index);
   opaque = slice_opaque_index(&opaque_index);
   late_left.prefix = INT64_C(0);
   late_left.cells = cells;

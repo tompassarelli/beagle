@@ -1,0 +1,13 @@
+# RATCHET — the QBE frontier. Shrink-only and two-sided: an unrecorded refusal
+# fails, a recorded refusal that no longer reproduces fails until deleted. See
+# bin/beagle-store-native-build for the gate, the schema, and --regen-qbe-frontier.
+#
+# scope<TAB>class<TAB>detail. QBE reports one refusal per program, so a scope
+# carries at most one line; resolving it reveals the next front.
+#
+store.store/known-term-handle+store.store/new-term-store+store.store/term-count	unsupported-value-semantics	hash
+store.store/term-count	shape-outside-slice	-
+store-native-server	clock-extern	-
+# The wasm32 line is the profile boundary itself, not a slice gap: QBE
+# materializes lp64 only and refuses any other profile by name.
+store-native-server@wasm32	abi-profile	wasm32

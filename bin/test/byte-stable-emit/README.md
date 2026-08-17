@@ -19,7 +19,7 @@ fact-canonical flip (move 3).
    placement).
 
 `run.sh` proves all four: fixed-point + round-trip over the in-repo fixture corpus
-(racket-only, no fram/bb), a locality receipt (one-token change → single-line
+(racket-only, no store/bb), a locality receipt (one-token change → single-line
 diff), and comment preservation + rendered-text round-trip. It also fails on any
 **skipped/unparseable** file — a skip is not a pass.
 

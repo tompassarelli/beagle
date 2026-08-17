@@ -4,19 +4,19 @@ Proves that a Beagle program can round-trip through projected facts without
 changing the compiler-visible program. The loop:
 
 ```
-.bclj --import--> lossless facts --(through a real Fram store)--> facts --export--> .bclj'
+.bclj --import--> lossless facts --(through a real Beagle Store store)--> facts --export--> .bclj'
 ```
 
 - **import** = `facts-roundtrip --emit-edn` (the lossless datum-level projection,
   comments included — *not* the lossy query projection the call graph uses).
-- **the round-trip store** = Fram's shipped `roundtrip-fram` module: facts loaded
+- **the round-trip store** = Beagle Store's shipped `roundtrip-store` module: facts loaded
   into its real term store and re-extracted from the live propositions.
 - **export** = byte-stable `datum->pretty` (`--render`, move 2).
 
-## The two proofs (`run.sh`, over `fram/src`)
+## The two proofs (`run.sh`, over `store/src`)
 
-1. **Datum-identical through the Fram store** — the program reconstructs
-   datum-identically after a round-trip through a real Fram store (not just an
+1. **Datum-identical through the Beagle Store store** — the program reconstructs
+   datum-identically after a round-trip through a real Beagle Store store (not just an
    in-memory map).
 2. **Recompile-identity (modulo srcloc)** — `beagle build` of the regenerated tree
    is **byte-identical** to `beagle build` of the original, after stripping
@@ -40,11 +40,11 @@ differ there.
 ## Run
 
 ```
-CODE_AS_FACTS_CORPUS=~/code/fram/main/src FRAM_OUT=~/code/fram/main/out bin/test/code-as-facts/run.sh
+CODE_AS_FACTS_CORPUS=~/code/store/main/src BEAGLE_STORE_OUT=~/code/store/main/out bin/test/code-as-facts/run.sh
 ```
 
-Needs racket (`facts-roundtrip`, `beagle-build-all`) + bb + fram's `out/` classpath.
-Gated in CI over the checked-out `fram/src`.
+Needs racket (`facts-roundtrip`, `beagle-build-all`) + bb + store's `out/` classpath.
+Gated in CI over the checked-out `store/src`.
 
 ## Structured graph-edit experiments
 
@@ -54,13 +54,13 @@ boundary:
 
 - **`rename.sh` / `delete.sh` / `authoring.sh`** — rename (O(1), scope-correct via
   `refers_to`) and delete (fail-closed on orphaned refs). The cross-module rename
-  uses Fram's current `.bgl` owner, adds one minimal qualified consumer, and gives
+  uses Beagle Store's current `.bgl` owner, adds one minimal qualified consumer, and gives
   projection, resolution, rendering, and coherent overlay checking separate
   deadlines.
   These operations EDIT or REMOVE existing names.
 - **`authoring-verbs.sh`** — `upsert-form` (add a NEW
   top-level def, or replace an existing one by name) and `set-body` (replace a defn's
-  body). The new form/body is an EDN datum **minted into the same Fram store** as
+  body). The new form/body is an EDN datum **minted into the same Beagle Store store** as
   `kind`/`v`/CRDT-order-slot facts (the inverse of `--emit-edn`), then the
   wrapper/body order slots are wired (append) or **superseded** (replace) —
   the rename template. The gate
@@ -71,8 +71,8 @@ boundary:
   enter the store as `v`-facts).
 
 ```
-FRAM_OUT=~/code/fram/main/out bin/test/code-as-facts/authoring-verbs.sh
+BEAGLE_STORE_OUT=~/code/store/main/out bin/test/code-as-facts/authoring-verbs.sh
 ```
 
 `rename.sh` is the complete resolver capability suite and runs against current
-Fram source.
+Beagle Store source.

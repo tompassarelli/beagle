@@ -1,8 +1,8 @@
 #lang beagle
 ;; Beagle-owned zero-argument fixture for the Native stdout capability. This is
-;; deliberately not Fram's variadic CLI entry: Native v0 has no rest-argument
+;; deliberately not Beagle Store's variadic CLI entry: Native v0 has no rest-argument
 ;; packing ABI, and this driver must not erase that external contract.
-(ns fram.main)
+(ns store.main)
 
 (defn -main [] Nil
-  (println "fram usage: validate | tell <subject> <slot> <value> | retract <subject> <slot> <value> (alias: untell) | query <edn> | selfcheck --deep"))
+  (println "store usage: validate | tell <subject> <slot> <value> | retract <subject> <slot> <value> (alias: untell) | query <edn> | selfcheck --deep"))

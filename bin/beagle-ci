@@ -20,7 +20,7 @@
 #   4. (optional) firn-build + firn-validate against ~/code/nixos-config
 #       — enabled with BEAGLE_VALIDATE_NIXOS_CONFIG=1
 #   5. (optional) bin/beagle-downstream --run — hermetic five-consumer gate
-#       (gjoa/wake/north/fram/nixos-config compiled with candidate ~/code/beagle
+#       (gjoa/wake/north/store/nixos-config compiled with candidate ~/code/beagle
 #       into external scratch; byte-clean by construction) — enabled with
 #       BEAGLE_DOWNSTREAM_GATE=1. Fast local `bin/beagle-ci` runs with this OFF
 #       by default (the five-consumer compile is a further cold build on top of

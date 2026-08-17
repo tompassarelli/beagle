@@ -190,8 +190,8 @@
   (let [(root-number Int) (instant-root facts)
         (subjects (Vec Int)) (descendant-ids facts root-number)
         (selected (Vec FactV0)) (select-facts facts subjects)
-        (root core/NativeId) (slice-id "source-root" ["fram.types"])
-        (source-text-id core/NativeId) (slice-id "source-text" ["fram.types"])
+        (root core/NativeId) (slice-id "source-root" ["store.types"])
+        (source-text-id core/NativeId) (slice-id "source-text" ["store.types"])
         (nodes (Vec stages/TermNodeV0))
         (conj
           (conj (source-nodes selected)
@@ -200,13 +200,13 @@
           (stages/->TermNodeV0 source-text-id
             (stages/->TextTermV0 source-text)))]
     (if (< root-number 0)
-      (throw (ex-info "fram.types Instant declaration is absent" {}))
+      (throw (ex-info "store.types Instant declaration is absent" {}))
       (stages/->SourceStageV1
         (stages/->TermGraphV0 root nodes)
         [(stages/->SourceModuleV1
-           (slice-id "module" ["fram.types"])
-           "fram.types"
-           "src/fram/types.bgl"
+           (slice-id "module" ["store.types"])
+           "store.types"
+           "src/store/types.bgl"
            (stages/content-digest source-text)
            (stages/content-digest (str "projection:" root-number))
            (stages/content-digest (str root-number ":Instant:Int:Int"))
@@ -342,7 +342,7 @@
 (defn main-text [(program core/NativeCoreProgram)] String
   (let [(types (Vec core/TypeDef)) (c11/ordered-types (core/nativecoreprogram-types program))
         (instant-index Int)
-        (c11/type-index types (lower/source-type-id "fram.types/Instant"))
+        (c11/type-index types (lower/source-type-id "store.types/Instant"))
         (instant-type String) (c11/type-name 0 instant-index)]
     (if (< instant-index 0)
       (throw (ex-info "Instant type is absent from C17 projection" {}))
@@ -363,7 +363,7 @@
   (let [(facts (Vec Any)) (read-string (slurp facts-path))
         (source-text String) (slurp source-path)
         (configuration (Vec String))
-        ["profile=3" "module=fram.types" "slice=Instant"]
+        ["profile=3" "module=store.types" "slice=Instant"]
         (source stages/SourceStageV1) (source-program facts source-text)
         (source-freeze stages/FrozenSourceStageV1)
         (require-source-freeze

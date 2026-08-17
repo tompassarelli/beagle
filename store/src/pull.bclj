@@ -1,0 +1,441 @@
+#lang beagle/clj
+
+;; Local nested-shape compatibility projection over an immutable TermStore.
+;; This module does not add a pull operation to the live FRAMRPC surface.
+(ns pull)
+
+
+(require store.store :as c)
+
+(require store.schema :as s)
+
+(require store.types :as t)
+
+(require clojure.string :as str)
+
+(def default-max-depth Int 5)
+
+(def default-max-nodes Int 1000)
+
+(def reserved-preds (Set Any)
+  #{"withdrawn_reason"
+    "value_kind"
+    "withdrawn_by"
+    "store-supersedes"
+    "name"
+    "withdrawn_at"
+    "cardinality"})
+
+(defn- reserved-pred? [(p Any)] Bool
+  (contains? reserved-preds p))
+
+(defn- clamp [(v Any) (default Int)] Int
+  (if (and (integer? v) (pos? v)) (min v default) default))
+
+(defn- valid-elem? [(e Any)] Bool
+  (letfn [(valid-subpat? [(sp Any)] Bool
+            (or (and (vector? sp)
+                  (every? (fn [(x Any)] Bool (elem? x)) sp))
+              (and (integer? sp) (pos? sp))
+              (= sp :...)))
+          (elem? [(x Any)] Bool
+            (cond
+              (= x :*) true
+              (string? x) (not (str/blank? x))
+              (map? x)
+              (and (seq x)
+                (every?
+                  (fn [(k Any)] Bool
+                    (and (string? k)
+                      (not (str/blank? k))
+                      (valid-subpat? (get x k))))
+                  (keys x)))
+              :else false))]
+    (elem? e)))
+
+(defn validate [(root Any) (pattern Any) (opts Any)] (Vec String)
+  (let [e-root
+        (if (or (and (string? root) (not (str/blank? root)))
+              (and (vector? root)
+                (seq root)
+                (every?
+                  (fn [(x Any)] Bool
+                    (and (string? x) (not (str/blank? x))))
+                  root)))
+          []
+          ["root must be a subject-name string or a non-empty vector of name strings"])
+        e-pat
+        (if-not (vector? pattern)
+          ["pattern must be a vector"]
+          (vec
+            (mapcat
+              (fn [(e Any)] (Vec String)
+                (if (valid-elem? e)
+                  []
+                  [(str "malformed pattern element: " (pr-str e))]))
+              pattern)))
+        e-caps
+        (vec
+          (mapcat
+            (fn [(k Keyword)] (Vec String)
+              (let [v (get opts k)]
+                (if (and (contains? opts k)
+                      (not (and (integer? v) (pos? v))))
+                  [(str k " must be a positive integer")]
+                  [])))
+            [:max-depth :max-nodes]))
+        e-asof
+        (let [v (get opts :as-of)]
+          (if (and (contains? opts :as-of)
+                (not (and (integer? v) (>= v 0))))
+            [":as-of must be a non-negative integer"]
+            []))]
+    (vec (concat e-root e-pat e-caps e-asof))))
+
+(defn run!
+  [(store-atom (Atom t/TermStore)) (root Any) (pattern Any) (opts Any)] Any
+  (let [errs (validate root pattern opts)]
+    (if (seq errs)
+      {:error errs}
+      (let [(schema s/Session) (s/session! store-atom)
+            (occurrences (Vec t/OperationOccurrence))
+            (c/occurrences store-atom)
+            (live-now (Vec t/OperationOccurrence))
+            (c/live-occurrences store-atom)
+            (withdrawals (Vec t/Withdrawal)) (c/withdrawals store-atom)
+            (asof Int?)
+            (let [candidate (get opts :as-of)]
+              (if (integer? candidate) candidate nil))
+            (prov? Bool) (boolean (get opts :provenance))
+            (max-depth Int)
+            (clamp (get opts :max-depth) default-max-depth)
+            (max-nodes Int)
+            (clamp (get opts :max-nodes) default-max-nodes)
+            (state (Atom Int)) (atom 0)]
+        (letfn [(event-occurrence [(event t/OperationOccurrence)] t/Triple
+                  (t/operationoccurrence-coordinate event))
+                (event-proposition [(event t/OperationOccurrence)] t/Triple
+                  (t/operationoccurrence-proposition event))
+                (event-sequence [(event t/OperationOccurrence)] Int
+                  (let [(occurrence t/Triple) (event-occurrence event)
+                        (transaction t/Triple) (t/triple-t1 occurrence)]
+                    (t/triple-t3 transaction)))
+                (assertion-event? [(event t/OperationOccurrence)] Bool
+                  (t/assertion-occurrence? event))
+                (events-at [(cutoff Int)] (Vec t/OperationOccurrence)
+                  (reduce
+                    (fn
+                      [(active (Vec t/OperationOccurrence))
+                       (event t/OperationOccurrence)]
+                      (Vec t/OperationOccurrence)
+                      (if (> (event-sequence event) cutoff)
+                        active
+                        (if (assertion-event? event)
+                          (conj active event)
+                          (let [(proposition t/Triple) (event-proposition event)
+                                (target t/OperationOccurrence?)
+                                (last
+                                  (filterv
+                                    (fn [(candidate t/OperationOccurrence)] Bool
+                                      (= proposition
+                                        (event-proposition candidate)))
+                                    active))]
+                            (if (nil? target)
+                              active
+                              (filterv
+                                (fn [(candidate t/OperationOccurrence)] Bool
+                                  (not= (event-occurrence target)
+                                    (event-occurrence candidate)))
+                                active))))))
+                    []
+                    occurrences))
+                (snapshot-events [] (Vec t/OperationOccurrence)
+                  (if (some? asof) (events-at asof) live-now))
+                (live-event? [(event t/OperationOccurrence)] Bool
+                  (boolean
+                    (some
+                      (fn [(candidate t/OperationOccurrence)] Bool
+                        (= (event-occurrence event)
+                          (event-occurrence candidate)))
+                      live-now)))
+                (withdrawal-for [(occurrence t/Triple)] t/Withdrawal?
+                  (let [(withdrawal t/Withdrawal?)
+                        (first
+                          (filterv
+                            (fn [(candidate t/Withdrawal)] Bool
+                              (= occurrence
+                                (t/operationoccurrence-coordinate
+                                  (t/withdrawal-assertion candidate))))
+                            withdrawals))]
+                    withdrawal))
+                (metadata-value [(owner Any) (predicate Keyword)] Any
+                  (let [(event t/OperationOccurrence?)
+                        (last
+                          (filterv
+                            (fn [(candidate t/OperationOccurrence)] Bool
+                              (if-not (assertion-event? candidate)
+                                false
+                                (let [(proposition t/Triple)
+                                      (event-proposition candidate)]
+                                  (and (= owner (t/triple-t1 proposition))
+                                    (= predicate
+                                      (t/triple-t2 proposition))
+                                    (or (nil? asof)
+                                      (<= (event-sequence candidate) asof))))))
+                            (snapshot-events)))]
+                    (if (nil? event)
+                      nil
+                      (t/triple-t3 (event-proposition event)))))
+                (agent-of [(occurrence t/Triple)] Any
+                  (or (metadata-value occurrence :kernel/asserted-by)
+                    (metadata-value (t/triple-t1 occurrence)
+                      :kernel/asserted-by)))
+                (recorded-at-of [(occurrence t/Triple)] Any
+                  (or (metadata-value occurrence :kernel/recorded-at)
+                    (metadata-value (t/triple-t1 occurrence)
+                      :kernel/recorded-at)))
+                (pid-of [(p String)] Any
+                  (s/resolve-predicate schema p))
+                (nm-of [(term Any)] Any
+                  (or (s/name-of schema term) term))
+                (fwd-events
+                  [(left Any) (predicate Any)] (Vec t/OperationOccurrence)
+                  (let [(candidates (Vec t/OperationOccurrence))
+                        (cond
+                          (some? asof) (snapshot-events)
+                          prov?
+                          (filterv
+                            (fn [(event t/OperationOccurrence)] Bool
+                              (and (assertion-event? event)
+                                (or (live-event? event)
+                                  (some?
+                                    (withdrawal-for
+                                      (event-occurrence event))))))
+                            occurrences)
+                          :else live-now)]
+                    (filterv
+                      (fn [(event t/OperationOccurrence)] Bool
+                        (if-not (assertion-event? event)
+                          false
+                          (let [(proposition t/Triple)
+                                (event-proposition event)]
+                            (and (= left (t/triple-t1 proposition))
+                              (= predicate
+                                (t/triple-t2 proposition))))))
+                      candidates)))
+                (rev-events
+                  [(predicate Any) (right Any)] (Vec t/OperationOccurrence)
+                  (filterv
+                    (fn [(event t/OperationOccurrence)] Bool
+                      (if-not (assertion-event? event)
+                        false
+                        (let [(proposition t/Triple)
+                              (event-proposition event)]
+                          (and (= predicate
+                                 (t/triple-t2 proposition))
+                            (= right (t/triple-t3 proposition))))))
+                    (snapshot-events)))
+                (subject-events [(left Any)] (Vec t/OperationOccurrence)
+                  (filterv
+                    (fn [(event t/OperationOccurrence)] Bool
+                      (and (assertion-event? event)
+                        (= left
+                          (t/triple-t1 (event-proposition event)))))
+                    (snapshot-events)))
+                (leaf [(predicate Any) (event t/OperationOccurrence)] Any
+                  (let [(proposition t/Triple) (event-proposition event)
+                        (right Any) (t/triple-t3 proposition)
+                        (value Any)
+                        (if (= s/ref-kind
+                               (s/lookup schema predicate
+                                 s/value-kind-predicate))
+                          (nm-of right)
+                          right)]
+                    (if-not prov?
+                      value
+                      (let [(occurrence t/Triple) (event-occurrence event)
+                            (withdrawal t/Withdrawal?)
+                            (if (some? asof)
+                              nil
+                              (withdrawal-for occurrence))
+                            (recorded-at Any) (recorded-at-of occurrence)
+                            (base (Map Keyword Any))
+                            (cond->
+                              {:val value
+                               :cid occurrence
+                               :by (agent-of occurrence)
+                               :seq (event-sequence event)
+                               :withdrawn (boolean withdrawal)}
+                              (some? recorded-at)
+                              (assoc :ts recorded-at))]
+                        (if (nil? withdrawal)
+                          base
+                          (let [(retraction t/Triple)
+                                (t/operationoccurrence-coordinate
+                                  (t/withdrawal-retraction withdrawal))]
+                            (assoc base
+                              :withdrawn_by (agent-of retraction)
+                              :withdrawn_at retraction)))))))
+                (values [(pname String) (predicate Any) (left Any)] Any
+                  (let [(events (Vec t/OperationOccurrence))
+                        (fwd-events left predicate)]
+                    (when (seq events)
+                      (let [(rendered (Vec Any))
+                            (mapv
+                              (fn [(event t/OperationOccurrence)] Any
+                                (leaf predicate event))
+                              events)]
+                        (if (= "single" (s/cardinality schema pname))
+                          (last rendered)
+                          rendered)))))
+                (subpat->pattern [(key String) (subpattern Any)] Any
+                  (cond
+                    (vector? subpattern) subpattern
+                    (integer? subpattern)
+                    (if (> subpattern 1)
+                      [{key (dec subpattern)}]
+                      [])
+                    (= subpattern :...) [{key :...}]
+                    :else []))
+                (recur-target
+                  [(target Any)
+                   (subpattern Any)
+                   (depth Int)
+                   (visited (Set Any))]
+                  Any
+                  (if (> (inc depth) max-depth)
+                    {:fram/id (nm-of target) :fram/truncated true}
+                    (node target (nm-of target) subpattern
+                      (inc depth) visited)))
+                (elem
+                  [(acc Any)
+                   (left Any)
+                   (depth Int)
+                   (visited (Set Any))
+                   (element Any)]
+                  Any
+                  (cond
+                    (= element :*)
+                    (reduce
+                      (fn [(result Any) (predicate Any)] Any
+                        (let [(pname String)
+                              (s/predicate-name schema predicate)]
+                          (if (reserved-pred? pname)
+                            result
+                            (let [value (values pname predicate left)]
+                              (if (nil? value)
+                                result
+                                (assoc result pname value))))))
+                      acc
+                      (distinct
+                        (mapv
+                          (fn [(event t/OperationOccurrence)] Any
+                            (t/triple-t2 (event-proposition event)))
+                          (subject-events left))))
+
+                    (and (string? element)
+                      (str/starts-with? element "_"))
+                    (let [predicate (pid-of (subs element 1))]
+                      (if (nil? predicate)
+                        acc
+                        (let [(subjects (Vec Any))
+                              (mapv
+                                (fn [(event t/OperationOccurrence)] Any
+                                  (t/triple-t1
+                                    (event-proposition event)))
+                                (rev-events predicate left))]
+                          (assoc acc element
+                            (mapv
+                              (fn [(subject Any)] Any
+                                (node subject (nm-of subject) []
+                                  (inc depth) visited))
+                              subjects)))))
+
+                    (string? element)
+                    (let [predicate (pid-of element)]
+                      (if (nil? predicate)
+                        acc
+                        (let [value (values element predicate left)]
+                          (if (nil? value)
+                            acc
+                            (assoc acc element value)))))
+
+                    (map? element)
+                    (reduce
+                      (fn [(result Any) (key String)] Any
+                        (let [subpattern (get element key)]
+                          (if (str/starts-with? key "_")
+                            (let [predicate (pid-of (subs key 1))]
+                              (if (nil? predicate)
+                                result
+                                (let [(subjects (Vec Any))
+                                      (mapv
+                                        (fn [(event t/OperationOccurrence)] Any
+                                          (t/triple-t1
+                                            (event-proposition event)))
+                                        (rev-events predicate left))]
+                                  (assoc result key
+                                    (mapv
+                                      (fn [(subject Any)] Any
+                                        (recur-target subject
+                                          (subpat->pattern key subpattern)
+                                          depth visited))
+                                      subjects)))))
+                            (let [predicate (pid-of key)]
+                              (if (nil? predicate)
+                                result
+                                (let [(rendered (Vec Any))
+                                      (mapv
+                                        (fn [(event t/OperationOccurrence)] Any
+                                          (let [(right Any)
+                                                (t/triple-t3
+                                                  (event-proposition event))
+                                                (target-name Any)
+                                                (s/name-of schema right)]
+                                            (if (nil? target-name)
+                                              right
+                                              (recur-target right
+                                                (subpat->pattern key subpattern)
+                                                depth visited))))
+                                        (fwd-events left predicate))]
+                                  (if (seq rendered)
+                                    (assoc result key
+                                      (if (= "single"
+                                             (s/cardinality schema key))
+                                        (first rendered)
+                                        rendered))
+                                    result)))))))
+                      acc
+                      (keys element))
+
+                    :else acc))
+                (node
+                  [(subject Any)
+                   (name Any)
+                   (requested Any)
+                   (depth Int)
+                   (visited (Set Any))]
+                  Any
+                  (cond
+                    (contains? visited subject)
+                    {:fram/id name :fram/cycle true}
+                    (>= (deref state) max-nodes)
+                    {:fram/id name :fram/truncated true}
+                    :else
+                    (do
+                      (swap! state (fn [(count Int)] Int (inc count)))
+                      (reduce
+                        (fn [(acc Any) (element Any)] Any
+                          (elem acc subject depth
+                            (conj visited subject) element))
+                        {:fram/id name}
+                        requested))))]
+          (let [one
+                (fn [(name Any)] Any
+                  (let [subject (s/resolve-name schema name)]
+                    (if (nil? subject)
+                      {:fram/id name}
+                      (node subject name pattern 0 #{}))))]
+            (if (vector? root)
+              (mapv (fn [(name Any)] Any (one name)) root)
+              (one root))))))))

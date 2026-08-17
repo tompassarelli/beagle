@@ -2291,10 +2291,10 @@
   (expect! "parse-program! reserves compiler prefix across metadata binders" (let [_ (parse-program! [["ns" "$beagle$ns"] ["defmacro" "$beagle$macro" [BRACKET-TAG] 1] ["declare-extern" "$beagle$extern" "Any"]])
    errors (parse-errors)]
   (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))
-  (expect! "parse-program! require :as (fold shape)" (let [prog (parse-program! [["ns" "fram.fold"] ["require" "fram.kernel" ":as" "k"]])]
-  (= (get prog "requires") [{"ns" "fram.kernel" "alias" "k" "refer" false}])))
-  (expect! "parse-program! ns docstring dropped" (let [prog (parse-program! [["ns" "fram.fold" ["#%string" "Replay the log."]]])]
-  (and (= (get prog "namespace") "fram.fold") (= (count (get prog "forms")) 0))))
+  (expect! "parse-program! require :as (fold shape)" (let [prog (parse-program! [["ns" "store.fold"] ["require" "store.kernel" ":as" "k"]])]
+  (= (get prog "requires") [{"ns" "store.kernel" "alias" "k" "refer" false}])))
+  (expect! "parse-program! ns docstring dropped" (let [prog (parse-program! [["ns" "store.fold" ["#%string" "Replay the log."]]])]
+  (and (= (get prog "namespace") "store.fold") (= (count (get prog "forms")) 0))))
   (expect! "parse-program! ns (:require [lib :as a])" (let [prog (parse-program! [["ns" "my.app" [":require" ["#%brackets" "clojure.string" ":as" "str"]]]])]
   (= (get prog "requires") [{"ns" "clojure.string" "alias" "str" "refer" false}])))
   (expect! "parse-program! ns :import retains complete declarations" (let [prog (parse-program! [["ns" "my.app" [":import" ["java.nio.charset" "StandardCharsets"] "java.util.zip.CRC32"]]])]
@@ -2305,7 +2305,7 @@
   (= (discover-requires! datums) (get (parse-program! datums) "requires"))))
   (expect! "parse-program! default target clj + gen-class false" (let [prog (parse-program! [["ns" "x.y"]])]
   (and (= (get prog "target") "clj") (= (get prog "gen-class") false))))
-  (expect! "parse-program! (:gen-class) sets program flag" (let [prog (parse-program! [["ns" "fram.main" [":gen-class"]]])]
+  (expect! "parse-program! (:gen-class) sets program flag" (let [prog (parse-program! [["ns" "store.main" [":gen-class"]]])]
   (= (get prog "gen-class") true)))
   (expect! "nix: (s ...) interpolated-string — literal parts are text, others expr" (let [node (parse-expr* ["s" ["#%string" "#!"] "pkgs.bash" ["#%string" "/bin"]])]
   (and (= (get node "node") "nix-interpolated-string") (= (nth (get node "parts") 0) {"type" "text" "value" "#!"}) (= (nth (get node "parts") 1) {"type" "expr" "value" {"node" "ref" "name" "pkgs.bash"}}) (= (nth (get node "parts") 2) {"type" "text" "value" "/bin"}))))

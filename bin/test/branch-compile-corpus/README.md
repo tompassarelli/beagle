@@ -4,7 +4,7 @@ This directory contains the Phase-C clean-build oracle and the compiler-owned
 Phase-D unit seam for the bounded branch-native experiment, plus the Phase-E
 lossless unit-wire checkpoint. It supplies four Native Core modules, three
 controlled mutations, and an independent clean full-build oracle. It does not
-add a cache or Fram integration.
+add a cache or Beagle Store integration.
 
 `TypedUnitV0` and `NativeUnitV0` now persist under the distinct
 `typed-unit-wire-v1` and `native-unit-wire-v1` tags. The bounded codec binds

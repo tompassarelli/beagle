@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# beagle-store-defcheck — launch the persistent warm def-level checker (see
+# bin/beagle-store-defcheck-server.rkt). Runs under the PINNED beagle racket so its
+# `(require beagle/private/*)` resolves the flake-linked beagle collection and
+# loads the precompiled .zo (never the system racket, which would recompile /
+# die on version-mismatched bytecode).
+#
+# Usage: bin/beagle-store-defcheck [port]        (default 49060; env BEAGLE_STORE_DEFCHECK_PORT)
+set -euo pipefail
+
+BEAGLE_HOME="${BEAGLE_HOME:-$HOME/code/beagle/main}"
+# shellcheck source=/dev/null
+source "$BEAGLE_HOME/bin/_beagle-racket"
+
+SERVER="$(cd "$(dirname "$0")" && pwd)/beagle-store-defcheck-server.rkt"
+PORT="${1:-${BEAGLE_STORE_DEFCHECK_PORT:-49060}}"
+
+exec "$RACKET" "$SERVER" "$PORT"

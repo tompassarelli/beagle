@@ -11,8 +11,8 @@
 ;;
 ;; Invariants preserved (see the C2 thread bars):
 ;;   * external scratch, cleaned up on exit (dynamic-wind trap)
-;;   * fram compiled BEFORE north, and fram's sources linked onto north's
-;;     resolve path in scratch (never into north's tree) so `(require fram.*)`
+;;   * store compiled BEFORE north, and store's sources linked onto north's
+;;     resolve path in scratch (never into north's tree) so `(require store.*)`
 ;;     type-checks fully instead of degrading to Any
 ;;   * gjoa purity: BEAGLE_PURITY=error check --profile 3 in addition to emit
 ;;   * firn: compiles the COMMITTED .bnix source of truth raw — no tag-resolve /
@@ -70,17 +70,17 @@
   (not (string=? "" (string-trim (git* repo "status" "--porcelain")))))
 
 ;; --- staging (cross-repo resolve deps, external, byte-clean) ------------------
-;; Only north needs it: its .bclj `(require fram.*)` resolves by walking UP the
-;; source dir tree for `fram/<mod>`. We mirror north's repo layout in scratch
-;; with symlinks and INJECT fram's sources as a sibling of north's — so the
-;; walk finds fram in scratch, never touching north's tree. Mirrors north's
+;; Only north needs it: its .bclj `(require store.*)` resolves by walking UP the
+;; source dir tree for `store/<mod>`. We mirror north's repo layout in scratch
+;; with symlinks and INJECT store's sources as a sibling of north's — so the
+;; walk finds store in scratch, never touching north's tree. Mirrors north's
 ;; build.sh symlink, relocated outside the repo.
-(define (fram-repo-path consumers)
-  ;; resolve fram's repo the same way the registry does (env override + default)
-  (define fram (findf (lambda (c) (string=? (consumer-name c) "fram")) consumers))
-  (if fram (consumer-repo-path fram)
-      (let ([env (getenv "FRAM_REPO")])
-        (simplify-path (path->complete-path (or env (expand-home "~/code/fram/main")))))))
+(define (store-repo-path consumers)
+  ;; resolve store's repo the same way the registry does (env override + default)
+  (define store (findf (lambda (c) (string=? (consumer-name c) "store")) consumers))
+  (if store (consumer-repo-path store)
+      (let ([env (getenv "BEAGLE_STORE_REPO")])
+        (simplify-path (path->complete-path (or env (expand-home "~/code/store/main")))))))
 
 (define (expand-home p)
   (if (string-prefix? p "~/")
@@ -96,8 +96,8 @@
      (make-directory* (build-path base "src"))
      (make-file-or-directory-link (build-path repo "src" "north")
                                   (build-path base "src" "north"))
-     (make-file-or-directory-link (build-path (fram-repo-path consumers) "src" "fram")
-                                  (build-path base "src" "fram"))
+     (make-file-or-directory-link (build-path (store-repo-path consumers) "src" "store")
+                                  (build-path base "src" "store"))
      (lambda (rel) (build-path base rel))]
     [else #f]))
 
@@ -211,8 +211,8 @@
    (parse-diagnostics stderr*)
    before after (string=? before after)))
 
-;; --- scheduler: bounded parallelism, fram-before-north -----------------------
-(define CONSUMER-DEPS (hash "north" '("fram")))
+;; --- scheduler: bounded parallelism, store-before-north -----------------------
+(define CONSUMER-DEPS (hash "north" '("store")))
 
 (define (run-consumers consumers scratch #:jobs [jobs 4] #:timeout [timeout-secs 300])
   ;; Derive every consumer's membership UP FRONT — in THIS (the caller's) thread,

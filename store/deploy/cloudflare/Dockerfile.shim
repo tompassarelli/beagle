@@ -1,0 +1,12 @@
+# store-shim image — the bearer-token HTTP->TCP bridge (shim.clj) on babashka.
+# Build from the repo root:
+#   docker build -f deploy/cloudflare/Dockerfile.shim -t store-shim .
+FROM babashka/babashka:latest
+
+WORKDIR /shim
+COPY deploy/cloudflare/shim.clj ./
+COPY out/ out/
+
+EXPOSE 8787
+# config via env: BEAGLE_STORE_SERVER_CONNECT, BEAGLE_STORE_SERVER_PORT, SHIM_PORT, SHIM_TOKEN | SHIM_TOKEN_FILE
+CMD ["bb", "-cp", "out", "shim.clj"]

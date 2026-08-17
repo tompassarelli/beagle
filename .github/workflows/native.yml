@@ -5,7 +5,7 @@ name: native
 # every PR builds the binary via self-host/native/build.sh and gates it with
 # self-host/native/verify-native.sh — the native binary's emit must be
 # byte-for-byte identical to BOTH the babashka seed emit AND the Racket oracle
-# emit, over the in-tree branch-core/src corpus. Release publication belongs
+# emit, over the in-tree store/src corpus. Release publication belongs
 # exclusively to release.yml.
 #
 # Why a workflow separate from test.yml: this pipeline needs the GraalVM +
@@ -111,4 +111,4 @@ jobs:
         run: nix shell nixpkgs#graalvmPackages.graalvm-ce nixpkgs#clojure -c ./self-host/native/build.sh
 
       - name: Verify native == bb seed == Racket oracle (byte-for-byte)
-        run: _BEAGLE_RACKET="$(which racket)" self-host/native/verify-native.sh branch-core/src/fram/*.bclj self-host/fixtures/lowering-temps.bclj
+        run: _BEAGLE_RACKET="$(which racket)" self-host/native/verify-native.sh store/src/store/*.bclj self-host/fixtures/lowering-temps.bclj

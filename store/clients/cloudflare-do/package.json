@@ -1,0 +1,50 @@
+{
+  "name": "@tompassarelli/store-cloudflare-do",
+  "version": "0.3.0",
+  "description": "Embed the Beagle Store engine inside a Cloudflare Durable Object over the wasm-embed host seam",
+  "type": "module",
+  "types": "./src/adapter.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/adapter.d.ts",
+      "import": "./src/adapter.mjs"
+    },
+    "./seams": {
+      "types": "./src/seams.d.ts",
+      "import": "./src/seams.mjs"
+    }
+  },
+  "files": [
+    "LICENSE",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "src/adapter.mjs",
+    "src/adapter.d.ts",
+    "src/seams.mjs",
+    "src/seams.d.ts",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "bun": "1.3.13"
+  },
+  "scripts": {
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "check:seams": "bun scripts/check-seams.mjs",
+    "pack:frames": "bun test/pack-frames.mjs",
+    "test:bun": "bun test/run-node.mjs lib/libstore.wasm ../../tests/wasm_embed/frames",
+    "test:workerd": "bun test/run-matrix.mjs test/out",
+    "capacity": "bash capacity/run-gate.sh",
+    "capacity:receipt": "bun test capacity/receipt.test.mjs"
+  },
+  "devDependencies": {
+    "miniflare": "5.20260804.1-alpha",
+    "wrangler": "4.121.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tompassarelli/beagle.git",
+    "directory": "clients/cloudflare-do"
+  },
+  "license": "MIT OR Apache-2.0"
+}

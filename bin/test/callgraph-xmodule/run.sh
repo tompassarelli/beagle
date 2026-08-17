@@ -9,22 +9,22 @@
 #
 # Corpus: xm.lib defines target; xm.mid calls it via (:as l) -> l/target; xm.top calls
 # xm.mid/relay fully-qualified. A transitive cross-module chain. blast(target) must
-# include relay AND (transitively) use-it. Needs racket + bb + fram out/ + chartroom.
+# include relay AND (transitively) use-it. Needs racket + bb + store out/ + chartroom.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
-FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
-CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
-export FRAM_OUT CHARTROOM
-source "$ROOT/bin/_fram-resolver"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
+export BEAGLE_STORE_OUT CHARTROOM
+source "$ROOT/bin/_store-resolver"
 CG="$ROOT/bin/beagle-callgraph"
 fail=0
 
 echo "================ reasoning call-graph — cross-module completeness ================"
-[ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-RES="$(find_fram_resolver)" || exit 3
+[ -d "$BEAGLE_STORE_OUT" ] || { echo "  (need BEAGLE_STORE_OUT)"; exit 3; }
+RES="$(find_store_resolver)" || exit 3
 
 capture_callgraph() {
   local dest="$1" corpus="$2" err output status=0

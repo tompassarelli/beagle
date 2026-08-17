@@ -1,7 +1,0 @@
-{
-  "name": "fram-cloudflare-kit",
-  "private": true,
-  "type": "module",
-  "description": "ESM marker so worker-client.js runs identically under node (local testing) and wrangler. Zero dependencies.",
-  "license": "MIT OR Apache-2.0"
-}

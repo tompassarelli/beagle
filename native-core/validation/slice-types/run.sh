@@ -2,9 +2,9 @@
 set -euo pipefail
 
 types_root="$(git rev-parse --show-toplevel)"
-fram_checkout="$("$types_root/native-core/validation/fram-checkout.sh")"
-types_source="$fram_checkout/src/fram/types.bgl"
-types_logical="${types_source#"$fram_checkout/"}"
+store_checkout="$("$types_root/native-core/validation/store-checkout.sh")"
+types_source="$store_checkout/src/store/types.bgl"
+types_logical="${types_source#"$store_checkout/"}"
 types_scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types.XXXXXX")"
 types_output="${NATIVE_SLICE_ARTIFACTS:-$types_scratch/artifacts}"
 types_clang_bin="$(command -v clang || true)"
@@ -20,7 +20,7 @@ if [[ -z "$types_clang_bin" ]]; then
 fi
 
 if [[ ! -f "$types_source" ]]; then
-  echo "run.sh: upstream Fram source is missing: $types_source" >&2
+  echo "run.sh: upstream Beagle Store source is missing: $types_source" >&2
   exit 1
 fi
 

@@ -884,6 +884,13 @@
 (check-ok "atom G2b: annotation widens the constructor in a let binding"
   '(defn t! [] Int? (let [(a (Atom Int?)) (atom nil)] (do (reset! a 5) (deref a)))))
 
+(check-ok "atom G2b: annotated union initializer retains its union in a fresh cell"
+  '(defrecord Analyzer [(bytes Int)])
+  '(defn t! [] (U Analyzer Nil)
+     (let [(empty (U Analyzer Nil)) nil
+           (cell (Atom (U Analyzer Nil))) (atom empty)]
+       (deref cell))))
+
 (check-err/rx "atom G2b: constructor init must fit the annotated element"
   #rx"atom init: expected Int"
   '(def bad (Atom Int) (atom "x")))

@@ -12,7 +12,7 @@
 #   SELFHOST_OUT=/tmp/stage runs the ladder against an isolated authored-source
 #   compilation without changing the checked-in seed.
 #   default corpus: every tracked fixture under self-host/fixtures/, plus the
-#   $FRAM_REPO/src/fram modules listed below that exist in that checkout
+#   $BEAGLE_STORE_REPO/src/store modules listed below that exist in that checkout
 #   BEAGLE_ORACLE_ROOT=/path selects the oracle binaries to compare against.
 #
 # Module resolution is closed on BOTH sides: rungs 6 and 7 pass the exact
@@ -132,18 +132,18 @@ else
 fi
 beagle_stage0_banner "$OUT"
 
-FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
+BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
   MODULES=(self-host/fixtures/*.bclj self-host/fixtures/*.bjs)
-  # Hosted fram modules whose require closure stays inside hosted beagle
-  # source. fold/import/tools left this corpus when fram moved their providers
-  # (fram.store, fram.types, fram.schema, ...) to Beagle Core (.bgl): a hosted
+  # Hosted store modules whose require closure stays inside hosted beagle
+  # source. fold/import/tools left this corpus when store moved their providers
+  # (store.store, store.types, store.schema, ...) to Beagle Core (.bgl): a hosted
   # module requiring a Core provider is refused by BOTH compilers under closed
   # module resolution, so those modules cannot serve as emit-parity rungs.
-  for fram_module in branch provider_host; do
-    [ -f "$FRAM_REPO/src/fram/$fram_module.bclj" ] && \
-      MODULES+=("$FRAM_REPO/src/fram/$fram_module.bclj")
+  for store_module in branch provider_host; do
+    [ -f "$BEAGLE_STORE_REPO/src/store/$store_module.bclj" ] && \
+      MODULES+=("$BEAGLE_STORE_REPO/src/store/$store_module.bclj")
   done
 fi
 

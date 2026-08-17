@@ -12,7 +12,7 @@
 ;;   ...
 ;;
 ;; The downstream loader (chartroom) namespaces node-ids by file and folds the
-;; triples into a Fram fact store.
+;; triples into a Beagle Store fact store.
 
 (require "parse.rkt"
          "emit-facts.rkt")

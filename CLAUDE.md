@@ -444,7 +444,7 @@ Analysis: JSONL → mechanically aggregable. `bin/beagle-halluc` reports counts 
 category / severity / resolution / date (the reduction-rate trend); or parse it with
 any JSON tool (`bb` + `cheshire`). Reduction rate = records-per-period falling as
 roots are fixed. (Future: each record is already a set of propositions
-and migrates cleanly to Fram Triples — hallucination-reduction inside the one graph.)
+and migrates cleanly to Beagle Store Triples — hallucination-reduction inside the one graph.)
 
 ### Test tiering during surface iteration
 
