@@ -277,16 +277,15 @@
   (module-source-snapshot
    source-id physical bytes target-override source target explicit?))
 
-(define (snapshot-syntax snapshot)
-  (define stxs
-    (read-beagle-syntax/bytes
-     (module-source-snapshot-physical-path snapshot)
-     (module-source-snapshot-bytes snapshot)
-     #:source-id (module-source-snapshot-source-id snapshot)))
-  (if (module-source-snapshot-target-override snapshot)
-      (retarget-beagle-syntax
-       stxs (module-source-snapshot-target-override snapshot))
-      stxs))
+(define (parse-snapshot snapshot resolver)
+  (define target-override
+    (module-source-snapshot-target-override snapshot))
+  (parse-program/bytes
+   (module-source-snapshot-bytes snapshot)
+   #:source-path (module-source-snapshot-physical-path snapshot)
+   #:source-id (module-source-snapshot-source-id snapshot)
+   #:target-override target-override
+   #:module-resolver resolver))
 
 (define (resolve-module-source-closure explicit-inputs roots)
   (unless (and (list? explicit-inputs)
@@ -482,10 +481,7 @@
       (define snapshot (car pending))
       (set! pending (cdr pending))
       (define program
-        (parse-program
-         (snapshot-syntax snapshot)
-         #:source-path (module-source-snapshot-source-id snapshot)
-         #:module-resolver resolver))
+        (parse-snapshot snapshot resolver))
       (unless (eq? (program-target program)
                    (module-source-snapshot-target snapshot))
         (error
@@ -529,10 +525,7 @@
   (define source-id (path-string (module-source-source-id source)))
   (define snapshot
     (module-source-closure-snapshot-ref closure source-id))
-  (parse-program
-   (snapshot-syntax snapshot)
-   #:source-path source-id
-   #:module-resolver resolver))
+  (parse-snapshot snapshot resolver))
 
 (provide
  (struct-out module-source-root-v0)

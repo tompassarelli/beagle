@@ -1283,13 +1283,19 @@
 (define (parse-program/bytes source-bytes
                              #:source-path source-path
                              #:source-id [source-id #f]
+                             #:target-override [target-override #f]
                              #:module-resolver [module-resolver #f])
   (unless (bytes? source-bytes)
     (raise-argument-error 'parse-program/bytes "bytes?" source-bytes))
   (define snapshot (bytes->immutable-bytes source-bytes))
   (define prog
     (parse-program
-     (read-beagle-syntax/bytes source-path snapshot #:source-id source-id)
+     (let ([stxs
+            (read-beagle-syntax/bytes
+             source-path snapshot #:source-id source-id)])
+       (if target-override
+           (retarget-beagle-syntax stxs target-override)
+           stxs))
      #:source-path (or source-id source-path)
      #:module-resolver module-resolver))
   (hash-set! PROGRAM->SOURCE-BYTES prog snapshot)
