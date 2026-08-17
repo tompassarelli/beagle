@@ -603,24 +603,65 @@
 (define (heavy-unit? u)
   (member (unit-file u) heavy-first-files))
 
+;; Cold scheduling hints from the most recent complete per-unit proofs. They
+;; affect placement only: coverage, cache validity, results, and exit status do
+;; not depend on them. Unit labels include a digest of the full phase name, so
+;; a renamed or new phase misses safely and falls back to its derived source
+;; weight rather than inheriting a stale estimate.
+(define historical-unit-weights
+  (hash
+   "wasm-materializer.rkt#core-publication-preserv-db27b4" 296
+   "wasm-materializer.rkt#publication-failpoints-n-73fa24" 206
+   "wasm-materializer.rkt#multiple-arena-bearing-e-6a5145" 120
+   "wasm-materializer.rkt#generation-verifier-dete-579176" 113
+   "wasm-materializer.rkt#entry-contract-matrix-re-4ada49" 98
+   "wasm-materializer.rkt#provenance-splice-matrix-79516a" 94
+   "wasm-materializer.rkt#wasm-bootstrap-emits-a-r-eb4d66" 82
+   "wasm-materializer.rkt#entries-that-flatten-to-057b8d" 80
+   "wasm-materializer.rkt#missing-supported-enviro-4b6109" 76
+   "wasm-materializer.rkt#compiler-failure-remains-6c9aea" 68
+   "wasm-materializer.rkt#seam-validator-timeout-o-0d50b6" 67
+   "wasm-materializer.rkt#runtime-timeout-owns-and-1989ce" 63
+   "wasm-materializer.rkt#compiler-timeout-owns-an-10142c" 60
+   "wasm-materializer.rkt#entry-validator-timeout-c5fc3e" 58
+   "wasm-materializer.rkt#strict-source-entry-abi-7f42c4" 56
+   "wasm-materializer.rkt#tool-resolver-timeout-re-169242" 51
+   "wasm-materializer.rkt#unsupported-callable-ent-d4bc24" 19
+   "wasm-materializer.rkt#runtime-io-surface-drive-7c1cab" 4
+   "wasm-materializer.rkt#supported-toolchain-buil-cfd33d" 3
+   "wasm-materializer.rkt#residual" 1
+   "native-simd.rkt" 112
+   "native-c17-parallel.rkt" 88
+   "check-all-nix.rkt" 27))
+
+(define (historical-or-source-weight u fallback)
+  (hash-ref historical-unit-weights (unit-label u)
+            (lambda ()
+              (if (string? (unit-phase u))
+                  (phase-source-weight u)
+                  fallback))))
+
 (define (worker-partitions units n)
   (define lanes (make-vector n '()))
   (define loads (make-vector n 0))
-  (define heavy-width
+  (define phase-width
     (min n (max 1 (quotient (+ n 3) 4))))
-  (define heavy-units (filter heavy-unit? units))
+  (define phase-units
+    (filter (lambda (u) (hash-has-key? sharded-files (unit-file u))) units))
+  (define whole-heavy-units
+    (filter (lambda (u)
+              (and (heavy-unit? u)
+                   (not (hash-has-key? sharded-files (unit-file u)))))
+            units))
   (define phase-total
-    (for/sum ([u (in-list heavy-units)] #:when (string? (unit-phase u)))
-      (phase-source-weight u)))
-  (define whole-heavy-weight
-    (max 1 (quotient (+ phase-total (sub1 heavy-width)) heavy-width)))
+    (for/sum ([u (in-list phase-units)])
+      (historical-or-source-weight u 1)))
+  (define phase-lane-average
+    (max 1 (quotient (+ phase-total (sub1 phase-width)) phase-width)))
   (define (weight u)
-    (cond
-      [(string? (unit-phase u)) (phase-source-weight u)]
-      [(eq? (unit-phase u) 'residual) 1]
-      [else whole-heavy-weight]))
-  (define ordered-heavy
-    (sort heavy-units
+    (historical-or-source-weight u phase-lane-average))
+  (define (heavier-first some-units)
+    (sort some-units
           (lambda (a b)
             (define wa (weight a))
             (define wb (weight b))
@@ -632,18 +673,31 @@
       (if (< (vector-ref loads candidate) (vector-ref loads best))
           candidate
           best)))
-  (for ([u (in-list ordered-heavy)])
-    (define owner (least-loaded heavy-width))
+  (for ([u (in-list (heavier-first phase-units))])
+    (define owner (least-loaded phase-width))
     (vector-set! lanes owner (cons u (vector-ref lanes owner)))
     (vector-set! loads owner (+ (vector-ref loads owner) (weight u))))
-  (define light-workers (- n heavy-width))
+  (define dedicated-whole-heavy? (> n phase-width))
+  (cond
+    [dedicated-whole-heavy?
+     (define owner phase-width)
+     (for ([u (in-list (heavier-first whole-heavy-units))])
+       (vector-set! lanes owner (cons u (vector-ref lanes owner))))]
+    [else
+     (for ([u (in-list (heavier-first whole-heavy-units))])
+       (define owner (least-loaded phase-width))
+       (vector-set! lanes owner (cons u (vector-ref lanes owner)))
+       (vector-set! loads owner (+ (vector-ref loads owner) (weight u))))])
+  (define reserved-width
+    (+ phase-width (if dedicated-whole-heavy? 1 0)))
+  (define light-workers (- n reserved-width))
   (define light-position 0)
   (for ([idx (in-list (launch-order units))]
         #:do [(define u (list-ref units idx))]
         #:unless (heavy-unit? u))
     (define owner
       (if (positive? light-workers)
-          (+ heavy-width (modulo light-position light-workers))
+          (+ reserved-width (modulo light-position light-workers))
           (modulo light-position n)))
     (vector-set! lanes owner (cons u (vector-ref lanes owner)))
     (set! light-position (add1 light-position)))
@@ -1295,7 +1349,13 @@
     (check-equal? (sort (append* (vector->list partitions)) string<? #:key unit-label)
                   (sort heavy-units string<? #:key unit-label)
                   "the cold-build heavy pool remains an exact partition")
-    (for ([i (in-range 4 16)])
+    (check-true
+     (andmap (lambda (un)
+               (and (heavy-unit? un)
+                    (not (hash-has-key? sharded-files (unit-file un)))))
+             (vector-ref partitions 4))
+     "worker 4 carries only build-heavy whole modules")
+    (for ([i (in-range 5 16)])
       (check-false (ormap heavy-unit? (vector-ref partitions i))
                    (format "worker ~a receives no compiler-heavy unit" i))))
 
