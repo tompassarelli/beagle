@@ -16,6 +16,7 @@
          racket/list
          racket/match
          racket/port
+         racket/promise
          racket/string
          racket/system
          file/sha1)
@@ -570,32 +571,89 @@
 ;; manifest-ordered report. Units therefore stay in heavy-first launch order
 ;; inside each worker, while the merge restores manifest order by label.
 ;;
-;; Phase-sharded files keep the same machine-wide concurrency cap as the
-;; thread scheduler. Assigning their first 16 phase units to 16 different
-;; processes was measured to make their owned 120-second fixture deadlines
-;; fail under contention; at K=16 their cap is four, so all phases are dealt
-;; deterministically across workers 0..3. Ordinary units use their launch
-;; position modulo K and consume the rest of the machine normally.
+;; Phase-sharded files and the known build-heavy whole modules share the same
+;; machine-wide heavy pool. A cold run with four Wasm phase processes plus
+;; three native/Nix builds made an owned 90-second build deadline expire; the
+;; cap has to cover all units that contend for those compiler resources, not
+;; only multiple invocations of one file.
+;;
+;; Partitioning is deterministic greedy LPT. A phase's weight is derived from
+;; the size of its source form (the longest phases contain the most fixtures
+;; and checks); a build-heavy whole file receives one lane's average phase
+;; weight. Ties break by scheduling label and then worker index. This avoids a
+;; hand-maintained phase list or timing table while preventing the former
+;; source-order round robin from putting the three largest phases in one lane.
+(define phase-source-weights
+  (delay
+    (for*/hash ([(fname _) (in-hash sharded-files)]
+                [form (in-list (or (top-level-forms (build-path tests-dir fname)) '()))]
+                #:when (and (pair? form) (eq? (car form) 'phase-test)
+                            (pair? (cdr form)) (string? (cadr form))))
+      (values (cons fname (cadr form))
+              (string-length (format "~s" form))))))
+
+(define (phase-source-weight u)
+  (cond
+    [(string? (unit-phase u))
+     (hash-ref (force phase-source-weights)
+               (cons (unit-file u) (unit-phase u))
+               1)]
+    [else 1]))
+
+(define (heavy-unit? u)
+  (member (unit-file u) heavy-first-files))
+
+(define (worker-partitions units n)
+  (define lanes (make-vector n '()))
+  (define loads (make-vector n 0))
+  (define heavy-width
+    (min n (max 1 (quotient (+ n 3) 4))))
+  (define heavy-units (filter heavy-unit? units))
+  (define phase-total
+    (for/sum ([u (in-list heavy-units)] #:when (string? (unit-phase u)))
+      (phase-source-weight u)))
+  (define whole-heavy-weight
+    (max 1 (quotient (+ phase-total (sub1 heavy-width)) heavy-width)))
+  (define (weight u)
+    (cond
+      [(string? (unit-phase u)) (phase-source-weight u)]
+      [(eq? (unit-phase u) 'residual) 1]
+      [else whole-heavy-weight]))
+  (define ordered-heavy
+    (sort heavy-units
+          (lambda (a b)
+            (define wa (weight a))
+            (define wb (weight b))
+            (if (= wa wb)
+                (string<? (unit-label a) (unit-label b))
+                (> wa wb)))))
+  (define (least-loaded limit)
+    (for/fold ([best 0]) ([candidate (in-range 1 limit)])
+      (if (< (vector-ref loads candidate) (vector-ref loads best))
+          candidate
+          best)))
+  (for ([u (in-list ordered-heavy)])
+    (define owner (least-loaded heavy-width))
+    (vector-set! lanes owner (cons u (vector-ref lanes owner)))
+    (vector-set! loads owner (+ (vector-ref loads owner) (weight u))))
+  (define light-workers (- n heavy-width))
+  (define light-position 0)
+  (for ([idx (in-list (launch-order units))]
+        #:do [(define u (list-ref units idx))]
+        #:unless (heavy-unit? u))
+    (define owner
+      (if (positive? light-workers)
+          (+ heavy-width (modulo light-position light-workers))
+          (modulo light-position n)))
+    (vector-set! lanes owner (cons u (vector-ref lanes owner)))
+    (set! light-position (add1 light-position)))
+  (for/vector ([lane (in-vector lanes)]) (reverse lane)))
+
 (define (units-for-worker-shard units spec)
   (cond
     [(not spec) units]
     [else
-     (define i (car spec))
-     (define n (cdr spec))
-     (define per-file-position (make-hash))
-     (for/list ([idx (in-list (launch-order units))]
-                [p (in-naturals)]
-                #:do [(define u (list-ref units idx))
-                      (define owner
-                        (cond
-                          [(hash-has-key? sharded-files (unit-file u))
-                           (hash-update! per-file-position (unit-file u) add1 0)
-                           (modulo
-                            (sub1 (hash-ref per-file-position (unit-file u)))
-                            (unit-concurrency-cap u n))]
-                          [else (modulo p n)]))]
-                #:when (= owner i))
-       u)]))
+     (vector-ref (worker-partitions units (cdr spec)) (car spec))]))
 
 ;; A sharded file may occupy at most ceil(K/4) worker slots. Ordinary files are
 ;; one unit each, so their effective per-file cap remains K.
@@ -1223,6 +1281,23 @@
                        shard)))
      '(5 5 5 5 0 0 0 0 0 0 0 0 0 0 0 0)
      "K=16 deals the phase-sharded file across exactly four workers"))
+
+  (let* ([wasm-units
+          (for/list ([i (in-range 20)])
+            (unit (format "wasm-materializer.rkt#~a" i)
+                  "wasm-materializer.rkt" (format "phase-~a" i) #f))]
+         [heavy-units
+          (append wasm-units
+                  (map u '("native-simd.rkt"
+                           "native-c17-parallel.rkt"
+                           "check-all-nix.rkt")))]
+         [partitions (worker-partitions heavy-units 16)])
+    (check-equal? (sort (append* (vector->list partitions)) string<? #:key unit-label)
+                  (sort heavy-units string<? #:key unit-label)
+                  "the cold-build heavy pool remains an exact partition")
+    (for ([i (in-range 4 16)])
+      (check-false (ormap heavy-unit? (vector-ref partitions i))
+                   (format "worker ~a receives no compiler-heavy unit" i))))
 
   ;; Worker serialization preserves failure text byte-for-byte, and merging
   ;; restores manifest order independently of worker completion order.
