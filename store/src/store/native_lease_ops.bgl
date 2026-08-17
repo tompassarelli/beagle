@@ -200,13 +200,12 @@
                  (= (leasestate-epoch lease) (fenceresult-epoch fence))))))
 
 (defn valid-grant-input?
-  [(resource Any) (holder Any) (ttl-ms Any) (now-ms Int)] Bool
+  [(resource Any) (holder Any) (ttl-ms Int) (now-ms Int)] Bool
   (and (t/term? resource)
        (and (t/term? holder)
-            (and (integer? ttl-ms)
-                 (and (pos? ttl-ms)
-                      (and (>= now-ms 0)
-                           (<= ttl-ms (- max-time-ms now-ms))))))))
+            (and (pos? ttl-ms)
+                 (and (>= now-ms 0)
+                      (<= ttl-ms (- max-time-ms now-ms)))))))
 
 (defn lease-proposition [(resource Any) (holder Any) (expires-ms Int)] t/Triple
   (t/triple resource :kernel/lease
@@ -270,7 +269,8 @@
             (resource Any) (nth values 0)
             (holder Any) (nth values 1)
             (ttl-ms Any) (nth values 2)]
-        (if (not (valid-grant-input? resource holder ttl-ms now-ms))
+        (if (not (and (integer? ttl-ms)
+                      (valid-grant-input? resource holder ttl-ms now-ms)))
           (error-response
            request served-version :rpc-invalid-payload false
            "lease acquire requires Term resource/holder and a positive bounded ttl-ms")
@@ -304,9 +304,10 @@
             (fence FenceResult) (parse-fence (nth values 0))
             (ttl-ms Any) (nth values 1)]
         (if (or (not (fenceresult-ok fence))
-                (not (valid-grant-input?
-                      (fenceresult-resource fence)
-                      (fenceresult-holder fence) ttl-ms now-ms)))
+                (not (and (integer? ttl-ms)
+                          (valid-grant-input?
+                           (fenceresult-resource fence)
+                           (fenceresult-holder fence) ttl-ms now-ms))))
           (error-response
            request served-version :rpc-invalid-payload false
            (or (fenceresult-message fence)
