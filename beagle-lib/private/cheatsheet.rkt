@@ -37,7 +37,7 @@
           "(defrecord Point [(x Int) (y Int)])")
 
    (cheat "defunion + match" "Types" 'clj
-          "Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the authoring loop can auto-fill the clauses)."
+          "Sum type over records. `match` must cover every constructor; a missing constructor is a compile error."
           (string-append
            "(defrecord Circle [(r Int)])\n"
            "(defrecord Square [(side Int)])\n"

@@ -25,7 +25,7 @@ Product type with typed fields; generates a constructor and accessors.
 ### defunion + match
 Target: `clj`
 
-Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the authoring loop can auto-fill the clauses).
+Sum type over records. `match` must cover every constructor; a missing constructor is a compile error.
 
 ```clojure
 (defrecord Circle [(r Int)])

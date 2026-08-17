@@ -89,10 +89,9 @@ artifacts below are the authoritative answers.
 | Beagle Store's in-repo Native Core consumer | [`store/README.md`](store/README.md) |
 | Surface policy and contribution anchor | [`CLAUDE.md`](CLAUDE.md) |
 
-The external consumer roster previously listed here (firn, gjoa, wake, and
-north) is intentionally not repeated as a maintained inventory; external
-project status is volatile. The names remain useful orientation, while
-`store/README.md` is the in-repo consumer reference.
+The external consumer roster is intentionally not maintained here because its
+status changes independently. [`store/README.md`](store/README.md) is the
+in-repo Beagle Store reference.
 
 ## Status and license
 

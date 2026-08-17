@@ -63,14 +63,10 @@ language bolted on: it is another property derived from the same typed program.
 
 Rust's offer is real: moves establish ownership transfer; `&T` and `&mut T`
 distinguish shared and exclusive access; lifetime parameters relate returned
-references to their inputs; `Drop` makes cleanup deterministic. The local Rust
-reference makes those mechanisms concrete rather than rhetorical: move and
-borrow syntax appear together at `claude-skills:skills/rust-engineer/references/ownership.md:5-26`,
-explicit lifetime relations at
-`claude-skills:skills/rust-engineer/references/ownership.md:28-55`, the different
-sharing and interior-mutability choices (`Box`, `Rc`, `Arc`, `RefCell`, `Mutex`)
-at `claude-skills:skills/rust-engineer/references/ownership.md:57-94`, and RAII
-cleanup at `claude-skills:skills/rust-engineer/references/ownership.md:194-219`.
+references to their inputs; `Drop` makes cleanup deterministic. Move and borrow
+syntax, explicit lifetime relations, several sharing and interior-mutability
+choices (`Box`, `Rc`, `Arc`, `RefCell`, `Mutex`), and RAII cleanup form one
+coherent system.
 
 The cost is not merely “syntax.” Ownership governs values and resources
 broadly, including aliasing and mutation, and that is exactly why it is useful.
@@ -79,9 +75,8 @@ lifetime decisions even when the domain statement is only “these temporary
 values die with this evaluation” or “this result must survive into the next
 generation.” Shared mutable graphs, cyclic structures, self-reference, and
 crossing async boundaries require the programmer to select and compose the
-appropriate ownership vocabulary; the same local reference's self-referential
-example needs `Pin<Box<_>>`, a raw pointer, and a narrowly justified unsafe
-write (`claude-skills:skills/rust-engineer/references/ownership.md:130-168`).
+appropriate ownership vocabulary; a self-referential example can need
+`Pin<Box<_>>`, a raw pointer, and a narrowly justified unsafe write.
 That is an honest price for a strong general-purpose proof system, not a Rust
 failure.
 
@@ -104,24 +99,14 @@ crossing.
 Zig's offer is also real. Allocator choice is explicit and composable rather
 than hidden in a runtime. It is inaccurate to say that every Zig function must
 take an allocator, but allocation policy propagates through the APIs that
-allocate. One local Zig consumer stores `std.mem.Allocator` in its reader and
-requires it at construction (`ClojureWasm:src/eval/reader.zig:34-68`); its
-convenience readers accept the allocator, while tests construct and explicitly
-deinitialize an `ArenaAllocator` (`ClojureWasm:src/eval/reader.zig:960-987`).
-The evaluator similarly threads an allocator through envelope, form, and
-top-level evaluation boundaries (`ClojureWasm:src/eval/driver.zig:44-84`,
-`ClojureWasm:src/eval/driver.zig:117-163`). This is control with visible failure
-and cleanup paths, and it is often exactly right for systems code.
+allocate. A Zig program can store `std.mem.Allocator` in a reader, require it at
+construction, and thread it through envelope, form, and top-level evaluation
+boundaries. This is control with visible failure and cleanup paths, and it is
+often exactly right for systems code.
 
-Zig also does not force one allocation policy. The same tree's accepted
-allocator decision uses a per-evaluation arena for short-lived values, a
-general-purpose allocator for long-lived values, and a mark-sweep heap for the
-long-lived subset that needs it
-(`ClojureWasm:.dev/decisions/0017_allocator_strategy.md:8-64`). It explicitly
-records why arena allocation avoids much of a generational collector, why
-reference counting is unattractive for persistent structural sharing, and why
-stop-the-world collection is acceptable for that workload
-(`ClojureWasm:.dev/decisions/0017_allocator_strategy.md:66-98`). This is the
+Zig also does not force one allocation policy. A program may use a
+per-evaluation arena for short-lived values, a general-purpose allocator for
+long-lived values, and a tracing heap for the subset that needs it. This is the
 strongest version of the Zig case: policy is auditable, workload-specific, and
 replaceable.
 
@@ -250,10 +235,10 @@ reading it repeatedly after the child epoch is destroyed
 states the exceptional lifetime edge, not the mechanics of every allocation
 that leads to it.
 
-## Regime two: why the store is the heap
+## Regime two: why Beagle Store is the heap
 
 The durable side begins by refusing to confuse semantic values with physical
-storage. The branch kernel's public value grammar is `Term := Atom | Triple`;
+storage. Beagle Store's public value grammar is `Term := Atom | Triple`;
 the recursive `Triple` is the semantic value, while integer handles and rows are
 private (`beagle:store/src/store/types.bgl:27-32`,
 `beagle:store/src/store/types.bgl:82-108`). A `TermStore` interns atoms and
@@ -268,114 +253,30 @@ terms (`beagle:store/src/store/store.bgl:249-304`).
 
 That separation is the key to “reachability over facts, not pointers.” The
 architecture document explicitly says rows, handles, and index rotations are
-private mechanics rather than semantic identity, while binary FRAMLOG is the
-authority from which liveness and indexes are replayed
-(`beagle:store/docs/architecture.md:36-49`). The live store exposes
+private mechanics rather than semantic identity, while the binary store log is
+the authority from which liveness and indexes are replayed
+(`beagle:store/docs/architecture.md:36-49`). Beagle Store exposes
 structural propositions by resolving private handles
 (`beagle:store/src/store/store.bgl:945-982`). Therefore a native address
 cannot be the durable reason to retain state. Addresses belong to a current
 materialization; facts, revisions, and named roots belong to history.
 
-## The semantic razor, including where Beagle violates it
+## Durable-state roadmap
 
-The governing razor is **one fact, one representation**. A semantic relation
-should be structural once, then projected into target spelling only at a textual
-boundary. This is the same move the allocation thesis makes: durable identity
-must not be duplicated as both a semantic fact and an incidental storage
-encoding.
+Beagle Store currently provides structural identity and a private physical
+representation. It does not yet make durable reachability, compaction, and
+reclamation one completed product contract.
 
-Applying that razor to Beagle itself found a violation; it did not certify a
-finished shave. The qualified-symbol audit found that `x/y` survives as one
-opaque symbol or string through the reader, AST, checked JSON, and
-`source.facts`, then gets split or pattern-matched again in checker, emitter,
-self-host, and store paths
-(an internal audit (2026-08-17) found this at lines 8-19 and 23-39). The
-remedy is designed, not landed: lower authored qualification once into
-structural qualifier/name/provider identity, carry those fields through facts,
-and reconstruct `x/y` only at rendering
-(the same internal audit (2026-08-17), lines 305-328).
-The audit strengthens the thesis by making its standard capable of rejecting
-Beagle's own tree-wide qualified-name sludge. It would weaken the thesis to
-pretend that the repository already satisfies the standard.
+The intended contract is explicit: compare-and-swap selects one durable
+revision; compaction changes physical organization without changing the history
+it denotes; and reclamation traverses durable facts from named roots rather
+than the pointer graph of a hydrated process. This remains a research roadmap
+until the implementation and its checks land together.
 
-## Stage 2 is the proof section, and it has not landed
-
-The governing Stage 2 definition makes the research thesis literal: it requires
-expected-old-to-candidate branch-ref CAS, post-durable watch, resealing beyond
-the current 64-segment ceiling, and reachability-based GC whose roots are heads,
-pins, checkpoints, and active sessions
-(the Stage 2 definition). A dated C145BM readiness
-snapshot recorded that implementation as not started
-(a dated C145BM readiness snapshot). It has since moved into
-an unlanded implementation lane: CAS and post-durable-watch checkpoints report
-their focused acceptance checks green, while the latest checkpoint says it is
-only starting v2 reseal and hosted/native parity
-(an internal progress record dated 2026-08-17). That is progress evidence, not a product
-fact: none of those Stage 2 commits is on Beagle main, and the record does not
-claim reseal or reachability-GC completion.
-
-Read together with the store's explicit semantic/private split,
-“reachability GC” must mean traversal of durable branch/revision facts from
-those roots—not scanning the native pointer graph of one hydrated arena. Under
-the Stage 2 contract, CAS would select one durable revision; resealing would
-change physical organization without changing the history it denotes; GC would
-delete only facts and artifacts unreachable from the explicit root set. That
-is how persistence, concurrency control, compaction, and reclamation would
-become operations over one visible model.
-
-This is also where the thesis is falsifiable. The format on Beagle main still
-caps chains at 64 segments (`beagle:store/src/store/branch.bclj:12-26`,
-`beagle:store/src/store/branch.bclj:281-284`,
-`beagle:store/src/store/branch.bclj:342-366`), and its v1 revision preimage
-includes the ordered physical segment identities
-(`beagle:store/src/store/branch.bclj:132-151`).
-Resealing that list while preserving revision identity is therefore impossible
-under the current preimage; the local S0 analysis names the required forward
-identity decision rather than hiding it
-(a local S0 identity analysis). Stage 2 is the proof obligation:
-one CAS winner, durable watch, compaction beyond 64, and fact-reachability GC
-must land and pass together before “the store is the heap” is a product fact.
-The partial CAS and watch checkpoints do not satisfy that obligation. Once
-Stage 2 lands, this section must replace its plan and progress citations with
-exact implementation and test `file:line` evidence for CAS, reseal, and
-reachability GC. Until then, the store-as-heap claim remains a falsifiable
-research thesis rather than a completed product claim.
-
-## Greywrought: the boundary in its present, manual form
-
-Greywrought is the useful counterexample because it already consumes Beagle's
-arena ABI while still exposing the cost Beagle intends to absorb. Its current
-native/Wasm consumer lane reserves two fixed 64 MiB state arenas and one fixed
-80 MiB scratch arena
-(`~/code/greywrought/worktrees/max-dig-arena/tools/native-stateful-wasm-host.c:132-135`,
-`~/code/greywrought/worktrees/max-dig-arena/tools/native-stateful-wasm-host.c:213-230`).
-The host destroys and reconstructs the scratch arena at a request boundary,
-resets the staged arena on rejection, swaps staged and committed arenas on
-success, and bulk-resets the old generation
-(`~/code/greywrought/worktrees/max-dig-arena/tools/native-stateful-wasm-host.c:432-468`).
-Its dig path allocates the candidate computation in scratch, copies the accepted
-volume into the staged state arena, and then destroys scratch
-(`~/code/greywrought/worktrees/max-dig-arena/tools/native-stateful-wasm-host.c:600-681`).
-
-This is already better than opaque retention: the ownership boundary is
-visible, bulk reclamation is deterministic, and promotion is visibly a copy.
-It is also not the endpoint. The 80 MiB constant is manual capacity policy; the
-host, not the compiler or store, currently decides which results cross from
-scratch to staged state. The settled `store-is-the-heap` record says exactly
-that: explicit native epochs, obligations 8/9, materialized arenas, and
-`bgl/promote` are on Beagle main, but Beagle's branch kernel does not yet model
-store generations as kernel-owned epochs or consume promotion at its
-longer-lived boundaries
-(the settled store-is-the-heap record). Phase 3 must discover those boundaries from
-control flow and durability, prove no use-after-close, and measure actual
-reclamation (the settled store-is-the-heap record).
-
-The same honesty applies to backend coverage. The derived epoch policy exists,
-but QBE consumers remain on the identity seam because that materializer does
-not yet open and close minted epochs
-(`beagle:native-core/src/native/lower.bclj:23438-23474`). The thesis rests on
-landed native mechanisms plus a specific, named integration program; it does
-not convert that program into past tense.
+The same limit applies to backend coverage. Native Core contains the arena and
+promotion mechanisms described above, but materializers and consumers may not
+yet use every mechanism. This document does not treat a planned integration as
+a shipped guarantee.
 
 ## What happened to the triangle
 
@@ -386,24 +287,27 @@ one allocator solve all three jobs.
 For transient computation, typed IR supplies safety, arenas supply control, and
 compiler-derived epochs preserve the ordinary source surface. At an actual
 young-to-old boundary, `bgl/promote` makes the copy explicit and checkable. For
-persistent state, the current branch store supplies structural identity, while
-Stage 2 requires CAS, reseal, and GC to operate on revisions and explicit roots
-rather than on the accidental pointer graph of a process. The costs remain, but
-they become local: arena exhaustion or growth, promotion bytes, root selection,
-fact traversal, compaction work, and external resources can each be measured
-and governed at the boundary that owns it.
+persistent state, Beagle Store supplies structural identity; its roadmap
+calls for durable revision selection, compaction, and reclamation over explicit
+roots rather than the accidental pointer graph of a process. The costs remain,
+but they become local: arena exhaustion or growth, promotion bytes, root
+selection, fact traversal, compaction work, and external resources can each be
+measured and governed at the boundary that owns it.
 
 The classical safety/control/ergonomics triangle therefore does not describe
 the whole Beagle design: its pressures are split across two representations
 rather than forced onto one hidden heap. They still trade off locally. The
 compiler owns temporary lifetime proofs, the driver owns execution capacity,
-and—if Stage 2 satisfies its acceptance contract—the store owns durable
-reachability; the programmer supplies the semantic facts that cannot be
+and Beagle Store is intended to own durable reachability once its roadmap
+is complete; the programmer supplies the semantic facts that cannot be
 inferred.
 
 ## The closing pair
 
-Rust makes lifetime provable. Zig makes allocation explicit. GC makes memory automatic. Beagle asks why persistent memory should be a separate thing from the data you're already reasoning about.
-If the store is the heap, reachability becomes a query, persistence becomes ordinary mutation of facts, and reclamation becomes a visible operation over the same model the program uses.
+Rust makes lifetime provable. Zig makes allocation explicit. GC makes memory
+automatic. Beagle asks whether persistent memory should remain separate from
+the data model a program already uses.
 
-THESIS-REVISED
+The Beagle Store thesis is that reachability can become a query, persistence a
+mutation of facts, and reclamation an operation over the same model. The
+durable-state roadmap above names the work required to establish that claim.

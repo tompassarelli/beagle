@@ -17,8 +17,8 @@ Native Core and produces an immutable validated Native Core program.
 "Backend-neutral" describes that frozen native program, not the `.bgl`
 extension. C17, QBE, and a C17/WASI Wasm bootstrap are the current
 materializers. The Wasm path is explicitly a bootstrap, not a direct emitter;
-its toolchain step is isolated behind `bin/beagle-materialize-wasm` so a future
-direct emitter can replace it without moving the frozen-program boundary. Its
+its toolchain step is isolated behind `bin/beagle-materialize-wasm`, preserving
+the frozen-program boundary if the materializer changes. Its
 first executable seam exports and runs only a validated parameterless `Int`
 entry; an entryless build remains an explicitly non-executable projection. The
 lowering tool may run from hosted `.bclj` during compiler bootstrapping without

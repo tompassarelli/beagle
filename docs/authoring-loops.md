@@ -44,14 +44,14 @@ diagnostics — consulted before proposing, not after failing.
 intent against witnesses → record the outcome as facts. The only loop with
 judgment in it. *(Prior art: OODA; the agentic loop.)*
 
-**task loop** — session scale: many reasoning loops under one goal,
-coordinated through threads and concerns. Above it sits the program.
+**task loop** — project scale: many reasoning loops under one goal. Above it
+sits the program.
 
 ## Composition
 
 ```
 program
-  ⊃ task loop            (threads/concerns coordinate)
+  ⊃ task loop            (work coordinates)
     ⊃ reasoning loop     (judgment: what should change)
       ⊃ authoring loop      (convergence: make it green)
         ⊃ oracle ladder  (mechanical: is it green)
@@ -66,5 +66,4 @@ program
 - **"repair compiler" / "repair-compiler loop"** — wrong subject; the
   compiler diagnoses, the loop repairs. Say *the compiler* (component),
   *agent-grade diagnostics* (its property), *authoring loop* (the protocol).
-- **"chartroom"** for the code graph — use *codegraph* (rename thread
-  019f2037-dfda).
+- **"chartroom"** for the code graph — use *codegraph*.

@@ -1,11 +1,10 @@
-# Codegen / check findings from dogfooding (gjoa authoring, 2026-06-20)
+# Historical codegen and check findings (2026-06-20)
 
 A running ledger. These surfaced not
-from a text→graph migration but from **using beagle to author a real project**
-(gjoa: an externs sweep, a cross-module `:require` refactor, and a from-scratch JS
-projector subsystem). The meta-signal: every failure here is "beagle emitted bad JS"
-or "beagle gave a false signal" — none is "the agent couldn't drive the language."
-The bottleneck moved to codegen quality, which is the encouraging direction.
+from a text→graph migration but from using Beagle in a downstream JavaScript
+project: an externs sweep, a cross-module `:require` refactor, and a projector
+subsystem. Each entry records either an incorrect emit or an incorrect checker
+signal. Unresolved entries are historical findings, not product commitments.
 
 The bar: a real wrong-emit, crash, or false check signal, with a minimal repro.
 
@@ -48,8 +47,8 @@ statement position (value unused). Two concrete consequences:
 lower it to an `if`-statement rather than a ternary. Restores byte-diff soundness,
 removes the statement-in-ternary crash class, cleaner output.
 
-**Status:** PROPOSAL — invasive (changes emit for `if`/`cond`/`when` across the
-board); deserves a deliberate build, not a bolt-on.
+**Status:** Unresolved at the time of this record; any change affects
+`if`/`cond`/`when` emission broadly.
 
 ---
 
@@ -69,7 +68,7 @@ Binary `(- a b)` is fine. Workaround was the literal `-1`.
 The emit-js unary path is guarded by `(= 1 (length args))`, so binary `-` is
 unaffected.
 
-**Status:** FIXED (this change) — genuinely one line + a regression test.
+**Status:** Fixed in the historical change that recorded this finding.
 
 ---
 
@@ -90,7 +89,8 @@ catches the `.roundmin` class at check time. The same mechanism applied to a
 user-declared host object is the enabling precondition for typed Firefox-API
 seams: today `(js/call gBrowser .bogusMethod x)` emits freely (see #7).
 
-**Status:** FILED — needs a closed-namespace marker; design call.
+**Status:** Unresolved in this historical record; it needs a closed-namespace
+marker.
 
 ---
 
@@ -105,7 +105,7 @@ doesn't credit the `:refer` import. Constant noise that dilutes real notes.
 (ns t (:require [fs :refer [readFileSync]]))
 (defn f [p] (readFileSync p "utf8"))   ; -> note: call to undefined function 'readFileSync'
 ```
-**Status:** FILED — `:refer`-imported names should not be flagged undefined.
+**Status:** Unresolved in this historical record.
 
 ---
 
@@ -118,12 +118,12 @@ doesn't credit the `:refer` import. Constant noise that dilutes real notes.
 `declare-extern`s as `unused declare-extern: B/X` — externs A never declared.
 ```clojure
 ;; log.bjs:  (declare-extern [PathUtils IOUtils] Any)
-;; consumer: (:require [gjoa.tabs.log :refer [create-logger!]])
+;; consumer: (:require [app.log :refer [create-logger!]])
 ;;   -> beagle [lint]: unused declare-extern: log/PathUtils   (in the CONSUMER)
 ```
 `:refer [x]` should scope to `x`; the unused-extern lint should only consider the
 current file's own `declare-extern`s. (Benign — verbose-profile only — but wrong.)
-**Status:** FILED.
+**Status:** Unresolved in this historical record.
 
 ---
 
@@ -144,13 +144,13 @@ Dynamic member names use the same operator with an expression key.
 ## 7. Declared host objects are not closed-world
 
 **Surfaced by:** evaluating whether typed member declarations could enforce the
-Firefox-API seam surface (gjoa task #73).
+Firefox API seam surface.
 
 **The issue:** `(js/call gBrowser .bogusMethod x)` emits
 `gBrowser.bogusMethod(x)` freely when `gBrowser` has the open `Any` boundary.
 The selector makes the member identity explicit, but it does not claim that the
 host object's member set is complete. Same root as #3.
-**Status:** FILED — couples with #3.
+**Status:** Unresolved in this historical record; related to #3.
 
 ---
 
@@ -212,14 +212,14 @@ build both and observe `c.js` imports `./a-b.js` while the file is `a_b.js`.
 **Fix direction:** the filename lowering and the import-specifier lowering must
 share one normalization (snake_case both, or preserve hyphens in both).
 
-**Status:** FILED — emitted ESM is broken for hyphenated module names outside a
-name-resolving bundler; one shared normalization fixes it.
+**Status:** Unresolved in this historical record. Plain ESM import resolution
+requires one shared normalization.
 
 ---
 
-## 11. Inline arrow fn with a map-literal body emits a JS block, not an object return  · FIXED (#8)
+## 11. Inline arrow fn with a map-literal body emitted a JS block, not an object return
 
-**Surfaced by:** building the gjoa about:sovereignty manifest generator — an inline
+**Surfaced by:** building a manifest generator — an inline
 `(fn [g] {map})` passed to an array's `map` method produced JS that wouldn't
 parse.
 
@@ -236,10 +236,10 @@ an arrow with a BLOCK body:
 A NAMED `defn` returning a map is fine (it emits `return {…};`). Only the inline
 arrow expression-body case was broken. Workaround at the time: a named `defn`.
 
-**Fix (PR #8):** in `emit-js.rkt` (fn-form case), wrap the expression body in parens
+**Fix:** in `emit-js.rkt` (fn-form case), wrap the expression body in parens
 when it emits starting with `{` — catching anything that lowers to an object
 literal in expression position, not only the syntactic map-form. Non-object bodies
 (`(x) => (x + 1)`) are unchanged. Regression test: `beagle-test` oracle
 `js-arrow-object`.
 
-**Status:** FIXED (#8).
+**Status:** Fixed in the historical change that recorded this finding.
