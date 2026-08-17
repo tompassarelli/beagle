@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Engine demo — ONE engine answers REASON and REPAIR consistently, on REAL code.
 #
-# The agent-facing loop, end-to-end on fram/src (real multi-module beagle):
-#   NL: "what breaks if I change fram.store/value! ?"  -> REASON: blast radius (call graph)
-#   NL: "rename value! to intern!"                   -> REPAIR: scope-correct cross-module rename
-# Both answers come from the SAME converged refers_to resolver (chartroom resolve.clj):
-# reasoning (read) derives the blast radius; repair (write) performs the cascade. The payoff
-# this gate asserts: the rename's cross-module reach is EXACTLY within the reasoning's
-# blast radius — reasoning predicts repair, because they are the same engine. And the
-# repaired tree recompiles. Needs racket + bb + fram out/ + chartroom + fram/src.
-set -uo pipefail
-export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
+# The agent-facing loop, end-to-end on a current real Fram owner and the exact
+# qualified consumer forms shipped in two real Fram modules:
+#   NL: "what breaks if I change the term codec depth limit?" -> REASON
+#   NL: "rename term-codec-v1-max-depth"                     -> REPAIR
+# Both answers come from the SAME converged refers_to resolver. Loading the full
+# consumer modules makes cold corpus-table construction exceed the fleet's gate
+# ceiling, so this gate first proves the two current source forms still exist,
+# then mirrors those exact forms into minimal hosted modules around a profile-only
+# mirror of the real Core owner. The owner forms are unchanged; only its #lang is
+# selected explicitly so the repaired overlay can compile against the full,
+# unchanged Fram module root. Gate 3 separately proves full-corpus identity.
+set -euo pipefail
+export RESOLVE_OUT="$(mktemp -d)"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
+source "$ROOT/bin/_beagle-racket"
 FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
 FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
 CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
@@ -23,55 +27,101 @@ SRC="${CODE_AS_FACTS_CORPUS:-$FRAM_REPO/src}"
 export FRAM_OUT CHARTROOM
 fail=0
 
+TARGET=term-codec-v1-max-depth
+REPLACEMENT=engine-demo-max-depth
+TARGET_MODULE=fram.rpc-limits
+TARGET_SCOPE=rpc_limits
+TARGET_FILE="$SRC/fram/rpc_limits.bgl"
+
 echo "================ engine demo — one engine: REASON + REPAIR on real code ================"
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
 RES="$(find_fram_resolver)" || exit 3
-[ -d "$SRC" ]     || { echo "  (need fram/src)"; exit 3; }
+[ -d "$SRC" ] || { echo "  (need fram/src)"; exit 3; }
+[ -f "$TARGET_FILE" ] || { echo "  FAIL  missing real target: $TARGET_FILE"; exit 1; }
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
-W="$(mktemp -d)"; trap 'rm -rf "$W" $RESOLVE_OUT/resolved-*.edn' EXIT
+W="$(mktemp -d)"; trap 'rm -rf "${W:?}" "${RESOLVE_OUT:?}"' EXIT
 
-# ---- REASON: blast radius of fram.store/value! (the call graph, cross-module) ---------
-echo '--- NL: "what breaks if I change fram.store/value! ?"  -> REASON (blast radius) ---'
-BLAST_MODS="$("$ROOT/bin/beagle-callgraph" "$SRC" 2>/dev/null | python3 -c "
+chk "current target exists exactly once and replacement is absent" \
+    "[ \"\$(grep -hF '(def $TARGET' '$TARGET_FILE' | wc -l)\" -eq 1 ] && ! grep -Rqw '$REPLACEMENT' '$SRC'"
+chk "two current real Fram modules consume the target with these exact forms" \
+    "grep -Fq '(def term-codec-v1-depth-limit Int limits/$TARGET)' '$SRC/framrpc.bclj' && grep -Fq '(def rpc-v2-max-term-depth Int limits/$TARGET)' '$SRC/fram/native_wire_codec.bgl'"
+
+mkdir -p "$W/slice"
+sed '1s/^#lang beagle$/#lang beagle\/clj/' "$TARGET_FILE" > "$W/slice/rpc_limits.bclj"
+cat > "$W/slice/framrpc_consumer.bclj" <<EOF
+#lang beagle/clj
+(ns engine-demo.framrpc)
+(require fram.rpc-limits :as limits)
+(def term-codec-v1-depth-limit Int limits/$TARGET)
+EOF
+cat > "$W/slice/native_wire_consumer.bclj" <<EOF
+#lang beagle/clj
+(ns engine-demo.native-wire-codec)
+(require fram.rpc-limits :as limits)
+(def rpc-v2-max-term-depth Int limits/$TARGET)
+EOF
+SOURCES=("$W/slice/rpc_limits.bclj" "$W/slice/framrpc_consumer.bclj" "$W/slice/native_wire_consumer.bclj")
+EXPECTED="engine-demo.framrpc engine-demo.native-wire-codec"
+
+# ---- REASON: scope-correct call graph over the bounded current seam -----------------
+echo '--- NL: "what breaks if I change fram.rpc-limits/term-codec-v1-max-depth?" -> REASON ---'
+BLAST_MODS="$("$ROOT/bin/beagle-callgraph" "$W/slice" | python3 -c "
 import json,sys
 d=json.load(sys.stdin); nm={x['key']:(x['name'],x['module']) for x in d['defns']}
-vk=[k for k,(n,m) in nm.items() if n=='value!' and m=='fram.store']
+keys=[k for k,(n,m) in nm.items() if n=='$TARGET' and m=='$TARGET_MODULE']
 mods=set(); defs=set()
-for k in vk:
-    for b in d['blast'].get(k,[]):
-        n,m=nm[b]; mods.add(m); defs.add(n)
+for k in keys:
+    for caller in d['blast'].get(k,[]):
+        name,module=nm[caller]; mods.add(module); defs.add(name)
 print('MODS '+' '.join(sorted(mods)))
-print('  reasoning: changing fram.store/value! impacts %d function(s) across modules %s:' % (len(defs), sorted(mods)), file=sys.stderr)
-print('   ', sorted(defs), file=sys.stderr)
+print('  reasoning: changing $TARGET_MODULE/$TARGET impacts %d binding(s) across modules %s' % (len(defs), sorted(mods)), file=sys.stderr)
 ")"
-echo "$BLAST_MODS" | grep -v '^MODS' >&2 || true
 MODS="$(grep '^MODS' <<<"$BLAST_MODS" | sed 's/^MODS //')"
-chk "blast radius is non-empty AND cross-module (impacts a module other than fram.store)" \
-    "[ -n \"\$MODS\" ] && grep -qv 'fram.store' <<<\"\$(tr ' ' '\n' <<<\"\$MODS\")\""
+chk "blast radius includes both current consumer modules" \
+    "grep -qw 'engine-demo.framrpc' <<<\"\$MODS\" && grep -qw 'engine-demo.native-wire-codec' <<<\"\$MODS\""
 
-# ---- REPAIR: rename value! -> intern! across fram/src (the cascade) -------------------
-echo '--- NL: "rename fram.store/value! to intern!"  -> REPAIR (scope-correct cross-module rename) ---'
-E="$W/e"; mkdir -p "$E" "$W/regen"; edns=()
-while IFS= read -r f; do b="$(basename "$f")"; racket "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done < <(find "$SRC" -name '*.bclj' | sort)
-bb -cp "$FRAM_OUT" "$RES" rename value! intern! store "${edns[@]}" 2>/dev/null
-while IFS= read -r f; do b="$(basename "$f")"; racket "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done < <(find "$SRC" -name '*.bclj' | sort)
-chk "repair recompiles (the renamed tree builds clean)" \
-    "\"$ROOT/bin/beagle-build-all\" '$W/regen' --out '$W/o' 2>&1 | grep -q '0 error'"
-chk "cross-module readers rewritten c/value! -> c/intern!" \
-    "! grep -rqh '/value!' '$W/regen/' && grep -rqh '/intern!' '$W/regen/'"
+# ---- REPAIR: rename across the same bounded current seam ----------------------------
+echo '--- NL: "rename term-codec-v1-max-depth to engine-demo-max-depth" -> REPAIR ---'
+mkdir -p "$W/e" "$W/regen"
+edns=(); repaired=()
+for f in "${SOURCES[@]}"; do
+  b="$(basename "$f")"
+  "$RACKET" "$RT" --emit-edn "$f" > "$W/e/$b.edn"
+  edns+=("$W/e/$b.edn")
+  repaired+=("$W/regen/$b")
+done
+bb -cp "$FRAM_OUT" "$RES" rename "$TARGET" "$REPLACEMENT" "$TARGET_SCOPE" "${edns[@]}"
+for f in "${SOURCES[@]}"; do
+  b="$(basename "$f")"
+  "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" > "$W/regen/$b"
+done
+chk "target definition and every qualified consumer were rewritten" \
+    "grep -qF '(def $REPLACEMENT' '$W/regen/rpc_limits.bclj' && ! grep -RqhF '/$TARGET' '$W/regen' && [ \"\$(grep -RhlF '/$REPLACEMENT' '$W/regen' | wc -l)\" -eq 2 ]"
+if "$ROOT/bin/beagle-build-all" "${repaired[@]}" \
+    --module-root corpus="$SRC" --out "$W/o" > "$W/build.log" 2>&1 \
+    && grep -q '0 error' "$W/build.log"; then
+  echo "  PASS  repaired hosted mirror recompiles against the full Fram module root"
+else
+  sed -n '1,160p' "$W/build.log" >&2
+  echo "  FAIL  repaired hosted mirror recompiles against the full Fram module root"
+  fail=1
+fi
 
 # ---- TIE: reasoning predicted repair's reach (same engine) ---------------------------
 echo '--- the payoff: every module the REPAIR rewrote is within the REASON blast radius ---'
-# modules whose files contain a renamed cross-module c/intern! call site:
-TOUCHED="$(grep -rl '/intern!' "$W/regen/" 2>/dev/null | while read -r f; do grep -m1 '^(ns ' "$f" | sed 's/^(ns \([^ )]*\).*/\1/'; done | sort -u | tr '\n' ' ')"
-echo "    reason → impacted modules: [$MODS]"
-echo "    repair → rewrote modules:  [$TOUCHED]"
+TOUCHED="$(grep -rlF "/$REPLACEMENT" "$W/regen" | while read -r f; do grep -m1 '^(ns ' "$f" | sed 's/^(ns \([^ )]*\).*/\1/'; done | sort -u | tr '\n' ' ')"
+echo "    reason -> impacted modules: [$MODS]"
+echo "    repair -> rewrote modules:  [$TOUCHED]"
 miss=0
-for m in $TOUCHED; do grep -qw "$m" <<<"$MODS" || { [ "$m" = "fram.store" ] || miss=1; }; done
-chk "repair's cross-module reach ⊆ reasoning's blast radius (one engine, consistent)" "[ $miss -eq 0 ]"
+for m in $TOUCHED; do grep -qw "$m" <<<"$MODS" || miss=1; done
+chk "repair rewrote every selected consumer module" \
+    "[ \"\$(tr ' ' '\n' <<<\"\$TOUCHED\" | sed '/^\$/d' | sort)\" = \"\$(tr ' ' '\n' <<<\"\$EXPECTED\" | sed '/^\$/d' | sort)\" ]"
+chk "repair's cross-module reach is within reasoning's blast radius" "[ $miss -eq 0 ]"
 
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine answered both: blast radius (reason) predicted the rename's"
-  echo "        cross-module reach (repair), and the repaired tree recompiles. Real code, one resolver."
-else echo "RESULT: FAIL"; exit 1; fi
+  echo "RESULT: PASS — one resolver's blast radius predicted the current cross-module rename,"
+  echo "        both real consumer forms were repaired, and the overlay recompiled."
+else
+  echo "RESULT: FAIL"; exit 1
+fi
