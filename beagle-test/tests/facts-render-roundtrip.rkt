@@ -18,8 +18,8 @@
          racket/string
          racket/path)
 
-;; Worktree root discovery (same pattern as beagle-test/tests/ast-json.rkt): load
-;; facts-roundtrip.rkt by FILE PATH so the WORKTREE's edited source is exercised,
+;; Worktree root discovery: load facts-roundtrip.rkt by FILE PATH so the
+;; WORKTREE's edited source is exercised,
 ;; not a stale collection .zo.
 (define root
   (path->string
