@@ -7,19 +7,41 @@
 
 (require rackunit
          racket/runtime-path
+         beagle/private/module-interface
          beagle/private/parse
          beagle/private/check)
 
 (define-runtime-path fixtures-dir "fixtures/scrutinee-narrowing")
 (define-runtime-path xmodule-dir "fixtures/narrowing-xmodule")
 
-(define ((checker dir) name)
+(define ((checker dir #:module-resolver [module-resolver #f]) name)
   (define src (build-path dir name))
+  (define program
+    (parse-program
+     (read-beagle-syntax src)
+     #:source-path src
+     #:module-resolver module-resolver))
   (parameterize ([current-check-profile 3])
-    (type-check! (parse-program (read-beagle-syntax src) #:source-path src))))
+    (type-check! program)))
+
+(define provider-path (build-path xmodule-dir "prov.bclj"))
+(define provider-stxs (read-beagle-syntax provider-path))
+(define provider-program
+  (parse-program provider-stxs #:source-path provider-path))
+(parameterize ([current-check-profile 3])
+  (type-check! provider-program))
+(define provider-source
+  (module-source
+   'prov
+   provider-path
+   provider-stxs
+   (program->module-interface provider-program #:source-id provider-path)))
+(define (provider-resolver namespace _importer-source)
+  (and (eq? namespace 'prov) provider-source))
 
 (define check-file (checker fixtures-dir))
-(define check-xmodule-file (checker xmodule-dir))
+(define check-xmodule-file
+  (checker xmodule-dir #:module-resolver provider-resolver))
 
 ;; --- same module -----------------------------------------------------------
 
