@@ -212,8 +212,10 @@ for materializer in "${materializers[@]}"; do
     [[ "$materializer" == "wasm" ]] && wasm_selected=true
 done
 core_checkpoint_eligible=0
-if [[ ${#materializers[@]} -eq 1 && "${materializers[0]}" == "c17" ]]; then
-    core_checkpoint_eligible=1
+if [[ ${#materializers[@]} -eq 1 ]]; then
+    case "${materializers[0]}" in
+        c17|qbe) core_checkpoint_eligible=1 ;;
+    esac
 fi
 $wasm_selected && [[ "$abi" != "wasm32" ]] &&
     die "materializer 'wasm' requires --abi wasm32 (got '$abi')"

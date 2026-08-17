@@ -22,6 +22,8 @@
   "../../native-core/validation/slice-parallel-runtime/qualified-parallel.bgl")
 (define-runtime-path constants-source
   "../../native-core/validation/slice-parallel-runtime/constants.bgl")
+(define-runtime-path parallel-source
+  "../../native-core/validation/slice-parallel-runtime/parallel.bgl")
 
 (define bb-command
   (or (find-executable-path "bb")
@@ -83,50 +85,81 @@
         (list driver)))
   (apply system*/exit-code (car argv) (cdr argv)))
 
-(define (seed-parallel-checkpoint)
-  ;; The driver's 90-second contract starts at materialization. Publish the
-  ;; exact pre-materializer checkpoint under its own 90-second owner so a cold
-  ;; gate never spends that contract rebuilding the frozen Native Core stage.
+(struct checkpoint-result (label status output) #:transparent)
+
+(define (run-checkpoint-seed scratch label materializer abi sources)
+  (define out (build-path scratch label))
+  (make-directory out)
+  (define log (open-output-string))
+  (define env
+    (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set!
+   env #"BEAGLE_CORE_BUILD_CACHE"
+   (path->bytes (path->directory-path core-build-cache)))
+  (environment-variables-set!
+   env #"BEAGLE_CORE_CHECKPOINT_FAILPOINT" #"after-stage")
+  (environment-variables-set! env #"NATIVE_PARALLEL_WORKERS" #"1")
+  (define status
+    (parameterize ([current-output-port log]
+                   [current-error-port log]
+                   [current-environment-variables env])
+      (apply system*/exit-code
+             racket-command supervisor "90" "5" "--"
+             beagle "build" "--materializer" materializer
+             "--abi" abi "--out" (path->string out)
+             (map path->string sources))))
+  (checkpoint-result label status (get-output-string log)))
+
+(define (check-checkpoint-seed result)
+  (define status (checkpoint-result-status result))
+  (define output (checkpoint-result-output result))
+  (unless (or (zero? status)
+              (and (not (= status 124))
+                   (string-contains?
+                    output "Core checkpoint post-stage failpoint")))
+    (error 'native-c17-parallel
+           "cold ~a checkpoint seed failed with status ~a:\n~a"
+           (checkpoint-result-label result) status output)))
+
+(define (seed-parallel-checkpoints)
+  ;; Each build inside the driver's unchanged 90-second contract starts from
+  ;; its exact frozen pre-materializer stage. Seed C17 first so the two
+  ;; independent refusal checkpoints share its compiler projection, then build
+  ;; those QBE and wasm32 identities concurrently under their own 90-second
+  ;; supervisors.
   (define scratch
     (make-temporary-file "native-c17-parallel-checkpoint-~a" 'directory))
   (dynamic-wind
     void
     (lambda ()
-      (define out (build-path scratch "out"))
-      (make-directory out)
-      (define log (open-output-string))
-      (define env
-        (environment-variables-copy (current-environment-variables)))
-      (environment-variables-set!
-       env #"BEAGLE_CORE_BUILD_CACHE"
-       (path->bytes (path->directory-path core-build-cache)))
-      (environment-variables-set!
-       env #"BEAGLE_CORE_CHECKPOINT_FAILPOINT" #"after-stage")
-      (environment-variables-set! env #"NATIVE_PARALLEL_WORKERS" #"1")
-      (define status
-        (parameterize ([current-output-port log]
-                       [current-error-port log]
-                       [current-environment-variables env])
-          (system*/exit-code
-           racket-command supervisor "90" "5" "--"
-           beagle "build" "--materializer" "c17"
-           "--out" (path->string out)
-           (path->string qualified-source) (path->string constants-source))))
-      (define output (get-output-string log))
-      (unless (or (zero? status)
-                  (and (not (= status 124))
-                       (string-contains?
-                        output "Core checkpoint post-stage failpoint")))
-        (error 'native-c17-parallel
-               "cold checkpoint seed failed with status ~a:\n~a"
-               status output)))
+      (check-checkpoint-seed
+       (run-checkpoint-seed
+        scratch "c17-lp64" "c17" "lp64"
+        (list qualified-source constants-source)))
+      (define result-boxes
+        (for/list ([spec (in-list
+                          (list (list "qbe-lp64" "qbe" "lp64")
+                                (list "c17-wasm32" "c17" "wasm32")))])
+          (define result (box #f))
+          (define worker
+            (thread
+             (lambda ()
+               (set-box!
+                result
+                (run-checkpoint-seed scratch
+                                     (car spec) (cadr spec) (caddr spec)
+                                     (list parallel-source))))))
+          (cons worker result)))
+      (for ([worker+result (in-list result-boxes)])
+        (thread-wait (car worker+result))
+        (check-checkpoint-seed (unbox (cdr worker+result)))))
     (lambda () (delete-directory/files scratch))))
 
 (module+ test
   (make-directory* core-build-cache)
   (test-case
    "C17 parallel exports and optional artifacts remain an active contract"
-   (seed-parallel-checkpoint)
+   (seed-parallel-checkpoints)
    (define driver-log (open-output-string))
    (define driver-status
      (parameterize ([current-output-port driver-log]
