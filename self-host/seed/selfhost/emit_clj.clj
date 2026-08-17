@@ -23,6 +23,32 @@
   (let [f (deref emit-expr-ref)]
   (f e)))
 
+(defn ^Boolean qualified-reference? [ref]
+  (and (map? ref) (string? (get ref "qualifier")) (string? (get ref "name"))))
+
+(defn reference-key [ref]
+  (cond
+  (qualified-reference? ref) ["qualified-ref" (get ref "qualifier") (get ref "name")]
+  (map? ref) (get ref "name")
+  :else ref))
+
+(defn ^String reference->clj [ref]
+  (if (qualified-reference? ref) (str (get ref "qualifier") "/" (get ref "name")) (if (map? ref) (get ref "name") (str ref))))
+
+(defn ^Boolean qualified-reference=? [ref ^String qualifier ^String name]
+  (and (qualified-reference? ref) (= (get ref "qualifier") qualifier) (= (get ref "name") name)))
+
+(defn metadata-reference-key [key]
+  (if (string? key) (let [index (str/last-index-of key "/")]
+  (if (and (some? index) (> index 0) (< index (- (count key) 1))) ["qualified-ref" (subs key 0 index) (subs key (+ index 1))] key)) key))
+
+(defn structuralize-reference-table [table]
+  (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (keys table)))
+
+(defn reference-key-leaf [key]
+  (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) (nth key 2) (if (string? key) (let [index (str/last-index-of key "/")]
+  (if (nil? index) key (subs key (+ index 1)))) key)))
+
 (def ^String HEX-DIGITS "0123456789abcdef")
 
 (defn ^String hex4 [code]
@@ -487,16 +513,19 @@
   (= pt "literal") (str (emit-pat-literal-test pat target-sym) " " body-str)
   (= pt "or") (let [tests (mapv (fn [alt] (if (= (get alt "type") "wildcard") "true" (emit-pat-literal-test alt target-sym))) (get pat "alternatives"))]
   (str "(or " (str/join " " tests) ") " body-str))
-  (= pt "record") (let [rec-name (get pat "name")
+  (= pt "record") (let [rec-ref pat
+   rec-key (reference-key rec-ref)
+   rec-name (get rec-ref "name")
    bindings (vec (get pat "bindings"))
-   direct-fields (get (deref record-fields) rec-name)
-   direct-namespace (get (deref record-namespaces) rec-name)
-   candidates (if (some? direct-fields) [] (filterv (fn [^String name] (= rec-name (unqualify-name name))) (keys (deref record-fields))))
+   direct-fields (get (deref record-fields) rec-key)
+   direct-namespace (let [registered (get (deref record-namespaces) rec-key)]
+  (if (some? registered) registered (if (qualified-reference? rec-ref) (get rec-ref "providerId") nil)))
+   candidates (if (some? direct-fields) [] (filterv (fn [key] (= rec-name (reference-key-leaf key))) (keys (deref record-fields))))
    candidate (if (= 0 (count candidates)) nil (nth candidates 0))
    fields (if (some? direct-fields) direct-fields (if (nil? candidate) nil (get (deref record-fields) candidate)))
    namespace (if (some? direct-fields) direct-namespace (if (nil? candidate) nil (get (deref record-namespaces) candidate)))
    compatible (every? (fn [^String name] (and (= fields (get (deref record-fields) name)) (= namespace (get (deref record-namespaces) name)))) candidates)
-   class-name (if (string? namespace) (str namespace "." (unqualify-name rec-name)) rec-name)
+   class-name (if (string? namespace) (str namespace "." rec-name) (reference->clj rec-ref))
    test (str "(instance? " class-name " " target-sym ")")]
   (if (not compatible) (do
   (throw (ex-info (str "ambiguous imported record pattern: " rec-name) {}))))
@@ -574,7 +603,7 @@
   (= kind "keyword") (str ":" (get e "value"))
   (= kind "char") (emit-char-lit (get e "value"))
   :else "nil"))
-  (= node "ref") (get e "name")
+  (= node "ref") (reference->clj e)
   (= node "def") (let [doc (get e "doc")]
   (str "(def " (if (= (get e "dynamic") true) "^:dynamic " "") (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
   (= node "defonce") (let [doc (get e "doc")]
@@ -631,8 +660,8 @@
   (= node "doseq") (str "(doseq [" (emit-for-clauses! (get e "clauses")) "]\n  " (emit-body (get e "body") "  ") ")")
   (= node "call") (let [fn-expr (get e "fn")
    args (get e "args")]
-  (if (= (get fn-expr "node") "ref") (let [fname (get fn-expr "name")]
-  (if (and (= 1 (count args)) (or (contains? (deref scalar-fns) fname) (= "bgl/promote" fname))) (emit-expr* (nth args 0)) (str "(" fname (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
+  (if (= (get fn-expr "node") "ref") (let [fn-key (reference-key fn-expr)]
+  (if (and (= 1 (count args)) (or (contains? (deref scalar-fns) fn-key) (qualified-reference=? fn-expr "bgl" "promote"))) (emit-expr* (nth args 0)) (str "(" (reference->clj fn-expr) (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
   (= node "vec") (str "[" (str/join " " (mapv emit-expr* (get e "items"))) "]")
   (= node "map") (let [strs (mapv (fn [p] (str (emit-expr* (get p "key")) " " (emit-expr* (get p "val")))) (get e "pairs"))]
   (str "{" (str/join " " strs) "}"))
@@ -641,7 +670,7 @@
   (= node "quoted") (emit-quoted-top (get e "datum"))
   (= node "regex") (str "#\"" (get e "pattern") "\"")
   (= node "method-call") (str "(" (get e "method") " " (emit-expr* (get e "target")) (emit-args (get e "args")) ")")
-  (= node "static-call") (str "(" (get e "name") (emit-args (get e "args")) ")")
+  (= node "static-call") (str "(" (reference->clj e) (emit-args (get e "args")) ")")
   (= node "new") (str "(" (get e "class") (emit-args (get e "args")) ")")
   (= node "kw-access") (let [_contract (record-field-access-contract e)
    dflt (get e "default")]
@@ -720,8 +749,8 @@
 
 (defn ^String emit-program! [prog]
   (reset! emit-expr-ref emit-expr!)
-  (reset! record-fields (get prog "importedRecordFieldOrder" {}))
-  (reset! record-namespaces (get prog "importedRecordNamespaces" {}))
+  (reset! record-fields (structuralize-reference-table (get prog "importedRecordFieldOrder" {})))
+  (reset! record-namespaces (structuralize-reference-table (get prog "importedRecordNamespaces" {})))
   (reset! scalar-fns {})
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)
@@ -777,6 +806,15 @@
   (expect! "char: \\u0041 canonicalizes to \\A" (= (emit-char-lit 65) "\\A"))
   (expect! "float: whole" (= (emit-float 1.0) "1.0"))
   (expect! "float: frac" (= (emit-float 3.14) "3.14"))
+  (expect! "reference: qualified ref renders only at output boundary" (= (emit-expr! {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil}) "str/upper-case"))
+  (expect! "reference: qualified call keeps structural callee identity" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "(str/upper-case value)"))
+  (expect! "reference: qualified static call renders class and method" (= (emit-expr! {"node" "static-call" "qualifier" "Math" "name" "abs" "providerId" nil "args" [{"node" "literal" "kind" "number" "value" -1}]}) "(Math/abs -1)"))
+  (expect! "reference: structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "value"))
+  (expect! "reference: imported record tables lower once at metadata boundary" (= (get (structuralize-reference-table {"models/Account" ["id"]}) ["qualified-ref" "models" "Account"]) ["id"]))
+  (expect! "reference: qualified record pattern uses provider identity" (do
+  (reset! record-fields {["qualified-ref" "models" "Account"] ["id"]})
+  (reset! record-namespaces {})
+  (= (emit-match-arm! {"pattern" {"type" "record" "qualifier" "models" "name" "Account" "providerId" "provider.models" "bindings" [{"name" "id"}]} "body" [{"node" "ref" "name" "id"}]} "value") "(instance? provider.models.Account value) (let [id (:id value)] id)")))
   (expect! "require: alias" (= (emit-require {"ns" "fram.kernel" "alias" "k" "refer" nil}) "[fram.kernel :as k]"))
   (expect! "require: default alias" (= (emit-require {"ns" "fram.rt" "alias" nil "refer" nil}) "[fram.rt :as rt]"))
   (expect! "require: refer" (= (emit-require {"ns" "x.y" "alias" nil "refer" ["a" "b"]}) "[x.y :refer [a b]]"))

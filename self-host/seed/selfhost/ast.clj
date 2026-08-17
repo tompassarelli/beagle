@@ -47,10 +47,12 @@
 (defn ^Boolean upper-case-char? [code]
   (and (>= code 65) (<= code 90)))
 
-(defn ^Boolean static-method-sym? [^String sym]
-  (let [idx (str/index-of sym "/")
-   slash-pos (if (nil? idx) -1 idx)]
-  (and (> slash-pos 0) (< (+ slash-pos 1) (count sym)) (or (upper-case-char? (int (.charAt sym 0))) (= (substring2 sym 0 3) "js/")))))
+(defn ^Boolean qualified-ref? [ref]
+  (and (map? ref) (= (get ref "node") "ref") (string? (get ref "qualifier")) (string? (get ref "name"))))
+
+(defn ^Boolean static-method-ref? [ref]
+  (and (qualified-ref? ref) (let [qualifier (get ref "qualifier")]
+  (and (> (count qualifier) 0) (or (upper-case-char? (int (.charAt qualifier 0))) (= qualifier "js"))))))
 
 (defn ^Boolean dynamic-var-sym? [^String sym]
   (and (>= (count sym) 3) (= (char-at sym 0) "*") (= (char-at sym (- (count sym) 1)) "*")))
@@ -97,6 +99,9 @@
 (defn make-call [fn-name args]
   {"node" "call" "fn" fn-name "args" args})
 
+(defn make-qualified-ref [^String qualifier ^String name provider-id]
+  {"node" "ref" "qualifier" qualifier "name" name "providerId" provider-id})
+
 (defn make-ref [^String name]
   {"node" "ref" "name" name})
 
@@ -130,7 +135,7 @@
 (defn make-method-call [^String method target args]
   {"node" "method-call" "method" method "target" target "args" args})
 
-(defn make-static-call [^String class-method args]
+(defn make-static-call [class-method args]
   {"node" "static-call" "class-method" class-method "args" args})
 
 (defn make-js-selector [^String name]
@@ -247,7 +252,7 @@
 (defn make-pat-literal [value]
   {"pattern" "literal" "value" value})
 
-(defn make-pat-record [^String type-name bindings]
+(defn make-pat-record [type-name bindings]
   {"pattern" "record" "type-name" type-name "bindings" bindings})
 
 (defn make-pat-map [entries]
@@ -336,9 +341,9 @@
   (expect! "dot-method: .foo" (dot-method-sym? ".foo"))
   (expect! "dot-method: not foo" (not (dot-method-sym? "foo")))
   (expect! "dot-method: not ." (not (dot-method-sym? ".")))
-  (expect! "static: Math/abs" (static-method-sym? "Math/abs"))
-  (expect! "static: js/console" (static-method-sym? "js/console"))
-  (expect! "static: not foo/bar" (not (static-method-sym? "foo/bar")))
+  (expect! "static: Math/abs" (static-method-ref? (make-qualified-ref "Math" "abs" nil)))
+  (expect! "static: js/console" (static-method-ref? (make-qualified-ref "js" "console" nil)))
+  (expect! "static: not foo/bar" (not (static-method-ref? (make-qualified-ref "foo" "bar" nil))))
   (expect! "dynamic: *state*" (dynamic-var-sym? "*state*"))
   (expect! "dynamic: not *x" (not (dynamic-var-sym? "*x")))
   (expect! "constructor: Point." (constructor-sym? "Point."))
@@ -351,6 +356,11 @@
   (expect! "make-def node type" (= (get node "node") "def"))
   (expect! "make-def name" (= (get node "name") "x"))
   (expect! "make-def value" (= (get (get node "value") "kind") "number")))
+  (let [node (make-qualified-ref "odd.ns" "->thing?!" nil)]
+  (expect! "qualified ref node type" (= (get node "node") "ref"))
+  (expect! "qualified ref qualifier" (= (get node "qualifier") "odd.ns"))
+  (expect! "qualified ref leaf" (= (get node "name") "->thing?!"))
+  (expect! "qualified ref unresolved provider" (nil? (get node "providerId"))))
   (let [node (make-defn "foo" [(make-param "x" {"kind" "prim" "name" "Int"} nil)] nil {"kind" "prim" "name" "String"} [(make-call "str" [(make-ref "x")])] false)]
   (expect! "make-defn node type" (= (get node "node") "defn"))
   (expect! "make-defn params" (= (count (get node "params")) 1))
@@ -397,6 +407,7 @@
   (expect! "pat-wildcard" (= (get (make-pat-wildcard) "pattern") "wildcard"))
   (expect! "pat-literal" (= (get (make-pat-literal 42) "value") 42))
   (expect! "pat-record" (= (get (make-pat-record "Circle" ["r"]) "type-name") "Circle"))
+  (expect! "qualified pat-record keeps structural type name" (qualified-ref? (get (make-pat-record (make-qualified-ref "models" "Widget" nil) ["item"]) "type-name")))
   (expect! "pat-var" (= (get (make-pat-var "x") "name") "x"))
   (let [node (make-nix-inherit ["a" "b"])]
   (expect! "nix-inherit" (= (get node "node") "nix-inherit"))

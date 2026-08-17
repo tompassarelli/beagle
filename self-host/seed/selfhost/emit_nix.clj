@@ -11,6 +11,8 @@
 
 (def nix-checked-program-ref (atom false))
 
+(def nix-require-prefixes-ref (atom {}))
+
 (defn ^String emit-expr* [e depth]
   (let [f (deref emit-expr-ref)]
   (f e depth)))
@@ -31,8 +33,26 @@
    out (if compiler-owned? (str "bgl____" (hex-encode-utf8 s)) ordinary)]
   (if (contains? nix-reserved-words out) (str out "'") out)))
 
-(defn ^String mangle-qualified-name [^String s]
-  (str/join "." (mapv mangle-name (str/split s #"/"))))
+(defn ^Boolean qualified-reference? [ref]
+  (and (map? ref) (string? (get ref "qualifier")) (string? (get ref "name"))))
+
+(defn ^Boolean qualified-reference=? [ref ^String qualifier ^String name]
+  (and (qualified-reference? ref) (= (get ref "qualifier") qualifier) (= (get ref "name") name)))
+
+(defn ^String mangle-qualified-parts [^String qualifier ^String name provider-id]
+  (let [prefixes (deref nix-require-prefixes-ref)
+   provider-binding (if (string? provider-id) (get prefixes provider-id) nil)
+   qualifier-binding (get prefixes qualifier)
+   runtime-prefix (if (some? provider-binding) provider-binding (if (some? qualifier-binding) qualifier-binding (mangle-name qualifier)))
+   members (mapv mangle-name (str/split name #"/"))]
+  (str/join "." (into [runtime-prefix] members))))
+
+(defn ^String mangle-qualified-name [ref]
+  (mangle-qualified-parts (get ref "qualifier") (get ref "name") (get ref "providerId")))
+
+(defn ^String mangle-record-validator-name [^String validator]
+  (let [parts (str/split validator #"/")]
+  (if (= 1 (count parts)) (mangle-name validator) (mangle-qualified-parts (nth parts 0) (str/join "/" (subvec parts 1)) nil))))
 
 (def ^String LIT-DOLLAR "LITDOLLAR")
 
@@ -141,7 +161,7 @@
 
 (defn call-fn-name [e]
   (let [f (get e "fn")]
-  (if (= (get f "node") "ref") (get f "name") nil)))
+  (if (and (= (get f "node") "ref") (not (qualified-reference? f))) (get f "name") nil)))
 
 (defn ^Boolean kw-access-has-default? [e]
   (not (absent? (get e "default"))))
@@ -382,7 +402,7 @@
   (let [node (get key "node")]
   (cond
   (and (= node "literal") (= (get key "kind") "keyword")) (nix-static-attr-path (get key "value"))
-  (= node "ref") (str "${" (mangle-name (get key "name")) "}")
+  (= node "ref") (str "${" (if (qualified-reference? key) (mangle-qualified-name key) (mangle-name (get key "name"))) "}")
   (and (= node "literal") (= (get key "kind") "string")) (let [v (get key "value")]
   (if (str/includes? v "${") (str "\"" (escape-nix-keep v) "\"") (str "\"" (escape-nix v) "\"")))
   (= node "quoted") (let [d (get key "datum")]
@@ -556,7 +576,7 @@
   (let [candidate-name "bgl____update__candidate"
    result (cond
   (absent? validator) candidate-name
-  (string? validator) (str "(" (mangle-qualified-name validator) " " candidate-name ")")
+  (string? validator) (str "(" (mangle-record-validator-name validator) " " candidate-name ")")
   :else (throw (ex-info "with-form has invalid record-update validator" {})))
    with-candidate (str "let " candidate-name " = " updated "; in " result)
    with-updates (loop [index (- (count updates) 1)
@@ -623,7 +643,7 @@
    pw (fn [a] (paren-wrap (emit-expr* a depth) a))
    E (fn [a] (emit-expr* a depth))]
   (cond
-  (and (some? fname) (= fname "bgl/promote") (= n 1)) (E (nth args 0))
+  (and (qualified-reference=? fn-expr "bgl" "promote") (= n 1)) (E (nth args 0))
   (and (some? fname) (= fname "not") (= n 1)) (str "!" (pw (nth args 0)))
   (and (some? fname) (= fname "mod") (= n 2)) (let [a (E (nth args 0))
    b (E (nth args 1))]
@@ -661,7 +681,7 @@
   (= n 2) (str "builtins.genList (x: x + " (E (nth args 0)) ") (" (E (nth args 1)) " - " (E (nth args 0)) ")")
   :else "null")
   (and (some? fname) (= fname "println")) (str "builtins.trace " (pw (nth args 0)) " null")
-  (and (some? fname) (str/includes? fname "/")) (let [nix-name (mangle-qualified-name fname)]
+  (qualified-reference? fn-expr) (let [nix-name (mangle-qualified-name fn-expr)]
   (if (= 0 n) (str nix-name " null") (str nix-name " " (str/join " " (mapv pw args)))))
   :else (let [fn-str (E fn-expr)]
   (if (= 0 n) (str fn-str " null") (str fn-str " " (str/join " " (mapv pw args))))))))
@@ -931,14 +951,13 @@
   (= kind "keyword") (str "\"" (escape-nix (get e "value")) "\"")
   (= kind "char") (str "\"" (escape-nix (str (char (get e "value")))) "\"")
   :else "null"))
-  (= node "ref") (let [s (get e "name")]
+  (= node "ref") (if (qualified-reference? e) (mangle-qualified-name e) (let [s (get e "name")]
   (cond
   (= s "nil") "null"
   (= s "true") "true"
   (= s "false") "false"
-  (str/includes? s "/") (mangle-qualified-name s)
   (str/includes? s ".") s
-  :else (mangle-name s)))
+  :else (mangle-name s))))
   (= node "def") (str "let " (mangle-name (get e "name")) " = " (emit-expr* (get e "value") depth) "; in " (mangle-name (get e "name")))
   (= node "fn") (let [params (get e "params")
    rest-p (get e "rest")
@@ -1043,9 +1062,21 @@
 (defn program-constrained-record-types [prog]
   (reduce add-form-constrained-record-types {} (get prog "forms")))
 
+(defn build-nix-require-prefixes [requires]
+  (reduce (fn [prefixes entry] (let [namespace (get entry "ns")
+   namespace-parts (str/split namespace #"\.")
+   default-prefix (nth namespace-parts (- (count namespace-parts) 1))
+   alias0 (get entry "alias")
+   alias (if (or (nil? alias0) (false? alias0)) default-prefix alias0)
+   runtime-prefix (mangle-name alias)
+   with-namespace (assoc prefixes namespace runtime-prefix)
+   with-default (assoc with-namespace default-prefix runtime-prefix)]
+  (assoc with-default alias runtime-prefix))) {} requires))
+
 (defn ^String emit-program! [prog]
   (reset! emit-expr-ref emit-expr!)
   (reset! recur-name-ref nil)
+  (reset! nix-require-prefixes-ref (build-nix-require-prefixes (get prog "requires")))
   (reset! nix-checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
   (reset! nix-record-types-ref (program-record-types prog))
   (reset! nix-constrained-record-types-ref (program-constrained-record-types prog))
@@ -1077,6 +1108,7 @@
 (defn run-tests! []
   (reset! emit-expr-ref emit-expr!)
   (reset! recur-name-ref nil)
+  (reset! nix-require-prefixes-ref {})
   (reset! nix-record-types-ref {})
   (reset! nix-constrained-record-types-ref {})
   (reset! passes [])
@@ -1115,10 +1147,17 @@
   (reset! nix-checked-program-ref false)
   result)))
   (expect! "ref dotted verbatim" (= (emit-expr! {"node" "ref" "name" "pkgs.bash"} 0) "pkgs.bash"))
-  (expect! "ref slashed -> dot" (= (emit-expr! {"node" "ref" "name" "lib/mkIf"} 0) "lib.mkIf"))
+  (expect! "qualified ref selects structurally" (= (emit-expr! {"node" "ref" "qualifier" "lib" "name" "mkIf" "providerId" nil} 0) "lib.mkIf"))
+  (expect! "qualified ref resolves provider through runtime import binding" (do
+  (reset! nix-require-prefixes-ref {"nixpkgs.lib" "nixlib" "lib" "nixlib"})
+  (let [result (= (emit-expr! {"node" "ref" "qualifier" "lib" "name" "mkIf" "providerId" "nixpkgs.lib"} 0) "nixlib.mkIf")]
+  (reset! nix-require-prefixes-ref {})
+  result)))
   (expect! "if/then/else" (= (emit-expr! {"node" "if" "cond" {"node" "ref" "name" "p"} "then" {"node" "literal" "kind" "string" "value" "a"} "else" {"node" "literal" "kind" "string" "value" "b"}} 0) "if p then \"a\" else \"b\""))
   (expect! "infix +" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "+"} "args" [{"node" "literal" "kind" "number" "value" 1} {"node" "literal" "kind" "number" "value" 2}]} 0) "(1 + 2)"))
-  (expect! "qualified call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "lib/mkDefault"} "args" [{"node" "literal" "kind" "string" "value" "nixos"}]} 0) "lib.mkDefault \"nixos\""))
+  (expect! "qualified call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "lib" "name" "mkDefault" "providerId" nil} "args" [{"node" "literal" "kind" "string" "value" "nixos"}]} 0) "lib.mkDefault \"nixos\""))
+  (expect! "structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]} 0) "value"))
+  (expect! "qualified record pattern uses the leaf tag" (= (emit-match! {"target" {"node" "ref" "name" "value"} "clauses" [{"pattern" {"type" "record" "qualifier" "models" "name" "Account" "providerId" nil "bindings" [{"name" "id"}]} "body" [{"node" "ref" "name" "id"}]} {"pattern" {"type" "wildcard"} "body" [{"node" "literal" "kind" "nil"}]}]} 0) "if value._tag == \"account\" then let id = value.id; in id else null"))
   (expect! "empty list" (= (emit-nix-list [] 0) "[ ]"))
   (expect! "small list single-line" (= (emit-nix-list [{"node" "literal" "kind" "number" "value" 1} {"node" "literal" "kind" "number" "value" 2}] 0) "[ 1 2 ]"))
   (do
