@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.terrain-generation
+  (:require [native.terrain :as terrain]))
+
+(defn brick-index [(coordinate Int)] Int
+  (mod coordinate terrain/brick-edge))

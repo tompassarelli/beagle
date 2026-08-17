@@ -33,4 +33,5 @@ BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$BEAGLE_ROOT/bin/test/racket-scope/run.sh" || exit 1
 "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit 1
 "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit 1
+"$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit 1
 exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt" "$@"

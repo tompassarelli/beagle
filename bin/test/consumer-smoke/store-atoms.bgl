@@ -1,0 +1,13 @@
+#lang beagle
+(ns store.consumer-smoke)
+
+;; Keep the fixture representative of Beagle Store's mutable TermStore boundary while
+;; leaving the source closure small enough for a warm gate.
+(defrecord AtomRow [(kind Keyword) (value Int?)])
+(defrecord TermStore
+  [(space-id String)
+   (next-sequence (Atom Int))
+   (atoms (Atom (Vec AtomRow)))])
+
+(defn atom-count [(store TermStore)] Int
+  (count (deref (termstore-atoms store))))

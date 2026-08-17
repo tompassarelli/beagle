@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.terrain)
+
+;; Reduced from Grey's native terrain contract: this name is consumed through
+;; an alias-qualified reference by the generation fixture.
+(def brick-edge Int 32)
