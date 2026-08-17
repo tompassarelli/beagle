@@ -322,9 +322,10 @@ option.
   power users, authored in `.bjs`.
 - **[wake](https://github.com/tompassarelli/wake)** — an application compiler
   (entities, views, routes → direct-DOM JS), itself authored in `.bjs`.
-- **[fram](https://github.com/Autonymy/fram)** — a slot-addressable,
-  typed-triple substrate with stratified Datalog, authored in Native Core
-  `.bgl`.
+- **[fram (`branch-core/`)](branch-core/README.md)** — the in-repo home of
+  Fram: a slot-addressable, typed-triple store with its `fram` CLI and engine,
+  authored in Native Core `.bgl`; the [standalone repository](https://github.com/Autonymy/fram)
+  remains as history/mirror.
 - **[north](https://github.com/tompassarelli/north)** — a work tracker and
   agent orchestrator over one triple graph, authored in `.bclj` and built on
   Fram.
