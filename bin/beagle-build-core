@@ -380,6 +380,80 @@ for ((closure_index = 0; closure_index < ${#closure_fields[@]}; closure_index +=
     source_snapshot_digests+=("$source_digest")
 done
 
+bundle_ast="$work/source_bundle.ast.json"
+run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
+    "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
+    "${explicit_normalized_sources[@]}" >"$bundle_ast"
+
+python3 - "$bundle_ast" "$work" "${#normalized_sources[@]}" \
+    "${normalized_sources[@]}" "${source_ids[@]}" <<'PY'
+import json
+import pathlib
+import sys
+
+bundle_path = pathlib.Path(sys.argv[1])
+work = pathlib.Path(sys.argv[2])
+source_count = int(sys.argv[3])
+sources = [
+    str(pathlib.Path(source).resolve())
+    for source in sys.argv[4:4 + source_count]
+]
+source_ids = sys.argv[4 + source_count:]
+if len(source_ids) != source_count:
+    raise SystemExit("beagle build: internal source path/id pairing is malformed")
+bundle = json.loads(bundle_path.read_text())
+if bundle.get("schemaVersion") != 2:
+    raise SystemExit(
+        f"beagle build: expected bundle AST schemaVersion 2, got {bundle.get('schemaVersion')}"
+    )
+module_list = bundle["modules"]
+modules = {module["source"]: module for module in module_list}
+if len(modules) != len(module_list):
+    raise SystemExit("beagle build: bundle AST contains duplicate source ids")
+if set(modules) != set(source_ids):
+    missing = sorted(set(source_ids) - set(modules))
+    extra = sorted(set(modules) - set(source_ids))
+    raise SystemExit(
+        f"beagle build: bundle AST source mismatch: missing={missing} extra={extra}"
+    )
+for index, (source, source_id) in enumerate(zip(sources, source_ids)):
+    module = modules[source_id]
+    destination = work / f"source_{index}.ast.json"
+    destination.write_text(
+        json.dumps(module["program"], sort_keys=True, separators=(",", ":")) + "\n"
+    )
+    interface_destination = work / f"source_{index}.interface.sha256"
+    interface_destination.write_text(module["interfaceSha256"] + "\n")
+PY
+
+source_index=0
+for source in "${normalized_sources[@]}"; do
+    ast="$work/source_${source_index}.ast.json"
+    source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
+    [[ "${source_digest_befores[$source_index]}" == "$source_digest_after" ]] ||
+        die "source changed while its checked projection was captured: $source"
+    ast_metadata="$work/source_${source_index}.metadata"
+    run_phase "ast-verify-$source_index" \
+        "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+        "$RACKET" "$AST_VERIFIER" "$ast" "$source" >"$ast_metadata"
+    mapfile -d '' -t checked_fields <"$ast_metadata"
+    [[ ${#checked_fields[@]} -eq 4 ]] ||
+        die "checked AST verifier returned malformed metadata for $source"
+    logical_path="${checked_fields[0]}"
+    interface_sha256_path="$work/source_${source_index}.interface.sha256"
+    interface_sha256="$(tr -d '\r\n' <"$interface_sha256_path")"
+    [[ "$interface_sha256" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        die "checked AST bundle returned a malformed interface digest for $source"
+    projector_args+=(--input "$ast=$logical_path"
+        --interface-sha256 "$logical_path=$interface_sha256")
+    if $wasm_selected; then
+        wasm_checked_sources+=(--checked-source "$source" "$ast")
+    fi
+    source_index=$((source_index + 1))
+done
+run_phase source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
+    bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
+
 core_modules=(
     native-core/src/native/core.bclj
     native-core/src/native/stages.bclj
@@ -480,12 +554,6 @@ if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]] ||
    ! git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules --; then
     core_result_cache_enabled=0
 fi
-if $wasm_selected; then
-    # A Wasm hit still needs the checked AST paths consumed by the external
-    # materializer. Keep that route uncached until those inputs have their own
-    # verified cache boundary; C17 and QBE cover the latency-critical route.
-    core_result_cache_enabled=0
-fi
 
 write_core_result_input_manifest() {
     local destination="$1" index tool_path bb_path racket_path
@@ -496,6 +564,8 @@ write_core_result_input_manifest() {
         printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
         printf 'compiler-projection-sha256 %s\n' "$compiled_digest"
         printf 'compiler-commit %s\n' "$compiler_commit"
+        printf 'source-facts-sha256 %s\n' \
+            "$(sha256sum "$facts" | awk '{print $1}')"
         printf 'abi %q\nsimd %s\n' "$abi" "$simd_required"
         for tool_path in "$PROJECTOR" "$AST_VERIFIER" \
                          "$MODULE_SOURCE_ROOT_CLI" "$BIN/beagle-ast"; do
@@ -634,83 +704,10 @@ if [[ "$core_result_cache_enabled" == 1 ]]; then
         echo "beagle build: core-result-cache MISS $core_result_key" >&2
     fi
 else
-    echo "beagle build: core-result-cache BYPASS untrusted-or-wasm-compiler" >&2
+    echo "beagle build: core-result-cache BYPASS untrusted-compiler" >&2
 fi
 
 if [[ "$core_result_cache_hit" != 1 ]]; then
-bundle_ast="$work/source_bundle.ast.json"
-run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
-    "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
-    "${explicit_normalized_sources[@]}" >"$bundle_ast"
-
-python3 - "$bundle_ast" "$work" "${#normalized_sources[@]}" \
-    "${normalized_sources[@]}" "${source_ids[@]}" <<'PY'
-import json
-import pathlib
-import sys
-
-bundle_path = pathlib.Path(sys.argv[1])
-work = pathlib.Path(sys.argv[2])
-source_count = int(sys.argv[3])
-sources = [
-    str(pathlib.Path(source).resolve())
-    for source in sys.argv[4:4 + source_count]
-]
-source_ids = sys.argv[4 + source_count:]
-if len(source_ids) != source_count:
-    raise SystemExit("beagle build: internal source path/id pairing is malformed")
-bundle = json.loads(bundle_path.read_text())
-if bundle.get("schemaVersion") != 2:
-    raise SystemExit(
-        f"beagle build: expected bundle AST schemaVersion 2, got {bundle.get('schemaVersion')}"
-    )
-module_list = bundle["modules"]
-modules = {module["source"]: module for module in module_list}
-if len(modules) != len(module_list):
-    raise SystemExit("beagle build: bundle AST contains duplicate source ids")
-if set(modules) != set(source_ids):
-    missing = sorted(set(source_ids) - set(modules))
-    extra = sorted(set(modules) - set(source_ids))
-    raise SystemExit(
-        f"beagle build: bundle AST source mismatch: missing={missing} extra={extra}"
-    )
-for index, (source, source_id) in enumerate(zip(sources, source_ids)):
-    module = modules[source_id]
-    destination = work / f"source_{index}.ast.json"
-    destination.write_text(
-        json.dumps(module["program"], sort_keys=True, separators=(",", ":")) + "\n"
-    )
-    interface_destination = work / f"source_{index}.interface.sha256"
-    interface_destination.write_text(module["interfaceSha256"] + "\n")
-PY
-
-source_index=0
-for source in "${normalized_sources[@]}"; do
-    ast="$work/source_${source_index}.ast.json"
-    source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
-    [[ "${source_digest_befores[$source_index]}" == "$source_digest_after" ]] ||
-        die "source changed while its checked projection was captured: $source"
-    ast_metadata="$work/source_${source_index}.metadata"
-    run_phase "ast-verify-$source_index" \
-        "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
-        "$RACKET" "$AST_VERIFIER" "$ast" "$source" >"$ast_metadata"
-    mapfile -d '' -t checked_fields <"$ast_metadata"
-    [[ ${#checked_fields[@]} -eq 4 ]] ||
-        die "checked AST verifier returned malformed metadata for $source"
-    logical_path="${checked_fields[0]}"
-    interface_sha256_path="$work/source_${source_index}.interface.sha256"
-    interface_sha256="$(tr -d '\r\n' <"$interface_sha256_path")"
-    [[ "$interface_sha256" =~ ^sha256:[0-9a-f]{64}$ ]] ||
-        die "checked AST bundle returned a malformed interface digest for $source"
-    projector_args+=(--input "$ast=$logical_path"
-        --interface-sha256 "$logical_path=$interface_sha256")
-    if $wasm_selected; then
-        wasm_checked_sources+=(--checked-source "$source" "$ast")
-    fi
-    source_index=$((source_index + 1))
-done
-run_phase source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
-    bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 export BEAGLE_CORE_FACTS="$facts"
 export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
