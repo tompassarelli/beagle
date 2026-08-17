@@ -6098,11 +6098,18 @@
   ;; --- if branch type merging ---
   (expect! "infer: if merges branch types"
     (let [t1 (infer-expr!
+                (make-if-node (make-ref "condition")
+                              (make-lit "string" "a")
+                              (make-lit "number" 1))
+                {"condition" BOOL-TYPE})]
+      (union-type? t1)))
+  (expect! "infer: literal if selects reachable branch"
+    (let [t1 (infer-expr!
                 (make-if-node (make-lit "bool" true)
                               (make-lit "string" "a")
                               (make-lit "number" 1))
                 {})]
-      (union-type? t1)))
+      (type-equal? t1 (make-prim "String"))))
   (expect! "infer: if same type no union"
     (let [t1 (infer-expr!
                 (make-if-node (make-lit "bool" true)
