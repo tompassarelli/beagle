@@ -3,8 +3,10 @@
 (require rackunit
          rackunit/text-ui
          racket/list
+         racket/set
          racket/string
          racket/port
+         beagle/private/ast
          beagle/private/syntax)
 
 ;; ============================================================================
@@ -431,6 +433,60 @@
       (check-equal? (repair-result-confidence (repair-structure "(f \"oops)\n")) 'low))))
 
 ;; ============================================================================
+;; 11. W5a syntax-object contract
+;; ============================================================================
+
+(define syntax-object-suite
+  (test-suite "syntax-object membrane"
+    (test-case "structural identifier keeps qualifier leaf and provider"
+      (define loc (src-loc 2 4 'fixture 'original #f 15 8))
+      (define name (make-structural-name 'service 'run 'provider-7))
+      (define value (make-syntax-ident name loc))
+      (check-equal? (structural-name-qualifier (syntax-ident-name value))
+                    'service)
+      (check-equal? (structural-name-leaf (syntax-ident-name value)) 'run)
+      (check-equal? (structural-name-provider-id (syntax-ident-name value))
+                    'provider-7)
+      (check-equal? (beagle-syntax->datum value) 'service/run))
+
+    (test-case "quote is inert while unquote owns syntax"
+      (define loc (src-loc 1 0 'fixture 'original #f 1 12))
+      (define quoted (datum->beagle-syntax '(quote service/run) loc))
+      (define antiquoted (datum->beagle-syntax '(unquote argument) loc))
+      (check-true (syntax-quote? quoted))
+      (check-equal? (syntax-quote-datum quoted) 'service/run)
+      (check-true (syntax-unquote? antiquoted))
+      (check-true (syntax-ident? (syntax-unquote-child antiquoted))))
+
+    (test-case "existing syntax child survives generated construction by identity"
+      (define caller-loc (src-loc 3 2 'caller 'original #f 40 16))
+      (define child-loc (src-loc 3 10 'caller 'original #f 48 3))
+      (define child
+        (make-syntax-ident
+         (make-structural-name #f 'caller-value)
+         child-loc
+         empty-scope-set
+         #f
+         (hasheq 'reader (reader-metadata #"arg" 'atom))))
+      (define origin (make-expansion-origin 'with-temp caller-loc))
+      (define generated
+        (datum->beagle-syntax (list 'list child) caller-loc
+                              empty-scope-set origin))
+      (define inserted (cadr (syntax-list-children generated)))
+      (check-eq? inserted child)
+      (check-equal? (beagle-syntax-span inserted) child-loc)
+      (check-equal? (beagle-syntax-origin generated) origin))
+
+    (test-case "malformed syntax construction fails immediately"
+      (define loc (src-loc 1 0 'fixture 'original #f 1 1))
+      (check-exn exn:fail:contract?
+                 (lambda ()
+                   (make-syntax-ident 'not-a-structural-name loc)))
+      (check-exn exn:fail:contract?
+                 (lambda ()
+                   (make-syntax-atom 1 loc (mutable-set)))))))
+
+;; ============================================================================
 ;; Run
 ;; ============================================================================
 
@@ -444,3 +500,4 @@
 (run-tests check-suite)
 (run-tests parinfer-suite)
 (run-tests safe-write-gate-suite)
+(run-tests syntax-object-suite)

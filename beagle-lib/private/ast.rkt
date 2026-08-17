@@ -3,7 +3,8 @@
 ;; AST struct definitions and shared utilities for beagle's parse pipeline.
 ;; Extracted from parse.rkt to reduce module size and allow direct struct imports.
 
-(require racket/string
+(require racket/set
+         racket/string
          "types.rkt")
 
 ;; --- tag aliases -----------------------------------------------------------
@@ -123,6 +124,394 @@
   (and (src-loc? loc)
        (or (eq? (src-loc-origin loc) 'original)
            (src-loc-canonical loc))))
+
+;; --- syntax objects ---------------------------------------------------------
+;;
+;; The reader and parser still exchange Racket syntax objects because the
+;; parser's source-location machinery is built around them.  Macro expansion
+;; crosses a narrower, immutable membrane: one of the syntax-* values below.
+;; `beagle-syntax->datum` is intentionally lossy and is used only by the legacy
+;; parser/evaluator adapters.  Quoted data is never recursively classified as
+;; identifiers.
+
+(struct reader-metadata (source-bytes delimiter) #:transparent)
+(struct structural-name (qualifier leaf provider-id) #:transparent)
+(struct expansion-origin (macro-id call-span parent) #:transparent)
+
+(struct syntax-atom (datum span scopes origin properties) #:transparent)
+(struct syntax-ident (name span scopes origin properties) #:transparent)
+(struct syntax-list (children span scopes origin properties) #:transparent)
+(struct syntax-vector (children span scopes origin properties) #:transparent)
+(struct syntax-quote (datum span scopes origin properties) #:transparent)
+(struct syntax-unquote (child splicing? span scopes origin properties) #:transparent)
+
+(define empty-scope-set (set))
+
+(define (ensure-syntax-span who value)
+  (unless (or (src-loc? value) (not value))
+    (raise-argument-error who "(or/c src-loc? #f)" value)))
+
+(define (ensure-syntax-scopes who value)
+  (unless (and (set? value) (not (set-mutable? value)))
+    (raise-argument-error who "immutable-set?" value)))
+
+(define (ensure-syntax-origin who value)
+  (unless (or (expansion-origin? value) (not value))
+    (raise-argument-error who "(or/c expansion-origin? #f)" value)))
+
+(define (ensure-syntax-properties who value)
+  (unless (and (hash? value) (immutable? value))
+    (raise-argument-error who "immutable-hash?" value)))
+
+(define (ensure-syntax-context who span scopes origin properties)
+  (ensure-syntax-span who span)
+  (ensure-syntax-scopes who scopes)
+  (ensure-syntax-origin who origin)
+  (ensure-syntax-properties who properties))
+
+(define (make-structural-name qualifier leaf [provider-id #f])
+  (unless (or (symbol? qualifier) (not qualifier))
+    (raise-argument-error 'make-structural-name "(or/c symbol? #f)" qualifier))
+  (unless (symbol? leaf)
+    (raise-argument-error 'make-structural-name "symbol?" leaf))
+  (structural-name qualifier leaf provider-id))
+
+(define (structural-name->symbol name)
+  (unless (structural-name? name)
+    (raise-argument-error 'structural-name->symbol "structural-name?" name))
+  (if (structural-name-qualifier name)
+      (string->symbol
+       (string-append
+        (symbol->string (structural-name-qualifier name))
+        "/"
+        (symbol->string (structural-name-leaf name))))
+      (structural-name-leaf name)))
+
+(define (qualified-ref->structural-name ref)
+  (unless (qualified-ref? ref)
+    (raise-argument-error
+     'qualified-ref->structural-name "qualified-ref?" ref))
+  (make-structural-name
+   (qualified-ref-qualifier ref)
+   (qualified-ref-name ref)
+   (qualified-ref-provider-id ref)))
+
+(define (structural-name->qualified-ref name)
+  (unless (structural-name? name)
+    (raise-argument-error
+     'structural-name->qualified-ref "structural-name?" name))
+  (qualified-ref
+   (structural-name-qualifier name)
+   (structural-name-leaf name)
+   (structural-name-provider-id name)))
+
+(define (symbol->structural-name symbol)
+  (unless (symbol? symbol)
+    (raise-argument-error 'symbol->structural-name "symbol?" symbol))
+  (define spelling (symbol->string symbol))
+  (define slash (regexp-match-positions #rx"/" spelling))
+  (if (and slash
+           (positive? (caar slash))
+           (< (cdar slash) (string-length spelling)))
+      (make-structural-name
+       (string->symbol (substring spelling 0 (caar slash)))
+       (string->symbol (substring spelling (cdar slash))))
+      (make-structural-name #f symbol)))
+
+(define (make-expansion-origin macro-id call-span [parent #f])
+  (unless (or (symbol? macro-id) (string? macro-id))
+    (raise-argument-error
+     'make-expansion-origin "(or/c symbol? string?)" macro-id))
+  (ensure-syntax-span 'make-expansion-origin call-span)
+  (unless (or (expansion-origin? parent) (not parent))
+    (raise-argument-error
+     'make-expansion-origin "(or/c expansion-origin? #f)" parent))
+  (expansion-origin macro-id call-span parent))
+
+(define (make-syntax-atom datum span
+                          [scopes empty-scope-set]
+                          [origin #f]
+                          [properties #hasheq()])
+  (ensure-syntax-context 'make-syntax-atom span scopes origin properties)
+  (syntax-atom datum span scopes origin properties))
+
+(define (make-syntax-ident name span
+                           [scopes empty-scope-set]
+                           [origin #f]
+                           [properties #hasheq()])
+  (unless (structural-name? name)
+    (raise-argument-error 'make-syntax-ident "structural-name?" name))
+  (ensure-syntax-context 'make-syntax-ident span scopes origin properties)
+  (syntax-ident name span scopes origin properties))
+
+(define (ensure-syntax-children who children)
+  (unless (and (list? children) (andmap beagle-syntax? children))
+    (raise-argument-error who "(listof beagle-syntax?)" children)))
+
+(define (make-syntax-list children span
+                          [scopes empty-scope-set]
+                          [origin #f]
+                          [properties #hasheq()])
+  (ensure-syntax-children 'make-syntax-list children)
+  (ensure-syntax-context 'make-syntax-list span scopes origin properties)
+  (syntax-list children span scopes origin properties))
+
+(define (make-syntax-vector children span
+                            [scopes empty-scope-set]
+                            [origin #f]
+                            [properties #hasheq()])
+  (ensure-syntax-children 'make-syntax-vector children)
+  (ensure-syntax-context 'make-syntax-vector span scopes origin properties)
+  (syntax-vector children span scopes origin properties))
+
+(define (make-syntax-quote datum span
+                           [scopes empty-scope-set]
+                           [origin #f]
+                           [properties #hasheq()])
+  (ensure-syntax-context 'make-syntax-quote span scopes origin properties)
+  (syntax-quote datum span scopes origin properties))
+
+(define (make-syntax-unquote child span
+                             [scopes empty-scope-set]
+                             [origin #f]
+                             [properties #hasheq()]
+                             #:splicing? [splicing? #f])
+  (unless (beagle-syntax? child)
+    (raise-argument-error 'make-syntax-unquote "beagle-syntax?" child))
+  (ensure-syntax-context 'make-syntax-unquote span scopes origin properties)
+  (syntax-unquote child splicing? span scopes origin properties))
+
+(define (beagle-syntax? value)
+  (or (syntax-atom? value)
+      (syntax-ident? value)
+      (syntax-list? value)
+      (syntax-vector? value)
+      (syntax-quote? value)
+      (syntax-unquote? value)))
+
+(define (beagle-syntax-span value)
+  (cond
+    [(syntax-atom? value) (syntax-atom-span value)]
+    [(syntax-ident? value) (syntax-ident-span value)]
+    [(syntax-list? value) (syntax-list-span value)]
+    [(syntax-vector? value) (syntax-vector-span value)]
+    [(syntax-quote? value) (syntax-quote-span value)]
+    [(syntax-unquote? value) (syntax-unquote-span value)]
+    [else
+     (raise-argument-error 'beagle-syntax-span "beagle-syntax?" value)]))
+
+(define (beagle-syntax-scopes value)
+  (cond
+    [(syntax-atom? value) (syntax-atom-scopes value)]
+    [(syntax-ident? value) (syntax-ident-scopes value)]
+    [(syntax-list? value) (syntax-list-scopes value)]
+    [(syntax-vector? value) (syntax-vector-scopes value)]
+    [(syntax-quote? value) (syntax-quote-scopes value)]
+    [(syntax-unquote? value) (syntax-unquote-scopes value)]
+    [else
+     (raise-argument-error 'beagle-syntax-scopes "beagle-syntax?" value)]))
+
+(define (beagle-syntax-origin value)
+  (cond
+    [(syntax-atom? value) (syntax-atom-origin value)]
+    [(syntax-ident? value) (syntax-ident-origin value)]
+    [(syntax-list? value) (syntax-list-origin value)]
+    [(syntax-vector? value) (syntax-vector-origin value)]
+    [(syntax-quote? value) (syntax-quote-origin value)]
+    [(syntax-unquote? value) (syntax-unquote-origin value)]
+    [else
+     (raise-argument-error 'beagle-syntax-origin "beagle-syntax?" value)]))
+
+(define (beagle-syntax-properties value)
+  (cond
+    [(syntax-atom? value) (syntax-atom-properties value)]
+    [(syntax-ident? value) (syntax-ident-properties value)]
+    [(syntax-list? value) (syntax-list-properties value)]
+    [(syntax-vector? value) (syntax-vector-properties value)]
+    [(syntax-quote? value) (syntax-quote-properties value)]
+    [(syntax-unquote? value) (syntax-unquote-properties value)]
+    [else
+     (raise-argument-error 'beagle-syntax-properties "beagle-syntax?" value)]))
+
+(define (beagle-syntax-property value key [default #f])
+  (hash-ref (beagle-syntax-properties value) key default))
+
+(define (beagle-syntax-reader-metadata value)
+  (beagle-syntax-property value 'reader #f))
+
+(define (syntax-keyword-symbol? value)
+  (and (symbol? value)
+       (let ([text (symbol->string value)])
+         (and (positive? (string-length text))
+              (char=? (string-ref text 0) #\:)))))
+
+(define (datum->beagle-syntax datum span
+                              [scopes empty-scope-set]
+                              [origin #f]
+                              [properties #hasheq()])
+  (cond
+    [(beagle-syntax? datum) datum]
+    [(and (symbol? datum) (not (syntax-keyword-symbol? datum)))
+     (make-syntax-ident
+      (symbol->structural-name datum) span scopes origin properties)]
+    [(and (list? datum)
+          (= (length datum) 2)
+          (eq? (car datum) 'quote))
+     (make-syntax-quote (cadr datum) span scopes origin properties)]
+    [(and (list? datum)
+          (= (length datum) 2)
+          (memq (car datum) '(unquote unquote-splicing)))
+     (make-syntax-unquote
+      (datum->beagle-syntax (cadr datum) span scopes origin properties)
+      span scopes origin properties
+      #:splicing? (eq? (car datum) 'unquote-splicing))]
+    [(bracketed? datum)
+     (make-syntax-vector
+      (map (lambda (child)
+             (datum->beagle-syntax child span scopes origin properties))
+           (bracket-body datum))
+      span scopes origin properties)]
+    [(list? datum)
+     (make-syntax-list
+      (map (lambda (child)
+             (datum->beagle-syntax child span scopes origin properties))
+           datum)
+      span scopes origin properties)]
+    [(vector? datum)
+     (make-syntax-vector
+      (map (lambda (child)
+             (datum->beagle-syntax child span scopes origin properties))
+           (vector->list datum))
+      span scopes origin properties)]
+    [else (make-syntax-atom datum span scopes origin properties)]))
+
+(define (beagle-syntax->datum value)
+  (cond
+    [(syntax-atom? value) (syntax-atom-datum value)]
+    [(syntax-ident? value)
+     (structural-name->symbol (syntax-ident-name value))]
+    [(syntax-list? value)
+     (map beagle-syntax->datum (syntax-list-children value))]
+    [(syntax-vector? value)
+     (cons BRACKET-TAG
+           (map beagle-syntax->datum (syntax-vector-children value)))]
+    [(syntax-quote? value) (list 'quote (syntax-quote-datum value))]
+    [(syntax-unquote? value)
+     (list (if (syntax-unquote-splicing? value)
+               'unquote-splicing
+               'unquote)
+           (beagle-syntax->datum (syntax-unquote-child value)))]
+    [else
+     (raise-argument-error
+      'beagle-syntax->datum "beagle-syntax?" value)]))
+
+(define (syntax-delimiter datum)
+  (cond
+    [(bracketed? datum) 'bracket]
+    [(map-tagged? datum) 'brace]
+    [(set-tagged? datum) 'set]
+    [(and (list? datum) (pair? datum) (eq? (car datum) 'quote)) 'quote]
+    [(and (list? datum) (pair? datum) (eq? (car datum) 'quasiquote))
+     'quasiquote]
+    [(and (list? datum) (pair? datum) (eq? (car datum) 'unquote-splicing))
+     'unquote-splicing]
+    [(and (list? datum) (pair? datum) (eq? (car datum) 'unquote)) 'unquote]
+    [(list? datum) 'paren]
+    [else #f]))
+
+(define (syntax-source-slice source-bytes stx)
+  (and source-bytes
+       (syntax-position stx)
+       (syntax-span stx)
+       (let* ([source-text (bytes->string/utf-8 source-bytes)]
+              [start (sub1 (syntax-position stx))]
+              [end (+ start (syntax-span stx))])
+         (and (<= 0 start end (string-length source-text))
+              (string->bytes/utf-8 (substring source-text start end))))))
+
+(define (reader-properties stx datum source-bytes)
+  (hasheq
+   'reader
+   (reader-metadata
+    (or (syntax-source-slice source-bytes stx) #"")
+    (syntax-delimiter datum))))
+
+(define (racket-syntax->beagle-syntax stx [source-bytes #f])
+  (unless (syntax? stx)
+    (raise-argument-error
+     'racket-syntax->beagle-syntax "syntax?" stx))
+  (define datum (syntax->datum stx))
+  (define span (stx->src-loc stx))
+  (define properties (reader-properties stx datum source-bytes))
+  (define children (syntax->list stx))
+  (cond
+    [(and (symbol? datum) (not (syntax-keyword-symbol? datum)))
+     (make-syntax-ident
+      (symbol->structural-name datum) span empty-scope-set #f properties)]
+    [(and (list? datum) (= (length datum) 2) (eq? (car datum) 'quote))
+     (make-syntax-quote
+      (cadr datum) span empty-scope-set #f properties)]
+    [(and (list? datum)
+          (= (length datum) 2)
+          (memq (car datum) '(unquote unquote-splicing)))
+     (make-syntax-unquote
+      (if (and children (= (length children) 2))
+          (racket-syntax->beagle-syntax (cadr children) source-bytes)
+          (datum->beagle-syntax (cadr datum) span))
+      span empty-scope-set #f properties
+      #:splicing? (eq? (car datum) 'unquote-splicing))]
+    [(bracketed? datum)
+     (make-syntax-vector
+      (if children
+          (map (lambda (child)
+                 (racket-syntax->beagle-syntax child source-bytes))
+               (cdr children))
+          (map (lambda (child) (datum->beagle-syntax child span))
+               (bracket-body datum)))
+      span empty-scope-set #f properties)]
+    [(list? datum)
+     (make-syntax-list
+      (if children
+          (map (lambda (child)
+                 (racket-syntax->beagle-syntax child source-bytes))
+               children)
+          (map (lambda (child) (datum->beagle-syntax child span)) datum))
+      span empty-scope-set #f properties)]
+    [else
+     (make-syntax-atom datum span empty-scope-set #f properties)]))
+
+(define (src-loc->syntax-source loc)
+  (and loc
+       (vector (src-loc-source loc)
+               (src-loc-line loc)
+               (src-loc-col loc)
+               (src-loc-pos loc)
+               (src-loc-span loc))))
+
+(define (beagle-syntax->racket-syntax value)
+  (unless (beagle-syntax? value)
+    (raise-argument-error
+     'beagle-syntax->racket-syntax "beagle-syntax?" value))
+  (define source (src-loc->syntax-source (beagle-syntax-span value)))
+  (define datum
+    (cond
+      [(syntax-atom? value) (syntax-atom-datum value)]
+      [(syntax-ident? value)
+       (structural-name->symbol (syntax-ident-name value))]
+      [(syntax-list? value)
+       (map beagle-syntax->racket-syntax (syntax-list-children value))]
+      [(syntax-vector? value)
+       (cons BRACKET-TAG
+             (map beagle-syntax->racket-syntax
+                  (syntax-vector-children value)))]
+      [(syntax-quote? value) (list 'quote (syntax-quote-datum value))]
+      [(syntax-unquote? value)
+       (list (if (syntax-unquote-splicing? value)
+                 'unquote-splicing
+                 'unquote)
+             (beagle-syntax->racket-syntax
+              (syntax-unquote-child value)))]))
+  (datum->syntax #f datum source))
 
 (define (->datum x) (if (syntax? x) (syntax->datum x) x))
 (define (stx-subs x) (and (syntax? x) (syntax->list x)))
@@ -653,6 +1042,27 @@
  ;; Source locations
  (struct-out src-loc) stx->src-loc synthetic-src-loc loc-blamable?
  ->datum stx-subs stx-ref stx-tail
+ ;; Macro-facing immutable syntax objects
+ (struct-out reader-metadata)
+ (struct-out structural-name)
+ (struct-out expansion-origin)
+ (struct-out syntax-atom)
+ (struct-out syntax-ident)
+ (struct-out syntax-list)
+ (struct-out syntax-vector)
+ (struct-out syntax-quote)
+ (struct-out syntax-unquote)
+ empty-scope-set
+ make-structural-name structural-name->symbol symbol->structural-name
+ qualified-ref->structural-name structural-name->qualified-ref
+ make-expansion-origin
+ make-syntax-atom make-syntax-ident make-syntax-list make-syntax-vector
+ make-syntax-quote make-syntax-unquote
+ beagle-syntax? beagle-syntax-span beagle-syntax-scopes
+ beagle-syntax-origin beagle-syntax-properties beagle-syntax-property
+ beagle-syntax-reader-metadata
+ datum->beagle-syntax beagle-syntax->datum
+ racket-syntax->beagle-syntax beagle-syntax->racket-syntax
  current-registry current-src-table store-src!
  current-body-locs-table body-loc-at
  register-program-body-locs-table! program-body-locs-table
