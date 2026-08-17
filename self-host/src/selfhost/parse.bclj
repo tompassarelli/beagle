@@ -523,7 +523,9 @@
 (defn make-ref! [(name String)] Any
   (let [id (consume-reference-id! name)
         base {"node" "ref" "name" name}]
-    (if (nil? id) base (assoc base "refersTo" id))))
+    (if (nil? id)
+      base
+      (assoc (assoc base "providerId" nil) "refersTo" id))))
 
 (defn make-qualified-ref!
   [(qualifier String) (name String) (provider-id Any)] Any
@@ -3872,7 +3874,8 @@
       (= (nth d 0) INTERNAL-RESOLVED-REF-TAG)
       (string? (nth d 1))
       (string? (nth d 2)))
-    {"node" "ref" "name" (nth d 1) "refersTo" (nth d 2)}
+    {"node" "ref" "name" (nth d 1) "providerId" nil
+     "refersTo" (nth d 2)}
     (and (string? d) (= d "nil"))
     NIL-LITERAL
     (and (string? d) (keyword-sym? d))
@@ -4608,6 +4611,10 @@
     (= (parse-expr* ["#%string" "hi"])
       {"node" "literal" "kind" "string" "value" "hi"}))
   (expect! "ref: symbol" (= (parse-expr* "x") {"node" "ref" "name" "x"}))
+  (expect! "resolved unqualified ref carries null provider (ast-json parity)"
+    (= (parse-expr* [INTERNAL-RESOLVED-REF-TAG "x" "lexical:test:1:0:x"])
+      {"node" "ref" "name" "x" "providerId" nil
+       "refersTo" "lexical:test:1:0:x"}))
   (expect! "ref: hyphenated"
     (= (parse-expr* "my-var") {"node" "ref" "name" "my-var"}))
   (expect! "ref: qualified lowercase lowers structurally"
@@ -5360,6 +5367,12 @@
            (not= outer-id inner-id)
            (not= param-id inner-id)
            (str/starts-with? outer-id "introduced-")
+           (contains? outer-use "providerId")
+           (nil? (get outer-use "providerId"))
+           (contains? caller-use "providerId")
+           (nil? (get caller-use "providerId"))
+           (contains? inner-use "providerId")
+           (nil? (get inner-use "providerId"))
            (= (get outer-use "refersTo") outer-id)
            (= (get caller-use "refersTo") param-id)
            (= (get inner-use "refersTo") inner-id))))
