@@ -12,32 +12,12 @@
          racket/format
          json
          openssl/sha1
-         (except-in "ast.rkt"
-                    call-form-fn
-                    static-call-class+method
-                    pat-record-type-name)
-         (only-in "ast.rkt"
-                  [call-form-fn raw-call-form-fn]
-                  [static-call-class+method raw-static-call-class+method]
-                  [pat-record-type-name raw-pat-record-type-name])
+         "ast.rkt"
          "types.rkt"
          "macros.rkt"
          (only-in "parse.rkt" program-source-bytes)
          (only-in "semantic-index.rkt" write-canonical-json)
          "js-emit-utils.rkt")
-
-;; CAMPAIGN SCAFFOLD — DIES WITH SEAM 7.
-(define (call-form-fn form)
-  (define ref (raw-call-form-fn form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
-
-(define (static-call-class+method form)
-  (define ref (raw-static-call-class+method form))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
-
-(define (pat-record-type-name pattern)
-  (define ref (raw-pat-record-type-name pattern))
-  (if (qualified-ref? ref) (qualified-ref->symbol ref) ref))
 
 (define current-json-src-table (make-parameter #f))
 (define current-json-type-table (make-parameter #f))
@@ -221,6 +201,17 @@
 
 (define (sym->js s)
   (if s (symbol->string s) 'null))
+
+(define (reference-fields ref)
+  (cond
+    [(qualified-ref? ref)
+     (hasheq 'qualifier (symbol->string (qualified-ref-qualifier ref))
+             'name (symbol->string (qualified-ref-name ref))
+             'providerId (sym->js (qualified-ref-provider-id ref)))]
+    [(symbol? ref) (hasheq 'name (symbol->string ref))]
+    [else (raise-argument-error 'reference-fields
+                                "(or/c qualified-ref? symbol?)"
+                                ref)]))
 
 (define (datum->json d)
   (cond
@@ -440,7 +431,8 @@
 
 (define (expr->json/raw e)
   (cond
-    [(qualified-ref? e) (expr->json/raw (qualified-ref->symbol e))]
+    [(qualified-ref? e)
+     (hash-set (reference-fields e) 'node "ref")]
     [(string? e)  (hasheq 'node "literal" 'kind "string" 'value e)]
     ;; value is the integer code point: JSON has no char type, and the
     ;; selfhost consumer re-emits canonically from the value (emit-clj-char
@@ -588,9 +580,10 @@
              'args (map expr->json (method-call-args e)))]
 
     [(static-call? e)
-     (hasheq 'node "static-call"
-             'name (symbol->string (static-call-class+method e))
-             'args (map expr->json (static-call-args e)))]
+     (hash-set*
+      (reference-fields (static-call-class+method e))
+      'node "static-call"
+      'args (map expr->json (static-call-args e)))]
 
     [(kw-access? e)
      (define wire
@@ -1130,14 +1123,17 @@
   (cond
     [(pat-wildcard? p) (hasheq 'type "wildcard")]
     [(pat-literal? p)  (hasheq 'type "literal" 'value (datum->json (pat-literal-value p)))]
-    [(pat-record? p)   (hasheq 'type "record"
-                               'name (symbol->string (pat-record-type-name p))
-                               'bindings (map (lambda (b)
-                                                (if (symbol? b)
-                                                    (hasheq 'name (symbol->string b))
-                                                    (hasheq 'field (symbol->string (car b))
-                                                            'name (symbol->string (cdr b)))))
-                                              (pat-record-bindings p)))]
+    [(pat-record? p)
+     (hash-set*
+      (reference-fields (pat-record-type-name p))
+      'type "record"
+      'bindings
+      (map (lambda (b)
+             (if (symbol? b)
+                 (hasheq 'name (symbol->string b))
+                 (hasheq 'field (symbol->string (car b))
+                         'name (symbol->string (cdr b)))))
+           (pat-record-bindings p)))]
     [(pat-map? p)      (hasheq 'type "map"
                                'entries (map (lambda (e)
                                                (hasheq 'key (datum->json (car e))

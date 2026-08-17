@@ -244,6 +244,11 @@
       (list "--output" (path->string facts-path) "--include-defs"))))
   (values status (and (zero? status) (file->string facts-path)) errors))
 
+(define (facts->rows facts)
+  (for/list ([line (in-list (string-split facts "\n"))]
+             #:unless (string=? line ""))
+    (string-split line "\t")))
+
 (define tests
   (test-suite
    "closed exact-byte checked bundle"
@@ -512,13 +517,26 @@
          (check-equal? status-a 0 errors-a)
          (check-equal? status-b 0 errors-b)
          (check-equal? bundle-a bundle-b)
+         (define bundle-json (string->jsexpr bundle-a))
          ;; Canonical logical-source-id order, not argument or dependency
          ;; order: the closed closure sorts by source id so the response is a
          ;; function of the sources alone.
          (check-equal?
           (map (lambda (module) (hash-ref module 'source))
-               (hash-ref (string->jsexpr bundle-a) 'modules))
+               (hash-ref bundle-json 'modules))
           '("src/bundle/app.bgl" "src/bundle/provider.bgl"))
+         (define app-program
+           (hash-ref (car (hash-ref bundle-json 'modules)) 'program))
+         (define run-form
+           (for/first ([form (in-list (hash-ref app-program 'forms))]
+                       #:when (equal? (hash-ref form 'name #f) "run"))
+             form))
+         (define callee-ref
+           (hash-ref (car (hash-ref run-form 'body)) 'fn))
+         (check-equal? (hash-ref callee-ref 'node) "ref")
+         (check-equal? (hash-ref callee-ref 'qualifier) "provider")
+         (check-equal? (hash-ref callee-ref 'name) "answer")
+         (check-equal? (hash-ref callee-ref 'providerId) 'null)
          (define-values (facts-status-a facts-a facts-errors-a)
            (bundle->source-facts bundle-a checkout-a))
          (define-values (facts-status-b facts-b facts-errors-b)
@@ -527,7 +545,23 @@
          (check-equal? facts-status-b 0 facts-errors-b)
          (check-equal? facts-a facts-b)
          (check-false (string-contains? facts-a (path->string checkout-a)))
-         (check-false (string-contains? facts-b (path->string checkout-b))))
+         (check-false (string-contains? facts-b (path->string checkout-b)))
+         (define facts-rows (facts->rows facts-a))
+         (define callee-row
+           (for/first ([row (in-list facts-rows)]
+                       #:when (and (equal? (list-ref row 1) "callee")
+                                   (equal? (list-ref row 2) "n")))
+             row))
+         (check-not-false callee-row)
+         (define callee-id (list-ref callee-row 3))
+         (check-not-false
+          (member (list callee-id "form-kind" "t" "ref") facts-rows))
+         (check-not-false
+          (member (list callee-id "qualifier" "t" "provider") facts-rows))
+         (check-not-false
+          (member (list callee-id "name" "t" "answer") facts-rows))
+         (check-false
+          (member (list callee-id "name" "t" "provider/answer") facts-rows)))
        (lambda () (delete-directory/files scratch))))
 
    (test-case "CLI failure leaves stdout empty"

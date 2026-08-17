@@ -272,11 +272,6 @@
                    {:target target})))
       n)))
 
-;; A callee that is not a plain name keeps an empty spelling and its source
-;; form, so native lowering can refuse indirect invocation without guessing.
-(defn callee-name [f]
-  (if (= "ref" (get f "node")) (get f "name") ""))
-
 (defn emit-binding [b]
   (let [n (nid)]
     (row! n "form-kind" "t" "binding")
@@ -440,6 +435,18 @@
     (row! n "name" "t" (str (get binding "name")))
     n))
 
+(defn emit-reference! [n reference]
+  (row! n "form-kind" "t" "ref")
+  (when-let [qualifier (get reference "qualifier")]
+    (row! n "qualifier" "t" qualifier))
+  (row! n "name" "t" (get reference "name"))
+  (when-let [provider-id (get reference "providerId")]
+    (row! n "provider-id" "t" provider-id))
+  n)
+
+(defn emit-reference [reference]
+  (emit-reference! (nid) reference))
+
 (defn emit-pattern [pattern]
   (let [n (nid)
         kind (get pattern "type")]
@@ -447,10 +454,15 @@
     (row! n "pattern-kind" "t" (str kind))
     (case kind
       "literal" (emit-pattern-literal! n (get pattern "value"))
-      "record" (do (row! n "name" "t" (str (get pattern "name")))
-                    (row! n "bindings" "n"
-                          (emit-seq (get pattern "bindings")
-                                    emit-pattern-binding)))
+      "record" (do
+                 (when-let [qualifier (get pattern "qualifier")]
+                   (row! n "qualifier" "t" qualifier))
+                 (row! n "name" "t" (get pattern "name"))
+                 (when-let [provider-id (get pattern "providerId")]
+                   (row! n "provider-id" "t" provider-id))
+                 (row! n "bindings" "n"
+                       (emit-seq (get pattern "bindings")
+                                 emit-pattern-binding)))
       "var" (row! n "name" "t" (str (get pattern "name")))
       "or" (row! n "alternatives" "n"
                   (emit-seq (get pattern "alternatives") emit-pattern))
@@ -479,20 +491,20 @@
                     (row! n "value" "t" (str (get e "pattern"))))
       ;; the parser spells a boolean constant as a reference; the projection
       ;; restores the literal so the lowering never resolves it as a binding
-      "ref"     (if (#{"true" "false"} (get e "name"))
+      "ref"     (if (and (nil? (get e "qualifier"))
+                          (#{"true" "false"} (get e "name")))
                   (do (row! n "form-kind" "t" "literal")
                       (row! n "literal-kind" "t" "bool")
                       (row! n "value" "t" (get e "name")))
-                  (do (row! n "form-kind" "t" "ref")
-                      (row! n "name" "t" (get e "name"))))
+                  (emit-reference! n e))
       "call"    (do (row! n "form-kind" "t" "call")
-                    (row! n "callee" "t" (callee-name (get e "fn")))
-                    (when (not= "ref" (get-in e ["fn" "node"]))
+                    (if (= "ref" (get-in e ["fn" "node"]))
+                      (row! n "callee" "n" (emit-reference (get e "fn")))
                       (row! n "callee-form" "n" (emit-expr (get e "fn"))))
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "static-call"
       (do (row! n "form-kind" "t" "static-call")
-          (row! n "callee" "t" (get e "name"))
+          (row! n "callee" "n" (emit-reference e))
           (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "method-call"
       (do (row! n "form-kind" "t" "method-call")
