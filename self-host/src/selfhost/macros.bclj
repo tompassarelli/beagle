@@ -250,7 +250,7 @@
 ;; reader tag as evaluator values so generated syntax cannot confuse a string
 ;; literal with a symbol.
 
-(declare macro-eval! macro-apply-fn!)
+(declare macro-eval! macro-apply-fn! macro-match-syntax-pattern!)
 
 (defn macro-eval-fail! [(msg String)] Any
   (throw (ex-info (str "macro-eval: " msg) {})))
@@ -315,6 +315,192 @@
     :else
       (macro-eval-fail!
         (str who " expected a list or vec, got: " (str value)))))
+
+;; --- syntax-match -----------------------------------------------------------
+
+(defn macro-pattern-form?
+  [(pattern Any) (head String) (arity Int)] Bool
+  (and (vector? pattern)
+       (= (count pattern) arity)
+       (= (nth pattern 0) head)))
+
+(defn macro-pattern-capture-name!
+  [(pattern Any) (form-name String)] String
+  (if (and (macro-pattern-form? pattern form-name 2)
+           (string? (nth pattern 1)))
+    (nth pattern 1)
+    (macro-eval-fail!
+      (str "invalid " form-name " pattern: " (str pattern)))))
+
+(defn macro-sequence-pattern! [(pattern Any)] Any
+  (cond
+    (and (vector? pattern) (= (count pattern) 0))
+      {"category" "list" "items" []}
+    (not (vector? pattern))
+      (macro-eval-fail! (str "invalid pattern category: " (str pattern)))
+    (= (nth pattern 0) "list")
+      {"category" "list" "items" (subvec pattern 1)}
+    (= (nth pattern 0) BRACKET-TAG)
+      {"category" "vector" "items" (subvec pattern 1)}
+    (= (nth pattern 0) MAP-TAG)
+      {"category" "map" "items" (subvec pattern 1)}
+    (vector? (nth pattern 0))
+      {"category" "list" "items" pattern}
+    :else
+      (macro-eval-fail!
+        (str "invalid pattern category: " (str (nth pattern 0))))))
+
+(defn macro-tail-splice-pattern? [(pattern Any)] Bool
+  (and (vector? pattern)
+       (> (count pattern) 0)
+       (= (nth pattern 0) "tail-splice")))
+
+(defn macro-validate-syntax-pattern!
+  [(pattern Any) (tail-position Bool)] Nil
+  (cond
+    (macro-pattern-form? pattern "literal" 2) nil
+    (macro-pattern-form? pattern "capture" 2)
+      (do (macro-pattern-capture-name! pattern "capture") nil)
+    (and (vector? pattern) (> (count pattern) 0)
+         (= (nth pattern 0) "capture"))
+      (do (macro-pattern-capture-name! pattern "capture") nil)
+    (macro-pattern-form? pattern "identifier" 2)
+      (let [nested (nth pattern 1)]
+        (if (macro-pattern-form? nested "capture" 2)
+          (do (macro-pattern-capture-name! nested "capture") nil)
+          (macro-eval-fail!
+            (str "invalid identifier pattern: " (str pattern)))))
+    (and (vector? pattern) (> (count pattern) 0)
+         (= (nth pattern 0) "identifier"))
+      (macro-eval-fail!
+        (str "invalid identifier pattern: " (str pattern)))
+    (macro-tail-splice-pattern? pattern)
+      (do
+        (macro-pattern-capture-name! pattern "tail-splice")
+        (if tail-position
+          nil
+          (macro-eval-fail!
+            "tail-splice must be the last list or vector pattern element")))
+    :else
+      (let [sequence (macro-sequence-pattern! pattern)
+            category (get sequence "category")
+            items (get sequence "items")]
+        (loop [(index Int) 0]
+          (if (= index (count items))
+            nil
+            (let [item (nth items index)
+                  tail (macro-tail-splice-pattern? item)]
+              (if (and tail
+                       (or (= category "map")
+                           (not= index (- (count items) 1))))
+                (macro-eval-fail!
+                  "tail-splice must be the last list or vector pattern element")
+                (do
+                  (macro-validate-syntax-pattern! item tail)
+                  (recur (+ index 1))))))))))
+
+(defn macro-syntax-sequence [(value Any)] Any
+  (cond
+    (syntax-list? value)
+      (let [children (get value "payload")]
+        (if (and (> (count children) 0)
+                 (= (macro-datum (nth children 0)) MAP-TAG))
+          {"category" "map" "items" (subvec children 1)}
+          {"category" "list" "items" children}))
+    (syntax-vector? value)
+      {"category" "vector" "items" (get value "payload")}
+    (and (vector? value) (> (count value) 0)
+         (= (nth value 0) BRACKET-TAG))
+      {"category" "vector" "items" (subvec value 1)}
+    (and (vector? value) (> (count value) 0)
+         (= (nth value 0) MAP-TAG))
+      {"category" "map" "items" (subvec value 1)}
+    (vector? value)
+      {"category" "list" "items" value}
+    :else nil))
+
+(defn macro-match-pattern-items!
+  [(patterns Any) (values Any)] Any
+  (let [tail
+        (and (> (count patterns) 0)
+             (macro-tail-splice-pattern?
+               (nth patterns (- (count patterns) 1))))
+        fixed-count (if tail (- (count patterns) 1) (count patterns))]
+    (if (if tail
+          (< (count values) fixed-count)
+          (not= (count values) fixed-count))
+      nil
+      (loop [(index Int) 0 (captures Any) {}]
+        (if (= index fixed-count)
+          (if tail
+            (assoc
+              captures
+              (macro-pattern-capture-name!
+                (nth patterns (- (count patterns) 1))
+                "tail-splice")
+              (subvec values fixed-count))
+            captures)
+          (let [matched
+                (macro-match-syntax-pattern!
+                  (nth patterns index) (nth values index))]
+            (if (nil? matched)
+              nil
+              (recur (+ index 1) (merge captures matched)))))))))
+
+(defn macro-match-syntax-pattern! [(pattern Any) (value Any)] Any
+  (cond
+    (macro-pattern-form? pattern "literal" 2)
+      (if (= (macro-datum value) (macro-datum (nth pattern 1))) {} nil)
+    (macro-pattern-form? pattern "capture" 2)
+      (assoc {} (macro-pattern-capture-name! pattern "capture") value)
+    (macro-pattern-form? pattern "identifier" 2)
+      (if (and (ast/beagle-syntax? value)
+               (= (get value "variant") "ident"))
+        (assoc
+          {}
+          (macro-pattern-capture-name! (nth pattern 1) "capture")
+          value)
+        nil)
+    :else
+      (let [expected (macro-sequence-pattern! pattern)
+            actual (macro-syntax-sequence value)]
+        (if (and (some? actual)
+                 (= (get expected "category") (get actual "category")))
+          (macro-match-pattern-items!
+            (get expected "items") (get actual "items"))
+          nil))))
+
+(defn macro-syntax-match-clause! [(clause Any)] Any
+  (if (and (vector? clause)
+           (= (count clause) 3)
+           (= (nth clause 0) BRACKET-TAG))
+    {"pattern" (nth clause 1) "body" (nth clause 2)}
+    (macro-eval-fail!
+      (str "expected [pattern body], got: " (str clause)))))
+
+(defn macro-eval-syntax-match! [(parts Any) (env Any)] Any
+  (if (< (count parts) 2)
+    (macro-eval-fail!
+      "expected a subject and at least one [pattern body] clause")
+    (let [clauses (subvec parts 1)]
+      (loop [(remaining Any) clauses]
+        (when (> (count remaining) 0)
+          (let [clause (macro-syntax-match-clause! (nth remaining 0))]
+            (macro-validate-syntax-pattern! (get clause "pattern") false)
+            (recur (subvec remaining 1)))))
+      (let [subject (macro-eval! (nth parts 0) env)]
+        (loop [(remaining Any) clauses]
+          (if (= (count remaining) 0)
+            (macro-eval-fail!
+              (str "no pattern matched: " (str (macro-datum subject))))
+            (let [clause (macro-syntax-match-clause! (nth remaining 0))
+                  captures
+                  (macro-match-syntax-pattern!
+                    (get clause "pattern") subject)]
+              (if (nil? captures)
+                (recur (subvec remaining 1))
+                (macro-eval!
+                  (get clause "body") (merge env captures))))))))))
 
 (defn macro-env-lookup! [(env Any) (name String)] Any
   (if (clojure.core/contains? env name)
@@ -518,6 +704,7 @@
           (= head "cond") (macro-eval-cond! parts env)
           (= head "fn") (macro-eval-fn! parts env)
           (= head "do") (macro-eval-body! parts env)
+          (= head "syntax-match") (macro-eval-syntax-match! parts env)
           (= head "quote")
             (if (= (count parts) 1)
               (nth parts 0)
