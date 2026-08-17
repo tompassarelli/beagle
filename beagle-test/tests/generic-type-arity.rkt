@@ -3,8 +3,8 @@
 (require rackunit
          racket/runtime-path
          racket/system
-         beagle/private/parse
-         beagle/private/check)
+         beagle/private/module-overlay-check
+         beagle/private/module-source-root)
 
 (define-runtime-path fixtures-dir "fixtures/generic-type-arity")
 (define-runtime-path selfhost-seed-dir "../../self-host/seed")
@@ -13,21 +13,55 @@
   (or (find-executable-path "bb")
       (error 'generic-type-arity "bb is required for self-host driver coverage")))
 
+(define fixture-root
+  (make-module-source-root-v0 "fixtures/generic-type-arity" fixtures-dir))
+
+(define (fixture-program name)
+  (define source-id (string-append "fixtures/generic-type-arity/" name))
+  (define zero-provider-input
+    (and
+     (equal? name "imported-zero-parameter-declaration.bjs")
+     (module-source-input
+      "fixtures/generic-type-arity/zero-provider.bjs"
+      (build-path fixtures-dir "zero-provider.bjs"))))
+  (define closure
+    (resolve-module-source-closure
+     (cons (module-source-input source-id (build-path fixtures-dir name))
+           (if zero-provider-input (list zero-provider-input) '()))
+     (list fixture-root)))
+  (define checked
+    (check-module-source-closure closure #:check-profile 3 #:emit? #f))
+  (unless (overlay-check-result-ok? checked)
+    (error 'beagle "~a"
+           (overlay-diagnostic-message
+            (car (overlay-check-result-diagnostics checked)))))
+  (checked-overlay-module-program
+   (for/first ([module (in-list (overlay-check-result-modules checked))]
+               #:when (equal? (checked-overlay-module-source module) source-id))
+     module)))
+
 (define (check-file name)
-  (define src (build-path fixtures-dir name))
-  (parameterize ([current-check-profile 3])
-    (type-check! (parse-program (read-beagle-syntax src) #:source-path src))))
+  (fixture-program name))
 
 (define (selfhost-check-file name)
   (define output (open-output-string))
+  (define root-spec
+    (string-append "fixtures/generic-type-arity=" (path->string fixtures-dir)))
+  (define source-args
+    (if (equal? name "imported-zero-parameter-declaration.bjs")
+        (list "--source"
+              (path->string (build-path fixtures-dir "zero-provider.bjs")))
+        '()))
   (define status
     (parameterize ([current-output-port output]
                    [current-error-port output])
-      (system*/exit-code
-       bb-path
-       "-cp" (path->string selfhost-seed-dir)
-       "-m" "selfhost.main"
-       "check" (path->string (build-path fixtures-dir name)))))
+      (apply system*/exit-code
+             bb-path
+             "-cp" (path->string selfhost-seed-dir)
+             "-m" "selfhost.main"
+             "check" "--module-root" root-spec
+             (append source-args
+                     (list (path->string (build-path fixtures-dir name)))))))
   (values status (get-output-string output)))
 
 (test-case "a local generic type requires its exact arity"
