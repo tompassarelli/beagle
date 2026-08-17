@@ -211,6 +211,10 @@ for materializer in "${materializers[@]}"; do
     seen_materializers["$materializer"]=1
     [[ "$materializer" == "wasm" ]] && wasm_selected=true
 done
+core_checkpoint_eligible=0
+if [[ ${#materializers[@]} -eq 1 && "${materializers[0]}" == "c17" ]]; then
+    core_checkpoint_eligible=1
+fi
 $wasm_selected && [[ "$abi" != "wasm32" ]] &&
     die "materializer 'wasm' requires --abi wasm32 (got '$abi')"
 declare -A seen_entries=()
@@ -306,6 +310,8 @@ commit_started=0
 work_cleaned=0
 core_result_staging=""
 core_result_alias_staging=""
+core_checkpoint_staging=""
+core_checkpoint_alias_staging=""
 cleanup() {
     local rc=$?
     if [[ "$commit_started" == "1" && "$build_committed" != "1" ]]; then
@@ -323,6 +329,14 @@ cleanup() {
         if [[ -n "$core_result_alias_staging" &&
               -f "$core_result_alias_staging" ]]; then
             rm -f -- "$core_result_alias_staging"
+        fi
+        if [[ -n "$core_checkpoint_staging" &&
+              -d "$core_checkpoint_staging" ]]; then
+            rm -rf -- "${core_checkpoint_staging:?}"
+        fi
+        if [[ -n "$core_checkpoint_alias_staging" &&
+              -f "$core_checkpoint_alias_staging" ]]; then
+            rm -f -- "$core_checkpoint_alias_staging"
         fi
         if [[ "$work_cleaned" != "1" ]]; then
             rm -rf "${work:?}"
@@ -516,13 +530,66 @@ validate_core_result_entry_from_alias() {
        "beagle-core-result/v1 $expected_key $artifact_manifest_digest" ]]
 }
 
+validate_core_checkpoint_entry_from_alias() {
+    local entry="$1" expected_key="$2" expected_input_digest="$3"
+    local artifact_manifest_digest expected_names actual_names allowed_names required
+    local expected_root_names actual_root_names
+    [[ -d "$entry" && ! -L "$entry" &&
+       -f "$entry/input.manifest" && ! -L "$entry/input.manifest" &&
+       -f "$entry/artifacts.sha256" && ! -L "$entry/artifacts.sha256" &&
+       -f "$entry/READY" && ! -L "$entry/READY" &&
+       -d "$entry/artifacts" && ! -L "$entry/artifacts" ]] || return 1
+    expected_root_names="$(printf '%s\n' READY artifacts artifacts.sha256 input.manifest |
+        LC_ALL=C sort)"
+    actual_root_names="$(find "$entry" -mindepth 1 -maxdepth 1 -printf '%f\n' |
+        LC_ALL=C sort)"
+    [[ "$expected_root_names" == "$actual_root_names" ]] || return 1
+    [[ "$(sha256sum "$entry/input.manifest" | awk '{print $1}')" == \
+       "$expected_input_digest" ]] || return 1
+    if find "$entry/artifacts" -mindepth 1 -maxdepth 1 ! -type f -print -quit |
+        grep -q .; then
+        return 1
+    fi
+    expected_names="$(awk '{ print $2 }' "$entry/artifacts.sha256" | LC_ALL=C sort)"
+    actual_names="$(find "$entry/artifacts" -mindepth 1 -maxdepth 1 -type f \
+        -printf '%f\n' | LC_ALL=C sort)"
+    [[ -n "$expected_names" && "$expected_names" == "$actual_names" ]] || return 1
+    allowed_names="$(printf '%s\n' frozen-native-stage.wire-v1 \
+        module.native-program native.entry-map native.receipts report.head \
+        source.facts stage-progress | LC_ALL=C sort)"
+    if [[ "$simd_required" == 1 ]]; then
+        allowed_names="$(printf '%s\n%s\n' "$allowed_names" module.simd-plan-v0 |
+            LC_ALL=C sort)"
+    fi
+    [[ "$allowed_names" == "$actual_names" ]] || return 1
+    (cd "$entry/artifacts" &&
+        sha256sum --check --strict ../artifacts.sha256 >/dev/null 2>&1) || return 1
+    for required in source.facts frozen-native-stage.wire-v1 \
+                    module.native-program native.receipts native.entry-map \
+                    report.head stage-progress; do
+        [[ -f "$entry/artifacts/$required" &&
+           ! -L "$entry/artifacts/$required" ]] || return 1
+    done
+    if [[ "$simd_required" == 1 ]]; then
+        [[ -f "$entry/artifacts/module.simd-plan-v0" &&
+           ! -L "$entry/artifacts/module.simd-plan-v0" ]] || return 1
+    fi
+    artifact_manifest_digest="$(sha256sum "$entry/artifacts.sha256" | awk '{print $1}')"
+    [[ "$(<"$entry/READY")" == \
+       "beagle-core-pre-materializer/v1 $expected_key $artifact_manifest_digest" ]]
+}
+
 core_result_early_input="$work/core-result-early-input.manifest"
 write_core_result_early_manifest "$core_result_early_input"
 core_result_early_key="$(sha256sum "$core_result_early_input" | awk '{print $1}')"
 core_result_alias_root="$cache_root/aliases"
 core_result_root="$cache_root/results"
 core_result_alias="$core_result_alias_root/$core_result_early_key"
+core_checkpoint_alias_root="$cache_root/checkpoint-aliases"
+core_checkpoint_root="$cache_root/checkpoints"
+core_checkpoint_alias="$core_checkpoint_alias_root/$core_result_early_key"
 core_result_early_hit=0
+core_checkpoint_early_hit=0
 if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
     mkdir -p "$core_result_alias_root" "$cache_root/.alias-locks" \
         "$cache_root/.result-tmp"
@@ -570,7 +637,61 @@ else
     echo "beagle build: core-result-alias BYPASS unavailable" >&2
 fi
 
-if [[ "$core_result_early_hit" != 1 ]]; then
+if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
+      "$core_result_early_hit" != 1 ]]; then
+    mkdir -p "$core_checkpoint_alias_root" "$core_checkpoint_root" \
+        "$cache_root/.checkpoint-alias-locks" "$cache_root/.checkpoint-tmp"
+    exec {core_checkpoint_alias_lock_fd}>\
+        "$cache_root/.checkpoint-alias-locks/$core_result_early_key.lock"
+    run_phase_leaf core-checkpoint-alias-lock \
+        "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        "$core_checkpoint_alias_lock_fd" ||
+        die "timed out acquiring the Core checkpoint alias lock"
+    validate_core_result_early_closure "$core_result_early_input" \
+        "$work/core-checkpoint-early-input.lookup" ||
+        die "Core checkpoint early input closure changed before alias lookup"
+    if [[ -e "$core_checkpoint_alias" ]]; then
+        checkpoint_alias_format=""
+        checkpoint_alias_early_key=""
+        checkpoint_alias_full_key=""
+        checkpoint_alias_input_digest=""
+        checkpoint_alias_extra=""
+        if [[ -f "$core_checkpoint_alias" && ! -L "$core_checkpoint_alias" ]]; then
+            read -r checkpoint_alias_format checkpoint_alias_early_key \
+                checkpoint_alias_full_key checkpoint_alias_input_digest \
+                checkpoint_alias_extra <"$core_checkpoint_alias" || true
+        fi
+        checkpoint_alias_entry="$core_checkpoint_root/$checkpoint_alias_full_key"
+        if [[ "$checkpoint_alias_format" == \
+                  "beagle-core-pre-materializer-alias/v1" &&
+              "$checkpoint_alias_early_key" == "$core_result_early_key" &&
+              "$checkpoint_alias_full_key" =~ ^[0-9a-f]{64}$ &&
+              "$checkpoint_alias_input_digest" =~ ^[0-9a-f]{64}$ &&
+              -z "${checkpoint_alias_extra:-}" ]] &&
+           validate_core_checkpoint_entry_from_alias "$checkpoint_alias_entry" \
+               "$checkpoint_alias_full_key" "$checkpoint_alias_input_digest"; then
+            cp -- "$checkpoint_alias_entry/artifacts/source.facts" \
+                "$work/artifacts/source.facts"
+            core_checkpoint_early_hit=1
+            echo "beagle build: core-checkpoint-alias HIT $core_result_early_key -> $checkpoint_alias_full_key" >&2
+        else
+            corrupt_checkpoint_alias=\
+"$cache_root/.checkpoint-tmp/corrupt-alias.$core_result_early_key.$$"
+            echo "beagle build: core-checkpoint-alias CORRUPT $core_result_early_key; retiring" >&2
+            mv "$core_checkpoint_alias" "$corrupt_checkpoint_alias"
+            rm -rf -- "${corrupt_checkpoint_alias:?}"
+        fi
+    fi
+    if [[ "$core_checkpoint_early_hit" != 1 ]]; then
+        echo "beagle build: core-checkpoint-alias MISS $core_result_early_key" >&2
+    fi
+    flock -u "$core_checkpoint_alias_lock_fd"
+else
+    echo "beagle build: core-checkpoint-alias BYPASS unavailable" >&2
+fi
+
+if [[ "$core_result_early_hit" != 1 && "$core_checkpoint_early_hit" != 1 ]]; then
 bundle_ast="$work/source_bundle.ast.json"
 run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
     "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
@@ -821,15 +942,78 @@ validate_core_result_entry() {
        "beagle-core-result/v1 $expected_key $artifact_manifest_digest" ]]
 }
 
+validate_core_checkpoint_entry() {
+    local entry="$1" expected_input="$2" expected_key="$3"
+    cmp -s "$expected_input" "$entry/input.manifest" || return 1
+    validate_core_checkpoint_entry_from_alias "$entry" "$expected_key" \
+        "$(sha256sum "$expected_input" | awk '{print $1}')"
+}
+
+validate_core_checkpoint_wire() {
+    local entry="$1" log="$2"
+    run_phase core-checkpoint-wire \
+        "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+        bb -cp "$compiled" -e '
+          (require (quote [native.stages :as stages]))
+          (let [path (first *command-line-args*)
+                encoding (slurp path)
+                frozen (stages/decode-frozen-native-stage-wire-v1 encoding)]
+            (when (or (nil? frozen)
+                      (not= encoding
+                            (stages/encode-frozen-native-stage-wire-v1 frozen)))
+              (System/exit 1)))' \
+        "$entry/artifacts/frozen-native-stage.wire-v1" \
+        >"$log" 2>&1
+}
+
+retire_core_checkpoint_alias() {
+    local expected_key="$1" alias_format alias_early alias_full alias_digest alias_extra
+    exec {core_checkpoint_retire_alias_lock_fd}>\
+        "$cache_root/.checkpoint-alias-locks/$core_result_early_key.lock"
+    run_phase_leaf core-checkpoint-alias-retire-lock \
+        "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        "$core_checkpoint_retire_alias_lock_fd" ||
+        die "timed out acquiring the Core checkpoint alias retirement lock"
+    if [[ -e "$core_checkpoint_alias" ]]; then
+        alias_format=""
+        alias_early=""
+        alias_full=""
+        alias_digest=""
+        alias_extra=""
+        if [[ -f "$core_checkpoint_alias" && ! -L "$core_checkpoint_alias" ]]; then
+            read -r alias_format alias_early alias_full alias_digest alias_extra \
+                <"$core_checkpoint_alias" || true
+        fi
+        if [[ "$alias_format" != "beagle-core-pre-materializer-alias/v1" ||
+              "$alias_early" != "$core_result_early_key" ||
+              ! "$alias_digest" =~ ^[0-9a-f]{64}$ ||
+              -n "${alias_extra:-}" ||
+              "$alias_full" == "$expected_key" ]]; then
+            corrupt_checkpoint_alias=\
+"$cache_root/.checkpoint-tmp/retired-alias.$core_result_early_key.$$"
+            mv "$core_checkpoint_alias" "$corrupt_checkpoint_alias"
+            rm -rf -- "${corrupt_checkpoint_alias:?}"
+        fi
+    fi
+    flock -u "$core_checkpoint_retire_alias_lock_fd"
+}
+
 core_result_input="$work/core-result-input.manifest"
 core_result_cache_hit=0
 core_result_publish_pending=0
+core_checkpoint_cache_hit=0
 if [[ "$core_result_early_hit" == 1 ]]; then
     cp -- "$alias_entry/input.manifest" "$core_result_input"
     core_result_key="$alias_full_key"
     core_result_entry="$alias_entry"
     core_result_cache_hit=1
     echo "beagle build: core-result-cache HIT $core_result_key" >&2
+elif [[ "$core_checkpoint_early_hit" == 1 ]]; then
+    cp -- "$checkpoint_alias_entry/input.manifest" "$core_result_input"
+    core_result_key="$checkpoint_alias_full_key"
+    core_result_entry="$core_result_root/$core_result_key"
+    core_checkpoint_entry="$checkpoint_alias_entry"
 else
     write_core_result_input_manifest "$core_result_input"
     core_result_key="$(sha256sum "$core_result_input" | awk '{print $1}')"
@@ -837,16 +1021,23 @@ else
 fi
 if [[ "$core_result_cache_enabled" == 1 &&
       "$core_result_early_hit" != 1 ]]; then
-    mkdir -p "$core_result_root" "$cache_root/.result-locks" \
-        "$cache_root/.result-tmp"
+    mkdir -p "$core_result_root" "$core_checkpoint_root" \
+        "$cache_root/.result-locks" "$cache_root/.result-tmp" \
+        "$cache_root/.checkpoint-tmp"
     exec {core_result_lock_fd}>"$cache_root/.result-locks/$core_result_key.lock"
     run_phase_leaf core-result-cache-lock \
         "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
         flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
         "$core_result_lock_fd" || die "timed out acquiring the Core result cache lock"
-    validate_core_result_input_closure "$core_result_input" \
-        "$work/core-result-input.lookup" ||
-        die "Core result input closure changed before cache lookup"
+    if [[ "$core_checkpoint_early_hit" == 1 ]]; then
+        validate_core_result_early_closure "$core_result_early_input" \
+            "$work/core-checkpoint-early-input.before-result-lookup" ||
+            die "Core checkpoint early input closure changed before result lookup"
+    else
+        validate_core_result_input_closure "$core_result_input" \
+            "$work/core-result-input.lookup" ||
+            die "Core result input closure changed before cache lookup"
+    fi
     if [[ -e "$core_result_entry" ]]; then
         if validate_core_result_entry "$core_result_entry" "$core_result_input" \
             "$core_result_key"; then
@@ -867,6 +1058,60 @@ else
     echo "beagle build: core-result-cache BYPASS untrusted-compiler" >&2
 fi
 
+if [[ "$core_result_cache_hit" != 1 && "$core_result_cache_enabled" == 1 &&
+      "$core_checkpoint_eligible" == 1 ]]; then
+    core_checkpoint_entry="${core_checkpoint_entry:-$core_checkpoint_root/$core_result_key}"
+    core_checkpoint_structural_ok=0
+    core_checkpoint_semantic_ok=0
+    if [[ -e "$core_checkpoint_entry" ]]; then
+        if validate_core_checkpoint_entry "$core_checkpoint_entry" \
+            "$core_result_input" "$core_result_key"; then
+            core_checkpoint_structural_ok=1
+            if validate_core_checkpoint_wire "$core_checkpoint_entry" \
+                "$work/core-checkpoint-wire.log"; then
+                core_checkpoint_semantic_ok=1
+            fi
+        fi
+        if [[ "$core_checkpoint_structural_ok" != 1 ||
+              "$core_checkpoint_semantic_ok" != 1 ]]; then
+            echo "beagle build: core-checkpoint CORRUPT $core_result_key; retiring" >&2
+            corrupt_checkpoint=\
+"$cache_root/.checkpoint-tmp/corrupt.$core_result_key.$$"
+            mv "$core_checkpoint_entry" "$corrupt_checkpoint"
+            rm -rf -- "${corrupt_checkpoint:?}"
+            retire_core_checkpoint_alias "$core_result_key"
+            if [[ "$core_checkpoint_early_hit" == 1 &&
+                  "$core_checkpoint_structural_ok" == 1 ]]; then
+                die "Core checkpoint wire was not a canonical resumable frozen stage; rerun after retirement"
+            fi
+        fi
+    fi
+    if [[ "$core_checkpoint_semantic_ok" == 1 ]]; then
+        mkdir "$work/core-checkpoint-hit"
+        cp -- "$core_checkpoint_entry/artifacts/frozen-native-stage.wire-v1" \
+            "$work/core-checkpoint-hit/frozen-native-stage.wire-v1"
+        cp -- "$core_checkpoint_entry/artifacts/report.head" \
+            "$work/core-checkpoint-hit/report.head"
+        cp -- "$core_checkpoint_entry/artifacts/stage-progress" \
+            "$work/core-checkpoint-hit/stage-progress"
+        for checkpoint_artifact in source.facts module.native-program \
+                                   native.receipts native.entry-map; do
+            cp -- "$core_checkpoint_entry/artifacts/$checkpoint_artifact" \
+                "$work/artifacts/$checkpoint_artifact"
+        done
+        if [[ "$simd_required" == 1 ]]; then
+            cp -- "$core_checkpoint_entry/artifacts/module.simd-plan-v0" \
+                "$work/artifacts/module.simd-plan-v0"
+        fi
+        core_checkpoint_cache_hit=1
+        echo "beagle build: core-checkpoint HIT $core_result_key" >&2
+    else
+        echo "beagle build: core-checkpoint MISS $core_result_key" >&2
+    fi
+elif [[ "$core_result_cache_hit" != 1 ]]; then
+    echo "beagle build: core-checkpoint BYPASS unavailable" >&2
+fi
+
 if [[ "$core_result_cache_hit" != 1 ]]; then
 export BEAGLE_CORE_FACTS="$facts"
 export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
@@ -879,6 +1124,21 @@ export BEAGLE_CORE_ENTRIES="$work/entries"
 printf '%s\n' "${materializers[@]}" >"$work/materializers"
 export BEAGLE_CORE_MATERIALIZERS="$work/materializers"
 export BEAGLE_CORE_PROJECTED_FACTS="$work/artifacts/source.facts"
+export BEAGLE_CORE_CHECKPOINT_WIRE=""
+export BEAGLE_CORE_CHECKPOINT_REPORT_HEAD=""
+export BEAGLE_CORE_CHECKPOINT_STAGE_PROGRESS=""
+export BEAGLE_CORE_CHECKPOINT_STAGE=""
+if [[ "$core_checkpoint_cache_hit" == 1 ]]; then
+    export BEAGLE_CORE_CHECKPOINT_WIRE=\
+"$work/core-checkpoint-hit/frozen-native-stage.wire-v1"
+    export BEAGLE_CORE_CHECKPOINT_REPORT_HEAD="$work/core-checkpoint-hit/report.head"
+    export BEAGLE_CORE_CHECKPOINT_STAGE_PROGRESS=\
+"$work/core-checkpoint-hit/stage-progress"
+elif [[ "$core_result_cache_enabled" == 1 &&
+        "$core_checkpoint_eligible" == 1 ]]; then
+    mkdir "$work/core-checkpoint-stage"
+    export BEAGLE_CORE_CHECKPOINT_STAGE="$work/core-checkpoint-stage"
+fi
 
 set +e
 run_phase core-lowering "${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}" \
@@ -905,6 +1165,7 @@ bb -cp "$compiled" -e '
 (def report-path (System/getenv "BEAGLE_CORE_REPORT"))
 (def native-report-format "beagle-native-report/v1")
 (def stage-progress (atom []))
+(def stage-progress-prefix (atom ""))
 (def active-stage (atom nil))
 
 (defn durable-write! [path text]
@@ -942,9 +1203,10 @@ bb -cp "$compiled" -e '
         (Files/deleteIfExists temporary)))))
 
 (defn stage-progress-text []
-  (apply str
-         (for [{:keys [name status elapsed-ms]} @stage-progress]
-           (str "stage-progress " name " " status "\n"))))
+  (str @stage-progress-prefix
+       (apply str
+              (for [{:keys [name status elapsed-ms]} @stage-progress]
+                (str "stage-progress " name " " status "\n")))))
 
 (defn publish-progress! []
   (durable-write! report-path
@@ -1587,6 +1849,54 @@ bb -cp "$compiled" -e '
            :report (str (apply str next-reports)
                         "result FAIL materialization\n")})))))
 
+(defn stage-core-checkpoint! [frozen report-head]
+  (let [stage-dir (System/getenv "BEAGLE_CORE_CHECKPOINT_STAGE")]
+    (when-not (str/blank? stage-dir)
+      (spit (str stage-dir "/frozen-native-stage.wire-v1")
+            (stages/encode-frozen-native-stage-wire-v1 frozen))
+      (spit (str stage-dir "/report.head") report-head)
+      (spit (str stage-dir "/stage-progress") (stage-progress-text))
+      (when (= "after-stage"
+               (System/getenv "BEAGLE_CORE_CHECKPOINT_FAILPOINT"))
+        (throw (ex-info "Core checkpoint post-stage failpoint" {}))))))
+
+(defn resume-core!
+  [wire-path report-head-path stage-progress-path artifacts-dir compiler-commit
+   materializers abi-id abi simd-required?]
+  (let [wire (slurp wire-path)
+        frozen (stages/decode-frozen-native-stage-wire-v1 wire)]
+    (when (or (nil? frozen)
+              (not= wire (stages/encode-frozen-native-stage-wire-v1 frozen)))
+      (throw (ex-info "Core checkpoint wire is not canonical" {})))
+    (let [stage (stages/frozennativestagev0-stage frozen)
+          native-encoding (stages/frozennativestagev0-encoding frozen)
+          published-native (slurp (str artifacts-dir "/module.native-program"))
+          _native-match
+          (when-not (= native-encoding published-native)
+            (throw (ex-info "Core checkpoint legacy identity disagrees with its wire"
+                            {})))
+          program (stages/nativestagev0-program stage)
+          projected (body-slice/projected-program program)
+          projected-facts (slurp (str artifacts-dir "/source.facts"))
+          configuration ["profile=3" (str "abi=" abi-id)
+                         (str "source-facts-sha256="
+                              (subs (stages/content-digest projected-facts) 7))]
+          epoch-digest (stages/frozennativestagev0-digest frozen)
+          simd-plan (simd/derive-plan projected epoch-digest abi-id)
+          _simd-match
+          (when simd-required?
+            (let [cached-plan (slurp (str artifacts-dir "/module.simd-plan-v0"))]
+              (when-not (= cached-plan (simd/simdplanv0-encoding simd-plan))
+                (throw (ex-info "Core checkpoint SIMD plan is inconsistent" {})))))
+          _progress (reset! stage-progress-prefix (slurp stage-progress-path))
+          materialization
+          (materialize-programs! projected projected artifacts-dir materializers
+                                 abi-id simd-plan simd-required? epoch-digest
+                                 compiler-commit configuration)]
+      (assoc materialization
+             :report (str (slurp report-head-path)
+                          (:report materialization))))))
+
 (defn compile-core!
   [facts-path projected-facts-path artifacts-dir compiler-commit entries
    materializers abi-id abi simd-required?]
@@ -1723,7 +2033,14 @@ bb -cp "$compiled" -e '
                       :else
                       (do
                         (finish-stage! "native-obligations" "PASS")
-                        (let [materialization
+                        (let [checkpoint-head
+                              (str head
+                                   (if simd-required?
+                                     (simd/plan-report simd-plan)
+                                     ""))
+                              _checkpoint
+                              (stage-core-checkpoint! frozen-native checkpoint-head)
+                              materialization
                               (materialize-programs! projected qbe-projected
                                                      artifacts-dir materializers
                                                      abi-id simd-plan
@@ -1731,10 +2048,7 @@ bb -cp "$compiled" -e '
                                                      compiler-commit
                                                      configuration)]
                           (assoc materialization
-                                 :report (str head
-                                           (if simd-required?
-                                             (simd/plan-report simd-plan)
-                                             "")
+                                 :report (str checkpoint-head
                                            (:report materialization))))))))))))))))
 
 (try
@@ -1751,14 +2065,22 @@ bb -cp "$compiled" -e '
                               (slurp (System/getenv "BEAGLE_CORE_ENTRIES")))))
         abi-id (or (System/getenv "BEAGLE_CORE_ABI") "lp64")
         simd-required? (= "1" (System/getenv "BEAGLE_CORE_SIMD_REQUIRED"))
+        checkpoint-wire-path (System/getenv "BEAGLE_CORE_CHECKPOINT_WIRE")
         abi (core/abi-profile-for abi-id)
         result (if (nil? abi)
                  {:ok? false
                   :report (str "abi-error unknown abi profile " abi-id "\n"
                                "result FAIL unknown abi profile\n")}
-                 (compile-core! facts-path projected-facts-path artifacts-dir
-                                compiler-commit entries materializers abi-id abi
-                                simd-required?))
+                 (if (str/blank? checkpoint-wire-path)
+                   (compile-core! facts-path projected-facts-path artifacts-dir
+                                  compiler-commit entries materializers abi-id abi
+                                  simd-required?)
+                   (resume-core!
+                    checkpoint-wire-path
+                    (System/getenv "BEAGLE_CORE_CHECKPOINT_REPORT_HEAD")
+                    (System/getenv "BEAGLE_CORE_CHECKPOINT_STAGE_PROGRESS")
+                    artifacts-dir compiler-commit materializers abi-id abi
+                    simd-required?)))
         final-report
         (report-with-stage-progress
          (str native-report-format "\n" (:report result)))]
@@ -1773,6 +2095,108 @@ bb -cp "$compiled" -e '
 ' >"$work/run.log" 2>&1
 runner_rc=$?
 set -e
+
+if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
+      "$core_checkpoint_cache_hit" != 1 &&
+      -f "$work/core-checkpoint-stage/frozen-native-stage.wire-v1" ]]; then
+    validate_core_result_input_closure "$core_result_input" \
+        "$work/core-checkpoint-input.before-publish" ||
+        die "Core checkpoint input closure changed before publication"
+    for checkpoint_artifact in source.facts module.native-program \
+                               native.receipts native.entry-map; do
+        [[ -f "$work/artifacts/$checkpoint_artifact" ]] ||
+            die "Core checkpoint stage omitted $checkpoint_artifact"
+    done
+    if [[ "$simd_required" == 1 ]]; then
+        [[ -f "$work/artifacts/module.simd-plan-v0" ]] ||
+            die "Core checkpoint stage omitted module.simd-plan-v0"
+    fi
+    for checkpoint_internal in frozen-native-stage.wire-v1 report.head \
+                               stage-progress; do
+        [[ -f "$work/core-checkpoint-stage/$checkpoint_internal" ]] ||
+            die "Core checkpoint stage omitted $checkpoint_internal"
+    done
+
+    core_checkpoint_staging="$(mktemp -d \
+        "$cache_root/.checkpoint-tmp/$core_result_key.XXXXXX")"
+    cp -- "$core_result_input" "$core_checkpoint_staging/input.manifest"
+    mkdir "$core_checkpoint_staging/artifacts"
+    cp -- "$work/core-checkpoint-stage/frozen-native-stage.wire-v1" \
+        "$core_checkpoint_staging/artifacts/frozen-native-stage.wire-v1"
+    cp -- "$work/core-checkpoint-stage/report.head" \
+        "$core_checkpoint_staging/artifacts/report.head"
+    cp -- "$work/core-checkpoint-stage/stage-progress" \
+        "$core_checkpoint_staging/artifacts/stage-progress"
+    for checkpoint_artifact in source.facts module.native-program \
+                               native.receipts native.entry-map; do
+        cp -- "$work/artifacts/$checkpoint_artifact" \
+            "$core_checkpoint_staging/artifacts/$checkpoint_artifact"
+    done
+    if [[ "$simd_required" == 1 ]]; then
+        cp -- "$work/artifacts/module.simd-plan-v0" \
+            "$core_checkpoint_staging/artifacts/module.simd-plan-v0"
+    fi
+    write_core_result_artifact_manifest "$core_checkpoint_staging/artifacts" \
+        "$core_checkpoint_staging/artifacts.sha256"
+    checkpoint_artifact_manifest_digest="$(sha256sum \
+        "$core_checkpoint_staging/artifacts.sha256" | awk '{print $1}')"
+    printf 'beagle-core-pre-materializer/v1 %s %s\n' "$core_result_key" \
+        "$checkpoint_artifact_manifest_digest" >"$core_checkpoint_staging/READY"
+    validate_core_checkpoint_entry "$core_checkpoint_staging" \
+        "$core_result_input" "$core_result_key" ||
+        die "new Core checkpoint failed structural validation"
+    validate_core_checkpoint_wire "$core_checkpoint_staging" \
+        "$work/core-checkpoint-new-wire.log" ||
+        die "new Core checkpoint failed wire validation"
+    sync -f "$core_checkpoint_staging"
+    core_checkpoint_entry="$core_checkpoint_root/$core_result_key"
+    [[ ! -e "$core_checkpoint_entry" ]] ||
+        die "Core checkpoint appeared while its result lock was held"
+    mv "$core_checkpoint_staging" "$core_checkpoint_entry"
+    core_checkpoint_staging=""
+    sync -f "$core_checkpoint_root"
+    echo "beagle build: core-checkpoint PUBLISHED $core_result_key" >&2
+
+    validate_core_result_early_closure "$core_result_early_input" \
+        "$work/core-checkpoint-early-input.before-alias-publish" ||
+        die "Core checkpoint early input closure changed before alias publication"
+    checkpoint_input_digest="$(sha256sum "$core_result_input" | awk '{print $1}')"
+    validate_core_checkpoint_entry "$core_checkpoint_entry" \
+        "$core_result_input" "$core_result_key" ||
+        die "published Core checkpoint failed alias validation"
+    exec {core_checkpoint_alias_publish_lock_fd}>\
+        "$cache_root/.checkpoint-alias-locks/$core_result_early_key.lock"
+    run_phase_leaf core-checkpoint-alias-publish-lock \
+        "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        "$core_checkpoint_alias_publish_lock_fd" ||
+        die "timed out acquiring the Core checkpoint alias publication lock"
+    core_checkpoint_alias_staging="$(mktemp \
+        "$cache_root/.checkpoint-tmp/$core_result_early_key.alias.XXXXXX")"
+    printf 'beagle-core-pre-materializer-alias/v1 %s %s %s\n' \
+        "$core_result_early_key" "$core_result_key" "$checkpoint_input_digest" \
+        >"$core_checkpoint_alias_staging"
+    sync -f "$core_checkpoint_alias_staging"
+    if { [[ -e "$core_checkpoint_alias" ]] || [[ -L "$core_checkpoint_alias" ]]; } &&
+       { [[ ! -f "$core_checkpoint_alias" ]] ||
+         [[ -L "$core_checkpoint_alias" ]] ||
+         ! cmp -s "$core_checkpoint_alias_staging" "$core_checkpoint_alias"; }; then
+        stale_checkpoint_alias=\
+"$cache_root/.checkpoint-tmp/replaced-alias.$core_result_early_key.$$"
+        echo "beagle build: core-checkpoint-alias STALE $core_result_early_key; replacing" >&2
+        mv "$core_checkpoint_alias" "$stale_checkpoint_alias"
+        rm -rf -- "${stale_checkpoint_alias:?}"
+    fi
+    if [[ ! -e "$core_checkpoint_alias" ]]; then
+        mv "$core_checkpoint_alias_staging" "$core_checkpoint_alias"
+        core_checkpoint_alias_staging=""
+        sync -f "$core_checkpoint_alias_root"
+    else
+        rm -f -- "$core_checkpoint_alias_staging"
+        core_checkpoint_alias_staging=""
+    fi
+    flock -u "$core_checkpoint_alias_publish_lock_fd"
+fi
 
 if [[ $runner_rc -ne 0 ]]; then
     if [[ -f "$work/artifacts/report.txt" ]]; then
@@ -1801,7 +2225,8 @@ fi
 fi
 
 if [[ "$core_result_cache_enabled" == 1 ]]; then
-    if [[ "$core_result_early_hit" == 1 ]]; then
+    if [[ "$core_result_early_hit" == 1 ||
+          "$core_checkpoint_early_hit" == 1 ]]; then
         validate_core_result_early_closure "$core_result_early_input" \
             "$work/core-result-early-input.before-finalize" ||
             die "Core result early input closure changed before finalization"
@@ -2028,7 +2453,8 @@ mapfile -t locked_manifest_digests <"$work/locked-manifest.digest"
     die "staged manifest identity changed before publication"
 
 if [[ "$core_result_cache_enabled" == 1 ]]; then
-    if [[ "$core_result_early_hit" == 1 ]]; then
+    if [[ "$core_result_early_hit" == 1 ||
+          "$core_checkpoint_early_hit" == 1 ]]; then
         validate_core_result_early_closure "$core_result_early_input" \
             "$work/core-result-early-input.before-cache-publish" ||
             die "Core result early input closure changed before cache publication"
