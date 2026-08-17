@@ -57,16 +57,16 @@ if [[ "${BEAGLE_DOWNSTREAM_GATE:-0}" == "1" ]]; then
 fi
 
 echo "=== 1/5: raco test beagle-test/tests/ ==="
-"$RACO" test beagle-test/tests/ 2>&1 | tail -5
+"$RACO" test beagle-test/tests/ 2>&1
 
 echo
 echo "=== 2/5: gate-result cache under-key regression tests ==="
-bin/test/gate-cache/run.sh 2>&1 | tail -3
+bin/test/gate-cache/run.sh 2>&1
 
 echo
 echo "=== 3/5: nix-instantiate smoke test on all fixtures ==="
 if command -v nix-instantiate >/dev/null; then
-    BEAGLE_NIX_EVAL_CHECK=1 "$RACO" test beagle-test/tests/nix-property.rkt 2>&1 | tail -3
+    BEAGLE_NIX_EVAL_CHECK=1 "$RACO" test beagle-test/tests/nix-property.rkt 2>&1
 else
     echo "  (skipped — nix-instantiate not on PATH)"
 fi
@@ -79,8 +79,8 @@ if [[ "${BEAGLE_VALIDATE_NIXOS_CONFIG:-0}" == "1" ]]; then
         echo "  (skipped — $nixos_repo not found; set NIXOS_CONFIG_REPO=<path>)"
     else
         cd "$nixos_repo"
-        BEAGLE_PATH="$repo" ./scripts/firn-build 2>&1 | tail -3
-        BEAGLE_PATH="$repo" ./scripts/firn-validate 2>&1 | tail -3
+        BEAGLE_PATH="$repo" ./scripts/firn-build 2>&1
+        BEAGLE_PATH="$repo" ./scripts/firn-validate 2>&1
     fi
 else
     echo

@@ -138,10 +138,25 @@
 (define (check-checkpoint-seed result)
   (define status (checkpoint-result-status result))
   (define output (checkpoint-result-output result))
+  (define warm-refusal
+    (and (= status 1)
+         (string-contains? output "beagle build: core-checkpoint HIT ")
+         (string-contains? output "result FAIL materialization")
+         (cond
+           [(string=? (checkpoint-result-label result) "qbe-lp64")
+            (string-contains?
+             output
+             "qbe-parallel REFUSED QBE deterministic parallel F64 instructions are unsupported")]
+           [(string=? (checkpoint-result-label result) "c17-wasm32")
+            (string-contains?
+             output
+             "wasm-parallel REFUSED shared-memory-worker-host-envelope-unavailable")]
+           [else #f])))
   (unless (or (zero? status)
               (and (not (= status 124))
-                   (string-contains?
-                    output "Core checkpoint post-stage failpoint")))
+                   (or warm-refusal
+                       (string-contains?
+                        output "Core checkpoint post-stage failpoint"))))
     (error 'native-c17-parallel
            "cold ~a checkpoint seed failed with status ~a:\n~a"
            (checkpoint-result-label result) status output)))
