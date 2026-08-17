@@ -17,9 +17,13 @@
 (def checks (atom []))
 (def program-version-before (atom nil))
 (def program-view-after (atom nil))
-(defn check! [label value]
-  (println (str (if value "[PASS] " "[FAIL] ") label))
-  (swap! checks conj [label (boolean value)]))
+(defn check!
+  ([label value] (check! label value nil))
+  ([label value detail]
+   (println (str (if value "[PASS] " "[FAIL] ") label))
+   (when (and (not value) detail)
+     (binding [*out* *err*] (println detail)))
+   (swap! checks conj [label (boolean value)])))
 
 (defn eventually [f]
   (loop [attempt 0]
@@ -166,7 +170,8 @@
                            checkout-root)]
       (check! "real sealed preflight earns beagle-store-code-status Level 3"
               (and (zero? (:exit status))
-                   (str/starts-with? (:out status) "level=3 "))))
+                   (str/starts-with? (:out status) "level=3 "))
+              (str "stdout: " (:out status) "stderr: " (:err status))))
 
     (check! "the resolved reference corpus is emitted for the scratch checkout"
             (and corpus-emit (zero? (:exit corpus-emit)) (.isFile corpus)))

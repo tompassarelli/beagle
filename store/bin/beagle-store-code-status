@@ -131,7 +131,9 @@ try:
             or payload.get("corpus", {}).get("moduleCount", 0) < 1
             or payload.get("check", {}).get("green") is not True):
         raise ValueError("graph-control preflight did not prove Level 3")
-except Exception:
+except Exception as error:
+    print(f"beagle-store-code-status: graph-control preflight failed: {error}",
+          file=sys.stderr)
     raise SystemExit(1)
 PY
   then
