@@ -185,5 +185,5 @@
     (println (if ok "  [PASS]" "  [FAIL]") label)
     (when (and (not ok) detail) (println "    actual:" (pr-str detail))))
   (if (seq failures)
-    (do (println "\nfram MCP FRAMRPC:" (count failures) "FAILED") (System/exit 1))
-    (println "\nfram MCP FRAMRPC:" (count @checks) "/" (count @checks) "PASS")))
+    (do (println "\nStore MCP FRAMRPC:" (count failures) "FAILED") (System/exit 1))
+    (println "\nStore MCP FRAMRPC:" (count @checks) "/" (count @checks) "PASS")))
