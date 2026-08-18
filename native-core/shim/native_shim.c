@@ -8980,6 +8980,65 @@ native_vec *native_text_regex_find(native_arena *arena, uint64_t source,
   return result;
 }
 
+uint64_t native_text_format_int(native_arena *arena, uint64_t format,
+                                int64_t source) {
+  static const uint8_t hex[] = "0123456789abcdef";
+  const uint8_t *format_bytes = native_text_bytes(format);
+  uint64_t format_length = native_text_length(format);
+  uint64_t magnitude;
+  uint8_t digits[32];
+  uint64_t digit_count = UINT64_C(0);
+  uint64_t width = UINT64_C(0);
+  uint64_t output_length;
+  uint8_t *output;
+  uint64_t position;
+  bool negative = source < INT64_C(0);
+
+  if ((format_length < UINT64_C(3)) ||
+      (format_bytes[0] != (uint8_t)'%') ||
+      (format_bytes[format_length - UINT64_C(1)] != (uint8_t)'x')) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  for (position = UINT64_C(1); position + UINT64_C(1) < format_length;
+       position++) {
+    uint8_t byte = format_bytes[position];
+    if ((byte < (uint8_t)'0') || (byte > (uint8_t)'9')) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    width = (width * UINT64_C(10)) + (uint64_t)(byte - (uint8_t)'0');
+    if (width > UINT64_C(64)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+  }
+  if (source < INT64_C(0)) {
+    magnitude = (uint64_t)(-(source + INT64_C(1))) + UINT64_C(1);
+  } else {
+    magnitude = (uint64_t)source;
+  }
+  do {
+    digits[digit_count++] = hex[magnitude & UINT64_C(0x0f)];
+    magnitude >>= 4;
+  } while (magnitude != UINT64_C(0));
+  if (negative) {
+    digits[digit_count++] = (uint8_t)'-';
+  }
+  output_length = (width > digit_count) ? width : digit_count;
+  if (output_length > UINT64_C(64)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  {
+    uint64_t result = native_text_alloc(arena, output_length, &output);
+    memset(output, '0', (size_t)output_length);
+    for (position = UINT64_C(0); position < digit_count; position++) {
+      output[output_length - UINT64_C(1) - position] = digits[position];
+    }
+    if (negative && (output_length > width)) {
+      output[0] = (uint8_t)'-';
+    }
+    return result;
+  }
+}
+
 native_vec *native_text_regex_split(native_arena *arena, uint64_t source,
                                     uint64_t pattern) {
   native_regex_program program;
@@ -11260,6 +11319,12 @@ int64_t native_host_process_wait_not_alive_v0(
   return -((int64_t)ENOTSUP);
 }
 
+void native_host_process_exit_v0(const native_capability *capability,
+                                 int64_t code) {
+  (void)capability;
+  exit((int)code);
+}
+
 int64_t native_host_process_wait_v0(
     const native_capability *capability, int64_t pid) {
   (void)capability;
@@ -11963,6 +12028,12 @@ int64_t native_host_process_wait_not_alive_v0(
       return -((int64_t)status);
     }
   }
+}
+
+void native_host_process_exit_v0(const native_capability *capability,
+                                 int64_t code) {
+  (void)capability;
+  exit((int)code);
 }
 
 int64_t native_host_process_run_inherit_v0(

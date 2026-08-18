@@ -2688,7 +2688,8 @@
       (= symbol "native_host_process_current_pid_v0")
       (= symbol "native_host_process_alive_v0")
       (= symbol "native_host_process_signal_v0")
-      (= symbol "native_host_process_wait_not_alive_v0")))
+      (= symbol "native_host_process_wait_not_alive_v0")
+      (= symbol "native_host_process_exit_v0")))
 
 (defn program-has-process-extern? [program core/NativeCoreProgram] Bool
   (some?

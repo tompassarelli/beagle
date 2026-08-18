@@ -2680,7 +2680,8 @@
       (same-id? candidate (host-process-lifecycle-abi-id "alive"))
       (same-id? candidate (host-process-lifecycle-abi-id "signal"))
       (same-id? candidate
-        (host-process-lifecycle-abi-id "wait-not-alive"))))
+        (host-process-lifecycle-abi-id "wait-not-alive"))
+      (same-id? candidate (host-process-lifecycle-abi-id "exit"))))
 
 (defn host-process-callee? [(name String)] Bool
   (or (= name "host.process/run-inherit")
@@ -2698,7 +2699,8 @@
       (= name "host.process/signal")
       (= name "host.process/wait-not-alive")
       (= name "host.process/wait")
-      (= name "host.process/close")))
+      (= name "host.process/close")
+      (= name "selfhost.rt/exit")))
 
 (defn host-socket-effect-id [] core/NativeId
   (lower-id "effect" ["host-socket-peer-lifecycle-v0"]))
@@ -10501,6 +10503,10 @@
       (same-id? (nth value-types 0) (int-type-id))
       (same-id? (nth value-types 1) (int-type-id)))
 
+    (= callee "selfhost.rt/exit")
+    (and (= 1 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id)))
+
     (or (= callee "host.process/wait")
         (= callee "host.process/close"))
     (and (= 1 (count value-types))
@@ -10520,6 +10526,8 @@
     (process-read-line-outcome-type-id)
     (= callee "host.process/alive?")
     (bool-type-id)
+    (= callee "selfhost.rt/exit")
+    (type-id "Nil")
     :else (int-type-id)))
 
 (defn host-process-call-abi-id [(callee String)] core/NativeId
@@ -10552,6 +10560,8 @@
     (host-process-lifecycle-abi-id "alive")
     (= callee "host.process/signal")
     (host-process-lifecycle-abi-id "signal")
+    (= callee "selfhost.rt/exit")
+    (host-process-lifecycle-abi-id "exit")
     :else (host-process-lifecycle-abi-id "wait-not-alive")))
 
 (defn host-process-call-arena? [(callee String)] Bool
@@ -17408,6 +17418,24 @@
                 (fail-result current
                   "TODO-NATIVE-REGEX-REPLACE-OPERANDS: str/replace takes Text, Regex, Text")
 
+                (and (= "format" callee) (= 2 (count values))
+                  (some? (source-string-literal-value index (nth args 0)))
+                  (text-operand? (nth value-types 0))
+                  (same-id? (nth value-types 1) (int-type-id)))
+                (let [(result-id core/NativeId)
+                      (state-id current owner "text-format-int")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->TextFormatIntV0 (arena-value-id owner)
+                          (nth values 0) (nth values 1))))
+                    result-id (text-type-id) false))
+
+                (= "format" callee)
+                (fail-result current
+                  "TODO-NATIVE-FORMAT-OPERANDS: format needs a literal Text format and one Int")
+
                 (and (= "re-matches" callee) (= 2 (count values))
                   (text-operand? (nth value-types 0))
                   (text-operand? (nth value-types 1)))
@@ -22810,7 +22838,20 @@
      "wait-not-alive" "native_host_process_wait_not_alive_v0"
      [(borrowed-abi-value "pid" (int-type-id))
       (borrowed-abi-value "timeout-ms" (int-type-id))]
-     "status" (int-type-id) layouts-digest)])
+     "status" (int-type-id) layouts-digest)
+   (core/->AbiDeclV0
+     (host-process-lifecycle-abi-id "exit")
+     (host-process-lifecycle-function-id "exit")
+     "native_host_process_exit_v0"
+     (core/->AbiImportV0 true)
+     (core/->RestrictedCAbiV0 true)
+     [(borrowed-abi-value "code" (int-type-id))]
+     nil
+     (type-id "LowerFailure")
+     [(host-process-effect-id)]
+     [(host-process-capability-id)]
+     "v0"
+     layouts-digest)])
 
 (defn host-time-sleep-abi [(layouts-digest String)] core/AbiDeclV0
   (core/->AbiDeclV0
@@ -23161,6 +23202,11 @@
       [(id-value (core/textregexfindv0-arena-id operation))
        (id-value (core/textregexfindv0-source-id operation))
        (id-value (core/textregexfindv0-pattern-id operation))])
+    (instance? native.core.TextFormatIntV0 operation)
+    (stages/canonical-record "text-format-int"
+      [(id-value (core/textformatintv0-arena-id operation))
+       (id-value (core/textformatintv0-format-id operation))
+       (id-value (core/textformatintv0-source-id operation))])
     (instance? native.core.TextSplitV0 operation)
     (stages/canonical-record "text-split"
       [(id-value (core/textsplitv0-arena-id operation))
@@ -24878,6 +24924,10 @@
     (core/->TextRegexFindV0 epoch-arena
       (core/textregexfindv0-source-id operation)
       (core/textregexfindv0-pattern-id operation))
+    (instance? native.core.TextFormatIntV0 operation)
+    (core/->TextFormatIntV0 epoch-arena
+      (core/textformatintv0-format-id operation)
+      (core/textformatintv0-source-id operation))
     (instance? native.core.TextSplitV0 operation)
     (core/->TextSplitV0 epoch-arena
       (core/textsplitv0-source-id operation)

@@ -621,6 +621,8 @@ uint64_t native_text_regex_replace(native_arena *arena, uint64_t source,
                                    uint64_t pattern, uint64_t replacement);
 native_vec *native_text_regex_find(native_arena *arena, uint64_t source,
                                    uint64_t pattern);
+uint64_t native_text_format_int(native_arena *arena, uint64_t format,
+                                int64_t source);
 native_vec *native_text_regex_split(native_arena *arena, uint64_t source,
                                     uint64_t pattern);
 native_vec *native_text_vector_trim(native_arena *arena,
@@ -808,6 +810,8 @@ int64_t native_host_process_signal_v0(
 /* Observes arbitrary PID death without waitpid and therefore never reaps. */
 int64_t native_host_process_wait_not_alive_v0(
     const native_capability *capability, int64_t pid, int64_t timeout_ms);
+void native_host_process_exit_v0(const native_capability *capability,
+                                 int64_t code);
 /* wait consumes the caller-owned child relationship. Result is exit 0..255,
    signal 256+signal, or -errno; EINTR is retried. */
 int64_t native_host_process_wait_v0(

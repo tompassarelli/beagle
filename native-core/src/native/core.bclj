@@ -338,6 +338,10 @@
     [arena-id NativeId
      source-id NativeId
      pattern-id NativeId])
+  (TextFormatIntV0
+    [arena-id NativeId
+     format-id NativeId
+     source-id NativeId])
   (TextSplitV0
     [arena-id NativeId
      source-id NativeId
@@ -2405,6 +2409,8 @@
     [(TextRegexMatchesV0 source-id pattern-id) [source-id pattern-id]]
     [(TextRegexFindV0 arena-id source-id pattern-id)
      [arena-id source-id pattern-id]]
+    [(TextFormatIntV0 arena-id format-id source-id)
+     [arena-id format-id source-id]]
     [(TextSplitV0 arena-id source-id pattern-id)
      [arena-id source-id pattern-id]]
     [(TextVectorTrimV0 arena-id source-id) [arena-id source-id]]

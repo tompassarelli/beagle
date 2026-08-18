@@ -321,7 +321,8 @@
       (= symbol "native_host_process_current_pid_v0")
       (= symbol "native_host_process_alive_v0")
       (= symbol "native_host_process_signal_v0")
-      (= symbol "native_host_process_wait_not_alive_v0")))
+      (= symbol "native_host_process_wait_not_alive_v0")
+      (= symbol "native_host_process_exit_v0")))
 
 (defn host-process-outcome-symbol? [symbol String] Bool
   (or (= symbol "native_host_process_run_capture_v0")
@@ -1685,6 +1686,11 @@
       (value-name function slots (core/textregexfindv0-arena-id operation)) ", "
       (value-name function slots (core/textregexfindv0-source-id operation)) ", "
       (value-name function slots (core/textregexfindv0-pattern-id operation)) ");\n")
+    (instance? native.core.TextFormatIntV0 operation)
+    (str "  " target " = native_text_format_int((native_arena *)"
+      (value-name function slots (core/textformatintv0-arena-id operation)) ", "
+      (value-name function slots (core/textformatintv0-format-id operation)) ", "
+      (value-name function slots (core/textformatintv0-source-id operation)) ");\n")
     (instance? native.core.TextSplitV0 operation)
     (str "  " target " = native_text_regex_split((native_arena *)"
       (value-name function slots (core/textsplitv0-arena-id operation)) ", "
