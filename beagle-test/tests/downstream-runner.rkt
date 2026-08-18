@@ -173,6 +173,8 @@
   (define north-repo (build-path base "north"))
   (write-file! (build-path store-repo "src" "store" "thing.bclj")
                "#lang beagle/clj\n(ns store.thing)\n(defn double [(x Int)] Int (* x 2))\n")
+  (make-directory* (build-path store-repo "codegraph" "src"))
+  (make-directory* (build-path store-repo "build" "interfaces"))
   (init-repo! store-repo)
   (write-file! (build-path north-repo "src" "north" "main.bclj")
                "#lang beagle/clj\n(ns north.main)\n(require store.thing :as t)\n(defn go [] Int (t/double 21))\n")
@@ -198,4 +200,88 @@
                    "north's (require store.thing) resolved via the Store root")
      (check-true (run-result-byteclean? (result-named results "north")))
      (check-true (run-result-byteclean? (result-named results "store")))))
+  (delete-directory/files base))
+
+(test-case "module roots: Store compiles through its three owned source roots"
+  (define base (make-temporary-file "c2-store-roots-~a" 'directory))
+  (define repo (build-path base "store"))
+  (write-file! (build-path repo "src" "store" "core.bclj")
+               "#lang beagle/clj\n(ns store.core)\n(defn value [] Int 20)\n")
+  (write-file! (build-path repo "codegraph" "src" "codegraph" "helper.bclj")
+               (string-append
+                "#lang beagle/clj\n(ns codegraph.helper)\n"
+                "(require store.core :as core)\n"
+                "(defn value [] Int (core/value))\n"))
+  (write-file! (build-path repo "build" "interfaces" "store" "iface.bclj")
+               "#lang beagle/clj\n(ns store.iface)\n(defn value [] Int 22)\n")
+  (write-file! (build-path repo "src" "store" "main.bclj")
+               (string-append
+                "#lang beagle/clj\n(ns store.main)\n"
+                "(require codegraph.helper :as helper)\n"
+                "(require store.iface :as iface)\n"
+                "(defn value [] Int (+ (helper/value) (iface/value)))\n"))
+  (init-repo! repo)
+  (define store-spec
+    `(consumer (name "store") (repo-env "STORE_FIXREPO")
+               (repo-default ,(path->string repo)) (target "clj")
+               (enumerators
+                ((enumerator (kind glob) (source #f) (root "src")
+                             (ext ".bclj") (recursive #t) (skip-basenames ())
+                             (skip-suffixes ()) (skip-prefixes ()) (shape-markers ()))
+                 (enumerator (kind glob) (source #f) (root "codegraph/src")
+                             (ext ".bclj") (recursive #t) (skip-basenames ())
+                             (skip-suffixes ()) (skip-prefixes ()) (shape-markers ()))
+                 (enumerator (kind glob) (source #f) (root "build/interfaces")
+                             (ext ".bclj") (recursive #t) (skip-basenames ())
+                             (skip-suffixes ()) (skip-prefixes ()) (shape-markers ()))))))
+  (define consumers (list store-spec))
+  (with-scratch
+   (lambda (scratch)
+     (define results (run-consumers consumers scratch #:jobs 1 #:timeout 120))
+     (define r (result-named results "store"))
+     (check-equal? (run-result-status r) "pass")
+     (check-equal? (run-result-count r) 4)
+     (check-true (run-result-byteclean? r))
+     (check-equal? (run-result-diagnostics r) '())))
+  (delete-directory/files base))
+
+(test-case "target overrides: Store compiles dependent Core files one at a time"
+  (define base (make-temporary-file "c2-store-core-~a" 'directory))
+  (define repo (build-path base "store"))
+  (write-file! (build-path repo "src" "store" "base.bgl")
+               "#lang beagle\n(ns store.base)\n(defn value [] Int 40)\n")
+  (write-file! (build-path repo "src" "store" "use.bgl")
+               (string-append
+                "#lang beagle\n(ns store.use)\n"
+                "(require store.base :as base)\n"
+                "(defn value [] Int (+ (base/value) 2))\n"))
+  ;; The Store runner always supplies all three owned roots, just as its hosted
+  ;; build does; only src contains files in this focused Core fixture.
+  (make-directory* (build-path repo "codegraph" "src"))
+  (make-directory* (build-path repo "build" "interfaces"))
+  (write-file! (build-path repo "build" "generated-targets.d" "00.tsv")
+               (string-append
+                "# kind\tsource\tdestination\n"
+                "beagle-core\tsrc/store/base.bgl\tout/store/base.clj\n"
+                "beagle-core\tsrc/store/use.bgl\tout/store/use.clj\n"))
+  (init-repo! repo)
+  (define store-spec
+    `(consumer (name "store") (repo-env "STORE_FIXREPO")
+               (repo-default ,(path->string repo)) (target "clj")
+               (enumerators
+                ((enumerator (kind tsv-manifest) (source #f)
+                             (manifest-root "build/generated-targets.d")
+                             (manifest-ext ".tsv")
+                             (include-kinds ("beagle-core"))
+                             (target-overrides (("beagle-core" . "clj")))
+                             (shape-markers ()))))))
+  (with-scratch
+   (lambda (scratch)
+     (define results (run-consumers (list store-spec) scratch
+                                    #:jobs 1 #:timeout 120))
+     (define r (result-named results "store"))
+     (check-equal? (run-result-status r) "pass")
+     (check-equal? (run-result-count r) 2)
+     (check-true (run-result-byteclean? r))
+     (check-equal? (run-result-diagnostics r) '())))
   (delete-directory/files base))

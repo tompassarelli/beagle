@@ -28,6 +28,7 @@
          racket/system
          racket/file
          racket/path
+         racket/runtime-path
          racket/set
          "registry.rkt")
 
@@ -87,6 +88,7 @@
 ;; check) into out-dir. Returns (values status stderr timed-out?), status is an
 ;; integer exit code or 'timeout.
 (define (racket-exe) (find-system-path 'exec-file))
+(define-runtime-path CANDIDATE-BEAGLE-BUILD "../../bin/beagle-build")
 
 (define (run-racket eval-str files extra-args out-dir env-overrides timeout-secs)
   (define args
@@ -102,6 +104,27 @@
   (parameterize ([current-environment-variables env])
     (define-values (proc pout pin perr)
       (apply subprocess #f #f #f (racket-exe) args))
+    (close-output-port pin)
+    (define drain-out (thread (lambda () (copy-port pout (open-output-nowhere)))))
+    (define drain-err (thread (lambda () (copy-port perr err-str))))
+    (define done? (sync/timeout timeout-secs proc))
+    (cond
+      [done?
+       (thread-wait drain-out) (thread-wait drain-err)
+       (values (subprocess-status proc) (get-output-string err-str) #f)]
+      [else
+       (subprocess-kill proc #t)
+       (subprocess-wait proc)
+       (thread-wait drain-out) (thread-wait drain-err)
+       (values 'timeout (get-output-string err-str) #t)])))
+
+(define (run-beagle-build args timeout-secs)
+  (define err-str (open-output-string))
+  (define env (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set! env #"BEAGLE_EMIT_SRCLOC" #"0")
+  (parameterize ([current-environment-variables env])
+    (define-values (proc pout pin perr)
+      (apply subprocess #f #f #f CANDIDATE-BEAGLE-BUILD args))
     (close-output-port pin)
     (define drain-out (thread (lambda () (copy-port pout (open-output-nowhere)))))
     (define drain-err (thread (lambda () (copy-port perr err-str))))
@@ -152,13 +175,27 @@
   (define (abs-of rel) (build-path repo rel))
   (define abs-files (for/list ([rel (in-list relpaths)]) (abs-of rel)))
   (define module-root-args
-    (if (string=? name "north")
-        (list "--module-root" (format "north=~a" (build-path repo "src"))
-              "--module-root"
-              (format "store=~a"
-                      (build-path (store-repo-path consumers) "src")))
-        '()))
+    (cond
+      [(string=? name "north")
+       (list "--module-root" (format "north=~a" (build-path repo "src"))
+             "--module-root"
+             (format "store=~a"
+                     (build-path (store-repo-path consumers) "src")))]
+      [(string=? name "store")
+       (list "--module-root"
+             (format "store/src=~a" (build-path repo "src"))
+             "--module-root"
+             (format "store/codegraph/src=~a"
+                     (build-path repo "codegraph" "src"))
+             "--module-root"
+             (format "store/build/interfaces=~a"
+                     (build-path repo "build" "interfaces")))]
+      [else '()]))
   (define t0 (current-inexact-milliseconds))
+  (define deadline-ms (+ t0 (* timeout-secs 1000.0)))
+  (define (remaining-seconds)
+    (max 0.0
+         (/ (- deadline-ms (current-inexact-milliseconds)) 1000.0)))
   ;; emit pass — grouped by per-file target override (registry file-targets),
   ;; each group a separate BUILD-EVAL invocation under its own `--target`.
   (define file-targets (consumer-result-file-targets derived))
@@ -169,6 +206,36 @@
   (define group-keys
     (sort (hash-keys groups) string<?
           #:key (lambda (k) (if k (symbol->string k) ""))))
+  ;; Store's generated-target manifest mixes hosted sources (compiled as one
+  ;; build-all batch) with Core sources retargeted to Clojure. build-all
+  ;; intentionally rejects --target, so mirror Store's own build.sh for only
+  ;; those overridden rows: one candidate beagle-build invocation per source,
+  ;; preserving the three owned module roots and the single consumer deadline.
+  (define (compile-store-target-files files k)
+    (let loop ([remaining-files (sort files path<?)]
+               [status 0]
+               [stderr ""])
+      (cond
+        [(or (null? remaining-files) (not (equal? status 0)))
+         (values status stderr (eq? status 'timeout))]
+        [else
+         (define remaining (remaining-seconds))
+         (if (zero? remaining)
+             (values 'timeout stderr #t)
+             (let* ([source (car remaining-files)]
+                    [relative (find-relative-path repo source)]
+                    [destination
+                     (path-replace-extension (build-path out-dir relative) #".clj")])
+               (make-directory* (path-only destination))
+               (let-values ([(s e _timed-out?)
+                             (run-beagle-build
+                              (append (list "--target" (symbol->string k))
+                                      module-root-args
+                                      (list (path->string source)
+                                            (path->string destination)))
+                              remaining)])
+                 (loop (cdr remaining-files) s
+                       (string-append stderr e)))))])))
   (define-values (status stderr timed-out?)
     (if (null? abs-files)
         (values 0 "" #f)
@@ -177,14 +244,22 @@
           (define extra
             (append module-root-args
                     (if k (list "--target" (symbol->string k)) '())))
-          (define-values (s e t?) (run-racket BUILD-EVAL (hash-ref groups k) extra out-dir '() timeout-secs))
+          (define remaining (remaining-seconds))
+          (define-values (s e t?)
+            (cond
+              [(zero? remaining) (values 'timeout "" #t)]
+              [(and (string=? name "store") k)
+               (compile-store-target-files (hash-ref groups k) k)]
+              [else
+               (run-racket BUILD-EVAL (hash-ref groups k) extra out-dir '() remaining)]))
           (values (if (equal? status 0) s status) (string-append stderr e) (or timed-out? t?)))))
   ;; gjoa: additionally its own stricter gate — purity check, profile 3
   (define-values (status* stderr*)
     (if (and (string=? name "gjoa") (equal? status 0))
         (let-values ([(cs ce _t)
                       (run-racket CHECK-EVAL abs-files (list "--profile" "3")
-                                  #f (list (cons "BEAGLE_PURITY" "error")) timeout-secs)])
+                                  #f (list (cons "BEAGLE_PURITY" "error"))
+                                  (remaining-seconds))])
           (values cs (string-append stderr ce)))
         (values status stderr)))
   (define dur (inexact->exact (round (- (current-inexact-milliseconds) t0))))

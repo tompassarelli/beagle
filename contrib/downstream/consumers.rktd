@@ -80,7 +80,7 @@
  (consumer
   (name "store")
   (repo-env "BEAGLE_STORE_REPO")
-  (repo-default "~/code/store/main")
+  (repo-default "~/code/beagle/main/store")
   (target "clj")
   (enumerators
    ((enumerator
