@@ -622,6 +622,7 @@ validate_core_checkpoint_entry_from_alias() {
         -printf '%f\n' | LC_ALL=C sort)"
     [[ -n "$expected_names" && "$expected_names" == "$actual_names" ]] || return 1
     allowed_names="$(printf '%s\n' frozen-native-stage.wire-v1 \
+        qbe-frozen-native-stage.wire-v1 \
         module.native-program native.entry-map native.receipts report.head \
         source.facts stage-progress | LC_ALL=C sort)"
     if [[ "$simd_required" == 1 ]]; then
@@ -632,6 +633,7 @@ validate_core_checkpoint_entry_from_alias() {
     (cd "$entry/artifacts" &&
         sha256sum --check --strict ../artifacts.sha256 >/dev/null 2>&1) || return 1
     for required in source.facts frozen-native-stage.wire-v1 \
+                    qbe-frozen-native-stage.wire-v1 \
                     module.native-program native.receipts native.entry-map \
                     report.head stage-progress; do
         [[ -f "$entry/artifacts/$required" &&
@@ -1217,26 +1219,28 @@ validate_core_checkpoint_wire() {
         "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
         bb -cp "$compiled" -e '
           (require (quote [native.stages :as stages]))
-          (let [path (first *command-line-args*)
-                encoding (slurp path)
-                frozen (stages/decode-frozen-native-stage-wire-v1 encoding)]
-            (when (or (nil? frozen)
-                      (not= encoding
-                            (stages/encode-frozen-native-stage-wire-v1 frozen)))
-              (System/exit 1)))' \
+          (doseq [path *command-line-args*]
+            (let [encoding (slurp path)
+                  frozen (stages/decode-frozen-native-stage-wire-v1 encoding)]
+              (when (or (nil? frozen)
+                        (not= encoding
+                              (stages/encode-frozen-native-stage-wire-v1 frozen)))
+                (System/exit 1))))' \
         "$entry/artifacts/frozen-native-stage.wire-v1" \
+        "$entry/artifacts/qbe-frozen-native-stage.wire-v1" \
         >"$log" 2>&1
 }
 
 validate_core_checkpoint_wire_attestation() {
     local attestation="$1" expected_wire_digest="$2"
-    local format wire_digest source_key source_ready_digest extra
+    local format wire_digest qbe_wire_digest source_key source_ready_digest extra
     local source_entry source_input_digest
     [[ -f "$attestation" && ! -L "$attestation" ]] || return 1
-    read -r format wire_digest source_key source_ready_digest extra \
+    read -r format wire_digest qbe_wire_digest source_key source_ready_digest extra \
         <"$attestation" || return 1
-    [[ "$format" == "beagle-core-checkpoint-wire-pass/v1" &&
+    [[ "$format" == "beagle-core-checkpoint-wire-pass/v2" &&
        "$wire_digest" == "$expected_wire_digest" &&
+       "$qbe_wire_digest" =~ ^[0-9a-f]{64}$ &&
        "$source_key" =~ ^[0-9a-f]{64}$ &&
        "$source_ready_digest" =~ ^[0-9a-f]{64}$ &&
        -z "${extra:-}" ]] || return 1
@@ -1250,11 +1254,13 @@ validate_core_checkpoint_wire_attestation() {
     validate_core_checkpoint_entry_from_alias "$source_entry" "$source_key" \
         "$source_input_digest" || return 1
     grep -Fqx "$wire_digest  frozen-native-stage.wire-v1" \
-        "$source_entry/artifacts.sha256"
+        "$source_entry/artifacts.sha256" &&
+        grep -Fqx "$qbe_wire_digest  qbe-frozen-native-stage.wire-v1" \
+            "$source_entry/artifacts.sha256"
 }
 
 record_core_checkpoint_wire_attestation() {
-    local source_entry="$1" wire_digest source_key source_input_digest
+    local source_entry="$1" wire_digest qbe_wire_digest source_key source_input_digest
     local source_ready_digest attestation staging
     source_key="$(basename "$source_entry")"
     source_input_digest="$(sha256sum "$source_entry/input.manifest" | awk '{print $1}')"
@@ -1263,6 +1269,8 @@ record_core_checkpoint_wire_attestation() {
         "$source_input_digest" || return 1
     wire_digest="$(sha256sum \
         "$source_entry/artifacts/frozen-native-stage.wire-v1" | awk '{print $1}')"
+    qbe_wire_digest="$(sha256sum \
+        "$source_entry/artifacts/qbe-frozen-native-stage.wire-v1" | awk '{print $1}')"
     source_ready_digest="$(sha256sum "$source_entry/READY" | awk '{print $1}')"
     mkdir -p "$core_checkpoint_wire_attestation_root" \
         "$cache_root/.checkpoint-tmp"
@@ -1274,8 +1282,9 @@ record_core_checkpoint_wire_attestation() {
     fi
     staging="$(mktemp \
         "$cache_root/.checkpoint-tmp/$wire_digest.attestation.XXXXXX")"
-    printf 'beagle-core-checkpoint-wire-pass/v1 %s %s %s\n' \
-        "$wire_digest" "$source_key" "$source_ready_digest" >"$staging"
+    printf 'beagle-core-checkpoint-wire-pass/v2 %s %s %s %s\n' \
+        "$wire_digest" "$qbe_wire_digest" "$source_key" \
+        "$source_ready_digest" >"$staging"
     sync -f "$staging"
     if [[ ! -e "$attestation" ]]; then
         ln "$staging" "$attestation" 2>/dev/null || true
@@ -1286,13 +1295,15 @@ record_core_checkpoint_wire_attestation() {
 }
 
 reuse_core_checkpoint_wire_attestation() {
-    local entry="$1" wire_digest attestation source_entry source_key
+    local entry="$1" wire_digest qbe_wire_digest attestation source_entry source_key
     local source_input_digest
     wire_digest="$(sha256sum \
         "$entry/artifacts/frozen-native-stage.wire-v1" | awk '{print $1}')"
+    qbe_wire_digest="$(sha256sum \
+        "$entry/artifacts/qbe-frozen-native-stage.wire-v1" | awk '{print $1}')"
     attestation="$core_checkpoint_wire_attestation_root/$wire_digest"
     if validate_core_checkpoint_wire_attestation "$attestation" "$wire_digest"; then
-        read -r _ _ source_key _ <"$attestation"
+        read -r _ _ _ source_key _ <"$attestation"
         echo "beagle build: core-checkpoint-wire-attestation HIT $wire_digest -> $source_key" >&2
         return 0
     fi
@@ -1309,6 +1320,8 @@ reuse_core_checkpoint_wire_attestation() {
         validate_core_checkpoint_entry_from_alias "$source_entry" "$source_key" \
             "$source_input_digest" || continue
         grep -Fqx "$wire_digest  frozen-native-stage.wire-v1" \
+            "$source_entry/artifacts.sha256" || continue
+        grep -Fqx "$qbe_wire_digest  qbe-frozen-native-stage.wire-v1" \
             "$source_entry/artifacts.sha256" || continue
         record_core_checkpoint_wire_attestation "$source_entry" || continue
         echo "beagle build: core-checkpoint-wire-attestation HIT $wire_digest -> $source_key" >&2
@@ -1460,6 +1473,8 @@ if [[ "$core_result_cache_hit" != 1 && "$core_result_cache_enabled" == 1 &&
         mkdir "$work/core-checkpoint-hit"
         cp -- "$core_checkpoint_entry/artifacts/frozen-native-stage.wire-v1" \
             "$work/core-checkpoint-hit/frozen-native-stage.wire-v1"
+        cp -- "$core_checkpoint_entry/artifacts/qbe-frozen-native-stage.wire-v1" \
+            "$work/core-checkpoint-hit/qbe-frozen-native-stage.wire-v1"
         cp -- "$core_checkpoint_entry/artifacts/report.head" \
             "$work/core-checkpoint-hit/report.head"
         cp -- "$core_checkpoint_entry/artifacts/stage-progress" \
@@ -1509,6 +1524,7 @@ printf '%s\n' "${materializers[@]}" >"$work/materializers"
 export BEAGLE_CORE_MATERIALIZERS="$work/materializers"
 export BEAGLE_CORE_PROJECTED_FACTS="$work/artifacts/source.facts"
 export BEAGLE_CORE_CHECKPOINT_WIRE=""
+export BEAGLE_CORE_CHECKPOINT_QBE_WIRE=""
 export BEAGLE_CORE_CHECKPOINT_REPORT_HEAD=""
 export BEAGLE_CORE_CHECKPOINT_STAGE_PROGRESS=""
 export BEAGLE_CORE_CHECKPOINT_STAGE=""
@@ -1519,6 +1535,8 @@ export BEAGLE_CORE_COMPILER_SOURCE_DIGEST="$compiler_source_digest"
 if [[ "$core_checkpoint_cache_hit" == 1 ]]; then
     export BEAGLE_CORE_CHECKPOINT_WIRE=\
 "$work/core-checkpoint-hit/frozen-native-stage.wire-v1"
+    export BEAGLE_CORE_CHECKPOINT_QBE_WIRE=\
+"$work/core-checkpoint-hit/qbe-frozen-native-stage.wire-v1"
     export BEAGLE_CORE_CHECKPOINT_REPORT_HEAD="$work/core-checkpoint-hit/report.head"
     export BEAGLE_CORE_CHECKPOINT_STAGE_PROGRESS=\
 "$work/core-checkpoint-hit/stage-progress"
@@ -2448,11 +2466,13 @@ bb -cp "$compiled" -e '
            :report (str (apply str next-reports)
                         "result FAIL materialization\n")})))))
 
-(defn stage-core-checkpoint! [frozen report-head]
+(defn stage-core-checkpoint! [frozen qbe-frozen report-head]
   (let [stage-dir (System/getenv "BEAGLE_CORE_CHECKPOINT_STAGE")]
     (when-not (str/blank? stage-dir)
       (spit (str stage-dir "/frozen-native-stage.wire-v1")
             (stages/encode-frozen-native-stage-wire-v1 frozen))
+      (spit (str stage-dir "/qbe-frozen-native-stage.wire-v1")
+            (stages/encode-frozen-native-stage-wire-v1 qbe-frozen))
       (spit (str stage-dir "/report.head") report-head)
       (spit (str stage-dir "/stage-progress") (stage-progress-text))
       (when (= "after-stage"
@@ -2460,15 +2480,19 @@ bb -cp "$compiled" -e '
         (throw (ex-info "Core checkpoint post-stage failpoint" {}))))))
 
 (defn resume-core!
-  [wire-path report-head-path stage-progress-path artifacts-dir compiler-commit
-   materializers abi-id abi simd-required?]
+  [wire-path qbe-wire-path report-head-path stage-progress-path artifacts-dir
+   compiler-commit materializers abi-id abi simd-required?]
   (let [wire (slurp wire-path)
+        qbe-wire (slurp qbe-wire-path)
         ;; The shell admits this path only after a digest-keyed canonical-wire
         ;; PASS or a fresh full decode/re-encode validation.
-        frozen (stages/decode-attested-frozen-native-stage-wire-v1 wire)]
-    (when (nil? frozen)
-      (throw (ex-info "Core checkpoint wire failed attested decoding" {})))
+        frozen (stages/decode-attested-frozen-native-stage-wire-v1 wire)
+        qbe-frozen
+        (stages/decode-attested-frozen-native-stage-wire-v1 qbe-wire)]
+    (when (or (nil? frozen) (nil? qbe-frozen))
+      (throw (ex-info "Core checkpoint wires failed attested decoding" {})))
     (let [stage (stages/frozennativestagev0-stage frozen)
+          qbe-stage (stages/frozennativestagev0-stage qbe-frozen)
           native-encoding (stages/frozennativestagev0-encoding frozen)
           published-native (slurp (str artifacts-dir "/module.native-program"))
           _native-match
@@ -2477,6 +2501,12 @@ bb -cp "$compiled" -e '
                             {})))
           program (stages/nativestagev0-program stage)
           projected (body-slice/projected-program program)
+          qbe-program (stages/nativestagev0-program qbe-stage)
+          _qbe-identity
+          (when-not (core/program-epoch-0? qbe-program)
+            (throw (ex-info "Core checkpoint QBE identity carries a minted epoch"
+                            {})))
+          qbe-projected (body-slice/projected-program qbe-program)
           projected-facts (slurp (str artifacts-dir "/source.facts"))
           configuration ["profile=3" (str "abi=" abi-id)
                          (str "source-facts-sha256="
@@ -2490,7 +2520,7 @@ bb -cp "$compiled" -e '
                 (throw (ex-info "Core checkpoint SIMD plan is inconsistent" {})))))
           _progress (reset! stage-progress-prefix (slurp stage-progress-path))
           materialization
-          (materialize-programs! projected projected artifacts-dir materializers
+          (materialize-programs! projected qbe-projected artifacts-dir materializers
                                  abi-id simd-plan simd-required? epoch-digest
                                  compiler-commit configuration)]
       (assoc materialization
@@ -3186,9 +3216,12 @@ bb -cp "$compiled" -e '
                         ;; QBE opens no minted epoch, so it is handed the
                         ;; identity program rather than the derived one it
                         ;; would refuse.
-                        qbe-program (lower/epoch-identity-program native-frozen
-                                                                  compiler-commit
-                                                                  configuration abi)
+                        qbe-epoch-result
+                        (lower/epoch-identity-stage native-frozen compiler-commit
+                                                    configuration abi)
+                        qbe-frozen (lower/epoch-result-frozen qbe-epoch-result)
+                        qbe-program (stages/nativestagev0-program
+                                      (stages/frozennativestagev0-stage qbe-frozen))
                         projected (body-slice/projected-program program)
                         qbe-projected (body-slice/projected-program qbe-program)
                         simd-plan (simd/derive-plan projected
@@ -3245,7 +3278,8 @@ bb -cp "$compiled" -e '
                                      (simd/plan-report simd-plan)
                                      ""))
                               _checkpoint
-                              (stage-core-checkpoint! frozen-native checkpoint-head)
+                              (stage-core-checkpoint! frozen-native qbe-frozen
+                                                      checkpoint-head)
                               materialization
                               (materialize-programs! projected qbe-projected
                                                      artifacts-dir materializers
@@ -3272,6 +3306,8 @@ bb -cp "$compiled" -e '
         abi-id (or (System/getenv "BEAGLE_CORE_ABI") "lp64")
         simd-required? (= "1" (System/getenv "BEAGLE_CORE_SIMD_REQUIRED"))
         checkpoint-wire-path (System/getenv "BEAGLE_CORE_CHECKPOINT_WIRE")
+        checkpoint-qbe-wire-path
+        (System/getenv "BEAGLE_CORE_CHECKPOINT_QBE_WIRE")
         abi (core/abi-profile-for abi-id)
         result (if (nil? abi)
                  {:ok? false
@@ -3283,6 +3319,7 @@ bb -cp "$compiled" -e '
                                   simd-required?)
                    (resume-core!
                     checkpoint-wire-path
+                    checkpoint-qbe-wire-path
                     (System/getenv "BEAGLE_CORE_CHECKPOINT_REPORT_HEAD")
                     (System/getenv "BEAGLE_CORE_CHECKPOINT_STAGE_PROGRESS")
                     artifacts-dir compiler-commit materializers abi-id abi
@@ -3310,7 +3347,8 @@ fi
 
 if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
       "$core_checkpoint_cache_hit" != 1 &&
-      -f "$work/core-checkpoint-stage/frozen-native-stage.wire-v1" ]]; then
+      -f "$work/core-checkpoint-stage/frozen-native-stage.wire-v1" &&
+      -f "$work/core-checkpoint-stage/qbe-frozen-native-stage.wire-v1" ]]; then
     validate_core_result_input_closure "$core_result_input" \
         "$work/core-checkpoint-input.before-publish" ||
         die "Core checkpoint input closure changed before publication"
@@ -3329,7 +3367,8 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
         [[ -f "$work/artifacts/module.simd-plan-v0" ]] ||
             die "Core checkpoint stage omitted module.simd-plan-v0"
     fi
-    for checkpoint_internal in frozen-native-stage.wire-v1 report.head \
+    for checkpoint_internal in frozen-native-stage.wire-v1 \
+                               qbe-frozen-native-stage.wire-v1 report.head \
                                stage-progress; do
         [[ -f "$work/core-checkpoint-stage/$checkpoint_internal" ]] ||
             die "Core checkpoint stage omitted $checkpoint_internal"
@@ -3341,6 +3380,8 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
     mkdir "$core_checkpoint_staging/artifacts"
     cp -- "$work/core-checkpoint-stage/frozen-native-stage.wire-v1" \
         "$core_checkpoint_staging/artifacts/frozen-native-stage.wire-v1"
+    cp -- "$work/core-checkpoint-stage/qbe-frozen-native-stage.wire-v1" \
+        "$core_checkpoint_staging/artifacts/qbe-frozen-native-stage.wire-v1"
     cp -- "$work/core-checkpoint-stage/report.head" \
         "$core_checkpoint_staging/artifacts/report.head"
     cp -- "$work/core-checkpoint-stage/stage-progress" \
