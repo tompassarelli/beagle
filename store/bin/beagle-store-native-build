@@ -150,6 +150,8 @@ beagle="$(command -v "$beagle_candidate" 2>/dev/null || true)"
 beagle="$(realpath "$beagle")"
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+checkout_root="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -z "$checkout_root" ]] || checkout_root="$(realpath "$checkout_root")"
 
 # A checkout-owned input has one logical name in every worktree. Keep external
 # inputs path-bound: without a root that can be re-anchored, sharing them by
@@ -433,6 +435,13 @@ for source in "${normalized_sources[@]}"; do
   done
 done
 source_snapshot_root="$(mktemp -d "$cache_root/.tmp/sources.XXXXXX")"
+source_module_root_args=()
+if [[ -n "$checkout_root" && "$source_common_root" == "$checkout_root/"* ]]; then
+  source_logical_root="${source_common_root#"$checkout_root"/}"
+  source_module_root_args=(
+    --module-root "$source_logical_root=$source_snapshot_root"
+  )
+fi
 source_logical_paths=()
 source_digests=()
 for index in "${!normalized_sources[@]}"; do
@@ -1079,6 +1088,7 @@ if [[ ! -e "$program_dir" ]]; then
   (
     cd "$source_snapshot_root"
     "$beagle" build "${materializer_args[@]}" \
+        "${source_module_root_args[@]}" \
         --out "$program_stage" --abi "$abi" \
         "${native_server_entry_args[@]}" \
         -- \
@@ -1128,6 +1138,7 @@ if [[ ! -e "$program_dir" ]]; then
     (
       cd "$source_snapshot_root"
       "$beagle" build --materializer c17 \
+          "${source_module_root_args[@]}" \
           --out "$program_stage" --abi "$abi" \
           "${native_server_entry_args[@]}" \
           -- \

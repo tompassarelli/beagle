@@ -410,7 +410,7 @@ source_digest_befores=()
 for source in "${sources[@]}"; do
     source="$(realpath "$source")"
     explicit_normalized_sources+=("$source")
-    explicit_source_ids+=("$(beagle_source_id "$source")")
+    explicit_source_ids+=("$(beagle_source_id "$source" "${module_roots[@]}")")
 done
 
 module_root_args=()

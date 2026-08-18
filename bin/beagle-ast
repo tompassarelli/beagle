@@ -91,7 +91,10 @@ BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source_args=()
 for src in "${sources[@]}"; do
     src_abs="$(realpath "$src")"
-    source_args+=("$src_abs" "$(beagle_source_id "$src_abs")")
+    source_args+=(
+        "$src_abs"
+        "$(beagle_source_id "$src_abs" "${module_root_specs[@]}")"
+    )
 done
 
 "$RACKET" -e "

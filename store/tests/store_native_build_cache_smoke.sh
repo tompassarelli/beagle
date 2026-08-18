@@ -25,6 +25,7 @@ if [[ "$command" == "build" ]]; then
   out=""
   abi=""
   materializers=()
+  module_roots=()
   sources=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -32,6 +33,7 @@ if [[ "$command" == "build" ]]; then
       --materializer) materializers+=("$2"); shift 2 ;;
       --abi) abi="$2"; shift 2 ;;
       --entry) shift 2 ;;
+      --module-root) module_roots+=("$2"); shift 2 ;;
       --) shift; sources+=("$@"); break ;;
       *) sources+=("$1"); shift ;;
     esac
@@ -43,6 +45,9 @@ if [[ "$command" == "build" ]]; then
     *) exit 96 ;;
   esac
   [[ -n "$out" && -n "$abi" && ${#sources[@]} -gt 0 ]] || exit 96
+  if [[ -n "${FAKE_MODULE_ROOT_OBSERVATIONS:-}" ]]; then
+    printf '%s\n' "${module_roots[@]}" >>"$FAKE_MODULE_ROOT_OBSERVATIONS"
+  fi
   printf '%s\n' "build-$(IFS=+; printf '%s' "${materializers[*]}")" \
     >>"$FAKE_NATIVE_CALLS"
   if [[ -n "${FAKE_SOURCE_OBSERVATIONS:-}" ]]; then
@@ -430,6 +435,26 @@ pinned_hit="$("${build_env[@]}" \
   fail "Beagle revision changed the content-keyed native program cache"
 ! grep -Fq "$beagle_pin" "$pinned_hit/input.manifest" ||
   fail "Beagle revision leaked into the native program cache identity"
+
+# A checkout-owned launch snapshot carries the checkout-relative module root
+# into Core, so its logical source ID survives the random snapshot directory.
+root_observations="$scratch/module-root.observations"
+: >"$root_observations"
+checkout_artifact="$(env \
+  BEAGLE_STORE_BEAGLE="$scratch/tool/bin/beagle" \
+  BEAGLE_STORE_NATIVE_CACHE="$scratch/cache-checkout-source" \
+  BEAGLE_STORE_NATIVE_CC="${CC:-cc}" \
+  BEAGLE_STORE_QBE_FRONTIER_LEDGER="$ledger" \
+  FAKE_NATIVE_CALLS="$calls" \
+  FAKE_MODULE_ROOT_OBSERVATIONS="$root_observations" \
+  "$builder" --host program --entry demo.main/start \
+  "$repo/src/commit_plan.bgl")" ||
+  fail "checkout-owned source snapshot build failed"
+[[ -f "$checkout_artifact/READY" ]] ||
+  fail "checkout-owned source snapshot produced no ready artifact"
+[[ "$(sort -u "$root_observations")" == \
+  store/src=*'/sources.'* ]] ||
+  fail "checkout-owned source snapshot omitted its stable git-relative root"
 
 # A QBE refusal invokes a second C17 materialization. Both passes must consume
 # the launch snapshot even when the original worktree source changes between

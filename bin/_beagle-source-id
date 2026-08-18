@@ -1,8 +1,34 @@
 #!/usr/bin/env bash
 
 beagle_source_id() {
-    local source_abs source_root source_id
+    local source_abs source_root source_id spec logical_root physical_root relative
+    local rooted_source_id=""
     source_abs="$(realpath "$1")"
+    shift
+    for spec in "$@"; do
+        logical_root="${spec%%=*}"
+        physical_root="${spec#*=}"
+        [[ "$logical_root" != "$spec" ]] || {
+            echo "beagle source id: module root must be LOGICAL_PREFIX=PHYSICAL_DIRECTORY: $spec" >&2
+            return 2
+        }
+        physical_root="$(realpath "$physical_root")"
+        case "$source_abs" in
+            "$physical_root"/*)
+                relative="${source_abs#"$physical_root"/}"
+                if [[ -n "$rooted_source_id" &&
+                      "$rooted_source_id" != "$logical_root/$relative" ]]; then
+                    echo "beagle source id: source maps to multiple logical source IDs: $source_abs" >&2
+                    return 2
+                fi
+                rooted_source_id="$logical_root/$relative"
+                ;;
+        esac
+    done
+    if [[ -n "$rooted_source_id" ]]; then
+        printf '%s\n' "$rooted_source_id"
+        return 0
+    fi
     source_root="$(
         git -C "$(dirname "$source_abs")" rev-parse --show-toplevel \
             2>/dev/null || true
