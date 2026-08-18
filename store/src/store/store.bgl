@@ -428,6 +428,23 @@
     (throw (ex-info "store: transaction frame requires a non-negative sequence and operations"
                     {:type :invalid-transaction-frame}))))
 
+(def canonical-validator String "store/canonical-validator-v1")
+(def canonical-shape-schema-id String "store/CommitOperationV1")
+
+(defn commit-metadata
+  [(producer String)
+   (shape-schema-id String)
+   (profile String?)]
+  t/CommitMetadata
+  (t/->CommitMetadata
+   producer
+   shape-schema-id
+   profile
+   (t/->CommitValidationAttestation
+    canonical-validator
+    :pending
+    canonical-validator)))
+
 (defn- find-active-bucket-position [(store t/TermStore) (handle Int)] Int
   (let [(slots slots/TermSlots) (store-active-slots store)
         (buckets (Vec t/ActiveBucket)) (store-active-buckets store)
@@ -643,10 +660,12 @@
 (defn- append-transaction!
   [(ctx (Atom t/TermStore))
    (sequence Int)
-   (operations (Vec t/CommitOperation))]
+   (operations (Vec t/CommitOperation))
+   (metadata t/CommitMetadata)]
   t/Triple
   (let [(before t/TermStore) (deref ctx)]
-    (if (not (valid-operations? operations))
+    (if (not (and (valid-operations? operations)
+                  (t/commit-metadata? metadata)))
       (throw (ex-info "store: transaction requires at least one valid operation"
                       {:type :invalid-transaction-frame}))
       (if (< sequence (store-next-sequence before))
@@ -657,9 +676,49 @@
           (t/transaction-coordinate
            (t/termstore-space-id final-store) sequence))))))
 
+(defn- canonical-validate-commit!
+  [(operations (Vec t/CommitOperation))
+   (metadata t/CommitMetadata)]
+  t/CommitMetadata
+  (let [(attestation t/CommitValidationAttestation)
+        (t/commitmetadata-validation-attestation metadata)]
+    (if (and (valid-operations? operations)
+             (t/commit-metadata? metadata)
+             (string? (t/commitmetadata-producer metadata))
+             (pos? (count (t/commitmetadata-producer metadata)))
+             (string? (t/commitmetadata-shape-schema-id metadata))
+             (pos? (count (t/commitmetadata-shape-schema-id metadata)))
+             (or (nil? (t/commitmetadata-profile metadata))
+                 (and (string? (t/commitmetadata-profile metadata))
+                      (pos? (count (t/commitmetadata-profile metadata)))))
+             (t/commit-validation-attestation? attestation))
+      (t/->CommitMetadata
+       (t/commitmetadata-producer metadata)
+       (t/commitmetadata-shape-schema-id metadata)
+       (t/commitmetadata-profile metadata)
+       (t/->CommitValidationAttestation
+        canonical-validator
+        :accepted
+        canonical-validator))
+      (throw (ex-info "store: canonical commit validation rejected the write"
+                      {:type :canonical-commit-rejected})))))
+
+(defn commit-boundary!
+  [(ctx (Atom t/TermStore))
+   (operations (Vec t/CommitOperation))
+   (metadata t/CommitMetadata)]
+  t/Triple
+  (let [validated (canonical-validate-commit! operations metadata)]
+    ;; `validated` is deliberately produced at the sole boundary before the
+    ;; private append. The raw primitive is never part of the Store surface.
+    (append-transaction!
+     ctx (store-next-sequence (deref ctx)) operations validated)))
+
 (defn commit-transaction!
   [(ctx (Atom t/TermStore)) (operations (Vec t/CommitOperation))] t/Triple
-  (append-transaction! ctx (store-next-sequence (deref ctx)) operations))
+  (commit-boundary!
+   ctx operations
+   (commit-metadata "store.legacy-api/v1" canonical-shape-schema-id nil)))
 
 (defn replay-transaction-result!
   [(ctx (Atom t/TermStore)) (frame t/TransactionFrame)] TransactionReplayResult
@@ -724,7 +783,10 @@
                 (valid-operations? (t/transactionframe-operations frame))))
     (append-transaction! ctx
                          (t/transactionframe-sequence frame)
-                         (t/transactionframe-operations frame))
+                         (t/transactionframe-operations frame)
+                         (commit-metadata "store.replay/v1"
+                                          canonical-shape-schema-id
+                                          nil))
     (throw (ex-info "store: invalid transaction frame"
                     {:type :invalid-transaction-frame}))))
 

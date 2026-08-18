@@ -100,6 +100,13 @@
   [(tx-sequence Int) (ordinal Int) (action Keyword) (triple-handle Int)])
 (defrecord ActiveBucket [(triple-handle Int) (positions (Vec Int))])
 (defrecord CommitOperation [(action Keyword) (proposition Triple)])
+(defrecord CommitValidationAttestation
+  [(validator String) (result Keyword) (attestation String)])
+(defrecord CommitMetadata
+  [(producer String)
+   (shape-schema-id String)
+   (profile String?)
+   (validation-attestation CommitValidationAttestation)])
 (defrecord TransactionFrame [(sequence Int) (operations (Vec CommitOperation))])
 ;; An operation occurrence records an assertion or retraction of proposition
 ;; content. Keeping it outside Term prevents system history from masquerading
@@ -137,6 +144,9 @@
    (operations (Vec OperationRow))])
 
 (defn commit-operation? [(v Any)] Bool (instance? CommitOperation v))
+(defn commit-validation-attestation? [(v Any)] Bool
+  (instance? CommitValidationAttestation v))
+(defn commit-metadata? [(v Any)] Bool (instance? CommitMetadata v))
 (defn transaction-frame? [(v Any)] Bool (instance? TransactionFrame v))
 (defn term-store-dump? [(v Any)] Bool (instance? TermStoreDump v))
 (defn operation-occurrence? [(v Any)] Bool (instance? OperationOccurrence v))

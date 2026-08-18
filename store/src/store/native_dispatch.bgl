@@ -634,7 +634,12 @@
            "mutation response exceeds FRAMRPC v2 encode limits")
           (if changed
             (do
-              (store/commit-transaction! root operations)
+              (store/commit-boundary!
+               root
+               operations
+               (store/commit-metadata "store.rpc/v2"
+                                      "store/CommitOperationV1"
+                                      "framrpc-v2"))
               (schema/refresh! session)
               candidate)
             candidate))))))

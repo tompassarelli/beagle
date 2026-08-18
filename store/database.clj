@@ -31,6 +31,43 @@
 ;; not a whole store on its own, so every single-file open must refuse it.
 (def ^:private continuation-flag 2)
 (def ^:private max-term-depth 256)
+(def ^:private canonical-validator "store/canonical-validator-v1")
+(def ^:private canonical-shape-schema-id "store/CommitOperationV1")
+
+(defn- default-commit-metadata [producer profile]
+  {:producer producer
+   :shape-schema-id canonical-shape-schema-id
+   :profile profile
+   :validation-attestation
+   {:validator canonical-validator
+    :result :pending
+    :attestation canonical-validator}})
+
+(defn- canonical-validate-commit! [operations metadata]
+  (let [metadata (or metadata (default-commit-metadata "store.legacy-api/v1" nil))
+        validation (:validation-attestation metadata)]
+    (when-not (and (map? metadata)
+                   (string? (:producer metadata))
+                   (pos? (count (:producer metadata)))
+                   (string? (:shape-schema-id metadata))
+                   (pos? (count (:shape-schema-id metadata)))
+                   (or (nil? (:profile metadata))
+                       (and (string? (:profile metadata))
+                            (pos? (count (:profile metadata)))))
+                   (map? validation)
+                   (string? (:validator validation))
+                   (keyword? (:result validation))
+                   (string? (:attestation validation)))
+      (throw (ex-info
+              "store: canonical commit validation rejected the write"
+              {:type :canonical-commit-rejected
+               :fram/code :canonical-commit-rejected
+               :metadata metadata})))
+    (assoc metadata
+           :validation-attestation
+           {:validator canonical-validator
+            :result :accepted
+            :attestation canonical-validator})))
 
 (defn- fail! [code message data]
   (throw (ex-info message (assoc data :type code :fram/code code))))
@@ -1812,9 +1849,10 @@
       (fail! :invalid-term "actor must be a Term" {:actor (:actor request)}))
     (vec (concat per-source tx-metadata))))
 
-(defn- append-and-replay! [db sequence operations]
+(defn- append-and-replay! [db sequence operations metadata]
   (let [frame (term-store/transaction-frame sequence operations)
         serializable {:tx-seq sequence
+                      :commit-metadata metadata
                       :operations (mapv operation-map (range) operations)}]
     (if *deferred-frames*
       (swap! *deferred-frames* conj serializable)
@@ -1911,12 +1949,15 @@
                 source-operations (mapv commit-operation! operations)
                 metadata (metadata-operations db tx-coordinate operations request)
                 all-operations (into source-operations metadata)
+                commit-metadata (canonical-validate-commit!
+                                 all-operations (:commit-metadata request))
                 before (term-store/operation-count context)
                 ;; A store is an identity: the rollback point has to be a fork
                 ;; taken before append-and-replay! mutates the live one.
                 before-store (term-store/fork-state @context)]
             (try
-              (let [committed (append-and-replay! db sequence all-operations)
+              (let [committed (append-and-replay!
+                               db sequence all-operations commit-metadata)
                     events (occurrences-range
                             db before (+ before (count source-operations)))
                     event-coordinates

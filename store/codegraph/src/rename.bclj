@@ -78,7 +78,12 @@
     (swap! file->nodes assoc src (vec (get loaded :nodes)))
     (reset! next-offset (inc (int (get loaded :top))))
     (when (pos? (count (vec (get loaded :operations))))
-      (c/commit-transaction! ctx (vec (get loaded :operations))))
+      (c/commit-boundary!
+       ctx
+       (vec (get loaded :operations))
+       (c/commit-metadata "store.codegraph/rename-load-v1"
+                          "store/CommitOperationV1"
+                          "codegraph-v1")))
     src))
 
 ;; A snapshot of the live view, keyed by subject; every read below goes through
@@ -205,7 +210,12 @@
                                         (and (not (contains? target-nodes node))
                                           (symbol-leaf? index node))))
                              targets))
-          _edit (when (pos? (count operations)) (c/commit-transaction! ctx operations))
+          _edit (when (pos? (count operations))
+                  (c/commit-boundary!
+                   ctx operations
+                   (c/commit-metadata "store.codegraph/rename-v1"
+                                      "store/CommitOperationV1"
+                                      "codegraph-v1")))
           projected (live-index ctx)
           outs (mapv (fn [(s String)] String (out-path s)) srcs)]
       (doseq [i (range (count srcs))]

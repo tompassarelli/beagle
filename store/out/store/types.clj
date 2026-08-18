@@ -193,6 +193,24 @@
 
 (defn commitoperation-proposition [r] (:proposition r))
 
+(defrecord CommitValidationAttestation [validator result attestation])
+
+(defn commitvalidationattestation-validator [r] (:validator r))
+
+(defn commitvalidationattestation-result [r] (:result r))
+
+(defn commitvalidationattestation-attestation [r] (:attestation r))
+
+(defrecord CommitMetadata [producer shape-schema-id profile validation-attestation])
+
+(defn commitmetadata-producer [r] (:producer r))
+
+(defn commitmetadata-shape-schema-id [r] (:shape-schema-id r))
+
+(defn commitmetadata-profile [r] (:profile r))
+
+(defn commitmetadata-validation-attestation [r] (:validation-attestation r))
+
 (defrecord TransactionFrame [sequence operations])
 
 (defn transactionframe-sequence [r] (:sequence r))
@@ -259,6 +277,12 @@
 
 (defn ^Boolean commit-operation? [v]
   (instance? CommitOperation v))
+
+(defn ^Boolean commit-validation-attestation? [v]
+  (instance? CommitValidationAttestation v))
+
+(defn ^Boolean commit-metadata? [v]
+  (instance? CommitMetadata v))
 
 (defn ^Boolean transaction-frame? [v]
   (instance? TransactionFrame v))

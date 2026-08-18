@@ -527,7 +527,18 @@
           committed
           (when (seq operations)
             (cancelled! cancellation)
-            (database/commit! db {:base base :operations operations}))]
+            (database/commit!
+             db
+             {:base base
+              :operations operations
+              :commit-metadata
+              {:producer "store.rpc/v2"
+               :shape-schema-id "store/CommitOperationV1"
+               :profile "framrpc-v2"
+               :validation-attestation
+               {:validator "store/canonical-validator-v1"
+                :result :pending
+                :attestation "store/canonical-validator-v1"}}}))]
       (when (:reject committed)
         (server-fail! :rpc/conflict "expected-version lost its commit race" {}))
       payload)))

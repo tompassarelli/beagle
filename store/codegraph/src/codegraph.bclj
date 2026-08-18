@@ -169,7 +169,12 @@
                            (c/assert-operation
                              (t/triple (node-term (nth e 0)) edge-pred (node-term (nth e 1)))))
                      edges)
-        _load (when (pos? (count operations)) (c/commit-transaction! ctx operations))
+        _load (when (pos? (count operations))
+                (c/commit-boundary!
+                 ctx operations
+                 (c/commit-metadata "store.codegraph/closure-v1"
+                                    "store/CommitOperationV1"
+                                    "codegraph-v1")))
         t0 (System/currentTimeMillis)
         db (d/run-rules! (c/live-propositions ctx)
              [(d/rule "reaches"

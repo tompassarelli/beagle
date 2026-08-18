@@ -227,7 +227,12 @@
           [(store/retract-operation (leasestate-proposition prior))
            (store/assert-operation proposition)])]
     (do
-      (store/commit-transaction! root operations)
+      (store/commit-boundary!
+       root
+       operations
+       (store/commit-metadata "store.lease/v1"
+                              "store/CommitOperationV1"
+                              "lease-v1"))
       (schema/refresh! session)
       (store/current-sequence root))))
 
@@ -236,8 +241,12 @@
     (if (nil? lease)
       (store/current-sequence root)
       (do
-        (store/commit-transaction!
-         root [(store/retract-operation (leasestate-proposition lease))])
+        (store/commit-boundary!
+         root
+         [(store/retract-operation (leasestate-proposition lease))]
+         (store/commit-metadata "store.lease/v1"
+                                "store/CommitOperationV1"
+                                "lease-v1"))
         (schema/refresh! session)
         (store/current-sequence root)))))
 

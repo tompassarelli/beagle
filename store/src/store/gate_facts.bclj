@@ -236,6 +236,14 @@
       (database/commit!
        database
        {:actor "store.gate-facts/v1"
+        :commit-metadata
+        {:producer "store.gate-facts/v1"
+         :shape-schema-id "store/CommitOperationV1"
+         :profile "gate-facts-v1"
+         :validation-attestation
+         {:validator "store/canonical-validator-v1"
+          :result :pending
+          :attestation "store/canonical-validator-v1"}}
         :operations
         (mapv
          (fn [(proposition Any)] Any

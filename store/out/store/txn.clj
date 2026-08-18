@@ -68,4 +68,4 @@
 (defn commit! [ctx builder]
   (let [current (deref builder)
    pinned (builder-coordinate current)]
-  (if (not (= (t/triple-t1 pinned) (store/space-id ctx))) (throw (ex-info "store: transaction belongs to a different space" {:type :transaction-space-mismatch})) (if (not (= (t/triple-t3 pinned) (store/next-sequence ctx))) (throw (ex-info "store: the store advanced under this transaction" {:type :transaction-sequence-drift :pinned (t/triple-t3 pinned) :observed (store/next-sequence ctx)})) (store/commit-transaction! ctx (builder-operations current))))))
+  (if (not (= (t/triple-t1 pinned) (store/space-id ctx))) (throw (ex-info "store: transaction belongs to a different space" {:type :transaction-space-mismatch})) (if (not (= (t/triple-t3 pinned) (store/next-sequence ctx))) (throw (ex-info "store: the store advanced under this transaction" {:type :transaction-sequence-drift :pinned (t/triple-t3 pinned) :observed (store/next-sequence ctx)})) (store/commit-boundary! ctx (builder-operations current) (store/commit-metadata "store.txn/v1" "store/CommitOperationV1" "store-schema-v1"))))))

@@ -315,6 +315,13 @@
 (defn transaction-frame [sequence operations]
   (if (and (>= sequence 0) (valid-operations? operations)) (t/->TransactionFrame sequence operations) (throw (ex-info "store: transaction frame requires a non-negative sequence and operations" {:type :invalid-transaction-frame}))))
 
+(def ^String canonical-validator "store/canonical-validator-v1")
+
+(def ^String canonical-shape-schema-id "store/CommitOperationV1")
+
+(defn commit-metadata [^String producer ^String shape-schema-id profile]
+  (t/->CommitMetadata producer shape-schema-id profile (t/->CommitValidationAttestation canonical-validator :pending canonical-validator)))
+
 (defn- find-active-bucket-position [store handle]
   (let [slots (store-active-slots store)
    buckets (store-active-buckets store)
@@ -436,13 +443,21 @@
   (append-valid-transaction! ctx sequence operations)
   (transaction-replay-ok)))))
 
-(defn- append-transaction! [ctx sequence operations]
+(defn- append-transaction! [ctx sequence operations metadata]
   (let [before (deref ctx)]
-  (if (not (valid-operations? operations)) (throw (ex-info "store: transaction requires at least one valid operation" {:type :invalid-transaction-frame})) (if (< sequence (store-next-sequence before)) (throw (ex-info "store: transaction sequence must advance within its space" {:type :nonmonotonic-transaction-sequence})) (let [final-store (append-valid-transaction! ctx sequence operations)]
+  (if (not (and (valid-operations? operations) (t/commit-metadata? metadata))) (throw (ex-info "store: transaction requires at least one valid operation" {:type :invalid-transaction-frame})) (if (< sequence (store-next-sequence before)) (throw (ex-info "store: transaction sequence must advance within its space" {:type :nonmonotonic-transaction-sequence})) (let [final-store (append-valid-transaction! ctx sequence operations)]
   (t/transaction-coordinate (t/termstore-space-id final-store) sequence))))))
 
+(defn- canonical-validate-commit! [operations metadata]
+  (let [attestation (t/commitmetadata-validation-attestation metadata)]
+  (if (and (valid-operations? operations) (t/commit-metadata? metadata) (string? (t/commitmetadata-producer metadata)) (pos? (count (t/commitmetadata-producer metadata))) (string? (t/commitmetadata-shape-schema-id metadata)) (pos? (count (t/commitmetadata-shape-schema-id metadata))) (or (nil? (t/commitmetadata-profile metadata)) (and (string? (t/commitmetadata-profile metadata)) (pos? (count (t/commitmetadata-profile metadata))))) (t/commit-validation-attestation? attestation)) (t/->CommitMetadata (t/commitmetadata-producer metadata) (t/commitmetadata-shape-schema-id metadata) (t/commitmetadata-profile metadata) (t/->CommitValidationAttestation canonical-validator :accepted canonical-validator)) (throw (ex-info "store: canonical commit validation rejected the write" {:type :canonical-commit-rejected})))))
+
+(defn commit-boundary! [ctx operations metadata]
+  (let [validated (canonical-validate-commit! operations metadata)]
+  (append-transaction! ctx (store-next-sequence (deref ctx)) operations validated)))
+
 (defn commit-transaction! [ctx operations]
-  (append-transaction! ctx (store-next-sequence (deref ctx)) operations))
+  (commit-boundary! ctx operations (commit-metadata "store.legacy-api/v1" canonical-shape-schema-id nil)))
 
 (defn ^TransactionReplayResult replay-transaction-result! [ctx frame]
   (if (and (t/transaction-frame? frame) (and (>= (t/transactionframe-sequence frame) 0) (valid-operations? (t/transactionframe-operations frame)))) (append-transaction-result! ctx (t/transactionframe-sequence frame) (t/transactionframe-operations frame)) (transaction-replay-error :invalid-transaction-frame "store: invalid transaction frame")))
@@ -469,7 +484,7 @@
   (transaction-replay-ok))))))
 
 (defn replay-transaction! [ctx frame]
-  (if (and (t/transaction-frame? frame) (and (>= (t/transactionframe-sequence frame) 0) (valid-operations? (t/transactionframe-operations frame)))) (append-transaction! ctx (t/transactionframe-sequence frame) (t/transactionframe-operations frame)) (throw (ex-info "store: invalid transaction frame" {:type :invalid-transaction-frame}))))
+  (if (and (t/transaction-frame? frame) (and (>= (t/transactionframe-sequence frame) 0) (valid-operations? (t/transactionframe-operations frame)))) (append-transaction! ctx (t/transactionframe-sequence frame) (t/transactionframe-operations frame) (commit-metadata "store.replay/v1" canonical-shape-schema-id nil)) (throw (ex-info "store: invalid transaction frame" {:type :invalid-transaction-frame}))))
 
 (defn- occurrence-at [store operation-position]
   (let [row (nth (store-operations store) operation-position)]

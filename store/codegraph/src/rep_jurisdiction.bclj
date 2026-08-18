@@ -118,7 +118,12 @@
                                              (c/assert-operation
                                                (t/triple nm hamt-pred hamt-mark)))
                                        (vec hamt-names))))
-        (_load Any) (when (pos? (count operations)) (c/commit-transaction! gctx operations))
+        (_load Any) (when (pos? (count operations))
+                      (c/commit-boundary!
+                       gctx operations
+                       (c/commit-metadata "store.codegraph/jurisdiction-load-v1"
+                                          "store/CommitOperationV1"
+                                          "codegraph-v1")))
         (db Any) (d/run-rules! (c/live-propositions gctx)
                   [(d/rule "forces"
                      [(d/variable "x")]
@@ -157,7 +162,12 @@
       "module(s)")
     (let [(ctx Any) (c/new-term-store space-id)
           (operations (Vec Any)) (regime-operations rep-defs)
-          (_load Any) (when (pos? (count operations)) (c/commit-transaction! ctx operations))]
+          (_load Any) (when (pos? (count operations))
+                        (c/commit-boundary!
+                         ctx operations
+                         (c/commit-metadata "store.codegraph/jurisdiction-load-v1"
+                                            "store/CommitOperationV1"
+                                            "codegraph-v1")))]
       (println "\n---- Q1. defs that SHIP THE HAMT (pull persistent runtime) ----")
       (doseq [nm (defs-with-regime ctx "hamt")]
         (println "  HAMT  " nm))

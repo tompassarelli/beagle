@@ -84,15 +84,25 @@
         (operations (Vec Any)) (mapv (fn [(line String)] Any (line->operation line))
                                 (filterv (fn [(line String)] Bool (str/starts-with? line "["))
                                   lines))
-        (_load Any) (when (pos? (count operations)) (c/commit-transaction! ctx operations))
+        (_load Any) (when (pos? (count operations))
+                      (c/commit-boundary!
+                       ctx operations
+                       (c/commit-metadata "store.codegraph/supersession-load-v1"
+                                          "store/CommitOperationV1"
+                                          "codegraph-v1")))
         (old-proposition Any) (first-sym-value-proposition ctx "red")
         (node Any) (t/triple-t1 old-proposition)
         (new-proposition Any) (t/triple node "v" "crimson")
         (occurrences-before (Vec Any)) (c/occurrences ctx)
         (old-occurrence Any)
         (assertion-occurrence-of occurrences-before old-proposition)
-        (_edit Any) (c/commit-transaction! ctx [(c/retract-operation old-proposition)
-                                               (c/assert-operation new-proposition)])
+        (_edit Any) (c/commit-boundary!
+                     ctx
+                     [(c/retract-operation old-proposition)
+                      (c/assert-operation new-proposition)]
+                     (c/commit-metadata "store.codegraph/supersession-v1"
+                                        "store/CommitOperationV1"
+                                        "codegraph-v1"))
         (occurrences (Vec Any)) (c/occurrences ctx)
         (new-occurrence Any) (assertion-occurrence-of occurrences new-proposition)
         (withdrawal Any) (withdrawal-of ctx old-occurrence)]
