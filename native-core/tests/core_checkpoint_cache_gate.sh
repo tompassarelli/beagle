@@ -31,8 +31,8 @@ trap cleanup EXIT
 cache="$work/cache"
 source_file="$work/checkpoint-fixture.bgl"
 mkdir -p "$work/out-cold" "$work/out-seed" "$work/out-resume" \
-    "$work/out-qbe-resume" "$work/out-invalidated" "$work/out-corrupt" \
-    "$work/out-legacy"
+    "$work/out-attested-c17" "$work/out-qbe-resume" \
+    "$work/out-invalidated" "$work/out-corrupt" "$work/out-legacy"
 
 write_fixture() {
     local value="$1"
@@ -95,6 +95,23 @@ cold_early_key="$(sed -n \
     "$work/cold.stderr")"
 [[ "$cold_early_key" =~ ^[0-9a-f]{64}$ ]] || {
     echo "core_checkpoint_cache_gate.sh: cold reference omitted its early key" >&2
+    exit 1
+}
+
+timeout --foreground 180s nice -n 19 env \
+    BEAGLE_CORE_BUILD_CACHE="$cache" \
+    "$repo/bin/beagle-build-core" --materializer c17 --materializer qbe \
+    --out "$work/out-attested-c17" "$source_file" \
+    >"$work/attested-c17.stdout" 2>"$work/attested-c17.stderr"
+grep -Eq '^beagle build: core-c17-attestation HIT [0-9a-f]{64} -> [0-9a-f]{64}$' \
+    "$work/attested-c17.stderr" || {
+    echo "core_checkpoint_cache_gate.sh: combined projection did not reuse C17's keyed PASS" >&2
+    exit 1
+}
+[[ -f "$work/out-attested-c17/module_0.c" &&
+   -f "$work/out-attested-c17/module_0.h" &&
+   -f "$work/out-attested-c17/module_0.ssa" ]] || {
+    echo "core_checkpoint_cache_gate.sh: attested C17 projection omitted outputs" >&2
     exit 1
 }
 
