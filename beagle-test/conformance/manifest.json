@@ -9,182 +9,1841 @@
       "path": "corpus/decided/alarm-bell-e003-number-alias-nominal.json",
       "status": "DECIDED",
       "sha256": "2dc3876e4bb920f648b6249328b86dce630e7531b4dc9927dc7e92725c44129b",
-      "coverage": ["ALARM-BELL", "type-checking", "diagnostic"]
+      "coverage": ["ALARM-BELL","type-checking","diagnostic"]
     },
     {
       "caseId": "alarm-bell-namespace-to-module-path",
       "path": "corpus/decided/alarm-bell-namespace-to-module-path.json",
       "status": "DECIDED",
       "sha256": "ece4458d8d9881d9ba262d2631cacca24837a7bb3696ef7fc231a5dea32aa190",
-      "coverage": ["ALARM-BELL", "module-emission", "host-leakage"]
+      "coverage": ["ALARM-BELL","module-emission","host-leakage"]
     },
     {
       "caseId": "hl-collection-ordering-core",
       "path": "corpus/decided/hl-collection-ordering-core.json",
       "status": "DECIDED",
       "sha256": "f1278fa3abf5be0e9b26455935daa902f1f4b0f5b829692a07afc6c6f38ff9c8",
-      "coverage": ["HOST-LEAKAGE", "HL-COLLECTION-ORDERING", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
     },
     {
       "caseId": "hl-collection-ordering-hosted-js",
       "path": "corpus/decided/hl-collection-ordering-hosted-js.json",
       "status": "DECIDED",
       "sha256": "47088342884f594934e6be4c0d703f1d2a82c59ca72cf3bf22b5882699f4495d",
-      "coverage": ["HOST-LEAKAGE", "HL-COLLECTION-ORDERING", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","hosted-js"]
     },
     {
       "caseId": "hl-equality-hashing-core",
       "path": "corpus/decided/hl-equality-hashing-core.json",
       "status": "DECIDED",
       "sha256": "0612ef9086fb781f1f6d4b8120c700920c456dd82f293d2f181d78e9a54cdd51",
-      "coverage": ["HOST-LEAKAGE", "HL-EQUALITY-HASHING", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
     },
     {
       "caseId": "hl-equality-hashing-hosted-js",
       "path": "corpus/decided/hl-equality-hashing-hosted-js.json",
       "status": "DECIDED",
       "sha256": "b891283123ceaaa0a38bbf0e5c574deef9a8be25cb28fdcb2ef5ac2be9c4a10b",
-      "coverage": ["HOST-LEAKAGE", "HL-EQUALITY-HASHING", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","hosted-js"]
     },
     {
       "caseId": "hl-host-macro-expansion-core",
       "path": "corpus/decided/hl-host-macro-expansion-core.json",
       "status": "DECIDED",
       "sha256": "e50d069adb9806b7464776e7b317d951a0dfbe0eff32d29e34daed96925b0a25",
-      "coverage": ["HOST-LEAKAGE", "HL-HOST-MACRO-EXPANSION", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
     },
     {
       "caseId": "hl-host-macro-expansion-hosted-clj",
       "path": "corpus/decided/hl-host-macro-expansion-hosted-clj.json",
       "status": "DECIDED",
       "sha256": "abe928473ead7b26453abfd8efc4c163d3fb84f71dfe8abb744a41f686f66cfc",
-      "coverage": ["HOST-LEAKAGE", "HL-HOST-MACRO-EXPANSION", "hosted-clj"]
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","hosted-clj"]
     },
     {
       "caseId": "hl-host-macro-expansion-hosted-js",
       "path": "corpus/decided/hl-host-macro-expansion-hosted-js.json",
       "status": "DECIDED",
       "sha256": "db1bca1feeaa68d90ce0de7fb67b8557e6cc7b09b5aa8bc8107cbf080d6402fb",
-      "coverage": ["HOST-LEAKAGE", "HL-HOST-MACRO-EXPANSION", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","hosted-js"]
     },
     {
       "caseId": "hl-native-core-gc-ownership-core",
       "path": "corpus/decided/hl-native-core-gc-ownership-core.json",
       "status": "DECIDED",
       "sha256": "871612bc082c4cafc153aac9fe030ab941e622819d2840c1f3ac6bae2f2778a9",
-      "coverage": ["HOST-LEAKAGE", "HL-NATIVE-CORE-GC-OWNERSHIP", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","core"]
     },
     {
       "caseId": "hl-native-core-gc-ownership-hosted-js",
       "path": "corpus/decided/hl-native-core-gc-ownership-hosted-js.json",
       "status": "DECIDED",
       "sha256": "e0736d293be5650b9721ae099ce44eb2cbefc9bb9d1aaa7f0c491a4929c820f6",
-      "coverage": ["HOST-LEAKAGE", "HL-NATIVE-CORE-GC-OWNERSHIP", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","hosted-js"]
     },
     {
       "caseId": "hl-number-semantics-clj",
       "path": "corpus/decided/hl-number-semantics-clj.json",
       "status": "DECIDED",
       "sha256": "f07b738c8f3bd2fd6d6e261a8ddbc7103343257f42c042133ab6bd9e68bc332e",
-      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "hosted-clj"]
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","hosted-clj"]
     },
     {
       "caseId": "hl-number-semantics-core",
       "path": "corpus/decided/hl-number-semantics-core.json",
       "status": "DECIDED",
       "sha256": "d208f7de51b291e97000a539533533ab982958876de6a86d4968463f22d4327a",
-      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
     },
     {
       "caseId": "hl-number-semantics-js",
       "path": "corpus/decided/hl-number-semantics-js.json",
       "status": "DECIDED",
       "sha256": "26a4b0295f3c879388b5590aa069a1dcfdc104f686cb9a73f197ca9138d18b58",
-      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","hosted-js"]
     },
     {
       "caseId": "hl-number-semantics-nix",
       "path": "corpus/decided/hl-number-semantics-nix.json",
       "status": "DECIDED",
       "sha256": "dd3a615517e11c176871900d96ce18f501b229cabc00a43fd8cd7791f21e796f",
-      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "hosted-nix"]
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","hosted-nix"]
     },
     {
       "caseId": "hl-symbol-behavior-core",
       "path": "corpus/decided/hl-symbol-behavior-core.json",
       "status": "DECIDED",
       "sha256": "4396b41f0c4cdd02f7121a7f0ffd2fa1685580cb879440fbff7f30d85291ea69",
-      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","core"]
     },
     {
       "caseId": "hl-symbol-behavior-hosted-clj",
       "path": "corpus/decided/hl-symbol-behavior-hosted-clj.json",
       "status": "DECIDED",
       "sha256": "79284d870117bfa4da9296d50a3262fbd18f226a064906e31f3972cfb73af7d0",
-      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "hosted-clj"]
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","hosted-clj"]
     },
     {
       "caseId": "hl-symbol-behavior-hosted-js",
       "path": "corpus/decided/hl-symbol-behavior-hosted-js.json",
       "status": "DECIDED",
       "sha256": "186fbc098534bedf4d610cc295c6c118795dbb207c9326eca9f49fd63719d4c4",
-      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","hosted-js"]
     },
     {
       "caseId": "hl-symbol-behavior-hosted-nix",
       "path": "corpus/decided/hl-symbol-behavior-hosted-nix.json",
       "status": "DECIDED",
       "sha256": "9a16d5d60187acbaa3d54c19987571072e1f000c731f7cc86bcb44e95866a23c",
-      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "hosted-nix"]
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","hosted-nix"]
     },
     {
       "caseId": "hl-truthiness-core",
       "path": "corpus/decided/hl-truthiness-core.json",
       "status": "DECIDED",
       "sha256": "7c737d75040d65bf4fb7ab05055c162f2d4a04ccee5df32a180fcf1bbba6c8c5",
-      "coverage": ["HOST-LEAKAGE", "HL-TRUTHINESS", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
     },
     {
       "caseId": "hl-truthiness-hosted-clj",
       "path": "corpus/decided/hl-truthiness-hosted-clj.json",
       "status": "DECIDED",
       "sha256": "d0f2c7c0cf17686d8a25bd0fa8437db5e7b23f3b41d449d8f42e219fb6f289fe",
-      "coverage": ["HOST-LEAKAGE", "HL-TRUTHINESS", "hosted-clj"]
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","hosted-clj"]
     },
     {
       "caseId": "hl-truthiness-hosted-js",
       "path": "corpus/decided/hl-truthiness-hosted-js.json",
       "status": "DECIDED",
       "sha256": "2229fdbc47618e01863ef292c82551f618e68a3fc5b9d8a607c72bee0f9fe23c",
-      "coverage": ["HOST-LEAKAGE", "HL-TRUTHINESS", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","hosted-js"]
     },
     {
       "caseId": "hl-unspecified-behavior-as-spec-core",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-core.json",
       "status": "DECIDED",
       "sha256": "081e0e06f7f793b5771497936b3c997ad40b62ec4cf81d37b5f58377eb5de5aa",
-      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "core"]
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
     },
     {
       "caseId": "hl-unspecified-behavior-as-spec-hosted-js",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-hosted-js.json",
       "status": "DECIDED",
       "sha256": "fd64a74b7ac1caaee498a66349f8c311ae151ca043392e60c1b599777d869fd4",
-      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "hosted-js"]
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","hosted-js"]
     },
     {
       "caseId": "hl-unspecified-behavior-as-spec-hosted-racket",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-hosted-racket.json",
       "status": "DECIDED",
       "sha256": "4972141e36198aef349dabfab15bb273e10df4d17c55ac7486dcf5e17470677f",
-      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "hosted-racket"]
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","hosted-racket"]
     },
     {
       "caseId": "hl-unspecified-behavior-as-spec-native-core",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-native-core.json",
       "status": "DECIDED",
       "sha256": "c82009d6747c273cbddd7ef2a9767ada43709a6e6851504e87cc6c66ad35c6d6",
-      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "native-core"]
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","native-core"]
+    },
+    {
+      "caseId": "div-and-allocation-minus-representation",
+      "path": "corpus/decided/div-and-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "4217b47efafdb05b0f958537c0d1f32b5fb499083324534cb9d5362e2855c77d",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-and-effects",
+      "path": "corpus/decided/div-and-effects.json",
+      "status": "DECIDED",
+      "sha256": "74262408035d13e562972807a1b200cb4b39cfa4de6f5446408fea94a13da61d",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-and-evaluation-minus-order",
+      "path": "corpus/decided/div-and-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "b54f3f6c32efee56f04b03e135a20674832066d1918970e7dca081da52f3dbbc",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-and-failure-minus-behavior",
+      "path": "corpus/decided/div-and-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "eac147f03092315d83e424473a67594a685985e59a720acd63b6178f60001af4",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-and-identity-minus-equality",
+      "path": "corpus/decided/div-and-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "0745efb75eab7322ceb264a28dd82420e9ab687ac03db3123c9e30f129cdb1bf",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-and-strictness-minus-laziness",
+      "path": "corpus/decided/div-and-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "d055bb74076e266f539fec8c65d59b200dbdc9f30029db0f94938ff53c7bca6e",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-array-minus-map-allocation-minus-representation",
+      "path": "corpus/decided/div-array-minus-map-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "a0b6af8c6a87bbf56623e8cd9f9b4a7e6a462f45ab17c752e48262f9b25df642",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-array-minus-map-evaluation-minus-order",
+      "path": "corpus/decided/div-array-minus-map-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "a23881bbb095544278de9ab42cc77fe17c963979c4a65049c4bb97d25bfc1eca",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-array-minus-map-strictness-minus-laziness",
+      "path": "corpus/decided/div-array-minus-map-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "daf3c0df742324bdef046fba2fc24703c9f35728c2144c5a5e2ca4d30f081798",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-assoc-failure-minus-behavior",
+      "path": "corpus/decided/div-assoc-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "dda1b325bfb809c783c9419d3605738fc851fb95d959f145dfb9816c4bce02ee",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-await-effects",
+      "path": "corpus/decided/div-await-effects.json",
+      "status": "DECIDED",
+      "sha256": "ad6b9e3c2123e1babc6ac0d061353e89c5e69778026996ef0962cdf59e2028b7",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-await-evaluation-minus-order",
+      "path": "corpus/decided/div-await-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "23d9f3e275905f4aceb713613775c7b236a5116322008613afb3feb1f080c428",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-await-strictness-minus-laziness",
+      "path": "corpus/decided/div-await-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "f8fc9ac885093ee210eef3d804497d542fbd4af0213f53b3c143439d0f95371c",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-bgl-slash-promote-allocation-minus-representation",
+      "path": "corpus/decided/div-bgl-slash-promote-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "3b0c8dd4a3cbb8d3bd62a981f6d2c4186a99a1ed0006b1f07ae3653d49574c44",
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","core"]
+    },
+    {
+      "caseId": "div-bgl-slash-promote-effects",
+      "path": "corpus/decided/div-bgl-slash-promote-effects.json",
+      "status": "DECIDED",
+      "sha256": "a7f8012f9fcc3d1a1744db32fae6405416ba421ed46b5d298d4fdc157e1a6ba8",
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","core"]
+    },
+    {
+      "caseId": "div-bgl-slash-promote-evaluation-minus-order",
+      "path": "corpus/decided/div-bgl-slash-promote-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "2cb5961f9ad71467eeac3925dfc552501ab1916436920e9174a8ad7c9a75804d",
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","core"]
+    },
+    {
+      "caseId": "div-bgl-slash-promote-failure-minus-behavior",
+      "path": "corpus/decided/div-bgl-slash-promote-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "c63bdd59ec008d1145e1f1fc2dc38e712df6f652593059141e5f6004570cb541",
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","core"]
+    },
+    {
+      "caseId": "div-bgl-slash-promote-identity-minus-equality",
+      "path": "corpus/decided/div-bgl-slash-promote-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "6d5ed30c15445601e8b1e8f4b23c38249acb5cb73ef763781e789ad2196604e9",
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","core"]
+    },
+    {
+      "caseId": "div-bgl-slash-promote-strictness-minus-laziness",
+      "path": "corpus/decided/div-bgl-slash-promote-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "1dd5f2a788c586e64bc49d6361113c19558fe582172f3fc798a49edeff8ba801",
+      "coverage": ["HOST-LEAKAGE","HL-NATIVE-CORE-GC-OWNERSHIP","core"]
+    },
+    {
+      "caseId": "div-boolean-allocation-minus-representation",
+      "path": "corpus/decided/div-boolean-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "e64c4b4ba2ab430fb087acbba3cc5511669029425b1f590538720328b9ca0253",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-boolean-effects",
+      "path": "corpus/decided/div-boolean-effects.json",
+      "status": "DECIDED",
+      "sha256": "d4c069e23812accdfca17eb903f3c24b5524f6413698f2f5a4204abbf34ceb89",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-boolean-evaluation-minus-order",
+      "path": "corpus/decided/div-boolean-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "daba2c37d90db8561811b34e492548488a9c06cf270d762f183581b5c16d7889",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-boolean-failure-minus-behavior",
+      "path": "corpus/decided/div-boolean-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "9d84e4481c1903644c0fa8008a6f5dcb8ab9ea4ce15b576afea85e4379bcc6e8",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-boolean-identity-minus-equality",
+      "path": "corpus/decided/div-boolean-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "a89b93aa7a946d35731ec07903b7006c64936505aaba6a5656c31c679171301f",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-boolean-strictness-minus-laziness",
+      "path": "corpus/decided/div-boolean-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "34fc4f7b41f849d26706f61d3e22f7f62b1a2ca57d17048b4b06757f8f37f950",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-cond-allocation-minus-representation",
+      "path": "corpus/decided/div-cond-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "6ad01cff415ccf579774eb9b36b5c792bcc02383a29e1a41ee8f7f0357c48869",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-cond-effects",
+      "path": "corpus/decided/div-cond-effects.json",
+      "status": "DECIDED",
+      "sha256": "dd957bc37bb47b5cc7775b949c7e47f1bce7d4e4316f0c5d57aa27cd4c5ca9cd",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-cond-evaluation-minus-order",
+      "path": "corpus/decided/div-cond-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "8e77a52735992d63eae179d58c891018f99da3645e65c3eecda1f35b58924721",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-cond-failure-minus-behavior",
+      "path": "corpus/decided/div-cond-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "7baa00cbc2a481661714988d96bddabc083c9b101c727e855638fa0e5e7d7d37",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-cond-identity-minus-equality",
+      "path": "corpus/decided/div-cond-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "597cd6878286c4b91ac45de0e36a76cdd42ad465663be11d287bf385cbecda35",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-cond-strictness-minus-laziness",
+      "path": "corpus/decided/div-cond-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "cdf7007ca2e8525e3008d6b45aa93d5239471994a67453f1401848964c72184a",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-conj-failure-minus-behavior",
+      "path": "corpus/decided/div-conj-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "75ce7e138ad1f68d3af739802b9b980fe5a4b8f660b978ad0ff1032a5baabb5c",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-dec-allocation-minus-representation",
+      "path": "corpus/decided/div-dec-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "08d7f85e6987915c8b33e9dfd1d7958bae855ecfc1a192847bf07472e2f2d93d",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-dec-effects",
+      "path": "corpus/decided/div-dec-effects.json",
+      "status": "DECIDED",
+      "sha256": "4762262e297f3d7b9f457912b3900acfb18b6b1c462acd12ceba3727cfe9929e",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-dec-evaluation-minus-order",
+      "path": "corpus/decided/div-dec-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "faeec4e8bc96c16241f5b4a83ff71b39d731650175c38be28d5f6964aed47d28",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-dec-failure-minus-behavior",
+      "path": "corpus/decided/div-dec-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "5bd14c1f8dbb83cc658231f200e1d33750ecb07491813f7f91a203a4c5b00ad4",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-dec-identity-minus-equality",
+      "path": "corpus/decided/div-dec-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "70bc6e3c546f139ce95abc558a5a59c074fabbd23b868967c43cf8b8779c27cd",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-dec-strictness-minus-laziness",
+      "path": "corpus/decided/div-dec-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "855704775c71b13ccce306e9837ad9aa5b6e30ffab9a6fc56911c93b0636cacf",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-disj-allocation-minus-representation",
+      "path": "corpus/decided/div-disj-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "46785e8ee9729bb24812b375d8669acd94e38e9854e506b61195fadf589eb26c",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-disj-evaluation-minus-order",
+      "path": "corpus/decided/div-disj-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "fb0a7de37a440a8c08a796b9f519f7a5890b2ac4182bfdc90d345062f23fcc01",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-disj-strictness-minus-laziness",
+      "path": "corpus/decided/div-disj-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "ae12344a488d6cbc60ceaac14049aa94bd16c89a0500feb525b1595dab59c80e",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-do-allocation-minus-representation",
+      "path": "corpus/decided/div-do-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "41a3723df4545e740830dda7442931293d456a5ca0fb9c67d2efbc7864fe2519",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-do-effects",
+      "path": "corpus/decided/div-do-effects.json",
+      "status": "DECIDED",
+      "sha256": "85e9f909d132e38647fe182de50aaf1233c0521c775964d1b6bd660aa973edcb",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-do-evaluation-minus-order",
+      "path": "corpus/decided/div-do-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "1a0539d608296751518ddd5e4a9121a800dca8daa51b9746c0a8fa272b56a671",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-do-strictness-minus-laziness",
+      "path": "corpus/decided/div-do-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "5dcecd15eab2bf8c427aa2351464b8208ef49dc43df7f2b1894bac33befcdecb",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-double-allocation-minus-representation",
+      "path": "corpus/decided/div-double-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "48d1d7ac12a59931ea9b6bc2be3209bfb9d808a2338ed02e16d902978ba14c46",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-double-effects",
+      "path": "corpus/decided/div-double-effects.json",
+      "status": "DECIDED",
+      "sha256": "9a6a8af8c03c6183c494c8420a5807453cd6b330b78d7fde74af4c58c4ec09fd",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-double-evaluation-minus-order",
+      "path": "corpus/decided/div-double-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "a19819595103843b2fa996ebed31adf1e9e3e6d3fe21e12cac5d0eb28bd75d16",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-double-failure-minus-behavior",
+      "path": "corpus/decided/div-double-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "407eb49908b49099dd16a040011a371737a8d807be163982d0222b7aa4a4ab74",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-double-identity-minus-equality",
+      "path": "corpus/decided/div-double-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "7fb40c80bd0705f4fc73fb586861f7e012941c56aa0b2161d6b839a872812861",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-double-strictness-minus-laziness",
+      "path": "corpus/decided/div-double-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "949f0fbb113ded0f189385dc9fe2662dc51241c1826fb932f835d81ce4636144",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-eq-effects",
+      "path": "corpus/decided/div-eq-effects.json",
+      "status": "DECIDED",
+      "sha256": "8eed8f9cf8145856a20dd89db9bdd7670c6ae466ebca5919395bba18453e263b",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-eq-failure-minus-behavior",
+      "path": "corpus/decided/div-eq-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "da971e177d42d92eb1c94193511115af3320c64fa14dd9e8b986a1828e129b8e",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-eq-strictness-minus-laziness",
+      "path": "corpus/decided/div-eq-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "cd10f9560a12bef66624059d8cf1ca5899ba939210c4a44fecd3f4549f8e30c1",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-filter-effects",
+      "path": "corpus/decided/div-filter-effects.json",
+      "status": "DECIDED",
+      "sha256": "54d10267816704892b72e9ded09cb493ef8ce33fd536bf0f7e67b0e45e74d4e6",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-float-minus-from-minus-bits-allocation-minus-representation",
+      "path": "corpus/decided/div-float-minus-from-minus-bits-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "db7389bcb7bb18c917cbc300e6ccf7caba30c6c8c64ca66c74c716db0f2f4700",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-from-minus-bits-effects",
+      "path": "corpus/decided/div-float-minus-from-minus-bits-effects.json",
+      "status": "DECIDED",
+      "sha256": "14b8b52a2d551403e99d9a058aca7ccf00cdf04150a5a57cd238f97e90bc4fad",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-from-minus-bits-evaluation-minus-order",
+      "path": "corpus/decided/div-float-minus-from-minus-bits-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "1b485350f34b9509634fdbbb8cb16b58e8c1670328b3e8e73b569f080497dbed",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-from-minus-bits-failure-minus-behavior",
+      "path": "corpus/decided/div-float-minus-from-minus-bits-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "6e06283d6f495f62aee3134a333ada66849d434b1b44b1f3a7e985fc2bc0ceef",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-from-minus-bits-identity-minus-equality",
+      "path": "corpus/decided/div-float-minus-from-minus-bits-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "9173a59eee33a76052ddbc02618dc5959220316d911e383a017dba17c9f5be5a",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-from-minus-bits-strictness-minus-laziness",
+      "path": "corpus/decided/div-float-minus-from-minus-bits-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "3b590d808a39330a606d1231f5748206f12ac82d42a243fe910d45088d4355ab",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-to-minus-bits-allocation-minus-representation",
+      "path": "corpus/decided/div-float-minus-to-minus-bits-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "80794176aeae6fa85b78b5cea2966b5210d58629baf1f22350f180977b4ebb29",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-to-minus-bits-effects",
+      "path": "corpus/decided/div-float-minus-to-minus-bits-effects.json",
+      "status": "DECIDED",
+      "sha256": "33bc5b27289e7a99a5820a684620938e621a19606e2c8cab6e1eb00c27725026",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-to-minus-bits-evaluation-minus-order",
+      "path": "corpus/decided/div-float-minus-to-minus-bits-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "b3ee0067e86f0d7a342207e77bc25719f0b394902df0144ee31a8601978cc6ea",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-to-minus-bits-failure-minus-behavior",
+      "path": "corpus/decided/div-float-minus-to-minus-bits-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "d2ba83348afc3a66f078fa552e2b24a347be1ff92c085f5108ace49198458935",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-to-minus-bits-identity-minus-equality",
+      "path": "corpus/decided/div-float-minus-to-minus-bits-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "7c053e4e1962c61fa763469b88ac057f6c8cbcdbc7e56de1e3a6fcf623fe3b86",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-float-minus-to-minus-bits-strictness-minus-laziness",
+      "path": "corpus/decided/div-float-minus-to-minus-bits-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "e8bd723cf06797fe3603336f58559f40e323e192db455cb585e01961cd4558b1",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-gensym-evaluation-minus-order",
+      "path": "corpus/decided/div-gensym-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "6b34827a81d526dbe0eea4024bc3300a020dea28edced3d0de54e5fc9492a3bf",
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","core"]
+    },
+    {
+      "caseId": "div-gensym-strictness-minus-laziness",
+      "path": "corpus/decided/div-gensym-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "6f17c04383162910a5f3f08d06d74a6c95134ee745b0ac6a7f33d04a860904b7",
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","core"]
+    },
+    {
+      "caseId": "div-gt-allocation-minus-representation",
+      "path": "corpus/decided/div-gt-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "f460f843b28a8f8c8a889e525a0a6aedd867bcbc0a6541aecdf748926ed0279e",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-gt-effects",
+      "path": "corpus/decided/div-gt-effects.json",
+      "status": "DECIDED",
+      "sha256": "99f527efbe4e40ef395d9370e06e860c2fac636e28f95ed25c259952ba83fa46",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-gt-evaluation-minus-order",
+      "path": "corpus/decided/div-gt-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "2879ff1f08dac21c4b76b2a44b32890d57bd4793eed99bd04276d4d1bc3a7e63",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-gt-failure-minus-behavior",
+      "path": "corpus/decided/div-gt-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "30e87d276112b5c34290587c9e4a34dff7111691eb36677678526e45d20b9442",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-gt-identity-minus-equality",
+      "path": "corpus/decided/div-gt-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "007068adb2fb471ae085a48b5ebfe4e931418d0f25d5b8810e6d390a8aec6c82",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-gt-strictness-minus-laziness",
+      "path": "corpus/decided/div-gt-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "0a575239fffa9abb8c6d545fe5635163089069e64257ddbdf03d8a695e2ff954",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-hash-allocation-minus-representation",
+      "path": "corpus/decided/div-hash-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "b02ab54d29e06f4c2b6e01a2714132e9eda1d31d1581ee670b941b86cc4025b3",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-hash-effects",
+      "path": "corpus/decided/div-hash-effects.json",
+      "status": "DECIDED",
+      "sha256": "c19029f1cfdd9b5abcefba70f218537694d2322fd1e604c7c2e1c6492e4bebc3",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-hash-evaluation-minus-order",
+      "path": "corpus/decided/div-hash-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "8bd176b2273f59f5e68d3ff75e8beccb4093c14581a314efba15b874a422066e",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-hash-failure-minus-behavior",
+      "path": "corpus/decided/div-hash-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "273d47412e1576fcf3ee19bfba4dcf9aae3dc68d44fe652e6a9031f31179f959",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-hash-identity-minus-equality",
+      "path": "corpus/decided/div-hash-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "cd54ebe67192a1f81a3513ce6940708498d15b76f316cb3ac19a9122a3147943",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-map-allocation-minus-representation",
+      "path": "corpus/decided/div-hash-minus-map-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "d6afee7315bf3cc6558f230c35f234275405a59f4930fd5bfac0d3f4aeae2d7b",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-map-evaluation-minus-order",
+      "path": "corpus/decided/div-hash-minus-map-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "f675cf65d5c726288b11f4dd3c05de9ffb380a14b1cc3c32c5536e2d9456d979",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-map-failure-minus-behavior",
+      "path": "corpus/decided/div-hash-minus-map-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "fced91df4ff02585b0f56980fbe81d36222c8d17d334e68aa6952e444c0c517e",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-map-strictness-minus-laziness",
+      "path": "corpus/decided/div-hash-minus-map-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "05547262be50469fa559f70c3ecba4be7f9169fdbbcdeb34c70a1ef8cf521ae1",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-set-allocation-minus-representation",
+      "path": "corpus/decided/div-hash-minus-set-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "6ea8bc46b77674f0d007becdfc20066fc3979979d39b16015be1be0d25488d71",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-set-evaluation-minus-order",
+      "path": "corpus/decided/div-hash-minus-set-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "7a59433a8de851935272b5c182d042fac05b92e1f8d088a797c465bf02dc9b38",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-set-failure-minus-behavior",
+      "path": "corpus/decided/div-hash-minus-set-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "d718ffe8890da9e3f56f119b131c949791ea96fa3461166e822cc60fb27578fb",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-hash-minus-set-strictness-minus-laziness",
+      "path": "corpus/decided/div-hash-minus-set-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "4600e035c7fc772095fd5a9aed54c5779b86378bece401843d065c6d3e239b17",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-hash-strictness-minus-laziness",
+      "path": "corpus/decided/div-hash-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "f53f617996e1f09bda1d25efc368d61719b0d376b0ab729ee600fe0d424b5eca",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-identical-q-failure-minus-behavior",
+      "path": "corpus/decided/div-identical-q-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "9e261df27995f3c70ed930d24f4e6ff8685aa93fd18d3fbcd7f9ccc9defc1f7f",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-if-allocation-minus-representation",
+      "path": "corpus/decided/div-if-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "54808007821980c1c62d166e18bc7fabad9d5c0c44bbb8d175017f27864bbf93",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-if-effects",
+      "path": "corpus/decided/div-if-effects.json",
+      "status": "DECIDED",
+      "sha256": "f80d9d886fabae01c7993509df577921fb7486c5ef25f2bddbf2c320104e727a",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-if-evaluation-minus-order",
+      "path": "corpus/decided/div-if-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "d11917d1a94c3430a959561bfe9151edabe7bfdfb07ba37b01bdff4235e0fc1a",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-if-failure-minus-behavior",
+      "path": "corpus/decided/div-if-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "d5730bf5efb79f8fee41ffa0cd4eff9e1d9652e6d76106ae539005e894e8dab2",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-if-identity-minus-equality",
+      "path": "corpus/decided/div-if-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "bdeee1d87269a88b872d617ab69fbf56bb539703e1136a95335070c19f0b49d5",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-if-strictness-minus-laziness",
+      "path": "corpus/decided/div-if-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "74a1580b3e0d6f8e69230b44ffbb410b4d5745b07e35c6c9b4d4f50d98b42a64",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-inc-allocation-minus-representation",
+      "path": "corpus/decided/div-inc-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "c21f281cc58500f00cf47f26d0c816663cf4129ba98528fa2edaed25f3246f6c",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-inc-effects",
+      "path": "corpus/decided/div-inc-effects.json",
+      "status": "DECIDED",
+      "sha256": "bfc873c07c7f12cf1acf22303ebd0b877fdd0b8c353f687d9c85217f84fd1dba",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-inc-evaluation-minus-order",
+      "path": "corpus/decided/div-inc-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "7c2dcc95486f565b403a6f2b424b934c08f6d5365fd10359c0dbcd5c475cbc22",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-inc-failure-minus-behavior",
+      "path": "corpus/decided/div-inc-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "4ef963b86b3483ad09dbd90a446096aaabdf887651d9119432213839771aa4dc",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-inc-identity-minus-equality",
+      "path": "corpus/decided/div-inc-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "ac68e42f48fc82482ef26f1dbdff52afdc971b6828c5de02f931358f47b0df93",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-inc-strictness-minus-laziness",
+      "path": "corpus/decided/div-inc-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "85a8f0789001fd29749ee75a1eb78184b2422b881d4120243b398eaf164b4483",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-let-allocation-minus-representation",
+      "path": "corpus/decided/div-let-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "83ae0a2d3c9c869c524bb7b76c4a507a7b66580348f6891744e7143bc529863f",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-let-effects",
+      "path": "corpus/decided/div-let-effects.json",
+      "status": "DECIDED",
+      "sha256": "641f330d7868322bf9a44ecbe1239f3259663a833bd7190983fc609d2170f9ae",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-let-evaluation-minus-order",
+      "path": "corpus/decided/div-let-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "21ad416e69b804a1e7fa55ad872284a459d2a124e3ce47f086e6d0aa879e5a96",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-let-strictness-minus-laziness",
+      "path": "corpus/decided/div-let-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "e71f7ec74e5385943036be6ca38ef0ac87609d45a0230bc40a1a337244819243",
+      "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
+    },
+    {
+      "caseId": "div-list-allocation-minus-representation",
+      "path": "corpus/decided/div-list-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "d35c16440a3c2367d8caa9cbb533cf9f6fbf5c3a218575465d962241e3872c8e",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-list-evaluation-minus-order",
+      "path": "corpus/decided/div-list-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "d36f06b341c2d0ab72342143713d11244d7dce98412df811fe343d0d3d2f312f",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-list-strictness-minus-laziness",
+      "path": "corpus/decided/div-list-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "62a91ea2b12cd61a791a43867159f5305e39e4eea19f8849e9c3660e63c9c169",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-long-allocation-minus-representation",
+      "path": "corpus/decided/div-long-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "8bd8064889f0dacde93bc8c47017358e0abf58e6359b36a87f6400d70e4db319",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-long-effects",
+      "path": "corpus/decided/div-long-effects.json",
+      "status": "DECIDED",
+      "sha256": "4f9c2dd7130004c70d2b166fbec00ae59cc81732b0aa6829854e6f26b70cb890",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-long-evaluation-minus-order",
+      "path": "corpus/decided/div-long-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "5ba7a474c928200490861f5601caf8c49c4d9144912f72d147024c64a4bfb6f3",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-long-failure-minus-behavior",
+      "path": "corpus/decided/div-long-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "7a6a114cdfa2498fec4c66cbff137a3b8f2e4e7ada2d6cafde5c4d2fa37008d8",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-long-identity-minus-equality",
+      "path": "corpus/decided/div-long-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "474ead3863cac0560342087adc8198f70fa5921eff258978ba0b6e41ed414c90",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-long-strictness-minus-laziness",
+      "path": "corpus/decided/div-long-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "acda05bf0913c2d9ddd958a8c7e63279a2b42bdc2f57b1e1b2101ce8e692bafd",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-lt-allocation-minus-representation",
+      "path": "corpus/decided/div-lt-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "30f8c0cbc0e9b29aa1b24068b55b10fca888a1f9177596234262c59e66626cd9",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-lt-effects",
+      "path": "corpus/decided/div-lt-effects.json",
+      "status": "DECIDED",
+      "sha256": "394f888b3cfe969eafe3b5c4611b3f5a5674ce474f018d29f2fd5fef904f32ce",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-lt-evaluation-minus-order",
+      "path": "corpus/decided/div-lt-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "8d74b8b8d9f49d8bd75e3d4ca4cea243a1888a7e934d87b7f8ac895e50180f0d",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-lt-failure-minus-behavior",
+      "path": "corpus/decided/div-lt-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "9c14aecada5958a6fb69a77f62b7cc0468c29200ea8f473ea2344cc049c57ec6",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-lt-identity-minus-equality",
+      "path": "corpus/decided/div-lt-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "913c3e79aa3cf2fe20b2ad2171ff1e47b0b130975b1f76469bad95842c023c9b",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-lt-strictness-minus-laziness",
+      "path": "corpus/decided/div-lt-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "5f68be6d507a24ab40623028c7e8e7695553a812f2b4c298a8de9973c6a47ae9",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-map-effects",
+      "path": "corpus/decided/div-map-effects.json",
+      "status": "DECIDED",
+      "sha256": "f979cefbcc60b21cd6365767239e4513c774dfd0ff85195b0fb8dbc2a5563e5e",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-minus-allocation-minus-representation",
+      "path": "corpus/decided/div-minus-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "a92d6237a37318de83053c9125412c88cea72efbaab1256a5482a5a595e34b07",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-effects",
+      "path": "corpus/decided/div-minus-effects.json",
+      "status": "DECIDED",
+      "sha256": "705cb14eaf0940b635dc804f231c5b2fe128d61969b94a9dbf81ed09253972c6",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-evaluation-minus-order",
+      "path": "corpus/decided/div-minus-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "e85c6d73076bb157914fea27d736033a908238a0f0ff920319e7a6f13c0d9c3c",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-failure-minus-behavior",
+      "path": "corpus/decided/div-minus-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "1dfeec83fe47bb1d44fea78bfba9b4c14dcb5bdc74cf896e412ee1f8e34cb906",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-gte-minus-allocation-minus-representation",
+      "path": "corpus/decided/div-minus-gte-minus-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "7957a1ec690f870a3f7276aa7bc60dd581db9cd2938dbd883376948eef41342c",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-gte-minus-effects",
+      "path": "corpus/decided/div-minus-gte-minus-effects.json",
+      "status": "DECIDED",
+      "sha256": "675825be0c1cafb228bc33dbf18d4e57714e201887c875c88be0023b1fb97650",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-gte-minus-evaluation-minus-order",
+      "path": "corpus/decided/div-minus-gte-minus-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "04d16b2e4b5845b7aece8597fcc0a3191bf6df7365919c98d27812fd8c472886",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-gte-minus-failure-minus-behavior",
+      "path": "corpus/decided/div-minus-gte-minus-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "889886ac3bb83a7d3ed9a3ebabe2eb6181fa7101c2672a579e07040dd4a0b3e9",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-gte-minus-identity-minus-equality",
+      "path": "corpus/decided/div-minus-gte-minus-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "58f6ef6564b159620347b2a72974850a705576c4958df0be2a9748b00c3b4c18",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-gte-minus-strictness-minus-laziness",
+      "path": "corpus/decided/div-minus-gte-minus-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "f2ac91caff986617ec02e06f37317ca84a6bd6ee013bebe016133493fd0c5551",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-identity-minus-equality",
+      "path": "corpus/decided/div-minus-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "e7c9776f040c3c79d982b017cbec4a09bcafa4c5c29ac6fbab13fcbcc7f39cbb",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-lte-minus-allocation-minus-representation",
+      "path": "corpus/decided/div-minus-lte-minus-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "634f5323e178f530fe1af3134019288d9149f0b0a53c388abef794997618c7e8",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-lte-minus-effects",
+      "path": "corpus/decided/div-minus-lte-minus-effects.json",
+      "status": "DECIDED",
+      "sha256": "a028437a9bb1a969e301e5133705436fabb5256ce4c20084aefa77911afdb6ea",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-lte-minus-evaluation-minus-order",
+      "path": "corpus/decided/div-minus-lte-minus-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "38f42f9602bca33c5af33695bfd3ebeb47586ef74cb6fe98b937676fe3830c9b",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-lte-minus-failure-minus-behavior",
+      "path": "corpus/decided/div-minus-lte-minus-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "37011a2be8380676c255820165d9359286af2fdb6c726a8bdcefcfabcb7a5031",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-lte-minus-identity-minus-equality",
+      "path": "corpus/decided/div-minus-lte-minus-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "c74c6e6532f713c15602dfcffad2c29ff1225601280b29fc85883b78ec5e49bf",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-lte-minus-strictness-minus-laziness",
+      "path": "corpus/decided/div-minus-lte-minus-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "3f1377e126a98588003c7c65969e1f87770dfd07e39b0515a15ea0ca4922a473",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-minus-strictness-minus-laziness",
+      "path": "corpus/decided/div-minus-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "ce624299c5f3a252e655aa334d330b6d24a57a87c5e7cc65d16d891fa34ac0a2",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-mod-allocation-minus-representation",
+      "path": "corpus/decided/div-mod-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "cf7c4323b61e625c679fdb39001f89cad326bc7358c56570dc13242e75a2c050",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-mod-effects",
+      "path": "corpus/decided/div-mod-effects.json",
+      "status": "DECIDED",
+      "sha256": "19b5df9d46d8b42fdaab4539d4198eefa0c9b95fd63cedd7808f7ce1324b5502",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-mod-evaluation-minus-order",
+      "path": "corpus/decided/div-mod-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "5c904755448fed9d55235a3de2df97486b38d7cc9e443fd7304f90edb5063e57",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-mod-failure-minus-behavior",
+      "path": "corpus/decided/div-mod-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "6dcbfb5276e9077e66fa26e4f932147bbd3d48feaaf970677bc2877b4984e4a4",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-mod-identity-minus-equality",
+      "path": "corpus/decided/div-mod-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "fc75cb08d0cf239b1055b7a129628c135340b7ad888198437ecc4512483b3224",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-mod-strictness-minus-laziness",
+      "path": "corpus/decided/div-mod-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "f764b89ff80a4cfb14699aa5c10e1de3433e1f2b518e72dad4ed2d22be589296",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-monotonic-minus-nanoseconds-effects",
+      "path": "corpus/decided/div-monotonic-minus-nanoseconds-effects.json",
+      "status": "DECIDED",
+      "sha256": "c576b839419feb573fc18e748b81ab3636a9b4cad78acf805bc82181e5696a02",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-monotonic-minus-nanoseconds-evaluation-minus-order",
+      "path": "corpus/decided/div-monotonic-minus-nanoseconds-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "bec4053e5cb1396619c05d7b13ef972574259130017acd5b5d3ce665fa6853ee",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-monotonic-minus-nanoseconds-strictness-minus-laziness",
+      "path": "corpus/decided/div-monotonic-minus-nanoseconds-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "5cbc899b131c05289431c4f998159d781591d34f6599e1d7ee89b532fbace97f",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-not-allocation-minus-representation",
+      "path": "corpus/decided/div-not-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "8d84f89da5e42efdebcfa03d6f03ae3d026b156b0398cfd9106e359b89a6d924",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-not-effects",
+      "path": "corpus/decided/div-not-effects.json",
+      "status": "DECIDED",
+      "sha256": "81285d40d9ff55aa8008ae84009de5f84a63cdbb64f10594fa84e5593c60e0bb",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-not-evaluation-minus-order",
+      "path": "corpus/decided/div-not-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "b376abcb1931cef4adad399c2f543f671ac2a62d605392b4d4606801959231ce",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-not-failure-minus-behavior",
+      "path": "corpus/decided/div-not-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "0596e80d3a4d68e50355391e5c328a09e60e784b0808fab2018587ceb4a40b9f",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-not-identity-minus-equality",
+      "path": "corpus/decided/div-not-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "113c1d74b811513dc5bd545864570b6e07e34348870107a057f905b11356cb83",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-not-strictness-minus-laziness",
+      "path": "corpus/decided/div-not-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "5ba1eb6f2295dbfc46c8adb705e91457fc90fedd4027f5b8a9afc02825d543e5",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-or-allocation-minus-representation",
+      "path": "corpus/decided/div-or-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "33792b14d1fa23b8c069490ede0f30264c834601e6472d58c42e8dfd38a9325a",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-or-effects",
+      "path": "corpus/decided/div-or-effects.json",
+      "status": "DECIDED",
+      "sha256": "954942e5e45654292c33f15057df859677fda081318aa15105cce65660b533e7",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-or-evaluation-minus-order",
+      "path": "corpus/decided/div-or-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "752411af62944c2bf1375fadf6d2f6368adff7579a1d4c9871aa90fb06cd6a09",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-or-failure-minus-behavior",
+      "path": "corpus/decided/div-or-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "35a43eec26783881c5b86278381e847f0304dd72d01504a888e4d743d8e71143",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-or-identity-minus-equality",
+      "path": "corpus/decided/div-or-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "a5274b9c4187ced28d11587d914e46fcbe479c8a675c9ec93e1a072367241273",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-or-strictness-minus-laziness",
+      "path": "corpus/decided/div-or-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "f62fb3747b4d66ac8b00e0c47ce1d43e6514e60b8758561d3619c1e92338226b",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-parse-minus-double-allocation-minus-representation",
+      "path": "corpus/decided/div-parse-minus-double-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "02d3ba8159149f9ee7434e3ac5040cfac3e4eed2e924cf6b68b507af5d79bb09",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-parse-minus-double-effects",
+      "path": "corpus/decided/div-parse-minus-double-effects.json",
+      "status": "DECIDED",
+      "sha256": "51a111d25509d4f6140f48a211e3cc3b33fcb4ec49e24405fa79fca5a1d59891",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-parse-minus-double-evaluation-minus-order",
+      "path": "corpus/decided/div-parse-minus-double-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "041349b8f6f691e90658009eb758cb0dbddc69cc25d815c41a806a905cec7245",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-parse-minus-double-failure-minus-behavior",
+      "path": "corpus/decided/div-parse-minus-double-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "9be93505754ab4cac1bc20d658f266ff71a57b48bbba3254ed7e049f0d43db36",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-parse-minus-double-identity-minus-equality",
+      "path": "corpus/decided/div-parse-minus-double-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "64d45b81f257f3aa550973e396f55cb0e647d24d8bc6af752a238b1936258da6",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-parse-minus-double-strictness-minus-laziness",
+      "path": "corpus/decided/div-parse-minus-double-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "34400c444bab857fb11a37dd5f81857b42a0e0bdae0a467a4d16c8fac2d8d543",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-plus-allocation-minus-representation",
+      "path": "corpus/decided/div-plus-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "db9e8b79bc1f30743ec2fb04e13d96b2a5ed80db9a5400e2cf7ae0471c628e41",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-plus-effects",
+      "path": "corpus/decided/div-plus-effects.json",
+      "status": "DECIDED",
+      "sha256": "7913e6dc80b27bdf60ab6125012c2a6cf8eeb1d085d3cef0de32f42832edcd85",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-plus-evaluation-minus-order",
+      "path": "corpus/decided/div-plus-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "dee86633a68a5e6a37083cad43b3882ea28a7ea558a7ab9efa903748f3f9cc61",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-plus-failure-minus-behavior",
+      "path": "corpus/decided/div-plus-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "0ac095ef601cd127854ad76ffb4a074d7576b9eff5f5af22cc5143a54db07bc1",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-plus-identity-minus-equality",
+      "path": "corpus/decided/div-plus-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "185ba98ca1df77bda90f7799af46916d215e817265dc12374ec1da9b654099bd",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-plus-strictness-minus-laziness",
+      "path": "corpus/decided/div-plus-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "79b47eb896aa84e34d94cfcbc599ddbad68fbf76892dfed7c8b370511dbf41a1",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-quot-allocation-minus-representation",
+      "path": "corpus/decided/div-quot-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "4a364a0e997b7f5103a5234626d40cfe9c72a95c3cdccca5ea423bf18f094fd8",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-quot-effects",
+      "path": "corpus/decided/div-quot-effects.json",
+      "status": "DECIDED",
+      "sha256": "a5cb8c1d7124db3e0e10809cb3a9758ebce19964c5249110fa1db39f35a3b863",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-quot-evaluation-minus-order",
+      "path": "corpus/decided/div-quot-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "bec21f6e83b7e2c1ab82aafa10ba23e21fc655f2d2e6d0a00d6ebd6895f8f1ef",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-quot-failure-minus-behavior",
+      "path": "corpus/decided/div-quot-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "06fb2a93163e76e72b248caf25ec2c6e7ffbdb3935a7ef70fd6163a5725fd503",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-quot-identity-minus-equality",
+      "path": "corpus/decided/div-quot-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "1747968a61b84bf0347f6e20568826d2cd9c832ff8debf9fae74e8ba1244db6e",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-quot-strictness-minus-laziness",
+      "path": "corpus/decided/div-quot-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "fd3e419104540c47b74726ce4c940e39bfd2cb0a0a639cc5522ae39c7e2ce2a9",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-rand-effects",
+      "path": "corpus/decided/div-rand-effects.json",
+      "status": "DECIDED",
+      "sha256": "4464498f074d4bc471a003ab1889ae1b27bce4df2a74f3a6db0f8a66c83b0aa5",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-evaluation-minus-order",
+      "path": "corpus/decided/div-rand-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "fa87e0aa6ea7140b412ffcfff9cb9384fc0facec61bc93b5e9162a56cd1d46c6",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-minus-int-effects",
+      "path": "corpus/decided/div-rand-minus-int-effects.json",
+      "status": "DECIDED",
+      "sha256": "f7a5fd3e7d01c826095de67c70f0124738059ec14748879b14d5ff508f9ca9db",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-minus-int-evaluation-minus-order",
+      "path": "corpus/decided/div-rand-minus-int-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "b89cdc27fac005a4d8a452c6a2fbee5c63501a4a9ab42661e9435b9028facbe9",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-minus-int-strictness-minus-laziness",
+      "path": "corpus/decided/div-rand-minus-int-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "570d9234288f188d051dd5681820243d5c869277a625cb624f15bb0035fdd97a",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-minus-nth-effects",
+      "path": "corpus/decided/div-rand-minus-nth-effects.json",
+      "status": "DECIDED",
+      "sha256": "69e361d9748715bd990d78bd5879aea6006b30afb752f8da19af8961b7f24093",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-minus-nth-evaluation-minus-order",
+      "path": "corpus/decided/div-rand-minus-nth-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "77c525e531e829cf510f9e89e7a129f947ae152900d2555de3eacc29c62e6a8b",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-minus-nth-strictness-minus-laziness",
+      "path": "corpus/decided/div-rand-minus-nth-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "6e7c966c3aa4820cf4f58f0f367ec27b5bc20844f5a946a043343940d74c751d",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-rand-strictness-minus-laziness",
+      "path": "corpus/decided/div-rand-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "93aa7dd33028ceb3bab8af417af3417e58acad7ff0490fd7bd6232319e398b74",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-random-minus-sample-effects",
+      "path": "corpus/decided/div-random-minus-sample-effects.json",
+      "status": "DECIDED",
+      "sha256": "a5ef2c323c7336035ebfb1fd024a4e9707ff172ba80ffddf88e1e795cf17c168",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-random-minus-sample-evaluation-minus-order",
+      "path": "corpus/decided/div-random-minus-sample-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "88018ecec000ab32c353ffd2dd81423a4cd1dbd30b57859feb894c4d011349aa",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-random-minus-sample-strictness-minus-laziness",
+      "path": "corpus/decided/div-random-minus-sample-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "f3b47137cbb1318a92ef6c59b4d0dc47679239e94408157ac3de213e861f61f5",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-random-minus-uuid-effects",
+      "path": "corpus/decided/div-random-minus-uuid-effects.json",
+      "status": "DECIDED",
+      "sha256": "566f9be90f229a1fd83865e9f28435029af3f15a05502ba400017cc54315e0d4",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-random-minus-uuid-evaluation-minus-order",
+      "path": "corpus/decided/div-random-minus-uuid-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "74b9e34b62dec65e327e6c2528a5b03379a429c14e67af9c311a1af253b6950e",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-random-minus-uuid-strictness-minus-laziness",
+      "path": "corpus/decided/div-random-minus-uuid-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "89bbb639f93eee033e3d1ed46ceff07a2a580423815dea4044ed7e20aff54649",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-reduce-effects",
+      "path": "corpus/decided/div-reduce-effects.json",
+      "status": "DECIDED",
+      "sha256": "bf3332c7d880ae22ef8161edc8f84aaf158cd929d2571e14798409b6409f74f5",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-reduce-minus-kv-allocation-minus-representation",
+      "path": "corpus/decided/div-reduce-minus-kv-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "385dd5e1eb433a5c39c135f619a7ec4070cb63ca8bc5103bdd4def2a28d62185",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-reduce-minus-kv-effects",
+      "path": "corpus/decided/div-reduce-minus-kv-effects.json",
+      "status": "DECIDED",
+      "sha256": "9bb87c9e2bb72dd743eda864a694d4a9c413dfd39882af7e7023a6c374ca1581",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-reduce-minus-kv-evaluation-minus-order",
+      "path": "corpus/decided/div-reduce-minus-kv-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "b4f5f1cc3625b326035b556927b1cb4434516d1a1752973701e27bd2b450ebd4",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-reduce-minus-kv-strictness-minus-laziness",
+      "path": "corpus/decided/div-reduce-minus-kv-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "ab2a989527404104b571f1c507f6afc341bb7aae33de5c8695a719a54a056c52",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-rem-allocation-minus-representation",
+      "path": "corpus/decided/div-rem-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "a4e0d9fd602d4dfe291a767de6e4e2bf8b0d18cc14f7e5c65e54fa1b5c26f8f9",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-rem-effects",
+      "path": "corpus/decided/div-rem-effects.json",
+      "status": "DECIDED",
+      "sha256": "6aacb01bb1cbda14e0ad70a190d7c0b147dd791a338d83c4d4a892c2c0160643",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-rem-evaluation-minus-order",
+      "path": "corpus/decided/div-rem-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "9cce76ae055983b0728b2cbc92bd567ae9ddb85b3e66e5bad2259f23f156afc3",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-rem-failure-minus-behavior",
+      "path": "corpus/decided/div-rem-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "cb079b7455dd0b483eb0e203ac015dcaf46105f9b7e134e9c2a17d2622155e16",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-rem-identity-minus-equality",
+      "path": "corpus/decided/div-rem-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "fedb190e0ecd7a327240b80c5d7d746a38b9b342b91313f07472013aae44929e",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-rem-strictness-minus-laziness",
+      "path": "corpus/decided/div-rem-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "c79357bcf38c7cd68d9c5d0f7140ec6d9ef7b74d74b5f66e2d40d9348d208f0d",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-seq-allocation-minus-representation",
+      "path": "corpus/decided/div-seq-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "a205ae0f1999f656ab968e3c97ec3d4376347c96b607f5d492bf55622eb69118",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-seq-evaluation-minus-order",
+      "path": "corpus/decided/div-seq-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "fb2605ac5c2d04546665108f56784412094de76c02c7d7a18485255e2084e7e0",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-seq-strictness-minus-laziness",
+      "path": "corpus/decided/div-seq-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "fc2e73aca8f932984630560c3b8be9178bbb2a1075539e4438bb10f1d02de9aa",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-set-failure-minus-behavior",
+      "path": "corpus/decided/div-set-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "fec3c0c726a0d70becdb9efea551ca3aa74c7d2af9e77b692002bdb0835fec7c",
+      "coverage": ["HOST-LEAKAGE","HL-EQUALITY-HASHING","core"]
+    },
+    {
+      "caseId": "div-set-strictness-minus-laziness",
+      "path": "corpus/decided/div-set-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "2923c457940cf3c628cffb5f5a286ba48a5ee80696018268b6bb4aa81d8456b6",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-shuffle-effects",
+      "path": "corpus/decided/div-shuffle-effects.json",
+      "status": "DECIDED",
+      "sha256": "9086526294e5ce6a9f36482f71dd159a2237eaad14efc092fbd94f971bb5d639",
+      "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
+    },
+    {
+      "caseId": "div-slash-allocation-minus-representation",
+      "path": "corpus/decided/div-slash-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "8a9dc0ed3b2f86e48b39bdac82787e0f24ac43a8fe557d610cb026c12485d593",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-slash-effects",
+      "path": "corpus/decided/div-slash-effects.json",
+      "status": "DECIDED",
+      "sha256": "c6ad16535d5be551aad553445aa8c034f73ec89ea45f88d3a3a5eb80c3797e6c",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-slash-evaluation-minus-order",
+      "path": "corpus/decided/div-slash-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "16331034ca41a40563e3958a7fb2a82921adbcbba37cdac405c4721bf0ad0d69",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-slash-failure-minus-behavior",
+      "path": "corpus/decided/div-slash-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "da5254e06a3fbb322b96a3e06d21d044b99c906ec22f26c0220abc681f9c9108",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-slash-identity-minus-equality",
+      "path": "corpus/decided/div-slash-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "a6c2a8dee42c10932939a5fcb1e87363375cce03f623af107917c61530e4c825",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-slash-strictness-minus-laziness",
+      "path": "corpus/decided/div-slash-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "31c3d7b7e74771c12be29369eb8324024026bf7b211517761beaa727af98fcb3",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-sort-effects",
+      "path": "corpus/decided/div-sort-effects.json",
+      "status": "DECIDED",
+      "sha256": "fc7b8d1f9dc1efd5ba43b42e5e0d9cbc957675182c82138a5274388cf4cf6d1e",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-sort-failure-minus-behavior",
+      "path": "corpus/decided/div-sort-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "1a4598ccfe55e8c26dedb6e6839175baa0c5671353efd7cf1c06dfe74dbeba17",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-star-allocation-minus-representation",
+      "path": "corpus/decided/div-star-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "ee10dbd496707b3686d671fbda450f53f7c5b95dea433becef4de26a1148c0eb",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-star-effects",
+      "path": "corpus/decided/div-star-effects.json",
+      "status": "DECIDED",
+      "sha256": "8730c22fcc26636294541b29d6a2b4e89df702a874aed6473c5392193feb8317",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-star-evaluation-minus-order",
+      "path": "corpus/decided/div-star-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "447389d724a930e5440b7966f3f4379d24528380193f3d7a823bff151bd0c463",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-star-failure-minus-behavior",
+      "path": "corpus/decided/div-star-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "b6bc91eb443f3fefd6f8dc10d1d1c2d0209dfdb736db3f97b1688ad444b50bda",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-star-identity-minus-equality",
+      "path": "corpus/decided/div-star-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "969ecadaf7da1ecbe9f0e594f89d161a748b0c96ff96a37f77f2f774d0a5a755",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-star-strictness-minus-laziness",
+      "path": "corpus/decided/div-star-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "7c9db155a528e40e34e02584fb7424d2d8764f83b1b1bcdc5e491b78a27c6c32",
+      "coverage": ["HOST-LEAKAGE","HL-NUMBER-SEMANTICS","core"]
+    },
+    {
+      "caseId": "div-symbol-effects",
+      "path": "corpus/decided/div-symbol-effects.json",
+      "status": "DECIDED",
+      "sha256": "28a102f818d35baaf7d3dfa9d7ef056399c05e2de21e5123c3e8ded3fddff1f0",
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","core"]
+    },
+    {
+      "caseId": "div-symbol-evaluation-minus-order",
+      "path": "corpus/decided/div-symbol-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "dab7336e1c6b8a06800f7cf0bc7df4ae4520956a450f338da78575b520117149",
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","core"]
+    },
+    {
+      "caseId": "div-symbol-strictness-minus-laziness",
+      "path": "corpus/decided/div-symbol-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "81eb2f758d7149c4ea96e6a01ba02ec2b21db69b5beae083832cbfb5e9c9af88",
+      "coverage": ["HOST-LEAKAGE","HL-SYMBOL-BEHAVIOR","core"]
+    },
+    {
+      "caseId": "div-vector-allocation-minus-representation",
+      "path": "corpus/decided/div-vector-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "ec7e4a27e899e9173831b7a1a6c1b63f65ac9c3a5a60b3e001555891db4d8a63",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-vector-evaluation-minus-order",
+      "path": "corpus/decided/div-vector-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "049b8053284a79aa8261133f3ce4697257f8470771981ed2a90c4803166b4ec4",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-vector-strictness-minus-laziness",
+      "path": "corpus/decided/div-vector-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "ab999096271b3e92d4884426afb21bf98e022b9d14748a5260e96b03221c19fc",
+      "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
+    },
+    {
+      "caseId": "div-when-allocation-minus-representation",
+      "path": "corpus/decided/div-when-allocation-minus-representation.json",
+      "status": "DECIDED",
+      "sha256": "eb9e47df90ac581348e1ba199a19e1fc9cf1399b31d66e19af67ae12f8832e95",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-when-effects",
+      "path": "corpus/decided/div-when-effects.json",
+      "status": "DECIDED",
+      "sha256": "4904de06c03eb33d4decf55de8bff54842e9731c4dd3194ee3708b31a957229e",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-when-evaluation-minus-order",
+      "path": "corpus/decided/div-when-evaluation-minus-order.json",
+      "status": "DECIDED",
+      "sha256": "4cb861ce699fa8094a119468e27410f03bb37053f2fd0a835b3d20402f5d257b",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-when-failure-minus-behavior",
+      "path": "corpus/decided/div-when-failure-minus-behavior.json",
+      "status": "DECIDED",
+      "sha256": "66374d485f3c669c5483f447979d3822327dde2881352745f713678b58bd6f24",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-when-identity-minus-equality",
+      "path": "corpus/decided/div-when-identity-minus-equality.json",
+      "status": "DECIDED",
+      "sha256": "e293184eba8877c06e8685ec4a1bc5654d9e55bf1ca314b2323e17096269f674",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
+    },
+    {
+      "caseId": "div-when-strictness-minus-laziness",
+      "path": "corpus/decided/div-when-strictness-minus-laziness.json",
+      "status": "DECIDED",
+      "sha256": "9a8703b2f8058151d3139e304321b7ef5e1977b9edbad1d40eb6afc7778c286f",
+      "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
     }
   ],
   "requiredCoverage": {
@@ -216,7 +1875,244 @@
       "hl-unspecified-behavior-as-spec-core",
       "hl-unspecified-behavior-as-spec-hosted-js",
       "hl-unspecified-behavior-as-spec-hosted-racket",
-      "hl-unspecified-behavior-as-spec-native-core"
+      "hl-unspecified-behavior-as-spec-native-core",
+      "div-and-allocation-minus-representation",
+      "div-and-effects",
+      "div-and-evaluation-minus-order",
+      "div-and-failure-minus-behavior",
+      "div-and-identity-minus-equality",
+      "div-and-strictness-minus-laziness",
+      "div-array-minus-map-allocation-minus-representation",
+      "div-array-minus-map-evaluation-minus-order",
+      "div-array-minus-map-strictness-minus-laziness",
+      "div-assoc-failure-minus-behavior",
+      "div-await-effects",
+      "div-await-evaluation-minus-order",
+      "div-await-strictness-minus-laziness",
+      "div-bgl-slash-promote-allocation-minus-representation",
+      "div-bgl-slash-promote-effects",
+      "div-bgl-slash-promote-evaluation-minus-order",
+      "div-bgl-slash-promote-failure-minus-behavior",
+      "div-bgl-slash-promote-identity-minus-equality",
+      "div-bgl-slash-promote-strictness-minus-laziness",
+      "div-boolean-allocation-minus-representation",
+      "div-boolean-effects",
+      "div-boolean-evaluation-minus-order",
+      "div-boolean-failure-minus-behavior",
+      "div-boolean-identity-minus-equality",
+      "div-boolean-strictness-minus-laziness",
+      "div-cond-allocation-minus-representation",
+      "div-cond-effects",
+      "div-cond-evaluation-minus-order",
+      "div-cond-failure-minus-behavior",
+      "div-cond-identity-minus-equality",
+      "div-cond-strictness-minus-laziness",
+      "div-conj-failure-minus-behavior",
+      "div-dec-allocation-minus-representation",
+      "div-dec-effects",
+      "div-dec-evaluation-minus-order",
+      "div-dec-failure-minus-behavior",
+      "div-dec-identity-minus-equality",
+      "div-dec-strictness-minus-laziness",
+      "div-disj-allocation-minus-representation",
+      "div-disj-evaluation-minus-order",
+      "div-disj-strictness-minus-laziness",
+      "div-do-allocation-minus-representation",
+      "div-do-effects",
+      "div-do-evaluation-minus-order",
+      "div-do-strictness-minus-laziness",
+      "div-double-allocation-minus-representation",
+      "div-double-effects",
+      "div-double-evaluation-minus-order",
+      "div-double-failure-minus-behavior",
+      "div-double-identity-minus-equality",
+      "div-double-strictness-minus-laziness",
+      "div-eq-effects",
+      "div-eq-failure-minus-behavior",
+      "div-eq-strictness-minus-laziness",
+      "div-filter-effects",
+      "div-float-minus-from-minus-bits-allocation-minus-representation",
+      "div-float-minus-from-minus-bits-effects",
+      "div-float-minus-from-minus-bits-evaluation-minus-order",
+      "div-float-minus-from-minus-bits-failure-minus-behavior",
+      "div-float-minus-from-minus-bits-identity-minus-equality",
+      "div-float-minus-from-minus-bits-strictness-minus-laziness",
+      "div-float-minus-to-minus-bits-allocation-minus-representation",
+      "div-float-minus-to-minus-bits-effects",
+      "div-float-minus-to-minus-bits-evaluation-minus-order",
+      "div-float-minus-to-minus-bits-failure-minus-behavior",
+      "div-float-minus-to-minus-bits-identity-minus-equality",
+      "div-float-minus-to-minus-bits-strictness-minus-laziness",
+      "div-gensym-evaluation-minus-order",
+      "div-gensym-strictness-minus-laziness",
+      "div-gt-allocation-minus-representation",
+      "div-gt-effects",
+      "div-gt-evaluation-minus-order",
+      "div-gt-failure-minus-behavior",
+      "div-gt-identity-minus-equality",
+      "div-gt-strictness-minus-laziness",
+      "div-hash-allocation-minus-representation",
+      "div-hash-effects",
+      "div-hash-evaluation-minus-order",
+      "div-hash-failure-minus-behavior",
+      "div-hash-identity-minus-equality",
+      "div-hash-minus-map-allocation-minus-representation",
+      "div-hash-minus-map-evaluation-minus-order",
+      "div-hash-minus-map-failure-minus-behavior",
+      "div-hash-minus-map-strictness-minus-laziness",
+      "div-hash-minus-set-allocation-minus-representation",
+      "div-hash-minus-set-evaluation-minus-order",
+      "div-hash-minus-set-failure-minus-behavior",
+      "div-hash-minus-set-strictness-minus-laziness",
+      "div-hash-strictness-minus-laziness",
+      "div-identical-q-failure-minus-behavior",
+      "div-if-allocation-minus-representation",
+      "div-if-effects",
+      "div-if-evaluation-minus-order",
+      "div-if-failure-minus-behavior",
+      "div-if-identity-minus-equality",
+      "div-if-strictness-minus-laziness",
+      "div-inc-allocation-minus-representation",
+      "div-inc-effects",
+      "div-inc-evaluation-minus-order",
+      "div-inc-failure-minus-behavior",
+      "div-inc-identity-minus-equality",
+      "div-inc-strictness-minus-laziness",
+      "div-let-allocation-minus-representation",
+      "div-let-effects",
+      "div-let-evaluation-minus-order",
+      "div-let-strictness-minus-laziness",
+      "div-list-allocation-minus-representation",
+      "div-list-evaluation-minus-order",
+      "div-list-strictness-minus-laziness",
+      "div-long-allocation-minus-representation",
+      "div-long-effects",
+      "div-long-evaluation-minus-order",
+      "div-long-failure-minus-behavior",
+      "div-long-identity-minus-equality",
+      "div-long-strictness-minus-laziness",
+      "div-lt-allocation-minus-representation",
+      "div-lt-effects",
+      "div-lt-evaluation-minus-order",
+      "div-lt-failure-minus-behavior",
+      "div-lt-identity-minus-equality",
+      "div-lt-strictness-minus-laziness",
+      "div-map-effects",
+      "div-minus-allocation-minus-representation",
+      "div-minus-effects",
+      "div-minus-evaluation-minus-order",
+      "div-minus-failure-minus-behavior",
+      "div-minus-gte-minus-allocation-minus-representation",
+      "div-minus-gte-minus-effects",
+      "div-minus-gte-minus-evaluation-minus-order",
+      "div-minus-gte-minus-failure-minus-behavior",
+      "div-minus-gte-minus-identity-minus-equality",
+      "div-minus-gte-minus-strictness-minus-laziness",
+      "div-minus-identity-minus-equality",
+      "div-minus-lte-minus-allocation-minus-representation",
+      "div-minus-lte-minus-effects",
+      "div-minus-lte-minus-evaluation-minus-order",
+      "div-minus-lte-minus-failure-minus-behavior",
+      "div-minus-lte-minus-identity-minus-equality",
+      "div-minus-lte-minus-strictness-minus-laziness",
+      "div-minus-strictness-minus-laziness",
+      "div-mod-allocation-minus-representation",
+      "div-mod-effects",
+      "div-mod-evaluation-minus-order",
+      "div-mod-failure-minus-behavior",
+      "div-mod-identity-minus-equality",
+      "div-mod-strictness-minus-laziness",
+      "div-monotonic-minus-nanoseconds-effects",
+      "div-monotonic-minus-nanoseconds-evaluation-minus-order",
+      "div-monotonic-minus-nanoseconds-strictness-minus-laziness",
+      "div-not-allocation-minus-representation",
+      "div-not-effects",
+      "div-not-evaluation-minus-order",
+      "div-not-failure-minus-behavior",
+      "div-not-identity-minus-equality",
+      "div-not-strictness-minus-laziness",
+      "div-or-allocation-minus-representation",
+      "div-or-effects",
+      "div-or-evaluation-minus-order",
+      "div-or-failure-minus-behavior",
+      "div-or-identity-minus-equality",
+      "div-or-strictness-minus-laziness",
+      "div-parse-minus-double-allocation-minus-representation",
+      "div-parse-minus-double-effects",
+      "div-parse-minus-double-evaluation-minus-order",
+      "div-parse-minus-double-failure-minus-behavior",
+      "div-parse-minus-double-identity-minus-equality",
+      "div-parse-minus-double-strictness-minus-laziness",
+      "div-plus-allocation-minus-representation",
+      "div-plus-effects",
+      "div-plus-evaluation-minus-order",
+      "div-plus-failure-minus-behavior",
+      "div-plus-identity-minus-equality",
+      "div-plus-strictness-minus-laziness",
+      "div-quot-allocation-minus-representation",
+      "div-quot-effects",
+      "div-quot-evaluation-minus-order",
+      "div-quot-failure-minus-behavior",
+      "div-quot-identity-minus-equality",
+      "div-quot-strictness-minus-laziness",
+      "div-rand-effects",
+      "div-rand-evaluation-minus-order",
+      "div-rand-minus-int-effects",
+      "div-rand-minus-int-evaluation-minus-order",
+      "div-rand-minus-int-strictness-minus-laziness",
+      "div-rand-minus-nth-effects",
+      "div-rand-minus-nth-evaluation-minus-order",
+      "div-rand-minus-nth-strictness-minus-laziness",
+      "div-rand-strictness-minus-laziness",
+      "div-random-minus-sample-effects",
+      "div-random-minus-sample-evaluation-minus-order",
+      "div-random-minus-sample-strictness-minus-laziness",
+      "div-random-minus-uuid-effects",
+      "div-random-minus-uuid-evaluation-minus-order",
+      "div-random-minus-uuid-strictness-minus-laziness",
+      "div-reduce-effects",
+      "div-reduce-minus-kv-allocation-minus-representation",
+      "div-reduce-minus-kv-effects",
+      "div-reduce-minus-kv-evaluation-minus-order",
+      "div-reduce-minus-kv-strictness-minus-laziness",
+      "div-rem-allocation-minus-representation",
+      "div-rem-effects",
+      "div-rem-evaluation-minus-order",
+      "div-rem-failure-minus-behavior",
+      "div-rem-identity-minus-equality",
+      "div-rem-strictness-minus-laziness",
+      "div-seq-allocation-minus-representation",
+      "div-seq-evaluation-minus-order",
+      "div-seq-strictness-minus-laziness",
+      "div-set-failure-minus-behavior",
+      "div-set-strictness-minus-laziness",
+      "div-shuffle-effects",
+      "div-slash-allocation-minus-representation",
+      "div-slash-effects",
+      "div-slash-evaluation-minus-order",
+      "div-slash-failure-minus-behavior",
+      "div-slash-identity-minus-equality",
+      "div-slash-strictness-minus-laziness",
+      "div-sort-effects",
+      "div-sort-failure-minus-behavior",
+      "div-star-allocation-minus-representation",
+      "div-star-effects",
+      "div-star-evaluation-minus-order",
+      "div-star-failure-minus-behavior",
+      "div-star-identity-minus-equality",
+      "div-star-strictness-minus-laziness",
+      "div-symbol-effects",
+      "div-symbol-evaluation-minus-order",
+      "div-symbol-strictness-minus-laziness",
+      "div-vector-allocation-minus-representation",
+      "div-vector-evaluation-minus-order",
+      "div-vector-strictness-minus-laziness",
+      "div-when-allocation-minus-representation",
+      "div-when-effects",
+      "div-when-evaluation-minus-order",
+      "div-when-failure-minus-behavior",
+      "div-when-identity-minus-equality",
+      "div-when-strictness-minus-laziness"
     ]
   }
 }

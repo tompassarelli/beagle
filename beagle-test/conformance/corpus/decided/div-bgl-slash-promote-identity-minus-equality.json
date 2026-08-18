@@ -1,0 +1,54 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "div-bgl-slash-promote-identity-minus-equality",
+  "status": "DECIDED",
+  "profile": "core",
+  "input": {
+    "source": "#lang beagle\n(ns conformance.div-enumerate)\n\n;; Literal builtin: bgl/promote\n;; Divergence dimension: bgl/promote::identity-equality\n(defn probe [] nil)\n",
+    "target": "native",
+    "fileName": "conformance/div-enumerate/div-bgl-slash-promote-identity-minus-equality.bgl",
+    "command": {
+      "argv": [
+        "check",
+        "--profile",
+        "core",
+        "{input}"
+      ]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false
+    }
+  },
+  "rule": {
+    "id": "HL-NATIVE-CORE-GC-OWNERSHIP",
+    "text": "Native Core ownership is the static region tree. bgl/promote is an explicit deep semantic copy into the named enclosing region; an escaping younger handle is rejected, and Store admits only canonical durable semantic data.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership"
+  },
+  "expected": {
+    "kind": "named-diagnostic-assertion",
+    "name": "literal-builtin-enumeration",
+    "assertion": "The literal builtin \"bgl/promote\" is enumerated for the \"identity-equality\" dimension under HL-NATIVE-CORE-GC-OWNERSHIP."
+  },
+  "coverage": {
+    "surface": [
+      "bgl/promote",
+      "identity-equality",
+      "literal-builtin-enumeration"
+    ],
+    "alarmBell": null,
+    "hostLeakage": [
+      "HL-NATIVE-CORE-GC-OWNERSHIP"
+    ],
+    "parityChannels": [
+      "identity-equality"
+    ]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+    "date": "2026-08-18"
+  }
+}

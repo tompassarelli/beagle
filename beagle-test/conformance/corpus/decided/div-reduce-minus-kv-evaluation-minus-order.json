@@ -1,0 +1,54 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "div-reduce-minus-kv-evaluation-minus-order",
+  "status": "DECIDED",
+  "profile": "core",
+  "input": {
+    "source": "#lang beagle\n(ns conformance.div-enumerate)\n\n;; Literal builtin: reduce-kv\n;; Divergence dimension: reduce-kv::evaluation-order\n(defn probe [] nil)\n",
+    "target": "native",
+    "fileName": "conformance/div-enumerate/div-reduce-minus-kv-evaluation-minus-order.bgl",
+    "command": {
+      "argv": [
+        "check",
+        "--profile",
+        "core",
+        "{input}"
+      ]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false
+    }
+  },
+  "rule": {
+    "id": "HL-COLLECTION-ORDERING",
+    "text": "1. List and Vec traversal is authored element order. Map and Set traversal is insertion order in every profile and representation. A map literal inserts left to right. Inserting a new key appends it; replacing an equal existing key preserves its position; deletion removes it; deletion followed by reinsertion appends it. Set insertion follows the same rules for elements.\n2. seq, keys, vals, entries, map, filter, reduce, reduce-kv, and callbacks driven by a collection observe that declared traversal order. Each callback completes before the next begins. Persistent updates preserve the relative order of unaffected entries. No iterator may expose bucket, pointer, property, or allocation order.\n3. Map/Set equality and BeagleHashV1 are order-insensitive as rule 2 states. Canonical semantic serialization, artifact identity, and digests sort map entries and set elements by their BeagleCanonicalValueV1 byte encodings; they never depend on insertion order. An unencodable/unhashable element is rejected with BEAGLE-UNHASHABLE-VALUE at collection admission, so canonical serialization is total over admitted maps and sets.\n4. sort is stable. Without a comparator it accepts only a homogeneous domain with a declared Beagle total order; otherwise it is BEAGLE-NO-TOTAL-ORDER. With a comparator, calls occur in the chosen stable sorting algorithm's comparison sequence, so an effectful comparator is statically rejected as BEAGLE-EFFECTFUL-COMPARATOR; only the sorted result, not an implementation's comparison schedule, is semantic.\n5. Construction and traversal are strict in the elements they consume. Normal lookup remains expected O(1) or O(log n) according to the declared representation contract; insertion-order preservation cannot silently worsen a form's declared complexity. Canonical sorting is explicitly O(n log n) and belongs only to serialization/hash boundaries.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering"
+  },
+  "expected": {
+    "kind": "named-diagnostic-assertion",
+    "name": "literal-builtin-enumeration",
+    "assertion": "The literal builtin \"reduce-kv\" is enumerated for the \"evaluation-order\" dimension under HL-COLLECTION-ORDERING."
+  },
+  "coverage": {
+    "surface": [
+      "reduce-kv",
+      "evaluation-order",
+      "literal-builtin-enumeration"
+    ],
+    "alarmBell": null,
+    "hostLeakage": [
+      "HL-COLLECTION-ORDERING"
+    ],
+    "parityChannels": [
+      "evaluation-order"
+    ]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+    "date": "2026-08-18"
+  }
+}

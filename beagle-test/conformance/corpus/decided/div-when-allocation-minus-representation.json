@@ -1,0 +1,54 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "div-when-allocation-minus-representation",
+  "status": "DECIDED",
+  "profile": "core",
+  "input": {
+    "source": "#lang beagle\n(ns conformance.div-enumerate)\n\n;; Literal builtin: when\n;; Divergence dimension: when::allocation-representation\n(defn probe [] nil)\n",
+    "target": "native",
+    "fileName": "conformance/div-enumerate/div-when-allocation-minus-representation.bgl",
+    "command": {
+      "argv": [
+        "check",
+        "--profile",
+        "core",
+        "{input}"
+      ]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false
+    }
+  },
+  "rule": {
+    "id": "HL-TRUTHINESS",
+    "text": "Exactly false and nil are falsey. Every other admitted value is truthy, including integer and Float zero, negative zero, NaN, empty String, empty List/Vec/Map/Set, Symbol, Keyword, records, unions with a non-Nil payload, functions, cells, and capabilities. A union is classified by its active value, not its static container type. There is no third truth state and no host coercion hook. if, when, cond, predicate positions, boolean, and macro-time conditionals use that same table. boolean(x) returns its Bool result. not(x) accepts any admitted value and returns the negation of that result. and and or evaluate operands left to right and return an operand rather than coercing it. and stops at the first falsey operand and otherwise returns the last; with no operands it returns true. or stops at the first truthy operand and otherwise returns the last; with no operands it returns nil. Skipped operands have no effects. cond evaluates tests left to right and only the selected body. Truth testing is pure, constant-time after any required closed-union tag dispatch, allocation-free, and valid in all profiles. A foreign host value cannot cross an Any boundary without first receiving a Beagle domain; an untagged foreign value is BEAGLE-FOREIGN-VALUE, not an invitation to use host truthiness.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness"
+  },
+  "expected": {
+    "kind": "named-diagnostic-assertion",
+    "name": "literal-builtin-enumeration",
+    "assertion": "The literal builtin \"when\" is enumerated for the \"allocation-representation\" dimension under HL-TRUTHINESS."
+  },
+  "coverage": {
+    "surface": [
+      "when",
+      "allocation-representation",
+      "literal-builtin-enumeration"
+    ],
+    "alarmBell": null,
+    "hostLeakage": [
+      "HL-TRUTHINESS"
+    ],
+    "parityChannels": [
+      "allocation-representation"
+    ]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+    "date": "2026-08-18"
+  }
+}
