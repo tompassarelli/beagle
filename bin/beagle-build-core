@@ -2309,10 +2309,11 @@ bb -cp "$compiled" -e '
   [wire-path report-head-path stage-progress-path artifacts-dir compiler-commit
    materializers abi-id abi simd-required?]
   (let [wire (slurp wire-path)
-        frozen (stages/decode-frozen-native-stage-wire-v1 wire)]
-    (when (or (nil? frozen)
-              (not= wire (stages/encode-frozen-native-stage-wire-v1 frozen)))
-      (throw (ex-info "Core checkpoint wire is not canonical" {})))
+        ;; The shell admits this path only after a digest-keyed canonical-wire
+        ;; PASS or a fresh full decode/re-encode validation.
+        frozen (stages/decode-attested-frozen-native-stage-wire-v1 wire)]
+    (when (nil? frozen)
+      (throw (ex-info "Core checkpoint wire failed attested decoding" {})))
     (let [stage (stages/frozennativestagev0-stage frozen)
           native-encoding (stages/frozennativestagev0-encoding frozen)
           published-native (slurp (str artifacts-dir "/module.native-program"))

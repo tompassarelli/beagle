@@ -97,6 +97,8 @@ timeout 30s nice -n 19 bb -cp "$scratch/out" -e '
         decoded-program (stages/decode-native-core-program-wire-v1 program-wire)
         frozen-wire (stages/encode-frozen-native-stage-wire-v1 frozen)
         decoded-frozen (stages/decode-frozen-native-stage-wire-v1 frozen-wire)
+        attested-frozen
+        (stages/decode-attested-frozen-native-stage-wire-v1 frozen-wire)
         decoded-stage (stages/frozennativestagev0-stage decoded-frozen)
         decoded-function (first
                            (core/nativecoreprogram-functions
@@ -134,6 +136,8 @@ timeout 30s nice -n 19 bb -cp "$scratch/out" -e '
     (assert decoded-frozen "frozen decoder rejected its canonical encoder")
     (assert (= frozen decoded-frozen)
       "frozen decode changed the stage/program record graph")
+    (assert (= decoded-frozen attested-frozen)
+      "attested frozen decoder changed the decoded stage")
     (assert (= flow (core/callinstruction-tokens decoded-call))
       "call token flow was not preserved")
     (assert (= [switch-case] (core/switchterminator-cases decoded-switch))

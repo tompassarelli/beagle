@@ -726,8 +726,8 @@
         (restore-native-program-f64-atoms bits (nativestagev0-program stage))]
     (with frozen [:stage (with stage [:program program])])))
 
-(defn decode-frozen-native-stage-wire-v1
-  [(encoding String)] (U FrozenNativeStageV0 Nil)
+(defn decode-frozen-native-stage-wire-v1*
+  [(encoding String) (canonical-check? Bool)] (U FrozenNativeStageV0 Nil)
   (let [(record (U NativeWireRecordV1 Nil))
         (required-native-wire-record encoding "frozen-native-stage-wire-v1" 2)]
     (if (nil? record)
@@ -750,6 +750,15 @@
                         (frozennativestagev0-encoding frozen))
                       (= (content-digest legacy-encoding)
                         (frozennativestagev0-digest frozen))
-                      (= encoding (encode-frozen-native-stage-wire-v1 frozen)))
+                      (or (not canonical-check?)
+                        (= encoding (encode-frozen-native-stage-wire-v1 frozen))))
                   frozen nil))
               nil)))))))
+
+(defn decode-frozen-native-stage-wire-v1
+  [(encoding String)] (U FrozenNativeStageV0 Nil)
+  (decode-frozen-native-stage-wire-v1* encoding true))
+
+(defn decode-attested-frozen-native-stage-wire-v1
+  [(encoding String)] (U FrozenNativeStageV0 Nil)
+  (decode-frozen-native-stage-wire-v1* encoding false))
