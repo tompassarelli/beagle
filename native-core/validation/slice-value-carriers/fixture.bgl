@@ -1,0 +1,17 @@
+#lang beagle
+(ns native.slice-value-carriers)
+
+(defn empty-vector-any [] Any [])
+
+(defn vector-any [] Any [1 2])
+
+(defn empty-map-any [] Any {})
+
+(defn map-any [] Any {:one 1 :two 2})
+
+(defn empty-set-any [] Any #{})
+
+(defn set-any [] Any #{1 2})
+
+(defn parsed-float-any [(text String)] Any
+  (parse-double text))

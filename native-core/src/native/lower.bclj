@@ -828,8 +828,49 @@
   (core/->TypeDef (record-reference-type-id record-key) "Reference"
     (core/->ReferenceType (source-type-id record-key))))
 
+(defn slice-value-type-id [] core/NativeId (type-id "SliceValue"))
+
+(defn slice-value-vector-type-id [] core/NativeId
+  (lower-id "vector-type" [(id-value (slice-value-type-id))]))
+
+(defn slice-value-map-type-id [] core/NativeId
+  (lower-id "map-type-v0"
+    [(id-value (slice-value-type-id)) (id-value (slice-value-type-id))]))
+
+(defn slice-value-set-type-id [] core/NativeId
+  (lower-id "set-type-v0" [(id-value (slice-value-type-id))]))
+
+(defn slice-value-nullable-type-id [] core/NativeId
+  (lower-id "closed-union-type"
+    [(id-value (slice-value-type-id)) (id-value (type-id "Nil"))]))
+
+(defn slice-value-vector-type [] core/TypeDef
+  (core/->TypeDef (slice-value-vector-type-id) "Vector"
+    (core/->VectorType (slice-value-type-id))))
+
+(defn slice-value-map-type [] core/TypeDef
+  (core/->TypeDef (slice-value-map-type-id) "Map"
+    (core/->MapTypeV0 (slice-value-type-id) (slice-value-type-id)
+      (core/->InsertionOrderV0 true))))
+
+(defn slice-value-set-type [] core/TypeDef
+  (core/->TypeDef (slice-value-set-type-id) "Set"
+    (core/->SetTypeV0 (slice-value-type-id)
+      (core/->InsertionOrderV0 true))))
+
+(defn slice-value-nullable-type [] core/TypeDef
+  (let [(id core/NativeId) (slice-value-nullable-type-id)]
+    (core/->TypeDef id "ClosedUnion"
+      (core/->UnionType
+        [(core/->TypeVariant (variant-id (id-value id) "0") "case-0"
+           (slice-value-type-id))
+         (core/->TypeVariant (variant-id (id-value id) "1") "case-1"
+           (type-id "Nil"))]))))
+
 ;; Records enter Any by reference, never by value: a record whose own fields are
-;; Any (Triple) would otherwise have no finite layout.
+;; Any would otherwise have no finite layout. Collections use recursive closed
+;; carriers: their storage points at SliceValue elements, so the union remains a
+;; finite value while nested dynamic data retains its complete shape.
 (defn slice-value-variants [(record-keys (Vec String))] (Vec core/TypeVariant)
   (loop [(position Int) 0
          (variants (Vec core/TypeVariant))
@@ -839,6 +880,12 @@
           (core/->TypeVariant (variant-id "SliceValue" "text") "text" (type-id "String"))
           (core/->TypeVariant (variant-id "SliceValue" "keyword") "keyword"
             (type-id "Keyword"))
+          (core/->TypeVariant (variant-id "SliceValue" "vector") "vector"
+            (slice-value-vector-type-id))
+          (core/->TypeVariant (variant-id "SliceValue" "map") "map"
+            (slice-value-map-type-id))
+          (core/->TypeVariant (variant-id "SliceValue" "set") "set"
+            (slice-value-set-type-id))
           (core/->TypeVariant (variant-id "SliceValue" "nil") "nil" nil)]]
     (if (>= position (count record-keys))
       variants
@@ -849,14 +896,16 @@
               (record-reference-type-id key))))))))
 
 (defn slice-value-type [(record-keys (Vec String))] core/TypeDef
-  (core/->TypeDef (type-id "SliceValue") "SliceValue"
+  (core/->TypeDef (slice-value-type-id) "SliceValue"
     (core/->UnionType (slice-value-variants record-keys))))
 
 (defn slice-value-definitions [(record-keys (Vec String))] (Vec core/TypeDef)
   (loop [(position Int) 0
          (definitions (Vec core/TypeDef))
          [(slice-value-type record-keys) (bool-type) (i64-type) (f64-type)
-          (text-type) (keyword-type)]]
+          (text-type) (keyword-type) (nil-type)
+          (slice-value-vector-type) (slice-value-map-type)
+          (slice-value-set-type) (slice-value-nullable-type)]]
     (if (>= position (count record-keys))
       definitions
       (recur (+ position 1)
@@ -7012,6 +7061,210 @@
                   (build-vector-literal owner settled expected
                     (argsresultv0-values coerced)))))))))
 
+(defn build-set-literal
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (set-type core/NativeId)
+   (values (Vec core/NativeId))]
+  ExprResultV0
+  (let [(element-type core/NativeId) (set-element-of types set-type)
+        (equality (U core/ConcreteEqualityV0 Nil))
+        (set-element-equality-for types element-type)]
+    (if (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-SET-ELEMENT-EQUALITY: the element type has no closed concrete equality")
+      (let [(result-id core/NativeId) (state-id state owner "set-lit")]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->SetLiteralInstructionV0
+              (core/->SsaValueV0 result-id set-type)
+              values (arena-value-id owner) equality))
+          result-id set-type false)))))
+
+(defn lower-contextual-set
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (expression core/NativeId)
+   (expected (U core/NativeId Nil))
+   (lower-item (Fn [BodyStateV0 core/NativeId core/NativeId] ExprResultV0))]
+  (U ExprResultV0 Nil)
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (items-node (U core/NativeId Nil))
+        (index-first-object index expression "items")
+        (items (Vec core/NativeId))
+        (if (nil? items-node) [] (index-sequence-items index items-node))]
+    (if (or (not (= "set" (fact-text index expression "form-kind")))
+            (nil? expected)
+            (not (set-type? types expected))
+            (= 0 (count items)))
+      nil
+      (let [(element-type core/NativeId) (set-element-of types expected)
+            (lowered ArgsResultV0)
+            (loop [(position Int) 0
+                   (current BodyStateV0) state
+                   (values (Vec core/NativeId)) []
+                   (value-types (Vec core/NativeId)) []]
+              (if (or (>= position (count items)) (state-blocked? current))
+                (->ArgsResultV0 current values value-types false)
+                (let [(item ExprResultV0)
+                      (lower-item current (nth items position) element-type)]
+                  (if (exprresultv0-terminated item)
+                    (->ArgsResultV0 (exprresultv0-state item) values
+                      value-types true)
+                    (recur (+ position 1) (exprresultv0-state item)
+                      (conj values (exprresultv0-value-id item))
+                      (conj value-types (exprresultv0-type-id item)))))))
+            (current BodyStateV0) (argsresultv0-state lowered)]
+        (cond
+          (argsresultv0-terminated lowered)
+          (->ExprResultV0 current (lower-id "body" ["unreachable"])
+            (type-id "LowerFailure") true)
+
+          (state-blocked? current) (dead-result current)
+
+          :else
+          (let [(coerced ArgsResultV0)
+                (coerce-values-to-type types owner current
+                  (argsresultv0-values lowered)
+                  (argsresultv0-value-types lowered)
+                  element-type)
+                (settled BodyStateV0) (argsresultv0-state coerced)]
+            (if (state-blocked? settled)
+              (dead-result settled)
+              (build-set-literal types owner settled expected
+                (argsresultv0-values coerced)))))))))
+
+(defn build-map-literal
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (map-type core/NativeId)
+   (key-ids (Vec core/NativeId))
+   (value-ids (Vec core/NativeId))]
+  ExprResultV0
+  (let [(key-type core/NativeId) (map-key-of types map-type)
+        (equality (U core/ConcreteEqualityV0 Nil))
+        (map-key-equality-for types key-type)]
+    (if (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-MAP-KEY-EQUALITY: the key type has no closed concrete equality")
+      (let [(result-id core/NativeId) (state-id state owner "map-lit")]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->MapLiteralInstructionV0
+              (core/->SsaValueV0 result-id map-type)
+              key-ids value-ids (arena-value-id owner) equality))
+          result-id map-type false)))))
+
+(defn lower-contextual-map
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (expression core/NativeId)
+   (expected (U core/NativeId Nil))
+   (lower-item (Fn [BodyStateV0 core/NativeId core/NativeId] ExprResultV0))]
+  (U ExprResultV0 Nil)
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (pairs-node (U core/NativeId Nil))
+        (index-first-object index expression "pairs")
+        (pairs (Vec core/NativeId))
+        (if (nil? pairs-node) [] (index-sequence-items index pairs-node))]
+    (if (or (not (= "map" (fact-text index expression "form-kind")))
+            (nil? expected)
+            (not (map-type? types expected))
+            (= 0 (count pairs)))
+      nil
+      (let [(key-type core/NativeId) (map-key-of types expected)
+            (value-type core/NativeId) (map-value-of types expected)
+            (lowered MapItemsResultV0)
+            (loop [(position Int) 0
+                   (current BodyStateV0) state
+                   (key-ids (Vec core/NativeId)) []
+                   (key-types (Vec core/NativeId)) []
+                   (value-ids (Vec core/NativeId)) []
+                   (value-types (Vec core/NativeId)) []]
+              (if (or (>= position (count pairs)) (state-blocked? current))
+                (->MapItemsResultV0 current key-ids key-types value-ids
+                  value-types false)
+                (let [(pair core/NativeId) (nth pairs position)
+                      (key-node (U core/NativeId Nil))
+                      (index-first-object index pair "key")
+                      (value-node (U core/NativeId Nil))
+                      (index-first-object index pair "value")]
+                  (if (or (nil? key-node) (nil? value-node))
+                    (->MapItemsResultV0
+                      (state-fail current
+                        "TODO-NATIVE-MAP-LITERAL-PAIR: every pair needs a key and value")
+                      key-ids key-types value-ids value-types false)
+                    (let [(key-result ExprResultV0)
+                          (lower-item current key-node key-type)]
+                      (if (exprresultv0-terminated key-result)
+                        (->MapItemsResultV0 (exprresultv0-state key-result)
+                          key-ids key-types value-ids value-types true)
+                        (let [(value-result ExprResultV0)
+                              (lower-item (exprresultv0-state key-result)
+                                value-node value-type)]
+                          (if (exprresultv0-terminated value-result)
+                            (->MapItemsResultV0
+                              (exprresultv0-state value-result)
+                              key-ids key-types value-ids value-types true)
+                            (recur (+ position 1)
+                              (exprresultv0-state value-result)
+                              (conj key-ids
+                                (exprresultv0-value-id key-result))
+                              (conj key-types
+                                (exprresultv0-type-id key-result))
+                              (conj value-ids
+                                (exprresultv0-value-id value-result))
+                              (conj value-types
+                                (exprresultv0-type-id value-result)))))))))))
+            (current BodyStateV0) (mapitemsresultv0-state lowered)]
+        (cond
+          (mapitemsresultv0-terminated lowered)
+          (->ExprResultV0 current (lower-id "body" ["unreachable"])
+            (type-id "LowerFailure") true)
+
+          (state-blocked? current) (dead-result current)
+
+          :else
+          (let [(coerced-keys ArgsResultV0)
+                (coerce-values-to-type types owner current
+                  (mapitemsresultv0-key-ids lowered)
+                  (mapitemsresultv0-key-types lowered)
+                  key-type)
+                (keys-settled BodyStateV0) (argsresultv0-state coerced-keys)
+                (coerced-values ArgsResultV0)
+                (coerce-values-to-type types owner keys-settled
+                  (mapitemsresultv0-value-ids lowered)
+                  (mapitemsresultv0-value-types lowered)
+                  value-type)
+                (settled BodyStateV0) (argsresultv0-state coerced-values)]
+            (if (state-blocked? settled)
+              (dead-result settled)
+              (build-map-literal types owner settled expected
+                (argsresultv0-values coerced-keys)
+                (argsresultv0-values coerced-values)))))))))
+
+(defn contextual-collection-carrier
+  [(types (Vec core/TypeDef))
+   (index SourceIndexV0)
+   (expression core/NativeId)
+   (expected (U core/NativeId Nil))]
+  (U core/NativeId Nil)
+  (if (or (nil? expected) (not (same-id? expected (slice-value-type-id))))
+    expected
+    (let [(kind String) (fact-text index expression "form-kind")]
+      (cond
+        (= "vec" kind) (vector-type-of types (slice-value-type-id))
+        (= "map" kind)
+        (map-type-of types (slice-value-type-id) (slice-value-type-id))
+        (= "set" kind) (set-type-of types (slice-value-type-id))
+        :else expected))))
+
 (defn lower-contextual-value
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -7020,11 +7273,37 @@
    (expected (U core/NativeId Nil))
    (lower-item (Fn [BodyStateV0 core/NativeId core/NativeId] ExprResultV0))]
   (U ExprResultV0 Nil)
-  (let [(empty (U ExprResultV0 Nil))
-        (lower-contextual-empty env owner state expression expected)]
-    (if (some? empty)
-      empty
-      (lower-contextual-vector env owner state expression expected lower-item))))
+  (let [(types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (carrier (U core/NativeId Nil))
+        (contextual-collection-carrier types (bodyenvv0-index env)
+          expression expected)
+        (empty (U ExprResultV0 Nil))
+        (lower-contextual-empty env owner state expression carrier)
+        (lowered (U ExprResultV0 Nil))
+        (if (some? empty)
+          empty
+          (let [(vector-value (U ExprResultV0 Nil))
+                (lower-contextual-vector env owner state expression carrier
+                  lower-item)]
+            (if (some? vector-value)
+              vector-value
+              (let [(map-value (U ExprResultV0 Nil))
+                    (lower-contextual-map env owner state expression carrier
+                      lower-item)]
+                (if (some? map-value)
+                  map-value
+                  (lower-contextual-set env owner state expression carrier
+                    lower-item))))))]
+    (if (or (nil? lowered)
+            (nil? carrier)
+            (nil? expected)
+            (same-id? carrier expected)
+            (exprresultv0-terminated lowered)
+            (state-blocked? (exprresultv0-state lowered)))
+      lowered
+      (lower-boundary-coerce types owner (exprresultv0-state lowered)
+        (exprresultv0-value-id lowered) (exprresultv0-type-id lowered)
+        expected))))
 
 (defn text-type-id [] core/NativeId (type-id "String"))
 
@@ -19631,6 +19910,14 @@
           (append-type-def base-source-types
             (nullable-map-value-type (int-type-id)))
           base-source-types)
+        ;; The checker publishes parse-double's nullable Float result even when
+        ;; no source annotation repeats it. Instantiate that closed family
+        ;; before body lowering so the intrinsic has an exact result carrier.
+        (parse-source-types (Vec core/TypeDef))
+        (if (index-has-callee? index "parse-double")
+          (append-type-def text-index-source-types
+            (nullable-map-value-type (float-type-id)))
+          text-index-source-types)
         (source-types (Vec core/TypeDef))
         (if (or
               (index-has-callee? index "host.fs/path-kind")
@@ -19643,8 +19930,8 @@
               (index-has-callee? index "host.fs/unlock")
               (index-has-callee? index "host.clock/format-iso8601")
               (index-has-callee? index "host.system/hostname"))
-          (append-type-defs text-index-source-types (filesystem-outcome-types))
-          text-index-source-types)
+          (append-type-defs parse-source-types (filesystem-outcome-types))
+          parse-source-types)
         (process-source-types (Vec core/TypeDef))
         (if (or
               (index-has-callee? index "host.process/run-capture")
