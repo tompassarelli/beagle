@@ -3,7 +3,8 @@
   irreducible Clojure layer (file IO, JSON, process) the .bclj `declare-extern`s
   bind to. Runs on babashka. Beagle owns the compiler logic; this owns the host
   calls."
-  (:require [cheshire.core :as cheshire]))
+  (:require [cheshire.core :as cheshire]
+            [clojure.string :as str]))
 
 ;; --- file / stream IO ---------------------------------------------------------
 
@@ -64,8 +65,17 @@
     (sequential? value) (mapv canonical-json-value value)
     :else value))
 
+(defn- lowercase-unicode-escapes [text]
+  ;; Racket's canonical JSON writer uses lowercase hex digits in \uXXXX
+  ;; escapes. Cheshire preserves the same codepoints but writes A-F uppercase;
+  ;; normalize only the JSON escape spelling so the projection digest matches
+  ;; without changing any decoded character.
+  (str/replace text #"\\u([0-9A-F]{4})"
+               (fn [[_ digits]] (str "\\u" (str/lower-case digits)))))
+
 (defn canonical-json [value]
-  (cheshire/generate-string (canonical-json-value value)))
+  (lowercase-unicode-escapes
+    (cheshire/generate-string (canonical-json-value value))))
 
 (defn- sha256-utf8 [text]
   (sha256-bytes (.getBytes ^String text java.nio.charset.StandardCharsets/UTF_8)))
