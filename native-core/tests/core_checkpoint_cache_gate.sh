@@ -183,8 +183,7 @@ invalidated_early_key="$(sed -n \
 # Remove the completed whole result, then make one checkpoint artifact a
 # symlink. Both the early alias and full-key validation must retire it before a
 # normal rebuild, and the rebuilt output must remain byte-identical.
-rm -f -- "$cache/aliases/$seed_early_key"
-rm -rf -- "${cache:?}/results/$seed_key"
+rm -rf -- "${cache:?}/aliases" "${cache:?}/results"
 rm -f -- "$cache/checkpoints/$seed_key/artifacts/report.head"
 ln -s module.native-program \
     "$cache/checkpoints/$seed_key/artifacts/report.head"
@@ -208,8 +207,7 @@ grep -Fqx "beagle build: core-checkpoint CORRUPT $seed_key; retiring" \
 # The legacy module.native-program identity is deliberately lossy. Make every
 # shell-level hash and marker internally consistent around those old bytes; the
 # wire decoder must still reject and retire the entry before materialization.
-rm -f -- "$cache/aliases/$seed_early_key"
-rm -rf -- "${cache:?}/results/$seed_key"
+rm -rf -- "${cache:?}/aliases" "${cache:?}/results"
 checkpoint_entry="$cache/checkpoints/$seed_key"
 cp -- "$checkpoint_entry/artifacts/module.native-program" \
     "$checkpoint_entry/artifacts/frozen-native-stage.wire-v1"
