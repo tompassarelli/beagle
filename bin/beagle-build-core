@@ -20,6 +20,7 @@ BIN="$BEAGLE_DIR/bin"
 PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
 AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
+CORE_COMPILER_PROJECTION="$BIN/beagle-core-compiler-projection"
 SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
 EMIT_MANAGER="$BEAGLE_DIR/native-core/bin/emit-workers"
 PLATFORM_SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded"
@@ -326,6 +327,8 @@ done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
 [[ -f "$AST_VERIFIER" ]] || die "checked-AST verifier is unavailable: $AST_VERIFIER"
 [[ -f "$FINALIZER" ]] || die "build finalizer is unavailable: $FINALIZER"
+[[ -x "$CORE_COMPILER_PROJECTION" ]] ||
+    die "Core compiler projection builder is unavailable: $CORE_COMPILER_PROJECTION"
 [[ -f "$MODULE_SOURCE_ROOT_CLI" ]] ||
     die "module source root resolver is unavailable: $MODULE_SOURCE_ROOT_CLI"
 
@@ -467,26 +470,15 @@ for ((closure_index = 0; closure_index < ${#closure_fields[@]}; closure_index +=
     source_snapshot_digests+=("$source_digest")
 done
 
-core_modules=(
-    native-core/src/native/core.bclj
-    native-core/src/native/stages.bclj
-    native-core/src/native/simd.bclj
-    native-core/src/native/lower.bclj
-    native-core/src/native/obligations.bclj
-    native-core/src/native/c11.bclj
-    native-core/src/native/slice.bclj
-    native-core/src/native/unit_reuse.bclj
-    native-core/src/native/unit_compile.bclj
-    native-core/src/native/fold_c17.bclj
-    native-core/src/native/body_c17.bclj
-    native-core/src/native/body_slice.bclj
-    native-core/src/native/qbe.bclj
-)
+core_modules=()
+mapfile -t core_modules < <("$CORE_COMPILER_PROJECTION" --list-sources)
+[[ ${#core_modules[@]} -gt 0 ]] || die "Core compiler projection source list is empty"
 
 cache_key_material() {
     local relative
     for relative in "${core_modules[@]}" \
                     bin/beagle-build-core \
+                    bin/beagle-core-compiler-projection \
                     bin/beagle-build-all \
                     bin/beagle-build \
                     bin/_beagle-racket \
@@ -941,19 +933,16 @@ compiled="${compiled_override:-$cache_entry/compiled}"
 
 if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
     compiled="$work/compiled"
-    mkdir -p "$compiled"
-    build_all_args=()
-    for relative in "${core_modules[@]}"; do
-        build_all_args+=("$BEAGLE_DIR/$relative")
-    done
     sorted_build_args=()
     mapfile -t sorted_build_args < <(
-        printf '%s\n' "${build_all_args[@]}" | LC_ALL=C sort
+        printf '%s\n' "${core_modules[@]}" |
+            sed "s|^|$BEAGLE_DIR/|" | LC_ALL=C sort
     )
     # The Racket bundle remains the unset-selector shadow. Native selection is
     # explicit and content-addresses the executable before it can populate the
     # compiler projection cache.
     if [[ -n "$native_compiler_bin" ]]; then
+        mkdir -p "$compiled"
         run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
             bash -c '
                 set -euo pipefail
@@ -987,10 +976,8 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
         echo "beagle build: core-compiler-cache MISS $compiler_source_digest" >&2
     else
         run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
-            "$BIN/beagle-build-all" \
-            --module-root native-core/src="$BEAGLE_DIR/native-core/src" \
-            "${build_all_args[@]}" \
-            --out "$compiled" >"$work/build.log" 2>&1 || {
+            "$CORE_COMPILER_PROJECTION" \
+            --out "$compiled" --log "$work/build.log" || {
                 sed -n '1,200p' "$work/build.log" >&2
                 exit 1
             }
@@ -998,17 +985,19 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
 
     # Generated Clojure needs provider records referred and imported until the
     # emitter qualifies cross-module union patterns itself.
-    core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
-        "$compiled/native/core.clj" | tr '\n' ' ')"
-    for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
-        generated="$compiled/native/$module.clj"
-        [[ -f "$generated" ]] || continue
-        sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
-        awk -v imp="(import '[native.core $core_records])" \
-            '!seen && /^$/ { print imp; seen = 1 } { print }' \
-            "$generated" >"$generated.tmp"
-        mv "$generated.tmp" "$generated"
-    done
+    if [[ -n "$native_compiler_bin" ]]; then
+        core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
+            "$compiled/native/core.clj" | tr '\n' ' ')"
+        for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+            generated="$compiled/native/$module.clj"
+            [[ -f "$generated" ]] || continue
+            sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
+            awk -v imp="(import '[native.core $core_records])" \
+                '!seen && /^$/ { print imp; seen = 1 } { print }' \
+                "$generated" >"$generated.tmp"
+            mv "$generated.tmp" "$generated"
+        done
+    fi
 
     # Publish by renaming a fully-populated staging dir, so a reader never sees
     # a half-written entry and a lost race just keeps this run's own copy.

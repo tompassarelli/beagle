@@ -64,7 +64,44 @@ def digest(path):
     return hasher.hexdigest()
 
 
-def run_case(case, compiler, repo_root):
+def prepare_core_compiler(repo_root):
+    builder = repo_root / "bin" / "beagle-core-compiler-projection"
+    if not builder.is_file():
+        fail("Core compiler projection builder is unavailable")
+    print("PREPARE core-compiler-projection", flush=True)
+    result = subprocess.run(
+        [str(builder), "--cache"],
+        cwd=str(repo_root),
+        stdout=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail("Core compiler projection preparation failed")
+    destination = Path(result.stdout.strip())
+    if not destination.is_dir():
+        fail("Core compiler projection cache returned no artifact")
+    print("PREPARED core-compiler-projection", flush=True)
+    return destination
+
+
+def needs_core_compiler(entries, manifest_path, requested_ids):
+    for entry in entries:
+        case_id = entry.get("caseId") if isinstance(entry, dict) else None
+        if requested_ids and case_id not in requested_ids:
+            continue
+        try:
+            case = read_json(manifest_path.parent / entry["path"])
+            validate_case(case, case_id)
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        argv = case["input"]["command"]["argv"]
+        if case["input"].get("target") == "core" and argv[0] == "execute":
+            return True
+    return False
+
+
+def run_case(case, compiler, repo_root, core_compiler=None):
     with tempfile.TemporaryDirectory(prefix="beagle-corpus-") as temp:
         temp_root = Path(temp)
         closure = case["input"].get("closure", {})
@@ -92,10 +129,14 @@ def run_case(case, compiler, repo_root):
             target = case["input"].get("target")
             entry = argv[2]
             if target == "core":
+                if core_compiler is None:
+                    fail("Core execution requires a prepared compiler projection")
                 executable = output_path / "program"
                 output_path.mkdir()
                 build_argv = [str(compiler), "native-exe", "--out", str(executable),
                               "--entry", entry, argv[3]]
+                build_env = os.environ.copy()
+                build_env["BEAGLE_CORE_COMPILED_OVERRIDE"] = str(core_compiler)
                 run_argv = [str(executable)]
             elif target in ("clj", "js"):
                 runtime = shutil.which("bb" if target == "clj" else "node")
@@ -247,6 +288,10 @@ def main():
             print("run-corpus: required ALARM-BELL case is not DECIDED: " + required_id,
                   file=sys.stderr)
             return 2
+    core_compiler = None
+    if needs_core_compiler(entries, args.manifest, args.case_ids):
+        core_compiler = prepare_core_compiler(repo_root)
+
     failures = 0
     for entry in entries:
         try:
@@ -261,8 +306,11 @@ def main():
                 fail("case payload digest does not match manifest")
             case = read_json(case_path)
             validate_case(case, case_id)
-            reason = run_case(case, args.compiler, repo_root)
-        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            reason = run_case(
+                case, args.compiler, repo_root, core_compiler=core_compiler
+            )
+        except (OSError, KeyError, TypeError, ValueError,
+                json.JSONDecodeError) as error:
             reason = str(error)
         if reason is None:
             print("PASS " + case_id)

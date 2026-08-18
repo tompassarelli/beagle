@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# Build and authenticate the hosted Clojure projection used by Core lowering.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+supervisor="$root/native-core/bin/run-bounded"
+kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
+overall_timeout="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-600}"
+
+sources=(
+    native-core/src/native/core.bclj
+    native-core/src/native/stages.bclj
+    native-core/src/native/simd.bclj
+    native-core/src/native/lower.bclj
+    native-core/src/native/obligations.bclj
+    native-core/src/native/c11.bclj
+    native-core/src/native/slice.bclj
+    native-core/src/native/unit_reuse.bclj
+    native-core/src/native/unit_compile.bclj
+    native-core/src/native/fold_c17.bclj
+    native-core/src/native/body_c17.bclj
+    native-core/src/native/body_slice.bclj
+    native-core/src/native/qbe.bclj
+)
+
+if [[ "${1:-}" == "--list-sources" && $# -eq 1 ]]; then
+    printf '%s\n' "${sources[@]}"
+    exit 0
+fi
+
+out=""
+log=""
+cache_requested=0
+cache_root="${BEAGLE_CORE_COMPILER_CACHE:-${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}/beagle/core-compiler-projections}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --out)
+            [[ $# -ge 2 ]] || { echo "beagle core compiler projection: --out needs a directory" >&2; exit 2; }
+            out="$2"
+            shift 2
+            ;;
+        --out=*)
+            out="${1#*=}"
+            shift
+            ;;
+        --log)
+            [[ $# -ge 2 ]] || { echo "beagle core compiler projection: --log needs a file" >&2; exit 2; }
+            log="$2"
+            shift 2
+            ;;
+        --log=*)
+            log="${1#*=}"
+            shift
+            ;;
+        --cache)
+            cache_requested=1
+            shift
+            ;;
+        --cache-root)
+            [[ $# -ge 2 ]] || { echo "beagle core compiler projection: --cache-root needs a directory" >&2; exit 2; }
+            cache_requested=1
+            cache_root="$2"
+            shift 2
+            ;;
+        --cache-root=*)
+            cache_requested=1
+            cache_root="${1#*=}"
+            shift
+            ;;
+        *)
+            echo "beagle core compiler projection: unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+[[ "$overall_timeout" =~ ^[1-9][0-9]*$ ]] || {
+    echo "beagle core compiler projection: invalid overall build deadline" >&2
+    exit 2
+}
+[[ "$kill_grace" =~ ^[1-9][0-9]*$ ]] || {
+    echo "beagle core compiler projection: invalid kill grace" >&2
+    exit 2
+}
+[[ -x "$supervisor" ]] || {
+    echo "beagle core compiler projection: build supervisor is unavailable" >&2
+    exit 2
+}
+if [[ "$cache_requested" == 1 ]]; then
+    [[ -z "$out" ]] || { echo "beagle core compiler projection: --cache and --out are mutually exclusive" >&2; exit 2; }
+    [[ "$cache_root" == /* ]] || { echo "beagle core compiler projection: cache root must be absolute" >&2; exit 2; }
+else
+    [[ -n "$out" ]] || { echo "beagle core compiler projection: --out is required" >&2; exit 2; }
+    [[ "$out" == /* ]] || { echo "beagle core compiler projection: --out must be absolute" >&2; exit 2; }
+    [[ ! -e "$out" ]] || { echo "beagle core compiler projection: --out already exists: $out" >&2; exit 2; }
+fi
+
+if [[ "${BEAGLE_CORE_COMPILER_PROJECTION_SUPERVISED:-0}" != 1 ]]; then
+    supervised_args=()
+    if [[ "$cache_requested" == 1 ]]; then
+        supervised_args+=(--cache-root "$cache_root")
+    else
+        supervised_args+=(--out "$out")
+        [[ -z "$log" ]] || supervised_args+=(--log "$log")
+    fi
+    exec "$supervisor" "$overall_timeout" "$kill_grace" -- \
+        env BEAGLE_CORE_COMPILER_PROJECTION_SUPERVISED=1 "$0" \
+        "${supervised_args[@]}"
+fi
+
+write_input_manifest() {
+    local destination="$1" relative
+    {
+        printf 'beagle-core-compiler-projection-input/v1\n'
+        for relative in "${sources[@]}" \
+                        bin/beagle-core-compiler-projection \
+                        bin/beagle-build-all \
+                        bin/_beagle-racket \
+                        share/targets.sh flake.nix flake.lock; do
+            [[ -f "$root/$relative" ]] || continue
+            printf '%s %s\n' "$relative" \
+                "$(sha256sum "$root/$relative" | awk '{print $1}')"
+        done
+        find "$root/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
+            LC_ALL=C sort -z | xargs -0 sha256sum |
+            awk -v prefix="${#root}" \
+                '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+    } >"$destination"
+}
+
+expected_modules() {
+    for source in "${sources[@]}"; do
+        basename "$source" .bclj
+    done | sed 's/$/.clj/' | LC_ALL=C sort
+}
+
+validate_compiled_tree() {
+    local compiled="$1" expected actual
+    [[ -d "$compiled/native" && ! -L "$compiled" ]] || return 1
+    expected="$(expected_modules)"
+    actual="$(find "$compiled/native" -mindepth 1 -maxdepth 1 -type f \
+        -printf '%f\n' | LC_ALL=C sort)"
+    [[ "$actual" == "$expected" ]] || return 1
+    ! find "$compiled" -mindepth 1 \( -type l -o ! -type d ! -type f \) \
+        -print -quit | grep -q .
+}
+
+cache_entry_valid() {
+    local entry="$1" key="$2" manifest_digest expected_names actual_names
+    [[ -d "$entry" && ! -L "$entry" &&
+       -f "$entry/input.manifest" && ! -L "$entry/input.manifest" &&
+       -f "$entry/artifacts.sha256" && ! -L "$entry/artifacts.sha256" &&
+       -f "$entry/READY" && ! -L "$entry/READY" ]] || return 1
+    validate_compiled_tree "$entry/compiled" || return 1
+    [[ "$(sha256sum "$entry/input.manifest" | awk '{print $1}')" == "$key" ]] || return 1
+    manifest_digest="$(sha256sum "$entry/artifacts.sha256" | awk '{print $1}')"
+    [[ "$(<"$entry/READY")" == \
+       "beagle-core-compiler-projection/v1 $key $manifest_digest" ]] || return 1
+    expected_names="$(awk '{ print $2 }' "$entry/artifacts.sha256" | LC_ALL=C sort)"
+    actual_names="$(cd "$entry/compiled" && find . -type f -printf '%p\n' | LC_ALL=C sort)"
+    [[ -n "$expected_names" && "$expected_names" == "$actual_names" ]] || return 1
+    (cd "$entry/compiled" && sha256sum --check --strict ../artifacts.sha256 >/dev/null 2>&1)
+}
+
+build_projection() {
+    local compiled="$1" build_log="$2" source generated core_records
+    local build_args=()
+    for source in "${sources[@]}"; do
+        build_args+=("$root/$source")
+    done
+    echo "beagle core compiler projection: construction START (one-time, overall build deadline=${overall_timeout}s)" >&2
+    if ! "$root/bin/beagle-build-all" \
+        --module-root "native-core/src=$root/native-core/src" \
+        "${build_args[@]}" --out "$compiled" >"$build_log" 2>&1; then
+        sed -n '1,200p' "$build_log" >&2
+        return 1
+    fi
+    core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
+        "$compiled/native/core.clj" | tr '\n' ' ')"
+    for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+        generated="$compiled/native/$module.clj"
+        [[ -f "$generated" ]] || continue
+        sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$generated"
+        awk -v imp="(import '[native.core $core_records])" \
+            '!seen && /^$/ { print imp; seen = 1 } { print }' \
+            "$generated" >"$generated.tmp"
+        mv "$generated.tmp" "$generated"
+    done
+    validate_compiled_tree "$compiled" || {
+        echo "beagle core compiler projection: compiled module set is incomplete" >&2
+        return 1
+    }
+    echo "beagle core compiler projection: construction END modules=${#sources[@]}" >&2
+}
+
+work=""
+cleanup() {
+    local rc=$?
+    [[ -z "$work" || ! -d "$work" ]] || rm -rf "${work:?}"
+    return "$rc"
+}
+trap cleanup EXIT
+
+if [[ "$cache_requested" == 1 ]]; then
+    mkdir -p "$cache_root/.locks" "$cache_root/.staging"
+    work="$(mktemp -d "$cache_root/.staging/identity.XXXXXX")"
+    write_input_manifest "$work/input.manifest"
+    key="$(sha256sum "$work/input.manifest" | awk '{print $1}')"
+    entry="$cache_root/$key"
+    exec {lock_fd}>"$cache_root/.locks/$key.lock"
+    echo "beagle core compiler projection: cache lock START $key" >&2
+    flock -x "$lock_fd"
+    echo "beagle core compiler projection: cache lock END $key" >&2
+    if cache_entry_valid "$entry" "$key"; then
+        echo "beagle core compiler projection: cache HIT $key" >&2
+        printf '%s\n' "$entry/compiled"
+        exit 0
+    fi
+    if [[ -e "$entry" ]]; then
+        corrupt="$cache_root/.staging/corrupt.$key.$$"
+        mv "$entry" "$corrupt"
+        rm -rf "${corrupt:?}"
+    fi
+    rm -rf "${work:?}"
+    work="$(mktemp -d "$cache_root/.staging/projection.XXXXXX")"
+    write_input_manifest "$work/input.manifest"
+    echo "beagle core compiler projection: cache MISS $key" >&2
+    build_projection "$work/compiled" "$work/build.log"
+    rm -f "$work/build.log"
+    (cd "$work/compiled" && find . -type f -print0 | LC_ALL=C sort -z |
+        xargs -0 sha256sum >"$work/artifacts.sha256")
+    manifest_digest="$(sha256sum "$work/artifacts.sha256" | awk '{print $1}')"
+    printf 'beagle-core-compiler-projection/v1 %s %s\n' \
+        "$key" "$manifest_digest" >"$work/READY"
+    cache_entry_valid "$work" "$key" || {
+        echo "beagle core compiler projection: staged cache proof is invalid" >&2
+        exit 1
+    }
+    mv "$work" "$entry"
+    work=""
+    echo "beagle core compiler projection: cache PUBLISHED $key" >&2
+    printf '%s\n' "$entry/compiled"
+    exit 0
+fi
+
+out_parent="$(dirname -- "$out")"
+mkdir -p "$out_parent"
+work="$(mktemp -d "$out_parent/.beagle-core-compiler-projection.XXXXXX")"
+build_projection "$work/compiled" "${log:-$work/build.log}"
+mv "$work/compiled" "$out"
