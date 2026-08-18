@@ -232,6 +232,12 @@
     [(string? value)
      (write-byte 6 out)
      (write-text value out)]
+    ;; Characters are distinct semantic values from their codepoint integers.
+    ;; Keep the codepoint scalar in the canonical payload and reserve a tag so
+    ;; `#\\A` cannot collide with the integer `65`.
+    [(char? value)
+     (write-byte 19 out)
+     (write-uvarint (char->integer value) out)]
     [(bytes? value)
      (write-byte 7 out)
      (write-framed value out)]

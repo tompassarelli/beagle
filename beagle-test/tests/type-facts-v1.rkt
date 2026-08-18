@@ -126,6 +126,15 @@
    (lambda ()
      (canonical-value-v1->bytes (hash "e\u0301" 1 "é" 2)))))
 
+(test-case "canonical characters preserve codepoints and type identity"
+  (check-equal? (canonical-value-v1-id #\é)
+                (canonical-value-v1-id (integer->char #xe9)))
+  (check-not-equal? (canonical-value-v1-id #\A)
+                    (canonical-value-v1-id 65))
+  (check-not-equal? (canonical-value-v1-id #\tab)
+                    (canonical-value-v1-id 9))
+  (check-not-exn (lambda () (canonical-value-v1->bytes #\u0001))))
+
 (test-case "implicit cycles reject while identity references encode"
   (define cycle (make-vector 1 #f))
   (vector-set! cycle 0 cycle)
