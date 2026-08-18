@@ -29,7 +29,7 @@
       "caseId": "hl-collection-ordering-hosted-js",
       "path": "corpus/decided/hl-collection-ordering-hosted-js.json",
       "status": "DECIDED",
-      "sha256": "47088342884f594934e6be4c0d703f1d2a82c59ca72cf3bf22b5882699f4495d",
+      "sha256": "e72086fe34a06780b03e4f0c2ee0a7307f9928d4e8f4ef6edb216327923397e5",
       "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","hosted-js"]
     },
     {
