@@ -11857,16 +11857,17 @@
    (state BodyStateV0)
    (callee String)
    (callback-body (U core/NativeId Nil))
-   (callback-source-parameter (U core/NativeId Nil))
+   (callback-source-parameters (Vec core/NativeId))
    (callback-accessor AccessorHitV0)
    (callback-signature (U TypedFunctionV0 Nil))
    (callback-return core/NativeId)
    (element-type core/NativeId)
    (collection-id core/NativeId)
-   (collection-type core/NativeId)]
+   (collection-type core/NativeId)
+   (indexed Bool)]
   ExprResultV0
   (let [types (Vec core/TypeDef) (bodyenvv0-types env)
-        mapping Bool (= "mapv" callee)
+        mapping Bool (or (= "mapv" callee) (= "map-indexed" callee))
         result-vector-type (U core/NativeId Nil)
         (if mapping
           (vector-type-of types callback-return)
@@ -11932,7 +11933,9 @@
             callback-result ExprResultV0
             (if (some? callback-signature)
               (lower-static-callback-call isolated owner
-                callback-signature [item-id] (str callee "-callback-call"))
+                callback-signature
+                (if indexed [header-index item-id] [item-id])
+                (str callee "-callback-call"))
               (if (accessorhitv0-found callback-accessor)
               (let [result-id core/NativeId
                     (state-id isolated owner "mapv-accessor")]
@@ -11943,13 +11946,20 @@
                       item-id (accessorhitv0-field-id callback-accessor)))
                   result-id callback-return false))
               (if (or (nil? callback-body)
-                      (nil? callback-source-parameter))
+                      (= 0 (count callback-source-parameters)))
                 (fail-result isolated
                   (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
                     " has no statically known callback body"))
-                  (let [callback-state BodyStateV0
-                      (bind-source-parameter-value env owner isolated
-                        callback-source-parameter 0 item-id element-type)]
+                  (let [indexed-state BodyStateV0
+                        (if indexed
+                          (bind-source-parameter-value env owner isolated
+                            (nth callback-source-parameters 0) 0
+                            header-index (int-type-id))
+                          isolated)
+                        callback-state BodyStateV0
+                        (bind-source-parameter-value env owner indexed-state
+                          (nth callback-source-parameters (if indexed 1 0))
+                          (if indexed 1 0) item-id element-type)]
                   (lower-contextual-boundary env owner callback-state callback-body
                     callback-return callback-return)))))
             restored BodyStateV0
@@ -12290,9 +12300,9 @@
 
           :else
           (lower-eager-vector-collect env owner collection-state callee
-            nil nil accessor nil return-type element-type
+            nil [] accessor nil return-type element-type
             (exprresultv0-value-id collection)
-            (exprresultv0-type-id collection)))))))
+            (exprresultv0-type-id collection) false))))))
 
 (defn lower-eager-vector-hof
   [(env BodyEnvV0)
@@ -12369,9 +12379,11 @@
             (str "TODO-NATIVE-VECTOR-HOF-VARIADIC: " callee
               " callbacks must have fixed arity"))
 
-          (or (not (= 1 (count callback-parameters)))
+          (or (not (= (if (= "map-indexed" callee) 2 1)
+                    (count callback-parameters)))
               (and (= "fn" callback-kind)
-                (not (= 1 (count callback-source-parameters)))))
+                (not (= (if (= "map-indexed" callee) 2 1)
+                      (count callback-source-parameters)))))
           (fail-result state
             (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-ARITY: " callee
               " callbacks take exactly one vector element"))
@@ -12401,7 +12413,9 @@
                 callback-return core/NativeId
                 (typeresolutionv0-type-id callback-return-resolution)
                 element-type core/NativeId
-                (core/parameter-type-id (nth callback-parameters 0))]
+                (core/parameter-type-id
+                  (nth callback-parameters
+                    (if (= "map-indexed" callee) 1 0)))]
             (cond
               (not (typeresolutionv0-valid callback-return-resolution))
               (fail-result state
@@ -12444,14 +12458,16 @@
                         (str "TODO-NATIVE-VECTOR-HOF-ELEMENT: " callee
                           " vector element must match its callback parameter"))
 
-                      (or (= "mapv" callee) (= "filterv" callee))
+                      (or (= "mapv" callee) (= "filterv" callee)
+                        (= "map-indexed" callee))
                       (lower-eager-vector-collect env owner collection-state callee
                         callback-body
                         (if (= "fn" callback-kind)
-                          (nth callback-source-parameters 0) callback-node)
+                          callback-source-parameters [])
                         (accessor-miss) callback-signature callback-return
                         element-type (exprresultv0-value-id collection)
-                        (exprresultv0-type-id collection))
+                        (exprresultv0-type-id collection)
+                        (= "map-indexed" callee))
 
                       :else
                       (lower-eager-vector-predicate env owner collection-state callee
@@ -14507,6 +14523,93 @@
                     (core/->TokenFlowV0 [] [])))
                 result-id (core/functiontype-return-type shape) false))))))))
 
+(defn lower-apply-concat
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (packed ExprResultV0)
+   (element-type core/NativeId)]
+  ExprResultV0
+  (let [(types (Vec core/TypeDef)) (bodyenvv0-types env)]
+    (if (or (same-id? element-type (type-id "LowerFailure"))
+            (not (vector-type? types element-type)))
+      (fail-result (exprresultv0-state packed)
+        "LOWER-APPLY-CONCAT: apply concat needs a vector of native vectors")
+      (let [(result-type core/NativeId) element-type
+            (state0 BodyStateV0) (exprresultv0-state packed)
+            (collection-id core/NativeId) (exprresultv0-value-id packed)
+            (length-id core/NativeId) (state-id state0 owner "apply-concat-length")
+            (zero-id core/NativeId) (state-id state0 owner "apply-concat-zero")
+            (empty-id core/NativeId) (state-id state0 owner "apply-concat-empty")
+            (header-id core/NativeId) (state-id state0 owner "apply-concat-header")
+            (body-id core/NativeId) (state-id state0 owner "apply-concat-body")
+            (exit-id core/NativeId) (state-id state0 owner "apply-concat-exit")
+            (header-index core/NativeId) (state-id state0 owner "apply-concat-index")
+            (header-output core/NativeId) (state-id state0 owner "apply-concat-output")
+            (prepared BodyStateV0)
+            (state-emit
+              (state-emit
+                (state-emit (state-bump state0)
+                  (core/->VecLengthInstruction
+                    (core/->SsaValueV0 length-id (int-type-id)) collection-id))
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 zero-id (int-type-id))
+                  (core/->I64Atom 0)))
+              (core/->VecEmptyInstruction
+                (core/->SsaValueV0 empty-id result-type)
+                length-id (arena-value-id owner)))
+            (entered BodyStateV0)
+            (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator header-id [zero-id empty-id]))
+              header-id
+              [(core/->Parameter header-index (int-type-id))
+               (core/->Parameter header-output result-type)])
+            (has-item core/NativeId)
+            (state-id entered owner "apply-concat-has-item")
+            (compared BodyStateV0)
+            (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-item (bool-type-id))
+                (core/->CompareLtI64V0 true) header-index length-id))
+            (branched BodyStateV0)
+            (state-open-block
+              (state-close compared
+                (core/->BranchTerminator has-item body-id exit-id))
+              body-id [])
+            (inner-id core/NativeId)
+            (state-id branched owner "apply-concat-inner")
+            (loaded BodyStateV0)
+            (state-emit (state-bump branched)
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 inner-id result-type)
+                collection-id header-index))
+            (next-output core/NativeId)
+            (state-id loaded owner "apply-concat-next-output")
+            (joined BodyStateV0)
+            (state-emit (state-bump loaded)
+              (core/->VecConcatInstruction
+                (core/->SsaValueV0 next-output result-type)
+                header-output inner-id (arena-value-id owner)))
+            (one-id core/NativeId) (state-id joined owner "apply-concat-one")
+            (with-one BodyStateV0)
+            (state-emit (state-bump joined)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 one-id (int-type-id))
+                (core/->I64Atom 1)))
+            (next-index ExprResultV0)
+            (lower-checked-arith with-one owner "+" header-index one-id)
+            (next-state BodyStateV0) (exprresultv0-state next-index)]
+        (if (state-blocked? next-state)
+          (dead-result next-state)
+          (->ExprResultV0
+            (state-open-block
+              (state-close (state-bump next-state)
+                (core/->JumpTerminator header-id
+                  [(exprresultv0-value-id next-index) next-output]))
+              exit-id [])
+            header-output result-type false))))))
+
 (defn lower-apply-call
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -14520,22 +14623,32 @@
       (fail-result state "LOWER-APPLY-ARITY: apply requires a callable and one typed vector")
       (let [target core/NativeId (nth arguments 0)
             name String (source-reference-spelling index target)
-            signature (U TypedFunctionV0 Nil) (find-signature env target name)
-            signature-source (U core/NativeId Nil)
-            (find-signature-source env target name)]
-        (if (or (nil? signature) (nil? signature-source))
-          (fail-result state
-            "LOWER-APPLY-CALLABLE: apply target must have a closed native signature")
-          (let [packed ExprResultV0
-                (lower-expr env owner state (nth arguments 1))
-                vector-type core/NativeId (exprresultv0-type-id packed)
-                element-type core/NativeId (vector-element-of types vector-type)
-                parameters (Vec core/Parameter)
+            packed ExprResultV0
+            (lower-expr env owner state (nth arguments 1))]
+        (cond
+          (exprresultv0-terminated packed) packed
+          (state-blocked? (exprresultv0-state packed))
+          (dead-result (exprresultv0-state packed))
+
+          (and (= "concat" name)
+               (not (exprresultv0-terminated packed))
+               (not (state-blocked? (exprresultv0-state packed))))
+          (let [element-type core/NativeId
+                (vector-element-of types (exprresultv0-type-id packed))]
+            (lower-apply-concat env owner (exprresultv0-state packed)
+              packed element-type))
+          :else
+          (let [signature (U TypedFunctionV0 Nil) (find-signature env target name)
+                signature-source (U core/NativeId Nil)
+                (find-signature-source env target name)]
+            (if (or (nil? signature) (nil? signature-source))
+              (fail-result state
+                "LOWER-APPLY-CALLABLE: apply target must have a closed native signature")
+              (let [vector-type core/NativeId (exprresultv0-type-id packed)
+                    element-type core/NativeId (vector-element-of types vector-type)
+                    parameters (Vec core/Parameter)
                 (typedfunctionv0-parameters signature)]
             (cond
-              (exprresultv0-terminated packed) packed
-              (state-blocked? (exprresultv0-state packed))
-              (dead-result (exprresultv0-state packed))
               (same-id? element-type (type-id "LowerFailure"))
               (fail-result (exprresultv0-state packed)
                 "LOWER-APPLY-VECTOR: apply arguments must be a typed vector")
@@ -14566,7 +14679,7 @@
                             (core/->SsaValueV0 value-id element-type)
                             (exprresultv0-value-id packed) index-id))]
                     (recur (+ position 1) loaded (conj values value-id)
-                      (conj value-types element-type))))))))))))
+                      (conj value-types element-type))))))))))))))
 
 (defn lower-expr-raw
   [(env BodyEnvV0)
@@ -16180,7 +16293,7 @@
             (lower-eager-vector-hof env owner state "filterv"
               (source-call-arguments index (nth args 0)))
 
-            (or (= "mapv" callee) (= "filterv" callee)
+            (or (= "mapv" callee) (= "map-indexed" callee) (= "filterv" callee)
                 (= "every?" callee) (= "some" callee))
             (lower-eager-vector-hof env owner state callee args)
 
