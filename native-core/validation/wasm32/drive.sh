@@ -64,9 +64,14 @@ materialize() { # materialize <corpus> <outdir>
 
 # Two independent materializations of the same corpus must be byte-identical.
 determinism() { # determinism <corpus> <name>
-  local corpus="$1" name="$2" file
-  materialize "$corpus" "$work/$name-a"
-  materialize "$corpus" "$work/$name-b"
+  local corpus="$1" name="$2" file first_pid second_pid failed=0
+  materialize "$corpus" "$work/$name-a" &
+  first_pid=$!
+  materialize "$corpus" "$work/$name-b" &
+  second_pid=$!
+  wait "$first_pid" || failed=1
+  wait "$second_pid" || failed=1
+  [[ "$failed" -eq 0 ]] || die "$corpus parallel materialization failed"
   for file in module_0.h module_0.c; do
     cmp -s "$work/$name-a/$file" "$work/$name-b/$file" \
       || die "$corpus re-emission is not byte-identical for $file"
@@ -89,8 +94,18 @@ build_and_run() { # build_and_run <name> <srcdir> <main.c> [extra cc flags...]
   echo "wasm32/drive.sh: $name strict compile + wasmtime run ok"
 }
 
+# ---- independent deterministic materializations ---------------------------
+determinism slice-fold fold &
+fold_determinism_pid=$!
+determinism slice-union union &
+union_determinism_pid=$!
+determinism_failed=0
+wait "$fold_determinism_pid" || determinism_failed=1
+wait "$union_determinism_pid" || determinism_failed=1
+[[ "$determinism_failed" -eq 0 ]] \
+  || die "parallel fold/union determinism materialization failed"
+
 # ---- slice-fold: generated probe main, arena round trip -------------------
-determinism slice-fold fold
 fold_asserts="$(grep -c '_Static_assert' "$work/fold-a/module_0.h")"
 [[ "$fold_asserts" -gt 0 ]] || die "slice-fold emitted no layout assertions"
 grep -q '_Static_assert(sizeof(native_m0_type_0) == 4' "$work/fold-a/module_0.h" \
@@ -98,17 +113,47 @@ grep -q '_Static_assert(sizeof(native_m0_type_0) == 4' "$work/fold-a/module_0.h"
 build_and_run slice_fold "$work/fold-a" "$work/fold-a/main.c"
 
 # ---- slice-union: value descriptor channel over a reference ---------------
-determinism slice-union union
 union_header="$work/union-a/module_0.h"
-any_type="$(sed -nE 's/^(native_m0_type_[0-9]+) native_m0_fn_1\(.*/\1/p' "$union_header")"
-nil_type="$(sed -nE 's/^(native_m0_type_[0-9]+) native_m0_fn_15\(.*/\1/p' "$union_header")"
-pair_type="$(sed -nE 's/^(native_m0_type_[0-9]+) native_m0_fn_7\(.*/\1/p' "$union_header")"
+union_report="$work/union-a/report.txt"
+function_index() { # function_index <source-name>
+  local function="$1"
+  awk -v fn_name="$function" \
+    '$1 == "lowered" && $2 ~ /^fn_[0-9]+$/ && $3 == fn_name {
+       sub(/^fn_/, "", $2)
+       print $2
+       found = 1
+       exit
+     }
+     END { exit !found }' \
+    "$union_report"
+}
+any_function="$(function_index wrap-int)"
+nil_function="$(function_index logic-empty-or)"
+pair_function="$(function_index pair-copy-of)"
+any_type="$(sed -nE \
+  "s/^(native_m0_type_[0-9]+) native_m0_fn_${any_function}\\(.*/\\1/p" \
+  "$union_header")"
+nil_type="$(sed -nE \
+  "s/^(native_m0_type_[0-9]+) native_m0_fn_${nil_function}\\(.*/\\1/p" \
+  "$union_header")"
+pair_type="$(sed -nE \
+  "s/^(native_m0_type_[0-9]+) native_m0_fn_${pair_function}\\(.*/\\1/p" \
+  "$union_header")"
 [[ -n "$any_type" && -n "$nil_type" && -n "$pair_type" ]] \
   || die "could not read the union probe types out of the wasm32 header"
+mapfile -t source_functions \
+  < <(sed -nE 's/^\(defn ([^ ]+).*/\1/p' \
+    "$repo/native-core/validation/slice-union/fixture.bgl")
+function_definitions=()
+for old_index in "${!source_functions[@]}"; do
+  current_index="$(function_index "${source_functions[$old_index]}")" \
+    || die "lowered function missing for wasm32 C harness: ${source_functions[$old_index]}"
+  function_definitions+=("-DSLICE_FN_${old_index}=native_m0_fn_${current_index}")
+done
 build_and_run slice_union "$work/union-a" \
   "$repo/native-core/validation/slice-union/main.c" \
   "-DSLICE_ANY_TYPE=$any_type" "-DSLICE_NIL_TYPE=$nil_type" \
-  "-DSLICE_PAIR_TYPE=$pair_type"
+  "-DSLICE_PAIR_TYPE=$pair_type" "${function_definitions[@]}"
 
 # QBE materializes LP64 only and must say so by name rather than emit or crash.
 refusal='qbe-materialize REFUSED abi profile wasm32: qbe materializes lp64 only'
