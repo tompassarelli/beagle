@@ -1854,7 +1854,8 @@
          (has-item? META-FORMS (nth datum 0)))))
 
 (defn- expand-and-resolve-program-syntax! [(syntaxes Any)] Any
-  (let [module-scope (syntax/fresh-scope-id! "module")]
+  (let [module-scope (syntax/fresh-scope-id! "module")
+        (indices (Vec Int)) (vec (range (count syntaxes)))]
     (mapv
       (fn [(index Int)] Any
         (let [value (nth syntaxes index)]
@@ -1863,7 +1864,7 @@
             (scope-walk*
               (syntax-add-scope! value module-scope)
               syntax/EMPTY-BINDING-TABLE [index] nil))))
-      (range (count syntaxes)))))
+      indices)))
 
 (defn- enqueue-identity! [(queues Any) (name String) (id String)] Nil
   (let [queue (or (get (deref queues) name) [])]

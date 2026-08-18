@@ -959,9 +959,10 @@
   (and (vector? datum) (> (count datum) 0) (has-item? META-FORMS (nth datum 0)))))
 
 (defn- expand-and-resolve-program-syntax! [syntaxes]
-  (let [module-scope (syntax/fresh-scope-id! "module")]
+  (let [module-scope (syntax/fresh-scope-id! "module")
+   indices (vec (range (count syntaxes)))]
   (mapv (fn [index] (let [value (nth syntaxes index)]
-  (if (scope-meta-syntax?! value) value (scope-walk* (syntax-add-scope! value module-scope) syntax/EMPTY-BINDING-TABLE [index] nil)))) (range (count syntaxes)))))
+  (if (scope-meta-syntax?! value) value (scope-walk* (syntax-add-scope! value module-scope) syntax/EMPTY-BINDING-TABLE [index] nil)))) indices)))
 
 (defn- enqueue-identity! [queues ^String name ^String id]
   (let [queue (or (get (deref queues) name) [])]
