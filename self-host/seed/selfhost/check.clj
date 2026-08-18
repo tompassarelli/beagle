@@ -1843,11 +1843,12 @@
 (defn extend-with-effective-params! [env params rest-param signature]
   (let [all-params (if (nil? rest-param) (vec params) (conj (vec params) rest-param))
    fixed-types (get signature "params")
-   effective-types (if (nil? rest-param) fixed-types (conj (vec fixed-types) (make-app "Vec" [(get signature "rest")])))]
+   effective-types (if (nil? rest-param) fixed-types (conj (vec fixed-types) (make-app "Vec" [(get signature "rest")])))
+   indices (vec (range (count all-params)))]
   (reduce (fn [out i] (let [parameter (nth all-params i)
    target (param-binding-target parameter)
    effective (nth effective-types i)]
-  (if (string? target) (binder-env-assoc out parameter target effective) (bind-destructure-type! out target effective "parameter" parameter)))) env (range (count all-params)))))
+  (if (string? target) (binder-env-assoc out parameter target effective) (bind-destructure-type! out target effective "parameter" parameter)))) env indices)))
 
 (defn constrain-callable-definitions! [prog env]
   (doseq [raw-form (get prog "forms")]

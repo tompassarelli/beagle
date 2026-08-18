@@ -440,7 +440,8 @@
    methods (get e "methods")
    raw-sigs (mapv (fn [method] (let [params (get method "params")
    rest-p (get method "rest")
-   fixed (mapv (fn [index] (str "$beagle$constraint$raw-param$" index)) (range (count params)))
+   indices (vec (range (count params)))
+   fixed (mapv (fn [index] (str "$beagle$constraint$raw-param$" index)) indices)
    all (if (or (nil? rest-p) (false? rest-p)) fixed (into fixed ["&" "$beagle$constraint$raw-rest"]))]
   (str "(" (protocol-raw-method-name protocol-name (get method "name")) " [" (str/join " " all) "])"))) methods)]
   (str "(defprotocol " protocol-name "\n  " (str/join "\n  " raw-sigs) ")\n\n" (str/join "\n\n" (mapv (fn [method] (emit-protocol-wrapper protocol-name method)) methods)))))

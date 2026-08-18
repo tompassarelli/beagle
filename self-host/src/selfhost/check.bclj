@@ -3940,7 +3940,8 @@
         effective-types (if (nil? rest-param)
                           fixed-types
                           (conj (vec fixed-types)
-                            (make-app "Vec" [(get signature "rest")])))]
+                            (make-app "Vec" [(get signature "rest")])))
+        (indices (Vec Int)) (vec (range (count all-params)))]
     (reduce
       (fn [(out Any) (i Int)] Any
         (let [parameter (nth all-params i)
@@ -3950,7 +3951,7 @@
             (binder-env-assoc out parameter target effective)
             (bind-destructure-type! out target effective "parameter" parameter))))
       env
-      (range (count all-params)))))
+      indices)))
 
 (defn constrain-callable-definitions! [(prog Any) (env Any)] Nil
   (doseq [raw-form (get prog "forms")]

@@ -865,9 +865,10 @@
           (mapv (fn [(method Any)] String
                   (let [params (get method "params")
                         rest-p (get method "rest")
+                        (indices (Vec Int)) (vec (range (count params)))
                         fixed (mapv (fn [(index Int)] String
                                       (str "$beagle$constraint$raw-param$" index))
-                                (range (count params)))
+                                indices)
                         all (if (or (nil? rest-p) (false? rest-p))
                               fixed
                               (into fixed ["&" "$beagle$constraint$raw-rest"]))]

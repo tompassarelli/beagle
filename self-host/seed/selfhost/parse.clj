@@ -842,6 +842,7 @@
   (let [children (scope-sequence-children value)
    clauses (nth children 1)
    items (scope-sequence-children clauses)
+   body-indices (vec (range 2 (count children)))
    state (loop [index 0
    out []
    current table
@@ -858,7 +859,7 @@
    bound (scope-bind-declaration! declaration current scope "comprehension" (conj (vec path) 1 index))]
   (recur (+ index 2) (conj (conj out (get bound "value")) rhs) (get bound "table") (conj region-scopes scope)))
   :else {"children" (into out (subvec (vec items) index)) "table" current "scopes" region-scopes}))
-   body (mapv (fn [index] (scope-walk* (syntax-add-scopes! (nth children index) (get state "scopes")) (get state "table") (conj (vec path) index) ctx)) (range 2 (count children)))]
+   body (mapv (fn [index] (scope-walk* (syntax-add-scopes! (nth children index) (get state "scopes")) (get state "table") (conj (vec path) index) ctx)) body-indices)]
   (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) (rebuild-scope-sequence! clauses (get state "children"))] body))))
 
 (defn- scope-walk-conditional-binding! [value table path ctx]

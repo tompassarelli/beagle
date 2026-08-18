@@ -1559,6 +1559,7 @@
   (let [children (scope-sequence-children value)
         clauses (nth children 1)
         items (scope-sequence-children clauses)
+        (body-indices (Vec Int)) (vec (range 2 (count children)))
         state
         (loop [(index Int) 0
                (out Any) []
@@ -1617,7 +1618,7 @@
             (scope-walk*
               (syntax-add-scopes! (nth children index) (get state "scopes"))
               (get state "table") (conj (vec path) index) ctx))
-          (range 2 (count children)))]
+          body-indices)]
     (rebuild-scope-sequence! value
       (into
         [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx)
