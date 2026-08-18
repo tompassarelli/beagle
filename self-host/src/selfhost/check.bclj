@@ -497,6 +497,22 @@
 
 ;; --- type-compatible? --------------------------------------------------------
 
+(defn nominal-union-has-member?
+  [(union-name String) (member-name String)] Bool
+  (let [members (get-in (deref STATE) ["union-members" union-name])]
+    (and (not (nil? members))
+         (boolean
+           (some (fn [(member String)] Bool
+                   (or (= member member-name)
+                       (= (unqualify-name member)
+                          (unqualify-name member-name))))
+                 members)))))
+
+(defn parametric-member-view? [(value Any)] Bool
+  (and (app-type? value)
+       (not (nil? (get-in (deref STATE)
+                   ["parametric-member-union" (get value "name")])))))
+
 (defn type-compatible? [(actual Any) (expected Any)] Bool
   (cond
     (or (nil? actual) (nil? expected)) true
@@ -524,6 +540,19 @@
       (every? (fn [(alt Any)] Bool (type-compatible? alt expected))
               (get actual "members"))
 
+    ;; A parametric member view retains the union's type arguments for field
+    ;; substitution, but remains compatible everywhere its bare member is.
+    (parametric-member-view? actual)
+      (type-compatible? (make-prim (get actual "name")) expected)
+    (parametric-member-view? expected)
+      (type-compatible? actual (make-prim (get expected "name")))
+
+    ;; A bare member is accepted by its parametric nominal union.
+    (and (prim? actual) (app-type? expected)
+         (nominal-union-has-member?
+           (get expected "name") (get actual "name")))
+      true
+
     (and (prim? actual)
          (= (get actual "name") "Keyword")
          (prim? expected)
@@ -545,7 +574,9 @@
                    (= (get expected "name") "U64") (= (get expected "name") "F32")))
           (and (= (get actual "name") "Float") (= (get expected "name") "F32"))
           (= (unqualify-name (get actual "name"))
-             (unqualify-name (get expected "name"))))
+             (unqualify-name (get expected "name")))
+          (nominal-union-has-member?
+            (get expected "name") (get actual "name")))
 
     (and (fn-type? actual) (fn-type? expected))
       (let [ap (get actual "params")
@@ -6495,6 +6526,14 @@
   (expect! "compat: union target rejects non-member"
     (not (type-compatible? (make-prim "Int")
       (make-union [(make-prim "String") (make-prim "Nil")]))))
+  (expect! "compat: nominal union accepts its declared member"
+    (do (swap! STATE assoc "union-members"
+          {"Instruction" ["AtomInstruction" "ArenaInstruction"]})
+        (type-compatible?
+          (make-prim "ArenaInstruction") (make-prim "Instruction"))))
+  (expect! "compat: nominal union rejects an undeclared nominal"
+    (not (type-compatible?
+      (make-prim "ForeignInstruction") (make-prim "Instruction"))))
   (expect! "compat: variadic actual satisfies unary expected"
     (type-compatible?
       (make-fn [] ANY (make-prim "String"))

@@ -261,6 +261,13 @@
   (and (var-type? a) (var-type? b)) (= (get a "name") (get b "name"))
   :else (= a b)))
 
+(defn ^Boolean nominal-union-has-member? [^String union-name ^String member-name]
+  (let [members (get-in (deref STATE) ["union-members" union-name])]
+  (and (not (nil? members)) (boolean (some (fn [^String member] (or (= member member-name) (= (unqualify-name member) (unqualify-name member-name)))) members)))))
+
+(defn ^Boolean parametric-member-view? [value]
+  (and (app-type? value) (not (nil? (get-in (deref STATE) ["parametric-member-union" (get value "name")])))))
+
 (defn ^Boolean type-compatible? [actual expected]
   (cond
   (or (nil? actual) (nil? expected)) true
@@ -273,8 +280,11 @@
   (and (union-type? actual) (union-type? expected)) (every? (fn [a-alt] (boolean (some (fn [e-alt] (type-compatible? a-alt e-alt)) (get expected "members")))) (get actual "members"))
   (union-type? expected) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "members")))
   (union-type? actual) (every? (fn [alt] (type-compatible? alt expected)) (get actual "members"))
+  (parametric-member-view? actual) (type-compatible? (make-prim (get actual "name")) expected)
+  (parametric-member-view? expected) (type-compatible? actual (make-prim (get expected "name")))
+  (and (prim? actual) (app-type? expected) (nominal-union-has-member? (get expected "name") (get actual "name"))) true
   (and (prim? actual) (= (get actual "name") "Keyword") (prim? expected) (some? (get-in (deref STATE) ["enum-types" (get expected "name")]))) true
-  (and (prim? actual) (prim? expected)) (or (= (get actual "name") (get expected "name")) (and (= (get expected "name") "Float") (= (get actual "name") "Int")) (and (= (get actual "name") "Int") (or (= (get expected "name") "I8") (= (get expected "name") "I16") (= (get expected "name") "I32") (= (get expected "name") "U8") (= (get expected "name") "U16") (= (get expected "name") "U32") (= (get expected "name") "U64") (= (get expected "name") "F32"))) (and (= (get actual "name") "Float") (= (get expected "name") "F32")) (= (unqualify-name (get actual "name")) (unqualify-name (get expected "name"))))
+  (and (prim? actual) (prim? expected)) (or (= (get actual "name") (get expected "name")) (and (= (get expected "name") "Float") (= (get actual "name") "Int")) (and (= (get actual "name") "Int") (or (= (get expected "name") "I8") (= (get expected "name") "I16") (= (get expected "name") "I32") (= (get expected "name") "U8") (= (get expected "name") "U16") (= (get expected "name") "U32") (= (get expected "name") "U64") (= (get expected "name") "F32"))) (and (= (get actual "name") "Float") (= (get expected "name") "F32")) (= (unqualify-name (get actual "name")) (unqualify-name (get expected "name"))) (nominal-union-has-member? (get expected "name") (get actual "name")))
   (and (fn-type? actual) (fn-type? expected)) (let [ap (get actual "params")
    ep (get expected "params")
    ar (get actual "rest")
@@ -2973,6 +2983,10 @@
   (= (get result "count") 0)))
   (expect! "compat: union target accepts member" (type-compatible? (make-prim "String") (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "compat: union target rejects non-member" (not (type-compatible? (make-prim "Int") (make-union [(make-prim "String") (make-prim "Nil")]))))
+  (expect! "compat: nominal union accepts its declared member" (do
+  (swap! STATE assoc "union-members" {"Instruction" ["AtomInstruction" "ArenaInstruction"]})
+  (type-compatible? (make-prim "ArenaInstruction") (make-prim "Instruction"))))
+  (expect! "compat: nominal union rejects an undeclared nominal" (not (type-compatible? (make-prim "ForeignInstruction") (make-prim "Instruction"))))
   (expect! "compat: variadic actual satisfies unary expected" (type-compatible? (make-fn [] ANY (make-prim "String")) (make-fn [ANY] nil (make-prim "String"))))
   (expect! "compat: fixed actual cannot satisfy variadic expected" (not (type-compatible? (make-fn [ANY] nil (make-prim "String")) (make-fn [] ANY (make-prim "String")))))
   (expect! "infer: vec of ints" (let [t1 (infer-expr! (make-vec-node [(make-lit "number" 1) (make-lit "number" 2)]) {})]
