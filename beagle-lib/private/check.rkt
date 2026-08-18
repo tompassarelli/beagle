@@ -16,7 +16,8 @@
          "stdlib-jvm.rkt"
          "nixos-schema.rkt"
          "macros.rkt"
-         "diagnostic-kind.rkt")
+         "diagnostic-kind.rkt"
+         "type-facts-v1.rkt")
 
 (define (named-reference? ref)
   (or (symbol? ref) (qualified-ref? ref) (resolved-ref? ref)))
@@ -864,6 +865,7 @@
 
 (define (type-check! prog)
   (when (>= (current-check-profile) 1)
+    (clear-program-shadow-evidence! prog)
     (hash-clear! RECORD-FIELDS)
     (hash-clear! RECORD-FIELD-ORDER)
     (hash-clear! UNION-MEMBERS)
@@ -3128,6 +3130,52 @@
     (unless (hash-has-key? indexes name) (strongconnect name)))
   (values (reverse components) edges))
 
+(define (emit-definition-evidence-v1! prog defns edges signatures)
+  ;; The fact payload is deliberately built only from finalized signatures and
+  ;; canonical local dependency names. No source path, span, traversal order,
+  ;; process identity, or checker epoch enters semantic identity.
+  (define profile
+    (semantic-profile-v1-for-target (program-target prog)))
+  (define facts (make-hasheq))
+  (for ([form (in-list defns)])
+    (define name (definition-name form))
+    (hash-set!
+     facts
+     name
+     (definition-scheme-fact-v1
+      profile
+      (format "~a/~a" (program-namespace prog) name)
+      (type->string (hash-ref signatures name))
+      (hash-ref edges name))))
+  (define fact-ids (make-hasheq))
+  (for ([(name fact) (in-hash facts)])
+    (hash-set! fact-ids name (semantic-fact-v1-id fact)))
+  (register-program-shadow-definition-fact-ids! prog fact-ids)
+  (define checker
+    (semantic-fact-v1-id
+     (checker-identity-fact-v1
+      profile "beagle/type-checker" "definition-scheme-finalization")))
+  (for ([form (in-list defns)])
+    (define name (definition-name form))
+    (define claim (hash-ref facts name))
+    (define using
+      (for/vector ([dependency (in-list (hash-ref edges name))])
+        (hash-ref fact-ids dependency)))
+    (define attestation
+      (make-attestation-v1
+       (current-type-facts-checker-epoch-v1)
+       claim
+       "PASS"
+       (hash 'seam "definition-scheme-finalization"
+             'using using)))
+    (append-program-shadow-evidence-edge!
+     prog
+     (make-derivation-edge-v1
+      (semantic-fact-v1-id claim)
+      checker
+      using
+      attestation))))
+
 (define (raise-inference-type-error clause actual expected error)
   (raise-diag
    'type-mismatch
@@ -3298,6 +3346,7 @@
       (hash-set! env name finalized)))
   (register-program-effective-definition-types! prog signatures)
   (check-core-function-abis! prog signatures)
+  (emit-definition-evidence-v1! prog defns _edges signatures)
   signatures)
 
 (define (prepare-and-infer-definition-types! prog env)
@@ -6764,6 +6813,7 @@
 ;; unbound and store-type! is a genuine no-op.
 (define (type-check-with-locs! prog error-handler #:capture-types? [capture-types? #f])
   (when (>= (current-check-profile) 1)
+    (clear-program-shadow-evidence! prog)
     (define env #f)
     (define nix-schema
       (and (eq? (program-target prog) 'nix)

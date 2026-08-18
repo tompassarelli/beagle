@@ -1009,6 +1009,30 @@
   (define table (program-effective-definition-types prog))
   (if table (hash-ref table name fallback) fallback))
 
+;; Shadow-only type-fact evidence is retained by program identity for inspection
+;; and future Store admission. No compiler path reads it for checking, lowering,
+;; or reuse. The reverse list makes one cheap cons allocation per emitted edge;
+;; callers receive a deterministic snapshot when they inspect it.
+(define PROGRAM->SHADOW-EVIDENCE-EDGES (make-weak-hasheq))
+(define PROGRAM->SHADOW-DEFINITION-FACT-IDS (make-weak-hasheq))
+(define (clear-program-shadow-evidence! prog)
+  (hash-set! PROGRAM->SHADOW-EVIDENCE-EDGES prog (box '()))
+  (hash-set! PROGRAM->SHADOW-DEFINITION-FACT-IDS prog (hasheq))
+  prog)
+(define (append-program-shadow-evidence-edge! prog edge)
+  (define cell
+    (hash-ref! PROGRAM->SHADOW-EVIDENCE-EDGES prog (lambda () (box '()))))
+  (set-box! cell (cons edge (unbox cell)))
+  edge)
+(define (program-shadow-evidence-edges prog)
+  (define cell (hash-ref PROGRAM->SHADOW-EVIDENCE-EDGES prog #f))
+  (if cell (list->vector (reverse (unbox cell))) (vector)))
+(define (register-program-shadow-definition-fact-ids! prog table)
+  (hash-set! PROGRAM->SHADOW-DEFINITION-FACT-IDS prog table)
+  table)
+(define (program-shadow-definition-fact-ids prog)
+  (hash-ref PROGRAM->SHADOW-DEFINITION-FACT-IDS prog (hasheq)))
+
 ;; Callable synchronization effects are inferred transitively without
 ;; rewriting authored function signatures. Module-interface publication and
 ;; binding-constraint proof both read this program-identity-scoped authority.
@@ -1511,6 +1535,11 @@
  register-program-effective-definition-types!
  program-effective-definition-types
  program-effective-definition-type
+ clear-program-shadow-evidence!
+ append-program-shadow-evidence-edge!
+ program-shadow-evidence-edges
+ register-program-shadow-definition-fact-ids!
+ program-shadow-definition-fact-ids
  register-program-callable-synchronous!
  program-callable-synchronous-table
  program-callable-synchronous?

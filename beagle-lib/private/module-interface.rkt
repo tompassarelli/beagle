@@ -952,6 +952,67 @@
   (string-append "sha256:"
                  (bytes->hex-string (sha256-bytes bytes))))
 
+(define (type-facts-v1-export name)
+  ;; type-facts-v1 also exposes source-facet parsing, which depends on this
+  ;; module through parse.rkt. Load it only after interface publication is
+  ;; executing so the existing parse/module-interface boundary stays acyclic.
+  (dynamic-require 'beagle/private/type-facts-v1 name))
+
+(define (emit-interface-evidence-v1! prog interface)
+  (define make-interface-fact
+    (type-facts-v1-export 'interface-publication-fact-v1))
+  (define make-interface-revision-fact
+    (type-facts-v1-export 'interface-revision-fact-v1))
+  (define make-checker-fact
+    (type-facts-v1-export 'checker-identity-fact-v1))
+  (define make-attestation
+    (type-facts-v1-export 'make-attestation-v1))
+  (define make-edge
+    (type-facts-v1-export 'make-derivation-edge-v1))
+  (define semantic-fact-id
+    (type-facts-v1-export 'semantic-fact-v1-id))
+  (define epoch
+    (type-facts-v1-export 'current-type-facts-checker-epoch-v1))
+  (define profile-for-target
+    (type-facts-v1-export 'semantic-profile-v1-for-target))
+  (define profile (profile-for-target (program-target prog)))
+  (define claim-fact
+    (make-interface-fact
+     profile
+     (format "~a" (program-namespace prog))
+     (module-interface-schema-version interface)
+     (module-interface-target interface)
+     (module-interface-digest interface)))
+  (define local-definition-ids
+    (hash-values (program-shadow-definition-fact-ids prog)))
+  (define imported-interface-ids
+    (for/list ([import (in-list (program-imported-module-interfaces prog))])
+      (define imported (module-import-interface import))
+      (semantic-fact-id
+       (make-interface-revision-fact
+        profile
+        (format "~a" (module-interface-namespace imported))
+        (module-interface-schema-version imported)
+        (module-interface-target imported)
+        (module-interface-digest imported)))))
+  (define using
+    (sort (append local-definition-ids imported-interface-ids) string<?))
+  (define checker
+    (semantic-fact-id
+     (make-checker-fact profile "beagle/type-checker" "interface-publication")))
+  (define attestation
+    (make-attestation
+     (epoch)
+     claim-fact
+     "PASS"
+     (hash 'seam "interface-publication"
+           'using (list->vector using)
+           'interface-digest (module-interface-digest interface))))
+  (append-program-shadow-evidence-edge!
+   prog
+   (make-edge (semantic-fact-id claim-fact) checker using attestation))
+  interface)
+
 (define (program->module-interface prog
                                    #:source-id [source-id #f]
                                    #:provisional? [provisional? #f])
@@ -1033,22 +1094,26 @@
        ,@(for/list ([stx (in-list (program-form-stxs prog))])
            (syntax->datum stx)))
       (imports ,@(program-imports prog))))
-  (module-interface
-   INTERFACE-SCHEMA-VERSION
-   (program-namespace prog)
-   (program-target prog)
-   qualified-bindings
-   macros
-   macro-fingerprints
-   qualified-type-declarations
-   type-exports
-   record-contracts
-   errors
-   (program-requires prog)
-   dynamic-vars
-   (sha256-datum canonical)
-   (sha256-datum source-canonical)
-   source-id))
+  (define interface
+    (module-interface
+     INTERFACE-SCHEMA-VERSION
+     (program-namespace prog)
+     (program-target prog)
+     qualified-bindings
+     macros
+     macro-fingerprints
+     qualified-type-declarations
+     type-exports
+     record-contracts
+     errors
+     (program-requires prog)
+     dynamic-vars
+     (sha256-datum canonical)
+     (sha256-datum source-canonical)
+     source-id))
+  (unless provisional?
+    (emit-interface-evidence-v1! prog interface))
+  interface)
 
 (define (module-interface-export? interface name)
   (hash-has-key? (module-interface-bindings interface) name))

@@ -22,6 +22,9 @@
 (struct attestation-v1 (checker-epoch semantic-fact-id result evidence)
   #:transparent
   #:constructor-name raw-attestation-v1)
+(struct derivation-edge-v1 (claim checker-identity using produced)
+  #:transparent
+  #:constructor-name raw-derivation-edge-v1)
 
 (struct source-span-v1 (path line column position span) #:transparent)
 (struct source-text-facet-v1 (fact source-bytes spans) #:transparent)
@@ -133,6 +136,150 @@
 
 (define (attestation-v1-id attestation)
   (canonical-value-v1-id (attestation-v1-envelope attestation)))
+
+(define current-type-facts-checker-epoch-v1
+  (make-parameter "beagle-checker-epoch-v1"))
+
+(define (fact-id-v1 who label value)
+  (unless (and (string? value)
+               (string-prefix? value "sha256:")
+               (> (string-length value) (string-length "sha256:")))
+    (fail who "expected a canonical semantic or attestation identity"
+          label value))
+  value)
+
+(define (canonical-fact-id-vector-v1 who input-facts)
+  (unless (or (vector? input-facts) (list? input-facts) (set? input-facts))
+    (fail who "expected a vector, list, or set of input fact identities"
+          "input-facts" input-facts))
+  (define identities
+    (for/list ([input (in-list
+                       (cond
+                         [(vector? input-facts) (vector->list input-facts)]
+                         [(list? input-facts) input-facts]
+                         [else (set->list input-facts)]))])
+      (fact-id-v1 who "input-fact" input)))
+  (define ordered (sort identities string<?))
+  (when (not (= (length ordered) (set-count (list->set ordered))))
+    (fail who "input fact identities must be unique" "input-facts" identities))
+  (list->vector ordered))
+
+(define (make-derivation-edge-v1 claim checker-identity input-facts produced)
+  (define who 'make-derivation-edge-v1)
+  (define claim-id (fact-id-v1 who "claim" claim))
+  (define checker-id (fact-id-v1 who "checker-identity" checker-identity))
+  (unless (attestation-v1? produced)
+    (raise-argument-error who "attestation-v1?" produced))
+  (unless (equal? claim-id (attestation-v1-semantic-fact-id produced))
+    (fail who
+          "produced attestation must name the edge claim"
+          "claim" claim-id
+          "attestation-semantic-fact-id"
+          (attestation-v1-semantic-fact-id produced)))
+  (raw-derivation-edge-v1
+   claim-id
+   checker-id
+   (canonical-fact-id-vector-v1 who input-facts)
+   produced))
+
+(define (derivation-edge-v1-envelope edge)
+  (unless (derivation-edge-v1? edge)
+    (raise-argument-error 'derivation-edge-v1-envelope
+                          "derivation-edge-v1?" edge))
+  (vector
+   "TypeDerivationV1"
+   1
+   (derivation-edge-v1-claim edge)
+   (derivation-edge-v1-checker-identity edge)
+   (derivation-edge-v1-using edge)
+   (attestation-v1-id (derivation-edge-v1-produced edge))))
+
+(define (derivation-edge-v1-canonical-bytes edge)
+  (canonical-value-v1->bytes (derivation-edge-v1-envelope edge)))
+
+(define (derivation-edge-v1-id edge)
+  (canonical-value-v1-id (derivation-edge-v1-envelope edge)))
+
+(define DEFINITION-SCHEME-V1-ENCODER
+  (make-fact-kind-encoder-v1
+   "DefinitionSchemeV1"
+   1
+   canonical-payload-encoder-v1))
+
+(define CHECKER-IDENTITY-V1-ENCODER
+  (make-fact-kind-encoder-v1
+   "CheckerIdentityV1"
+   1
+   canonical-payload-encoder-v1))
+
+(define INTERFACE-REVISION-V1-ENCODER
+  (make-fact-kind-encoder-v1
+   "InterfaceRevisionV1"
+   1
+   canonical-payload-encoder-v1))
+
+(define INTERFACE-PUBLICATION-V1-ENCODER
+  (make-fact-kind-encoder-v1
+   "InterfacePublicationV1"
+   1
+   canonical-payload-encoder-v1))
+
+(define (semantic-profile-v1-for-target target)
+  (case target
+    [(core) 'core]
+    [(clj hosted-clj) 'hosted-clj]
+    [(js hosted-js) 'hosted-js]
+    [else
+     (fail 'semantic-profile-v1-for-target
+           "unknown compiler target"
+           "target" target)]))
+
+(define (definition-scheme-fact-v1 semantic-profile subject signature dependencies)
+  (make-semantic-fact-v1
+   DEFINITION-SCHEME-V1-ENCODER
+   semantic-profile
+   (canonical-tagged-v1 "DefinitionSubjectV1" (require-name
+                                                 'definition-scheme-fact-v1
+                                                 "subject"
+                                                 subject))
+   (hash 'signature signature
+         'dependencies (list->vector dependencies))))
+
+(define (checker-identity-fact-v1 semantic-profile checker seam)
+  (make-semantic-fact-v1
+   CHECKER-IDENTITY-V1-ENCODER
+   semantic-profile
+   (canonical-tagged-v1 "CheckerSubjectV1"
+                        (require-name 'checker-identity-fact-v1
+                                      "checker"
+                                      checker))
+   (hash 'seam (require-name 'checker-identity-fact-v1 "seam" seam))))
+
+(define (interface-revision-fact-v1 semantic-profile subject schema-version
+                                     target digest)
+  (make-semantic-fact-v1
+   INTERFACE-REVISION-V1-ENCODER
+   semantic-profile
+   (canonical-tagged-v1 "InterfaceSubjectV1"
+                        (require-name 'interface-revision-fact-v1
+                                      "subject"
+                                      subject))
+   (hash 'schema-version schema-version
+         'target target
+         'digest (require-name 'interface-revision-fact-v1 "digest" digest))))
+
+(define (interface-publication-fact-v1 semantic-profile subject schema-version
+                                        target digest)
+  (make-semantic-fact-v1
+   INTERFACE-PUBLICATION-V1-ENCODER
+   semantic-profile
+   (canonical-tagged-v1 "InterfaceSubjectV1"
+                        (require-name 'interface-publication-fact-v1
+                                      "subject"
+                                      subject))
+   (hash 'schema-version schema-version
+         'target target
+         'digest (require-name 'interface-publication-fact-v1 "digest" digest))))
 
 (define SOURCE-TEXT-FACET-V1-ENCODER
   (make-fact-kind-encoder-v1
@@ -343,6 +490,25 @@
  make-attestation-v1
  attestation-v1-envelope
  attestation-v1-id
+ derivation-edge-v1?
+ derivation-edge-v1-claim
+ derivation-edge-v1-checker-identity
+ derivation-edge-v1-using
+ derivation-edge-v1-produced
+ make-derivation-edge-v1
+ derivation-edge-v1-envelope
+ derivation-edge-v1-canonical-bytes
+ derivation-edge-v1-id
+ current-type-facts-checker-epoch-v1
+ DEFINITION-SCHEME-V1-ENCODER
+ CHECKER-IDENTITY-V1-ENCODER
+ INTERFACE-REVISION-V1-ENCODER
+ INTERFACE-PUBLICATION-V1-ENCODER
+ semantic-profile-v1-for-target
+ definition-scheme-fact-v1
+ checker-identity-fact-v1
+ interface-revision-fact-v1
+ interface-publication-fact-v1
  SOURCE-TEXT-FACET-V1-ENCODER
  SOURCE-SEMANTIC-FACET-V1-ENCODER
  (struct-out source-span-v1)
