@@ -146,6 +146,7 @@ module_roots=()
 sources=()
 simd_required=0
 emit_workers=""
+emit_workers_explicit=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -205,11 +206,13 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || die "--emit-workers needs a positive integer"
             [[ -z "$emit_workers" ]] || die "--emit-workers may be specified only once"
             emit_workers="$2"
+            emit_workers_explicit=1
             shift 2
             ;;
         --emit-workers=*)
             [[ -z "$emit_workers" ]] || die "--emit-workers may be specified only once"
             emit_workers="${1#*=}"
+            emit_workers_explicit=1
             shift
             ;;
         --help|-h)
@@ -1173,6 +1176,7 @@ export BEAGLE_CORE_COMMIT="$compiler_commit"
 export BEAGLE_CORE_ABI="$abi"
 export BEAGLE_CORE_SIMD_REQUIRED="$simd_required"
 export BEAGLE_CORE_EMIT_WORKERS="$emit_workers"
+export BEAGLE_CORE_EMIT_WORKERS_EXPLICIT="$emit_workers_explicit"
 export BEAGLE_CORE_EMIT_COMPILED="$compiled"
 export BEAGLE_CORE_EMIT_SUPERVISOR="$SUPERVISOR"
 export BEAGLE_CORE_EMIT_RACKET="$RACKET"
@@ -1837,6 +1841,21 @@ bb -cp "$compiled" -e '
    "      (spit result-path \"ERROR\\n\")\n"
    "      (System/exit 2))))\n"))
 
+;; The commander benchmark measured 5.49s serial for 118 functions versus
+;; roughly 40s of fixed worker-process startup.  Linear extrapolation puts the
+;; crossover near 118 * 40 / 5.49 = 860 functions; 1024 is a conservative
+;; default that leaves margin for non-linear startup and host variance.
+(def emission-parallel-threshold 1024)
+
+(defn emission-parallel? [program]
+  (let [function-count (count (core/nativecoreprogram-functions program))
+        requested (Long/parseLong (System/getenv "BEAGLE_CORE_EMIT_WORKERS"))
+        explicit? (= "1" (System/getenv "BEAGLE_CORE_EMIT_WORKERS_EXPLICIT"))]
+    (and (> requested 1)
+         (> function-count 1)
+         (or explicit?
+             (>= function-count emission-parallel-threshold)))))
+
 (defn emission-worker-indexes [function-count worker-count worker-index]
   (vec (range worker-index function-count worker-count)))
 
@@ -1980,9 +1999,7 @@ bb -cp "$compiled" -e '
    compiler-commit configuration]
   (start-stage! "materialization-c17")
   (let [parallel? (and (not simd-required?)
-                       (> (Long/parseLong
-                           (System/getenv "BEAGLE_CORE_EMIT_WORKERS")) 1)
-                       (> (count (core/nativecoreprogram-functions projected)) 1))
+                       (emission-parallel? projected))
         result (cond
                  parallel?
                  (let [batch (parallel-function-text "c17" projected abi-id)]
@@ -2026,9 +2043,7 @@ bb -cp "$compiled" -e '
 (defn materialize-wasm-bootstrap-c17!
   [projected artifacts-dir abi-id input-digest compiler-commit configuration]
   (start-stage! "materialization-wasm-bootstrap-c17")
-  (let [parallel? (and (> (Long/parseLong
-                            (System/getenv "BEAGLE_CORE_EMIT_WORKERS")) 1)
-                       (> (count (core/nativecoreprogram-functions projected)) 1))
+  (let [parallel? (emission-parallel? projected)
         result (if parallel?
                  (let [batch (parallel-function-text "c17" projected abi-id)]
                    (if (:ok? batch)
@@ -2053,9 +2068,7 @@ bb -cp "$compiled" -e '
 (defn materialize-qbe! [projected artifacts-dir abi-id plan simd-required?]
   (start-stage! "materialization-qbe")
   (let [parallel? (and (not simd-required?)
-                       (> (Long/parseLong
-                           (System/getenv "BEAGLE_CORE_EMIT_WORKERS")) 1)
-                       (> (count (core/nativecoreprogram-functions projected)) 1))
+                       (emission-parallel? projected))
         result (cond
                  simd-required?
                  (qbe/materialize-program-with-simd projected 0 abi-id plan)
