@@ -580,6 +580,7 @@
                  (program->module-interface
                   prog
                   #:source-id (module-source-source-id source)
+                  #:provisional? (= check-profile 0)
                   #:capture-types? capture?)))])))
         (if (interfaces-stable? current-sources next-sources)
             (values round-programs next-sources)

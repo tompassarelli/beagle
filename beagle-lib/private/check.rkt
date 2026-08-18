@@ -8639,10 +8639,7 @@
          (define-values (next origins) (analyze (car remaining) current))
          (if (null? (cdr remaining))
              (values next origins)
-             (loop (cdr remaining)
-                   (if (direct-primitive-call? (car remaining) 'conj! current)
-                       (escape-origins next origins (car remaining))
-                       next)))) ]))
+             (loop (cdr remaining) next))) ]))
   (define (analyze-and-discard value state)
     (define-values (next _origins) (analyze value state))
     next)
@@ -8830,17 +8827,6 @@
             (set-origin-status after-rest owner-origins 'dead))
           (record-exception-state! result-state)
           (values result-state (seteq))]
-         [(eq? fn 'conj!)
-          ;; conj! consumes the lexical handle and returns its sole successor.
-          ;; A fresh origin distinguishes that successor from every stale
-          ;; binding which still names the consumed generation.
-          (define next-origin (gensym 'transient-owner))
-          (define consumed
-            (set-origin-status after-rest owner-origins 'dead))
-          (define result-state
-            (set-origin-status consumed (seteq next-origin) 'live))
-          (record-exception-state! result-state)
-          (values result-state (seteq next-origin))]
          [else
           (record-exception-state! after-rest)
           (values after-rest owner-origins)])]
