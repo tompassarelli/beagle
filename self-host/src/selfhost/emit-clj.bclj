@@ -1031,7 +1031,7 @@
                   (filterv
                     (fn [(key Any)] Bool
                       (= rec-name (reference-key-leaf key)))
-                    (keys (deref record-fields))))
+                    (vec (sort (vec (keys (deref record-fields)))))))
               candidate (if (= 0 (count candidates)) nil (nth candidates 0))
               fields (if (some? direct-fields)
                        direct-fields

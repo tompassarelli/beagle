@@ -537,7 +537,7 @@
    direct-fields (get (deref record-fields) rec-key)
    direct-namespace (let [registered (get (deref record-namespaces) rec-key)]
   (if (some? registered) registered (if (qualified-reference? rec-ref) (get rec-ref "providerId") nil)))
-   candidates (if (some? direct-fields) [] (filterv (fn [key] (= rec-name (reference-key-leaf key))) (keys (deref record-fields))))
+   candidates (if (some? direct-fields) [] (filterv (fn [key] (= rec-name (reference-key-leaf key))) (vec (sort (vec (keys (deref record-fields)))))))
    candidate (if (= 0 (count candidates)) nil (nth candidates 0))
    fields (if (some? direct-fields) direct-fields (if (nil? candidate) nil (get (deref record-fields) candidate)))
    namespace (if (some? direct-fields) direct-namespace (if (nil? candidate) nil (get (deref record-namespaces) candidate)))
