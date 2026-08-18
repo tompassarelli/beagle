@@ -29,7 +29,13 @@
   #:constructor-name raw-read-receipt-v1)
 
 (define (canonical-sort values)
-  (sort values string<? #:key canonical-value-v1-id))
+  ;; Racket's sort may call #:key for every comparison. Candidate payloads can
+  ;; be large, so decorate once while preserving the same digest ordering.
+  (map cdr
+       (sort (for/list ([value (in-list values)])
+               (cons (canonical-value-v1-id value) value))
+             string<?
+             #:key car)))
 
 (define (require-profile who profile)
   (unless (memq profile READ-RECEIPT-PROFILES)
