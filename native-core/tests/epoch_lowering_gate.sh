@@ -55,7 +55,9 @@ bb -cp "$work/out" -e "
            'epoch-stage-mint-passes? 'epoch-stage-nested-mint-passes?
            'epoch-stage-no-arena-refusal-passes?
            'epoch-identity-fixture-passes? 'epoch-identity-fold-passes?
-           'epoch-identity-mint-passes? 'epoch-identity-nested-passes?]]
+           'epoch-identity-mint-passes? 'epoch-identity-nested-passes?
+           'epoch-derived-resume-mint-passes?
+           'epoch-derived-resume-nested-passes?]]
   (println (pr-str [n (deref (ns-resolve ns n))])))
 " > "$report"
 

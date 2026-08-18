@@ -23484,6 +23484,153 @@
         (epoch-identity-stage frozen-native compiler-commit configuration
           abi)))))
 
+(defn epoch-identity-instruction
+  [(instruction core/Instruction)] core/Instruction
+  (if (instance? native.core.PromoteInstructionV0 instruction)
+    (core/->CopyInstruction
+      (core/promoteinstructionv0-result instruction)
+      (core/promoteinstructionv0-source-id instruction))
+    instruction))
+
+(defn epoch-derived-function-to-identity
+  [(function core/FunctionDef)] core/FunctionDef
+  (let [(root (U EpochRootArenaV0 Nil)) (entry-arena-instruction function)]
+    (if (nil? root)
+      (with function
+        [:blocks
+         (mapv
+           (fn [(block core/BasicBlock)] core/BasicBlock
+             (with block
+               [:instructions
+                (mapv epoch-identity-instruction
+                  (core/basicblock-instructions block))]))
+           (core/functiondef-blocks function))])
+      (let [(function-id core/NativeId) (core/functiondef-id function)
+            (root-arena core/NativeId) (epochrootarenav0-value-id root)
+            (region-id core/NativeId)
+            (lower-id "region" ["epoch" (id-value function-id) "0"])
+            (effect-id core/NativeId)
+            (lower-id "effect" ["epoch" (id-value function-id) "0"])
+            (epoch-arena core/NativeId)
+            (lower-id "epoch-arena" [(id-value function-id) "0"])]
+        (with function
+          [:blocks
+           (mapv
+             (fn [(block core/BasicBlock)] core/BasicBlock
+               (with block
+                 [:instructions
+                  (loop [(position Int) 0
+                         (instructions (Vec core/Instruction))
+                         (core/basicblock-instructions block)
+                         (rebuilt (Vec core/Instruction)) []]
+                    (if (>= position (count instructions))
+                      rebuilt
+                      (let [(instruction core/Instruction)
+                            (nth instructions position)]
+                        (recur (+ position 1) instructions
+                          (cond
+                            (same-id? (core/instruction-result-id instruction)
+                              epoch-arena)
+                            rebuilt
+
+                            (and
+                              (instance? native.core.ArenaCloseInstructionV0
+                                instruction)
+                              (same-id?
+                                (core/arenacloseinstructionv0-source-id
+                                  instruction)
+                                epoch-arena))
+                            rebuilt
+
+                            (instance? native.core.PromoteInstructionV0 instruction)
+                            (conj rebuilt (epoch-identity-instruction instruction))
+
+                            (and (epoch-retargetable? instruction)
+                              (optional-same-id?
+                                (obligations/instruction-arena-operand instruction)
+                                epoch-arena))
+                            (conj rebuilt
+                              (retarget-arena-operand instruction root-arena))
+
+                            :else (conj rebuilt instruction))))))]))
+             (core/functiondef-blocks function))]
+          [:regions
+           (filterv
+             (fn [(candidate core/NativeId)] Bool
+               (not (same-id? candidate region-id)))
+             (core/functiondef-regions function))]
+          [:effects
+           (filterv
+             (fn [(candidate core/NativeId)] Bool
+               (not (same-id? candidate effect-id)))
+             (core/functiondef-effects function))])))))
+
+(defn epoch-generated-region-ids
+  [(functions (Vec core/FunctionDef))] (Map String Bool)
+  (loop [(position Int) 0 (generated (Map String Bool)) {}]
+    (if (>= position (count functions))
+      generated
+      (let [(function-id core/NativeId)
+            (core/functiondef-id (nth functions position))]
+        (recur (+ position 1)
+          (assoc generated
+            (id-value
+              (lower-id "region" ["epoch" (id-value function-id) "0"]))
+            true))))))
+
+(defn epoch-generated-effect-ids
+  [(functions (Vec core/FunctionDef))] (Map String Bool)
+  (loop [(position Int) 0 (generated (Map String Bool)) {}]
+    (if (>= position (count functions))
+      generated
+      (let [(function-id core/NativeId)
+            (core/functiondef-id (nth functions position))]
+        (recur (+ position 1)
+          (assoc generated
+            (id-value
+              (lower-id "effect" ["epoch" (id-value function-id) "0"]))
+            true))))))
+
+(defn epoch-derived-program-to-identity
+  [(program core/NativeCoreProgram)] core/NativeCoreProgram
+  (let [(functions (Vec core/FunctionDef))
+        (core/nativecoreprogram-functions program)
+        (region-ids (Map String Bool)) (epoch-generated-region-ids functions)
+        (effect-ids (Map String Bool)) (epoch-generated-effect-ids functions)]
+    (with program
+      [:functions (mapv epoch-derived-function-to-identity functions)]
+      [:regions
+       (filterv
+         (fn [(region core/RegionDef)] Bool
+           (not (= true (get region-ids (id-value (core/regiondef-id region))))))
+         (core/nativecoreprogram-regions program))]
+      [:effects
+       (filterv
+         (fn [(effect core/EffectDef)] Bool
+           (not (= true (get effect-ids (id-value (core/effectdef-id effect))))))
+         (core/nativecoreprogram-effects program))]
+      [:allowed-regions
+       (filterv
+         (fn [(region-id core/NativeId)] Bool
+           (not (= true (get region-ids (id-value region-id)))))
+         (core/nativecoreprogram-allowed-regions program))]
+      [:allowed-effects
+       (filterv
+         (fn [(effect-id core/NativeId)] Bool
+           (not (= true (get effect-ids (id-value effect-id)))))
+         (core/nativecoreprogram-allowed-effects program))])))
+
+(defn epoch-derived-frozen-to-identity
+  [(derived stages/FrozenNativeStageV0)] stages/FrozenNativeStageV0
+  (let [(stage stages/NativeStageV0) (stages/frozennativestagev0-stage derived)
+        (program core/NativeCoreProgram)
+        (epoch-derived-program-to-identity (stages/nativestagev0-program stage))
+        (identity-stage stages/NativeStageV0)
+        (with stage [:program program])
+        (encoding String) (stages/encode-native-stage identity-stage)]
+    (stages/->FrozenNativeStageV0 identity-stage encoding
+      (stages/content-digest encoding))))
+
 ;; The derived policy: §2's inference, minting an epoch wherever a function's
 ;; escape closure leaves interior allocations. A materializer downstream of
 ;; this seam must open and close minted epochs; the QBE backend does not yet,
@@ -24411,3 +24558,29 @@
 ;; and zero closes is again the assignment, not an empty program.
 (def epoch-identity-nested-passes? Bool
   (epoch-identity-inert? epoch-nested-frozen))
+
+(defn epoch-derived-resume-identity? [(frozen stages/FrozenNativeStageV0)] Bool
+  (let [(identity stages/FrozenNativeStageV0)
+        (epoch-result-frozen
+          (epoch-identity-stage frozen "epoch-gate-commit" ["profile=3"]
+            (core/abi-profile-lp64)))
+        (derived stages/FrozenNativeStageV0)
+        (epoch-result-frozen
+          (epoch-derived-stage frozen "epoch-gate-commit" ["profile=3"]
+            (core/abi-profile-lp64)))
+        (recovered stages/FrozenNativeStageV0)
+        (epoch-derived-frozen-to-identity derived)
+        (program core/NativeCoreProgram)
+        (stages/nativestagev0-program
+          (stages/frozennativestagev0-stage recovered))]
+    (and (core/program-epoch-0? program)
+      (= (stages/frozennativestagev0-encoding identity)
+         (stages/frozennativestagev0-encoding recovered))
+      (= (stages/frozennativestagev0-digest identity)
+         (stages/frozennativestagev0-digest recovered)))))
+
+(def epoch-derived-resume-mint-passes? Bool
+  (epoch-derived-resume-identity? epoch-mint-frozen))
+
+(def epoch-derived-resume-nested-passes? Bool
+  (epoch-derived-resume-identity? epoch-nested-frozen))
