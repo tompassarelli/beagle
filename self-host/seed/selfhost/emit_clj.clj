@@ -46,8 +46,9 @@
   (and (qualified-reference? ref) (= (get ref "qualifier") qualifier) (= (get ref "name") name)))
 
 (defn metadata-reference-key [key]
-  (if (string? key) (let [index (str/last-index-of key "/")]
-  (if (and (some? index) (> index 0) (< index (- (count key) 1))) ["qualified-ref" (subs key 0 index) (subs key (+ index 1))] key)) key))
+  (if (string? key) (let [text key
+   index (str/last-index-of text "/")]
+  (if (and (some? index) (> index 0) (< index (- (count text) 1))) ["qualified-ref" (subs text 0 index) (subs text (+ index 1))] text)) key))
 
 (defn structuralize-reference-table [table]
   (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (keys table)))
