@@ -186,6 +186,8 @@
     (instance? native.core.BoxRecordInstruction instruction) true
     (instance? native.core.RecordMaterializeInstructionV0 instruction) true
     (instance? native.core.CallInstruction instruction) true
+    (instance? native.core.ClosureInstructionV0 instruction) true
+    (instance? native.core.ClosureCallInstructionV0 instruction) true
     (instance? native.core.ExternCallInstruction instruction) true
     (instance? native.core.VariantValueInstruction instruction) true
     (instance? native.core.CheckedInstruction instruction)
@@ -3119,6 +3121,34 @@
           (core/callinstruction-function-id instruction)
           (core/callinstruction-arguments instruction)
           (core/callinstruction-arena-id instruction)) ");\n")
+
+      (instance? native.core.ClosureInstructionV0 instruction)
+      (str "  " target ".invoke = &"
+        (function-name module-index
+          (function-index-of functions
+            (core/closureinstructionv0-function-id instruction)))
+        ";\n  " target ".environment = (void *)"
+        (value-name function slots
+          (core/closureinstructionv0-environment-id instruction))
+        ";\n")
+
+      (instance? native.core.ClosureCallInstructionV0 instruction)
+      (let [(closure String)
+            (value-name function slots
+              (core/closurecallinstructionv0-closure-id instruction))
+            (arguments (Vec core/NativeId))
+            (core/closurecallinstructionv0-arguments instruction)]
+        (str "  " target " = " closure ".invoke((native_arena *)"
+          (value-name function slots
+            (core/closurecallinstructionv0-arena-id instruction))
+          ", capability, " closure ".environment"
+          (loop [(position Int) 0 (emitted String) ""]
+            (if (>= position (count arguments))
+              emitted
+              (recur (+ position 1)
+                (str emitted ", "
+                  (value-name function slots (nth arguments position))))))
+          ");\n"))
 
       (instance? native.core.ExternCallInstruction instruction)
       (emit-extern-call types layouts abis function slots target instruction)

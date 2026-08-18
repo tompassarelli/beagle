@@ -262,6 +262,10 @@
     [(StoreInstruction value) (core/storeinstruction-result instruction)]
     [(AllocateInstruction value) (core/allocateinstruction-result instruction)]
     [(CallInstruction value) (core/callinstruction-result instruction)]
+    [(ClosureInstructionV0 value)
+     (core/closureinstructionv0-result instruction)]
+    [(ClosureCallInstructionV0 value)
+     (core/closurecallinstructionv0-result instruction)]
     [(ExternCallInstruction value)
      (core/externcallinstruction-result instruction)]
     [(CompareInstruction value) (core/compareinstruction-result instruction)]
@@ -673,6 +677,7 @@
     [(BufferShapeV0 value) []]
     [(MapShapeV0 value) []]
     [(SetShapeV0 value) []]
+    [(ClosureShapeV0 value) []]
     [(ReferenceShapeV0 value) []]
     [(AtomCellShapeV0 value) []]))
 
@@ -687,6 +692,7 @@
       [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
+      [(ClosureShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
       [(AtomCellShapeV0 value) false])))
 
@@ -701,6 +707,7 @@
       [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
+      [(ClosureShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
       [(AtomCellShapeV0 value) false])))
 
@@ -715,6 +722,7 @@
       [(BufferShapeV0 value) []]
       [(MapShapeV0 value) []]
       [(SetShapeV0 value) []]
+      [(ClosureShapeV0 value) []]
       [(ReferenceShapeV0 value) []]
       [(AtomCellShapeV0 value) []])))
 
@@ -729,6 +737,7 @@
       [(BufferShapeV0 value) nil]
       [(MapShapeV0 value) nil]
       [(SetShapeV0 value) nil]
+      [(ClosureShapeV0 value) nil]
       [(ReferenceShapeV0 value) nil]
       [(AtomCellShapeV0 value) nil])))
 
@@ -743,6 +752,7 @@
       [(BufferShapeV0 value) -1]
       [(MapShapeV0 value) -1]
       [(SetShapeV0 value) -1]
+      [(ClosureShapeV0 value) -1]
       [(ReferenceShapeV0 value) -1]
       [(AtomCellShapeV0 value) -1])))
 
@@ -1072,6 +1082,8 @@
     [(StoreInstruction value) false]
     [(AllocateInstruction value) false]
     [(CallInstruction value) false]
+    [(ClosureInstructionV0 value) false]
+    [(ClosureCallInstructionV0 value) false]
     [(ExternCallInstruction value) false]
     [(CompareInstruction value) false]
     [(FieldInstruction value) false]
@@ -1695,6 +1707,8 @@
       [(CallInstruction value)
        (emit-call context result-name (core/callinstruction-function-id instruction)
          (core/callinstruction-arguments instruction))]
+      [(ClosureInstructionV0 value) ""]
+      [(ClosureCallInstructionV0 value) ""]
       [(ExternCallInstruction value) ""]
       [(CompareInstruction value)
        (let [(comparison core/CompareOpV0)
@@ -2186,6 +2200,8 @@
     [(StoreInstruction value) (store-supported? (core/storeinstruction-store instruction))]
     [(AllocateInstruction value) true]
     [(CallInstruction value) true]
+    [(ClosureInstructionV0 value) false]
+    [(ClosureCallInstructionV0 value) false]
     [(ExternCallInstruction value) false]
     [(CompareInstruction value)
      (comparison-supported? (core/compareinstruction-comparison instruction))]

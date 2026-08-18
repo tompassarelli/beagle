@@ -67,8 +67,9 @@
   ;; An Atom is an opaque identity-bearing cell, never a general reference.
   ;; Its content type fixes the byte layout copied under the state token.
   (AtomCellTypeV0 [(content-type NativeId)])
-  ;; A closed callable signature is semantic type information only. Physical
-  ;; closure layout and indirect-call ABI remain separate, explicit obligations.
+  ;; A callable is two machine words at the ABI boundary: an invoke pointer and
+  ;; an arena-owned environment pointer. The signature fixes the invoke slot;
+  ;; the creation instruction fixes the lifted function and captured values.
   (FunctionType
     [(parameter-types (Vec NativeId))
      (rest-type (U NativeId Nil))
@@ -163,6 +164,7 @@
      (stride-bytes Int)
      (align-bytes Int)
      (iteration-order CollectionOrderV0)])
+  (ClosureShapeV0 [(token Bool)])
   (ReferenceShapeV0 [(target-type NativeId)])
   (AtomCellShapeV0 [(content-type NativeId)]))
 
@@ -420,6 +422,19 @@
      (function-id NativeId)
      (arguments (Vec NativeId))
      (arena-id (U NativeId Nil))
+     (tokens TokenFlowV0)])
+  (ClosureInstructionV0
+    [(result SsaValueV0)
+     (function-id NativeId)
+     ;; The environment is an arena-owned reference to a closure-specific
+     ;; record.  The callable value itself is the stable two-word
+     ;; {invoke-pointer, environment-pointer} ABI.
+     (environment-id NativeId)])
+  (ClosureCallInstructionV0
+    [(result SsaValueV0)
+     (closure-id NativeId)
+     (arguments (Vec NativeId))
+     (arena-id NativeId)
      (tokens TokenFlowV0)])
   ;; The ABI declaration, rather than a source-language callee name, owns the
   ;; physical symbol, effects, capabilities, ownership, and failure contract.
@@ -1025,6 +1040,10 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      (ssavaluev0-id result)]
     [(CallInstruction result function-id arguments arena-id tokens)
+     (ssavaluev0-id result)]
+    [(ClosureInstructionV0 result function-id environment-id)
+     (ssavaluev0-id result)]
+    [(ClosureCallInstructionV0 result closure-id arguments arena-id tokens)
      (ssavaluev0-id result)]
     [(ExternCallInstruction result abi-id arguments arena-id tokens)
      (ssavaluev0-id result)]
@@ -1902,6 +1921,7 @@
      (and (id-in? known-types element-type)
        (> stride-bytes 0)
        (> align-bytes 0))]
+    [(ClosureShapeV0 token) true]
     [(ReferenceShapeV0 target-type) (id-in? known-types target-type)]
     [(AtomCellShapeV0 content-type) (id-in? known-types content-type)]))
 
@@ -1982,6 +2002,9 @@
        (id-in? known-capabilities capability))]
     [(CallInstruction result function-id arguments arena-id tokens)
      (id-in? known-functions function-id)]
+    [(ClosureInstructionV0 result function-id environment-id)
+     (id-in? known-functions function-id)]
+    [(ClosureCallInstructionV0 result closure-id arguments arena-id tokens) true]
     [(ExternCallInstruction result abi-id arguments arena-id tokens)
      (id-in? known-abis abi-id)]
     [(CompareInstruction result comparison left-id right-id) true]
@@ -2283,6 +2306,10 @@
      [byte-count-id]]
     [(CallInstruction result function-id arguments arena-id tokens)
      (if (nil? arena-id) arguments (into arguments [arena-id]))]
+    [(ClosureInstructionV0 result function-id environment-id)
+     [environment-id]]
+    [(ClosureCallInstructionV0 result closure-id arguments arena-id tokens)
+     (into [closure-id arena-id] arguments)]
     [(ExternCallInstruction result abi-id arguments arena-id tokens)
      (if (nil? arena-id) arguments (into arguments [arena-id]))]
     [(CompareInstruction result comparison left-id right-id) [left-id right-id]]
@@ -2472,6 +2499,8 @@
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
     [(CallInstruction result function-id arguments arena-id tokens) true]
+    [(ClosureInstructionV0 result function-id environment-id) true]
+    [(ClosureCallInstructionV0 result closure-id arguments arena-id tokens) true]
     [(ExternCallInstruction result abi-id arguments arena-id tokens) true]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) true]

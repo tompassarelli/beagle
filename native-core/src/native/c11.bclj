@@ -11,7 +11,7 @@
 (import (native.core
           BoolKind I64Kind F64Kind TextKind BytesKind KeywordKind RefKind
           ScalarShapeV0 BytesShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 BufferShapeV0 ReferenceShapeV0
-          MapShapeV0 SetShapeV0 AtomCellShapeV0
+          MapShapeV0 SetShapeV0 AtomCellShapeV0 ClosureShapeV0
           AtomType RecordType UnionType VectorType BufferTypeV0 MapTypeV0 SetTypeV0
           ReferenceType AtomCellTypeV0 FunctionType OutcomeType
           BoolAtom I64Atom F64Atom TextAtom KeywordAtom RefAtom
@@ -207,6 +207,7 @@
       [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
+      [(ClosureShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
       [(AtomCellShapeV0 value) false])))
 
@@ -221,6 +222,7 @@
       [(BufferShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
+      [(ClosureShapeV0 value) false]
       [(ReferenceShapeV0 value) false]
       [(AtomCellShapeV0 value) false])))
 
@@ -235,6 +237,7 @@
       [(BufferShapeV0 value) []]
       [(MapShapeV0 value) []]
       [(SetShapeV0 value) []]
+      [(ClosureShapeV0 value) []]
       [(ReferenceShapeV0 value) []]
       [(AtomCellShapeV0 value) []])))
 

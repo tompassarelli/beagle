@@ -378,6 +378,8 @@
   (let [n (nid)]
     (row! n "form-kind" "t" "letfn-entry")
     (row! n "name" "t" (get entry "name"))
+    (when-let [binding-id (get entry "bindingId")]
+      (row! n "binding-id" "t" binding-id))
     (row! n "params" "n" (emit-seq (get entry "params") emit-param))
     (when-let [rest-param (get entry "rest")]
       (row! n "rest" "n" (emit-param rest-param)))
@@ -442,6 +444,8 @@
   (row! n "name" "t" (get reference "name"))
   (when-let [provider-id (get reference "providerId")]
     (row! n "provider-id" "t" provider-id))
+  (when-let [binding-id (get reference "refersTo")]
+    (row! n "binding-id" "t" binding-id))
   n)
 
 (defn emit-reference [reference]
@@ -498,7 +502,10 @@
                       (row! n "value" "t" (get e "name")))
                   (emit-reference! n e))
       "call"    (do (row! n "form-kind" "t" "call")
-                    (if (= "ref" (get-in e ["fn" "node"]))
+                    (if (and (= "ref" (get-in e ["fn" "node"]))
+                             (or (nil? (get-in e ["fn" "refersTo"]))
+                                 (clojure.string/starts-with?
+                                   (get-in e ["fn" "refersTo"]) "letfn:")))
                       (row! n "callee" "n" (emit-reference (get e "fn")))
                       (row! n "callee-form" "n" (emit-expr (get e "fn"))))
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
@@ -537,7 +544,7 @@
                     (row! n "bindings" "n"
                           (emit-seq (get e "bindings") emit-binding))
                     (row! n "body" "n" (emit-body (get e "body"))))
-      "letfn"   (do (row! n "form-kind" "t" "unsupported-letfn")
+      "letfn"   (do (row! n "form-kind" "t" "letfn")
                     (row! n "fns" "n"
                           (emit-seq (get e "fns") emit-letfn-entry))
                     (row! n "body" "n" (emit-body (get e "body"))))

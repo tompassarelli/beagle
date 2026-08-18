@@ -160,6 +160,9 @@
 (defn layout-set? [(layout core/LayoutDef)] Bool
   (instance? native.core.SetShapeV0 (core/layoutdef-shape layout)))
 
+(defn layout-closure? [(layout core/LayoutDef)] Bool
+  (instance? native.core.ClosureShapeV0 (core/layoutdef-shape layout)))
+
 (defn layout-reference? [(layout core/LayoutDef)] Bool
   (instance? native.core.ReferenceShapeV0 (core/layoutdef-shape layout)))
 
@@ -234,8 +237,18 @@
   [(layouts (Vec core/LayoutDef))
    (type-def core/TypeDef)] (Vec core/NativeId)
   (let [(layout (U core/LayoutDef Nil))
-        (layout-for-type layouts (core/typedef-id type-def))]
-    (if (nil? layout) [] (layout-dependencies layout))))
+        (layout-for-type layouts (core/typedef-id type-def))
+        (shape core/TypeShape) (core/typedef-shape type-def)
+        (layout-refs (Vec core/NativeId))
+        (if (nil? layout) [] (layout-dependencies layout))]
+    (if (instance? native.core.FunctionType shape)
+      (let [(rest-type (U core/NativeId Nil))
+            (core/functiontype-rest-type shape)]
+        (vec (concat layout-refs
+          (core/functiontype-parameter-types shape)
+          (if (nil? rest-type) [] [rest-type])
+          [(core/functiontype-return-type shape)])))
+      layout-refs)))
 
 (defn dependencies-ready?
   [(types (Vec core/TypeDef))
@@ -345,6 +358,9 @@
 
           (instance? native.core.AtomCellTypeV0 shape)
           (layout-atom-cell? layout-value)
+
+          (instance? native.core.FunctionType shape)
+          (and (layout-closure? layout-value) dependencies-present)
 
           :else false)))))
 
@@ -618,6 +634,38 @@
           (join-lines payload-assertion)))
       "")))
 
+(defn emit-callable-parameters
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (parameters (Vec core/NativeId))]
+  String
+  (loop [(position Int) 0 (result String) ""]
+    (if (>= position (count parameters))
+      result
+      (recur (+ position 1)
+        (str result ", "
+          (c-type types module-index (nth parameters position)))))))
+
+(defn emit-closure-type
+  [(types (Vec core/TypeDef))
+   (module-index Int)
+   (type-name-value String)
+   (type-def core/TypeDef)
+   (layout core/LayoutDef)]
+  String
+  (let [(shape core/TypeShape) (core/typedef-shape type-def)]
+    (if (not (instance? native.core.FunctionType shape))
+      ""
+      (str "typedef struct " type-name-value " {\n"
+        "  " (c-type types module-index (core/functiontype-return-type shape))
+        " (*invoke)(native_arena *, const native_capability *, void *"
+        (emit-callable-parameters types module-index
+          (core/functiontype-parameter-types shape))
+        ");\n"
+        "  void *environment;\n"
+        "} " type-name-value ";\n"
+        (join-lines (size-align-assertions type-name-value layout))))))
+
 (defn emit-type
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
@@ -644,6 +692,8 @@
         (emit-map-type types module-index type-name-value layout-value)
         (layout-set? layout-value)
         (emit-set-type types module-index type-name-value layout-value)
+        (layout-closure? layout-value)
+        (emit-closure-type types module-index type-name-value type-def layout-value)
         (layout-atom-cell? layout-value)
         (emit-atom-cell-type type-name-value layout-value)
         :else (emit-reference-type type-name-value layout-value)))))

@@ -2142,14 +2142,6 @@
                 (return-type (U core/NativeId Nil))
                 (index-first-object index effective-type "ret")]
             (cond
-              (or (some? rest-type) (some? source-rest))
-              (->EffectiveFunctionSignatureV0
-                true parameter-types return-type
-                [(core/->DiagnosticV0
-                   "LOWER-VARIADIC-FUNCTION-ABI"
-                   (str name " has a rest parameter; Native v0 has no call-site packing ABI"))]
-                false)
-
               (not (= (count parameter-types) (count source-parameters)))
               (->EffectiveFunctionSignatureV0
                 true parameter-types return-type
@@ -2171,6 +2163,48 @@
               :else
               (->EffectiveFunctionSignatureV0
                 true parameter-types return-type [] true))))))))
+
+(defn append-parameter-resolutions
+  [(left ParameterResolutionV0)
+   (right ParameterResolutionV0)]
+  ParameterResolutionV0
+  (->ParameterResolutionV0
+    (vec (concat (parameterresolutionv0-parameters left)
+           (parameterresolutionv0-parameters right)))
+    (append-type-defs (parameterresolutionv0-definitions left)
+      (parameterresolutionv0-definitions right))
+    (append-diagnostics (parameterresolutionv0-diagnostics left)
+      (parameterresolutionv0-diagnostics right))
+    (and (parameterresolutionv0-valid left)
+      (parameterresolutionv0-valid right))))
+
+(defn resolve-rest-parameter
+  [(index SourceIndexV0)
+   (source-function core/NativeId)
+   (owner-id core/NativeId)]
+  ParameterResolutionV0
+  (let [(source-rest (U core/NativeId Nil))
+        (index-first-object index source-function "rest")]
+    (if (nil? source-rest)
+      (->ParameterResolutionV0 [] [] [] true)
+      (let [(name String) (parameter-name-at index source-rest 0)
+            (source-type (U core/NativeId Nil))
+            (field-type-at index source-rest)]
+        (if (nil? source-type)
+          (->ParameterResolutionV0 [] [(lower-failure-type)]
+            [(core/->DiagnosticV0
+               "LOWER-REST-PARAMETER-MISSING-ANNOTATION"
+               (str "rest parameter has no closed vector type: " name))]
+            false)
+          (let [(resolution TypeResolutionV0)
+                (resolve-source-type index source-type)]
+            (->ParameterResolutionV0
+              [(core/->Parameter
+                 (lower-id "parameter" [(id-value owner-id) name])
+                 (typeresolutionv0-type-id resolution))]
+              (typeresolutionv0-definitions resolution)
+              (typeresolutionv0-diagnostics resolution)
+              (typeresolutionv0-valid resolution))))))))
 
 (defn resolve-parameters-with-signature
   [(index SourceIndexV0)
@@ -3007,12 +3041,27 @@
    (value-types (Vec core/NativeId))
    (terminated Bool)])
 
+(defrecord ClosureCaptureV0
+  [(name String)
+   (type-id core/NativeId)
+   (parameter-id core/NativeId)])
+
+(defrecord ClosureSpecV0
+  [(source core/NativeId)
+   (binding-id String)
+   (callable-type core/NativeId)
+   (environment-type core/NativeId)
+   (environment-reference-type core/NativeId)
+   (captures (Vec ClosureCaptureV0))
+   (resolution FunctionResolutionV0)])
+
 (defrecord BodyEnvV0
   [(index SourceIndexV0)
    (types (Vec core/TypeDef))
    (signatures (Vec TypedFunctionV0))
    (signature-sources (Vec core/NativeId))
    (globals (Vec GlobalBindingV0))
+   (closures (Vec ClosureSpecV0))
    (whole-input-limit Int)])
 
 (defn state-blocked? [(state BodyStateV0)] Bool
@@ -3427,31 +3476,52 @@
 
 ;; Immutable top-level refs are transparent function aliases. Resolve them
 ;; before body lowering so every call still targets the canonical FunctionDef.
+(defn binding-signature-position
+  [(env BodyEnvV0) (binding-id String)] (U Int Nil)
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (sources (Vec core/NativeId)) (bodyenvv0-signature-sources env)]
+    (if (= "" binding-id)
+      nil
+      (loop [(position Int) 0]
+        (if (>= position (count sources))
+          nil
+          (if (= binding-id (fact-text index (nth sources position) "binding-id"))
+            position
+            (recur (+ position 1))))))))
+
 (defn function-signature-position
   [(env BodyEnvV0) (source core/NativeId) (spelling String)] (U Int Nil)
   (let [(index SourceIndexV0) (bodyenvv0-index env)
         (globals (Vec GlobalBindingV0)) (bodyenvv0-globals env)
+        (callee-ref (U core/NativeId Nil))
+        (index-first-object index source "callee")
+        (binding-id String)
+        (if (nil? callee-ref) "" (fact-text index callee-ref "binding-id"))
+        (bound-position (U Int Nil))
+        (binding-signature-position env binding-id)
         (initial ResolvedSourceNameV0)
         (resolve-source-name index (source-module-name index source) spelling)]
-    (loop [(resolved ResolvedSourceNameV0) initial
-           (fuel Int) (+ 1 (count globals))]
-      (let [(position (U Int Nil)) (signature-position-at env resolved)]
-        (cond
-          (some? position) position
-          (<= fuel 0) nil
-          :else
-          (let [(global (U GlobalBindingV0 Nil)) (global-at env resolved)]
-            (if (nil? global)
-              nil
-              (let [(value core/NativeId) (globalbindingv0-value global)
-                    (target String) (fact-text index value "name")]
-                (if (or (not (= "ref" (fact-text index value "form-kind")))
-                        (= "" target))
-                  nil
-                  (recur
-                    (resolve-source-name index
-                      (globalbindingv0-module-name global) target)
-                    (- fuel 1)))))))))))
+    (if (some? bound-position)
+      bound-position
+      (loop [(resolved ResolvedSourceNameV0) initial
+             (fuel Int) (+ 1 (count globals))]
+        (let [(position (U Int Nil)) (signature-position-at env resolved)]
+          (cond
+            (some? position) position
+            (<= fuel 0) nil
+            :else
+            (let [(global (U GlobalBindingV0 Nil)) (global-at env resolved)]
+              (if (nil? global)
+                nil
+                (let [(value core/NativeId) (globalbindingv0-value global)
+                      (target String) (fact-text index value "name")]
+                  (if (or (not (= "ref" (fact-text index value "form-kind")))
+                          (= "" target))
+                    nil
+                    (recur
+                      (resolve-source-name index
+                        (globalbindingv0-module-name global) target)
+                      (- fuel 1))))))))))))
 
 (defn find-signature
   [(env BodyEnvV0)
@@ -4083,7 +4153,8 @@
                   (source-free-names index (nth children position) bound
                     include-callees (- fuel 1)))))))
 
-        (or (= "defn" kind) (= "fn" kind) (= "arity-clause" kind)
+        (or (= "defn" kind) (= "fn" kind) (= "letfn-entry" kind)
+            (= "arity-clause" kind)
             (= "protocol-method" kind) (= "impl-method" kind))
         (let [(parameters (Vec core/NativeId))
               (function-parameter-items index node)
@@ -4312,6 +4383,236 @@
             (if (string-member? keys (global-key global))
               (conj selected global)
               selected)))))))
+
+(defn source-ref-type-source
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (name String)
+   (fuel Int)]
+  (U core/NativeId Nil)
+  (if (<= fuel 0)
+    nil
+    (if (and (= "ref" (fact-text index node "form-kind"))
+          (= name (source-reference-spelling index node)))
+      (index-first-object index node "inferred-type")
+      (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
+        (loop [(position Int) 0]
+          (if (>= position (count children))
+            nil
+            (let [(found (U core/NativeId Nil))
+                  (source-ref-type-source index (nth children position) name
+                    (- fuel 1))]
+              (if (some? found) found (recur (+ position 1))))))))))
+
+(defn global-or-function-name?
+  [(index SourceIndexV0)
+   (globals (Vec GlobalBindingV0))
+   (name String)]
+  Bool
+  (or
+    (some?
+      (some
+        (fn [(global GlobalBindingV0)] Bool
+          (= name (globalbindingv0-name global)))
+        globals))
+    (some?
+      (some
+        (fn [(source core/NativeId)] Bool
+          (= name (fact-text index source "name")))
+        (vec (concat (index-form-ids index "defn")
+               (index-form-ids index "defn-multi")))))))
+
+(defn resolve-closure-captures
+  [(index SourceIndexV0)
+   (globals (Vec GlobalBindingV0))
+   (source core/NativeId)
+   (owner core/NativeId)]
+  (Vec ClosureCaptureV0)
+  (let [(names (Vec String))
+        (source-free-ref-names index source [] (+ 1 (index-facts index)))]
+    (loop [(position Int) 0 (captures (Vec ClosureCaptureV0)) []]
+      (if (>= position (count names))
+        captures
+        (let [(name String) (nth names position)
+              (source-type (U core/NativeId Nil))
+              (source-ref-type-source index source name
+                (+ 1 (index-facts index)))]
+          (if (or (global-or-function-name? index globals name)
+                (nil? source-type))
+            (recur (+ position 1) captures)
+            (let [(resolution TypeResolutionV0)
+                  (resolve-source-type index source-type)]
+              (recur (+ position 1)
+                (conj captures
+                  (->ClosureCaptureV0 name
+                    (typeresolutionv0-type-id resolution)
+                    (lower-id "capture-parameter"
+                      [(id-value owner) name])))))))))))
+
+(defn capture-parameters
+  [(captures (Vec ClosureCaptureV0))] (Vec core/Parameter)
+  (mapv
+    (fn [(capture ClosureCaptureV0)] core/Parameter
+      (core/->Parameter (closurecapturev0-parameter-id capture)
+        (closurecapturev0-type-id capture)))
+    captures))
+
+(defn closure-environment-unit-field-id
+  [(owner core/NativeId)] core/NativeId
+  (lower-id "closure-environment-unit" [(id-value owner)]))
+
+(defn closure-environment-type
+  [(owner core/NativeId)
+   (captures (Vec ClosureCaptureV0))]
+  core/TypeDef
+  (core/->TypeDef
+    (lower-id "closure-environment" [(id-value owner)])
+    "ClosureEnvironment"
+    (core/->RecordType
+      (if (= 0 (count captures))
+        [(core/->TypeField
+           (closure-environment-unit-field-id owner)
+           "$unit" (bool-type-id))]
+        (mapv
+          (fn [(capture ClosureCaptureV0)] core/TypeField
+            (core/->TypeField
+              (closurecapturev0-parameter-id capture)
+              (closurecapturev0-name capture)
+              (closurecapturev0-type-id capture)))
+          captures)))))
+
+(defn closure-environment-reference-type
+  [(owner core/NativeId) (environment-type core/NativeId)]
+  core/TypeDef
+  (core/->TypeDef
+    (lower-id "closure-environment-reference" [(id-value owner)])
+    "ClosureEnvironmentRef"
+    (core/->ReferenceType environment-type)))
+
+(defn closure-callable-type
+  [(parameters (Vec core/Parameter))
+   (rest-parameter (U core/Parameter Nil))
+   (return-type core/NativeId)]
+  core/TypeDef
+  (let [(parameter-types (Vec core/NativeId))
+        (mapv
+          (fn [(parameter core/Parameter)] core/NativeId
+            (core/parameter-type-id parameter))
+          parameters)
+        (rest-type (U core/NativeId Nil))
+        (if (nil? rest-parameter)
+          nil
+          (core/parameter-type-id rest-parameter))
+        (parts (Vec String))
+        (vec (concat
+               (mapv
+                 (fn [(parameter core/NativeId)] String (id-value parameter))
+                 parameter-types)
+               [(if (nil? rest-type) "fixed" (str "rest:" (id-value rest-type)))
+                "returns" (id-value return-type)]))]
+    (core/->TypeDef (lower-id "function-type" parts) "Function"
+      (core/->FunctionType parameter-types rest-type return-type))))
+
+(defn resolve-closure-spec
+  [(index SourceIndexV0)
+   (globals (Vec GlobalBindingV0))
+   (source core/NativeId)]
+  ClosureSpecV0
+  (let [(source-name (U String Nil)) (index-first-text index source "name")
+        (name String)
+        (if (nil? source-name)
+          (str "$closure$" (id-value source)) source-name)
+        (id core/NativeId) (function-id source name)
+        (captures (Vec ClosureCaptureV0))
+        (resolve-closure-captures index globals source id)
+        (escaping Bool) (= "fn" (fact-text index source "form-kind"))
+        (environment core/TypeDef) (closure-environment-type id captures)
+        (environment-reference core/TypeDef)
+        (closure-environment-reference-type id (core/typedef-id environment))
+        (fixed ParameterResolutionV0) (resolve-parameters index source id)
+        (rest ParameterResolutionV0) (resolve-rest-parameter index source id)
+        (user-parameters ParameterResolutionV0)
+        (append-parameter-resolutions fixed rest)
+        (parameters (Vec core/Parameter))
+        (if (not escaping)
+          (parameterresolutionv0-parameters user-parameters)
+          (into
+            [(core/->Parameter
+               (lower-id "closure-environment-parameter" [(id-value id)])
+               (core/typedef-id environment-reference))]
+            (parameterresolutionv0-parameters user-parameters)))
+        (source-return (U core/NativeId Nil))
+        (index-first-object index source "ret")
+        (return-resolution TypeResolutionV0)
+        (if (nil? source-return)
+          (->TypeResolutionV0 (type-id "LowerFailure") [(lower-failure-type)]
+            [(core/->DiagnosticV0 "LOWER-CLOSURE-RETURN"
+               (str name " has no closed return type"))]
+            false)
+          (resolve-source-type index source-return))
+        (fixed-parameters (Vec core/Parameter))
+        (parameterresolutionv0-parameters fixed)
+        (rest-parameters (Vec core/Parameter))
+        (parameterresolutionv0-parameters rest)
+        (rest-parameter (U core/Parameter Nil))
+        (if (= 0 (count rest-parameters)) nil (nth rest-parameters 0))
+        (callable core/TypeDef)
+        (closure-callable-type fixed-parameters rest-parameter
+          (typeresolutionv0-type-id return-resolution))
+        (function TypedFunctionV0)
+        (->TypedFunctionV0 id name name parameters
+          (typeresolutionv0-type-id return-resolution)
+          (type-id "LowerFailure")
+          (if (not escaping)
+            [(pure-effect-id)]
+            [(pure-effect-id) (allocate-effect-id)])
+          (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
+            (str "native body lowering remains for " name))
+          "")
+        (base-definitions (Vec core/TypeDef))
+        (append-type-defs
+          (parameterresolutionv0-definitions user-parameters)
+          (typeresolutionv0-definitions return-resolution))
+        (definitions (Vec core/TypeDef))
+        (if escaping
+          (append-type-def
+            (append-type-def
+              (append-type-def base-definitions environment)
+              environment-reference)
+            callable)
+          base-definitions)
+        (resolution FunctionResolutionV0)
+        (->FunctionResolutionV0 function definitions
+          (append-diagnostics
+            (parameterresolutionv0-diagnostics user-parameters)
+            (typeresolutionv0-diagnostics return-resolution))
+          (and (parameterresolutionv0-valid user-parameters)
+            (typeresolutionv0-valid return-resolution)))
+        (binding-id String) (fact-text index source "binding-id")]
+    (->ClosureSpecV0 source binding-id (core/typedef-id callable)
+      (core/typedef-id environment) (core/typedef-id environment-reference)
+      captures resolution)))
+
+(defn resolve-closure-specs
+  [(index SourceIndexV0)
+   (globals (Vec GlobalBindingV0))]
+  (Vec ClosureSpecV0)
+  (mapv
+    (fn [(source core/NativeId)] ClosureSpecV0
+      (resolve-closure-spec index globals source))
+    (vec (concat (index-form-ids index "fn")
+           (index-form-ids index "letfn-entry")))))
+
+(defn closure-spec-for-source
+  [(env BodyEnvV0) (source core/NativeId)] (U ClosureSpecV0 Nil)
+  (let [(closures (Vec ClosureSpecV0)) (bodyenvv0-closures env)]
+    (loop [(position Int) 0]
+      (if (>= position (count closures))
+        nil
+        (let [(closure ClosureSpecV0) (nth closures position)]
+          (if (same-id? source (closurespecv0-source closure))
+            closure
+            (recur (+ position 1))))))))
 
 ;; A nested loop's body belongs to its own header (its init forms do not), and
 ;; an unknown form kind is walked as non-tail so a `recur` reachable through
@@ -5267,6 +5568,118 @@
                 (arena-value-id owner)))
             push-id))))))
 
+(defn vector-prefix [(values (Vec core/NativeId)) (limit Int)] (Vec core/NativeId)
+  (loop [(position Int) 0 (result (Vec core/NativeId)) []]
+    (if (or (>= position limit) (>= position (count values)))
+      result
+      (recur (+ position 1) (conj result (nth values position))))))
+
+(defn vector-tail-from
+  [(values (Vec core/NativeId)) (start Int)] (Vec core/NativeId)
+  (loop [(position Int) start (result (Vec core/NativeId)) []]
+    (if (>= position (count values))
+      result
+      (recur (+ position 1) (conj result (nth values position))))))
+
+(defn parameter-prefix
+  [(parameters (Vec core/Parameter)) (limit Int)] (Vec core/Parameter)
+  (loop [(position Int) 0 (result (Vec core/Parameter)) []]
+    (if (or (>= position limit) (>= position (count parameters)))
+      result
+      (recur (+ position 1) (conj result (nth parameters position))))))
+
+(declare vector-element-of)
+
+(defn lower-static-call-values
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (signature TypedFunctionV0)
+   (source (U core/NativeId Nil))
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (let [(types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (parameters (Vec core/Parameter))
+        (typedfunctionv0-parameters signature)
+        (rest-source (U core/NativeId Nil))
+        (if (nil? source) nil
+          (index-first-object (bodyenvv0-index env) source "rest"))
+        (fixed-count Int)
+        (if (nil? rest-source) (count parameters) (- (count parameters) 1))]
+    (if (or (< fixed-count 0)
+          (if (nil? rest-source)
+            (not (= (count values) fixed-count))
+            (< (count values) fixed-count)))
+      (fail-result state
+        (str "TODO-NATIVE-CALL-ARGUMENTS: "
+          (typedfunctionv0-name signature)
+          " arguments do not match its native parameters"))
+      (let [(fixed-values (Vec core/NativeId))
+            (vector-prefix values fixed-count)
+            (fixed-types (Vec core/NativeId))
+            (vector-prefix value-types fixed-count)
+            (fixed-parameters (Vec core/Parameter))
+            (parameter-prefix parameters fixed-count)
+            (coerced-fixed ArgsResultV0)
+            (coerce-arguments types owner state fixed-values fixed-types
+              fixed-parameters)
+            (fixed-state BodyStateV0)
+            (argsresultv0-state coerced-fixed)]
+        (if (state-blocked? fixed-state)
+          (dead-result fixed-state)
+          (let [(packed ExprResultV0)
+                (if (nil? rest-source)
+                  (->ExprResultV0 fixed-state
+                    (lower-id "body" ["no-rest"])
+                    (type-id "Nil") false)
+                  (let [(rest-parameter core/Parameter)
+                        (nth parameters fixed-count)
+                        (rest-vector-type core/NativeId)
+                        (core/parameter-type-id rest-parameter)
+                        (element-type core/NativeId)
+                        (vector-element-of types rest-vector-type)
+                        (coerced-rest ArgsResultV0)
+                        (coerce-values-to-type types owner fixed-state
+                          (vector-tail-from values fixed-count)
+                          (vector-tail-from value-types fixed-count)
+                          element-type)]
+                    (if (state-blocked? (argsresultv0-state coerced-rest))
+                      (dead-result (argsresultv0-state coerced-rest))
+                      (build-vector-literal owner
+                        (argsresultv0-state coerced-rest) rest-vector-type
+                        (argsresultv0-values coerced-rest)))))
+                (settled BodyStateV0) (exprresultv0-state packed)]
+            (if (state-blocked? settled)
+              (dead-result settled)
+              (let [(call-values (Vec core/NativeId))
+                    (if (nil? rest-source)
+                      (argsresultv0-values coerced-fixed)
+                      (conj (argsresultv0-values coerced-fixed)
+                        (exprresultv0-value-id packed)))
+                    (result-id core/NativeId)
+                    (state-id settled owner "call")
+                    (called BodyStateV0)
+                    (state-emit (state-bump settled)
+                      (core/->CallInstruction
+                        (core/->SsaValueV0 result-id
+                          (typedfunctionv0-return-type signature))
+                        (typedfunctionv0-id signature) call-values nil
+                        (core/->TokenFlowV0 [] [])))]
+                (if (signature-traps? env signature)
+                  (let [(trap-id core/NativeId)
+                        (state-id called owner "unreachable-call")
+                        (trapped BodyStateV0)
+                        (state-emit (state-bump called)
+                          (core/->AtomInstruction
+                            (core/->SsaValueV0 trap-id (int-type-id))
+                            (core/->I64Atom (trap-failure-code))))]
+                    (->ExprResultV0
+                      (state-close trapped (core/->TrapTerminator trap-id))
+                      trap-id (type-id "LowerFailure") true))
+                  (->ExprResultV0 called result-id
+                    (typedfunctionv0-return-type signature) false))))))))))
+
 (defn vector-type? [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
     (and (not (nil? definition))
@@ -5948,6 +6361,7 @@
       (instance? native.core.TransientSetConjInstructionV0 instruction)
       (instance? native.core.RecordAssocInstructionV0 instruction)
       (instance? native.core.BoxRecordInstruction instruction)
+      (instance? native.core.ClosureCallInstructionV0 instruction)
       (instance? native.core.AllocateInstruction instruction)
       (instance? native.core.AtomCreateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
@@ -13495,6 +13909,223 @@
                       (exprresultv0-value-id source) (arena-value-id owner)))
                   result-id expected false)))))))))
 
+(defn lower-closure-value
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (source core/NativeId)]
+  ExprResultV0
+  (let [(spec (U ClosureSpecV0 Nil)) (closure-spec-for-source env source)]
+    (if (nil? spec)
+      (fail-result state "LOWER-CLOSURE-SIGNATURE: closure has no closed callable signature")
+      (let [(captures (Vec ClosureCaptureV0)) (closurespecv0-captures spec)
+            (capture-values (Vec core/NativeId))
+            (loop [(position Int) 0 (values (Vec core/NativeId)) []]
+              (if (>= position (count captures))
+                values
+                (let [(capture ClosureCaptureV0) (nth captures position)
+                      (binding (U LocalBindingV0 Nil))
+                      (find-local (bodystatev0-locals state)
+                        (closurecapturev0-name capture))]
+                  (if (nil? binding)
+                    []
+                    (recur (+ position 1)
+                      (conj values (localbindingv0-value-id binding)))))))]
+        (if (not (= (count capture-values) (count captures)))
+          (fail-result state
+            "LOWER-CLOSURE-CAPTURE: a captured lexical value is unavailable")
+          (let [(unit-id core/NativeId)
+                (state-id state owner "closure-environment-unit")
+                (seeded BodyStateV0)
+                (if (= 0 (count captures))
+                  (state-emit (state-bump state)
+                    (core/->AtomInstruction
+                      (core/->SsaValueV0 unit-id (bool-type-id))
+                      (core/->BoolAtom true)))
+                  state)
+                (environment-values (Vec core/NativeId))
+                (if (= 0 (count captures)) [unit-id] capture-values)
+                (record-id core/NativeId)
+                (state-id seeded owner "closure-environment-record")
+                (boxed-id core/NativeId)
+                (state-id (state-bump seeded) owner "closure-environment")
+                (closure-id core/NativeId)
+                (state-id (state-bump (state-bump seeded)) owner "closure")
+                (recorded BodyStateV0)
+                (state-emit (state-bump seeded)
+                  (core/->RecordInstruction
+                    (core/->SsaValueV0 record-id
+                      (closurespecv0-environment-type spec))
+                    environment-values))
+                (boxed BodyStateV0)
+                (state-emit (state-bump recorded)
+                  (core/->BoxRecordInstruction
+                    (core/->SsaValueV0 boxed-id
+                      (closurespecv0-environment-reference-type spec))
+                    record-id (arena-value-id owner)))
+                (created BodyStateV0)
+                (state-emit (state-bump boxed)
+                  (core/->ClosureInstructionV0
+                    (core/->SsaValueV0 closure-id
+                      (closurespecv0-callable-type spec))
+                    (typedfunctionv0-id
+                      (functionresolutionv0-function
+                        (closurespecv0-resolution spec)))
+                    boxed-id))]
+            (->ExprResultV0 created closure-id
+              (closurespecv0-callable-type spec) false)))))))
+
+(defn function-shape-of
+  [(types (Vec core/TypeDef)) (target core/NativeId)]
+  (U core/FunctionType Nil)
+  (let [(definition (U core/TypeDef Nil)) (lookup-type types target)]
+    (if (nil? definition)
+      nil
+      (let [(shape core/TypeShape) (core/typedef-shape definition)]
+        (if (instance? native.core.FunctionType shape) shape nil)))))
+
+(defn lower-source-arguments
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (arguments (Vec core/NativeId))]
+  ArgsResultV0
+  (loop [(position Int) 0
+         (current BodyStateV0) state
+         (values (Vec core/NativeId)) []
+         (types (Vec core/NativeId)) []]
+    (if (or (>= position (count arguments)) (state-blocked? current))
+      (->ArgsResultV0 current values types false)
+      (let [(argument ExprResultV0)
+            (lower-expr env owner current (nth arguments position))]
+        (if (exprresultv0-terminated argument)
+          (->ArgsResultV0 (exprresultv0-state argument) values types true)
+          (recur (+ position 1) (exprresultv0-state argument)
+            (conj values (exprresultv0-value-id argument))
+            (conj types (exprresultv0-type-id argument))))))))
+
+(defn callable-parameters
+  [(shape core/FunctionType)] (Vec core/Parameter)
+  (mapv
+    (fn [(type core/NativeId)] core/Parameter
+      (core/->Parameter (lower-id "callable-parameter" [(id-value type)]) type))
+    (core/functiontype-parameter-types shape)))
+
+(defn lower-indirect-call
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (callee-form core/NativeId)
+   (arguments (Vec core/NativeId))]
+  ExprResultV0
+  (let [(types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (callee ExprResultV0) (lower-expr env owner state callee-form)
+        (shape (U core/FunctionType Nil))
+        (function-shape-of types (exprresultv0-type-id callee))]
+    (cond
+      (exprresultv0-terminated callee) callee
+      (state-blocked? (exprresultv0-state callee))
+      (dead-result (exprresultv0-state callee))
+      (nil? shape)
+      (fail-result (exprresultv0-state callee)
+        "LOWER-INDIRECT-CALL-TYPE: callee is not a closed callable")
+      (some? (core/functiontype-rest-type shape))
+      (fail-result (exprresultv0-state callee)
+        "LOWER-INDIRECT-VARIADIC-CALL: variadic callable values require apply")
+      :else
+      (let [(lowered ArgsResultV0)
+            (lower-source-arguments env owner (exprresultv0-state callee)
+              arguments)
+            (parameters (Vec core/Parameter)) (callable-parameters shape)]
+        (cond
+          (argsresultv0-terminated lowered)
+          (dead-result (argsresultv0-state lowered))
+          (state-blocked? (argsresultv0-state lowered))
+          (dead-result (argsresultv0-state lowered))
+          (not (= (count parameters) (count (argsresultv0-values lowered))))
+          (fail-result (argsresultv0-state lowered)
+            "LOWER-INDIRECT-CALL-ARITY: arguments do not match callable signature")
+          :else
+          (let [(coerced ArgsResultV0)
+                (coerce-arguments types owner (argsresultv0-state lowered)
+                  (argsresultv0-values lowered) (argsresultv0-value-types lowered)
+                  parameters)
+                (result-id core/NativeId)
+                (state-id (argsresultv0-state coerced) owner "closure-call")]
+            (if (state-blocked? (argsresultv0-state coerced))
+              (dead-result (argsresultv0-state coerced))
+              (->ExprResultV0
+                (state-emit (state-bump (argsresultv0-state coerced))
+                  (core/->ClosureCallInstructionV0
+                    (core/->SsaValueV0 result-id
+                      (core/functiontype-return-type shape))
+                    (exprresultv0-value-id callee)
+                    (argsresultv0-values coerced)
+                    (arena-value-id owner)
+                    (core/->TokenFlowV0 [] [])))
+                result-id (core/functiontype-return-type shape) false))))))))
+
+(defn lower-apply-call
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (source core/NativeId)
+   (arguments (Vec core/NativeId))]
+  ExprResultV0
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (types (Vec core/TypeDef)) (bodyenvv0-types env)]
+    (if (not (= 2 (count arguments)))
+      (fail-result state "LOWER-APPLY-ARITY: apply requires a callable and one typed vector")
+      (let [(target core/NativeId) (nth arguments 0)
+            (name String) (source-reference-spelling index target)
+            (signature (U TypedFunctionV0 Nil)) (find-signature env target name)
+            (signature-source (U core/NativeId Nil))
+            (find-signature-source env target name)]
+        (if (or (nil? signature) (nil? signature-source))
+          (fail-result state
+            "LOWER-APPLY-CALLABLE: apply target must have a closed native signature")
+          (let [(packed ExprResultV0)
+                (lower-expr env owner state (nth arguments 1))
+                (vector-type core/NativeId) (exprresultv0-type-id packed)
+                (element-type core/NativeId) (vector-element-of types vector-type)
+                (parameters (Vec core/Parameter))
+                (typedfunctionv0-parameters signature)]
+            (cond
+              (exprresultv0-terminated packed) packed
+              (state-blocked? (exprresultv0-state packed))
+              (dead-result (exprresultv0-state packed))
+              (same-id? element-type (type-id "LowerFailure"))
+              (fail-result (exprresultv0-state packed)
+                "LOWER-APPLY-VECTOR: apply arguments must be a typed vector")
+              (some? (index-first-object index signature-source "rest"))
+              (fail-result (exprresultv0-state packed)
+                "LOWER-APPLY-VARIADIC: variadic apply target is not closed in this ABI")
+              :else
+              (loop [(position Int) 0
+                     (current BodyStateV0) (exprresultv0-state packed)
+                     (values (Vec core/NativeId)) []
+                     (value-types (Vec core/NativeId)) []]
+                (if (or (>= position (count parameters))
+                      (state-blocked? current))
+                  (lower-static-call-values env owner current signature
+                    signature-source values value-types)
+                  (let [(index-id core/NativeId)
+                        (state-id current owner "apply-index")
+                        (indexed BodyStateV0)
+                        (state-emit (state-bump current)
+                          (core/->AtomInstruction
+                            (core/->SsaValueV0 index-id (int-type-id))
+                            (core/->I64Atom position)))
+                        (value-id core/NativeId)
+                        (state-id indexed owner "apply-value")
+                        (loaded BodyStateV0)
+                        (state-emit (state-bump indexed)
+                          (core/->VecGetInstruction
+                            (core/->SsaValueV0 value-id element-type)
+                            (exprresultv0-value-id packed) index-id))]
+                    (recur (+ position 1) loaded (conj values value-id)
+                      (conj value-types element-type))))))))))))
+
 (defn lower-expr-raw
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -13596,8 +14227,13 @@
               (localbindingv0-type-id binding) false)))
 
         (= "fn" kind)
-        (fail-result state
-          "TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an eager inline callback")
+        (lower-closure-value env owner state expr)
+
+        (= "letfn" kind)
+        (let [(body (U core/NativeId Nil)) (index-first-object index expr "body")]
+          (if (nil? body)
+            (fail-result state "LOWER-LETFN-BODY: letfn has no body")
+            (lower-expr-expected env owner state body expected)))
 
         (= "do" kind)
         (let [(body-node (U core/NativeId Nil))
@@ -14914,15 +15550,13 @@
               (if (nil? args-node) [] (index-sequence-items index args-node))]
           (cond
             (and (= "" callee) (some? callee-form))
-            (fail-result state
-              "TODO-NATIVE-INDIRECT-CALL: v0 has no closure or function-pointer ABI")
+            (lower-indirect-call env owner state callee-form args)
 
             (and (= "apply" callee)
               (not (and (= 2 (count args))
                 (source-ref-named? index (nth args 0) "str")
                 (source-call-named? index (nth args 1) "repeat"))))
-            (fail-result state
-              "TODO-NATIVE-APPLY: no frozen Beagle Store function requires dynamic argument spreading")
+            (lower-apply-call env owner state expr args)
 
             (and (= "assoc" callee) (> (count args) 0)
               (or (source-ref-record? env state (nth args 0))
@@ -15819,6 +16453,8 @@
                   (payloadless-union-member-constructor env resolved-callee)
                   (signature (U TypedFunctionV0 Nil))
                   (find-signature env expr callee)
+                  (signature-source (U core/NativeId Nil))
+                  (find-signature-source env expr callee)
                   (lowered ArgsResultV0)
                   (loop [(position Int) 0
                          (current BodyStateV0) state
@@ -17846,63 +18482,8 @@
                                 (fact-text index source-union "name"))))))))))
 
                 (some? signature)
-                (let [(parameters (Vec core/Parameter))
-                      (typedfunctionv0-parameters signature)
-                      (arity-ok Bool) (= (count parameters) (count values))]
-                  (if (not arity-ok)
-                    (fail-result current
-                      (str "TODO-NATIVE-CALL-ARGUMENTS: " callee
-                        " arguments do not match its native parameters"))
-                    (let [(coerced ArgsResultV0)
-                          (coerce-arguments types owner current values value-types
-                            parameters)
-                          (settled BodyStateV0) (argsresultv0-state coerced)
-                          (coerced-values (Vec core/NativeId))
-                          (argsresultv0-values coerced)
-                          (coerced-types (Vec core/NativeId))
-                          (argsresultv0-value-types coerced)
-                          (types-ok Bool)
-                          (and (= (count parameters) (count coerced-types))
-                            (loop [(position Int) 0]
-                              (if (>= position (count parameters))
-                                true
-                                (if (same-id?
-                                      (core/parameter-type-id
-                                        (nth parameters position))
-                                      (nth coerced-types position))
-                                  (recur (+ position 1))
-                                  false))))
-                          (result-id core/NativeId)
-                          (state-id settled owner "call")]
-                      (cond
-                        (state-blocked? settled) (dead-result settled)
-                        (not types-ok)
-                        (fail-result settled
-                          (str "TODO-NATIVE-CALL-ARGUMENTS: " callee
-                            " arguments do not match its native parameters"))
-                        :else
-                        (let [(called BodyStateV0)
-                              (state-emit (state-bump settled)
-                                (core/->CallInstruction
-                                  (core/->SsaValueV0 result-id
-                                    (typedfunctionv0-return-type signature))
-                                  (typedfunctionv0-id signature)
-                                  coerced-values
-                                  nil
-                                  (core/->TokenFlowV0 [] [])))]
-                          (if (signature-traps? env signature)
-                            (let [(trap-id core/NativeId)
-                                  (state-id called owner "unreachable-call")
-                                  (trapped BodyStateV0)
-                                  (state-emit (state-bump called)
-                                    (core/->AtomInstruction
-                                      (core/->SsaValueV0 trap-id (int-type-id))
-                                      (core/->I64Atom (trap-failure-code))))]
-                              (->ExprResultV0
-                                (state-close trapped (core/->TrapTerminator trap-id))
-                                trap-id (type-id "LowerFailure") true))
-                            (->ExprResultV0 called result-id
-                              (typedfunctionv0-return-type signature) false)))))))
+                (lower-static-call-values env owner current signature
+                  signature-source values value-types)
 
                 :else
                 (fail-result current
@@ -18309,9 +18890,13 @@
             (function-parameter-items index source-function)
             (effective-signature EffectiveFunctionSignatureV0)
             (effective-function-signature index source-function source-parameters)
-            (parameters ParameterResolutionV0)
+            (fixed-parameters ParameterResolutionV0)
             (resolve-parameters-with-signature index source-function id
               effective-signature)
+            (rest-parameter ParameterResolutionV0)
+            (resolve-rest-parameter index source-function id)
+            (parameters ParameterResolutionV0)
+            (append-parameter-resolutions fixed-parameters rest-parameter)
             (source-return (U core/NativeId Nil))
             (if (and
                   (effectivefunctionsignaturev0-present effective-signature)
@@ -18406,6 +18991,35 @@
   NativeReadinessV0
   (->NativeLoweredV0 entry-id blocks))
 
+(defn initialize-closure-captures
+  [(owner core/NativeId)
+   (state BodyStateV0)
+   (spec (U ClosureSpecV0 Nil))
+   (parameters (Vec core/Parameter))]
+  BodyStateV0
+  (if (or (nil? spec) (= 0 (count (closurespecv0-captures spec)))
+        (= 0 (count parameters)))
+    state
+    (let [(environment-id core/NativeId)
+          (core/parameter-id (nth parameters 0))
+          (captures (Vec ClosureCaptureV0)) (closurespecv0-captures spec)]
+      (loop [(position Int) 0 (current BodyStateV0) state]
+        (if (>= position (count captures))
+          current
+          (let [(capture ClosureCaptureV0) (nth captures position)
+                (value-id core/NativeId)
+                (state-id current owner "closure-capture")]
+            (recur (+ position 1)
+              (state-bind
+                (state-emit (state-bump current)
+                  (core/->FieldInstruction
+                    (core/->SsaValueV0 value-id
+                      (closurecapturev0-type-id capture))
+                    environment-id
+                    (closurecapturev0-parameter-id capture)))
+                (closurecapturev0-name capture) value-id
+                (closurecapturev0-type-id capture)))))))))
+
 (defn lower-function-body
   [(env BodyEnvV0)
    (signature TypedFunctionV0)
@@ -18417,11 +19031,21 @@
         (body-node (U core/NativeId Nil))
         (index-first-object index source-function "body")
         (parameters (Vec core/Parameter)) (typedfunctionv0-parameters signature)
+        (closure-spec (U ClosureSpecV0 Nil))
+        (closure-spec-for-source env source-function)
+        (capture-count Int)
+        (if (nil? closure-spec) 0
+          (count (closurespecv0-captures closure-spec)))
+        (has-environment Bool)
+        (and (some? closure-spec)
+          (= "fn" (fact-text index source-function "form-kind")))
+        (user-parameters (Vec core/Parameter))
+        (if has-environment (tail-parameters parameters) parameters)
         (source-parameters (Vec core/NativeId))
         (function-parameter-items index source-function)
-        (parameter-locals (Vec LocalBindingV0))
+        (fixed-parameter-locals (Vec LocalBindingV0))
         (loop [(position Int) 0 (collected (Vec LocalBindingV0)) []]
-          (if (or (>= position (count parameters))
+          (if (or (>= position (count user-parameters))
                   (>= position (count source-parameters)))
             collected
             (recur (+ position 1)
@@ -18429,10 +19053,27 @@
                 (->LocalBindingV0
                   (parameter-name-at index (nth source-parameters position)
                     position)
-                  (core/parameter-id (nth parameters position))
-                  (core/parameter-type-id (nth parameters position)))))))
+                  (core/parameter-id (nth user-parameters position))
+                  (core/parameter-type-id (nth user-parameters position)))))))
+        (source-rest (U core/NativeId Nil))
+        (index-first-object index source-function "rest")
+        (parameter-locals (Vec LocalBindingV0))
+        (if (or (nil? source-rest)
+              (>= (count source-parameters) (count user-parameters)))
+          fixed-parameter-locals
+          (let [(rest-parameter core/Parameter)
+                (nth user-parameters (count source-parameters))]
+            (conj fixed-parameter-locals
+              (->LocalBindingV0
+                (parameter-name-at index source-rest (count source-parameters))
+                (core/parameter-id rest-parameter)
+                (core/parameter-type-id rest-parameter)))))
         (parameter-bound-names (Vec String))
-        (source-parameters-bound-names index source-parameters)
+        (if (nil? source-rest)
+          (source-parameters-bound-names index source-parameters)
+          (append-unique-strings
+            (source-parameters-bound-names index source-parameters)
+            [(parameter-name-at index source-rest (count source-parameters))]))
         (entry-id core/NativeId) (lower-id "block-entry" [(id-value id)])]
     (if (nil? body-node)
       (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
@@ -18442,11 +19083,22 @@
               (->BodyStateV0 [] entry-id [] [] true 0 [] "" [] [] [] nil)
               (needed-globals env body-node
                 parameter-bound-names))
+            (with-captures BodyStateV0)
+            (initialize-closure-captures id globalized closure-spec parameters)
             (guarded BodyStateV0)
-            (guard-parameter-bindings env id globalized source-parameters
-              parameters)
+            (guard-parameter-bindings env id with-captures source-parameters
+              user-parameters)
+            (rest-guarded BodyStateV0)
+            (if (or (nil? source-rest)
+                  (>= (count source-parameters) (count user-parameters)))
+              guarded
+              (let [(rest-parameter core/Parameter)
+                    (nth user-parameters (count source-parameters))]
+                (guard-binding-value env id guarded source-rest
+                  (core/parameter-id rest-parameter)
+                  (core/parameter-type-id rest-parameter))))
             (initialized BodyStateV0)
-            (loop [(position Int) 0 (current BodyStateV0) guarded]
+            (loop [(position Int) 0 (current BodyStateV0) rest-guarded]
               (if (>= position (count parameter-locals))
                 current
                 (let [(binding LocalBindingV0) (nth parameter-locals position)]
@@ -18457,7 +19109,7 @@
                       (localbindingv0-type-id binding))))))
             (projected BodyStateV0)
             (project-parameter-bindings env id initialized source-function
-              source-parameters parameters)
+              source-parameters user-parameters)
             (result ExprResultV0)
             (lower-expr-expected env id projected body-node
               (typedfunctionv0-return-type signature))
@@ -18802,15 +19454,9 @@
   (let [(signature TypedFunctionV0) (functionresolutionv0-function resolution)
         (prior NativeReadinessV0) (typedfunctionv0-readiness signature)
         (readiness NativeReadinessV0)
-        (cond
-          (function-signature-carries-function? (bodyenvv0-types env) signature)
-          (->NativeTodoV0 "TODO-NATIVE-FUNCTION-ABI"
-            (str (typedfunctionv0-name signature)
-              " has a function-bearing parameter or return type; v0 has no closure ABI"))
-
-          (ready-function? signature) prior
-
-          :else (lower-function-body env signature source-function))
+        (if (ready-function? signature)
+          prior
+          (lower-function-body env signature source-function))
         ;; A vector allocation is discovered in the body, not the signature, so
         ;; the effect that admits it is added once the blocks exist.
         (prior-effects (Vec core/NativeId)) (typedfunctionv0-effects signature)
@@ -19914,8 +20560,24 @@
         (build-source-index graph (stages/sourcestagev1-modules source))
         (record-keys (Vec String)) (sourceindexv0-record-keys index)
         (record-resolutions (Vec RecordResolutionV0)) (resolve-records index)
-        (function-sources (Vec core/NativeId)) (index-form-ids index "defn")
-        (signature-resolutions (Vec FunctionResolutionV0)) (resolve-functions index)
+        (globals (Vec GlobalBindingV0)) (source-globals index)
+        (top-function-sources (Vec core/NativeId))
+        (index-form-ids index "defn")
+        (top-signature-resolutions (Vec FunctionResolutionV0))
+        (resolve-functions index)
+        (closures (Vec ClosureSpecV0)) (resolve-closure-specs index globals)
+        (function-sources (Vec core/NativeId))
+        (vec (concat top-function-sources
+               (mapv
+                 (fn [(closure ClosureSpecV0)] core/NativeId
+                   (closurespecv0-source closure))
+                 closures)))
+        (signature-resolutions (Vec FunctionResolutionV0))
+        (vec (concat top-signature-resolutions
+               (mapv
+                 (fn [(closure ClosureSpecV0)] FunctionResolutionV0
+                   (closurespecv0-resolution closure))
+                 closures)))
         (base-record-types (Vec core/TypeDef))
         (collect-record-types record-keys record-resolutions)
         (declared-union-types (Vec core/TypeDef))
@@ -19926,7 +20588,6 @@
             (append-type-defs base-record-types declared-union-types)
             (regex-match-type))
           (append-type-defs base-record-types declared-union-types))
-        (globals (Vec GlobalBindingV0)) (source-globals index)
         (declared-types (Vec core/TypeDef))
         (append-type-defs
           (append-type-defs
@@ -19977,7 +20638,7 @@
         (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)]
     (->TypingPreludeV0
       (->BodyEnvV0 index process-source-types signatures function-sources
-        globals (whole-input-limit-from-configuration configuration))
+        globals closures (whole-input-limit-from-configuration configuration))
       record-resolutions signature-resolutions record-keys source-digest)))
 
 (defn lower-typed-stage
@@ -20192,8 +20853,8 @@
                   "mutable buffer header reference"))
 
               (instance? native.core.FunctionType shape)
-              (->LayoutMeasureV0 pointer-bytes pointer-align false
-                "TODO-NATIVE-FUNCTION-LAYOUT: callable signatures have no closure layout or indirect-call ABI")
+              (->LayoutMeasureV0 (* 2 pointer-bytes) pointer-align true
+                "two-word closure: invoke pointer plus arena-owned environment")
 
               (instance? native.core.MapTypeV0 shape)
               (->LayoutMeasureV0 pointer-bytes pointer-align true
@@ -20405,10 +21066,8 @@
       (instance? native.core.ReferenceType shape)
       (core/->ReferenceShapeV0 (core/referencetype-target-type shape))
 
-      ;; Placeholder only: resolve-layout marks FunctionType unclosed, so this
-      ;; reference-sized shape can never authorize a closure ABI.
       (instance? native.core.FunctionType shape)
-      (core/->ReferenceShapeV0 (core/typedef-id definition))
+      (core/->ClosureShapeV0 true)
 
       (instance? native.core.AtomCellTypeV0 shape)
       (core/->AtomCellShapeV0 (core/atomcelltypev0-content-type shape))
@@ -21648,6 +22307,10 @@
     (stages/canonical-record "atom-cell-layout"
       [(id-value (core/atomcellshapev0-content-type shape))])
 
+    (instance? native.core.ClosureShapeV0 shape)
+    (stages/canonical-record "closure-layout-v0"
+      ["invoke-pointer" "arena-owned-environment-pointer"])
+
     :else
     (stages/canonical-record "reference-layout"
       [(id-value (core/referenceshapev0-target-type shape))])))
@@ -22455,6 +23118,20 @@
          (core/codecprimitiveinstructionv0-result instruction))
        (encode-codec-primitive-operation
          (core/codecprimitiveinstructionv0-operation instruction))])
+
+    (instance? native.core.ClosureInstructionV0 instruction)
+    (stages/canonical-record "closure-instruction-v0"
+      [(encode-ssa-value (core/closureinstructionv0-result instruction))
+       (id-value (core/closureinstructionv0-function-id instruction))
+       (id-value (core/closureinstructionv0-environment-id instruction))])
+
+    (instance? native.core.ClosureCallInstructionV0 instruction)
+    (stages/canonical-record "closure-call-instruction-v0"
+      [(encode-ssa-value (core/closurecallinstructionv0-result instruction))
+       (id-value (core/closurecallinstructionv0-closure-id instruction))
+       (encode-id-roots "arguments"
+         (core/closurecallinstructionv0-arguments instruction))
+       (id-value (core/closurecallinstructionv0-arena-id instruction))])
 
     (instance? native.core.CallInstruction instruction)
     (let [(arena (U core/NativeId Nil))
@@ -24445,7 +25122,7 @@
 
 (def empty-context-env BodyEnvV0
   (->BodyEnvV0 empty-context-index empty-context-types
-    [empty-context-signature] [] [] WHOLE-INPUT-DEFAULT-LIMIT))
+    [empty-context-signature] [] [] [] WHOLE-INPUT-DEFAULT-LIMIT))
 
 (def empty-context-owner core/NativeId
   (empty-context-id "owner"))

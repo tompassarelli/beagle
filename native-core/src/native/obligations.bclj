@@ -718,6 +718,9 @@
    (parent-size Int)
    (abi core/AbiProfileV0)] Bool
   (cond
+    (instance? native.core.FunctionType type-shape)
+    (and (instance? native.core.ClosureShapeV0 layout-shape)
+      (= parent-size (* 2 (core/abiprofilev0-pointer-bytes abi))))
     (some? (get type-shape :kind nil))
     (let [(kind Any) (get type-shape :kind nil)]
       (if (instance? native.core.BytesKind kind)
@@ -801,6 +804,10 @@
         (instance? native.core.MapShapeV0 shape)
         (instance? native.core.SetShapeV0 shape))
       (and (= size (core/abiprofilev0-pointer-bytes abi))
+        (= alignment (core/abiprofilev0-pointer-align abi)))
+
+      (instance? native.core.ClosureShapeV0 shape)
+      (and (= size (* 2 (core/abiprofilev0-pointer-bytes abi)))
         (= alignment (core/abiprofilev0-pointer-align abi)))
 
       (instance? native.core.BytesShapeV0 shape)
