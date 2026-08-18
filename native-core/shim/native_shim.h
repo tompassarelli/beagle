@@ -671,6 +671,12 @@ void native_host_stderr_write_v0(
     const native_capability *capability, uint64_t text);
 void native_host_stderr_write_line_v0(
     const native_capability *capability, uint64_t text);
+bool native_host_filesystem_file_exists_v0(
+    const native_capability *capability, uint64_t path);
+/* Returns the process working-directory-prefixed path without filesystem
+   canonicalization, matching java.io.File.getAbsolutePath. */
+uint64_t native_host_filesystem_abs_path_v0(
+    native_arena *arena, const native_capability *capability, uint64_t path);
 /* Path kind result: 1 regular file, 2 directory, 3 symbolic link, 4 other. */
 int32_t native_host_filesystem_path_kind_v0(
     const native_capability *capability, uint64_t path, int64_t *out);

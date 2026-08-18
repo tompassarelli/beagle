@@ -9755,6 +9755,90 @@ static bool native_host_filesystem_capability_valid(
   return (capability != NULL) && (capability->token != UINT64_C(0));
 }
 
+bool native_host_filesystem_file_exists_v0(
+    const native_capability *capability, uint64_t path_text) {
+  char *path = NULL;
+  struct stat metadata;
+  int32_t status;
+  bool result;
+  if (!native_host_filesystem_capability_valid(capability)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return false;
+  }
+  result = (stat(path, &metadata) == 0) && S_ISREG(metadata.st_mode);
+  free(path);
+  return result;
+}
+
+uint64_t native_host_filesystem_abs_path_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text) {
+  char *path = NULL;
+  char *working_directory = NULL;
+  char *absolute = NULL;
+  uint8_t *destination;
+  uint64_t path_length;
+  uint64_t working_length;
+  uint64_t absolute_length;
+  uint64_t result;
+  int32_t status;
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  path_length = (uint64_t)strlen(path);
+  if ((path_length > UINT64_C(0)) && (path[0] == '/')) {
+    absolute = path;
+    path = NULL;
+  } else {
+    working_directory = getcwd(NULL, (size_t)0U);
+    if (working_directory == NULL) {
+      free(path);
+      native_trap(NATIVE_TRAP_IO);
+    }
+    working_length = (uint64_t)strlen(working_directory);
+    if (working_length > UINT64_MAX - UINT64_C(1) ||
+        path_length > UINT64_MAX - working_length - UINT64_C(1)) {
+      free(working_directory);
+      free(path);
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    absolute_length = working_length +
+      ((path_length == UINT64_C(0)) ? UINT64_C(0) : UINT64_C(1)) +
+      path_length;
+    absolute = (char *)malloc((size_t)absolute_length + (size_t)1U);
+    if (absolute == NULL) {
+      free(working_directory);
+      free(path);
+      native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+    }
+    memcpy(absolute, working_directory, (size_t)working_length);
+    if (path_length != UINT64_C(0)) {
+      absolute[working_length] = '/';
+    }
+    if (path_length != UINT64_C(0)) {
+      memcpy(absolute + working_length + UINT64_C(1), path,
+             (size_t)path_length);
+    }
+    absolute[absolute_length] = '\0';
+  }
+  absolute_length = (uint64_t)strlen(absolute);
+  result = native_text_alloc(arena, absolute_length, &destination);
+  if (absolute_length != UINT64_C(0)) {
+    memcpy(destination, absolute, (size_t)absolute_length);
+  }
+  free(working_directory);
+  free(path);
+  free(absolute);
+  return result;
+}
+
 int32_t native_host_filesystem_path_kind_v0(
     const native_capability *capability, uint64_t path_text, int64_t *out) {
   char *path = NULL;

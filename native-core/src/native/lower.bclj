@@ -2193,7 +2193,9 @@
   (lower-id "extern" ["host-environment-lookup-v0"]))
 
 (defn host-environment-callee? [(name String)] Bool
-  (or (= name "System/getenv") (= name "java.lang.System/getenv")))
+  (or (= name "System/getenv")
+      (= name "java.lang.System/getenv")
+      (= name "selfhost.rt/getenv")))
 
 (defn host-context-effect-id [] core/NativeId
   (lower-id "effect" ["host-context-read-v0"]))
@@ -2298,7 +2300,8 @@
 
 (defn host-stderr-callee? [(name String)] Bool
   (or (= name "host.stderr/write-text")
-      (= name "host.stderr/write-line")))
+      (= name "host.stderr/write-line")
+      (= name "selfhost.rt/eprint")))
 
 (defn host-filesystem-effect-id [] core/NativeId
   (lower-id "effect" ["host-filesystem-v0"]))
@@ -2320,7 +2323,9 @@
       (= name "host.fs/make-parent-directories")
       (= name "host.fs/append-text")
       (= name "host.fs/lock-exclusive")
-      (= name "host.fs/unlock")))
+      (= name "host.fs/unlock")
+      (= name "selfhost.rt/file-exists?")
+      (= name "selfhost.rt/abs-path")))
 
 (defn host-filesystem-operation [(name String)] String
   (cond
@@ -2332,6 +2337,8 @@
     (= name "host.fs/append-text") "append-text"
     (= name "host.fs/lock-exclusive") "lock-exclusive"
     (= name "host.fs/unlock") "unlock"
+    (= name "selfhost.rt/file-exists?") "file-exists"
+    (= name "selfhost.rt/abs-path") "abs-path"
     :else ""))
 
 (defn host-filesystem-abi-id? [(candidate core/NativeId)] Bool
@@ -2343,7 +2350,9 @@
         (host-filesystem-abi-id "make-parent-directories"))
       (same-id? candidate (host-filesystem-abi-id "append-text"))
       (same-id? candidate (host-filesystem-abi-id "lock-exclusive"))
-      (same-id? candidate (host-filesystem-abi-id "unlock"))))
+      (same-id? candidate (host-filesystem-abi-id "unlock"))
+      (same-id? candidate (host-filesystem-abi-id "file-exists"))
+      (same-id? candidate (host-filesystem-abi-id "abs-path"))))
 
 (defn host-process-effect-id [] core/NativeId
   (lower-id "effect" ["host-process-run-inherit-v0"]))
@@ -9026,7 +9035,9 @@
 
     (or (= callee "host.fs/path-kind")
         (= callee "host.fs/make-parent-directories")
-        (= callee "host.fs/lock-exclusive"))
+        (= callee "host.fs/lock-exclusive")
+        (= callee "selfhost.rt/file-exists?")
+        (= callee "selfhost.rt/abs-path"))
     (and (= 1 (count value-types))
       (text-operand? (nth value-types 0)))
 
@@ -9044,6 +9055,8 @@
 
 (defn host-filesystem-result-type [(callee String)] core/NativeId
   (cond
+    (= callee "selfhost.rt/file-exists?") (bool-type-id)
+    (= callee "selfhost.rt/abs-path") (text-type-id)
     (= callee "host.fs/read-text-bounded")
     (filesystem-text-outcome-type-id)
     (= callee "host.fs/list-directory-bounded")
@@ -9069,7 +9082,8 @@
           (result-type core/NativeId) (host-filesystem-result-type callee)
           (operation String) (host-filesystem-operation callee)
           (arena (U core/NativeId Nil))
-          (if (or (= callee "host.fs/read-text-bounded")
+          (if (or (= callee "selfhost.rt/abs-path")
+                (= callee "host.fs/read-text-bounded")
                 (= callee "host.fs/list-directory-bounded"))
             (arena-value-id owner)
             nil)]
@@ -15915,7 +15929,8 @@
                   (host-stdout-abi-id) values value-types)
 
                 (and (host-stderr-callee? callee)
-                  (= callee "host.stderr/write-text"))
+                  (or (= callee "host.stderr/write-text")
+                      (= callee "selfhost.rt/eprint")))
                 (lower-host-text-output-call owner current callee
                   (host-stderr-write-abi-id) values value-types)
 
@@ -20499,6 +20514,37 @@
       "v0"
       layouts-digest)))
 
+(defn host-filesystem-direct-abi
+  [(operation String)
+   (symbol String)
+   (parameters (Vec core/AbiValueV0))
+   (result-name String)
+   (result-type core/NativeId)
+   (arena-owned Bool)
+   (layouts-digest String)]
+  core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-filesystem-abi-id operation)
+    (host-filesystem-function-id operation)
+    symbol
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    parameters
+    (core/->AbiValueV0 result-name result-type
+      (if arena-owned
+        (core/->ArenaOwnedV0 (arena-region-id))
+        (core/->OwnedV0 true))
+      (if arena-owned (arena-region-id) nil))
+    (type-id "LowerFailure")
+    (if arena-owned
+      [(allocate-effect-id) (host-filesystem-effect-id)]
+      [(host-filesystem-effect-id)])
+    (if arena-owned
+      [(allocate-capability-id) (host-filesystem-capability-id)]
+      [(host-filesystem-capability-id)])
+    "v0"
+    layouts-digest))
+
 (defn host-filesystem-abis [(layouts-digest String)] (Vec core/AbiDeclV0)
   [(host-filesystem-abi
      "read-text-bounded"
@@ -20559,6 +20605,22 @@
      [(borrowed-abi-value "descriptor" (int-type-id))]
      (filesystem-nil-outcome-type-id)
      false
+     layouts-digest)
+   (host-filesystem-direct-abi
+     "file-exists"
+     "native_host_filesystem_file_exists_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     "exists"
+     (bool-type-id)
+     false
+     layouts-digest)
+   (host-filesystem-direct-abi
+     "abs-path"
+     "native_host_filesystem_abs_path_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     "path"
+     (text-type-id)
+     true
      layouts-digest)])
 
 (defn host-process-direct-abi
@@ -20836,7 +20898,9 @@
           (any-function-calls-abi? functions
             (host-filesystem-abi-id "path-kind"))
           (any-function-calls-abi? functions
-            (host-filesystem-abi-id "write-text-atomic")))
+            (host-filesystem-abi-id "write-text-atomic"))
+          (any-function-calls-abi? functions
+            (host-filesystem-abi-id "file-exists")))
         (with-filesystem-base (Vec core/AbiDeclV0))
         (if filesystem-base-used
           (vec (concat with-stderr
@@ -20863,6 +20927,16 @@
               (host-filesystem-abi-id "unlock"))
           (conj with-filesystem-lock (nth filesystem-abis 7))
           with-filesystem-lock)
+        (with-filesystem-file-exists (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "file-exists"))
+          (conj with-filesystem (nth filesystem-abis 8))
+          with-filesystem)
+        (with-filesystem-abs-path (Vec core/AbiDeclV0))
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "abs-path"))
+          (conj with-filesystem-file-exists (nth filesystem-abis 9))
+          with-filesystem-file-exists)
         (process-abis (Vec core/AbiDeclV0)) (host-process-abis digest)
         (called-process-abis (Vec core/AbiDeclV0))
         (filterv
@@ -20870,7 +20944,7 @@
             (any-function-calls-abi? functions (core/abideclv0-id abi)))
           process-abis)
         (with-process (Vec core/AbiDeclV0))
-        (vec (concat with-filesystem called-process-abis))
+        (vec (concat with-filesystem-abs-path called-process-abis))
         (with-time-sleep (Vec core/AbiDeclV0))
         (if (any-function-calls-abi? functions (host-time-sleep-abi-id))
           (conj with-process (host-time-sleep-abi digest))
