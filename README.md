@@ -21,8 +21,9 @@ went wrong, where it occurred, and what a valid next edit is.
 Types exist to make that loop reliable. Static type information checks at
 compile time and erases before emit; an explicitly authored binding constraint
 is an ordinary predicate that remains as a local runtime guard. The deeper
-thesis is recorded in [`docs/INFLUENCES.md`](docs/INFLUENCES.md): one typed
-authoring IR can target real ecosystems while preserving idiomatic output.
+thesis is recorded in [`docs/INFLUENCES.md`](docs/INFLUENCES.md): Beagle's proven portable
+semantic core targets admitted ecosystems with idiomatic output within each profile envelope;
+regime-bound code is accepted only by its declared profile and is never cross-emitted.
 
 Beagle has a Native Core path and explicit hosted source profiles. The live
 profiles, extensions, form set, and materializers are compiler-owned: query
