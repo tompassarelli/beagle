@@ -67,7 +67,7 @@
             fallback))))))
 
 (defn string-qualified-reference [(spelling String)] Any
-  (let [separator (str/last-index-of spelling "/")]
+  (let [(separator (U Int Nil)) (str/last-index-of spelling "/")]
     (if (and (some? separator)
           (> separator 0)
           (< separator (- (count spelling) 1)))

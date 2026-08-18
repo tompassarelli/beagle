@@ -103,7 +103,7 @@
 ;; emitter-internal lookup uses the same structural identity as the AST.
 (defn metadata-reference-key [(key Any)] Any
   (if (string? key)
-    (let [index (str/last-index-of key "/")]
+    (let [(index (U Int Nil)) (str/last-index-of key "/")]
       (if (and (some? index)
             (> index 0)
             (< index (- (count key) 1)))

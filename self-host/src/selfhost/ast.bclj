@@ -250,7 +250,7 @@
        (string? (get value "leaf"))))
 
 (defn symbol->structural-name! [(symbol String)] Any
-  (let [slash (str/index-of symbol "/")]
+  (let [(slash (U Int Nil)) (str/index-of symbol "/")]
     (if (and (some? slash) (> slash 0) (< (+ slash 1) (count symbol)))
       (make-structural-name!
         (subs symbol 0 slash)
