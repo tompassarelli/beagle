@@ -54,8 +54,9 @@
   (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (keys table)))
 
 (defn reference-key-leaf [key]
-  (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) (nth key 2) (if (string? key) (let [index (str/last-index-of key "/")]
-  (if (nil? index) key (subs key (+ index 1)))) key)))
+  (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) (nth key 2) (if (string? key) (let [text key
+   index (str/last-index-of text "/")]
+  (if (nil? index) text (subs text (+ index 1)))) key)))
 
 (def ^String HEX-DIGITS "0123456789abcdef")
 

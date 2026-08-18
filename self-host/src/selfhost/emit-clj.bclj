@@ -124,8 +124,9 @@
         (= "qualified-ref" (nth key 0)))
     (nth key 2)
     (if (string? key)
-      (let [index (str/last-index-of key "/")]
-        (if (nil? index) key (subs key (+ index 1))))
+      (let [(text String) key
+            (index (U Int Nil)) (str/last-index-of text "/")]
+        (if (nil? index) text (subs text (+ index 1))))
       key)))
 
 ;; --- Clojure-readable string writer ------------------------------------------
