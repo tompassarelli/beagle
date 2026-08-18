@@ -152,9 +152,10 @@
              ;; SOFT-reported (no hard assert): native JS object keys can't key by
              ;; value (needs the P3 HAMT) and `(count <set>)` emits `.length` on a
              ;; JS Set (→ undefined) — both fixes live in emit-js/check.rkt, owned
-             ;; elsewhere. A separate DIVERGENCES list pins 3 deliberate Beagle-JS
-             ;; ≠ Clojure differences (0/""-truthiness, kw→string) in BOTH directions
-             ;; so a resolved divergence fails loudly and graduates into the corpus.
+             ;; elsewhere. A separate DIVERGENCES list pins the deliberate keyword
+             ;; rendering difference in BOTH directions so a resolved divergence
+             ;; fails loudly and graduates into the corpus. The former 0/""
+             ;; truthiness divergences are now ordinary cross-target agreements.
              ;; A real correctness gate.
              "conformance.rkt"
              ;; P3 rep-selection SOUNDNESS gate (2026-06-21): the "trust spine"

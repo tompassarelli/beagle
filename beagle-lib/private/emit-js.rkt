@@ -273,17 +273,13 @@
     [(concat) (format "[].concat(~a)" (string-join (map emit-expr args) ", "))]
     [(apply) (if (= n 2) (format "~a(...~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(identity) (if (= n 1) (emit-expr (car args)) #f)]
-    [(boolean) (if (= n 1) (format "Boolean(~a)" (emit-expr (car args))) #f)]
+    [(boolean) (if (= n 1) (emit-truthy-expr (car args)) #f)]
     [(string?) (if (= n 1) (format "(typeof ~a === 'string')" (emit-expr (car args))) #f)]
     [(number?) (if (= n 1) (format "(typeof ~a === 'number')" (emit-expr (car args))) #f)]
     [(keyword?) (if (= n 1) (format "(typeof ~a === 'string')" (emit-expr (car args))) #f)]
     [(fn?) (if (= n 1) (format "(typeof ~a === 'function')" (emit-expr (car args))) #f)]
-    [(and) (if (>= n 1)
-              (format "(~a)" (string-join (map emit-expr args) " && "))
-              #f)]
-    [(or) (if (>= n 1)
-             (format "(~a)" (string-join (map emit-expr args) " || "))
-             #f)]
+    [(and) (emit-logical-expr 'and args)]
+    [(or) (emit-logical-expr 'or args)]
     [(throw) (if (= n 1) (format "(() => { throw ~a; })()" (emit-expr (car args))) #f)]
     [(ex-info) (if (= n 2) (format "Object.assign(new Error(~a), {data: ~a})"
                                    (emit-expr (car args)) (emit-expr (cadr args))) #f)]
@@ -443,8 +439,9 @@
                    [(= n 2) (format "~a.slice(0, -~a)" (emit-expr (cadr args)) (emit-expr (car args)))]
                    [else #f])]
     [(pr-str) (if (>= n 1)
-                (format "[~a].map(x => JSON.stringify(x)).join(' ')"
-                        (string-join (map emit-expr args) ", "))
+                (format
+                 "((..._xs) => { const _pr = (_x) => _x == null ? 'nil' : Array.isArray(_x) ? '[' + _x.map(_pr).join(' ') + ']' : typeof _x === 'string' ? JSON.stringify(_x) : String(_x); return _xs.map(_pr).join(' '); })(~a)"
+                 (string-join (map emit-expr args) ", "))
                 #f)]
     [(to-array) (if (= n 1) (format "Array.from(~a)" (emit-expr (car args))) #f)]
     [(aget) (if (= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
@@ -2172,19 +2169,19 @@
      (cond
        [(if-form-else-expr e)
         (format "(~a ? ~a : ~a)"
-                (emit-expr (if-form-cond-expr e))
+                (emit-truthy-expr (if-form-cond-expr e))
                 (emit-expr (if-form-then-expr e))
                 (emit-expr (if-form-else-expr e)))]
        [else
         (format "(~a ? ~a : null)"
-                (emit-expr (if-form-cond-expr e))
+                (emit-truthy-expr (if-form-cond-expr e))
                 (emit-expr (if-form-then-expr e)))])]
 
     [(when-form? e)
      (define async? (or (expr-has-await? (when-form-cond-expr e))
                         (contains-await? (when-form-body e))))
      (iife (format "if (~a) { ~a }"
-                    (emit-expr (when-form-cond-expr e))
+                    (emit-truthy-expr (when-form-cond-expr e))
                     (emit-body-return (when-form-body e) ""))
            #:async? async?)]
 
@@ -2259,7 +2256,7 @@
          (define body-str (if (= (length body) 1) (emit-expr (car body)) (emit-body-return body "")))
          (if (else-clause? c)
            (format "~a" body-str)
-           (format "(~a) ? ~a" (emit-expr test) body-str))))
+           (format "(~a) ? ~a" (emit-truthy-expr test) body-str))))
      ;; Clojure cond with no matching clause yields nil — without a trailing
      ;; :else the ternary chain would dangle (`a ? x : b ? y` with no final
      ;; `: …`), so supply the implicit null branch.
@@ -2824,7 +2821,10 @@
         (define op (hash-ref JS-INFIX-OPS fn-sym))
         (format "(~a)" (string-join (map emit-expr args) (format " ~a " op)))]
        [(and (js-unary? fn-sym) (= 1 (length args)))
-        (format "(~a~a)" (hash-ref JS-UNARY-OPS fn-sym) (emit-expr (car args)))]
+        (if (eq? fn-sym 'not)
+            (format "(!~a)" (emit-truthy-expr (car args)))
+            (format "(~a~a)" (hash-ref JS-UNARY-OPS fn-sym)
+                    (emit-expr (car args))))]
        [(and (current-js-semantic-contracts)
              (hash-ref (current-js-semantic-contracts) e #f)
              (= (length args) 3)
@@ -4075,6 +4075,37 @@
 (define (clj-truthy-test value-str)
   (format "~a !== false && ~a != null" value-str value-str))
 
+(define (clj-truthy-expr value-str)
+  (format "((_truthy) => _truthy !== false && _truthy != null)(~a)"
+          value-str))
+
+(define (statically-bool? e)
+  (define type (arg-type e))
+  (and (type-prim? type)
+       (eq? (unqualify-type-name (type-prim-name type)) 'Bool)))
+
+(define (emit-truthy-expr e)
+  (define value-str (emit-expr e))
+  (if (statically-bool? e) value-str (clj-truthy-expr value-str)))
+
+(define (emit-logical-expr op args)
+  (define identity-value (if (eq? op 'and) "true" "null"))
+  (cond
+    [(null? args) identity-value]
+    [(null? (cdr args)) (emit-expr (car args))]
+    [else
+     (define next (emit-logical-expr op (cdr args)))
+     (define first (car args))
+     (define first-str (emit-expr first))
+     (if (statically-bool? first)
+         (format "(~a ~a ~a)" first-str (if (eq? op 'and) "&&" "||") next)
+         (let ([truthy (clj-truthy-test "_logical")])
+           (format "((_logical) => (~a ? ~a : ~a))(~a)"
+                   truthy
+                   (if (eq? op 'and) next "_logical")
+                   (if (eq? op 'and) "_logical" next)
+                   first-str)))]))
+
 ;; Logical loop tails lower as statements because recur never has a JS value.
 (define (emit-logical-loop-stmt e bind-names emit-value)
   (define op (call-form-fn e))
@@ -4112,7 +4143,8 @@
     [(logical-call? e)
      (emit-logical-loop-stmt e bind-names emit-value)]
     [(and (if-form? e) (expr-contains-recur? e))
-     (define cond-str (emit-expr (if-form-cond-expr e)))
+     (define cond-str
+       (emit-truthy-expr (if-form-cond-expr e)))
      (define then-str (emit-loop-stmt (if-form-then-expr e) bind-names emit-value))
      (if (if-form-else-expr e)
        (let ([else-str (emit-loop-stmt (if-form-else-expr e) bind-names emit-value)])
@@ -4124,7 +4156,7 @@
                (emit-value "null")))]
     [(and (when-form? e) (body-contains-recur? (when-form-body e)))
      (format "if (~a) { ~a } else { ~a }"
-             (emit-expr (when-form-cond-expr e))
+             (emit-truthy-expr (when-form-cond-expr e))
              (emit-loop-body-seq (when-form-body e))
              (emit-value "null"))]
     [(and (or (when-let-form? e) (when-some-form? e))
@@ -4204,7 +4236,8 @@
          (define body-str (emit-loop-body-seq (cond-clause-body c)))
          (if (else-clause? c)
            (format "{ ~a }" body-str)
-           (format "if (~a) { ~a }" (emit-expr test) body-str))))
+           (format "if (~a) { ~a }"
+                   (emit-truthy-expr test) body-str))))
      ;; No :else means no clause may match — terminate the loop with nil rather
      ;; than spinning the enclosing while(true).
      (define has-else? (for/or ([c (in-list (cond-form-clauses e))]) (else-clause? c)))
@@ -4262,7 +4295,7 @@
     [(when-form? e)
      (define inner (string-append indent "  "))
      (format "if (~a) {\n~a~a\n~a}"
-             (emit-expr (when-form-cond-expr e))
+             (emit-truthy-expr (when-form-cond-expr e))
              inner
              (emit-body-return (when-form-body e) inner)
              indent)]
@@ -4325,7 +4358,7 @@
     [(and (if-form? e) (not (if-form-else-expr e)))
      (define inner (string-append indent "  "))
      (format "if (~a) {\n~a~a\n~a}"
-             (emit-expr (if-form-cond-expr e))
+             (emit-truthy-expr (if-form-cond-expr e))
              inner (emit-return-position (if-form-then-expr e) inner)
              indent)]
     [(and (if-form? e) (if-form-else-expr e)
@@ -4337,7 +4370,7 @@
                    (not (if-form-else-expr (if-form-else-expr e))))))
      (define inner (string-append indent "  "))
      (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
-             (emit-expr (if-form-cond-expr e))
+             (emit-truthy-expr (if-form-cond-expr e))
              inner (emit-return-position (if-form-then-expr e) inner)
              indent
              inner (emit-return-position (if-form-else-expr e) inner)
@@ -4387,7 +4420,7 @@
     [(when-form? e)
      (define inner (string-append indent "  "))
      (format "if (~a) {\n~a~a\n~a}"
-             (emit-expr (when-form-cond-expr e))
+             (emit-truthy-expr (when-form-cond-expr e))
              inner
              (emit-body-stmts (when-form-body e) inner)
              indent)]
@@ -4406,7 +4439,7 @@
     [(and (if-form? e) (not (if-form-else-expr e)))
      (define inner (string-append indent "  "))
      (format "if (~a) {\n~a~a\n~a}"
-             (emit-expr (if-form-cond-expr e))
+             (emit-truthy-expr (if-form-cond-expr e))
              inner
              (emit-body-stmts-inline (list (if-form-then-expr e)) inner)
              indent)]
@@ -4416,7 +4449,7 @@
     [(if-form? e)
      (define inner (string-append indent "  "))
      (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
-             (emit-expr (if-form-cond-expr e))
+             (emit-truthy-expr (if-form-cond-expr e))
              inner (emit-body-stmts-inline (list (if-form-then-expr e)) inner) indent
              inner (emit-body-stmts-inline (list (if-form-else-expr e)) inner) indent)]
     ;; EFFECT position: cond lowers to an if / else-if / else chain. No trailing
@@ -4431,7 +4464,8 @@
          (if (else-clause? c)
            (format "{\n~a~a\n~a}" inner body-str indent)
            (format "if (~a) {\n~a~a\n~a}"
-                   (emit-expr (cond-clause-test c)) inner body-str indent))))
+                   (emit-truthy-expr (cond-clause-test c))
+                   inner body-str indent))))
      (string-join parts " else ")]
     [else
      (emit-expr-stmt e)]))

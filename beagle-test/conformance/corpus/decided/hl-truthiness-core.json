@@ -5,11 +5,11 @@
   "status": "DECIDED",
   "profile": "core",
   "input": {
-    "source": "#lang beagle\n(ns probe.hl-truthiness)\n\n;; The values and assertions in this source are the smallest deterministic\n;; truthiness corpus named by HL-TRUTHINESS.\n(defn probe [] Any\n  (truthiness-case))\n",
+    "source": "#lang beagle\n(ns probe.hl-truthiness)\n\n(defunion TruthSample\n  (TruthPresent [(value Int)]))\n\n(defmacro macro-truth []\n  (if nil\n    \"macro-wrong\"\n    (if 0 \"macro-truthy\" \"macro-wrong\")))\n\n(defn main! [] Int\n  (let [values [false nil 0 -0.0 +nan.0 \"\" (list) [] {} #{} 'probe :probe\n                (->TruthPresent 1) (fn [] Int 1) (atom 0)]\n        first-effect (atom 0)\n        second-effect (atom 0)\n        cond-step (atom 0)\n        truthy-values (mapv boolean values)\n        not-values (mapv not values)\n        and-values [(and true false (reset! second-effect 1))\n                    (and true nil (reset! second-effect 2))\n                    (and true 0)]\n        or-values [(or false 0 (reset! second-effect 3))\n                   (or false nil)]\n        macro-value (macro-truth)\n        cond-value\n        (cond\n          (do (reset! cond-step 1) false) \"wrong\"\n          (if (= (deref cond-step) 1)\n            (do (reset! cond-step 2) nil)\n            true) \"wrong\"\n          (if (= (deref cond-step) 2)\n            (do (reset! cond-step 3) 0)\n            false) (if (= (deref cond-step) 3) \"selected-body\" \"wrong\")\n          :else \"wrong\")]\n    (when 0 (reset! first-effect 1))\n    (println (str \"truthy \" (pr-str truthy-values)))\n    (println (str \"not \" (pr-str not-values)))\n    (println (str \"and \" (pr-str and-values)))\n    (println (str \"or \" (pr-str or-values)))\n    (println (str \"effects [\" (deref first-effect) \" \" (deref second-effect) \"]\"))\n    (println (str \"cond [\" cond-value \" \"\n                  (if (= (deref cond-step) 3) \"tests-left-to-right\" \"wrong\") \"]\"))\n    (println (str \"macro [\" macro-value \"]\"))\n    0))\n",
     "target": "core",
     "fileName": "probe/hl-truthiness.bgl",
     "command": {
-      "argv": ["check", "{input}"]
+      "argv": ["execute", "--entry", "probe.hl-truthiness/main!", "{input}"]
     },
     "closure": {
       "kind": "single-source",

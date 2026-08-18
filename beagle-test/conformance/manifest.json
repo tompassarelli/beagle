@@ -141,21 +141,21 @@
       "caseId": "hl-truthiness-core",
       "path": "corpus/decided/hl-truthiness-core.json",
       "status": "DECIDED",
-      "sha256": "7c737d75040d65bf4fb7ab05055c162f2d4a04ccee5df32a180fcf1bbba6c8c5",
+      "sha256": "e8fbd0d3a8c6fee8a92a381226a0f368a5c17f96e7c97a08e48eddb347b457f0",
       "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","core"]
     },
     {
       "caseId": "hl-truthiness-hosted-clj",
       "path": "corpus/decided/hl-truthiness-hosted-clj.json",
       "status": "DECIDED",
-      "sha256": "d0f2c7c0cf17686d8a25bd0fa8437db5e7b23f3b41d449d8f42e219fb6f289fe",
+      "sha256": "477a2961ae756f375b835bcc4bbbb51ff37de4ce416941aa7036ab278129b3b2",
       "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","hosted-clj"]
     },
     {
       "caseId": "hl-truthiness-hosted-js",
       "path": "corpus/decided/hl-truthiness-hosted-js.json",
       "status": "DECIDED",
-      "sha256": "2229fdbc47618e01863ef292c82551f618e68a3fc5b9d8a607c72bee0f9fe23c",
+      "sha256": "25ab87b1b9143480e260ae3dcb295060be2ea7d2bfa85aef7485debf61688b7a",
       "coverage": ["HOST-LEAKAGE","HL-TRUTHINESS","hosted-js"]
     },
     {

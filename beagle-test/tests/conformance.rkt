@@ -269,6 +269,8 @@
    ;; SCALAR SANITY — MUST be GREEN (proves the harness is correct).
    (list "scalar-int-eq"  "(= 1 1)"     "Bool" 'scalar)
    (list "scalar-str-eq"  "(= \"a\" \"a\")" "Bool" 'scalar)
+   (list "truthy-zero"    "(if 0 \"t\" \"f\")" "String" 'scalar)
+   (list "truthy-empty"   "(if \"\" \"t\" \"f\")" "String" 'scalar)
 
    ;; COMPOUND VALUE EQUALITY — RED today (= -> === ref equality on JS).
    (list "map-eq-true"   "(= {:a 1} {:a 1})"  "Bool" 'compound)
@@ -459,9 +461,6 @@
 
 (define DIVERGENCES
   (list
-   ;; truthiness: Clojure treats 0 and "" as TRUTHY; JS treats them as FALSY.
-   (list "div-truthy-zero"  "(if 0 \"t\" \"f\")"  "String" "\"t\"" "\"f\"")
-   (list "div-truthy-empty" "(if \"\" \"t\" \"f\")" "String" "\"t\"" "\"f\"")
    ;; keyword→string: (str :foo) is ":foo" in Clojure, "foo" in Beagle-JS
    ;; (keywords emit as bare strings). RAW compare is mandatory here.
    (list "div-kw-as-string" "(str :foo)" "String" "\":foo\"" "\"foo\"")))

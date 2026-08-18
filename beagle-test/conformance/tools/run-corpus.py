@@ -4,6 +4,8 @@
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -83,14 +85,80 @@ def run_case(case, compiler, repo_root):
                         .replace("{output}", str(output_path)))
 
         argv = [substitute(token) for token in case["input"]["command"]["argv"]]
-        result = subprocess.run(
-            [str(compiler)] + argv,
-            cwd=str(repo_root),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
+        build_env = None
+        if argv and argv[0] == "execute":
+            if len(argv) != 4 or argv[1] != "--entry":
+                fail("execute command must be: execute --entry NS/NAME {input}")
+            target = case["input"].get("target")
+            entry = argv[2]
+            if target == "core":
+                executable = output_path / "program"
+                output_path.mkdir()
+                build_argv = [str(compiler), "native-exe", "--out", str(executable),
+                              "--entry", entry, argv[3]]
+                run_argv = [str(executable)]
+            elif target in ("clj", "js"):
+                runtime = shutil.which("bb" if target == "clj" else "node")
+                if runtime is None:
+                    fail("runtime unavailable for target " + target)
+                emitted = output_path.with_suffix(".clj" if target == "clj" else ".mjs")
+                build_argv = [str(compiler), "build", argv[3], str(emitted)]
+                if target == "clj":
+                    expression = "(do (load-file {}) ({}) nil)".format(
+                        json.dumps(str(emitted)), entry)
+                    run_argv = [runtime, "-e", expression]
+                else:
+                    build_env = os.environ.copy()
+                    build_env["BEAGLE_JS_RUNTIME_PREFIX"] = (
+                        (repo_root / "beagle-lib" / "lib" / "beagle").resolve().as_uri()
+                        + "/"
+                    )
+                    js_name = (entry.rsplit("/", 1)[-1]
+                               .replace("_", "__")
+                               .replace("-", "_")
+                               .replace("?", "_p")
+                               .replace("!", "_bang")
+                               .replace("=", "_eq")
+                               .replace(">", "_gt")
+                               .replace("<", "_lt")
+                               .replace("%", "_pct"))
+                    expression = "import({}).then(m => m[{}]())".format(
+                        json.dumps(emitted.as_uri()), json.dumps(js_name))
+                    run_argv = [runtime, "--input-type=module", "-e", expression]
+            else:
+                fail("execute command does not support target " + str(target))
+            built = subprocess.run(
+                build_argv,
+                cwd=str(repo_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=build_env,
+            )
+            if built.returncode != 0:
+                detail = canonicalize(built.stdout + built.stderr, temp_root)
+                return "execution build failed: " + " ".join(detail.split())[:1200]
+            if target == "js":
+                with emitted.open("a", encoding="utf-8") as stream:
+                    stream.write("\nexport { " + js_name + " };\n")
+            result = subprocess.run(
+                run_argv,
+                cwd=str(temp_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+        else:
+            result = subprocess.run(
+                [str(compiler)] + argv,
+                cwd=str(repo_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
         expected = case["expected"]
         combined = canonicalize(result.stdout + result.stderr, temp_root)
         expected_exit = expected.get("exitCode")

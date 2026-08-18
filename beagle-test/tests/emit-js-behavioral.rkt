@@ -338,17 +338,17 @@ console.log(JSON.stringify(snapshot()));"
      "main();"
      "false")
 
-   ;; --- truthiness (CLJS-inspired) ------------------------------------------
+   ;; --- Beagle truthiness: only false and nil are falsey --------------------
 
-   (check-js-output "if with 0 — JS falsy"
+   (check-js-output "if with 0 — Beagle truthy"
      (list '(defn f [(x Int)] String (if x "truthy" "falsy")))
      "console.log(f(0));"
-     "falsy")
+     "truthy")
 
-   (check-js-output "if with empty string — JS falsy"
+   (check-js-output "if with empty string — Beagle truthy"
      (list '(defn f [(x String)] String (if x "truthy" "falsy")))
      "console.log(f(\"\"));"
-     "falsy")
+     "truthy")
 
    (check-js-output "if with null — falsy"
      (list '(defn f [(x Any)] String (if x "truthy" "falsy")))

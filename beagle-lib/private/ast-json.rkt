@@ -31,6 +31,14 @@
 
 (define CHECKED-PROGRAM-SCHEMA-VERSION 4)
 
+(define (float->json-value value)
+  (cond
+    [(eqv? value -0.0) "-0.0"]
+    [(eqv? value +nan.0) "NaN"]
+    [(eqv? value +inf.0) "Infinity"]
+    [(eqv? value -inf.0) "-Infinity"]
+    [else value]))
+
 (define (sha256-prefixed bytes)
   (string-append "sha256:"
                  (bytes->hex-string (sha256-bytes bytes))))
@@ -474,7 +482,7 @@
     ;; rules), never from surface text.
     [(char? e)    (hasheq 'node "literal" 'kind "char" 'value (char->integer e))]
     [(and (number? e) (inexact? e))
-     (hasheq 'node "literal" 'kind "float" 'value e)]
+     (hasheq 'node "literal" 'kind "float" 'value (float->json-value e))]
     [(number? e)  (hasheq 'node "literal" 'kind "number" 'value e)]
     [(boolean? e) (hasheq 'node "literal" 'kind "bool" 'value e)]
     [(symbol? e)

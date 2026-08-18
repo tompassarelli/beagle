@@ -65,7 +65,8 @@
   datum)
 
 (define (macro-truthy? value)
-  (not (eq? (macro-datum value) #f)))
+  (define datum (macro-datum value))
+  (not (or (eq? datum #f) (eq? datum 'nil))))
 
 ;; --- Evaluator ---------------------------------------------------------------
 
@@ -773,7 +774,7 @@
 
    'true #t
    'false #f
-   'nil '()
+   'nil 'nil
 
    'syntax-name syntax-name
    'syntax-type syntax-type
