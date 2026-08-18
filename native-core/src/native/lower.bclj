@@ -2994,6 +2994,19 @@
 (defn fail-result [(state BodyStateV0) (detail String)] ExprResultV0
   (dead-result (state-fail state detail)))
 
+(defn state-id
+  [(state BodyStateV0) (owner core/NativeId) (label String)] core/NativeId
+  (lower-id "body"
+    [(id-value owner) label (str (bodystatev0-counter state))]))
+
+(defn state-bump [(state BodyStateV0)] BodyStateV0
+  (with state [:counter (+ 1 (bodystatev0-counter state))]))
+
+(defn state-emit
+  [(state BodyStateV0) (instruction core/Instruction)] BodyStateV0
+  (with state
+    [:instructions (conj (bodystatev0-instructions state) instruction)]))
+
 ;; A statically resolved callback is lowered as an ordinary direct call at its
 ;; loop body.  The native function id is already the ABI-stable identity used
 ;; by normal call lowering; no function value or closure representation is
@@ -3016,19 +3029,6 @@
             (core/->TokenFlowV0 [] [])))]
     (->ExprResultV0 called result-id
       (typedfunctionv0-return-type signature) false)))
-
-(defn state-id
-  [(state BodyStateV0) (owner core/NativeId) (label String)] core/NativeId
-  (lower-id "body"
-    [(id-value owner) label (str (bodystatev0-counter state))]))
-
-(defn state-bump [(state BodyStateV0)] BodyStateV0
-  (with state [:counter (+ 1 (bodystatev0-counter state))]))
-
-(defn state-emit
-  [(state BodyStateV0) (instruction core/Instruction)] BodyStateV0
-  (with state
-    [:instructions (conj (bodystatev0-instructions state) instruction)]))
 
 (defn state-close [(state BodyStateV0) (terminator core/Terminator)] BodyStateV0
   (if (not (bodystatev0-open state))

@@ -26,22 +26,59 @@ bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
 
 mkdir -p "$scratch/artifacts"
 source "$repo/bin/_beagle-racket"
-"$RACKET" "$repo/native-core/bin/run-bounded.rkt" 180 5 -- \
-  "$repo/bin/beagle-build-all" \
-  "$repo/native-core/src/native/core.bclj" \
-  "$repo/native-core/src/native/stages.bclj" \
-  "$repo/native-core/src/native/lower.bclj" \
-  "$repo/native-core/src/native/obligations.bclj" \
-  "$repo/native-core/src/native/simd.bclj" \
-  "$repo/native-core/src/native/c11.bclj" \
-  "$repo/native-core/src/native/slice.bclj" \
-  "$repo/native-core/src/native/fold_c17.bclj" \
-  "$repo/native-core/src/native/body_c17.bclj" \
-  "$here/carrier_slice.bclj" \
-  --out "$scratch/compiled" >"$scratch/compiler.log" 2>&1 || {
-    sed -n '1,240p' "$scratch/compiler.log" >&2
-    exit 1
-  }
+base_compiled="${NATIVE_SLICE_BASE_COMPILED:-}"
+if [[ -n "$base_compiled" ]]; then
+  [[ -f "$base_compiled/native/core.clj" ]] \
+    || die "base compiler projection omitted native/core.clj: $base_compiled"
+  cp -a "$base_compiled" "$scratch/compiled"
+
+  declare -a compiler_pids=()
+  declare -a compiler_names=(lower body_c17 slice_value_carriers_slice)
+  declare -a compiler_sources=(
+    "$repo/native-core/src/native/lower.bclj"
+    "$repo/native-core/src/native/body_c17.bclj"
+    "$here/carrier_slice.bclj"
+  )
+  for index in "${!compiler_sources[@]}"; do
+    name="${compiler_names[$index]}"
+    mkdir -p "$scratch/$name"
+    "$RACKET" "$repo/native-core/bin/run-bounded.rkt" 180 5 -- \
+      "$repo/bin/beagle-build-all" \
+      --module-root native-core/src="$repo/native-core/src" \
+      "${compiler_sources[$index]}" \
+      --out "$scratch/$name" >"$scratch/$name.log" 2>&1 &
+    compiler_pids+=("$!")
+  done
+
+  compiler_failed=0
+  for index in "${!compiler_pids[@]}"; do
+    if ! wait "${compiler_pids[$index]}"; then
+      sed -n '1,240p' "$scratch/${compiler_names[$index]}.log" >&2
+      compiler_failed=1
+    fi
+  done
+  (( compiler_failed == 0 )) || exit 1
+  for name in "${compiler_names[@]}"; do
+    cp "$scratch/$name/native/$name.clj" "$scratch/compiled/native/$name.clj"
+  done
+else
+  "$RACKET" "$repo/native-core/bin/run-bounded.rkt" 180 5 -- \
+    "$repo/bin/beagle-build-all" \
+    "$repo/native-core/src/native/core.bclj" \
+    "$repo/native-core/src/native/stages.bclj" \
+    "$repo/native-core/src/native/lower.bclj" \
+    "$repo/native-core/src/native/obligations.bclj" \
+    "$repo/native-core/src/native/simd.bclj" \
+    "$repo/native-core/src/native/c11.bclj" \
+    "$repo/native-core/src/native/slice.bclj" \
+    "$repo/native-core/src/native/fold_c17.bclj" \
+    "$repo/native-core/src/native/body_c17.bclj" \
+    "$here/carrier_slice.bclj" \
+    --out "$scratch/compiled" >"$scratch/compiler.log" 2>&1 || {
+      sed -n '1,240p' "$scratch/compiler.log" >&2
+      exit 1
+    }
+fi
 
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/compiled/native/core.clj" | tr '\n' ' ')"
