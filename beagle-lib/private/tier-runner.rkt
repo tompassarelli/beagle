@@ -1132,6 +1132,20 @@
      (printf "BUILD OK — all active tests passing.\n")
      (exit 0)]))
 
+(define (units-for-worker-tiers active-units demoted-units gated-units spec)
+  ;; One supervisor owns the complete sequential worker lane, so tier-local
+  ;; partitioning is unsound: independent heavy units from different tiers can
+  ;; otherwise land on the same worker and make an advisory tier block by
+  ;; exhausting the worker deadline. Partition the selected work once, then
+  ;; recover the tier buckets for reporting and exit-status semantics.
+  (define assigned
+    (units-for-worker-shard
+     (append active-units demoted-units gated-units)
+     spec))
+  (values (filter (lambda (u) (memq u active-units)) assigned)
+          (filter (lambda (u) (memq u demoted-units)) assigned)
+          (filter (lambda (u) (memq u gated-units)) assigned)))
+
 (define (run-worker plan)
   (define spec (worker-shard))
   (unless (and spec (worker-result-path))
@@ -1140,19 +1154,16 @@
      "process worker mode requires --worker-shard and --worker-result"))
   ;; Each process is one sequential scheduling lane. The coordinator supplies
   ;; the width by launching N such processes, each under its own supervisor.
-  (define active-results
-    (map run-test-unit
-         (units-for-worker-shard (tier-plan-active-units plan) spec)))
-  (define demoted-results
-    (if (active-only?)
-        '()
-        (map run-test-unit
-             (units-for-worker-shard (tier-plan-demoted-units plan) spec))))
-  (define gated-results
-    (if (include-gated?)
-        (map run-test-unit
-             (units-for-worker-shard (tier-plan-gated-units plan) spec))
-        '()))
+  (define selected-demoted
+    (if (active-only?) '() (tier-plan-demoted-units plan)))
+  (define selected-gated
+    (if (include-gated?) (tier-plan-gated-units plan) '()))
+  (define-values (active-units demoted-units gated-units)
+    (units-for-worker-tiers
+     (tier-plan-active-units plan) selected-demoted selected-gated spec))
+  (define active-results (map run-test-unit active-units))
+  (define demoted-results (map run-test-unit demoted-units))
+  (define gated-results (map run-test-unit gated-units))
   (write-worker-output
    (worker-result-path) active-results demoted-results gated-results)
   (exit
@@ -1365,7 +1376,19 @@
      "independent build-heavy whole modules own distinct worker lanes")
     (for ([i (in-range 8 16)])
       (check-false (ormap heavy-unit? (vector-ref partitions i))
-                   (format "worker ~a receives no compiler-heavy unit" i))))
+                   (format "worker ~a receives no compiler-heavy unit" i)))
+    (define active-units
+      (append wasm-units (list (u "native-simd.rkt"))))
+    (define demoted-units (list (u "native-c17-parallel.rkt")))
+    (define gated-units (list (u "check-all-nix.rkt")))
+    (define cross-tier-partitions
+      (for/list ([i (in-range 16)])
+        (define-values (active demoted gated)
+          (units-for-worker-tiers
+           active-units demoted-units gated-units (cons i 16)))
+        (append active demoted gated)))
+    (check-equal? cross-tier-partitions (vector->list partitions)
+                  "tiers share one worker plan, so advisory work cannot stack on an active heavy lane"))
 
   (let-values ([(wasm-units refusals)
                 (file->units "wasm-materializer.rkt")])
