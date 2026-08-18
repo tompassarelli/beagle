@@ -124,7 +124,14 @@ grep -Fq "Core checkpoint post-stage failpoint" "$work/seed.stderr" || {
     exit 1
 }
 
+timeout --foreground 180s nice -n 19 env \
+    BEAGLE_CORE_BUILD_CACHE="$cache" \
+    "$repo/bin/beagle-build-core" --materializer qbe \
+    --out "$work/out-qbe-resume" "$source_file" \
+    >"$work/qbe-resume.stdout" 2>"$work/qbe-resume.stderr" &
+qbe_resume_pid=$!
 run_build "$work/out-resume" "$work/resume"
+wait "$qbe_resume_pid"
 grep -Fqx "beagle build: core-checkpoint-alias HIT $seed_early_key -> $seed_key" \
     "$work/resume.stderr" || {
     echo "core_checkpoint_cache_gate.sh: resume did not hit the early checkpoint alias" >&2
@@ -144,11 +151,6 @@ grep -Fq "beagle build: core-result-cache HIT" "$work/resume.stderr" && {
     exit 1
 }
 
-timeout --foreground 180s nice -n 19 env \
-    BEAGLE_CORE_BUILD_CACHE="$cache" \
-    "$repo/bin/beagle-build-core" --materializer qbe \
-    --out "$work/out-qbe-resume" "$source_file" \
-    >"$work/qbe-resume.stdout" 2>"$work/qbe-resume.stderr"
 grep -Fqx "beagle build: core-checkpoint-alias HIT $seed_early_key -> $seed_key" \
     "$work/qbe-resume.stderr" || {
     echo "core_checkpoint_cache_gate.sh: QBE did not share C17's pre-materializer alias" >&2
