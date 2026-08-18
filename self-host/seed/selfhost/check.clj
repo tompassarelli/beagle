@@ -675,6 +675,11 @@
   (swap! bindings assoc (nth params i) (nth args i)))
   (apply-type-bindings field-type bindings)))))
 
+(defn member-view-type [^String member-name target-type]
+  (let [pdef (parametric-def-for-app target-type)
+   members (if (nil? pdef) [] (get pdef "members"))]
+  (if (and (not (nil? pdef)) (boolean (some (fn [^String member] (= member member-name)) members))) (make-app member-name (get target-type "args")) (make-prim member-name))))
+
 (defn record-field-map-for-type [aggregate]
   (cond
   (prim? aggregate) (get-in (deref STATE) ["record-fields" (get aggregate "name")])
@@ -871,16 +876,70 @@
   (if (= (get e "node") "call") (let [fn-ref (get e "fn")]
   (if (named-reference? fn-ref) fn-ref nil)) nil))
 
+(defn ^String unqualified-member-name [^String name]
+  (let [dot-index (str/last-index-of name ".")
+   slash-index (str/last-index-of name "/")
+   separator (cond
+  (nil? dot-index) slash-index
+  (nil? slash-index) dot-index
+  (> dot-index slash-index) dot-index
+  :else slash-index)]
+  (if (nil? separator) name (subs name (+ separator 1)))))
+
+(defn ^Boolean string-in? [values ^String wanted]
+  (boolean (some (fn [^String value] (= value wanted)) values)))
+
+(defn closed-union-members [value]
+  (let [nominal (cond
+  (prim? value) (get-in (deref STATE) ["union-members" (get value "name")])
+  (app-type? value) (get-in (deref STATE) ["union-members" (get value "name")])
+  :else nil)]
+  (cond
+  (not (nil? nominal)) nominal
+  (and (prim? value) (boolean (some (fn [members] (string-in? members (get value "name"))) (vals (get (deref STATE) "union-members"))))) [(get value "name")]
+  (and (app-type? value) (not (nil? (get-in (deref STATE) ["parametric-member-union" (get value "name")])))) [(get value "name")]
+  (union-type? value) (reduce (fn [members alternative] (into members (closed-union-members alternative))) [] (get value "members"))
+  :else [])))
+
+(defn canonical-union-member-name [^String written target-type]
+  (let [members (closed-union-members target-type)]
+  (if (string-in? members written) written (let [base (unqualified-member-name written)
+   matches (reduce (fn [found ^String member] (if (and (= base (unqualified-member-name member)) (not (string-in? found member))) (conj found member) found)) [] members)]
+  (if (= (count matches) 1) (first matches) nil)))))
+
+(defn subtract-union-member [current ^String member-name]
+  (cond
+  (any-type? current) current
+  (and (prim? current) (not (nil? (get-in (deref STATE) ["union-members" (get current "name")])))) (let [members (get-in (deref STATE) ["union-members" (get current "name")])
+   remaining (filterv (fn [^String member] (not= member member-name)) members)]
+  (cond
+  (= (count remaining) (count members)) current
+  (= (count remaining) 0) current
+  (= (count remaining) 1) (make-prim (first remaining))
+  :else (make-union (mapv (fn [^String member] (make-prim member)) remaining))))
+  :else (remove-from-union current (make-prim member-name))))
+
+(defn unstable-binding-keys [value]
+  (cond
+  (map? value) (let [nested (reduce (fn [found child] (merge found (unstable-binding-keys child))) {} (vals value))
+   target (if (= (get value "node") "set!") (get value "target") nil)]
+  (if (and (not (nil? target)) (= (get target "node") "ref")) (assoc nested (local-reference-key target) true) nested))
+  (vector? value) (reduce (fn [found child] (merge found (unstable-binding-keys child))) {} value)
+  :else {}))
+
+(defn stable-scrutinee-key [target env]
+  (let [key (if (= (get target "node") "ref") (local-reference-key target) nil)
+   dynamic-vars (get env "#%dynamic-vars")]
+  (if (and (not (nil? key)) (contains? env key) (nil? (get (get (deref STATE) "unstable-bindings") key)) (nil? (get dynamic-vars (get target "name")))) key nil)))
+
 (defn instance-narrowings [cond-expr env]
   (let [fn-name (call-fn-name cond-expr)
    args (get cond-expr "args")]
-  (if (and (= fn-name "instance?") (= (count args) 2) (= (get (nth args 0) "node") "ref") (= (get (nth args 1) "node") "ref")) (let [member-name (get (nth args 0) "name")
-   var-name (local-reference-key (nth args 1))
+  (if (and (= fn-name "instance?") (= (count args) 2) (= (get (nth args 0) "node") "ref") (= (get (nth args 1) "node") "ref")) (let [written-name (reference->string (nth args 0))
+   var-name (stable-scrutinee-key (nth args 1) env)
    current (get env var-name)
-   members (if (union-type? current) (get current "members") [current])
-   matches (filterv (fn [member] (and (prim? member) (= (get member "name") member-name))) members)]
-  (if (= (count matches) 1) (let [member (first matches)]
-  {"then" {var-name member} "else" {var-name (remove-from-union current member)}}) nil)) nil)))
+   member-name (if (nil? current) nil (canonical-union-member-name written-name current))]
+  (if (not (nil? member-name)) {"then" {var-name (member-view-type member-name current)} "else" {var-name (subtract-union-member current member-name)}} nil)) nil)))
 
 (defn test-narrowings [cond-expr env]
   (let [fn-name (call-fn-name cond-expr)
@@ -909,20 +968,23 @@
   (let [tn (test-narrowings cond-expr env)]
   {"then" (merge env (get tn "then")) "else" (merge env (get tn "else"))}))
 
-(defn narrow-env-for-match [clause target-type env]
+(defn narrow-env-for-match [clause target-type env scrutinee]
   (let [pat (get clause "pattern")]
   (cond
-  (= (get pat "type") "record") (let [rec-name (get pat "name")
+  (= (get pat "type") "record") (let [written-name (get pat "name")
+   canonical-name (canonical-union-member-name written-name target-type)
+   rec-name (if (nil? canonical-name) written-name canonical-name)
    bindings (get pat "bindings")
    field-map (get-in (deref STATE) ["record-fields" rec-name])
-   field-order (get-in (deref STATE) ["record-field-order" rec-name])]
+   field-order (get-in (deref STATE) ["record-field-order" rec-name])
+   arm-env (if (nil? scrutinee) env (assoc env scrutinee (member-view-type rec-name target-type)))]
   (if (not (nil? field-map)) (reduce (fn [arm-env i] (let [b (nth bindings i)
    kw (if (not (nil? field-order)) (if (< i (count field-order)) (nth field-order i) nil) nil)
    raw-type (if (and (not (nil? kw)) (not (nil? (get field-map kw)))) (get field-map kw) ANY)
    bname (if (string? b) b (get b "name"))]
-  (binder-env-assoc arm-env pat bname raw-type))) env (range (count bindings))) (if (= (count bindings) 1) (let [b0 (nth bindings 0)
+  (binder-env-assoc arm-env pat bname raw-type))) arm-env (range (count bindings))) (if (= (count bindings) 1) (let [b0 (nth bindings 0)
    bname (if (string? b0) b0 (get b0 "name"))]
-  (binder-env-assoc env pat bname (make-prim rec-name))) env)))
+  (binder-env-assoc arm-env pat bname (make-prim rec-name))) arm-env)))
   (= (get pat "type") "var") (binder-env-assoc env pat (get pat "name") target-type)
   :else env)))
 
@@ -1477,8 +1539,9 @@
   (last-expr-type! (get e "body") body-env)
   ANY)
   (= (get e "node") "match") (let [target-type (infer-expr! (get e "target") env)
+   scrutinee (stable-scrutinee-key (get e "target") env)
    clauses (get e "clauses")
-   arm-types (mapv (fn [c] (let [arm-env (narrow-env-for-match c target-type env)]
+   arm-types (mapv (fn [c] (let [arm-env (narrow-env-for-match c target-type env scrutinee)]
   (last-expr-type! (get c "body") arm-env))) clauses)]
   (check-match-exhaustiveness! target-type clauses)
   (if (= (count arm-types) 0) ANY (merge-types-list arm-types)))
@@ -2523,8 +2586,9 @@
   nil)
 
 (defn type-check! [prog]
-  (let [checked-input (tag-semantic-node-ids prog)]
-  (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "definition-inference-counter" 0 "definition-inference-bindings" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
+  (let [checked-input (tag-semantic-node-ids prog)
+   unstable-bindings (unstable-binding-keys checked-input)]
+  (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "unstable-bindings" unstable-bindings "definition-inference-counter" 0 "definition-inference-bindings" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
   (install-imported-record-contracts! (get checked-input IMPORTED-RECORD-CONTRACTS-KEY []))
   (let [initial-env (build-initial-env! checked-input)
    inferred (infer-definition-types! checked-input initial-env)
@@ -2971,6 +3035,24 @@
   (swap! STATE assoc-in ["union-members" "Shape"] ["Circle" "Square" "Triangle"])
   (check-match-exhaustiveness! (make-prim "Shape") [{"pattern" {"type" "record" "name" "Circle" "bindings" []} "body" [(make-lit "string" "circle")]} {"pattern" {"type" "record" "name" "Square" "bindings" []} "body" [(make-lit "string" "square")]}])
   (> (count (get (deref STATE) "diagnostics")) 0)))
+  (expect! "narrowing: instance? resolves and subtracts nominal union members" (do
+  (swap! STATE assoc "union-members" {"Shape" ["Circle" "Rect"]})
+  (swap! STATE assoc "unstable-bindings" {})
+  (let [env {"shape" (make-prim "Shape") "#%dynamic-vars" {}}
+   narrowed (instance-narrowings (make-call "instance?" [(make-ref "native.core.Circle") (make-ref "shape")]) env)]
+  (and (= "Circle" (get (get (get narrowed "then") "shape") "name")) (= "Rect" (get (get (get narrowed "else") "shape") "name"))))))
+  (expect! "narrowing: match arm refines a stable scrutinee to its member" (do
+  (swap! STATE assoc "union-members" {"Shape" ["Circle" "Rect"]})
+  (swap! STATE assoc "record-fields" {})
+  (swap! STATE assoc "record-field-order" {})
+  (swap! STATE assoc "unstable-bindings" {})
+  (let [env {"shape" (make-prim "Shape") "#%dynamic-vars" {}}
+   clause {"pattern" {"type" "record" "name" "Circle" "bindings" []} "body" []}
+   narrowed (narrow-env-for-match clause (make-prim "Shape") env "shape")]
+  (= "Circle" (get (get narrowed "shape") "name")))))
+  (expect! "narrowing: set! makes a scrutinee unstable" (do
+  (swap! STATE assoc "unstable-bindings" {"shape" true})
+  (nil? (stable-scrutinee-key (make-ref "shape") {"shape" (make-prim "Shape") "#%dynamic-vars" {}}))))
   (expect! "infer: fn returns fn type" (let [e {"node" "fn" "params" [(make-param "x" (make-prim "Int"))] "rest" false "ret" (make-prim "Bool") "body" [(make-lit "bool" true)]}
    t1 (infer-expr! e {})]
   (and (fn-type? t1) (= (count (get t1 "params")) 1) (= (get (get t1 "ret") "name") "Bool"))))
