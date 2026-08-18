@@ -1134,13 +1134,19 @@ else
     core_result_entry="$core_result_root/$core_result_key"
 fi
 core_checkpoint_input="$work/core-checkpoint-input.manifest"
-write_core_checkpoint_identity "$core_result_input" "$core_checkpoint_input"
-core_checkpoint_key="$(sha256sum "$core_checkpoint_input" | awk '{print $1}')"
 if [[ "$core_checkpoint_early_hit" == 1 ]]; then
-    [[ "$checkpoint_alias_full_key" == "$core_checkpoint_key" ]] ||
-        die "Core checkpoint alias full identity disagrees with its materializer-agnostic input"
+    # The checkpoint carries post-stage source facts, not the projected facts
+    # whose digest sealed its input manifest. Preserve that validated identity.
+    cp -- "$checkpoint_alias_entry/input.manifest" "$core_checkpoint_input"
+    [[ "$(grep -c '^compiler-projection-sha256 ' "$core_checkpoint_input" || true)" == 1 &&
+       "$(grep '^compiler-projection-sha256 ' "$core_checkpoint_input")" == \
+           "compiler-projection-sha256 $compiled_digest" ]] ||
+        die "Core checkpoint compiler projection disagrees with the current compiler"
+    core_checkpoint_key="$checkpoint_alias_full_key"
     core_checkpoint_entry="$checkpoint_alias_entry"
 else
+    write_core_checkpoint_identity "$core_result_input" "$core_checkpoint_input"
+    core_checkpoint_key="$(sha256sum "$core_checkpoint_input" | awk '{print $1}')"
     core_checkpoint_entry="$core_checkpoint_root/$core_checkpoint_key"
 fi
 if [[ "$core_result_cache_enabled" == 1 &&
