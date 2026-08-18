@@ -1,0 +1,50 @@
+{:format "beagle.store/SP5FleetFixtureV1"
+ :version 1
+ :worker-count 8
+ :worker-budget-ms 3000
+ :fleet-budget-ms 10000
+ :initial-revision "store-revision-fleet-0"
+ :initial-route "route-fleet-old"
+ :launcher-public-key "MCowBQYDK2VwAyEA+W1OvNmmt4ZvG59Nx5Zu3eV1cXr5ujDAMSk4WWJOh2s="
+ :expected-attestation-id "sha256:7cf49e5de1c71b4809dcd28a76db2386f699da0bbc7af3d931c4e4d33d00181d"
+ :proof-pack
+ {:format "beagle.store/MaterializationProofPackV1"
+  :version 1
+  :attestation-id "sha256:7cf49e5de1c71b4809dcd28a76db2386f699da0bbc7af3d931c4e4d33d00181d"
+  :attestation
+  {:format "beagle.store/MaterializationAttestationV1"
+   :version 1
+   :executable-id "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+   :compiler-epoch-id "compiler-epoch-2026-08-18"
+   :schema-id "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+   :policy-id "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+   :snapshot-id "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+   :inputs-id "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+   :outputs-id "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+   :launcher-signature "JrFe4vGRNLabYzkHsYykgWRWRLFjVN01G2++R33IMrSnvbkbfaoVNaWm+/r/3Ux2dcicfk8aSwIaGYubCdIAAw=="}
+  :observation nil}
+ :workers
+ [{:attempt-id "fleet-attempt-01" :candidate-root "candidate-root-01"
+   :claim-label "claim-01" :missing-claim-label "claim-01-cold"
+   :published-route "route-fleet-01" :evidence-digest "sha256:evidence-01"}
+  {:attempt-id "fleet-attempt-02" :candidate-root "candidate-root-02"
+   :claim-label "claim-02" :missing-claim-label "claim-02-cold"
+   :published-route "route-fleet-02" :evidence-digest "sha256:evidence-02"}
+  {:attempt-id "fleet-attempt-03" :candidate-root "candidate-root-03"
+   :claim-label "claim-03" :missing-claim-label "claim-03-cold"
+   :published-route "route-fleet-03" :evidence-digest "sha256:evidence-03"}
+  {:attempt-id "fleet-attempt-04" :candidate-root "candidate-root-04"
+   :claim-label "claim-04" :missing-claim-label "claim-04-cold"
+   :published-route "route-fleet-04" :evidence-digest "sha256:evidence-04"}
+  {:attempt-id "fleet-attempt-05" :candidate-root "candidate-root-05"
+   :claim-label "claim-05" :missing-claim-label "claim-05-cold"
+   :published-route "route-fleet-05" :evidence-digest "sha256:evidence-05"}
+  {:attempt-id "fleet-attempt-06" :candidate-root "candidate-root-06"
+   :claim-label "claim-06" :missing-claim-label "claim-06-cold"
+   :published-route "route-fleet-06" :evidence-digest "sha256:evidence-06"}
+  {:attempt-id "fleet-attempt-07" :candidate-root "candidate-root-07"
+   :claim-label "claim-07" :missing-claim-label "claim-07-cold"
+   :published-route "route-fleet-07" :evidence-digest "sha256:evidence-07"}
+  {:attempt-id "fleet-attempt-08" :candidate-root "candidate-root-08"
+   :claim-label "claim-08" :missing-claim-label "claim-08-cold"
+   :published-route "route-fleet-08" :evidence-digest "sha256:evidence-08"}]}
