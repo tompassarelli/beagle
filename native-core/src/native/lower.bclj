@@ -8738,6 +8738,141 @@
             [(core/->Parameter join-parameter (bool-type-id))])
           join-parameter (bool-type-id) false)))))
 
+(defn vector-variants-of
+  [(types (Vec core/TypeDef))
+   (value-type core/NativeId)]
+  (Vec core/TypeVariant)
+  (filterv
+    (fn [(variant core/TypeVariant)] Bool
+      (let [(payload (U core/NativeId Nil))
+            (core/typevariant-payload-type variant)]
+        (and (some? payload) (vector-type? types payload))))
+    (union-variants-of types value-type)))
+
+(defn nth-dispatch-type [(value-type core/NativeId)] core/NativeId
+  (if (same-id? value-type (type-id "Any"))
+    (slice-value-type-id)
+    value-type))
+
+(defn lower-dynamic-vector-nth
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (source-id core/NativeId)
+   (source-type core/NativeId)
+   (index-id core/NativeId)]
+  ExprResultV0
+  (let [(variants (Vec core/TypeVariant))
+        (union-variants-of types source-type)
+        (vector-variants (Vec core/TypeVariant))
+        (vector-variants-of types source-type)]
+    (if (= 0 (count vector-variants))
+      (fail-result state
+        "TODO-NATIVE-NTH-OPERAND: nth needs a native vector or a union carrying one")
+      (let [(element-type (U core/NativeId Nil))
+            (core/typevariant-payload-type (nth vector-variants 0))]
+        (if (nil? element-type)
+          (fail-result state
+            "TODO-NATIVE-NTH-RESULT: union vector arms have no element type")
+          (let [(element-type core/NativeId) element-type
+                (same-elements Bool)
+                (every?
+                  (fn [(variant core/TypeVariant)] Bool
+                    (let [(payload (U core/NativeId Nil))
+                          (core/typevariant-payload-type variant)]
+                      (if (nil? payload)
+                        false
+                        (same-id? element-type payload))))
+                  vector-variants)]
+            (if (not same-elements)
+              (fail-result state
+                "TODO-NATIVE-NTH-RESULT: union vector arms have different element types")
+              (let [(join-id core/NativeId) (state-id state owner "dynamic-nth-join")
+                    (join-parameter core/NativeId)
+                    (state-id state owner "dynamic-nth-value")
+                    (vector-arm-id core/NativeId)
+                    (state-id state owner "dynamic-nth-vector-arm")
+                    (cases (Vec core/SwitchCaseV0))
+                    (loop [(position Int) 0
+                           (collected (Vec core/SwitchCaseV0)) []]
+                      (if (>= position (count variants))
+                        collected
+                        (let [(variant core/TypeVariant) (nth variants position)
+                              (is-vector Bool)
+                              (some?
+                                (some
+                                  (fn [(candidate core/TypeVariant)] Bool
+                                    (same-id? (core/typevariant-id candidate)
+                                      (core/typevariant-id variant)))
+                                  vector-variants))
+                              (target core/NativeId)
+                              (if is-vector vector-arm-id
+                                (state-id state owner
+                                  (str "dynamic-nth-trap-" position)))]
+                          (recur (+ position 1)
+                            (conj collected
+                              (core/->SwitchCaseV0
+                                (core/typevariant-id variant) target []))))))
+                    (switched BodyStateV0)
+                    (state-close (state-bump state)
+                      (core/->SwitchTerminator source-id cases))
+                    (armed BodyStateV0)
+                    (loop [(position Int) 0
+                           (current BodyStateV0) switched]
+                      (if (or (>= position (count variants))
+                              (state-blocked? current))
+                        current
+                        (let [(variant core/TypeVariant) (nth variants position)
+                              (payload (U core/NativeId Nil))
+                              (core/typevariant-payload-type variant)
+                              (is-vector Bool)
+                              (some?
+                                (some
+                                  (fn [(candidate core/TypeVariant)] Bool
+                                    (same-id? (core/typevariant-id candidate)
+                                      (core/typevariant-id variant)))
+                                  vector-variants))
+                              (arm-id core/NativeId)
+                              (if is-vector vector-arm-id
+                                (state-id state owner
+                                  (str "dynamic-nth-trap-" position)))
+                              (opened BodyStateV0)
+                              (state-open-block current arm-id [])]
+                          (if (or (not is-vector) (nil? payload))
+                            (let [(code-id core/NativeId)
+                                  (state-id opened owner
+                                    (str "dynamic-nth-code-" position))]
+                              (recur (+ position 1)
+                                (state-close
+                                  (state-emit (state-bump opened)
+                                    (core/->AtomInstruction
+                                      (core/->SsaValueV0 code-id (int-type-id))
+                                      (core/->I64Atom (trap-failure-code))))
+                                  (core/->TrapTerminator code-id))))
+                            (let [(extracted-id core/NativeId)
+                                  (state-id opened owner
+                                    (str "dynamic-nth-vector-" position))
+                                  (extracted BodyStateV0)
+                                  (state-emit (state-bump opened)
+                                    (core/->UnionExtractInstruction
+                                      (core/->SsaValueV0 extracted-id payload)
+                                      source-id (core/typevariant-id variant)))
+                                  (result-id core/NativeId)
+                                  (state-id extracted owner
+                                    (str "dynamic-nth-result-" position))
+                                  (read BodyStateV0)
+                                  (state-emit (state-bump extracted)
+                                    (core/->VecGetInstruction
+                                      (core/->SsaValueV0 result-id element-type)
+                                      extracted-id index-id))]
+                              (recur (+ position 1)
+                                (state-close read
+                                  (core/->JumpTerminator join-id [result-id]))))))))
+                    (joined BodyStateV0)
+                    (state-open-block armed join-id
+                      [(core/->Parameter join-parameter element-type)])]
+                (->ExprResultV0 joined join-parameter element-type false)))))))))
+
 (defn lower-truthy-with-budget
   [(types (Vec core/TypeDef))
    (owner core/NativeId)
@@ -18203,6 +18338,18 @@
                           (core/->SsaValueV0 result-id element)
                           (nth values 0) (nth values 1)))
                       result-id element false)))
+
+                (and (= "nth" callee) (= 2 (count values))
+                  (> (count
+                       (union-variants-of types
+                         (nth-dispatch-type (nth value-types 0)))) 0))
+                (if (not (same-id? (nth value-types 1) (int-type-id)))
+                  (fail-result current
+                    "TODO-NATIVE-NTH-INDEX: the index operand is not a native Int")
+                  (lower-dynamic-vector-nth types owner current
+                    (nth values 0)
+                    (nth-dispatch-type (nth value-types 0))
+                    (nth values 1)))
 
                 (and (= "conj" callee) (> (count values) 0)
                   (vector-type? types (nth value-types 0)))
