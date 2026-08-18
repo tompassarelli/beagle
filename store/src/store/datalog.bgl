@@ -1240,15 +1240,16 @@
 (defn- positive-relation-names [(rules (Vec Rule))] (Vec String)
   (vec
    (sort
-    (reduce
-     (fn [(relations (Set String)) (value Rule)] (Set String)
-       (reduce (fn [(current (Set String)) (literal Literal)] (Set String)
-                 (if (and (= :relation (literal-kind literal))
-                          (not (literal-negated literal)))
-                   (conj current (literal-relation literal))
-                   current))
-               relations (rule-body value)))
-     #{} rules))))
+    (vec
+     (reduce
+      (fn [(relations (Set String)) (value Rule)] (Set String)
+        (reduce (fn [(current (Set String)) (literal Literal)] (Set String)
+                  (if (and (= :relation (literal-kind literal))
+                           (not (literal-negated literal)))
+                    (conj current (literal-relation literal))
+                    current))
+                relations (rule-body value)))
+      #{} rules)))))
 
 (defn- body-results-pinned!
   [(db Db)
