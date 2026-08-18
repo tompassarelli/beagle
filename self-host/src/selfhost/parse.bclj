@@ -4725,7 +4725,7 @@
     (deref out)))
 
 (defn- surface-name-leaf [(name String)] String
-  (let [separator (str/last-index-of name "/")]
+  (let [(separator (U Int Nil)) (str/last-index-of name "/")]
     (if (nil? separator) name (subs name (+ separator 1)))))
 
 ;; This is the existing module-import publication path.  Provider checking has
