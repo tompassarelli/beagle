@@ -22,7 +22,7 @@
       "caseId": "hl-collection-ordering-core",
       "path": "corpus/decided/hl-collection-ordering-core.json",
       "status": "DECIDED",
-      "sha256": "41dd3a7aa89b86cffff2da895778938d2c51b74882d25c129edb942f28d58f26",
+      "sha256": "6b1d2c955ff3fa9acb392cad3e68301e61161619d92e26c07fdc8df01824e8f8",
       "coverage": ["HOST-LEAKAGE","HL-COLLECTION-ORDERING","core"]
     },
     {

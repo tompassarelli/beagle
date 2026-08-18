@@ -5,9 +5,9 @@
   "status": "DECIDED",
   "profile": "core",
   "input": {
-    "source": "#lang beagle\n(ns conformance.hl-collection-ordering)\n\n(defn probe []\n  (let [m0 {\"10\" :ten \"2\" :two :a :a [1 2] :compound}\n        m1 (assoc m0 :b :b)\n        m2 (assoc m1 :a :replaced)\n        m3 (dissoc m2 \"2\")\n        m4 (assoc m3 \"2\" :reinserted)\n        s0 #{\"10\" \"2\" :a [1 2]}\n        s1 (conj s0 :b)\n        s2 (disj s1 \"2\")\n        s3 (conj s2 \"2\")\n        effectful-comparator (fn [x y] (do (println x) (compare x y)))]\n    (sort effectful-comparator [2 1 1])))\n",
+    "source": "#lang beagle\n(ns conformance.hl-collection-ordering)\n\n(defn probe [] Any\n  (let [m0 {\"10\" :ten \"2\" :two :a :a [1 2] :compound}\n        m1 (assoc m0 :b :b)\n        m2 (assoc m1 :a :replaced)\n        m3 (dissoc m2 \"2\")\n        m4 (assoc m3 \"2\" :reinserted)\n        s0 #{\"10\" \"2\" :a [1 2]}\n        s1 (conj s0 :b)\n        s2 (disj s1 \"2\")\n        s3 (conj s2 \"2\")\n        effectful-comparator (fn [x y] Int (do (println x) (compare x y)))]\n    (sort-by effectful-comparator [2 1 1])))\n",
     "target": "core",
-    "fileName": "probe/hl-collection-ordering.bl",
+    "fileName": "probe/hl-collection-ordering.bgl",
     "command": {
       "argv": ["check", "--profile", "1", "{input}"]
     },
