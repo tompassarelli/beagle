@@ -61,7 +61,6 @@
              "docfill.rkt"              ; every compiler-owned doc span vs beagle-lib/private/targets.rkt (fix: bin/beagle doc-fill)
              "wasm-materializer.rkt"    ; registered bootstrap artifact/digest/report + visible tool failures
              "native-simd.rkt"          ; deterministic SIMD plan + scalar tail/refusal execution
-             "native-c17-parallel.rkt" ; explicit C17 export boundary + optional parallel artifacts finalize atomically
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "code-as-facts-rename.rkt" ; hermetic recursive-fact edit/reconstruction floor; Beagle Store owns scope resolution
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
@@ -165,7 +164,7 @@
              ;; (reserved-property mangling + effect-position lowering).
              "emit-js-behavioral.rkt")) ; requires bun
 
-  (demoted . ()) ; (empty) emit-js-behavioral.rkt promoted to active 2026-07-19
+  (demoted . ("native-c17-parallel.rkt")) ; v0.24.0 seal-only diagnostic; requalify before promotion
 
   (gated . (;; Non-Nix target tests parked behind BEAGLE_ALL_TARGETS=1.
             ;; SQL emitter is dormant (its schema-typing in check.rkt is live).
