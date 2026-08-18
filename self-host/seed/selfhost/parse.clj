@@ -799,11 +799,12 @@
 
 (defn- scope-walk-function-clause! [clause table path ctx]
   (let [children (scope-sequence-children clause)]
-  (if (and (vector? children) (> (count children) 0) (= (get (nth children 0) "variant") "vector")) (let [params (scope-walk-params! (nth children 0) table (conj (vec path) 0) ctx)]
+  (if (and (vector? children) (> (count children) 0) (= (get (nth children 0) "variant") "vector")) (let [indices (vec (range (count children)))
+   params (scope-walk-params! (nth children 0) table (conj (vec path) 0) ctx)]
   (rebuild-scope-sequence! clause (mapv (fn [index] (cond
   (= index 0) (get params "value")
   (= index 1) (nth children index)
-  :else (scope-walk* (syntax-add-scope! (nth children index) (get params "scope")) (get params "table") (conj (vec path) index) ctx))) (range (count children))))) (scope-walk-generic! clause table path ctx))))
+  :else (scope-walk* (syntax-add-scope! (nth children index) (get params "scope")) (get params "table") (conj (vec path) index) ctx))) indices))) (scope-walk-generic! clause table path ctx))))
 
 (defn- scope-walk-function! [value table path ctx name-index]
   (let [children (scope-sequence-children value)

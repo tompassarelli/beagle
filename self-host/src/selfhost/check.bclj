@@ -1932,7 +1932,8 @@
             (binding-constraint p)
             env
             "parameter"))))
-    (reduce
+    (let [(indices (Vec Int)) (vec (range (count all-params)))]
+      (reduce
       (fn [(out Any) (i Int)] Any
         (let [p (nth all-params i)
               target (param-binding-target p)
@@ -1940,8 +1941,8 @@
           (if (string? target)
             (binder-env-assoc out p target effective)
             (bind-destructure-type! out target effective "parameter" p))))
-      env
-      (range (count all-params)))))
+        env
+        indices))))
 
 ;; infer-expr! is mutually recursive with the helpers below (and register-*!);
 ;; beagle/clj has no `declare` combiner, but a passthrough (declare ...) emits a

@@ -815,10 +815,11 @@
   (let [p (nth all-params i)]
   (if (= (get p "type") "param") (do
   (check-binding-constraint! p (get p "ann") (nth effective-types i) (binding-constraint p) env "parameter")))))
+  (let [indices (vec (range (count all-params)))]
   (reduce (fn [out i] (let [p (nth all-params i)
    target (param-binding-target p)
    effective (nth effective-types i)]
-  (if (string? target) (binder-env-assoc out p target effective) (bind-destructure-type! out target effective "parameter" p)))) env (range (count all-params)))))
+  (if (string? target) (binder-env-assoc out p target effective) (bind-destructure-type! out target effective "parameter" p)))) env indices))))
 
 (defn extend-with-let-bindings! [env bindings]
   (reduce (fn [out b] (let [declared (get b "ann")

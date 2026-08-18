@@ -502,10 +502,11 @@
     (if (not (bindings-have-constraints? bindings))
       (str "(loop [" (emit-let-bindings! bindings) "]\n  "
            (emit-body-with-loop-context! (get e "body") "  " nil) ")")
-      (let [raw-names
+      (let [(loop-indices (Vec Int)) (vec (range (count bindings)))
+            raw-names
               (mapv (fn [(index Int)] String
                       (str "$beagle$constraint$raw-loop$" index))
-                (range (count bindings)))
+                loop-indices)
             init-bindings
               (loop [(index Int) 0 (acc (Vec String)) []]
                 (if (>= index (count bindings))

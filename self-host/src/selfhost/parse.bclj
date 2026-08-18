@@ -1440,7 +1440,8 @@
     (if (and (vector? children)
              (> (count children) 0)
              (= (get (nth children 0) "variant") "vector"))
-      (let [params
+      (let [(indices (Vec Int)) (vec (range (count children)))
+            params
             (scope-walk-params!
               (nth children 0) table (conj (vec path) 0) ctx)]
         (rebuild-scope-sequence! clause
@@ -1454,7 +1455,7 @@
                     (syntax-add-scope!
                       (nth children index) (get params "scope"))
                     (get params "table") (conj (vec path) index) ctx)))
-            (range (count children)))))
+            indices)))
       (scope-walk-generic! clause table path ctx))))
 
 (defn- scope-walk-function!

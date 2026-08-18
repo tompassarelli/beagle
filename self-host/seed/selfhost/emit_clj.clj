@@ -259,7 +259,8 @@
 
 (defn ^String emit-loop-with-constraints! [e]
   (let [bindings (get e "bindings")]
-  (if (not (bindings-have-constraints? bindings)) (str "(loop [" (emit-let-bindings! bindings) "]\n  " (emit-body-with-loop-context! (get e "body") "  " nil) ")") (let [raw-names (mapv (fn [index] (str "$beagle$constraint$raw-loop$" index)) (range (count bindings)))
+  (if (not (bindings-have-constraints? bindings)) (str "(loop [" (emit-let-bindings! bindings) "]\n  " (emit-body-with-loop-context! (get e "body") "  " nil) ")") (let [loop-indices (vec (range (count bindings)))
+   raw-names (mapv (fn [index] (str "$beagle$constraint$raw-loop$" index)) loop-indices)
    init-bindings (loop [index 0
    acc []]
   (if (>= index (count bindings)) acc (let [binding (nth bindings index)

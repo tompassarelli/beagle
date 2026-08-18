@@ -1222,11 +1222,12 @@
               rest-args (subvec scoped-args (count fixed))]
           (if (= kind "defmacro")
             (let [env0 (make-macro-env)
+                  (indices (Vec Int)) (vec (range (count fixed)))
                   env (reduce
                         (fn [(e Any) (i Int)] Any
                           (assoc e (nth fixed i) (nth fixed-args i)))
                         env0
-                        (range (count fixed)))
+                        indices)
                   env+rest (if (some? rest-name)
                              (assoc env rest-name rest-args)
                              env)]

@@ -653,7 +653,8 @@
   :else (let [fixed-args (subvec scoped-args 0 (count fixed))
    rest-args (subvec scoped-args (count fixed))]
   (if (= kind "defmacro") (let [env0 (make-macro-env)
-   env (reduce (fn [e i] (assoc e (nth fixed i) (nth fixed-args i))) env0 (range (count fixed)))
+   indices (vec (range (count fixed)))
+   env (reduce (fn [e i] (assoc e (nth fixed i) (nth fixed-args i))) env0 indices)
    env+rest (if (some? rest-name) (assoc env rest-name rest-args) env)]
   (try
   (macro-eval! template env+rest)
