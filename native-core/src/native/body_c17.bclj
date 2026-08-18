@@ -1590,9 +1590,12 @@
               "  }\n")))))))
 
 (defn emit-text-builtin
-  [(function core/FunctionDef)
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (function core/FunctionDef)
    (slots (Vec ValueSlotV0))
    (target String)
+   (result core/SsaValueV0)
    (operation core/TextBuiltinOpV0)]
   String
   (cond
@@ -2164,7 +2167,7 @@
           ", UINT64_C(" (count operands) "));\n  }\n"))
 
       (instance? native.core.TextBuiltinInstruction instruction)
-      (emit-text-builtin function slots target
+      (emit-text-builtin types layouts function slots target result
         (core/textbuiltininstruction-builtin instruction))
 
       (instance? native.core.CopyInstruction instruction)
