@@ -124,8 +124,8 @@ run_phase() { # <name> <deadline-seconds> <command...>
 # provenance sidecar matches this checkout; otherwise use the current seed.
 source self-host/native/stage0-select.sh
 beagle_select_stage0 "$OUT" self-host/native/beagle-selfhost || exit $?
-# Self-host CLI dispatch — only main-driver subcommands route to native; the
-# stage-isolated evals stay bb because native exposes only the CLI.
+# Self-host CLI dispatch. Stage-isolated emission uses `emit-from-ast` so every
+# target follows the same native-or-seed route as the full compiler chain.
 if [ "$STAGE0" = native ]; then
   SH_MAIN_CMD=("$NATIVE_BIN")
 else
@@ -197,9 +197,25 @@ for src in "${MODULES[@]}"; do
     continue
   fi
 
+  emit_target_path="$LAB/$name-target"
+  if run_phase "$name target extraction" "$PHASE_JSON" \
+       python3 -c '
+import json, sys
+target = json.load(open(sys.argv[1])).get("target")
+if target not in {"clj", "js", "nix"}:
+    sys.exit(1)
+print(target)
+' "$astj" > "$emit_target_path" 2>/dev/null; then
+    read -r emit_target < "$emit_target_path"
+  else
+    bad "$name oracle AST has no supported emission target"
+    continue
+  fi
+
   echo "=== 2. emit parity (racket AST -> self emit) : $name ==="
   if run_phase "$name stage-2 self emit" "$PHASE_CHECK" \
-       bb -cp "$OUT" -e "(require '[selfhost.emit-clj :as e] '[cheshire.core :as json]) (print (e/emit-program! (json/parse-string (slurp \"$astj\") false)))" \
+       bash -c 'input=$1; shift; exec "$@" < "$input"' \
+         bash "$astj" "${SH_MAIN_CMD[@]}" emit-from-ast --target "$emit_target" \
        > "$LAB/$name-stage2.clj" 2>"$LAB/$name-stage2.err"; then
     if run_phase "$name stage-2 byte compare" "$PHASE_FAST" \
          diff -q "$oracle" "$LAB/$name-stage2.clj" >/dev/null 2>&1; then
@@ -214,7 +230,7 @@ for src in "${MODULES[@]}"; do
 
   echo "=== 3. AST parity (self reader+parse vs beagle-ast) : $name ==="
   if run_phase "$name stage-3 self AST" "$PHASE_CHECK" \
-       "${SH_MAIN_CMD[@]}" ast "$src" \
+       "${SH_MAIN_CMD[@]}" ast --target "$emit_target" "$src" \
        > "$LAB/$name-self-ast.json" 2>"$LAB/$name-stage3.err"; then
     :
   else
@@ -252,7 +268,7 @@ sys.exit(0 if same_forms and same_meta else 1)
 
   echo "=== 4. full self-hosted chain ($STAGE0) vs racket emit : $name ==="
   if run_phase "$name full self-host emit" "$PHASE_CHECK" \
-       "${SH_MAIN_CMD[@]}" emit "$src" \
+       "${SH_MAIN_CMD[@]}" emit --target "$emit_target" "$src" \
        > "$LAB/$name-chain.clj" 2>"$LAB/$name-chain.err"; then
     if run_phase "$name full-chain byte compare" "$PHASE_FAST" \
          diff -q "$oracle" "$LAB/$name-chain.clj" >/dev/null 2>&1; then
