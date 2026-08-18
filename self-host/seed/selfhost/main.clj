@@ -364,7 +364,10 @@
   (println (selfhost.rt/canonical-json (checked-projection (assoc snapshot "program" prog))))))
 
 (defn- cmd-check! [^String path ^String target]
-  (check-or-die! (get (parse-file-target! path target) "program"))
+  (let [prog (get (parse-file-target! path target) "program")]
+  (check-or-die! prog)
+  (if (= (c/purity-severity) "warn") (do
+  (c/check-purity! prog))))
   (selfhost.rt/eprint "ok\n"))
 
 (defn- cmd-emit! [^String path ^String target]

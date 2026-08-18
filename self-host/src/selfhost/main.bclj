@@ -801,7 +801,13 @@
                (checked-projection (assoc snapshot "program" prog))))))
 
 (defn- cmd-check! [(path String) (target String)] Nil
-  (check-or-die! (get (parse-file-target! path target) "program"))
+  (let [prog (get (parse-file-target! path target) "program")]
+    (check-or-die! prog)
+    ;; The hosted check command exposes warn-level purity from its checked
+    ;; projection and its command-level diagnostic pass. Preserve that
+    ;; observable warning multiplicity without changing the checker facts.
+    (when (= (c/purity-severity) "warn")
+      (c/check-purity! prog)))
   (selfhost.rt/eprint "ok\n"))
 
 (defn- cmd-emit! [(path String) (target String)] Nil
