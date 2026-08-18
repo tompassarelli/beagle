@@ -554,12 +554,12 @@
    imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "synchronous"))) (reference-map-assoc out (get entry "name") (get entry "synchronous")) out)) {} imported)
    external-proofs (reduce (fn [out entry] (if (and (string? (get entry "name")) (nil? (reference-map-ref out (get entry "name") nil))) (reference-map-assoc out (get entry "name") (not (= (get entry "synchronous") false))) out)) imported-proofs (get prog "externs"))
    builtin-proofs (reduce (fn [out name] (assoc out name true)) external-proofs (keys STDLIB))
-   assumed (reduce (fn [out name] (assoc out name true)) builtin-proofs (keys local-definitions))]
+   assumed (reduce (fn [out name] (assoc out name true)) builtin-proofs (vec (sort (keys local-definitions))))]
   (loop [proofs assumed]
   (let [next (reduce (fn [out name] (let [form (get local-definitions name)
    clauses (callable-form-clauses form)
    synchronous? (every? (fn [clause] (callable-clause-synchronous? clause proofs)) clauses)]
-  (assoc out name synchronous?))) proofs (keys local-definitions))]
+  (assoc out name synchronous?))) proofs (vec (sort (keys local-definitions))))]
   (if (= next proofs) next (recur next))))))
 
 (defn ^Boolean function-valued-type? [type]
@@ -606,12 +606,12 @@
    imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "returnsSynchronousCallable"))) (reference-map-assoc out (get entry "name") (get entry "returnsSynchronousCallable")) out)) {} imported)
    external-proofs (reduce (fn [out entry] (let [name (get entry "name")]
   (if (and (string? name) (nil? (reference-map-ref out name nil))) (reference-map-assoc out name (= true (get entry "returnsSynchronousCallable"))) out))) imported-proofs (get prog "externs"))
-   assumed (reduce (fn [out name] (assoc out name true)) external-proofs (keys local-definitions))]
+   assumed (reduce (fn [out name] (assoc out name true)) external-proofs (vec (sort (keys local-definitions))))]
   (loop [proofs assumed]
   (let [next (reduce (fn [out name] (let [form (get local-definitions name)
    proven? (every? (fn [clause] (let [body (get clause "body")]
   (and (vector? body) (> (count body) 0) (constraint-value-synchronous? (subvec body 0 (- (count body) 1)) callable-proofs) (callable-body-tail-synchronous? body callable-proofs proofs {})))) (callable-form-clauses form))]
-  (assoc out name proven?))) proofs (keys local-definitions))]
+  (assoc out name proven?))) proofs (vec (sort (keys local-definitions))))]
   (if (= next proofs) next (recur next))))))
 
 (defn ^Boolean constraint-synchronization-proof [predicate env]

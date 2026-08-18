@@ -1326,7 +1326,7 @@
             (fn [(out Any) (name Any)] Any
               (assoc out name true))
             builtin-proofs
-            (keys local-definitions))]
+            (vec (sort (keys local-definitions))))]
     ;; Greatest fixed point. Removed local names remain explicitly false so a
     ;; caller cannot reinterpret them as an unknown/synchronous host function.
     (loop [proofs assumed]
@@ -1342,7 +1342,7 @@
                             clauses)]
                     (assoc out name synchronous?)))
                 proofs
-                (keys local-definitions))]
+                (vec (sort (keys local-definitions))))]
         (if (= next proofs) next (recur next))))))
 
 (defn function-valued-type? [(type Any)] Bool
@@ -1487,7 +1487,7 @@
           (reduce
             (fn [(out Any) (name Any)] Any (assoc out name true))
             external-proofs
-            (keys local-definitions))]
+            (vec (sort (keys local-definitions))))]
     ;; Greatest fixed point: recursive factories remain proven only when every
     ;; return path retains positive callable-value provenance.
     (loop [proofs assumed]
@@ -1509,7 +1509,7 @@
                             (callable-form-clauses form))]
                     (assoc out name proven?)))
                 proofs
-                (keys local-definitions))]
+                (vec (sort (keys local-definitions))))]
         (if (= next proofs) next (recur next))))))
 
 (defn constraint-synchronization-proof [(predicate Any) (env Any)] Bool
