@@ -521,9 +521,6 @@ write_core_result_early_manifest() {
             "$(sha256sum "$racket_path" | awk '{print $1}')"
         printf 'bb %q\n' "$(bb --version 2>&1 | sed -n '1p')"
         printf 'bb-bin-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
-        for index in "${!module_roots[@]}"; do
-            printf 'module-root %06d %q\n' "$index" "${module_roots[$index]}"
-        done
         for index in "${!source_ids[@]}"; do
             printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
                 "${source_digest_befores[$index]}"
@@ -969,9 +966,6 @@ write_core_result_input_manifest() {
             "$(sha256sum "$racket_path" | awk '{print $1}')"
         printf 'bb %q\n' "$(bb --version 2>&1 | sed -n '1p')"
         printf 'bb-bin-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
-        for index in "${!module_roots[@]}"; do
-            printf 'module-root %06d %q\n' "$index" "${module_roots[$index]}"
-        done
         for index in "${!source_ids[@]}"; do
             printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
                 "${source_digest_befores[$index]}"
