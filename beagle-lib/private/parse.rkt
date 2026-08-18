@@ -49,6 +49,27 @@
   details     ; hasheq with structured data (cause, form, etc.)
 ) #:transparent)
 
+(define current-macro-output-origin-chain (make-parameter #f))
+
+(define (expansion-context-chain ctx)
+  (let loop ([current ctx] [names '()])
+    (if current
+        (loop (expansion-ctx-parent current)
+              (cons (expansion-ctx-macro-name current) names))
+        names)))
+
+(define (source-text-at-span location)
+  (define source-bytes (current-source-bytes))
+  (and source-bytes
+       location
+       (src-loc-pos location)
+       (src-loc-span location)
+       (let* ([source (bytes->string/utf-8 source-bytes)]
+              [start (sub1 (src-loc-pos location))]
+              [end (+ start (src-loc-span location))])
+         (and (<= 0 start end (string-length source))
+              (substring source start end)))))
+
 ;; A machine-applicable suggestion attached to a pointed-replacement error so
 ;; tools (beagle-repair --emit-patch) can auto-apply the fix instead of
 ;; re-deriving it from the prose message. This is the Lean Suggestion/TryThis
@@ -81,10 +102,35 @@
   (define details0
     (cond
       [ctx
-       (hash-set* base-details
-                  'original-kind (symbol->string kind)
-                  'macro-name (symbol->string (expansion-ctx-macro-name ctx))
-                  'macro-depth (expansion-ctx-depth ctx))]
+       (define origin-chain
+         (or (current-macro-output-origin-chain)
+             (expansion-context-chain ctx)))
+       (define call-span (expansion-ctx-call-span ctx))
+       (define call-syntax (expansion-ctx-call-syntax ctx))
+       (define macro-details
+         (hash-set* base-details
+                    'original-kind (symbol->string kind)
+                    'macro-name (symbol->string (expansion-ctx-macro-name ctx))
+                    'macro-depth (expansion-ctx-depth ctx)
+                    'semantic-error-id "BEAGLE-MACRO-OUTPUT-ERROR"
+                    'origin-chain (map symbol->string origin-chain)
+                    'blame-form
+                    (or (source-text-at-span call-span)
+                        (and call-syntax
+                             (binding-datum->src
+                              (beagle-syntax->datum call-syntax))))))
+       (if call-span
+           (hash-set* macro-details
+                      'error-file (let ([source (src-loc-source call-span)])
+                                    (cond
+                                      [(path? source) (path->string source)]
+                                      [(string? source) source]
+                                      [else #f]))
+                      'error-line (src-loc-line call-span)
+                      'error-col (src-loc-col call-span)
+                      'error-pos (src-loc-pos call-span)
+                      'error-span (src-loc-span call-span))
+           macro-details)]
       [else base-details]))
   (define details1
     (for/fold ([details details0]) ([(key value) (in-hash extra-details)])
@@ -92,7 +138,9 @@
   (define details
     (if suggestion (hash-set details1 'suggestion suggestion) details1))
   (raise (beagle-parse-error
-          (format "beagle: ~a" msg)
+          (format "beagle: ~a~a"
+                  (if ctx "BEAGLE-MACRO-OUTPUT-ERROR: " "")
+                  msg)
           (current-continuation-marks)
           effective-kind
           details)))
@@ -2176,6 +2224,24 @@
   ;; reads this to set current-macro-expansion-ctx during type-check,
   ;; which lets raise-diag rebucket post-expansion type errors as
   ;; 'macro-expansion-type-error.
+  (define (canonical-macro-name raw-name)
+    (define name
+      (if (symbol? raw-name) raw-name (string->symbol (format "~a" raw-name))))
+    (define parts (string-split (symbol->string name) "/"))
+    (cond
+      [(= (length parts) 2)
+       (define prefix (string->symbol (car parts)))
+       (define required
+         (findf
+          (lambda (entry)
+            (or (eq? (require-entry-alias entry) prefix)
+                (eq? (require-entry-ns entry) prefix)))
+          requires))
+       (if required
+           (string->symbol
+            (format "~a/~a" (require-entry-ns required) (cadr parts)))
+           name)]
+      [else name]))
   (define src-table (make-hasheq))
   (define macro-derived-table (make-hasheq))
   (define body-locs-table (make-hasheq))
@@ -2227,7 +2293,11 @@
                (car d)
                (racket-syntax->beagle-syntax s (current-source-bytes))))
             (define parsed-node
-              (parameterize ([current-macro-expansion-ctx ctx])
+              (parameterize
+                  ([current-macro-expansion-ctx ctx]
+                   [current-macro-output-origin-chain
+                    (map canonical-macro-name
+                         (macro-origin-names expanded))])
                 (parse-top expansion-stx)))
             (mark-macro-derived! parsed-node ctx)
             parsed-node)
@@ -2402,6 +2472,31 @@
    origin
    (current-source-bytes)
    #f))
+
+(define (macro-origin-names value)
+  (define seen (mutable-seteq))
+  (define names '())
+  (define (record-origin! origin)
+    (when (expansion-origin? origin)
+      (record-origin! (expansion-origin-parent origin))
+      (define name (expansion-origin-macro-id origin))
+      (unless (set-member? seen name)
+        (set-add! seen name)
+        (set! names (cons name names)))))
+  (define (walk current)
+    (when (beagle-syntax? current)
+      (record-origin! (beagle-syntax-origin current))
+      (cond
+        [(syntax-list? current)
+         (for ([child (in-list (syntax-list-children current))])
+           (walk child))]
+        [(syntax-vector? current)
+         (for ([child (in-list (syntax-vector-children current))])
+           (walk child))]
+        [(syntax-unquote? current) (walk (syntax-unquote-child current))]
+        [else (void)])))
+  (walk value)
+  (reverse names))
 
 (define (parse-expr x)
   (define origin

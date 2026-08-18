@@ -243,7 +243,11 @@
   ;; Original symptom is preserved for downstream tooling.
   (check-equal? (hash-ref details 'original-kind) "removed-form")
   ;; Macro provenance is attached.
-  (check-equal? (hash-ref details 'macro-name) "bad"))
+  (check-equal? (hash-ref details 'macro-name) "bad")
+  (check-equal? (hash-ref details 'semantic-error-id)
+                "BEAGLE-MACRO-OUTPUT-ERROR")
+  (check-equal? (hash-ref details 'origin-chain) '("bad"))
+  (check-regexp-match #rx"BEAGLE-MACRO-OUTPUT-ERROR" (exn-message e)))
 
 ;; --- macro-expansion-type-error: defmacro emits wrong-typed output ----------
 
