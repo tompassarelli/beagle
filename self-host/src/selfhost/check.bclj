@@ -2784,12 +2784,13 @@
     (and (app-type? expected) (= (get expected "name") "HVec")
          (not (nil? value)) (= (get value "node") "vec"))
     (let [items (get value "items")
-          elems (get expected "args")]
+          elems (get expected "args")
+          (indices (Vec Int)) (vec (range (count items)))]
       (and (= (count items) (count elems))
            (every? true?
              (mapv (fn [(i Int)] Bool
                      (fresh-value-compatible?! (nth items i) (nth elems i) env))
-               (range (count items))))))
+               indices))))
 
     :else (type-compatible? (infer-expr! value env) expected)))
 

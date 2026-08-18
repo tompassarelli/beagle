@@ -1514,6 +1514,10 @@
         functions (nth children 1)
         fn-values (scope-sequence-children functions)
         scope (syntax/fresh-scope-id! "letfn")
+        (fn-indices (Vec Int)) (vec (range (count fn-values)))
+        (rendered-indices (Vec Int))
+          (vec (range (count fn-values)))
+        (body-indices (Vec Int)) (vec (range 2 (count children)))
         named
         (reduce
           (fn [(state Any) (index Int)] Any
@@ -1529,7 +1533,7 @@
                    (into [(get bound "value")] (subvec (vec fn-children) 1))))
                "table" (get bound "table")}))
           {"values" [] "table" table}
-          (range (count fn-values)))
+          fn-indices)
         rendered-functions
         (rebuild-scope-sequence! functions
           (mapv
@@ -1537,14 +1541,14 @@
               (scope-walk-function!
                 (syntax-add-scope! (nth (get named "values") index) scope)
                 (get named "table") (conj (vec path) 1 index) ctx 0))
-            (range (count (get named "values")))))
+            rendered-indices))
         body
         (mapv
           (fn [(index Int)] Any
             (scope-walk*
               (syntax-add-scope! (nth children index) scope)
               (get named "table") (conj (vec path) index) ctx))
-          (range 2 (count children)))]
+          body-indices)]
     (rebuild-scope-sequence! value
       (into
         [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx)

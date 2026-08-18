@@ -827,12 +827,15 @@
    functions (nth children 1)
    fn-values (scope-sequence-children functions)
    scope (syntax/fresh-scope-id! "letfn")
+   fn-indices (vec (range (count fn-values)))
+   rendered-indices (vec (range (count fn-values)))
+   body-indices (vec (range 2 (count children)))
    named (reduce (fn [state index] (let [fn-value (nth fn-values index)
    fn-children (scope-sequence-children fn-value)
    bound (scope-bind-target! (nth fn-children 0) (get state "table") scope "letfn" (conj (vec path) 1 index 0))]
-  {"values" (conj (get state "values") (rebuild-scope-sequence! fn-value (into [(get bound "value")] (subvec (vec fn-children) 1)))) "table" (get bound "table")})) {"values" [] "table" table} (range (count fn-values)))
-   rendered-functions (rebuild-scope-sequence! functions (mapv (fn [index] (scope-walk-function! (syntax-add-scope! (nth (get named "values") index) scope) (get named "table") (conj (vec path) 1 index) ctx 0)) (range (count (get named "values")))))
-   body (mapv (fn [index] (scope-walk* (syntax-add-scope! (nth children index) scope) (get named "table") (conj (vec path) index) ctx)) (range 2 (count children)))]
+  {"values" (conj (get state "values") (rebuild-scope-sequence! fn-value (into [(get bound "value")] (subvec (vec fn-children) 1)))) "table" (get bound "table")})) {"values" [] "table" table} fn-indices)
+   rendered-functions (rebuild-scope-sequence! functions (mapv (fn [index] (scope-walk-function! (syntax-add-scope! (nth (get named "values") index) scope) (get named "table") (conj (vec path) 1 index) ctx 0)) rendered-indices))
+   body (mapv (fn [index] (scope-walk* (syntax-add-scope! (nth children index) scope) (get named "table") (conj (vec path) index) ctx)) body-indices)]
   (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) rendered-functions] body))))
 
 (defn- scope-walk-for-like! [value table path ctx]

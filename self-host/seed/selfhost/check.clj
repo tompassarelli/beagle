@@ -1239,8 +1239,9 @@
   (cond
   (union-type? expected) (boolean (some (fn [alt] (fresh-value-compatible?! value alt env)) (get expected "members")))
   (and (app-type? expected) (= (get expected "name") "HVec") (not (nil? value)) (= (get value "node") "vec")) (let [items (get value "items")
-   elems (get expected "args")]
-  (and (= (count items) (count elems)) (every? true? (mapv (fn [i] (fresh-value-compatible?! (nth items i) (nth elems i) env)) (range (count items))))))
+   elems (get expected "args")
+   indices (vec (range (count items)))]
+  (and (= (count items) (count elems)) (every? true? (mapv (fn [i] (fresh-value-compatible?! (nth items i) (nth elems i) env)) indices))))
   :else (type-compatible? (infer-expr! value env) expected)))
 
 (defn ^Boolean check-atom-ctor! [value expected env]

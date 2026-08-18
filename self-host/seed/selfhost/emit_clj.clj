@@ -415,16 +415,17 @@
    rest-p (get method "rest")
    all (params+rest params rest-p)
    fixed-count (count params)
-   raw-names (mapv (fn [index] (callable-raw-name index fixed-count)) (range (count all)))
+   all-indices (vec (range (count all)))
+   raw-names (mapv (fn [index] (callable-raw-name index fixed-count)) all-indices)
    rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
    predicate-bindings (loop [index 0
    acc []]
   (if (>= index (count all)) acc (let [param (nth all index)]
   (recur (+ index 1) (if (constraint-present? param) (conj acc (str "$beagle$constraint$predicate$" index " " (emit-expr* (checked-binding-constraint param)))) acc)))))
-   checked-names (mapv (fn [index] (str "$beagle$constraint$checked-param$" index)) (range (count all)))
+   checked-names (mapv (fn [index] (str "$beagle$constraint$checked-param$" index)) all-indices)
    checked-bindings (mapv (fn [index] (let [param (nth all index)
    raw (nth raw-names index)]
-  (str (nth checked-names index) " " (if (constraint-present? param) (emit-guarded-binding-value param (str "$beagle$constraint$predicate$" index) raw) raw)))) (range (count all)))
+  (str (nth checked-names index) " " (if (constraint-present? param) (emit-guarded-binding-value param (str "$beagle$constraint$predicate$" index) raw) raw)))) all-indices)
    call-args (if (= 0 (count predicate-bindings)) raw-names checked-names)
    raw-method (protocol-raw-method-name protocol-name (get method "name"))
    call (if (or (nil? rest-p) (false? rest-p)) (str "(" raw-method (if (= 0 (count call-args)) "" (str " " (str/join " " call-args))) ")") (str "(apply " raw-method " " (str/join " " call-args) ")"))

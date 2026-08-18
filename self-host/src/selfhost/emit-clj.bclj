@@ -798,9 +798,10 @@
         rest-p (get method "rest")
         all (params+rest params rest-p)
         fixed-count (count params)
+        (all-indices (Vec Int)) (vec (range (count all)))
         raw-names (mapv (fn [(index Int)] String
                           (callable-raw-name index fixed-count))
-                    (range (count all)))
+                    all-indices)
         rest-normalization
           (if (or (nil? rest-p) (false? rest-p))
             []
@@ -818,7 +819,7 @@
                     acc)))))
         checked-names (mapv (fn [(index Int)] String
                               (str "$beagle$constraint$checked-param$" index))
-                        (range (count all)))
+                        all-indices)
         checked-bindings
           (mapv (fn [(index Int)] String
                   (let [param (nth all index)
@@ -828,7 +829,7 @@
                         (emit-guarded-binding-value param
                           (str "$beagle$constraint$predicate$" index) raw)
                         raw))))
-            (range (count all)))
+            all-indices)
         call-args (if (= 0 (count predicate-bindings)) raw-names checked-names)
         raw-method (protocol-raw-method-name protocol-name (get method "name"))
         call (if (or (nil? rest-p) (false? rest-p))
