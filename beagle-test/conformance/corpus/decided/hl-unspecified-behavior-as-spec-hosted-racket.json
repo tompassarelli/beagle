@@ -5,7 +5,7 @@
   "status": "DECIDED",
   "profile": "hosted-racket",
   "input": {
-    "source": "#lang beagle/js\n(ns leakage.unspecified-behavior-as-spec)\n\n;; The case has a map/set artifact, a macro-generated name, numeric serialization,\n;; a declared two-member choice, and a deliberately missing semantic contract.\n(defn probe []\n  (canonical-artifact\n    {:map {2 \"b\" 1 \"a\"} :set #{2 1}\n     :name (macro-generated-name probe)\n     :number (serialize-number 12.50)\n     :choice (declared-choice :left :right)}))\n",
+    "source": "#lang beagle\n(ns leakage.unspecified-behavior-as-spec)\n\n;; The case has a map/set artifact, a macro-generated name, numeric serialization,\n;; a declared two-member choice, and a deliberately missing semantic contract.\n(defn probe [] Any\n  (canonical-artifact\n    {:map {2 \"b\" 1 \"a\"} :set #{2 1}\n     :name (macro-generated-name probe)\n     :number (serialize-number 12.50)\n     :choice (declared-choice :left :right)}))\n",
     "target": "racket",
     "fileName": "leakage/unspecified_behavior_as_spec.bgl",
     "command": {

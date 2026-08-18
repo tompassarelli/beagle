@@ -162,28 +162,28 @@
       "caseId": "hl-unspecified-behavior-as-spec-core",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-core.json",
       "status": "DECIDED",
-      "sha256": "ddcdbcca97def102fca2a2b13c74aec14096e44870f1f74ce27b9c769ade998f",
+      "sha256": "78b74d761f05037e30b3b26da74b72e4dfe8aff594f68cd937b2601eab130044",
       "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","core"]
     },
     {
       "caseId": "hl-unspecified-behavior-as-spec-hosted-js",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-hosted-js.json",
       "status": "DECIDED",
-      "sha256": "3f9d794a5f551b049fb8be8ce874eda9d010e8e4460b9d7a4847f075505a731d",
+      "sha256": "92d62c69212433414bdc39b637441d7d18c684e48c991223c649054dcae4d5a1",
       "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","hosted-js"]
     },
     {
       "caseId": "hl-unspecified-behavior-as-spec-hosted-racket",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-hosted-racket.json",
       "status": "DECIDED",
-      "sha256": "c5afbfe3a3cedf720d2b7654d0a0dfce5f6e727b88bebae789e2a9c9e2f0c74e",
+      "sha256": "89ea9a5865864f71fa6db3fe0756c19ff9f4407526fb8a160b4360396cb0fff8",
       "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","hosted-racket"]
     },
     {
       "caseId": "hl-unspecified-behavior-as-spec-native-core",
       "path": "corpus/decided/hl-unspecified-behavior-as-spec-native-core.json",
       "status": "DECIDED",
-      "sha256": "ddf52f93d2e8c4488322a4395ac0ecacbf9aa78e136fc7651f1727c0eae898fc",
+      "sha256": "9f780e926f9cb928ae338a1ba0583d81df1464fcb322e6a3c00a9115830a49e8",
       "coverage": ["HOST-LEAKAGE","HL-UNSPECIFIED-BEHAVIOR-AS-SPEC","native-core"]
     },
     {
