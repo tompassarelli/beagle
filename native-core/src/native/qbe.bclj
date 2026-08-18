@@ -2697,14 +2697,23 @@
       (= symbol "native_host_filesystem_lock_exclusive_v0")
       (= symbol "native_host_filesystem_unlock_v0")
       (= symbol "native_host_filesystem_file_exists_v0")
-      (= symbol "native_host_filesystem_abs_path_v0")))
+      (= symbol "native_host_filesystem_abs_path_v0")
+      (= symbol "native_host_filesystem_read_text_bounded_or_die_v0")
+      (= symbol "native_host_stdin_read_text_bounded_or_die_v0")))
+
+(defn filesystem-extern-abi? [(abi core/AbiDeclV0)] Bool
+  (and (filesystem-extern-symbol? (core/abideclv0-symbol abi))
+    (or (instance? native.core.RestrictedCOutcomeOutAbiV0
+          (core/abideclv0-convention abi))
+      (instance? native.core.RestrictedCAbiV0
+        (core/abideclv0-convention abi)))))
 
 (defn program-has-filesystem-extern? [(program core/NativeCoreProgram)] Bool
   (some?
     (some (fn [(abi core/AbiDeclV0)] Bool
             (and (instance? native.core.AbiImportV0
                    (core/abideclv0-direction abi))
-              (filesystem-extern-symbol? (core/abideclv0-symbol abi))))
+              (filesystem-extern-abi? abi)))
       (core/nativecoreprogram-abis program))))
 
 ;; --- entry point ----------------------------------------------------------

@@ -151,7 +151,7 @@
       (->UnitPreparationRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
         "preparation accepts exactly the nine defn branch corpus units")
       (let [(prelude lower/TypingPreludeV0)
-            (lower/prepare-typing-prelude frozen-source)
+            (lower/prepare-typing-prelude frozen-source configuration)
             (env lower/BodyEnvV0) (lower/typingpreludev0-env prelude)
             (index lower/SourceIndexV0) (lower/bodyenvv0-index env)
             (resolutions (Vec lower/FunctionResolutionV0))

@@ -312,6 +312,10 @@
 (defn host-context-outcome-symbol? [(symbol String)] Bool
   (= symbol "native_host_system_hostname_v0"))
 
+(defn host-whole-input-symbol? [(symbol String)] Bool
+  (or (= symbol "native_host_filesystem_read_text_bounded_or_die_v0")
+      (= symbol "native_host_stdin_read_text_bounded_or_die_v0")))
+
 (defn host-clock-outcome-symbol? [(symbol String)] Bool
   (= symbol "native_host_clock_format_iso8601_v0"))
 
@@ -346,7 +350,9 @@
                    (core/abideclv0-convention abi))
               (or (host-direct-symbol? (core/abideclv0-symbol abi))
                 (host-process-direct-symbol? (core/abideclv0-symbol abi))
-                (host-context-direct-symbol? (core/abideclv0-symbol abi))))
+                (host-context-direct-symbol? (core/abideclv0-symbol abi))
+                (host-whole-input-symbol?
+                  (core/abideclv0-symbol abi))))
             (and (instance? native.core.RestrictedCOutcomeOutAbiV0
                    (core/abideclv0-convention abi))
               (or (host-socket-symbol? (core/abideclv0-symbol abi))
@@ -1745,11 +1751,11 @@
               [])
             (with-capability (Vec String))
             (if (> (count (core/abideclv0-required-capabilities abi)) 0)
-              ["capability"]
-              [])
+              (conj hidden "capability")
+              hidden)
             (arguments (Vec String))
             (loop [(position Int) 0
-                   (collected (Vec String)) (vec (concat hidden with-capability))
+                   (collected (Vec String)) with-capability
                    (values (Vec core/NativeId))
                    (core/externcallinstruction-arguments instruction)]
               (if (>= position (count values))

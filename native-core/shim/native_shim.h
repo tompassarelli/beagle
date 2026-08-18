@@ -683,6 +683,14 @@ int32_t native_host_filesystem_path_kind_v0(
 int32_t native_host_filesystem_read_text_bounded_v0(
     native_arena *arena, const native_capability *capability, uint64_t path,
     int64_t max_bytes, uint64_t *out);
+/* Compiler whole-input adapters fail loudly with a structured diagnostic on
+   any host error or bound overflow; they never return a truncated Text. */
+uint64_t native_host_filesystem_read_text_bounded_or_die_v0(
+    native_arena *arena, const native_capability *capability, uint64_t path,
+    int64_t max_bytes);
+uint64_t native_host_stdin_read_text_bounded_or_die_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t max_bytes);
 /* Entries exclude . and .. and are returned in bytewise ascending order. */
 int32_t native_host_filesystem_list_directory_bounded_v0(
     native_arena *arena, const native_capability *capability, uint64_t path,

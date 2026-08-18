@@ -9976,6 +9976,121 @@ int32_t native_host_filesystem_read_text_bounded_v0(
   return 0;
 }
 
+static void native_host_input_failure(const char *input, const char *code,
+                                     uint64_t observed, int64_t limit) {
+  fprintf(stderr,
+          "native-host-input-diagnostic code=%s input=%s observed-size=%llu "
+          "limit=%lld\n",
+          code, input, (unsigned long long)observed, (long long)limit);
+  fflush(stderr);
+  exit(EXIT_FAILURE);
+}
+
+static void native_host_input_failure_text(uint64_t input_text,
+                                           const char *code,
+                                           uint64_t observed, int64_t limit) {
+  fprintf(stderr, "native-host-input-diagnostic code=%s input=", code);
+  fwrite(native_text_bytes(input_text), (size_t)1U,
+         (size_t)native_text_length(input_text), stderr);
+  fprintf(stderr, " observed-size=%llu limit=%lld\n",
+          (unsigned long long)observed, (long long)limit);
+  fflush(stderr);
+  exit(EXIT_FAILURE);
+}
+
+uint64_t native_host_filesystem_read_text_bounded_or_die_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text, int64_t max_bytes) {
+  uint64_t result = UINT64_C(0);
+  int32_t status = native_host_filesystem_read_text_bounded_v0(
+      arena, capability, path_text, max_bytes, &result);
+  if (status == EFBIG) {
+    native_host_input_failure_text(
+        path_text, "HOST-INPUT-BOUND-EXCEEDED",
+        (max_bytes < INT64_MAX) ? (uint64_t)(max_bytes + INT64_C(1)) :
+                                  UINT64_MAX,
+        max_bytes);
+  }
+  if (status != 0) {
+    native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                   max_bytes);
+  }
+  return result;
+}
+
+uint64_t native_host_stdin_read_text_bounded_or_die_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t max_bytes) {
+  uint8_t *buffer = NULL;
+  uint8_t *destination = NULL;
+  size_t length = (size_t)0U;
+  size_t capacity = (size_t)0U;
+  size_t bound;
+  uint64_t result;
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (max_bytes < INT64_C(0)) ||
+      ((uint64_t)max_bytes > (uint64_t)SIZE_MAX)) {
+    native_host_input_failure("stdin", "HOST-INPUT-INVALID-BOUND", 0,
+                             max_bytes);
+  }
+  bound = (size_t)max_bytes;
+  for (;;) {
+    ssize_t amount;
+    if (length == capacity) {
+      size_t grown = (capacity == (size_t)0U) ? (size_t)1U : capacity * 2U;
+      uint8_t *replacement;
+      if (capacity == bound) {
+        uint8_t extra;
+        amount = read(STDIN_FILENO, &extra, (size_t)1U);
+        if (amount < 0 && errno == EINTR) {
+          continue;
+        }
+        if (amount > 0) {
+          native_host_input_failure("stdin", "HOST-INPUT-BOUND-EXCEEDED",
+                                   (uint64_t)length + UINT64_C(1), max_bytes);
+        }
+        if (amount < 0) {
+          native_host_input_failure("stdin", "HOST-INPUT-READ-FAILED",
+                                   (uint64_t)length, max_bytes);
+        }
+        break;
+      }
+      if ((grown < capacity) || (grown > bound)) {
+        grown = bound;
+      }
+      replacement = (uint8_t *)realloc(buffer, grown);
+      if (replacement == NULL) {
+        native_host_input_failure("stdin", "HOST-INPUT-ALLOC-FAILED",
+                                 (uint64_t)length, max_bytes);
+      }
+      buffer = replacement;
+      capacity = grown;
+    }
+    amount = read(STDIN_FILENO, buffer + length, capacity - length);
+    if (amount < 0 && errno == EINTR) {
+      continue;
+    }
+    if (amount < 0) {
+      native_host_input_failure("stdin", "HOST-INPUT-READ-FAILED",
+                               (uint64_t)length, max_bytes);
+    }
+    if (amount == 0) {
+      break;
+    }
+    length += (size_t)amount;
+  }
+  result = native_text_alloc(arena, (uint64_t)length, &destination);
+  if ((length != (size_t)0U) && (destination != NULL)) {
+    memcpy(destination, buffer, length);
+  }
+  free(buffer);
+  if (!native_utf8_valid(destination, (uint64_t)length)) {
+    native_host_input_failure("stdin", "HOST-INPUT-INVALID-UTF8",
+                             (uint64_t)length, max_bytes);
+  }
+  return result;
+}
+
 static int native_host_filesystem_name_compare(const void *left,
                                                const void *right) {
   const char *left_name = *(const char *const *)left;

@@ -2315,6 +2315,17 @@
 (defn host-filesystem-function-id [(operation String)] core/NativeId
   (lower-id "extern" [(str "host-filesystem-" operation "-v0")]))
 
+(defn host-whole-input-abi-id [(operation String)] core/NativeId
+  (lower-id "abi" [(str "host-whole-input-" operation "-v0")]))
+
+(defn host-whole-input-function-id [(operation String)] core/NativeId
+  (lower-id "extern" [(str "host-whole-input-" operation "-v0")]))
+
+(defn host-whole-input-symbol [(operation String)] String
+  (if (= operation "read-file-bounded")
+    "native_host_filesystem_read_text_bounded_or_die_v0"
+    "native_host_stdin_read_text_bounded_or_die_v0"))
+
 (defn host-filesystem-callee? [(name String)] Bool
   (or (= name "host.fs/read-text-bounded")
       (= name "host.fs/list-directory-bounded")
@@ -2352,7 +2363,9 @@
       (same-id? candidate (host-filesystem-abi-id "lock-exclusive"))
       (same-id? candidate (host-filesystem-abi-id "unlock"))
       (same-id? candidate (host-filesystem-abi-id "file-exists"))
-      (same-id? candidate (host-filesystem-abi-id "abs-path"))))
+      (same-id? candidate (host-filesystem-abi-id "abs-path"))
+      (same-id? candidate (host-whole-input-abi-id "read-file-bounded"))
+      (same-id? candidate (host-whole-input-abi-id "read-stdin-bounded"))))
 
 (defn host-process-effect-id [] core/NativeId
   (lower-id "effect" ["host-process-run-inherit-v0"]))
@@ -2603,6 +2616,29 @@
                 (if (< shifted (+ limit digit))
                   nil
                   (recur (+ position 1) (- shifted digit)))))))))))
+
+;; Whole-input compiler services are deliberately bounded. The configuration
+;; entry is part of the receipt context so changing it cannot silently reuse a
+;; program lowered under a different host-input contract.
+(def WHOLE-INPUT-DEFAULT-LIMIT Int 67108864)
+(def WHOLE-INPUT-CONFIG-PREFIX String "native-whole-input-limit=")
+
+(defn whole-input-limit-from-configuration
+  [(configuration (Vec String))] Int
+  (loop [(position Int) 0]
+    (if (>= position (count configuration))
+      WHOLE-INPUT-DEFAULT-LIMIT
+      (let [(entry String) (nth configuration position)]
+        (if (and (>= (count entry) (count WHOLE-INPUT-CONFIG-PREFIX))
+                 (= WHOLE-INPUT-CONFIG-PREFIX
+                   (subs entry 0 (count WHOLE-INPUT-CONFIG-PREFIX))))
+          (let [(parsed (U Int Nil))
+                (parse-int-text
+                  (subs entry (count WHOLE-INPUT-CONFIG-PREFIX)
+                    (count entry)))]
+            (if (and (some? parsed) (> parsed 0)) parsed
+              WHOLE-INPUT-DEFAULT-LIMIT))
+          (recur (+ position 1)))))))
 
 (defrecord GlobalBindingV0
   [(module-name String)
@@ -2893,7 +2929,8 @@
    (types (Vec core/TypeDef))
    (signatures (Vec TypedFunctionV0))
    (signature-sources (Vec core/NativeId))
-   (globals (Vec GlobalBindingV0))])
+   (globals (Vec GlobalBindingV0))
+   (whole-input-limit Int)])
 
 (defn state-blocked? [(state BodyStateV0)] Bool
   (> (count (bodystatev0-failure state)) 0))
@@ -9119,6 +9156,43 @@
             arena
             (core/->TokenFlowV0 [] [])))
         result-id result-type false))))
+
+(defn lower-whole-input-call
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (callee String)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (let [file? (= callee "selfhost.rt/slurp-file")
+        valid? (if file?
+                  (and (= 1 (count values))
+                    (text-operand? (nth value-types 0)))
+                  (= 0 (count values)))]
+    (if (not valid?)
+      (fail-result state
+        (str "TODO-NATIVE-WHOLE-INPUT-OPERANDS: " callee
+          (if file? " takes one Text path" " takes no operands")))
+      (let [(operation String)
+            (if file? "read-file-bounded" "read-stdin-bounded")
+            (limit-id core/NativeId) (state-id state owner "whole-input-limit")
+            (with-limit BodyStateV0)
+            (state-emit (state-bump state)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 limit-id (int-type-id))
+                (core/->I64Atom (bodyenvv0-whole-input-limit env))))
+            (result-id core/NativeId) (state-id with-limit owner "whole-input")
+            arguments (if file? [(nth values 0) limit-id] [limit-id])]
+        (->ExprResultV0
+          (state-emit with-limit
+            (core/->ExternCallInstruction
+              (core/->SsaValueV0 result-id (text-type-id))
+              (host-whole-input-abi-id operation)
+              arguments
+              (arena-value-id owner)
+              (core/->TokenFlowV0 [] [])))
+          result-id (text-type-id) false)))))
 
 (defn lower-host-text-output-call
   [(owner core/NativeId)
@@ -16131,6 +16205,11 @@
                 (host-context-callee? callee)
                 (lower-host-context-call owner current callee values)
 
+                (or (= callee "selfhost.rt/slurp-file")
+                    (= callee "selfhost.rt/read-stdin"))
+                (lower-whole-input-call env owner current callee values
+                  value-types)
+
                 (host-filesystem-callee? callee)
                 (lower-host-filesystem-call owner current callee values value-types)
 
@@ -19449,7 +19528,8 @@
    (source-digest String)])
 
 (defn prepare-typing-prelude
-  [(frozen-source stages/FrozenSourceStageV1)] TypingPreludeV0
+  [(frozen-source stages/FrozenSourceStageV1)
+   (configuration (Vec String))] TypingPreludeV0
   (let [(source stages/SourceStageV1)
         (stages/frozensourcestagev1-stage frozen-source)
         (source-digest String) (stages/frozensourcestagev1-digest frozen-source)
@@ -19513,7 +19593,7 @@
         (signatures (Vec TypedFunctionV0)) (collect-functions signature-resolutions)]
     (->TypingPreludeV0
       (->BodyEnvV0 index process-source-types signatures function-sources
-        globals)
+        globals (whole-input-limit-from-configuration configuration))
       record-resolutions signature-resolutions record-keys source-digest)))
 
 (defn lower-typed-stage
@@ -19524,7 +19604,8 @@
   (let [(source stages/SourceStageV1)
         (stages/frozensourcestagev1-stage frozen-source)
         (graph stages/TermGraphV0) (stages/sourcestagev1-terms source)
-        (prelude TypingPreludeV0) (prepare-typing-prelude frozen-source)
+        (prelude TypingPreludeV0)
+        (prepare-typing-prelude frozen-source configuration)
         (source-digest String) (typingpreludev0-source-digest prelude)
         (env BodyEnvV0) (typingpreludev0-env prelude)
         (record-resolutions (Vec RecordResolutionV0))
@@ -20648,8 +20729,28 @@
     "v0"
     layouts-digest))
 
+(defn host-whole-input-abi [(operation String) (layouts-digest String)]
+  core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-whole-input-abi-id operation)
+    (host-whole-input-function-id operation)
+    (host-whole-input-symbol operation)
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    (if (= operation "read-file-bounded")
+      [(borrowed-abi-value "path" (text-type-id))
+       (borrowed-abi-value "max-bytes" (int-type-id))]
+      [(borrowed-abi-value "max-bytes" (int-type-id))])
+    (core/->AbiValueV0 "result" (text-type-id)
+      (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+    (type-id "LowerFailure")
+    [(allocate-effect-id) (host-filesystem-effect-id)]
+    [(allocate-capability-id) (host-filesystem-capability-id)]
+    "v0"
+    layouts-digest))
 (defn host-filesystem-abis [(layouts-digest String)] (Vec core/AbiDeclV0)
-  [(host-filesystem-abi
+  (conj
+    [(host-filesystem-abi
      "read-text-bounded"
      "native_host_filesystem_read_text_bounded_v0"
      [(borrowed-abi-value "path" (text-type-id))
@@ -20724,7 +20825,10 @@
      "path"
      (text-type-id)
      true
-     layouts-digest)])
+     layouts-digest)]
+    (host-whole-input-abi "read-file-bounded" layouts-digest)
+    (host-whole-input-abi "read-stdin-bounded" layouts-digest)))
+ 
 
 (defn host-process-direct-abi
   [(operation String)
@@ -23947,7 +24051,7 @@
 
 (def empty-context-env BodyEnvV0
   (->BodyEnvV0 empty-context-index empty-context-types
-    [empty-context-signature] [] []))
+    [empty-context-signature] [] [] WHOLE-INPUT-DEFAULT-LIMIT))
 
 (def empty-context-owner core/NativeId
   (empty-context-id "owner"))
