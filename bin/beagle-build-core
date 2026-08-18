@@ -655,6 +655,7 @@ write_core_checkpoint_identity "$core_result_early_input" \
 core_checkpoint_early_key="$(sha256sum "$core_checkpoint_early_input" | awk '{print $1}')"
 core_result_alias_root="$cache_root/aliases"
 core_result_root="$cache_root/results"
+core_c17_attestation_root="$cache_root/c17-attestations"
 core_result_alias="$core_result_alias_root/$core_result_early_key"
 core_checkpoint_alias_root="$cache_root/checkpoint-aliases"
 core_checkpoint_root="$cache_root/checkpoints"
@@ -1091,9 +1092,76 @@ validate_recorded_core_result_pass() {
        "beagle-core-result/v1 $key $artifact_manifest_digest" ]]
 }
 
+use_core_c17_attestation_source() {
+    local source_entry="$1" native_digest="$2" facts_digest="$3"
+    local entry_map_digest="$4" report receipt header_digest source_digest
+    [[ "$source_entry" != "$core_result_entry" ]] || return 1
+    validate_recorded_core_result_pass "$source_entry" || return 1
+    report="$source_entry/artifacts/report.txt"
+    receipt="$source_entry/artifacts/c17.receipt"
+    [[ -f "$report" && -f "$receipt" &&
+       -f "$source_entry/artifacts/module.native-program" &&
+       -f "$source_entry/artifacts/module_0.h" &&
+       -f "$source_entry/artifacts/module_0.c" &&
+       "$native_digest" == "$(sha256sum \
+           "$source_entry/artifacts/module.native-program" | awk '{print $1}')" ]] ||
+        return 1
+    cmp -s "$work/artifacts/native.entry-map" \
+        "$source_entry/artifacts/native.entry-map" || return 1
+    header_digest="$(sha256sum "$source_entry/artifacts/module_0.h" |
+        awk '{print $1}')"
+    source_digest="$(sha256sum "$source_entry/artifacts/module_0.c" |
+        awk '{print $1}')"
+    [[ "$(grep -Fxc "native-provenance-v0 epoch sha256:$native_digest" \
+            "$report" || true)" == 1 &&
+       "$(grep -Fxc 'materialize-c17 OK module_0.h module_0.c' \
+            "$report" || true)" == 1 &&
+       "$(grep -Fxc "materialize-c17-artifact module_0.h sha256:$header_digest" \
+            "$report" || true)" == 1 &&
+       "$(grep -Fxc "materialize-c17-artifact module_0.c sha256:$source_digest" \
+            "$report" || true)" == 1 &&
+       "$(grep -Fxc "materialize-c17-artifact native.entry-map sha256:$entry_map_digest" \
+            "$report" || true)" == 1 &&
+       "$(grep -Fxc 'result PASS' "$report" || true)" == 1 &&
+       "$(grep -c '^obligation-projection PASS ' "$report" || true)" == 10 ]] ||
+        return 1
+    ! grep -q '^pending ' "$report" || return 1
+    grep -Fq "sha256:$native_digest" "$receipt" || return 1
+    grep -Fq "source-facts-sha256=$facts_digest" "$receipt" || return 1
+    grep -Fq 'abi=lp64' "$receipt" || return 1
+    grep -Fq 'profile=3' "$receipt" || return 1
+    grep -Fq 'native-to-c17' "$receipt" || return 1
+    grep -Fq 'restricted-c17-v0' "$receipt" || return 1
+    grep -Fq "sha256:$header_digest" "$receipt" || return 1
+    grep -Fq "sha256:$source_digest" "$receipt" || return 1
+    grep -Fq "sha256:$entry_map_digest" "$receipt" || return 1
+    cp -- "$source_entry/artifacts/module_0.h" "$work/artifacts/module_0.h"
+    cp -- "$source_entry/artifacts/module_0.c" "$work/artifacts/module_0.c"
+    cp -- "$receipt" "$work/artifacts/c17.receipt"
+    grep '^materialize-c17' "$report" >"$work/core-c17-attestation.report"
+    core_c17_attestation_report="$work/core-c17-attestation.report"
+}
+
+record_core_c17_attestation() {
+    local source_entry="$1" native_digest="$2" source_key ready_digest
+    local attestation staging
+    source_key="$(basename "$source_entry")"
+    ready_digest="$(sha256sum "$source_entry/READY" | awk '{print $1}')"
+    mkdir -p "$core_c17_attestation_root" "$cache_root/.result-tmp"
+    attestation="$core_c17_attestation_root/$native_digest"
+    staging="$(mktemp "$cache_root/.result-tmp/$native_digest.c17.XXXXXX")"
+    printf 'beagle-core-c17-pass/v1 %s %s %s\n' \
+        "$native_digest" "$source_key" "$ready_digest" >"$staging"
+    sync -f "$staging"
+    [[ ! -e "$attestation" && ! -L "$attestation" ]] || rm -f -- "$attestation"
+    ln "$staging" "$attestation"
+    rm -f -- "$staging"
+    sync -f "$core_c17_attestation_root"
+}
+
 reuse_core_c17_attestation() {
-    local native_digest facts_digest entry_map_digest source_entry source_key
-    local report receipt header_digest source_digest
+    local native_digest facts_digest entry_map_digest attestation
+    local format recorded_digest source_key ready_digest extra source_entry
     [[ "$core_checkpoint_cache_hit" == 1 &&
        -n "${seen_materializers[c17]:-}" &&
        "$abi" == "lp64" && "$simd_required" == 0 ]] || return 1
@@ -1102,55 +1170,34 @@ reuse_core_c17_attestation() {
     facts_digest="$(sha256sum "$work/artifacts/source.facts" | awk '{print $1}')"
     entry_map_digest="$(sha256sum "$work/artifacts/native.entry-map" |
         awk '{print $1}')"
+    attestation="$core_c17_attestation_root/$native_digest"
+    if [[ -f "$attestation" && ! -L "$attestation" ]]; then
+        read -r format recorded_digest source_key ready_digest extra \
+            <"$attestation" || true
+        source_entry="$core_result_root/$source_key"
+        if [[ "$format" == "beagle-core-c17-pass/v1" &&
+              "$recorded_digest" == "$native_digest" &&
+              "$source_key" =~ ^[0-9a-f]{64}$ &&
+              "$ready_digest" =~ ^[0-9a-f]{64}$ &&
+              -z "${extra:-}" &&
+              -f "$source_entry/READY" &&
+              "$(sha256sum "$source_entry/READY" | awk '{print $1}')" == \
+                  "$ready_digest" ]] &&
+           use_core_c17_attestation_source "$source_entry" "$native_digest" \
+               "$facts_digest" "$entry_map_digest"; then
+            echo "beagle build: core-c17-attestation HIT $native_digest -> $source_key" >&2
+            return 0
+        fi
+        rm -f -- "$attestation"
+    fi
     while IFS= read -r -d '' source_entry; do
-        [[ "$source_entry" != "$core_result_entry" ]] || continue
-        validate_recorded_core_result_pass "$source_entry" || continue
-        report="$source_entry/artifacts/report.txt"
-        receipt="$source_entry/artifacts/c17.receipt"
-        [[ -f "$report" && -f "$receipt" &&
-           -f "$source_entry/artifacts/module.native-program" &&
-           -f "$source_entry/artifacts/module_0.h" &&
-           -f "$source_entry/artifacts/module_0.c" &&
-           "$native_digest" == "$(sha256sum \
-               "$source_entry/artifacts/module.native-program" | awk '{print $1}')" ]] ||
-            continue
-        cmp -s "$work/artifacts/native.entry-map" \
-            "$source_entry/artifacts/native.entry-map" || continue
-        header_digest="$(sha256sum "$source_entry/artifacts/module_0.h" |
-            awk '{print $1}')"
-        source_digest="$(sha256sum "$source_entry/artifacts/module_0.c" |
-            awk '{print $1}')"
-        [[ "$(grep -Fxc "native-provenance-v0 epoch sha256:$native_digest" \
-                "$report" || true)" == 1 &&
-           "$(grep -Fxc 'materialize-c17 OK module_0.h module_0.c' \
-                "$report" || true)" == 1 &&
-           "$(grep -Fxc "materialize-c17-artifact module_0.h sha256:$header_digest" \
-                "$report" || true)" == 1 &&
-           "$(grep -Fxc "materialize-c17-artifact module_0.c sha256:$source_digest" \
-                "$report" || true)" == 1 &&
-           "$(grep -Fxc "materialize-c17-artifact native.entry-map sha256:$entry_map_digest" \
-                "$report" || true)" == 1 &&
-           "$(grep -Fxc 'result PASS' "$report" || true)" == 1 &&
-           "$(grep -c '^obligation-projection PASS ' "$report" || true)" == 10 ]] ||
-            continue
-        ! grep -q '^pending ' "$report" || continue
-        grep -Fq "sha256:$native_digest" "$receipt" || continue
-        grep -Fq "source-facts-sha256=$facts_digest" "$receipt" || continue
-        grep -Fq 'abi=lp64' "$receipt" || continue
-        grep -Fq 'profile=3' "$receipt" || continue
-        grep -Fq 'native-to-c17' "$receipt" || continue
-        grep -Fq 'restricted-c17-v0' "$receipt" || continue
-        grep -Fq "sha256:$header_digest" "$receipt" || continue
-        grep -Fq "sha256:$source_digest" "$receipt" || continue
-        grep -Fq "sha256:$entry_map_digest" "$receipt" || continue
-        cp -- "$source_entry/artifacts/module_0.h" "$work/artifacts/module_0.h"
-        cp -- "$source_entry/artifacts/module_0.c" "$work/artifacts/module_0.c"
-        cp -- "$receipt" "$work/artifacts/c17.receipt"
-        grep '^materialize-c17' "$report" >"$work/core-c17-attestation.report"
-        core_c17_attestation_report="$work/core-c17-attestation.report"
-        source_key="$(basename "$source_entry")"
-        echo "beagle build: core-c17-attestation HIT $native_digest -> $source_key" >&2
-        return 0
+        if use_core_c17_attestation_source "$source_entry" "$native_digest" \
+            "$facts_digest" "$entry_map_digest"; then
+            record_core_c17_attestation "$source_entry" "$native_digest"
+            source_key="$(basename "$source_entry")"
+            echo "beagle build: core-c17-attestation HIT $native_digest -> $source_key" >&2
+            return 0
+        fi
     done < <(find "$core_result_root" -mindepth 1 -maxdepth 1 \
         -type d -print0 2>/dev/null)
     echo "beagle build: core-c17-attestation MISS $native_digest" >&2
