@@ -1099,7 +1099,7 @@
    rest-t (get fn-t "rest")
    n-fixed (count fixed)
    n-args (count args)
-   argument-indices (vec (range (if (< n-fixed n-args) n-fixed n-args)))
+   argument-indices (vec (range (if (nil? rest-t) (if (< n-fixed n-args) n-fixed n-args) n-args)))
    fn-display (reference->string fn-name)
    fn-leaf (reference-leaf fn-name)
    check-slot (fn [i] (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
@@ -1877,16 +1877,23 @@
   (loop [env initial-env
    types (definition-type-table prog initial-env)
    remaining pending]
-  (if (= (count remaining) 0) {"env" env "types" types} (let [step (reduce (fn [state form] (let [before-diags (get (deref STATE) "diagnostics")
-   inferred (prune-inference-type (infer-expr! (get form "value") (get state "env")))]
-  (if (and (not (poly-type? inferred)) (not (type-contains-inference-var? inferred)) (not (type-contains-any? inferred))) (let [name (get form "name")]
-  {"env" (assoc (get state "env") name inferred) "types" (assoc (get state "types") name inferred) "remaining" (get state "remaining") "progress" true}) (do
+  (if (= (count remaining) 0) {"env" env "types" types "ok" true} (let [step (reduce (fn [state form] (if (= true (get state "failed")) state (let [before-diags (get (deref STATE) "diagnostics")
+   inferred (prune-inference-type (infer-expr! (get form "value") (get state "env")))
+   after-diags (get (deref STATE) "diagnostics")]
+  (cond
+  (> (count after-diags) (count before-diags)) {"env" (get state "env") "types" (get state "types") "remaining" (get state "remaining") "progress" (get state "progress") "failed" true}
+  (and (not (poly-type? inferred)) (not (type-contains-inference-var? inferred)) (not (type-contains-any? inferred))) (let [name (get form "name")]
+  {"env" (assoc (get state "env") name inferred) "types" (assoc (get state "types") name inferred) "remaining" (get state "remaining") "progress" true "failed" false})
+  :else (do
   (swap! STATE assoc "diagnostics" before-diags)
-  {"env" (get state "env") "types" (get state "types") "remaining" (conj (get state "remaining") form) "progress" (get state "progress")})))) {"env" env "types" types "remaining" [] "progress" false} remaining)]
-  (if (= true (get step "progress")) (recur (get step "env") (get step "types") (get step "remaining")) (do
+  {"env" (get state "env") "types" (get state "types") "remaining" (conj (get state "remaining") form) "progress" (get state "progress") "failed" false}))))) {"env" env "types" types "remaining" [] "progress" false "failed" false} remaining)]
+  (cond
+  (= true (get step "failed")) {"env" (get step "env") "types" (get step "types") "ok" false}
+  (= true (get step "progress")) (recur (get step "env") (get step "types") (get step "remaining"))
+  :else (do
   (doseq [form (get step "remaining")]
   (emit-diag! (str "beagle: " (get form "node") " " (get form "name") ": omitted type did not resolve to a concrete monomorphic type; " "add a type annotation, or write Any explicitly for an intentional dynamic boundary")))
-  {"env" (get step "env") "types" (get step "types")})))))))
+  {"env" (get step "env") "types" (get step "types") "ok" false})))))))
 
 (defn infer-definition-types! [prog initial-env]
   (let [before-provisional (get (deref STATE) "diagnostics")]
@@ -1894,8 +1901,9 @@
   (swap! STATE assoc "diagnostics" before-provisional)
   (let [values (infer-value-definition-types! prog initial-env)
    env (get values "env")]
+  (if (= true (get values "ok")) (do
   (constrain-callable-definitions! prog env)
-  (finalize-callable-definition-types! prog env (get values "types")))))
+  (assoc (finalize-callable-definition-types! prog env (get values "types")) "ok" true)) values))))
 
 (defn check-core-function-abis! [prog types]
   (if (= (get prog "target") "core") (do
@@ -2626,13 +2634,14 @@
    inferred (infer-definition-types! checked-input initial-env)
    env (get inferred "env")]
   (swap! STATE assoc "effective-definition-types" (get inferred "types"))
+  (if (= true (get inferred "ok")) (do
   (check-declared-module-contract! checked-input (get inferred "types"))
   (check-core-function-abis! checked-input (get inferred "types"))
   (doseq [form (get checked-input "forms")]
   (check-form! form env))
   (check-nix-free-dotted! checked-input)
   (check-qualified-resolution! checked-input env)
-  (check-purity! checked-input))
+  (check-purity! checked-input))))
   (swap! STATE assoc "checked-program" (decorate-tagged-value checked-input (get (deref STATE) "record-updates") (get (deref STATE) "record-field-accesses") (get (deref STATE) "binding-constraint-proofs"))))
   (let [diags (get (deref STATE) "diagnostics")]
   {"diagnostics" diags "count" (count diags)}))
@@ -3138,6 +3147,15 @@
   (expect! "definition inference: unresolved value cycle is rejected" (let [prog (make-prog [(make-def-node "left" nil (make-ref "right")) (make-def-node "right" nil (make-ref "left"))])
    result (type-check! prog)]
   (and (> (get result "count") 0) (diagnostics-include? (get result "diagnostics") "omitted type did not resolve to a concrete monomorphic type"))))
+  (expect! "definition inference: row-22 defonce keeps the causal nth diagnostic" (let [initializer (make-call "nth" [(make-call "*" [(make-lit "number" 65535) (make-lit "float" 0.5)]) (make-call "-" [(make-lit "number" 256)])])
+   definition (assoc (make-def-node "g__2" nil initializer) "node" "defonce")
+   diagnostics (get (type-check! (make-prog [definition])) "diagnostics")]
+  (and (= (first diagnostics) "beagle: call to nth: arg 1 expected (Vec Any), got Float") (not (diagnostics-include? diagnostics "omitted type did not resolve")))))
+  (expect! "definition inference: row-29 def keeps the causal nth diagnostic" (let [if-let-value (make-let-node [(make-let-binding "w__5" nil (make-lit "float" 100.0))] [(make-if-node (make-ref "w__5") (make-lit "float" 0.0) (make-lit "number" -1))])
+   index (make-if-node (make-lit "bool" true) (make-lit "number" 0) (make-lit "number" 3))
+   definition (make-def-node "g__4" nil (make-call "nth" [if-let-value index]))
+   diagnostics (get (type-check! (make-prog [definition])) "diagnostics")]
+  (and (= (first diagnostics) "beagle: call to nth: arg 1 expected (Vec Any), got Float") (not (diagnostics-include? diagnostics "omitted type did not resolve")))))
   (expect! "definition inference: authored Any stays authored and effective" (let [authored (make-prim "Any")
    prog (make-prog [(make-def-node "dynamic" authored (make-lit "number" 42))])
    result (type-check! prog)
