@@ -1015,7 +1015,10 @@
 
 (define (program->module-interface prog
                                    #:source-id [source-id #f]
-                                   #:provisional? [provisional? #f])
+                                   #:provisional? [provisional? #f]
+                                   #:capture-types? [capture-types? #f])
+  (when capture-types?
+    (ensure-program-read-receipt-table! prog))
   (define effective
     (publication-effective-definition-types prog provisional?))
   (define ast-bindings
@@ -1113,6 +1116,38 @@
      source-id))
   (unless provisional?
     (emit-interface-evidence-v1! prog interface))
+  (when capture-types?
+    (define profile (semantic-profile-for-target (program-target prog)))
+    (define members (sort (hash-keys qualified-bindings) symbol<?))
+    (define semantic-id (module-interface-digest interface))
+    (define compiler-inputs
+      (hash 'source-id source-id
+            'namespace (program-namespace prog)
+            'target (program-target prog)
+            'profile profile
+            'interface source-canonical))
+    (record-program-read-receipt!
+     prog
+     (make-read-receipt-v1
+      'interface-publication
+      (or source-id (symbol->string (program-namespace prog)))
+      members
+      'published
+      profile
+      (program-target prog)
+      compiler-inputs
+      #:semantic-fact-ids (list semantic-id)))
+    (record-program-read-receipt!
+     prog
+     (make-read-receipt-v1
+      'module-member-enumeration
+      (list 'interface (program-namespace prog))
+      members
+      (list->vector members)
+      profile
+      (program-target prog)
+      compiler-inputs
+      #:semantic-fact-ids (list semantic-id))))
   interface)
 
 (define (module-interface-export? interface name)

@@ -65,6 +65,7 @@
              "gate-fact-maintainer.rkt" ; shadow-only gate fact envelopes, miss-before-fallback, cold coverage
              "type-facts-v1.rkt"      ; shadow-only canonical envelopes, source facets, and SCC identities
              "evidence-edges-v1.rkt" ; shadow-only derivation/evidence chains at checker seams
+             "read-receipts-v1.rkt"   ; shadow-only compiler consumer read receipts
              "code-as-facts-rename.rkt" ; hermetic recursive-fact edit/reconstruction floor; Beagle Store owns scope resolution
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
              "export-xmodule.rkt"       ; a js/export'd definition keeps its signature across modules + on the query surface

@@ -144,6 +144,66 @@
 ;; errors, which still travel through their ordinary error callback.
 (define current-purity-warning-port (make-parameter #f))
 
+(define (compiler-semantic-receipt-inputs prog)
+  (hash
+   'check-profile (current-check-profile)
+   'target (program-target prog)
+   'namespace (program-namespace prog)
+   'forms (list->vector (map syntax->datum (program-form-stxs prog)))
+   'requires
+   (list->vector
+    (for/list ([entry (in-list (program-requires prog))])
+      (vector (require-entry-ns entry)
+              (require-entry-alias entry)
+              (require-entry-refer entry))))))
+
+(define (record-check-selection-receipts! prog)
+  (define target (program-target prog))
+  (define profile (semantic-profile-for-target target))
+  (define inputs (compiler-semantic-receipt-inputs prog))
+  (record-program-read-receipt!
+   prog
+   (make-read-receipt-v1
+    'semantic-profile-selection
+    (program-namespace prog)
+    '()
+    profile
+    profile
+    target
+    inputs
+    #:semantic-fact-ids
+    (list (semantic-fact-id-v1
+           "ProfileSelectionV1"
+           profile
+           (program-namespace prog)
+           profile))))
+  (record-program-read-receipt!
+   prog
+   (make-read-receipt-v1
+    'target-selection
+    (program-namespace prog)
+    '()
+    target
+    profile
+    target
+    inputs
+    #:semantic-fact-ids
+    (list (semantic-fact-id-v1
+           "TargetSelectionV1"
+           profile
+           (program-namespace prog)
+           target))))
+  (record-program-read-receipt!
+   prog
+   (make-read-receipt-v1
+    'compiler-semantic-inputs
+    (program-namespace prog)
+    '()
+    'read
+    profile
+    target
+    inputs)))
+
 (define INFERENCE-BOTTOM #f)
 
 (define (inference-bottom? type)
@@ -1837,6 +1897,20 @@
     (define interface (module-import-interface import))
     (define prefix (module-import-prefix import))
     (define namespace (module-interface-namespace interface))
+    (define members (interface-member-candidates interface))
+    (define profile (semantic-profile-for-target (program-target prog)))
+    (record-program-read-receipt!
+     prog
+     (make-read-receipt-v1
+      'module-member-enumeration
+      (list 'import prefix namespace)
+      members
+      (list->vector members)
+      profile
+      (program-target prog)
+      (hash 'check-profile (current-check-profile)
+            'consumer 'build-initial-env)
+      #:semantic-fact-ids (list (module-interface-digest interface))))
     (for ([(name binding) (in-hash (module-interface-bindings interface))]
           #:unless (eq? (interface-binding-kind binding) 'macro))
       (define binding-type (interface-binding-type binding))
@@ -6824,7 +6898,10 @@
     ;; Capture per-node inferred types ONLY when asked (types-as-view /
     ;; beagle-explain-type). When off, type-tbl is #f so store-type! no-ops.
     (define type-tbl (and capture-types? (make-hasheq)))
-    (when type-tbl (register-program-type-table! prog type-tbl))
+    (when capture-types?
+      (register-program-type-table! prog type-tbl)
+      (ensure-program-read-receipt-table! prog)
+      (record-check-selection-receipts! prog))
     (define binder-type-tbl (make-hasheq))
     (register-program-binder-type-table! prog binder-type-tbl)
     ;; Free dotted-name scope check (nix target) needs the program-wide set of
@@ -9151,6 +9228,28 @@
      (go-body (defmethod-form-body root) #f)]
     [else (go root)]))
 
+(define (interface-member-candidates interface)
+  (sort (hash-keys (module-interface-bindings interface)) symbol<?))
+
+(define (record-resolution-receipt! prog query candidates result interface)
+  (define target (program-target prog))
+  (define profile (semantic-profile-for-target target))
+  (record-program-read-receipt!
+   prog
+   (make-read-receipt-v1
+    'resolution-lookup
+    query
+    candidates
+    result
+    profile
+    target
+    (hash 'check-profile (current-check-profile)
+          'resolution 'module-interface)
+    #:semantic-fact-ids
+    (if interface
+        (list (module-interface-digest interface))
+        '()))))
+
 (define (check-module-interface-resolution! prog)
   (when (and (>= (current-check-profile) 1)
              (pair? (program-imported-module-interfaces prog)))
@@ -9187,6 +9286,16 @@
                (values raw #f #f))]))
       (when prefix
         (define interface (hash-ref prefix->interface prefix #f))
+        (define candidates
+          (if interface (interface-member-candidates interface) '()))
+        (record-resolution-receipt!
+         prog
+         spelling
+         candidates
+         (if (and interface (module-interface-export? interface member))
+             'hit
+             'miss)
+         interface)
         (when (and interface
                    (not (module-interface-export? interface member)))
           (set! violations
@@ -9278,6 +9387,16 @@
     (define module-prefixes
       (for/set ([(_ p) (in-hash (program-imported-symbol-ns prog))])
         (symbol->string p)))
+    (define prefix->interface
+      (for/fold ([out (hash)])
+                ([import (in-list (program-imported-module-interfaces prog))])
+        (define interface (module-import-interface import))
+        (hash-set
+         (hash-set out
+                   (symbol->string (module-import-prefix import))
+                   interface)
+         (symbol->string (module-interface-namespace interface))
+         interface)))
     (define noted-ns (mutable-set))
     (define violations '())
     (define (visit! ref loc)
@@ -9307,6 +9426,19 @@
                   (qualified-interface-name
                    (qualified-ref-qualifier ref)
                    (qualified-ref-name ref))))))
+      (define interface (and qualified? (hash-ref prefix->interface p #f)))
+      (define ns (hash-ref required p #f))
+      (define candidates
+        (cond
+          [interface (interface-member-candidates interface)]
+          [ns (hash-ref catalog (symbol->string ns) '())]
+          [else '()]))
+      (record-resolution-receipt!
+       prog
+       s
+       candidates
+       (if resolved-in-env? 'hit 'miss)
+       interface)
       (when (and qualified?
                  (char-alphabetic? (string-ref s 0))
                  (or (not clj-target?)
@@ -9314,7 +9446,6 @@
                  (or (not clj-target?)
                      (not (string-prefix? s "clojure.")))
                  (not resolved-in-env?))
-        (define ns (hash-ref required p #f))
         (cond
           [ns
            (when clj-target?

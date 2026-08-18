@@ -5,7 +5,8 @@
 
 (require racket/set
          racket/string
-         "types.rkt")
+         "types.rkt"
+         "read-receipts-v1.rkt")
 
 ;; --- tag aliases -----------------------------------------------------------
 (define BT BRACKET-TAG)
@@ -977,6 +978,62 @@
 (define (program-type-table prog)
   (hash-ref PROGRAM->TYPES prog #f))
 
+;; Shadow-only evidence table.  It is program-scoped like the existing type
+;; capture table, and receipt identity deduplicates repeated reads while
+;; preserving the exact canonical receipt payload.
+(define PROGRAM->READ-RECEIPTS (make-weak-hasheq))
+(define (register-program-read-receipt-table! prog table)
+  (unless (hash? table)
+    (raise-argument-error 'register-program-read-receipt-table! "hash?" table))
+  (hash-set! PROGRAM->READ-RECEIPTS prog table)
+  table)
+(define (ensure-program-read-receipt-table! prog)
+  (or (hash-ref PROGRAM->READ-RECEIPTS prog #f)
+      (register-program-read-receipt-table! prog (make-hash))))
+(define (program-read-receipts prog)
+  (define table (hash-ref PROGRAM->READ-RECEIPTS prog #f))
+  (if table
+      (sort (hash-values table)
+            string<?
+            #:key read-receipt-v1-id)
+      '()))
+(define (record-program-read-receipt! prog receipt)
+  (unless (read-receipt-v1? receipt)
+    (raise-argument-error 'record-program-read-receipt!
+                          "read-receipt-v1?"
+                          receipt))
+  (define table (hash-ref PROGRAM->READ-RECEIPTS prog #f))
+  (when table
+    (hash-set! table (read-receipt-v1-id receipt) receipt))
+  receipt)
+
+(define (program-type-ref prog node [fallback #f])
+  (define table (program-type-table prog))
+  (define value (and table (hash-ref table node #f)))
+  (when table
+    (define profile (semantic-profile-for-target (program-target prog)))
+    (record-program-read-receipt!
+     prog
+     (make-read-receipt-v1
+      'per-node-capture
+      (format "~s" node)
+      '()
+      (if value 'hit 'miss)
+      profile
+      (program-target prog)
+      (hash 'capture 'per-node-type
+            'node (format "~s" node))
+      #:semantic-fact-ids
+      (if value
+          (list
+           (semantic-fact-id-v1
+            "TypeJudgmentV1"
+            profile
+            (format "~s" node)
+            (type->string value)))
+          '()))))
+  (or value fallback))
+
 ;; Checked lexical binder types are a cross-pass side table.  Parameter and
 ;; destructuring ASTs retain authored syntax; emitters read this table to make
 ;; representation decisions for every name projected out of an aggregate.
@@ -1529,6 +1586,10 @@
  register-program-body-locs-table! program-body-locs-table
  current-type-table store-type!
  register-program-type-table! program-type-table
+ register-program-read-receipt-table! ensure-program-read-receipt-table!
+ program-read-receipts record-program-read-receipt!
+ program-type-ref
+ (all-from-out "read-receipts-v1.rkt")
  current-binder-type-table store-binder-type!
  register-program-binder-type-table! program-binder-type-table
  binding-projected-types

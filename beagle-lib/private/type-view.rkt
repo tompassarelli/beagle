@@ -129,7 +129,7 @@
 ;; relative to the form substring. Reports to stderr when some eligible bindings
 ;; could not be annotated (no recorded position/type — e.g. literal/leaf values
 ;; or multi-arity bodies), so the gap is never silent.
-(define (annotate-inferred text form form-stx src-tbl ty-tbl)
+(define (annotate-inferred prog text form form-stx src-tbl ty-tbl)
   (define-values (base _end) (form-bounds form-stx text))
   (define candidates
     (for/list ([b (in-list (deep-collect let-binding? form))]
@@ -140,7 +140,7 @@
     (for*/list ([b (in-list candidates)]
                 [v (in-value (let-binding-value b))]
                 [loc (in-value (hash-ref src-tbl v #f))]
-                [ty (in-value (hash-ref ty-tbl v #f))]
+                [ty (in-value (program-type-ref prog v))]
                 [abs (in-value (loc-offset loc))]
                 [span (in-value (and abs (name-span-offsets text abs (let-binding-name b))))]
                 #:when (and span ty))
@@ -162,10 +162,11 @@
 ;; all (pp.all): a DEBUG projection — prefix every typed+positioned node in
 ;; the form with `^T`. Unlike clean/inferred this does NOT round-trip (the
 ;; reader treats `^T` as metadata); it is for reading, not re-parsing.
-(define (annotate-all text form form-stx src-tbl ty-tbl)
+(define (annotate-all prog text form form-stx src-tbl ty-tbl)
   (define-values (start end) (form-bounds form-stx text))
   (define edits
-    (for*/list ([(node ty) (in-hash ty-tbl)]
+    (for*/list ([(node stored-ty) (in-hash ty-tbl)]
+                [ty (in-value (program-type-ref prog node stored-ty))]
                 [loc (in-value (hash-ref src-tbl node #f))]
                 [abs (in-value (loc-offset loc))]
                 ;; A resolved-ref is the checker's identity-bearing adapter for
@@ -200,8 +201,8 @@
     (cond
       [(not form) text]   ; no NAME: clean view of the whole file
       [(string=? level "clean")    (form-source text form-stx)]
-      [(string=? level "inferred") (annotate-inferred text form form-stx src-tbl ty-tbl)]
-      [(string=? level "all")      (annotate-all text form form-stx src-tbl ty-tbl)]
+      [(string=? level "inferred") (annotate-inferred prog text form form-stx src-tbl ty-tbl)]
+      [(string=? level "all")      (annotate-all prog text form form-stx src-tbl ty-tbl)]
       [else (error 'beagle-explain-type "unknown --level ~a (use clean|inferred|all)" level)]))
   (cond
     [(not write?) rendered]

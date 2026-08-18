@@ -143,6 +143,47 @@
   (for/or ([raw-form (in-list (program-forms prog))])
     (callable-publishes-inference? (unwrap-definition-form raw-form))))
 
+(define (record-ordering-dependency-receipts! entries overlay)
+  (for ([entry (in-list entries)])
+    (define source (car entry))
+    (define prog (cdr entry))
+    (define source-id (module-source-id-string source))
+    (define dependencies
+      (for/list ([required (in-list (program-requires prog))])
+        (define providers
+          (sort
+           (map module-source-id-string
+                (hash-ref
+                 (candidate-overlay-by-namespace overlay)
+                 (require-entry-ns required)
+                 '()))
+           string<?))
+        (vector (require-entry-ns required) providers
+                (and (= (length providers) 1) (car providers)))))
+    (define selected
+      (for/list ([dependency (in-list dependencies)]
+                 #:when (string? (vector-ref dependency 2)))
+        (vector-ref dependency 2)))
+    (define target (program-target prog))
+    (define profile (semantic-profile-for-target target))
+    (ensure-program-read-receipt-table! prog)
+    (record-program-read-receipt!
+     prog
+     (make-read-receipt-v1
+      'ordering-dependency
+      (list 'module-order source-id)
+      (sort (remove-duplicates
+             (append-map (lambda (dependency)
+                           (vector-ref dependency 1))
+                         dependencies))
+            string<?)
+      (list->vector selected)
+      profile
+      target
+      (hash 'source-id source-id
+            'requires (list->vector dependencies)
+            'ordering 'candidate-overlay)))))
+
 ;; Return deterministic strongly connected components for candidate requires.
 ;; Namespace-free modules cannot satisfy requires and therefore have no inbound
 ;; graph edge, but still participate as singleton source nodes.
@@ -299,7 +340,8 @@
           (program->module-interface
            prog
            #:source-id (module-source-source-id source)
-           #:provisional? #t)])))
+           #:provisional? #t
+           #:capture-types? capture-types?)])))
     (define max-rounds (add1 (length sources)))
     ;; Imported aliases can cross more than one candidate boundary before a
     ;; checked consumer sees them.  Converge the deliberately weak parse-only
@@ -346,7 +388,8 @@
                  (program->module-interface
                   prog
                   #:source-id (module-source-source-id source)
-                  #:provisional? #t)))])))
+                  #:provisional? #t
+                  #:capture-types? capture-types?)))])))
         (if (interfaces-stable? current-sources next-sources)
             next-sources
             (stabilize-provisional next-sources (add1 round)))))
@@ -472,6 +515,10 @@
               (module-source-source-id source)
               'parse
               (lambda () (parse-checked-source source current-resolver))))))
+        (when capture-types?
+          (record-ordering-dependency-receipts!
+           round-programs
+           current-overlay))
         ;; Every provider in the candidate context is checked before its
         ;; interface can become authority. Selectors affect only the
         ;; returned/emitted module set, never the proof closure.
@@ -530,7 +577,8 @@
                (lambda ()
                  (program->module-interface
                   prog
-                  #:source-id (module-source-source-id source))))])))
+                  #:source-id (module-source-source-id source)
+                  #:capture-types? capture-types?)))])))
         (if (interfaces-stable? current-sources next-sources)
             (values round-programs next-sources)
             (stabilize next-sources (add1 round)))))

@@ -736,9 +736,11 @@
     (define interface
       (and (pair? defs)
            (program->module-interface
-            prog
-            #:provisional?
-            (not (hash? (program-effective-definition-types prog))))))
+           prog
+           #:provisional?
+            (not (hash? (program-effective-definition-types prog)))
+            #:capture-types?
+            (and (program-type-table prog) #t))))
     (if (not interface)
         '()
         (sort
