@@ -2073,8 +2073,27 @@
                                           (string-length ns-prefix)))))
            t)))
       (for ([kv (in-list additions)])
-        (unless (hash-has-key? env (car kv))
+        ;; The parser records host-qualified uses as provisional Any externs.
+        ;; A required typed host namespace is authoritative for that spelling,
+        ;; so replace only that provisional Any rather than preserving it over
+        ;; the catalog contract.
+        (when (or (not (hash-has-key? env (car kv)))
+                  (any-type? (hash-ref env (car kv))))
           (hash-set! env (car kv) (cdr kv))))))
+  ;; `:refer` has no qualified alias to trigger the loop above. Project the
+  ;; required namespace's catalog entry onto each referred bare name, again
+  ;; replacing only parser-created Any placeholders.
+  (for ([r (in-list (program-requires prog))]
+        #:when (require-entry-refer r))
+    (define namespace (require-entry-ns r))
+    (define catalog (builtin-env-for-target (program-target prog)))
+    (for ([name (in-list (require-entry-refer r))])
+      (define contract
+        (hash-ref catalog (qualified-ref namespace name #f) #f))
+      (when (and contract
+                 (or (not (hash-has-key? env name))
+                     (any-type? (hash-ref env name))))
+        (hash-set! env name contract))))
   ;; record types imported from other modules
   (define imported-field-order (program-imported-record-field-order prog))
   (for ([(rec-name field-map) (in-hash (program-imported-record-fields prog))])

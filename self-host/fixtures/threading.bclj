@@ -11,7 +11,7 @@
 ;;     the desugared datum re-parses — nested binder mints number identically
 ;; Run: self-host/verify-selfhost.sh self-host/fixtures/threading.bclj
 
-(defn first-int [(xs (Vec Int))] Any
+(defn first-int [(xs (Vec Int))] (U Int Nil)
   (if (> (count xs) 0) (nth xs 0) nil))
 
 (defn pipeline [(x Int)] Int

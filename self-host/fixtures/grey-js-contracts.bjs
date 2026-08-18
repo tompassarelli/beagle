@@ -38,7 +38,7 @@
   (js/call Math .max 1 2))
 
 (def map-size Int
-  (let [values (js/new Map)]
+  (let [(values (JsMap Any Any)) (js/new Map)]
     (js/get values .size)))
 
 (defn string-index [] (JsMap String Int)
