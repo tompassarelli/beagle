@@ -1764,7 +1764,9 @@
                   pattern
                   (scope-walk-pattern!
                     (nth clause-children 0) table scope
-                    (conj (vec path) index 0))]
+                    (conj (vec path) index 0))
+                  (body-indices (Vec Int))
+                    (vec (range 1 (count clause-children)))]
               (rebuild-scope-sequence! clause
                 (into [(get pattern "value")]
                   (mapv
@@ -1774,7 +1776,7 @@
                           (nth clause-children body-index) scope)
                         (get pattern "table")
                         (conj (vec path) index body-index) ctx))
-                    (range 1 (count clause-children)))))))
+                    body-indices)))))
           (range 2 (count children)))]
     (rebuild-scope-sequence! value
       (into
