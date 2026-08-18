@@ -66,10 +66,45 @@
     "null"})
 
 (defn hex-encode-utf8 [(s String)] String
-  (str/join ""
-    (mapv (fn [(byte Any)] String
-            (format "%02x" (bit-and (int byte) 255)))
-      (.getBytes s "UTF-8"))))
+  (let [(size Int) (count s)]
+    (loop [(index Int) 0 (out String) ""]
+      (if (>= index size)
+        out
+        (let [(unit-char Any) (subs s index (+ index 1))
+              (unit Int) (int (first unit-char))
+              (paired Bool)
+              (and (>= unit 55296) (< unit 56320) (< (+ index 1) size))
+              (point Int)
+              (if paired
+                (+ 65536
+                  (+ (* (- unit 55296) 1024)
+                    (-
+                      (int
+                        (first
+                          (let [(low-char Any) (subs s (+ index 1) (+ index 2))]
+                            low-char)))
+                      56320)))
+                unit)]
+          (recur
+            (+ index (if paired 2 1))
+            (cond
+              (< point 128)
+              (str out (format "%02x" point))
+              (< point 2048)
+              (str out
+                (format "%02x" (+ 192 (quot point 64)))
+                (format "%02x" (+ 128 (mod point 64))))
+              (< point 65536)
+              (str out
+                (format "%02x" (+ 224 (quot point 4096)))
+                (format "%02x" (+ 128 (mod (quot point 64) 64)))
+                (format "%02x" (+ 128 (mod point 64))))
+              :else
+              (str out
+                (format "%02x" (+ 240 (quot point 262144)))
+                (format "%02x" (+ 128 (mod (quot point 4096) 64)))
+                (format "%02x" (+ 128 (mod (quot point 64) 64)))
+                (format "%02x" (+ 128 (mod point 64)))))))))))
 
 (defn mangle-name [(s String)] String
   (let [compiler-owned? (str/starts-with? s "$beagle$")

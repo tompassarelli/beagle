@@ -32,7 +32,10 @@
 (defn- surrogate-pair-at? [(src String) (i Int)] Bool
   (if (>= (+ i 1) (count src))
     false
-    (let [hi (int (.charAt src i)) lo (int (.charAt src (+ i 1)))]
+    (let [(hi-char Any) (rd/char-at src i)
+          (lo-char Any) (rd/char-at src (+ i 1))
+          hi (int (first hi-char))
+          lo (int (first lo-char))]
       (and (>= hi 55296) (<= hi 56319) (>= lo 56320) (<= lo 57343)))))
 
 (defn- build-codepoint-offsets [(src String)] Any
@@ -373,7 +376,7 @@
   (loop [i 0 out "\""]
     (if (>= i (count s))
       (str out "\"")
-      (let [ch (rd/char-at s i) code (int (.charAt s i)) escaped (cond (= ch "\"") "\\\"" (= ch "\\") "\\\\" (= ch "\n") "\\n" (= ch "\r") "\\r" (= ch "\t") "\\t" (or (< code 32) (= code 127)) (str "\\u" (hex4 code)) :else ch)]
+      (let [ch (rd/char-at s i) (cs Any) ch code (int (first cs)) escaped (cond (= ch "\"") "\\\"" (= ch "\\") "\\\\" (= ch "\n") "\\n" (= ch "\r") "\\r" (= ch "\t") "\\t" (or (< code 32) (= code 127)) (str "\\u" (hex4 code)) :else ch)]
         (recur (+ i 1) (str out escaped))))))
 
 (defn- fact-line [(subject Int) (predicate String) (object Any)] String

@@ -13,8 +13,10 @@
 (def LINE-COLS (atom []))
 
 (defn- ^Boolean surrogate-pair-at? [^String src i]
-  (if (>= (+ i 1) (count src)) false (let [hi (int (.charAt src i))
-   lo (int (.charAt src (+ i 1)))]
+  (if (>= (+ i 1) (count src)) false (let [hi-char (rd/char-at src i)
+   lo-char (rd/char-at src (+ i 1))
+   hi (int (first hi-char))
+   lo (int (first lo-char))]
   (and (>= hi 55296) (<= hi 56319) (>= lo 56320) (<= lo 57343)))))
 
 (defn- build-codepoint-offsets [^String src]
@@ -282,7 +284,8 @@
   (loop [i 0
    out "\""]
   (if (>= i (count s)) (str out "\"") (let [ch (rd/char-at s i)
-   code (int (.charAt s i))
+   cs ch
+   code (int (first cs))
    escaped (cond
   (= ch "\"") "\\\""
   (= ch "\\") "\\\\"

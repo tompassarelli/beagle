@@ -26,7 +26,19 @@
 (def nix-reserved-words #{"if" "then" "else" "let" "in" "with" "rec" "inherit" "assert" "or" "true" "false" "null"})
 
 (defn ^String hex-encode-utf8 [^String s]
-  (str/join "" (mapv (fn [byte] (format "%02x" (bit-and (int byte) 255))) (.getBytes s "UTF-8"))))
+  (let [size (count s)]
+  (loop [index 0
+   out ""]
+  (if (>= index size) out (let [unit-char (subs s index (+ index 1))
+   unit (int (first unit-char))
+   paired (and (>= unit 55296) (< unit 56320) (< (+ index 1) size))
+   point (if paired (+ 65536 (+ (* (- unit 55296) 1024) (- (int (first (let [low-char (subs s (+ index 1) (+ index 2))]
+  low-char))) 56320))) unit)]
+  (recur (+ index (if paired 2 1)) (cond
+  (< point 128) (str out (format "%02x" point))
+  (< point 2048) (str out (format "%02x" (+ 192 (quot point 64))) (format "%02x" (+ 128 (mod point 64))))
+  (< point 65536) (str out (format "%02x" (+ 224 (quot point 4096))) (format "%02x" (+ 128 (mod (quot point 64) 64))) (format "%02x" (+ 128 (mod point 64))))
+  :else (str out (format "%02x" (+ 240 (quot point 262144))) (format "%02x" (+ 128 (mod (quot point 4096) 64))) (format "%02x" (+ 128 (mod (quot point 64) 64))) (format "%02x" (+ 128 (mod point 64)))))))))))
 
 (defn ^String mangle-name [^String s]
   (let [compiler-owned? (str/starts-with? s "$beagle$")

@@ -85,7 +85,8 @@
   (= suffix "formfeed") 12
   (= suffix "backspace") 8
   (and (= (count suffix) 5) (= (char-at suffix 0) "u")) (decode-u4 suffix 1)
-  (= (count suffix) 1) (int (.charAt suffix 0))
+  (= (count suffix) 1) (let [ch (char-at suffix 0)]
+  (int (first ch)))
   :else 65533))
 
 (defn read-string-literal [^String src pos]
