@@ -3337,11 +3337,16 @@
       profile
       (format "~a/~a" (program-namespace prog) name)
       (type->string (hash-ref signatures name))
-      (hash-ref edges name))))
+      (hash-ref edges name)
+      (normalize-signature-obligations-v1
+       prog
+       form
+       #:semantic-profile profile))))
   (define fact-ids (make-hasheq))
   (for ([(name fact) (in-hash facts)])
     (hash-set! fact-ids name (semantic-fact-v1-id fact)))
   (register-program-shadow-definition-fact-ids! prog fact-ids)
+  (register-program-shadow-definition-facts! prog facts)
   (define checker
     (semantic-fact-v1-id
      (checker-identity-fact-v1

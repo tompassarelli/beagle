@@ -118,7 +118,7 @@
      (define positive-binding (binding-ref positive 'keep))
      (define constraint
        (car (interface-binding-constraints positive-binding)))
-     (check-equal? (module-interface-schema-version positive) 8)
+     (check-equal? (module-interface-schema-version positive) 9)
      (check-true (interface-constraint? constraint))
      (check-false (interface-constraint-synchronous? constraint))
      (check-false (interface-constraint-provider constraint))

@@ -1195,7 +1195,7 @@
       #rx"p/Box expects 1 argument, got 0"
       (diagnostic-text unapplied)))))
 
-(test-case "interface v8 rejects stale schemas and malformed export arity"
+(test-case "interface v9 rejects stale schemas and malformed export arity"
   (with-overlay-files
    (lambda (_root provider-source consumer-source)
      (write-text!
@@ -1238,7 +1238,7 @@
         valid-interface
         [schema-version 1]))
      (check-exn
-      #rx"uses interface schema v1; this compiler requires v8"
+      #rx"uses interface schema v1; this compiler requires v9"
       (lambda () (parse-consumer stale-interface)))
      (define valid-box
        (module-interface-type-export-ref valid-interface 'Box))
@@ -1284,10 +1284,10 @@
       (overlay-check-result-ok? second)
       "a prior parse must not license an unrelated bare alias"))))
 
-(test-case "interface v7 includes dynamic-var status in consumer pruning"
+(test-case "interface v9 includes dynamic-var status in consumer pruning"
   (with-overlay-files
    (lambda (root provider-source _consumer-source)
-     (check-equal? INTERFACE-SCHEMA-VERSION 8)
+     (check-equal? INTERFACE-SCHEMA-VERSION 9)
      (check-true INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
      (define plain-edn
        (candidate!

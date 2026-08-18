@@ -9,6 +9,7 @@
          racket/string
          (only-in file/sha1 bytes->hex-string)
          "canonical-value-v1.rkt"
+         "effect-normalization-v1.rkt"
          "parse.rkt")
 
 (define SEMANTIC-PROFILES-V1 '(core hosted-clj hosted-js hosted-nix))
@@ -225,6 +226,15 @@
    1
    canonical-payload-encoder-v1))
 
+;; Schema 2 extends the existing definition-signature kind with the reserved
+;; first-mint effects/obligations slot.  The old encoder remains exported for
+;; decoding and fixture compatibility; newly minted signatures use V2.
+(define DEFINITION-SCHEME-V2-ENCODER
+  (make-fact-kind-encoder-v1
+   "DefinitionSchemeV1"
+   2
+   canonical-payload-encoder-v1))
+
 (define CHECKER-IDENTITY-V1-ENCODER
   (make-fact-kind-encoder-v1
    "CheckerIdentityV1"
@@ -254,15 +264,18 @@
            "unknown compiler target"
            "target" target)]))
 
-(define (definition-scheme-fact-v1 semantic-profile subject signature dependencies)
+(define (definition-scheme-fact-v1
+         semantic-profile subject signature dependencies
+         [effects (normalized-obligations-v1-open)])
   (make-semantic-fact-v1
-   DEFINITION-SCHEME-V1-ENCODER
+   DEFINITION-SCHEME-V2-ENCODER
    semantic-profile
    (canonical-tagged-v1 "DefinitionSubjectV1" (require-name
                                                  'definition-scheme-fact-v1
                                                  "subject"
                                                  subject))
    (hash 'signature signature
+         'effects effects
          'dependencies (list->vector dependencies))))
 
 (define (checker-identity-fact-v1 semantic-profile checker seam)
@@ -806,11 +819,14 @@
  derivation-edge-v1-id
  current-type-facts-checker-epoch-v1
  DEFINITION-SCHEME-V1-ENCODER
+ DEFINITION-SCHEME-V2-ENCODER
  CHECKER-IDENTITY-V1-ENCODER
  INTERFACE-REVISION-V1-ENCODER
  INTERFACE-PUBLICATION-V1-ENCODER
  semantic-profile-v1-for-target
  definition-scheme-fact-v1
+ normalized-obligations-v1-open
+ normalize-signature-obligations-v1
  checker-identity-fact-v1
  interface-revision-fact-v1
  interface-publication-fact-v1

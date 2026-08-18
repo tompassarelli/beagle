@@ -12,11 +12,12 @@
          racket/set
          openssl/sha1
          "ast.rkt"
+         "effect-normalization-v1.rkt"
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 8)
-;; V7 is the complete Beagle import boundary: finalized bindings, macros,
+(define INTERFACE-SCHEMA-VERSION 9)
+;; V9 is the complete Beagle import boundary: finalized bindings, macros,
 ;; type/record/error contracts, and dynamic-var status all participate in the
 ;; interface digest.  Unchanged interfaces can therefore prune reverse users.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
@@ -25,7 +26,7 @@
 (struct interface-constraint (expression synchronous? provider) #:transparent)
 (struct interface-binding
   (name kind type raises constraints synchronous?
-        returns-synchronous-callable?)
+        returns-synchronous-callable? effects)
   #:transparent)
 (struct interface-macro (name kind fixed-params rest-param template)
   #:transparent)
@@ -35,7 +36,7 @@
 (struct interface-record-contract (name kind fields validator-symbol)
   #:transparent)
 (struct interface-protocol-method-contract
-  (name params rest-param return-type)
+  (name params rest-param return-type effects)
   #:transparent)
 (struct interface-protocol-contract (name methods) #:transparent)
 (struct module-interface
@@ -62,6 +63,18 @@
   (type-fn (map param-interface-type params)
            (and rest-param (param-interface-type rest-param))
            return-type))
+
+(define (open-interface-effects prog)
+  (normalized-obligations-v1-open
+   (program-target prog)
+   (profile-for-target (program-target prog))))
+
+(define (interface-effects-for prog owner provisional?)
+  (normalize-signature-obligations-v1
+   prog
+   owner
+   #:semantic-profile (profile-for-target (program-target prog))
+   #:provisional? provisional?))
 
 (define (param-interface-constraint p)
   (and (param? p) (param-constraint p)))
@@ -181,7 +194,8 @@
           param parameter
           [constraint
            (constraint-contract-for prog parameter provisional?)])))
-      (protocol-method-return-type method))))
+      (protocol-method-return-type method)
+      (open-interface-effects prog))))
   (interface-protocol-contract name contracts))
 
 (define (program-protocol-contracts prog [provisional? #f])
@@ -209,7 +223,8 @@
      #f
      (callable-constraints prog fields #:provisional? provisional?)
      #t
-     #f))
+     #f
+     (open-interface-effects prog)))
    (if map-constructor?
        (list
         (interface-binding
@@ -219,7 +234,8 @@
          #f
          (list #f)
          #t
-         #f))
+         #f
+         (open-interface-effects prog)))
        '())
    (for/list ([field (in-list fields)])
      (interface-binding
@@ -230,7 +246,8 @@
       #f
       (list #f)
       #t
-      #f))))
+      #f
+      (open-interface-effects prog)))))
 
 (define unwrap-public-form unwrap-definition-form)
 
@@ -303,7 +320,8 @@
          #f
          '()
          #f
-         #f))]
+         #f
+         (open-interface-effects prog)))]
       [(defonce-form name type _ _)
        (add!
         (interface-binding
@@ -313,7 +331,8 @@
          #f
          '()
          #f
-         #f))]
+         #f
+         (open-interface-effects prog)))]
       [(defn-form name params rest-param return-type _ private? raises _)
        (unless private?
          (define authored
@@ -331,7 +350,8 @@
             (program-callable-synchronous? prog name #f))
            (and
             (not provisional?)
-            (program-returns-synchronous-callable? prog name #f)))))]
+            (program-returns-synchronous-callable? prog name #f))
+           (interface-effects-for prog form provisional?))))]
       [(defn-multi name arities private? _)
        (unless private?
          (define alternatives
@@ -362,7 +382,8 @@
             (program-callable-synchronous? prog name #f))
            (and
             (not provisional?)
-            (program-returns-synchronous-callable? prog name #f)))))]
+            (program-returns-synchronous-callable? prog name #f))
+           (interface-effects-for prog form provisional?))))]
       [(record-form name fields)
        (add-record! name fields 'record-constructor)]
       [(protocol-form _ methods)
@@ -382,10 +403,12 @@
             (protocol-method-rest-param method)
             #:provisional? provisional?)
            #t
-           #f)))]
+           #f
+           (open-interface-effects prog))))]
       [(defmulti-form name _)
        (add! (interface-binding name 'defmulti
-                                (type-fn (list ANY) ANY ANY) #f '() #f #f))]
+                                (type-fn (list ANY) ANY ANY) #f '() #f #f
+                                (open-interface-effects prog)))]
       [(defenum-form name _)
        (add!
         (interface-binding
@@ -395,7 +418,8 @@
          #f
          '()
          #f
-         #f))]
+         #f
+         (open-interface-effects prog)))]
       [(defunion-form _ members _ member-fields)
        (when member-fields
          (for ([member (in-list members)])
@@ -419,7 +443,8 @@
          #f
          (list #f)
          #t
-         #f))
+         #f
+         (open-interface-effects prog)))
        (add!
         (interface-binding
          (string->symbol
@@ -429,7 +454,8 @@
          #f
          (list #f)
          #t
-         #f))]
+         #f
+         (open-interface-effects prog)))]
       [_ (void)]))
   out)
 
@@ -438,11 +464,14 @@
   ;; their local semantic products explicitly on the program.
   (define extern-bindings
     (for/hasheq ([(name type) (in-hash (program-declared-externs prog))])
-      (values name (interface-binding name 'extern type #f '() #f #f))))
+      (values name
+              (interface-binding name 'extern type #f '() #f #f
+                                 (open-interface-effects prog)))))
   (for/fold ([bindings extern-bindings])
             ([name (in-hash-keys (program-declared-macros prog))])
     (hash-set bindings name
-              (interface-binding name 'macro ANY #f '() #f #f))))
+              (interface-binding name 'macro ANY #f '() #f #f
+                                 (open-interface-effects prog)))))
 
 (define (program-interface-macros prog)
   (for/hasheq ([(name definition)
@@ -703,7 +732,8 @@
        (qualify-provider-local-type-references
         (interface-protocol-method-contract-return-type method)
         namespace
-        local-type-names))))))
+        local-type-names)
+       (interface-protocol-method-contract-effects method))))))
 
 (define (qualify-interface-type-declaration
          declaration namespace local-type-names)
@@ -844,7 +874,9 @@
         (interface-protocol-method-contract-rest-param method))))
     (return
      ,(type->canonical-datum
-       (interface-protocol-method-contract-return-type method)))))
+       (interface-protocol-method-contract-return-type method)))
+    (effects
+     ,(interface-protocol-method-contract-effects method))))
 
 (define (type-declaration-details->canonical-datum declaration)
   (define details (interface-type-declaration-details declaration))
@@ -893,7 +925,8 @@
                (map interface-constraint->canonical-datum
                     (interface-binding-constraints binding))
                (interface-binding-synchronous? binding)
-               (interface-binding-returns-synchronous-callable? binding))))
+               (interface-binding-returns-synchronous-callable? binding)
+               (interface-binding-effects binding))))
     (macros
      ,@(for/list ([name (in-list (sort (hash-keys macro-fingerprints)
                                       symbol<?))])

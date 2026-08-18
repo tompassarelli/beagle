@@ -8,6 +8,8 @@
          racket/string
          beagle/private/module-overlay-check
          beagle/private/module-source-root
+         beagle/private/ast
+         beagle/private/type-facts-v1
          beagle/private/shadow-facts-v1)
 
 (define root (make-temporary-file "beagle-shadow-production-~a" 'directory))
@@ -25,17 +27,25 @@
    "#lang beagle/clj\n\n"
    "(ns parity.provider)\n\n"
    "(defn leaf [(x Int)] Int (+ x 1))\n"
-   "(defn mid [(x Int)] Int (leaf x))\n"))
+   "(defn mid [(x Int)] Int (leaf x))\n"
+   "(defn stable [(x Int)] Int (+ x 2))\n"))
 
 (define provider-whitespace-source
   (string-append
    "#lang beagle/clj\n\n\n"
    "(ns parity.provider)\n\n"
    "  (defn leaf [(x Int)] Int (+ x 1))\n"
-   "(defn mid [(x Int)] Int (leaf x))\n"))
+   "(defn mid [(x Int)] Int (leaf x))\n"
+   "(defn stable [(x Int)] Int (+ x 2))\n"))
 
 (define provider-body-edit-source
   (string-replace provider-source "(+ x 1)" "(+ x 2)"))
+
+(define provider-contract-edit-source
+  (string-replace
+   provider-source
+   "(+ x 1)"
+   "(let [ignored (mapv inc [x])] x)"))
 
 (define consumer-source
   (string-append
@@ -56,7 +66,7 @@
    "parity.provider"
    "parity.renamed"))
 
-(define (graph-for provider-id provider-file provider-text consumer-text)
+(define (checked-for provider-id provider-file provider-text consumer-text)
   (write-source! provider-file provider-text)
   (write-source! consumer-path consumer-text)
   (define closure
@@ -72,6 +82,11 @@
      #:shadow-facts? #t
      #:emit? #t))
   (check-true (overlay-check-result-ok? checked))
+  (values closure checked))
+
+(define (graph-for provider-id provider-file provider-text consumer-text)
+  (define-values (closure checked)
+    (checked-for provider-id provider-file provider-text consumer-text))
   (shadow-fact-graph-v1-from-modules
    (for/list ([module (in-list (overlay-check-result-modules checked))])
      (shadow-fact-module-input-v1
@@ -80,6 +95,14 @@
       (checked-overlay-module-program module)
       (checked-overlay-module-interface module)))
    #:source-snapshots (module-source-closure-snapshots closure)))
+
+(define (definition-facts-for provider-id provider-file provider-text consumer-text)
+  (define-values (_closure checked)
+    (checked-for provider-id provider-file provider-text consumer-text))
+  (for/hash ([module (in-list (overlay-check-result-modules checked))])
+    (values (checked-overlay-module-source module)
+            (program-shadow-definition-facts
+             (checked-overlay-module-program module)))))
 
 (define (reasons differences)
   (remove-duplicates
@@ -151,6 +174,31 @@
                (member (shadow-divergence-v1-reason difference)
                        '(module-added module-removed)))
              differences)))
+
+   (test-case "contract edit moves exactly its signature cone"
+     (define first
+       (definition-facts-for "parity/provider.bclj" provider-path
+                             provider-source consumer-source))
+     (define second
+       (definition-facts-for "parity/provider.bclj" provider-path
+                             provider-contract-edit-source consumer-source))
+     (define before (hash-ref first "parity/provider.bclj"))
+     (define after (hash-ref second "parity/provider.bclj"))
+     (define changed
+       (for/list ([name (in-list (sort (hash-keys before) symbol<?))]
+                  #:when
+                  (not (equal?
+                        (semantic-fact-v1-id (hash-ref before name))
+                        (semantic-fact-v1-id (hash-ref after name)))))
+         name))
+     (check-equal? changed '(leaf))
+     (define leaf-effects
+       (hash-ref
+        (semantic-fact-v1-payload (hash-ref after 'leaf))
+        'effects))
+     (check-equal?
+      (hash-ref (hash-ref leaf-effects 'allocation) 'status)
+      'required))
 
    (test-case "rename removes the old identity and adds the new one"
      (define first

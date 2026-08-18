@@ -1072,9 +1072,11 @@
 ;; callers receive a deterministic snapshot when they inspect it.
 (define PROGRAM->SHADOW-EVIDENCE-EDGES (make-weak-hasheq))
 (define PROGRAM->SHADOW-DEFINITION-FACT-IDS (make-weak-hasheq))
+(define PROGRAM->SHADOW-DEFINITION-FACTS (make-weak-hasheq))
 (define (clear-program-shadow-evidence! prog)
   (hash-set! PROGRAM->SHADOW-EVIDENCE-EDGES prog (box '()))
   (hash-set! PROGRAM->SHADOW-DEFINITION-FACT-IDS prog (hasheq))
+  (hash-set! PROGRAM->SHADOW-DEFINITION-FACTS prog (hasheq))
   prog)
 (define (append-program-shadow-evidence-edge! prog edge)
   (define cell
@@ -1089,6 +1091,11 @@
   table)
 (define (program-shadow-definition-fact-ids prog)
   (hash-ref PROGRAM->SHADOW-DEFINITION-FACT-IDS prog (hasheq)))
+(define (register-program-shadow-definition-facts! prog table)
+  (hash-set! PROGRAM->SHADOW-DEFINITION-FACTS prog table)
+  table)
+(define (program-shadow-definition-facts prog)
+  (hash-ref PROGRAM->SHADOW-DEFINITION-FACTS prog (hasheq)))
 
 ;; Callable synchronization effects are inferred transitively without
 ;; rewriting authored function signatures. Module-interface publication and
@@ -1601,6 +1608,8 @@
  program-shadow-evidence-edges
  register-program-shadow-definition-fact-ids!
  program-shadow-definition-fact-ids
+ register-program-shadow-definition-facts!
+ program-shadow-definition-facts
  register-program-callable-synchronous!
  program-callable-synchronous-table
  program-callable-synchronous?
