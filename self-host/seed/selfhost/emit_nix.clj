@@ -1048,7 +1048,7 @@
 
 (defn program-record-types [prog]
   (let [imported-fields (get prog "imported-record-fields")
-   from-fields (if (map? imported-fields) (reduce (fn [names ^String name] (assoc names name true)) {} (keys imported-fields)) {})]
+   from-fields (if (map? imported-fields) (reduce (fn [names ^String name] (assoc names name true)) {} (vec (keys imported-fields))) {})]
   (reduce add-form-record-types from-fields (get prog "forms"))))
 
 (defn add-form-constrained-record-types [names form]

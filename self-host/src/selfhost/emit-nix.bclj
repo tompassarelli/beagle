@@ -2129,7 +2129,7 @@
         from-fields (if (map? imported-fields)
                       (reduce (fn [(names Any) (name String)] Any
                                 (assoc names name true))
-                        {} (keys imported-fields))
+                        {} (vec (keys imported-fields)))
                       {})]
     (reduce add-form-record-types from-fields (get prog "forms"))))
 

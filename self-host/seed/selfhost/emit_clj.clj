@@ -51,7 +51,7 @@
   (if (and (some? index) (> index 0) (< index (- (count text) 1))) ["qualified-ref" (subs text 0 index) (subs text (+ index 1))] text)) key))
 
 (defn structuralize-reference-table [table]
-  (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (keys table)))
+  (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (vec (keys table))))
 
 (defn reference-key-leaf [key]
   (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) (nth key 2) (if (string? key) (let [text key

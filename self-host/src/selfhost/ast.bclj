@@ -562,7 +562,7 @@
                 (assoc out key
                   (lower-binding-output-identities (get value key))))
               {}
-              (keys value))
+              (vec (keys value)))
             direct (get lowered "bindingId")
             identities (get lowered "bindingIds")
             node (get lowered "node")

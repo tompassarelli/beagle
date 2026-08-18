@@ -259,7 +259,7 @@
   (reduce
     (fn [(out Any) (key Any)] Any
       (assoc out (metadata-reference-key key) (get table key)))
-    {} (keys table)))
+    {} (vec (keys table))))
 
 (defn record-fields-ref [(table Any) (ref Any)] Any
   (get table (reference-key ref)))

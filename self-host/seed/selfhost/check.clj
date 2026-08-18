@@ -64,7 +64,7 @@
   (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
 
 (defn- ordered-keys [table]
-  (vec (sort (keys table))))
+  (vec (sort (vec (keys table)))))
 
 (def ANY {"kind" "prim" "name" "Any"})
 
@@ -2014,7 +2014,7 @@
   (map? x) (if (= (get x "node") "quoted") acc (let [nm (get x "name")
    acc1 (if (string? nm) (conj acc nm) acc)
    acc2 (if (= (get x "node") "nix-with-cfg") (conj acc1 "cfg") acc1)]
-  (reduce (fn [a v] (nix-collect-bound v a)) acc2 (vals x))))
+  (reduce (fn [a v] (nix-collect-bound v a)) acc2 (vec (vals x)))))
   (vector? x) (reduce (fn [a v] (nix-collect-bound v a)) acc x)
   :else acc))
 
@@ -2058,7 +2058,7 @@
 (defn collect-references [x acc]
   (cond
   (map? x) (let [acc1 (if (= (get x "node") "ref") (conj acc x) acc)]
-  (reduce (fn [a v] (collect-references v a)) acc1 (vals x)))
+  (reduce (fn [a v] (collect-references v a)) acc1 (vec (vals x))))
   (vector? x) (reduce (fn [a v] (collect-references v a)) acc x)
   :else acc))
 
@@ -2600,7 +2600,7 @@
   (and (= (count (ordered-keys left)) (count (ordered-keys right))) (every? (fn [^String name] (contains? right name)) (ordered-keys left))))
 
 (defn- sorted-names [table]
-  (vec (sort (keys table))))
+  (vec (sort (vec (keys table)))))
 
 (defn- check-declared-module-contract! [prog effective]
   (let [declared (get prog "declared-contract")]

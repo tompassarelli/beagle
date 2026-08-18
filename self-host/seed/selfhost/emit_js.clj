@@ -203,7 +203,7 @@
   (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) {"node" "ref" "qualifier" (nth key 1) "name" (nth key 2) "providerId" nil} spelling)))
 
 (defn structuralize-reference-table [table]
-  (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (keys table)))
+  (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (vec (keys table))))
 
 (defn record-fields-ref [table ref]
   (get table (reference-key ref)))

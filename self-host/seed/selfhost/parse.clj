@@ -691,7 +691,7 @@
 (defn- merge-identities! [left right]
   (reduce (fn [result name] (if (contains? result name) (do
   (err! (str "binding target repeats a name: " name))
-  result) (assoc result name (get right name)))) left (keys right)))
+  result) (assoc result name (get right name)))) left (vec (keys right))))
 
 (defn- scope-bind-target! [value table scope ^String binding-kind path]
   (let [scoped (syntax-add-scope! value scope)
@@ -2316,7 +2316,7 @@
   (= kind "union") (assoc t "members" (mapv (fn [member] (qualify-provider-type member provider-ns local-type-names)) (get t "members")))
   (= kind "fn") (assoc (assoc (assoc t "params" (mapv (fn [param] (qualify-provider-type param provider-ns local-type-names)) (get t "params"))) "rest" (if (nil? (get t "rest")) nil (qualify-provider-type (get t "rest") provider-ns local-type-names))) "ret" (qualify-provider-type (get t "ret") provider-ns local-type-names))
   (= kind "poly") (let [bounds (get t "bounds")]
-  (assoc (assoc t "body" (qualify-provider-type (get t "body") provider-ns local-type-names)) "bounds" (if (map? bounds) (reduce (fn [out name] (assoc out name (qualify-provider-type (get bounds name) provider-ns local-type-names))) {} (keys bounds)) bounds)))
+  (assoc (assoc t "body" (qualify-provider-type (get t "body") provider-ns local-type-names)) "bounds" (if (map? bounds) (reduce (fn [out name] (assoc out name (qualify-provider-type (get bounds name) provider-ns local-type-names))) {} (vec (keys bounds))) bounds)))
   :else t))))
 
 (defn- module-local-type-aliases-with-imports! [datums imported-aliases]
@@ -2343,7 +2343,7 @@
   (reduce (fn [out name] (let [expansion (get local-aliases name)
    prefixed (assoc out (str prefix "/" name) expansion)
    full (assoc prefixed (str provider-ns "/" name) expansion)]
-  (if (= true (get refer-set name)) (assoc full name expansion) full))) {} (keys local-aliases))))
+  (if (= true (get refer-set name)) (assoc full name expansion) full))) {} (vec (keys local-aliases)))))
 
 (defn module-type-aliases! [datums ^String prefix refer-syms]
   (module-type-aliases-with-imports! datums prefix refer-syms {}))

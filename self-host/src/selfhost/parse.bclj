@@ -1149,7 +1149,7 @@
           result)
         (assoc result name (get right name))))
     left
-    (keys right)))
+    (vec (keys right))))
 
 (defn- scope-bind-target!
   [(value Any) (table Any) (scope Any) (binding-kind String) (path Any)] Any
@@ -4511,7 +4511,7 @@
                           (qualify-provider-type
                             (get bounds name) provider-ns local-type-names)))
                 {}
-                (keys bounds))
+                (vec (keys bounds)))
               bounds)))
         :else t))))
 
@@ -4559,7 +4559,7 @@
             (assoc full name expansion)
             full)))
       {}
-      (keys local-aliases))))
+      (vec (keys local-aliases)))))
 
 (defn module-type-aliases! [(datums Any) (prefix String) (refer-syms Any)] Any
   (module-type-aliases-with-imports! datums prefix refer-syms {}))

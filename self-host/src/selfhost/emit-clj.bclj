@@ -116,7 +116,7 @@
   (reduce
     (fn [(out Any) (key Any)] Any
       (assoc out (metadata-reference-key key) (get table key)))
-    {} (keys table)))
+    {} (vec (keys table))))
 
 (defn reference-key-leaf [(key Any)] Any
   (if (and (vector? key)

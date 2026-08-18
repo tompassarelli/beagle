@@ -114,7 +114,7 @@
   (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
 
 (defn- ordered-keys [(table Any)] Any
-  (vec (sort (keys table))))
+  (vec (sort (vec (keys table)))))
 
 ;; --- type constructors (inlined from types.bjs) ------------------------------
 
@@ -4228,7 +4228,7 @@
         (let [nm (get x "name")
               acc1 (if (string? nm) (conj acc nm) acc)
               acc2 (if (= (get x "node") "nix-with-cfg") (conj acc1 "cfg") acc1)]
-          (reduce (fn [(a Any) (v Any)] Any (nix-collect-bound v a)) acc2 (vals x))))
+          (reduce (fn [(a Any) (v Any)] Any (nix-collect-bound v a)) acc2 (vec (vals x)))))
     (vector? x)
       (reduce (fn [(a Any) (v Any)] Any (nix-collect-bound v a)) acc x)
     :else acc))
@@ -4294,7 +4294,7 @@
       (let [acc1 (if (= (get x "node") "ref")
                    (conj acc x)
                    acc)]
-        (reduce (fn [(a Any) (v Any)] Any (collect-references v a)) acc1 (vals x)))
+        (reduce (fn [(a Any) (v Any)] Any (collect-references v a)) acc1 (vec (vals x))))
     (vector? x)
       (reduce (fn [(a Any) (v Any)] Any (collect-references v a)) acc x)
     :else acc))
@@ -5496,7 +5496,7 @@
        (every? (fn [(name String)] Bool (contains? right name)) (ordered-keys left))))
 
 (defn- sorted-names [(table Any)] Any
-  (vec (sort (keys table))))
+  (vec (sort (vec (keys table)))))
 
 (defn- check-declared-module-contract! [(prog Any) (effective Any)] Nil
   (let [declared (get prog "declared-contract")]

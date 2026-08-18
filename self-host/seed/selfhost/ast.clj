@@ -325,7 +325,7 @@
   (cond
   (vector? value) (mapv lower-binding-output-identities value)
   (not (map? value)) value
-  :else (let [lowered (reduce (fn [out key] (assoc out key (lower-binding-output-identities (get value key)))) {} (keys value))
+  :else (let [lowered (reduce (fn [out key] (assoc out key (lower-binding-output-identities (get value key)))) {} (vec (keys value)))
    direct (get lowered "bindingId")
    identities (get lowered "bindingIds")
    node (get lowered "node")
