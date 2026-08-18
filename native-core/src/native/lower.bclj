@@ -18687,6 +18687,35 @@
                 (fail-result current
                   "TODO-NATIVE-VEC-OPERAND: vec lowers a native vector or a closed insertion-order set")
 
+                ;; Native v0 has one sequential carrier, so a list shares the
+                ;; vector layout; mixed items enter through the dynamic domain.
+                (= "list" callee)
+                (let [(uniform Bool)
+                      (loop [(position Int) 1]
+                        (cond
+                          (>= position (count value-types)) true
+                          (same-id? (nth value-types position)
+                            (nth value-types 0))
+                          (recur (+ position 1))
+                          :else false))
+                      (element core/NativeId)
+                      (if (and (> (count values) 0) uniform)
+                        (nth value-types 0)
+                        (slice-value-type-id))
+                      (vector-type (U core/NativeId Nil))
+                      (vector-type-of types element)]
+                  (if (nil? vector-type)
+                    (fail-result current
+                      "TODO-NATIVE-LIST-ELEMENT-TYPE: the program declares no vector of the list element type")
+                    (let [(coerced ArgsResultV0)
+                          (coerce-values-to-type types owner current values
+                            value-types element)
+                          (settled BodyStateV0) (argsresultv0-state coerced)]
+                      (if (state-blocked? settled)
+                        (dead-result settled)
+                        (build-vector-literal owner settled vector-type
+                          (argsresultv0-values coerced))))))
+
                 (and (or (= "hash" callee)
                        (or (= "compare" callee)
                          (or (= "=" callee) (= "not=" callee))))
