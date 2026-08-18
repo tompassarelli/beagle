@@ -7275,6 +7275,9 @@
     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-body-locs-table body-locs-tbl]
                    [current-type-table type-tbl]
+                   [current-interface-member-candidate-cache (make-hasheq)]
+                   [current-resolution-receipt-cache
+                    (and capture-types? (make-hasheq))]
                    [current-binder-type-table binder-type-tbl]
                    [current-check-target (program-target prog)]
                    [current-check-program prog]
@@ -9591,27 +9594,44 @@
      (go-body (defmethod-form-body root) #f)]
     [else (go root)]))
 
+(define current-interface-member-candidate-cache (make-parameter #f))
+(define current-resolution-receipt-cache (make-parameter #f))
+
 (define (interface-member-candidates interface)
-  (sort (hash-keys (module-interface-bindings interface)) symbol<?))
+  (define cache (current-interface-member-candidate-cache))
+  (define (compute)
+    (sort (hash-keys (module-interface-bindings interface)) symbol<?))
+  (if cache
+      (hash-ref! cache interface compute)
+      (compute)))
 
 (define (record-resolution-receipt! prog query candidates result interface)
-  (define target (program-target prog))
-  (define profile (semantic-profile-for-target target))
-  (record-program-read-receipt!
-   prog
-   (make-read-receipt-v1
-    'resolution-lookup
-    query
-    candidates
-    result
-    profile
-    target
-    (hash 'check-profile (current-check-profile)
-          'resolution 'module-interface)
-    #:semantic-fact-ids
-    (if interface
-        (list (module-interface-digest interface))
-        '()))))
+  (define cache (current-resolution-receipt-cache))
+  (when cache
+    ;; The receipt table is identity-deduplicated. Avoid reserializing the
+    ;; same large interface candidate set for repeated uses of one name.
+    (define candidate-key (or interface candidates))
+    (define seen (hash-ref! cache candidate-key make-hash))
+    (define receipt-key (cons query result))
+    (unless (hash-ref seen receipt-key #f)
+      (define target (program-target prog))
+      (define profile (semantic-profile-for-target target))
+      (record-program-read-receipt!
+       prog
+       (make-read-receipt-v1
+        'resolution-lookup
+        query
+        candidates
+        result
+        profile
+        target
+        (hash 'check-profile (current-check-profile)
+              'resolution 'module-interface)
+        #:semantic-fact-ids
+        (if interface
+            (list (module-interface-digest interface))
+            '())))
+      (hash-set! seen receipt-key #t))))
 
 (define (check-module-interface-resolution! prog)
   (when (and (>= (current-check-profile) 1)
