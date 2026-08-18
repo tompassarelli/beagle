@@ -9,6 +9,111 @@
             [native.obligations :as obligations]))
 
 
+(defrecord ProfileIdentityV1
+  [(source-profile-id String)
+   (profile-schema-version Int)
+   (semantic-environment-id String)
+   (target-abi-profile String)
+   (encoding String)
+   (digest String)])
+
+(defrecord SemanticEvaluationOrderV1
+  [(operator-order String)
+   (argument-order String)
+   (element-traversal-order String)
+   (callback-invocation-order String)])
+
+(defrecord SemanticStrictnessV1
+  [(input-demand String)
+   (element-demand String)
+   (result-demand String)
+   (realization-boundary String)])
+
+(defrecord SemanticAllocationBehaviorV1
+  [(result-representation String)
+   (allocation-destination String)
+   (freshness String)
+   (aliasing String)
+   (allocation-bound String)])
+
+(defrecord SemanticValueIdentityV1
+  [(identity-bearing Bool)
+   (equality-rule String)
+   (hashing-rule String)
+   (identity-preservation String)])
+
+(defrecord SemanticMutationPersistenceV1
+  [(input-mutation String)
+   (result-mutability String)
+   (persistence-rule String)
+   (update-visibility String)])
+
+(defrecord SemanticEffectsV1
+  [(effect-set (Vec String))
+   (effect-order String)
+   (required-capabilities (Vec String))
+   (atomicity String)])
+
+(defrecord SemanticFailureBehaviorV1
+  [(static-rejections String)
+   (runtime-failure-mode String)
+   (failure-type String)
+   (partial-result-rule String)])
+
+(defrecord SemanticOwnershipLifetimeV1
+  [(input-ownership String)
+   (result-ownership String)
+   (borrow-rule String)
+   (escape-rule String)
+   (lifetime-region String)])
+
+(defrecord SemanticProfileAvailabilityV1
+  [(availability String) (required-profile-features (Vec String))])
+
+(defrecord SemanticPortabilityConditionsV1
+  [(compatible-profile-ids (Vec String))
+   (required-obligations (Vec String))
+   (discharge-evidence-kinds (Vec String))
+   (portability-diagnostic-id String)])
+
+(defrecord SemanticComplexityV1
+  [(time-class String) (space-class String) (order-sensitivity String)])
+
+(defrecord SemanticFormContractV1
+  [(contract-id String)
+   (contract-schema-id String)
+   (form-id String)
+   (profile-identity ProfileIdentityV1)
+   (contract-version Int)
+   (classification String)
+   (evaluation-order SemanticEvaluationOrderV1)
+   (strictness SemanticStrictnessV1)
+   (allocation-behavior SemanticAllocationBehaviorV1)
+   (value-identity SemanticValueIdentityV1)
+   (mutation-and-persistence SemanticMutationPersistenceV1)
+   (effects SemanticEffectsV1)
+   (failure-behavior SemanticFailureBehaviorV1)
+   (ownership-and-lifetime SemanticOwnershipLifetimeV1)
+   (profile-availability SemanticProfileAvailabilityV1)
+   (portability-conditions SemanticPortabilityConditionsV1)
+   (contractual-complexity SemanticComplexityV1)
+   (decision-evidence-ids (Vec String))
+   (encoding String)])
+
+(defrecord UnitDerivationReceiptV1
+  [(receipt-id String)
+   (profile-identity ProfileIdentityV1)
+   (unit-id core/NativeId)
+   (unit-semantic-digest String)
+   (dependency-context-digest String)
+   (typing-environment-hash String)
+   (form-contract-hashes (Vec String))
+   (form-contract-set-digest String)
+   (compiler-rule-epoch String)
+   (materialization-receipt-id String)
+   (result-fact-hashes (Vec String))
+   (encoding String)])
+
 (defrecord UnitContractV0
   [(unit-id core/NativeId)
    (qualified-name String)
@@ -68,16 +173,364 @@
 
 (defunion TypedUnitWireDecodeResultV1
   (TypedUnitWireDecodedV1 [(unit TypedUnitV0)])
-  (TypedUnitWireRejectedV1
-    [(code String) (detail String) (offset Int)]))
+  (TypedUnitWireRejectedV1 [(code String) (detail String) (offset Int)]))
 
 (defunion NativeUnitWireDecodeResultV1
   (NativeUnitWireDecodedV1 [(unit NativeUnitV0)])
-  (NativeUnitWireRejectedV1
-    [(code String) (detail String) (offset Int)]))
+  (NativeUnitWireRejectedV1 [(code String) (detail String) (offset Int)]))
 
 (defn id-value [(identity core/NativeId)] String
   (core/nativeid-value identity))
+
+(defn encode-string-set [(tag String) (values (Vec String))] String
+  (stages/canonical-set tag values))
+
+(defn make-profile-identity-v1
+  [(source-profile-id String)
+   (profile-schema-version Int)
+   (semantic-environment-id String)
+   (target-abi-profile String)]
+  ProfileIdentityV1
+  (let [(encoding String)
+        (stages/canonical-record "profile-identity-v1"
+          [source-profile-id
+           (str profile-schema-version)
+           semantic-environment-id
+           target-abi-profile])]
+    (->ProfileIdentityV1 source-profile-id profile-schema-version
+      semantic-environment-id target-abi-profile encoding
+      (stages/content-digest encoding))))
+
+(defn core-profile-identity-v1 [] ProfileIdentityV1
+  (make-profile-identity-v1
+    "core" 1
+    (stages/content-digest
+      (stages/canonical-record "core-semantic-environment-v1"
+        ["semantic-contract-slice-v1"]))
+    "NONE"))
+
+(defn encode-semantic-evaluation-order
+  [(value SemanticEvaluationOrderV1)] String
+  (stages/canonical-record "semantic-evaluation-order-v1"
+    [(semanticevaluationorderv1-operator-order value)
+     (semanticevaluationorderv1-argument-order value)
+     (semanticevaluationorderv1-element-traversal-order value)
+     (semanticevaluationorderv1-callback-invocation-order value)]))
+
+(defn encode-semantic-strictness [(value SemanticStrictnessV1)] String
+  (stages/canonical-record "semantic-strictness-v1"
+    [(semanticstrictnessv1-input-demand value)
+     (semanticstrictnessv1-element-demand value)
+     (semanticstrictnessv1-result-demand value)
+     (semanticstrictnessv1-realization-boundary value)]))
+
+(defn encode-semantic-allocation [(value SemanticAllocationBehaviorV1)] String
+  (stages/canonical-record "semantic-allocation-behavior-v1"
+    [(semanticallocationbehaviorv1-result-representation value)
+     (semanticallocationbehaviorv1-allocation-destination value)
+     (semanticallocationbehaviorv1-freshness value)
+     (semanticallocationbehaviorv1-aliasing value)
+     (semanticallocationbehaviorv1-allocation-bound value)]))
+
+(defn encode-semantic-value-identity [(value SemanticValueIdentityV1)] String
+  (stages/canonical-record "semantic-value-identity-v1"
+    [(stages/encode-bool
+       (semanticvalueidentityv1-identity-bearing value))
+     (semanticvalueidentityv1-equality-rule value)
+     (semanticvalueidentityv1-hashing-rule value)
+     (semanticvalueidentityv1-identity-preservation value)]))
+
+(defn encode-semantic-mutation-persistence
+  [(value SemanticMutationPersistenceV1)] String
+  (stages/canonical-record "semantic-mutation-persistence-v1"
+    [(semanticmutationpersistencev1-input-mutation value)
+     (semanticmutationpersistencev1-result-mutability value)
+     (semanticmutationpersistencev1-persistence-rule value)
+     (semanticmutationpersistencev1-update-visibility value)]))
+
+(defn encode-semantic-effects [(value SemanticEffectsV1)] String
+  (stages/canonical-record "semantic-effects-v1"
+    [(encode-string-set "effect-set"
+       (semanticeffectsv1-effect-set value))
+     (semanticeffectsv1-effect-order value)
+     (encode-string-set "required-capabilities"
+       (semanticeffectsv1-required-capabilities value))
+     (semanticeffectsv1-atomicity value)]))
+
+(defn encode-semantic-failure [(value SemanticFailureBehaviorV1)] String
+  (stages/canonical-record "semantic-failure-behavior-v1"
+    [(semanticfailurebehaviorv1-static-rejections value)
+     (semanticfailurebehaviorv1-runtime-failure-mode value)
+     (semanticfailurebehaviorv1-failure-type value)
+     (semanticfailurebehaviorv1-partial-result-rule value)]))
+
+(defn encode-semantic-ownership [(value SemanticOwnershipLifetimeV1)] String
+  (stages/canonical-record "semantic-ownership-lifetime-v1"
+    [(semanticownershiplifetimev1-input-ownership value)
+     (semanticownershiplifetimev1-result-ownership value)
+     (semanticownershiplifetimev1-borrow-rule value)
+     (semanticownershiplifetimev1-escape-rule value)
+     (semanticownershiplifetimev1-lifetime-region value)]))
+
+(defn encode-semantic-profile-availability
+  [(value SemanticProfileAvailabilityV1)] String
+  (stages/canonical-record "semantic-profile-availability-v1"
+    [(semanticprofileavailabilityv1-availability value)
+     (encode-string-set "required-profile-features"
+       (semanticprofileavailabilityv1-required-profile-features value))]))
+
+(defn encode-semantic-portability
+  [(value SemanticPortabilityConditionsV1)] String
+  (stages/canonical-record "semantic-portability-conditions-v1"
+    [(encode-string-set "compatible-profile-ids"
+       (semanticportabilityconditionsv1-compatible-profile-ids value))
+     (encode-string-set "required-obligations"
+       (semanticportabilityconditionsv1-required-obligations value))
+     (encode-string-set "discharge-evidence-kinds"
+       (semanticportabilityconditionsv1-discharge-evidence-kinds value))
+     (semanticportabilityconditionsv1-portability-diagnostic-id value)]))
+
+(defn encode-semantic-complexity [(value SemanticComplexityV1)] String
+  (stages/canonical-record "semantic-complexity-v1"
+    [(semanticcomplexityv1-time-class value)
+     (semanticcomplexityv1-space-class value)
+     (semanticcomplexityv1-order-sensitivity value)]))
+
+(defn make-semantic-form-contract-v1
+  [(contract-schema-id String)
+   (form-id String)
+   (profile-identity ProfileIdentityV1)
+   (contract-version Int)
+   (classification String)
+   (evaluation-order SemanticEvaluationOrderV1)
+   (strictness SemanticStrictnessV1)
+   (allocation-behavior SemanticAllocationBehaviorV1)
+   (value-identity SemanticValueIdentityV1)
+   (mutation-and-persistence SemanticMutationPersistenceV1)
+   (effects SemanticEffectsV1)
+   (failure-behavior SemanticFailureBehaviorV1)
+   (ownership-and-lifetime SemanticOwnershipLifetimeV1)
+   (profile-availability SemanticProfileAvailabilityV1)
+   (portability-conditions SemanticPortabilityConditionsV1)
+   (contractual-complexity SemanticComplexityV1)
+   (decision-evidence-ids (Vec String))]
+  SemanticFormContractV1
+  (let [(encoding String)
+        (stages/canonical-record "semantic-form-contract-v1"
+          [contract-schema-id
+           form-id
+           (profileidentityv1-encoding profile-identity)
+           (str contract-version)
+           classification
+           (encode-semantic-evaluation-order evaluation-order)
+           (encode-semantic-strictness strictness)
+           (encode-semantic-allocation allocation-behavior)
+           (encode-semantic-value-identity value-identity)
+           (encode-semantic-mutation-persistence mutation-and-persistence)
+           (encode-semantic-effects effects)
+           (encode-semantic-failure failure-behavior)
+           (encode-semantic-ownership ownership-and-lifetime)
+           (encode-semantic-profile-availability profile-availability)
+           (encode-semantic-portability portability-conditions)
+           (encode-semantic-complexity contractual-complexity)
+           (encode-string-set "decision-evidence-ids"
+             decision-evidence-ids)])]
+    (->SemanticFormContractV1
+      (stages/content-digest encoding)
+      contract-schema-id form-id profile-identity contract-version
+      classification evaluation-order strictness allocation-behavior
+      value-identity mutation-and-persistence effects failure-behavior
+      ownership-and-lifetime profile-availability portability-conditions
+      contractual-complexity decision-evidence-ids encoding)))
+
+(defn rebuild-semantic-form-contract
+  [(contract SemanticFormContractV1)
+   (profile-identity ProfileIdentityV1)
+   (contract-version Int)]
+  SemanticFormContractV1
+  (make-semantic-form-contract-v1
+    (semanticformcontractv1-contract-schema-id contract)
+    (semanticformcontractv1-form-id contract)
+    profile-identity contract-version
+    (semanticformcontractv1-classification contract)
+    (semanticformcontractv1-evaluation-order contract)
+    (semanticformcontractv1-strictness contract)
+    (semanticformcontractv1-allocation-behavior contract)
+    (semanticformcontractv1-value-identity contract)
+    (semanticformcontractv1-mutation-and-persistence contract)
+    (semanticformcontractv1-effects contract)
+    (semanticformcontractv1-failure-behavior contract)
+    (semanticformcontractv1-ownership-and-lifetime contract)
+    (semanticformcontractv1-profile-availability contract)
+    (semanticformcontractv1-portability-conditions contract)
+    (semanticformcontractv1-contractual-complexity contract)
+    (semanticformcontractv1-decision-evidence-ids contract)))
+
+(defn semantic-form-contract-with-version
+  [(contract SemanticFormContractV1)
+   (contract-version Int)]
+  SemanticFormContractV1
+  (rebuild-semantic-form-contract contract
+    (semanticformcontractv1-profile-identity contract) contract-version))
+
+(defn semantic-form-contract-with-profile
+  [(contract SemanticFormContractV1)
+   (profile-identity ProfileIdentityV1)]
+  SemanticFormContractV1
+  (rebuild-semantic-form-contract contract profile-identity
+    (semanticformcontractv1-contract-version contract)))
+
+(defn five-form-semantic-contracts
+  [(profile-identity ProfileIdentityV1)] (Vec SemanticFormContractV1)
+  (let [(schema String) "beagle.semantic-form-contract/v1"
+        (evidence (Vec String))
+        ["SEMANTIC-CONTRACTS-DESIGN#narrow-post-flip-migration-slice"]]
+    [(make-semantic-form-contract-v1
+       schema "let" profile-identity 1 "common"
+       (->SemanticEvaluationOrderV1
+         "special-form" "left-to-right" "none" "none")
+       (->SemanticStrictnessV1
+         "strict-initializers" "not-applicable" "strict-body-result"
+         "binding-complete")
+       (->SemanticAllocationBehaviorV1
+         "body-result" "none" "preserved" "preserved"
+         "no-intrinsic-allocation")
+       (->SemanticValueIdentityV1
+         false "value-defined" "value-defined" "preserved")
+       (->SemanticMutationPersistenceV1
+         "none" "value-defined" "lexical-bindings-immutable"
+         "after-each-initializer")
+       (->SemanticEffectsV1
+         [] "initializers-left-to-right-then-body" [] "not-atomic")
+       (->SemanticFailureBehaviorV1
+         "binding-shape-and-type-rules" "propagate-initializer-or-body"
+         "propagated" "failed-binding-not-installed")
+       (->SemanticOwnershipLifetimeV1
+         "preserved" "body-result" "lexical" "body-result-may-escape"
+         "implementation-chosen")
+       (->SemanticProfileAvailabilityV1 "available" ["lexical-binding"])
+       (->SemanticPortabilityConditionsV1
+         ["clj" "js" "nix" "core"] [] [] "NONE")
+       (->SemanticComplexityV1
+         "linear-in-bindings" "constant-per-binding" "order-sensitive")
+       evidence)
+     (make-semantic-form-contract-v1
+       schema "map" profile-identity 1 "similar-but-semantically-different"
+       (->SemanticEvaluationOrderV1
+         "callback-first" "left-to-right" "left-to-right"
+         "left-to-right")
+       (->SemanticStrictnessV1
+         "strict-input" "eager-all-elements" "strict-result" "call-return")
+       (->SemanticAllocationBehaviorV1
+         "eager-vector" "current-arena" "fresh-result"
+         "elements-preserved" "linear-in-input")
+       (->SemanticValueIdentityV1
+         false "structural" "structural" "new-container")
+       (->SemanticMutationPersistenceV1
+         "none" "persistent-value" "input-preserved" "result-only")
+       (->SemanticEffectsV1
+         [] "callback-left-to-right" ["allocate"] "not-atomic")
+       (->SemanticFailureBehaviorV1
+         "typed-unary-callback-and-supported-input" "first-callback-failure"
+         "propagated" "no-result")
+       (->SemanticOwnershipLifetimeV1
+         "borrowed-input" "arena-owned" "elements-borrowed-during-callback"
+         "result-follows-arena" "current-arena")
+       (->SemanticProfileAvailabilityV1
+         "available" ["native-eager-higher-order"])
+       (->SemanticPortabilityConditionsV1
+         ["core"] [] [] "SEM-CONTRACT-MAP-CROSS-PROFILE")
+       (->SemanticComplexityV1 "linear" "linear" "order-sensitive")
+       evidence)
+     (make-semantic-form-contract-v1
+       schema "store/transact" profile-identity 1 "native-only"
+       (->SemanticEvaluationOrderV1
+         "transaction-first" "left-to-right" "store-defined"
+         "transaction-body-once")
+       (->SemanticStrictnessV1
+         "strict" "strict" "commit-visible" "transaction-commit")
+       (->SemanticAllocationBehaviorV1
+         "durable-revision" "store" "fresh-revision"
+         "structural-identity" "transaction-bounded")
+       (->SemanticValueIdentityV1
+         true "structural-term" "canonical-term-hash" "durable-identity")
+       (->SemanticMutationPersistenceV1
+         "store-only" "durable" "append-only-revision" "commit-atomic")
+       (->SemanticEffectsV1
+         ["store-write"] "transaction-order" ["store-write"] "atomic")
+       (->SemanticFailureBehaviorV1
+         "transaction-and-capability-rules" "abort-transaction"
+         "store-transaction-failure" "no-partial-commit")
+       (->SemanticOwnershipLifetimeV1
+         "borrowed-transaction-input" "store-owned" "transaction-scoped"
+         "durable-result-may-escape" "store")
+       (->SemanticProfileAvailabilityV1 "available" ["beagle-store"])
+       (->SemanticPortabilityConditionsV1
+         ["core"] ["store-write-capability"] ["capability-proof"]
+         "SEM-CONTRACT-STORE-OP")
+       (->SemanticComplexityV1
+         "transaction-dependent" "durable-delta" "order-sensitive")
+       evidence)
+     (make-semantic-form-contract-v1
+       schema "bgl/promote" profile-identity 1
+       "similar-but-semantically-different"
+       (->SemanticEvaluationOrderV1
+         "value-first" "left-to-right" "reachable-layout-order" "none")
+       (->SemanticStrictnessV1
+         "strict" "deep-copy-when-crossing" "strict-result" "copy-complete")
+       (->SemanticAllocationBehaviorV1
+         "same-typed-value" "parent-arena" "fresh-copy-when-crossing"
+         "aliasing-not-preserved" "reachable-value-bounded")
+       (->SemanticValueIdentityV1
+         false "structural" "structural" "value-preserved-address-changed")
+       (->SemanticMutationPersistenceV1
+         "none" "value-defined" "source-preserved" "new-parent-copy")
+       (->SemanticEffectsV1
+         ["allocate"] "descriptor-copy-order" ["allocate"] "not-atomic")
+       (->SemanticFailureBehaviorV1
+         "provable-lifetime-crossing" "allocation-failure"
+         "lower-failure" "no-result")
+       (->SemanticOwnershipLifetimeV1
+         "borrowed-source" "parent-arena-owned" "source-valid-during-copy"
+         "result-may-outlive-child" "parent-arena")
+       (->SemanticProfileAvailabilityV1
+         "available" ["arena-promotion"])
+       (->SemanticPortabilityConditionsV1
+         ["core"] ["epoch-soundness"] ["lifetime-proof"]
+         "SEM-CONTRACT-ARENA-ALLOC")
+       (->SemanticComplexityV1
+         "linear-in-reachable-value" "linear-copy" "layout-order-sensitive")
+       evidence)
+     (make-semantic-form-contract-v1
+       schema "println" profile-identity 1 "portable-with-obligations"
+       (->SemanticEvaluationOrderV1
+         "callee-first" "left-to-right" "left-to-right" "none")
+       (->SemanticStrictnessV1
+         "strict-arguments" "strict-rendering" "strict-nil" "write-complete")
+       (->SemanticAllocationBehaviorV1
+         "nil" "implementation-chosen" "not-applicable"
+         "not-applicable" "rendered-text-bounded")
+       (->SemanticValueIdentityV1
+         false "nil" "nil" "not-applicable")
+       (->SemanticMutationPersistenceV1
+         "none" "immutable-nil" "external-output-only" "ordered-write")
+       (->SemanticEffectsV1
+         ["stdout-write"] "arguments-then-single-line-write"
+         ["stdout-write"] "single-write")
+       (->SemanticFailureBehaviorV1
+         "printable-arguments" "host-output-failure" "lower-failure"
+         "no-result-guarantee-after-failure")
+       (->SemanticOwnershipLifetimeV1
+         "borrowed-arguments" "owned-nil" "call-scoped"
+         "no-borrow-escapes" "call")
+       (->SemanticProfileAvailabilityV1 "available" ["stdout"])
+       (->SemanticPortabilityConditionsV1
+         ["clj" "js" "nix" "core"] ["stdout-write-capability"]
+         ["capability-proof"] "SEM-CONTRACT-EFFECT")
+       (->SemanticComplexityV1
+         "linear-in-rendered-output" "render-buffer-dependent"
+         "order-sensitive")
+       evidence)]))
 
 (defn decimal-digit? [(character String)] Bool
   (or (= character "0") (= character "1") (= character "2")
@@ -109,8 +562,7 @@
       (= ":" (subs text position (+ position 1))) position
       :else (recur (+ position 1)))))
 
-(defn read-wire-part
-  [(text String) (offset Int)] (U WirePartV1 Nil)
+(defn read-wire-part [(text String) (offset Int)] (U WirePartV1 Nil)
   (let [(colon Int) (colon-offset text offset)]
     (if (< colon offset)
       nil
@@ -154,8 +606,7 @@
           (= field-count (count (wirerecordv1-fields record))))
       record nil)))
 
-(defn wire-record-with-tag
-  [(text String) (tag String)] (U WireRecordV1 Nil)
+(defn wire-record-with-tag [(text String) (tag String)] (U WireRecordV1 Nil)
   (let [(record (U WireRecordV1 Nil)) (parse-wire-record text)]
     (if (and (some? record) (= tag (wirerecordv1-tag record))) record nil)))
 
@@ -197,8 +648,7 @@
     (stages/canonical-record "none" [])
     (stages/canonical-record "some" [(stages/encode-id value)])))
 
-(defn decode-wire-optional-id
-  [(encoding String)] (U (Vec core/NativeId) Nil)
+(defn decode-wire-optional-id [(encoding String)] (U (Vec core/NativeId) Nil)
   (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
     (cond
       (nil? record) nil
@@ -215,8 +665,7 @@
   [(decoded (Vec core/NativeId))] (U core/NativeId Nil)
   (if (= 0 (count decoded)) nil (nth decoded 0)))
 
-(defn encode-wire-id-vector
-  [(tag String) (values (Vec core/NativeId))] String
+(defn encode-wire-id-vector [(tag String) (values (Vec core/NativeId))] String
   (stages/canonical-record tag
     (mapv (fn [(value core/NativeId)] String (stages/encode-id value)) values)))
 
@@ -236,8 +685,7 @@
               nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn encode-id-vector
-  [(tag String) (identities (Vec core/NativeId))] String
+(defn encode-id-vector [(tag String) (identities (Vec core/NativeId))] String
   (stages/canonical-record tag
     (mapv (fn [(identity core/NativeId)] String (id-value identity))
       identities)))
@@ -271,8 +719,7 @@
     [(lower/NativeTodoV0 code detail)
      (stages/canonical-record "typed-pending-v0" [code detail])]))
 
-(defn encode-typed-function-payload
-  [(function lower/TypedFunctionV0)] String
+(defn encode-typed-function-payload [(function lower/TypedFunctionV0)] String
   (stages/canonical-record "typed-unit-function-v0"
     [(lower/encode-typed-function
        (lower/typedfunctionv0-id function)
@@ -330,8 +777,7 @@
     [(stages/encode-id (core/parameter-id parameter))
      (stages/encode-id (core/parameter-type-id parameter))]))
 
-(defn encode-parameters-wire-v1
-  [(parameters (Vec core/Parameter))] String
+(defn encode-parameters-wire-v1 [(parameters (Vec core/Parameter))] String
   (stages/canonical-record "parameters-wire-v1"
     (mapv encode-parameter-wire-v1 parameters)))
 
@@ -465,8 +911,7 @@
            (lower/nativeloweredv0-blocks readiness)))])
     (stages/canonical-record "unsupported-readiness-wire-v1" [])))
 
-(defn encode-typed-function-wire-v1
-  [(function lower/TypedFunctionV0)] String
+(defn encode-typed-function-wire-v1 [(function lower/TypedFunctionV0)] String
   (stages/canonical-record "typed-function-wire-v1"
     [(stages/encode-id (lower/typedfunctionv0-id function))
      (stages/encode-string (lower/typedfunctionv0-name function))
@@ -587,8 +1032,7 @@
      (encode-ownership-wire-v1 (core/abivaluev0-ownership value))
      (encode-wire-optional-id (core/abivaluev0-lifetime-region value))]))
 
-(defn encode-optional-abi-value-wire-v1
-  [(value (U core/AbiValueV0 Nil))] String
+(defn encode-optional-abi-value-wire-v1 [(value (U core/AbiValueV0 Nil))] String
   (if (nil? value)
     (stages/canonical-record "none" [])
     (stages/canonical-record "some" [(encode-abi-value-wire-v1 value)])))
@@ -635,8 +1079,7 @@
      (encode-wire-id-vector "native-function-capabilities-wire-v1"
        (core/functiondef-capabilities function))]))
 
-(defn decode-parameter-wire-v1
-  [(encoding String)] (U core/Parameter Nil)
+(defn decode-parameter-wire-v1 [(encoding String)] (U core/Parameter Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "parameter-wire-v1" 2)]
     (if (nil? record)
@@ -647,8 +1090,7 @@
         (if (and (some? identity) (some? type-id))
           (core/->Parameter identity type-id) nil)))))
 
-(defn decode-parameters-wire-v1
-  [(encoding String)] (U (Vec core/Parameter) Nil)
+(defn decode-parameters-wire-v1 [(encoding String)] (U (Vec core/Parameter) Nil)
   (let [(record (U WireRecordV1 Nil))
         (wire-record-with-tag encoding "parameters-wire-v1")]
     (if (nil? record)
@@ -663,8 +1105,7 @@
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-ssa-value-wire-v1
-  [(encoding String)] (U core/SsaValueV0 Nil)
+(defn decode-ssa-value-wire-v1 [(encoding String)] (U core/SsaValueV0 Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "ssa-value-wire-v1" 2)]
     (if (nil? record)
@@ -675,8 +1116,7 @@
         (if (and (some? identity) (some? type-id))
           (core/->SsaValueV0 identity type-id) nil)))))
 
-(defn decode-native-atom-wire-v1
-  [(encoding String)] (U core/NativeAtom Nil)
+(defn decode-native-atom-wire-v1 [(encoding String)] (U core/NativeAtom Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "i64-atom-wire-v1" 1)]
     (if (nil? record)
@@ -735,8 +1175,7 @@
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-token-flow-wire-v1
-  [(encoding String)] (U core/TokenFlowV0 Nil)
+(defn decode-token-flow-wire-v1 [(encoding String)] (U core/TokenFlowV0 Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "token-flow-wire-v1" 2)]
     (if (nil? record)
@@ -749,8 +1188,7 @@
         (if (and (some? consumed) (some? produced))
           (core/->TokenFlowV0 consumed produced) nil)))))
 
-(defn decode-switch-case-wire-v1
-  [(encoding String)] (U core/SwitchCaseV0 Nil)
+(defn decode-switch-case-wire-v1 [(encoding String)] (U core/SwitchCaseV0 Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "switch-case-wire-v1" 3)]
     (if (nil? record)
@@ -779,8 +1217,7 @@
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-terminator-wire-v1
-  [(encoding String)] (U core/Terminator Nil)
+(defn decode-terminator-wire-v1 [(encoding String)] (U core/Terminator Nil)
   (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
     (if (nil? record)
       nil
@@ -810,8 +1247,7 @@
 
           :else nil)))))
 
-(defn decode-instruction-wire-v1
-  [(encoding String)] (U core/Instruction Nil)
+(defn decode-instruction-wire-v1 [(encoding String)] (U core/Instruction Nil)
   (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
     (if (nil? record)
       nil
@@ -907,8 +1343,7 @@
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-basic-block-wire-v1
-  [(encoding String)] (U core/BasicBlock Nil)
+(defn decode-basic-block-wire-v1 [(encoding String)] (U core/BasicBlock Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "basic-block-wire-v1" 4)]
     (if (nil? record)
@@ -925,8 +1360,7 @@
               (some? instructions) (some? terminators))
           (core/->BasicBlock identity parameters instructions terminators) nil)))))
 
-(defn decode-blocks-wire-v1
-  [(encoding String)] (U (Vec core/BasicBlock) Nil)
+(defn decode-blocks-wire-v1 [(encoding String)] (U (Vec core/BasicBlock) Nil)
   (let [(record (U WireRecordV1 Nil))
         (wire-record-with-tag encoding "blocks-wire-v1")]
     (if (nil? record)
@@ -991,8 +1425,7 @@
           (sorted-distinct-fields? (wirerecordv1-fields record)))
       record nil)))
 
-(defn decode-type-variant-wire-v1
-  [(encoding String)] (U core/TypeVariant Nil)
+(defn decode-type-variant-wire-v1 [(encoding String)] (U core/TypeVariant Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "type-variant-wire-v1" 3)]
     (if (nil? record)
@@ -1016,8 +1449,7 @@
         (if (nil? value) nil
           (recur (+ position 1) (conj values value)))))))
 
-(defn decode-type-shape-wire-v1
-  [(encoding String)] (U core/TypeShape Nil)
+(defn decode-type-shape-wire-v1 [(encoding String)] (U core/TypeShape Nil)
   (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
     (if (nil? record)
       nil
@@ -1044,8 +1476,7 @@
 
           :else nil)))))
 
-(defn decode-type-def-wire-v1
-  [(encoding String)] (U core/TypeDef Nil)
+(defn decode-type-def-wire-v1 [(encoding String)] (U core/TypeDef Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "type-def-wire-v1" 3)]
     (if (nil? record)
@@ -1058,8 +1489,7 @@
         (if (and (some? identity) (some? name) (some? shape))
           (core/->TypeDef identity name shape) nil)))))
 
-(defn decode-type-defs-wire-v1
-  [(encoding String)] (U (Vec core/TypeDef) Nil)
+(defn decode-type-defs-wire-v1 [(encoding String)] (U (Vec core/TypeDef) Nil)
   (let [(record (U WireRecordV1 Nil))
         (canonical-set-wire-record encoding "typed-unit-types-wire-v1")]
     (if (nil? record)
@@ -1074,8 +1504,7 @@
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-effect-wire-v1
-  [(encoding String)] (U core/EffectDef Nil)
+(defn decode-effect-wire-v1 [(encoding String)] (U core/EffectDef Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "pure-effect-wire-v1" 2)]
     (if (nil? record)
@@ -1086,8 +1515,7 @@
         (if (and (some? identity) (some? token))
           (core/->EffectDef identity (core/->PureEffect token)) nil)))))
 
-(defn decode-effects-wire-v1
-  [(encoding String)] (U (Vec core/EffectDef) Nil)
+(defn decode-effects-wire-v1 [(encoding String)] (U (Vec core/EffectDef) Nil)
   (let [(record (U WireRecordV1 Nil))
         (canonical-set-wire-record encoding "typed-unit-effects-wire-v1")]
     (if (nil? record)
@@ -1163,8 +1591,7 @@
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-layout-shape-wire-v1
-  [(encoding String)] (U core/LayoutShapeV0 Nil)
+(defn decode-layout-shape-wire-v1 [(encoding String)] (U core/LayoutShapeV0 Nil)
   (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
     (if (nil? record)
       nil
@@ -1189,8 +1616,7 @@
 
           :else nil)))))
 
-(defn decode-layout-def-wire-v1
-  [(encoding String)] (U core/LayoutDef Nil)
+(defn decode-layout-def-wire-v1 [(encoding String)] (U core/LayoutDef Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "layout-def-wire-v1" 5)]
     (if (nil? record)
@@ -1222,8 +1648,7 @@
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-ownership-wire-v1
-  [(encoding String)] (U core/OwnershipRuleV0 Nil)
+(defn decode-ownership-wire-v1 [(encoding String)] (U core/OwnershipRuleV0 Nil)
   (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
     (if (or (nil? record) (not= 1 (count (wirerecordv1-fields record))))
       nil
@@ -1238,8 +1663,7 @@
             (core/->OwnedV0 token)
             :else nil))))))
 
-(defn decode-abi-value-wire-v1
-  [(encoding String)] (U core/AbiValueV0 Nil)
+(defn decode-abi-value-wire-v1 [(encoding String)] (U core/AbiValueV0 Nil)
   (let [(record (U WireRecordV1 Nil))
         (required-wire-record encoding "abi-value-wire-v1" 4)]
     (if (nil? record)
@@ -1346,8 +1770,7 @@
             capabilities version layout-digest)
           nil)))))
 
-(defn decode-abis-wire-v1
-  [(encoding String)] (U (Vec core/AbiDeclV0) Nil)
+(defn decode-abis-wire-v1 [(encoding String)] (U (Vec core/AbiDeclV0) Nil)
   (let [(record (U WireRecordV1 Nil))
         (canonical-set-wire-record encoding "native-unit-abis-wire-v1")]
     (if (nil? record)
@@ -1542,9 +1965,7 @@
       (stages/content-digest encoding))))
 
 (defn dependency-context-digest
-  [(unit stages/SourceUnitV0)
-   (contracts (Vec UnitContractV0))]
-  String
+  [(unit stages/SourceUnitV0) (contracts (Vec UnitContractV0))] String
   (let [(rows (Vec String))
         (mapv
           (fn [(read-id core/NativeId)] String
@@ -1564,17 +1985,155 @@
     (stages/content-digest
       (stages/canonical-set "dependency-context-v0" rows))))
 
-(defn unit-result-key
-  [(compiler-context-digest String)
-   (unit stages/SourceUnitV0)
-   (contracts (Vec UnitContractV0))]
-  String
+(defn canonical-contract-hashes
+  [(contracts (Vec SemanticFormContractV1))] (Vec String)
+  (vec
+    (sort
+      (distinct
+        (mapv
+          (fn [(contract SemanticFormContractV1)] String
+            (semanticformcontractv1-contract-id contract))
+          contracts)))))
+
+(defn form-contract-set-digest [(hashes (Vec String))] String
   (stages/content-digest
-    (stages/canonical-record "beagle-unit-result-v0"
-      [compiler-context-digest
-       (id-value (stages/sourceunitv0-id unit))
-       (stages/sourceunitv0-semantic-digest unit)
-       (dependency-context-digest unit contracts)])))
+    (stages/canonical-set "semantic-form-contract-set-v1" hashes)))
+
+(defn encode-unit-derivation-receipt
+  [(profile-identity ProfileIdentityV1)
+   (unit-id core/NativeId)
+   (unit-semantic-digest String)
+   (dependency-digest String)
+   (typing-environment-hash String)
+   (form-contract-hashes (Vec String))
+   (form-contract-set-digest-value String)
+   (compiler-rule-epoch String)
+   (materialization-receipt-id String)
+   (result-fact-hashes (Vec String))]
+  String
+  (stages/canonical-record "unit-derivation-receipt-v1"
+    [(profileidentityv1-encoding profile-identity)
+     (stages/encode-id unit-id)
+     unit-semantic-digest
+     dependency-digest
+     typing-environment-hash
+     (stages/canonical-set "form-contract-hashes" form-contract-hashes)
+     form-contract-set-digest-value
+     compiler-rule-epoch
+     materialization-receipt-id
+     (stages/canonical-set "result-fact-hashes" result-fact-hashes)]))
+
+(defn make-unit-derivation-receipt
+  [(profile-identity ProfileIdentityV1)
+   (unit stages/SourceUnitV0)
+   (unit-contracts (Vec UnitContractV0))
+   (form-contracts (Vec SemanticFormContractV1))
+   (typing-environment-hash String)
+   (compiler-rule-epoch String)
+   (materialization-receipt-id String)
+   (result-fact-hashes (Vec String))]
+  UnitDerivationReceiptV1
+  (let [(contract-hashes (Vec String))
+        (canonical-contract-hashes form-contracts)
+        (contract-set-digest String)
+        (form-contract-set-digest contract-hashes)
+        (dependency-digest String)
+        (dependency-context-digest unit unit-contracts)
+        (encoding String)
+        (encode-unit-derivation-receipt
+          profile-identity
+          (stages/sourceunitv0-id unit)
+          (stages/sourceunitv0-semantic-digest unit)
+          dependency-digest
+          typing-environment-hash
+          contract-hashes
+          contract-set-digest
+          compiler-rule-epoch
+          materialization-receipt-id
+          result-fact-hashes)]
+    (->UnitDerivationReceiptV1
+      (stages/content-digest encoding)
+      profile-identity
+      (stages/sourceunitv0-id unit)
+      (stages/sourceunitv0-semantic-digest unit)
+      dependency-digest
+      typing-environment-hash
+      contract-hashes
+      contract-set-digest
+      compiler-rule-epoch
+      materialization-receipt-id
+      (vec (sort result-fact-hashes))
+      encoding)))
+
+(defn semantic-contract-for-hash
+  [(contracts (Vec SemanticFormContractV1))
+   (contract-hash String)]
+  (U SemanticFormContractV1 Nil)
+  (some
+    (fn [(contract SemanticFormContractV1)] (U SemanticFormContractV1 Nil)
+      (if (= contract-hash (semanticformcontractv1-contract-id contract))
+        contract nil))
+    contracts))
+
+(defn receipt-contract-hashes-valid?
+  [(profile-identity ProfileIdentityV1)
+   (contract-hashes (Vec String))
+   (contracts (Vec SemanticFormContractV1))]
+  Bool
+  (every?
+    (fn [(contract-hash String)] Bool
+      (let [(contract (U SemanticFormContractV1 Nil))
+            (semantic-contract-for-hash contracts contract-hash)]
+        (and (some? contract)
+          (= (profileidentityv1-digest profile-identity)
+            (profileidentityv1-digest
+              (semanticformcontractv1-profile-identity contract)))
+          (= contract-hash
+            (stages/content-digest
+              (semanticformcontractv1-encoding contract))))))
+    contract-hashes))
+
+(defn unit-derivation-receipt-valid-for?
+  [(receipt UnitDerivationReceiptV1)
+   (unit stages/SourceUnitV0)
+   (unit-contracts (Vec UnitContractV0))
+   (form-contracts (Vec SemanticFormContractV1))]
+  Bool
+  (let [(contract-hashes (Vec String))
+        (unitderivationreceiptv1-form-contract-hashes receipt)]
+    (and
+      (= (unitderivationreceiptv1-receipt-id receipt)
+        (stages/content-digest
+          (unitderivationreceiptv1-encoding receipt)))
+      (= (profileidentityv1-digest
+           (unitderivationreceiptv1-profile-identity receipt))
+        (stages/content-digest
+          (profileidentityv1-encoding
+            (unitderivationreceiptv1-profile-identity receipt))))
+      (core/native-id= (unitderivationreceiptv1-unit-id receipt)
+        (stages/sourceunitv0-id unit))
+      (= (unitderivationreceiptv1-unit-semantic-digest receipt)
+        (stages/sourceunitv0-semantic-digest unit))
+      (= (unitderivationreceiptv1-dependency-context-digest receipt)
+        (dependency-context-digest unit unit-contracts))
+      (= contract-hashes (vec (sort (distinct contract-hashes))))
+      (= (unitderivationreceiptv1-form-contract-set-digest receipt)
+        (form-contract-set-digest contract-hashes))
+      (receipt-contract-hashes-valid?
+        (unitderivationreceiptv1-profile-identity receipt)
+        contract-hashes form-contracts))))
+
+(defn unit-result-key [(receipt UnitDerivationReceiptV1)] String
+  (stages/content-digest
+    (stages/canonical-record "beagle-unit-result-v1"
+      [(profileidentityv1-digest
+         (unitderivationreceiptv1-profile-identity receipt))
+       (id-value (unitderivationreceiptv1-unit-id receipt))
+       (unitderivationreceiptv1-unit-semantic-digest receipt)
+       (unitderivationreceiptv1-dependency-context-digest receipt)
+       (unitderivationreceiptv1-typing-environment-hash receipt)
+       (unitderivationreceiptv1-form-contract-set-digest receipt)
+       (unitderivationreceiptv1-compiler-rule-epoch receipt)])))
 
 (defn conj-id
   [(identities (Vec core/NativeId))
@@ -1672,9 +2231,7 @@
                       (nth (core/basicblock-instructions block) inner))))))))))))
 
 (defn find-type
-  [(types (Vec core/TypeDef))
-   (target core/NativeId)]
-  (U core/TypeDef Nil)
+  [(types (Vec core/TypeDef)) (target core/NativeId)] (U core/TypeDef Nil)
   (some
     (fn [(definition core/TypeDef)] (U core/TypeDef Nil)
       (if (core/native-id= target (core/typedef-id definition))
@@ -1682,9 +2239,7 @@
     types))
 
 (defn reachable-type-ids
-  [(types (Vec core/TypeDef))
-   (seeds (Vec core/NativeId))]
-  (Vec core/NativeId)
+  [(types (Vec core/TypeDef)) (seeds (Vec core/NativeId))] (Vec core/NativeId)
   (loop [(round Int) 0 (current (Vec core/NativeId)) seeds]
     (let [(grown (Vec core/NativeId))
           (loop [(position Int) 0 (collected (Vec core/NativeId)) current]
@@ -1921,8 +2476,7 @@
     [(payloadclaimv0-category claim)
      (id-value (payloadclaimv0-identity claim))]))
 
-(defn check-payload-claims
-  [(claims (Vec PayloadClaimV0))] ClaimCheckV0
+(defn check-payload-claims [(claims (Vec PayloadClaimV0))] ClaimCheckV0
   (loop [(position Int) 0
          (encodings (Map String String)) {}
          (valid Bool) true
@@ -1940,16 +2494,14 @@
               (id-value (payloadclaimv0-identity claim))
               " has unequal canonical payloads")))))))
 
-(defn contract-claims
-  [(contracts (Vec UnitContractV0))] (Vec PayloadClaimV0)
+(defn contract-claims [(contracts (Vec UnitContractV0))] (Vec PayloadClaimV0)
   (mapv (fn [(contract UnitContractV0)] PayloadClaimV0
           (->PayloadClaimV0 "unit-contract"
             (unitcontractv0-unit-id contract)
             (unitcontractv0-encoding contract)))
     contracts))
 
-(defn typed-unit-claims
-  [(units (Vec TypedUnitV0))] (Vec PayloadClaimV0)
+(defn typed-unit-claims [(units (Vec TypedUnitV0))] (Vec PayloadClaimV0)
   (loop [(position Int) 0 (claims (Vec PayloadClaimV0)) []]
     (if (>= position (count units))
       claims
@@ -1976,8 +2528,7 @@
                       (encode-capability capability)))
               (typedunitv0-capabilities unit)))))))))
 
-(defn native-unit-claims
-  [(units (Vec NativeUnitV0))] (Vec PayloadClaimV0)
+(defn native-unit-claims [(units (Vec NativeUnitV0))] (Vec PayloadClaimV0)
   (loop [(position Int) 0 (claims (Vec PayloadClaimV0)) []]
     (if (>= position (count units))
       claims
@@ -2076,7 +2627,8 @@
         (insert-typed-function (nth values position) result)))))
 
 (defn insert-native-function
-  [(item core/FunctionDef) (sorted (Vec core/FunctionDef))]
+  [(item core/FunctionDef)
+   (sorted (Vec core/FunctionDef))]
   (Vec core/FunctionDef)
   (loop [(position Int) 0 (inserted Bool) false
          (result (Vec core/FunctionDef)) []]
@@ -2114,7 +2666,8 @@
       (recur (+ position 1) (insert-effect (nth values position) result)))))
 
 (defn insert-capability
-  [(item core/CapabilityDef) (sorted (Vec core/CapabilityDef))]
+  [(item core/CapabilityDef)
+   (sorted (Vec core/CapabilityDef))]
   (Vec core/CapabilityDef)
   (loop [(position Int) 0 (inserted Bool) false
          (result (Vec core/CapabilityDef)) []]
@@ -2184,32 +2737,26 @@
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-abi (nth values position) result)))))
 
-(defn source-unit-ids
-  [(units (Vec stages/SourceUnitV0))] (Vec core/NativeId)
+(defn source-unit-ids [(units (Vec stages/SourceUnitV0))] (Vec core/NativeId)
   (mapv (fn [(unit stages/SourceUnitV0)] core/NativeId
           (stages/sourceunitv0-id unit))
     units))
 
-(defn contract-ids
-  [(contracts (Vec UnitContractV0))] (Vec core/NativeId)
+(defn contract-ids [(contracts (Vec UnitContractV0))] (Vec core/NativeId)
   (mapv (fn [(contract UnitContractV0)] core/NativeId
           (unitcontractv0-unit-id contract))
     contracts))
 
-(defn typed-unit-ids
-  [(units (Vec TypedUnitV0))] (Vec core/NativeId)
+(defn typed-unit-ids [(units (Vec TypedUnitV0))] (Vec core/NativeId)
   (mapv (fn [(unit TypedUnitV0)] core/NativeId (typedunitv0-unit-id unit))
     units))
 
-(defn native-unit-ids
-  [(units (Vec NativeUnitV0))] (Vec core/NativeId)
+(defn native-unit-ids [(units (Vec NativeUnitV0))] (Vec core/NativeId)
   (mapv (fn [(unit NativeUnitV0)] core/NativeId (nativeunitv0-unit-id unit))
     units))
 
 (defn exact-id-set?
-  [(expected (Vec core/NativeId))
-   (actual (Vec core/NativeId))]
-  Bool
+  [(expected (Vec core/NativeId)) (actual (Vec core/NativeId))] Bool
   (and (= (count expected) (count actual))
     (core/unique-ids? actual)
     (core/ids-in? expected actual)
@@ -2256,8 +2803,7 @@
     (instance? native.core.VariantValueInstruction instruction) true
     :else false))
 
-(defn switch-cases-wire-v1-supported?
-  [(cases (Vec core/SwitchCaseV0))] Bool
+(defn switch-cases-wire-v1-supported? [(cases (Vec core/SwitchCaseV0))] Bool
   (and (> (count cases) 0)
     (core/unique-ids?
       (mapv (fn [(switch-case core/SwitchCaseV0)] core/NativeId
@@ -2290,15 +2836,13 @@
       (core/id-in? block-ids entry-block)
       (every? block-wire-v1-supported? blocks))))
 
-(defn readiness-wire-v1-supported?
-  [(readiness lower/NativeReadinessV0)] Bool
+(defn readiness-wire-v1-supported? [(readiness lower/NativeReadinessV0)] Bool
   (and (instance? native.lower.NativeLoweredV0 readiness)
     (blocks-wire-v1-supported?
       (lower/nativeloweredv0-entry-block readiness)
       (lower/nativeloweredv0-blocks readiness))))
 
-(defn typed-function-wire-v1-supported?
-  [(function lower/TypedFunctionV0)] Bool
+(defn typed-function-wire-v1-supported? [(function lower/TypedFunctionV0)] Bool
   (let [(effects (Vec core/NativeId)) (lower/typedfunctionv0-effects function)
         (readiness lower/NativeReadinessV0)
         (lower/typedfunctionv0-readiness function)]
@@ -2335,8 +2879,7 @@
 (defn effect-wire-v1-supported? [(effect core/EffectDef)] Bool
   (instance? native.core.PureEffect (core/effectdef-kind effect)))
 
-(defn distinct-native-ids
-  [(values (Vec core/NativeId))] (Vec core/NativeId)
+(defn distinct-native-ids [(values (Vec core/NativeId))] (Vec core/NativeId)
   (loop [(position Int) 0 (result (Vec core/NativeId)) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (conj-id result (nth values position))))))
@@ -2380,8 +2923,7 @@
         (core/effect-ids effects))
       (= 0 (count (typedunitv0-capabilities unit))))))
 
-(defn scalar-wire-v1-supported?
-  [(representation core/ScalarReprV0)] Bool
+(defn scalar-wire-v1-supported? [(representation core/ScalarReprV0)] Bool
   (or (instance? native.core.SignedIntReprV0 representation)
     (instance? native.core.UnsignedIntReprV0 representation)))
 
@@ -2400,8 +2942,7 @@
             (core/unionshapev0-variants shape)))
         :else false))))
 
-(defn ownership-wire-v1-supported?
-  [(ownership core/OwnershipRuleV0)] Bool
+(defn ownership-wire-v1-supported? [(ownership core/OwnershipRuleV0)] Bool
   (or (instance? native.core.BorrowedV0 ownership)
     (instance? native.core.OwnedV0 ownership)))
 
@@ -2681,9 +3222,7 @@
     units))
 
 (defn typed-unit-function-valid?
-  [(source-units (Vec stages/SourceUnitV0))
-   (unit TypedUnitV0)]
-  Bool
+  [(source-units (Vec stages/SourceUnitV0)) (unit TypedUnitV0)] Bool
   (let [(source (U stages/SourceUnitV0 Nil))
         (source-unit-for source-units (typedunitv0-unit-id unit))]
     (and (some? source)
@@ -2693,9 +3232,7 @@
           (stages/sourceunitv0-name source))))))
 
 (defn native-unit-function-valid?
-  [(source-units (Vec stages/SourceUnitV0))
-   (unit NativeUnitV0)]
-  Bool
+  [(source-units (Vec stages/SourceUnitV0)) (unit NativeUnitV0)] Bool
   (let [(source (U stages/SourceUnitV0 Nil))
         (source-unit-for source-units (nativeunitv0-unit-id unit))]
     (and (some? source)
@@ -2705,9 +3242,7 @@
           (stages/sourceunitv0-name source))))))
 
 (defn native-unit-for-id
-  [(units (Vec NativeUnitV0))
-   (target core/NativeId)]
-  (U NativeUnitV0 Nil)
+  [(units (Vec NativeUnitV0)) (target core/NativeId)] (U NativeUnitV0 Nil)
   (some
     (fn [(unit NativeUnitV0)] (U NativeUnitV0 Nil)
       (if (core/native-id= target (nativeunitv0-unit-id unit)) unit nil))
@@ -2754,9 +3289,7 @@
           (core/abideclv0-layout-digest (nth abis 0)))))))
 
 (defn unit-pairs-valid?
-  [(typed-units (Vec TypedUnitV0))
-   (native-units (Vec NativeUnitV0))]
-  Bool
+  [(typed-units (Vec TypedUnitV0)) (native-units (Vec NativeUnitV0))] Bool
   (every?
     (fn [(typed-unit TypedUnitV0)] Bool
       (let [(native-unit (U NativeUnitV0 Nil))
@@ -2845,8 +3378,7 @@
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-effect current (nth additions inner))))))))))
 
-(defn collect-capabilities
-  [(units (Vec TypedUnitV0))] (Vec core/CapabilityDef)
+(defn collect-capabilities [(units (Vec TypedUnitV0))] (Vec core/CapabilityDef)
   (loop [(position Int) 0
          (values (Vec core/CapabilityDef))
          (lower/slice-capabilities false false false false false false false false)]
@@ -2906,9 +3438,7 @@
               (recur (+ inner 1) (append-abi current (nth additions inner))))))))))
 
 (defn layout-for-type?
-  [(layouts (Vec core/LayoutDef))
-   (type-id core/NativeId)]
-  Bool
+  [(layouts (Vec core/LayoutDef)) (type-id core/NativeId)] Bool
   (some? (some (fn [(layout core/LayoutDef)] Bool
                  (core/native-id= type-id (core/layoutdef-type-id layout)))
            layouts)))
@@ -2950,9 +3480,7 @@
       abis)))
 
 (defn abi-layout-digests-match?
-  [(abis (Vec core/AbiDeclV0))
-   (layouts (Vec core/LayoutDef))]
-  Bool
+  [(abis (Vec core/AbiDeclV0)) (layouts (Vec core/LayoutDef))] Bool
   (let [(expected String) (lower/layout-digest layouts)]
     (every? (fn [(abi core/AbiDeclV0)] Bool
               (= expected (core/abideclv0-layout-digest abi)))
@@ -3025,8 +3553,7 @@
     []))
 
 (defn verdict-results
-  [(verdicts (Vec obligations/ObligationVerdictV0))]
-  (Vec core/ObligationResult)
+  [(verdicts (Vec obligations/ObligationVerdictV0))] (Vec core/ObligationResult)
   (lower/native-obligation-results
     (obligations/obligation-passed? (nth verdicts 0))
     (obligations/obligation-passed? (nth verdicts 1))

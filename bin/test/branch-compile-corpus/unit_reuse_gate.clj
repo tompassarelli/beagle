@@ -228,13 +228,34 @@
 (defn native-digest [native]
   (unit/nativeunitv0-digest native))
 
+(def semantic-contract-profile (unit/core-profile-identity-v1))
+
+(def semantic-contract-registry
+  (unit/five-form-semantic-contracts semantic-contract-profile))
+
+(def branch-unit-typing-environment
+  (stages/content-digest "branch-unit-typing-environment-v1"))
+
+(defn branch-unit-derivation-receipt
+  [source-unit unit-contracts compiler-context]
+  (unit/make-unit-derivation-receipt
+   semantic-contract-profile
+   source-unit
+   unit-contracts
+   []
+   branch-unit-typing-environment
+   (:rule-epoch compiler-context)
+   (:materialization-receipt-id compiler-context)
+   []))
+
 (defn result-keys [case-data compiler-context]
   (into {}
         (map
          (fn [row]
            [(:name row)
-            (unit/unit-result-key compiler-context (:source row)
-                                  (:contracts case-data))])
+            (unit/unit-result-key
+             (branch-unit-derivation-receipt
+              (:source row) (:contracts case-data) compiler-context))])
          (:rows case-data))))
 
 (defn changed-result-names [baseline candidate compiler-context]
@@ -1350,7 +1371,8 @@
 (defn prepared-candidate [case-data compiler-context]
   (let [result (singleton/prepare-unit-compilation
                 (:frozen-source case-data)
-                compiler-context
+                (:rule-epoch compiler-context)
+                semantic-contract-registry
                 (:configuration case-data))]
     (require!
      (instance? native.unit_compile.UnitPreparationAcceptedV0 result)
@@ -1395,7 +1417,9 @@
                  (:contracts case-data)))))
 
 (defn expected-result-key [case-data source-unit compiler-context]
-  (unit/unit-result-key compiler-context source-unit (:contracts case-data)))
+  (unit/unit-result-key
+   (branch-unit-derivation-receipt
+    source-unit (:contracts case-data) compiler-context)))
 
 (defn singleton-typed! [candidate prepared row compiler-context]
   (let [source-unit (:source row)
@@ -1404,6 +1428,10 @@
                        (lower/function-id
                         unit-id (stages/sourceunitv0-name source-unit)))
         key (expected-result-key candidate source-unit compiler-context)
+        receipt
+        (branch-unit-derivation-receipt
+         source-unit (read-contracts-for candidate source-unit)
+         compiler-context)
         _ (probe-reset!)
         result (with-singleton-probes
                 (fn []
@@ -1413,7 +1441,7 @@
                    (stages/sourceunitv0-semantic-digest source-unit)
                    (stages/sourceunitv0-read-set source-unit)
                    (read-contracts-for candidate source-unit)
-                   compiler-context
+                   receipt
                    key)))]
     (require!
      (instance? native.unit_compile.TypedUnitCompiledV0 result)
@@ -1452,6 +1480,9 @@
                        (lower/function-id
                         unit-id (stages/sourceunitv0-name source-unit)))
         key (expected-result-key candidate source-unit compiler-context)
+        receipt
+        (branch-unit-derivation-receipt
+         source-unit (:contracts candidate) compiler-context)
         target (first (filter #(core/native-id= unit-id
                                                 (unit/typedunitv0-unit-id %))
                               typed-set))
@@ -1459,7 +1490,7 @@
         result (with-singleton-probes
                 (fn []
                   (singleton/compile-native-unit
-                   prepared unit-id target typed-set compiler-context key
+                   prepared unit-id target typed-set receipt key
                    abi)))]
     (require!
      (instance? native.unit_compile.NativeUnitCompiledV0 result)
@@ -1531,11 +1562,14 @@
         function (unit/typedunitv0-function target)
         typed-set (:typed-units case-data)
         result-key (expected-result-key case-data source-unit compiler-context)
+        receipt
+        (branch-unit-derivation-receipt
+         source-unit (:contracts case-data) compiler-context)
         invoke (fn [replacement]
                  (singleton/compile-native-unit
                   prepared unit-id replacement
                   (replace-typed-unit typed-set replacement)
-                  compiler-context result-key abi))
+                  receipt result-key abi))
         not-ready
         (assoc target :function
                (assoc function :readiness
@@ -1580,8 +1614,11 @@
         unit-id (stages/sourceunitv0-id source-unit)
         stale-contracts
         [(contract-for baseline "corpus.foundation/adjust")]
+        receipt
+        (branch-unit-derivation-receipt
+         source-unit stale-contracts compiler-context)
         result-key
-        (unit/unit-result-key compiler-context source-unit stale-contracts)
+        (unit/unit-result-key receipt)
         attach-before (probe-total :attach-body)
         lower-before (probe-total :lower-ready-function)
         _ (probe-reset!)
@@ -1594,7 +1631,7 @@
             (stages/sourceunitv0-semantic-digest source-unit)
             (stages/sourceunitv0-read-set source-unit)
             stale-contracts
-            compiler-context
+            receipt
             result-key)))]
     (require!
      (instance? native.unit_compile.TypedUnitCompileRejectedV0 result)
@@ -1667,6 +1704,10 @@
         function-text
         (native-id-text
          (lower/function-id unit-id (stages/sourceunitv0-name source-unit)))
+        receipt
+        (branch-unit-derivation-receipt
+         source-unit (read-contracts-for baseline source-unit)
+         compiler-context)
         reset-probes (probe-reset!)
         result
         (with-singleton-probes
@@ -1677,7 +1718,7 @@
             (stages/sourceunitv0-semantic-digest source-unit)
             (stages/sourceunitv0-read-set source-unit)
             (read-contracts-for baseline source-unit)
-            compiler-context
+            receipt
             (expected-result-key baseline source-unit compiler-context))))]
     (require!
      (instance? native.unit_compile.TypedUnitCompileRejectedV0 result)
@@ -1796,23 +1837,200 @@
       (assert-reversed! candidate mixed assembly compiler-commit abi)
       assembly)))
 
+(def semantic-contract-probe-forms
+  ["let" "map" "store/transact" "bgl/promote" "println"])
+
+(def semantic-contract-probe-uses
+  {"let" ["let"]
+   "map" ["let" "map"]
+   "store/transact" ["let" "map" "store/transact"]
+   "bgl/promote" ["let" "bgl/promote"]
+   "println" ["let" "println"]})
+
+(defn semantic-contract-by-form [contracts form-id]
+  (first
+   (filter #(= form-id (unit/semanticformcontractv1-form-id %)) contracts)))
+
+(defn semantic-contract-probe-unit [form-id]
+  (let [unit-id (core/->NativeId (str "semantic-contract-probe/" form-id))]
+    (stages/->SourceUnitV0
+     unit-id
+     (core/->NativeId "semantic-contract-probe/module")
+     "defn"
+     form-id
+     (stages/content-digest
+      (stages/canonical-record "semantic-contract-probe-source-v1" [form-id]))
+     (core/->NativeId (str "semantic-contract-probe/root/" form-id))
+     [])))
+
+(defn semantic-contracts-for-unit [contracts source-unit]
+  (mapv
+   (fn [form-id]
+     (let [contract (semantic-contract-by-form contracts form-id)]
+       (require! (some? contract)
+                 (str "semantic contract probe omitted " form-id))
+       contract))
+   (get semantic-contract-probe-uses (stages/sourceunitv0-name source-unit))))
+
+(defn semantic-contract-probe-receipt
+  [profile contracts source-unit materialization-receipt-id]
+  (unit/make-unit-derivation-receipt
+   profile
+   source-unit
+   []
+   (semantic-contracts-for-unit contracts source-unit)
+   (stages/content-digest "semantic-contract-probe-typing-environment-v1")
+   (stages/content-digest "semantic-contract-probe-rule-epoch-v1")
+   materialization-receipt-id
+   [(stages/content-digest
+     (str "semantic-contract-probe-result/"
+          (stages/sourceunitv0-name source-unit)))]))
+
+(defn semantic-contract-probe-state
+  [profile contracts materialization-receipt-id]
+  (into
+   {}
+   (map
+    (fn [form-id]
+      (let [source-unit (semantic-contract-probe-unit form-id)
+            receipt
+            (semantic-contract-probe-receipt
+             profile contracts source-unit materialization-receipt-id)]
+        [form-id
+         {:source-unit source-unit
+          :receipt receipt
+          :key (unit/unit-result-key receipt)}]))
+    semantic-contract-probe-forms)))
+
+(defn changed-semantic-contract-probe-keys [before after]
+  (set
+   (for [[form-id state] after
+         :when (not= (:key state) (:key (get before form-id)))]
+     form-id)))
+
+(defn assert-semantic-contract-slice! []
+  (let [profile (unit/core-profile-identity-v1)
+        contracts (unit/five-form-semantic-contracts profile)
+        contracts-by-form
+        (into {}
+              (map (juxt unit/semanticformcontractv1-form-id identity)
+                   contracts))
+        contract-ids
+        (mapv unit/semanticformcontractv1-contract-id contracts)]
+    (require! (= (set semantic-contract-probe-forms)
+                 (set (keys contracts-by-form)))
+              "five-form contract registry differs from the probe surface")
+    (require! (= 5 (count contracts))
+              "five-form contract registry contains the wrong row count")
+    (require! (= 5 (count (distinct contract-ids)))
+              "profile-qualified five-form contract IDs collided")
+    (doseq [contract contracts]
+      (require!
+       (= (unit/semanticformcontractv1-contract-id contract)
+          (stages/content-digest
+           (unit/semanticformcontractv1-encoding contract)))
+       (str (unit/semanticformcontractv1-form-id contract)
+            " contract ID is not its canonical envelope digest"))
+      (require!
+       (= "core"
+          (unit/profileidentityv1-source-profile-id
+           (unit/semanticformcontractv1-profile-identity contract)))
+       (str (unit/semanticformcontractv1-form-id contract)
+            " contract lost its Core profile qualifier")))
+    (let [let-contract (get contracts-by-form "let")
+          hosted-profile
+          (unit/make-profile-identity-v1
+           "clj" 1
+           (stages/content-digest "semantic-contract-probe-clj-environment-v1")
+           "NONE")
+          hosted-let
+          (unit/semantic-form-contract-with-profile
+           let-contract hosted-profile)]
+      (require!
+       (not= (unit/semanticformcontractv1-contract-id let-contract)
+             (unit/semanticformcontractv1-contract-id hosted-let))
+       "visually identical let contracts collided across source profiles"))
+    (let [implementation-a
+          (stages/content-digest "semantic-contract-probe-implementation-a")
+          implementation-b
+          (stages/content-digest "semantic-contract-probe-implementation-b")
+          baseline
+          (semantic-contract-probe-state profile contracts implementation-a)
+          reattested
+          (semantic-contract-probe-state profile contracts implementation-b)
+          map-v2
+          (unit/semantic-form-contract-with-version
+           (get contracts-by-form "map") 2)
+          bumped-contracts
+          (mapv #(if (= "map" (unit/semanticformcontractv1-form-id %))
+                   map-v2
+                   %)
+                contracts)
+          bumped
+          (semantic-contract-probe-state
+           profile bumped-contracts implementation-a)
+          referencing-map #{"map" "store/transact"}]
+      (require!
+       (every?
+        (fn [form-id]
+          (not=
+           (unit/unitderivationreceiptv1-receipt-id
+            (:receipt (get baseline form-id)))
+           (unit/unitderivationreceiptv1-receipt-id
+            (:receipt (get reattested form-id)))))
+        semantic-contract-probe-forms)
+       "implementation-only re-attestation did not mint fresh receipts")
+      (require!
+       (= #{} (changed-semantic-contract-probe-keys baseline reattested))
+       "implementation-only change invalidated semantic unit results")
+      (require!
+       (= referencing-map
+          (changed-semantic-contract-probe-keys baseline bumped))
+       "map contract-version bump did not invalidate exactly its readers")
+      (doseq [form-id semantic-contract-probe-forms]
+        (let [source-unit (:source-unit (get baseline form-id))
+              receipt (:receipt (get baseline form-id))
+              expected-hashes
+              (set
+               (map unit/semanticformcontractv1-contract-id
+                    (semantic-contracts-for-unit contracts source-unit)))]
+          (require!
+           (= expected-hashes
+              (set
+               (unit/unitderivationreceiptv1-form-contract-hashes receipt)))
+           (str form-id " derivation receipt omitted a consulted contract"))
+          (require!
+           (unit/unit-derivation-receipt-valid-for?
+            receipt source-unit [] contracts)
+           (str form-id " derivation receipt does not bind its unit inputs"))))
+      (println
+       "branch-compile-corpus: semantic contracts PASS five forms, exact 2/5 contract bump, 0/5 implementation change"))))
+
 (defn -main [& args]
   (require! (= 2 (count args))
             "usage: unit_reuse_gate.clj BUILD_ROOT COMPILER_COMMIT")
   (let [[build-root compiler-commit] args
         abi (core/abi-profile-lp64)
         compiler-context
-        (stages/content-digest
-         (stages/canonical-record
-          "branch-unit-reuse-gate-context-v0"
-          [compiler-commit "profile=3" "abi=lp64" "materializer=c17"
-           "unit-contract-v0" "typed-unit-wire-v1"
-           "native-unit-wire-v1"]))
+        {:rule-epoch
+         (stages/content-digest
+          (stages/canonical-record
+           "branch-unit-semantic-rule-epoch-v1"
+           ["profile=core" "profile-schema=1" "abi=lp64"
+            "unit-contract-v0" "semantic-form-contract-v1"
+            "unit-derivation-receipt-v1" "typed-unit-wire-v1"
+            "native-unit-wire-v1"]))
+         :materialization-receipt-id
+         (stages/content-digest
+          (stages/canonical-record
+           "branch-unit-materialization-receipt-v1"
+           [compiler-commit "materializer=c17"]))}
         baseline (load-case build-root "baseline" compiler-commit abi)
         comment (load-case build-root "comment-layout" compiler-commit abi)
         private (load-case build-root "private-implementation" compiler-commit abi)
         public (load-case build-root "public-interface" compiler-commit abi)]
     (assert-probe-mechanism!)
+    (assert-semantic-contract-slice!)
     (assert-contract-shape! baseline)
     (assert-wire-round-trips! baseline)
     (assert-v0-rejected! baseline)
