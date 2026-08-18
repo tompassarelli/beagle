@@ -17303,11 +17303,13 @@
                   (->ExprResultV0
                     (state-emit (state-bump current)
                       (core/->TextBuiltinInstruction
-                        (core/->SsaValueV0 result-id (bool-type-id))
-                        ;; re-matches spells pattern before source.
-                        (core/->TextRegexMatchesV0
+                        (core/->SsaValueV0 result-id (regex-match-type-id))
+                        ;; re-matches spells pattern before source. Its native
+                        ;; result is the closed capture vector so callers may
+                        ;; inspect groups after checking presence.
+                        (core/->TextRegexFindV0 (arena-value-id owner)
                           (nth values 1) (nth values 0))))
-                    result-id (bool-type-id) false))
+                    result-id (regex-match-type-id) false))
 
                 (= "re-matches" callee)
                 (fail-result current
@@ -21121,7 +21123,9 @@
         declared-union-types (Vec core/TypeDef)
         (source-union-types index)
         record-types (Vec core/TypeDef)
-        (if (index-has-callee? index "re-find")
+        (if (or
+              (index-has-callee? index "re-find")
+              (index-has-callee? index "re-matches"))
           (append-type-def
             (append-type-defs base-record-types declared-union-types)
             (regex-match-type))
