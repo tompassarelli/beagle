@@ -5,7 +5,7 @@
 (ns store.snapshot-codec
   (:require [commit-plan :as plan]
             [store.log-codec :as log]
-            [store.native-wire-codec :as wire]
+            [store.native-wire-codec :as wire :refer [defwire]]
             [store.store :as term-store]
             [store.types :as t]))
 
@@ -23,12 +23,6 @@
 (def snapshot-max-record-bytes Int 1048576)
 (def snapshot-max-log-labels Int 64)
 (def snapshot-header-fixed-bytes Int 28)
-
-(def record-atom Int 1)
-(def record-triple Int 2)
-(def record-transaction Int 3)
-(def record-operation Int 4)
-(def record-trailer Int 5)
 
 (def atom-string Int 1)
 (def atom-int Int 2)
@@ -86,6 +80,34 @@
 (defrecord BootPlan
   [(route Keyword) (reason Keyword?) (report String) (image Image?)])
 
+(wire/defwire snapshot-record
+  (framed :u32le :crc32)
+  (tagged :u8
+    [1 atom
+     [(row (codec t/AtomRow :atom
+                  append-snapshot-atom-payload!
+                  read-snapshot-atom-payload! -1))]]
+    [2 triple [(t1 :i64le) (t2 :i64le) (t3 :i64le)]]
+    [3 transaction
+     [(sequence :i64le)
+      (first-operation :i64le)
+      (operation-count :i64le)]]
+    [4 operation
+     [(tx-sequence :i64le)
+      (ordinal :i64le)
+      (action :u8)
+      (triple-handle :i64le)]]
+    [5 trailer
+     [(sequence :i64le)
+      (watermark :i64le)
+      (labels (codec (Vec String) :bounded-text-list
+                     append-snapshot-labels! read-snapshot-labels! -1
+                     snapshot-max-log-labels))
+      (image-start :i64le)
+      (image-end :i64le)
+      (stamp :i64le)
+      (fingerprint :u32le)]]))
+
 (def no-sidecar Sidecar? nil)
 (def no-image Image? nil)
 (def no-reason Keyword? nil)
@@ -138,17 +160,6 @@
         (wire/append-u32-le! out (log/crc32 bytes))
         nil))))
 
-;; A payload staged in its own growing vector costs the arena the whole image a
-;; second time, so a row record declares its length and writes straight into OUT.
-(def atom-int-record-bytes Int 10)
-(def atom-float-record-bytes Int 10)
-(def atom-bool-record-bytes Int 3)
-(def atom-instant-record-bytes Int 14)
-(def text-atom-header-bytes Int 6)
-(def triple-record-bytes Int 25)
-(def transaction-record-bytes Int 25)
-(def operation-record-bytes Int 26)
-
 (defn- start-record! [(out wire/Encoder) (payload-bytes Int)] Int
   (do
     (wire/append-u32-le! out payload-bytes)
@@ -164,135 +175,116 @@
         (wire/append-u32-le! out (log/crc32-range bytes start end))
         nil))))
 
-(defn- append-text-atom-record!
-  [(out wire/Encoder) (atom-kind Int) (text String) (label String)] Nil
-  (let [(bytes (Vec Int))
-        (wire/utf8-bytes! out text snapshot-max-text-bytes label)]
-    (if (deref (wire/encoder-error out))
-      nil
-      (let [(payload-bytes Int) (+ text-atom-header-bytes (count bytes))
-            (start Int) (start-record! out payload-bytes)]
-        (do
-          (wire/append-u8! out record-atom)
-          (wire/append-u8! out atom-kind)
-          (wire/append-u32-le! out (count bytes))
-          (wire/append-bytes! out bytes)
-          (finish-record! out start payload-bytes))))))
-
-(defn- start-atom-record! [(out wire/Encoder) (atom-kind Int) (bytes Int)] Int
-  (let [(start Int) (start-record! out bytes)]
-    (do
-      (wire/append-u8! out record-atom)
-      (wire/append-u8! out atom-kind)
-      start)))
-
-(defn- append-atom-record! [(out wire/Encoder) (row t/AtomRow)] Nil
+(defn- append-snapshot-atom-payload! [(out wire/Encoder) (row t/AtomRow)] Nil
   (let [kind (t/atomrow-kind row)]
     (cond
       [(= :string kind)
-       (append-text-atom-record!
-        out atom-string (text-or-empty (t/atomrow-string-value row))
-        "snapshot string atom")]
+       (do
+         (wire/append-u8! out atom-string)
+         (wire/append-sized-text!
+          out (text-or-empty (t/atomrow-string-value row))
+          snapshot-max-text-bytes "snapshot string atom"))]
       [(= :int kind)
-       (let [(start Int)
-             (start-atom-record! out atom-int atom-int-record-bytes)]
-         (do
-           (wire/append-i64-le! out (int-or-zero (t/atomrow-int-value row)))
-           (finish-record! out start atom-int-record-bytes)))]
+       (do
+         (wire/append-u8! out atom-int)
+         (wire/append-i64-le! out (int-or-zero (t/atomrow-int-value row))))]
       [(= :float kind)
        (let [(value Float?) (t/atomrow-float-value row)]
          (if (nil? value)
            (wire/encoder-error! out "snapshot float atom has no value")
-           (let [(present Float) value
-                 (start Int)
-                 (start-atom-record! out atom-float atom-float-record-bytes)]
+           (let [(present Float) value]
              (do
+               (wire/append-u8! out atom-float)
                (wire/append-i64-le! out (float-to-bits present))
-               (finish-record! out start atom-float-record-bytes)))))]
+               nil))))]
       [(= :bool kind)
-       (let [(start Int)
-             (start-atom-record! out atom-bool atom-bool-record-bytes)]
-         (do
-           (wire/append-u8!
-            out (if (bool-or-false (t/atomrow-bool-value row)) 1 0))
-           (finish-record! out start atom-bool-record-bytes)))]
+       (do
+         (wire/append-u8! out atom-bool)
+         (wire/append-u8!
+          out (if (bool-or-false (t/atomrow-bool-value row)) 1 0)))]
       [(= :keyword kind)
        (let [(value Keyword?) (t/atomrow-keyword-value row)]
          (if (nil? value)
            (wire/encoder-error! out "snapshot keyword atom has no value")
            (let [(present Keyword) value]
-             (append-text-atom-record!
-              out atom-keyword (subs (str present) 1)
-              "snapshot keyword atom"))))]
+             (do
+               (wire/append-u8! out atom-keyword)
+               (wire/append-sized-text!
+                out (subs (str present) 1) snapshot-max-text-bytes
+                "snapshot keyword atom")))))]
       [(= :instant kind)
        (let [(value t/Instant?) (t/atomrow-instant-value row)]
          (if (nil? value)
            (wire/encoder-error! out "snapshot instant atom has no value")
-           (let [(present t/Instant) value
-                 (start Int)
-                 (start-atom-record! out atom-instant
-                                     atom-instant-record-bytes)]
+           (let [(present t/Instant) value]
              (do
+               (wire/append-u8! out atom-instant)
                (wire/append-i64-le! out (t/instant-epoch-seconds present))
                (wire/append-u32-le! out (t/instant-nanos present))
-               (finish-record! out start atom-instant-record-bytes)))))]
+               nil))))]
       [:else
        (wire/encoder-error! out "snapshot atom row has an unknown kind")])))
 
-(defn- append-triple-record! [(out wire/Encoder) (row t/TripleRow)] Nil
-  (let [(start Int) (start-record! out triple-record-bytes)]
+(defn- append-atom-record! [(out wire/Encoder) (row t/AtomRow)] Nil
+  (let [(payload wire/Encoder) (new-encoder)]
     (do
-      (wire/append-u8! out record-triple)
-      (wire/append-i64-le! out (t/triplerow-t1 row))
-      (wire/append-i64-le! out (t/triplerow-t2 row))
-      (wire/append-i64-le! out (t/triplerow-t3 row))
-      (finish-record! out start triple-record-bytes))))
+      (append-snapshot-record-atom! payload row)
+      (frame-record! out payload))))
+
+(defn- append-triple-record! [(out wire/Encoder) (row t/TripleRow)] Nil
+  (let [(start Int)
+        (start-record! out snapshot-record-triple-fixed-bytes)]
+    (do
+      (append-snapshot-record-triple!
+       out (t/triplerow-t1 row) (t/triplerow-t2 row) (t/triplerow-t3 row))
+      (finish-record! out start snapshot-record-triple-fixed-bytes))))
 
 (defn- append-transaction-record!
   [(out wire/Encoder) (row t/TransactionRow)] Nil
-  (let [(start Int) (start-record! out transaction-record-bytes)]
+  (let [(start Int)
+        (start-record! out snapshot-record-transaction-fixed-bytes)]
     (do
-      (wire/append-u8! out record-transaction)
-      (wire/append-i64-le! out (t/transactionrow-sequence row))
-      (wire/append-i64-le! out (t/transactionrow-first-operation row))
-      (wire/append-i64-le! out (t/transactionrow-operation-count row))
-      (finish-record! out start transaction-record-bytes))))
+      (append-snapshot-record-transaction!
+       out (t/transactionrow-sequence row)
+       (t/transactionrow-first-operation row)
+       (t/transactionrow-operation-count row))
+      (finish-record! out start snapshot-record-transaction-fixed-bytes))))
 
 (defn- append-operation-record! [(out wire/Encoder) (row t/OperationRow)] Nil
   (let [action (t/operationrow-action row)]
     (if (and (not= t/assert-action action) (not= t/retract-action action))
       (wire/encoder-error!
        out "snapshot operation action must be assert or retract")
-      (let [(start Int) (start-record! out operation-record-bytes)]
+      (let [(start Int)
+            (start-record! out snapshot-record-operation-fixed-bytes)]
         (do
-          (wire/append-u8! out record-operation)
-          (wire/append-i64-le! out (t/operationrow-tx-sequence row))
-          (wire/append-i64-le! out (t/operationrow-ordinal row))
-          (wire/append-u8!
-           out (if (= t/assert-action action) action-assert action-retract))
-          (wire/append-i64-le! out (t/operationrow-triple-handle row))
-          (finish-record! out start operation-record-bytes))))))
+          (append-snapshot-record-operation!
+           out (t/operationrow-tx-sequence row)
+           (t/operationrow-ordinal row)
+           (if (= t/assert-action action) action-assert action-retract)
+           (t/operationrow-triple-handle row))
+          (finish-record! out start snapshot-record-operation-fixed-bytes))))))
+
+(defn- append-snapshot-labels! [(out wire/Encoder) (labels (Vec String))] Nil
+  (do
+    (wire/append-u32-le! out (count labels))
+    (loop [(position Int) 0]
+      (if (>= position (count labels))
+        nil
+        (do
+          (wire/append-sized-text!
+           out (nth labels position) snapshot-max-text-bytes
+           "snapshot log label")
+          (recur (+ position 1)))))))
 
 (defn- append-trailer-record! [(out wire/Encoder) (sidecar Sidecar)] Nil
   (let [(payload wire/Encoder) (new-encoder)
         (labels (Vec String)) (sidecar-log-set sidecar)]
     (do
-      (wire/append-u8! payload record-trailer)
-      (wire/append-i64-le! payload (sidecar-sequence sidecar))
-      (wire/append-i64-le! payload (sidecar-watermark sidecar))
-      (wire/append-u32-le! payload (count labels))
-      (loop [(position Int) 0]
-        (if (>= position (count labels))
-          nil
-          (do
-            (wire/append-sized-text!
-             payload (nth labels position) snapshot-max-text-bytes
-             "snapshot log label")
-            (recur (+ position 1)))))
-      (wire/append-i64-le! payload (sidecar-image-start sidecar))
-      (wire/append-i64-le! payload (sidecar-image-end sidecar))
-      (wire/append-i64-le! payload (sidecar-stamp sidecar))
-      (wire/append-u32-le! payload (sidecar-fingerprint sidecar))
+      (append-snapshot-record-trailer!
+       payload (sidecar-sequence sidecar) (sidecar-watermark sidecar) labels
+       (sidecar-image-start sidecar) (sidecar-image-end sidecar)
+       (sidecar-stamp sidecar) (sidecar-fingerprint sidecar))
       (frame-record! out payload))))
 
 (defn- append-atom-records! [(out wire/Encoder) (rows (Vec t/AtomRow))] Nil
@@ -382,114 +374,62 @@
 (defn- failed-record [(message String)] RecordResult
   (->RecordResult 0 nil nil nil nil nil message))
 
-(defn- decode-atom-record! [(decoder wire/Decoder)] RecordResult
+(defn- failed-atom! [(decoder wire/Decoder) (message String)] t/AtomRow
+  (do
+    (wire/decoder-error! decoder message)
+    (t/->AtomRow :int nil 0 nil nil nil nil)))
+
+(defn- read-snapshot-atom-payload! [(decoder wire/Decoder)] t/AtomRow
   (let [kind (wire/read-u8! decoder "snapshot atom kind")]
     (cond
       [(= kind atom-string)
        (let [value (wire/read-sized-text! decoder snapshot-max-text-bytes
                                           "snapshot string atom")]
-         (->RecordResult record-atom
-                         (t/->AtomRow :string value nil nil nil nil nil)
-                         nil nil nil nil nil))]
+         (t/->AtomRow :string value nil nil nil nil nil))]
       [(= kind atom-int)
        (let [value (wire/read-i64-le! decoder "snapshot int atom")]
-         (->RecordResult record-atom
-                         (t/->AtomRow :int nil value nil nil nil nil)
-                         nil nil nil nil nil))]
+         (t/->AtomRow :int nil value nil nil nil nil))]
       [(= kind atom-float)
        (let [value (float-from-bits
                     (wire/read-i64-le! decoder "snapshot float atom"))]
-         (->RecordResult record-atom
-                         (t/->AtomRow :float nil nil value nil nil nil)
-                         nil nil nil nil nil))]
+         (t/->AtomRow :float nil nil value nil nil nil))]
       [(= kind atom-bool)
        (let [value (wire/read-u8! decoder "snapshot bool atom")]
          (if (> value 1)
-           (failed-record "snapshot bool atom is outside its range")
-           (->RecordResult record-atom
-                           (t/->AtomRow :bool nil nil nil (= value 1) nil nil)
-                           nil nil nil nil nil)))]
+           (failed-atom! decoder "snapshot bool atom is outside its range")
+           (t/->AtomRow :bool nil nil nil (= value 1) nil nil)))]
       [(= kind atom-keyword)
        (let [spelling (wire/read-sized-text! decoder snapshot-max-text-bytes
                                              "snapshot keyword atom")]
          (if (= 0 (count spelling))
-           (failed-record "snapshot keyword atom spelling must be nonempty")
-           (->RecordResult
-            record-atom
-            (t/->AtomRow :keyword nil nil nil nil (keyword spelling) nil)
-            nil nil nil nil nil)))]
+           (failed-atom!
+            decoder "snapshot keyword atom spelling must be nonempty")
+           (t/->AtomRow :keyword nil nil nil nil (keyword spelling) nil)))]
       [(= kind atom-instant)
        (let [seconds (wire/read-i64-le! decoder "snapshot instant atom")
              nanos (wire/read-u32-le! decoder "snapshot instant nanoseconds")]
          (if (>= nanos 1000000000)
-           (failed-record "snapshot instant nanoseconds are outside the range")
-           (->RecordResult
-            record-atom
-            (t/->AtomRow :instant nil nil nil nil nil (t/instant seconds nanos))
-            nil nil nil nil nil)))]
-      [:else (failed-record "snapshot atom record has an unknown kind")])))
+           (failed-atom!
+            decoder "snapshot instant nanoseconds are outside the range")
+           (t/->AtomRow
+            :instant nil nil nil nil nil (t/instant seconds nanos))))]
+      [:else (failed-atom! decoder "snapshot atom record has an unknown kind")])))
 
-(defn- decode-triple-record! [(decoder wire/Decoder)] RecordResult
-  (let [t1 (wire/read-i64-le! decoder "snapshot triple handle")
-        t2 (wire/read-i64-le! decoder "snapshot triple handle")
-        t3 (wire/read-i64-le! decoder "snapshot triple handle")]
-    (->RecordResult record-triple nil (t/->TripleRow t1 t2 t3)
-                    nil nil nil nil)))
-
-(defn- decode-transaction-record! [(decoder wire/Decoder)] RecordResult
-  (let [sequence (wire/read-i64-le! decoder "snapshot transaction sequence")
-        first-operation
-        (wire/read-i64-le! decoder "snapshot transaction first operation")
-        operation-count
-        (wire/read-i64-le! decoder "snapshot transaction operation count")]
-    (->RecordResult record-transaction nil nil
-                    (t/->TransactionRow sequence first-operation
-                                        operation-count)
-                    nil nil nil)))
-
-(defn- decode-operation-record! [(decoder wire/Decoder)] RecordResult
-  (let [sequence (wire/read-i64-le! decoder "snapshot operation sequence")
-        ordinal (wire/read-i64-le! decoder "snapshot operation ordinal")
-        action (wire/read-u8! decoder "snapshot operation action")
-        handle (wire/read-i64-le! decoder "snapshot operation handle")]
-    (cond
-      [(= action action-assert)
-       (->RecordResult record-operation nil nil nil
-                       (t/->OperationRow sequence ordinal t/assert-action
-                                         handle)
-                       nil nil)]
-      [(= action action-retract)
-       (->RecordResult record-operation nil nil nil
-                       (t/->OperationRow sequence ordinal t/retract-action
-                                         handle)
-                       nil nil)]
-      [:else
-       (failed-record "snapshot operation action is unknown")])))
-
-(defn- decode-trailer-record! [(decoder wire/Decoder)] RecordResult
-  (let [sequence (wire/read-i64-le! decoder "snapshot sidecar sequence")
-        watermark (wire/read-i64-le! decoder "snapshot sidecar watermark")
-        label-count (wire/read-u32-le! decoder "snapshot log label count")]
+(defn- read-snapshot-labels! [(decoder wire/Decoder)] (Vec String)
+  (let [label-count (wire/read-u32-le! decoder "snapshot log label count")]
     (if (> label-count snapshot-max-log-labels)
-      (failed-record "snapshot log set exceeds its label bound")
-      (let [(labels (Vec String))
-            (loop [(position Int) 0 (current (Vec String)) empty-labels]
-              (if (>= position label-count)
-                current
-                (recur (+ position 1)
-                       (conj current
-                             (wire/read-sized-text!
-                              decoder snapshot-max-text-bytes
-                              "snapshot log label")))))
-            (image-start Int) (wire/read-i64-le! decoder "snapshot image start")
-            (image-end Int) (wire/read-i64-le! decoder "snapshot image end")
-            (stamp Int) (wire/read-i64-le! decoder "snapshot stamp")
-            (fingerprint Int)
-            (wire/read-u32-le! decoder "snapshot fingerprint")]
-        (->RecordResult record-trailer nil nil nil nil
-                        (->Sidecar sequence watermark labels image-start
-                                   image-end stamp fingerprint)
-                        nil)))))
+      (do
+        (wire/decoder-error! decoder
+                             "snapshot log set exceeds its label bound")
+        empty-labels)
+      (loop [(position Int) 0 (current (Vec String)) empty-labels]
+        (if (>= position label-count)
+          current
+          (recur (+ position 1)
+                 (conj current
+                       (wire/read-sized-text!
+                        decoder snapshot-max-text-bytes
+                        "snapshot log label"))))))))
 
 (defn- decode-record!
   [(bytes ByteSource) (payload-start Int) (payload-end Int)] RecordResult
@@ -497,11 +437,71 @@
         decoder (payload-decoder bytes (+ payload-start 1) payload-end)
         decoded
         (cond
-          [(= kind record-atom) (decode-atom-record! decoder)]
-          [(= kind record-triple) (decode-triple-record! decoder)]
-          [(= kind record-transaction) (decode-transaction-record! decoder)]
-          [(= kind record-operation) (decode-operation-record! decoder)]
-          [(= kind record-trailer) (decode-trailer-record! decoder)]
+          [(= kind snapshot-record-atom-tag)
+           (let [(fields WireFields_snapshot-record_atom)
+                 (read-snapshot-record-atom! decoder)]
+             (->RecordResult
+              kind (wirefields_snapshot-record_atom-row fields)
+              nil nil nil nil nil))]
+          [(= kind snapshot-record-triple-tag)
+           (let [(fields WireFields_snapshot-record_triple)
+                 (read-snapshot-record-triple! decoder)]
+             (->RecordResult
+              kind nil
+              (t/->TripleRow
+               (wirefields_snapshot-record_triple-t1 fields)
+               (wirefields_snapshot-record_triple-t2 fields)
+               (wirefields_snapshot-record_triple-t3 fields))
+              nil nil nil nil))]
+          [(= kind snapshot-record-transaction-tag)
+           (let [(fields WireFields_snapshot-record_transaction)
+                 (read-snapshot-record-transaction! decoder)]
+             (->RecordResult
+              kind nil nil
+              (t/->TransactionRow
+               (wirefields_snapshot-record_transaction-sequence fields)
+               (wirefields_snapshot-record_transaction-first-operation fields)
+               (wirefields_snapshot-record_transaction-operation-count fields))
+              nil nil nil))]
+          [(= kind snapshot-record-operation-tag)
+           (let [(fields WireFields_snapshot-record_operation)
+                 (read-snapshot-record-operation! decoder)
+                 action (wirefields_snapshot-record_operation-action fields)]
+             (cond
+               [(= action action-assert)
+                (->RecordResult
+                 kind nil nil nil
+                 (t/->OperationRow
+                  (wirefields_snapshot-record_operation-tx-sequence fields)
+                  (wirefields_snapshot-record_operation-ordinal fields)
+                  t/assert-action
+                  (wirefields_snapshot-record_operation-triple-handle fields))
+                 nil nil)]
+               [(= action action-retract)
+                (->RecordResult
+                 kind nil nil nil
+                 (t/->OperationRow
+                  (wirefields_snapshot-record_operation-tx-sequence fields)
+                  (wirefields_snapshot-record_operation-ordinal fields)
+                  t/retract-action
+                  (wirefields_snapshot-record_operation-triple-handle fields))
+                 nil nil)]
+               [:else
+                (failed-record "snapshot operation action is unknown")]))]
+          [(= kind snapshot-record-trailer-tag)
+           (let [(fields WireFields_snapshot-record_trailer)
+                 (read-snapshot-record-trailer! decoder)]
+             (->RecordResult
+              kind nil nil nil nil
+              (->Sidecar
+               (wirefields_snapshot-record_trailer-sequence fields)
+               (wirefields_snapshot-record_trailer-watermark fields)
+               (wirefields_snapshot-record_trailer-labels fields)
+               (wirefields_snapshot-record_trailer-image-start fields)
+               (wirefields_snapshot-record_trailer-image-end fields)
+               (wirefields_snapshot-record_trailer-stamp fields)
+               (wirefields_snapshot-record_trailer-fingerprint fields))
+              nil))]
           [:else (failed-record "snapshot record has an unknown kind")])
         error (deref (wire/decoder-error decoder))]
     (cond
@@ -546,21 +546,21 @@
                 [(recordresult-error decoded)
                  (failed-read
                   (error-or-snapshot (recordresult-error decoded)))]
-                [(= kind record-atom)
+                [(= kind snapshot-record-atom-tag)
                  (recur next-position (conj atoms (atom-row-of decoded))
                         triples transactions operations)]
-                [(= kind record-triple)
+                [(= kind snapshot-record-triple-tag)
                  (recur next-position atoms
                         (conj triples (triple-row-of decoded))
                         transactions operations)]
-                [(= kind record-transaction)
+                [(= kind snapshot-record-transaction-tag)
                  (recur next-position atoms triples
                         (conj transactions (transaction-row-of decoded))
                         operations)]
-                [(= kind record-operation)
+                [(= kind snapshot-record-operation-tag)
                  (recur next-position atoms triples transactions
                         (conj operations (operation-row-of decoded)))]
-                [(= kind record-trailer)
+                [(= kind snapshot-record-trailer-tag)
                  (if (not= next-position (count bytes))
                    (failed-read "snapshot trailer is not the last record")
                    (->ReadResult

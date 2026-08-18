@@ -2,7 +2,7 @@
 
 (ns store.log-codec
   (:require [store.chain-rules :as chain-rules]
-            [store.native-wire-codec :as wire]
+            [store.native-wire-codec :as wire :refer [defwire]]
             [store.store :as term-store]
             [store.types :as t]))
 
@@ -57,6 +57,30 @@
 
 (defrecord HeaderFields
   [(ok Bool) (space-id String) (flags Int) (header-bytes Int) (error String?)])
+
+(wire/defwire framlog-header
+  (framed :none :none)
+  (tagged :none
+    [0 header
+     [(version :u16le "FRAMLOG version")
+      (flags :u16le "FRAMLOG flags")
+      (space-id (bounded-text max-codec-count) "FRAMLOG SpaceId")]]))
+
+(wire/defwire framlog-transaction
+  (framed :u32le :crc32)
+  (tagged :none
+    [0 payload
+     [(sequence :i64le "FRAMLOG transaction sequence")
+      (operation-count :u32le "FRAMLOG operation count")]]))
+
+(wire/defwire framlog-operation
+  (framed :none :none)
+  (tagged :none
+    [0 payload
+     [(ordinal :u32le "FRAMLOG operation ordinal")
+      (action :u8 "FRAMLOG operation action")
+      (proposition (codec t/Triple :term append-framlog-term!
+                          read-framlog-term! -1))]]))
 
 (defn failed-boot [(message String)] BootResult
   (->BootResult status-fatal nil 0 [] message))
@@ -155,28 +179,39 @@
           (recur (+ position 1))
           false)))))
 
+(defn- append-framlog-term! [(encoder wire/Encoder) (term t/Triple)] Nil
+  (do
+    (reset! (wire/encoder-nodes encoder) 0)
+    (wire/append-term-limited!
+     encoder term 0 max-codec-count max-codec-count max-term-depth)))
+
+(defn- read-framlog-term! [(decoder wire/Decoder)] t/Triple
+  (let [_ (reset! (wire/decoder-nodes decoder) 0)
+        proposition
+        (wire/read-term-limited!
+         decoder 0 max-codec-count max-codec-count max-term-depth)
+        triple (t/term-as-triple proposition)]
+    (if triple
+      triple
+      (do
+        (wire/decoder-error!
+         decoder "FRAMLOG operation proposition is not a Triple")
+        (t/triple "" "" "")))))
+
 (defn encode-header! [(space-id String)] BytesResult
   (if (= 0 (count space-id))
     (failed-bytes "FRAMLOG SpaceId must be nonempty")
     (let [encoder (wire/->Encoder (wire/empty-byte-cell) (atom 0)
-                                  (wire/empty-error-cell))
-          space-bytes
-          (wire/utf8-bytes! encoder space-id max-codec-count "FRAMLOG SpaceId")]
-      (if (deref (wire/encoder-error encoder))
-        (failed-bytes
-         (str "FRAMLOG header encode failed: "
-              (deref (wire/encoder-error encoder))))
-        (do
-          (swap! (wire/encoder-bytes encoder) into framlog-magic)
-          (wire/append-u16-le! encoder framlog-version)
-          (wire/append-u16-le! encoder framlog-flags)
-          (wire/append-u32-le! encoder (count space-bytes))
-          (swap! (wire/encoder-bytes encoder) into space-bytes)
-          (let [error (deref (wire/encoder-error encoder))]
-            (if error
-              (failed-bytes (str "FRAMLOG header encode failed: " error))
-              (->BytesResult status-ok
-                             (deref (wire/encoder-bytes encoder)) nil))))))))
+                                  (wire/empty-error-cell))]
+      (do
+        (swap! (wire/encoder-bytes encoder) into framlog-magic)
+        (append-framlog-header-header!
+         encoder framlog-version framlog-flags space-id)
+        (let [error (deref (wire/encoder-error encoder))]
+          (if error
+            (failed-bytes (str "FRAMLOG header encode failed: " error))
+            (->BytesResult status-ok
+                           (deref (wire/encoder-bytes encoder)) nil)))))))
 
 (defn decode-frame-payload-range!
   [(bytes ByteSource) (start Int) (end Int)] FrameDecodeResult
@@ -184,9 +219,14 @@
                                 (wire/empty-error-cell))]
     (if (< (- end start) 12)
       (->FrameDecodeResult nil "FRAMLOG transaction header is truncated")
-      (let [sequence (wire/read-i64-le! decoder "FRAMLOG transaction sequence")
+      (let [(transaction-fields WireFields_framlog-transaction_payload)
+            (read-framlog-transaction-payload! decoder)
+            sequence
+            (wirefields_framlog-transaction_payload-sequence
+             transaction-fields)
             operation-count
-            (wire/read-u32-le! decoder "FRAMLOG operation count")]
+            (wirefields_framlog-transaction_payload-operation-count
+             transaction-fields)]
         (cond
           [(deref (wire/decoder-error decoder))
            (->FrameDecodeResult nil (deref (wire/decoder-error decoder)))]
@@ -208,23 +248,23 @@
                    [:else
                     (->FrameDecodeResult
                      (term-store/transaction-frame sequence operations) nil)]))
-               (let [actual
-                     (wire/read-u32-le! decoder "FRAMLOG operation ordinal")
-                     action (wire/read-u8! decoder "FRAMLOG operation action")
-                     _ (reset! (wire/decoder-nodes decoder) 0)
-                     proposition
-                     (wire/read-term-limited!
-                      decoder 0 max-codec-count max-codec-count max-term-depth)
-                     triple (t/term-as-triple proposition)
+               (let [(operation-fields WireFields_framlog-operation_payload)
+                     (read-framlog-operation-payload! decoder)
+                     actual
+                     (wirefields_framlog-operation_payload-ordinal
+                      operation-fields)
+                     action
+                     (wirefields_framlog-operation_payload-action
+                      operation-fields)
+                     triple
+                     (wirefields_framlog-operation_payload-proposition
+                      operation-fields)
                      error (deref (wire/decoder-error decoder))]
                  (cond
                    [error (->FrameDecodeResult nil error)]
                    [(not= actual ordinal)
                     (->FrameDecodeResult
                      nil "FRAMLOG operation ordinals are not contiguous")]
-                   [(nil? triple)
-                    (->FrameDecodeResult
-                     nil "FRAMLOG operation proposition is not a Triple")]
                    [(= action 1)
                     (recur (+ ordinal 1)
                            (conj operations
@@ -834,23 +874,23 @@
     (if (or (< sequence 0) (= 0 (count operations)))
       (failed-bytes "FRAMLOG transaction frame is invalid")
       (do
-        (wire/append-i64-le! payload sequence)
-        (wire/append-u32-le! payload (count operations))
+        (append-framlog-transaction-payload!
+         payload sequence (count operations))
         (loop [ordinal 0]
           (if (< ordinal (count operations))
             (let [operation (nth operations ordinal)
-                  action (t/commitoperation-action operation)]
-              (wire/append-u32-le! payload ordinal)
-              (cond
-                [(= action t/assert-action) (wire/append-u8! payload 1)]
-                [(= action t/retract-action) (wire/append-u8! payload 2)]
-                [:else
-                 (wire/encoder-error!
-                  payload "FRAMLOG operation action must be assert or retract")])
-              (reset! (wire/encoder-nodes payload) 0)
-              (wire/append-term-limited!
-               payload (t/commitoperation-proposition operation)
-               0 max-codec-count max-codec-count max-term-depth)
+                  action (t/commitoperation-action operation)
+                  action-tag
+                  (cond
+                    [(= action t/assert-action) 1]
+                    [(= action t/retract-action) 2]
+                    [:else 0])]
+              (if (= action-tag 0)
+                (wire/encoder-error!
+                 payload "FRAMLOG operation action must be assert or retract")
+                (append-framlog-operation-payload!
+                 payload ordinal action-tag
+                 (t/commitoperation-proposition operation)))
               (recur (+ ordinal 1)))
             nil))
         (let [payload-error (deref (wire/encoder-error payload))

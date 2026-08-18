@@ -17,6 +17,48 @@
 (def term-node-count-error String
   "TermCodecV1 node count exceeds the configured bound")
 
+(defwire rpc-v2-frame-header
+  (framed :u32le :none)
+  (tagged :u8
+    [1 request
+     [(flags :u8 "frame flags")
+      (body-length :u32le "body length")
+      (request-id :i64le "request id")]]
+    [2 response
+     [(flags :u8 "frame flags")
+      (body-length :u32le "body length")
+      (request-id :i64le "request id")]]))
+
+(defwire rpc-v2-request-body
+  (framed :none :none)
+  (tagged :none
+    [0 request
+     [(space (codec String :bounded-space-term append-space-term!
+                    read-space-term! -1 rpc-v2-max-space-bytes))
+      (op (codec Keyword :keyword-term append-keyword-term!
+                 read-request-keyword-term! -1))
+      (expected-version (optional :i64le) "expected-version")
+      (page (optional (codec t/RpcPageRequest :page-request
+                             append-page-request! read-page-request! -1)))
+      (timeout-ms (optional :u32le) "timeout-ms")
+      (payload (codec Any :term append-schema-term! read-schema-term! -1))]]))
+
+(defwire rpc-v2-response-body
+  (framed :none :none)
+  (tagged :none
+    [0 response
+     [(space (codec String :bounded-space-term append-space-term!
+                    read-space-term! -1 rpc-v2-max-space-bytes))
+      (op (codec Keyword :keyword-term append-keyword-term!
+                 read-response-keyword-term! -1))
+      (served-version :i64le)
+      (page (optional (codec t/RpcPageResponse :page-response
+                             append-page-response! read-page-response! -1)))
+      (error (optional (codec t/RpcError :rpc-error
+                              append-error! read-error! -1)))
+      (payload (optional (codec Any :term append-schema-term!
+                                read-schema-term! -1)))]]))
+
 (defrecord DecodeResult [(frame t/RpcFrameV2?) (error String?)])
 
 (defrecord EncodeResult [(bytes (U Nil (Vec Int))) (error String?)])
@@ -39,6 +81,308 @@
 
 (defrecord Encoder
   [(bytes (Atom (Vec Int))) (nodes (Atom Int)) (error (Atom String?))])
+
+(defrecord WireFieldSchema
+  [(name Keyword) (kind Keyword) (fixed-bytes Int) (bound Int?) (optional Bool)])
+
+(defrecord WireCaseSchema
+  [(tag Int) (name Keyword) (fixed-bytes Int) (fields (Vec WireFieldSchema))])
+
+(defrecord WireSchema
+  [(name Keyword)
+   (length-kind Keyword)
+   (checksum-kind Keyword)
+   (tag-kind Keyword)
+   (cases (Vec WireCaseSchema))])
+
+;; A field is `(name wire-type)` or `(name wire-type context)`. Wire types are
+;; primitive keywords, `(bounded-text maximum)`, `(optional wire-type)`, or a
+;; typed `(codec Type kind append-fn read-fn fixed-bytes [bound])` pair. The
+;; latter is how domain records compose schemas without exposing target code or
+;; splitting one field's encoder and decoder across declarations.
+(defmacro defwire [name framing tagging]
+  (syntax-match (list framing tagging)
+    [(list
+      (list (literal framed) (capture length-kind) (capture checksum-kind))
+      (list (literal tagged) (capture tag-kind) (tail-splice cases)))
+     (let [base-type
+           (fn [spec] Any
+             (cond
+               [(= spec ':u8) 'Int]
+               [(= spec ':u16le) 'Int]
+               [(= spec ':u32le) 'Int]
+               [(= spec ':i64le) 'Int]
+               [(= spec ':bool) 'Bool]
+               [(= spec ':term) 'store.types/Term]
+               [(if (list? spec) (= (first spec) 'bounded-text) false) 'String]
+               [(if (list? spec) (= (first spec) 'codec) false) (nth spec 1)]
+               [:else
+                (error "defwire " name ": unsupported wire type " spec)]))
+           field-type
+           (fn [spec] Any
+             (if (if (list? spec) (= (first spec) 'optional) false)
+               (list 'U 'Nil (base-type (nth spec 1)))
+               (base-type spec)))
+           base-kind
+           (fn [spec] Any
+             (cond
+               [(if (list? spec) (= (first spec) 'bounded-text) false)
+                ':bounded-text]
+               [(if (list? spec) (= (first spec) 'codec) false) (nth spec 2)]
+               [:else spec]))
+           field-kind
+           (fn [spec] Any
+             (if (if (list? spec) (= (first spec) 'optional) false)
+               (base-kind (nth spec 1))
+               (base-kind spec)))
+           base-fixed
+           (fn [spec] Any
+             (cond
+               [(= spec ':u8) 1]
+               [(= spec ':bool) 1]
+               [(= spec ':u16le) 2]
+               [(= spec ':u32le) 4]
+               [(= spec ':i64le) 8]
+               [(= spec ':term) -1]
+               [(if (list? spec) (= (first spec) 'bounded-text) false) -1]
+               [(if (list? spec) (= (first spec) 'codec) false) (nth spec 5)]
+               [:else
+                (error "defwire " name ": unsupported wire type " spec)]))
+           field-fixed
+           (fn [spec] Any
+             (if (if (list? spec) (= (first spec) 'optional) false)
+               (let [fixed (base-fixed (nth spec 1))]
+                 (if (< fixed 0) -1 (+ 1 fixed)))
+               (base-fixed spec)))
+           field-bound
+           (fn [spec] Any
+             (let [base (if (if (list? spec) (= (first spec) 'optional) false)
+                          (nth spec 1) spec)]
+               (cond
+                 [(if (list? base) (= (first base) 'bounded-text) false)
+                  (nth base 1)]
+                 [(if (list? base) (= (first base) 'codec) false)
+                  (if (= (count base) 7) (nth base 6) 'nil)]
+                 [:else 'nil])))
+           field-optional?
+           (fn [spec] Any
+             (if (list? spec) (= (first spec) 'optional) false))
+           append-base
+           (fn [spec encoder value context] Any
+             (cond
+               [(= spec ':u8)
+                (list 'store.native-wire-codec/append-u8! encoder value)]
+               [(= spec ':u16le)
+                (list 'store.native-wire-codec/append-u16-le! encoder value)]
+               [(= spec ':u32le)
+                (list 'store.native-wire-codec/append-u32-le! encoder value)]
+               [(= spec ':i64le)
+                (list 'store.native-wire-codec/append-i64-le! encoder value)]
+               [(= spec ':bool)
+                (list 'store.native-wire-codec/append-u8!
+                      encoder (list 'if value 1 0))]
+               [(= spec ':term)
+                (list 'store.native-wire-codec/append-term! encoder value 0)]
+               [(if (list? spec) (= (first spec) 'bounded-text) false)
+                (list 'store.native-wire-codec/append-sized-text!
+                      encoder value (nth spec 1) context)]
+               [(if (list? spec) (= (first spec) 'codec) false)
+                (list (nth spec 3) encoder value)]
+               [:else
+                (error "defwire " name ": unsupported wire type " spec)]))
+           read-base
+           (fn [spec decoder context] Any
+             (cond
+               [(= spec ':u8)
+                (list 'store.native-wire-codec/read-u8! decoder context)]
+               [(= spec ':u16le)
+                (list 'store.native-wire-codec/read-u16-le! decoder context)]
+               [(= spec ':u32le)
+                (list 'store.native-wire-codec/read-u32-le! decoder context)]
+               [(= spec ':i64le)
+                (list 'store.native-wire-codec/read-i64-le! decoder context)]
+               [(= spec ':bool)
+                (list 'store.native-wire-codec/read-bool! decoder context)]
+               [(= spec ':term)
+                (list 'store.native-wire-codec/read-term! decoder 0)]
+               [(if (list? spec) (= (first spec) 'bounded-text) false)
+                (list 'store.native-wire-codec/read-sized-text!
+                      decoder (nth spec 1) context)]
+               [(if (list? spec) (= (first spec) 'codec) false)
+                (list (nth spec 4) decoder)]
+               [:else
+                (error "defwire " name ": unsupported wire type " spec)]))
+           append-field
+           (fn [spec encoder value context] Any
+             (if (field-optional? spec)
+               (let [base (nth spec 1)
+                     present (list 'not (list 'nil? value))
+                     present-value 'wire-present-value]
+                 (list 'do
+                       (list 'store.native-wire-codec/append-presence!
+                             encoder present)
+                       (list 'if-let
+                             (vec (ann present-value (base-type base)) value)
+                             (append-base base encoder present-value context)
+                             'nil)))
+               (append-base spec encoder value context)))
+           read-field
+           (fn [spec decoder context] Any
+             (if (field-optional? spec)
+               (list 'if
+                     (list 'store.native-wire-codec/read-presence!
+                           decoder (str context " presence"))
+                     (read-base (nth spec 1) decoder context)
+                     'nil)
+               (read-base spec decoder context)))
+           checked-cases
+           (map-indexed
+            (fn [case-index case] Any
+              (if (vector? case)
+                (if (= (count case) 3)
+                  (let [fields (nth case 2)]
+                    (if (vector? fields)
+                      (do
+                        (map-indexed
+                         (fn [field-index field] Any
+                           (if (list? field)
+                             (if (if (= (count field) 2)
+                                   true (= (count field) 3))
+                               (do (field-type (nth field 1)) field)
+                               (syntax-error-at fields field-index
+                                 "Invalid defwire field declaration: " field))
+                             (syntax-error-at fields field-index
+                               "Invalid defwire field declaration: " field)))
+                         fields)
+                        case)
+                      (syntax-error-at cases case-index
+                        "Invalid defwire case fields: " fields)))
+                  (syntax-error-at cases case-index
+                    "Invalid defwire case declaration: " case))
+                (syntax-error-at cases case-index
+                  "Invalid defwire case declaration: " case)))
+            cases)
+           tag-bytes (cond
+                       [(= tag-kind ':none) 0]
+                       [(= tag-kind ':u8) 1]
+                       [(= tag-kind ':u16le) 2]
+                       [:else
+                        (error "defwire " name
+                               ": tag kind must be :none, :u8, or :u16le")])
+           append-tag
+           (fn [encoder tag] Any
+             (cond
+               [(= tag-kind ':none) 'nil]
+               [(= tag-kind ':u8)
+                (list 'store.native-wire-codec/append-u8! encoder tag)]
+               [:else
+                (list 'store.native-wire-codec/append-u16-le! encoder tag)]))
+           case-forms
+           (mapcat
+            (fn [case] Any
+              (let [tag (nth case 0)
+                    case-name (nth case 1)
+                    fields (nth case 2)
+                    helper-prefix (format-symbol "~a-~a" name case-name)
+                    tag-name (format-symbol "~a-tag" helper-prefix)
+                    fixed-name (format-symbol "~a-fixed-bytes" helper-prefix)
+                    append-name (format-symbol "append-~a!" helper-prefix)
+                    read-name (format-symbol "read-~a!" helper-prefix)
+                    record-name
+                    (format-symbol "WireFields_~a_~a" name case-name)
+                    constructor-name (format-symbol "->~a" record-name)
+                    fixed-fields (map (fn [field] Any
+                                        (field-fixed (nth field 1))) fields)
+                    fixed-bytes
+                    (if (every? (fn [size] Any (>= size 0)) fixed-fields)
+                      (+ tag-bytes (reduce + 0 fixed-fields)) -1)
+                    encoder 'wire-encoder
+                    decoder 'wire-decoder
+                    locals
+                    (map-indexed
+                     (fn [index field] Any
+                       (format-symbol "wire-field-~a-~a" index (nth field 0)))
+                     fields)
+                    writes
+                    (map
+                     (fn [field local] Any
+                       (let [field-name (nth field 0)
+                             context (if (= (count field) 3)
+                                       (nth field 2)
+                                       (str name " " case-name " " field-name))]
+                         (append-field (nth field 1) encoder local context)))
+                     fields locals)
+                    append-parameters
+                    (apply vec
+                           (cons (ann encoder 'store.native-wire-codec/Encoder)
+                                 (map
+                                  (fn [field local] Any
+                                    (ann local (field-type (nth field 1))))
+                                  fields locals)))
+                    bindings
+                    (mapcat
+                     (fn [field local] Any
+                       (let [context (if (= (count field) 3)
+                                       (nth field 2)
+                                       (str name " " case-name " " (nth field 0)))]
+                         (list (ann local (field-type (nth field 1)))
+                               (read-field (nth field 1) decoder context))))
+                     fields locals)]
+                (list
+                 (list 'defrecord record-name
+                       (apply vec
+                              (map
+                               (fn [field] Any
+                                 (ann (nth field 0)
+                                      (field-type (nth field 1))))
+                               fields)))
+                 (list 'def tag-name 'Int tag)
+                 (list 'def fixed-name 'Int fixed-bytes)
+                 (make-defn append-name
+                   append-parameters 'Nil
+                   (cons 'do
+                         (append (list (append-tag encoder tag)) writes
+                                 (list 'nil))))
+                 (make-defn read-name
+                   (vec (ann decoder 'store.native-wire-codec/Decoder)) record-name
+                   (list 'let
+                         (apply vec
+                                bindings)
+                         (cons constructor-name locals))))))
+            checked-cases)
+           case-schemas
+           (map
+            (fn [case] Any
+              (let [tag (nth case 0)
+                    case-name (nth case 1)
+                    fields (nth case 2)
+                    fixed-fields (map (fn [field] Any
+                                        (field-fixed (nth field 1))) fields)
+                    fixed-bytes
+                    (if (every? (fn [size] Any (>= size 0)) fixed-fields)
+                      (+ tag-bytes (reduce + 0 fixed-fields)) -1)
+                    field-schemas
+                    (map
+                     (fn [field] Any
+                       (let [spec (nth field 1)]
+                         (list 'store.native-wire-codec/->WireFieldSchema
+                               (make-keyword (nth field 0))
+                               (field-kind spec)
+                               (field-fixed spec)
+                               (field-bound spec)
+                               (field-optional? spec))))
+                     fields)]
+                (list 'store.native-wire-codec/->WireCaseSchema
+                      tag (make-keyword case-name)
+                      fixed-bytes (apply vec field-schemas))))
+            checked-cases)
+           schema-name (format-symbol "~a-schema" name)
+           schema
+           (list 'def schema-name 'store.native-wire-codec/WireSchema
+                 (list 'store.native-wire-codec/->WireSchema
+                       (make-keyword name) length-kind
+                       checksum-kind tag-kind (apply vec case-schemas)))]
+       (cons 'do (append case-forms (list schema))))]))
 
 (def empty-byte-vector (Vec Int) [])
 (def no-error String? nil)
@@ -440,26 +784,79 @@
           "")))
     ""))
 
+(defn append-space-term! [(encoder Encoder) (space String)] Nil
+  (let [space-node (encoder-node! encoder 0)
+        space-bytes
+        (if space-node
+          (utf8-bytes! encoder space rpc-v2-max-space-bytes "SpaceId")
+          [])]
+    (if (nil? (deref (encoder-error encoder)))
+      (do
+        (append-u8! encoder 1)
+        (append-u32-le! encoder (count space-bytes))
+        (swap! (encoder-bytes encoder) into space-bytes)
+        nil)
+      nil)))
+
+(defn append-keyword-term! [(encoder Encoder) (value Keyword)] Nil
+  (append-term! encoder value 0))
+
+(defn read-request-keyword-term! [(decoder Decoder)] Keyword
+  (read-keyword-term! decoder "request op"))
+
+(defn read-response-keyword-term! [(decoder Decoder)] Keyword
+  (read-keyword-term! decoder "response op"))
+
+(defn append-schema-term! [(encoder Encoder) (term Any)] Nil
+  (append-term! encoder term 0))
+
+(defn read-schema-term! [(decoder Decoder)] Any
+  (read-term! decoder 0))
+
 (defn read-page-request! [(decoder Decoder)] t/RpcPageRequest
   (let [(limit Int) (read-u32-le! decoder "page limit")
         (cursor-present Bool) (read-presence! decoder "page cursor presence")
         (cursor t/Term?) (if cursor-present (read-term! decoder 0) nil)]
     (t/->RpcPageRequest limit cursor)))
 
+(defn append-page-request! [(encoder Encoder) (page t/RpcPageRequest)] Nil
+  (append-u32-le! encoder (t/rpcpagerequest-limit page))
+  (let [cursor (t/rpc-page-request-cursor-value page)]
+    (append-presence! encoder (not (nil? cursor)))
+    (if (nil? cursor) nil (append-term! encoder cursor 0))))
+
+(defn read-page-response! [(decoder Decoder)] t/RpcPageResponse
+  (let [ordinal (read-u32-le! decoder "page ordinal")
+        cursor-present (read-presence! decoder "page cursor presence")
+        cursor (if cursor-present (read-term! decoder 0) nil)
+        done (read-bool! decoder "page done")]
+    (t/->RpcPageResponse ordinal cursor done)))
+
+(defn read-error! [(decoder Decoder)] t/RpcError
+  (let [code (read-keyword-term! decoder "response error code")
+        retryable (read-bool! decoder "response error retryable")
+        message-term (read-term! decoder 0)
+        message
+        (if (string? message-term)
+          message-term
+          (do
+            (decoder-error! decoder
+                            "response error message must be a String Term")
+            ""))
+        detail-present (read-presence! decoder "response error detail presence")
+        detail (if detail-present (read-term! decoder 0) nil)]
+    (t/->RpcError code retryable message detail)))
+
 (defn read-request-body! [(decoder Decoder)] t/RpcRequest
-  (let [(space String) (read-space-term! decoder)
-        (op Keyword) (read-keyword-term! decoder "request op")
-        (expected-present Bool) (read-presence! decoder "expected-version presence")
-        (expected Int?) (if expected-present
-                         (read-i64-le! decoder "expected-version") nil)
-        (page-present Bool) (read-presence! decoder "request page presence")
-        (page t/RpcPageRequest?)
-        (if page-present (read-page-request! decoder) nil)
-        (timeout-present Bool) (read-presence! decoder "timeout-ms presence")
-        (timeout Int?) (if timeout-present
-                        (read-u32-le! decoder "timeout-ms") nil)
-        (payload t/Term) (read-term! decoder 0)]
-    (t/->RpcRequest space op expected page timeout payload)))
+  (let [(fields WireFields_rpc-v2-request-body_request)
+        (read-rpc-v2-request-body-request! decoder)]
+    (t/->RpcRequest
+     (wirefields_rpc-v2-request-body_request-space fields)
+     (wirefields_rpc-v2-request-body_request-op fields)
+     (wirefields_rpc-v2-request-body_request-expected-version fields)
+     (wirefields_rpc-v2-request-body_request-page fields)
+     (wirefields_rpc-v2-request-body_request-timeout-ms fields)
+     (wirefields_rpc-v2-request-body_request-payload fields))))
 
 (defn magic-valid! [(decoder Decoder)] Bool
   (loop [index 0 valid true]
@@ -485,9 +882,13 @@
        (let [major (read-u16-le! decoder "major version")
              minor (read-u16-le! decoder "minor version")
              kind (read-u8! decoder "frame kind")
-             flags (read-u8! decoder "frame flags")
-             body-length (read-u32-le! decoder "body length")
-             request-id (read-i64-le! decoder "request id")]
+             (header WireFields_rpc-v2-frame-header_request)
+             (read-rpc-v2-frame-header-request! decoder)
+             flags (wirefields_rpc-v2-frame-header_request-flags header)
+             body-length
+             (wirefields_rpc-v2-frame-header_request-body-length header)
+             request-id
+             (wirefields_rpc-v2-frame-header_request-request-id header)]
          (cond
            [(or (not= major 2) (not= minor 0))
             (->DecodeResult nil "FRAMRPC major/minor version is unsupported")]
@@ -530,30 +931,13 @@
     (if (nil? detail) nil (append-term! encoder detail 0))))
 
 (defn append-response-body! [(encoder Encoder) (response t/RpcResponse)] Nil
-  (let [space-node (encoder-node! encoder 0)
-        space-bytes
-        (if space-node
-          (utf8-bytes! encoder (t/rpcresponse-space response)
-                       rpc-v2-max-space-bytes "SpaceId")
-          [])]
-    (if (nil? (deref (encoder-error encoder)))
-      (do
-        (append-u8! encoder 1)
-        (append-u32-le! encoder (count space-bytes))
-        (swap! (encoder-bytes encoder) into space-bytes)
-        nil)
-      nil))
-  (append-term! encoder (t/rpcresponse-op response) 0)
-  (append-i64-le! encoder (t/rpcresponse-served-version response))
-  (let [page (t/rpcresponse-page response)
-        error (t/rpcresponse-error response)
-        payload (t/rpc-response-payload-value response)]
-    (append-presence! encoder (not (nil? page)))
-    (if page (append-page-response! encoder page) nil)
-    (append-presence! encoder (not (nil? error)))
-    (if error (append-error! encoder error) nil)
-    (append-presence! encoder (not (nil? payload)))
-    (if (nil? payload) nil (append-term! encoder payload 0))))
+  (append-rpc-v2-response-body-response!
+   encoder (t/rpcresponse-space response)
+   (t/rpcresponse-op response)
+   (t/rpcresponse-served-version response)
+   (t/rpcresponse-page response)
+   (t/rpcresponse-error response)
+   (t/rpc-response-payload-value response)))
 
 (defn finish-response-frame!
   [(frame t/RpcFrameV2) (body-bytes (Vec Int))] EncodeResult
@@ -561,10 +945,8 @@
     (swap! (encoder-bytes out) into rpc-v2-magic)
     (append-u16-le! out 2)
     (append-u16-le! out 0)
-    (append-u8! out 2)
-    (append-u8! out 0)
-    (append-u32-le! out (count body-bytes))
-    (append-i64-le! out (t/rpcframev2-request-id frame))
+    (append-rpc-v2-frame-header-response!
+     out 0 (count body-bytes) (t/rpcframev2-request-id frame))
     (swap! (encoder-bytes out) into body-bytes)
     (let [error (deref (encoder-error out))]
       (if error
