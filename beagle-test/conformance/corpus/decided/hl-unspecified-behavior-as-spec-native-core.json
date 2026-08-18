@@ -9,7 +9,7 @@
     "target": "native",
     "fileName": "leakage/unspecified_behavior_as_spec.bgl",
     "command": {
-      "argv": ["check", "--profile", "native-core", "{input}"]
+      "argv": ["check", "--profile", "1", "{input}"]
     },
     "closure": {
       "kind": "single-source",
@@ -33,6 +33,7 @@
   },
   "expected": {
     "kind": "canonical-output",
+    "exitCode": 1,
     "assertions": [
       {
         "kind": "byte-identical",

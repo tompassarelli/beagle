@@ -9,7 +9,7 @@
     "target": "racket",
     "fileName": "leakage/unspecified_behavior_as_spec.bgl",
     "command": {
-      "argv": ["check", "--profile", "hosted-racket", "{input}"]
+      "argv": ["check", "--profile", "3", "{input}"]
     },
     "closure": {
       "kind": "single-source",
@@ -33,6 +33,7 @@
   },
   "expected": {
     "kind": "canonical-output",
+    "exitCode": 1,
     "assertions": [
       {
         "kind": "byte-identical",
