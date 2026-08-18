@@ -63,6 +63,9 @@
 (defn local-reference-key [value]
   (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
 
+(defn- ordered-keys [table]
+  (vec (sort (keys table))))
+
 (def ANY {"kind" "prim" "name" "Any"})
 
 (def NIL-TYPE {"kind" "prim" "name" "Nil"})
@@ -464,7 +467,7 @@
    alias (get require-spec "alias")
    prefix (if (string? alias) alias namespace)
    referred (get require-spec "refer")]
-  (if (nil? contracts) env (let [qualified (reduce (fn [out member] (reference-map-assoc out (make-qualified-ref prefix member namespace) (get contracts member))) env (keys contracts))]
+  (if (nil? contracts) env (let [qualified (reduce (fn [out member] (reference-map-assoc out (make-qualified-ref prefix member namespace) (get contracts member))) env (ordered-keys contracts))]
   (if (vector? referred) (reduce (fn [out member] (let [contract (get contracts member)]
   (if (nil? contract) out (assoc out member contract)))) qualified referred) qualified))))) {} requires))
 
@@ -533,7 +536,7 @@
   (= node "static-call") (and (= true (reference-map-ref proofs value false)) (constraint-value-synchronous? (get value "args") proofs))
   (= node "ref") (let [key (reference-key value)]
   (if (contains? proofs key) (= true (get proofs key)) true))
-  :else (every? (fn [key] (constraint-value-synchronous? (get value key) proofs)) (keys value))))
+  :else (every? (fn [key] (constraint-value-synchronous? (get value key) proofs)) (ordered-keys value))))
   :else true))
 
 (defn callable-form-clauses [form]
@@ -553,13 +556,13 @@
    imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
    imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "synchronous"))) (reference-map-assoc out (get entry "name") (get entry "synchronous")) out)) {} imported)
    external-proofs (reduce (fn [out entry] (if (and (string? (get entry "name")) (nil? (reference-map-ref out (get entry "name") nil))) (reference-map-assoc out (get entry "name") (not (= (get entry "synchronous") false))) out)) imported-proofs (get prog "externs"))
-   builtin-proofs (reduce (fn [out name] (assoc out name true)) external-proofs (keys STDLIB))
-   assumed (reduce (fn [out name] (assoc out name true)) builtin-proofs (vec (sort (keys local-definitions))))]
+   builtin-proofs (reduce (fn [out name] (assoc out name true)) external-proofs (ordered-keys STDLIB))
+   assumed (reduce (fn [out name] (assoc out name true)) builtin-proofs (ordered-keys local-definitions))]
   (loop [proofs assumed]
   (let [next (reduce (fn [out name] (let [form (get local-definitions name)
    clauses (callable-form-clauses form)
    synchronous? (every? (fn [clause] (callable-clause-synchronous? clause proofs)) clauses)]
-  (assoc out name synchronous?))) proofs (vec (sort (keys local-definitions))))]
+  (assoc out name synchronous?))) proofs (ordered-keys local-definitions))]
   (if (= next proofs) next (recur next))))))
 
 (defn ^Boolean function-valued-type? [type]
@@ -606,12 +609,12 @@
    imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "returnsSynchronousCallable"))) (reference-map-assoc out (get entry "name") (get entry "returnsSynchronousCallable")) out)) {} imported)
    external-proofs (reduce (fn [out entry] (let [name (get entry "name")]
   (if (and (string? name) (nil? (reference-map-ref out name nil))) (reference-map-assoc out name (= true (get entry "returnsSynchronousCallable"))) out))) imported-proofs (get prog "externs"))
-   assumed (reduce (fn [out name] (assoc out name true)) external-proofs (vec (sort (keys local-definitions))))]
+   assumed (reduce (fn [out name] (assoc out name true)) external-proofs (ordered-keys local-definitions))]
   (loop [proofs assumed]
   (let [next (reduce (fn [out name] (let [form (get local-definitions name)
    proven? (every? (fn [clause] (let [body (get clause "body")]
   (and (vector? body) (> (count body) 0) (constraint-value-synchronous? (subvec body 0 (- (count body) 1)) callable-proofs) (callable-body-tail-synchronous? body callable-proofs proofs {})))) (callable-form-clauses form))]
-  (assoc out name proven?))) proofs (vec (sort (keys local-definitions))))]
+  (assoc out name proven?))) proofs (ordered-keys local-definitions))]
   (if (= next proofs) next (recur next))))))
 
 (defn ^Boolean constraint-synchronization-proof [predicate env]
@@ -631,7 +634,7 @@
   (let [bounds (get inferred "bounds")
    bounds-ok? (or (nil? bounds) (every? (fn [var] (let [bound (get bounds var)
    bound-value (get (deref bindings) var)]
-  (or (nil? bound-value) (any-type? bound-value) (type-compatible? bound-value bound)))) (keys bounds)))]
+  (or (nil? bound-value) (any-type? bound-value) (type-compatible? bound-value bound)))) (ordered-keys bounds)))]
   {"type" (apply-type-bindings body bindings) "bounds-ok" bounds-ok?})) {"type" inferred "bounds-ok" true}))
 
 (defn binding-constraint-error! [target declared predicate-type ^String context ^String reason]
@@ -1038,7 +1041,7 @@
   (infer-type-var-bindings! (get body "ret") expected-result bindings)))
   (let [bounds (get poly-t "bounds")]
   (if (not (nil? bounds)) (do
-  (doseq [var (keys bounds)]
+  (doseq [var (ordered-keys bounds)]
   (let [bound (get bounds var)
    inferred (get (deref bindings) var)]
   (if (and (not (nil? inferred)) (not (any-type? inferred)) (not (type-compatible? inferred bound))) (do
@@ -2088,7 +2091,7 @@
   (if (or (nil? marker) (boolean (some (fn [present] (= present marker)) markers))) markers (conj markers marker)))
 
 (defn origins-union [left right]
-  (reduce (fn [out origin] (assoc out origin true)) left (keys right)))
+  (reduce (fn [out origin] (assoc out origin true)) left (ordered-keys right)))
 
 (defn purity-result [state origins]
   {"state" state "origins" origins})
@@ -2110,10 +2113,10 @@
   (if (nil? status) "absent" status)))
 
 (defn ^Boolean purity-origins-live? [state origins]
-  (and (> (count origins) 0) (every? (fn [origin] (= (purity-owner-status state origin) "live")) (keys origins))))
+  (and (> (count origins) 0) (every? (fn [origin] (= (purity-owner-status state origin) "live")) (ordered-keys origins))))
 
 (defn purity-set-origin-status [state origins ^String status]
-  (assoc state "owners" (reduce (fn [owners origin] (assoc owners origin status)) (get state "owners") (keys origins))))
+  (assoc state "owners" (reduce (fn [owners origin] (assoc owners origin status)) (get state "owners") (ordered-keys origins))))
 
 (defn purity-escape-origins [state origins node]
   (if (= 0 (count origins)) state (purity-set-origin-status (purity-note state "transient-escape") origins "dead")))
@@ -2151,8 +2154,8 @@
   (assoc base "next-id" (get counter-source "next-id")))
 
 (defn purity-join-states [base states]
-  (let [origin-ids (reduce (fn [ids state] (reduce (fn [out origin] (assoc out origin true)) ids (keys (get state "owners")))) {} states)
-   owners (reduce (fn [out origin] (assoc out origin (if (every? (fn [state] (= (purity-owner-status state origin) "live")) states) "live" "dead"))) {} (keys origin-ids))
+  (let [origin-ids (reduce (fn [ids state] (reduce (fn [out origin] (assoc out origin true)) ids (ordered-keys (get state "owners")))) {} states)
+   owners (reduce (fn [out origin] (assoc out origin (if (every? (fn [state] (= (purity-owner-status state origin) "live")) states) "live" "dead"))) {} (ordered-keys origin-ids))
    max-id (reduce (fn [current state] (let [candidate (get state "next-id")]
   (if (> candidate current) candidate current))) (get base "next-id") states)
    all-markers (reduce (fn [markers state] (reduce marker-add markers (get state "markers"))) (get base "markers") states)]
@@ -2329,8 +2332,8 @@
    origins (get result "origins")
    binding (if (string? target) (get (get state "scope") target) nil)
    prior (if (nil? binding) {} (get binding "origins"))
-   prior-still-live (reduce (fn [live origin] (if (= (purity-owner-status next origin) "dead") live (assoc live origin true))) {} (keys prior))
-   disjoint (every? (fn [origin] (not (contains? seen origin))) (keys origins))
+   prior-still-live (reduce (fn [live origin] (if (= (purity-owner-status next origin) "dead") live (assoc live origin true))) {} (ordered-keys prior))
+   disjoint (every? (fn [origin] (not (contains? seen origin))) (ordered-keys origins))
    exact-target (and (= (get arg "node") "ref") (= (get arg "name") target))
    safe-transfer (and (not (nil? binding)) (> (count prior) 0) (or exact-target (purity-binding-acquires-owner? target arg state)) disjoint)
    without-abandoned (if (or (= 0 (count prior-still-live)) (= prior origins)) next (purity-escape-origins next prior-still-live value))
@@ -2437,7 +2440,7 @@
   {"counter" (get result "state") "states" (conj (get acc "states") (get result "state")) "origins" (origins-union (get acc "origins") (get result "origins"))})) {"counter" after-target "states" [] "origins" {}} (get value "clauses"))]
   (purity-result (purity-join-states after-target (get summary "states")) (get summary "origins")))
   (or (= node "defn") (= node "defn-multi") (= node "def") (= node "defonce")) (let [marked (purity-note state "definition-publication")
-   live (reduce (fn [origins origin] (if (= (purity-owner-status marked origin) "live") (assoc origins origin true) origins)) {} (keys (get marked "owners")))]
+   live (reduce (fn [origins origin] (if (= (purity-owner-status marked origin) "live") (assoc origins origin true) origins)) {} (ordered-keys (get marked "owners")))]
   (purity-result (purity-escape-origins marked live value) {}))
   :else (purity-analyze-unknown value state)))))
 
@@ -2524,7 +2527,7 @@
    own-id (if semantic-node? next-id nil)
    child-start (if semantic-node? (+ next-id 1) next-id)
    tagged (reduce (fn [state key] (if (or (= key WITH-CHECK-ID-KEY) (= key KW-ACCESS-CHECK-ID-KEY) (= key BINDING-CHECK-ID-KEY)) state (let [child (tag-semantic-node-ids-from (get value key) (get state "next"))]
-  {"value" (assoc (get state "value") key (get child "value")) "next" (get child "next")}))) {"value" {} "next" child-start} (keys value))
+  {"value" (assoc (get state "value") key (get child "value")) "next" (get child "next")}))) {"value" {} "next" child-start} (ordered-keys value))
    tagged-value (cond
   with-node? (assoc (get tagged "value") WITH-CHECK-ID-KEY own-id)
   kw-access-node? (assoc (get tagged "value") KW-ACCESS-CHECK-ID-KEY own-id)
@@ -2542,7 +2545,7 @@
   (map? value) (let [with-check-id (get value WITH-CHECK-ID-KEY)
    kw-check-id (get value KW-ACCESS-CHECK-ID-KEY)
    binding-check-id (get value BINDING-CHECK-ID-KEY)
-   decorated (reduce (fn [out key] (if (or (= key WITH-CHECK-ID-KEY) (= key KW-ACCESS-CHECK-ID-KEY) (= key BINDING-CHECK-ID-KEY) (= key IMPORTED-RECORD-CONTRACTS-KEY) (= key IMPORTED-CALLABLE-SYNCHRONIZATION-KEY)) out (assoc out key (decorate-tagged-value (get value key) record-updates record-field-accesses binding-constraint-proofs)))) {} (keys value))]
+   decorated (reduce (fn [out key] (if (or (= key WITH-CHECK-ID-KEY) (= key KW-ACCESS-CHECK-ID-KEY) (= key BINDING-CHECK-ID-KEY) (= key IMPORTED-RECORD-CONTRACTS-KEY) (= key IMPORTED-CALLABLE-SYNCHRONIZATION-KEY)) out (assoc out key (decorate-tagged-value (get value key) record-updates record-field-accesses binding-constraint-proofs)))) {} (ordered-keys value))]
   (let [definition-types (get (deref STATE) "effective-definition-types")
    node (get value "node")
    name (get value "name")
@@ -2568,7 +2571,7 @@
 (defn- freshen-contract-implementation! [scheme]
   (if (poly-type? scheme) (let [replacements (reduce (fn [out ^String name] (assoc out name (fresh-inference-var!))) {} (get scheme "vars"))
    raw-bounds (get scheme "bounds")
-   bounds (if (map? raw-bounds) (mapv (fn [^String name] [(get replacements name) (substitute-contract-vars (get raw-bounds name) replacements)]) (keys raw-bounds)) [])]
+   bounds (if (map? raw-bounds) (mapv (fn [^String name] [(get replacements name) (substitute-contract-vars (get raw-bounds name) replacements)]) (ordered-keys raw-bounds)) [])]
   {"instance" (substitute-contract-vars (get scheme "body") replacements) "bounds" bounds}) {"instance" scheme "bounds" []}))
 
 (defn- rigid-declared-contract [scheme]
@@ -2587,7 +2590,7 @@
   (reduce (fn [out entry] (assoc out (get entry "name") (get entry "type"))) {} surface))
 
 (defn- ^Boolean same-name-set? [left right]
-  (and (= (count (keys left)) (count (keys right))) (every? (fn [^String name] (contains? right name)) (keys left))))
+  (and (= (count (ordered-keys left)) (count (ordered-keys right))) (every? (fn [^String name] (contains? right name)) (ordered-keys left))))
 
 (defn- sorted-names [table]
   (vec (sort (keys table))))
@@ -2596,7 +2599,7 @@
   (let [declared (get prog "declared-contract")]
   (if (map? declared) (do
   (let [raw (named-surface (get prog "inferred-public-surface" []))
-   inferred (reduce (fn [out ^String name] (assoc out name (get effective name (get raw name)))) {} (keys raw))]
+   inferred (reduce (fn [out ^String name] (assoc out name (get effective name (get raw name)))) {} (ordered-keys raw))]
   (if (not (same-name-set? declared inferred)) (emit-diag! (str "beagle [E030]: defcontract export set does not match the public module interface; declared " (str (sorted-names declared)) ", inferred " (str (sorted-names inferred)))) (let [conforms (atom true)]
   (doseq [name (sorted-names declared)]
   (if (not (implementation-refines-declared?! (get inferred name) (get declared name))) (do
@@ -2639,7 +2642,7 @@
   (cond
   (= node "record") (conj names (get form "name"))
   (or (= node "defunion") (= node "deferror")) (let [member-fields (get form "member-fields")]
-  (if (map? member-fields) (into names (keys member-fields)) names))
+  (if (map? member-fields) (into names (ordered-keys member-fields)) names))
   :else names))) [] (get prog "forms")))
 
 (defn export-checked-record-contracts! [prog]
