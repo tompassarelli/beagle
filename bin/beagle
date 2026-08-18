@@ -38,6 +38,8 @@ Author:
   validate [FILE...]        Parse + check + schema validation
   build [--target T] PATH [OUT]
                             Emit an explicit hosted target
+  build --shadow-facts PATH <file-or-dir> ...
+                            Emit the shadow-only canonical fact graph
   build [--module-root LOGICAL=PHYSICAL]... PATH [OUT]
                             Emit a hosted source-profile target with a closed module graph
   build --materializer M... [--module-root LOGICAL=PHYSICAL]...

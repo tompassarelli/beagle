@@ -283,10 +283,12 @@
                               #:check-sources [check-sources #f]
                               #:emit? [emit? #t]
                               #:capture-types? [capture-types? #f]
+                              #:shadow-facts? [shadow-facts? #f]
                               #:closed? [closed? #f]
                               #:diagnostic-sink [diagnostic-sink void]
                               #:parse-source [parse-source* parse-source])
   (let/ec abort
+    (define capture? (or capture-types? shadow-facts?))
     (define sources
       (sort input-sources string<? #:key module-source-id-string))
     (define (guard source phase thunk)
@@ -341,7 +343,7 @@
            prog
            #:source-id (module-source-source-id source)
            #:provisional? #t
-           #:capture-types? capture-types?)])))
+           #:capture-types? capture?)])))
     (define max-rounds (add1 (length sources)))
     ;; Imported aliases can cross more than one candidate boundary before a
     ;; checked consumer sees them.  Converge the deliberately weak parse-only
@@ -389,7 +391,7 @@
                   prog
                   #:source-id (module-source-source-id source)
                   #:provisional? #t
-                  #:capture-types? capture-types?)))])))
+                  #:capture-types? capture?)))])))
         (if (interfaces-stable? current-sources next-sources)
             next-sources
             (stabilize-provisional next-sources (add1 round)))))
@@ -515,7 +517,7 @@
               (module-source-source-id source)
               'parse
               (lambda () (parse-checked-source source current-resolver))))))
-        (when capture-types?
+        (when capture?
           (record-ordering-dependency-receipts!
            round-programs
            current-overlay))
@@ -544,7 +546,7 @@
                       (exn-message error)
                       (format "~a" error)))
                  diagnostics)))
-             #:capture-types? capture-types?)))
+             #:capture-types? capture?)))
         (define current-interfaces
           (map module-source-interface current-sources))
         (define current-digest
@@ -578,7 +580,7 @@
                  (program->module-interface
                   prog
                   #:source-id (module-source-source-id source)
-                  #:capture-types? capture-types?)))])))
+                  #:capture-types? capture?)))])))
         (if (interfaces-stable? current-sources next-sources)
             (values round-programs next-sources)
             (stabilize next-sources (add1 round)))))
@@ -614,6 +616,7 @@
                                      #:check-sources [check-sources #f]
                                      #:emit? [emit? #t]
                                      #:capture-types? [capture-types? #f]
+                                     #:shadow-facts? [shadow-facts? #f]
                                      #:diagnostic-sink [diagnostic-sink void])
   (check-module-overlay
    (module-source-closure-sources closure)
@@ -622,6 +625,7 @@
    #:check-sources check-sources
    #:emit? emit?
    #:capture-types? capture-types?
+   #:shadow-facts? shadow-facts?
    #:closed? #t
    #:diagnostic-sink diagnostic-sink
    #:parse-source
@@ -632,7 +636,9 @@
                            #:check-profile [check-profile 2]
                            #:check-namespaces [check-namespaces #f]
                            #:check-sources [check-sources #f]
-                           #:emit? [emit? #t])
+                           #:emit? [emit? #t]
+                           #:capture-types? [capture-types? #f]
+                           #:shadow-facts? [shadow-facts? #f])
   (let/ec abort
     (define sources
       (for/list ([edn-path (in-list edn-paths)])
@@ -652,7 +658,9 @@
      #:check-profile check-profile
      #:check-namespaces check-namespaces
      #:check-sources check-sources
-     #:emit? emit?)))
+     #:emit? emit?
+     #:capture-types? capture-types?
+     #:shadow-facts? shadow-facts?)))
 
 (provide
  check-edn-overlay

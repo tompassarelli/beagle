@@ -13,8 +13,10 @@
          "module-overlay-check.rkt"
          "module-source-root.rkt"
          "module-source-root-cli.rkt"
+         "canonical-value-v1.rkt"
          "error-format.rkt"
          "query.rkt"
+         "shadow-facts-v1.rkt"
          "extensions.rkt"
          "targets.rkt"
          (only-in "batch-compile.rkt" compile-source-for-target)
@@ -41,7 +43,10 @@
   (path->string (simplify-path (path->complete-path path))))
 
 (define (emit-checked-program prog path out-dir in-place? export-plan
-                              #:warning-count [warning-count 0])
+                              #:warning-count [warning-count 0]
+                              #:artifact-sink
+                              [artifact-sink (lambda (_path _target _source)
+                                               (void))])
   ;; Extension/header mismatch check
   (define expected-tgt (expected-target-for-extension path))
   (when (extension-target-mismatch? path (program-target prog))
@@ -64,6 +69,7 @@
         (and (eq? target 'js)
              (hash-ref export-plan ns (set)))])
       (emit-program prog)))
+  (artifact-sink path target source)
   (define out-path
     (cond
       [in-place?
@@ -247,10 +253,11 @@
            (parse-program (read-beagle-syntax f) #:source-path f)]))))
   (programs->export-plan (filter values programs)))
 
-(define (build-text-overlay files roots out-dir json? in-place?)
+(define (build-text-overlay files roots out-dir json? in-place? shadow-output)
   (define captured '())
   (define source->file (make-hash))
   (define source->profile-path (make-hash))
+  (define emitted-artifacts (make-hash))
   (define (capture! source _phase value location)
     (set! captured (cons (list source value location) captured)))
   (define (report! source value location)
@@ -299,6 +306,7 @@
          (check-module-source-closure
           closure
           #:capture-types? #t
+          #:shadow-facts? (and shadow-output #t)
           #:emit? #f
           #:diagnostic-sink capture!)))
   (when (and checked
@@ -323,22 +331,46 @@
      (define export-plan
        (programs->export-plan
         (map checked-overlay-module-program modules)))
-     (for/fold ([built 0] [errors 0])
-               ([module (in-list modules)])
-       (define source-id (format "~a" (checked-overlay-module-source module)))
-       (define path (hash-ref source->file source-id source-id))
-       (define profile-path
-         (hash-ref source->profile-path source-id path))
-       (if (with-handlers
-               ([exn:fail?
-                 (lambda (error)
-                   (report! source-id error #f)
-                   #f)])
-             (emit-checked-program
-              (checked-overlay-module-program module)
-              profile-path out-dir in-place? export-plan))
-           (values (add1 built) errors)
-           (values built (add1 errors))))]))
+     (define-values (built errors)
+       (for/fold ([built 0] [errors 0])
+                 ([module (in-list modules)])
+         (define source-id (format "~a" (checked-overlay-module-source module)))
+         (define path (hash-ref source->file source-id source-id))
+         (define profile-path
+           (hash-ref source->profile-path source-id path))
+         (if
+          (with-handlers
+              ([exn:fail?
+                (lambda (error)
+                  (report! source-id error #f)
+                  #f)])
+            (emit-checked-program
+             (checked-overlay-module-program module)
+             profile-path out-dir in-place? export-plan
+             #:artifact-sink
+             (lambda (_path target source)
+               (hash-set!
+                emitted-artifacts
+                source-id
+                (vector source-id
+                        target
+                        (canonical-value-v1-id source))))))
+          (values (add1 built) errors)
+          (values built (add1 errors)))))
+     (when (and shadow-output (zero? errors))
+       (shadow-fact-graph-v1-write
+        (shadow-fact-graph-v1-from-modules
+         (for/list ([module (in-list modules)])
+           (shadow-fact-module-input-v1
+            (checked-overlay-module-source module)
+            (checked-overlay-module-namespace module)
+            (checked-overlay-module-program module)
+            (checked-overlay-module-interface module)))
+         #:source-snapshots
+         (module-source-closure-snapshots closure)
+         #:artifacts emitted-artifacts)
+        shadow-output))
+     (values built errors)]))
 
 (define (expand-args args)
   (sort
@@ -356,6 +388,7 @@
   (define out-dir #f)
   (define warn? #f)
   (define in-place? #f)
+  (define shadow-output #f)
   (define build-edn? #f)   ; #33: treat file-args as --emit-edn triple dumps
   (define target-override #f)   ; --target: force every file through this target
   (define file-args '())
@@ -372,6 +405,15 @@
          (exit 2))
        (set! out-dir (cadr rest))
        (loop (cddr rest))]
+      [(string=? (car rest) "--shadow-facts")
+       (when (null? (cdr rest))
+         (eprintf "beagle-build-all: --shadow-facts requires a graph path\n")
+         (exit 2))
+       (set! shadow-output (cadr rest))
+       (loop (cddr rest))]
+      [(string-prefix? (car rest) "--shadow-facts=")
+       (set! shadow-output (substring (car rest) (string-length "--shadow-facts=")))
+       (loop (cdr rest))]
       [(string=? (car rest) "--warn")
        (set! warn? #t)
        (loop (cdr rest))]
@@ -404,6 +446,11 @@
      "beagle-build-all: --module-root cannot be combined with --target, --build-edn, or --warn\n")
     (exit 2))
 
+  (when (and shadow-output (or target-override build-edn? warn?))
+    (eprintf
+     "beagle-build-all: --shadow-facts requires the ordinary whole-module build path\n")
+    (exit 2))
+
   (when (null? file-args)
     (eprintf
      "usage: beagle-build-all <file-or-dir> ... [--module-root LOGICAL=PHYSICAL]... [--out <dir>] [--in-place] [--warn]\n")
@@ -425,7 +472,8 @@
   (cond
     [(and (not build-edn?) (not target-override) (not warn?))
      (define-values (overlay-built overlay-errors)
-       (build-text-overlay files roots out-dir json? in-place?))
+       (build-text-overlay
+        files roots out-dir json? in-place? shadow-output))
      (set! built overlay-built)
      (set! errors overlay-errors)]
     [else
