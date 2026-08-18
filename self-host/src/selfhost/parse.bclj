@@ -1755,6 +1755,7 @@
 
 (defn- scope-walk-match! [(value Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children value)
+        (clause-indices (Vec Int)) (vec (range 2 (count children)))
         clauses
         (mapv
           (fn [(index Int)] Any
@@ -1777,7 +1778,7 @@
                         (get pattern "table")
                         (conj (vec path) index body-index) ctx))
                     body-indices)))))
-          (range 2 (count children)))]
+          clause-indices)]
     (rebuild-scope-sequence! value
       (into
         [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx)

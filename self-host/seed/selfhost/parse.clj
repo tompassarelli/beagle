@@ -915,12 +915,13 @@
 
 (defn- scope-walk-match! [value table path ctx]
   (let [children (scope-sequence-children value)
+   clause-indices (vec (range 2 (count children)))
    clauses (mapv (fn [index] (let [clause (nth children index)
    clause-children (scope-sequence-children clause)
    scope (syntax/fresh-scope-id! "pattern")
    pattern (scope-walk-pattern! (nth clause-children 0) table scope (conj (vec path) index 0))
    body-indices (vec (range 1 (count clause-children)))]
-  (rebuild-scope-sequence! clause (into [(get pattern "value")] (mapv (fn [body-index] (scope-walk* (syntax-add-scope! (nth clause-children body-index) scope) (get pattern "table") (conj (vec path) index body-index) ctx)) body-indices))))) (range 2 (count children)))]
+  (rebuild-scope-sequence! clause (into [(get pattern "value")] (mapv (fn [body-index] (scope-walk* (syntax-add-scope! (nth clause-children body-index) scope) (get pattern "table") (conj (vec path) index body-index) ctx)) body-indices))))) clause-indices)]
   (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) (scope-walk* (nth children 1) table (conj (vec path) 1) ctx)] clauses))))
 
 (defn scope-walk! [value table path ctx]
