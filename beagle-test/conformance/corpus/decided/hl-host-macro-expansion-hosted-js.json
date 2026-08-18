@@ -9,7 +9,7 @@
     "target": "js",
     "fileName": "probe/consumer.bjs",
     "command": {
-      "argv": ["expand", "--profile", "3", "{input}"]
+      "argv": ["check", "--profile", "3", "{root}/probe"]
     },
     "closure": {
       "kind": "closed-multi-source",

@@ -9,7 +9,7 @@
     "target": "clj",
     "fileName": "probe/consumer.bclj",
     "command": {
-      "argv": ["expand", "--profile", "2", "{input}"]
+      "argv": ["check", "--profile", "2", "{root}/probe"]
     },
     "closure": {
       "kind": "closed-multi-source",

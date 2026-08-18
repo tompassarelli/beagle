@@ -50,21 +50,21 @@
       "caseId": "hl-host-macro-expansion-core",
       "path": "corpus/decided/hl-host-macro-expansion-core.json",
       "status": "DECIDED",
-      "sha256": "e50d069adb9806b7464776e7b317d951a0dfbe0eff32d29e34daed96925b0a25",
+      "sha256": "679412355ef3965769f717c4e81331ec1cef8ad524ff834b87f75149815f0c05",
       "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","core"]
     },
     {
       "caseId": "hl-host-macro-expansion-hosted-clj",
       "path": "corpus/decided/hl-host-macro-expansion-hosted-clj.json",
       "status": "DECIDED",
-      "sha256": "abe928473ead7b26453abfd8efc4c163d3fb84f71dfe8abb744a41f686f66cfc",
+      "sha256": "690cf952c820d9346f504ad94b6b5208d7f91cc302ec4f6730d4ed4773cd6c6e",
       "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","hosted-clj"]
     },
     {
       "caseId": "hl-host-macro-expansion-hosted-js",
       "path": "corpus/decided/hl-host-macro-expansion-hosted-js.json",
       "status": "DECIDED",
-      "sha256": "db1bca1feeaa68d90ce0de7fb67b8557e6cc7b09b5aa8bc8107cbf080d6402fb",
+      "sha256": "c4346291ae148facef027234d0f23e3ebca670f6a7cefa7c5876a8d448938cc4",
       "coverage": ["HOST-LEAKAGE","HL-HOST-MACRO-EXPANSION","hosted-js"]
     },
     {

@@ -9,7 +9,7 @@
     "target": "core",
     "fileName": "probe/consumer.bgl",
     "command": {
-      "argv": ["expand", "--profile", "1", "{input}"]
+      "argv": ["check", "--profile", "1", "{root}/probe"]
     },
     "closure": {
       "kind": "closed-multi-source",
