@@ -2311,6 +2311,7 @@
 (defn codec-primitive-operation-name
   [(operation core/CodecPrimitiveOpV0)] String
   (cond
+    (instance? native.core.CharFromCodepointV0 operation) "char-from-codepoint"
     (instance? native.core.Utf8EncodeV0 operation) "utf8-encode"
     (instance? native.core.Utf8DecodeV0 operation) "utf8-decode"
     (instance? native.core.Utf8DecodeSourceV0 operation) "utf8-decode-source"

@@ -1600,6 +1600,15 @@
     (str "  " target " = native_text_compare("
       (value-name function slots (core/textcomparev0-left-id operation)) ", "
       (value-name function slots (core/textcomparev0-right-id operation)) ");\n")
+    (instance? native.core.TextLastIndexOfV0 operation)
+    (emit-optional-i64-call types layouts target result
+      (str "native_text_last_index_of("
+        (value-name function slots
+          (core/textlastindexofv0-source-id operation))
+        ", "
+        (value-name function slots
+          (core/textlastindexofv0-needle-id operation))
+        ", "))
     (instance? native.core.TextEndsWithV0 operation)
     (let [(source String)
           (value-name function slots (core/textendswithv0-source-id operation))
@@ -2310,6 +2319,14 @@
       (let [(operation core/CodecPrimitiveOpV0)
             (core/codecprimitiveinstructionv0-operation instruction)]
         (cond
+          (instance? native.core.CharFromCodepointV0 operation)
+          (str "  " target " = native_text_from_codepoint((native_arena *)"
+            (value-name function slots
+              (core/charfromcodepointv0-arena-id operation))
+            ", "
+            (value-name function slots
+              (core/charfromcodepointv0-source-id operation))
+            ");\n")
           (instance? native.core.Utf8EncodeV0 operation)
           (str "  " target " = native_utf8_encode((native_arena *)"
             (value-name function slots (core/utf8encodev0-arena-id operation))

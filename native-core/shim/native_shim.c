@@ -7426,6 +7426,42 @@ bool native_text_index_of(uint64_t source, uint64_t needle, int64_t *out) {
   return false;
 }
 
+bool native_text_last_index_of(uint64_t source, uint64_t needle, int64_t *out) {
+  uint64_t source_length = native_text_length(source);
+  uint64_t needle_length = native_text_length(needle);
+  const uint8_t *source_bytes = native_text_bytes(source);
+  const uint8_t *needle_bytes = native_text_bytes(needle);
+  uint64_t index;
+  if (out == NULL) {
+    return false;
+  }
+  if (needle_length == UINT64_C(0)) {
+    if (source_length > (uint64_t)INT64_MAX) {
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    *out = (int64_t)source_length;
+    return true;
+  }
+  if (needle_length > source_length) {
+    return false;
+  }
+  index = source_length - needle_length;
+  for (;;) {
+    if (memcmp(source_bytes + index, needle_bytes, (size_t)needle_length) == 0) {
+      if (index > (uint64_t)INT64_MAX) {
+        native_trap(NATIVE_TRAP_OVERFLOW);
+      }
+      *out = (int64_t)index;
+      return true;
+    }
+    if (index == UINT64_C(0)) {
+      break;
+    }
+    index -= UINT64_C(1);
+  }
+  return false;
+}
+
 static bool native_unicode_whitespace(uint32_t codepoint) {
   return ((codepoint >= UINT32_C(0x0009)) &&
           (codepoint <= UINT32_C(0x000d))) ||
@@ -8341,6 +8377,22 @@ static uint64_t native_utf8_write_codepoint(uint8_t *destination,
     return UINT64_C(4);
   }
   native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+uint64_t native_text_from_codepoint(native_arena *arena, int64_t value) {
+  uint32_t codepoint;
+  uint64_t length;
+  uint8_t *destination;
+  uint64_t handle;
+  if (value < INT64_C(0) || value > INT64_C(0x10ffff) ||
+      (value >= INT64_C(0xd800) && value <= INT64_C(0xdfff))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  codepoint = (uint32_t)value;
+  length = native_utf8_codepoint_length(codepoint);
+  handle = native_text_alloc(arena, length, &destination);
+  (void)native_utf8_write_codepoint(destination, codepoint);
+  return handle;
 }
 
 static uint8_t native_jdk_lower_mapping(const uint8_t *bytes, uint64_t length,

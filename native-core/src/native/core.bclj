@@ -263,6 +263,7 @@
 ;; sequences.
 (defunion TextBuiltinOpV0
   (TextCompareV0 [(left-id NativeId) (right-id NativeId)])
+  (TextLastIndexOfV0 [(source-id NativeId) (needle-id NativeId)])
   (TextEndsWithV0 [(source-id NativeId) (suffix-id NativeId)])
   (TextTrimV0 [(arena-id NativeId) (source-id NativeId)])
   (TextLowerV0 [(arena-id NativeId) (source-id NativeId)])
@@ -323,6 +324,7 @@
 ;; Pure target-neutral codec semantics. UTF-8 operations allocate only their
 ;; returned value in the caller's arena; binary64 conversions are bit-level.
 (defunion CodecPrimitiveOpV0
+  (CharFromCodepointV0 [(arena-id NativeId) (source-id NativeId)])
   (Utf8EncodeV0 [(arena-id NativeId) (source-id NativeId)])
   (Utf8DecodeV0 [(arena-id NativeId) (source-id NativeId)])
   ;; Same semantics as Utf8DecodeV0 over a borrowed byte source: the octets are
@@ -2231,6 +2233,7 @@
 (defn text-builtin-ssa-refs [(operation TextBuiltinOpV0)] (Vec NativeId)
   (match operation
     [(TextCompareV0 left-id right-id) [left-id right-id]]
+    [(TextLastIndexOfV0 source-id needle-id) [source-id needle-id]]
     [(TextEndsWithV0 source-id suffix-id) [source-id suffix-id]]
     [(TextTrimV0 arena-id source-id) [arena-id source-id]]
     [(TextLowerV0 arena-id source-id) [arena-id source-id]]
@@ -2252,6 +2255,7 @@
 
 (defn codec-primitive-ssa-refs [(operation CodecPrimitiveOpV0)] (Vec NativeId)
   (match operation
+    [(CharFromCodepointV0 arena-id source-id) [arena-id source-id]]
     [(Utf8EncodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeSourceV0 arena-id source-id) [arena-id source-id]]

@@ -7312,6 +7312,7 @@
     (= "integer?" callee)
     (= "int?" callee)
     (= "number?" callee)
+    (= "double?" callee)
     (= "boolean?" callee)
     (= "keyword?" callee)))
 
@@ -7320,6 +7321,7 @@
     (= "string?" callee) [(text-type-id)]
     (or (= "integer?" callee) (= "int?" callee)) [(int-type-id)]
     (= "number?" callee) [(int-type-id) (type-id "Float")]
+    (= "double?" callee) [(type-id "Float")]
     (= "boolean?" callee) [(bool-type-id)]
     (= "keyword?" callee) [(keyword-type-id)]
     :else []))
@@ -7931,6 +7933,26 @@
               (core/->SsaValueV0 result-id optional) source-id needle-id))
           result-id optional false)))))
 
+(defn lower-text-last-index
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (source-id core/NativeId)
+   (needle-id core/NativeId)]
+  ExprResultV0
+  (let [(optional (U core/NativeId Nil))
+        (optional-scalar-type-of types (int-type-id))]
+    (if (nil? optional)
+      (fail-result state
+        "TODO-NATIVE-TEXT-LAST-INDEX-TYPE: the source program declares no nullable Int")
+      (let [(result-id core/NativeId) (state-id state owner "text-last-index")]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->TextBuiltinInstruction
+              (core/->SsaValueV0 result-id optional)
+              (core/->TextLastIndexOfV0 source-id needle-id)))
+          result-id optional false)))))
+
 (defn lower-text-ends-with
   [(owner core/NativeId)
    (state BodyStateV0)
@@ -8029,6 +8051,29 @@
         (core/->I64ToF64InstructionV0
           (core/->SsaValueV0 result-id (float-type-id)) source-id))
       result-id (float-type-id) false)))
+
+(defn lower-char
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (value-id core/NativeId)
+   (value-type core/NativeId)]
+  ExprResultV0
+  (let [(source ExprResultV0)
+        (lower-boundary-coerce types owner state value-id value-type
+          (int-type-id))
+        (settled BodyStateV0) (exprresultv0-state source)]
+    (if (state-blocked? settled)
+      (dead-result settled)
+      (let [(result-id core/NativeId) (state-id settled owner "char")]
+        (->ExprResultV0
+          (state-emit (state-bump settled)
+            (core/->CodecPrimitiveInstructionV0
+              (core/->SsaValueV0 result-id (text-type-id))
+              (core/->CharFromCodepointV0
+                (arena-value-id owner)
+                (exprresultv0-value-id source))))
+          result-id (text-type-id) false)))))
 
 (defn lower-float-to-int
   [(state BodyStateV0)
@@ -15717,6 +15762,14 @@
                 (fail-result current
                   "TODO-NATIVE-FLOAT-FROM-BITS-OPERAND: float-from-bits takes one native Int value")
 
+                (and (= "char" callee) (= 1 (count values)))
+                (lower-char types owner current
+                  (nth values 0) (nth value-types 0))
+
+                (= "char" callee)
+                (fail-result current
+                  "TODO-NATIVE-CHAR-ARITY: char takes one codepoint value")
+
                 (and (= "double" callee) (= 1 (count values)))
                 (lower-double types owner current
                   (nth values 0) (nth value-types 0))
@@ -16271,6 +16324,16 @@
                 (= "str/index-of" callee)
                 (fail-result current
                   "TODO-NATIVE-TEXT-INDEX-OPERANDS: str/index-of takes two native Text operands")
+
+                (and (= "str/last-index-of" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (lower-text-last-index types owner current
+                  (nth values 0) (nth values 1))
+
+                (= "str/last-index-of" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-LAST-INDEX-OPERANDS: str/last-index-of takes two native Text operands")
 
                 (and (= "str/blank?" callee) (= 1 (count values))
                   (text-operand? (nth value-types 0)))
@@ -21287,6 +21350,10 @@
     (stages/canonical-record "text-compare"
       [(id-value (core/textcomparev0-left-id operation))
        (id-value (core/textcomparev0-right-id operation))])
+    (instance? native.core.TextLastIndexOfV0 operation)
+    (stages/canonical-record "text-last-index-of"
+      [(id-value (core/textlastindexofv0-source-id operation))
+       (id-value (core/textlastindexofv0-needle-id operation))])
     (instance? native.core.TextEndsWithV0 operation)
     (stages/canonical-record "text-ends-with"
       [(id-value (core/textendswithv0-source-id operation))
@@ -21383,6 +21450,9 @@
 (defn encode-codec-primitive-operation
   [(operation core/CodecPrimitiveOpV0)] String
   (match operation
+    [(CharFromCodepointV0 arena-id source-id)
+     (stages/canonical-record "char-from-codepoint-v0"
+       [(id-value arena-id) (id-value source-id)])]
     [(Utf8EncodeV0 arena-id source-id)
      (stages/canonical-record "utf8-encode-v0"
        [(id-value arena-id) (id-value source-id)])]
@@ -23033,6 +23103,9 @@
    (epoch-arena core/NativeId)]
   core/CodecPrimitiveOpV0
   (cond
+    (instance? native.core.CharFromCodepointV0 operation)
+    (core/->CharFromCodepointV0 epoch-arena
+      (core/charfromcodepointv0-source-id operation))
     (instance? native.core.Utf8EncodeV0 operation)
     (core/->Utf8EncodeV0 epoch-arena (core/utf8encodev0-source-id operation))
     (instance? native.core.Utf8DecodeV0 operation)

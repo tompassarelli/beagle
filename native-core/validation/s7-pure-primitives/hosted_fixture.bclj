@@ -1,0 +1,16 @@
+#lang beagle/clj
+(ns native.s7-pure-primitives-hosted)
+
+(defn last-index-found? [] Bool
+  (let [(found (U Int Nil)) (clojure.string/last-index-of "ababa" "ba")]
+    (and (some? found) (= found 3))))
+
+(defn last-index-missing? [] Bool
+  (nil? (clojure.string/last-index-of "ababa" "zz")))
+
+(defn double-predicate? [] Bool
+  (and (double? 1.5) (not (double? 1))))
+
+(defn char-roundtrip? [] Bool
+  (and (= (str (char 65)) "A")
+       (= (str (char 128512)) "😀")))

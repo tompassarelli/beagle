@@ -236,6 +236,7 @@
    'subs       (fn-of '(String Int) 'String #:rest 'Int)
    'string?    (fn-of '(Any) 'Bool)
    'number?    (fn-of '(Any) 'Bool)
+   'double?    (fn-of '(Any) 'Bool)
    'integer?   (fn-of '(Any) 'Bool)
    'keyword?   (fn-of '(Any) 'Bool)
    'symbol?    (fn-of '(Any) 'Bool)

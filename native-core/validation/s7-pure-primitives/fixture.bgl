@@ -1,0 +1,24 @@
+#lang beagle
+(ns native.s7-pure-primitives)
+
+(defn last-index-found? [] Bool
+  (let [(found (U Int Nil)) (str/last-index-of "ababa" "ba")]
+    (and (some? found) (= found 3))))
+
+(defn last-index-missing? [] Bool
+  (nil? (str/last-index-of "ababa" "zz")))
+
+(defn double-predicate? [] Bool
+  (and (double? 1.5) (not (double? 1))))
+
+(defn char-roundtrip? [] Bool
+  (and (= (str (char 65)) "A")
+       (= (str (char 128512)) "😀")))
+
+(defn main [] Int
+  (if (and (last-index-found?)
+           (last-index-missing?)
+           (double-predicate?)
+           (char-roundtrip?))
+    0
+    1))
