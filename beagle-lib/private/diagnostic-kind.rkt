@@ -217,6 +217,7 @@
    'bare-nix-form          'surface-divergence
    'macro-source-error      'surface-divergence
    'macro-expansion-parse-error 'surface-divergence
+   'invalid-symbol          'surface-divergence
    'reader-conditional-no-match 'surface-divergence
    'bad-defunion           'surface-divergence
    'duplicate-meta         'type-error

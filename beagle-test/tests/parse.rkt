@@ -1944,6 +1944,17 @@
                   "def *x* not marked dynamic via read-beagle-syntax path"))
     (lambda () (when (file-exists? tmp) (delete-file tmp)))))
 
+(test-case "read-beagle-syntax projects invalid Unicode through Beagle diagnostics"
+  (define error
+    (with-handlers ([beagle-parse-error? values])
+      (read-beagle-syntax/bytes
+       "invalid-symbol.bgl"
+       #"#lang beagle\n(def invalid Any (symbol \"\\ud800\"))\n")
+      #f))
+  (check-pred beagle-parse-error? error)
+  (check-eq? (beagle-parse-error-kind error) 'invalid-symbol)
+  (check-regexp-match #rx"BEAGLE-INVALID-SYMBOL" (exn-message error)))
+
 ;; --- canonical function / typed-field vector layout -----------------------
 
 (test-case "canonical physical layouts cover every function-style grammar site"

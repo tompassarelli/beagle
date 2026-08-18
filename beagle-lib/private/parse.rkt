@@ -316,6 +316,18 @@
     [(regexp-match? #rx"^#lang[ ]+beagle[ ]*$" lang-line) 'core]
     [else #f]))
 
+(define (read-syntax/with-unicode-diagnostic src in)
+  (with-handlers
+      ([exn:fail:read?
+        (lambda (error)
+          (if (regexp-match? #rx"bad or incomplete surrogate-style encoding"
+                             (exn-message error))
+              (raise-parse-error
+               'invalid-symbol
+               "BEAGLE-INVALID-SYMBOL: invalid Unicode scalar value")
+              (raise error)))])
+    (read-syntax src in)))
+
 (define (canonical-source-path path)
   (simplify-path
    (path->complete-path (if (path? path) path (string->path path)))))
@@ -356,7 +368,7 @@
       (parameterize ([current-readtable target-readtable])
         (define forms
           (let loop ([acc '()])
-            (define d (read-syntax src in))
+            (define d (read-syntax/with-unicode-diagnostic src in))
             (if (eof-object? d) (reverse acc) (loop (cons d acc)))))
         (cond
           [target

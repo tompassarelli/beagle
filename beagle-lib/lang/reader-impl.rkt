@@ -563,7 +563,15 @@
 
 (define (beagle-read-syntax src in)
   (parameterize ([current-readtable beagle-readtable])
-    (read-syntax src in)))
+    (with-handlers
+        ([exn:fail:read?
+          (lambda (error)
+            (if (regexp-match? #rx"bad or incomplete surrogate-style encoding"
+                               (exn-message error))
+                (error 'beagle
+                       "BEAGLE-INVALID-SYMBOL: invalid Unicode scalar value")
+                (raise error)))])
+      (read-syntax src in))))
 
 (provide beagle-read beagle-read-syntax beagle-readtable
          fn-shorthand->fn reading-fn-shorthand? unquote-reader)
