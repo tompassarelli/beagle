@@ -97,6 +97,28 @@ class VerifyDivergenceCoverageTest(unittest.TestCase):
         def no_evidence(coverage: dict, manifest: dict, payload: dict) -> None:
             coverage["rows"][0]["caseIds"] = []
 
+        def evidence_marked_uncovered(
+            coverage: dict, manifest: dict, payload: dict
+        ) -> None:
+            coverage["rows"][0]["status"] = "uncovered"
+
+        def enumeration_not_joined(
+            coverage: dict, manifest: dict, payload: dict
+        ) -> None:
+            coverage["rows"][0]["caseIds"] = []
+            coverage["rows"][0]["status"] = "uncovered"
+            payload["expected"] = {
+                "kind": "named-diagnostic-assertion",
+                "name": "literal-builtin-enumeration",
+            }
+            payload["coverage"] = {
+                "surface": [
+                    "symbol",
+                    "failure-behavior",
+                    "literal-builtin-enumeration",
+                ]
+            }
+
         cases = [
             ("UNRESOLVED_QUESTION_DIMENSION", unresolved),
             ("DUPLICATE_DIMENSION", duplicate),
@@ -104,6 +126,8 @@ class VerifyDivergenceCoverageTest(unittest.TestCase):
             ("CASE_NOT_DECIDED", not_decided),
             ("IMPLEMENTATION_OBSERVED_ONLY_EVIDENCE", implementation_only),
             ("COVERED_WITHOUT_CASE_EVIDENCE", no_evidence),
+            ("UNCOVERED_WITH_CASE_EVIDENCE", evidence_marked_uncovered),
+            ("ENUMERATION_CASE_NOT_JOINED", enumeration_not_joined),
         ]
         for reason, mutate in cases:
             with self.subTest(reason=reason):

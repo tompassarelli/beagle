@@ -57,6 +57,30 @@ def implementation_observed_only(
     )
 
 
+def enumerated_dimension(payload: dict[str, Any]) -> str | None:
+    expected = payload.get("expected")
+    if not isinstance(expected, dict) or expected.get("name") != (
+        "literal-builtin-enumeration"
+    ):
+        return None
+    coverage = payload.get("coverage")
+    if not isinstance(coverage, dict):
+        reject("INVALID_DOCUMENT", "enumeration case has no coverage object")
+    surface = coverage.get("surface")
+    if (
+        not isinstance(surface, list)
+        or len(surface) != 3
+        or not all(isinstance(value, str) and value for value in surface)
+        or surface[2] != "literal-builtin-enumeration"
+    ):
+        reject(
+            "INVALID_DOCUMENT",
+            "enumeration case coverage.surface must be [name, question, "
+            "'literal-builtin-enumeration']",
+        )
+    return f"{surface[0]}::{surface[1]}"
+
+
 def verify(coverage_path: Path, manifest_path: Path) -> tuple[int, int]:
     coverage = load_object(coverage_path, "coverage document")
     manifest = load_object(manifest_path, "manifest")
@@ -69,12 +93,21 @@ def verify(coverage_path: Path, manifest_path: Path) -> tuple[int, int]:
         reject("INVALID_DOCUMENT", "manifest cases must be an array")
 
     case_index: dict[str, dict[str, Any]] = {}
+    payload_index: dict[str, dict[str, Any]] = {}
     for entry in manifest_cases:
         if not isinstance(entry, dict) or not isinstance(entry.get("caseId"), str):
             reject("INVALID_DOCUMENT", "every manifest case must have a string caseId")
-        case_index[entry["caseId"]] = entry
+        case_id = entry["caseId"]
+        case_index[case_id] = entry
+        case_path = entry.get("path")
+        if not isinstance(case_path, str) or not case_path:
+            reject("INVALID_DOCUMENT", f"manifest case {case_id!r} has no path")
+        payload_index[case_id] = load_object(
+            manifest_path.parent / case_path, f"case {case_id!r}"
+        )
 
     seen: set[str] = set()
+    row_case_ids: dict[str, set[str]] = {}
     covered = 0
     uncovered = 0
     for row_number, row in enumerate(rows, start=1):
@@ -104,6 +137,12 @@ def verify(coverage_path: Path, manifest_path: Path) -> tuple[int, int]:
                 "COVERED_WITHOUT_CASE_EVIDENCE",
                 f"dimension {dimension!r} claims coverage with no case evidence",
             )
+        if status == "uncovered" and case_ids:
+            reject(
+                "UNCOVERED_WITH_CASE_EVIDENCE",
+                f"dimension {dimension!r} has case evidence but claims to be uncovered",
+            )
+        row_case_ids[dimension] = set(case_ids)
 
         for case_id in case_ids:
             entry = case_index.get(case_id)
@@ -112,10 +151,7 @@ def verify(coverage_path: Path, manifest_path: Path) -> tuple[int, int]:
                     "CASE_NOT_IN_MANIFEST",
                     f"dimension {dimension!r} references absent case {case_id!r}",
                 )
-            case_path = entry.get("path")
-            if not isinstance(case_path, str) or not case_path:
-                reject("INVALID_DOCUMENT", f"manifest case {case_id!r} has no path")
-            payload = load_object(manifest_path.parent / case_path, f"case {case_id!r}")
+            payload = payload_index[case_id]
             if implementation_observed_only(entry, payload):
                 reject(
                     "IMPLEMENTATION_OBSERVED_ONLY_EVIDENCE",
@@ -127,10 +163,28 @@ def verify(coverage_path: Path, manifest_path: Path) -> tuple[int, int]:
                     f"dimension {dimension!r} references non-DECIDED case {case_id!r}",
                 )
 
-        if status == "covered":
+        if case_ids:
             covered += 1
         else:
             uncovered += 1
+
+    for case_id, payload in payload_index.items():
+        dimension = enumerated_dimension(payload)
+        if dimension is None:
+            continue
+        entry = case_index[case_id]
+        if entry.get("status") != "DECIDED" or payload.get("status") != "DECIDED":
+            continue
+        if dimension not in row_case_ids:
+            reject(
+                "ENUMERATION_DIMENSION_NOT_IN_INVENTORY",
+                f"enumeration case {case_id!r} names absent dimension {dimension!r}",
+            )
+        if case_id not in row_case_ids[dimension]:
+            reject(
+                "ENUMERATION_CASE_NOT_JOINED",
+                f"enumeration case {case_id!r} is absent from dimension {dimension!r}",
+            )
 
     return covered, uncovered
 
