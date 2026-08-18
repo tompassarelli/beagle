@@ -32,6 +32,8 @@
 
 (def bc-get-used (atom false))
 
+(def bc-range-used (atom false))
+
 (def inline-scope (atom {}))
 
 (def ctx (atom "stmt"))
@@ -721,6 +723,9 @@
   (= fn-sym "list") (str "[" (emit-args-list args) "]")
   (= fn-sym "into") (if (= n 2) (str "[..." a0 ", ..." a1 "]") nil)
   (= fn-sym "concat") (str "[].concat(" (emit-args-list args) ")")
+  (= fn-sym "range") (do
+  (reset! bc-range-used true)
+  (str "$$bc$range(" (emit-args-list args) ")"))
   (= fn-sym "reverse") (if (= n 1) (str "[..." a0 "].reverse()") nil)
   (= fn-sym "sort") (if (= n 1) (str "[..." a0 "].sort()") nil)
   (= fn-sym "map") (if (= n 2) (str a1 ".map(" a0 ")") nil)
@@ -1669,6 +1674,7 @@
   (reset! module-bindings (build-module-bindings (get prog "requires")))
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
+  (reset! bc-range-used false)
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
@@ -1679,7 +1685,7 @@
   (let [body (str/join "\n\n" (mapv (fn [f] (reset! ctx "stmt")
   (emit-form! f)) forms))
    header (emit-module-header prog)
-   runtime-bindings (into (if (some? (str/index-of body "$$bc$equiv")) ["equivV as $$bc$equiv"] []) (if (deref bc-get-used) ["get as $$bc$get"] []))
+   runtime-bindings (into (if (some? (str/index-of body "$$bc$equiv")) ["equivV as $$bc$equiv"] []) (into (if (deref bc-get-used) ["get as $$bc$get"] []) (if (deref bc-range-used) ["range as $$bc$range"] [])))
    runtime-import (if (= 0 (count runtime-bindings)) "" (str "import { " (str/join ", " runtime-bindings) " } from 'beagle/core.js';\n"))]
   (str header runtime-import "\n" body "\n")))))
 

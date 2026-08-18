@@ -10,6 +10,8 @@
 
 (def local-names (atom {}))
 
+(def refer-output-names (atom {}))
+
 (def match-counter (atom 0))
 
 (def emit-target (atom "clj"))
@@ -40,7 +42,16 @@
   :else ref))
 
 (defn ^String reference->clj [ref]
-  (if (qualified-reference? ref) (str (get ref "qualifier") "/" (get ref "name")) (if (map? ref) (get ref "name") (str ref))))
+  (if (qualified-reference? ref) (str (get ref "qualifier") "/" (get ref "name")) (if (map? ref) (let [name (get ref "name")
+   referred (get (deref refer-output-names) name)]
+  (if (and (not (contains? ref "refersTo")) (not (= true (get (deref local-names) name))) (string? referred)) (str referred "/" name) name)) (str ref))))
+
+(defn register-refer-output-names! [requires]
+  (reset! refer-output-names (reduce (fn [out require] (let [alias (get require "alias")
+   refer (get require "refer")]
+  (if (and (string? alias) (vector? refer)) (reduce (fn [names name] (if (not (string? name)) names (let [old (get names name)]
+  (if (nil? old) (assoc names name alias) (if (= old alias) names (assoc names name false)))))) out refer) out))) {} (vec requires)))
+  nil)
 
 (defn ^Boolean qualified-reference=? [ref ^String qualifier ^String name]
   (and (qualified-reference? ref) (= (get ref "qualifier") qualifier) (= (get ref "name") name)))
@@ -780,8 +791,10 @@
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)
   (reset! emit-target (get prog "target"))
+  (reset! refer-output-names {})
   (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
   (register-tables! (get prog "forms"))
+  (register-refer-output-names! (get prog "requires"))
   (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
   (str (emit-ns-form prog body) "\n\n" (if (str/includes? body CLJ-SHA256-CALL) (str CLJ-SHA256-RUNTIME "\n") "") body "\n"))))
 

@@ -26,6 +26,11 @@
 ;; Locally defined callables shadow portable stdlib intrinsics.
 (def local-names Any (atom {}))
 
+;; Unqualified referred names retain their authored spelling in the checked AST,
+;; but Clojure source must call through the require alias. This table is built
+;; from the program's requires, not from emitted text.
+(def refer-output-names Any (atom {}))
+
 (def match-counter Any (atom 0))
 
 (def emit-target Any (atom "clj"))
@@ -90,7 +95,36 @@
 (defn reference->clj [(ref Any)] String
   (if (qualified-reference? ref)
     (str (get ref "qualifier") "/" (get ref "name"))
-    (if (map? ref) (get ref "name") (str ref))))
+    (if (map? ref)
+      (let [name (get ref "name")
+            referred (get (deref refer-output-names) name)]
+        (if (and (not (contains? ref "refersTo"))
+                 (not (= true (get (deref local-names) name)))
+                 (string? referred))
+          (str referred "/" name)
+          name))
+      (str ref))))
+
+(defn register-refer-output-names! [(requires Any)] Nil
+  (reset! refer-output-names
+    (reduce
+      (fn [(out Any) (require Any)] Any
+        (let [alias (get require "alias")
+              refer (get require "refer")]
+          (if (and (string? alias) (vector? refer))
+            (reduce
+              (fn [(names Any) (name Any)] Any
+                (if (not (string? name))
+                  names
+                  (let [old (get names name)]
+                    (if (nil? old)
+                      (assoc names name alias)
+                      (if (= old alias) names (assoc names name false))))))
+              out refer)
+            out)))
+      {}
+      (vec requires)))
+  nil)
 
 (defn qualified-reference=?
   [(ref Any) (qualifier String) (name String)] Bool
@@ -1573,11 +1607,13 @@
     (reset! match-counter 0)
     (reset! loop-constraint-arity nil)
     (reset! emit-target (get prog "target"))
+    (reset! refer-output-names {})
     (reset! checked-program-ref
       (and (= (get prog "kind") "beagle.checked-program")
            (= (get prog "schemaVersion") 4)
            (= (get prog "phase") "checked")))
     (register-tables! (get prog "forms"))
+    (register-refer-output-names! (get prog "requires"))
     (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
       (str (emit-ns-form prog body) "\n\n"
         (if (str/includes? body CLJ-SHA256-CALL)

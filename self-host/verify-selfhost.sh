@@ -175,6 +175,11 @@ done
 for src in "${MODULES[@]}"; do
   name="$(basename "$src")"
   name="${name%.*}"
+  case "$src" in
+    *.bjs) target=js; emitter=selfhost.emit-js ;;
+    *.bnix) target=nix; emitter=selfhost.emit-nix ;;
+    *) target=clj; emitter=selfhost.emit-clj ;;
+  esac
   oracle="$LAB/$name-oracle.clj"
   astj="$LAB/$name-ast.json"
 

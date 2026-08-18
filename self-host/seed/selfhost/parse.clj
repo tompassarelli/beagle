@@ -948,6 +948,83 @@
    surface (syntax/make-syntax-list! (into [(nth children 0) (scope-walk* init table (conj (vec path) 1) ctx) name] steps) span scopes origin properties)]
   (syntax/make-syntax-list! [(generated "#%resolved-as-thread") surface resolved] span scopes origin properties)))
 
+(defn- scope-thread-step-insert! [val step ^String position]
+  (let [children (scope-sequence-children step)
+   span (syntax/beagle-syntax-span step)
+   scopes (syntax/beagle-syntax-scopes step)
+   origin (syntax/beagle-syntax-origin step)
+   properties (syntax/beagle-syntax-properties step)]
+  (if (some? children) (if (= position "first") (rebuild-scope-sequence! step (vec (concat [(nth children 0)] [val] (subvec (vec children) 1)))) (rebuild-scope-sequence! step (vec (concat (vec children) [val])))) (syntax/make-syntax-list! [step val] span scopes origin properties))))
+
+(defn- scope-thread-generated! [datum span scopes origin properties]
+  (syntax/datum->beagle-syntax! datum span scopes origin properties))
+
+(defn- scope-expand-thread! [init steps ^String position]
+  (reduce (fn [acc step] (scope-thread-step-insert! acc step position)) init steps))
+
+(defn- scope-expand-cond-thread! [value init clauses ^String kind]
+  (let [span (syntax/beagle-syntax-span value)
+   scopes (syntax/beagle-syntax-scopes value)
+   origin (syntax/beagle-syntax-origin value)
+   properties (syntax/beagle-syntax-properties value)
+   generated (fn [datum] (scope-thread-generated! datum span scopes origin properties))
+   n (count clauses)
+   pairs (loop [i 0
+   out []]
+  (if (>= (+ i 1) n) out (recur (+ i 2) (conj out [(nth clauses i) (nth clauses (+ i 1))]))))
+   position (if (= kind "cond->") "first" "last")
+   k (count pairs)
+   temps (loop [i 0
+   out []]
+  (if (>= i (+ k 1)) out (recur (+ i 1) (conj out (generated (fresh-lowered-sym! "cond-thread"))))))
+   inner (loop [i (- k 1)
+   acc (nth temps k)]
+  (if (< i 0) acc (let [test (nth (nth pairs i) 0)
+   step (nth (nth pairs i) 1)
+   threaded (scope-thread-step-insert! (nth temps i) step position)
+   conditional (syntax/make-syntax-list! [(generated "if") test threaded (nth temps i)] span scopes origin properties)
+   binding (syntax/make-syntax-vector! [(nth temps (+ i 1)) conditional] span scopes origin properties)]
+  (recur (- i 1) (syntax/make-syntax-list! [(generated "let") binding acc] span scopes origin properties)))))]
+  (syntax/make-syntax-list! [(generated "let") (syntax/make-syntax-vector! [(nth temps 0) init] span scopes origin properties) inner] span scopes origin properties)))
+
+(defn- scope-expand-some-thread! [value init steps ^String kind]
+  (let [span (syntax/beagle-syntax-span value)
+   scopes (syntax/beagle-syntax-scopes value)
+   origin (syntax/beagle-syntax-origin value)
+   properties (syntax/beagle-syntax-properties value)
+   generated (fn [datum] (scope-thread-generated! datum span scopes origin properties))
+   position (if (= kind "some->") "first" "last")
+   m (count steps)]
+  (if (= m 0) init (let [temps (mapv (fn [_] (generated (fresh-lowered-sym! "some-thread"))) (vec (range m)))
+   threadeds (mapv (fn [i] (scope-thread-step-insert! (nth temps i) (nth steps i) position)) (vec (range m)))]
+  (loop [i (- m 1)
+   acc (nth threadeds (- m 1))]
+  (let [previous (if (= i 0) init (nth threadeds (- i 1)))
+   conditional (syntax/make-syntax-list! [(generated "if") (syntax/make-syntax-list! [(generated "nil?") (nth temps i)] span scopes origin properties) (generated "nil") acc] span scopes origin properties)
+   binding (syntax/make-syntax-vector! [(nth temps i) previous] span scopes origin properties)
+   node (syntax/make-syntax-list! [(generated "let") binding conditional] span scopes origin properties)]
+  (if (= i 0) node (recur (- i 1) node))))))))
+
+(defn- scope-walk-thread! [value table path ctx]
+  (let [children (scope-sequence-children value)
+   raw (scope-syntax-datum! value)
+   head (nth raw 0)
+   init (nth children 1)
+   steps (subvec (vec children) 2)
+   span (syntax/beagle-syntax-span value)
+   scopes (syntax/beagle-syntax-scopes value)
+   origin (syntax/beagle-syntax-origin value)
+   properties (syntax/beagle-syntax-properties value)
+   generated (fn [datum] (scope-thread-generated! datum span scopes origin properties))
+   expansion (cond
+  (or (= head "->") (= head "->>")) (scope-expand-thread! init steps (if (= head "->") "first" "last"))
+  (or (= head "cond->") (= head "cond->>")) (scope-expand-cond-thread! value init steps head)
+  :else (scope-expand-some-thread! value init steps head))
+   resolved (scope-walk* expansion table path ctx)
+   surface-steps (mapv (fn [index] (scope-walk* (nth steps index) table (conj (vec path) (+ index 2)) ctx)) (vec (range (count steps))))
+   surface (syntax/make-syntax-list! (into [(nth children 0) (scope-walk* init table (conj (vec path) 1) ctx)] surface-steps) span scopes origin properties)]
+  (syntax/make-syntax-list! [(generated "#%resolved-thread") surface resolved] span scopes origin properties)))
+
 (defn- scope-walk-pattern! [pattern table scope path]
   (let [variant (get pattern "variant")]
   (cond
@@ -995,6 +1072,7 @@
   (= head "catch") (scope-walk-single-binder! value table path ctx 1 2 "catch")
   (and (= head "rescue") (= (count raw) 4)) (scope-walk-single-binder! value table path ctx 2 3 "rescue")
   (and (= head "as->") (>= (count raw) 3)) (scope-walk-as-thread! value table path ctx)
+  (and (has-item? ["->" "->>" "cond->" "cond->>" "some->" "some->>"] head) (>= (count raw) 2)) (scope-walk-thread! value table path ctx)
   (= head "js/quote") value
   (= head "match") (scope-walk-match! value table path ctx)
   :else (scope-walk-generic! value table path ctx)))
@@ -1435,6 +1513,13 @@
   (if (and (vector? form) (> (count form) 0) (receiver-first-js-thread-head? (nth form 0))) (let [head (nth form 0)
    ref (lower-qualified-reference! head)]
   (make-call (if (nil? ref) (make-ref! head) ref) (mapv parse-expr* (subvec form 1)))) (parse-expr* form)))
+
+(defn- parse-thread-unresolved-surface! [forms]
+  (let [saved (deref REFERENCE-ID-QUEUES)]
+  (reset! REFERENCE-ID-QUEUES {})
+  (let [result (mapv parse-thread-surface-expr! forms)]
+  (reset! REFERENCE-ID-QUEUES saved)
+  result)))
 
 (defn expand-thread-first [init steps]
   (reduce (fn [acc step] (thread-step-insert acc step "first")) init steps))
@@ -1905,8 +1990,15 @@
   (and (string? head) (some? (deref CURRENT-REGISTRY-CELL)) (mac/macro-application? (deref CURRENT-REGISTRY-CELL) d)) (parse-expr* (mac/macro-datum (mac/expand-fully! (deref CURRENT-REGISTRY-CELL) (syntax-for-datum! d) 0 nil)))
   (and (= head "#%resolved-as-thread") (= (count rest-items) 2)) (let [surface (nth rest-items 0)
    expansion (nth rest-items 1)
+   args (subvec (vec surface) 1)
+   init (parse-thread-surface-expr! (nth args 0))
+   name {"node" "ref" "name" (nth args 1)}
+   steps (parse-thread-unresolved-surface! (subvec args 2))]
+  (make-threading "as->" (into [init name] steps) (parse-expr* expansion)))
+  (and (= head "#%resolved-thread") (= (count rest-items) 2)) (let [surface (nth rest-items 0)
+   expansion (nth rest-items 1)
    args (subvec (vec surface) 1)]
-  (make-threading "as->" (mapv parse-thread-surface-expr! args) (parse-expr* expansion)))
+  (make-threading (nth surface 0) (mapv parse-thread-surface-expr! args) (parse-expr* expansion)))
   (and (string? head) (= head "unsafe")) (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
   (and (string? head) (str/starts-with? head "unsafe-")) (err! (str "(" head " \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead"))
   (= head "fmt") (err! "(fmt ...) is not supported — use str / format")
@@ -2178,6 +2270,16 @@
 
 (declare inferred-module-surface*!)
 
+(defn- ^Boolean thread-generated-name? [name]
+  (and (string? name) (or (str/starts-with? name "cond-thread__") (str/starts-with? name "some-thread__"))))
+
+(defn- strip-thread-generated-identities! [value]
+  (cond
+  (vector? value) (mapv strip-thread-generated-identities! value)
+  (map? value) (let [rendered (reduce (fn [out key] (assoc out key (strip-thread-generated-identities! (get value key)))) {} (vec (keys value)))]
+  (if (thread-generated-name? (get rendered "name")) (dissoc (dissoc (dissoc rendered "bindingId") "refersTo") "providerId") rendered))
+  :else value))
+
 (defn parse-program! [datums]
   (reset-errors!)
   (mac/reset-lowering-counter!)
@@ -2296,7 +2398,7 @@
   (reset! BINDER-ID-QUEUES {})
   (reset! REFERENCE-ID-QUEUES {})
   (reset! CURRENT-REGISTRY-CELL nil)
-  (let [program {"namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires) "imports" (deref imports)}]
+  (let [program {"namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (mapv strip-thread-generated-identities! (deref forms)) "externs" (deref extern-list) "requires" (deref requires) "imports" (deref imports)}]
   (if (= declared-contract false) program (assoc (assoc program "declared-contract" declared-contract) "inferred-public-surface" (inferred-module-surface*! datums "" nil))))))
 
 (defn parse-program-with-parametric-arities! [datums imported-arities]
