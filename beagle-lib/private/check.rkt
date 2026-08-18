@@ -509,6 +509,7 @@
     [(unresolved-call)     "E027"]
     [(native-abi)          "E029"]
     [(contract-refinement) "E030"]
+    [(numeric-range)       "BEAGLE-NUMERIC-RANGE"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -5474,6 +5475,21 @@
 
 ;; --- inference -------------------------------------------------------------
 
+(define INT-MIN -9223372036854775808)
+(define INT-MAX 9223372036854775807)
+
+(define (check-int-literal-range! value)
+  (when (and (exact-integer? value)
+             (or (< value INT-MIN) (> value INT-MAX)))
+    (raise-diag
+     'numeric-range
+     (format "BEAGLE-NUMERIC-RANGE: Int literal ~a is outside [~a, ~a]"
+             value INT-MIN INT-MAX)
+     (hasheq 'value (number->string value)
+             'minimum (number->string INT-MIN)
+             'maximum (number->string INT-MAX))
+     #:src (src-for value))))
+
 ;; infer-expr is the single choke point through which every expression's type
 ;; flows. The thin wrapper records each node's inferred type into
 ;; current-type-table (when bound) so types-as-view / beagle-explain-type can
@@ -5487,6 +5503,7 @@
 
 (define (infer-expr* e env)
   (check-target-form e)
+  (check-int-literal-range! e)
   (cond
     [(or (string? e) (boolean? e) (exact-integer? e) (real? e) (char? e))
      (or (infer-literal-type e) ANY)]

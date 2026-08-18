@@ -145,6 +145,7 @@
    'missing-export       'type-error
    'unresolved-call      'type-error
    'native-abi           'type-error
+   'numeric-range        'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 

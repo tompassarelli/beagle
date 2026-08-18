@@ -165,6 +165,18 @@
 (check-ok "typed def with matching literal passes"
   '(def x Int 42))
 
+(check-ok "Int boundary literals pass"
+  '(def minimum Int -9223372036854775808)
+  '(def maximum Int 9223372036854775807))
+
+(check-err/rx "Int literal above the signed 64-bit domain is rejected"
+  #rx"BEAGLE-NUMERIC-RANGE"
+  '(def too-large Int 9223372036854775808))
+
+(check-err/rx "Int literal below the signed 64-bit domain is rejected"
+  #rx"BEAGLE-NUMERIC-RANGE"
+  '(def too-small Int -9223372036854775809))
+
 (check-ok "Any annotation accepts anything"
   '(def x Any "hi"))
 
