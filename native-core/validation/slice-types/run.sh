@@ -3,7 +3,8 @@ set -euo pipefail
 
 types_root="$(git rev-parse --show-toplevel)"
 store_checkout="$("$types_root/native-core/validation/store-checkout.sh")"
-types_source="$store_checkout/src/store/types.bgl"
+types_source="$store_checkout/src/fram/types.bgl"
+types_module_root="store/src=$store_checkout/src"
 types_logical="${types_source#"$store_checkout/"}"
 types_scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types.XXXXXX")"
 types_output="${NATIVE_SLICE_ARTIFACTS:-$types_scratch/artifacts}"
@@ -24,7 +25,8 @@ if [[ ! -f "$types_source" ]]; then
   exit 1
 fi
 
-"$types_root/bin/beagle-facts" "$types_source" >"$types_scratch/facts.raw"
+"$types_root/bin/beagle-facts" --module-root "$types_module_root" \
+  "$types_source" >"$types_scratch/facts.raw"
 {
   printf '[\n'
   tail -n +2 "$types_scratch/facts.raw"
@@ -36,6 +38,7 @@ fi
   "$types_root/native-core/src/native/stages.bclj" \
   "$types_root/native-core/src/native/lower.bclj" \
   "$types_root/native-core/src/native/obligations.bclj" \
+  "$types_root/native-core/src/native/simd.bclj" \
   "$types_root/native-core/src/native/c11.bclj" \
   "$types_root/native-core/validation/slice-types/pipeline.bclj" \
   --out "$types_scratch/out" >"$types_scratch/build.log" 2>&1 || {

@@ -2,7 +2,7 @@
 # beagle-facts: emit a file/dir's AST as CNF fact triples (analysis projection).
 #
 # Usage:
-#   bin/beagle-facts <file-or-dir> ...
+#   bin/beagle-facts [--module-root LOGICAL=PHYSICAL]... <file-or-dir> ...
 #
 # Directories are expanded to all beagle source files. Output is a stream of
 #   @file <path>
@@ -13,12 +13,49 @@ set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: beagle-facts <file-or-dir> ..." >&2
+    echo "usage: beagle-facts [--module-root LOGICAL=PHYSICAL]... <file-or-dir> ..." >&2
+    exit 2
+fi
+
+module_root_args=()
+inputs=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --module-root)
+            if [[ $# -lt 2 ]]; then
+                echo "beagle-facts: --module-root requires LOGICAL_PREFIX=PHYSICAL_DIRECTORY" >&2
+                exit 2
+            fi
+            module_root_args+=("$1" "$2")
+            shift 2
+            ;;
+        --module-root=*)
+            module_root_args+=("$1")
+            shift
+            ;;
+        --)
+            shift
+            inputs+=("$@")
+            break
+            ;;
+        -*)
+            echo "beagle-facts: unknown option: $1" >&2
+            exit 2
+            ;;
+        *)
+            inputs+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ ${#inputs[@]} -eq 0 ]]; then
+    echo "usage: beagle-facts [--module-root LOGICAL=PHYSICAL]... <file-or-dir> ..." >&2
     exit 2
 fi
 
 files=()
-for a in "$@"; do
+for a in "${inputs[@]}"; do
     if [[ -d "$a" ]]; then
         while IFS= read -r f; do files+=("$f"); done < <(
             find "$a" -type f \( -name '*.bjs' -o -name '*.bclj' -o -name '*.bnix' \) | sort)
@@ -32,4 +69,4 @@ if [[ ${#files[@]} -eq 0 ]]; then
     exit 1
 fi
 
-"$RACKET" -e "(require beagle/private/facts-cli)(run-facts (vector->list (current-command-line-arguments)))" -- "${files[@]}"
+"$RACKET" -e "(require beagle/private/facts-cli)(run-facts (vector->list (current-command-line-arguments)))" -- "${module_root_args[@]}" "${files[@]}"

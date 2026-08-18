@@ -62,6 +62,7 @@
              "wasm-materializer.rkt"    ; registered bootstrap artifact/digest/report + visible tool failures
              "native-simd.rkt"          ; deterministic SIMD plan + scalar tail/refusal execution
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
+             "facts-cli.rkt"          ; explicit inputs emit; module-root dependencies only resolve
              "gate-fact-maintainer.rkt" ; shadow-only gate fact envelopes, miss-before-fallback, cold coverage
              "type-facts-v1.rkt"      ; shadow-only canonical envelopes, source facets, and SCC identities
              "evidence-edges-v1.rkt" ; shadow-only derivation/evidence chains at checker seams

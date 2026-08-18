@@ -18,14 +18,37 @@
 ;; The downstream loader (chartroom) namespaces node-ids by file and folds the
 ;; triples into a Beagle Store fact store.
 
-(require "parse.rkt"
+(require racket/list
+         "module-interface.rkt"
+         "module-source-root.rkt"
+         "module-source-root-cli.rkt"
          "emit-facts.rkt")
 
 (provide run-facts)
 
 (define (run-facts args)
-  (for ([path (in-list args)])
+  (define-values (roots paths)
+    (parse-module-root-arguments args 'beagle-facts))
+  (define inputs
+    (for/list ([path (in-list paths)])
+      (module-source-input
+       (module-source-logical-id-for-path roots path)
+       path)))
+  (define closure (resolve-module-source-closure inputs roots))
+  (define sources (module-source-closure-sources closure))
+  (define (resolver namespace _importer)
+    (for/first ([source (in-list sources)]
+                #:when (eq? (module-source-namespace source) namespace))
+      source))
+  (for ([path (in-list paths)]
+        [input (in-list inputs)])
     (printf "@file ~a\n" path)
-    (define prog (parse-program (read-beagle-syntax path) #:source-path path))
+    (define source
+      (module-source-snapshot-source
+       (module-source-closure-snapshot-ref
+        closure
+        (module-source-input-source-id input))))
+    (define prog
+      (module-source-closure-parse-source closure source resolver))
     (display (facts-emit-program prog))
     (newline)))

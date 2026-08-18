@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drive store:src/store/types.bgl through the whole native pipeline and emit the
+# Drive store:src/fram/types.bgl through the whole native pipeline and emit the
 # C17 projection of its record ABI.
 #
 #   beagle-ast -> source facts -> frozen source program -> typed program
@@ -17,7 +17,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-}"
 store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
-src="$store_checkout/src/store/types.bgl"
+src="$store_checkout/src/fram/types.bgl"
+module_root="store/src=$store_checkout/src"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types-full.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
@@ -27,7 +28,8 @@ if [[ ! -f "$src" ]]; then
   echo "drive.sh: upstream Beagle Store source is missing: $src" >&2
   exit 1
 fi
-"$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
+"$repo/bin/beagle-ast" --module-root "$module_root" \
+  "$src" >"$scratch/types.ast.json"
 logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/types.ast.json")"
 bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/types.facts"
@@ -39,6 +41,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   --out "$scratch/out" >"$scratch/build.log" 2>&1 || { sed -n '1,200p' "$scratch/build.log" >&2; exit 1; }
@@ -48,7 +51,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
 bb -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
-  (native.slice/emit-slice! \"$scratch/types.facts\" \"store.types\"
+  (native.slice/emit-slice! \"$scratch/types.facts\" \"fram.types\"
     \"$logical\" \"$art\" \"native-slice-types-full-v0\" \"$abi\"))"
 
 cat "$art/report.txt"
