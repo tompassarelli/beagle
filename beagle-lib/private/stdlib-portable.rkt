@@ -71,7 +71,7 @@
                  #:rest (p 'Any))
    'mapv       (poly-fn '(A B)
                  (list (type-fn (list (tv 'A)) #f (tv 'B))
-                       (p 'Any))
+                       (type-app 'Vec (list (tv 'A))))
                  (type-app 'Vec (list (tv 'B))))
    'filter     (poly-fn '(A)
                  (list (type-fn (list (tv 'A)) #f (p 'Any))
@@ -79,14 +79,28 @@
                  (p 'Any))
    'filterv    (poly-fn '(A)
                  (list (type-fn (list (tv 'A)) #f (p 'Any))
-                       (p 'Any))
+                       (type-app 'Vec (list (tv 'A))))
                  (type-app 'Vec (list (tv 'A))))
    'remove     (poly-fn '(A)
                  (list (type-fn (list (tv 'A)) #f (p 'Any))
                        (p 'Any))
                  (p 'Any))
    'mapcat     (fn-of '(Any Any) 'Any #:rest 'Any)
-   'reduce     (fn-of '(Any Any) 'Any #:rest 'Any)
+   'reduce
+   (poly-overloads
+    '(A B)
+    (list
+     (type-fn
+      (list (type-fn (list (tv 'A) (tv 'A)) #f (tv 'A))
+            (type-app 'Vec (list (tv 'A))))
+      #f
+      (tv 'A))
+     (type-fn
+      (list (type-fn (list (tv 'B) (tv 'A)) #f (tv 'B))
+            (tv 'B)
+            (type-app 'Vec (list (tv 'A))))
+      #f
+      (tv 'B))))
    'apply      (fn-of '(Any Any) 'Any #:rest 'Any)
    'comp       (fn-of '() 'Any #:rest 'Any)
    'partial    (fn-of '(Any) 'Any #:rest 'Any)

@@ -25,4 +25,7 @@
     (type-fn param-types rest-type ret-type)
     bounds))
 
-(provide p tv fn-of poly-fn)
+(define (poly-overloads vars signatures #:bounds [bounds #f])
+  (type-poly vars (type-union signatures) bounds))
+
+(provide p tv fn-of poly-fn poly-overloads)

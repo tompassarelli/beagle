@@ -54,6 +54,16 @@ The outer `[...]` is only a collection; each entry is `symbol`, `(binding-form T
 (defn clamp [(n Int positive?)] Int (if (> n 100) 100 n))
 ```
 
+### forall type variables
+Target: `clj`
+
+Explicit rank-1 polymorphism uses `(forall [T ...] Type)`. Names in the vector are rigid type variables inside `Type`; a bounded variable is written `(T <: Bound)`.
+
+```clojure
+(declare-extern host/id (forall [T] (Fn [T] T)))
+(def enemy-id String (host/id "slime"))
+```
+
 
 ## Types / contracts
 

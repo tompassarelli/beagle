@@ -61,6 +61,12 @@
            "(defn positive? [(value Int)] Bool (> value 0))\n"
            "(defn clamp [(n Int positive?)] Int (if (> n 100) 100 n))"))
 
+   (cheat "forall type variables" "Types" 'clj
+          "Explicit rank-1 polymorphism uses `(forall [T ...] Type)`. Names in the vector are rigid type variables inside `Type`; a bounded variable is written `(T <: Bound)`."
+          (string-append
+           "(declare-extern host/id (forall [T] (Fn [T] T)))\n"
+           "(def enemy-id String (host/id \"slime\"))"))
+
    ;; --- bindings & functions ------------------------------------------------
    (cheat "def / defonce" "Bindings" 'clj
           "Typed top-level binding."

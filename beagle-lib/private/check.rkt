@@ -6422,56 +6422,77 @@
        (loop (cdr cls) else-env (cons body-type acc))])))
 
 (define (resolve-poly-call poly-type args env [expected-result #f] [require-complete? #f])
-  (define body (type-poly-body poly-type))
-  (define bounds (type-poly-bounds poly-type))
-  (define bindings (make-hasheq))
-  (define arg-types (map (lambda (a) (infer-expr a env)) args))
-  (define fixed (type-fn-params body))
-  (define rest-t (type-fn-rest-type body))
-  (define n-fixed (length fixed))
-  ;; A member accessor declares the BARE member prim, so the type-var walk has
-  ;; nothing to unify; a member view's args are the union's args in param order,
-  ;; which is exactly the accessor's poly-var order.
-  (for ([pt (in-list fixed)]
-        [at (in-list arg-types)])
-    (when (and (type-prim? pt) (type-app? at)
-               (type-compatible?
-                pt
-                (type-prim (type-app-ctor at)))
-               (hash-has-key? PARAMETRIC-MEMBER-UNION (type-app-ctor at)))
-      (for ([v (in-list (type-poly-vars poly-type))]
-            [a (in-list (type-app-args at))])
-        (unless (hash-has-key? bindings v) (hash-set! bindings v a)))))
-  (for ([pt (in-list fixed)]
-        [at (in-list arg-types)])
-    (infer-type-var-bindings pt at bindings))
-  (when (and rest-t (> (length arg-types) n-fixed))
-    (for ([at (in-list (list-tail arg-types n-fixed))])
-      (infer-type-var-bindings rest-t at bindings)))
-  (when expected-result
-    (infer-type-var-bindings (type-fn-ret body) expected-result bindings))
-  (when bounds
-    (for ([(var bound) (in-hash bounds)])
-      (define inferred (hash-ref bindings var #f))
-      (when (and inferred (not (any-type? inferred))
-                 (not (type-compatible? inferred bound)))
-        (raise-diag 'type-bound
-          (format "type variable ~a was inferred as ~a, which doesn't satisfy bound ~a"
-                  var (type->string inferred) (type->string bound))
-          (hasheq 'var var
-                  'inferred (type->string inferred)
-                  'bound (type->string bound))))))
-  (when require-complete?
-    (define missing
-      (filter (lambda (var) (not (hash-has-key? bindings var)))
-              (type-poly-vars poly-type)))
-    (when (pair? missing)
-      (raise-diag 'cannot-infer
-                  (format "js/new cannot infer type parameter~a ~a without an expected result type"
-                          (if (= (length missing) 1) "" "s")
-                          (string-join (map symbol->string missing) ", "))
-                  (hasheq 'parameters (map symbol->string missing)))))
-  (apply-type-bindings body bindings))
+  (let/ec return
+    (define poly-body (type-poly-body poly-type))
+    ;; An authored scheme may cover distinct arities with a union of function
+    ;; types. Select by arity before collecting bindings so every quantified
+    ;; variable is solved against exactly the callable branch being invoked.
+    (define body
+      (cond
+        [(type-fn? poly-body) poly-body]
+        [(and (type-union? poly-body)
+              (andmap type-fn? (type-union-alts poly-body)))
+         (define n-args (length args))
+         (for/first ([alternative (in-list (type-union-alts poly-body))]
+                     #:when
+                     (if (type-fn-rest-type alternative)
+                         (>= n-args (length (type-fn-params alternative)))
+                         (= n-args (length (type-fn-params alternative)))))
+           alternative)]
+        [else #f]))
+    (unless body
+      ;; Preserve the union so the ordinary callable-union path emits the
+      ;; established arity diagnostic with every available branch.
+      (return poly-body))
+    (define bounds (type-poly-bounds poly-type))
+    (define bindings (make-hasheq))
+    (define arg-types (map (lambda (a) (infer-expr a env)) args))
+    (define fixed (type-fn-params body))
+    (define rest-t (type-fn-rest-type body))
+    (define n-fixed (length fixed))
+    ;; A member accessor declares the BARE member prim, so the type-var walk has
+    ;; nothing to unify; a member view's args are the union's args in param order,
+    ;; which is exactly the accessor's poly-var order.
+    (for ([pt (in-list fixed)]
+          [at (in-list arg-types)])
+      (when (and (type-prim? pt) (type-app? at)
+                 (type-compatible?
+                  pt
+                  (type-prim (type-app-ctor at)))
+                 (hash-has-key? PARAMETRIC-MEMBER-UNION (type-app-ctor at)))
+        (for ([v (in-list (type-poly-vars poly-type))]
+              [a (in-list (type-app-args at))])
+          (unless (hash-has-key? bindings v) (hash-set! bindings v a)))))
+    (for ([pt (in-list fixed)]
+          [at (in-list arg-types)])
+      (infer-type-var-bindings pt at bindings))
+    (when (and rest-t (> (length arg-types) n-fixed))
+      (for ([at (in-list (list-tail arg-types n-fixed))])
+        (infer-type-var-bindings rest-t at bindings)))
+    (when expected-result
+      (infer-type-var-bindings (type-fn-ret body) expected-result bindings))
+    (when bounds
+      (for ([(var bound) (in-hash bounds)])
+        (define inferred (hash-ref bindings var #f))
+        (when (and inferred (not (any-type? inferred))
+                   (not (type-compatible? inferred bound)))
+          (raise-diag 'type-bound
+            (format "type variable ~a was inferred as ~a, which doesn't satisfy bound ~a"
+                    var (type->string inferred) (type->string bound))
+            (hasheq 'var var
+                    'inferred (type->string inferred)
+                    'bound (type->string bound))))))
+    (when require-complete?
+      (define missing
+        (filter (lambda (var) (not (hash-has-key? bindings var)))
+                (type-poly-vars poly-type)))
+      (when (pair? missing)
+        (raise-diag 'cannot-infer
+                    (format "js/new cannot infer type parameter~a ~a without an expected result type"
+                            (if (= (length missing) 1) "" "s")
+                            (string-join (map symbol->string missing) ", "))
+                    (hasheq 'parameters (map symbol->string missing)))))
+    (apply-type-bindings body bindings)))
 
 ;; Lint: warn when a let-binding name doesn't match the record accessor field.
 ;; e.g., (let [reason (ordercancelled-cancelled-at event)] ...) — binding says

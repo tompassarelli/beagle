@@ -129,6 +129,32 @@
    (lambda ()
      (checked "(defn heads [(tail Any)] Any (map first tail))"))))
 
+(test-case "portable vector HOFs preserve a game-shaped polymorphic call chain"
+  (check-equal?
+   (type->string (hash-ref STDLIB-PORTABLE 'mapv))
+   "(forall [A B] (Fn [(Fn [A] B) (Vec A)] (Vec B)))")
+  (check-equal?
+   (type->string (hash-ref STDLIB-PORTABLE 'filterv))
+   "(forall [A] (Fn [(Fn [A] Any) (Vec A)] (Vec A)))")
+  (check-equal?
+   (type->string (hash-ref STDLIB-PORTABLE 'reduce))
+   (string-append
+    "(forall [A B] (U (Fn [(Fn [A A] A) (Vec A)] A) "
+    "(Fn [(Fn [B A] B) B (Vec A)] B)))"))
+  (define program
+    (checked
+     (string-append
+      "(defrecord Enemy [(hp Int) (reward Int)])\n"
+      "(defn alive? [(enemy Enemy)] Bool (> (enemy-hp enemy) 0))\n"
+      "(defn reward [(enemy Enemy)] Int (enemy-reward enemy))\n"
+      "(defn total-reward [enemies] Int\n"
+      "  (reduce + 0 (mapv reward (filterv alive? enemies))))\n"
+      "(defn sum-scores [(scores (Vec Int))] Int (reduce + scores))")))
+  (check-equal? (type->string (signature program 'total-reward))
+                "(Fn [(Vec Enemy)] Int)")
+  (check-equal? (type->string (signature program 'sum-scores))
+                "(Fn [(Vec Int)] Int)"))
+
 (test-case "callee-before-caller and caller-before-callee infer identically"
   (define before
     (checked
