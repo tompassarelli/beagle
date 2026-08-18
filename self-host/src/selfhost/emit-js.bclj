@@ -7,10 +7,10 @@
 ;; Runs as emitted clj under babashka. Byte-parity target: BEAGLE_EMIT_SRCLOC=0
 ;; oracle js emission.
 ;;
-;; DOCUMENTED GAP: the selfhost chain carries no per-node TYPE TABLE. Explicit
-;; binding annotations still drive polymorphic reads (Any/type-var/union) so
-;; kw-access agrees with the oracle; unannotated non-leaf rep selection and
-;; HAMT/scalar-=== dispatch remain outside this port.
+;; Checked AST nodes carry their inferred types. Explicit binding annotations
+;; also drive polymorphic reads (Any/type-var/union) so kw-access agrees with
+;; the oracle; unannotated non-leaf HAMT representation selection remains
+;; outside this port.
 ;;
 ;; bb/SCI resolves defn bodies eagerly and beagle has no `declare`, so the four
 ;; mutually-recursive body emitters + emit-form! + emit-expr! route their
@@ -661,6 +661,37 @@
             :else false))))))
 
 ;; --- rep selection ------------------------------------------------------------
+
+(def SCALAR-EQ-SAFE-PRIMS Any
+  {"Int" true "U8" true "U16" true "U32" true "U64" true
+   "I8" true "I16" true "I32" true
+   "String" true "Bool" true "Keyword" true})
+
+(defn unqualify-type-name [(name String)] String
+  (let [(index (U Int Nil)) (str/last-index-of name "/")]
+    (if (nil? index) name (subs name (+ index 1)))))
+
+(defn node-static-type [(node Any)] Any
+  (if (map? node)
+    (let [inferred (get node "inferredType")
+          effective (get node "effectiveType")
+          projected (if (absent? inferred) effective inferred)]
+      (if (and (absent? projected)
+               (= (get node "node") "ref")
+               (string? (get node "name")))
+        (get (deref type-env) (get node "name"))
+        projected))
+    nil))
+
+(defn scalar-eq-safe-node? [(node Any)] Bool
+  (if (map? node)
+    (let [node-type (node-static-type node)]
+      (and (map? node-type)
+           (= (get node-type "kind") "prim")
+           (string? (get node-type "name"))
+           (contains? SCALAR-EQ-SAFE-PRIMS
+             (unqualify-type-name (get node-type "name")))))
+    false))
 
 (defn poly-read-type? [(t Any)] Bool
   (and (not (nil? t))
@@ -2135,12 +2166,21 @@
               " }"))))))
 
 (defn emit-eq-pairs! [(args Any)] String
-  (let [n (count args)]
+  (let [n (count args)
+        rendered (mapv emit-expr*! args)]
     (str/join " && "
       (loop [(i Int) 0 (acc (Vec String)) []]
         (if (>= i (- n 1)) acc
-          (recur (+ i 1) (conj acc (str "$$bc$equiv(" (emit-expr*! (nth args i)) ", "
-                                        (emit-expr*! (nth args (+ i 1))) ")"))))))))
+          (let [left (nth args i)
+                right (nth args (+ i 1))
+                left-str (nth rendered i)
+                right-str (nth rendered (+ i 1))
+                comparison
+                  (if (and (scalar-eq-safe-node? left)
+                           (scalar-eq-safe-node? right))
+                    (str left-str " === " right-str)
+                    (str "$$bc$equiv(" left-str ", " right-str ")"))]
+            (recur (+ i 1) (conj acc comparison))))))))
 
 (defn emit-call! [(e Any)] String
   (let [fn-expr (get e "fn") args (get e "args") n (count args)]
@@ -2771,6 +2811,37 @@
   (expect! "string: control x01" (= (js-string-lit (str "x" (char 1) "y")) "\"x\\x01y\""))
   (expect! "kw->prop: colon" (= (kw->prop ":price") "price"))
   (expect! "kw->prop: bare" (= (kw->prop "k") "k"))
+  (expect! "typed scalar equality emits strict comparison without runtime"
+    (= (emit-call!
+         {"node" "call"
+          "fn" {"node" "ref" "name" "="}
+          "args" [{"node" "ref" "name" "left"
+                    "inferredType" {"kind" "prim" "name" "Int"}}
+                  {"node" "ref" "name" "right"
+                    "inferredType" {"kind" "prim" "name" "Int"}}]})
+       "(left === right)"))
+  (expect! "typed binding context drives scalar equality in the full chain"
+    (let [saved-types (deref type-env)]
+      (reset! type-env
+        {"left" {"kind" "prim" "name" "Int"}
+         "right" {"kind" "prim" "name" "Int"}})
+      (let [emitted
+              (emit-call!
+                {"node" "call"
+                 "fn" {"node" "ref" "name" "="}
+                 "args" [{"node" "ref" "name" "left"}
+                         {"node" "ref" "name" "right"}]})]
+        (reset! type-env saved-types)
+        (= emitted "(left === right)"))))
+  (expect! "uncertain equality retains recursive value semantics"
+    (= (emit-call!
+         {"node" "call"
+          "fn" {"node" "ref" "name" "="}
+          "args" [{"node" "ref" "name" "left"
+                    "inferredType" {"kind" "prim" "name" "Any"}}
+                  {"node" "ref" "name" "right"
+                    "inferredType" {"kind" "prim" "name" "Int"}}]})
+       "($$bc$equiv(left, right))"))
   (let [receiver {"node" "ref" "name" "obj"}
         selector {"node" "js-selector" "name" "raw_name"}
         dynamic-key {"node" "ref" "name" "key"}]

@@ -438,6 +438,22 @@
   (= c "{") true
   :else false))))))
 
+(def SCALAR-EQ-SAFE-PRIMS {"Int" true "U8" true "U16" true "U32" true "U64" true "I8" true "I16" true "I32" true "String" true "Bool" true "Keyword" true})
+
+(defn ^String unqualify-type-name [^String name]
+  (let [index (str/last-index-of name "/")]
+  (if (nil? index) name (subs name (+ index 1)))))
+
+(defn node-static-type [node]
+  (if (map? node) (let [inferred (get node "inferredType")
+   effective (get node "effectiveType")
+   projected (if (absent? inferred) effective inferred)]
+  (if (and (absent? projected) (= (get node "node") "ref") (string? (get node "name"))) (get (deref type-env) (get node "name")) projected)) nil))
+
+(defn ^Boolean scalar-eq-safe-node? [node]
+  (if (map? node) (let [node-type (node-static-type node)]
+  (and (map? node-type) (= (get node-type "kind") "prim") (string? (get node-type "name")) (contains? SCALAR-EQ-SAFE-PRIMS (unqualify-type-name (get node-type "name"))))) false))
+
 (defn ^Boolean poly-read-type? [t]
   (and (not (nil? t)) (or (= (get t "kind") "var") (= (get t "kind") "union") (and (= (get t "kind") "prim") (= (get t "name") "Any")))))
 
@@ -1312,10 +1328,16 @@
   (if (leading-brace? body-str) (str prefix "(" params ") => (" body-str ")") (str prefix "(" params ") => " body-str))) (str prefix "(" params ") => { " (str/join " " (into setup [(emit-body-return* body "")])) " }"))))))
 
 (defn ^String emit-eq-pairs! [args]
-  (let [n (count args)]
+  (let [n (count args)
+   rendered (mapv emit-expr*! args)]
   (str/join " && " (loop [i 0
    acc []]
-  (if (>= i (- n 1)) acc (recur (+ i 1) (conj acc (str "$$bc$equiv(" (emit-expr*! (nth args i)) ", " (emit-expr*! (nth args (+ i 1))) ")"))))))))
+  (if (>= i (- n 1)) acc (let [left (nth args i)
+   right (nth args (+ i 1))
+   left-str (nth rendered i)
+   right-str (nth rendered (+ i 1))
+   comparison (if (and (scalar-eq-safe-node? left) (scalar-eq-safe-node? right)) (str left-str " === " right-str) (str "$$bc$equiv(" left-str ", " right-str ")"))]
+  (recur (+ i 1) (conj acc comparison))))))))
 
 (defn ^String emit-call! [e]
   (let [fn-expr (get e "fn")
@@ -1717,6 +1739,13 @@
   (expect! "string: control x01" (= (js-string-lit (str "x" (char 1) "y")) "\"x\\x01y\""))
   (expect! "kw->prop: colon" (= (kw->prop ":price") "price"))
   (expect! "kw->prop: bare" (= (kw->prop "k") "k"))
+  (expect! "typed scalar equality emits strict comparison without runtime" (= (emit-call! {"node" "call" "fn" {"node" "ref" "name" "="} "args" [{"node" "ref" "name" "left" "inferredType" {"kind" "prim" "name" "Int"}} {"node" "ref" "name" "right" "inferredType" {"kind" "prim" "name" "Int"}}]}) "(left === right)"))
+  (expect! "typed binding context drives scalar equality in the full chain" (let [saved-types (deref type-env)]
+  (reset! type-env {"left" {"kind" "prim" "name" "Int"} "right" {"kind" "prim" "name" "Int"}})
+  (let [emitted (emit-call! {"node" "call" "fn" {"node" "ref" "name" "="} "args" [{"node" "ref" "name" "left"} {"node" "ref" "name" "right"}]})]
+  (reset! type-env saved-types)
+  (= emitted "(left === right)"))))
+  (expect! "uncertain equality retains recursive value semantics" (= (emit-call! {"node" "call" "fn" {"node" "ref" "name" "="} "args" [{"node" "ref" "name" "left" "inferredType" {"kind" "prim" "name" "Any"}} {"node" "ref" "name" "right" "inferredType" {"kind" "prim" "name" "Int"}}]}) "($$bc$equiv(left, right))"))
   (let [receiver {"node" "ref" "name" "obj"}
    selector {"node" "js-selector" "name" "raw_name"}
    dynamic-key {"node" "ref" "name" "key"}]
