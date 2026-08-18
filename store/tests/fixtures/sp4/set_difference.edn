@@ -1,0 +1,5 @@
+{:attempt-id "maintenance-attempt-sp4"
+ :prepared-claim-ids ["claim-c" "claim-a" "claim-b"]
+ :observed-claim-ids ["claim-extra" "claim-b"]
+ :expected-missing-claim-ids ["claim-a" "claim-c"]
+ :expected-unexplained-claim-ids ["claim-extra"]}
