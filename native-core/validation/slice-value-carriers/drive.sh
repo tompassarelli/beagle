@@ -26,8 +26,9 @@ if [[ -n "$base_compiled" ]]; then
   source "$repo/bin/_beagle-racket"
 
   declare -a compiler_pids=()
-  declare -a compiler_names=(lower body_c17 unit_compile)
+  declare -a compiler_names=(core lower body_c17 unit_compile)
   declare -a compiler_sources=(
+    "$repo/native-core/src/native/core.bclj"
     "$repo/native-core/src/native/lower.bclj"
     "$repo/native-core/src/native/body_c17.bclj"
     "$repo/native-core/src/native/unit_compile.bclj"
