@@ -17,23 +17,71 @@ for command in rg; do
 done
 
 "$repo/bin/beagle" check --agent "$here/fixture.bgl"
-"$repo/bin/beagle" build --materializer c17 \
-  --out "$scratch/artifacts" "$here/fixture.bgl"
+
+"$repo/bin/beagle-ast" "$here/fixture.bgl" >"$scratch/fixture.ast.json"
+bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+  --input \
+  "$scratch/fixture.ast.json=native-core/validation/slice-value-carriers/fixture.bgl" \
+  --output "$scratch/fixture.facts" --include-defs
+
+mkdir -p "$scratch/artifacts"
+source "$repo/bin/_beagle-racket"
+"$RACKET" "$repo/native-core/bin/run-bounded.rkt" 180 5 -- \
+  "$repo/bin/beagle-build-all" \
+  "$repo/native-core/src/native/core.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
+  "$repo/native-core/src/native/lower.bclj" \
+  "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
+  "$repo/native-core/src/native/c11.bclj" \
+  "$repo/native-core/src/native/slice.bclj" \
+  "$repo/native-core/src/native/fold_c17.bclj" \
+  "$repo/native-core/src/native/body_c17.bclj" \
+  "$here/carrier_slice.bclj" \
+  --out "$scratch/compiled" >"$scratch/compiler.log" 2>&1 || {
+    sed -n '1,240p' "$scratch/compiler.log" >&2
+    exit 1
+  }
+
+records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
+  "$scratch/compiled/native/core.clj" | tr '\n' ' ')"
+for module in \
+  stages lower obligations c11 slice fold_c17 body_c17 \
+  slice_value_carriers_slice; do
+  generated="$scratch/compiled/native/$module.clj"
+  [[ -f "$generated" ]] || continue
+  sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
+    "$generated"
+  awk -v import="(import '[native.core $records])" \
+    '!seen && /^$/ { print import; seen = 1 } { print }' \
+    "$generated" >"$generated.tmp"
+  mv "$generated.tmp" "$generated"
+done
+
+bb -cp "$scratch/compiled" -e "
+(require 'native.slice-value-carriers-slice)
+(spit \"$scratch/artifacts/report.txt\"
+  (native.slice-value-carriers-slice/emit-fixture!
+    \"$scratch/fixture.facts\" \"$scratch/artifacts\"))"
 
 report="$scratch/artifacts/report.txt"
 for expected in \
   'stage source-to-typed ACCEPTED' \
   'stage typed-to-native COMPLETE' \
-  'materialize-c17 OK module_0.h module_0.c' \
-  'result PASS'; do
+  'materialize OK module_0.h module_0.c'; do
   rg -Fx "$expected" "$report" >/dev/null \
     || die "report is missing: $expected"
 done
 
+if rg -q '^pending |REJECTED|REFUSED' "$report"; then
+  cat "$report" >&2
+  die "focused Native Core report retained a rejection"
+fi
+
 for function in \
   empty-vector-any vector-any empty-map-any map-any empty-set-any set-any \
   parsed-float-any; do
-  rg -q "^lowered fn_[0-9]+ ${function} " "$report" \
+  rg -Fx "lowered ${function}" "$report" \
     || die "lowered function is missing: $function"
 done
 
