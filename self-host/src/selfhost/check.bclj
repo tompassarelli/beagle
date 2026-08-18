@@ -715,15 +715,10 @@
       :else nil)))
 
 ;; A 2-arg `(if c t)` (and the when/when-let/when-some/some-> lowerings) stores
-;; a synthetic bool-literal `false` as its else (parse.bclj make-if, matching
-;; the oracle AST). An EXPLICIT `false` parses as a ref, never a literal — so a
-;; bool-literal-false in else position always means "no else" and types as Nil,
-;; mirroring the oracle checker (which reads #f-the-absence, not false-the-Bool).
+;; JSON false as its absent else, matching the oracle AST. An explicit source
+;; `false` parses as a ref, so the sentinel remains unambiguous and types as Nil.
 (defn synthetic-absent-else? [(e Any)] Bool
-  (and (not (nil? e))
-       (= (get e "node") "literal")
-       (= (get e "kind") "bool")
-       (= (get e "value") false)))
+  (false? e))
 
 ;; Element type of a collection literal (vec / map key / map value). Mirrors the
 ;; oracle's vec-form / map-form inference (check.rkt): the FIRST element type if

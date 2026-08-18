@@ -136,12 +136,13 @@ BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
   MODULES=(self-host/fixtures/*.bclj self-host/fixtures/*.bjs)
-  # Hosted store modules whose require closure stays inside hosted beagle
-  # source. fold/import/tools left this corpus when store moved their providers
-  # (store.store, store.types, store.schema, ...) to Beagle Core (.bgl): a hosted
-  # module requiring a Core provider is refused by BOTH compilers under closed
-  # module resolution, so those modules cannot serve as emit-parity rungs.
-  for store_module in branch provider_host; do
+  # Hosted store modules whose require closure stays inside hosted Beagle
+  # source. fold/import/tools/provider_host left this corpus when Store moved
+  # their providers (store.store, store.types, store.schema, ...) to Beagle Core
+  # (.bgl): a hosted module requiring a Core provider is refused by BOTH
+  # compilers under closed module resolution, so it cannot serve as an
+  # emit-parity rung.
+  for store_module in branch; do
     [ -f "$BEAGLE_STORE_REPO/src/store/$store_module.bclj" ] && \
       MODULES+=("$BEAGLE_STORE_REPO/src/store/$store_module.bclj")
   done
@@ -212,7 +213,7 @@ for src in "${MODULES[@]}"; do
 
   echo "=== 3. AST parity (self reader+parse vs beagle-ast) : $name ==="
   if run_phase "$name stage-3 self AST" "$PHASE_CHECK" \
-       bb -cp "$OUT" -e "(require '[selfhost.reader :as r] '[selfhost.parse :as p] '[cheshire.core :as json]) (print (json/generate-string (p/parse-program! (r/read-program (slurp \"$src\")))))" \
+       "${SH_MAIN_CMD[@]}" ast "$src" \
        > "$LAB/$name-self-ast.json" 2>"$LAB/$name-stage3.err"; then
     :
   else

@@ -370,7 +370,7 @@
   {"node" "let" "bindings" bindings "body" body})
 
 (defn make-if [test then-expr else-expr]
-  {"node" "if" "cond" test "then" then-expr "else" (if (nil? else-expr) FALSE-LITERAL else-expr)})
+  {"node" "if" "cond" test "then" then-expr "else" (if (nil? else-expr) false else-expr)})
 
 (defn make-cond [clauses]
   {"node" "cond" "clauses" clauses})
@@ -2535,14 +2535,14 @@
   (and (= (count (get node "bindings")) 1) (= (get (nth (get node "bindings") 0) "name") "t") (= (get (get (nth (get node "bindings") 0) "ann") "name") "Any") (= (get (get (nth (get node "bindings") 0) "value") "node") "kw-access"))))
   (expect! "if with else" (let [node (parse-expr* ["if" true "yes" "no"])]
   (and (= (get node "node") "if") (= (get (get node "then") "name") "yes") (= (get (get node "else") "name") "no"))))
-  (expect! "if without else — bool-false literal (ast-json parity)" (let [node (parse-expr* ["if" true "yes"])]
-  (and (= (get node "node") "if") (= (get node "else") {"node" "literal" "kind" "bool" "value" false}))))
+  (expect! "if without else — false sentinel (ast-json parity)" (let [node (parse-expr* ["if" true "yes"])]
+  (and (= (get node "node") "if") (= (get node "else") false))))
   (expect! "cond flat style" (let [node (parse-expr* ["cond" true "a" false "b"])]
   (and (= (get node "node") "cond") (= (count (get node "clauses")) 2))))
   (expect! "cond bracket style" (let [node (parse-expr* ["cond" [BRACKET-TAG true "a"] [BRACKET-TAG ":else" "b"]])]
   (and (= (get node "node") "cond") (= (count (get node "clauses")) 2))))
   (expect! "when canonicalizes to (if c (do ...)) — oracle parity" (let [node (parse-expr* ["when" "c" "a" "b"])]
-  (and (= (get node "node") "if") (= (get (get node "then") "node") "do") (= (count (get (get node "then") "body")) 2) (= (get node "else") {"node" "literal" "kind" "bool" "value" false}))))
+  (and (= (get node "node") "if") (= (get (get node "then") "node") "do") (= (count (get (get node "then") "body")) 2) (= (get node "else") false))))
   (expect! "when-not canonicalizes to (if (not c) (do ...))" (let [node (parse-expr* ["when-not" "c" "a"])]
   (and (= (get node "node") "if") (= (get (get (get node "cond") "fn") "name") "not"))))
   (expect! "if-not swaps branches (oracle parity)" (let [node (parse-expr* ["if-not" "c" "t" "e"])]

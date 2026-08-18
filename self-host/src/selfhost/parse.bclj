@@ -618,8 +618,9 @@
 (defn make-let [(bindings Any) (body Any)] Any
   {"node" "let" "bindings" bindings "body" body})
 
-;; (if c t) stores else = #f in Racket; ast-json serializes that as a bool
-;; literal (expr->json is unguarded there). Replicated faithfully.
+;; (if c t) stores else = #f in Racket; ast-json serializes that slot as JSON
+;; false. Keep the absence sentinel distinct from an explicit source `false`,
+;; which parses as a reference.
 (defn make-if [(test Any) (then-expr Any) (else-expr Any)] Any
   {"node"
    "if"
@@ -628,7 +629,7 @@
    "then"
    then-expr
    "else"
-   (if (nil? else-expr) FALSE-LITERAL else-expr)})
+   (if (nil? else-expr) false else-expr)})
 
 (defn make-cond [(clauses Any)] Any {"node" "cond" "clauses" clauses})
 
@@ -4948,10 +4949,10 @@
       (and (= (get node "node") "if")
         (= (get (get node "then") "name") "yes")
         (= (get (get node "else") "name") "no"))))
-  (expect! "if without else — bool-false literal (ast-json parity)"
+  (expect! "if without else — false sentinel (ast-json parity)"
     (let [node (parse-expr* ["if" true "yes"])]
       (and (= (get node "node") "if")
-        (= (get node "else") {"node" "literal" "kind" "bool" "value" false}))))
+        (= (get node "else") false))))
   (expect! "cond flat style"
     (let [node (parse-expr* ["cond" true "a" false "b"])]
       (and (= (get node "node") "cond") (= (count (get node "clauses")) 2))))
@@ -4963,7 +4964,7 @@
       (and (= (get node "node") "if")
         (= (get (get node "then") "node") "do")
         (= (count (get (get node "then") "body")) 2)
-        (= (get node "else") {"node" "literal" "kind" "bool" "value" false}))))
+        (= (get node "else") false))))
   (expect! "when-not canonicalizes to (if (not c) (do ...))"
     (let [node (parse-expr* ["when-not" "c" "a"])]
       (and (= (get node "node") "if")

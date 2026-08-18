@@ -344,7 +344,7 @@
   :else nil)))
 
 (defn ^Boolean synthetic-absent-else? [e]
-  (and (not (nil? e)) (= (get e "node") "literal") (= (get e "kind") "bool") (= (get e "value") false)))
+  (false? e))
 
 (defn collection-elem-type [types]
   (if (and (> (count types) 0) (not (any-type? (nth types 0))) (every? (fn [t] (type-compatible? t (nth types 0))) (drop 1 types))) (nth types 0) ANY))
