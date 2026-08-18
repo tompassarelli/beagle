@@ -522,6 +522,201 @@
 (def writer-admission-progress-phases-v1
   [:deriving :derived :waiting :admitted :accepted :deadline :failed])
 
+;; MaintenanceBatchV1 is the Store-facing transaction contract shared by the
+;; fact maintainers. A batch is complete before it reaches writer authority;
+;; the append callback therefore has exactly one CAS-shaped operation to do.
+(def maintenance-batch-version-v1 1)
+(def maintenance-batch-format-v1 "beagle.store/MaintenanceBatchV1")
+(def maintenance-batch-result-format-v1
+  "beagle.store/MaintenanceBatchResultV1")
+(def maintenance-state-format-v1 "beagle.store/MaintenanceStateV1")
+(def maintenance-receipt-format-v1 "beagle.store/MaintenanceReceiptV1")
+(def maintenance-batch-kinds-v1 [:preparation :completion])
+(def maintenance-batch-statuses-v1
+  [:accepted :stale-revision :durability-ambiguous :failed])
+(def maintenance-attempt-id-key-v1 :maintenance-attempt-id)
+(def maintenance-stale-conflict-code-v1
+  :maintenance-batch/stale-revision)
+
+(defn- maintenance-fail! [code message data]
+  (throw (ex-info message (assoc data :type code :fram/code code))))
+
+(defn- maintenance-attempt-id? [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn maintenance-state-v1
+  "Create the pure Store route state used to decide one maintenance CAS."
+  [revision published-route]
+  (when-not (some? revision)
+    (maintenance-fail! :maintenance-batch/invalid-state
+                       "maintenance state requires a Store revision" {}))
+  {:format maintenance-state-format-v1
+   :version maintenance-batch-version-v1
+   :revision revision
+   :published-route published-route
+   :attempts {}})
+
+(defn maintenance-batch-v1
+  "Validate and freeze one complete preparation or completion transaction."
+  [{:keys [kind attempt-id expected-revision facts] :as request}]
+  (when-not (some #{kind} maintenance-batch-kinds-v1)
+    (maintenance-fail! :maintenance-batch/invalid-kind
+                       "maintenance batch kind must be preparation or completion"
+                       {:kind kind}))
+  (when-not (maintenance-attempt-id? attempt-id)
+    (maintenance-fail! :maintenance-batch/invalid-attempt-id
+                       "maintenance batch requires a nonempty MaintenanceAttemptId"
+                       {:attempt-id attempt-id}))
+  (when-not (some? expected-revision)
+    (maintenance-fail! :maintenance-batch/invalid-revision
+                       "maintenance batch requires an expected Store revision"
+                       {}))
+  (when-not (and (vector? facts) (seq facts))
+    (maintenance-fail! :maintenance-batch/invalid-facts
+                       "maintenance batch requires a nonempty fact vector" {}))
+  (doseq [[index fact] (map-indexed vector facts)]
+    (when-not (and (map? fact)
+                   (= attempt-id (get fact maintenance-attempt-id-key-v1)))
+      (maintenance-fail!
+       :maintenance-batch/attempt-mismatch
+       "every maintenance fact must name the batch MaintenanceAttemptId"
+       {:attempt-id attempt-id :fact-index index :fact fact})))
+  (when (and (= kind :preparation) (contains? request :published-route))
+    (maintenance-fail! :maintenance-batch/invalid-route
+                       "preparation cannot publish a route" {}))
+  (when (and (= kind :completion)
+             (not (contains? request :published-route)))
+    (maintenance-fail! :maintenance-batch/invalid-route
+                       "completion requires its complete published route" {}))
+  (cond->
+   {:format maintenance-batch-format-v1
+    :version maintenance-batch-version-v1
+    :kind kind
+    :attempt-id attempt-id
+    :expected-revision expected-revision
+    :facts facts}
+    (= kind :completion) (assoc :published-route (:published-route request))))
+
+(defn- require-maintenance-state! [state]
+  (when-not (and (map? state)
+                 (= maintenance-state-format-v1 (:format state))
+                 (= maintenance-batch-version-v1 (:version state))
+                 (some? (:revision state))
+                 (map? (:attempts state)))
+    (maintenance-fail! :maintenance-batch/invalid-state
+                       "maintenance CAS requires a MaintenanceStateV1 value"
+                       {:state state}))
+  state)
+
+(defn- maintenance-result
+  [status batch expected current revision]
+  (cond->
+   {:format maintenance-batch-result-format-v1
+    :version maintenance-batch-version-v1
+    :status status
+    :attempt-id (:attempt-id batch)
+    :batch-kind (:kind batch)
+    :expected-revision expected
+    :current-revision current}
+    (= status :stale-revision)
+    (assoc :code maintenance-stale-conflict-code-v1)
+    (= status :accepted) (assoc :revision revision)))
+
+(defn apply-maintenance-batch-v1
+  "Purely apply one complete batch against EXPECTED-REVISION.
+
+   A stale revision returns a typed conflict with the original state. Accepted
+   preparation and completion each install one whole fact vector. Completion
+   may publish a route only after preparation for the same attempt exists."
+  [state request next-revision]
+  (let [state (require-maintenance-state! state)
+        batch (maintenance-batch-v1 request)
+        expected (:expected-revision batch)
+        current (:revision state)
+        attempt-id (:attempt-id batch)
+        kind (:kind batch)
+        attempt (get-in state [:attempts attempt-id])]
+    (if (not= expected current)
+      {:state state
+       :result (maintenance-result :stale-revision batch expected current nil)}
+      (do
+        (when-not (and (some? next-revision) (not= current next-revision))
+          (maintenance-fail! :maintenance-batch/invalid-revision
+                             "accepted maintenance batch must advance revision"
+                             {:current current :next next-revision}))
+        (when (contains? attempt kind)
+          (maintenance-fail! :maintenance-batch/duplicate-batch
+                             "maintenance attempt already contains this batch kind"
+                             {:attempt-id attempt-id :kind kind}))
+        (when (and (= kind :completion) (not (contains? attempt :preparation)))
+          (maintenance-fail! :maintenance-batch/missing-preparation
+                             "completion requires preparation for the same attempt"
+                             {:attempt-id attempt-id}))
+        (let [next-state
+              (cond-> (-> state
+                          (assoc :revision next-revision)
+                          (assoc-in [:attempts attempt-id kind] batch))
+                (= kind :completion)
+                (assoc :published-route (:published-route batch)))]
+          {:state next-state
+           :result
+           (maintenance-result :accepted batch expected current next-revision)})))))
+
+(defn commit-maintenance-batch-v1!
+  "Cross the durability boundary exactly once.
+
+   APPEND-CAS! owns the atomic expected-revision comparison and append. This
+   wrapper deliberately does not retry exceptions, including
+   :durability-ambiguous, because a retry could turn an unknown append into a
+   false success."
+  [append-cas! request]
+  (when-not (ifn? append-cas!)
+    (maintenance-fail! :maintenance-batch/invalid-request
+                       "maintenance append CAS must be callable" {}))
+  (let [batch (maintenance-batch-v1 request)
+        outcome (append-cas! batch)
+        result (:result outcome)
+        status (:status result)]
+    (when-not (and (map? outcome)
+                   (map? result)
+                   (= maintenance-batch-result-format-v1 (:format result))
+                   (= maintenance-batch-version-v1 (:version result))
+                   (some #{status} [:accepted :stale-revision])
+                   (= (:attempt-id batch) (:attempt-id result))
+                   (= (:kind batch) (:batch-kind result))
+                   (= (:expected-revision batch)
+                      (:expected-revision result))
+                   (if (= status :accepted)
+                     (some? (:revision result))
+                     (= maintenance-stale-conflict-code-v1 (:code result))))
+      (maintenance-fail! :maintenance-batch/invalid-append-result
+                         "maintenance append CAS returned an invalid result"
+                         {:result result}))
+    outcome))
+
+(defn maintenance-receipt-v1
+  "Build a dual-status receipt without treating old-gate PASS as maintenance PASS."
+  [{:keys [attempt-id old-gate-status fact-maintenance-status revision]
+    :as request}]
+  (when-not (maintenance-attempt-id? attempt-id)
+    (maintenance-fail! :maintenance-receipt/invalid-attempt-id
+                       "maintenance receipt requires a MaintenanceAttemptId" {}))
+  (when-not (some #{old-gate-status} [:pass :fail])
+    (maintenance-fail! :maintenance-receipt/invalid-old-gate-status
+                       "old gate status must be pass or fail"
+                       {:old-gate-status old-gate-status}))
+  (when-not (some #{fact-maintenance-status} maintenance-batch-statuses-v1)
+    (maintenance-fail! :maintenance-receipt/invalid-maintenance-status
+                       "fact maintenance status is not a V1 status"
+                       {:fact-maintenance-status fact-maintenance-status}))
+  (cond->
+   {:format maintenance-receipt-format-v1
+    :version maintenance-batch-version-v1
+    :attempt-id attempt-id
+    :old-gate-status old-gate-status
+    :fact-maintenance-status fact-maintenance-status}
+    (contains? request :revision) (assoc :revision revision)))
+
 (defn monotonic-ms
   "Return monotonic milliseconds for admission deadlines."
   []

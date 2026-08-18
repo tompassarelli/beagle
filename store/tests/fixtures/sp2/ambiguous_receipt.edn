@@ -1,0 +1,6 @@
+{:format "beagle.store/MaintenanceReceiptV1"
+ :version 1
+ :attempt-id "cold-maintenance-attempt"
+ :old-gate-status :pass
+ :fact-maintenance-status :durability-ambiguous
+ :revision "store-revision-cold"}
