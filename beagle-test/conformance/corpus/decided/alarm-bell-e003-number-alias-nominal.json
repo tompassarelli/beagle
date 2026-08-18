@@ -1,0 +1,49 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "alarm-bell-e003-number-alias-nominal",
+  "status": "DECIDED",
+  "profile": "hosted-js",
+  "input": {
+    "source": "#lang beagle/js\n(ns probe.p2)\n\n(defn c [(x Number)] Number (+ x 1))\n",
+    "target": "js",
+    "fileName": "probe/p2.bjs",
+    "command": {
+      "argv": ["check", "--profile", "3", "{input}"]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false
+    }
+  },
+  "rule": {
+    "id": "ALARM-BELL-E003-NUMBER-ALIAS-NOMINAL",
+    "text": "Number is a union alias, not a nominal primitive; numeric refinement must preserve that union identity and must not render two distinct types as the same Number.",
+    "reference": "todo:beagle-program-handoff/wave2/E003-CHECKER-DEFECT.md"
+  },
+  "expected": {
+    "kind": "canonical-output",
+    "exitCode": 0,
+    "stdout": "",
+    "stderr": "  /probe/p2.bjs ok\n\n1 file(s), 0 error(s)\n"
+  },
+  "coverage": {
+    "surface": ["numeric-refinement", "return-type-checking"],
+    "alarmBell": "union-alias-versus-nominal",
+    "hostLeakage": [],
+    "parityChannels": ["diagnostic", "status"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "syntax-semantics-doctrine",
+    "reference": "todo:beagle-program-handoff/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS",
+    "date": "2026-08-18"
+  },
+  "observations": {
+    "historicalDivergence": {
+      "diagnosticCode": "E003",
+      "diagnosticCore": "expected Number, got Number",
+      "reference": "todo:beagle-program-handoff/wave2/E003-CHECKER-DEFECT.md"
+    }
+  }
+}

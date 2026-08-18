@@ -1,0 +1,28 @@
+{
+  "schema": "BeagleConformanceCorpusV1",
+  "version": 1,
+  "status": "DESIGNED",
+  "digestAlgorithm": "sha256",
+  "cases": [
+    {
+      "caseId": "alarm-bell-e003-number-alias-nominal",
+      "path": "corpus/decided/alarm-bell-e003-number-alias-nominal.json",
+      "status": "DECIDED",
+      "sha256": "2dc3876e4bb920f648b6249328b86dce630e7531b4dc9927dc7e92725c44129b",
+      "coverage": ["ALARM-BELL", "type-checking", "diagnostic"]
+    },
+    {
+      "caseId": "alarm-bell-namespace-to-module-path",
+      "path": "corpus/decided/alarm-bell-namespace-to-module-path.json",
+      "status": "DECIDED",
+      "sha256": "ece4458d8d9881d9ba262d2631cacca24837a7bb3696ef7fc231a5dea32aa190",
+      "coverage": ["ALARM-BELL", "module-emission", "host-leakage"]
+    }
+  ],
+  "requiredCoverage": {
+    "alarmBell": [
+      "alarm-bell-e003-number-alias-nominal",
+      "alarm-bell-namespace-to-module-path"
+    ]
+  }
+}

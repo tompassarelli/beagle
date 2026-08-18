@@ -1,0 +1,66 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "alarm-bell-namespace-to-module-path",
+  "status": "DECIDED",
+  "profile": "hosted-js",
+  "input": {
+    "source": "#lang beagle/js\n(ns gjoa.tools.icons.generate\n  (:require [gjoa.tools.prep.paths :refer [REPO-ROOT]]))\n(println REPO-ROOT)\n",
+    "target": "js",
+    "fileName": "gjoa/tools/icons/generate.bjs",
+    "command": {
+      "argv": ["build", "--module-root", "test={root}", "{input}", "--out", "{output}"]
+    },
+    "closure": {
+      "kind": "explicit-module-closure",
+      "ambientFiles": false,
+      "requiredNamespaces": ["gjoa.tools.prep.paths"],
+      "files": [
+        {
+          "path": "gjoa/tools/prep/paths.bjs",
+          "source": "#lang beagle/js\n(ns gjoa.tools.prep.paths)\n(js/export (def REPO-ROOT String \".\"))\n"
+        }
+      ]
+    }
+  },
+  "rule": {
+    "id": "ALARM-BELL-NAMESPACE-NOT-PATH",
+    "text": "A namespace is a logical identity; emitted module paths are derived from its segments. The compiler must preserve segment boundaries and hyphens, and must never treat the namespace string itself as a filesystem path.",
+    "reference": "todo:beagle-program-handoff/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS"
+  },
+  "expected": {
+    "kind": "canonical-output",
+    "exitCode": 0,
+    "stdout": "",
+    "stderr": "  /gjoa/tools/icons/generate.bjs -> /output/gjoa/tools/icons/generate.js\n  /gjoa/tools/prep/paths.bjs -> /output/gjoa/tools/prep/paths.js\n\n2 built, 0 error(s)\n",
+    "artifacts": [
+      {
+        "path": "output/gjoa/tools/icons/generate.js",
+        "sha256": "442708dd0b36475bab4d9efccf10262b0be02c080de509056e292172d2cc4b20"
+      },
+      {
+        "path": "output/gjoa/tools/prep/paths.js",
+        "sha256": "854d0bb8fd8cf17f4feb6f45885cf63469f2d6d02a5147ea7436ef8fb5da158c"
+      }
+    ]
+  },
+  "coverage": {
+    "surface": ["namespace-resolution", "js-module-emission"],
+    "alarmBell": "namespace-not-path",
+    "hostLeakage": ["HL-SYMBOL-BEHAVIOR", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC"],
+    "parityChannels": ["diagnostic", "artifact"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "syntax-semantics-doctrine",
+    "reference": "todo:beagle-program-handoff/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS",
+    "date": "2026-08-18"
+  },
+  "observations": {
+    "historicalDivergence": {
+      "vocabulary": "namespace-not-path",
+      "breaks": ["excluded compile-time-only ns", "ns/directory mismatch", ".test.bjs emit rename"],
+      "reference": "todo:agent-coord.md#EXEC-35"
+    }
+  }
+}
