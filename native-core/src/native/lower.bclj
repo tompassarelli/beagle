@@ -23716,8 +23716,14 @@
                      (any-function-calls-abi? typed-functions
                        (host-filesystem-abi-id "path-kind"))
                      (any-function-calls-abi? typed-functions
-                       (host-filesystem-abi-id "write-text-atomic")))
+                       (host-filesystem-abi-id "write-text-atomic"))
+                     (any-function-calls-abi? typed-functions
+                       (host-filesystem-abi-id "file-exists")))
                  4 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "file-exists")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "abs-path")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "make-parent-directories")) 1 0)
                (if (any-function-calls-abi? typed-functions
