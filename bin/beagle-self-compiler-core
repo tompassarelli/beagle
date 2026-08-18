@@ -226,8 +226,8 @@ bb "$BEAGLE_DIR/native-core/bin/source-facts.clj" \
     "${projector_args[@]}" --output "$facts" --include-defs
 
 # The closure substrate is already self-host certified. Emit every Core
-# compiler module through that front end in parallel, then apply the same
-# provider-record import normalization used by the oracle projection route.
+# compiler module through that front end in parallel and preserve those bytes:
+# this projection is compared directly with the Racket oracle.
 core_modules=(
     native-core/src/native/core.bclj
     native-core/src/native/stages.bclj
@@ -277,18 +277,6 @@ if [[ "$emit_failure" == 1 ]]; then
     die "self-host Core compiler closure emission failed"
 fi
 rm -f -- "${compiled:?}"/native/*.emit.err
-
-core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
-    "$compiled/native/core.clj" | tr '\n' ' ')"
-for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
-    generated="$compiled/native/$module.clj"
-    sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
-        "$generated"
-    awk -v imp="(import '[native.core $core_records])" \
-        '!seen && /^$/ { print imp; seen = 1 } { print }' \
-        "$generated" >"$generated.tmp"
-    mv "$generated.tmp" "$generated"
-done
 
 if [[ -n "${BEAGLE_SELF_COMPILER_COMPILED_OUT:-}" ]]; then
     compiled_copy="$BEAGLE_SELF_COMPILER_COMPILED_OUT"
