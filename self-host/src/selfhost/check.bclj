@@ -2315,7 +2315,8 @@
               arm-env (if (nil? scrutinee)
                         env
                         (assoc env scrutinee
-                          (member-view-type rec-name target-type)))]
+                          (member-view-type rec-name target-type)))
+              (indices (Vec Int)) (vec (range (count bindings)))]
           (if (not (nil? field-map))
             (reduce (fn [(arm-env Any) (i Int)] Any
                       (let [b (nth bindings i)
@@ -2327,7 +2328,7 @@
                                        ANY)
                             bname (if (string? b) b (get b "name"))]
                         (binder-env-assoc arm-env pat bname raw-type)))
-                    arm-env (range (count bindings)))
+                    arm-env indices)
             (if (= (count bindings) 1)
               (let [b0 (nth bindings 0)
                     bname (if (string? b0) b0 (get b0 "name"))]

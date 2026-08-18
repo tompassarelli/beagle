@@ -759,13 +759,14 @@
   (let [seqs (mapv (fn [(xs Any)] Any (macro-seq! xs "map")) colls)
         width (if (= (count seqs) 0)
                 0
-                (reduce min (mapv count seqs)))]
+                (reduce min (mapv count seqs)))
+        (indices (Vec Int)) (vec (range width))]
     (mapv
       (fn [(i Int)] Any
         (macro-apply-fn!
           fn-value
           (mapv (fn [(xs Any)] Any (nth xs i)) seqs)))
-      (range width))))
+      indices)))
 
 (defn macro-distinct-values [(items Any)] Any
   (reduce

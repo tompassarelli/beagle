@@ -762,7 +762,8 @@
 (defn- scope-walk-let-like! [value table path ctx]
   (let [children (scope-sequence-children value)
    scoped-bindings (scope-walk-sequential-bindings! (nth children 1) table (conj (vec path) 1) ctx)
-   body (mapv (fn [index] (scope-walk* (syntax-add-scopes! (nth children index) (get scoped-bindings "scopes")) (get scoped-bindings "table") (conj (vec path) index) ctx)) (range 2 (count children)))]
+   body-indices (vec (range 2 (count children)))
+   body (mapv (fn [index] (scope-walk* (syntax-add-scopes! (nth children index) (get scoped-bindings "scopes")) (get scoped-bindings "table") (conj (vec path) index) ctx)) body-indices)]
   (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) (get scoped-bindings "value")] body))))
 
 (defn- scope-walk-params! [params table path ctx]

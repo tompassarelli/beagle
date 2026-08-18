@@ -990,12 +990,13 @@
    bindings (get pat "bindings")
    field-map (get-in (deref STATE) ["record-fields" rec-name])
    field-order (get-in (deref STATE) ["record-field-order" rec-name])
-   arm-env (if (nil? scrutinee) env (assoc env scrutinee (member-view-type rec-name target-type)))]
+   arm-env (if (nil? scrutinee) env (assoc env scrutinee (member-view-type rec-name target-type)))
+   indices (vec (range (count bindings)))]
   (if (not (nil? field-map)) (reduce (fn [arm-env i] (let [b (nth bindings i)
    kw (if (not (nil? field-order)) (if (< i (count field-order)) (nth field-order i) nil) nil)
    raw-type (if (and (not (nil? kw)) (not (nil? (get field-map kw)))) (get field-map kw) ANY)
    bname (if (string? b) b (get b "name"))]
-  (binder-env-assoc arm-env pat bname raw-type))) arm-env (range (count bindings))) (if (= (count bindings) 1) (let [b0 (nth bindings 0)
+  (binder-env-assoc arm-env pat bname raw-type))) arm-env indices) (if (= (count bindings) 1) (let [b0 (nth bindings 0)
    bname (if (string? b0) b0 (get b0 "name"))]
   (binder-env-assoc arm-env pat bname (make-prim rec-name))) arm-env)))
   (= (get pat "type") "var") (binder-env-assoc env pat (get pat "name") target-type)

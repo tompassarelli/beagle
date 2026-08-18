@@ -316,9 +316,11 @@
   [(params Any) (rest-p Any) (body-str String)] Any
   (let [all (params+rest params rest-p)
         fixed-count (count params)
+        (all-indices (Vec Int)) (vec (range (count all)))
+        (fixed-indices (Vec Int)) (vec (range fixed-count))
         raw-names (mapv (fn [(index Int)] String
                           (callable-raw-name index fixed-count))
-                    (range (count all)))
+                    all-indices)
         fixed-raw (mapv
                     (fn [(index Int)] String
                       (let [raw (nth raw-names index)
@@ -328,7 +330,7 @@
                                  (string? target))
                           (str (clj-tag-prefix (get param "ann")) raw)
                           raw)))
-                    (range fixed-count))
+                    fixed-indices)
         params-str (str/join " "
                      (if (or (nil? rest-p) (false? rest-p))
                        fixed-raw
@@ -358,12 +360,12 @@
                         (emit-guarded-binding-value binding
                           (str "$beagle$constraint$predicate$" index) raw)
                         raw))))
-            (range (count all)))
+            all-indices)
         target-bindings
           (mapv (fn [(index Int)] String
                   (str (emit-binding-form (binding-target (nth all index))) " "
                        "$beagle$constraint$checked-param$" index))
-            (range (count all)))]
+            all-indices)]
     {"params" params-str
      "body" (str "(let [" (str/join "\n       "
                                   (into rest-normalization predicate-bindings)) "]\n"

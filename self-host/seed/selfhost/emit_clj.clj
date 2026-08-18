@@ -180,11 +180,13 @@
 (defn emit-constrained-callable [params rest-p ^String body-str]
   (let [all (params+rest params rest-p)
    fixed-count (count params)
-   raw-names (mapv (fn [index] (callable-raw-name index fixed-count)) (range (count all)))
+   all-indices (vec (range (count all)))
+   fixed-indices (vec (range fixed-count))
+   raw-names (mapv (fn [index] (callable-raw-name index fixed-count)) all-indices)
    fixed-raw (mapv (fn [index] (let [raw (nth raw-names index)
    param (nth params index)
    target (param-binding-target param)]
-  (if (and (= (get param "type") "param") (string? target)) (str (clj-tag-prefix (get param "ann")) raw) raw))) (range fixed-count))
+  (if (and (= (get param "type") "param") (string? target)) (str (clj-tag-prefix (get param "ann")) raw) raw))) fixed-indices)
    params-str (str/join " " (if (or (nil? rest-p) (false? rest-p)) fixed-raw (into fixed-raw ["&" CLJ-HOST-REST])))
    rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
    predicate-bindings (loop [index 0
@@ -194,8 +196,8 @@
    checked-bindings (mapv (fn [index] (let [binding (nth all index)
    raw (nth raw-names index)
    checked (str "$beagle$constraint$checked-param$" index)]
-  (str checked " " (if (constraint-present? binding) (emit-guarded-binding-value binding (str "$beagle$constraint$predicate$" index) raw) raw)))) (range (count all)))
-   target-bindings (mapv (fn [index] (str (emit-binding-form (binding-target (nth all index))) " " "$beagle$constraint$checked-param$" index)) (range (count all)))]
+  (str checked " " (if (constraint-present? binding) (emit-guarded-binding-value binding (str "$beagle$constraint$predicate$" index) raw) raw)))) all-indices)
+   target-bindings (mapv (fn [index] (str (emit-binding-form (binding-target (nth all index))) " " "$beagle$constraint$checked-param$" index)) all-indices)]
   {"params" params-str "body" (str "(let [" (str/join "\n       " (into rest-normalization predicate-bindings)) "]\n" "  (let [" (str/join "\n       " checked-bindings) "]\n" "    (let [" (str/join "\n       " target-bindings) "]\n" "      " body-str ")))")}))
 
 (defn emit-callable-signature+body [params rest-p ^String body-str]

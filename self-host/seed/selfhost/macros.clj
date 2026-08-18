@@ -404,8 +404,9 @@
 
 (defn macro-map-values! [fn-value colls]
   (let [seqs (mapv (fn [xs] (macro-seq! xs "map")) colls)
-   width (if (= (count seqs) 0) 0 (reduce min (mapv count seqs)))]
-  (mapv (fn [i] (macro-apply-fn! fn-value (mapv (fn [xs] (nth xs i)) seqs))) (range width))))
+   width (if (= (count seqs) 0) 0 (reduce min (mapv count seqs)))
+   indices (vec (range width))]
+  (mapv (fn [i] (macro-apply-fn! fn-value (mapv (fn [xs] (nth xs i)) seqs))) indices)))
 
 (defn macro-distinct-values [items]
   (reduce (fn [result item] (if (some? (some (fn [seen] (if (= (macro-datum seen) (macro-datum item)) true nil)) result)) result (conj result item))) [] items))
