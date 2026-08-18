@@ -874,7 +874,7 @@
   CandidateSource
   (reduce (fn [(current CandidateSource) (tuple Tuple)] CandidateSource
             (candidate-source-add relation current tuple))
-          source tuples))
+          source (vec tuples)))
 
 (defn withdrawal-candidate-source
   [(root t/TermStore)
@@ -1311,7 +1311,7 @@
                      (if (contains? (get db relation #{}) tuple)
                        rows-value
                        (conj rows-value tuple)))
-                   #{} (get candidate relation #{}))]
+                   #{} (vec (get candidate relation #{})))]
        (if (empty? new-tuples) delta (assoc delta relation new-tuples))))
    {} relations))
 
@@ -1328,7 +1328,7 @@
                               (tuple Tuple)]
                              (Set Tuple)
                              (conj rows-value tuple))
-                           (or known #{}) new-tuples))))))
+                           (or known #{}) (vec new-tuples)))))))
    db relations))
 
 (defn- delta-empty? [(delta Db) (relations (Vec String))] Bool
@@ -1370,7 +1370,7 @@
                                       (tuple Tuple)]
                                      (Set Tuple)
                                      (conj rows-value tuple))
-                                   (or known #{}) derived))))
+                                   (or known #{}) (vec derived)))))
                 current))))]
     (if (query-evaluation-context-open? context)
       (db-new-only candidate db relations)
@@ -1409,7 +1409,7 @@
                                       (tuple Tuple)]
                                      (Set Tuple)
                                      (conj rows-value tuple))
-                                   (or known #{}) derived))))
+                                   (or known #{}) (vec derived)))))
                 current))))]
     (if (not (query-evaluation-context-open? context))
       seeded
@@ -1541,7 +1541,7 @@
         (recur (+ index 1)
                (reduce (fn [(acc (Set String)) (relation String)] (Set String)
                          (conj acc relation))
-                       lower heads)
+                       lower (vec heads))
                problems2)))))
 
 (defn facts [(db Db) (relation String)] (Vec Tuple)

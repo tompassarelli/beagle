@@ -123,7 +123,7 @@
                           (Map String (Vec Int))
                           (assoc index token
                                  (conj (get index token []) handle)))
-                        current (token-set! value))
+                        current (vec (token-set! value)))
                        current)))))
         (weight Int) (+ 112 (* 14 row-count) (postings-weight postings))
         (error TextError?) (index-limit-error weight maximum)]

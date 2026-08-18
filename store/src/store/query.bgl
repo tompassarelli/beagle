@@ -253,7 +253,7 @@
 
 (defn- set-union [(left (Set String)) (right (Set String))] (Set String)
   (reduce (fn [(acc (Set String)) (value String)] (Set String) (conj acc value))
-          left right))
+          left (vec right)))
 
 (defn- empty-string-set [] (Set String) #{})
 (defn- empty-query-errors [] (Vec QueryError) [])
@@ -283,7 +283,7 @@
               acc
               (conj acc (query-error :query-unbound-variable
                                      (str context " variable '" name "' is not bound")))))
-          [] (term-vars terms)))
+          [] (vec (term-vars terms))))
 
 (defn- head-arities [(rules (Vec d/Rule))] (Map String Int)
   (reduce (fn [(acc (Map String Int)) (rule d/Rule)] (Map String Int)
@@ -542,7 +542,7 @@
                                              (str "relation '" relation
                                                   "' is defined only in a later stratum")))
                     inner))
-                acc (positive-relations rule)))
+                acc (vec (positive-relations rule))))
              errors stratum)]
         (recur (inc position) (set-union lower current) errors2)))))
 
