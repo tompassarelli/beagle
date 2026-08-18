@@ -514,3 +514,122 @@
    :write-authorized (and (= role :active) (held? handle))
    :log (.getCanonicalPath (io/file (str log)))
    :lock (authority-path log)})
+
+;; WriterAdmissionV1 is the process-independent Store adapter seam. Compiler
+;; epochs describe derived content, never the authority identity of the Store.
+(def writer-admission-version-v1 1)
+(def writer-admission-format-v1 "beagle.store/WriterAdmissionV1")
+(def writer-admission-progress-phases-v1
+  [:deriving :derived :waiting :admitted :accepted :deadline :failed])
+
+(defn monotonic-ms
+  "Return monotonic milliseconds for admission deadlines."
+  []
+  (quot (System/nanoTime) 1000000))
+
+(defn- admission-fail! [code message data]
+  (throw (ex-info message (assoc data :type code :fram/code code))))
+
+(defn- require-admission-request!
+  [{:keys [log space-id batch-id compiler-epoch-id timeout-ms retry-ms
+           derive! publish! progress! now-ms sleep-ms! try-acquire-fn]}]
+  (when-not (and (some? log) (not (str/blank? (str log))))
+    (admission-fail! :writer-admission/invalid-request
+                     "writer admission requires a Store log path" {}))
+  (when-not (and (string? space-id) (not (str/blank? space-id)))
+    (admission-fail! :writer-admission/invalid-request
+                     "writer admission requires a stable SpaceId" {}))
+  (when-not (some? batch-id)
+    (admission-fail! :writer-admission/invalid-request
+                     "writer admission requires a batch ID" {}))
+  (when-not (some? compiler-epoch-id)
+    (admission-fail! :writer-admission/invalid-request
+                     "writer admission requires a compiler epoch ID" {}))
+  (when-not (and (integer? timeout-ms) (pos? timeout-ms))
+    (admission-fail! :writer-admission/invalid-request
+                     "writer admission timeout must be positive milliseconds"
+                     {:timeout-ms timeout-ms}))
+  (when-not (and (integer? retry-ms) (pos? retry-ms))
+    (admission-fail! :writer-admission/invalid-request
+                     "writer admission retry interval must be positive milliseconds"
+                     {:retry-ms retry-ms}))
+  (doseq [[label callback]
+          [[:derive! derive!] [:publish! publish!] [:progress! progress!]
+           [:now-ms now-ms] [:sleep-ms! sleep-ms!]
+           [:try-acquire-fn try-acquire-fn]]]
+    (when-not (ifn? callback)
+      (admission-fail! :writer-admission/invalid-request
+                       (str (name label) " must be callable")
+                       {:field label}))))
+
+(defn- admission-event
+  [{:keys [log space-id batch-id compiler-epoch-id]} started now phase attempt]
+  {:format writer-admission-format-v1
+   :version writer-admission-version-v1
+   :phase phase
+   :batch-id batch-id
+   :space-id space-id
+   :compiler-epoch-id compiler-epoch-id
+   :log (.getCanonicalPath (io/file (str log)))
+   :attempt attempt
+   :elapsed-ms (max 0 (- now started))})
+
+(defn run-admitted-batch!
+  "Derive a batch without writer authority, then wait boundedly and publish it.
+
+   :timeout-ms bounds the whole call, including derivation. :progress! receives
+   WriterAdmissionV1 events. :publish! runs with the authority handle and must
+   return only after the batch is durable; only then is :accepted reported.
+   Compiler epoch is receipt metadata and never participates in Store identity."
+  [{:keys [timeout-ms retry-ms progress! now-ms sleep-ms! try-acquire-fn]
+    :or {retry-ms 10
+         progress! (fn [_] nil)
+         now-ms monotonic-ms
+         sleep-ms! #(Thread/sleep (long %))}
+    :as request}]
+  (let [request (assoc request
+                       :retry-ms retry-ms
+                       :progress! progress!
+                       :now-ms now-ms
+                       :sleep-ms! sleep-ms!
+                       :try-acquire-fn
+                       (or try-acquire-fn #(try-acquire! (:log request))))]
+    (require-admission-request! request)
+    (let [{:keys [derive! publish! progress! now-ms sleep-ms! try-acquire-fn]}
+          request
+          started (now-ms)
+          deadline (+ started timeout-ms)
+          emit! (fn [phase attempt]
+                  (let [event (admission-event request started (now-ms)
+                                               phase attempt)]
+                    (progress! event)
+                    event))]
+      (emit! :deriving 0)
+      (let [derived (derive!)]
+        (emit! :derived 0)
+        (loop [attempt 1]
+          (let [now (now-ms)]
+            (when (>= now deadline)
+              (let [event (emit! :deadline attempt)]
+                (admission-fail!
+                 :writer-admission/deadline
+                 "writer admission deadline elapsed before authority was acquired"
+                 (select-keys event
+                              [:format :version :batch-id :space-id
+                               :compiler-epoch-id :attempt :elapsed-ms]))))
+            (if-let [authority (try-acquire-fn)]
+              (try
+                (emit! :admitted attempt)
+                (let [value (publish! authority derived)
+                      accepted (emit! :accepted attempt)]
+                  (assoc accepted :status :accepted :value value))
+                (catch Throwable error
+                  (emit! :failed attempt)
+                  (throw error))
+                (finally
+                  (release! authority)))
+              (let [remaining (- deadline (now-ms))]
+                (emit! :waiting attempt)
+                (when (pos? remaining)
+                  (sleep-ms! (min retry-ms remaining)))
+                (recur (inc attempt))))))))))
