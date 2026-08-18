@@ -889,6 +889,7 @@ CLJ
              (emit-args (static-call-args e)))]
     [(dynamic-var? e)
      (symbol->string (dynamic-var-name e))]
+    [(ascription? e) (emit-expr (ascription-expr e))]
     [(check-expr? e)
      (define inner (emit-expr (check-expr-expr e)))
      (define contract

@@ -528,35 +528,68 @@
             [tok (token-end tok)]
             [else #f])])))
 
+(define (spanning-entry stxs datum style)
+  (define first-stx (car stxs))
+  (define last-stx (last stxs))
+  (define start (syntax-position first-stx))
+  (define last-start (syntax-position last-stx))
+  (define last-span (syntax-span last-stx))
+  (define span (and start last-start last-span (- (+ last-start last-span) start)))
+  (syntax-property
+   (syntax-property
+    (datum->syntax
+     #f datum
+     (vector (syntax-source first-stx)
+             (syntax-line first-stx)
+             (syntax-column first-stx)
+             start span))
+    'beagle-binding-entry-style style)
+   'beagle-binding-entry-source-stxs stxs))
+
 (define (logical-entry-stxs vector-stx)
   (define subs (stx-subs vector-stx))
   (define items (and subs (cdr subs)))
   (and items
-       (let loop ([rest items] [acc '()])
-         (cond
-           [(null? rest) (reverse acc)]
-           [(eq? (->datum (car rest)) '&)
-            (and (pair? (cdr rest))
-                 (let* ([amp (car rest)]
-                        [declaration (cadr rest)]
-                        [start (syntax-position amp)]
-                        [decl-start (syntax-position declaration)]
-                        [decl-span (syntax-span declaration)]
-                        [span (and start decl-start decl-span
-                                   (- (+ decl-start decl-span) start))]
-                        [entry
-                         (datum->syntax
-                          #f
-                          (list amp declaration)
-                          (vector (syntax-source amp)
-                                  (syntax-line amp)
-                                  (syntax-column amp)
-                                  start
-                                  span))])
-                   (reverse (cons entry acc))))]
-           [(structured-binding? (->datum (car rest)))
-            (loop (cdr rest) (cons (car rest) acc))]
-           [else (loop (cdr rest) (cons (car rest) acc))]))))
+       (let* ([legacy? (and (pair? items)
+                            (structured-binding? (->datum (car items))))]
+              [flat? (and (not legacy?)
+                          (pair? items)
+                          (pair? (cdr items))
+                          (type-expression-datum? (->datum (cadr items))))])
+         (and (or legacy? flat?)
+         (let loop ([rest items] [acc '()])
+           (cond
+             [(null? rest) (reverse acc)]
+             [legacy?
+              (cond
+                [(and (eq? (->datum (car rest)) '&) (pair? (cdr rest)))
+                 (reverse
+                  (cons (spanning-entry
+                         (take rest 2)
+                         (list '& (->datum (cadr rest)))
+                         'legacy-rest)
+                        acc))]
+                [else
+                 (loop (cdr rest)
+                       (cons (syntax-property
+                              (car rest) 'beagle-binding-entry-style 'legacy)
+                             acc))])]
+             [(eq? (->datum (car rest)) '&)
+              (and (>= (length rest) 3)
+                   (reverse
+                    (cons (spanning-entry
+                           (take rest 3)
+                           (map ->datum (take rest 3))
+                           'flat)
+                          acc)))]
+             [else
+              (and (>= (length rest) 2)
+                   (loop (cddr rest)
+                         (cons (spanning-entry
+                                (take rest 2)
+                                (map ->datum (take rest 2))
+                                'flat)
+                               acc)))]))))))
 
 ;; Each binding is one source datum, so layout never has to infer logical
 ;; boundaries from alternating marker tokens.
@@ -660,27 +693,45 @@
                                    0)))))
       (token-text close))]))
 
+(define (legacy-declaration-text tokens declaration)
+  (define children (stx-subs declaration))
+  (define rendered
+    (for/list ([child (in-list children)])
+      (fragment->inline tokens
+                        (syntax-start-offset child)
+                        (syntax-end-offset child tokens))))
+  (if (= (length rendered) 3)
+      (format "~a (~a where ~a)" (car rendered) (cadr rendered) (caddr rendered))
+      (string-join rendered " ")))
+
+(define (entry-refinement? entry)
+  (define style (syntax-property entry 'beagle-binding-entry-style))
+  (define datum (->datum entry))
+  (cond
+    [(eq? style 'legacy-rest)
+     (define declaration (cadr datum))
+     (or (= (length declaration) 3)
+         (and (list? (cadr declaration))
+              (= (length (cadr declaration)) 3)
+              (eq? (cadr (cadr declaration)) 'where)))]
+    [(eq? style 'legacy)
+     (or (= (length datum) 3)
+         (and (list? (cadr datum)) (= (length (cadr datum)) 3)
+              (eq? (cadr (cadr datum)) 'where)))]
+    [else
+     (define type-datum (last datum))
+     (and (list? type-datum) (= (length type-datum) 3)
+          (eq? (cadr type-datum) 'where))]))
+
 (define (canonical-entry-text tokens entry start end col [suffix-width 0])
   (define inline (fragment->inline tokens start end))
   (define datum (->datum entry))
-  (define over-width?
-    (> (+ col (string-length inline) suffix-width)
-       SIGNATURE-LINE-WIDTH))
-  (cond
-    [(and (list? datum)
-          (= (length datum) 2)
-          (eq? (car datum) '&)
-          (structured-binding? (cadr datum))
-          over-width?
-          (not (comment-in-range? tokens start end)))
-     (define declaration (cadr (stx-subs entry)))
-     (string-append "& "
-                    (nested-layout-text tokens declaration (+ col 2)
-                                        suffix-width))]
-    [(and (structured-binding? datum)
-          over-width?
-          (not (comment-in-range? tokens start end)))
-     (nested-layout-text tokens entry col suffix-width)]
+  (case (syntax-property entry 'beagle-binding-entry-style)
+    [(legacy) (legacy-declaration-text tokens entry)]
+    [(legacy-rest)
+     (define source-stxs
+       (syntax-property entry 'beagle-binding-entry-source-stxs))
+     (string-append "& " (legacy-declaration-text tokens (cadr source-stxs)))]
     [else inline]))
 
 (define (canonical-vector-text tokens open close entries continuation-col
@@ -689,27 +740,25 @@
   (define close-start (token-offset close))
   (define starts (map syntax-start-offset entries))
   (cond
-    [(or (not vertical?) (null? starts))
-     (string-append "[" (fragment->inline tokens open-end close-start) "]")]
+    [(null? starts) "[]"]
     [else
-     (define boundaries (append (cdr starts) (list close-start)))
      (define fragments
-       (for/list ([start (in-list (cons open-end (cdr starts)))]
-                  [end (in-list boundaries)]
-                  [entry (in-list entries)]
+       (for/list ([entry (in-list entries)]
                   [index (in-naturals)])
          (canonical-entry-text
-          tokens entry start end continuation-col
+          tokens entry (syntax-start-offset entry)
+          (syntax-end-offset entry tokens) continuation-col
           (if (= index (sub1 (length entries)))
               (string-length (token-text close))
               0))))
-     (string-append
-      "["
-      (car fragments)
-      (apply string-append
-             (for/list ([fragment (in-list (cdr fragments))])
-               (string-append "\n" (make-string continuation-col #\space) fragment)))
-      "]")]))
+     (if vertical?
+         (string-append
+          "[" (car fragments)
+          (apply string-append
+                 (for/list ([fragment (in-list (cdr fragments))])
+                   (string-append "\n" (make-string continuation-col #\space) fragment)))
+          "]")
+         (string-append "[" (string-join fragments " ") "]"))]))
 
 (define (expression-end-offset tokens tok)
   (cond
@@ -719,22 +768,48 @@
     [tok (token-end tok)]
     [else #f]))
 
-(define (signature-tail-end-offset tokens close return-slot?)
+(struct signature-tail (end fragments) #:transparent)
+
+(define (where-clause-token? tokens tok)
+  (and tok
+       (eq? (token-type tok) 'open-paren)
+       (let ([head (next-significant-token tokens (token-end tok))])
+         (and head (string=? (token-text head) "where")))))
+
+(define (signature-tail-info tokens close return-slot?)
   (cond
-    [(not return-slot?) (token-end close)]
+    [(not return-slot?) (signature-tail (token-end close) '())]
     [else
      (define return-token
        (next-significant-token tokens (token-end close)))
      (define return-end
        (or (expression-end-offset tokens return-token) (token-end close)))
-     (define maybe-raises
-       (next-significant-token tokens return-end))
+     (define return-text
+       (fragment->inline tokens (token-offset return-token) return-end))
+     (define maybe-where (next-significant-token tokens return-end))
+     (define-values (after-where fragments)
+       (if (where-clause-token? tokens maybe-where)
+           (let ([where-end (expression-end-offset tokens maybe-where)])
+             (values where-end
+                     (list return-text
+                           (fragment->inline tokens
+                                             (token-offset maybe-where)
+                                             where-end))))
+           (values return-end (list return-text))))
+     (define maybe-raises (next-significant-token tokens after-where))
      (if (and maybe-raises (string=? (token-text maybe-raises) ":raises"))
-         (let ([error-type
-                (next-significant-token tokens (token-end maybe-raises))])
-           (or (expression-end-offset tokens error-type)
-               (token-end maybe-raises)))
-         return-end)]))
+         (let* ([error-type
+                 (next-significant-token tokens (token-end maybe-raises))]
+                [error-end
+                 (or (expression-end-offset tokens error-type)
+                     (token-end maybe-raises))])
+           (signature-tail
+            error-end
+            (append fragments
+                    (list (fragment->inline tokens
+                                            (token-offset maybe-raises)
+                                            error-end)))))
+         (signature-tail after-where fragments))]))
 
 (define (signature-continuation-col form-stx open placement tokens)
   (case placement
@@ -767,7 +842,7 @@
       SIGNATURE-LINE-WIDTH))
 
 (define (check-layout-vector! source tokens form-stx anchor vector-stx placement role
-                              [return-slot? #t])
+                              [return-slot? #t] [return-own-line? #f])
   (define start (syntax-start-offset vector-stx))
   (define entries (and start (logical-entry-stxs vector-stx)))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
@@ -780,29 +855,24 @@
         [(owner) anchor-end]
         [(clause) (if clause-open (token-end clause-open) (token-offset open))]
         [else (token-offset open)]))
-    (define signature-end
-      (signature-tail-end-offset tokens close return-slot?))
+    (define tail-info (signature-tail-info tokens close return-slot?))
+    (define signature-end (signature-tail-end tail-info))
     (define gap
       (and (eq? placement 'owner)
            (fragment->inline tokens anchor-end (token-offset open))))
     (define continuation-col
       (signature-continuation-col form-stx open placement tokens))
-    (define layout
-      (cond
-        [(inline-signature-fits? tokens form-stx open signature-end placement)
-         'inline]
-        [(signature-unit-fits? tokens open signature-end continuation-col)
-         'unit]
-        [else 'expanded]))
+    (define expanded?
+      (or (> (length entries) 1)
+          (for/or ([entry (in-list entries)])
+            (entry-refinement? entry))))
+    (define layout (if expanded? 'expanded 'inline))
     (define vector-col
       (if (eq? layout 'inline) (token-col open) continuation-col))
     (define vector-text
       (canonical-vector-text tokens open close entries (add1 vector-col)
                              (eq? layout 'expanded)))
-    (define tail-text
-      (if return-slot?
-          (fragment->inline tokens (token-end close) signature-end)
-          ""))
+    (define tail-fragments (signature-tail-fragments tail-info))
     (define prefix-text
       (case placement
         [(owner)
@@ -831,13 +901,24 @@
        vector-text
        (cond
          [(not return-slot?) ""]
-         [(eq? layout 'expanded)
-          (string-append "\n" (make-string continuation-col #\space) tail-text
+         [(and (eq? layout 'expanded) return-own-line?)
+          (string-append "\n" (make-string continuation-col #\space)
+                         (string-join
+                          tail-fragments
+                          (string-append "\n"
+                                         (make-string continuation-col #\space)))
                          (if body?
                              (string-append "\n"
                                             (make-string continuation-col #\space))
                              ""))]
-         [else (string-append " " tail-text)])))
+         [else
+          (string-append
+           (if (null? tail-fragments)
+               ""
+               (string-append " " (string-join tail-fragments " ")))
+           (if (and (eq? layout 'expanded) body?)
+               (string-append "\n" (make-string continuation-col #\space))
+               ""))])))
     (define before (substring source region-start region-end))
     (unless (string=? before replacement)
       (define path
@@ -902,14 +983,15 @@
     (define anchor (if (eq? tail tail0) name-stx (car tail0)))
     (cond
       [(and (pair? tail) (vector-stx? (car tail)))
-       (check-layout-vector! source tokens form-stx anchor (car tail) 'owner "parameter")]
+       (check-layout-vector! source tokens form-stx anchor (car tail) 'owner
+                             "parameter" #t #t)]
       [else
        (for ([clause (in-list tail)])
          (define clause-subs (stx-subs clause))
          (when (and clause-subs (pair? clause-subs)
                     (vector-stx? (car clause-subs)))
            (check-layout-vector! source tokens clause clause (car clause-subs) 'clause
-                                 "multi-arity parameter")))])))
+                                 "multi-arity parameter" #t #t)))])))
 
 (define (inspect-layout-form! source tokens form-stx)
   (define subs (stx-subs form-stx))
@@ -918,8 +1000,6 @@
     (case head
       [(defn defn-) (inspect-defn-layout! source tokens form-stx)]
       [(fn) (inspect-fn-layout! source tokens form-stx)]
-      [(defmacro)
-       (inspect-named-form-vector! source tokens form-stx 2 1 "macro parameter")]
       [(defrecord) (inspect-named-form-vector! source tokens form-stx 2 1 "typed field")]
       [(letfn)
        (define fns (stx-ref subs 1))
@@ -2738,6 +2818,34 @@
          (or (bracketed? first-elem)
              (and (pair? first-elem) (bracketed? (car first-elem)))))))
 
+(define (signature-where-clause? datum)
+  (and (list? datum) (= (length datum) 2) (eq? (car datum) 'where)))
+
+(define (parse-signature-tail return-datum tail [tail-stxs #f]
+                              #:raises? [raises-allowed? #t]
+                              #:context [context "function"])
+  (define parsed-return (parse-type return-datum))
+  (define-values (effective-return after-where after-where-stxs)
+    (if (and (pair? tail) (signature-where-clause? (car tail)))
+        (values (type-refinement parsed-return (cadar tail) 'signature)
+                (cdr tail)
+                (and tail-stxs (cdr tail-stxs)))
+        (values parsed-return tail tail-stxs)))
+  (define-values (raises body body-stxs)
+    (if (and raises-allowed? (pair? after-where) (eq? (car after-where) ':raises))
+        (begin
+          (when (< (length after-where) 3)
+            (raise-parse-error
+             'bad-form "~a :raises needs an error type and body" context))
+          (values (parse-type (cadr after-where))
+                  (cddr after-where)
+                  (and after-where-stxs (cddr after-where-stxs))))
+        (values #f after-where after-where-stxs)))
+  (when (null? body)
+    (raise-parse-error
+     'bad-form "~a needs a return type and body" context))
+  (values effective-return raises (parse-body (or body-stxs body))))
+
 (define (parse-arity-clause clause)
   (define datum (->datum clause))
   (define subs (stx-subs clause))
@@ -2751,9 +2859,10 @@
     (raise-parse-error
      'bad-form
      "multi-arity clause needs a return type and body — write `([params] ReturnType body...)`"))
-  (arity-clause parsed rest-p
-                (parse-type (car rest))
-                (parse-body (or (stx-tail subs 2) (cdr rest)))))
+  (define-values (return-type _raises body)
+    (parse-signature-tail (car rest) (cdr rest) (stx-tail subs 2)
+                          #:raises? #f #:context "multi-arity clause"))
+  (arity-clause parsed rest-p return-type body))
 
 ;; A second top-level parameter vector in a single-arity `defn` tail is the
 ;; retired flattened multi-arity spelling. Detect the stray declaration form
@@ -3166,6 +3275,18 @@
   (lambda (d subs)
     (do-form (parse-body (or (stx-tail subs 1) (cdr d))))))
 
+;; `(: expr Type)` is a compile-time ascription. Emitters erase the wrapper
+;; after the checker proves the inner expression compatible with Type.
+(register-combiner! ':
+  (lambda (d subs)
+    (match d
+      [(list ': expr type-datum)
+       (ascription (parse-expr (or (stx-ref subs 1) expr))
+                    (parse-type type-datum))]
+      [_ (raise-parse-error
+          'bad-form
+          "ascription requires exactly `(: expr Type)`, got: ~v" d)])))
+
 ;; `if` — conditional (2- and 3-arg). Any other arity falls back to the legacy
 ;; dispatch, so malformed `if` is handled exactly as before.
 (register-combiner! 'if
@@ -3287,9 +3408,13 @@
          "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")]
       [(list 'fn params-form return-type body body-rest ...)
        (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
+         (define-values (effective-return _raises parsed-body)
+           (parse-signature-tail return-type (cons body body-rest)
+                                 (stx-tail subs 3)
+                                 #:raises? #f #:context "fn"))
          (fn-form parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 3) (cons body body-rest)))))]
+                  effective-return
+                  parsed-body))]
       [(list 'fn params-form _ ...)
        (raise-parse-error
         'bad-form
@@ -3551,6 +3676,14 @@
 ;; (or 'defn 'defn-) arms, so both heads route to this ONE handler; the arms are
 ;; kept in source order (semantically significant), with defn-only and
 ;; defn--only arms interleaved exactly as in the legacy match.
+(define (parse-single-defn name params-form return-datum tail subs private?)
+  (let-values ([(parsed rest-p)
+                (parse-params (or (stx-ref subs 2) params-form))])
+    (define-values (return-type raises body)
+      (parse-signature-tail return-datum tail (stx-tail subs 4)
+                            #:context (format "defn ~a" name)))
+    (defn-form name parsed rest-p return-type body private? raises #f)))
+
 (define (parse-defn-form d subs)
   ;; Reserved-name guard: a function named after a built-in combiner head would be
   ;; defined as dead code while every (name ...) call site silently resolves to the
@@ -3600,16 +3733,8 @@
                            (or (stx-tail subs 2)
                                (cons first-clause rest-clauses))) #f #f)]
 
-    [(list 'defn (? symbol? name) params-form return-type ':raises err-type body body-rest ...)
-       (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p (parse-type return-type)
-                  (parse-body (or (stx-tail subs 6) (cons body body-rest)))
-                  #f (parse-type err-type) #f))]
-    [(list 'defn (? symbol? name) params-form return-type body body-rest ...)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p (parse-type return-type)
-                  (parse-body (or (stx-tail subs 4) (cons body body-rest)))
-                  #f #f #f))]
+    [(list 'defn (? symbol? name) params-form return-type tail ...)
+     (parse-single-defn name params-form return-type tail subs #f)]
 
     ;; defn with ^:private metadata on name
     [(list 'defn (list '#%meta _ (? symbol? name)) first-clause rest-clauses ...)
@@ -3618,16 +3743,8 @@
                            (or (stx-tail subs 2)
                                (cons first-clause rest-clauses))) #t #f)]
 
-    [(list 'defn (list '#%meta _ (? symbol? name)) params-form return-type ':raises err-type body body-rest ...)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 6) (cons body body-rest))) #t (parse-type err-type) #f))]
-    [(list 'defn (list '#%meta _ (? symbol? name)) params-form return-type body body-rest ...)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 4) (cons body body-rest))) #t #f #f))]
+    [(list 'defn (list '#%meta _ (? symbol? name)) params-form return-type tail ...)
+     (parse-single-defn name params-form return-type tail subs #t)]
 
     ;; defn- (private defn)
     [(list 'defn- (? symbol? name) first-clause rest-clauses ...)
@@ -3636,16 +3753,8 @@
                            (or (stx-tail subs 2)
                                (cons first-clause rest-clauses))) #t #f)]
 
-    [(list 'defn- (? symbol? name) params-form return-type ':raises err-type body body-rest ...)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 6) (cons body body-rest))) #t (parse-type err-type) #f))]
-    [(list 'defn- (? symbol? name) params-form return-type body body-rest ...)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 4) (cons body body-rest))) #t #f #f))]
+    [(list 'defn- (? symbol? name) params-form return-type tail ...)
+     (parse-single-defn name params-form return-type tail subs #t)]
 
     ;; Any defn shape the arms above didn't accept must not reach the
     ;; call-form passthrough (silent type-layer bypass — bug class 2026-06-12).
@@ -5171,17 +5280,79 @@
 
 ;; --- params + bindings -----------------------------------------------------
 
-;; A param item is a bare name or a structural `(binding-form Type
-;; [constraint])` binding.
-;; Destructuring in a strict executable signature must carry the incoming
-;; aggregate type; Beagle has no principal row/sequence-kind type to infer for
-;; a bare pattern.
+(define (binding-style items)
+  (cond
+    [(null? items) #f]
+    [(structured-binding? (car items)) 'legacy]
+    [(and (pair? (cdr items))
+          (type-expression-datum? (cadr items)))
+     'flat]
+    [else 'inferred]))
+
+(define (flat-structured-binder items)
+  (for/first ([item (in-list items)] [index (in-naturals)]
+              #:when (and (even? index) (structured-binding? item)))
+    item))
+
+(define (raise-mixed-bindings context datum [source-stx #f])
+  (raise-parse-error
+   'mixed-typed-bindings
+   "~a vector mixes legacy grouped declarations with flat binding/type pairs; use strict pairs all the way through"
+   context
+   #:details (source-error-details source-stx datum)))
+
+(define (raise-missing-binding-type context binder [source-stx #f] #:hint [hint ""])
+  (raise-parse-error
+   'missing-binding-type
+   (string-append "~a ~a has no following type" hint)
+   context (binding-datum->src binder)
+   #:details
+   (hash-set (source-error-details source-stx binder)
+             'binder (binding-datum->src binder))))
+
+;; Repair hints feed the automated repair loop, so every declaration-site
+;; rejection spells the grammar it wants back. Record fields are pairs
+;; (rule 4c) and a field-local validator is a refinement type (rule 3).
+(define RECORD-FIELD-GRAMMAR-HINT
+  (string-append "\n\n"
+                 "Each field is one binding/type pair:\n"
+                 "  name Type\n"
+                 "  name (Type where validator)"))
+
+;; A field declaration is complete only when its type slot really parses as a
+;; type. `(wire-validator id)` has the shape of a grouped declaration but no
+;; meaningful type, so in the slot after a complete field it is metadata that
+;; was flattened out of the declaration it belongs to.
+(define (complete-record-field-declaration? datum)
+  (and (structured-binding? datum)
+       (symbol? (car datum))
+       (type-expression-datum? (cadr datum))))
+
+(define (raise-flattened-record-field declaration stray stray-stx)
+  (raise-parse-error
+   'inline-type-annotation
+   (string-append
+    "Invalid field declaration: ~a"
+    RECORD-FIELD-GRAMMAR-HINT
+    "\n\n"
+    "Did you mean:\n"
+    "  ~a (~a where ~a)")
+   #:details (source-error-details stray-stx stray)
+   (binding-datum->src stray)
+   (binding-datum->src (car declaration))
+   (binding-datum->src (cadr declaration))
+   (binding-datum->src stray)))
+
+;; Executable signatures retain wholly inferred vectors. Typed vectors
+;; dual-read the legacy grouped declaration and the new flat pair grammar. A
+;; vector chooses one style at its first declaration and stays in that style
+;; through the rest parameter.
 (define (parse-params p)
   (define d (->datum p))
   (define items (bracket-items p "parameter list"))
   (define item-stxs (bracket-stxs (stx-subs p) d))
-  ;; after-amp stays the raw item LIST so retired flat punctuation remains
-  ;; distinguishable from the canonical singleton `& (more (Vec Int))`.
+  (when (> (count (lambda (item) (eq? item '&)) items) 1)
+    (raise-parse-error 'bad-form "parameter list may contain only one & marker"))
   (define amp-pos (index-of items '&))
   (define before-amp (if amp-pos (take items amp-pos) items))
   (define after-amp (and amp-pos (drop items (add1 amp-pos))))
@@ -5191,19 +5362,43 @@
     (and item-stxs (if amp-pos (take item-stxs amp-pos) item-stxs)))
   (define after-amp-stxs
     (and item-stxs amp-pos (drop item-stxs (add1 amp-pos))))
-  (define fixed (parse-typed-params before-amp before-amp-stxs))
+  (define fixed-style (binding-style before-amp))
+  (define rest-style (and after-amp (pair? after-amp) (binding-style after-amp)))
+  (when (and fixed-style rest-style (not (eq? fixed-style rest-style))
+             ;; In a typed vector, `& name` is the odd rest pair. Let the
+             ;; style-specific branch name that binder as missing its type.
+             (not (and (memq fixed-style '(legacy flat))
+                       (eq? rest-style 'inferred)
+                       (= (length after-amp) 1)
+                       (symbol? (car after-amp)))))
+    (raise-mixed-bindings "parameter" d p))
+  (define style (or fixed-style rest-style 'inferred))
+  (define fixed (parse-typed-params before-amp before-amp-stxs style))
   (define rest-p
     (and after-amp
-         (cond
-           [(and (= (length after-amp) 1) (symbol? (car after-amp)))
+         (case style
+           [(inferred)
+            (unless (and (= (length after-amp) 1)
+                         (symbol? (car after-amp)))
+              (raise-parse-error
+               'bad-form
+               "& must be followed by exactly one inferred parameter or one binding/type pair"))
             (define source-stx (and after-amp-stxs (car after-amp-stxs)))
+            (define name (parse-binding-form (car after-amp) "rest parameter"))
             (register-syntax-binder!
-             (store-src!
-              (param (car after-amp) #f #f)
-              (and source-stx (stx->src-loc source-stx)))
+             (store-src! (param name #f #f)
+                         (and source-stx (stx->src-loc source-stx)))
              source-stx)]
-           [(and (= (length after-amp) 1)
-                 (structured-binding? (car after-amp)))
+           [(legacy)
+            (when (and (= (length after-amp) 1)
+                       (symbol? (car after-amp)))
+              (raise-missing-binding-type
+               "rest parameter" (car after-amp)
+               (and after-amp-stxs (car after-amp-stxs))))
+            (unless (and (= (length after-amp) 1)
+                         (structured-binding? (car after-amp)))
+              (raise-mixed-bindings "rest parameter" after-amp
+                                    (and after-amp-stxs (car after-amp-stxs))))
             (define-values (name type constraint)
               (parse-structured-binding
                (car after-amp)
@@ -5216,12 +5411,30 @@
             (define source-stx (and after-amp-stxs (car after-amp-stxs)))
             (register-syntax-binder!
              (store-src!
-              (param name type constraint)
+             (param name type constraint)
               (and source-stx (stx->src-loc source-stx)))
              source-stx)]
-           [else
-            (error 'beagle "bad rest parameter after &: ~v"
-                   (if (= (length after-amp) 1) (car after-amp) after-amp))])))
+           [(flat)
+            (when (= (length after-amp) 1)
+              (raise-missing-binding-type
+               "rest parameter" (car after-amp)
+               (and after-amp-stxs (car after-amp-stxs))))
+            (unless (= (length after-amp) 2)
+              (raise-parse-error
+               'bad-form
+               "& must be followed by exactly one binding/type pair"))
+            (define name
+              (parse-binding-form (car after-amp) "rest parameter"))
+            (unless (symbol? name)
+              (raise-parse-error
+               'inline-type-annotation
+               "rest parameter must bind one name, not a destructuring pattern"))
+            (define source-stx (and after-amp-stxs (car after-amp-stxs)))
+            (register-syntax-binder!
+             (store-src!
+              (param name (parse-type (cadr after-amp)) #f)
+              (and source-stx (stx->src-loc source-stx)))
+             source-stx)])))
   (define all-bound
     (append (apply append (map binding-target-bound-names fixed))
             (if rest-p (binding-target-bound-names rest-p) '())))
@@ -5237,44 +5450,69 @@
      duplicate))
   (values fixed rest-p))
 
-;; Walks param items left-to-right. Bracket and map destructures are single
-;; items; a two- or three-form list is one typed binding.
-(define (parse-typed-params items [item-stxs #f])
-  (let loop ([rest items] [stxs item-stxs] [acc '()])
-    (cond
-      [(null? rest) (reverse acc)]
-      ;; Single-item parameter (bracket, map-destructure, or bare).
-      [else
-       (define item (car rest))
-       (define parsed
-         (cond
-           [(structured-binding? item)
-            (define-values (name type constraint)
-              (parse-structured-binding item "parameter" (and stxs (car stxs))))
-            (store-src! (param name type constraint)
-                        (and stxs (stx->src-loc (car stxs))))]
-           [(bracketed? item)
-            (raise-parse-error
-             'inline-type-annotation
-             "destructured parameter requires an aggregate type — write `([pattern ...] Type)`")]
-           [(map-destructure-form? item)
-            (raise-parse-error
-             'inline-type-annotation
-             "destructured parameter requires an aggregate type — write `({:keys [...]} Type)`")]
-           [(symbol? item)
-            (validate-identifier! item "parameter")
-            (note-capitalized-binding! item "parameter")
-            (store-src! (param item #f #f)
-                        (and stxs (stx->src-loc (car stxs))))]
-           [else
-            (error 'beagle
-                   "bad parameter: ~v~nexpected name, (binding-form Type), or (binding-form Type constraint)"
-                   item)]))
-       (define source-stx (and stxs (car stxs)))
-       (loop
-        (cdr rest)
-        (and stxs (cdr stxs))
-        (cons (register-syntax-binder! parsed source-stx) acc))])))
+;; Legacy declarations remain reader-compatible; flat declarations are strict
+;; adjacent pairs. Both paths lower to the same param AST.
+(define (parse-typed-params items [item-stxs #f] [style (binding-style items)])
+  (case (or style 'inferred)
+    [(inferred)
+     (define stxs (or item-stxs (make-list (length items) #f)))
+     (for/list ([item (in-list items)]
+                [source-stx (in-list stxs)]
+                [index (in-naturals)])
+       ;; A grouped declaration inside an otherwise inferred vector makes the
+       ;; vector typed, so the binder ahead of it is the one left without a
+       ;; type. Rule 4a names that binder rather than the enclosing list.
+       (when (structured-binding? item)
+         (define untyped (max 0 (sub1 index)))
+         (raise-missing-binding-type
+          "parameter" (list-ref items untyped) (list-ref stxs untyped)))
+       (when (or (bracketed? item) (map-destructure-form? item))
+         (raise-missing-binding-type "parameter" item source-stx))
+       (define name (parse-binding-form item "parameter"))
+       (register-syntax-binder!
+        (store-src! (param name #f #f)
+                    (and source-stx (stx->src-loc source-stx)))
+        source-stx))]
+    [(legacy)
+     (for/list ([item (in-list items)]
+                [source-stx (in-list (or item-stxs (make-list (length items) #f)))])
+       (unless (structured-binding? item)
+         ;; A bare binder in a typed vector is an omitted type (Ruling 2), not
+         ;; an unreadable list — name it.
+         (if (binding-form-datum? item)
+             (raise-missing-binding-type "parameter" item source-stx)
+             (raise-mixed-bindings "parameter" item source-stx)))
+       (define-values (name type constraint)
+         (parse-structured-binding item "parameter" source-stx))
+       (register-syntax-binder!
+        (store-src! (param name type constraint)
+                    (and source-stx (stx->src-loc source-stx)))
+        source-stx))]
+    [(flat)
+     (define mixed (flat-structured-binder items))
+     (when mixed
+       (raise-mixed-bindings "parameter" mixed
+                             (and item-stxs
+                                  (list-ref item-stxs (index-of items mixed)))))
+     (when (odd? (length items))
+       (raise-missing-binding-type
+        "parameter" (last items) (and item-stxs (last item-stxs))))
+     (let loop ([rest items] [stxs item-stxs] [acc '()])
+       (cond
+         [(null? rest) (reverse acc)]
+         [else
+          (define binder (car rest))
+          (define type-datum (cadr rest))
+          (define source-stx (and stxs (car stxs)))
+          (when (structured-binding? binder)
+            (raise-mixed-bindings "parameter" binder source-stx))
+          (define name (parse-binding-form binder "parameter"))
+          (define parsed
+            (store-src! (param name (parse-type type-datum) #f)
+                        (and source-stx (stx->src-loc source-stx))))
+          (loop (cddr rest)
+                (and stxs (cddr stxs))
+                (cons (register-syntax-binder! parsed source-stx) acc))]))]))
 
 (define (map-destructure-form? item)
   (and (map-tagged? item)
@@ -5456,19 +5694,9 @@
     (error 'beagle "target-case: no branches provided"))
   (target-case-form cases))
 
-;; Record fields use the same `(name Type)` grammar as parameter vectors.
-;; Field types are required — records are typed
-;; boundaries; there is no inference across a record's surface.
-(define (complete-record-field-declaration? datum)
-  (and (structured-binding? datum)
-       (symbol? (car datum))
-       ;; A declaration whose type form is not meaningful is not a complete
-       ;; field. In the position immediately after a valid `(name Type)` form,
-       ;; diagnose that exact outer form as flattened field-local metadata.
-       (with-handlers ([exn:fail? (lambda (_error) #f)])
-         (parse-type (cadr datum))
-         #t)))
-
+;; Record fields share the dual-read declaration grammar, but always require a
+;; type. Legacy grouped constraints remain emission-compatible during this
+;; enabling seam; the canonical printer rewrites them as refinement types.
 (define (parse-record-fields f)
   (define d (->datum f))
   (define subs (stx-subs f))
@@ -5476,46 +5704,68 @@
   (define item-stxs (bracket-stxs subs d))
   (when (null? items)
     (error 'beagle "defrecord requires at least one field"))
-  (let loop ([rest items] [stxs item-stxs] [acc '()])
-    (cond
-      [(null? rest) (reverse acc)]
-      [(and (structured-binding? (car rest))
-            (= (length (car rest)) 2)
-            (pair? (cdr rest))
-            (not (complete-record-field-declaration? (cadr rest))))
-       (define declaration (car rest))
-       (define stray (cadr rest))
-       (define stray-stx (and stxs (pair? (cdr stxs)) (cadr stxs)))
-       (raise-parse-error
-        'inline-type-annotation
-        (string-append
-         "Invalid field declaration: ~a\n\n"
-         "Each field must be one complete form:\n"
-         "  (name Type validator)\n\n"
-         "Did you mean:\n"
-         "  (~a ~a ~a)")
-        #:details
-        (source-error-details stray-stx stray)
-        (binding-datum->src stray)
-        (binding-datum->src (car declaration))
-        (binding-datum->src (cadr declaration))
-        (binding-datum->src stray))]
-      [(structured-binding? (car rest))
+  ;; Fields are always typed, so an otherwise inferred-looking sequence still
+  ;; enters the strict flat-pair parser and receives a type diagnostic.
+  (define style
+    (let ([detected (binding-style items)])
+      (if (eq? detected 'inferred) 'flat (or detected 'flat))))
+  (define stxs (or item-stxs (make-list (length items) #f)))
+  (case style
+    [(legacy)
+     ;; Metadata flattened out of a grouped declaration lands in the slot after
+     ;; a complete field. Diagnose it there, with the flat-pair repair, before
+     ;; the type slot of the bogus declaration reaches `parse-type` and reports
+     ;; a far worse `unknown type` on a name the author never wrote as a type.
+     (for ([item (in-list items)]
+           [next (in-list (cdr items))]
+           [next-stx (in-list (cdr stxs))])
+       (when (and (structured-binding? item)
+                  (= (length item) 2)
+                  (not (complete-record-field-declaration? next)))
+         (raise-flattened-record-field item next next-stx)))
+     (for/list ([item (in-list items)]
+                [source-stx (in-list stxs)])
+       (unless (structured-binding? item)
+         (if (binding-form-datum? item)
+             (raise-missing-binding-type "record field" item source-stx
+                                         #:hint RECORD-FIELD-GRAMMAR-HINT)
+             (raise-mixed-bindings "record field" item source-stx)))
        (define-values (name type constraint)
-         (parse-structured-binding (car rest) "record field"
-                                   (and stxs (car stxs))))
+         (parse-structured-binding item "record field" source-stx))
        (unless (symbol? name)
          (error 'beagle
                 "defrecord field name must be a symbol, got destructuring pattern: ~v"
-                (car rest)))
-       (loop (cdr rest) (and stxs (cdr stxs))
-             (cons (store-src! (param name type constraint)
-                               (and stxs (stx->src-loc (car stxs))))
-                   acc))]
-      [else
-       (error 'beagle
-              "defrecord field needs a type — use [(name Type) (name2 Type2 validator) ...], got: ~v"
-              (car rest))])))
+                item))
+       (store-src! (param name type constraint)
+                   (and source-stx (stx->src-loc source-stx))))]
+    [(flat)
+     (define mixed (flat-structured-binder items))
+     (when mixed
+       (raise-mixed-bindings "record field" mixed
+                             (and item-stxs
+                                  (list-ref item-stxs (index-of items mixed)))))
+     (when (odd? (length items))
+       (raise-missing-binding-type
+        "record field" (last items) (and item-stxs (last item-stxs))
+        #:hint RECORD-FIELD-GRAMMAR-HINT))
+     (let loop ([rest items] [stxs item-stxs] [acc '()])
+       (cond
+         [(null? rest) (reverse acc)]
+         [else
+          (define binder (car rest))
+          (define source-stx (and stxs (car stxs)))
+          (when (structured-binding? binder)
+            (raise-mixed-bindings "record field" binder source-stx))
+          (define name (parse-binding-form binder "record field"))
+          (unless (symbol? name)
+            (error 'beagle
+                   "defrecord field name must be a symbol, got destructuring pattern: ~v"
+                   binder))
+          (loop (cddr rest)
+                (and stxs (cddr stxs))
+                (cons (store-src! (param name (parse-type (cadr rest)) #f)
+                                  (and source-stx (stx->src-loc source-stx)))
+                      acc))]))]))
 
 (define (parse-type-impls rest)
   (let loop ([items rest] [cur-proto #f] [cur-methods '()] [acc '()])

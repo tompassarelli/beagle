@@ -537,6 +537,7 @@
     [(unspecified-semantics) "BEAGLE-UNSPECIFIED-SEMANTICS"]
     [(native-abi)          "E029"]
     [(contract-refinement) "E030"]
+    [(refinement-not-implemented) "E031"]
     [(numeric-range)       "BEAGLE-NUMERIC-RANGE"]
     [(effectful-comparator) "BEAGLE-EFFECTFUL-COMPARATOR"]
     [else                 "E000"]))
@@ -1072,6 +1073,38 @@
       [else (void)]))
   out)
 
+(define (find-authored-refinement prog)
+  (let/ec found
+    (define (walk value owner)
+      (cond
+        [(type-refinement? value) (found (cons value owner))]
+        [(pair? value) (walk (car value) owner) (walk (cdr value) owner)]
+        [(vector? value) (for ([item (in-vector value)]) (walk item owner))]
+        [(hash? value)
+         (for ([(key item) (in-hash value)])
+           (walk key owner)
+           (walk item owner))]
+        [(struct? value)
+         (for ([item (in-list (cdr (vector->list (struct->vector value))))])
+           (walk item owner))]
+        [else (void)]))
+    (for ([form (in-list (program-forms prog))]) (walk form form))
+    #f))
+
+(define (reject-authored-refinements! prog)
+  (define found (find-authored-refinement prog))
+  (when found
+    (define refinement (car found))
+    (define owner (cdr found))
+    (raise-diag
+     'refinement-not-implemented
+     "refinement semantics are not yet implemented; the syntax is reserved, but static proof and trust-boundary guards land in a later seam"
+     (hasheq 'feature "refinement-types"
+             'status "not-yet-implemented"
+             'placement (symbol->string (type-refinement-placement refinement))
+             'predicate (format "~s" (type-refinement-predicate refinement)))
+     #:src (src-for owner))))
+
 (define (type-check! prog)
   (when (>= (current-check-profile) 1)
     (clear-program-shadow-evidence! prog)
@@ -1099,6 +1132,7 @@
                    [current-raising-functions (hasheq)]
                    [current-binder-type-table binder-type-tbl]
                    [current-nixos-schema nix-schema])
+      (reject-authored-refinements! prog)
       (call-with-fresh-type-metas
        (lambda ()
          (set! env (build-initial-env prog))
@@ -2030,6 +2064,8 @@
          (for ([arg (in-list (call-form-args inner))])
            (check-error-expr! arg env))
          (check-error-expr! inner env))]
+    [(ascription? e)
+     (check-error-expr! (ascription-expr e) env)]
     [(rescue-form? e)
      (define inner (rescue-form-expr e))
      (define contract (raising-call-contract inner))
@@ -3253,6 +3289,7 @@
                  (set-add scope (rescue-form-err-name value))
                  scope))]
       [(check-expr? value) (walk (check-expr-expr value) scope)]
+      [(ascription? value) (walk (ascription-expr value) scope)]
       [(await-form? value) (walk (await-form-expr value) scope)]
       [(set!-form? value)
        (walk (set!-form-target value) scope)
@@ -5614,6 +5651,20 @@
     [(resolved-ref? e)
      (reference-hash-ref env e ANY)]
     [(quoted? e) ANY]
+    [(ascription? e)
+     (define expected (ascription-type e))
+     (define inner (ascription-expr e))
+     (define actual (infer-expr-with-expected inner env expected))
+     (unless (or (check-hvec-literal inner expected env (src-for inner))
+                 (check-atom-ctor inner expected env (src-for inner))
+                 (type-compatible? actual expected))
+       (raise-diag
+        'type-mismatch
+        (format "ascription: expected ~a, got ~a"
+                (type->string expected) (type->string actual))
+        (type-mismatch-details expected actual)
+        #:src (or (src-for e) (src-for inner))))
+     expected]
     [(regex-lit? e)
      (regex-construction-contract e)
      REGEX]
@@ -9678,6 +9729,7 @@
       [(rescue-form? e) (go (rescue-form-expr e) l)
                         (go (rescue-form-fallback e) l)]
       [(check-expr? e) (go (check-expr-expr e) l)]
+      [(ascription? e) (go (ascription-expr e) l)]
       [(set!-form? e) (go (set!-form-target e) l)
                       (go (set!-form-value e) l)]
       [(jst-selector? e) (void)]

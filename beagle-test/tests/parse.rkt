@@ -173,27 +173,41 @@
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Any)
   (check-false (param-type (car (defn-form-params f)))))
 
-(test-case "typed and bare parameters compose structurally"
+;; Ruling 2 deleted omitted binding types, so a vector that mixes a grouped
+;; declaration with a bare binder is a rejection, not a parse. Rule 4a fixes
+;; the diagnostic's shape: it names the binder left without a type, never the
+;; enclosing list.
+(parse-err/rx "a grouped declaration beside a bare binder names the untyped binder"
+  #rx"^beagle: parameter b has no following type$"
+  (L 'defn 'mixed (br (L 'a 'Int) 'b) 'Any '(foo a b)))
+
+(parse-err/rx "a bare binder ahead of a grouped declaration names that binder"
+  #rx"^beagle: parameter a has no following type$"
+  (L 'defn 'mixed-constraints
+     (br 'a (L 'b 'Int 'positive?) (L 'c 'String))
+     'Any
+     'b))
+
+;; Ruling 4 keeps the reader dual-reading during migration: rejecting a MIXED
+;; vector must never become rejecting the legacy spelling itself. These are the
+;; property the incremental corpus conversion rests on.
+(test-case "an all-legacy parameter vector still parses"
   (define f
     (car (parse-one
-          (L 'defn 'mixed (br (L 'a 'Int) 'b) 'Any '(foo a b)))))
-  (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
-  (check-false (param-type (cadr (defn-form-params f)))))
-
-(test-case "each parameter independently owns its optional constraint"
-  (define f
-    (car
-     (parse-one
-      (L 'defn 'mixed-constraints
-         (br 'a (L 'b 'Int 'positive?) (L 'c 'String))
-         'Any
-         'b))))
+          (L 'defn 'legacy (br (L 'a 'Int) (L 'b 'String) (L 'c 'Int 'positive?))
+             'Any 'a))))
   (define params (defn-form-params f))
   (check-equal? (map param-name params) '(a b c))
-  (check-false (param-type (car params)))
-  (check-eq? (type-prim-name (param-type (cadr params))) 'Int)
-  (check-equal? (param-constraint (cadr params)) 'positive?)
-  (check-false (param-constraint (caddr params))))
+  (check-eq? (type-prim-name (param-type (car params))) 'Int)
+  (check-eq? (type-prim-name (param-type (cadr params))) 'String)
+  (check-equal? (param-constraint (caddr params)) 'positive?))
+
+(test-case "an all-legacy record field vector still parses"
+  (define f (car (parse-one
+                  (L 'defrecord 'Legacy (br (L 'a 'Int) (L 'b 'String))))))
+  (check-true (record-form? f))
+  (check-equal? (map param-name (record-form-fields f)) '(a b))
+  (check-eq? (type-prim-name (param-type (car (record-form-fields f)))) 'Int))
 
 (test-case "typed destructuring owns its aggregate constraint"
   (define f
@@ -393,10 +407,9 @@
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Any)
   (check-false (param-type (car (defn-form-params f)))))
 
-(test-case "defn may mix typed and bare structural parameters"
-  (define f (car (parse-one '(defn mix [(x Int) y] Any (+ x y)))))
-  (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
-  (check-false (param-type (cadr (defn-form-params f)))))
+(parse-err/rx "defn rejects a vector mixing a typed and a bare parameter"
+  #rx"^beagle: parameter y has no following type$"
+  '(defn mix [(x Int) y] Any (+ x y)))
 
 (test-case "an all-bare param vector stays untyped"
   (define f (car (parse-one '(defn mix [x y] Any (+ x y)))))
@@ -830,8 +843,10 @@
           (check-regexp-match
            #rx"Invalid field declaration: character-id-wire\\?"
            (exn-message e))
+          ;; Rule 4c: the repair is spelled in the flat pair grammar, and a
+          ;; field-local validator is a refinement type (rule 3).
           (check-regexp-match
-           #rx"Did you mean:\n  \\(id String character-id-wire\\?\\)"
+           #rx"Did you mean:\n  id \\(String where character-id-wire\\?\\)"
            (exn-message e))
           (define details (beagle-parse-error-details e))
           (check-equal? (hash-ref details 'stray-form) "character-id-wire?")
@@ -853,7 +868,7 @@
            #rx"Invalid field declaration: \\(wire-validator id\\)"
            (exn-message e))
           (check-regexp-match
-           #rx"Did you mean:\n  \\(id String \\(wire-validator id\\)\\)"
+           #rx"Did you mean:\n  id \\(String where \\(wire-validator id\\)\\)"
            (exn-message e))
           (define details (beagle-parse-error-details e))
           (check-equal? (hash-ref details 'stray-form) "(wire-validator id)")
@@ -1869,8 +1884,14 @@
   (check-true (record-form? f))
   (check-equal? (map param-name (record-form-fields f)) '(id n)))
 
-(parse-err/rx "defrecord untyped field rejection names the structural form"
-  #rx"[(]name Type[)]"
+;; Rule 4a: the rejection names the untyped field, and carries the pair
+;; grammar so the repair loop has a target spelling.
+(parse-err/rx "defrecord untyped field rejection names the field"
+  #rx"record field id has no following type"
+  (L 'defrecord 'T (br 'id)))
+
+(parse-err/rx "defrecord untyped field rejection spells the pair grammar"
+  #rx"Each field is one binding/type pair:\n  name Type"
   (L 'defrecord 'T (br 'id)))
 
 ;; Map destructure: :or/:as supported; :strs/:syms pointedly rejected.
@@ -1996,7 +2017,12 @@
      (cons "record" "(defrecord R [(x Int) (y Int)])\n")
      (cons "union" "(defunion U (Pair [(x Int) (y Int)]))\n")
      (cons "throwable union" "(defunion :throwable E (Bad [(message String) (code Int)]))\n")
-     (cons "destructure/rest" "(defn f [x ({:keys [y]} Config) & rest] Any x)\n")
+     ;; Ruling 2 requires every binder to carry a type, so this case is written
+     ;; in both readable spellings rather than the retired mixed one.
+     (cons "destructure/rest legacy"
+           "(defn f [({:keys [y]} Config) & (rest (Vec Int))] Any y)\n")
+     (cons "destructure/rest flat"
+           "(defn f [{:keys [y]} Config & rest (Vec Int)] Any y)\n")
      (cons "nested type layout" "(defn f [(x (Vec Int)) (y (Vec Int))] (Vec Int) x)\n")))
   (for ([case (in-list cases)])
     (check-not-exn (lambda () (parse-source-text (cdr case))) (car case))))

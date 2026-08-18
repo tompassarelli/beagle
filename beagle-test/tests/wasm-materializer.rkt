@@ -1537,7 +1537,7 @@ SH
            (list "rest" "native.entry-rest"
                  "(defn entry [& (xs (Vec Int))] Int 1)\n" "must not have a rest parameter")
            (list "missing return" "native.entry-untyped"
-                 "(defn entry [] 1)\n" "malformed defn — expected")
+                 "(defn entry [] 1)\n" "needs a return type and body")
            (list "non Int" "native.entry-bool"
                  "(defn entry [] Bool true)\n" "must have an explicit Int return")
            (list "duplicate qualified" "native.entry-duplicate"

@@ -14,6 +14,7 @@
          "extensions.rkt"
          "macros.rkt"
          "types.rkt"
+         "surface-canonical.rkt"
          ;; THE single beagle readtable — no bespoke subset reader to drift
          ;; (#19/#32). Datum mode (plain read) gives container/reader tags as data.
          (only-in "../lang/reader-impl.rkt" beagle-readtable))
@@ -75,7 +76,7 @@
 ;; #%regex→#"..", #%meta→^m f, reader-conditional(-splice)→#?(..)/#?@(..), and
 ;; the quote family quote/quasiquote/unquote/unquote-splicing→' ` ~ ~@. Anything
 ;; else is a plain list → (..). Booleans are beagle `true`/`false` (not #t/#f).
-(define (datum->beagle-src d)
+(define (datum->beagle-src/raw d)
   (cond
     [(string? d) (~v d)]
     [(boolean? d) (if d "true" "false")]
@@ -109,6 +110,9 @@
     [(pair? d)
      (format "(~a)" (render-list-body d))]
     [else (~v d)]))
+
+(define (datum->beagle-src d)
+  (datum->beagle-src/raw (canonicalize-beagle-datum d)))
 
 (define (render-list-body items)
   (let loop ([rest items] [acc '()])

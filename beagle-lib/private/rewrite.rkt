@@ -24,6 +24,7 @@
          racket/port
          racket/format
          racket/string
+         (only-in "facts-roundtrip.rkt" datum->pretty)
          ;; THE single beagle readtable — no bespoke subset reader to drift
          ;; (#19/#32). Datum mode (plain read) yields container/reader tags as data.
          (only-in "../lang/reader-impl.rkt" beagle-readtable))
@@ -130,7 +131,7 @@
 ;; whitespace/comments — caller should review the diff before applying.
 (define (write-beagle-source forms out)
   (for ([f (in-list forms)])
-    (write-beagle-form f out 0)
+    (display (datum->pretty f) out)
     (display "\n\n" out)))
 
 (define (write-beagle-form form out indent)

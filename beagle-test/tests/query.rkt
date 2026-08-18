@@ -16,8 +16,8 @@
          beagle/private/query)
 
 (define-runtime-path CANONICAL-FIXTURE "fixtures/query/canonical.bjs")
-(define-runtime-path RETIRED-FLAT-FIXTURE
-  "fixtures/query/invalid/retired-flat.bjs")
+(define-runtime-path UNTYPED-FIELD-FIXTURE
+  "fixtures/query/invalid/untyped-field.bjs")
 (define-runtime-path DAEMON-FILES "../../bin/_beagle-daemon-files")
 (define-runtime-path DAEMON-CLI "../../bin/beagle-daemon")
 
@@ -312,12 +312,14 @@
          (check-equal? err ""))))
     (lambda () (delete-directory/files scratch))))
 
-(test-case "fields: retired flat fields are refused by the canonical parser"
+;; The flat pair `[x Float]` is the CANONICAL field surface now, so what the
+;; parser refuses here is the omitted type, named at the field it belongs to.
+(test-case "fields: an untyped record field is refused by the canonical parser"
   (check-exn
-   #rx"use \\[\\(name Type\\) \\(name2 Type2 validator\\) \\.\\.\\.\\]"
+   #rx"record field x has no following type"
    (lambda ()
      (fixture-query-output
-      RETIRED-FLAT-FIXTURE
+      UNTYPED-FIELD-FIXTURE
       '("fields" "Retired")))))
 
 (test-case "fields: empty source fails with the missing record"

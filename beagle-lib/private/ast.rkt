@@ -1309,6 +1309,7 @@
 (struct pat-or       (alternatives)                          #:transparent)
 
 (struct check-expr  (expr)                                   #:transparent)
+(struct ascription  (expr type)                              #:transparent)
 (struct rescue-form (expr fallback err-name)                 #:transparent)
 (struct target-case-form (cases)                             #:transparent)
 
@@ -1658,7 +1659,8 @@
  (struct-out match-form) (struct-out match-clause)
  (struct-out pat-wildcard) (struct-out pat-literal) (struct-out pat-record)
  (struct-out pat-map) (struct-out pat-var) (struct-out pat-or)
- (struct-out check-expr) (struct-out rescue-form) (struct-out target-case-form)
+ (struct-out check-expr) (struct-out ascription)
+ (struct-out rescue-form) (struct-out target-case-form)
  (struct-out with-meta)
  (struct-out threading-marker)
  (struct-out when-let-form) (struct-out if-let-form)

@@ -89,9 +89,12 @@
   (check-true (matches? #rx"\\(defn add \\[x y\\]" out))
   (check-true (matches? #rx"\\(\\+ x y\\)"            out)))
 
-(test-case "each mixed parameter entry lowers independently"
-  (define out (compile '(defn select [a (b String)] Any b)))
-  (check-true (matches? #rx"\\(defn select \\[a \\^String b\\]" out)))
+;; Omitted binding types are gone, so a vector mixing a bare binder with a
+;; grouped declaration is rejected — naming the binder left without a type.
+(test-case "mixed inferred and typed parameters are rejected"
+  (check-exn
+   #rx"parameter a has no following type"
+   (lambda () (compile '(defn select [a (b String)] Any b)))))
 
 (test-case "unchecked constraint emission fails closed without a sync proof"
   (check-exn

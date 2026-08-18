@@ -2585,6 +2585,7 @@
     [(dynamic-var? e)
      (mangle-name (dynamic-var-name e))]
 
+    [(ascription? e) (emit-expr (ascription-expr e))]
     [(check-expr? e)
      (define inner (emit-expr (check-expr-expr e)))
      (define contract

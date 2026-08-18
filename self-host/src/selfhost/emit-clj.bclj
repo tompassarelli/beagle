@@ -1539,6 +1539,7 @@
       (= node "dynamic-var")
         (get e "name")
 
+      (= node "ascription") (emit-expr! (get e "expr"))
       (= node "check")
         (str "(let [r__check " (emit-expr* (get e "expr")) "]\n"
              "  (if (instance? Ok r__check)\n"

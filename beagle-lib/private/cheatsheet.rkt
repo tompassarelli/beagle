@@ -34,15 +34,18 @@
    ;; --- types ---------------------------------------------------------------
    (cheat "defrecord" "Types" 'clj
           "Product type with typed fields; generates a constructor and accessors."
-          "(defrecord Point [(x Int) (y Int)])")
+          (string-append
+           "(defrecord Point\n"
+           "  [x Int\n"
+           "   y Int])"))
 
    (cheat "defunion + match" "Types" 'clj
           "Sum type over records. `match` must cover every constructor; a missing constructor is a compile error."
           (string-append
-           "(defrecord Circle [(r Int)])\n"
-           "(defrecord Square [(side Int)])\n"
+           "(defrecord Circle [r Int])\n"
+           "(defrecord Square [side Int])\n"
            "(defunion Shape Circle Square)\n"
-           "(defn area [(s Shape)] Int\n"
+           "(defn area [s Shape] Int\n"
            "  (match s [(Circle r) r] [(Square side) side]))"))
 
    (cheat "defscalar :where" "Types / contracts" 'clj
@@ -55,11 +58,17 @@
           "Enumeration of named constants."
           "(defenum Color Red Green Blue)")
 
-   (cheat "structural binding annotations" "Types" 'clj
-          "The outer `[...]` is only a collection; each entry is `symbol`, `(binding-form Type)`, or `(binding-form Type constraint)`. Thus `[a (b Point)]` directly mixes an inferred and a typed binding. Sequential and associative destructures may occupy `binding-form`; their complete incoming aggregate is typed and, when present, passed to the constraint before any names are projected. A constraint must be a statically known synchronous unary `(Fn [Type] Bool)` predicate without `Any`; false raises a runtime binding-constraint error. Call-produced predicates require an explicit positive returned-callable synchronization proof from the callee; executing the factory synchronously is not sufficient. Every field or macro declaration likewise owns all its validators/encoders/decoders in one form; flattened adjacent metadata is rejected. Executable signatures place their mandatory return directly after the parameter vector; a type-level function signature is written `(Fn [ParamType ...] ReturnType)`."
+   (cheat "typed binding pairs" "Types" 'clj
+          "A typed binding vector alternates `binding-form Type` — strict pairs all the way through. Every binder carries a type; an omitted one is a rejection naming that binder, because without the retired `(name Type)` parens nothing marks where an entry starts. Sequential and associative destructures may occupy `binding-form`; the whole pattern is ONE binder, and its complete incoming aggregate is what the type describes, so the projected names need no annotations of their own. More than one binding in a vector always breaks one binding per line, at every binding site and with no width threshold; a lone unrefined binding may stay inline. Record fields take the same pair law, and metadata flattened out of its declaration is rejected. Executable signatures place their mandatory return directly after the parameter vector; a type-level function signature is written `(Fn [ParamType ...] ReturnType)`. A per-binding constraint is a refinement type expression, `(Int where positive?)` — the syntax is reserved and its semantics land in a later seam. The legacy grouped spelling is still read while the corpus migrates, but canonical writers emit only the pair form."
           (string-append
-           "(defn positive? [(value Int)] Bool (> value 0))\n"
-           "(defn clamp [(n Int positive?)] Int (if (> n 100) 100 n))"))
+           "(defrecord Size\n"
+           "  [w Int\n"
+           "   h Int])\n"
+           "(defn scaled-area\n"
+           "  [{:keys [w h]} Size\n"
+           "   factor Int]\n"
+           "  Int\n"
+           "  (* factor (* w h)))"))
 
    (cheat "forall type variables" "Types" 'clj
           "Explicit rank-1 polymorphism uses `(forall [T ...] Type)`. Names in the vector are rigid type variables inside `Type`; a bounded variable is written `(T <: Bound)`."
@@ -75,13 +84,16 @@
    (cheat "defn" "Functions" 'clj
           "Function with typed params and return. Params are a bracket vector."
           (string-append
-           "(defn add [(x Int) (y Int)] Int\n"
+           "(defn add\n"
+           "  [x Int\n"
+           "   y Int]\n"
+           "  Int\n"
            "  (+ x y))"))
 
    (cheat "let / loop / recur / cond" "Control flow" 'clj
           "Standard control flow; bindings use bracket vectors."
           (string-append
-           "(defn sum-to [(n Int)] Int\n"
+           "(defn sum-to [n Int] Int\n"
            "  (loop [i 0 acc 0]\n"
            "    (cond [(> i n) acc]\n"
            "          [:else (recur (+ i 1) (+ acc i))])))"))

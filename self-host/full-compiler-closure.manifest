@@ -2,14 +2,14 @@
 # Ordered records are part of the identity. Paths are repository-relative.
 
 input self-host self-host/src/selfhost/ast.bclj sha256:0248f27b39609134bd4f44c14c359f31d3f152a06174480b874f520c68f692cf
-input self-host self-host/src/selfhost/check.bclj sha256:2873415e08f3b97752ded04a8dec37ce61603fe899e405217fe72dc38a350513
-input self-host self-host/src/selfhost/emit-clj.bclj sha256:90ba2c8bcf5d51aafc731ef2fa3096c21e14111debc417d89e35441a6369fe3d
-input self-host self-host/src/selfhost/emit-js.bclj sha256:f93fea54846ec10fecfe784469018b9a16a243685390dc6079644318cf7d77b7
-input self-host self-host/src/selfhost/emit-nix.bclj sha256:8b297e535a5f6b60eda0669e20369b73b9deeb159c419eeaec782c91c7bb8d36
+input self-host self-host/src/selfhost/check.bclj sha256:cc6f5d66963a64043b1ed744a82cce2ab6d4779fd952d0fac0c4583aff97f96e
+input self-host self-host/src/selfhost/emit-clj.bclj sha256:238d4a9ed7009540cd01a8dd14d6f80384b97f60506c172c16f2c4bd94242258
+input self-host self-host/src/selfhost/emit-js.bclj sha256:45a2b6b0c2e653fa029d58ec712ae843b265da76444a0830069bf09aaad896bb
+input self-host self-host/src/selfhost/emit-nix.bclj sha256:3194756f258f8d5a5677fd9f938ab56372c0333ae7f95abcbb7481c3cc6d4859
 input self-host self-host/src/selfhost/facts-roundtrip.bclj sha256:434c66a889b16525a74944901068458cdbc54732d8e34ab3a3e3ffad8853b958
 input self-host self-host/src/selfhost/macros.bclj sha256:94b7b11912f58eab26b6369fe61f88362f248e36cd7f026796b1ec282691f59c
 input self-host self-host/src/selfhost/main.bclj sha256:042638991705cee04de5bcb5ce4b59a42dc9a536dfc78b890fd7e841488bdf40
-input self-host self-host/src/selfhost/parse.bclj sha256:a7dddc0b5c5fbc8ba6d5a8a9a9394db3f6a3a34c344fbd7828e497f728fa6528
+input self-host self-host/src/selfhost/parse.bclj sha256:6dcb1bbe03022d674a4aee717d76ba48dfc9d8d410b21396630c1d7a65529f5f
 input self-host self-host/src/selfhost/probe.bclj sha256:436a52a7412d50203db923ebe7c9b578b1e5bd2dade18b68e458f6038375f21f
 input self-host self-host/src/selfhost/reader.bclj sha256:20296bd42e2b45ec9386680ca858b20f036d0210c734230c6e3bd6dda11e7331
 input self-host self-host/src/selfhost/rt.clj sha256:f36eb4ff905a2c57e459c8bb5b91f39988f0769cc122c8d6b5cd6a031d95a2fa

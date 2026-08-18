@@ -64,8 +64,10 @@
         "#?(:clj 1 :nix 2)" "#?@(:clj [1 2] :default [])"
         "'x" "'(a b)" "`(a ~b ~@cs)" "true" "false"
         "(fn [%1] (inc %1))"
-        ;; Structural signatures round-trip without punctuation decoration.
-        "(defn f [(a Int)] Int a)" "(defn old [(a Int)] Int a)"))
+        ;; Canonical flat binding/type pairs round-trip unchanged. The legacy
+        ;; grouped spelling is still read, but it is rewritten on the way out
+        ;; (asserted below), so it is not a fixed point and never belongs here.
+        "(defn f [a Int] Int a)" "(defn old [a Int] Int a)"))
 
 (for ([s (in-list RT-BATTERY)])
   (test-case (format "renderer round-trips: ~a" s)
@@ -84,8 +86,12 @@
   (check-equal? (render "`(a ~b ~@cs)")              "`(a ~b ~@cs)")
   (check-equal? (render "true")                      "true")
   (check-equal? (render "false")                     "false")
+  ;; The canonical writer emits only the ruled flat surface, so a legacy
+  ;; grouped declaration is rewritten rather than preserved.
   (check-equal? (render "(defn f [(a Int)] Int a)")
-                "(defn f [(a Int)] Int a)"))
+                "(defn f [a Int] Int a)")
+  (check-equal? (render "(defn f [a Int] Int a)")
+                "(defn f [a Int] Int a)"))
 
 ;; --- (3) macro expansion still works, output re-reads -----------------------
 

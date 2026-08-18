@@ -26,7 +26,8 @@
          (only-in "check.rkt" type-check-with-locs!)
          (only-in "ast.rkt" program-type-table program-src-table
                   src-loc? src-loc-pos src-loc-span)
-         (only-in "types.rkt" type->string)
+         (only-in "types.rkt" type->string type-expression-datum?)
+         "surface-canonical.rkt"
          (only-in "targets.rkt" lang-for-target-id))
 
 (provide datum->facts facts->datum datum->src datum->pretty edn-triples->datum read-edn-triples
@@ -437,32 +438,32 @@
          [(unquote-splicing) "~@"]
          [(syntax)           "#'"]
          [else #f])))
-(define (datum->src d)
+(define (datum->src/raw d)
   (cond
     [(null? d) "()"]
-    [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src (cdr d)) " "))]
-    [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (cdr d)) " "))]
-    [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (cdr d)) " "))]
+    [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src/raw (cdr d)) " "))]
+    [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src/raw (cdr d)) " "))]
+    [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src/raw (cdr d)) " "))]
     [(and (pair? d) (eq? (car d) %regex) (pair? (cdr d)) (string? (cadr d))) (format "#\"~a\"" (cadr d))]
     ;; `^m form` — `^` glued to the meta datum, one space, then the target form.
     ;; Handles type hints (^String), flags (^:dynamic), maps (^{:private true}),
     ;; nested meta (^a ^b x = (#%meta a (#%meta b x)) → recursion) and meta on
     ;; collections (form renders via the container clauses above).
-    [(meta-form? d) (format "^~a ~a" (datum->src (cadr d)) (datum->src (caddr d)))]
+    [(meta-form? d) (format "^~a ~a" (datum->src/raw (cadr d)) (datum->src/raw (caddr d)))]
     ;; `` `x `` / ~x / ~@x / #'x — prefix glued to its single operand, no space.
-    [(prefix-macro d) => (lambda (px) (string-append px (datum->src (cadr d))))]
+    [(prefix-macro d) => (lambda (px) (string-append px (datum->src/raw (cadr d))))]
     ;; reader conditionals: (reader-conditional tag form …) → #?(tag form …);
     ;; splice → #?@(…). Tail spliced verbatim (already alternating tag/form).
-    [(rcond-form? d)        (format "#?(~a)"  (string-join (map datum->src (cdr d)) " "))]
-    [(rcond-splice-form? d) (format "#?@(~a)" (string-join (map datum->src (cdr d)) " "))]
+    [(rcond-form? d)        (format "#?(~a)"  (string-join (map datum->src/raw (cdr d)) " "))]
+    [(rcond-splice-form? d) (format "#?@(~a)" (string-join (map datum->src/raw (cdr d)) " "))]
     ;; #_form / #js form / ##Name — prefix glued to its single operand.
-    [(hash-prefix d) => (lambda (px) (string-append px (datum->src (cadr d))))]
+    [(hash-prefix d) => (lambda (px) (string-append px (datum->src/raw (cadr d))))]
     [(pair? d)
      (let-values ([(elems tail) (split-improper d)])
        (if (null? tail)
-           (format "(~a)" (string-join (map datum->src elems) " "))
-           (format "(~a . ~a)" (string-join (map datum->src elems) " ") (datum->src tail))))]
-    [(vector? d) (format "[~a]" (string-join (map datum->src (vector->list d)) " "))]
+           (format "(~a)" (string-join (map datum->src/raw elems) " "))
+           (format "(~a . ~a)" (string-join (map datum->src/raw elems) " ") (datum->src/raw tail))))]
+    [(vector? d) (format "[~a]" (string-join (map datum->src/raw (vector->list d)) " "))]
     ;; edn-string, NOT `~s`: Racket's write escapes control chars with Racket-only
     ;; sequences (ESC → `\e`, BEL → `\a`, …) that Clojure's reader REJECTS
     ;; ("Unsupported escape character: \e"). edn-string emits the Clojure/EDN-valid
@@ -475,6 +476,14 @@
     [(keyword? d) (string-append ":" (keyword->string d))]
     [(char? d)    (format "\\~a" d)]
     [else (format "~a" d)]))                ; numbers
+
+;; Canonicalization is contextual — it descends into code and stops at quoted
+;; data — so it runs EXACTLY ONCE, here at the surface. Every renderer below
+;; walks an already-canonical tree and must therefore recurse through
+;; `datum->src/raw`; re-entering here per node would re-canonicalize each
+;; subtree as though it were top level and rewrite quoted data.
+(define (datum->src d)
+  (datum->src/raw (canonicalize-beagle-datum d)))
 
 ;; --- byte-stable pretty-printer (move 2) ------------------------------------
 ;; datum->src renders one line — fine for round-trip identity, but it collapses a
@@ -517,26 +526,57 @@
 (define (bracket-elems d)
   (if (vector? d) (vector->list d) (cdr d)))
 
-;; `& rest` is one logical parameter even though the reader exposes two datums.
+;; A flat binding/type pair is one logical row. `&` belongs to the one pair
+;; following it.
 (define (logical-vector-elems d)
   (let loop ([xs (bracket-elems d)] [out '()])
     (cond
       [(null? xs) (reverse out)]
-      [(and (eq? (car xs) '&) (pair? (cdr xs)))
-       (loop (cddr xs) (cons (list '& (cadr xs)) out))]
-      [else (loop (cdr xs) (cons (list (car xs)) out))])))
+      [(and (eq? (car xs) '&) (>= (length xs) 3))
+       (loop (cdddr xs) (cons (list '& (cadr xs) (caddr xs)) out))]
+      [(>= (length xs) 2)
+       (loop (cddr xs) (cons (list (car xs) (cadr xs)) out))]
+      [else (reverse (cons xs out))])))
 
 (define (grammar-vector-context? ctx)
-  (memq ctx '(params fields)))
+  (memq ctx '(params fields bindings)))
 
+;; `(Base where pred)` — a refinement is infix, so `where` sits in the middle.
+(define (refinement-datum? d)
+  (and (list? d) (= (length d) 3) (eq? (cadr d) 'where)))
+
+;; A `let`/`loop` binding carries its type inside the canonical ascription, so
+;; the refinement that forces a break is reached through `(: value Type)`.
+(define (ascribed-refinement? d)
+  (and (list? d) (= (length d) 3) (eq? (car d) ':)
+       (refinement-datum? (caddr d))))
+
+;; Only a vector that actually declares types is laid out by the grammar; a
+;; wholly inferred parameter vector keeps the generic width formatter.
+(define (typed-declaration-vector? d)
+  (define items (bracket-elems d))
+  (or (and (pair? items) (legacy-declaration? (car items)))
+      (and (pair? items) (pair? (cdr items))
+           (type-expression-datum? (cadr items)))))
+
+;; The breaking law is stated in BINDINGS and is absolute: more than one
+;; binding in a vector always breaks, one binding per line, with no width
+;; threshold. A refinement forces the break even for a single binding.
 (define (grammar-vector-break? d ctx)
-  #f)
+  (and (grammar-vector? d ctx)
+       (or (eq? ctx 'bindings) (typed-declaration-vector? d))
+       (let ([logical (logical-vector-elems d)])
+         (or (> (length logical) 1)
+             (for/or ([entry (in-list logical)])
+               (if (eq? ctx 'bindings)
+                   (ascribed-refinement? (last entry))
+                   (refinement-datum? (last entry))))))))
 
 (define (grammar-vector? d ctx)
   (and (grammar-vector-context? ctx) (bracket-datum? d)))
 
 (define (logical-elem->src item)
-  (string-join (map datum->src item) " "))
+  (string-join (map datum->src/raw item) " "))
 
 (define (binding-form-datum? d)
   (or (symbol? d)
@@ -549,7 +589,7 @@
        (binding-form-datum? (car d))))
 
 (define (nested-datum->pretty d col [suffix-width 0])
-  (define oneline (datum->src d))
+  (define oneline (datum->src/raw d))
   (define-values (open close elems) (pp-seq-parts d))
   (cond
     [(<= (+ col (string-length oneline) suffix-width) PP-WIDTH) oneline]
@@ -576,7 +616,7 @@
       close)]))
 
 (define (structured-binding->pretty d col [suffix-width 0])
-  (define oneline (datum->src d))
+  (define oneline (datum->src/raw d))
   (cond
     [(<= (+ col (string-length oneline) suffix-width) PP-WIDTH) oneline]
     [else
@@ -601,8 +641,17 @@
                                    0)))))
       ")")]))
 
-(define (logical-elem->pretty item col [suffix-width 0])
+(define (logical-elem->pretty item col [suffix-width 0] [ctx 'params])
   (cond
+    ;; A binding row is `binder initializer`. The binder is one token, so only
+    ;; the initializer can be wide; letting it break beneath keeps a one-token
+    ;; edit a one-line diff even though the row itself never rejoins its
+    ;; neighbours.
+    [(and (eq? ctx 'bindings) (= (length item) 2))
+     (define prefix (string-append (datum->src/raw (car item)) " "))
+     (string-append
+      prefix
+      (datum->pretty/context (cadr item) (+ col (string-length prefix)) 'normal))]
     [(and (= (length item) 1)
           (structured-binding-datum? (car item)))
      (structured-binding->pretty (car item) col suffix-width)]
@@ -615,7 +664,7 @@
        (cadr item) (+ col 2) suffix-width))]
     [else (logical-elem->src item)]))
 
-(define (grammar-vector->pretty d col)
+(define (grammar-vector->pretty d col [ctx 'params])
   (define logical (logical-vector-elems d))
   (define inner-col (add1 col))
   (define pad (make-string inner-col #\space))
@@ -624,7 +673,7 @@
       (string-append
        "[" (logical-elem->pretty
              (car logical) inner-col
-             (if (null? (cdr logical)) 1 0))
+             (if (null? (cdr logical)) 1 0) ctx)
        (apply string-append
               (for/list ([item (in-list (cdr logical))]
                          [index (in-naturals 1)])
@@ -632,7 +681,7 @@
                  "\n" pad
                  (logical-elem->pretty
                   item inner-col
-                  (if (= index (sub1 (length logical))) 1 0)))))
+                  (if (= index (sub1 (length logical))) 1 0) ctx))))
        "]")))
 
 ;; A function signature has three canonical width states. Keep the owner and
@@ -641,19 +690,20 @@
 ;; that unit cannot fit at its continuation indentation; the positional return
 ;; then owns the following line. This is purely width-driven--parameter count
 ;; never changes the shape.
-(define (signature-unit->pretty elems col)
-  (define oneline (string-join (map datum->src elems) " "))
+(define (signature-unit->pretty elems col [return-own-line? #f] [ctx 'params])
+  (define oneline (string-join (map datum->src/raw elems) " "))
   (cond
-    [(<= (+ col (string-length oneline)) PP-WIDTH) oneline]
-    [(and (pair? elems) (bracket-datum? (car elems)))
+    [(and (pair? elems)
+          (bracket-datum? (car elems))
+          (grammar-vector-break? (car elems) ctx))
      (define pad (make-string col #\space))
      (define tail (cdr elems))
      (string-append
-      (grammar-vector->pretty (car elems) col)
+      (grammar-vector->pretty (car elems) col ctx)
       (if (null? tail)
           ""
-          (string-append "\n" pad
-                         (string-join (map datum->src tail) " "))))]
+          (string-append (if return-own-line? (string-append "\n" pad) " ")
+                         (string-join (map datum->src/raw tail) " "))))]
     [else oneline]))
 
 (define (list-elems d)
@@ -700,6 +750,11 @@
        [(and (eq? head 'defrecord)
              (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
         'fields]
+       ;; `let`/`loop` vectors are binder/initializer pairs, so the breaking
+       ;; law governs them exactly as it governs a parameter vector.
+       [(and (memq head '(let loop))
+             (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
+        'bindings]
        [(and (memq head '(defn defn- fn)) (arity-clause? child)) 'arity-clause]
        [(and (eq? head 'letfn) (= i 1) (bracket-datum? child)) 'letfn-bindings]
        [(and (memq head '(defprotocol extend-type)) (symbol-owner-vector? child)) 'method]
@@ -775,10 +830,10 @@
       (string-length (last pieces))))
 
 (define (datum->pretty/context d col ctx)
-  (define oneline (datum->src d))
+  (define oneline (datum->src/raw d))
   (define-values (open close elems) (pp-seq-parts d))
   (cond
-    [(grammar-vector-break? d ctx) (grammar-vector->pretty d col)]
+    [(grammar-vector-break? d ctx) (grammar-vector->pretty d col ctx)]
     [(and (not (canonical-layout-needed? d ctx))
           (<= (+ col (string-length oneline)) PP-WIDTH))
      oneline]                                                  ; fits on this line — inline
@@ -794,7 +849,7 @@
     ;; small), one space, then the target form breaks at the correct column, so
     ;; the meta stays glued to its form across the break (idempotent: pure in col).
     [(meta-form? d)
-     (let ([pfx (string-append "^" (datum->src (cadr d)) " ")])
+     (let ([pfx (string-append "^" (datum->src/raw (cadr d)) " ")])
        (string-append pfx (datum->pretty/context (caddr d) (+ col (string-length pfx)) ctx)))]
     [(not open) oneline]                                      ; unbreakable atom over width
     [(null? elems) (string-append open close)]
@@ -806,40 +861,53 @@
      (define keep (min (context-head-keep ctx head after) (length after)))
      (define body-pad (make-string (+ col BODY-INDENT) #\space))
      (define inline-signature
-       (for/fold ([out (string-append open (datum->src head))])
+       (for/fold ([out (string-append open (datum->src/raw head))])
                  ([e (in-list (take after keep))])
-         (string-append out " " (datum->src e))))
+         (string-append out " " (datum->src/raw e))))
      (define signature-over-width?
-       (> (+ col (string-length inline-signature)) PP-WIDTH))
+       (for/or ([e (in-list (take after keep))]
+                [i (in-naturals 1)])
+         (define child-ctx (grammar-child-context d ctx i e))
+         (and (grammar-vector? e child-ctx)
+              (grammar-vector-break? e child-ctx))))
      (define kept (take after keep))
      (define signature-vector-index
        (for/first ([e (in-list kept)] [i (in-naturals 1)]
                    #:when (grammar-vector? e (grammar-child-context d ctx i e)))
          (sub1 i)))
+     (define signature-vector-ctx
+       (and signature-vector-index
+            (grammar-child-context
+             d ctx (add1 signature-vector-index)
+             (list-ref kept signature-vector-index))))
      (define signature
        (if (and signature-over-width? signature-vector-index)
            (let* ([owner-elems (take kept signature-vector-index)]
                   [unit-elems (drop kept signature-vector-index)]
                   [owner
-                   (for/fold ([out (string-append open (datum->src head))])
+                   (for/fold ([out (string-append open (datum->src/raw head))])
                              ([e (in-list owner-elems)])
-                     (string-append out " " (datum->src e)))])
+                     (string-append out " " (datum->src/raw e)))])
              (string-append
               owner "\n" body-pad
-              (signature-unit->pretty unit-elems (+ col BODY-INDENT))))
-           (for/fold ([out (string-append open (datum->src head))])
+              (signature-unit->pretty
+               unit-elems (+ col BODY-INDENT)
+               (memq head '(defn defn-))
+               signature-vector-ctx)))
+           (for/fold ([out (string-append open (datum->src/raw head))])
                      ([e (in-list kept)] [i (in-naturals 1)])
              (define child-ctx (grammar-child-context d ctx i e))
              (cond
                [(and (grammar-vector? e child-ctx)
                      (grammar-vector-break? e child-ctx))
                 (string-append out "\n" body-pad
-                               (grammar-vector->pretty e (+ col BODY-INDENT)))]
+                               (grammar-vector->pretty e (+ col BODY-INDENT)
+                                                       child-ctx))]
                [(canonical-layout-needed? e child-ctx)
                 (define start-col (add1 (current-col out col)))
                 (string-append out " "
                                (datum->pretty/context e start-col child-ctx))]
-               [else (string-append out " " (datum->src e))]))))
+               [else (string-append out " " (datum->src/raw e))]))))
      (string-append
       signature
       (apply string-append (for/list ([e (in-list (drop after keep))]
@@ -859,13 +927,14 @@
      (define pad (make-string inner-col #\space))
      (define signature-elems (take elems keep))
      (define inline-unit
-       (string-join (map datum->src signature-elems) " "))
+       (string-join (map datum->src/raw signature-elems) " "))
      (define unit-fits?
-       (<= (+ inner-col (string-length inline-unit)) PP-WIDTH))
+       (not (and (pair? signature-elems)
+                 (grammar-vector-break? (car signature-elems) 'params))))
      (define signature
        (if unit-fits?
            inline-unit
-           (signature-unit->pretty signature-elems inner-col)))
+           (signature-unit->pretty signature-elems inner-col #t)))
      (string-append
       open signature
       (apply string-append
@@ -887,7 +956,7 @@
       close)]))
 
 (define (datum->pretty d [col 0])
-  (datum->pretty/context d col 'normal))
+  (datum->pretty/context (canonicalize-beagle-datum d) col 'normal))
 
 (define (read-edn-triples path)
   (for/list ([line (in-list (file->lines path))]
@@ -1197,8 +1266,9 @@
       (with-output-to-file tmp #:exists 'replace (lambda () (display (string-join (map datum->src ds) "\n\n"))))
       (define re (with-handlers ([exn:fail? (lambda (_) #f)]) (map syntax->datum (read-beagle-syntax tmp))))
       (delete-file tmp)
-      (when (and re (equal? re ds)) (set! rt-ok (add1 rt-ok)))))
-  (printf "text-is-a-view (facts -> source -> re-read identical): ~a / ~a files ~a\n"
+      (when (and re (equal? re (map canonicalize-beagle-datum ds)))
+        (set! rt-ok (add1 rt-ok)))))
+  (printf "text-is-a-view (facts -> source -> re-read canonical): ~a / ~a files ~a\n"
           rt-ok rt-files (if (= rt-ok rt-files) "PASS" "")))
 
 ;; --- move-2 pretty-printer modes -------------------------------------------
@@ -1225,7 +1295,11 @@
        (with-output-to-file tmp #:exists 'replace (lambda () (display text1)))
        (define ds2 (with-handlers ([exn:fail? (lambda (_) #f)]) (map syntax->datum (read-beagle-syntax tmp))))
        (delete-file tmp)
-       (define rt-ok (and ds2 (equal? ds2 ds)))
+       ;; The writer is canonical: it emits only the ruled flat surface, so a
+       ;; legacy grouped declaration is deliberately REWRITTEN, not preserved.
+       ;; The property that still has teeth is that nothing else changes — the
+       ;; rendered text re-reads to the canonical form of the same program.
+       (define rt-ok (and ds2 (equal? ds2 (map canonicalize-beagle-datum ds))))
        (define text2 (and ds2 (string-join (map (lambda (d) (datum->pretty d 0)) ds2) "\n\n")))
        (define fp-ok (and text2 (string=? text1 text2)))
        (when rt-ok (set! rt (add1 rt)))
@@ -1233,7 +1307,7 @@
        (when (and (not (and rt-ok fp-ok)) (< (length bad) 3))
          (set! bad (cons (path->string f) bad)))]))
   (printf "================ move-2 — byte-stable emit gate ================\n")
-  (printf "files: ~a   round-trip identical: ~a/~a   pretty fixed-point: ~a/~a   skipped(unparseable): ~a\n"
+  (printf "files: ~a   canonical round-trip: ~a/~a   pretty fixed-point: ~a/~a   skipped(unparseable): ~a\n"
           n rt n fp n (length skipped))
   (unless (null? skipped)
     (printf "  SKIPPED (not gated — a skip is not a pass):\n")

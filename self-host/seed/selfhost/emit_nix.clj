@@ -1001,6 +1001,7 @@
   (throw (ex-info "(recur ...) outside of (loop ...)" {}))))
   (let [arg-strs (mapv (fn [a] (paren-wrap (emit-expr* a depth) a)) (get e "args"))]
   (if (= 0 (count arg-strs)) name (str name " " (str/join " " arg-strs)))))
+  (= node "ascription") (emit-expr! (get e "expr") depth)
   (= node "check") (str "(let r = " (emit-expr* (get e "expr") depth) "; in if r ? _tag && r._tag == \"Ok\" then r.value else abort \"check failed\")")
   (= node "rescue") (str "(let r = " (emit-expr* (get e "expr") depth) "; in if r ? _tag && r._tag == \"Ok\" then r.value else " (emit-expr* (get e "fallback") depth) ")")
   (= node "target-case") (let [cases (vec (get e "cases"))

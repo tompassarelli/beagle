@@ -259,6 +259,7 @@
   (= node "literal") (contains? #{"string" "bool" "char" "nil"} (get e "kind"))
   (or (= node "regex") (= node "vec") (= node "set") (= node "call") (= node "static-call") (= node "kw-access") (= node "dynamic-var") (= node "js-dot") (= node "js-get") (= node "js-call") (= node "js-new") (= node "js-template") (= node "js-import-meta")) true
   (= node "threading") (js-postfix-base? (get e "desugared"))
+  (= node "ascription") (js-postfix-base? (get e "expr"))
   :else false))))
 
 (defn ^String emit-js-postfix-base! [e]
@@ -418,6 +419,7 @@
   (= node "js-new") (or (expr-has-await? (get e "callee")) (anyb (get e "args")))
   (= node "js-typeof") (expr-has-await? (get e "expr"))
   (= node "threading") (anyb (get e "args"))
+  (= node "ascription") (expr-has-await? (get e "expr"))
   (= node "check") (expr-has-await? (get e "expr"))
   (= node "rescue") (or (expr-has-await? (get e "expr")) (expr-has-await? (get e "fallback")))
   :else false))))
@@ -1515,6 +1517,7 @@
    js-branch (first (filterv (fn [c] (= (get c "target") "js")) cases))]
   (if (nil? js-branch) "null" (emit-expr*! (get js-branch "body"))))
   (= node "dynamic-var") (mangle-name (get e "name"))
+  (= node "ascription") (emit-expr*! (get e "expr"))
   (= node "check") (iife (str "const r = " (emit-expr*! (get e "expr")) "; if (r && r.__tag === \"Ok\") return r.value; throw new Error(\"check failed: \" + JSON.stringify(r));") false)
   (= node "rescue") (let [err-name (let [en (get e "err")]
   (if (absent? en) "_err" (mangle-name en)))]

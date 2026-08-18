@@ -1035,6 +1035,7 @@
        (for ([l (in-list (nix-multiline-string-lines e))])
          (unless (string? l) (walk l)))]
       [(threading-marker? e) (walk (threading-marker-desugared e))]
+      [(ascription? e) (walk (ascription-expr e))]
       [else (void)]))
   (for ([f (in-list (program-forms prog))])
     (walk f)))

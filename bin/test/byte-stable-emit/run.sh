@@ -4,7 +4,8 @@
 # The pretty-printer (datum->pretty in beagle-lib/private/facts-roundtrip.rkt)
 # turns facts back into source. It must satisfy the move-2 contract:
 #   1. idempotent fixed-point  — pretty(parse(pretty(x))) == pretty(x)
-#   2. round-trip preserving   — pretty text re-reads to the IDENTICAL datum
+#   2. canonical round-trip    — pretty text re-reads to the CANONICAL datum
+#                                (only the retired grouped spelling changes)
 #   3. LOCAL                    — a one-token change => a small, local diff
 #                                (the property determinism does NOT give for free)
 #   4. comment-preserving       — comments survive the facts->source render

@@ -888,6 +888,9 @@
     [(dynamic-var? e)
      (hasheq 'node "dynamic-var" 'name (symbol->string (dynamic-var-name e)))]
 
+    ;; Checker-only: Native lowering receives the checked inner expression.
+    [(ascription? e) (expr->json (ascription-expr e))]
+
     [(check-expr? e)
      (hasheq 'node "check" 'expr (expr->json (check-expr-expr e)))]
 

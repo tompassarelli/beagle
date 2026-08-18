@@ -2008,6 +2008,7 @@
           (if (= 0 (count arg-strs))
             name
             (str name " " (str/join " " arg-strs)))))
+      (= node "ascription") (emit-expr! (get e "expr") depth)
       (= node "check")
       (str "(let r = "
         (emit-expr* (get e "expr") depth)

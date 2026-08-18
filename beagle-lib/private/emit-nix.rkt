@@ -1200,6 +1200,7 @@
        (string-append name " null")
        (string-append name " " (string-join arg-strs " ")))]
 
+    [(ascription? e) (emit-expr (ascription-expr e))]
     [(check-expr? e)
      (define inner (emit-expr (check-expr-expr e) depth))
      (format "(let r = ~a; in if r ? _tag && r._tag == \"Ok\" then r.value else abort \"check failed\")"

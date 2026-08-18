@@ -1,315 +1,208 @@
 #lang racket/base
 
-;; Every Beagle source writer preserves structural typed forms. Executable
-;; signatures use a mandatory positional return; function-type arrows remain.
+;; Canonical surface rendering for flat typed bindings and ascription.
 
 (require rackunit
-         racket/string
          racket/port
-         racket/file
+         racket/string
          beagle/lang/reader-impl
          (only-in beagle/private/facts-roundtrip datum->src datum->pretty)
          (only-in beagle/private/expand-tool datum->beagle-src)
-         (only-in beagle/private/rewrite write-beagle-source)
-         (only-in beagle/private/query query-sig))
+         (only-in beagle/private/rewrite write-beagle-source))
 
-(define (rd s) (beagle-read (open-input-string s)))
-(define (src s) (datum->src (rd s)))
-(define (pp s [col 0]) (datum->pretty (rd s) col))
+(define (rd source)
+  (beagle-read (open-input-string source)))
 
-(define STRUCTURAL-BATTERY
-  '("(def answer Int 42)"
-    "(defonce once Int 1)"
-    "(defn add [(x Int) (y Int)] Int (+ x y))"
-    "(defn positive [(x Int positive?)] Int x)"
-    "(defn hof [(cb (Fn [Int] String))] String (cb 1))"
-    "(defrecord P [(x Int) (y (Vec Int) nonempty?)])"
-    "(let [(v Int positive?) e] v)"
-    "(fn [(b Int)] Int b)"
-    "(defn m ([(a Int)] Int a) ([(a Int) (b Int)] Int b))"))
+(define (src source)
+  (datum->src (rd source)))
 
-(for ([s (in-list STRUCTURAL-BATTERY)])
-  (test-case (format "datum->src is byte-identical for: ~a" s)
-    (check-equal? (src s) s))
-  (test-case (format "datum->beagle-src is byte-identical for: ~a" s)
-    (check-equal? (datum->beagle-src (rd s)) s)))
+(define (pretty source)
+  (datum->pretty (rd source)))
 
-(test-case "function-type arrows remain data inside types"
-  (check-equal? (src "(defn hof [(cb (Fn [Int] String))] String (cb 1))")
-                "(defn hof [(cb (Fn [Int] String))] String (cb 1))"))
+(define LEGACY->CANONICAL
+  (list
+   (cons "(def answer Int 42)"
+         "(def answer (: 42 Int))")
+   (cons "(defonce once Int 1)"
+         "(defonce once (: 1 Int))")
+   (cons "(defn greet [(name String)] String (str name))"
+         "(defn greet [name String] String (str name))")
+   (cons "(fn [(value Int)] Int value)"
+         "(fn [value Int] Int value)")
+   (cons "(defn collect [(first Int) & (more (Vec Int))] Int first)"
+         "(defn collect [first Int & more (Vec Int)] Int first)")
+   (cons "(let [(value Int) source] value)"
+         "(let [value (: source Int)] value)")
+   (cons "(defrecord Point [(x Float) (y Float)])"
+         "(defrecord Point [x Float y Float])")))
 
-(test-case "structural source writers emit no annotation punctuation"
-  (for ([s (in-list STRUCTURAL-BATTERY)])
-    (for ([out (in-list (list (src s) (pp s) (datum->beagle-src (rd s))))])
-      (check-false (string-contains? out "#%:") s)
-      (check-false (string-contains? out ":-") s))))
+(for ([example (in-list LEGACY->CANONICAL)])
+  (define legacy (car example))
+  (define canonical (cdr example))
+  (test-case (format "datum source canonicalizes: ~a" legacy)
+    (check-equal? (src legacy) canonical)
+    (check-equal? (datum->beagle-src (rd legacy)) canonical)
+    (check-equal? (src canonical) canonical)))
 
-(define ROUNDTRIP-BATTERY
-  (append
-   STRUCTURAL-BATTERY
-   '("(defn ^:private q [(a Int)] Int a)"
-     "(def ^:dynamic *cfg* Int 1)"
-     "(defn r [(a Int) & (more Int)] Int a)"
-     "(defn fr [(xs (Vec Int))] Nil (for [(x Int) xs :let [(y Int) x]] y))"
-     "(defprotocol Area (area [self] Int))"
-     "(letfn [(h [(b Int)] Int b)] (h 1))"
-     "(forall [(T <: String)] T)"
-     "{:k 1 :j 2}"
-     "`[(~name ~type)]")))
-
-(for ([s (in-list ROUNDTRIP-BATTERY)])
-  (test-case (format "read->datum->src->read is the identity: ~a" s)
-    (check-equal? (rd (src s)) (rd s)))
-  (test-case (format "read->datum->pretty->read is the identity: ~a" s)
-    (check-equal? (rd (pp s)) (rd s)))
-  (test-case (format "read->write-beagle-source->read is the identity: ~a" s)
-    (define out
-      (with-output-to-string
-        (lambda () (write-beagle-source (list (rd s)) (current-output-port)))))
-    (check-equal? (rd out) (rd s) out)))
-
-(define CANONICAL-LAYOUT
-  '("(defn add [(x Int) (y Int)] Int (+ x y))"
-    "(defn resty [(x Int) & (more Int)] Int x)"
-    "(fn [(x Int) (y Int)] Int (+ x y))"
-    "(fn add [(x Int) (y Int)] Int (+ x y))"
-    "(defmacro pair [x y] `[~x ~y])"
-    "(defn choose ([x] Any x) ([x y] Any y))"
-    "(letfn [(sum [(x Int) (y Int)] Int (+ x y))] (sum 1 2))"
-    "(defprotocol P (m [self (x Int)] Int))"
-    "(extend-type T P (m [self (x Int)] Int x))"
-    "(defrecord P [(x Int) (y String)])"
-    "(defunion Shape (Rect [(width Int) (height Int)]))"
-    "(defunion :throwable Failure (Bad [(message String) (path String)]))"))
-
-(for ([s (in-list CANONICAL-LAYOUT)])
-  (test-case (format "canonical grammar layout: ~a" s)
-    (define out (pp s))
-    (check-equal? out s)
-    (check-equal? (rd out) (rd s))))
-
-(test-case "three grammar entries stay inline when the complete signature fits"
-  (check-equal? (pp "(defn f [(a Int) (b Int) (c Int)] Int a)")
-                "(defn f [(a Int) (b Int) (c Int)] Int a)"))
-
-(test-case "compact constrained bindings preserve their structural owner form"
-  (check-equal? (pp "(defn f [(a Int positive?)] Int a)")
-                "(defn f [(a Int positive?)] Int a)"))
-
-(test-case "complete signature width is inclusive at 80 columns"
-  (define prefix "(defn ")
-  (define suffix " [(x Int) (y Int)] Int")
-  (define name-80
-    (make-string (- 80 (string-length prefix) (string-length suffix)) #\x))
-  (define signature-80 (string-append prefix name-80 suffix))
-  (define out-80 (pp (string-append signature-80 " 0)")))
-  (check-equal? (car (string-split out-80 "\n")) signature-80)
-  (define name-81 (string-append name-80 "x"))
-  (define out-81 (pp (string-append prefix name-81 suffix " 0)")))
-  (check-equal? (car (string-split out-81 "\n")) (string-append prefix name-81))
-  (check-equal? (cadr (string-split out-81 "\n"))
-                "  [(x Int) (y Int)] Int"))
-
-(test-case "an over-width owner moves a fitting signature as one unit"
-  (define name (make-string 58 #\z))
-  (define out
-    (pp (format "(defn ~a [(alpha Int) (beta String)] Int alpha)" name)))
-  (define lines (string-split out "\n"))
-  (check-equal? (car lines) (format "(defn ~a" name))
-  (check-equal? (cadr lines) "  [(alpha Int) (beta String)] Int")
-  (check-equal? (caddr lines) "  alpha)"))
-
-(test-case "an over-width signature unit expands bindings and isolates return"
-  (define source
-    (string-append
-     "(defn complicated-distance "
-     "[(anchor Coordinate) (coord Coordinate) (world WorldState) "
-     "(options DistanceOptions)] Float world)"))
+(test-case "single unrefined pair stays inline regardless of width"
+  (define name (make-string 120 #\n))
+  (define source (format "(defn ~a [value Int] Int value)" name))
   (check-equal?
-   (pp source)
-   (string-append
-    "(defn complicated-distance\n"
-    "  [(anchor Coordinate)\n"
-    "   (coord Coordinate)\n"
-    "   (world WorldState)\n"
-    "   (options DistanceOptions)]\n"
-    "  Float\n"
-    "  world)")))
+   (pretty source)
+   (format "(defn ~a [value Int] Int\n  value)" name)))
 
-(test-case "expanded signatures keep constrained declarations whole"
-  (define source
-    (string-append
-     "(defn constrained-distance "
-     "[(anchor Coordinate coordinate?) (coord Coordinate coordinate?) "
-     "(world WorldState ready-world?) (options DistanceOptions valid-options?)] "
-     "Float world)"))
+(test-case "more than one pair breaks by grammar, not width"
   (check-equal?
-   (pp source)
+   (pretty "(defn add [(x Int) (y Int)] Int (+ x y))")
    (string-append
-    "(defn constrained-distance\n"
-    "  [(anchor Coordinate coordinate?)\n"
-    "   (coord Coordinate coordinate?)\n"
-    "   (world WorldState ready-world?)\n"
-    "   (options DistanceOptions valid-options?)]\n"
-    "  Float\n"
-    "  world)")))
+    "(defn add\n"
+    "  [x Int\n"
+    "   y Int]\n"
+    "  Int\n"
+    "  (+ x y))")))
 
-(test-case "an individually over-width declaration expands internally"
+(test-case "a refinement forces a one-pair vector to break"
+  (check-equal?
+   (pretty "(defn positive [(x Int positive?)] Int x)")
+   (string-append
+    "(defn positive\n"
+    "  [x (Int where positive?)]\n"
+    "  Int\n"
+    "  x)")))
+
+(test-case "canonical ruling example"
   (define source
     (string-append
-     "(defn validated-coordinate "
-     "[(coordinate InternationalCoordinateReferenceSystem "
-     "coordinate-inside-supported-world-boundaries?)] Float coordinate)"))
+     "(defn resize [shape Shape width (Int where (> _ 0)) "
+     "height (Int where (> _ 0))] Shape "
+     "(where (fits shape width height)) ...)"))
   (define expected
     (string-append
-     "(defn validated-coordinate\n"
-     "  [(coordinate\n"
-     "    InternationalCoordinateReferenceSystem\n"
-     "    coordinate-inside-supported-world-boundaries?)]\n"
-     "  Float\n"
-     "  coordinate)"))
-  (check-equal? (pp source) expected)
-  (check-equal? (pp expected) expected))
+     "(defn resize\n"
+     "  [shape Shape\n"
+     "   width (Int where (> _ 0))\n"
+     "   height (Int where (> _ 0))]\n"
+     "  Shape\n"
+     "  (where (fits shape width height))\n"
+     "  ...)"))
+  (check-equal? (pretty source) expected)
+  (check-equal? (pretty expected) expected))
 
-(test-case "a long constraint expression expands inside its declaration"
-  (define source
-    (string-append
-     "(defn validated-coordinate "
-     "[(coordinate Coordinate (and coordinate-inside-supported-world-boundaries? "
-     "coordinate-has-supported-reference-system?))] Float coordinate)"))
-  (define expected
-    (string-append
-     "(defn validated-coordinate\n"
-     "  [(coordinate\n"
-     "    Coordinate\n"
-     "    (and\n"
-     "     coordinate-inside-supported-world-boundaries?\n"
-     "     coordinate-has-supported-reference-system?))]\n"
-     "  Float\n"
-     "  coordinate)"))
-  (check-equal? (pp source) expected)
-  (check-true
-   (for/and ([line (in-list (string-split expected "\n"))])
-     (<= (string-length line) 80)))
-  (check-equal? (pp expected) expected))
-
-(test-case "a long constrained rest declaration expands as one structural entry"
-  (define source
-    (string-append
-     "(defn collect [(first Int) & "
-     "(remaining-values (Vec InternationalCoordinateReferenceSystem) "
-     "all-coordinates-inside-supported-world-boundaries?)] Int first)"))
-  (define expected
-    (string-append
-     "(defn collect\n"
-     "  [(first Int)\n"
-     "   & (remaining-values\n"
-     "      (Vec InternationalCoordinateReferenceSystem)\n"
-     "      all-coordinates-inside-supported-world-boundaries?)]\n"
-     "  Int\n"
-     "  first)"))
-  (check-equal? (pp source) expected)
-  (check-true
-   (for/and ([line (in-list (string-split expected "\n"))])
-     (<= (string-length line) 80)))
-  (check-equal? (pp expected) expected))
-
-(test-case "the enclosing vector closer counts at the 80-column boundary"
-  (define predicate-at-80 (make-string 68 #\p))
-  (define predicate-at-81 (string-append predicate-at-80 "p"))
-  (define at-80
-    (pp (format "(defn f [(x Int ~a)] Int x)" predicate-at-80)))
-  (check-true
-   (string-contains? at-80 (format "  [(x Int ~a)]\n" predicate-at-80)))
-  (check-true
-   (for/and ([line (in-list (string-split at-80 "\n"))])
-     (<= (string-length line) 80)))
-  (define at-81
-    (pp (format "(defn f [(x Int ~a)] Int x)" predicate-at-81)))
-  (check-true (string-contains? at-81 "  [(x\n    Int\n"))
-  (check-true
-   (for/and ([line (in-list (string-split at-81 "\n"))])
-     (<= (string-length line) 80))))
-
-(test-case "typed destructuring is one structural binding form"
+(test-case "destructuring binder remains one pair"
   (check-equal?
-   (pp (string-append
-        "(defn distance [([x1 y1] (HVec Float Float)) "
-        "([x2 y2] (HVec Float Float))] Float "
-        "(+ x1 x2))"))
+   (pretty
+    "(defn place [({:keys [w h]} Size) (label String)] Point label)")
    (string-append
-    "(defn distance [([x1 y1] (HVec Float Float)) "
-    "([x2 y2] (HVec Float Float))] Float\n"
-    "  (+ x1 x2))"))
-  (check-equal?
-   (src "(defn connect [({:keys [host port]} Config)] String host)")
-   "(defn connect [({:keys [host port]} Config)] String host)"))
+    "(defn place\n"
+    "  [{:keys [w h]} Size\n"
+    "   label String]\n"
+    "  Point\n"
+    "  label)")))
 
-(test-case "all three signature layout tiers are idempotent"
-  (define sources
-    (list
-     "(defn distance [(a Point) (b Point)] Float a)"
-     (format "(defn ~a [(a Point) (b Point)] Float a)"
-             (make-string 62 #\h))
-     (string-append
-      "(defn complicated-distance "
-      "[(anchor Coordinate) (coord Coordinate) (world WorldState) "
-      "(options DistanceOptions)] Float world)")))
-  (for ([source (in-list sources)])
-    (define once (pp source))
-    (check-equal? (datum->pretty (rd once)) once source)))
-
-(test-case "multi-arity clauses expand the unit without orphaning their opener"
-  (define source
-    (string-append
-     "(defn f "
-     "([(anchor Coordinate) (coord Coordinate) (world WorldState) "
-     "(options DistanceOptions)] Float anchor) ([x] Int x))"))
+(test-case "variadic marker stays attached to exactly one pair"
   (check-equal?
-   (pp source)
+   (pretty "(defn collect [(first Int) & (more (Vec Int))] Int first)")
+   (string-append
+    "(defn collect\n"
+    "  [first Int\n"
+    "   & more (Vec Int)]\n"
+    "  Int\n"
+    "  first)")))
+
+(test-case "fn and defrecord use the same vector break law"
+  (check-equal?
+   (pretty "(fn [(x Int) (y Int)] Int (+ x y))")
+   (string-append
+    "(fn\n"
+    "  [x Int\n"
+    "   y Int] Int\n"
+    "  (+ x y))"))
+  (check-equal?
+   (pretty "(defrecord Point [(x Float) (y Float)])")
+   (string-append
+    "(defrecord Point\n"
+    "  [x Float\n"
+    "   y Float])")))
+
+;; The breaking law is per-VECTOR, not per-form: there is no form in the
+;; language where two bindings share a line. `let` and `loop` are bound by it
+;; exactly as `defn` is, with no width threshold and no "it fits" case.
+(test-case "let and loop break more than one binding one per line"
+  (check-equal?
+   (pretty "(let [a 1 b 2] a)")
+   (string-append
+    "(let\n"
+    "  [a 1\n"
+    "   b 2]\n"
+    "  a)"))
+  (check-equal?
+   (pretty "(loop [i 0 total 0] i)")
+   (string-append
+    "(loop\n"
+    "  [i 0\n"
+    "   total 0]\n"
+    "  i)"))
+  (check-equal?
+   (pretty "(let [(a Int) 1 (b Int) 2] a)")
+   (string-append
+    "(let\n"
+    "  [a (: 1 Int)\n"
+    "   b (: 2 Int)]\n"
+    "  a)")))
+
+(test-case "a single unrefined binding may stay inline"
+  (check-equal? (pretty "(let [a 1] a)") "(let [a 1] a)")
+  (check-equal? (pretty "(loop [i 0] i)") "(loop [i 0] i)")
+  (check-equal? (pretty "(let [(a Int) 1] a)") "(let [a (: 1 Int)] a)"))
+
+(test-case "a refinement forces a one-binding let to break"
+  (check-equal?
+   (pretty "(let [(width Int (> _ 0)) source] width)")
+   (string-append
+    "(let\n"
+    "  [width (: source (Int where (> _ 0)))]\n"
+    "  width)")))
+
+(test-case "multi-arity defn prints each expanded return on its own line"
+  (check-equal?
+   (pretty
+    "(defn f ([(x Int)] Int x) ([(x Int) (y Int)] Int (+ x y)))")
    (string-append
     "(defn f\n"
-    "  ([(anchor Coordinate)\n"
-    "    (coord Coordinate)\n"
-    "    (world WorldState)\n"
-    "    (options DistanceOptions)]\n"
-    "   Float\n"
-    "   anchor)\n"
-    "  ([x] Int x))")))
+    "  ([x Int] Int x)\n"
+    "  ([x Int\n"
+    "    y Int]\n"
+    "   Int\n"
+    "   (+ x y)))")))
 
-(test-case "ordinary data and let binding vectors keep generic pretty-printing"
-  (check-equal? (pp "[a b]") "[a b]")
-  (check-equal? (pp "(f [a b])") "(f [a b])")
-  (check-equal? (pp "(let [a 1 b 2] (+ a b))")
-                "(let [a 1 b 2] (+ a b))"))
+(test-case "nested typed owner sites contain no grouped declarations"
+  (for ([source
+         (in-list
+          (list
+           "(letfn [(sum [(x Int) (y Int)] Int (+ x y))] (sum 1 2))"
+           "(defprotocol P (m [(self P) (x Int)] Int))"
+           "(extend-type T P (m [(self T) (x Int)] Int x))"
+           "(defunion Shape (Rect [(width Int) (height Int)]))"))])
+    (define rendered (src source))
+    (check-false (regexp-match? #px"\\[\\([^]]+ [^]]+\\)" rendered)
+                 rendered)))
 
-(test-case "datum->pretty is idempotent at the fixed point"
-  (for ([s (in-list ROUNDTRIP-BATTERY)])
-    (check-equal? (datum->pretty (rd (pp s))) (pp s) s)))
+(test-case "write-beagle-source emits the canonical fixed point"
+  (define legacy (rd "(defn add [(x Int) (y Int)] Int (+ x y))"))
+  (define rendered
+    (with-output-to-string
+      (lambda ()
+        (write-beagle-source (list legacy) (current-output-port)))))
+  (check-equal?
+   rendered
+   (string-append
+    "(defn add\n"
+    "  [x Int\n"
+    "   y Int]\n"
+    "  Int\n"
+    "  (+ x y))\n\n")))
 
-(test-case "symbols containing an interior colon still round-trip via bars"
-  (for ([s (in-list '("|a:b|" "|:|" "(f |x:| |:y|)"))])
-    (check-equal? (rd (src s)) (rd s) (src s))))
-
-(test-case "keywords stay bare"
-  (check-equal? (src "(f :kw ::kw :a/b :-)" )
-                "(f :kw ::kw :a/b :-)"))
-
-(test-case "query-sig reports the structural signature"
-  (define tmp (make-temporary-file "sig-~a.bclj"))
-  (dynamic-wind
-   void
-   (lambda ()
-     (call-with-output-file tmp
-       (lambda (o)
-         (display (string-append
-                   "#lang beagle/clj\n(ns t)\n"
-                   "(defn add [(x Int) (y Int)] String \"s\")\n"
-                   "(def answer Int 42)\n") o))
-       #:exists 'truncate/replace)
-     (define out
-       (with-output-to-string
-         (lambda () (query-sig "add" (list (path->string tmp))))))
-     (check-true (string-contains? out "Int") out)
-     (check-true (string-contains? out "String") out))
-   (lambda () (delete-file tmp))))
+(test-case "ordinary vectors and colon-bearing symbols stay data"
+  (check-equal? (pretty "(f [a b])") "(f [a b])")
+  (check-equal? (rd (src "(f |x:| :kw ::kw)"))
+                (rd "(f |x:| :kw ::kw)")))

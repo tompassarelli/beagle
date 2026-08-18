@@ -8,7 +8,11 @@
          beagle/private/parse
          beagle/private/check
          beagle/private/types
-         beagle/private/ast)
+         beagle/private/ast
+         beagle/private/emit-dispatch
+         beagle/private/emit-clj
+         beagle/private/emit-js
+         beagle/private/emit-nix)
 
 (define PRELUDE "(ns t)\n(define-target clj)\n")
 
@@ -57,16 +61,22 @@
     (parse-src "(def value (Fn Int Bool) nil)")
     (fail "expected malformed function type rejection")))
 
-;; Every binding-bearing surface uses `(name Type)` as one structural datum.
+;; Legacy grouped declarations remain readable during the enabling seam.
 (ok "def"                     "(def answer Int 42)")
 (ok "def + docstring"         "(def answer Int \"doc\" 42)")
 (ok "untyped def"             "(def answer 42)")
 (ok "defonce"                 "(defonce once Int 1)")
 (ok "dynamic def"             "(def ^:dynamic *cfg* Int 1)")
-(ok "typed, bare, and mixed params"
-    "(defn f [(x Int) y (z String)] Int x)")
+(ok "legacy grouped params"
+    "(defn f [(x Int) (y Any) (z String)] Int x)")
+(ok "flat strict params"
+    "(defn f [x Int y Any z String] Int x)")
+(ok "wholly inferred params remain readable"
+    "(defn f [x y] Any x)")
+(ok "wholly inferred rest remains readable"
+    "(defn f [x & more] Any x)")
 (ok "typed sequential destructuring parameter"
-    "(defn f [([x y] (HVec Float Float)) opts] Float x)")
+    "(defn f [([x y] (HVec Float Float)) (opts Any)] Float x)")
 (ok "typed map destructuring parameter"
     "(defrecord Config [(host String) (port Int)])\n(defn f [({:keys [host port]} Config) (timeout Int)] String host)")
 (ok "nested heterogeneous destructuring parameter"
@@ -78,7 +88,7 @@
 (ok "homogeneous map default closes missing-key nullability"
     "(defn f [({:keys [x] :or {x 0}} (Map Keyword Int))] Int x)")
 (ok "typed rest param"        "(defn r [(x Int) & (more (Vec Int))] Int x)")
-(ok "bare rest param"         "(defn r [x & more] Any more)")
+(ok "flat rest param"         "(defn r [x Int & more (Vec Int)] Int x)")
 (ok "function type param"     "(defn hof [(cb (Fn [Int] String))] String (cb 1))")
 (ok "zero-argument function type"
     "(declare-extern host/now (Fn [] Int))")
@@ -96,6 +106,7 @@
 (ok "doseq binding"
     "(defn f [(xs (Vec Int))] Nil (doseq [(x Int) xs] (println x)))")
 (ok "record fields"           "(defrecord Point [(x Int) (y Int)])")
+(ok "flat record fields"      "(defrecord Point [x Int y Int])")
 (ok "union and error fields"
     "(defunion Shape (Circle [(radius Int)]))\n(defunion :throwable Boom (Boom [(message String)]))")
 (ok "catch binding"
@@ -107,6 +118,7 @@
     "(defunion :throwable Boom (Boom [(message String)]))\n(defn f [] Int :raises Boom 1)")
 (ok "private defn"            "(defn- f [(x Int)] Int x)")
 (ok "anonymous fn"            "(defn f [(x Int)] Int ((fn [(y Int)] Int y) x))")
+(ok "flat anonymous fn"       "(defn f [x Int] Int ((fn [y Int] Int y) x))")
 (ok "letfn"                   "(defn f [(x Int)] Int (letfn [(g [(y Int)] Int y)] (g x)))")
 (ok "multi-arity"
     "(defn f ([(x Int)] Int x) ([(x Int) (y Int)] Int (+ x y)))")
@@ -119,12 +131,12 @@
 (test-case "types populate AST slots"
   (define program
     (parse-src
-     "(def answer Int 42)\n(defn add [(x Int) y] String (let [(n Int) x] \"s\"))"))
+     "(def answer Int 42)\n(defn add [x Int y Any] String (let [(n Int) x] \"s\"))"))
   (define forms (program-forms program))
   (check-eq? (type-prim-name (def-form-type (car forms))) 'Int)
   (define function (cadr forms))
   (check-eq? (type-prim-name (param-type (car (defn-form-params function)))) 'Int)
-  (check-false (param-type (cadr (defn-form-params function))))
+  (check-true (type? (param-type (cadr (defn-form-params function)))))
   (check-eq? (type-prim-name (defn-form-return-type function)) 'String)
   (define binding (car (let-form-bindings (car (defn-form-body function)))))
   (check-eq? (type-prim-name (let-binding-type binding)) 'Int))
@@ -145,17 +157,17 @@
   (check-eq? (type-prim-name (param-type map-param)) 'Config))
 
 (err/rx "bare sequential destructuring parameter requires annotation"
-        #rx"destructured parameter requires an aggregate type"
+        #rx"parameter .*x y.* has no following type"
         "(defn f [[x y]] Any x)")
 (err/rx "bare map destructuring parameter requires annotation"
-        #rx"destructured parameter requires an aggregate type"
+        #rx"parameter .*host.* has no following type"
         "(defn f [{:keys [host]}] Any host)")
 (err/rx "record fields cannot destructure"
         #rx"field name must be a symbol"
         "(defrecord Bad [([x y] (HVec Int Int))])")
 (err/rx "rest parameter cannot destructure"
         #rx"rest parameter must bind one name"
-        "(defn f [x & ([y z] (HVec Int Int))] Int x)")
+        "(defn f [x Int & [y z] (HVec Int Int)] Int x)")
 (err/rx "catch cannot destructure"
         #rx"catch binding must be"
         "(defn f [] Int (try 1 (catch ([e more] (HVec Exception Any)) 0)))")
@@ -239,14 +251,14 @@
 (test-case "qualified nominal api/Fn remains legal"
   (check-not-exn (lambda () (parse-src "(def value api/Fn nil)"))))
 (ok "value-level Fn binding remains legal"
-    "(defn value-level [(Fn Int)] Int Fn)")
+    "(defn value-level [Fn Int] Int Fn)")
 ;; The slot is fixed; the parser never guesses whether a type-shaped symbol is
 ;; a body expression.
 (err/rx "defn missing return slot"
-        #rx"expected.*ReturnType"
+        #rx"needs a return type and body"
         "(defn f [] 1)")
 (err/rx "defn return without body"
-        #rx"expected.*ReturnType"
+        #rx"needs a return type and body"
         "(defn f [] Int)")
 (err/rx "fn return without body"
         #rx"fn needs a return type and body"
@@ -263,3 +275,64 @@
    (lambda ()
      (check-src
       "(defn f [(cb (Fn [Int] Int)) (x Int)] Int (-> x cb))"))))
+
+(test-case "legacy and flat signatures lower to the same AST"
+  (define legacy
+    (parse-src
+     "(defrecord P [(x Int) (y String)])\n(defn f [(p P) & (xs (Vec Int))] P p)"))
+  (define flat
+    (parse-src
+     "(defrecord P [x Int y String])\n(defn f [p P & xs (Vec Int)] P p)"))
+  (for ([target (in-list '(clj js nix))])
+    (define emit (emitter-backend-emit-program (resolve-backend target)))
+    (check-equal? (emit legacy) (emit flat) (symbol->string target))))
+
+(test-case "odd flat vector reports the binder in structured details"
+  (with-handlers ([beagle-parse-error?
+                   (lambda (error)
+                     (check-eq? (beagle-parse-error-kind error)
+                                'missing-binding-type)
+                     (check-equal?
+                      (hash-ref (beagle-parse-error-details error) 'binder)
+                      "age")
+                     (check-true
+                      (string-contains? (exn-message error)
+                                        "parameter age has no following type")))])
+    (parse-src "(defn f [name String age] String name)")
+    (fail "expected missing type rejection")))
+
+(test-case "mixed grouped and flat declarations have a structured kind"
+  (with-handlers ([beagle-parse-error?
+                   (lambda (error)
+                     (check-eq? (beagle-parse-error-kind error)
+                                'mixed-typed-bindings))])
+    (parse-src "(defn f [x Int (y String)] Int x)")
+    (fail "expected mixed declaration rejection")))
+
+(ok "expression ascription" "(def answer (: 42 Int))")
+(check-err/rx "ascription checks its expression"
+              #rx"ascription: expected Int, got String"
+              "(def answer (: \"no\" Int))")
+
+(define (check-refinement-reserved src placement)
+  (with-handlers ([beagle-diagnostic?
+                   (lambda (error)
+                     (check-eq? (beagle-diagnostic-kind error)
+                                'refinement-not-implemented)
+                     (define details (beagle-diagnostic-details error))
+                     (check-equal? (hash-ref details 'error-code) "E031")
+                     (check-equal? (hash-ref details 'status)
+                                   "not-yet-implemented")
+                     (check-equal? (hash-ref details 'placement) placement))])
+    (check-src src)
+    (fail "expected reserved refinement rejection")))
+
+(test-case "inline refinement parses and is rejected by the checker"
+  (check-refinement-reserved
+   "(defn positive [x (Int where (> x 0))] Int x)"
+   "inline"))
+
+(test-case "signature where clause parses and is rejected by the checker"
+  (check-refinement-reserved
+   "(defn bounded [lo Int hi Int] Bool (where (<= lo hi)) true)"
+   "signature"))

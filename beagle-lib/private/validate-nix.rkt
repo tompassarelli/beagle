@@ -541,6 +541,7 @@
        (for-each (lambda (b) (walk b body-scope)) (with-open-form-body e))]
       [(with-meta? e)      (walk (with-meta-expr e) scope)]
       [(threading-marker? e) (walk (threading-marker-desugared e) scope)]
+      [(ascription? e) (walk (ascription-expr e) scope)]
       [(letfn-form? e)
        (define group-scope
          (for/fold ([current scope])

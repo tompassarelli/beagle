@@ -750,6 +750,7 @@
    branch (if (nil? branch0) (pick "clj") branch0)]
   (if (nil? branch) "nil" (emit-expr* (get branch "body"))))
   (= node "dynamic-var") (get e "name")
+  (= node "ascription") (emit-expr! (get e "expr"))
   (= node "check") (str "(let [r__check " (emit-expr* (get e "expr")) "]\n" "  (if (instance? Ok r__check)\n" "    (ok-value r__check)\n" "    (throw (ex-info (str \"check failed: \" (err-error r__check)) {:error r__check}))))")
   (= node "rescue") (let [err-name (let [en (get e "err")]
   (if (absent? en) "_" en))]

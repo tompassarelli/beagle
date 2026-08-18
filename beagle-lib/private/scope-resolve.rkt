@@ -10,7 +10,8 @@
          racket/string
          "ast.rkt"
          "macros.rkt"
-         "tags.rkt")
+         "tags.rkt"
+         "types.rkt")
 
 (provide expand-and-resolve-program
          current-scope-expansion-error-handler
@@ -332,11 +333,32 @@
     (if (typed-declaration? value)
         (target-bound-names (car (syntax-list-children value)))
         (target-bound-names value)))
+  (define items (sequence-children params))
+  (define declarations
+    (filter (lambda (item) (not (eq? (syntax-datum item) '&))) items))
+  (define first-declaration
+    (and (pair? declarations) (car declarations)))
+  (define legacy? (and first-declaration (typed-declaration? first-declaration)))
+  (define flat?
+    (and (not legacy?)
+         (pair? declarations)
+         (pair? (cdr declarations))
+         (type-expression-datum? (syntax-datum (cadr declarations)))))
+  (define logical-declarations
+    (if (or legacy? (not flat?))
+        (filter (lambda (item) (not (eq? (syntax-datum item) '&))) items)
+        (let loop ([rest items] [out '()])
+          (cond
+            [(null? rest) (reverse out)]
+            [(eq? (syntax-datum (car rest)) '&)
+             (loop (cdr rest) out)]
+            [else
+             (loop (if (pair? (cdr rest)) (cddr rest) '())
+                   (cons (car rest) out))]))))
   (define duplicate
-    (for/fold ([seen (seteq)] [found #f] #:result found)
-              ([item (in-list (sequence-children params))]
-               #:unless (eq? (syntax-datum item) '&)
-               [name (in-list (declaration-bound-names item))])
+    (for*/fold ([seen (seteq)] [found #f] #:result found)
+               ([item (in-list logical-declarations)]
+                [name (in-list (declaration-bound-names item))])
       (values (set-add seen name)
               (or found (and (set-member? seen name) name)))))
   (when duplicate
@@ -349,18 +371,39 @@
       duplicate)))
   (define scope (fresh-scope-id 'parameter))
   (define-values (rendered body-table identities)
-    (for/fold ([out '()] [current table] [ids #hasheq()])
-              ([item (in-list (sequence-children params))]
-               [index (in-naturals)])
-      (cond
-        [(eq? (syntax-datum item) '&)
-         (values (append out (list item)) current ids)]
-        [else
-         (define-values (bound table* ids*)
-           (bind-declaration
-            item current scope 'parameter (append path (list index))))
-         (values
-          (append out (list bound)) table* (merge-identities ids ids*))])))
+    (if (or legacy? (not flat?))
+        (for/fold ([out '()] [current table] [ids #hasheq()])
+                  ([item (in-list items)] [index (in-naturals)])
+          (cond
+            [(eq? (syntax-datum item) '&)
+             (values (append out (list item)) current ids)]
+            [else
+             (define-values (bound table* ids*)
+               (bind-declaration
+                item current scope 'parameter (append path (list index))))
+             (values
+              (append out (list bound)) table*
+              (merge-identities ids ids*))]))
+        (let loop ([rest items]
+                   [index 0]
+                   [out '()]
+                   [current table]
+                   [ids #hasheq()])
+          (cond
+            [(null? rest) (values out current ids)]
+            [(eq? (syntax-datum (car rest)) '&)
+             (loop (cdr rest) (add1 index)
+                   (append out (list (car rest))) current ids)]
+            [else
+             (define-values (bound table* ids*)
+               (bind-declaration
+                (car rest) current scope 'parameter (append path (list index))))
+             (if (pair? (cdr rest))
+                 (loop (cddr rest) (+ index 2)
+                       (append out (list bound (cadr rest))) table*
+                       (merge-identities ids ids*))
+                 (values (append out (list bound)) table*
+                         (merge-identities ids ids*)))]))))
   (values (rebuild-sequence params rendered) body-table scope identities))
 
 (define (walk-function-clause clause table path ctx)

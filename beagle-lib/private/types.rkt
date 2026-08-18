@@ -50,6 +50,7 @@
 (struct type-fn    (params rest-type ret)      #:transparent)  ; rest-type: type or #f
 (struct type-app   (ctor args)                 #:transparent)
 (struct type-union (alts)                      #:transparent)
+(struct type-refinement (base predicate placement) #:transparent)
 (struct type-var   (name)                      #:transparent)
 (struct type-meta  (id [solution #:mutable])
   #:transparent
@@ -71,7 +72,7 @@
 
 (define (type? x)
   (or (type-prim? x) (type-fn? x) (type-app? x) (type-union? x)
-      (type-var? x) (type-meta? x) (type-poly? x)))
+      (type-refinement? x) (type-var? x) (type-meta? x) (type-poly? x)))
 
 (define current-type-vars (make-parameter '()))
 ;; Set by checker: maps union-name → (listof member-symbol) for subtype checks
@@ -171,6 +172,12 @@
 
 (define (parse-type t)
   (cond
+    ;; Syntax is reserved before semantics: the checker rejects this node with
+    ;; a structured not-yet-implemented diagnostic until proof/guard placement
+    ;; lands. Preserve the authored predicate datum for that later seam.
+    [(and (list? t) (= (length t) 3) (eq? (cadr t) 'where))
+     (type-refinement (parse-type (car t)) (caddr t) 'inline)]
+
     ;; A vector is never a type expression.  Retired arrow vectors receive a
     ;; pointed replacement instead of falling through to a generic bad-type
     ;; diagnostic; accepting them here would create a second language surface.
@@ -347,6 +354,15 @@
 
     [else
      (error 'beagle "bad type expression: ~v" t)]))
+
+;; Binding vectors remain allowed to be wholly inferred.  The flat surface is
+;; selected only when the second form is a real type expression; this keeps
+;; `[x y]` as two inferred parameters while making `[x Int y]` a typed vector
+;; with a pointed missing-type diagnostic for `y`.
+(define (type-expression-datum? datum)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (parse-type datum)
+    #t))
 
 (define (parse-fn-params params)
   ;; Detect `& T` for variadic functions.  The rest type is the final entry;
@@ -1131,6 +1147,7 @@
  (struct-out type-fn)
  (struct-out type-app)
  (struct-out type-union)
+ (struct-out type-refinement)
  (struct-out type-var)
  (struct-out type-meta)
  (struct-out type-poly)
@@ -1151,6 +1168,7 @@
  any-type?
  dynamic-type?
  parse-type
+ type-expression-datum?
  type-compatible?
  type-invariant-equal?
  type->string

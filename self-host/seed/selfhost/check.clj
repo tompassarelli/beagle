@@ -520,6 +520,7 @@
    jsk (get value "jsk")]
   (cond
   (= node "quoted") true
+  (= node "ascription") (constraint-value-synchronous? (get value "expr") proofs)
   (= node "await") false
   (and (= node "static-call") (= (get value "qualifier") "js") (= (get value "name") "await")) false
   (= jsk "await") false
@@ -1359,6 +1360,12 @@
   (emit-diag! (str (js-target-form-name e) " is only supported in beagle/js (current target: " (get (deref STATE) "target") ")"))
   ANY)
   (= (get e "node") "threading") (infer-expr! (get e "desugared") env)
+  (= (get e "node") "ascription") (let [expected (get e "ann")
+   inner (get e "expr")
+   actual (infer-expr-expected! inner env expected)]
+  (if (not (type-compatible? actual expected)) (do
+  (emit-diag! (str "beagle: ascription: expected " (type->string expected) ", got " (type->string actual)))))
+  expected)
   (= (get e "node") "literal") (let [t (infer-literal-type e)]
   (if (nil? t) ANY t))
   (= (get e "node") "ref") (let [found (reference-map-ref env e nil)]
@@ -2315,6 +2322,7 @@
   (if (and (> (count origins) 0) (< (get binding "lambda-depth") (get state "lambda-depth"))) (purity-result (purity-escape-origins state origins value) {}) (purity-result state origins)))))
   (= node "call") (purity-analyze-call value state)
   (= node "threading") (purity-analyze (get value "desugared") state)
+  (= node "ascription") (purity-analyze (get value "expr") state)
   (= node "let") (let [outer-scope (get state "scope")
    bound (purity-analyze-bindings (get value "bindings") state true)
    result (purity-analyze-sequence (get value "body") bound)]
@@ -2556,6 +2564,7 @@
 
 (defn decorate-tagged-value [value record-updates record-field-accesses binding-constraint-proofs]
   (cond
+  (and (map? value) (= (get value "node") "ascription")) (decorate-tagged-value (get value "expr") record-updates record-field-accesses binding-constraint-proofs)
   (vector? value) (mapv (fn [item] (decorate-tagged-value item record-updates record-field-accesses binding-constraint-proofs)) value)
   (map? value) (let [with-check-id (get value WITH-CHECK-ID-KEY)
    kw-check-id (get value KW-ACCESS-CHECK-ID-KEY)
@@ -2628,6 +2637,7 @@
   (let [checked-input (tag-semantic-node-ids prog)
    unstable-bindings (unstable-binding-keys checked-input)]
   (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "unstable-bindings" unstable-bindings "definition-inference-counter" 0 "definition-inference-bindings" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
+  (if (some? (get checked-input "authored-refinement")) (emit-diag! "beagle [E031] [refinement-not-implemented]: refinement semantics are not yet implemented; the syntax is reserved, but static proof and trust-boundary guards land in a later seam") (do
   (install-imported-record-contracts! (get checked-input IMPORTED-RECORD-CONTRACTS-KEY []))
   (install-imported-union-contracts! (get checked-input "externs"))
   (let [initial-env (build-initial-env! checked-input)
@@ -2642,7 +2652,7 @@
   (check-nix-free-dotted! checked-input)
   (check-qualified-resolution! checked-input env)
   (check-purity! checked-input))))
-  (swap! STATE assoc "checked-program" (decorate-tagged-value checked-input (get (deref STATE) "record-updates") (get (deref STATE) "record-field-accesses") (get (deref STATE) "binding-constraint-proofs"))))
+  (swap! STATE assoc "checked-program" (decorate-tagged-value checked-input (get (deref STATE) "record-updates") (get (deref STATE) "record-field-accesses") (get (deref STATE) "binding-constraint-proofs"))))))
   (let [diags (get (deref STATE) "diagnostics")]
   {"diagnostics" diags "count" (count diags)}))
 
@@ -3166,6 +3176,15 @@
   (= (count (check-program! prog)) 0)))
   (expect! "check-program!: reports errors" (let [prog (make-prog [(make-def-node "x" (make-prim "String") (make-lit "number" 42))])]
   (> (count (check-program! prog)) 0)))
+  (expect! "ascription checks and erases into the checked projection" (let [prog (make-prog [(make-def-node "x" nil {"node" "ascription" "expr" (make-lit "number" 42) "ann" (make-prim "Int")})])
+   diagnostics (check-program! prog)
+   checked (decorate-checked-program! prog)]
+  (and (= (count diagnostics) 0) (= (get (get (nth (get checked "forms") 0) "value") "node") "literal"))))
+  (expect! "ascription rejects a mismatched expression" (let [prog (make-prog [(make-def-node "x" nil {"node" "ascription" "expr" (make-lit "string" "no") "ann" (make-prim "Int")})])]
+  (diagnostics-include? (check-program! prog) "ascription: expected Int, got String")))
+  (expect! "refinement syntax is rejected with E031" (let [refinement {"kind" "refinement" "base" (make-prim "Int") "predicate" [">" "x" 0] "placement" "inline"}
+   prog (assoc (make-prog []) "authored-refinement" refinement)]
+  (diagnostics-include? (check-program! prog) "E031")))
   (expect! "Core ABI: finalized polymorphic function rejected" (do
   (reset! STATE {"diagnostics" []})
   (check-core-function-abis! (assoc (make-prog [(make-defn-node "constant" [(make-param "x" nil)] (make-prim "Int") [(make-lit "number" 1)])]) "target" "core") {"constant" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-prim "Int")) nil)})

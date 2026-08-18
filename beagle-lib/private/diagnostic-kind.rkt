@@ -130,6 +130,7 @@
    'def-type            'type-error
    'let-binding         'type-error
    'binding-constraint  'type-error
+   'refinement-not-implemented 'type-error
    'type-bound          'type-error
    'scalar-predicate    'type-error
    'scalar-predicate-declaration 'type-error
@@ -213,6 +214,8 @@
    'removed-form           'surface-divergence
    'unknown-form           'surface-divergence
    'inline-type-annotation 'surface-divergence
+   'mixed-typed-bindings  'surface-divergence
+   'missing-binding-type  'surface-divergence
    'legacy-function-type     'surface-divergence
    'malformed-function-type  'surface-divergence
    'reserved-type-name       'surface-divergence

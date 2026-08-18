@@ -10,7 +10,10 @@ fact-canonical flip (move 3).
 
 1. **Idempotent fixed-point** — `pretty(parse(pretty(x))) == pretty(x)`, byte-identical.
    Follows from purity (output depends only on the datum + width) + the round-trip.
-2. **Round-trip preserving** — pretty text re-reads to the IDENTICAL datum.
+2. **Canonical round-trip** — pretty text re-reads to the CANONICAL datum. The
+   writer emits only the ruled flat binding surface, so a legacy grouped
+   declaration is deliberately rewritten; the gated property is that nothing
+   else changes.
 3. **Locality** — a one-token change yields a small, local diff (each element owns
    its line when a form breaks). This is the property determinism does NOT give for
    free.
@@ -39,8 +42,10 @@ bindings; `fn` params+`-> ret`; `defrecord` name+fields; threading inits;
   formatter (prettier, gofmt, cljfmt, black) has this; round-trip still holds. The
   locality guarantee is for edits that don't cross the width boundary — the common
   case. Not a gate failure.
-- **A pathologically long signature line** (e.g. a many-binding `let`) stays one
-  line rather than breaking per-pair. Cosmetic; the diff is still local.
+- **Binding vectors are laid out by grammar, not width.** A vector holding more
+  than one binding always breaks one binding per line — `defn`, `fn`,
+  `defrecord`, `let`, `loop` alike — so that shape is fixed and never reflows.
+  A single unrefined binding stays inline.
 - **Comment capture gaps** (pre-existing in Turtle #6, not introduced here): block
   `#|...|#` comments and comments *inside* a form are not captured; at most one
   comment per line; exact whitespace/alignment is normalized.

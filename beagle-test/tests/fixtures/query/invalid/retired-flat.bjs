@@ -1,4 +1,0 @@
-#lang beagle/js
-(ns query.invalid-flat)
-
-(defrecord Retired [x Float])
