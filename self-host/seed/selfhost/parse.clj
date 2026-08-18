@@ -820,7 +820,7 @@
   (= index params-index) (get params "value")
   (= index return-index) (nth children index)
   (> index return-index) (scope-walk* (syntax-add-scope! (nth children index) (get params "scope")) (get params "table") (conj (vec path) index) ctx)
-  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))))))
+  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) indices))))))
 
 (defn- scope-walk-letfn! [value table path ctx]
   (let [children (scope-sequence-children value)

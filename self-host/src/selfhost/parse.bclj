@@ -1507,7 +1507,7 @@
                   :else
                     (scope-walk*
                       (nth children index) table (conj (vec path) index) ctx)))
-              (range (count children))))))))
+              indices))))))
 
 (defn- scope-walk-letfn! [(value Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children value)

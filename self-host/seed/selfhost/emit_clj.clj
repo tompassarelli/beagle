@@ -346,7 +346,8 @@
   (str "$beagle$record$" (unqualify-name name) "$validate"))
 
 (defn emit-record-constructor-guards [^String name fields]
-  (let [constrained (filterv (fn [entry] (constraint-present? (nth entry 1))) (mapv (fn [index] [index (nth fields index)]) (range (count fields))))]
+  (let [field-indices (vec (range (count fields)))
+   constrained (filterv (fn [entry] (constraint-present? (nth entry 1))) (mapv (fn [index] [index (nth fields index)]) field-indices))]
   (if (= 0 (count constrained)) [] (let [positional (str "->" name)
    map-factory (str "map->" name)
    raw-positional (str "$beagle$record$" name "$raw-constructor")

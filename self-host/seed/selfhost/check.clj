@@ -1099,6 +1099,7 @@
    rest-t (get fn-t "rest")
    n-fixed (count fixed)
    n-args (count args)
+   argument-indices (vec (range (if (< n-fixed n-args) n-fixed n-args)))
    fn-display (reference->string fn-name)
    fn-leaf (reference-leaf fn-name)
    check-slot (fn [i] (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
@@ -1119,11 +1120,11 @@
   (not (nil? rest-t)) (do
   (if (< n-args n-fixed) (do
   (emit-diag! (str "beagle: call to " fn-display ": expected at least " n-fixed " arg(s), got " n-args))))
-  (mapv check-slot (range n-args)))
+  (mapv check-slot argument-indices))
   :else (do
   (if (not= n-fixed n-args) (do
   (emit-diag! (str "beagle: call to " fn-display ": expected " n-fixed " arg(s), got " n-args))))
-  (mapv check-slot (range (if (< n-fixed n-args) n-fixed n-args)))))))
+  (mapv check-slot argument-indices)))))
 
 (defn infer-cond-clauses! [clauses env]
   (let [final (reduce (fn [state c] (let [test (get c "test")

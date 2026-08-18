@@ -670,11 +670,12 @@
   (str "$beagle$record$" (unqualify-name name) "$validate"))
 
 (defn emit-record-constructor-guards [(name String) (fields Any)] Any
-  (let [constrained
+  (let [(field-indices (Vec Int)) (vec (range (count fields)))
+        constrained
           (filterv (fn [(entry Any)] Bool
                      (constraint-present? (nth entry 1)))
             (mapv (fn [(index Int)] Any [index (nth fields index)])
-              (range (count fields))))]
+              field-indices))]
     (if (= 0 (count constrained))
       []
       (let [positional (str "->" name)
