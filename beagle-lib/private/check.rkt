@@ -508,6 +508,7 @@
     [(missing-export)      "E026"]
     [(unresolved-call)     "E027"]
     [(native-abi)          "E029"]
+    [(contract-refinement) "E030"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -634,7 +635,7 @@
                   'source-semantic-fact-id source-semantic-id
                   'syntax-node-id syntax-node-id)))))
 
-(define (raise-diag kind message details #:src [src #f])
+(define (raise-diag kind message details #:src [src #f] #:fact [given-fact #f])
   ;; When the form currently under type-check came from macro expansion
   ;; (current-macro-expansion-ctx is set by type-check-with-locs! for
   ;; macro-derived forms), rebucket the rejection as
@@ -673,8 +674,9 @@
                                        [else #f])))
         with-cause))
   (define fact
-    (and (eq? effective-kind 'type-mismatch)
-         (make-type-mismatch-diagnostic-fact details+src src)))
+    (or given-fact
+        (and (eq? effective-kind 'type-mismatch)
+             (make-type-mismatch-diagnostic-fact details+src src))))
   (raise (beagle-diagnostic
           (format "beagle: ~a" message)
           (current-continuation-marks)
@@ -1087,6 +1089,7 @@
                             [current-returns-synchronous-callable
                              return-callable-sync])
                (prepare-and-infer-definition-types! prog env)))
+           (check-declared-module-contract! prog)
            (parameterize ([current-regex-bindings regex-bindings]
                           [current-callable-synchronous callable-sync]
                           [current-returns-synchronous-callable
@@ -3595,6 +3598,222 @@
                  [current-regex-string-ops regex-string-ops])
     (infer-definition-types! prog env))
   (values regex-bindings regex-string-ops))
+
+;; Instantiate every implementation quantifier with inference metavariables.
+;; Declaration quantifiers remain authored/rigid below, so unification proves
+;; the required direction: a reusable implementation may satisfy one declared
+;; instance, but one implementation instance cannot claim a reusable contract.
+(define (freshen-contract-implementation scheme)
+  (cond
+    [(type-poly? scheme)
+     (define replacements
+       (for/hasheq ([name (in-list (type-poly-vars scheme))])
+         (values name (fresh-type-meta))))
+     (values (apply-type-bindings (type-poly-body scheme) replacements)
+             (for/list ([(name bound) (in-hash (or (type-poly-bounds scheme)
+                                                   (hasheq)))])
+               (cons (hash-ref replacements name)
+                     (apply-type-bindings bound replacements))))]
+    [else (values scheme '())]))
+
+(define (declared-contract-body scheme)
+  (if (type-poly? scheme) (type-poly-body scheme) scheme))
+
+(define (contract-scheme-text-fact-id prog name role scheme-text)
+  (semantic-fact-v1-id
+   (definition-scheme-fact-v1
+    (semantic-profile-v1-for-target (program-target prog))
+    (format "~a/~a/~a" (program-namespace prog) role name)
+    scheme-text
+    '()
+    (normalized-obligations-v1-open))))
+
+(define (contract-scheme-fact-id prog name role scheme)
+  (contract-scheme-text-fact-id prog name role (type->string scheme)))
+
+(define (contract-aggregate-scheme prog names scheme-ref)
+  (format
+   "~s"
+   (for/list ([name (in-list names)])
+     (list name (type->string (scheme-ref name))))))
+
+(define (contract-source-context prog)
+  (define src (program-declared-module-contract-source prog))
+  (define source-bytes (program-source-bytes prog))
+  (and
+   src source-bytes
+   (with-handlers ([exn:fail? (lambda (_) #f)])
+     (define profile
+       (semantic-profile-v1-for-target (program-target prog)))
+     (define source-path (diagnostic-source-path src prog))
+     (define source-id (diagnostic-source-id prog))
+     (define-values (text-facet semantic-facet)
+       (compute-source-facets-v1
+        source-bytes
+        #:source-path source-path
+        #:source-id source-id
+        #:semantic-profile profile))
+     (define source-text-id
+       (semantic-fact-v1-id (source-text-facet-v1-fact text-facet)))
+     (define source-semantic-id
+       (semantic-fact-v1-id
+        (source-semantic-facet-v1-fact semantic-facet)))
+     (list
+      profile
+      source-text-id
+      source-semantic-id
+      (diagnostic-source-anchor-v2
+       source-text-id source-semantic-id source-path
+       (src-loc-line src) (src-loc-col src)
+       (src-loc-pos src) (src-loc-span src))))))
+
+(define (make-contract-refinement-fact prog payload evidence)
+  (define context (contract-source-context prog))
+  (and
+   context
+   (let ([profile (car context)]
+         [source-text-id (cadr context)]
+         [source-semantic-id (caddr context)]
+         [anchor (cadddr context)])
+     (define checker
+       (checker-identity-fact-v1
+        profile "beagle/type-checker" "declared-contract-refinement"))
+     (make-contract-refinement-diagnostic-fact-v2
+      profile
+      (vector "DeclaredContractRefinementSubjectV1"
+              source-semantic-id
+              (hash-ref payload 'export-name))
+      payload
+      (vector source-text-id source-semantic-id)
+      (vector anchor)
+      checker
+      evidence))))
+
+(define (implementation-refines-declared? inferred declared)
+  (with-handlers ([exn:fail:type-unification? (lambda (_) #f)])
+    (define-values (instance bounds)
+      (freshen-contract-implementation inferred))
+    (unify-types! instance (declared-contract-body declared))
+    (for/and ([entry (in-list bounds)])
+      (define solved (zonk-type (car entry)))
+      (or (type-meta? solved)
+          (type-compatible? solved (cdr entry))))))
+
+(define (sorted-export-names table)
+  (sort (hash-keys table) symbol<?))
+
+(define (raise-contract-export-set-mismatch! prog declared inferred)
+  (define declared-names (sorted-export-names declared))
+  (define inferred-names (sorted-export-names inferred))
+  (define missing
+    (filter (lambda (name) (not (hash-has-key? inferred name)))
+            declared-names))
+  (define unexpected
+    (filter (lambda (name) (not (hash-has-key? declared name)))
+            inferred-names))
+  (define declared-aggregate
+    (contract-aggregate-scheme
+     prog declared-names (lambda (name) (hash-ref declared name))))
+  (define inferred-aggregate
+    (contract-aggregate-scheme
+     prog inferred-names
+     (lambda (name) (interface-binding-type (hash-ref inferred name)))))
+  (define declared-id
+    (contract-scheme-text-fact-id
+     prog '*module-export-set* "declared-contract" declared-aggregate))
+  (define inferred-id
+    (contract-scheme-text-fact-id
+     prog '*module-export-set* "inferred-effective" inferred-aggregate))
+  (define payload
+    (hasheq
+     'export-name "*module-export-set*"
+     'relation INTERFACE-REFINEMENT-RELATION-V1
+     'declared-scheme-fact-id declared-id
+     'inferred-effective-scheme-fact-id inferred-id
+     'declared-scheme declared-aggregate
+     'inferred-effective-scheme inferred-aggregate
+     'declared-exports (map symbol->string declared-names)
+     'inferred-exports (map symbol->string inferred-names)
+     'missing-exports (map symbol->string missing)
+     'unexpected-exports (map symbol->string unexpected)))
+  (define fact
+    (make-contract-refinement-fact
+     prog payload (hasheq 'rule "exact-public-export-set")))
+  (raise-diag
+   'contract-refinement
+   (format
+    "defcontract export set does not match the public module interface; missing: ~a; unexpected: ~a"
+    missing unexpected)
+   payload
+   #:src (program-declared-module-contract-source prog)
+   #:fact fact))
+
+(define (raise-contract-scheme-mismatch! prog name declared inferred)
+  (define declared-id
+    (contract-scheme-fact-id prog name "declared-contract" declared))
+  (define inferred-id
+    (or (hash-ref (program-shadow-definition-fact-ids prog) name #f)
+        (contract-scheme-fact-id prog name "inferred-effective" inferred)))
+  (define payload
+    (hasheq
+     'export-name (symbol->string name)
+     'relation INTERFACE-REFINEMENT-RELATION-V1
+     'declared-scheme-fact-id declared-id
+     'inferred-effective-scheme-fact-id inferred-id
+     'declared-scheme (type->string declared)
+     'inferred-effective-scheme (type->string inferred)))
+  (define fact
+    (make-contract-refinement-fact
+     prog payload
+     (hasheq 'rule "directional-rank-1-instantiation-unification")))
+  (raise-diag
+   'contract-refinement
+   (format
+    "implementation scheme for ~a does not refine its declared contract: inferred ~a, declared ~a"
+    name (type->string inferred) (type->string declared))
+   payload
+   #:src (program-declared-module-contract-source prog)
+   #:fact fact))
+
+(define (check-declared-module-contract! prog)
+  (define declared (program-declared-module-contract prog))
+  (when declared
+    ;; The provisional interface is used only to obtain the existing path's
+    ;; complete publication set and generated binding schemes.  Finalized
+    ;; top-level schemes come from the checker's effective-signature table.
+    (define inferred-interface
+      (program->module-interface prog #:provisional? #t))
+    (define inferred-bindings (module-interface-bindings inferred-interface))
+    (define local-type-names
+      (list->seteq
+       (hash-keys (module-interface-type-exports inferred-interface))))
+    (unless (equal? (list->seteq (hash-keys declared))
+                    (list->seteq (hash-keys inferred-bindings)))
+      (raise-contract-export-set-mismatch! prog declared inferred-bindings))
+    (define effective (program-effective-definition-types prog))
+    (for ([name (in-list (sorted-export-names declared))])
+      (define inferred
+        (hash-ref effective name
+                  (lambda ()
+                    (interface-binding-type
+                     (hash-ref inferred-bindings name)))))
+      (define declared-scheme (hash-ref declared name))
+      ;; Generated interface bindings already carry provider-qualified nominal
+      ;; types.  Compare both sides at that same publication boundary so an
+      ;; authored local `Point` denotes the published `provider/Point`.
+      (define published-inferred
+        (qualify-provider-local-type-references
+         inferred (program-namespace prog) local-type-names))
+      (define published-declared
+        (qualify-provider-local-type-references
+         declared-scheme (program-namespace prog) local-type-names))
+      (unless (implementation-refines-declared?
+               published-inferred published-declared)
+        (raise-contract-scheme-mismatch!
+         prog name declared-scheme inferred)))
+    ;; Only this checked projection authorizes the existing publication path.
+    ;; Compatibility edges intentionally remain absent in this first slice.
+    (register-program-conformed-contract-projection! prog declared)))
 
 ;; A typed destructuring binder annotates the value entering the pattern.  The
 ;; pattern's bound names receive projections of that aggregate type; they must
@@ -7089,7 +7308,8 @@
                              return-callable-sync])
                (prepare-and-infer-definition-types! prog env)))
            (set! regex-bindings bindings)
-           (set! regex-string-ops string-ops))
+           (set! regex-string-ops string-ops)
+           (check-declared-module-contract! prog))
          ;; One solver failure is one coherent rejection. Continuing with a
          ;; partial or #f env only manufactures cascades and can publish an
          ;; incomplete effective-signature table.

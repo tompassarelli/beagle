@@ -1394,6 +1394,8 @@
   (define imp-dyn-vars (mutable-seteq))  ; G-A: imported ^:dynamic vars (qualified)
   (define imp-module-interfaces '())
   (define declared-type-aliases (make-hasheq))
+  (define declared-module-contract #f)
+  (define declared-module-contract-source #f)
 
   (define (referred? refer-syms name)
     (and refer-syms (memq name refer-syms)))
@@ -2040,6 +2042,31 @@
        (hash-set! externs name type)
        (hash-set! declared-externs name type)]
 
+      ;; One complete declaration per export.  The vector is the exact public
+      ;; name set; adjacent/flattened tokens are never paired implicitly.
+      [(list 'defcontract (? bracketed? entries-form))
+       (when declared-module-contract
+         (raise-parse-error 'duplicate-meta "duplicate defcontract"))
+       (define entries (bracket-body entries-form))
+       (define contract
+         (for/fold ([out (hasheq)]) ([entry (in-list entries)])
+           (match entry
+             [(list (? symbol? name) scheme-expr)
+              (validate-identifier! name "contract export")
+              (when (hash-has-key? out name)
+                (raise-parse-error
+                 'duplicate-meta
+                 "defcontract: duplicate export declaration: ~a"
+                 name))
+              (hash-set out name (parse-type scheme-expr))]
+             [_
+              (raise-parse-error
+               'bad-meta-value
+               "defcontract: each export must be one complete (name Scheme) declaration, got: ~v"
+               entry)])))
+       (set! declared-module-contract contract)
+       (set! declared-module-contract-source (stx->src-loc s))]
+
       ;; (require lib), (require lib :as a), (require lib :refer [syms]),
       ;; (require lib :as a :refer [syms]) — bare form, options trailing.
       ;; (require '[lib :as a] '[lib2 :refer [x]] 'lib3) — quoted libspecs,
@@ -2078,6 +2105,11 @@
       [(cons 'declare-extern _)
        (raise-parse-error 'bad-meta-value
                           "malformed declare-extern — expected (declare-extern name TYPE) or (declare-extern [name1 name2 ...] TYPE), got: ~v" d)]
+      [(cons 'defcontract _)
+       (raise-parse-error
+        'bad-meta-value
+        "malformed defcontract — expected (defcontract [(name Scheme) ...]), got: ~v"
+        d)]
       [(cons 'defmacro _)
        (raise-parse-error 'bad-meta-value
                           "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: ~v" d)]
@@ -2232,6 +2264,9 @@
   ;; body tails that store-src! refused to record.
   (when (positive? (hash-count body-locs-table))
     (register-program-body-locs-table! prog body-locs-table))
+  (when declared-module-contract
+    (register-program-declared-module-contract!
+     prog declared-module-contract declared-module-contract-source))
   prog)
 
 (define (meta-form? d)
@@ -2240,6 +2275,7 @@
                        define-target
                        defmacro
                        declare-extern
+                       defcontract
                        require
                        import
                        defalias))))   ; G1 — aliases erase at parse-type; no IR/emit

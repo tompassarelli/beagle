@@ -54,6 +54,7 @@
    "define-target"
    "defmacro"
    "defalias"
+   "defcontract"
    "declare-extern"
    "require"
    "import"])
@@ -905,8 +906,7 @@
     {"name" name "ann" ann "constraint" constraint "value" value}
     name))
 
-(defn make-for-binding!
-  [(name Any) (ann Any) (constraint Any) (expr Any)] Any
+(defn make-for-binding! [(name Any) (ann Any) (constraint Any) (expr Any)] Any
   (decorate-binder-identities!
     {"type" "binding"
      "name" name
@@ -1107,7 +1107,8 @@
 (defn- path->text [(path Any)] String
   (str/join "." (mapv str path)))
 
-(defn- stable-binding-id! [(identifier Any) (path Any) (binding-kind String)] Any
+(defn- stable-binding-id!
+  [(identifier Any) (path Any) (binding-kind String)] Any
   (let [span (syntax/beagle-syntax-span identifier)
         name (syntax/structural-name->symbol (get identifier "payload"))
         introduced (some? (syntax/beagle-syntax-origin identifier))
@@ -1118,8 +1119,7 @@
       (str (if introduced (str "introduced-" binding-kind) binding-kind)
            ":" source ":" (path->text path) ":" name))))
 
-(defn- syntax-ident-with-binding!
-  [(identifier Any) (id Any) (role String)] Any
+(defn- syntax-ident-with-binding! [(identifier Any) (id Any) (role String)] Any
   (syntax/make-syntax-ident!
     (get identifier "payload")
     (syntax/beagle-syntax-span identifier)
@@ -1350,8 +1350,7 @@
          (get scoped-bindings "value")]
         body))))
 
-(defn- scope-walk-params!
-  [(params Any) (table Any) (path Any) (ctx Any)] Any
+(defn- scope-walk-params! [(params Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children params)]
     (letfn [(target-bound-names [(value Any)] Any
           (let [variant (get value "variant")
@@ -1669,8 +1668,7 @@
                 (nth children index) table (conj (vec path) index) ctx)))
         (range (count children))))))
 
-(defn- scope-walk-as-thread!
-  [(value Any) (table Any) (path Any) (ctx Any)] Any
+(defn- scope-walk-as-thread! [(value Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children value)
         init (nth children 1)
         name (nth children 2)
@@ -4014,6 +4012,40 @@
     (> (count d) 0)
     (has-item? META-FORMS (nth d 0))))
 
+;; The declaration is metadata, not an executable form.  Each vector member is
+;; one complete `(name Scheme)` entry; adjacent tokens are never paired.
+(defn module-declared-contract! [(datums Any)] Any
+  (let [found (atom false)]
+    (doseq [d datums]
+      (when (and (vector? d) (not (bracketed? d)) (> (count d) 0)
+                 (= (nth d 0) "defcontract"))
+        (if (not (= (deref found) false))
+          (err! "duplicate defcontract")
+          (if (and (= (count d) 2) (bracketed? (nth d 1)))
+            (let [contract
+                  (reduce
+                    (fn [(out Any) (entry Any)] Any
+                      (if (and (vector? entry) (not (bracketed? entry))
+                               (= (count entry) 2)
+                               (string? (nth entry 0)))
+                        (let [name (nth entry 0)]
+                          (validate-identifier! name "contract export")
+                          (if (contains? out name)
+                            (do
+                              (err! (str "defcontract: duplicate export declaration: " name))
+                              out)
+                            (assoc out name (parse-type* (nth entry 1)))))
+                        (do
+                          (err! (str "defcontract: each export must be one complete (name Scheme) declaration, got: " (str entry)))
+                          out)))
+                    {}
+                    (bracket-body (nth d 1)))]
+              (reset! found contract))
+            (do
+              (err! (str "malformed defcontract — expected (defcontract [(name Scheme) ...]), got: " (str d)))
+              (reset! found {}))))))
+    (deref found)))
+
 ;; --- require libspec registration ---------------------------------------------
 ;; libspec: lib | [lib] | [lib :as a] | [lib :refer [syms]] | [lib :as a :refer [syms]]
 ;; possibly quoted. Returns {"ns" .. "alias" ..|false "refer" [..]|false} or nil.
@@ -4113,6 +4145,8 @@
             nil))))
     (deref requires)))
 
+(declare inferred-module-surface*!)
+
 ;; --- parse-program! -----------------------------------------------------------
 (defn parse-program! [(datums Any)] Any
   (reset-errors!)
@@ -4132,7 +4166,8 @@
   (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
     (when (= (get (deref USER-PARAMETRIC-ARITIES) name) 0)
       (zero-parametric-declaration-error! name)))
-  (let [namespace (atom "beagle.user") ns-set (atom false) target (atom "clj") target-set (atom false) extern-seen (atom {}) extern-list (atom []) requires (atom []) imports (atom []) gen-class (atom false) forms (atom [])]
+  (let [declared-contract (module-declared-contract! datums)
+        namespace (atom "beagle.user") ns-set (atom false) target (atom "clj") target-set (atom false) extern-seen (atom {}) extern-list (atom []) requires (atom []) imports (atom []) gen-class (atom false) forms (atom [])]
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0)))
         (let [name-form (nth d 1)]
@@ -4213,6 +4248,8 @@
                 nil))
             (= head "defalias")
             nil
+            (= head "defcontract")
+            nil
             (= head "declare-extern")
             (if (>= (count d) 3)
               (let [name-form (nth d 1) t (parse-type* (nth d 2)) add-extern! (fn
@@ -4264,20 +4301,27 @@
     (reset! BINDER-ID-QUEUES {})
     (reset! REFERENCE-ID-QUEUES {})
     (reset! CURRENT-REGISTRY-CELL nil)
-    {"namespace"
-     (deref namespace)
-     "target"
-     (deref target)
-     "gen-class"
-     (deref gen-class)
-     "forms"
-     (deref forms)
-     "externs"
-     (deref extern-list)
-     "requires"
-     (deref requires)
-     "imports"
-     (deref imports)}))
+    (let [program
+          {"namespace"
+           (deref namespace)
+           "target"
+           (deref target)
+           "gen-class"
+           (deref gen-class)
+           "forms"
+           (deref forms)
+           "externs"
+           (deref extern-list)
+           "requires"
+           (deref requires)
+           "imports"
+           (deref imports)}]
+      (if (= declared-contract false)
+        program
+        (assoc
+          (assoc program "declared-contract" declared-contract)
+          "inferred-public-surface"
+          (inferred-module-surface*! datums "" nil))))))
 
 (defn parse-program-with-parametric-arities!
   [(datums Any) (imported-arities Any)] Any
@@ -4291,8 +4335,7 @@
   (reset! PRELOADED-TYPE-ALIASES imported-aliases)
   (parse-program! datums))
 
-(defn parse-program-with-syntax!
-  [(datums Any) (syntaxes Any)] Any
+(defn parse-program-with-syntax! [(datums Any) (syntaxes Any)] Any
   (reset! PROGRAM-SYNTAXES-PENDING syntaxes)
   (parse-program! datums))
 
@@ -4542,7 +4585,18 @@
       (let [a (get rp "ann")] (if (some? a) a (make-prim "Any")))
       nil)))
 
-(defn- import-module-surface*!
+(defn- module-target-from-datums [(datums Any)] String
+  (reduce
+    (fn [(target String) (datum Any)] String
+      (let [d (import-normalize datum)]
+        (if (and (vector? d) (not (bracketed? d)) (= (count d) 2)
+                 (= (nth d 0) "define-target") (string? (nth d 1)))
+          (nth d 1)
+          target)))
+    "clj"
+    datums))
+
+(defn inferred-module-surface*!
   [(datums Any) (prefix String) (refer-syms Any)] Any
   (doseq [datum datums]
     (validate-reserved-type-declaration! (import-normalize datum)))
@@ -4552,7 +4606,9 @@
         (let [name-form (nth d 1) name (nth name-form 0) arity (- (count name-form) 1)]
           (swap! USER-PARAMETRIC-ARITIES assoc name arity)
           (swap! USER-PARAMETRIC-ARITIES assoc (str prefix "/" name) arity)))))
-  (let [refer-set (if (some? refer-syms) (reduce (fn [(m Any) (s Any)] Any (assoc m s true)) {} refer-syms) nil) referred? (fn
+  (let [contract-clj? (and (not (= (module-declared-contract! datums) false))
+                            (= (module-target-from-datums datums) "clj"))
+        refer-set (if (some? refer-syms) (reduce (fn [(m Any) (s Any)] Any (assoc m s true)) {} refer-syms) nil) referred? (fn
                                                                                                                              [(nm
                                                                                                                                Any)]
                                                                                                                              Bool
@@ -4562,7 +4618,7 @@
                                                                                                                                                                                                                         (t
                                                                                                                                                                                                                          Any)]
                                                                                                                                                                                                                        Nil
-                                                                                                                                                                                                                       (let [q (str prefix "/" nm)] (when (not (= true (get (deref seen) q))) (swap! seen assoc q true) (swap! out conj {"name" q "type" t})) (when (and (referred? nm) (not (= true (get (deref seen) nm)))) (swap! seen assoc nm true) (swap! out conj {"name" nm "type" t}))) nil)]
+                                                                                                                                                                                                                       (let [q (if (= prefix "") nm (str prefix "/" nm))] (when (not (= true (get (deref seen) q))) (swap! seen assoc q true) (swap! out conj {"name" q "type" t})) (when (and (referred? nm) (not (= true (get (deref seen) nm)))) (swap! seen assoc nm true) (swap! out conj {"name" nm "type" t}))) nil)]
     (doseq [d0 datums]
       (let [d (import-normalize d0)]
         (when (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (string? (nth d 0)))
@@ -4580,6 +4636,9 @@
                   (make-fn-type (mapv (fn [(f Any)] Any (get f "ann")) fields)
                     nil
                     (make-prim nm)))
+                (when contract-clj?
+                  (emit! (str "map->" nm)
+                    (make-fn-type [(make-prim "Any")] nil (make-prim nm))))
                 (doseq [f fields]
                   (emit! (str nlow "-" (get f "name"))
                     (make-fn-type [(make-prim nm)] nil (get f "ann")))))
@@ -4630,13 +4689,36 @@
               nil)))))
     (deref out)))
 
+(defn- surface-name-leaf [(name String)] String
+  (let [separator (str/last-index-of name "/")]
+    (if (nil? separator) name (subs name (+ separator 1)))))
+
+;; This is the existing module-import publication path.  Provider checking has
+;; already proved the declaration before the driver calls it; publication now
+;; selects exactly that conformed name/type projection rather than inventing a
+;; second interface encoder.
+(defn- conformed-module-surface!
+  [(datums Any) (prefix String) (refer-syms Any)] Any
+  (let [inferred (inferred-module-surface*! datums prefix refer-syms)
+        declared (module-declared-contract! datums)]
+    (if (= declared false)
+      inferred
+      (mapv
+        (fn [(entry Any)] Any
+          (let [leaf (surface-name-leaf (get entry "name"))]
+            (assoc entry "type" (get declared leaf))))
+        (filterv
+          (fn [(entry Any)] Bool
+            (contains? declared (surface-name-leaf (get entry "name"))))
+          inferred)))))
+
 (defn import-module-surface-with-aliases!
   [(datums Any) (prefix String) (refer-syms Any) (imported-aliases Any)] Any
   (let [saved (deref TYPE-ALIASES)
         local-aliases
           (module-local-type-aliases-with-imports! datums imported-aliases)]
     (reset! TYPE-ALIASES (merge saved imported-aliases local-aliases))
-    (let [result (import-module-surface*! datums prefix refer-syms)]
+    (let [result (conformed-module-surface! datums prefix refer-syms)]
       (reset! TYPE-ALIASES saved)
       result)))
 
@@ -5453,6 +5535,38 @@
         (= (get (nth (get prog "forms") 0) "node") "def")
         (= (count (get prog "externs")) 1)
         (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "defcontract parses as canonical non-executable module metadata"
+    (let [prog
+          (parse-program!
+            [["defcontract"
+              [BRACKET-TAG
+               ["id" ["Fn" [BRACKET-TAG "Int"] "Int"]]]]
+             ["defn" "id" [BRACKET-TAG ["x" "Int"]] "Int" "x"]])]
+      (and (= (get-in prog ["declared-contract" "id"])
+              (make-fn-type [(make-prim "Int")] nil (make-prim "Int")))
+           (= (count (get prog "forms")) 1)
+           (= (get (nth (get prog "forms") 0) "node") "defn"))))
+  (expect! "clj defcontract record surface includes generated map constructor"
+    (let [prog
+          (parse-program!
+            [["define-target" "clj"]
+             ["defcontract"
+              [BRACKET-TAG
+               ["->Point" ["Fn" [BRACKET-TAG "String"] "Point"]]
+               ["map->Point" ["Fn" [BRACKET-TAG "Any"] "Point"]]
+               ["point-x" ["Fn" [BRACKET-TAG "Point"] "String"]]]]
+             ["defrecord" "Point" [BRACKET-TAG ["x" "String"]]]])
+          surface (get prog "inferred-public-surface")
+          names (mapv (fn [(entry Any)] Any (get entry "name")) surface)
+          map-entry
+          (first
+            (filterv (fn [(entry Any)] Bool
+                       (= (get entry "name") "map->Point"))
+              surface))]
+      (and (= names ["->Point" "map->Point" "point-x"])
+           (= (get map-entry "type")
+              (make-fn-type [(make-prim "Any")] nil
+                (make-prim "Point"))))))
   (expect! "scope resolution separates macro, caller, and nested capture zones"
     (let [prog
           (parse-program!

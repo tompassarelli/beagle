@@ -2222,8 +2222,12 @@
 ;; --- resolve polymorphic call ------------------------------------------------
 
 (defn resolve-poly-call-expected!
-  [(poly-t Any) (args (Vec Any)) (env Any) (expected-result Any)
-   (require-complete? Bool)] Any
+  [(poly-t Any)
+   (args (Vec Any))
+   (env Any)
+   (expected-result Any)
+   (require-complete? Bool)]
+  Any
   (let [body (get poly-t "body")
         bindings (atom {})
         arg-types (mapv (fn [(a Any)] Any (infer-expr! a env)) args)
@@ -2278,7 +2282,8 @@
        (nil? (reference-map-ref env e nil))
        (nil? (str/index-of (get e "name") "."))))
 
-(defn last-expr-type-expected! [(body (Vec Any)) (env Any) (expected-result Any)] Any
+(defn last-expr-type-expected!
+  [(body (Vec Any)) (env Any) (expected-result Any)] Any
   (let [n (count body)]
     (if (= n 0)
       ANY
@@ -2695,8 +2700,12 @@
       :else {"closed" false "type" nil "owner" nil})))
 
 (defn infer-js-member-call!
-  [(selector String) (owner String) (member-type Any)
-   (args (Vec Any)) (env Any)] Any
+  [(selector String)
+   (owner String)
+   (member-type Any)
+   (args (Vec Any))
+   (env Any)]
+  Any
   (cond
     (poly-type? member-type)
     (let [resolved (resolve-poly-call! member-type args env)]
@@ -2726,7 +2735,8 @@
    (receiver Any)
    (key Any)
    (trailing (Vec Any))
-   (env Any)] Any
+   (env Any)]
+  Any
   (let [receiver-type (infer-expr! receiver env)
         selector (js-selector-name key)]
     (cond
@@ -3674,8 +3684,7 @@
   ["A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M"
    "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z"])
 
-(defn rewrite-inference-vars!
-  [(t Any) (mapping Any) (names Any)] Any
+(defn rewrite-inference-vars! [(t Any) (mapping Any) (names Any)] Any
   (let [resolved (prune-inference-type t)]
     (cond
       (inference-var? resolved)
@@ -4217,8 +4226,7 @@
        (not (contains? (get state "scope") "transient"))
        (not (contains? (get state "globals") "transient"))))
 
-(defn purity-direct-primitive-call?
-  [(value Any) (name String) (state Any)] Bool
+(defn purity-direct-primitive-call? [(value Any) (name String) (state Any)] Bool
   (and (= (get value "node") "call")
        (= (call-fn-name value) name)
        (not (contains? (get state "scope") name))
@@ -4236,8 +4244,7 @@
         :else (purity-conj-pipeline-root receiver state)))
     nil))
 
-(defn purity-binding-acquires-owner?
-  [(target Any) (value Any) (state Any)] Bool
+(defn purity-binding-acquires-owner? [(target Any) (value Any) (state Any)] Bool
   (and (string? target)
        (or (purity-direct-transient-call? value state)
            (let [root (purity-conj-pipeline-root value state)]
@@ -5210,6 +5217,122 @@
 
     :else value))
 
+(defn- substitute-contract-vars [(t Any) (replacements Any)] Any
+  (cond
+    (nil? t) nil
+    (var-type? t) (get replacements (get t "name") t)
+    (fn-type? t)
+      (make-fn
+        (mapv (fn [(p Any)] Any (substitute-contract-vars p replacements))
+          (get t "params"))
+        (if (nil? (get t "rest")) nil
+          (substitute-contract-vars (get t "rest") replacements))
+        (substitute-contract-vars (get t "ret") replacements))
+    (app-type? t)
+      (make-app (get t "name")
+        (mapv (fn [(a Any)] Any (substitute-contract-vars a replacements))
+          (get t "args")))
+    (union-type? t)
+      (make-union
+        (mapv (fn [(member Any)] Any
+                (substitute-contract-vars member replacements))
+          (get t "members")))
+    (poly-type? t)
+      (let [nested
+            (reduce (fn [(out Any) (name String)] Any (dissoc out name))
+              replacements (get t "vars"))]
+        (make-poly
+          (get t "vars")
+          (substitute-contract-vars (get t "body") nested)
+          (get t "bounds")))
+    :else t))
+
+(defn- freshen-contract-implementation! [(scheme Any)] Any
+  (if (poly-type? scheme)
+    (let [replacements
+          (reduce (fn [(out Any) (name String)] Any
+                    (assoc out name (fresh-inference-var!)))
+            {} (get scheme "vars"))
+          raw-bounds (get scheme "bounds")
+          bounds
+          (if (map? raw-bounds)
+            (mapv
+              (fn [(name String)] Any
+                [(get replacements name)
+                 (substitute-contract-vars (get raw-bounds name) replacements)])
+              (keys raw-bounds))
+            [])]
+      {"instance" (substitute-contract-vars (get scheme "body") replacements)
+       "bounds" bounds})
+    {"instance" scheme "bounds" []}))
+
+(defn- rigid-declared-contract [(scheme Any)] Any
+  (if (poly-type? scheme)
+    (let [replacements
+          (reduce
+            (fn [(out Any) (name String)] Any
+              (assoc out name (make-prim (str "#%contract-rigid/" name))))
+            {}
+            (get scheme "vars"))]
+      (substitute-contract-vars (get scheme "body") replacements))
+    scheme))
+
+(defn- implementation-refines-declared?! [(inferred Any) (declared Any)] Bool
+  (let [fresh (freshen-contract-implementation! inferred)
+        instance (get fresh "instance")
+        expected (rigid-declared-contract declared)]
+    (unify-inference-types! instance expected)
+    (and (type-compatible? (prune-inference-type instance) expected)
+         (every?
+           (fn [(entry Any)] Bool
+             (let [solved (prune-inference-type (nth entry 0))]
+               (or (inference-var? solved)
+                   (type-compatible? solved (nth entry 1)))))
+           (get fresh "bounds")))))
+
+(defn- named-surface [(surface Any)] Any
+  (reduce
+    (fn [(out Any) (entry Any)] Any
+      (assoc out (get entry "name") (get entry "type")))
+    {}
+    surface))
+
+(defn- same-name-set? [(left Any) (right Any)] Bool
+  (and (= (count (keys left)) (count (keys right)))
+       (every? (fn [(name String)] Bool (contains? right name)) (keys left))))
+
+(defn- sorted-names [(table Any)] Any
+  (vec (sort (keys table))))
+
+(defn- check-declared-module-contract! [(prog Any) (effective Any)] Nil
+  (let [declared (get prog "declared-contract")]
+    (when (map? declared)
+      (let [raw (named-surface (get prog "inferred-public-surface" []))
+            inferred
+            (reduce
+              (fn [(out Any) (name String)] Any
+                (assoc out name (get effective name (get raw name))))
+              {}
+              (keys raw))]
+        (if (not (same-name-set? declared inferred))
+          (emit-diag!
+            (str "beagle [E030]: defcontract export set does not match the public module interface; declared "
+              (str (sorted-names declared)) ", inferred "
+              (str (sorted-names inferred))))
+          (let [conforms (atom true)]
+            (doseq [name (sorted-names declared)]
+              (when (not (implementation-refines-declared?!
+                           (get inferred name) (get declared name)))
+                (reset! conforms false)
+                (emit-diag!
+                  (str "beagle [E030]: implementation scheme for " name
+                    " does not refine its declared contract: inferred "
+                    (type->string (get inferred name)) ", declared "
+                    (type->string (get declared name))))))
+            (when (deref conforms)
+              (swap! STATE assoc "conformed-contract-projection" declared)))))))
+  nil)
+
 (defn type-check! [(prog Any)] Any
   (let [checked-input (tag-semantic-node-ids prog)]
     (reset! STATE {"record-fields" {}
@@ -5234,6 +5357,7 @@
           inferred (infer-definition-types! checked-input initial-env)
           env (get inferred "env")]
       (swap! STATE assoc "effective-definition-types" (get inferred "types"))
+      (check-declared-module-contract! checked-input (get inferred "types"))
       (check-core-function-abis! checked-input (get inferred "types"))
       (doseq [form (get checked-input "forms")]
         (check-form! form env))
@@ -5382,8 +5506,7 @@
 (defn make-call [(fn-name String) (args (Vec Any))] Any
   {"node" "call" "fn" {"node" "ref" "name" fn-name} "args" args})
 
-(defn make-static-call
-  [(qualifier String) (name String) (args (Vec Any))] Any
+(defn make-static-call [(qualifier String) (name String) (args (Vec Any))] Any
   {"node" "static-call" "qualifier" qualifier "name" name
    "providerId" nil "args" args})
 
@@ -6549,6 +6672,52 @@
       (and (= (get result "count") 0)
            (poly-type? effective)
            (= (type->string effective) "(forall [A] (Fn [A] Int))"))))
+
+  (expect! "defcontract: exact export set conforms"
+    (let [scheme (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+          prog
+          (assoc
+            (assoc (make-prog []) "declared-contract" {"id" scheme})
+            "inferred-public-surface" [{"name" "id" "type" scheme}])
+          diagnostics (check-program! prog)]
+      (and (= (count diagnostics) 0)
+           (= (get (deref STATE) "conformed-contract-projection")
+              {"id" scheme}))))
+  (expect! "defcontract: mismatched export set rejects with E030"
+    (let [scheme (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+          prog
+          (assoc
+            (assoc (make-prog []) "declared-contract" {"id" scheme})
+            "inferred-public-surface" [{"name" "other" "type" scheme}])
+          diagnostics (check-program! prog)]
+      (and (= (count diagnostics) 1)
+           (diagnostics-include? diagnostics "[E030]")
+           (diagnostics-include? diagnostics "export set"))))
+  (expect! "defcontract: inferred forall refines monomorphic declaration"
+    (let [declared
+          (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+          inferred
+          (make-poly ["A"]
+            (make-fn [(make-var "A")] nil (make-var "A")) nil)
+          prog
+          (assoc
+            (assoc (make-prog []) "declared-contract" {"id" declared})
+            "inferred-public-surface" [{"name" "id" "type" inferred}])]
+      (= (count (check-program! prog)) 0)))
+  (expect! "defcontract: monomorphic implementation rejects forall declaration"
+    (let [inferred
+          (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+          declared
+          (make-poly ["A"]
+            (make-fn [(make-var "A")] nil (make-var "A")) nil)
+          prog
+          (assoc
+            (assoc (make-prog []) "declared-contract" {"id" declared})
+            "inferred-public-surface" [{"name" "id" "type" inferred}])
+          diagnostics (check-program! prog)]
+      (and (= (count diagnostics) 1)
+           (diagnostics-include? diagnostics "[E030]")
+           (diagnostics-include? diagnostics "does not refine"))))
 
   (expect! "definition inference: Core rejects only the unresolved callable ABI"
     (let [constant (assoc

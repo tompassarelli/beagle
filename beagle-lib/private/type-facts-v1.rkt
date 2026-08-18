@@ -50,6 +50,26 @@
         attestation derivation repair)
   #:transparent)
 
+;; A declared contract is an overlay on the one module-interface authority.
+;; Its conformance proof names the exact relation and semantic profile; future
+;; evolution edges use the same explicit pair instead of an unqualified
+;; "compatible" bit.  R0 mints no compatibility edges.
+(define INTERFACE-REFINEMENT-RELATION-V1
+  "implementation-refines-declared")
+(define INTERFACE-COMPATIBILITY-RELATIONS-V1
+  '(source-compatibility
+    consumer-substitutability
+    stored-shape-compatibility))
+(struct interface-compatibility-edge-v1
+  (relation semantic-profile predecessor-interface-fact-id
+            successor-interface-fact-id)
+  #:transparent)
+(struct interface-conformance-v1
+  (fact relation semantic-profile declared-interface-fact-id
+        implementation-interface-fact-id compatibility-edges
+        attestation derivation)
+  #:transparent)
+
 (struct recursive-member-v1 (identity payload) #:transparent)
 (struct recursive-reference-v1 (member-identity) #:transparent)
 
@@ -253,6 +273,18 @@
    1
    canonical-payload-encoder-v1))
 
+(define INTERFACE-CONFORMANCE-V1-ENCODER
+  (make-fact-kind-encoder-v1
+   "InterfaceConformanceV1"
+   1
+   canonical-payload-encoder-v1))
+
+(define INTERFACE-COMPATIBILITY-EDGE-V1-ENCODER
+  (make-fact-kind-encoder-v1
+   "InterfaceCompatibilityEdgeV1"
+   1
+   canonical-payload-encoder-v1))
+
 (define (semantic-profile-v1-for-target target)
   (case target
     [(core) 'core]
@@ -314,6 +346,122 @@
          'target target
          'digest (require-name 'interface-publication-fact-v1 "digest" digest))))
 
+(define (make-interface-compatibility-edge-v1
+         relation semantic-profile predecessor-interface-fact-id
+         successor-interface-fact-id)
+  (define who 'make-interface-compatibility-edge-v1)
+  (unless (memq relation INTERFACE-COMPATIBILITY-RELATIONS-V1)
+    (fail who
+          "unknown interface compatibility relation"
+          "relation" relation
+          "allowed" INTERFACE-COMPATIBILITY-RELATIONS-V1))
+  (unless (memq semantic-profile SEMANTIC-PROFILES-V1)
+    (fail who
+          "unknown semantic profile"
+          "semantic-profile" semantic-profile
+          "allowed" SEMANTIC-PROFILES-V1))
+  (interface-compatibility-edge-v1
+   relation
+   semantic-profile
+   (fact-id-v1 who
+               "predecessor-interface-fact-id"
+               predecessor-interface-fact-id)
+   (fact-id-v1 who
+               "successor-interface-fact-id"
+               successor-interface-fact-id)))
+
+(define (interface-compatibility-edge-v1->canonical edge)
+  (unless (interface-compatibility-edge-v1? edge)
+    (raise-argument-error 'interface-compatibility-edge-v1->canonical
+                          "interface-compatibility-edge-v1?"
+                          edge))
+  ;; Revalidate at the canonical boundary as well as construction time.  The
+  ;; semantic fact writer must never encode an implicit/unknown relation even
+  ;; if an in-module caller obtained a raw struct value.
+  (define validated
+    (make-interface-compatibility-edge-v1
+     (interface-compatibility-edge-v1-relation edge)
+     (interface-compatibility-edge-v1-semantic-profile edge)
+     (interface-compatibility-edge-v1-predecessor-interface-fact-id edge)
+     (interface-compatibility-edge-v1-successor-interface-fact-id edge)))
+  (vector
+   "InterfaceCompatibilityEdgeV1"
+   1
+   (interface-compatibility-edge-v1-relation validated)
+   (interface-compatibility-edge-v1-semantic-profile validated)
+   (interface-compatibility-edge-v1-predecessor-interface-fact-id validated)
+   (interface-compatibility-edge-v1-successor-interface-fact-id validated)))
+
+(define (interface-compatibility-edge-fact-v1 edge)
+  (unless (interface-compatibility-edge-v1? edge)
+    (raise-argument-error 'interface-compatibility-edge-fact-v1
+                          "interface-compatibility-edge-v1?"
+                          edge))
+  (make-semantic-fact-v1
+   INTERFACE-COMPATIBILITY-EDGE-V1-ENCODER
+   (interface-compatibility-edge-v1-semantic-profile edge)
+   (vector
+    "InterfaceCompatibilityEdgeSubjectV1"
+    (interface-compatibility-edge-v1-predecessor-interface-fact-id edge)
+    (interface-compatibility-edge-v1-successor-interface-fact-id edge))
+   (interface-compatibility-edge-v1->canonical edge)))
+
+(define (make-interface-conformance-v1
+         semantic-profile subject declared-interface-fact-id
+         implementation-interface-fact-id checker-fact used-rule-fact-ids)
+  (define who 'make-interface-conformance-v1)
+  (define declared-id
+    (fact-id-v1 who "declared-interface-fact-id" declared-interface-fact-id))
+  (define implementation-id
+    (fact-id-v1 who
+                "implementation-interface-fact-id"
+                implementation-interface-fact-id))
+  (unless (semantic-fact-v1? checker-fact)
+    (raise-argument-error who "semantic-fact-v1? checker-fact" checker-fact))
+  (define rules (canonical-fact-id-vector-v1 who used-rule-fact-ids))
+  ;; Compatibility edges describe evolution between contract revisions. This
+  ;; first type/interface-only slice proves refinement but emits no such edge.
+  (define compatibility-edges (vector))
+  (define payload
+    (hash
+     'relation INTERFACE-REFINEMENT-RELATION-V1
+     'semantic-profile semantic-profile
+     'declared-interface-fact-id declared-id
+     'implementation-interface-fact-id implementation-id
+     'used-rule-fact-ids rules
+     'compatibility-edges compatibility-edges))
+  (define fact
+    (make-semantic-fact-v1
+     INTERFACE-CONFORMANCE-V1-ENCODER semantic-profile subject payload))
+  (define using
+    (canonical-fact-id-vector-v1
+     who
+     (remove-duplicates
+      (append (list declared-id implementation-id) (vector->list rules)))))
+  (define attestation
+    (make-attestation-v1
+     (current-type-facts-checker-epoch-v1)
+     fact
+     "PASS"
+     (hash 'relation INTERFACE-REFINEMENT-RELATION-V1
+           'semantic-profile semantic-profile
+           'using using)))
+  (define derivation
+    (make-derivation-edge-v1
+     (semantic-fact-v1-id fact)
+     (semantic-fact-v1-id checker-fact)
+     using
+     attestation))
+  (interface-conformance-v1
+   fact
+   INTERFACE-REFINEMENT-RELATION-V1
+   semantic-profile
+   declared-id
+   implementation-id
+   compatibility-edges
+   attestation
+   derivation))
+
 (define SOURCE-TEXT-FACET-V1-ENCODER
   (make-fact-kind-encoder-v1
    "SourceTextFacetV1"
@@ -359,6 +507,34 @@
    "BeagleDiagnosticV2"
    1
    encode-diagnostic-payload-v2))
+
+(define CONTRACT-REFINEMENT-DIAGNOSTIC-CODE-V1 "E030")
+
+(define CONTRACT-REFINEMENT-PAYLOAD-FIELDS-V1
+  '(export-name
+    relation
+    declared-scheme-fact-id
+    inferred-effective-scheme-fact-id
+    declared-scheme
+    inferred-effective-scheme))
+
+(define (contract-refinement-payload-v1? payload)
+  (and
+   (hash? payload)
+   (for/and ([key (in-list CONTRACT-REFINEMENT-PAYLOAD-FIELDS-V1)])
+     (hash-has-key? payload key))
+   (equal? (hash-ref payload 'relation)
+           INTERFACE-REFINEMENT-RELATION-V1)
+   (with-handlers ([exn:fail? (lambda (_) #f)])
+     (fact-id-v1
+      'contract-refinement-payload-v1?
+      "declared-scheme-fact-id"
+      (hash-ref payload 'declared-scheme-fact-id))
+     (fact-id-v1
+      'contract-refinement-payload-v1?
+      "inferred-effective-scheme-fact-id"
+      (hash-ref payload 'inferred-effective-scheme-fact-id))
+     #t)))
 
 (define (diagnostic-source-anchor-v2->canonical anchor)
   (unless (diagnostic-source-anchor-v2? anchor)
@@ -494,17 +670,60 @@
    fact code typed-payload ids anchors semantic-profile attestation derivation
    repair))
 
+(define (make-contract-refinement-diagnostic-fact-v2
+         semantic-profile subject typed-payload relevant-fact-ids
+         source-anchors checker-fact evidence)
+  (define who 'make-contract-refinement-diagnostic-fact-v2)
+  (unless (contract-refinement-payload-v1? typed-payload)
+    (fail who
+          "malformed declared-contract refinement payload"
+          "required-fields" CONTRACT-REFINEMENT-PAYLOAD-FIELDS-V1
+          "payload" typed-payload))
+  (define declared-id
+    (hash-ref typed-payload 'declared-scheme-fact-id))
+  (define inferred-id
+    (hash-ref typed-payload 'inferred-effective-scheme-fact-id))
+  (make-diagnostic-fact-v2
+   semantic-profile
+   subject
+   CONTRACT-REFINEMENT-DIAGNOSTIC-CODE-V1
+   typed-payload
+   (remove-duplicates
+    (append (cond
+              [(vector? relevant-fact-ids)
+               (vector->list relevant-fact-ids)]
+              [(set? relevant-fact-ids)
+               (set->list relevant-fact-ids)]
+              [else relevant-fact-ids])
+            (list declared-id inferred-id)))
+   source-anchors
+   checker-fact
+   "FAIL"
+   (hash 'relation INTERFACE-REFINEMENT-RELATION-V1
+         'declared-scheme-fact-id declared-id
+         'inferred-effective-scheme-fact-id inferred-id
+         'evidence evidence)))
+
 (define (diagnostic-fact-v2-render-message diagnostic)
   (unless (diagnostic-fact-v2? diagnostic)
     (raise-argument-error 'diagnostic-fact-v2-render-message
                           "diagnostic-fact-v2?"
                           diagnostic))
   (define payload (diagnostic-fact-v2-typed-payload diagnostic))
-  (format "beagle: call to ~a: arg ~a expected ~a, got ~a"
-          (hash-ref payload 'function)
-          (hash-ref payload 'arg-position)
-          (hash-ref payload 'expected)
-          (hash-ref payload 'actual)))
+  (cond
+    [(equal? (diagnostic-fact-v2-code diagnostic)
+             CONTRACT-REFINEMENT-DIAGNOSTIC-CODE-V1)
+     (format
+      "beagle: declared contract export ~a is not refined by inferred scheme ~a (declared ~a)"
+      (hash-ref payload 'export-name)
+      (hash-ref payload 'inferred-effective-scheme)
+      (hash-ref payload 'declared-scheme))]
+    [else
+     (format "beagle: call to ~a: arg ~a expected ~a, got ~a"
+             (hash-ref payload 'function)
+             (hash-ref payload 'arg-position)
+             (hash-ref payload 'expected)
+             (hash-ref payload 'actual))]))
 
 (define (diagnostic-fact-v2-render-human diagnostic)
   (define payload (diagnostic-fact-v2-typed-payload diagnostic))
@@ -518,19 +737,39 @@
                 line
                 (add1 column))
         (diagnostic-source-anchor-v2-path anchor)))
+  (define prefix
+    (string-append
+     (format "error[~a]: ~a"
+             (diagnostic-fact-v2-code diagnostic)
+             (diagnostic-fact-v2-render-message diagnostic))
+     (format "\n  profile: ~a" (diagnostic-fact-v2-profile diagnostic))
+     (format "\n  --> ~a" location)))
+  (define details
+    (cond
+      [(equal? (diagnostic-fact-v2-code diagnostic)
+               CONTRACT-REFINEMENT-DIAGNOSTIC-CODE-V1)
+       (string-append
+        (format "\n  relation: ~a" (hash-ref payload 'relation))
+        (format "\n  declared scheme: ~a"
+                (hash-ref payload 'declared-scheme))
+        (format "\n  inferred effective scheme: ~a"
+                (hash-ref payload 'inferred-effective-scheme))
+        (format "\n  declared scheme fact: ~a"
+                (hash-ref payload 'declared-scheme-fact-id))
+        (format "\n  inferred scheme fact: ~a"
+                (hash-ref payload 'inferred-effective-scheme-fact-id)))]
+      [else
+       (string-append
+        (format "\n  cause: ~a" (hash-ref payload 'root-cause))
+        (format "\n  expected: ~a" (hash-ref payload 'expected))
+        (format "\n  actual: ~a" (hash-ref payload 'actual))
+        (format "\n  next: ~a" (hash-ref payload 'lawful-next-edit))
+        (format "\n  verify: ~a" (hash-ref payload 'verification))
+        (format "\n  related: ~a"
+                (vector->list (hash-ref payload 'related-causes))))]))
   (string-append
-   (format "error[~a]: ~a"
-           (diagnostic-fact-v2-code diagnostic)
-           (diagnostic-fact-v2-render-message diagnostic))
-   (format "\n  profile: ~a" (diagnostic-fact-v2-profile diagnostic))
-   (format "\n  --> ~a" location)
-   (format "\n  cause: ~a" (hash-ref payload 'root-cause))
-   (format "\n  expected: ~a" (hash-ref payload 'expected))
-   (format "\n  actual: ~a" (hash-ref payload 'actual))
-   (format "\n  next: ~a" (hash-ref payload 'lawful-next-edit))
-   (format "\n  verify: ~a" (hash-ref payload 'verification))
-   (format "\n  related: ~a"
-           (vector->list (hash-ref payload 'related-causes)))
+   prefix
+   details
    (format "\n  derivation: ~a"
            (derivation-edge-v1-id (diagnostic-fact-v2-derivation diagnostic)))))
 
@@ -823,6 +1062,10 @@
  CHECKER-IDENTITY-V1-ENCODER
  INTERFACE-REVISION-V1-ENCODER
  INTERFACE-PUBLICATION-V1-ENCODER
+ INTERFACE-CONFORMANCE-V1-ENCODER
+ INTERFACE-COMPATIBILITY-EDGE-V1-ENCODER
+ INTERFACE-REFINEMENT-RELATION-V1
+ INTERFACE-COMPATIBILITY-RELATIONS-V1
  semantic-profile-v1-for-target
  definition-scheme-fact-v1
  normalized-obligations-v1-open
@@ -830,6 +1073,24 @@
  checker-identity-fact-v1
  interface-revision-fact-v1
  interface-publication-fact-v1
+ interface-compatibility-edge-v1?
+ interface-compatibility-edge-v1-relation
+ interface-compatibility-edge-v1-semantic-profile
+ interface-compatibility-edge-v1-predecessor-interface-fact-id
+ interface-compatibility-edge-v1-successor-interface-fact-id
+ make-interface-compatibility-edge-v1
+ interface-compatibility-edge-v1->canonical
+ interface-compatibility-edge-fact-v1
+ interface-conformance-v1?
+ interface-conformance-v1-fact
+ interface-conformance-v1-relation
+ interface-conformance-v1-semantic-profile
+ interface-conformance-v1-declared-interface-fact-id
+ interface-conformance-v1-implementation-interface-fact-id
+ interface-conformance-v1-compatibility-edges
+ interface-conformance-v1-attestation
+ interface-conformance-v1-derivation
+ make-interface-conformance-v1
  SOURCE-TEXT-FACET-V1-ENCODER
  SOURCE-SEMANTIC-FACET-V1-ENCODER
  (struct-out source-span-v1)
@@ -837,11 +1098,15 @@
  (struct-out source-semantic-facet-v1)
  compute-source-facets-v1
  DIAGNOSTIC-V2-ENCODER
+ CONTRACT-REFINEMENT-DIAGNOSTIC-CODE-V1
+ CONTRACT-REFINEMENT-PAYLOAD-FIELDS-V1
+ contract-refinement-payload-v1?
  (struct-out diagnostic-source-anchor-v2)
  (struct-out diagnostic-repair-precondition-v2)
  (struct-out diagnostic-repair-v2)
  (struct-out diagnostic-fact-v2)
  make-diagnostic-fact-v2
+ make-contract-refinement-diagnostic-fact-v2
  diagnostic-fact-v2-render-message
  diagnostic-fact-v2-render-human
  diagnostic-fact-v2->jsexpr

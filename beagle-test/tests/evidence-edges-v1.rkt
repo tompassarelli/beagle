@@ -37,13 +37,8 @@
               #:when (equal? (derivation-edge-v1-claim edge) id))
     edge))
 
-(define (checked-claim-id)
-  (semantic-fact-v1-id
-   (definition-scheme-fact-v1
-    'hosted-clj
-    "evidence.edges/checked"
-    "(Fn [Int] Int)"
-    '(leaf))))
+(define (checked-claim-id prog)
+  (hash-ref (program-shadow-definition-fact-ids prog) 'checked))
 
 (define tests
   (test-suite
@@ -52,7 +47,7 @@
    (test-case "checked definition emits a complete semantic evidence chain"
      (define-values (prog interface edges)
        (compile-source SOURCE "checker:epoch-1"))
-     (define checked-id (checked-claim-id))
+     (define checked-id (checked-claim-id prog))
      (define leaf-id
        (hash-ref (program-shadow-definition-fact-ids prog) 'leaf))
      (define edge (definition-edge edges checked-id))
@@ -82,12 +77,12 @@
         (derivation-edge-v1-canonical-bytes edge))))
 
    (test-case "epoch changes re-attestation but not semantic chain identities"
-     (define-values (_prog-a _interface-a edges-a)
+     (define-values (prog-a _interface-a edges-a)
        (compile-source SOURCE "checker:epoch-1"))
-     (define-values (_prog-b _interface-b edges-b)
+     (define-values (prog-b _interface-b edges-b)
        (compile-source SOURCE "checker:epoch-2"))
-     (define before (definition-edge edges-a (checked-claim-id)))
-     (define after (definition-edge edges-b (checked-claim-id)))
+     (define before (definition-edge edges-a (checked-claim-id prog-a)))
+     (define after (definition-edge edges-b (checked-claim-id prog-b)))
      (check-equal? (derivation-edge-v1-claim before)
                    (derivation-edge-v1-claim after))
      (check-equal? (derivation-edge-v1-checker-identity before)

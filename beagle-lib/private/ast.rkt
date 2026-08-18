@@ -1066,6 +1066,31 @@
   (define table (program-effective-definition-types prog))
   (if table (hash-ref table name fallback) fallback))
 
+;; A `defcontract` is an author-owned overlay on the existing inferred module
+;; interface.  Keep both declaration and checked projection program-scoped so
+;; programs without the form retain their exact AST representation and every
+;; publication consumer continues to share one interface encoder.
+(define PROGRAM->DECLARED-MODULE-CONTRACT (make-weak-hasheq))
+(define PROGRAM->DECLARED-MODULE-CONTRACT-SOURCE (make-weak-hasheq))
+(define PROGRAM->CONFORMED-CONTRACT-PROJECTION (make-weak-hasheq))
+
+(define (register-program-declared-module-contract! prog contract [source #f])
+  (hash-set! PROGRAM->DECLARED-MODULE-CONTRACT prog contract)
+  (when source
+    (hash-set! PROGRAM->DECLARED-MODULE-CONTRACT-SOURCE prog source)))
+
+(define (program-declared-module-contract prog)
+  (hash-ref PROGRAM->DECLARED-MODULE-CONTRACT prog #f))
+
+(define (program-declared-module-contract-source prog)
+  (hash-ref PROGRAM->DECLARED-MODULE-CONTRACT-SOURCE prog #f))
+
+(define (register-program-conformed-contract-projection! prog projection)
+  (hash-set! PROGRAM->CONFORMED-CONTRACT-PROJECTION prog projection))
+
+(define (program-conformed-contract-projection prog)
+  (hash-ref PROGRAM->CONFORMED-CONTRACT-PROJECTION prog #f))
+
 ;; Shadow-only type-fact evidence is retained by program identity for inspection
 ;; and future Store admission. No compiler path reads it for checking, lowering,
 ;; or reuse. The reverse list makes one cheap cons allocation per emitted edge;
@@ -1603,6 +1628,11 @@
  register-program-effective-definition-types!
  program-effective-definition-types
  program-effective-definition-type
+ register-program-declared-module-contract!
+ program-declared-module-contract
+ program-declared-module-contract-source
+ register-program-conformed-contract-projection!
+ program-conformed-contract-projection
  clear-program-shadow-evidence!
  append-program-shadow-evidence-edge!
  program-shadow-evidence-edges

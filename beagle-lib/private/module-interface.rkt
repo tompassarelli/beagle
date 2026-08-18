@@ -45,6 +45,13 @@
                   dynamic-vars digest source-digest source-id)
   #:transparent)
 
+;; Conformance is evidence about publication, not a second interface value.
+;; Keep it attached by interface identity so the existing module-interface
+;; remains the sole object imported by consumers.
+(define MODULE-INTERFACE->CONFORMANCE (make-weak-hasheq))
+(define (module-interface-conformance interface)
+  (hash-ref MODULE-INTERFACE->CONFORMANCE interface #f))
+
 ;; A resolver returns a module-source. INTERFACE is #f during the bootstrap
 ;; parse and a module-interface during authoritative parsing.
 (struct module-source (namespace source-id stxs interface) #:transparent)
@@ -275,6 +282,35 @@
         'program->module-interface
         "interface publication requires finalized effective definition signatures; type-check the program first or use #:provisional? #t only for bootstrap parsing"))
      effective]))
+
+(define (publication-conformed-bindings prog bindings provisional?)
+  (define declaration (program-declared-module-contract prog))
+  (cond
+    [(or provisional? (not declaration)) bindings]
+    [else
+     (define projection (program-conformed-contract-projection prog))
+     (unless (hash? projection)
+       (error
+        'program->module-interface
+        "declared module contract has no passing conformance projection; type-check the program before publication"))
+     (for/hasheq ([(name declared-scheme) (in-hash projection)])
+       (define candidate
+         (hash-ref
+          bindings
+          name
+          (lambda ()
+            (error
+             'program->module-interface
+             "conformed contract projection names missing interface export ~a"
+             name))))
+       (when (pair? (free-type-metas declared-scheme))
+         (error
+          'program->module-interface
+          "cannot publish unresolved inference metavariable in declared contract scheme for ~a"
+          name))
+       (values
+        name
+        (struct-copy interface-binding candidate [type declared-scheme])))]))
 
 (define (published-definition-type effective name authored)
   (define published
@@ -991,13 +1027,20 @@
   ;; executing so the existing parse/module-interface boundary stays acyclic.
   (dynamic-require 'beagle/private/type-facts-v1 name))
 
-(define (emit-interface-evidence-v1! prog interface)
+(define (emit-interface-evidence-v1!
+         prog interface [implementation-interface-digest #f])
   (define make-interface-fact
     (type-facts-v1-export 'interface-publication-fact-v1))
   (define make-interface-revision-fact
     (type-facts-v1-export 'interface-revision-fact-v1))
   (define make-checker-fact
     (type-facts-v1-export 'checker-identity-fact-v1))
+  (define make-conformance
+    (type-facts-v1-export 'make-interface-conformance-v1))
+  (define conformance-fact
+    (type-facts-v1-export 'interface-conformance-v1-fact))
+  (define conformance-derivation
+    (type-facts-v1-export 'interface-conformance-v1-derivation))
   (define make-attestation
     (type-facts-v1-export 'make-attestation-v1))
   (define make-edge
@@ -1009,10 +1052,11 @@
   (define profile-for-target
     (type-facts-v1-export 'semantic-profile-v1-for-target))
   (define profile (profile-for-target (program-target prog)))
+  (define subject (format "~a" (program-namespace prog)))
   (define claim-fact
     (make-interface-fact
      profile
-     (format "~a" (program-namespace prog))
+     subject
      (module-interface-schema-version interface)
      (module-interface-target interface)
      (module-interface-digest interface)))
@@ -1028,11 +1072,49 @@
         (module-interface-schema-version imported)
         (module-interface-target imported)
         (module-interface-digest imported)))))
-  (define using
+  (define base-using
     (sort (append local-definition-ids imported-interface-ids) string<?))
   (define checker
     (semantic-fact-id
      (make-checker-fact profile "beagle/type-checker" "interface-publication")))
+  (define conformance
+    (and
+     implementation-interface-digest
+     (let* ([declared-revision
+             (make-interface-revision-fact
+              profile
+              subject
+              (module-interface-schema-version interface)
+              (module-interface-target interface)
+              (module-interface-digest interface))]
+            [implementation-revision
+             (make-interface-revision-fact
+              profile
+              subject
+              (module-interface-schema-version interface)
+              (module-interface-target interface)
+              implementation-interface-digest)]
+            [proof
+             (make-conformance
+              profile
+              (vector "InterfaceConformanceSubjectV1"
+                      subject
+                      (module-interface-digest interface))
+              (semantic-fact-id declared-revision)
+              (semantic-fact-id implementation-revision)
+              (make-checker-fact
+               profile "beagle/type-checker" "interface-conformance")
+              (vector))])
+       (append-program-shadow-evidence-edge!
+        prog (conformance-derivation proof))
+       (hash-set! MODULE-INTERFACE->CONFORMANCE interface proof)
+       proof)))
+  (define using
+    (if conformance
+        (sort
+         (cons (semantic-fact-id (conformance-fact conformance)) base-using)
+         string<?)
+        base-using))
   (define attestation
     (make-attestation
      (epoch)
@@ -1060,6 +1142,8 @@
   (for ([(name binding)
          (in-hash (declared-interface-bindings prog))])
     (hash-set! bindings name binding))
+  (define conformed-bindings
+    (publication-conformed-bindings prog bindings provisional?))
   (define errors (program-errors prog provisional?))
   (define macros (program-interface-macros prog))
   (define macro-fingerprints (interface-macro-fingerprints macros))
@@ -1098,8 +1182,8 @@
         contract
         (program-namespace prog)
         local-type-names))))
-  (define qualified-bindings
-    (for/hasheq ([(name binding) (in-hash bindings)])
+  (define (qualify-bindings input)
+    (for/hasheq ([(name binding) (in-hash input)])
       (values
        name
        (struct-copy
@@ -1110,6 +1194,8 @@
           (interface-binding-type binding)
           (program-namespace prog)
           local-type-names)]))))
+  (define qualified-candidate-bindings (qualify-bindings bindings))
+  (define qualified-bindings (qualify-bindings conformed-bindings))
   (define canonical
     (interface-canonical-datum
      (program-namespace prog)
@@ -1123,6 +1209,22 @@
      errors
      (program-requires prog)
      dynamic-vars))
+  (define implementation-canonical
+    (and
+     (not provisional?)
+     (program-declared-module-contract prog)
+     (interface-canonical-datum
+      (program-namespace prog)
+      (program-target prog)
+      (program-gen-class? prog)
+      qualified-candidate-bindings
+      macro-fingerprints
+      qualified-type-declarations
+      type-exports
+      record-contracts
+      errors
+      (program-requires prog)
+      dynamic-vars)))
   (define source-canonical
     `(module-program
       (interface ,canonical)
@@ -1148,7 +1250,11 @@
      (sha256-datum source-canonical)
      source-id))
   (unless provisional?
-    (emit-interface-evidence-v1! prog interface))
+    (emit-interface-evidence-v1!
+     prog
+     interface
+     (and implementation-canonical
+          (sha256-datum implementation-canonical))))
   (when capture-types?
     (define profile (semantic-profile-for-target (program-target prog)))
     (define members (sort (hash-keys qualified-bindings) symbol<?))
@@ -1394,6 +1500,7 @@
  interface-constraint->canonical-datum
  record-validator-symbol
  program->module-interface
+ module-interface-conformance
  module-interface-export?
  module-interface-binding-ref
  module-interface-type-export?

@@ -176,7 +176,15 @@
       "(defn constant [unused] Int 1)"
       "(defn constant [(unused Int)] Int 1)"
       "Annotate each otherwise unconstrained parameter with the concrete type required by the Core ABI."
-      #:since "0.18")))
+      #:since "0.18")
+
+   (E "E030" "Declared module contract mismatch"
+      "A module's public implementation does not refine its defcontract declaration."
+      "The public export set must match exactly, and every inferred effective scheme must be at least as general as its declared scheme."
+      "(defcontract [(id (forall [A] (Fn [A] A)))])\n(defn id [(x Int)] Int x)"
+      "(defcontract [(id (Fn [Int] Int))])\n(defn id [(x Int)] Int x)"
+      "Make the export names exact, or narrow the declaration/generalize the implementation until implementation-refines-declared holds."
+      #:since "0.24.0")))
 
 (define CODE->EXPL
   (let ([h (make-hash)])

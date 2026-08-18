@@ -51,6 +51,7 @@
              "check.rkt"
              "definition-inference.rkt"
              "effective-signature-publication.rkt"
+             "declared-module-contracts.rkt"
              "daemon-effective-signatures.rkt"
              "binding-constraint-check.rkt"     ; unary Any-free synchronous binding constraints — checker contract
              "binding-constraint-interface.rkt" ; the same contract as published module-interface schema v6

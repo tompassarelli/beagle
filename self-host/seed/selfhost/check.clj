@@ -2470,6 +2470,58 @@
   :else decorated)))
   :else value))
 
+(defn- substitute-contract-vars [t replacements]
+  (cond
+  (nil? t) nil
+  (var-type? t) (get replacements (get t "name") t)
+  (fn-type? t) (make-fn (mapv (fn [p] (substitute-contract-vars p replacements)) (get t "params")) (if (nil? (get t "rest")) nil (substitute-contract-vars (get t "rest") replacements)) (substitute-contract-vars (get t "ret") replacements))
+  (app-type? t) (make-app (get t "name") (mapv (fn [a] (substitute-contract-vars a replacements)) (get t "args")))
+  (union-type? t) (make-union (mapv (fn [member] (substitute-contract-vars member replacements)) (get t "members")))
+  (poly-type? t) (let [nested (reduce (fn [out ^String name] (dissoc out name)) replacements (get t "vars"))]
+  (make-poly (get t "vars") (substitute-contract-vars (get t "body") nested) (get t "bounds")))
+  :else t))
+
+(defn- freshen-contract-implementation! [scheme]
+  (if (poly-type? scheme) (let [replacements (reduce (fn [out ^String name] (assoc out name (fresh-inference-var!))) {} (get scheme "vars"))
+   raw-bounds (get scheme "bounds")
+   bounds (if (map? raw-bounds) (mapv (fn [^String name] [(get replacements name) (substitute-contract-vars (get raw-bounds name) replacements)]) (keys raw-bounds)) [])]
+  {"instance" (substitute-contract-vars (get scheme "body") replacements) "bounds" bounds}) {"instance" scheme "bounds" []}))
+
+(defn- rigid-declared-contract [scheme]
+  (if (poly-type? scheme) (let [replacements (reduce (fn [out ^String name] (assoc out name (make-prim (str "#%contract-rigid/" name)))) {} (get scheme "vars"))]
+  (substitute-contract-vars (get scheme "body") replacements)) scheme))
+
+(defn- ^Boolean implementation-refines-declared?! [inferred declared]
+  (let [fresh (freshen-contract-implementation! inferred)
+   instance (get fresh "instance")
+   expected (rigid-declared-contract declared)]
+  (unify-inference-types! instance expected)
+  (and (type-compatible? (prune-inference-type instance) expected) (every? (fn [entry] (let [solved (prune-inference-type (nth entry 0))]
+  (or (inference-var? solved) (type-compatible? solved (nth entry 1))))) (get fresh "bounds")))))
+
+(defn- named-surface [surface]
+  (reduce (fn [out entry] (assoc out (get entry "name") (get entry "type"))) {} surface))
+
+(defn- ^Boolean same-name-set? [left right]
+  (and (= (count (keys left)) (count (keys right))) (every? (fn [^String name] (contains? right name)) (keys left))))
+
+(defn- sorted-names [table]
+  (vec (sort (keys table))))
+
+(defn- check-declared-module-contract! [prog effective]
+  (let [declared (get prog "declared-contract")]
+  (if (map? declared) (do
+  (let [raw (named-surface (get prog "inferred-public-surface" []))
+   inferred (reduce (fn [out ^String name] (assoc out name (get effective name (get raw name)))) {} (keys raw))]
+  (if (not (same-name-set? declared inferred)) (emit-diag! (str "beagle [E030]: defcontract export set does not match the public module interface; declared " (str (sorted-names declared)) ", inferred " (str (sorted-names inferred)))) (let [conforms (atom true)]
+  (doseq [name (sorted-names declared)]
+  (if (not (implementation-refines-declared?! (get inferred name) (get declared name))) (do
+  (reset! conforms false)
+  (emit-diag! (str "beagle [E030]: implementation scheme for " name " does not refine its declared contract: inferred " (type->string (get inferred name)) ", declared " (type->string (get declared name)))))))
+  (if (deref conforms) (do
+  (swap! STATE assoc "conformed-contract-projection" declared)))))))))
+  nil)
+
 (defn type-check! [prog]
   (let [checked-input (tag-semantic-node-ids prog)]
   (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "definition-inference-counter" 0 "definition-inference-bindings" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
@@ -2478,6 +2530,7 @@
    inferred (infer-definition-types! checked-input initial-env)
    env (get inferred "env")]
   (swap! STATE assoc "effective-definition-types" (get inferred "types"))
+  (check-declared-module-contract! checked-input (get inferred "types"))
   (check-core-function-abis! checked-input (get inferred "types"))
   (doseq [form (get checked-input "forms")]
   (check-form! form env))
@@ -2980,6 +3033,23 @@
    result (type-check! prog)
    effective (get-in (deref STATE) ["effective-definition-types" "constant"])]
   (and (= (get result "count") 0) (poly-type? effective) (= (type->string effective) "(forall [A] (Fn [A] Int))"))))
+  (expect! "defcontract: exact export set conforms" (let [scheme (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+   prog (assoc (assoc (make-prog []) "declared-contract" {"id" scheme}) "inferred-public-surface" [{"name" "id" "type" scheme}])
+   diagnostics (check-program! prog)]
+  (and (= (count diagnostics) 0) (= (get (deref STATE) "conformed-contract-projection") {"id" scheme}))))
+  (expect! "defcontract: mismatched export set rejects with E030" (let [scheme (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+   prog (assoc (assoc (make-prog []) "declared-contract" {"id" scheme}) "inferred-public-surface" [{"name" "other" "type" scheme}])
+   diagnostics (check-program! prog)]
+  (and (= (count diagnostics) 1) (diagnostics-include? diagnostics "[E030]") (diagnostics-include? diagnostics "export set"))))
+  (expect! "defcontract: inferred forall refines monomorphic declaration" (let [declared (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+   inferred (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) nil)
+   prog (assoc (assoc (make-prog []) "declared-contract" {"id" declared}) "inferred-public-surface" [{"name" "id" "type" inferred}])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "defcontract: monomorphic implementation rejects forall declaration" (let [inferred (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+   declared (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) nil)
+   prog (assoc (assoc (make-prog []) "declared-contract" {"id" declared}) "inferred-public-surface" [{"name" "id" "type" inferred}])
+   diagnostics (check-program! prog)]
+  (and (= (count diagnostics) 1) (diagnostics-include? diagnostics "[E030]") (diagnostics-include? diagnostics "does not refine"))))
   (expect! "definition inference: Core rejects only the unresolved callable ABI" (let [constant (assoc (make-prog [(make-defn-node "constant" [(make-param "x" nil)] (make-prim "Int") [(make-lit "number" 1)])]) "target" "core")
    constant-result (type-check! constant)
    constant-diagnostics (get constant-result "diagnostics")

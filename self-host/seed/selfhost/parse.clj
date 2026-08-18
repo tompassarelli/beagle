@@ -12,7 +12,7 @@
 
 (def ^String CHAR-TAG "#%char")
 
-(def META-FORMS ["ns" "define-target" "defmacro" "defalias" "declare-extern" "require" "import"])
+(def META-FORMS ["ns" "define-target" "defmacro" "defalias" "defcontract" "declare-extern" "require" "import"])
 
 (def ERRORS (atom []))
 
@@ -2033,6 +2033,22 @@
 (defn ^Boolean meta-form? [d]
   (and (vector? d) (not (bracketed? d)) (> (count d) 0) (has-item? META-FORMS (nth d 0))))
 
+(defn module-declared-contract! [datums]
+  (let [found (atom false)]
+  (doseq [d datums]
+  (if (and (vector? d) (not (bracketed? d)) (> (count d) 0) (= (nth d 0) "defcontract")) (do
+  (if (not (= (deref found) false)) (err! "duplicate defcontract") (if (and (= (count d) 2) (bracketed? (nth d 1))) (let [contract (reduce (fn [out entry] (if (and (vector? entry) (not (bracketed? entry)) (= (count entry) 2) (string? (nth entry 0))) (let [name (nth entry 0)]
+  (validate-identifier! name "contract export")
+  (if (contains? out name) (do
+  (err! (str "defcontract: duplicate export declaration: " name))
+  out) (assoc out name (parse-type* (nth entry 1))))) (do
+  (err! (str "defcontract: each export must be one complete (name Scheme) declaration, got: " (str entry)))
+  out))) {} (bracket-body (nth d 1)))]
+  (reset! found contract)) (do
+  (err! (str "malformed defcontract — expected (defcontract [(name Scheme) ...]), got: " (str d)))
+  (reset! found {})))))))
+  (deref found)))
+
 (defn- decode-require-libspec! [spec ^Boolean report?]
   (let [unq (if (and (vector? spec) (= (count spec) 2) (= (nth spec 0) "quote")) (nth spec 1) spec)]
   (cond
@@ -2097,6 +2113,8 @@
   :else nil)))))
   (deref requires)))
 
+(declare inferred-module-surface*!)
+
 (defn parse-program! [datums]
   (reset-errors!)
   (mac/reset-lowering-counter!)
@@ -2112,7 +2130,8 @@
   (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
   (if (= (get (deref USER-PARAMETRIC-ARITIES) name) 0) (do
   (zero-parametric-declaration-error! name))))
-  (let [namespace (atom "beagle.user")
+  (let [declared-contract (module-declared-contract! datums)
+   namespace (atom "beagle.user")
    ns-set (atom false)
    target (atom "clj")
    target-set (atom false)
@@ -2169,6 +2188,7 @@
   (err! (str "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: " (str d)))
   nil))
   (= head "defalias") nil
+  (= head "defcontract") nil
   (= head "declare-extern") (if (>= (count d) 3) (let [name-form (nth d 1)
    t (parse-type* (nth d 2))
    add-extern! (fn [nm] (if (string? nm) (do
@@ -2210,7 +2230,8 @@
   (reset! BINDER-ID-QUEUES {})
   (reset! REFERENCE-ID-QUEUES {})
   (reset! CURRENT-REGISTRY-CELL nil)
-  {"namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires) "imports" (deref imports)}))
+  (let [program {"namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires) "imports" (deref imports)}]
+  (if (= declared-contract false) program (assoc (assoc program "declared-contract" declared-contract) "inferred-public-surface" (inferred-module-surface*! datums "" nil))))))
 
 (defn parse-program-with-parametric-arities! [datums imported-arities]
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
@@ -2332,7 +2353,11 @@
   (if (some? rp) (let [a (get rp "ann")]
   (if (some? a) a (make-prim "Any"))) nil)))
 
-(defn- import-module-surface*! [datums ^String prefix refer-syms]
+(defn- ^String module-target-from-datums [datums]
+  (reduce (fn [^String target datum] (let [d (import-normalize datum)]
+  (if (and (vector? d) (not (bracketed? d)) (= (count d) 2) (= (nth d 0) "define-target") (string? (nth d 1))) (nth d 1) target))) "clj" datums))
+
+(defn inferred-module-surface*! [datums ^String prefix refer-syms]
   (doseq [datum datums]
   (validate-reserved-type-declaration! (import-normalize datum)))
   (doseq [d0 datums]
@@ -2343,11 +2368,12 @@
    arity (- (count name-form) 1)]
   (swap! USER-PARAMETRIC-ARITIES assoc name arity)
   (swap! USER-PARAMETRIC-ARITIES assoc (str prefix "/" name) arity))))))
-  (let [refer-set (if (some? refer-syms) (reduce (fn [m s] (assoc m s true)) {} refer-syms) nil)
+  (let [contract-clj? (and (not (= (module-declared-contract! datums) false)) (= (module-target-from-datums datums) "clj"))
+   refer-set (if (some? refer-syms) (reduce (fn [m s] (assoc m s true)) {} refer-syms) nil)
    referred? (fn [nm] (and (some? refer-set) (= true (get refer-set nm))))
    out (atom [])
    seen (atom {})
-   emit! (fn [nm t] (let [q (str prefix "/" nm)]
+   emit! (fn [nm t] (let [q (if (= prefix "") nm (str prefix "/" nm))]
   (if (not (= true (get (deref seen) q))) (do
   (swap! seen assoc q true)
   (swap! out conj {"name" q "type" t})))
@@ -2369,6 +2395,8 @@
    fields (parse-record-fields! (nth d 2))
    nlow (str/lower-case nm)]
   (emit! (str "->" nm) (make-fn-type (mapv (fn [f] (get f "ann")) fields) nil (make-prim nm)))
+  (if contract-clj? (do
+  (emit! (str "map->" nm) (make-fn-type [(make-prim "Any")] nil (make-prim nm)))))
   (doseq [f fields]
   (emit! (str nlow "-" (get f "name")) (make-fn-type [(make-prim nm)] nil (get f "ann")))))
   (and (= head "defscalar") (>= (count d) 3) (string? (nth d 1)) (string? (nth d 2))) (let [nm (nth d 1)
@@ -2395,11 +2423,21 @@
   :else nil))))))
   (deref out)))
 
+(defn- ^String surface-name-leaf [^String name]
+  (let [separator (str/last-index-of name "/")]
+  (if (nil? separator) name (subs name (+ separator 1)))))
+
+(defn- conformed-module-surface! [datums ^String prefix refer-syms]
+  (let [inferred (inferred-module-surface*! datums prefix refer-syms)
+   declared (module-declared-contract! datums)]
+  (if (= declared false) inferred (mapv (fn [entry] (let [leaf (surface-name-leaf (get entry "name"))]
+  (assoc entry "type" (get declared leaf)))) (filterv (fn [entry] (contains? declared (surface-name-leaf (get entry "name")))) inferred)))))
+
 (defn import-module-surface-with-aliases! [datums ^String prefix refer-syms imported-aliases]
   (let [saved (deref TYPE-ALIASES)
    local-aliases (module-local-type-aliases-with-imports! datums imported-aliases)]
   (reset! TYPE-ALIASES (merge saved imported-aliases local-aliases))
-  (let [result (import-module-surface*! datums prefix refer-syms)]
+  (let [result (conformed-module-surface! datums prefix refer-syms)]
   (reset! TYPE-ALIASES saved)
   result)))
 
@@ -2766,6 +2804,13 @@
   (and (= (count errors) 1) (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
   (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
   (and (= (get prog "namespace") "my.app") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "defcontract parses as canonical non-executable module metadata" (let [prog (parse-program! [["defcontract" [BRACKET-TAG ["id" ["Fn" [BRACKET-TAG "Int"] "Int"]]]] ["defn" "id" [BRACKET-TAG ["x" "Int"]] "Int" "x"]])]
+  (and (= (get-in prog ["declared-contract" "id"]) (make-fn-type [(make-prim "Int")] nil (make-prim "Int"))) (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "defn"))))
+  (expect! "clj defcontract record surface includes generated map constructor" (let [prog (parse-program! [["define-target" "clj"] ["defcontract" [BRACKET-TAG ["->Point" ["Fn" [BRACKET-TAG "String"] "Point"]] ["map->Point" ["Fn" [BRACKET-TAG "Any"] "Point"]] ["point-x" ["Fn" [BRACKET-TAG "Point"] "String"]]]] ["defrecord" "Point" [BRACKET-TAG ["x" "String"]]]])
+   surface (get prog "inferred-public-surface")
+   names (mapv (fn [entry] (get entry "name")) surface)
+   map-entry (first (filterv (fn [entry] (= (get entry "name") "map->Point")) surface))]
+  (and (= names ["->Point" "map->Point" "point-x"]) (= (get map-entry "type") (make-fn-type [(make-prim "Any")] nil (make-prim "Point"))))))
   (expect! "scope resolution separates macro, caller, and nested capture zones" (let [prog (parse-program! [["defmacro" "around" [BRACKET-TAG "body"] ["quasiquote" ["let" [BRACKET-TAG "tmp" 1] ["do" "tmp" ["unquote" "body"]]]]] ["defn" "capture" [BRACKET-TAG ["tmp" "Int"]] "Int" ["around" ["do" "tmp" ["let" [BRACKET-TAG "tmp" 2] "tmp"]]]]])
    form (nth (get prog "forms") 0)
    param (nth (get form "params") 0)
