@@ -46,7 +46,7 @@
      (root "src/gjoa/chrome/bjs")
      (ext ".bjs")
      (recursive #t)
-     (skip-basenames ("macros.bjs"))
+     (skip-basenames ())
      (skip-suffixes (".test.bjs"))
      (skip-prefixes ("test/"))
      (shape-markers ("BJS-ROOT" "macros.bjs" ".test.bjs" "test/"))))))

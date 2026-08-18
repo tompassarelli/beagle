@@ -355,7 +355,15 @@
       (and north-result
            (andmap (lambda (path) (string-prefix? path "src/north/"))
                    (consumer-result-relpaths north-result)))
-      "live North membership is exclusively its current src/north build contract")]
+      "live North membership is exclusively its current src/north build contract")
+     (define gjoa-result
+       (findf (lambda (r) (string=? (consumer-result-name r) "gjoa")) run1))
+     (check-equal? (consumer-result-count gjoa-result) 50
+                   "live Gjoa membership matches its current compile batch")
+     (check-not-false
+      (member "src/gjoa/chrome/bjs/macros.bjs"
+              (consumer-result-relpaths gjoa-result))
+      "Gjoa's macro namespace provider stays in the checked overlay")]
     [else
      (printf "~a\n" "(skipping live derivation: not all consumer repos checked out)")]))
 
