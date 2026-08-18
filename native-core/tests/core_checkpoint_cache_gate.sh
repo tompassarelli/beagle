@@ -31,7 +31,8 @@ trap cleanup EXIT
 cache="$work/cache"
 source_file="$work/checkpoint-fixture.bgl"
 mkdir -p "$work/out-cold" "$work/out-seed" "$work/out-resume" \
-    "$work/out-invalidated" "$work/out-corrupt" "$work/out-legacy"
+    "$work/out-qbe-resume" "$work/out-invalidated" "$work/out-corrupt" \
+    "$work/out-legacy"
 
 write_fixture() {
     local value="$1"
@@ -140,6 +141,26 @@ grep -Fq "beagle build: core-result-cache HIT" "$work/resume.stderr" && {
 }
 [[ "$(tree_digest "$work/out-cold")" == "$(tree_digest "$work/out-resume")" ]] || {
     echo "core_checkpoint_cache_gate.sh: cold and resumed output trees differ" >&2
+    exit 1
+}
+
+timeout --foreground 180s nice -n 19 env \
+    BEAGLE_CORE_BUILD_CACHE="$cache" \
+    "$repo/bin/beagle-build-core" --materializer qbe \
+    --out "$work/out-qbe-resume" "$source_file" \
+    >"$work/qbe-resume.stdout" 2>"$work/qbe-resume.stderr"
+grep -Fqx "beagle build: core-checkpoint-alias HIT $seed_early_key -> $seed_key" \
+    "$work/qbe-resume.stderr" || {
+    echo "core_checkpoint_cache_gate.sh: QBE did not share C17's pre-materializer alias" >&2
+    exit 1
+}
+grep -Fqx "beagle build: core-checkpoint HIT $seed_key" \
+    "$work/qbe-resume.stderr" || {
+    echo "core_checkpoint_cache_gate.sh: QBE did not reuse C17's frozen checkpoint" >&2
+    exit 1
+}
+[[ -f "$work/out-qbe-resume/module_0.ssa" ]] || {
+    echo "core_checkpoint_cache_gate.sh: QBE checkpoint resume omitted its projection" >&2
     exit 1
 }
 
