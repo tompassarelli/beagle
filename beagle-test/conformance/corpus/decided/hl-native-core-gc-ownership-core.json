@@ -9,7 +9,7 @@
     "target": "core",
     "fileName": "conformance/hl-native-core-gc-ownership-core.bgl",
     "command": {
-      "argv": ["check", "--profile", "core", "{input}"]
+      "argv": ["check", "--profile", "1", "{input}"]
     },
     "closure": {
       "kind": "controlled-allocator-fixture",

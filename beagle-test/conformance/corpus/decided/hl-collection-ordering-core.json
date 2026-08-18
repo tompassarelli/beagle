@@ -9,7 +9,7 @@
     "target": "core",
     "fileName": "probe/hl-collection-ordering.bl",
     "command": {
-      "argv": ["check", "--profile", "core", "{input}"]
+      "argv": ["check", "--profile", "1", "{input}"]
     },
     "closure": {
       "kind": "single-source",

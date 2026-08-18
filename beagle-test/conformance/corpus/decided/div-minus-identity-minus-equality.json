@@ -5,14 +5,14 @@
   "status": "DECIDED",
   "profile": "core",
   "input": {
-    "source": "#lang beagle\n(ns conformance.div-enumerate)\n\n;; Literal builtin: -\n;; Divergence dimension: -::identity-equality\n(defn probe [] nil)\n",
+    "source": "#lang beagle\n(ns conformance.div-enumerate)\n\n;; Literal builtin: -\n;; Divergence dimension: -::identity-equality\n(defn probe [] Nil nil)\n",
     "target": "native",
     "fileName": "conformance/div-enumerate/div-minus-identity-minus-equality.bgl",
     "command": {
       "argv": [
         "check",
         "--profile",
-        "core",
+        "1",
         "{input}"
       ]
     },

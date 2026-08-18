@@ -9,7 +9,7 @@
     "target": "native",
     "fileName": "conformance/hl-equality-hashing.bclj",
     "command": {
-      "argv": ["check", "--profile", "core", "{input}"]
+      "argv": ["check", "--profile", "1", "{input}"]
     },
     "closure": {
       "kind": "single-source",

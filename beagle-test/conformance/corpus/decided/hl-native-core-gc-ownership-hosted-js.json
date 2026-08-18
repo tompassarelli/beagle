@@ -9,7 +9,7 @@
     "target": "js",
     "fileName": "conformance/hl-native-core-gc-ownership-hosted-js.bjs",
     "command": {
-      "argv": ["check", "--profile", "hosted-js", "{input}"]
+      "argv": ["check", "--profile", "3", "{input}"]
     },
     "closure": {
       "kind": "controlled-allocator-fixture",

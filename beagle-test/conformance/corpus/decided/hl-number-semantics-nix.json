@@ -9,7 +9,7 @@
     "target": "nix",
     "fileName": "conformance/hl-number-semantics.bnix",
     "command": {
-      "argv": ["check", "--profile", "4", "{input}"]
+      "argv": ["check", "--profile", "2", "{input}"]
     },
     "closure": {
       "kind": "single-source",
