@@ -23,6 +23,7 @@
 set -uo pipefail
 WT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WT"
+source bin/_beagle-cold-authority
 ORACLE_ROOT="${BEAGLE_ORACLE_ROOT:-$WT}"
 ORACLE_BEAGLE="$ORACLE_ROOT/bin/beagle"
 ORACLE_BUILD="$ORACLE_ROOT/bin/beagle-build"

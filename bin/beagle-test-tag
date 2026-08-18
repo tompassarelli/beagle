@@ -10,6 +10,8 @@
 #   bin/beagle-test-tag --list           # list known tags + counts
 set -euo pipefail
 
+source "$(dirname "$0")/_beagle-cold-authority"
+
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 source "$(dirname "${BASH_SOURCE[0]}")/_beagle-racket"

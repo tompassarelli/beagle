@@ -5,6 +5,8 @@
 
 set -uo pipefail
 
+source "$(dirname "$0")/_beagle-cold-authority"
+
 # Hold the same gate lock across planning, durable miss recording, fallback,
 # and cold finalization.  The nested authoritative gate sees the inherited
 # lock marker and does not release the lock between those boundaries.

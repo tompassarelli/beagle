@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+source "$(dirname "$0")/_beagle-cold-authority"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BEAGLE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 

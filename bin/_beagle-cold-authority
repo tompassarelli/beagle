@@ -1,0 +1,5 @@
+# Gate and verdict launchers source this before resolving compiler commands.
+# Development fact reuse is never release or verdict authority, even when a
+# caller accidentally exports its opt-in flag into the gate environment.
+unset BEAGLE_DEV_FACT_REUSE
+export BEAGLE_FACT_REUSE_FORBIDDEN=1

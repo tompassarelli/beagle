@@ -30,6 +30,8 @@
 # convergence + self-test gate is green).
 set -uo pipefail
 
+source "$(dirname "$0")/_beagle-cold-authority"
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 

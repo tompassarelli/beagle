@@ -6,6 +6,7 @@
 # so every fixture is a real throwaway git repo with the real scripts copied in
 # and the fixture files staged — a bare mktemp directory cannot exercise them.
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/bin/_beagle-cold-authority"
 export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

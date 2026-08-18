@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/bin/_beagle-cold-authority"
+
 export LC_ALL=C
 export TZ=UTC
 

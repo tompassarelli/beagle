@@ -22,6 +22,7 @@
 # Exit codes: 0 = ok; 1 = a consumer failed / not byte-clean; 2 = usage / dirty
 # refusal; 3 = enumerator drift.
 set -euo pipefail
+source "$(dirname "$0")/_beagle-cold-authority"
 source "$(dirname "$0")/_beagle-racket"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

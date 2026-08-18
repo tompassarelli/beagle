@@ -16,6 +16,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
+source bin/_beagle-cold-authority
 NATIVE="${BEAGLE_NATIVE_BIN:-self-host/native/beagle-selfhost}"
 SEED=self-host/seed
 LAB=.lab/native-verify

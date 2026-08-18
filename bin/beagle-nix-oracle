@@ -17,6 +17,8 @@
 
 set -euo pipefail
 
+source "$(dirname "$0")/_beagle-cold-authority"
+
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! command -v nix-instantiate >/dev/null; then

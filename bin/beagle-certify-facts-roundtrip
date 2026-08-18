@@ -2,6 +2,8 @@
 # Certify the self-hosted facts-roundtrip CLI against the current Racket oracle.
 set -euo pipefail
 
+source "$(dirname "$0")/_beagle-cold-authority"
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 source "$ROOT/bin/_beagle-racket"

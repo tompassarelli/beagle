@@ -9,6 +9,8 @@
 # A successful run always writes the authoritative frozen native program encoding
 # and digest, plus every explicitly selected materializer projection. The
 # command accepts canonical `.bgl` / bare `#lang beagle` sources only.
+# `BEAGLE_DEV_FACT_REUSE=1` opts iterative development builds into exact
+# per-unit Store reuse; the default and every cold-authority caller keep it off.
 
 set -euo pipefail
 
@@ -56,6 +58,23 @@ die() {
     echo "beagle build: $*" >&2
     exit 2
 }
+
+dev_fact_reuse=0
+case "${BEAGLE_DEV_FACT_REUSE:-0}" in
+    0) ;;
+    1)
+        if [[ "${BEAGLE_FACT_REUSE_FORBIDDEN:-0}" == 1 ]]; then
+            echo "beagle build: dev-facts FORBIDDEN cold-authority" >&2
+        else
+            dev_fact_reuse=1
+        fi
+        ;;
+    *) die "BEAGLE_DEV_FACT_REUSE must be 0 or 1" ;;
+esac
+dev_fact_store="${BEAGLE_DEV_FACT_STORE:-$BEAGLE_DIR/.beagle/dev-compile-facts.framlog}"
+if [[ "$dev_fact_reuse" == 1 && "$dev_fact_store" != /* ]]; then
+    die "BEAGLE_DEV_FACT_STORE must be an absolute path"
+fi
 
 run_bounded() {
     local seconds="$1"
@@ -409,6 +428,8 @@ core_modules=(
     native-core/src/native/obligations.bclj
     native-core/src/native/c11.bclj
     native-core/src/native/slice.bclj
+    native-core/src/native/unit_reuse.bclj
+    native-core/src/native/unit_compile.bclj
     native-core/src/native/fold_c17.bclj
     native-core/src/native/body_c17.bclj
     native-core/src/native/body_slice.bclj
@@ -436,10 +457,17 @@ cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/bu
 compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
 compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
 core_result_cache_enabled=1
+core_result_cache_bypass_reason="untrusted-compiler"
 if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]] ||
    ! git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- ||
    ! git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules --; then
     core_result_cache_enabled=0
+fi
+if [[ "$dev_fact_reuse" == 1 ]]; then
+    # A development fact run must reach the per-unit read path instead of
+    # disappearing behind the older whole-result cache.
+    core_result_cache_enabled=0
+    core_result_cache_bypass_reason="dev-fact-reuse"
 fi
 
 write_core_result_early_manifest() {
@@ -1057,7 +1085,7 @@ if [[ "$core_result_cache_enabled" == 1 &&
         echo "beagle build: core-result-cache MISS $core_result_key" >&2
     fi
 else
-    echo "beagle build: core-result-cache BYPASS untrusted-compiler" >&2
+    echo "beagle build: core-result-cache BYPASS $core_result_cache_bypass_reason" >&2
 fi
 
 if [[ "$core_result_cache_hit" != 1 && "$core_result_cache_enabled" == 1 &&
@@ -1130,6 +1158,10 @@ export BEAGLE_CORE_CHECKPOINT_WIRE=""
 export BEAGLE_CORE_CHECKPOINT_REPORT_HEAD=""
 export BEAGLE_CORE_CHECKPOINT_STAGE_PROGRESS=""
 export BEAGLE_CORE_CHECKPOINT_STAGE=""
+export BEAGLE_CORE_DEV_FACT_REUSE="$dev_fact_reuse"
+export BEAGLE_CORE_DEV_FACT_STORE="$dev_fact_store"
+export BEAGLE_CORE_REPO_ROOT="$BEAGLE_DIR"
+export BEAGLE_CORE_COMPILER_SOURCE_DIGEST="$compiler_source_digest"
 if [[ "$core_checkpoint_cache_hit" == 1 ]]; then
     export BEAGLE_CORE_CHECKPOINT_WIRE=\
 "$work/core-checkpoint-hit/frozen-native-stage.wire-v1"
@@ -1151,10 +1183,14 @@ bb -cp "$compiled" -e '
          (quote [native.lower :as lower])
          (quote [native.obligations :as obligations])
          (quote [native.slice :as slice])
+         (quote [native.unit-reuse :as unit])
+         (quote [native.unit-compile :as singleton])
          (quote [native.c11 :as c11])
          (quote [native.body-c17 :as body])
          (quote [native.body-slice :as body-slice])
          (quote [native.qbe :as qbe])
+         (quote [clojure.edn :as edn])
+         (quote [clojure.java.shell :as shell])
          (quote [clojure.string :as str]))
 
 (import (quote [java.lang ProcessHandle])
@@ -1899,6 +1935,591 @@ bb -cp "$compiled" -e '
              :report (str (slurp report-head-path)
                           (:report materialization))))))
 
+(def dev-fact-kind "DevCompileUnitResultV1")
+(def dev-fact-profile "profile=3")
+
+(defn empty-dev-counters []
+  {:hits 0 :misses 0 :divergences 0})
+
+(defn add-dev-counter [counters status]
+  (case status
+    :hit (update counters :hits inc)
+    :miss (update counters :misses inc)
+    :divergence (update counters :divergences inc)
+    counters))
+
+(defn merge-dev-counters [left right]
+  {:hits (+ (:hits left) (:hits right))
+   :misses (+ (:misses left) (:misses right))
+   :divergences (+ (:divergences left) (:divergences right))})
+
+(defn dev-fact-enabled? []
+  (= "1" (System/getenv "BEAGLE_CORE_DEV_FACT_REUSE")))
+
+(defn dev-unit-id-text [identity]
+  (core/nativeid-value identity))
+
+(defn log-dev-fallback!
+  [status stage result-key unit-id]
+  (binding [*out* *err*]
+    (println
+     (str "beagle build: dev-facts "
+          (if (= :divergence status) "DIVERGENCE" "MISS")
+          " stage=" stage
+          " key=" result-key
+          " unit=" (dev-unit-id-text unit-id)
+          " fallback=cold-unit"))))
+
+(defn dev-fact-envelope
+  [stage result-key compiler-context profile unit-id payload]
+  [dev-fact-kind stage result-key compiler-context profile
+   (dev-unit-id-text unit-id)
+   (count (.getBytes ^String payload StandardCharsets/UTF_8))
+   (stages/content-digest payload)
+   payload])
+
+(defn dev-fact-entry
+  [stage result-key compiler-context profile unit-id payload]
+  (let [envelope (dev-fact-envelope stage result-key compiler-context
+                                    profile unit-id payload)
+        encoding (pr-str envelope)]
+    [(stages/content-digest encoding) encoding]))
+
+(defn invoke-dev-fact-store [command request]
+  (let [repo-root (System/getenv "BEAGLE_CORE_REPO_ROOT")
+        classpath (str repo-root "/store/out")
+        input (str (pr-str request) "\n")]
+    (try
+      (let [result
+            (apply shell/sh
+                   (concat
+                    ["timeout" "--foreground" "-k" "1s" "2s"
+                     "env" "-u" "BEAGLE_STORE_TELEMETRY_LOG"
+                     "bb" "-cp" classpath "-m" "store.dev-compile-facts"
+                     command]
+                    [:in input]))]
+        (if (zero? (:exit result))
+          (edn/read-string (:out result))
+          (do
+            (binding [*out* *err*]
+              (println
+               (str "beagle build: dev-facts Store " command
+                    " unavailable exit=" (:exit result))))
+            nil)))
+      (catch Exception error
+        (binding [*out* *err*]
+          (println
+           (str "beagle build: dev-facts Store " command
+                " unavailable: " (.getMessage error))))
+        nil))))
+
+(defn query-dev-facts [store requests]
+  (let [response
+        (invoke-dev-fact-store
+         "query"
+         ["store.dev-compile-facts/query-v1" store requests])]
+    (if (and (vector? response)
+             (= 5 (count response))
+             (= "store.dev-compile-facts/query-response-v1" (nth response 0))
+             (#{"ONLINE" "COLD"} (nth response 1))
+             (vector? (nth response 4)))
+      {:usable? true :mode (nth response 1) :rows (nth response 4)}
+      {:usable? false :mode "DEGRADED" :rows []})))
+
+(defn append-dev-facts [store entries]
+  (if (empty? entries)
+    "RETAINED"
+    (let [response
+          (invoke-dev-fact-store
+           "append"
+           ["store.dev-compile-facts/append-v1" store entries])]
+      (if (and (vector? response)
+               (= 5 (count response))
+               (= "store.dev-compile-facts/append-response-v1"
+                  (nth response 0))
+               (= "ok" (nth response 1)))
+        "PUBLISHED"
+        "DEFERRED"))))
+
+(defn parse-dev-fact-row [row]
+  (try
+    (when (and (vector? row)
+               (= 4 (count row))
+               (string? (nth row 0))
+               (string? (nth row 1))
+               (string? (nth row 2))
+               (string? (nth row 3)))
+      (let [requested-stage (nth row 0)
+            requested-key (nth row 1)
+            fact-id (nth row 2)
+            encoding (nth row 3)
+            envelope (edn/read-string encoding)]
+        (when (and (vector? envelope)
+                   (= 9 (count envelope))
+                   (= dev-fact-kind (nth envelope 0))
+                   (= encoding (pr-str envelope))
+                   (= fact-id (stages/content-digest encoding)))
+          {:requested-stage requested-stage
+           :requested-key requested-key
+           :id fact-id
+           :stage (nth envelope 1)
+           :result-key (nth envelope 2)
+           :compiler-context (nth envelope 3)
+           :profile (nth envelope 4)
+           :unit-id (nth envelope 5)
+           :byte-count (nth envelope 6)
+           :digest (nth envelope 7)
+           :payload (nth envelope 8)})))
+    (catch Exception _ nil)))
+
+(defn rows-for-dev-request [rows stage result-key]
+  (filterv
+   (fn [row]
+     (and (vector? row)
+          (= 4 (count row))
+          (= stage (nth row 0))
+          (= result-key (nth row 1))))
+   rows))
+
+(defn dev-fact-metadata-valid?
+  [fact stage result-key compiler-context profile unit-id]
+  (and (some? fact)
+       (= stage (:requested-stage fact))
+       (= result-key (:requested-key fact))
+       (= stage (:stage fact))
+       (= result-key (:result-key fact))
+       (= compiler-context (:compiler-context fact))
+       (= profile (:profile fact))
+       (= (dev-unit-id-text unit-id) (:unit-id fact))
+       (integer? (:byte-count fact))
+       (<= 0 (:byte-count fact))
+       (string? (:digest fact))
+       (string? (:payload fact))))
+
+(defn select-typed-dev-fact
+  [rows result-key compiler-context profile unit-id]
+  (try
+    (let [candidates (rows-for-dev-request rows "typed" result-key)]
+      (cond
+        (empty? candidates) {:status :miss}
+        (not= 1 (count candidates)) {:status :divergence}
+        :else
+        (let [fact (parse-dev-fact-row (first candidates))]
+          (if-not
+           (dev-fact-metadata-valid?
+            fact "typed" result-key compiler-context profile unit-id)
+            {:status :divergence}
+            (let [decoded
+                  (unit/decode-typed-unit-wire-v1
+                   (:payload fact) (:byte-count fact) (:digest fact) unit-id)]
+              (if (instance? native.unit_reuse.TypedUnitWireDecodedV1 decoded)
+                {:status :hit
+                 :unit (unit/typedunitwiredecodedv1-unit decoded)}
+                {:status :divergence}))))))
+    (catch Exception _ {:status :divergence})))
+
+(defn select-native-dev-fact
+  [rows result-key compiler-context profile unit-id]
+  (try
+    (let [candidates (rows-for-dev-request rows "native" result-key)]
+      (cond
+        (empty? candidates) {:status :miss}
+        (not= 1 (count candidates)) {:status :divergence}
+        :else
+        (let [fact (parse-dev-fact-row (first candidates))]
+          (if-not
+           (dev-fact-metadata-valid?
+            fact "native" result-key compiler-context profile unit-id)
+            {:status :divergence}
+            (let [decoded
+                  (unit/decode-native-unit-wire-v1
+                   (:payload fact) (:byte-count fact) (:digest fact) unit-id)]
+              (if (instance? native.unit_reuse.NativeUnitWireDecodedV1 decoded)
+                {:status :hit
+                 :unit (unit/nativeunitwiredecodedv1-unit decoded)}
+                {:status :divergence}))))))
+    (catch Exception _ {:status :divergence})))
+
+(defn dev-read-contracts [prepared source-unit]
+  (let [wanted
+        (set (map dev-unit-id-text
+                  (stages/sourceunitv0-read-set source-unit)))]
+    (filterv
+     (fn [contract]
+       (contains? wanted
+                  (dev-unit-id-text
+                   (unit/unitcontractv0-unit-id contract))))
+     (singleton/preparedcandidatev0-contracts prepared))))
+
+(defn dev-typed-requests
+  [source-units prepared compiler-context profile]
+  (mapv
+   (fn [source-unit]
+     ["typed"
+      (unit/unit-result-key
+       compiler-context source-unit
+       (singleton/preparedcandidatev0-contracts prepared))
+      compiler-context
+      profile
+      (dev-unit-id-text (stages/sourceunitv0-id source-unit))])
+   source-units))
+
+(defn compile-dev-typed-units
+  [source-units prepared rows compiler-context profile]
+  (loop [position 0
+         compiled []
+         pending []
+         counters (empty-dev-counters)]
+    (if (>= position (count source-units))
+      {:ok? true
+       :units compiled
+       :pending pending
+       :counters counters}
+      (let [source-unit (nth source-units position)
+            unit-id (stages/sourceunitv0-id source-unit)
+            result-key
+            (unit/unit-result-key
+             compiler-context source-unit
+             (singleton/preparedcandidatev0-contracts prepared))
+            selection
+            (select-typed-dev-fact
+             rows result-key compiler-context profile unit-id)
+            status (:status selection)
+            next-counters (add-dev-counter counters status)]
+        (if (= :hit status)
+          (recur (inc position)
+                 (conj compiled (:unit selection))
+                 pending
+                 next-counters)
+          (let [result
+                (do
+                  (log-dev-fallback!
+                   status "typed" result-key unit-id)
+                  (singleton/compile-typed-unit
+                   prepared
+                   unit-id
+                   (stages/sourceunitv0-semantic-digest source-unit)
+                   (stages/sourceunitv0-read-set source-unit)
+                   (dev-read-contracts prepared source-unit)
+                   compiler-context
+                   result-key))]
+            (if-not
+             (instance? native.unit_compile.TypedUnitCompiledV0 result)
+              {:ok? false
+               :reason
+               (if
+                (instance?
+                 native.unit_compile.TypedUnitCompileRejectedV0 result)
+                 (str
+                  (singleton/typedunitcompilerejectedv0-code result)
+                  ": "
+                  (singleton/typedunitcompilerejectedv0-detail result))
+                 "typed unit compiler returned an unknown result")
+               :counters next-counters}
+              (let [produced
+                    (singleton/typedunitcompiledv0-unit result)
+                    next-pending
+                    (if (= :miss status)
+                      (conj
+                       pending
+                       (dev-fact-entry
+                        "typed" result-key compiler-context profile unit-id
+                        (unit/typedunitv0-encoding produced)))
+                      pending)]
+                (recur (inc position)
+                       (conj compiled produced)
+                       next-pending
+                       next-counters)))))))))
+
+(defn dev-typed-set-digest [typed-units]
+  (stages/content-digest
+   (stages/canonical-set
+    "dev-typed-unit-set-v1"
+    (mapv unit/typedunitv0-digest typed-units))))
+
+(defn dev-native-result-key
+  [source-unit prepared typed-units compiler-context]
+  (stages/content-digest
+   (stages/canonical-record
+    "beagle-dev-native-result-v1"
+    [(unit/unit-result-key
+      compiler-context source-unit
+      (singleton/preparedcandidatev0-contracts prepared))
+     (dev-typed-set-digest typed-units)])))
+
+(defn dev-native-requests
+  [source-units prepared typed-units compiler-context profile]
+  (mapv
+   (fn [source-unit]
+     ["native"
+      (dev-native-result-key
+       source-unit prepared typed-units compiler-context)
+      compiler-context
+      profile
+      (dev-unit-id-text (stages/sourceunitv0-id source-unit))])
+   source-units))
+
+(defn dev-typed-unit-for [typed-units unit-id]
+  (some
+   (fn [candidate]
+     (when
+      (core/native-id=
+       unit-id (unit/typedunitv0-unit-id candidate))
+       candidate))
+   typed-units))
+
+(defn compile-dev-native-units
+  [source-units prepared typed-units rows compiler-context profile abi]
+  (loop [position 0
+         compiled []
+         pending []
+         counters (empty-dev-counters)]
+    (if (>= position (count source-units))
+      {:ok? true
+       :units compiled
+       :pending pending
+       :counters counters}
+      (let [source-unit (nth source-units position)
+            unit-id (stages/sourceunitv0-id source-unit)
+            fact-key
+            (dev-native-result-key
+             source-unit prepared typed-units compiler-context)
+            selection
+            (select-native-dev-fact
+             rows fact-key compiler-context profile unit-id)
+            status (:status selection)
+            next-counters (add-dev-counter counters status)]
+        (if (= :hit status)
+          (recur (inc position)
+                 (conj compiled (:unit selection))
+                 pending
+                 next-counters)
+          (let [base-key
+                (unit/unit-result-key
+                 compiler-context source-unit
+                 (singleton/preparedcandidatev0-contracts prepared))
+                target (dev-typed-unit-for typed-units unit-id)
+                result
+                (do
+                  (log-dev-fallback!
+                   status "native" fact-key unit-id)
+                  (singleton/compile-native-unit
+                   prepared unit-id target typed-units
+                   compiler-context base-key abi))]
+            (if-not
+             (instance? native.unit_compile.NativeUnitCompiledV0 result)
+              {:ok? false
+               :reason
+               (if
+                (instance?
+                 native.unit_compile.NativeUnitCompileRejectedV0 result)
+                 (str
+                  (singleton/nativeunitcompilerejectedv0-code result)
+                  ": "
+                  (singleton/nativeunitcompilerejectedv0-detail result))
+                 "native unit compiler returned an unknown result")
+               :counters next-counters}
+              (let [produced
+                    (singleton/nativeunitcompiledv0-unit result)
+                    next-pending
+                    (if (= :miss status)
+                      (conj
+                       pending
+                       (dev-fact-entry
+                        "native" fact-key compiler-context profile unit-id
+                        (unit/nativeunitv0-encoding produced)))
+                      pending)]
+                (recur (inc position)
+                       (conj compiled produced)
+                       next-pending
+                       next-counters)))))))))
+
+(defn dev-typing-result
+  [assembly frozen-source compiler-commit configuration]
+  (let [frozen (unit/unitassemblyv0-typed assembly)
+        slice (unit/unitassemblyv0-typed-slice assembly)
+        digest (stages/frozentypedstagev0-digest frozen)
+        stage (stages/frozentypedstagev0-stage frozen)
+        graph (stages/typedstagev0-terms stage)
+        functions (lower/typedslicev0-functions slice)
+        clean (lower/term-graph-clean? graph)
+        obligations
+        (vec
+         (concat
+          (lower/type-closure-obligations digest true clean)
+          (lower/function-todo-obligations functions digest)))
+        receipt
+        (lower/make-receipt
+         (stages/frozensourcestagev1-digest frozen-source)
+         compiler-commit
+         "source-to-typed"
+         configuration
+         []
+         obligations
+         digest)]
+    (lower/->TypingAcceptedV0 frozen slice receipt)))
+
+(defn dev-native-result
+  [assembly compiler-commit configuration]
+  (let [frozen (unit/unitassemblyv0-native assembly)
+        digest (stages/frozennativestagev0-digest frozen)
+        stage (stages/frozennativestagev0-stage frozen)
+        clean (lower/term-graph-clean?
+               (stages/nativestagev0-terms stage))
+        receipt
+        (lower/make-receipt
+         (stages/nativestagev0-typed-digest stage)
+         compiler-commit
+         "typed-to-native"
+         configuration
+         []
+         (lower/native-receipt-obligations
+          digest true true true true clean true true true)
+         digest)]
+    (lower/->NativeLoweringCompleteV0 frozen receipt)))
+
+(defn dev-compile-attempt
+  [frozen-source compiler-commit configuration abi]
+  (let [source
+        (stages/frozensourcestagev1-stage frozen-source)
+        source-units (stages/sourcestagev1-units source)
+        compiler-source
+        (or (System/getenv "BEAGLE_CORE_COMPILER_SOURCE_DIGEST")
+            "unresolved")
+        compiler-context
+        (stages/content-digest
+         (stages/canonical-record
+          "beagle-dev-unit-context-v1"
+          [compiler-commit
+           compiler-source
+           dev-fact-profile
+           (str "abi=" (System/getenv "BEAGLE_CORE_ABI"))
+           "unit-contract-v0"
+           "typed-unit-wire-v1"
+           "native-unit-wire-v1"]))
+        preparation
+        (singleton/prepare-unit-compilation
+         frozen-source compiler-context configuration)]
+    (if-not
+     (instance?
+      native.unit_compile.UnitPreparationAcceptedV0 preparation)
+      {:ok? false
+       :reason "candidate is outside the admitted singleton unit subset"
+       :counters (empty-dev-counters)}
+      (let [prepared
+            (singleton/unitpreparationacceptedv0-prepared preparation)
+            store (System/getenv "BEAGLE_CORE_DEV_FACT_STORE")
+            typed-query
+            (query-dev-facts
+             store
+             (dev-typed-requests
+              source-units prepared compiler-context dev-fact-profile))
+            typed-pass
+            (compile-dev-typed-units
+             source-units prepared (:rows typed-query)
+             compiler-context dev-fact-profile)]
+        (if-not (:ok? typed-pass)
+          {:ok? false
+           :reason (:reason typed-pass)
+           :counters (:counters typed-pass)}
+          (let [typed-units (:units typed-pass)
+                native-query
+                (query-dev-facts
+                 store
+                 (dev-native-requests
+                  source-units prepared typed-units
+                  compiler-context dev-fact-profile))
+                native-pass
+                (compile-dev-native-units
+                 source-units prepared typed-units (:rows native-query)
+                 compiler-context dev-fact-profile abi)
+                counters
+                (merge-dev-counters
+                 (:counters typed-pass)
+                 (:counters native-pass))]
+            (if-not (:ok? native-pass)
+              {:ok? false
+               :reason (:reason native-pass)
+               :counters counters}
+              (let [assembly-result
+                    (unit/assemble-unit-payloads
+                     frozen-source
+                     (singleton/preparedcandidatev0-contracts prepared)
+                     typed-units
+                     (:units native-pass)
+                     compiler-commit
+                     configuration
+                     abi)]
+                (if-not
+                 (instance?
+                  native.unit_reuse.UnitAssemblyAcceptedV0 assembly-result)
+                  {:ok? false
+                   :reason
+                   (if
+                    (instance?
+                     native.unit_reuse.UnitAssemblyRejectedV0 assembly-result)
+                     (str
+                      (unit/unitassemblyrejectedv0-code assembly-result)
+                      ": "
+                      (unit/unitassemblyrejectedv0-detail assembly-result))
+                     "unit assembly returned an unknown result")
+                   :counters (add-dev-counter counters :divergence)}
+                  (let [assembly
+                        (unit/unitassemblyacceptedv0-assembly assembly-result)
+                        typed-stage-result
+                        (dev-typing-result
+                         assembly frozen-source compiler-commit configuration)
+                        native-stage-result
+                        (dev-native-result
+                         assembly compiler-commit configuration)
+                        epoch-result
+                        (lower/epoch-derived-stage
+                         (unit/unitassemblyv0-native assembly)
+                         compiler-commit configuration abi)
+                        epoch-match?
+                        (=
+                         (stages/frozennativestagev0-encoding
+                          (unit/unitassemblyv0-epoch assembly))
+                         (stages/frozennativestagev0-encoding
+                          (lower/epoch-result-frozen epoch-result)))]
+                    (if-not epoch-match?
+                      {:ok? false
+                       :reason "assembled epoch differs from cold epoch derivation"
+                       :counters (add-dev-counter counters :divergence)}
+                      (let [pending
+                            (vec
+                             (concat
+                              (:pending typed-pass)
+                              (:pending native-pass)))
+                            maintenance
+                            (if
+                             (and (:usable? typed-query)
+                                  (:usable? native-query))
+                              (append-dev-facts store pending)
+                              "UNAVAILABLE")]
+                        {:ok? true
+                         :typing-result typed-stage-result
+                         :native-result native-stage-result
+                         :epoch-result epoch-result
+                         :counters counters
+                         :maintenance maintenance}))))))))))))
+
+(defn dev-fact-report [attempt]
+  (let [counters (:counters attempt)
+        mode
+        (cond
+          (not (:ok? attempt)) "COLD-FALLBACK"
+          (pos? (:divergences counters)) "MIXED-DIVERGENCE"
+          (pos? (:hits counters)) "FACT-REUSE"
+          :else "COLD-POPULATE")]
+    (str "dev-facts mode=" mode
+         " hits=" (:hits counters)
+         " misses=" (:misses counters)
+         " divergences=" (:divergences counters)
+         " maintenance=" (or (:maintenance attempt) "NONE")
+         (if (:ok? attempt) "" (str " reason=" (:reason attempt)))
+         "\n")))
+
 (defn compile-core!
   [facts-path projected-facts-path artifacts-dir compiler-commit entries
    materializers abi-id abi simd-required?]
@@ -1931,8 +2552,22 @@ bb -cp "$compiled" -e '
           (let [_finish-freeze (finish-stage! "source-freeze" "ACCEPTED")
                 frozen-source (lower/sourcefreezeacceptedv0-frozen freeze-result)
                 source-receipt (lower/sourcefreezeacceptedv0-receipt freeze-result)
+                dev-attempt
+                (when (dev-fact-enabled?)
+                  (dev-compile-attempt
+                   frozen-source compiler-commit configuration abi))
+                dev-report
+                (if (some? dev-attempt) (dev-fact-report dev-attempt) "")
+                _write-dev-report
+                (when (some? dev-attempt)
+                  (binding [*out* *err*]
+                    (print (str "beagle build: " dev-report))))
                 _start-typing (start-stage! "source-to-typed")
-                typing-result (lower/lower-typed-stage frozen-source compiler-commit configuration)]
+                typing-result
+                (if (and (some? dev-attempt) (:ok? dev-attempt))
+                  (:typing-result dev-attempt)
+                  (lower/lower-typed-stage
+                   frozen-source compiler-commit configuration))]
             (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
               (do
                 (finish-stage! "source-to-typed" "REJECTED")
@@ -1943,8 +2578,12 @@ bb -cp "$compiled" -e '
                     frozen-typed (lower/typingacceptedv0-frozen typing-result)
                     typed-slice (lower/typingacceptedv0-slice typing-result)
                     _start-lowering (start-stage! "typed-to-native")
-                    native-result (lower/lower-native-stage frozen-typed typed-slice
-                                    compiler-commit configuration abi)]
+                    native-result
+                    (if (and (some? dev-attempt) (:ok? dev-attempt))
+                      (:native-result dev-attempt)
+                      (lower/lower-native-stage
+                       frozen-typed typed-slice
+                       compiler-commit configuration abi))]
                 (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
                   (do
                     (finish-stage! "typed-to-native" "PENDING")
@@ -1957,9 +2596,11 @@ bb -cp "$compiled" -e '
                   (let [_finish-lowering (finish-stage! "typed-to-native" "COMPLETE")
                         native-frozen (lower/nativeloweringcompletev0-frozen native-result)
                         _start-epoch (start-stage! "native-to-epoch")
-                        epoch-result (lower/epoch-derived-stage native-frozen
-                                                                compiler-commit
-                                                                configuration abi)
+                        epoch-result
+                        (if (and (some? dev-attempt) (:ok? dev-attempt))
+                          (:epoch-result dev-attempt)
+                          (lower/epoch-derived-stage
+                           native-frozen compiler-commit configuration abi))
                         epoch-complete? (lower/epoch-result-complete? epoch-result)
                         epoch-pendings (epoch-pending-details epoch-result)
                         _finish-epoch (finish-stage!
@@ -2000,6 +2641,7 @@ bb -cp "$compiled" -e '
                         head (str
                               (native-report-head rows entries source program projected
                                                   native-program epoch-result abi verdicts)
+                              dev-report
                               (native-provenance-report
                                source-receipt frozen-source typing-result frozen-typed
                                native-result native-frozen epoch-result frozen-native
@@ -2097,6 +2739,12 @@ bb -cp "$compiled" -e '
 ' >"$work/run.log" 2>&1
 runner_rc=$?
 set -e
+
+if [[ "$dev_fact_reuse" == 1 && -f "$work/run.log" ]]; then
+    # The hosted Core runner is captured for deterministic artifact handling;
+    # surface its bounded fact evidence on the outer build log as well.
+    rg '^beagle build: dev-facts ' "$work/run.log" >&2 || true
+fi
 
 if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
       "$core_checkpoint_cache_hit" != 1 &&
