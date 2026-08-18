@@ -216,11 +216,58 @@
           type = "app";
           program = "${beagle}/bin/${name}";
         };
+
+        # --- STAGE1 FULL NATIVE COMPILER ------------------------------------
+        # The oracle worker materializes the exact Core projection outside the
+        # checkout.  The gate supplies that path through an impure evaluation;
+        # builtins.path then imports its bytes into the Nix graph, so the build
+        # itself has no checkout or network dependency.  An unset path keeps
+        # normal flake evaluation useful and makes the package fail pointedly
+        # only when someone tries to build it without a projection.
+        stage1ProjectionPath = builtins.getEnv "BEAGLE_STAGE1_PROJECTION";
+        stage1Projection =
+          if stage1ProjectionPath == "" then null else builtins.path {
+            path = stage1ProjectionPath;
+            name = "beagle-stage1-projection";
+          };
+        stage1ProjectionStorePath =
+          if stage1Projection == null then "" else toString stage1Projection;
+        stage1ProjectionCommit =
+          if stage1ProjectionPath == "" then "" else builtins.baseNameOf stage1ProjectionPath;
+        beagleCompilerNative = pkgs.stdenv.mkDerivation {
+          pname = "beagle-compiler-native";
+          version = "0.24.0-stage1";
+          src = ./.;
+          nativeBuildInputs = [ pkgs.coreutils pkgs.findutils pkgs.gnugrep ];
+          dontConfigure = true;
+          dontBuild = true;
+          installPhase = ''
+            if [ -z "${stage1ProjectionStorePath}" ]; then
+              echo "beagle-compiler-native: set BEAGLE_STAGE1_PROJECTION under --impure" >&2
+              exit 2
+            fi
+            mkdir -p "$out"
+            bash "$src/self-host/native/stage1-package.sh" \
+              --projection "${stage1ProjectionStorePath}" \
+              --projection-commit "${stage1ProjectionCommit}" \
+              --source-root "$src" \
+              --manifest "$src/self-host/full-compiler-closure.manifest" \
+              --lock "$src/flake.lock" \
+              --out "$out"
+          '';
+          meta = {
+            description = "Reproducible Stage 1 Core-capable Beagle compiler";
+            license = [ pkgs.lib.licenses.mit pkgs.lib.licenses.asl20 ];
+            platforms = pkgs.lib.platforms.unix;
+            mainProgram = "beagle-compiler-native";
+          };
+        };
       in
       {
         packages.default = beagle;
         packages.beagle = beagle;
         packages.store = storeSelf.packages.${system}.default;
+        packages.beagle-compiler-native = beagleCompilerNative;
 
         # --- STAGE0 NATIVE COMPILER -----------------------------------------
         # The canonical Beagle builder: a GraalVM native-image of the blessed
