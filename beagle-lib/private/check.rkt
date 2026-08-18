@@ -510,6 +510,7 @@
     [(native-abi)          "E029"]
     [(contract-refinement) "E030"]
     [(numeric-range)       "BEAGLE-NUMERIC-RANGE"]
+    [(effectful-comparator) "BEAGLE-EFFECTFUL-COMPARATOR"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -1442,6 +1443,59 @@
                'declared (type->string coll-type)
                'order "unspecified")))))
 
+(define CALLABLE-VALUES-ENV-KEY '#%callable-values)
+
+(define comparator-effectful-calls
+  (set 'print 'println 'printf 'prn 'spit 'slurp
+       'swap! 'reset! 'compare-and-set!
+       'rand 'rand-int 'rand-nth 'random-uuid 'shuffle))
+
+(define (resolve-callable-value value env [fuel 32])
+  (cond
+    [(or (fn-form? value) (defn-form? value)) value]
+    [(or (zero? fuel) (not (local-reference? value))) #f]
+    [else
+     (define resolved
+       (reference-hash-ref
+        (hash-ref env CALLABLE-VALUES-ENV-KEY (hasheq)) value #f))
+     (and resolved
+          (not (equal? resolved value))
+          (resolve-callable-value resolved env (sub1 fuel)))]))
+
+(define (callable-effect-witnesses callable)
+  (cond
+    [(fn-form? callable)
+     (analyze-expression-effects
+      (fn-form-body callable) comparator-effectful-calls
+      #:params (fn-form-params callable)
+      #:rest-param (fn-form-rest-param callable)
+      #:result-escapes? #f)]
+    [(defn-form? callable)
+     (apply append
+            (for/list ([clause (in-list (definition-clauses callable))])
+              (analyze-expression-effects
+               (inference-clause-body clause) comparator-effectful-calls
+               #:params (inference-clause-params clause)
+               #:rest-param (inference-clause-rest-param clause)
+               #:result-escapes? #f)))]
+    [else '()]))
+
+(define (check-effectful-sort-comparator! call env)
+  (when (and (eq? (call-form-fn call) 'sort-by)
+             (pair? (call-form-args call)))
+    (define comparator (car (call-form-args call)))
+    (define callable (resolve-callable-value comparator env))
+    (define witnesses (and callable (callable-effect-witnesses callable)))
+    (when (pair? witnesses)
+      (raise-diag
+       'effectful-comparator
+       "BEAGLE-EFFECTFUL-COMPARATOR: stable sort requires a pure comparator"
+       (hasheq
+        'function "sort-by"
+        'effects
+        (map (lambda (w) (format "~a" (effect-witness-marker w))) witnesses))
+       #:src (src-for comparator)))))
+
 ;; --- allocation region and allocation failure -------------------------------
 
 (define PORTABLE-ALLOCATING-FNS
@@ -2319,6 +2373,18 @@
         (hash-set h (string->symbol (substring s (add1 (caar dot)))) fqcn)
         (hash-set h fqcn fqcn))))
   (hash-set! env '#%jvm-imports jvm-imports)
+  (hash-set!
+   env CALLABLE-VALUES-ENV-KEY
+   (for/fold ([values (hasheq)])
+             ([raw-form (in-list (program-forms prog))])
+     (define form (unwrap-definition-form raw-form))
+     (cond
+       [(defn-form? form) (hash-set values (defn-form-name form) form)]
+       [(and (def-form? form) (fn-form? (def-form-value form)))
+        (hash-set values (def-form-name form) (def-form-value form))]
+       [(and (defonce-form? form) (fn-form? (defonce-form-value form)))
+        (hash-set values (defonce-form-name form) (defonce-form-value form))]
+       [else values])))
   env)
 
 (define (index-parametric-members! union-name pdef)
@@ -6373,6 +6439,7 @@
     [(call-form? e)
      (warn-target-exclude (call-form-fn e) e)
      (check-collection-order-use! e env)
+     (check-effectful-sort-comparator! e env)
      (define ref (call-form-fn e))
      (define fn ref)
      (when (and (eq? (current-check-target) 'js)
@@ -6943,7 +7010,17 @@
                                  'name (symbol->string bname))
                        #:src (src-for (let-binding-value b)))))
        (check-binding-accessor-mismatch bname (let-binding-value b) out)
-       (binder-env-set! out b bname (or declared inferred ANY))]))
+       (binder-env-set! out b bname (or declared inferred ANY))
+       (when (symbol? bname)
+         (define callable-values
+           (hash-set (hash-ref out CALLABLE-VALUES-ENV-KEY (hasheq))
+                     bname (let-binding-value b)))
+         (define binding-id (binder-binding-id b bname #f))
+         (hash-set!
+          out CALLABLE-VALUES-ENV-KEY
+          (if binding-id
+              (hash-set callable-values binding-id (let-binding-value b))
+              callable-values)))]))
   out)
 
 (define (collection-element-type collection-type)

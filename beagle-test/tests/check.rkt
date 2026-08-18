@@ -177,6 +177,22 @@
   #rx"BEAGLE-NUMERIC-RANGE"
   '(def too-small Int -9223372036854775809))
 
+(check-err/rx "stable sort rejects an effectful lexical comparator"
+  #rx"BEAGLE-EFFECTFUL-COMPARATOR"
+  (list 'defn 'probe (br) 'Any
+     (list 'let
+        (br 'effectful-comparator
+            (list 'fn (br 'x 'y) 'Int
+               (list 'do (list 'println 'x) (list 'compare 'x 'y))))
+        (list 'sort-by 'effectful-comparator (br 2 1 1)))))
+
+(check-ok "stable sort admits a pure lexical comparator"
+  (list 'defn 'probe (br) 'Any
+     (list 'let
+        (br 'pure-comparator
+            (list 'fn (br 'x 'y) 'Int (list 'compare 'x 'y)))
+        (list 'sort-by 'pure-comparator (br 2 1 1)))))
+
 (check-ok "Any annotation accepts anything"
   '(def x Any "hi"))
 

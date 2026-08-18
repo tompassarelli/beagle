@@ -146,6 +146,7 @@
    'unresolved-call      'type-error
    'native-abi           'type-error
    'numeric-range        'type-error
+   'effectful-comparator 'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 
