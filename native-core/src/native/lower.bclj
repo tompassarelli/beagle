@@ -37,6 +37,31 @@
 (defn same-id? [(left core/NativeId) (right core/NativeId)] Bool
   (core/native-id= left right))
 
+;; Anonymous finite unions are sets. Canonicalize by the stable NativeId text
+;; before minting their identity so source traversal and branch order cannot
+;; change either the union id or its tag assignment.
+(defn insert-canonical-type-id
+  [(item core/NativeId) (ordered (Vec core/NativeId))] (Vec core/NativeId)
+  (if (core/id-in? ordered item)
+    ordered
+    (loop [(position Int) 0
+           (inserted Bool) false
+           (result (Vec core/NativeId)) []]
+      (if (>= position (count ordered))
+        (if inserted result (conj result item))
+        (let [(current core/NativeId) (nth ordered position)]
+          (if (and (not inserted)
+                (< (compare (id-value item) (id-value current)) 0))
+            (recur (+ position 1) true (conj (conj result item) current))
+            (recur (+ position 1) inserted (conj result current))))))))
+
+(defn canonical-type-ids [(ids (Vec core/NativeId))] (Vec core/NativeId)
+  (loop [(position Int) 0 (ordered (Vec core/NativeId)) []]
+    (if (>= position (count ids))
+      ordered
+      (recur (+ position 1)
+        (insert-canonical-type-id (nth ids position) ordered)))))
+
 (defn find-node
   [(graph stages/TermGraphV0) (target core/NativeId)] (U stages/TermNodeV0 Nil)
   (let [(nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)]
@@ -842,7 +867,9 @@
 
 (defn slice-value-nullable-type-id [] core/NativeId
   (lower-id "closed-union-type"
-    [(id-value (slice-value-type-id)) (id-value (type-id "Nil"))]))
+    (mapv
+      (fn [(member core/NativeId)] String (id-value member))
+      (canonical-type-ids [(slice-value-type-id) (type-id "Nil")]))))
 
 (defn slice-value-vector-type [] core/TypeDef
   (core/->TypeDef (slice-value-vector-type-id) "Vector"
@@ -859,13 +886,15 @@
       (core/->InsertionOrderV0 true))))
 
 (defn slice-value-nullable-type [] core/TypeDef
-  (let [(id core/NativeId) (slice-value-nullable-type-id)]
+  (let [(members (Vec core/NativeId))
+        (canonical-type-ids [(slice-value-type-id) (type-id "Nil")])
+        (id core/NativeId) (slice-value-nullable-type-id)]
     (core/->TypeDef id "ClosedUnion"
       (core/->UnionType
         [(core/->TypeVariant (variant-id (id-value id) "0") "case-0"
-           (slice-value-type-id))
+           (nth members 0))
          (core/->TypeVariant (variant-id (id-value id) "1") "case-1"
-           (type-id "Nil"))]))))
+           (nth members 1))]))))
 
 ;; Records enter Any by reference, never by value: a record whose own fields are
 ;; Any would otherwise have no finite layout. Collections use recursive closed
@@ -925,10 +954,11 @@
 
 (defn union-member-ids
   [(record-keys (Vec String)) (ids (Vec core/NativeId))] (Vec core/NativeId)
-  (mapv
-    (fn [(member core/NativeId)] core/NativeId
-      (union-member-id record-keys member))
-    ids))
+  (canonical-type-ids
+    (mapv
+      (fn [(member core/NativeId)] core/NativeId
+        (union-member-id record-keys member))
+      ids)))
 
 (defn lower-failure-type [] core/TypeDef
   (core/->TypeDef (type-id "LowerFailure") "LowerFailure"
@@ -1530,14 +1560,18 @@
 
 (defn nullable-map-value-type-id [(value-type core/NativeId)] core/NativeId
   (lower-id "closed-union-type"
-    [(id-value value-type) (id-value (type-id "Nil"))]))
+    (mapv
+      (fn [(member core/NativeId)] String (id-value member))
+      (canonical-type-ids [value-type (type-id "Nil")]))))
 
 (defn nullable-map-value-type [(value-type core/NativeId)] core/TypeDef
-  (let [(id core/NativeId) (nullable-map-value-type-id value-type)
+  (let [(members (Vec core/NativeId))
+        (canonical-type-ids [value-type (type-id "Nil")])
+        (id core/NativeId) (nullable-map-value-type-id value-type)
         (owner String) (id-value id)]
     (core/->TypeDef id "ClosedUnion"
       (core/->UnionType
-        (union-variants owner [value-type (type-id "Nil")])))))
+        (union-variants owner members)))))
 
 (defn closed-vector-type-id [(element-type core/NativeId)] core/NativeId
   (lower-id "vector-type" [(id-value element-type)]))

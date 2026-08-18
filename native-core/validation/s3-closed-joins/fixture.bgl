@@ -1,0 +1,34 @@
+#lang beagle
+(ns native.s3-closed-joins)
+
+(defn heterogeneous-map [] (Map Keyword Any)
+  {:text "seven" :count 7 :flag true})
+
+(defn int-first [(take-int Bool)] (U Int String)
+  (if take-int 7 "seven"))
+
+(defn text-first [(take-text Bool)] (U String Int)
+  (if take-text "seven" 7))
+
+(defn widen-choice [(value (U String Int))] Any
+  value)
+
+(defn checked-int [(value Any)] Int
+  value)
+
+(defn checked-map-count [] Int
+  (get (heterogeneous-map) :count))
+
+(defn roundtrip-int [] Int
+  (checked-int (widen-choice (int-first true))))
+
+(defn reverse-roundtrip-int [] Int
+  (checked-int (widen-choice (text-first false))))
+
+(defn main [] Int
+  (if (and (= (checked-map-count) 7)
+           (= (roundtrip-int) 7)
+           (= (reverse-roundtrip-int) 7))
+    0
+    1))
+
