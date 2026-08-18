@@ -1014,15 +1014,24 @@
      (define schema-path (find-schema-json (car files)))
      (cond
        [(not schema-path)
-        (empty-validation-result
-         (list
-          (validation-error
-           (car files) #f #f
-           (format
-            "cannot find .beagle-cache/schema.json; searched upward from ~a"
-            (car files))
-           'missing-schema #f))
-         (length files))]
+        (define all-file-keys
+          (for/list ([file-program (in-list file-programs)])
+            (define-values (keys _warnings)
+              (collect-program-keys (cdr file-program)))
+            (cons (car file-program) keys)))
+        (if (for/or ([file-keys (in-list all-file-keys)])
+              (pair? (cdr file-keys)))
+            (empty-validation-result
+             (list
+              (validation-error
+               (car files) #f #f
+               (format
+                "cannot find .beagle-cache/schema.json; searched upward from ~a"
+                (car files))
+               'missing-schema #f))
+             (length files))
+            (validation-result
+             '() #f #f #f all-file-keys (set) (length files)))]
        [else
         (with-handlers
           ([exn:fail?

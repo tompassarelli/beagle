@@ -404,6 +404,17 @@ BNIX
              'missing-schema)
   (delete-directory/files dir))
 
+(test-case "schema-free Nix source skips option schema preflight"
+  (define dir (make-temporary-directory))
+  (define source-file
+    (write-bnix-file
+     dir "ordinary-program.bnix"
+     "(ns ordinary-program)\n(def answer Int 42)"))
+  (define result (validate-files (list source-file)))
+  (check-equal? (validation-result-error-count result) 0)
+  (check-false (validation-result-schema result))
+  (delete-directory/files dir))
+
 (test-case "unknown option result preserves nearest suggestion"
   (define dir
     (make-validator-repo
