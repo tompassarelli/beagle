@@ -4661,8 +4661,14 @@
                   (when (and (> (count body) 0) (string? (nth body 0)))
                     (emit! (nth body 0) (make-prim (nth body 0)))))
                 (string? (nth d 1))
-                (emit! (nth d 1)
-                  (make-union (mapv make-prim (filterv string? (subvec d 2)))))
+                (let [member-names
+                        (filterv string?
+                          (mapv member-type-name (subvec d 2)))
+                      qualified-members
+                        (mapv (fn [(member String)] Any
+                                (make-prim (str prefix "/" member)))
+                          member-names)]
+                  (emit! (nth d 1) (make-union qualified-members)))
                 :else
                 nil)
               (or (= head "def") (= head "defonce"))
@@ -5324,6 +5330,21 @@
   (expect! "^{:dynamic true} longhand sets the dynamic flag"
     (= (get (parse-expr* ["def" ["#%meta" [MAP-TAG ":dynamic" true] "*x*"] 1]) "dynamic")
       true))
+  (expect! "import: fielded nominal union retains qualified member types"
+    (let [surface
+            (import-module-surface!
+              [["defunion" "Op"
+                ["AddOp" [BRACKET-TAG ["left" "Int"]]]
+                ["SubOp" [BRACKET-TAG ["left" "Int"]]]]]
+              "core" nil)
+          union-entry
+            (first
+              (filterv (fn [(entry Any)] Bool
+                         (= (get entry "name") "core/Op"))
+                surface))
+          members (get (get union-entry "type") "members")]
+      (= ["core/AddOp" "core/SubOp"]
+         (mapv (fn [(member Any)] String (get member "name")) members))))
   (expect! "plain def: dynamic false, doc false"
     (let [node (parse-expr* ["def" "x" 1])]
       (and (= (get node "dynamic") false) (= (get node "doc") false))))

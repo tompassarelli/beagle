@@ -2410,7 +2410,9 @@
   (bracketed? (nth d 1)) (let [body (bracket-body (nth d 1))]
   (if (and (> (count body) 0) (string? (nth body 0))) (do
   (emit! (nth body 0) (make-prim (nth body 0))))))
-  (string? (nth d 1)) (emit! (nth d 1) (make-union (mapv make-prim (filterv string? (subvec d 2)))))
+  (string? (nth d 1)) (let [member-names (filterv string? (mapv member-type-name (subvec d 2)))
+   qualified-members (mapv (fn [^String member] (make-prim (str prefix "/" member))) member-names)]
+  (emit! (nth d 1) (make-union qualified-members)))
   :else nil)
   (or (= head "def") (= head "defonce")) (cond
   (and (= (count d) 4) (string? (nth d 1))) (emit! (nth d 1) (parse-type* (nth d 2)))
@@ -2692,6 +2694,10 @@
   (expect! "target-case: cases sorted by target name; branches parse" (= (parse-expr* ["target-case" ":js" 2 ":clj" 1]) {"node" "target-case" "cases" [{"target" "clj" "body" {"node" "literal" "kind" "number" "value" 1}} {"target" "js" "body" {"node" "literal" "kind" "number" "value" 2}}]}))
   (expect! "^:dynamic def sets the dynamic flag" (= (get (parse-expr* ["def" ["#%meta" ":dynamic" "*x*"] 1]) "dynamic") true))
   (expect! "^{:dynamic true} longhand sets the dynamic flag" (= (get (parse-expr* ["def" ["#%meta" [MAP-TAG ":dynamic" true] "*x*"] 1]) "dynamic") true))
+  (expect! "import: fielded nominal union retains qualified member types" (let [surface (import-module-surface! [["defunion" "Op" ["AddOp" [BRACKET-TAG ["left" "Int"]]] ["SubOp" [BRACKET-TAG ["left" "Int"]]]]] "core" nil)
+   union-entry (first (filterv (fn [entry] (= (get entry "name") "core/Op")) surface))
+   members (get (get union-entry "type") "members")]
+  (= ["core/AddOp" "core/SubOp"] (mapv (fn [member] (get member "name")) members))))
   (expect! "plain def: dynamic false, doc false" (let [node (parse-expr* ["def" "x" 1])]
   (and (= (get node "dynamic") false) (= (get node "doc") false))))
   (expect! "def docstring recorded" (= (get (parse-expr* ["def" "x" ["#%string" "d"] 1]) "doc") "d"))

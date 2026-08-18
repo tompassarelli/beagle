@@ -1152,6 +1152,15 @@
   (swap! STATE assoc-in ["record-validators" name] validator)))))))
   nil)
 
+(defn install-imported-union-contracts! [externs]
+  (doseq [external externs]
+  (let [name (get external "name")
+   external-type (get external "type")
+   alternatives (if (union-type? external-type) (get external-type "members") [])]
+  (if (and (string? name) (> (count alternatives) 0) (every? prim? alternatives)) (do
+  (swap! STATE assoc-in ["union-members" name] (mapv (fn [alternative] (get alternative "name")) alternatives))))))
+  nil)
+
 (defn register-record-validator! [^String name fields]
   (if (fields-have-constraints? fields) (do
   (swap! STATE assoc-in ["record-validators" name] (record-validator-symbol name))))
@@ -2600,6 +2609,7 @@
    unstable-bindings (unstable-binding-keys checked-input)]
   (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "unstable-bindings" unstable-bindings "definition-inference-counter" 0 "definition-inference-bindings" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
   (install-imported-record-contracts! (get checked-input IMPORTED-RECORD-CONTRACTS-KEY []))
+  (install-imported-union-contracts! (get checked-input "externs"))
   (let [initial-env (build-initial-env! checked-input)
    inferred (infer-definition-types! checked-input initial-env)
    env (get inferred "env")]
@@ -2987,6 +2997,10 @@
   (swap! STATE assoc "union-members" {"Instruction" ["AtomInstruction" "ArenaInstruction"]})
   (type-compatible? (make-prim "ArenaInstruction") (make-prim "Instruction"))))
   (expect! "compat: nominal union rejects an undeclared nominal" (not (type-compatible? (make-prim "ForeignInstruction") (make-prim "Instruction"))))
+  (expect! "import: nominal union extern installs qualified member relation" (do
+  (swap! STATE assoc "union-members" {})
+  (install-imported-union-contracts! [{"name" "core/Instruction" "type" (make-union [(make-prim "core/AtomInstruction") (make-prim "core/ArenaInstruction")])}])
+  (= ["core/AtomInstruction" "core/ArenaInstruction"] (get-in (deref STATE) ["union-members" "core/Instruction"]))))
   (expect! "compat: variadic actual satisfies unary expected" (type-compatible? (make-fn [] ANY (make-prim "String")) (make-fn [ANY] nil (make-prim "String"))))
   (expect! "compat: fixed actual cannot satisfy variadic expected" (not (type-compatible? (make-fn [ANY] nil (make-prim "String")) (make-fn [] ANY (make-prim "String")))))
   (expect! "infer: vec of ints" (let [t1 (infer-expr! (make-vec-node [(make-lit "number" 1) (make-lit "number" 2)]) {})]
