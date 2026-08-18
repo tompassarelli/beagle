@@ -702,7 +702,7 @@
   (= variant "vector") (let [state (reduce (fn [current index] (let [child (nth children index)
    datum (scope-syntax-datum! child)]
   (if (= datum "&") (assoc current "children" (conj (get current "children") child)) (let [bound (scope-bind-target! child (get current "table") scope binding-kind (conj (vec path) index))]
-  {"children" (conj (get current "children") (get bound "value")) "table" (get bound "table") "identities" (merge-identities! (get current "identities") (get bound "identities"))})))) {"children" [] "table" table "identities" {}} (range (count children)))]
+  {"children" (conj (get current "children") (get bound "value")) "table" (get bound "table") "identities" (merge-identities! (get current "identities") (get bound "identities"))})))) {"children" [] "table" table "identities" {}} (vec (range (count children))))]
   {"value" (rebuild-scope-sequence! scoped (get state "children")) "table" (get state "table") "identities" (get state "identities")})
   (and (= variant "list") (> (count children) 0) (= (scope-syntax-datum! (nth children 0)) MAP-TAG)) (let [state (loop [index 1
    rendered [(nth children 0)]

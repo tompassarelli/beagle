@@ -1183,7 +1183,7 @@
                            (get current "identities")
                            (get bound "identities"))}))))
                 {"children" [] "table" table "identities" {}}
-                (range (count children)))]
+                (vec (range (count children))))]
           {"value" (rebuild-scope-sequence! scoped (get state "children"))
            "table" (get state "table")
            "identities" (get state "identities")})

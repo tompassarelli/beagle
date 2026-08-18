@@ -240,7 +240,7 @@
   Any
   (let [base (reduce (fn [(acc Any) (i Int)] Any
                         (assoc acc (nth fixed-params i) (nth fixed-args i)))
-                      {} (range (count fixed-params)))]
+                      {} (vec (range (count fixed-params))))]
     (if (not (nil? rest-name))
       (assoc base rest-name rest-args)
       base)))

@@ -133,7 +133,7 @@
   (get (deref reg) name))
 
 (defn make-bindings [fixed-params fixed-args rest-name rest-args]
-  (let [base (reduce (fn [acc i] (assoc acc (nth fixed-params i) (nth fixed-args i))) {} (range (count fixed-params)))]
+  (let [base (reduce (fn [acc i] (assoc acc (nth fixed-params i) (nth fixed-args i))) {} (vec (range (count fixed-params))))]
   (if (not (nil? rest-name)) (assoc base rest-name rest-args) base)))
 
 (declare macro-eval! macro-apply-fn! macro-match-syntax-pattern!)
