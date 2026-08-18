@@ -17011,21 +17011,36 @@
                 (lower-bitwise types owner current callee values value-types)
 
                 (and (= "atom" bare-callee) (= 1 (count values)))
-                (let [(cell-type (U core/NativeId Nil))
-                      (atom-cell-type-of types (nth value-types 0))]
+                (let [(expected-content (U core/NativeId Nil))
+                      (if (nil? expected)
+                        nil
+                        (atom-cell-content-of types expected))
+                      (inferred-cell-type (U core/NativeId Nil))
+                      (atom-cell-type-of types (nth value-types 0))
+                      (cell-type (U core/NativeId Nil))
+                      (if (some? expected-content) expected inferred-cell-type)
+                      (initial ExprResultV0)
+                      (if (nil? expected-content)
+                        (->ExprResultV0 current (nth values 0)
+                          (nth value-types 0) false)
+                        (lower-boundary-coerce types owner current
+                          (nth values 0) (nth value-types 0) expected-content))]
                   (if (nil? cell-type)
                     (fail-result current
                       "TODO-NATIVE-ATOM-TYPE: atom needs a closed (Atom T) annotation for its initial value type")
-                    (let [(result-id core/NativeId)
-                          (state-id current owner "atom-create")]
-                      (->ExprResultV0
-                        (state-emit (state-bump current)
-                          (core/->AtomCreateInstruction
-                            (core/->SsaValueV0 result-id cell-type)
-                            (nth values 0)
-                            (arena-value-id owner)
-                            (atom-state-value-id owner)))
-                        result-id cell-type false))))
+                    (if (state-blocked? (exprresultv0-state initial))
+                      (dead-result (exprresultv0-state initial))
+                      (let [(result-id core/NativeId)
+                            (state-id (exprresultv0-state initial) owner
+                              "atom-create")]
+                        (->ExprResultV0
+                          (state-emit (state-bump (exprresultv0-state initial))
+                            (core/->AtomCreateInstruction
+                              (core/->SsaValueV0 result-id cell-type)
+                              (exprresultv0-value-id initial)
+                              (arena-value-id owner)
+                              (atom-state-value-id owner)))
+                          result-id cell-type false)))))
 
                 (= "atom" bare-callee)
                 (fail-result current

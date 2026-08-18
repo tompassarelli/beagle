@@ -180,7 +180,8 @@ run_phase atom-source-materialization 180 bb -cp "$scratch/out" -e "
 
 for name in direct-update make-counter-cell make-vector-cell reset-counter! \
     update-counter! assoc-counter! assoc-counter-map! append-value! \
-    append-values!; do
+    append-values! local-any-cell make-any-cell any-deref any-reset! \
+    any-swap! any-cas! counter-cas!; do
   awk -v name="$name" \
     '$1 == "lowered" && $3 == name { found = 1 } END { exit !found }' \
     "$scratch/source-report.txt" || {
@@ -190,6 +191,13 @@ for name in direct-update make-counter-cell make-vector-cell reset-counter! \
   }
 done
 rg -q '^materialize OK module_0.h module_0.c$' "$scratch/source-report.txt"
+if rg -q 'TODO-NATIVE-ATOM-(TYPE|DEREF-CELL|SWAP-CELL)' \
+    "$scratch/source-report.txt"; then
+  echo "drive.sh: S4 atom cell-flow rejection remains" >&2
+  rg -n 'TODO-NATIVE-ATOM-(TYPE|DEREF-CELL|SWAP-CELL)' \
+    "$scratch/source-report.txt" >&2
+  exit 1
+fi
 rg -q 'TODO-NATIVE-ATOM-SWAP-UPDATER: swap! requires a statically named pure native updater' \
   "$scratch/refusal-report.txt"
 

@@ -25,9 +25,7 @@
   (swap! cell assoc :value replacement))
 
 (defn assoc-counter-map!
-  [(cell (Atom CounterMap))
-   (key Keyword)
-   (replacement Int)] CounterMap
+  [(cell (Atom CounterMap)) (key Keyword) (replacement Int)] CounterMap
   (swap! cell assoc key replacement))
 
 (defn append-value! [(cell (Atom (Vec Int))) (value Int)] (Vec Int)
@@ -35,3 +33,32 @@
 
 (defn append-values! [(cell (Atom (Vec Int))) (values (Vec Int))] (Vec Int)
   (swap! cell into values))
+
+;; S4 dynamic and global cell-flow witnesses.  The declared Atom Any boundary
+;; is the closed SliceValue carrier; the concrete initializer must cross that
+;; boundary before the cell exists, then every mutation must retain it.
+(def any-global (Atom Any) (atom 0))
+
+(defn local-any-cell [] (Atom Any)
+  (let [(cell (Atom Any)) (atom 0)] cell))
+
+(defn make-any-cell [(initial Any)] (Atom Any)
+  (atom initial))
+
+(defn any-deref [] Any
+  (deref any-global))
+
+(defn any-reset! [(value Any)] Any
+  (reset! any-global value))
+
+(defn any-update [(value Any)] Any value)
+
+(defn any-swap! [] Any
+  (swap! any-global any-update))
+
+(defn any-cas! [(expected Any) (replacement Any)] Bool
+  (compare-and-set! any-global expected replacement))
+
+(defn counter-cas!
+  [(cell (Atom Counter)) (expected Counter) (replacement Counter)] Bool
+  (compare-and-set! cell expected replacement))
