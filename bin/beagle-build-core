@@ -658,6 +658,8 @@ core_result_root="$cache_root/results"
 core_result_alias="$core_result_alias_root/$core_result_early_key"
 core_checkpoint_alias_root="$cache_root/checkpoint-aliases"
 core_checkpoint_root="$cache_root/checkpoints"
+core_checkpoint_wire_attestation_root=\
+"$cache_root/checkpoint-wire-attestations"
 core_checkpoint_alias="$core_checkpoint_alias_root/$core_checkpoint_early_key"
 core_result_early_hit=0
 core_checkpoint_early_hit=0
@@ -1081,6 +1083,96 @@ validate_core_checkpoint_wire() {
         >"$log" 2>&1
 }
 
+validate_core_checkpoint_wire_attestation() {
+    local attestation="$1" expected_wire_digest="$2"
+    local format wire_digest source_key source_ready_digest extra
+    local source_entry source_input_digest
+    [[ -f "$attestation" && ! -L "$attestation" ]] || return 1
+    read -r format wire_digest source_key source_ready_digest extra \
+        <"$attestation" || return 1
+    [[ "$format" == "beagle-core-checkpoint-wire-pass/v1" &&
+       "$wire_digest" == "$expected_wire_digest" &&
+       "$source_key" =~ ^[0-9a-f]{64}$ &&
+       "$source_ready_digest" =~ ^[0-9a-f]{64}$ &&
+       -z "${extra:-}" ]] || return 1
+    source_entry="$core_checkpoint_root/$source_key"
+    [[ -f "$source_entry/READY" && ! -L "$source_entry/READY" &&
+       "$(sha256sum "$source_entry/READY" | awk '{print $1}')" == \
+           "$source_ready_digest" ]] || return 1
+    source_input_digest="$(sha256sum "$source_entry/input.manifest" 2>/dev/null |
+        awk '{print $1}')"
+    [[ "$source_input_digest" == "$source_key" ]] || return 1
+    validate_core_checkpoint_entry_from_alias "$source_entry" "$source_key" \
+        "$source_input_digest" || return 1
+    grep -Fqx "$wire_digest  frozen-native-stage.wire-v1" \
+        "$source_entry/artifacts.sha256"
+}
+
+record_core_checkpoint_wire_attestation() {
+    local source_entry="$1" wire_digest source_key source_input_digest
+    local source_ready_digest attestation staging
+    source_key="$(basename "$source_entry")"
+    source_input_digest="$(sha256sum "$source_entry/input.manifest" | awk '{print $1}')"
+    [[ "$source_key" == "$source_input_digest" ]] || return 1
+    validate_core_checkpoint_entry_from_alias "$source_entry" "$source_key" \
+        "$source_input_digest" || return 1
+    wire_digest="$(sha256sum \
+        "$source_entry/artifacts/frozen-native-stage.wire-v1" | awk '{print $1}')"
+    source_ready_digest="$(sha256sum "$source_entry/READY" | awk '{print $1}')"
+    mkdir -p "$core_checkpoint_wire_attestation_root" \
+        "$cache_root/.checkpoint-tmp"
+    attestation="$core_checkpoint_wire_attestation_root/$wire_digest"
+    if ! validate_core_checkpoint_wire_attestation \
+        "$attestation" "$wire_digest"; then
+        [[ ! -e "$attestation" && ! -L "$attestation" ]] ||
+            rm -f -- "$attestation"
+    fi
+    staging="$(mktemp \
+        "$cache_root/.checkpoint-tmp/$wire_digest.attestation.XXXXXX")"
+    printf 'beagle-core-checkpoint-wire-pass/v1 %s %s %s\n' \
+        "$wire_digest" "$source_key" "$source_ready_digest" >"$staging"
+    sync -f "$staging"
+    if [[ ! -e "$attestation" ]]; then
+        ln "$staging" "$attestation" 2>/dev/null || true
+        sync -f "$core_checkpoint_wire_attestation_root"
+    fi
+    rm -f -- "$staging"
+    validate_core_checkpoint_wire_attestation "$attestation" "$wire_digest"
+}
+
+reuse_core_checkpoint_wire_attestation() {
+    local entry="$1" wire_digest attestation source_entry source_key
+    local source_input_digest
+    wire_digest="$(sha256sum \
+        "$entry/artifacts/frozen-native-stage.wire-v1" | awk '{print $1}')"
+    attestation="$core_checkpoint_wire_attestation_root/$wire_digest"
+    if validate_core_checkpoint_wire_attestation "$attestation" "$wire_digest"; then
+        read -r _ _ source_key _ <"$attestation"
+        echo "beagle build: core-checkpoint-wire-attestation HIT $wire_digest -> $source_key" >&2
+        return 0
+    fi
+    [[ ! -e "$attestation" && ! -L "$attestation" ]] ||
+        rm -f -- "$attestation"
+
+    while IFS= read -r -d '' source_entry; do
+        [[ "$source_entry" != "$entry" ]] || continue
+        source_key="$(basename "$source_entry")"
+        [[ "$source_key" =~ ^[0-9a-f]{64}$ ]] || continue
+        source_input_digest="$(sha256sum \
+            "$source_entry/input.manifest" 2>/dev/null | awk '{print $1}')"
+        [[ "$source_input_digest" == "$source_key" ]] || continue
+        validate_core_checkpoint_entry_from_alias "$source_entry" "$source_key" \
+            "$source_input_digest" || continue
+        grep -Fqx "$wire_digest  frozen-native-stage.wire-v1" \
+            "$source_entry/artifacts.sha256" || continue
+        record_core_checkpoint_wire_attestation "$source_entry" || continue
+        echo "beagle build: core-checkpoint-wire-attestation HIT $wire_digest -> $source_key" >&2
+        return 0
+    done < <(find "$core_checkpoint_root" -mindepth 1 -maxdepth 1 \
+        -type d -print0 2>/dev/null)
+    return 1
+}
+
 retire_core_checkpoint_alias() {
     local expected_key="$1" alias_format alias_early alias_full alias_digest alias_extra
     exec {core_checkpoint_retire_alias_lock_fd}>\
@@ -1196,9 +1288,13 @@ if [[ "$core_result_cache_hit" != 1 && "$core_result_cache_enabled" == 1 &&
         if validate_core_checkpoint_entry "$core_checkpoint_entry" \
             "$core_checkpoint_input" "$core_checkpoint_key"; then
             core_checkpoint_structural_ok=1
-            if validate_core_checkpoint_wire "$core_checkpoint_entry" \
-                "$work/core-checkpoint-wire.log"; then
+            if reuse_core_checkpoint_wire_attestation "$core_checkpoint_entry" ||
+               validate_core_checkpoint_wire "$core_checkpoint_entry" \
+                   "$work/core-checkpoint-wire.log"; then
                 core_checkpoint_semantic_ok=1
+                record_core_checkpoint_wire_attestation \
+                    "$core_checkpoint_entry" ||
+                    die "failed to record the Core checkpoint wire PASS"
             fi
         fi
         if [[ "$core_checkpoint_structural_ok" != 1 ||
@@ -3122,6 +3218,8 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
     mv "$core_checkpoint_staging" "$core_checkpoint_entry"
     core_checkpoint_staging=""
     sync -f "$core_checkpoint_root"
+    record_core_checkpoint_wire_attestation "$core_checkpoint_entry" ||
+        die "failed to record the published Core checkpoint wire PASS"
     echo "beagle build: core-checkpoint PUBLISHED $core_checkpoint_key" >&2
 
     validate_core_result_early_closure "$core_result_early_input" \

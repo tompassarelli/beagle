@@ -142,6 +142,11 @@ grep -Fqx "beagle build: core-checkpoint HIT $seed_key" \
     echo "core_checkpoint_cache_gate.sh: resume did not decode the frozen checkpoint" >&2
     exit 1
 }
+grep -Eq '^beagle build: core-checkpoint-wire-attestation HIT [0-9a-f]{64} -> [0-9a-f]{64}$' \
+    "$work/resume.stderr" || {
+    echo "core_checkpoint_cache_gate.sh: resume did not reuse its keyed wire PASS" >&2
+    exit 1
+}
 grep -Fq "beagle build: core-result-cache HIT" "$work/resume.stderr" && {
     echo "core_checkpoint_cache_gate.sh: resume incorrectly used a whole result" >&2
     exit 1
@@ -159,6 +164,11 @@ grep -Fqx "beagle build: core-checkpoint-alias HIT $seed_early_key -> $seed_key"
 grep -Fqx "beagle build: core-checkpoint HIT $seed_key" \
     "$work/qbe-resume.stderr" || {
     echo "core_checkpoint_cache_gate.sh: QBE did not reuse C17's frozen checkpoint" >&2
+    exit 1
+}
+grep -Eq '^beagle build: core-checkpoint-wire-attestation HIT [0-9a-f]{64} -> [0-9a-f]{64}$' \
+    "$work/qbe-resume.stderr" || {
+    echo "core_checkpoint_cache_gate.sh: QBE did not reuse the keyed wire PASS" >&2
     exit 1
 }
 [[ -f "$work/out-qbe-resume/module_0.ssa" ]] || {
@@ -240,4 +250,4 @@ grep -Fqx "beagle build: core-checkpoint CORRUPT $seed_key; retiring" \
     exit 1
 }
 
-echo "core checkpoint cache: failpoint seed, resume, invalidation, corruption recovery, legacy rejection, byte identity PASS"
+echo "core checkpoint cache: failpoint seed, attested resume, invalidation, corruption recovery, legacy rejection, byte identity PASS"
