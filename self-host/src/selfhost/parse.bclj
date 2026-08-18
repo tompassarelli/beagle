@@ -1664,7 +1664,8 @@
         bound
         (scope-bind-declaration!
           (nth children binder-index) table scope binding-kind
-          (conj (vec path) binder-index))]
+          (conj (vec path) binder-index))
+        (indices (Vec Int)) (vec (range (count children)))]
     (rebuild-scope-sequence! value
       (mapv
         (fn [(index Int)] Any
@@ -1677,7 +1678,7 @@
             :else
               (scope-walk*
                 (nth children index) table (conj (vec path) index) ctx)))
-        (range (count children))))))
+        indices))))
 
 (defn- scope-walk-as-thread! [(value Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children value)

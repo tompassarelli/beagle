@@ -875,11 +875,12 @@
 (defn- scope-walk-single-binder! [value table path ctx binder-index body-start ^String binding-kind]
   (let [children (scope-sequence-children value)
    scope (syntax/fresh-scope-id! binding-kind)
-   bound (scope-bind-declaration! (nth children binder-index) table scope binding-kind (conj (vec path) binder-index))]
+   bound (scope-bind-declaration! (nth children binder-index) table scope binding-kind (conj (vec path) binder-index))
+   indices (vec (range (count children)))]
   (rebuild-scope-sequence! value (mapv (fn [index] (cond
   (= index binder-index) (get bound "value")
   (>= index body-start) (scope-walk* (syntax-add-scope! (nth children index) scope) (get bound "table") (conj (vec path) index) ctx)
-  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))))
+  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) indices))))
 
 (defn- scope-walk-as-thread! [value table path ctx]
   (let [children (scope-sequence-children value)
