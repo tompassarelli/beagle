@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-types_root="$(git rev-parse --show-toplevel)"
+types_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 store_checkout="$("$types_root/native-core/validation/store-checkout.sh")"
 types_source="$store_checkout/src/fram/types.bgl"
 types_module_root="store/src=$store_checkout/src"
-types_logical="${types_source#"$store_checkout/"}"
 types_scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types.XXXXXX")"
 types_output="${NATIVE_SLICE_ARTIFACTS:-$types_scratch/artifacts}"
 types_clang_bin="$(command -v clang || true)"
@@ -47,7 +46,7 @@ fi
   }
 
 bb -cp "$types_scratch/out" -e \
-  "(require 'native.slice-types-pipeline) (native.slice-types-pipeline/emit-slice! \"$types_scratch/facts.edn\" \"$types_logical\" \"$types_output\")"
+  "(require 'native.slice-types-pipeline) (native.slice-types-pipeline/emit-slice! \"$types_scratch/facts.edn\" \"$types_source\" \"$types_output\")"
 
 sha256sum "$types_source" | cut -d ' ' -f 1 >"$types_output/source.sha256"
 
