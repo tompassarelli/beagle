@@ -258,7 +258,8 @@
   :else (recur (+ index 1) acc)))))))
 
 (defn ^String emit-loop-with-constraints! [e]
-  (let [bindings (get e "bindings")]
+  (let [bindings (get e "bindings")
+   loop-indices (vec (range (count bindings)))]
   (if (not (bindings-have-constraints? bindings)) (str "(loop [" (emit-let-bindings! bindings) "]\n  " (emit-body-with-loop-context! (get e "body") "  " nil) ")") (let [loop-indices (vec (range (count bindings)))
    raw-names (mapv (fn [index] (str "$beagle$constraint$raw-loop$" index)) loop-indices)
    init-bindings (loop [index 0
@@ -272,8 +273,8 @@
    iteration-bindings (mapv (fn [index] (let [binding (nth bindings index)
    raw (nth raw-names index)
    target (emit-binding-target! (get binding "name"))]
-  (str target " " (if (constraint-present? binding) (str "(if $beagle$constraint$first-iteration " raw " " "(let [$beagle$constraint$predicate$" index " " (emit-expr* (checked-binding-constraint binding)) "] " (emit-guarded-binding-value binding (str "$beagle$constraint$predicate$" index) raw) "))") raw)))) (range (count bindings)))
-   loop-bindings (mapv (fn [index] (str (nth raw-names index) " (nth $beagle$constraint$initial-values " index ")")) (range (count bindings)))
+  (str target " " (if (constraint-present? binding) (str "(if $beagle$constraint$first-iteration " raw " " "(let [$beagle$constraint$predicate$" index " " (emit-expr* (checked-binding-constraint binding)) "] " (emit-guarded-binding-value binding (str "$beagle$constraint$predicate$" index) raw) "))") raw)))) loop-indices)
+   loop-bindings (mapv (fn [index] (str (nth raw-names index) " (nth $beagle$constraint$initial-values " index ")")) loop-indices)
    body (emit-body-with-loop-context! (get e "body") "    " (count bindings))]
   (str "(let [$beagle$constraint$initial-values (let [" (str/join "\n       " init-bindings) "] [" (str/join " " raw-names) "])]\n" "  (loop [" (str/join " " loop-bindings) " $beagle$constraint$first-iteration true]\n" "    (let [" (str/join "\n         " iteration-bindings) "]\n" "      " body ")))")))))
 

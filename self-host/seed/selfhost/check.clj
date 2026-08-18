@@ -1062,11 +1062,12 @@
   (and (= (get e "node") "ref") (not (qualified-reference? e)) (nil? (reference-map-ref env e nil)) (nil? (str/index-of (get e "name") "."))))
 
 (defn last-expr-type-expected! [body env expected-result]
-  (let [n (count body)]
+  (let [n (count body)
+   indices (vec (range n))]
   (if (= n 0) ANY (reduce (fn [acc i] (let [e (nth body i)]
   (if (and (< i (- n 1)) (bare-swallowed-ref? e env)) (do
   (emit-diag! (str "beagle: bare symbol `" (get e "name") "` in non-final statement position resolves to nothing" " and has no effect — usually a binding name swallowed by" " an imbalanced paren in a previous `let` binding's value." " Check the enclosing `let` bindings for a missing `)`." " If you meant a call, write `(" (get e "name") " ...)`."))))
-  (if (and (= i (- n 1)) (not (nil? expected-result))) (infer-expr-expected! e env expected-result) (infer-expr! e env)))) ANY (range n)))))
+  (if (and (= i (- n 1)) (not (nil? expected-result))) (infer-expr-expected! e env expected-result) (infer-expr! e env)))) ANY indices))))
 
 (defn last-expr-type! [body env]
   (last-expr-type-expected! body env nil))

@@ -2450,7 +2450,8 @@
 
 (defn last-expr-type-expected!
   [(body (Vec Any)) (env Any) (expected-result Any)] Any
-  (let [n (count body)]
+  (let [n (count body)
+        (indices (Vec Int)) (vec (range n))]
     (if (= n 0)
       ANY
       (reduce (fn [(acc Any) (i Int)] Any
@@ -2465,7 +2466,7 @@
                   (if (and (= i (- n 1)) (not (nil? expected-result)))
                     (infer-expr-expected! e env expected-result)
                     (infer-expr! e env))))
-              ANY (range n)))))
+              ANY indices))))
 
 (defn last-expr-type! [(body (Vec Any)) (env Any)] Any
   (last-expr-type-expected! body env nil))

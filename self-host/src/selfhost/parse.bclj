@@ -1461,7 +1461,8 @@
 (defn- scope-walk-function!
   [(value Any) (table Any) (path Any) (ctx Any) (name-index Any)] Any
   (let [children (scope-sequence-children value)
-        params-index (+ (if (nil? name-index) 0 (int name-index)) 1)]
+        params-index (+ (if (nil? name-index) 0 (int name-index)) 1)
+        (indices (Vec Int)) (vec (range (count children)))]
     (cond
       (or (>= params-index (count children))
           (nil? (scope-sequence-children (nth children params-index))))
@@ -1484,7 +1485,7 @@
                   (nth children index) table (conj (vec path) index) ctx)
                 (scope-walk*
                   (nth children index) table (conj (vec path) index) ctx)))
-            (range (count children))))
+            indices))
 
       :else
         (let [params

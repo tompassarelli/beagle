@@ -808,11 +808,12 @@
 
 (defn- scope-walk-function! [value table path ctx name-index]
   (let [children (scope-sequence-children value)
-   params-index (+ (if (nil? name-index) 0 (int name-index)) 1)]
+   params-index (+ (if (nil? name-index) 0 (int name-index)) 1)
+   indices (vec (range (count children)))]
   (cond
   (or (>= params-index (count children)) (nil? (scope-sequence-children (nth children params-index)))) (scope-walk-generic! value table path ctx)
   (and (= (get (nth children params-index) "variant") "list") (every? (fn [clause] (let [clause-children (scope-sequence-children clause)]
-  (and (= (get clause "variant") "list") (vector? clause-children) (> (count clause-children) 0) (= (get (nth clause-children 0) "variant") "vector")))) (subvec (vec children) params-index))) (rebuild-scope-sequence! value (mapv (fn [index] (if (>= index params-index) (scope-walk-function-clause! (nth children index) table (conj (vec path) index) ctx) (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))
+  (and (= (get clause "variant") "list") (vector? clause-children) (> (count clause-children) 0) (= (get (nth clause-children 0) "variant") "vector")))) (subvec (vec children) params-index))) (rebuild-scope-sequence! value (mapv (fn [index] (if (>= index params-index) (scope-walk-function-clause! (nth children index) table (conj (vec path) index) ctx) (scope-walk* (nth children index) table (conj (vec path) index) ctx))) indices))
   :else (let [params (scope-walk-params! (nth children params-index) table (conj (vec path) params-index) ctx)
    return-index (+ params-index 1)]
   (rebuild-scope-sequence! value (mapv (fn [index] (cond
