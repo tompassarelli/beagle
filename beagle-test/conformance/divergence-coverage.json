@@ -17,9 +17,9 @@
   "manifest": "manifest.json",
   "summary": {
     "dimensions": 2062,
-    "covered": 9,
-    "uncovered": 2053,
-    "rowsWithEvidence": 75
+    "covered": 258,
+    "uncovered": 1804,
+    "rowsWithEvidence": 258
   },
   "rows": [
     {
@@ -32,11 +32,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -52,11 +55,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -72,11 +78,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -92,11 +101,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -112,11 +124,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -132,11 +147,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -152,11 +170,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-star-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -172,11 +193,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-star-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -192,11 +216,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-star-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -212,11 +239,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-star-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -232,11 +262,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-star-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -252,11 +285,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-star-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -272,11 +308,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-slash-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -292,11 +331,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-slash-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -312,11 +354,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-slash-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -332,11 +377,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-slash-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -352,11 +400,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-slash-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -372,11 +423,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-slash-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -392,11 +446,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-plus-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -412,11 +469,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-plus-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -432,11 +492,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-plus-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -452,11 +515,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-plus-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -472,11 +538,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-plus-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -492,11 +561,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-plus-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -512,11 +584,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-lt-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -532,11 +607,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-lt-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -552,11 +630,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-lt-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -572,11 +653,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-lt-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -592,11 +676,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-lt-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -612,11 +699,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-lt-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -632,11 +722,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-lte-minus-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -652,11 +745,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-lte-minus-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -672,11 +768,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-lte-minus-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -692,11 +791,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-lte-minus-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -712,11 +814,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-lte-minus-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -732,11 +837,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-lte-minus-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -752,11 +860,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-eq-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -772,11 +883,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-eq-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -794,9 +908,10 @@
       ],
       "caseIds": [
         "hl-equality-hashing-core",
-        "hl-equality-hashing-hosted-js"
+        "hl-equality-hashing-hosted-js",
+        "div-eq-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -936,11 +1051,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gt-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -956,11 +1074,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gt-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -976,11 +1097,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gt-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -996,11 +1120,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gt-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1016,11 +1143,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gt-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1036,11 +1166,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gt-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1056,11 +1189,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-gte-minus-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1076,11 +1212,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-gte-minus-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1096,11 +1235,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-gte-minus-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1116,11 +1258,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-gte-minus-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1136,11 +1281,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-gte-minus-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1156,11 +1304,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-minus-gte-minus-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1495,9 +1646,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-and-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -1520,9 +1672,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-and-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -1542,11 +1695,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-and-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1565,9 +1721,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-and-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -1590,9 +1747,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-and-identity-minus-equality"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -1612,11 +1770,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-and-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1872,11 +2033,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-array-minus-map-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1892,11 +2056,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-array-minus-map-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -1912,11 +2079,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-array-minus-map-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -2256,7 +2426,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -2278,9 +2448,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-assoc-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -2440,11 +2611,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-await-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -2460,11 +2634,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-await-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -2500,11 +2677,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-await-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -2540,11 +2720,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-bgl-slash-promote-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -2560,11 +2743,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-bgl-slash-promote-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -2582,9 +2768,10 @@
       ],
       "caseIds": [
         "hl-native-core-gc-ownership-core",
-        "hl-native-core-gc-ownership-hosted-js"
+        "hl-native-core-gc-ownership-hosted-js",
+        "div-bgl-slash-promote-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -2604,11 +2791,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-bgl-slash-promote-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -2626,9 +2816,10 @@
       ],
       "caseIds": [
         "hl-native-core-gc-ownership-core",
-        "hl-native-core-gc-ownership-hosted-js"
+        "hl-native-core-gc-ownership-hosted-js",
+        "div-bgl-slash-promote-identity-minus-equality"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -2650,9 +2841,10 @@
       ],
       "caseIds": [
         "hl-native-core-gc-ownership-core",
-        "hl-native-core-gc-ownership-hosted-js"
+        "hl-native-core-gc-ownership-hosted-js",
+        "div-bgl-slash-promote-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -4112,11 +4304,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-boolean-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -4132,11 +4327,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-boolean-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -4155,9 +4353,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-boolean-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -4180,9 +4379,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-boolean-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -4205,9 +4405,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-boolean-identity-minus-equality"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -4227,11 +4428,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-boolean-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -5935,9 +6139,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-cond-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -5960,9 +6165,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-cond-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -5982,11 +6188,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-cond-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -6005,9 +6214,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-cond-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -6027,11 +6237,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-cond-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -6047,11 +6260,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-cond-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -6451,7 +6667,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -6473,9 +6689,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-conj-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -7155,11 +7372,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-dec-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -7175,11 +7395,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-dec-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -7195,11 +7418,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-dec-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -7215,11 +7441,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-dec-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -7235,11 +7464,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-dec-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -7255,11 +7487,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-dec-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -8955,11 +9190,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-disj-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -8977,9 +9215,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-disj-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -9001,9 +9240,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-disj-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -9047,7 +9287,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -9071,7 +9311,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -9115,7 +9355,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -9139,7 +9379,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -9339,11 +9579,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-do-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -9359,11 +9602,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-do-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -9379,11 +9625,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-do-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -9399,11 +9648,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-do-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -9939,11 +10191,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-double-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -9959,11 +10214,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-double-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -9979,11 +10237,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-double-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -9999,11 +10260,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-double-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -10019,11 +10283,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-double-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -10039,11 +10306,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-double-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -11937,9 +12207,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-filter-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -12619,11 +12890,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12639,11 +12913,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12659,11 +12936,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12679,11 +12959,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12699,11 +12982,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12719,11 +13005,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12739,11 +13028,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12759,11 +13051,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12779,11 +13074,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12799,11 +13097,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12819,11 +13120,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -12839,11 +13143,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -13919,11 +14226,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gensym-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -13939,11 +14249,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-gensym-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -14554,11 +14867,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-hash-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -14574,11 +14890,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-hash-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -14594,11 +14913,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-hash-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -14614,11 +14936,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-hash-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -14636,9 +14961,10 @@
       ],
       "caseIds": [
         "hl-equality-hashing-core",
-        "hl-equality-hashing-hosted-js"
+        "hl-equality-hashing-hosted-js",
+        "div-hash-identity-minus-equality"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14660,9 +14986,10 @@
       ],
       "caseIds": [
         "hl-equality-hashing-core",
-        "hl-equality-hashing-hosted-js"
+        "hl-equality-hashing-hosted-js",
+        "div-hash-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14684,9 +15011,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-map-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14708,9 +15036,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-map-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14732,9 +15061,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-map-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14780,7 +15110,7 @@
         "hl-equality-hashing-core",
         "hl-equality-hashing-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14804,9 +15134,10 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js",
         "hl-equality-hashing-core",
-        "hl-equality-hashing-hosted-js"
+        "hl-equality-hashing-hosted-js",
+        "div-hash-minus-map-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14828,9 +15159,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-set-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14852,9 +15184,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-set-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14876,9 +15209,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-set-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14924,7 +15258,7 @@
         "hl-equality-hashing-core",
         "hl-equality-hashing-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14948,9 +15282,10 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js",
         "hl-equality-hashing-core",
-        "hl-equality-hashing-hosted-js"
+        "hl-equality-hashing-hosted-js",
+        "div-hash-minus-set-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -14972,9 +15307,10 @@
       ],
       "caseIds": [
         "hl-equality-hashing-core",
-        "hl-equality-hashing-hosted-js"
+        "hl-equality-hashing-hosted-js",
+        "div-identical-q-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -15117,9 +15453,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-if-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -15142,9 +15479,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-if-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -15164,11 +15502,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-if-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15187,9 +15528,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-if-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -15209,11 +15551,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-if-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15229,11 +15574,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-if-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15609,11 +15957,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-inc-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15629,11 +15980,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-inc-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15649,11 +16003,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-inc-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15669,11 +16026,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-inc-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15689,11 +16049,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-inc-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -15709,11 +16072,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-inc-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -19493,7 +19859,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -19913,11 +20279,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-let-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -19933,11 +20302,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-let-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -19953,11 +20325,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-let-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -19973,11 +20348,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-let-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20153,11 +20531,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-list-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20173,11 +20554,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-list-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20193,11 +20577,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-list-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20513,11 +20900,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-long-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20533,11 +20923,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-long-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20553,11 +20946,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-long-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20573,11 +20969,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-long-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20593,11 +20992,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-long-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20613,11 +21015,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-long-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -20755,9 +21160,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-map-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -22617,11 +23023,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-mod-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22637,11 +23046,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-mod-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22657,11 +23069,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-mod-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22677,11 +23092,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-mod-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22697,11 +23115,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-mod-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22717,11 +23138,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-mod-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22837,11 +23261,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-monotonic-minus-nanoseconds-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22857,11 +23284,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-monotonic-minus-nanoseconds-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -22897,11 +23327,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-monotonic-minus-nanoseconds-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -24927,11 +25360,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-not-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -24947,11 +25383,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-not-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -24970,9 +25409,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-not-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -24995,9 +25435,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-not-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -25020,9 +25461,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-not-identity-minus-equality"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -25042,11 +25484,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-not-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26205,9 +26650,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-or-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -26230,9 +26676,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-or-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -26252,11 +26699,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-or-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26275,9 +26725,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-or-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -26300,9 +26751,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-or-identity-minus-equality"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -26322,11 +26774,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-or-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26562,11 +27017,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-parse-minus-double-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26582,11 +27040,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-parse-minus-double-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26602,11 +27063,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-parse-minus-double-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26622,11 +27086,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-parse-minus-double-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26642,11 +27109,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-parse-minus-double-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -26662,11 +27132,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-parse-minus-double-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28782,11 +29255,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-quot-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28802,11 +29278,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-quot-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28822,11 +29301,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-quot-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28842,11 +29324,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-quot-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28862,11 +29347,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-quot-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28882,11 +29370,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-quot-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28902,11 +29393,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28922,11 +29416,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -28962,11 +29459,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29022,11 +29522,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-minus-int-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29042,11 +29545,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-minus-int-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29082,11 +29588,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-minus-int-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29142,11 +29651,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-minus-nth-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29162,11 +29674,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-minus-nth-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29202,11 +29717,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rand-minus-nth-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29262,11 +29780,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-random-minus-sample-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29282,11 +29803,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-random-minus-sample-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29322,11 +29846,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-random-minus-sample-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29382,11 +29909,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-random-minus-uuid-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29402,11 +29932,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-random-minus-uuid-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -29442,11 +29975,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-random-minus-uuid-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -30504,9 +31040,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -30568,9 +31105,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -30592,9 +31130,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -30616,9 +31155,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -30640,9 +31180,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -31062,11 +31603,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rem-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -31082,11 +31626,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rem-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -31102,11 +31649,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rem-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -31122,11 +31672,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rem-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -31142,11 +31695,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rem-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -31162,11 +31718,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-rem-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -32984,9 +33543,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-seq-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -33008,9 +33568,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-seq-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -33032,9 +33593,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-seq-allocation-minus-representation"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -33058,7 +33620,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -33478,11 +34040,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-set-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -33518,11 +34083,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-set-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -33898,11 +34466,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-shuffle-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -34560,9 +35131,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-sort-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -34586,7 +35158,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -34608,9 +35180,10 @@
       ],
       "caseIds": [
         "hl-collection-ordering-core",
-        "hl-collection-ordering-hosted-js"
+        "hl-collection-ordering-hosted-js",
+        "div-sort-failure-minus-behavior"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -36090,11 +36663,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-symbol-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -36110,11 +36686,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-symbol-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -36155,11 +36734,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-symbol-effects"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -39769,7 +40351,7 @@
         "hl-collection-ordering-core",
         "hl-collection-ordering-hosted-js"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted JavaScript"
@@ -40069,11 +40651,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-vector-evaluation-minus-order"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -40089,11 +40674,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-vector-strictness-minus-laziness"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -40109,11 +40697,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-vector-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -40312,9 +40903,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-when-evaluation-minus-order"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -40337,9 +40929,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-when-strictness-minus-laziness"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -40359,11 +40952,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-when-allocation-minus-representation"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -40382,9 +40978,10 @@
       "caseIds": [
         "hl-truthiness-core",
         "hl-truthiness-hosted-clj",
-        "hl-truthiness-hosted-js"
+        "hl-truthiness-hosted-js",
+        "div-when-effects"
       ],
-      "status": "uncovered",
+      "status": "covered",
       "evidenceProfiles": [
         "Core",
         "Hosted Clojure",
@@ -40404,11 +41001,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-when-identity-minus-equality"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
@@ -40424,11 +41024,14 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "caseIds": [],
-      "status": "uncovered",
-      "evidenceProfiles": [],
+      "caseIds": [
+        "div-when-failure-minus-behavior"
+      ],
+      "status": "covered",
+      "evidenceProfiles": [
+        "Core"
+      ],
       "missingProfiles": [
-        "Core",
         "Hosted Clojure",
         "Hosted JavaScript",
         "Hosted Nix"
