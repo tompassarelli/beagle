@@ -22,28 +22,51 @@
 (define (named-reference? ref)
   (or (symbol? ref) (qualified-ref? ref) (resolved-ref? ref)))
 
-(define (resolved-ref-structural-reference ref)
-  (define name (resolved-ref-name ref))
-  (if (structural-name-qualifier name)
-      (structural-name->qualified-ref name)
-      (structural-name-leaf name)))
+(define (reference-structural-name ref)
+  (cond
+    [(resolved-ref? ref)
+     (define name (resolved-ref-name ref))
+     (if (structural-name-qualifier name)
+         name
+         (structural-name-leaf name))]
+    [(qualified-ref? ref)
+     (make-structural-name
+      (qualified-ref-qualifier ref)
+      (qualified-ref-name ref)
+      (qualified-ref-provider-id ref))]
+    [else #f]))
+
+(define (reference-hash-qualified-ref table structural provider-id)
+  (for/or ([key (in-hash-keys table)]
+           #:when
+           (and (qualified-ref? key)
+                (eq? (qualified-ref-qualifier key)
+                     (structural-name-qualifier structural))
+                (eq? (qualified-ref-name key)
+                     (structural-name-leaf structural))
+                (equal? (qualified-ref-provider-id key) provider-id)))
+    (hash-ref table key #f)))
 
 (define (reference-hash-ref table ref [fallback #f])
+  (define structural (reference-structural-name ref))
   (or (and (resolved-ref? ref)
            (hash-ref table (resolved-ref-binding-id ref) #f))
       (hash-ref table ref #f)
-      (and (resolved-ref? ref)
-           (reference-hash-ref
-            table (resolved-ref-structural-reference ref) #f))
-      (and (qualified-ref? ref)
-           (qualified-ref-provider-id ref)
-           (hash-ref
-            table
-            (qualified-ref
-             (qualified-ref-qualifier ref)
-             (qualified-ref-name ref)
-             #f)
-            #f))
+      (and structural
+           (or (hash-ref table structural #f)
+               (reference-hash-qualified-ref
+                table structural (structural-name-provider-id structural))))
+      (and structural
+           (structural-name? structural)
+           (structural-name-provider-id structural)
+           (or (hash-ref
+                table
+                (make-structural-name
+                 (structural-name-qualifier structural)
+                 (structural-name-leaf structural)
+                 #f)
+                #f)
+               (reference-hash-qualified-ref table structural #f)))
       fallback))
 
 (define (reference-hash-set! table ref value)

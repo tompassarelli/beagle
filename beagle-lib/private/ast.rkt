@@ -401,24 +401,6 @@
         (symbol->string (structural-name-leaf name))))
       (structural-name-leaf name)))
 
-(define (qualified-ref->structural-name ref)
-  (unless (qualified-ref? ref)
-    (raise-argument-error
-     'qualified-ref->structural-name "qualified-ref?" ref))
-  (make-structural-name
-   (qualified-ref-qualifier ref)
-   (qualified-ref-name ref)
-   (qualified-ref-provider-id ref)))
-
-(define (structural-name->qualified-ref name)
-  (unless (structural-name? name)
-    (raise-argument-error
-     'structural-name->qualified-ref "structural-name?" name))
-  (qualified-ref
-   (structural-name-qualifier name)
-   (structural-name-leaf name)
-   (structural-name-provider-id name)))
-
 (define (symbol->structural-name symbol)
   (unless (symbol? symbol)
     (raise-argument-error 'symbol->structural-name "symbol?" symbol))
@@ -1603,7 +1585,6 @@
  (struct-out resolution-ambiguous)
  resolve-scoped-identifier
  make-structural-name structural-name->symbol symbol->structural-name
- qualified-ref->structural-name structural-name->qualified-ref
  make-expansion-origin
  make-syntax-atom make-syntax-ident make-syntax-list make-syntax-vector
  make-syntax-quote make-syntax-unquote
