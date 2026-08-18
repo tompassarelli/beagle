@@ -907,8 +907,9 @@
   {"value" (get bound "value") "table" (get bound "table")}))
   (= variant "list") (let [children (scope-sequence-children pattern)
    head (if (> (count children) 0) (scope-syntax-datum! (nth children 0)) nil)]
-  (if (= head "or") {"value" pattern "table" table} (let [state (reduce (fn [current index] (let [bound (scope-walk-pattern! (nth children index) (get current "table") scope (conj (vec path) index))]
-  {"children" (conj (get current "children") (get bound "value")) "table" (get bound "table")})) {"children" (if (> (count children) 0) [(nth children 0)] []) "table" table} (range 1 (count children)))]
+  (if (= head "or") {"value" pattern "table" table} (let [indices (vec (range 1 (count children)))
+   state (reduce (fn [current index] (let [bound (scope-walk-pattern! (nth children index) (get current "table") scope (conj (vec path) index))]
+  {"children" (conj (get current "children") (get bound "value")) "table" (get bound "table")})) {"children" (if (> (count children) 0) [(nth children 0)] []) "table" table} indices)]
   {"value" (rebuild-scope-sequence! pattern (get state "children")) "table" (get state "table")})))
   :else {"value" pattern "table" table})))
 
