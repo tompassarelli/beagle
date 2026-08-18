@@ -2104,8 +2104,8 @@
     nil))
 
 (defn unqualified-member-name [(name String)] String
-  (let [dot-index (str/last-index-of name ".")
-        slash-index (str/last-index-of name "/")
+  (let [(dot-index (U Int Nil)) (str/last-index-of name ".")
+        (slash-index (U Int Nil)) (str/last-index-of name "/")
         separator (cond
                     (nil? dot-index) slash-index
                     (nil? slash-index) dot-index
