@@ -1958,7 +1958,8 @@
 ;; --- js/quote emission (port of beagle-lib/private/emit-js-quote.rkt) ---------
 
 (defn indent-str [(depth Int)] String
-  (str/join "" (mapv (fn [(x Any)] String " ") (vec (range (* depth 2))))))
+  (let [(spaces (Vec Int)) (vec (range (* depth 2)))]
+    (str/join "" (mapv (fn [(x Any)] String " ") spaces))))
 
 (defn escape-js-template-string [(s String)] String
   (str/replace (str/replace s "`" "\\`") "${" "\\${"))

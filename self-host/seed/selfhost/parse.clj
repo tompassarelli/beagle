@@ -741,7 +741,8 @@
 
 (defn- scope-walk-generic! [value table path ctx]
   (let [children (scope-sequence-children value)]
-  (rebuild-scope-sequence! value (mapv (fn [index] (scope-walk* (nth children index) table (conj (vec path) index) ctx)) (vec (range (count children)))))))
+  (let [indices (vec (range (count children)))]
+  (rebuild-scope-sequence! value (mapv (fn [index] (scope-walk* (nth children index) table (conj (vec path) index) ctx)) indices)))))
 
 (defn- scope-walk-sequential-bindings! [vector-value table path ctx]
   (let [items (scope-sequence-children vector-value)]

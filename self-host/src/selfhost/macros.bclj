@@ -747,11 +747,12 @@
         (str "fn expected " (str (count params)) " argument(s), got "
              (str (count args)))))
     (let [env
-          (reduce
-            (fn [(e Any) (i Int)] Any
-              (assoc e (nth params i) (nth args i)))
-            (get closure "env")
-            (vec (range (count params))))]
+          (let [(indices (Vec Int)) (vec (range (count params)))]
+            (reduce
+              (fn [(e Any) (i Int)] Any
+                (assoc e (nth params i) (nth args i)))
+              (get closure "env")
+              indices))]
       (macro-eval-body! (get closure "body") env))))
 
 (defn macro-map-values! [(fn-value Any) (colls Any)] Any

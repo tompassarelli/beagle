@@ -1284,12 +1284,13 @@
 
 (defn- scope-walk-generic! [(value Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children value)]
-    (rebuild-scope-sequence! value
-      (mapv
-        (fn [(index Int)] Any
-          (scope-walk*
-            (nth children index) table (conj (vec path) index) ctx))
-        (vec (range (count children)))))))
+    (let [(indices (Vec Int)) (vec (range (count children)))]
+      (rebuild-scope-sequence! value
+        (mapv
+          (fn [(index Int)] Any
+            (scope-walk*
+              (nth children index) table (conj (vec path) index) ctx))
+          indices)))))
 
 (defn- scope-walk-sequential-bindings!
   [(vector-value Any) (table Any) (path Any) (ctx Any)] Any

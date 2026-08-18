@@ -398,7 +398,8 @@
   (let [params (get closure "params")]
   (if (not= (count params) (count args)) (do
   (macro-eval-fail! (str "fn expected " (str (count params)) " argument(s), got " (str (count args))))))
-  (let [env (reduce (fn [e i] (assoc e (nth params i) (nth args i))) (get closure "env") (vec (range (count params))))]
+  (let [env (let [indices (vec (range (count params)))]
+  (reduce (fn [e i] (assoc e (nth params i) (nth args i))) (get closure "env") indices))]
   (macro-eval-body! (get closure "body") env))))
 
 (defn macro-map-values! [fn-value colls]
