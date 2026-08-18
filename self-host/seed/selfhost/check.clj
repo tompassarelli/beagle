@@ -1006,7 +1006,9 @@
    union-members (if (not (nil? union-name)) (get-in (deref STATE) ["union-members" union-name]) nil)]
   (if (not (nil? union-members)) (do
   (let [matched-types (reduce (fn [acc c] (let [pat (get c "pattern")]
-  (if (= (get pat "type") "record") (conj acc (get pat "name")) acc))) [] clauses)
+  (if (= (get pat "type") "record") (let [written (get pat "name")
+   canonical (canonical-union-member-name written target-type)]
+  (conj acc (if (nil? canonical) written canonical))) acc))) [] clauses)
    missing (filterv (fn [m] (nil? (some (fn [x] (= x m)) matched-types))) union-members)]
   (if (> (count missing) 0) (do
   (emit-diag! (str "beagle: match on " union-name " is not exhaustive; missing cases: " (str/join ", " missing))))))))
@@ -3063,6 +3065,11 @@
   (swap! STATE assoc-in ["union-members" "Shape"] ["Circle" "Square" "Triangle"])
   (check-match-exhaustiveness! (make-prim "Shape") [{"pattern" {"type" "record" "name" "Circle" "bindings" []} "body" [(make-lit "string" "circle")]} {"pattern" {"type" "record" "name" "Square" "bindings" []} "body" [(make-lit "string" "square")]}])
   (> (count (get (deref STATE) "diagnostics")) 0)))
+  (expect! "match: imported qualified union accepts written bare members" (do
+  (swap! STATE assoc "union-members" {"core/Shape" ["core/Circle" "core/Rect"]})
+  (swap! STATE assoc "diagnostics" [])
+  (check-match-exhaustiveness! (make-prim "core/Shape") [{"pattern" {"type" "record" "name" "Circle" "bindings" []} "body" []} {"pattern" {"type" "record" "name" "Rect" "bindings" []} "body" []}])
+  (= 0 (count (get (deref STATE) "diagnostics")))))
   (expect! "narrowing: instance? resolves and subtracts nominal union members" (do
   (swap! STATE assoc "union-members" {"Shape" ["Circle" "Rect"]})
   (swap! STATE assoc "unstable-bindings" {})

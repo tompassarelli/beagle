@@ -2350,7 +2350,13 @@
       (let [matched-types (reduce (fn [(acc Any) (c Any)] Any
                                     (let [pat (get c "pattern")]
                                       (if (= (get pat "type") "record")
-                                        (conj acc (get pat "name"))
+                                        (let [written (get pat "name")
+                                              canonical
+                                                (canonical-union-member-name
+                                                  written target-type)]
+                                          (conj acc
+                                            (if (nil? canonical)
+                                              written canonical)))
                                         acc)))
                                   [] clauses)
             missing (filterv (fn [(m Any)] Bool
@@ -6692,6 +6698,18 @@
            {"pattern" {"type" "record" "name" "Square" "bindings" []}
             "body" [(make-lit "string" "square")]}])
         (> (count (get (deref STATE) "diagnostics")) 0)))
+
+  (expect! "match: imported qualified union accepts written bare members"
+    (do (swap! STATE assoc "union-members"
+          {"core/Shape" ["core/Circle" "core/Rect"]})
+        (swap! STATE assoc "diagnostics" [])
+        (check-match-exhaustiveness!
+          (make-prim "core/Shape")
+          [{"pattern" {"type" "record" "name" "Circle" "bindings" []}
+            "body" []}
+           {"pattern" {"type" "record" "name" "Rect" "bindings" []}
+            "body" []}])
+        (= 0 (count (get (deref STATE) "diagnostics")))))
 
   (expect! "narrowing: instance? resolves and subtracts nominal union members"
     (do (swap! STATE assoc "union-members" {"Shape" ["Circle" "Rect"]})
