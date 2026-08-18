@@ -476,12 +476,27 @@ cache_key_material() {
         LC_ALL=C sort -z |
         xargs -0 sha256sum |
         awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+    if [[ -n "$native_compiler_digest" ]]; then
+        printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
+    fi
 }
 
 cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/build-core}"
+compiled_override="${BEAGLE_CORE_COMPILED_OVERRIDE:-}"
+native_compiler_bin=""
+native_compiler_digest=""
+if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]]; then
+    [[ -z "$compiled_override" ]] ||
+        die "BEAGLE_NATIVE_COMPILER_BIN cannot be combined with BEAGLE_CORE_COMPILED_OVERRIDE"
+    [[ -n "$BEAGLE_NATIVE_COMPILER_BIN" ]] ||
+        die "BEAGLE_NATIVE_COMPILER_BIN must name an executable native compiler"
+    [[ -x "$BEAGLE_NATIVE_COMPILER_BIN" ]] ||
+        die "native compiler is unavailable or not executable: $BEAGLE_NATIVE_COMPILER_BIN"
+    native_compiler_bin="$(realpath "$BEAGLE_NATIVE_COMPILER_BIN")"
+    native_compiler_digest="$(sha256sum "$native_compiler_bin" | awk '{print $1}')"
+fi
 compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
 compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
-compiled_override="${BEAGLE_CORE_COMPILED_OVERRIDE:-}"
 if [[ -n "$compiled_override" ]]; then
     [[ -d "$compiled_override" ]] ||
         die "native Core compiler projection is unavailable: $compiled_override"
@@ -509,6 +524,9 @@ write_core_result_early_manifest() {
     {
         printf 'beagle-core-result-early-input/v1\n'
         printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
+        if [[ -n "$native_compiler_digest" ]]; then
+            printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
+        fi
         printf 'compiler-commit %s\n' "$compiler_commit"
         printf 'abi %q\nsimd %s\n' "$abi" "$simd_required"
         for tool_path in "$PROJECTOR" "$AST_VERIFIER" \
@@ -895,6 +913,7 @@ fi
 # bytes in addition to the early input closure.
 cache_entry="$cache_root/$compiler_source_digest"
 compiled="${compiled_override:-$cache_entry/compiled}"
+: >"$work/build.log"
 
 if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
     compiled="$work/compiled"
@@ -903,14 +922,55 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
     for relative in "${core_modules[@]}"; do
         build_all_args+=("$BEAGLE_DIR/$relative")
     done
-    run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
-        "$BIN/beagle-build-all" \
-        --module-root native-core/src="$BEAGLE_DIR/native-core/src" \
-        "${build_all_args[@]}" \
-        --out "$compiled" >"$work/build.log" 2>&1 || {
-            sed -n '1,200p' "$work/build.log" >&2
-            exit 1
-        }
+    sorted_build_args=()
+    mapfile -t sorted_build_args < <(
+        printf '%s\n' "${build_all_args[@]}" | LC_ALL=C sort
+    )
+    # The Racket bundle remains the unset-selector shadow. Native selection is
+    # explicit and content-addresses the executable before it can populate the
+    # compiler projection cache.
+    if [[ -n "$native_compiler_bin" ]]; then
+        run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
+            bash -c '
+                set -euo pipefail
+                out="$1"
+                native="$2"
+                module_root="$3"
+                build_log="$4"
+                shift 4
+                sources=("$@")
+                bundle_args=()
+                for source in "${sources[@]}"; do
+                    bundle_args+=(--source "$source")
+                done
+                for source in "${sources[@]}"; do
+                    module="$(basename "$source" .bclj)"
+                    destination="$out/native/$module.clj"
+                    mkdir -p "$(dirname "$destination")"
+                    "$native" emit --target clj \
+                        --module-root "native-core/src=$module_root" \
+                        "${bundle_args[@]}" "$source" \
+                        >"$destination" 2>>"$build_log"
+                    printf '  %s -> %s\n' "$source" "$destination" >>"$build_log"
+                done
+                printf "\n%d built, 0 error(s)\n" "${#sources[@]}" >>"$build_log"
+            ' _ "$compiled" "$native_compiler_bin" \
+            "$BEAGLE_DIR/native-core/src" "$work/build.log" \
+            "${sorted_build_args[@]}" || {
+                sed -n '1,200p' "$work/build.log" >&2
+                exit 1
+            }
+        echo "beagle build: core-compiler-cache MISS $compiler_source_digest" >&2
+    else
+        run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
+            "$BIN/beagle-build-all" \
+            --module-root native-core/src="$BEAGLE_DIR/native-core/src" \
+            "${build_all_args[@]}" \
+            --out "$compiled" >"$work/build.log" 2>&1 || {
+                sed -n '1,200p' "$work/build.log" >&2
+                exit 1
+            }
+    fi
 
     # Generated Clojure needs provider records referred and imported until the
     # emitter qualifies cross-module union patterns itself.
@@ -943,6 +1003,9 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
     fi
 else
     touch -c "$cache_entry" 2>/dev/null || true
+    if [[ -n "$native_compiler_bin" && -z "$compiled_override" ]]; then
+        echo "beagle build: core-compiler-cache HIT $compiler_source_digest" >&2
+    fi
 fi
 
 compiled_digest="$(
@@ -951,6 +1014,20 @@ compiled_digest="$(
         sha256sum | awk '{print $1}'
 )"
 
+if [[ "${BEAGLE_CORE_PROJECTION_ONLY:-0}" == 1 ]]; then
+    projection_out="${BEAGLE_CORE_PROJECTION_ONLY_OUT:-}"
+    [[ -n "$projection_out" ]] ||
+        die "BEAGLE_CORE_PROJECTION_ONLY_OUT is required for projection-only builds"
+    [[ "$projection_out" != "/" ]] ||
+        die "BEAGLE_CORE_PROJECTION_ONLY_OUT may not be the filesystem root"
+    mkdir -p "$projection_out"
+    cp -a "$compiled/." "$projection_out/"
+    if [[ -n "${BEAGLE_CORE_PROJECTION_ONLY_LOG:-}" ]]; then
+        cp -- "$work/build.log" "$BEAGLE_CORE_PROJECTION_ONLY_LOG"
+    fi
+    exit 0
+fi
+
 write_core_result_input_manifest() {
     local destination="$1" index tool_path bb_path racket_path
     bb_path="$(realpath "$(command -v bb)")"
@@ -958,6 +1035,9 @@ write_core_result_input_manifest() {
     {
         printf 'beagle-core-result-input/v1\n'
         printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
+        if [[ -n "$native_compiler_digest" ]]; then
+            printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
+        fi
         printf 'compiler-projection-sha256 %s\n' "$compiled_digest"
         printf 'compiler-commit %s\n' "$compiler_commit"
         printf 'source-facts-sha256 %s\n' \
