@@ -4939,8 +4939,8 @@
         (let [name-form (nth d 1) name (nth name-form 0) arity (- (count name-form) 1)]
           (swap! USER-PARAMETRIC-ARITIES assoc name arity)
           (swap! USER-PARAMETRIC-ARITIES assoc (str prefix "/" name) arity)))))
-  (let [contract-clj? (and (not (= (module-declared-contract! datums) false))
-                            (= (module-target-from-datums datums) "clj"))
+  (let [provider-ns (module-namespace datums)
+        contract-clj? (= (module-target-from-datums datums) "clj")
         local-type-names (module-local-type-names datums)
         refer-set (if (some? refer-syms)
                     (reduce (fn [(m Any) (s Any)] Any (assoc m s true))
@@ -4951,14 +4951,21 @@
         out (atom [])
         seen (atom {})
         emit! (fn [(nm Any) (t Any)] Nil
-                (let [q (if (= prefix "") nm (str prefix "/" nm))
+                (let [q (if (= prefix "")
+                          nm
+                          (str prefix "/" nm))
+                      provider-q (str provider-ns "/" nm)
                       qualified-type
                         (if (= prefix "")
                           t
-                          (qualify-provider-type t prefix local-type-names))]
-                  (when (not (= true (get (deref seen) q)))
-                    (swap! seen assoc q true)
-                    (swap! out conj {"name" q "type" qualified-type}))
+                          (qualify-provider-type t provider-ns local-type-names))
+                      names (if (= prefix "")
+                              [q]
+                              (if (= q provider-q) [q] [q provider-q]))]
+                  (doseq [name names]
+                    (when (not (= true (get (deref seen) name)))
+                      (swap! seen assoc name true)
+                      (swap! out conj {"name" name "type" qualified-type})))
                   (when (and (referred? nm)
                              (not (= true (get (deref seen) nm))))
                     (swap! seen assoc nm true)
@@ -5011,7 +5018,10 @@
                           (mapv member-type-name (subvec d 2)))
                       qualified-members
                         (mapv (fn [(member String)] Any
-                                (make-prim (str prefix "/" member)))
+                                (make-prim
+                                  (if (= prefix "")
+                                    member
+                                    (str provider-ns "/" member))))
                           member-names)]
                   (emit! (nth d 1) (make-union qualified-members)))
                 :else
@@ -5088,10 +5098,19 @@
         (mapv
           (fn [(contract Any)] Any
             (let [name (get contract "name")
-                  qualified (assoc contract "name" (str prefix "/" name))]
+                  namespace (get contract "namespace")
+                  qualified (assoc contract "name" (str prefix "/" name))
+                  provider-qualified
+                    (if (string? namespace)
+                      (assoc contract "name" (str namespace "/" name))
+                      qualified)
+                  names (if (= (get qualified "name")
+                               (get provider-qualified "name"))
+                          [qualified]
+                          [qualified provider-qualified])]
               (if (= true (get refer-set name))
-                [qualified (assoc contract "name" name)]
-                [qualified])))
+                (conj (vec names) (assoc contract "name" name))
+                names)))
           contracts)))))
 
 (defn qualify-imported-callable-synchronization
@@ -5704,7 +5723,7 @@
                          (= (get entry "name") "core/Op"))
                 surface))
           members (get (get union-entry "type") "members")]
-      (= ["core/AddOp" "core/SubOp"]
+      (= ["beagle.user/AddOp" "beagle.user/SubOp"]
          (mapv (fn [(member Any)] String (get member "name")) members))))
   (expect! "import: function signatures qualify provider-local nominal types"
     (let [surface
@@ -5721,8 +5740,8 @@
                          (= (get entry "name") "core/consume"))
                 surface))
           function-type (get function-entry "type")]
-      (and (= "core/Op" (get (first (get function-type "params")) "name"))
-           (= "core/NativeId" (get (get function-type "ret") "name")))))
+      (and (= "beagle.user/Op" (get (first (get function-type "params")) "name"))
+           (= "beagle.user/NativeId" (get (get function-type "ret") "name")))))
   (expect! "plain def: dynamic false, doc false"
     (let [node (parse-expr* ["def" "x" 1])]
       (and (= (get node "dynamic") false) (= (get node "doc") false))))

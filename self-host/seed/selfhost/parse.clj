@@ -2548,17 +2548,21 @@
    arity (- (count name-form) 1)]
   (swap! USER-PARAMETRIC-ARITIES assoc name arity)
   (swap! USER-PARAMETRIC-ARITIES assoc (str prefix "/" name) arity))))))
-  (let [contract-clj? (and (not (= (module-declared-contract! datums) false)) (= (module-target-from-datums datums) "clj"))
+  (let [provider-ns (module-namespace datums)
+   contract-clj? (= (module-target-from-datums datums) "clj")
    local-type-names (module-local-type-names datums)
    refer-set (if (some? refer-syms) (reduce (fn [m s] (assoc m s true)) {} refer-syms) nil)
    referred? (fn [nm] (and (some? refer-set) (= true (get refer-set nm))))
    out (atom [])
    seen (atom {})
    emit! (fn [nm t] (let [q (if (= prefix "") nm (str prefix "/" nm))
-   qualified-type (if (= prefix "") t (qualify-provider-type t prefix local-type-names))]
-  (if (not (= true (get (deref seen) q))) (do
-  (swap! seen assoc q true)
-  (swap! out conj {"name" q "type" qualified-type})))
+   provider-q (str provider-ns "/" nm)
+   qualified-type (if (= prefix "") t (qualify-provider-type t provider-ns local-type-names))
+   names (if (= prefix "") [q] (if (= q provider-q) [q] [q provider-q]))]
+  (doseq [name names]
+  (if (not (= true (get (deref seen) name))) (do
+  (swap! seen assoc name true)
+  (swap! out conj {"name" name "type" qualified-type}))))
   (if (and (referred? nm) (not (= true (get (deref seen) nm)))) (do
   (swap! seen assoc nm true)
   (swap! out conj {"name" nm "type" qualified-type}))))
@@ -2593,7 +2597,7 @@
   (if (and (> (count body) 0) (string? (nth body 0))) (do
   (emit! (nth body 0) (make-prim (nth body 0))))))
   (string? (nth d 1)) (let [member-names (filterv string? (mapv member-type-name (subvec d 2)))
-   qualified-members (mapv (fn [^String member] (make-prim (str prefix "/" member))) member-names)]
+   qualified-members (mapv (fn [^String member] (make-prim (if (= prefix "") member (str provider-ns "/" member)))) member-names)]
   (emit! (nth d 1) (make-union qualified-members)))
   :else nil)
   (or (= head "def") (= head "defonce")) (cond
@@ -2631,8 +2635,11 @@
 (defn qualify-imported-record-contracts [contracts ^String prefix refer-syms]
   (let [refer-set (if (some? refer-syms) (reduce (fn [out ^String name] (assoc out name true)) {} refer-syms) {})]
   (vec (apply concat (mapv (fn [contract] (let [name (get contract "name")
-   qualified (assoc contract "name" (str prefix "/" name))]
-  (if (= true (get refer-set name)) [qualified (assoc contract "name" name)] [qualified]))) contracts)))))
+   namespace (get contract "namespace")
+   qualified (assoc contract "name" (str prefix "/" name))
+   provider-qualified (if (string? namespace) (assoc contract "name" (str namespace "/" name)) qualified)
+   names (if (= (get qualified "name") (get provider-qualified "name")) [qualified] [qualified provider-qualified])]
+  (if (= true (get refer-set name)) (conj (vec names) (assoc contract "name" name)) names))) contracts)))))
 
 (defn qualify-imported-callable-synchronization [entries ^String prefix refer-syms]
   (let [refer-set (if (some? refer-syms) (reduce (fn [out ^String name] (assoc out name true)) {} refer-syms) {})]
@@ -2888,11 +2895,11 @@
   (expect! "import: fielded nominal union retains qualified member types" (let [surface (import-module-surface! [["defunion" "Op" ["AddOp" [BRACKET-TAG ["left" "Int"]]] ["SubOp" [BRACKET-TAG ["left" "Int"]]]]] "core" nil)
    union-entry (first (filterv (fn [entry] (= (get entry "name") "core/Op")) surface))
    members (get (get union-entry "type") "members")]
-  (= ["core/AddOp" "core/SubOp"] (mapv (fn [member] (get member "name")) members))))
+  (= ["beagle.user/AddOp" "beagle.user/SubOp"] (mapv (fn [member] (get member "name")) members))))
   (expect! "import: function signatures qualify provider-local nominal types" (let [surface (import-module-surface! [["defrecord" "NativeId" [BRACKET-TAG ["value" "String"]]] ["defunion" "Op" ["AddOp" [BRACKET-TAG ["left" "NativeId"]]]] ["defn" "consume" [BRACKET-TAG ["op" "Op"]] "NativeId" "missing"]] "core" nil)
    function-entry (first (filterv (fn [entry] (= (get entry "name") "core/consume")) surface))
    function-type (get function-entry "type")]
-  (and (= "core/Op" (get (first (get function-type "params")) "name")) (= "core/NativeId" (get (get function-type "ret") "name")))))
+  (and (= "beagle.user/Op" (get (first (get function-type "params")) "name")) (= "beagle.user/NativeId" (get (get function-type "ret") "name")))))
   (expect! "plain def: dynamic false, doc false" (let [node (parse-expr* ["def" "x" 1])]
   (and (= (get node "dynamic") false) (= (get node "doc") false))))
   (expect! "def docstring recorded" (= (get (parse-expr* ["def" "x" ["#%string" "d"] 1]) "doc") "d"))
