@@ -628,7 +628,7 @@
    "wasm-materializer.rkt#tool-resolver-timeout-re-169242" 14
    "wasm-materializer.rkt#unsupported-callable-ent-d4bc24" 34
    "wasm-materializer.rkt#runtime-io-surface-drive-7c1cab" 4
-   "wasm-materializer.rkt#supported-toolchain-buil-cfd33d" 4
+   "wasm-materializer.rkt#supported-toolchain-buil-cfd33d" 120
    "wasm-materializer.rkt#residual" 4
    "native-simd.rkt" 112
    "native-c17-parallel.rkt" 88
@@ -644,8 +644,12 @@
 (define (worker-partitions units n)
   (define lanes (make-vector n '()))
   (define loads (make-vector n 0))
+  ;; The in-process queue keeps the ordinary ceil(K/4) file cap. Process
+  ;; shards need one additional lane because their owner is the complete
+  ;; sequential lane: with the resolved Wasm tools, four balanced lanes still
+  ;; exceed the 420-second owner even though every individual phase is sound.
   (define phase-width
-    (min n (max 1 (quotient (+ n 3) 4))))
+    (min n (max 1 (add1 (quotient (+ n 3) 4)))))
   (define phase-units
     (filter (lambda (u) (hash-has-key? sharded-files (unit-file u))) units))
   (define whole-heavy-units
@@ -1313,8 +1317,9 @@
     (check-equal? rest '(0 1) "skipped phase units retain their launch order"))
 
   ;; Local process shards partition the whole launch exactly once. A sharded
-  ;; file is dealt only across its machine-wide cap, so K=16 cannot recreate
-  ;; the measured sixteen-phase fixture contention.
+  ;; file is dealt across five process lanes at K=16, so it cannot recreate the
+  ;; measured sixteen-phase fixture contention and no sequential lane owns the
+  ;; complete resolved-toolchain tail.
   (let* ([wasm-units
           (for/list ([i (in-range 20)])
             (unit (format "wasm-materializer.rkt#~a" i)
@@ -1335,8 +1340,8 @@
        (length (filter (lambda (un)
                          (string=? (unit-file un) "wasm-materializer.rkt"))
                        shard)))
-     '(5 5 5 5 0 0 0 0 0 0 0 0 0 0 0 0)
-     "K=16 deals the phase-sharded file across exactly four workers"))
+     '(4 4 4 4 4 0 0 0 0 0 0 0 0 0 0 0)
+     "K=16 deals the phase-sharded file across exactly five workers"))
 
   (let* ([wasm-units
           (for/list ([i (in-range 20)])
@@ -1352,13 +1357,13 @@
                   (sort heavy-units string<? #:key unit-label)
                   "the cold-build heavy pool remains an exact partition")
     (check-equal?
-     (for/list ([i (in-range 4 7)])
+     (for/list ([i (in-range 5 8)])
        (map unit-label (vector-ref partitions i)))
      '(("native-simd.rkt")
        ("native-c17-parallel.rkt")
        ("check-all-nix.rkt"))
      "independent build-heavy whole modules own distinct worker lanes")
-    (for ([i (in-range 7 16)])
+    (for ([i (in-range 8 16)])
       (check-false (ormap heavy-unit? (vector-ref partitions i))
                    (format "worker ~a receives no compiler-heavy unit" i))))
 
