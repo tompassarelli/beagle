@@ -161,6 +161,37 @@
                        "reason" "TODO-EPOCH-UNCLASSIFIED"
                        "detail" (str "unanticipated verdict shape: " verdict "/" class))})))
 
+(defn with-validity-binding
+  "Attach exactly one validity binding to a site result.
+
+   A successful epoch assignment is semantic: its currentness is the named
+   epoch that the fold proved. A refusal is structural: it records the exact
+   observed site shape without pretending that semantic currentness was proved.
+   Store/epoch.clj consumes this closed shape during cold genesis."
+  [{:keys [assignment refusal] :as result}]
+  (cond
+    assignment
+    {:assignment
+     (assoc assignment
+            "validityBinding"
+            {"kind" "SEMANTIC"
+             "currentness" {"kind" "EPOCH"
+                             "name" (get assignment "epoch")}
+             "basis" (get assignment "basis")})}
+
+    refusal
+    {:refusal
+     (assoc refusal
+            "validityBinding"
+            {"kind" "STRUCTURAL"
+             "shape" {"verdict" (get refusal "verdict" "ESCAPES")
+                      "route" (get refusal "route" "unknown")
+                      "reason" (get refusal "reason")}})}
+
+    :else
+    (throw (ex-info "epoch site result must contain exactly one outcome"
+                    {:result result}))))
+
 (defn build-tree
   "Epoch tree: module -> stage epochs -> loop/callback children, with
    per-epoch allocation counts and per-stage caller-owned production."
@@ -227,7 +258,7 @@
       sites      (get report "sites")
       roots      (get-in report ["boundaries" "roots"])
       attributed (get-in report ["boundaries" "callerAttributed"])
-      results    (mapv #(assign roots attributed %) sites)
+      results    (mapv #(with-validity-binding (assign roots attributed %)) sites)
       assignments (into [] (keep :assignment) results)
       refusals    (into [] (keep :refusal) results)
       total      (count sites)
