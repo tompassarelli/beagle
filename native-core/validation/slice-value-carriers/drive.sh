@@ -18,26 +18,19 @@ done
 
 "$repo/bin/beagle" check --agent "$here/fixture.bgl"
 
-"$repo/bin/beagle-ast" "$here/fixture.bgl" >"$scratch/fixture.ast.json"
-bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input \
-  "$scratch/fixture.ast.json=native-core/validation/slice-value-carriers/fixture.bgl" \
-  --output "$scratch/fixture.facts" --include-defs
-
-mkdir -p "$scratch/artifacts"
-source "$repo/bin/_beagle-racket"
 base_compiled="${NATIVE_SLICE_BASE_COMPILED:-}"
 if [[ -n "$base_compiled" ]]; then
   [[ -f "$base_compiled/native/core.clj" ]] \
     || die "base compiler projection omitted native/core.clj: $base_compiled"
   cp -a "$base_compiled" "$scratch/compiled"
+  source "$repo/bin/_beagle-racket"
 
   declare -a compiler_pids=()
-  declare -a compiler_names=(lower body_c17 slice_value_carriers_slice)
+  declare -a compiler_names=(lower body_c17 unit_compile)
   declare -a compiler_sources=(
     "$repo/native-core/src/native/lower.bclj"
     "$repo/native-core/src/native/body_c17.bclj"
-    "$here/carrier_slice.bclj"
+    "$repo/native-core/src/native/unit_compile.bclj"
   )
   for index in "${!compiler_sources[@]}"; do
     name="${compiler_names[$index]}"
@@ -61,51 +54,32 @@ if [[ -n "$base_compiled" ]]; then
   for name in "${compiler_names[@]}"; do
     cp "$scratch/$name/native/$name.clj" "$scratch/compiled/native/$name.clj"
   done
+  records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
+    "$scratch/compiled/native/core.clj" | tr '\n' ' ')"
+  for name in lower body_c17; do
+    generated="$scratch/compiled/native/$name.clj"
+    sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
+      "$generated"
+    awk -v import="(import '[native.core $records])" \
+      '!seen && /^$/ { print import; seen = 1 } { print }' \
+      "$generated" >"$generated.tmp"
+    mv "$generated.tmp" "$generated"
+  done
+
+  BEAGLE_CORE_COMPILED_OVERRIDE="$scratch/compiled" \
+    "$repo/bin/beagle" build --materializer c17 \
+      --out "$scratch/artifacts" "$here/fixture.bgl"
 else
-  "$RACKET" "$repo/native-core/bin/run-bounded.rkt" 180 5 -- \
-    "$repo/bin/beagle-build-all" \
-    "$repo/native-core/src/native/core.bclj" \
-    "$repo/native-core/src/native/stages.bclj" \
-    "$repo/native-core/src/native/lower.bclj" \
-    "$repo/native-core/src/native/obligations.bclj" \
-    "$repo/native-core/src/native/simd.bclj" \
-    "$repo/native-core/src/native/c11.bclj" \
-    "$repo/native-core/src/native/slice.bclj" \
-    "$repo/native-core/src/native/fold_c17.bclj" \
-    "$repo/native-core/src/native/body_c17.bclj" \
-    "$here/carrier_slice.bclj" \
-    --out "$scratch/compiled" >"$scratch/compiler.log" 2>&1 || {
-      sed -n '1,240p' "$scratch/compiler.log" >&2
-      exit 1
-    }
+  "$repo/bin/beagle" build --materializer c17 \
+    --out "$scratch/artifacts" "$here/fixture.bgl"
 fi
-
-records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
-  "$scratch/compiled/native/core.clj" | tr '\n' ' ')"
-for module in \
-  stages lower obligations c11 slice fold_c17 body_c17 \
-  slice_value_carriers_slice; do
-  generated="$scratch/compiled/native/$module.clj"
-  [[ -f "$generated" ]] || continue
-  sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
-    "$generated"
-  awk -v import="(import '[native.core $records])" \
-    '!seen && /^$/ { print import; seen = 1 } { print }' \
-    "$generated" >"$generated.tmp"
-  mv "$generated.tmp" "$generated"
-done
-
-bb -cp "$scratch/compiled" -e "
-(require 'native.slice-value-carriers-slice)
-(spit \"$scratch/artifacts/report.txt\"
-  (native.slice-value-carriers-slice/emit-fixture!
-    \"$scratch/fixture.facts\" \"$scratch/artifacts\"))"
 
 report="$scratch/artifacts/report.txt"
 for expected in \
   'stage source-to-typed ACCEPTED' \
   'stage typed-to-native COMPLETE' \
-  'materialize OK module_0.h module_0.c'; do
+  'materialize-c17 OK module_0.h module_0.c' \
+  'result PASS'; do
   rg -Fx "$expected" "$report" >/dev/null \
     || die "report is missing: $expected"
 done
@@ -118,7 +92,7 @@ fi
 for function in \
   empty-vector-any vector-any empty-map-any map-any empty-set-any set-any \
   parsed-float-any; do
-  rg -Fx "lowered ${function}" "$report" \
+  rg -q "^lowered fn_[0-9]+ ${function} " "$report" \
     || die "lowered function is missing: $function"
 done
 
