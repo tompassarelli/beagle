@@ -2567,7 +2567,7 @@
 ;; --- module header + program --------------------------------------------------
 
 (defn last-seg [(s String)] String
-  (let [idx (str/last-index-of s ".")]
+  (let [(idx (U Int Nil)) (str/last-index-of s ".")]
     (if (nil? idx)
       s
       (let [(offset Int) idx]
@@ -2723,8 +2723,8 @@
   nil)
 
 (defn appears-before? [(text String) (left String) (right String)] Bool
-  (let [left-index (str/index-of text left)
-        right-index (str/index-of text right)]
+  (let [(left-index (U Int Nil)) (str/index-of text left)
+        (right-index (U Int Nil)) (str/index-of text right)]
     (and (not (nil? left-index)) (not (nil? right-index)) (< left-index right-index))))
 
 (defn appears-once? [(text String) (needle String)] Bool

@@ -466,7 +466,7 @@
 ;; --- unqualify ---------------------------------------------------------------
 
 (defn unqualify-name [(name String)] String
-  (let [idx (str/index-of name "/")]
+  (let [(idx (U Int Nil)) (str/index-of name "/")]
     (if (some? idx)
       (let [(offset Int) idx]
         (subs name (+ offset 1)))
@@ -4204,7 +4204,7 @@
   ;; root before the first dot; nil for keyword (`:k`), no dot, or empty root.
   (if (str/starts-with? s ":")
     nil
-    (let [i (str/index-of s ".")]
+    (let [(i (U Int Nil)) (str/index-of s ".")]
       (if (or (nil? i) (= i 0)) nil (subs s 0 i)))))
 
 (defn nix-qualified? [(ref Any)] Bool

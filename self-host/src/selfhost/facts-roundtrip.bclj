@@ -1024,7 +1024,7 @@
       :else (head-keep head after))))
 
 (defn- current-col [(text String) (initial Int)] Int
-  (let [idx (str/last-index-of text "\n")]
+  (let [(idx (U Int Nil)) (str/last-index-of text "\n")]
     (if (nil? idx)
       (+ initial (count text))
       (let [(line-break Int) idx]

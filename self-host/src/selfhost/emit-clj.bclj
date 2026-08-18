@@ -596,7 +596,7 @@
 ;; --- ns emission (emit-clj.rkt emit-ns) -----------------------------------------
 
 (defn last-dot-segment [(s String)] String
-  (let [idx (str/last-index-of s ".")]
+  (let [(idx (U Int Nil)) (str/last-index-of s ".")]
     (if (nil? idx)
       s
       (let [(offset Int) idx]
@@ -617,7 +617,7 @@
          "]")))
 
 (defn emit-import [(class-name String)] String
-  (let [idx (str/last-index-of class-name ".")]
+  (let [(idx (U Int Nil)) (str/last-index-of class-name ".")]
     (if (nil? idx)
       class-name
       (let [(offset Int) idx]
@@ -660,7 +660,7 @@
   (mapv (fn [(f Any)] String (get f "name")) fields))
 
 (defn unqualify-name [(name String)] String
-  (let [index (str/last-index-of name "/")]
+  (let [(index (U Int Nil)) (str/last-index-of name "/")]
     (if (nil? index)
       name
       (let [(offset Int) index]
