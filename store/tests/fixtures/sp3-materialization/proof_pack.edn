@@ -1,0 +1,20 @@
+{:launcher-public-key "MCowBQYDK2VwAyEA+W1OvNmmt4ZvG59Nx5Zu3eV1cXr5ujDAMSk4WWJOh2s="
+ :expected-attestation-id "sha256:7cf49e5de1c71b4809dcd28a76db2386f699da0bbc7af3d931c4e4d33d00181d"
+ :proof-pack
+ {:format "beagle.store/MaterializationProofPackV1"
+  :version 1
+  :attestation-id "sha256:7cf49e5de1c71b4809dcd28a76db2386f699da0bbc7af3d931c4e4d33d00181d"
+  :attestation
+  {:format "beagle.store/MaterializationAttestationV1"
+   :version 1
+   :executable-id "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+   :compiler-epoch-id "compiler-epoch-2026-08-18"
+   :schema-id "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+   :policy-id "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+   :snapshot-id "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+   :inputs-id "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+   :outputs-id "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+   :launcher-signature "JrFe4vGRNLabYzkHsYykgWRWRLFjVN01G2++R33IMrSnvbkbfaoVNaWm+/r/3Ux2dcicfk8aSwIaGYubCdIAAw=="}
+  :observation
+  {:artifact "store-materialization-fixture"
+   :result-count 3}}}
