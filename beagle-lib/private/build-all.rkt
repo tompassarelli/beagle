@@ -8,6 +8,7 @@
          "parse.rkt"
          "check.rkt"
          "emit.rkt"
+         (only-in "emit-nix.rkt" current-nix-module-omit-attrs)
          (only-in "emit-js.rkt" current-js-export-names)
          "lint.rkt"
          "module-overlay-check.rkt"
@@ -19,6 +20,7 @@
          "shadow-facts-v1.rkt"
          "extensions.rkt"
          "targets.rkt"
+         "nix-project.rkt"
          (only-in "batch-compile.rkt" compile-source-for-target)
          ;; #33 datum-IR: build straight from fact triples, skipping the text trip
          (only-in "facts-roundtrip.rkt" edn-triples->syntax read-edn-triples))
@@ -391,6 +393,7 @@
   (define shadow-output #f)
   (define build-edn? #f)   ; #33: treat file-args as --emit-edn triple dumps
   (define target-override #f)   ; --target: force every file through this target
+  (define nix-project-manifest #f)
   (define file-args '())
 
   (define-values (roots args-without-roots)
@@ -429,6 +432,12 @@
          (exit 2))
        (set! target-override (string->symbol (cadr rest)))
        (loop (cddr rest))]
+      [(string=? (car rest) "--nix-project")
+       (when (null? (cdr rest))
+         (eprintf "beagle-build-all: --nix-project requires a .bnix manifest\n")
+         (exit 2))
+       (set! nix-project-manifest (cadr rest))
+       (loop (cddr rest))]
       [else
        (set! file-args (append file-args (list (car rest))))
        (loop (cdr rest))]))
@@ -441,6 +450,17 @@
     (eprintf "beagle-build-all: --target and --build-edn are mutually exclusive\n")
     (exit 2))
 
+  (when (and nix-project-manifest (pair? file-args))
+    (eprintf "beagle-build-all: --nix-project owns membership; do not pass source paths\n")
+    (exit 2))
+
+  (when (and nix-project-manifest
+             (or (not in-place?) out-dir target-override build-edn? warn?
+                 (pair? roots)))
+    (eprintf
+     "beagle-build-all: --nix-project requires --in-place and cannot be combined with other build modes\n")
+    (exit 2))
+
   (when (and (pair? roots) (or target-override build-edn? warn?))
     (eprintf
      "beagle-build-all: --module-root cannot be combined with --target, --build-edn, or --warn\n")
@@ -451,14 +471,23 @@
      "beagle-build-all: --shadow-facts requires the ordinary whole-module build path\n")
     (exit 2))
 
-  (when (null? file-args)
+  (when (and (null? file-args) (not nix-project-manifest))
     (eprintf
-     "usage: beagle-build-all <file-or-dir> ... [--module-root LOGICAL=PHYSICAL]... [--out <dir>] [--in-place] [--warn]\n")
+     "usage: beagle-build-all <file-or-dir> ... [--module-root LOGICAL=PHYSICAL]... [--out <dir>] [--in-place] [--warn]\n       beagle-build-all --nix-project PROJECT.bnix --in-place\n")
     (exit 2))
 
   ;; --build-edn args are triple dumps (any extension), not .b* source — take
   ;; them verbatim; the text path globs/filters for beagle source files.
-  (define files (if build-edn? file-args (expand-args file-args)))
+  (define project
+    (and nix-project-manifest
+         (load-nix-project (current-directory) nix-project-manifest)))
+  (define files
+    (cond
+      [project
+       (for/list ([rel (in-list (nix-project-members project))])
+         (path->string (build-path (nix-project-root project) rel)))]
+      [build-edn? file-args]
+      [else (expand-args file-args)]))
 
   (when (null? files)
     (eprintf "beagle-build-all: no ~a found\n"
@@ -469,29 +498,32 @@
   (define built 0)
   (define errors 0)
 
-  (cond
-    [(and (not build-edn?) (not target-override) (not warn?))
-     (define-values (overlay-built overlay-errors)
-       (build-text-overlay
-        files roots out-dir json? in-place? shadow-output))
-     (set! built overlay-built)
-     (set! errors overlay-errors)]
-    [else
-     ;; Retargeted, EDN-authored, and explicitly warning builds retain their
-     ;; dedicated paths; they do not claim checked text-overlay semantics.
-     (define export-plan (build-export-plan files build-edn?))
-     (for ([f (in-list files)])
-       (define ok?
-         (cond
-           [build-edn?
-            (build-one-edn f out-dir json? export-plan
-                           #:warn? warn? #:in-place? in-place?)]
-           [target-override
-            (build-one-file-target f out-dir json? target-override)]
-           [else
-            (build-one-file f out-dir json? export-plan
-                            #:warn? warn? #:in-place? in-place?)]))
-       (if ok? (set! built (+ built 1)) (set! errors (+ errors 1))))])
+  (parameterize
+      ([current-nix-module-omit-attrs
+        (if project (nix-project-omit-module-attrs project) '())])
+    (cond
+      [(and (not build-edn?) (not target-override) (not warn?))
+       (define-values (overlay-built overlay-errors)
+         (build-text-overlay
+          files roots out-dir json? in-place? shadow-output))
+       (set! built overlay-built)
+       (set! errors overlay-errors)]
+      [else
+       ;; Retargeted, EDN-authored, and explicitly warning builds retain their
+       ;; dedicated paths; they do not claim checked text-overlay semantics.
+       (define export-plan (build-export-plan files build-edn?))
+       (for ([f (in-list files)])
+         (define ok?
+           (cond
+             [build-edn?
+              (build-one-edn f out-dir json? export-plan
+                             #:warn? warn? #:in-place? in-place?)]
+             [target-override
+              (build-one-file-target f out-dir json? target-override)]
+             [else
+              (build-one-file f out-dir json? export-plan
+                              #:warn? warn? #:in-place? in-place?)]))
+         (if ok? (set! built (+ built 1)) (set! errors (+ errors 1))))]))
 
   (unless json?
     (eprintf "\n~a built, ~a error(s)\n" built errors))

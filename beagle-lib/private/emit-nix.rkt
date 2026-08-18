@@ -26,6 +26,7 @@
 (define current-nix-require-prefixes (make-parameter (hash)))
 (define current-nix-semantic-contracts (make-parameter #f))
 (define current-nix-constraint-owners (make-parameter (hasheq)))
+(define current-nix-module-omit-attrs (make-parameter '()))
 
 ;; --- identifier mangling ---------------------------------------------------
 
@@ -2420,6 +2421,40 @@
    (string-join entries "\n")
    "\n" (indent depth) "}"))
 
+(define (qualified-reference=? ref qualifier name)
+  (and (qualified-ref? ref)
+       (eq? (qualified-ref-qualifier ref) qualifier)
+       (eq? (qualified-ref-name ref) name)))
+
+;; Only the outer NixOS module map owns project authoring metadata. Preserve a
+;; nested key with the same spelling: it is ordinary user configuration.
+(define (omit-module-attrs expr attrs)
+  (cond
+    [(map-form? expr)
+     (struct-copy
+      map-form expr
+      [pairs
+       (filter (lambda (pair) (not (memq (car pair) attrs)))
+               (map-form-pairs expr))])]
+    [(let-form? expr)
+     (define body (let-form-body expr))
+     (if (null? body)
+         expr
+         (struct-copy
+          let-form expr
+          [body (append (drop-right body 1)
+                        (list (omit-module-attrs (last body) attrs)))]))]
+    [(and (call-form? expr)
+          (or (qualified-reference=? (call-form-fn expr) 'lib 'mkIf)
+              (eq? (call-form-fn expr) 'lib.mkIf))
+          (pair? (call-form-args expr)))
+     (define args (call-form-args expr))
+     (struct-copy
+      call-form expr
+      [args (append (drop-right args 1)
+                    (list (omit-module-attrs (last args) attrs)))])]
+    [else expr]))
+
 (define (emit-nix-fn-set e depth)
   (define formals (nix-fn-set-formals e))
   (define rest? (nix-fn-set-rest? e))
@@ -2441,7 +2476,12 @@
     (if at-name
       (format "{ ~a } @ ~a" set-str (mangle-name at-name))
       (format "{ ~a }" set-str)))
-  (define body-str (emit-expr body depth))
+  (define attrs
+    (if (and (= depth 0) rest?)
+        (current-nix-module-omit-attrs)
+        '()))
+  (define body-str
+    (emit-expr (if (null? attrs) body (omit-module-attrs body attrs)) depth))
   (cond
     [(= depth 0)
      (format "~a:\n\n~a" pattern body-str)]
@@ -2456,3 +2496,5 @@
   (emitter-backend 'nix nix-emit-program))
 
 (register-backend! 'nix nix-backend)
+
+(provide current-nix-module-omit-attrs)

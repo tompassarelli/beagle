@@ -618,6 +618,29 @@
   (check-true (and out (string-contains? out "...")))
   (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
 
+(test-case "project module policy omits only declared outer authoring attrs"
+  (define source
+    (string-append
+     "(define-target nix) "
+     "(nix/module [config lib] "
+     "  (let [enabled true] "
+     "    {:tags [desktop] "
+     "     :tags-opt-in [experimental] "
+     "     :tag-overrides {:desktop {:demo true}} "
+     "     :flake-inputs {:demo {:url \"github:example/demo\"}} "
+     "     :config {:tags [runtime] :enabled enabled}}))"))
+  (define ordinary (nix-emit source))
+  (check-true (string-contains? ordinary "tags ="))
+  (define project-emitted
+    (parameterize
+        ([current-nix-module-omit-attrs
+          '(:tags :tags-opt-in :tag-overrides :flake-inputs)])
+      (nix-emit source)))
+  (check-false (string-contains? project-emitted "tags-opt-in ="))
+  (check-false (string-contains? project-emitted "tag-overrides ="))
+  (check-false (string-contains? project-emitted "flake-inputs ="))
+  (check-equal? (length (regexp-match* #rx"tags =" project-emitted)) 1))
+
 (test-case "overlay emits curried (final: prev: body)"
   (define out (nix-emit-forms '(define-target nix)
     `(nix/overlay ,(br 'final 'prev) ,(mt ':foo 1))))
