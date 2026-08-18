@@ -14,7 +14,6 @@
 
 (def max-list-values Int 65536)
 
-(def unpaged-occurrence-limit Int limits/rpc-v2-max-unpaged-rows)
 (def default-query-timeout-ms Int 5000)
 (def max-query-timeout-ms Int 60000)
 (def query-step-limit Int 10000000)
@@ -1172,7 +1171,7 @@
     ;; An unpaged answer nests one Term node per row, so it is bounded by the
     ;; same codec budget the occurrence path takes; say so here instead of
     ;; letting the encoder fail on the way out.
-    (if (> (count rows) unpaged-occurrence-limit)
+    (if (> (count rows) limits/rpc-v2-max-unpaged-rows)
       (do
         (record-read-error!
          context :term-depth-exceeded
@@ -1222,7 +1221,7 @@
   PageResult
   (if (nil? page)
     (->PageResult
-     (rpc-occurrences (vec (take unpaged-occurrence-limit rows))) nil)
+     (rpc-occurrences (vec (take limits/rpc-v2-max-unpaged-rows rows))) nil)
     (let [limit (page-request-limit! context page)]
       (cond
         [(not (read-context-ok? context)) (empty-occurrence-page-result)]

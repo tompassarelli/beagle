@@ -11,7 +11,6 @@
 (def rpc-v2-max-string-bytes Int 1048576)
 (def rpc-v2-max-space-bytes Int 4096)
 (def rpc-v2-max-term-nodes Int 65536)
-(def rpc-v2-max-term-depth Int limits/term-codec-v1-max-depth)
 (def rpc-v2-magic (Vec Int) [70 82 65 77 82 80 67 0])
 (def recursive-term-depth-error String
   "recursive Term exceeds the TermCodecV1 depth bound")
@@ -286,11 +285,11 @@
 
 (defn decoder-node! [(decoder Decoder) (depth Int)] Bool
   (decoder-node-limited! decoder depth rpc-v2-max-term-nodes
-                         rpc-v2-max-term-depth))
+                         limits/term-codec-v1-max-depth))
 
 (defn encoder-node! [(encoder Encoder) (depth Int)] Bool
   (encoder-node-limited! encoder depth rpc-v2-max-term-nodes
-                         rpc-v2-max-term-depth))
+                         limits/term-codec-v1-max-depth))
 
 (defn read-term-limited!
   [(decoder Decoder)
@@ -342,7 +341,7 @@
 
 (defn read-term! [(decoder Decoder) (depth Int)] t/Term
   (read-term-limited! decoder depth rpc-v2-max-string-bytes
-                      rpc-v2-max-term-nodes rpc-v2-max-term-depth))
+                      rpc-v2-max-term-nodes limits/term-codec-v1-max-depth))
 
 (defn append-term-limited!
   [(encoder Encoder)
@@ -395,7 +394,7 @@
 
 (defn append-term! [(encoder Encoder) (term Any) (depth Int)] Nil
   (append-term-limited! encoder term depth rpc-v2-max-string-bytes
-                        rpc-v2-max-term-nodes rpc-v2-max-term-depth))
+                        rpc-v2-max-term-nodes limits/term-codec-v1-max-depth))
 
 (defn canonical-term-sha256-result! [(term Any)] TermDigestResult
   (let [encoder (->Encoder (empty-byte-cell) (atom 0) (empty-error-cell))]
