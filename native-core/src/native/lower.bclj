@@ -4364,6 +4364,62 @@
           keys
           (recur (+ round 1) expanded))))))
 
+(defn global-key-in? [(globals (Vec GlobalBindingV0)) (key String)] Bool
+  (loop [(position Int) 0]
+    (if (>= position (count globals))
+      false
+      (if (= key (global-key (nth globals position)))
+        true
+        (recur (+ position 1))))))
+
+(defn global-dependency-pending?
+  [(index SourceIndexV0)
+   (remaining (Vec GlobalBindingV0))
+   (global GlobalBindingV0)]
+  Bool
+  (let [(dependencies (Vec String))
+        (source-ref-keys index (globalbindingv0-module-name global)
+          (globalbindingv0-value global) [] (+ 1 (index-facts index)))]
+    (loop [(position Int) 0]
+      (if (>= position (count dependencies))
+        false
+        (if (global-key-in? remaining (nth dependencies position))
+          true
+          (recur (+ position 1)))))))
+
+(defn first-ready-global-position
+  [(index SourceIndexV0) (remaining (Vec GlobalBindingV0))] Int
+  (loop [(position Int) 0]
+    (cond
+      (>= position (count remaining)) -1
+      (global-dependency-pending? index remaining (nth remaining position))
+      (recur (+ position 1))
+      :else position)))
+
+(defn remove-global-position
+  [(globals (Vec GlobalBindingV0)) (target Int)] (Vec GlobalBindingV0)
+  (loop [(position Int) 0 (collected (Vec GlobalBindingV0)) []]
+    (if (>= position (count globals))
+      collected
+      (recur (+ position 1)
+        (if (= position target)
+          collected
+          (conj collected (nth globals position)))))))
+
+;; Source order is not initialization order. Native v0 hoists immutable globals
+;; into each function entry, so every acyclic dependency must be bound first.
+(defn order-global-bindings
+  [(index SourceIndexV0) (globals (Vec GlobalBindingV0))] (Vec GlobalBindingV0)
+  (loop [(remaining (Vec GlobalBindingV0)) globals
+         (ordered (Vec GlobalBindingV0)) []]
+    (if (= 0 (count remaining))
+      ordered
+      (let [(ready Int) (first-ready-global-position index remaining)]
+        (if (< ready 0)
+          (vec (concat ordered remaining))
+          (recur (remove-global-position remaining ready)
+            (conj ordered (nth remaining ready))))))))
+
 (defn needed-globals
   [(env BodyEnvV0)
    (body core/NativeId)
@@ -4375,14 +4431,16 @@
         (close-global-keys index globals
           (source-ref-keys index (source-module-name index body) body bound
             (+ 1 (index-facts index))))]
-    (loop [(position Int) 0 (selected (Vec GlobalBindingV0)) []]
-      (if (>= position (count globals))
-        selected
-        (let [(global GlobalBindingV0) (nth globals position)]
-          (recur (+ position 1)
-            (if (string-member? keys (global-key global))
-              (conj selected global)
-              selected)))))))
+    (let [(selected (Vec GlobalBindingV0))
+          (loop [(position Int) 0 (found (Vec GlobalBindingV0)) []]
+            (if (>= position (count globals))
+              found
+              (let [(global GlobalBindingV0) (nth globals position)]
+                (recur (+ position 1)
+                  (if (string-member? keys (global-key global))
+                    (conj found global)
+                    found)))))]
+      (order-global-bindings index selected))))
 
 (defn source-ref-type-source
   [(index SourceIndexV0)

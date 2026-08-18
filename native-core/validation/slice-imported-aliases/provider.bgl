@@ -4,5 +4,6 @@
 (defrecord Item [(value Int)])
 (defalias Term (Dyn String Int Item))
 
-(def provider-label String "provider")
+;; Declaration order cannot override the immutable dependency edge.
 (def exported-label String provider-label)
+(def provider-label String "provider")
