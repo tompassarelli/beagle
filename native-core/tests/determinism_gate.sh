@@ -7,6 +7,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 validation="$repo/native-core/validation"
+platform_supervisor="$repo/native-core/bin/run-bounded"
 
 # Cached gate: the run is traced and its green result keyed on the full input
 # closure (bin/_gate-cache-run); an unchanged closure replays as cached-green.
@@ -40,6 +41,8 @@ while [ $# -gt 0 ]; do
 done
 
 work="$(mktemp -d)"
+# Invoked indirectly by the EXIT trap.
+# shellcheck disable=SC2329
 cleanup() { rm -rf "${work:?}"; }
 trap cleanup EXIT
 
@@ -47,16 +50,125 @@ status=0
 
 # Materializes twice via a driver that honors NATIVE_SLICE_ARTIFACTS, then
 # byte-compares the two resulting directory trees.
+run_supervised_artifacts_slice() {
+  local name="$1" driver="$2" run phase_deadline kill_grace receipts
+  local completed pid rc failed expected
+  shift 2
+  local -a live=() next_live=()
+  local -A run_by_pid=() status_by_run=()
+
+  phase_deadline="${BEAGLE_NATIVE_VALIDATION_PHASE_DEADLINE_SECONDS:-170}"
+  kill_grace="${BEAGLE_NATIVE_VALIDATION_KILL_GRACE_SECONDS:-5}"
+  [[ "$phase_deadline" =~ ^[1-9][0-9]*$ ]] || {
+    echo "determinism_gate.sh: invalid materialization deadline: $phase_deadline" >&2
+    return 2
+  }
+  [[ "$kill_grace" =~ ^[1-9][0-9]*$ ]] || {
+    echo "determinism_gate.sh: invalid kill grace: $kill_grace" >&2
+    return 2
+  }
+  [[ -x "$platform_supervisor" ]] || {
+    echo "determinism_gate.sh: platform supervisor is unavailable: $platform_supervisor" >&2
+    return 2
+  }
+  receipts="${NATIVE_DETERMINISM_RECEIPT_ROOT:-$work/$name/receipts}"
+  mkdir -p "$receipts"
+
+  for run in 1 2; do
+    echo "--- $name (materialization $run/2) START deadline=${phase_deadline}s ---"
+    BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipts/run-$run.receipt" \
+      "$platform_supervisor" "$phase_deadline" "$kill_grace" -- \
+      env NATIVE_SLICE_REPO="$repo" \
+        NATIVE_SLICE_ARTIFACTS="$work/$name/run$run" \
+        BEAGLE_NATIVE_VALIDATION_RECEIPT_DIR="$receipts/run-$run-driver" \
+        "$@" bash "$driver" >"$receipts/run-$run.log" 2>&1 &
+    pid=$!
+    live+=("$pid")
+    run_by_pid["$pid"]="$run"
+  done
+
+  failed=0
+  while ((${#live[@]} > 0)); do
+    completed=""
+    set +e
+    wait -n -p completed "${live[@]}"
+    rc=$?
+    set -e
+    if [[ -z "$completed" || -z "${run_by_pid[$completed]+set}" ]]; then
+      echo "determinism_gate.sh: $name supervisor wait contract failed" >&2
+      failed=1
+      break
+    fi
+    run="${run_by_pid[$completed]}"
+    status_by_run["$run"]="$rc"
+    next_live=()
+    for pid in "${live[@]}"; do
+      [[ "$pid" == "$completed" ]] || next_live+=("$pid")
+    done
+    live=("${next_live[@]}")
+    if [[ "$rc" == 0 ]]; then
+      echo "--- $name (materialization $run/2) END status=0 ---"
+    else
+      echo "determinism_gate.sh: $name materialization $run failed status=$rc" >&2
+      failed=1
+      break
+    fi
+  done
+
+  if [[ "$failed" == 1 && ${#live[@]} -gt 0 ]]; then
+    for pid in "${live[@]}"; do
+      kill -TERM "$pid" 2>/dev/null || true
+    done
+    for pid in "${live[@]}"; do
+      set +e
+      wait "$pid"
+      rc=$?
+      set -e
+      status_by_run["${run_by_pid[$pid]}"]="$rc"
+    done
+    live=()
+  fi
+
+  for run in 1 2; do
+    [[ -f "$receipts/run-$run.log" ]] && cat "$receipts/run-$run.log"
+    rc="${status_by_run[$run]:-missing}"
+    if [[ "$rc" != missing ]]; then
+      if [[ "$rc" == 124 ]]; then
+        expected='subtree-reaped-v0 timeout status=124'
+      else
+        expected="subtree-reaped-v0 exit status=$rc"
+      fi
+      if [[ ! -f "$receipts/run-$run.receipt" || \
+            "$(<"$receipts/run-$run.receipt")" != "$expected" ]]; then
+        echo "determinism_gate.sh: $name materialization $run receipt mismatch" >&2
+        failed=1
+      fi
+    else
+      failed=1
+    fi
+  done
+  [[ "$failed" == 0 ]]
+}
+
 run_env_artifacts_slice() {
   local name="$1" driver="$2"; shift 2
   local run1="$work/$name/run1" run2="$work/$name/run2"
   mkdir -p "$run1" "$run2"
+  if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x || \
+        "${BEAGLE_NATIVE_VALIDATION_SUPERVISED:-0}" == 1 ]]; then
+    run_supervised_artifacts_slice "$name" "$driver" "$@" || {
+      echo "determinism_gate.sh: $name supervised materialization failed" >&2
+      status=1
+      return
+    }
+  else
   echo "--- $name (materialization 1/2) ---"
   NATIVE_SLICE_REPO="$repo" NATIVE_SLICE_ARTIFACTS="$run1" "$@" bash "$driver" \
     || { echo "determinism_gate.sh: $name materialization 1 failed" >&2; status=1; return; }
   echo "--- $name (materialization 2/2) ---"
   NATIVE_SLICE_REPO="$repo" NATIVE_SLICE_ARTIFACTS="$run2" "$@" bash "$driver" \
     || { echo "determinism_gate.sh: $name materialization 2 failed" >&2; status=1; return; }
+  fi
   if diff -rq "$run1" "$run2" >"$work/$name/diff.txt"; then
     echo "PASS  $name: byte-identical across two materializations"
   else

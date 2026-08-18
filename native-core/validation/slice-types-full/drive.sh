@@ -15,6 +15,9 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
+if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]]; then
+  exec "$here/drive-native.sh"
+fi
 art="${NATIVE_SLICE_ARTIFACTS:-}"
 store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
 src="$store_checkout/src/fram/types.bgl"

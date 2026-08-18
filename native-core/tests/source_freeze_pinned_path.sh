@@ -2,6 +2,9 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]]; then
+  exec "$repo/native-core/tests/source_freeze_native.sh"
+fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/native-source-freeze-path.XXXXXX")"
 trap 'rm -rf "${work:?}"' EXIT
 
