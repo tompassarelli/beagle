@@ -2369,17 +2369,19 @@
   (swap! USER-PARAMETRIC-ARITIES assoc name arity)
   (swap! USER-PARAMETRIC-ARITIES assoc (str prefix "/" name) arity))))))
   (let [contract-clj? (and (not (= (module-declared-contract! datums) false)) (= (module-target-from-datums datums) "clj"))
+   local-type-names (module-local-type-names datums)
    refer-set (if (some? refer-syms) (reduce (fn [m s] (assoc m s true)) {} refer-syms) nil)
    referred? (fn [nm] (and (some? refer-set) (= true (get refer-set nm))))
    out (atom [])
    seen (atom {})
-   emit! (fn [nm t] (let [q (if (= prefix "") nm (str prefix "/" nm))]
+   emit! (fn [nm t] (let [q (if (= prefix "") nm (str prefix "/" nm))
+   qualified-type (if (= prefix "") t (qualify-provider-type t prefix local-type-names))]
   (if (not (= true (get (deref seen) q))) (do
   (swap! seen assoc q true)
-  (swap! out conj {"name" q "type" t})))
+  (swap! out conj {"name" q "type" qualified-type})))
   (if (and (referred? nm) (not (= true (get (deref seen) nm)))) (do
   (swap! seen assoc nm true)
-  (swap! out conj {"name" nm "type" t}))))
+  (swap! out conj {"name" nm "type" qualified-type}))))
   nil)]
   (doseq [d0 datums]
   (let [d (import-normalize d0)]
@@ -2698,6 +2700,10 @@
    union-entry (first (filterv (fn [entry] (= (get entry "name") "core/Op")) surface))
    members (get (get union-entry "type") "members")]
   (= ["core/AddOp" "core/SubOp"] (mapv (fn [member] (get member "name")) members))))
+  (expect! "import: function signatures qualify provider-local nominal types" (let [surface (import-module-surface! [["defrecord" "NativeId" [BRACKET-TAG ["value" "String"]]] ["defunion" "Op" ["AddOp" [BRACKET-TAG ["left" "NativeId"]]]] ["defn" "consume" [BRACKET-TAG ["op" "Op"]] "NativeId" "missing"]] "core" nil)
+   function-entry (first (filterv (fn [entry] (= (get entry "name") "core/consume")) surface))
+   function-type (get function-entry "type")]
+  (and (= "core/Op" (get (first (get function-type "params")) "name")) (= "core/NativeId" (get (get function-type "ret") "name")))))
   (expect! "plain def: dynamic false, doc false" (let [node (parse-expr* ["def" "x" 1])]
   (and (= (get node "dynamic") false) (= (get node "doc") false))))
   (expect! "def docstring recorded" (= (get (parse-expr* ["def" "x" ["#%string" "d"] 1]) "doc") "d"))
