@@ -21,7 +21,11 @@ PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
 AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
 SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
+PLATFORM_SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded"
 MODULE_SOURCE_ROOT_CLI="$BEAGLE_DIR/beagle-lib/private/module-source-root-cli.rkt"
+original_args=("$@")
+native_route_selected=0
+[[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]] && native_route_selected=1
 source "$BIN/_beagle-racket"
 source "$BIN/_beagle-source-id"
 
@@ -34,6 +38,10 @@ core_kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
     echo "beagle build: bounded supervisor is unavailable: $SUPERVISOR" >&2
     exit 2
 }
+if [[ "$native_route_selected" == 1 && ! -x "$PLATFORM_SUPERVISOR" ]]; then
+    echo "beagle build: platform supervisor is unavailable: $PLATFORM_SUPERVISOR" >&2
+    exit 2
+fi
 # One bounded supervisor owns the entire build tree. It prefers a private PID
 # namespace and falls back to a scoped process group when the host forbids
 # unprivileged user namespaces. Individual phases use the same supervisor with
@@ -44,9 +52,15 @@ if [[ "${BEAGLE_CORE_SUPERVISED:-0}" != "1" ]]; then
         echo "beagle build: BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS must be a positive integer" >&2
         exit 2
     }
-    exec "$RACKET" "$SUPERVISOR" \
-        "$overall_timeout" "$core_kill_grace" -- \
-        env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
+    if [[ "$native_route_selected" == 1 ]]; then
+        exec "$PLATFORM_SUPERVISOR" \
+            "$overall_timeout" "$core_kill_grace" -- \
+            env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
+    else
+        exec "$RACKET" "$SUPERVISOR" \
+            "$overall_timeout" "$core_kill_grace" -- \
+            env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
+    fi
 fi
 
 source "$BEAGLE_DIR/share/targets.sh"
@@ -81,8 +95,11 @@ run_bounded() {
     local seconds="$1"
     local kill_grace="$2"
     shift 2
-    "$RACKET" "$SUPERVISOR" \
-        "$seconds" "$kill_grace" -- "$@"
+    if [[ "$native_route_selected" == 1 ]]; then
+        "$PLATFORM_SUPERVISOR" "$seconds" "$kill_grace" -- "$@"
+    else
+        "$RACKET" "$SUPERVISOR" "$seconds" "$kill_grace" -- "$@"
+    fi
 }
 
 run_phase_with_grace() {
@@ -478,6 +495,8 @@ cache_key_material() {
         awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
     if [[ -n "$native_compiler_digest" ]]; then
         printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
+        printf 'platform-supervisor %s\n' \
+            "$(sha256sum "$PLATFORM_SUPERVISOR" | awk '{print $1}')"
     fi
 }
 
@@ -1025,6 +1044,32 @@ if [[ "${BEAGLE_CORE_PROJECTION_ONLY:-0}" == 1 ]]; then
     if [[ -n "${BEAGLE_CORE_PROJECTION_ONLY_LOG:-}" ]]; then
         cp -- "$work/build.log" "$BEAGLE_CORE_PROJECTION_ONLY_LOG"
     fi
+    exit 0
+fi
+
+# Seam 9 authenticates and caches the compiler-module projection above.  Once
+# that contract is established, the full native compiler owns Core lowering,
+# obligations, parallel emission, materializer reports, and atomic publication.
+# The public arguments are identical, so the handoff introduces no second CLI
+# surface.  This phase is separately supervised and timed; the outer build
+# deadline remains containment, never a substitute for this deadline.
+if [[ -n "$native_compiler_bin" ]]; then
+    native_phase_start_ns="$(date +%s%N)"
+    set +e
+    run_phase core-lowering "${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}" \
+        env -u BEAGLE_NATIVE_COMPILER_BIN \
+        "$native_compiler_bin" "${original_args[@]}"
+    native_runner_rc=$?
+    set -e
+    native_phase_end_ns="$(date +%s%N)"
+    native_phase_seconds=$((
+        (native_phase_end_ns - native_phase_start_ns + 999999999) / 1000000000
+    ))
+    echo "beagle build: phase core-lowering SECONDS $native_phase_seconds" >&2
+    [[ "$native_runner_rc" == 0 ]] || exit "$native_runner_rc"
+    rm -rf "${work:?}"
+    work_cleaned=1
+    build_committed=1
     exit 0
 fi
 

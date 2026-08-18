@@ -100,6 +100,7 @@ driver_names=(
     native-core/bin/source-facts.clj
     native-core/bin/verify-checked-ast.rkt
     native-core/validation/build-finalize.clj
+    native-core/bin/run-bounded
     native-core/bin/run-bounded.rkt
     beagle-lib/private/module-source-root-cli.rkt
     self-host/native/stage1-package.sh
