@@ -8,6 +8,8 @@
 
 (def scalar-fns (atom {}))
 
+(def local-names (atom {}))
+
 (def match-counter (atom 0))
 
 (def emit-target (atom "clj"))
@@ -15,6 +17,10 @@
 (def checked-program-ref (atom false))
 
 (def ^String CLJ-HOST-REST "$beagle$rest$host")
+
+(def ^String CLJ-SHA256-CALL (str "beagle$sha256" "_bytes_v0"))
+
+(def ^String CLJ-SHA256-RUNTIME (str "(defn- " CLJ-SHA256-CALL " [values]\n" "  (when-not (vector? values)\n" "    (throw (ex-info \"sha256-bytes requires a Vec Int\"\n" "                    {:value values})))\n" "  (let [raw (byte-array\n" "             (map-indexed\n" "              (fn [index value]\n" "                (if (and (integer? value) (<= 0 value 255))\n" "                  (unchecked-byte value)\n" "                  (throw\n" "                   (ex-info \"sha256-bytes requires byte values from 0 through 255\"\n" "                            {:index index :value value}))))\n" "              values))\n" "        digest (.digest (java.security.MessageDigest/getInstance \"SHA-256\") raw)]\n" "    (apply str\n" "           (map (fn [value]\n" "                  (format \"%02x\" (bit-and (int value) 255)))\n" "                digest))))"))
 
 (def loop-constraint-arity (atom nil))
 
@@ -662,7 +668,10 @@
   (= node "call") (let [fn-expr (get e "fn")
    args (get e "args")]
   (if (= (get fn-expr "node") "ref") (let [fn-key (reference-key fn-expr)]
-  (if (and (= 1 (count args)) (or (contains? (deref scalar-fns) fn-key) (qualified-reference=? fn-expr "bgl" "promote"))) (emit-expr* (nth args 0)) (str "(" (reference->clj fn-expr) (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
+  (cond
+  (and (= 1 (count args)) (or (contains? (deref scalar-fns) fn-key) (qualified-reference=? fn-expr "bgl" "promote"))) (emit-expr* (nth args 0))
+  (and (= fn-key "sha256-bytes") (= 1 (count args)) (not (contains? (deref local-names) fn-key))) (str "(" CLJ-SHA256-CALL " " (emit-expr* (nth args 0)) ")")
+  :else (str "(" (reference->clj fn-expr) (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
   (= node "vec") (str "[" (str/join " " (mapv emit-expr* (get e "items"))) "]")
   (= node "map") (let [strs (mapv (fn [p] (str (emit-expr* (get p "key")) " " (emit-expr* (get p "val")))) (get e "pairs"))]
   (str "{" (str/join " " strs) "}"))
@@ -746,6 +755,9 @@
   (swap! scalar-fns assoc (str "->" nm) true)))
   (swap! scalar-fns assoc (str (str/lower-case nm) "-value") true))
   :else nil)))
+  (doseq [f forms]
+  (if (or (= (get f "node") "def") (= (get f "node") "defonce") (= (get f "node") "defn") (= (get f "node") "defn-multi") (= (get f "node") "defmulti")) (do
+  (swap! local-names assoc (get f "name") true))))
   nil)
 
 (defn ^String emit-program! [prog]
@@ -754,13 +766,14 @@
   (reset! record-fields (structuralize-reference-table (get prog "importedRecordFieldOrder" {})))
   (reset! record-namespaces (structuralize-reference-table (get prog "importedRecordNamespaces" {})))
   (reset! scalar-fns {})
+  (reset! local-names {})
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)
   (reset! emit-target (get prog "target"))
   (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
   (register-tables! (get prog "forms"))
   (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
-  (str (emit-ns-form prog body) "\n\n" body "\n"))))
+  (str (emit-ns-form prog body) "\n\n" (if (str/includes? body CLJ-SHA256-CALL) (str CLJ-SHA256-RUNTIME "\n") "") body "\n"))))
 
 (def passes (atom []))
 
@@ -779,6 +792,7 @@
   (reset! record-fields {})
   (reset! record-namespaces {})
   (reset! scalar-fns {})
+  (reset! local-names {})
   (reset! match-counter 0)
   (reset! loop-constraint-arity nil)
   (reset! emit-target "clj")
@@ -816,6 +830,13 @@
   (expect! "reference: qualified call keeps structural callee identity" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "(str/upper-case value)"))
   (expect! "reference: qualified static call renders class and method" (= (emit-expr! {"node" "static-call" "qualifier" "Math" "name" "abs" "providerId" nil "args" [{"node" "literal" "kind" "number" "value" -1}]}) "(Math/abs -1)"))
   (expect! "reference: structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "value"))
+  (expect! "intrinsic: sha256-bytes injects its Clojure runtime call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "ref" "name" "values"}]}) (str "(" CLJ-SHA256-CALL " values)")))
+  (expect! "intrinsic: local sha256-bytes shadows the portable intrinsic" (do
+  (reset! local-names {"sha256-bytes" true})
+  (let [output (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "ref" "name" "values"}]})]
+  (reset! local-names {})
+  (= output "(sha256-bytes values)"))))
+  (expect! "intrinsic: program includes the sha256 runtime helper" (str/includes? (emit-program! {"namespace" "fixture.sha256" "target" "clj" "gen-class" false "requires" [] "imports" [] "externs" [] "forms" [{"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "vec" "items" []}]}]}) CLJ-SHA256-RUNTIME))
   (expect! "reference: imported record tables lower once at metadata boundary" (= (get (structuralize-reference-table {"models/Account" ["id"]}) ["qualified-ref" "models" "Account"]) ["id"]))
   (expect! "reference: qualified record pattern uses provider identity" (do
   (reset! record-fields {["qualified-ref" "models" "Account"] ["id"]})
