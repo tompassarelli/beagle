@@ -1,0 +1,73 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "hl-unspecified-behavior-as-spec-hosted-js",
+  "status": "DECIDED",
+  "profile": "hosted-js",
+  "input": {
+    "source": "#lang beagle/js\n(ns leakage.unspecified-behavior-as-spec)\n\n;; The case has a map/set artifact, a macro-generated name, numeric serialization,\n;; a declared two-member choice, and a deliberately missing semantic contract.\n(defn probe []\n  (canonical-artifact\n    {:map {2 \"b\" 1 \"a\"} :set #{2 1}\n     :name (macro-generated-name probe)\n     :number (serialize-number 12.50)\n     :choice (declared-choice :left :right)}))\n",
+    "target": "js",
+    "fileName": "leakage/unspecified_behavior_as_spec.bjs",
+    "command": {
+      "argv": ["check", "--profile", "hosted-js", "{input}"]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false,
+      "network": false,
+      "wallClock": false,
+      "scheduler": false,
+      "providers": {
+        "clock": "fixed",
+        "entropy": "fixed",
+        "allocationSeeds": [17, 43],
+        "hashSeeds": [29, 47],
+        "traversalSeeds": [41, 53]
+      }
+    }
+  },
+  "rule": {
+    "id": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
+    "text": "Every author-observable semantic point has exactly one of three contract classifications: canonical result, named rejection, or explicit finite allowed-outcome set. Missing, UNKNOWN, implementation-defined, host-defined, and matches Racket are inadmissible and make the form unavailable with BEAGLE-UNSPECIFIED-SEMANTICS before execution. A finite allowed-outcome set lists every semantic value/error member and the condition under which choice occurs, and declares whether choice is deterministic for a run, module, transaction, or call. Deliberately nondeterministic operations are explicit effects with required capability, evaluation/effect order, result domain, failure behavior, replay boundary, ownership, profile availability, and complexity contract. Representation may vary only when every observable contract dimension is unchanged; silent fallback is forbidden. A newly discovered unspecified point blocks only that form/profile, is recorded as UNDECIDED, and cannot become a DECIDED assertion by copying implementation output; once decided, divergence is MIGRATION-REQUIRED.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-HL-UNSPECIFIED-BEHAVIOR-AS-SPEC"
+  },
+  "expected": {
+    "kind": "canonical-output",
+    "assertions": [
+      {
+        "kind": "byte-identical",
+        "scope": ["map/set artifact", "macro-generated name", "numeric serialization"],
+        "runs": 2,
+        "controlledRuns": [
+          {"allocationSeed": 17, "hashSeed": 29, "traversalSeed": 41},
+          {"allocationSeed": 43, "hashSeed": 47, "traversalSeed": 53}
+        ]
+      },
+      {
+        "kind": "named-diagnostic",
+        "diagnosticId": "BEAGLE-UNSPECIFIED-SEMANTICS",
+        "condition": "deliberately missing semantic contract",
+        "phase": "before-execution"
+      },
+      {
+        "kind": "finite-allowed-outcome-membership",
+        "value": "choice",
+        "allowedValues": ["left", "right"],
+        "choiceScope": "call",
+        "outsideSet": "defect"
+      }
+    ]
+  },
+  "coverage": {
+    "surface": ["map/set-artifact", "macro-generated-name", "numeric-serialization", "declared-choice", "missing-contract"],
+    "alarmBell": [],
+    "hostLeakage": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
+    "parityChannels": ["canonical-output", "diagnostic", "status", "allowed-outcome-membership"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
+    "date": "2026-08-18"
+  }
+}

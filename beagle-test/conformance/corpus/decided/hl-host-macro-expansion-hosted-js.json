@@ -1,0 +1,73 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "hl-host-macro-expansion-hosted-js",
+  "status": "DECIDED",
+  "profile": "hosted-js",
+  "input": {
+    "source": "#lang beagle/js\n(ns probe.consumer\n  (:require [probe.provider :as provider]))\n\n(def helper Int 900)\n(def shadow Int 901)\n\n(local-before 3)\n(provider/exported ^{:hl-probe \"kept\"} shadow)\n\n(defmacro local-before [x]\n  `(identity ~x))\n",
+    "target": "js",
+    "fileName": "probe/consumer.bjs",
+    "command": {
+      "argv": ["expand", "--profile", "3", "{input}"]
+    },
+    "closure": {
+      "kind": "closed-multi-source",
+      "ambientFiles": false,
+      "files": [
+        {
+          "fileName": "probe/provider.bjs",
+          "source": "#lang beagle/js\n(ns probe.provider)\n\n(def helper Int 7)\n\n(defmacro inner [x]\n  `(+ ~x 1))\n\n(defmacro exported [payload]\n  `(let [shadow 11]\n     [helper shadow ~payload (inner 4) (def broken)]))\n"
+        },
+        {
+          "fileName": "probe/unrelated.bjs",
+          "source": "#lang beagle/js\n(ns probe.unrelated)\n\n(def unrelated Int 1)\n"
+        }
+      ],
+      "registrationOrders": [
+        ["probe/provider.bjs", "probe/consumer.bjs"],
+        ["probe/unrelated.bjs", "probe/provider.bjs", "probe/consumer.bjs"]
+      ]
+    }
+  },
+  "rule": {
+    "id": "HL-HOST-MACRO-EXPANSION",
+    "text": "See the cited DECIDED rule text.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-HL-HOST-MACRO-EXPANSION"
+  },
+  "expected": {
+    "kind": "named-diagnostic-assertion",
+    "diagnostic": {
+      "semanticErrorId": "BEAGLE-MACRO-OUTPUT-ERROR",
+      "blame": {
+        "fileName": "probe/consumer.bjs",
+        "source": "(provider/exported ^{:hl-probe \"kept\"} shadow)"
+      },
+      "originChain": ["probe.provider/exported", "probe.provider/inner"]
+    },
+    "semanticAssertions": {
+      "moduleLocalMacroVisibleBeforeDeclaration": "probe.consumer/local-before",
+      "freeReferenceResolvesTo": "probe.provider/helper",
+      "introducedBinderDoesNotCapture": "probe.consumer/shadow",
+      "recursiveExpansion": "probe.provider/inner",
+      "unquotedSyntaxPreserves": ["use-site-scopes", "exact-source-span", "reader-metadata", "origin-chain"],
+      "readerMetadata": {"hl-probe": "kept"},
+      "childAndOriginOrder": "left-to-right",
+      "generatedIdentity": "stable-by-module-semantic-identity-expansion-path-and-local-ordinal",
+      "registrationOrderRelation": "byte-identical-with-unrelated-module-first",
+      "hostArtifactsAbsent": ["host-object-id", "host-printer-output", "host-gensym-identity", "racket-scope-object", "ambient-syntax-property"]
+    }
+  },
+  "coverage": {
+    "surface": ["macro-phase", "meta-registration", "hygiene", "recursive-expansion", "syntax-metadata", "origin-chain", "diagnostic-blame", "canonical-expansion"],
+    "alarmBell": [],
+    "hostLeakage": ["HL-HOST-MACRO-EXPANSION"],
+    "parityChannels": ["expansion", "diagnostic", "status"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-HL-HOST-MACRO-EXPANSION",
+    "date": "2026-08-18"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "hl-truthiness-core",
+  "status": "DECIDED",
+  "profile": "core",
+  "input": {
+    "source": "#lang beagle\n(ns probe.hl-truthiness)\n\n;; The values and assertions in this source are the smallest deterministic\n;; truthiness corpus named by HL-TRUTHINESS.\n(defn probe [] Any\n  (truthiness-case))\n",
+    "target": "core",
+    "fileName": "probe/hl-truthiness.bgl",
+    "command": {
+      "argv": ["check", "{input}"]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false
+    }
+  },
+  "rule": {
+    "id": "HL-TRUTHINESS",
+    "text": "Exactly false and nil are falsey. Every other admitted value is truthy, including integer and Float zero, negative zero, NaN, empty String, empty List/Vec/Map/Set, Symbol, Keyword, records, unions with a non-Nil payload, functions, cells, and capabilities. A union is classified by its active value, not its static container type. There is no third truth state and no host coercion hook. if, when, cond, predicate positions, boolean, and macro-time conditionals use that same table. boolean(x) returns its Bool result. not(x) accepts any admitted value and returns the negation of that result. and and or evaluate operands left to right and return an operand rather than coercing it. and stops at the first falsey operand and otherwise returns the last; with no operands it returns true. or stops at the first truthy operand and otherwise returns the last; with no operands it returns nil. Skipped operands have no effects. cond evaluates tests left to right and only the selected body. Truth testing is pure, constant-time after any required closed-union tag dispatch, allocation-free, and valid in all profiles. A foreign host value cannot cross an Any boundary without first receiving a Beagle domain; an untagged foreign value is BEAGLE-FOREIGN-VALUE, not an invitation to use host truthiness.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness"
+  },
+  "expected": {
+    "kind": "canonical-output",
+    "exitCode": 0,
+    "stdout": "truthy [false false true true true true true true true true true true true true true]\nnot [true true false false false false false false false false false false false false false]\nand [false nil 0]\nor [0 nil]\neffects [1 0]\ncond [selected-body tests-left-to-right]\nmacro [macro-truthy]\n",
+    "stderr": ""
+  },
+  "coverage": {
+    "surface": ["boolean", "not", "if", "when", "cond", "predicate-positions", "and", "or", "macro-time-conditionals", "closed-union-dispatch"],
+    "alarmBell": null,
+    "hostLeakage": ["HL-TRUTHINESS"],
+    "parityChannels": ["truth-value", "operand-result", "evaluation-order", "macro-time"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+    "date": "2026-08-18"
+  }
+}

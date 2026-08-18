@@ -1,0 +1,58 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "hl-equality-hashing-core",
+  "status": "DECIDED",
+  "profile": "core",
+  "input": {
+    "source": "#lang beagle/core\n(ns conformance.hl-equality-hashing)\n\n;; The corpus runner supplies the smallest deterministic equality/hash probe.\n(defn probe [(x Any)] Any x)\n",
+    "target": "native",
+    "fileName": "conformance/hl-equality-hashing.bclj",
+    "command": {
+      "argv": ["check", "--profile", "core", "{input}"]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false
+    }
+  },
+  "rule": {
+    "id": "HL-EQUALITY-HASHING",
+    "text": "Equality and hashing are domain-strict and host-independent; unsupported semantic values and non-admissible NaN collection membership use the decided semantic errors.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#HL-EQUALITY-HASHING"
+  },
+  "expected": {
+    "kind": "named-diagnostic-assertion",
+    "name": "HL-EQUALITY-HASHING-SMALLEST-DETERMINISTIC-CASE",
+    "assertions": [
+      "complete equality matrix for separately allocated hashable atoms and aggregates",
+      "exact BeagleHashV1 hashes for equal values",
+      "equal values have equal hashes and a fixed collision does not establish equality",
+      "map key lookup succeeds across representation and insertion-order changes",
+      {
+        "construct": "equality-or-hash on mutable cells, capabilities, functions, iterators, foreign/host objects, raw pointers, or Buffers",
+        "diagnostic": "BEAGLE-UNSUPPORTED-VALUE-SEMANTICS"
+      },
+      {
+        "construct": "NaN admitted as a map key or set element",
+        "diagnostic": "BEAGLE-UNHASHABLE-VALUE"
+      },
+      {
+        "construct": "identical? applied to an immutable semantic value",
+        "diagnostic": "BEAGLE-NONIDENTITY-VALUE"
+      }
+    ]
+  },
+  "coverage": {
+    "surface": ["equality", "hashing", "identity", "collections", "canonical-encoding"],
+    "alarmBell": [],
+    "hostLeakage": ["HL-EQUALITY-HASHING"],
+    "parityChannels": ["semantic-value", "diagnostic", "hash", "status"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#HL-EQUALITY-HASHING",
+    "date": "2026-08-18"
+  }
+}

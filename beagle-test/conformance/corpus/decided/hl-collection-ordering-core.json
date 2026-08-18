@@ -1,0 +1,42 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "hl-collection-ordering-core",
+  "status": "DECIDED",
+  "profile": "core",
+  "input": {
+    "source": "#lang beagle\n(ns conformance.hl-collection-ordering)\n\n(defn probe []\n  (let [m0 {\"10\" :ten \"2\" :two :a :a [1 2] :compound}\n        m1 (assoc m0 :b :b)\n        m2 (assoc m1 :a :replaced)\n        m3 (dissoc m2 \"2\")\n        m4 (assoc m3 \"2\" :reinserted)\n        s0 #{\"10\" \"2\" :a [1 2]}\n        s1 (conj s0 :b)\n        s2 (disj s1 \"2\")\n        s3 (conj s2 \"2\")\n        effectful-comparator (fn [x y] (do (println x) (compare x y)))]\n    (sort effectful-comparator [2 1 1])))\n",
+    "target": "core",
+    "fileName": "probe/hl-collection-ordering.bl",
+    "command": {
+      "argv": ["check", "--profile", "core", "{input}"]
+    },
+    "closure": {
+      "kind": "single-source",
+      "ambientFiles": false
+    }
+  },
+  "rule": {
+    "id": "HL-COLLECTION-ORDERING",
+    "text": "1. List and Vec traversal is authored element order. Map and Set traversal is insertion order in every profile and representation. A map literal inserts left to right. Inserting a new key appends it; replacing an equal existing key preserves its position; deletion removes it; deletion followed by reinsertion appends it. Set insertion follows the same rules for elements.\n2. seq, keys, vals, entries, map, filter, reduce, reduce-kv, and callbacks driven by a collection observe that declared traversal order. Each callback completes before the next begins. Persistent updates preserve the relative order of unaffected entries. No iterator may expose bucket, pointer, property, or allocation order.\n3. Map/Set equality and BeagleHashV1 are order-insensitive as rule 2 states. Canonical semantic serialization, artifact identity, and digests sort map entries and set elements by their BeagleCanonicalValueV1 byte encodings; they never depend on insertion order. An unencodable/unhashable element is rejected with BEAGLE-UNHASHABLE-VALUE at collection admission, so canonical serialization is total over admitted maps and sets.\n4. sort is stable. Without a comparator it accepts only a homogeneous domain with a declared Beagle total order; otherwise it is BEAGLE-NO-TOTAL-ORDER. With a comparator, calls occur in the chosen stable sorting algorithm's comparison sequence, so an effectful comparator is statically rejected as BEAGLE-EFFECTFUL-COMPARATOR; only the sorted result, not an implementation's comparison schedule, is semantic.\n5. Construction and traversal are strict in the elements they consume. Normal lookup remains expected O(1) or O(log n) according to the declared representation contract; insertion-order preservation cannot silently worsen a form's declared complexity. Canonical sorting is explicitly O(n log n) and belongs only to serialization/hash boundaries.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering"
+  },
+  "expected": {
+    "kind": "named-diagnostic-assertion",
+    "name": "effectful-comparator-rejection",
+    "diagnosticCode": "BEAGLE-EFFECTFUL-COMPARATOR",
+    "assertion": "The effectful comparator in the stable sort case is statically rejected with BEAGLE-EFFECTFUL-COMPARATOR."
+  },
+  "coverage": {
+    "surface": ["map-ordering", "set-ordering", "persistent-updates", "stable-sort"],
+    "alarmBell": "host-collection-order-leakage",
+    "hostLeakage": ["HL-COLLECTION-ORDERING"],
+    "parityChannels": ["ordering", "equality", "hash", "canonicalization", "diagnostic", "status"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+    "date": "2026-08-18"
+  }
+}

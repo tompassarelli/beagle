@@ -17,12 +17,206 @@
       "status": "DECIDED",
       "sha256": "ece4458d8d9881d9ba262d2631cacca24837a7bb3696ef7fc231a5dea32aa190",
       "coverage": ["ALARM-BELL", "module-emission", "host-leakage"]
+    },
+    {
+      "caseId": "hl-collection-ordering-core",
+      "path": "corpus/decided/hl-collection-ordering-core.json",
+      "status": "DECIDED",
+      "sha256": "f1278fa3abf5be0e9b26455935daa902f1f4b0f5b829692a07afc6c6f38ff9c8",
+      "coverage": ["HOST-LEAKAGE", "HL-COLLECTION-ORDERING", "core"]
+    },
+    {
+      "caseId": "hl-collection-ordering-hosted-js",
+      "path": "corpus/decided/hl-collection-ordering-hosted-js.json",
+      "status": "DECIDED",
+      "sha256": "47088342884f594934e6be4c0d703f1d2a82c59ca72cf3bf22b5882699f4495d",
+      "coverage": ["HOST-LEAKAGE", "HL-COLLECTION-ORDERING", "hosted-js"]
+    },
+    {
+      "caseId": "hl-equality-hashing-core",
+      "path": "corpus/decided/hl-equality-hashing-core.json",
+      "status": "DECIDED",
+      "sha256": "0612ef9086fb781f1f6d4b8120c700920c456dd82f293d2f181d78e9a54cdd51",
+      "coverage": ["HOST-LEAKAGE", "HL-EQUALITY-HASHING", "core"]
+    },
+    {
+      "caseId": "hl-equality-hashing-hosted-js",
+      "path": "corpus/decided/hl-equality-hashing-hosted-js.json",
+      "status": "DECIDED",
+      "sha256": "b891283123ceaaa0a38bbf0e5c574deef9a8be25cb28fdcb2ef5ac2be9c4a10b",
+      "coverage": ["HOST-LEAKAGE", "HL-EQUALITY-HASHING", "hosted-js"]
+    },
+    {
+      "caseId": "hl-host-macro-expansion-core",
+      "path": "corpus/decided/hl-host-macro-expansion-core.json",
+      "status": "DECIDED",
+      "sha256": "e50d069adb9806b7464776e7b317d951a0dfbe0eff32d29e34daed96925b0a25",
+      "coverage": ["HOST-LEAKAGE", "HL-HOST-MACRO-EXPANSION", "core"]
+    },
+    {
+      "caseId": "hl-host-macro-expansion-hosted-clj",
+      "path": "corpus/decided/hl-host-macro-expansion-hosted-clj.json",
+      "status": "DECIDED",
+      "sha256": "abe928473ead7b26453abfd8efc4c163d3fb84f71dfe8abb744a41f686f66cfc",
+      "coverage": ["HOST-LEAKAGE", "HL-HOST-MACRO-EXPANSION", "hosted-clj"]
+    },
+    {
+      "caseId": "hl-host-macro-expansion-hosted-js",
+      "path": "corpus/decided/hl-host-macro-expansion-hosted-js.json",
+      "status": "DECIDED",
+      "sha256": "db1bca1feeaa68d90ce0de7fb67b8557e6cc7b09b5aa8bc8107cbf080d6402fb",
+      "coverage": ["HOST-LEAKAGE", "HL-HOST-MACRO-EXPANSION", "hosted-js"]
+    },
+    {
+      "caseId": "hl-native-core-gc-ownership-core",
+      "path": "corpus/decided/hl-native-core-gc-ownership-core.json",
+      "status": "DECIDED",
+      "sha256": "871612bc082c4cafc153aac9fe030ab941e622819d2840c1f3ac6bae2f2778a9",
+      "coverage": ["HOST-LEAKAGE", "HL-NATIVE-CORE-GC-OWNERSHIP", "core"]
+    },
+    {
+      "caseId": "hl-native-core-gc-ownership-hosted-js",
+      "path": "corpus/decided/hl-native-core-gc-ownership-hosted-js.json",
+      "status": "DECIDED",
+      "sha256": "e0736d293be5650b9721ae099ce44eb2cbefc9bb9d1aaa7f0c491a4929c820f6",
+      "coverage": ["HOST-LEAKAGE", "HL-NATIVE-CORE-GC-OWNERSHIP", "hosted-js"]
+    },
+    {
+      "caseId": "hl-number-semantics-clj",
+      "path": "corpus/decided/hl-number-semantics-clj.json",
+      "status": "DECIDED",
+      "sha256": "f07b738c8f3bd2fd6d6e261a8ddbc7103343257f42c042133ab6bd9e68bc332e",
+      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "hosted-clj"]
+    },
+    {
+      "caseId": "hl-number-semantics-core",
+      "path": "corpus/decided/hl-number-semantics-core.json",
+      "status": "DECIDED",
+      "sha256": "d208f7de51b291e97000a539533533ab982958876de6a86d4968463f22d4327a",
+      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "core"]
+    },
+    {
+      "caseId": "hl-number-semantics-js",
+      "path": "corpus/decided/hl-number-semantics-js.json",
+      "status": "DECIDED",
+      "sha256": "26a4b0295f3c879388b5590aa069a1dcfdc104f686cb9a73f197ca9138d18b58",
+      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "hosted-js"]
+    },
+    {
+      "caseId": "hl-number-semantics-nix",
+      "path": "corpus/decided/hl-number-semantics-nix.json",
+      "status": "DECIDED",
+      "sha256": "dd3a615517e11c176871900d96ce18f501b229cabc00a43fd8cd7791f21e796f",
+      "coverage": ["HOST-LEAKAGE", "HL-NUMBER-SEMANTICS", "hosted-nix"]
+    },
+    {
+      "caseId": "hl-symbol-behavior-core",
+      "path": "corpus/decided/hl-symbol-behavior-core.json",
+      "status": "DECIDED",
+      "sha256": "4396b41f0c4cdd02f7121a7f0ffd2fa1685580cb879440fbff7f30d85291ea69",
+      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "core"]
+    },
+    {
+      "caseId": "hl-symbol-behavior-hosted-clj",
+      "path": "corpus/decided/hl-symbol-behavior-hosted-clj.json",
+      "status": "DECIDED",
+      "sha256": "79284d870117bfa4da9296d50a3262fbd18f226a064906e31f3972cfb73af7d0",
+      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "hosted-clj"]
+    },
+    {
+      "caseId": "hl-symbol-behavior-hosted-js",
+      "path": "corpus/decided/hl-symbol-behavior-hosted-js.json",
+      "status": "DECIDED",
+      "sha256": "186fbc098534bedf4d610cc295c6c118795dbb207c9326eca9f49fd63719d4c4",
+      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "hosted-js"]
+    },
+    {
+      "caseId": "hl-symbol-behavior-hosted-nix",
+      "path": "corpus/decided/hl-symbol-behavior-hosted-nix.json",
+      "status": "DECIDED",
+      "sha256": "9a16d5d60187acbaa3d54c19987571072e1f000c731f7cc86bcb44e95866a23c",
+      "coverage": ["HOST-LEAKAGE", "HL-SYMBOL-BEHAVIOR", "hosted-nix"]
+    },
+    {
+      "caseId": "hl-truthiness-core",
+      "path": "corpus/decided/hl-truthiness-core.json",
+      "status": "DECIDED",
+      "sha256": "7c737d75040d65bf4fb7ab05055c162f2d4a04ccee5df32a180fcf1bbba6c8c5",
+      "coverage": ["HOST-LEAKAGE", "HL-TRUTHINESS", "core"]
+    },
+    {
+      "caseId": "hl-truthiness-hosted-clj",
+      "path": "corpus/decided/hl-truthiness-hosted-clj.json",
+      "status": "DECIDED",
+      "sha256": "d0f2c7c0cf17686d8a25bd0fa8437db5e7b23f3b41d449d8f42e219fb6f289fe",
+      "coverage": ["HOST-LEAKAGE", "HL-TRUTHINESS", "hosted-clj"]
+    },
+    {
+      "caseId": "hl-truthiness-hosted-js",
+      "path": "corpus/decided/hl-truthiness-hosted-js.json",
+      "status": "DECIDED",
+      "sha256": "2229fdbc47618e01863ef292c82551f618e68a3fc5b9d8a607c72bee0f9fe23c",
+      "coverage": ["HOST-LEAKAGE", "HL-TRUTHINESS", "hosted-js"]
+    },
+    {
+      "caseId": "hl-unspecified-behavior-as-spec-core",
+      "path": "corpus/decided/hl-unspecified-behavior-as-spec-core.json",
+      "status": "DECIDED",
+      "sha256": "081e0e06f7f793b5771497936b3c997ad40b62ec4cf81d37b5f58377eb5de5aa",
+      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "core"]
+    },
+    {
+      "caseId": "hl-unspecified-behavior-as-spec-hosted-js",
+      "path": "corpus/decided/hl-unspecified-behavior-as-spec-hosted-js.json",
+      "status": "DECIDED",
+      "sha256": "fd64a74b7ac1caaee498a66349f8c311ae151ca043392e60c1b599777d869fd4",
+      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "hosted-js"]
+    },
+    {
+      "caseId": "hl-unspecified-behavior-as-spec-hosted-racket",
+      "path": "corpus/decided/hl-unspecified-behavior-as-spec-hosted-racket.json",
+      "status": "DECIDED",
+      "sha256": "4972141e36198aef349dabfab15bb273e10df4d17c55ac7486dcf5e17470677f",
+      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "hosted-racket"]
+    },
+    {
+      "caseId": "hl-unspecified-behavior-as-spec-native-core",
+      "path": "corpus/decided/hl-unspecified-behavior-as-spec-native-core.json",
+      "status": "DECIDED",
+      "sha256": "c82009d6747c273cbddd7ef2a9767ada43709a6e6851504e87cc6c66ad35c6d6",
+      "coverage": ["HOST-LEAKAGE", "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC", "native-core"]
     }
   ],
   "requiredCoverage": {
     "alarmBell": [
       "alarm-bell-e003-number-alias-nominal",
       "alarm-bell-namespace-to-module-path"
+    ],
+    "hostLeakage": [
+      "hl-collection-ordering-core",
+      "hl-collection-ordering-hosted-js",
+      "hl-equality-hashing-core",
+      "hl-equality-hashing-hosted-js",
+      "hl-host-macro-expansion-core",
+      "hl-host-macro-expansion-hosted-clj",
+      "hl-host-macro-expansion-hosted-js",
+      "hl-native-core-gc-ownership-core",
+      "hl-native-core-gc-ownership-hosted-js",
+      "hl-number-semantics-clj",
+      "hl-number-semantics-core",
+      "hl-number-semantics-js",
+      "hl-number-semantics-nix",
+      "hl-symbol-behavior-core",
+      "hl-symbol-behavior-hosted-clj",
+      "hl-symbol-behavior-hosted-js",
+      "hl-symbol-behavior-hosted-nix",
+      "hl-truthiness-core",
+      "hl-truthiness-hosted-clj",
+      "hl-truthiness-hosted-js",
+      "hl-unspecified-behavior-as-spec-core",
+      "hl-unspecified-behavior-as-spec-hosted-js",
+      "hl-unspecified-behavior-as-spec-hosted-racket",
+      "hl-unspecified-behavior-as-spec-native-core"
     ]
   }
 }

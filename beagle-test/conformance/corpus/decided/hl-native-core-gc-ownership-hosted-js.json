@@ -1,0 +1,62 @@
+{
+  "schema": "BeagleConformanceCaseV1",
+  "corpusVersion": 1,
+  "caseId": "hl-native-core-gc-ownership-hosted-js",
+  "status": "DECIDED",
+  "profile": "hosted-js",
+  "input": {
+    "source": "#lang beagle/js\n(ns conformance.hl-native-core-gc-ownership)\n\n;; Controlled allocator fixture, seed 0, owned by this case.\n;; Create a young nested record/vector/Text, promote it, poison and close\n;; the young arena, force allocation and collection pressure, then assert\n;; canonical bytes and value. Also attempt an unpromoted escape, attempt to\n;; admit a capability to Store, and store the promoted semantic data before\n;; closing the root arena.\n",
+    "target": "js",
+    "fileName": "conformance/hl-native-core-gc-ownership-hosted-js.bjs",
+    "command": {
+      "argv": ["check", "--profile", "hosted-js", "{input}"]
+    },
+    "closure": {
+      "kind": "controlled-allocator-fixture",
+      "ambientFiles": false,
+      "allocator": {
+        "seed": 0,
+        "ownedByCase": true
+      }
+    }
+  },
+  "rule": {
+    "id": "HL-NATIVE-CORE-GC-OWNERSHIP",
+    "text": "A GC-hosted profile must discharge the same ownership and escape obligations. bgl/promote is an explicit deep semantic copy; host reachability cannot discharge ownership, and Store admits only canonical durable semantic data.",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#HL-NATIVE-CORE-GC-OWNERSHIP"
+  },
+  "expected": {
+    "kind": "named-diagnostic-assertion",
+    "name": "hl-native-core-gc-ownership-smallest-deterministic-case",
+    "assertions": [
+      {
+        "name": "promoted-value-survives-young-arena-close",
+        "assertion": "canonical-bytes-and-value-remain-valid-after-young-arena-close-and-allocation-collection-pressure"
+      },
+      {
+        "name": "unpromoted-young-handle-escape",
+        "diagnostic": "BEAGLE-REGION-ESCAPE"
+      },
+      {
+        "name": "capability-admission-to-store",
+        "diagnostic": "BEAGLE-NONDURABLE-VALUE"
+      },
+      {
+        "name": "stored-promoted-data-survives-root-arena-close",
+        "assertion": "identical-canonical-bytes-after-root-arena-close"
+      }
+    ]
+  },
+  "coverage": {
+    "surface": ["nested-record-vector-text", "region-promotion", "store-admission"],
+    "alarmBell": [],
+    "hostLeakage": "HL-NATIVE-CORE-GC-OWNERSHIP",
+    "parityChannels": ["diagnostic", "canonical-value", "status"]
+  },
+  "decision": {
+    "owner": "language-contract-authority",
+    "reviewer": "leakage-rules-decided",
+    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#HL-NATIVE-CORE-GC-OWNERSHIP",
+    "date": "2026-08-18"
+  }
+}
