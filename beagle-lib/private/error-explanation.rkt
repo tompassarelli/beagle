@@ -162,6 +162,14 @@
       "Use the pointed suggestion, import or define the function, or declare an intentional host binding with declare-extern."
       #:since "0.17")
 
+   (E "BEAGLE-UNSPECIFIED-SEMANTICS" "Missing semantic contract"
+      "A call has no local, imported, built-in, or explicitly declared external semantic contract."
+      "An undeclared call would otherwise inherit target-specific behavior or fail only after compilation."
+      "(host-operation value)  ;; ERROR: no semantic contract"
+      "(declare-extern host-operation (Fn [Any] Any))\n(host-operation value)"
+      "Define or import the function, declare an intentional external boundary, or fix the name."
+      #:since "0.18")
+
    (E "E028" "Invalid scalar constraint declaration"
       "A defscalar :where predicate is incompatible with the scalar backing type."
       "The :where grammar compares the backing value to a numeric literal, so it requires a numeric primitive backing type."

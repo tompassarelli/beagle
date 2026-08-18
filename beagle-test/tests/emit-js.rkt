@@ -203,11 +203,11 @@
      (check-exn
       (lambda (e)
         (and (beagle-diagnostic? e)
-             (eq? (beagle-diagnostic-kind e) 'unresolved-call)
+             (eq? (beagle-diagnostic-kind e) 'unspecified-semantics)
              (equal? (hash-ref (beagle-diagnostic-details e)
                                'error-code
                                #f)
-                     "E027")
+                     "BEAGLE-UNSPECIFIED-SEMANTICS")
              (regexp-match? #rx"pointergesture-pointer-id" (exn-message e))))
       (lambda ()
         (set! result

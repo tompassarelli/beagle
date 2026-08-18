@@ -144,6 +144,7 @@
    'error-contract       'type-error
    'missing-export       'type-error
    'unresolved-call      'type-error
+   'unspecified-semantics 'type-error
    'native-abi           'type-error
    'numeric-range        'type-error
    'effectful-comparator 'type-error

@@ -129,9 +129,16 @@ def run_case(case, compiler, repo_root):
                 if needle and needle not in combined:
                     return "diagnostic missing semanticErrorId={!r}".format(needle)
             return None
-        if canonicalize(result.stdout, temp_root) != normalize(expected.get("stdout", "")):
+        for assertion in expected.get("assertions", []):
+            if assertion.get("kind") == "named-diagnostic":
+                needle = assertion.get("diagnosticId")
+                if needle and needle not in combined:
+                    return "diagnostic missing diagnosticId={!r}".format(needle)
+        if ("stdout" in expected and
+                canonicalize(result.stdout, temp_root) != normalize(expected["stdout"])):
             return "stdout differs from canonical output: {!r}".format(result.stdout[:400])
-        if canonicalize(result.stderr, temp_root) != normalize(expected.get("stderr", "")):
+        if ("stderr" in expected and
+                canonicalize(result.stderr, temp_root) != normalize(expected["stderr"])):
             return "stderr differs from canonical output: {!r}".format(result.stderr[:400])
         for artifact in expected.get("artifacts", []):
             artifact_path = temp_root / artifact["path"]

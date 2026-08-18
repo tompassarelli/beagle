@@ -110,6 +110,10 @@
 (define (builtin-env-for-target target)
   (stdlib-for-target target))
 
+;; Forward declarations are compile-time directives carried through the AST for
+;; backend consumption, not calls whose meaning comes from the value environment.
+(define COMPILE-TIME-CALLS (seteq 'declare))
+
 (define ANY (type-prim 'Any))
 (define NIL (type-prim 'Nil))
 (define REGEX (type-prim 'Regex))
@@ -507,6 +511,7 @@
     [(allocation-contract) "E024"]
     [(missing-export)      "E026"]
     [(unresolved-call)     "E027"]
+    [(unspecified-semantics) "BEAGLE-UNSPECIFIED-SEMANTICS"]
     [(native-abi)          "E029"]
     [(contract-refinement) "E030"]
     [(numeric-range)       "BEAGLE-NUMERIC-RANGE"]
@@ -2306,28 +2311,30 @@
        (when (>= (current-check-profile) 3)
          (hash-set! UNION-MEMBERS name members)
          (hash-set! env name
-                    (type-union (map (lambda (m) (type-prim m)) members)))
-         (when member-fields
-           (for ([m (in-list members)])
-             (define fields (hash-ref member-fields m '()))
-             ;; Zero-field throwable members still own a nullary constructor;
-             ;; local checking must expose the same ABI as module interfaces
-             ;; and every backend emitter.
-             (hash-set! RECORD-FIELDS m
-                        (for/hasheq ([fld (in-list fields)])
-                          (values
-                           (string->symbol
-                            (string-append ":" (symbol->string (param-name fld))))
-                           (or (param-type fld) ANY))))
-             (hash-set! RECORD-FIELD-ORDER m
-                        (map (lambda (fld)
-                               (string->symbol
-                                (string-append ":" (symbol->string (param-name fld)))))
-                             fields))
-             (hash-set! env (string->symbol (string-append "->" (symbol->string m)))
-                        (type-fn (map (lambda (f) (or (param-type f) ANY)) fields)
-                                 #f
-                                 (type-prim m))))))]
+                    (type-union (map (lambda (m) (type-prim m)) members))))
+       ;; The profile guard controls exhaustive throwable analysis, not the
+       ;; constructors and accessors that every emitter exposes.
+       (when member-fields
+         (for ([m (in-list members)])
+           (define fields (hash-ref member-fields m '()))
+           ;; Zero-field throwable members still own a nullary constructor;
+           ;; local checking must expose the same ABI as module interfaces
+           ;; and every backend emitter.
+           (hash-set! RECORD-FIELDS m
+                      (for/hasheq ([fld (in-list fields)])
+                        (values
+                         (string->symbol
+                          (string-append ":" (symbol->string (param-name fld))))
+                         (or (param-type fld) ANY))))
+           (hash-set! RECORD-FIELD-ORDER m
+                      (map (lambda (fld)
+                             (string->symbol
+                              (string-append ":" (symbol->string (param-name fld)))))
+                           fields))
+           (hash-set! env (string->symbol (string-append "->" (symbol->string m)))
+                      (type-fn (map (lambda (f) (or (param-type f) ANY)) fields)
+                               #f
+                               (type-prim m)))))]
       [(defscalar-form name backing preds)
        (define scalar-type (type-prim name))
        (define backing-type (type-prim backing))
@@ -6442,15 +6449,15 @@
      (check-effectful-sort-comparator! e env)
      (define ref (call-form-fn e))
      (define fn ref)
-     (when (and (eq? (current-check-target) 'js)
-                (symbol? fn)
-                (not (hash-has-key? env fn))
+     (when (and (symbol? fn)
+                (not (call-form-env-ref env e #f))
+                (not (set-member? COMPILE-TIME-CALLS fn))
                 (not (string-contains? (symbol->string fn) "/")))
        (define suggestion (call-name-suggestion fn env))
        (raise-diag
-        'unresolved-call
+        'unspecified-semantics
         (format
-         "unresolved function `~a` on the js target; it would emit a free JavaScript reference~a. Define or import it, declare an intentional host binding with declare-extern, or fix the name."
+         "BEAGLE-UNSPECIFIED-SEMANTICS: function `~a` has no semantic contract~a. Define or import it, declare an intentional host binding with declare-extern, or fix the name."
          fn
          (if suggestion (format "; did you mean `~a`" suggestion) ""))
         (hasheq 'function (symbol->string fn)

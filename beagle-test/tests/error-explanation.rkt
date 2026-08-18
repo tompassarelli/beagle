@@ -25,6 +25,7 @@
     scalar-predicate scalar-predicate-declaration type-bound target-form sql-group-by sql-table
     sql-column sql-type nixos-unknown-option nixos-type-mismatch
     template-splice macro-expansion-type-error unresolved-alias unresolved-call
+    unspecified-semantics
     native-abi))
 
 (test-case "every code raise-diag can stamp has a registry entry"

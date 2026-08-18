@@ -179,7 +179,7 @@
                     (constructor [(message String)] Nil (js/return)))
                  '(defn stray [(message String)] Any (super message)))))])
          (check-exn
-          #rx"unresolved function `super`"
+          #rx"BEAGLE-UNSPECIFIED-SEMANTICS.*`super`"
           (lambda () (type-check! (jst-parse forms))))))
 
      (test-case "js/class rejected in CLJ target"

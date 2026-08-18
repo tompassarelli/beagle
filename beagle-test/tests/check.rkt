@@ -220,6 +220,22 @@
 (check-ok "known builtin call type-checks"
   '(def x Int (+ 1 1)))
 
+(check-err/rx "missing callable contract fails closed before execution"
+  #rx"BEAGLE-UNSPECIFIED-SEMANTICS.*unknown-operation"
+  '(defn probe [] Any (unknown-operation 1)))
+
+(check-ok "forward declaration is a compile-time contract"
+  '(declare later)
+  '(defn later [] Int 1))
+
+(check-ok "throwable constructors have contracts at the default profile"
+  `(defunion :throwable Failure (Bad ,(br '(code Int))))
+  '(defn failure [] Bad (->Bad 1)))
+
+(check-ok "declare-extern supplies an intentional callable contract"
+  (list 'declare-extern 'host-operation (fn-ty '(Any) 'Any))
+  '(defn probe [] Any (host-operation 1)))
+
 (check-module-ok "Number arithmetic satisfies a declared Number return"
   "(defn c [(x Number)] Number (+ x 1))")
 
@@ -1772,7 +1788,7 @@ BEAGLE
   '(def x Any (tgt/keep-target "" true true)))
 
 (check-err/rx "js: unresolved record accessor points at the canonical name"
-  #rx"unresolved function `pointer-gesture-pointer-id`.*did you mean `pointergesture-pointer-id`"
+  #rx"BEAGLE-UNSPECIFIED-SEMANTICS.*`pointer-gesture-pointer-id`.*did you mean `pointergesture-pointer-id`"
   '(define-target js)
   '(defrecord PointerGesture [(pointer-id Float)])
   '(defn read-pointer [(gesture PointerGesture)] Float
