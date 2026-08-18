@@ -865,11 +865,12 @@
 (defn- scope-walk-conditional-binding! [value table path ctx]
   (let [children (scope-sequence-children value)
    bindings (scope-walk-sequential-bindings! (nth children 1) table (conj (vec path) 1) ctx)
-   head (scope-syntax-datum! (nth children 0))]
+   head (scope-syntax-datum! (nth children 0))
+   indices (vec (range (count children)))]
   (rebuild-scope-sequence! value (mapv (fn [index] (cond
   (= index 1) (get bindings "value")
   (and (>= index 2) (or (has-item? ["when-let" "when-some"] head) (= index 2))) (scope-walk* (syntax-add-scopes! (nth children index) (get bindings "scopes")) (get bindings "table") (conj (vec path) index) ctx)
-  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) (range (count children))))))
+  :else (scope-walk* (nth children index) table (conj (vec path) index) ctx))) indices))))
 
 (defn- scope-walk-single-binder! [value table path ctx binder-index body-start ^String binding-kind]
   (let [children (scope-sequence-children value)
