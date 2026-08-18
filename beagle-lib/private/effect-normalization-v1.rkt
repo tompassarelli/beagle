@@ -30,7 +30,10 @@
   (cond
     [(not value) #f]
     [(type? value) (type-name value)]
-    [(pair? value) (map failure-value value)]
+    [(list? value) (map failure-value value)]
+    [(pair? value)
+     (cons (failure-value (car value))
+           (failure-value (cdr value)))]
     [(vector? value) (for/vector ([item (in-vector value)])
                        (failure-value item))]
     [else value]))
