@@ -10,7 +10,7 @@
          "canonical-value-v1.rkt"
          "parse.rkt")
 
-(define SEMANTIC-PROFILES-V1 '(core hosted-clj hosted-js))
+(define SEMANTIC-PROFILES-V1 '(core hosted-clj hosted-js hosted-nix))
 
 (struct fact-kind-encoder-v1 (kind schema-version encode-payload)
   #:transparent
@@ -229,6 +229,7 @@
     [(core) 'core]
     [(clj hosted-clj) 'hosted-clj]
     [(js hosted-js) 'hosted-js]
+    [(nix hosted-nix) 'hosted-nix]
     [else
      (fail 'semantic-profile-v1-for-target
            "unknown compiler target"
