@@ -20,6 +20,12 @@
   (BodySuccessV0 [(artifact BodyArtifactV0)])
   (BodyFailureV0 [(detail String)]))
 
+(defrecord BodyFunctionFragmentV0 [(function-index Int) (text String)])
+
+(defunion BodyFunctionBatchV0
+  (BodyFunctionBatchSuccessV0 [(fragments (Vec BodyFunctionFragmentV0))])
+  (BodyFunctionBatchFailureV0 [(detail String)]))
+
 (defrecord ValueSlotV0 [(id core/NativeId) (type-id core/NativeId)])
 
 ;; Text and Keyword literals become length-prefixed constant blobs. Their
@@ -3676,10 +3682,9 @@
               "  return INT32_C(0);\n"
               "}\n\n")))))))
 
-(defn emit-source
+(defn emit-source-prefix
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
-   (regions (Vec core/RegionDef))
    (functions (Vec core/FunctionDef))
    (abis (Vec core/AbiDeclV0))
    (module-index Int)
@@ -3704,7 +3709,22 @@
     (emit-internal-function-prototypes types functions abis module-index)
     (emit-text-pool module-index pool)
     (emit-value-descriptors types layouts functions module-index)
-    (emit-parallel-adapters types functions module-index)
+    (emit-parallel-adapters types functions module-index)))
+
+(defn emit-source
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (regions (Vec core/RegionDef))
+   (functions (Vec core/FunctionDef))
+   (abis (Vec core/AbiDeclV0))
+   (module-index Int)
+   (pool ConstantPoolV0)
+   (header-name String)
+   (plans (Vec simd/SimdLoopPlanV0))]
+  String
+  (str
+    (emit-source-prefix types layouts functions abis module-index pool
+      header-name plans)
     (emit-functions types layouts regions functions abis module-index pool
       plans)))
 
@@ -3752,6 +3772,56 @@
             (emit-source types layouts (core/nativecoreprogram-regions program)
               functions abis module-index pool header-name plans)))))))
 
+(defn materialize-program-plans-with-function-text
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (abi-id String)
+   (plans (Vec simd/SimdLoopPlanV0))
+   (function-text String)]
+  BodyMaterializationV0
+  (let [(validation core/ValidationReport) (core/validate-program program)]
+    (cond
+      (< module-index 0)
+      (->BodyFailureV0 "module index must be nonnegative")
+
+      (and (not (= abi-id "lp64"))
+        (functions-use-parallel? (core/nativecoreprogram-functions program)))
+      (->BodyFailureV0
+        "shared-memory-worker-host-envelope-unavailable")
+
+      (not (core/validationreport-passed validation))
+      (->BodyFailureV0 "native program is not frozen: validation obligations failed")
+
+      (not (program-supported? program))
+      (->BodyFailureV0
+        "native program uses a shape outside the restricted C17 body slice")
+
+      (not (pool-emittable?
+             (collect-pool (core/nativecoreprogram-functions program))))
+      (->BodyFailureV0
+        "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
+
+      :else
+      (let [(layouts (Vec core/LayoutDef))
+            (core/nativecoreprogram-layouts program)
+            (types (Vec core/TypeDef))
+            (c17/dependency-ordered-types
+              (core/nativecoreprogram-types program) layouts)
+            (functions (Vec core/FunctionDef))
+            (c17/ordered-functions (core/nativecoreprogram-functions program))
+            (abis (Vec core/AbiDeclV0)) (core/nativecoreprogram-abis program)
+            (pool ConstantPoolV0) (collect-pool functions)
+            (header-name String) (str "module_" module-index ".h")]
+        (->BodySuccessV0
+          (->BodyArtifactV0
+            header-name
+            (emit-public-header types layouts functions abis module-index)
+            (str "module_" module-index ".c")
+            (str
+              (emit-source-prefix types layouts functions abis module-index pool
+                header-name plans)
+              function-text)))))))
+
 (defn materialize-program-for-abi
   [(program core/NativeCoreProgram)
    (module-index Int)
@@ -3775,3 +3845,93 @@
       (->BodyFailureV0
         "SimdPlanV0 contains no eligible-elementwise-f64-v0 loop")
       (materialize-program-plans program module-index "lp64" eligible))))
+
+;; A worker batch carries absolute indexes into the canonical function order.
+;; Fragments are independent, but their indexes are not local to a worker:
+;; generated names and cross-function calls use the whole-program position.
+(defn canonical-function-indexes?
+  [(indexes (Vec Int)) (function-count Int)] Bool
+  (loop [(position Int) 0 (previous Int) -1]
+    (if (>= position (count indexes))
+      true
+      (let [(current Int) (nth indexes position)]
+        (if (or (< current 0)
+              (>= current function-count)
+              (<= current previous))
+          false
+          (recur (+ position 1) current))))))
+
+(defn function-batch-ok? [(result BodyFunctionBatchV0)] Bool
+  (match result
+    [(BodyFunctionBatchSuccessV0 fragments) true]
+    [(BodyFunctionBatchFailureV0 detail) false]))
+
+(defn function-batch-detail [(result BodyFunctionBatchV0)] String
+  (match result
+    [(BodyFunctionBatchSuccessV0 fragments) ""]
+    [(BodyFunctionBatchFailureV0 detail) detail]))
+
+(defn function-batch-fragments
+  [(result BodyFunctionBatchV0)] (Vec BodyFunctionFragmentV0)
+  (match result
+    [(BodyFunctionBatchSuccessV0 fragments) fragments]
+    [(BodyFunctionBatchFailureV0 detail) []]))
+
+(defn materialize-function-indexes
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (abi-id String)
+   (plans (Vec simd/SimdLoopPlanV0))
+   (function-indexes (Vec Int))]
+  BodyFunctionBatchV0
+  (let [(validation core/ValidationReport) (core/validate-program program)]
+    (cond
+      (< module-index 0)
+      (->BodyFunctionBatchFailureV0 "module index must be nonnegative")
+
+      (and (not (= abi-id "lp64"))
+        (functions-use-parallel? (core/nativecoreprogram-functions program)))
+      (->BodyFunctionBatchFailureV0
+        "shared-memory-worker-host-envelope-unavailable")
+
+      (not (core/validationreport-passed validation))
+      (->BodyFunctionBatchFailureV0
+        "native program is not frozen: validation obligations failed")
+
+      (not (program-supported? program))
+      (->BodyFunctionBatchFailureV0
+        "native program uses a shape outside the restricted C17 body slice")
+
+      (not (pool-emittable?
+             (collect-pool (core/nativecoreprogram-functions program))))
+      (->BodyFunctionBatchFailureV0
+        "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
+
+      :else
+      (let [(layouts (Vec core/LayoutDef))
+            (core/nativecoreprogram-layouts program)
+            (types (Vec core/TypeDef))
+            (c17/dependency-ordered-types
+              (core/nativecoreprogram-types program) layouts)
+            (functions (Vec core/FunctionDef))
+            (c17/ordered-functions (core/nativecoreprogram-functions program))
+            (abis (Vec core/AbiDeclV0)) (core/nativecoreprogram-abis program)
+            (pool ConstantPoolV0) (collect-pool functions)]
+        (if-not (canonical-function-indexes?
+                  function-indexes (count functions))
+          (->BodyFunctionBatchFailureV0
+            "function indexes must be strictly increasing, unique, and in canonical range")
+          (->BodyFunctionBatchSuccessV0
+            (loop [(position Int) 0
+                   (fragments (Vec BodyFunctionFragmentV0)) []]
+              (if (>= position (count function-indexes))
+                fragments
+                (let [(function-index Int)
+                      (nth function-indexes position)]
+                  (recur (+ position 1)
+                    (conj fragments
+                      (->BodyFunctionFragmentV0 function-index
+                        (emit-function types layouts
+                          (core/nativecoreprogram-regions program)
+                          functions abis module-index pool function-index
+                          (nth functions function-index) plans)))))))))))))

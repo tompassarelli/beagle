@@ -4,6 +4,7 @@
 # Usage:
 #   beagle build --materializer c17|qbe|wasm [...] --out DIR
 #     [--abi lp64|wasm32] [--entry NS/NAME]... [--simd]
+#     [--emit-workers N]
 #     [--module-root LOGICAL_PREFIX=PHYSICAL_DIRECTORY]... SOURCE.bgl...
 #
 # A successful run always writes the authoritative frozen native program encoding
@@ -144,6 +145,7 @@ entries=()
 module_roots=()
 sources=()
 simd_required=0
+emit_workers=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -199,6 +201,17 @@ while [[ $# -gt 0 ]]; do
             simd_required=1
             shift
             ;;
+        --emit-workers)
+            [[ $# -ge 2 ]] || die "--emit-workers needs a positive integer"
+            [[ -z "$emit_workers" ]] || die "--emit-workers may be specified only once"
+            emit_workers="$2"
+            shift 2
+            ;;
+        --emit-workers=*)
+            [[ -z "$emit_workers" ]] || die "--emit-workers may be specified only once"
+            emit_workers="${1#*=}"
+            shift
+            ;;
         --help|-h)
             usage
             exit 0
@@ -220,6 +233,17 @@ done
 
 [[ -n "$out" ]] || die "--out DIR is required"
 [[ ${#materializers[@]} -gt 0 ]] || die "at least one --materializer is required"
+if [[ -z "$emit_workers" ]]; then
+    if command -v nproc >/dev/null 2>&1; then
+        emit_workers="$(nproc)"
+    elif command -v getconf >/dev/null 2>&1; then
+        emit_workers="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')"
+    else
+        emit_workers=1
+    fi
+fi
+[[ "$emit_workers" =~ ^[1-9][0-9]*$ ]] ||
+    die "--emit-workers expects a positive integer, got: $emit_workers"
 declare -A seen_materializers=()
 wasm_selected=false
 for materializer in "${materializers[@]}"; do
@@ -1148,6 +1172,16 @@ export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
 export BEAGLE_CORE_ABI="$abi"
 export BEAGLE_CORE_SIMD_REQUIRED="$simd_required"
+export BEAGLE_CORE_EMIT_WORKERS="$emit_workers"
+export BEAGLE_CORE_EMIT_COMPILED="$compiled"
+export BEAGLE_CORE_EMIT_SUPERVISOR="$SUPERVISOR"
+export BEAGLE_CORE_EMIT_RACKET="$RACKET"
+export BEAGLE_CORE_EMIT_BB="$(command -v bb)"
+export BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS=\
+"${BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS:-${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}}"
+export BEAGLE_CORE_EMIT_KILL_GRACE_SECONDS="$core_kill_grace"
+export BEAGLE_CORE_EMIT_WORK_ROOT="$work/emission-workers"
+mkdir -p "$BEAGLE_CORE_EMIT_WORK_ROOT"
 export BEAGLE_CORE_REPORT="$work/progress.txt"
 printf '%s\n' "${entries[@]}" >"$work/entries"
 export BEAGLE_CORE_ENTRIES="$work/entries"
@@ -1193,7 +1227,8 @@ bb -cp "$compiled" -e '
          (quote [clojure.java.shell :as shell])
          (quote [clojure.string :as str]))
 
-(import (quote [java.lang ProcessHandle])
+(import (quote [java.io File])
+        (quote [java.lang ProcessBuilder ProcessBuilder$Redirect ProcessHandle])
         (quote [java.nio ByteBuffer])
         (quote [java.nio.channels FileChannel])
         (quote [java.nio.charset StandardCharsets])
@@ -1746,6 +1781,166 @@ bb -cp "$compiled" -e '
        (body-slice/obligation-report "obligation-projection" verdicts)
        (body-slice/failing-obligation-verdicts verdicts)))
 
+;; Function bodies are independent after the program and every canonical
+;; whole-program table have frozen.  Workers receive absolute positions in the
+;; canonical function order and write one isolated fragment per position.  The
+;; coordinator alone concatenates those fragments, in absolute order.
+(def emission-worker-code
+  (str
+   "(require (quote [clojure.string :as str])\n"
+   "         (quote [native.body-c17 :as body])\n"
+   "         (quote [native.qbe :as qbe])\n"
+   "         (quote [native.stages :as stages]))\n"
+   "(let [[backend wire-path worker-dir indexes-text abi-id] *command-line-args*\n"
+   "      result-path (str worker-dir \"/result\")\n"
+   "      error-path (str worker-dir \"/error.txt\")]\n"
+   "  (try\n"
+   "    (let [program (stages/decode-native-core-program-wire-v1 (slurp wire-path))\n"
+   "          indexes (mapv #(Long/parseLong %) (str/split indexes-text #\",\"))]\n"
+   "      (when (nil? program)\n"
+   "        (throw (ex-info \"worker could not decode canonical native program\" {})))\n"
+   "      (let [batch (case backend\n"
+   "                    \"c17\" (body/materialize-function-indexes\n"
+   "                              program 0 abi-id [] indexes)\n"
+   "                    \"qbe\" (qbe/materialize-function-indexes\n"
+   "                              program 0 abi-id indexes)\n"
+   "                    (throw (ex-info \"unknown emission backend\"\n"
+   "                                    {:backend backend})))\n"
+   "            ok? (case backend\n"
+   "                  \"c17\" (body/function-batch-ok? batch)\n"
+   "                  \"qbe\" (qbe/function-batch-ok? batch))]\n"
+   "        (if-not ok?\n"
+   "          (do\n"
+   "            (spit error-path\n"
+   "                  (case backend\n"
+   "                    \"c17\" (body/function-batch-detail batch)\n"
+   "                    \"qbe\" (qbe/function-batch-detail batch)))\n"
+   "            (spit result-path \"REFUSED\\n\")\n"
+   "            (System/exit 1))\n"
+   "          (do\n"
+   "            (doseq [fragment\n"
+   "                    (case backend\n"
+   "                      \"c17\" (body/function-batch-fragments batch)\n"
+   "                      \"qbe\" (qbe/function-batch-fragments batch))]\n"
+   "              (let [index (case backend\n"
+   "                            \"c17\" (body/bodyfunctionfragmentv0-function-index fragment)\n"
+   "                            \"qbe\" (qbe/qbefunctionfragmentv0-function-index fragment))\n"
+   "                    text (case backend\n"
+   "                           \"c17\" (body/bodyfunctionfragmentv0-text fragment)\n"
+   "                           \"qbe\" (qbe/qbefunctionfragmentv0-text fragment))]\n"
+   "                (spit (format \"%s/fragment-%012d.part\" worker-dir index) text)))\n"
+   "            (spit result-path \"OK\\n\")))))\n"
+   "    (catch Throwable error\n"
+   "      (spit error-path\n"
+   "            (str (.getName (class error)) \": \"\n"
+   "                 (or (ex-message error) \"unknown worker error\") \"\\n\"))\n"
+   "      (spit result-path \"ERROR\\n\")\n"
+   "      (System/exit 2))))\n"))
+
+(defn emission-worker-indexes [function-count worker-count worker-index]
+  (vec (range worker-index function-count worker-count)))
+
+(defn launch-emission-worker!
+  [backend wire-path function-count worker-count worker-index abi-id]
+  (let [root (System/getenv "BEAGLE_CORE_EMIT_WORK_ROOT")
+        worker-dir (str root "/" backend "-" worker-index)
+        _created (.mkdirs (File. worker-dir))
+        indexes (emission-worker-indexes function-count worker-count worker-index)
+        index-argument (str/join "," indexes)
+        stdout-path (str worker-dir "/stdout.log")
+        stderr-path (str worker-dir "/stderr.log")
+        receipt-path (str worker-dir "/supervisor.receipt")
+        command [(System/getenv "BEAGLE_CORE_EMIT_RACKET")
+                 (System/getenv "BEAGLE_CORE_EMIT_SUPERVISOR")
+                 (System/getenv "BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS")
+                 (System/getenv "BEAGLE_CORE_EMIT_KILL_GRACE_SECONDS")
+                 "--"
+                 (System/getenv "BEAGLE_CORE_EMIT_BB")
+                 "-cp" (System/getenv "BEAGLE_CORE_EMIT_COMPILED")
+                 "-e" emission-worker-code
+                 backend wire-path worker-dir index-argument abi-id]
+        builder (ProcessBuilder. (into-array String command))]
+    (.put (.environment builder)
+          "BEAGLE_BOUNDED_COMPLETION_RECEIPT" receipt-path)
+    (.redirectOutput builder (ProcessBuilder$Redirect/to (File. stdout-path)))
+    (.redirectError builder (ProcessBuilder$Redirect/to (File. stderr-path)))
+    {:index worker-index
+     :worker-dir worker-dir
+     :receipt-path receipt-path
+     :process (.start builder)}))
+
+(defn await-emission-worker [worker]
+  (let [status (.waitFor (:process worker))
+        receipt (if (.isFile (File. (:receipt-path worker)))
+                  (str/trim (slurp (:receipt-path worker)))
+                  "")
+        expected (if (= status 124)
+                   "subtree-reaped-v0 timeout status=124"
+                   (str "subtree-reaped-v0 exit status=" status))
+        result-path (str (:worker-dir worker) "/result")
+        result (if (.isFile (File. result-path))
+                 (str/trim (slurp result-path))
+                 "MISSING")]
+    (assoc worker :status status :receipt receipt :expected expected :result result)))
+
+(defn emission-worker-error [worker]
+  (let [path (str (:worker-dir worker) "/error.txt")]
+    (if (.isFile (File. path))
+      (str/trim (slurp path))
+      (let [stderr-path (str (:worker-dir worker) "/stderr.log")]
+        (if (.isFile (File. stderr-path))
+          (str/trim (slurp stderr-path))
+          "worker produced no diagnostic")))))
+
+(defn parallel-function-text [backend program abi-id]
+  (let [function-count (count (core/nativecoreprogram-functions program))
+        requested (Long/parseLong (System/getenv "BEAGLE_CORE_EMIT_WORKERS"))
+        worker-count (min requested function-count)]
+    (if (= function-count 0)
+      {:ok? true :text ""}
+      (let [root (System/getenv "BEAGLE_CORE_EMIT_WORK_ROOT")
+            wire-path (str root "/" backend ".native-program-wire-v1")
+            _wire (spit wire-path
+                        (stages/encode-native-core-program-wire-v1 program))
+            workers (mapv #(launch-emission-worker!
+                            backend wire-path function-count worker-count % abi-id)
+                          (range worker-count))
+            completed (mapv await-emission-worker workers)
+            failure (first
+                     (filter #(or (not= (:receipt %) (:expected %))
+                                  (not= (:status %) 0)
+                                  (not= (:result %) "OK"))
+                             completed))]
+        (if (some? failure)
+          (if (and (= (:status failure) 1)
+                   (= (:result failure) "REFUSED")
+                   (= (:receipt failure) (:expected failure)))
+            {:ok? false :detail (emission-worker-error failure)}
+            (throw
+             (ex-info
+              (str backend " emission worker " (:index failure) " failed: "
+                   (emission-worker-error failure))
+              {:backend backend
+               :worker (:index failure)
+               :status (:status failure)
+               :receipt (:receipt failure)
+               :expected-receipt (:expected failure)
+               :result (:result failure)})))
+          {:ok? true
+           :text
+           (apply str
+                  (map
+                   (fn [function-index]
+                     (str (if (and (= backend "qbe")
+                                   (> function-index 0))
+                            "\n" "")
+                          (slurp
+                           (format "%s/%s-%d/fragment-%012d.part"
+                                   root backend
+                                   (mod function-index worker-count)
+                                   function-index))))
+                   (range function-count)))})))))
+
 (defn emit-c17-materialization!
   [result artifacts-dir stage-name report-name report input-digest
    compiler-commit configuration]
@@ -1784,7 +1979,17 @@ bb -cp "$compiled" -e '
   [projected artifacts-dir plan simd-required? abi-id input-digest
    compiler-commit configuration]
   (start-stage! "materialization-c17")
-  (let [result (cond
+  (let [parallel? (and (not simd-required?)
+                       (> (Long/parseLong
+                           (System/getenv "BEAGLE_CORE_EMIT_WORKERS")) 1)
+                       (> (count (core/nativecoreprogram-functions projected)) 1))
+        result (cond
+                 parallel?
+                 (let [batch (parallel-function-text "c17" projected abi-id)]
+                   (if (:ok? batch)
+                     (body/materialize-program-plans-with-function-text
+                      projected 0 abi-id [] (:text batch))
+                     (body/->BodyFailureV0 (:detail batch))))
                  (not simd-required?)
                  (body/materialize-program-for-abi projected 0 abi-id)
                  (not= abi-id "lp64")
@@ -1821,7 +2026,16 @@ bb -cp "$compiled" -e '
 (defn materialize-wasm-bootstrap-c17!
   [projected artifacts-dir abi-id input-digest compiler-commit configuration]
   (start-stage! "materialization-wasm-bootstrap-c17")
-  (let [result (body/materialize-program-for-abi projected 0 abi-id)
+  (let [parallel? (and (> (Long/parseLong
+                            (System/getenv "BEAGLE_CORE_EMIT_WORKERS")) 1)
+                       (> (count (core/nativecoreprogram-functions projected)) 1))
+        result (if parallel?
+                 (let [batch (parallel-function-text "c17" projected abi-id)]
+                   (if (:ok? batch)
+                     (body/materialize-program-plans-with-function-text
+                      projected 0 abi-id [] (:text batch))
+                     (body/->BodyFailureV0 (:detail batch))))
+                 (body/materialize-program-for-abi projected 0 abi-id))
         ok? (body/materialization-ok? result)
         report (str "materialize-wasm-bootstrap-c17 "
                     (if ok?
@@ -1838,8 +2052,20 @@ bb -cp "$compiled" -e '
 
 (defn materialize-qbe! [projected artifacts-dir abi-id plan simd-required?]
   (start-stage! "materialization-qbe")
-  (let [result (if simd-required?
+  (let [parallel? (and (not simd-required?)
+                       (> (Long/parseLong
+                           (System/getenv "BEAGLE_CORE_EMIT_WORKERS")) 1)
+                       (> (count (core/nativecoreprogram-functions projected)) 1))
+        result (cond
+                 simd-required?
                  (qbe/materialize-program-with-simd projected 0 abi-id plan)
+                 parallel?
+                 (let [batch (parallel-function-text "qbe" projected abi-id)]
+                   (if (:ok? batch)
+                     (qbe/materialize-program-with-function-text
+                      projected 0 abi-id (:text batch))
+                     (qbe/->QbeFailure (:detail batch))))
+                 :else
                  (qbe/materialize-program projected 0 abi-id))
         ok? (instance? native.qbe.QbeSuccess result)
         parallel-refusal? (and (program-has-parallel? projected) (not ok?))

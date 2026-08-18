@@ -20,6 +20,12 @@
   (QbeSuccess [(artifact QbeArtifact)])
   (QbeFailure [(detail String)]))
 
+(defrecord QbeFunctionFragmentV0 [(function-index Int) (text String)])
+
+(defunion QbeFunctionBatchV0
+  (QbeFunctionBatchSuccessV0 [(fragments (Vec QbeFunctionFragmentV0))])
+  (QbeFunctionBatchFailureV0 [(detail String)]))
+
 (defn materialization-ok? [(result QbeMaterialization)] Bool
   (match result
     [(QbeSuccess artifact) true]
@@ -2703,7 +2709,7 @@
 
 ;; --- entry point ----------------------------------------------------------
 
-(defn emit-module
+(defn emit-module-prefix
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
    (functions (Vec core/FunctionDef))
@@ -2716,8 +2722,78 @@
       data-text
       (if (= (count data-text) 0) "" "\n")
       type-text
-      (if (= (count type-text) 0) "" "\n")
-      (emit-functions types layouts functions texts module-index))))
+      (if (= (count type-text) 0) "" "\n"))))
+
+(defn emit-module
+  [(types (Vec core/TypeDef))
+   (layouts (Vec core/LayoutDef))
+   (functions (Vec core/FunctionDef))
+   (texts (Vec String))
+   (module-index Int)] String
+  (str (emit-module-prefix types layouts functions texts module-index)
+    (emit-functions types layouts functions texts module-index)))
+
+(defn materialization-failure-detail
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (abi-id String)]
+  String
+  (let [(validation core/ValidationReport) (core/validate-program program)
+        (unsupported (U String Nil)) (unsupported-value-semantics program)
+        (unsupported-codec (U String Nil)) (unsupported-codec-primitive program)
+        (unsupported-unicode (U String Nil)) (unsupported-unicode-text program)
+        (unsupported-division (U String Nil))
+        (unsupported-checked-division program)
+        (functions (Vec core/FunctionDef))
+        (ordered-functions (core/nativecoreprogram-functions program))
+        (texts (Vec String)) (collect-texts functions)]
+    (cond
+      (< module-index 0) "module index must be nonnegative"
+      (not= abi-id "lp64")
+      (str "abi profile " abi-id ": qbe materializes lp64 only")
+      (not (core/validationreport-passed validation))
+      "native program is not frozen: validation obligations failed"
+      (not (core/program-epoch-0? program))
+      "native program carries a minted epoch: the QBE materializer emits epoch-0 only"
+      (program-has-parallel-v0? program)
+      "QBE deterministic parallel F64 instructions are unsupported"
+      (program-has-buffer-v0? program)
+      "QBE Buffer v0 is unsupported: mutable region-owned storage has no QBE runtime representation"
+      (program-has-socket-extern? program)
+      "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation"
+      (program-has-filesystem-extern? program)
+      "QBE filesystem extern ABI is unsupported: typed host outcomes have no QBE call representation"
+      (program-has-host-context-extern? program)
+      "QBE host context extern ABI is unsupported: ambient host identity and terminal state have no QBE call representation"
+      (program-has-exec-replacement-extern? program)
+      "QBE exec-replacement extern ABI is unsupported: process image replacement has no QBE call representation"
+      (program-has-process-extern? program)
+      "QBE process extern ABI is unsupported: inherited process execution has no QBE call representation"
+      (program-has-clock-extern? program)
+      "QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation"
+      (program-has-stderr-extern? program)
+      "QBE stderr extern ABI is unsupported: Text handles have no QBE call representation"
+      (program-has-stdout-extern? program)
+      "QBE stdout extern ABI is unsupported: Text handles have no QBE call representation"
+      (program-has-host-extern? program)
+      "QBE host extern ABI is unsupported: optional Text handles have no QBE representation"
+      (program-has-transient-vec? program)
+      "QBE TransientVec builder is unsupported: transient vector operations have no QBE runtime representation"
+      (program-has-vector-sort? program)
+      "QBE vector sort is unsupported: sealed value descriptors have no QBE data representation"
+      (some? unsupported)
+      (str "unsupported native value-semantics op: " unsupported)
+      (some? unsupported-codec)
+      (str "QBE codec primitive is unsupported: " unsupported-codec)
+      (some? unsupported-unicode)
+      (str "QBE Unicode text primitive is unsupported: " unsupported-unicode)
+      (some? unsupported-division)
+      (str "QBE checked integer division is unsupported: " unsupported-division)
+      (not (every? text-emittable? texts))
+      "native program contains a Text or Keyword literal outside the QBE literal slice"
+      (not (program-supported? program))
+      "native program uses a shape outside the QBE materializer's slice"
+      :else "")))
 
 (defn materialize-program
   [(program core/NativeCoreProgram)
@@ -2819,3 +2895,89 @@
   (->QbeFailure
     (str (simd/demanded-backend-refusal "qbe")
       "; plan-digest=" (simd/simdplanv0-digest plan))))
+
+(defn canonical-function-indexes?
+  [(indexes (Vec Int)) (function-count Int)] Bool
+  (loop [(position Int) 0 (previous Int) -1]
+    (if (>= position (count indexes))
+      true
+      (let [(current Int) (nth indexes position)]
+        (if (or (< current 0)
+              (>= current function-count)
+              (<= current previous))
+          false
+          (recur (+ position 1) current))))))
+
+(defn function-batch-ok? [(result QbeFunctionBatchV0)] Bool
+  (match result
+    [(QbeFunctionBatchSuccessV0 fragments) true]
+    [(QbeFunctionBatchFailureV0 detail) false]))
+
+(defn function-batch-detail [(result QbeFunctionBatchV0)] String
+  (match result
+    [(QbeFunctionBatchSuccessV0 fragments) ""]
+    [(QbeFunctionBatchFailureV0 detail) detail]))
+
+(defn function-batch-fragments
+  [(result QbeFunctionBatchV0)] (Vec QbeFunctionFragmentV0)
+  (match result
+    [(QbeFunctionBatchSuccessV0 fragments) fragments]
+    [(QbeFunctionBatchFailureV0 detail) []]))
+
+(defn materialize-function-indexes
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (abi-id String)
+   (function-indexes (Vec Int))]
+  QbeFunctionBatchV0
+  (let [(failure String)
+        (materialization-failure-detail program module-index abi-id)]
+    (if (not= failure "")
+      (->QbeFunctionBatchFailureV0 failure)
+      (let [(types (Vec core/TypeDef))
+            (ordered-types (core/nativecoreprogram-types program))
+            (layouts (Vec core/LayoutDef))
+            (ordered-layouts (core/nativecoreprogram-layouts program))
+            (functions (Vec core/FunctionDef))
+            (ordered-functions (core/nativecoreprogram-functions program))
+            (texts (Vec String)) (collect-texts functions)]
+        (if-not (canonical-function-indexes?
+                  function-indexes (count functions))
+          (->QbeFunctionBatchFailureV0
+            "function indexes must be strictly increasing, unique, and in canonical range")
+          (->QbeFunctionBatchSuccessV0
+            (loop [(position Int) 0
+                   (fragments (Vec QbeFunctionFragmentV0)) []]
+              (if (>= position (count function-indexes))
+                fragments
+                (let [(function-index Int)
+                      (nth function-indexes position)]
+                  (recur (+ position 1)
+                    (conj fragments
+                      (->QbeFunctionFragmentV0 function-index
+                        (emit-function types layouts functions texts module-index
+                          function-index
+                          (nth functions function-index))))))))))))))
+
+(defn materialize-program-with-function-text
+  [(program core/NativeCoreProgram)
+   (module-index Int)
+   (abi-id String)
+   (function-text String)]
+  QbeMaterialization
+  (let [(failure String)
+        (materialization-failure-detail program module-index abi-id)]
+    (if (not= failure "")
+      (->QbeFailure failure)
+      (let [(types (Vec core/TypeDef))
+            (ordered-types (core/nativecoreprogram-types program))
+            (layouts (Vec core/LayoutDef))
+            (ordered-layouts (core/nativecoreprogram-layouts program))
+            (functions (Vec core/FunctionDef))
+            (ordered-functions (core/nativecoreprogram-functions program))
+            (texts (Vec String)) (collect-texts functions)
+            (module-name String) (str "module_" module-index ".ssa")]
+        (->QbeSuccess
+          (->QbeArtifact module-name
+            (str (emit-module-prefix types layouts functions texts module-index)
+              function-text)))))))
