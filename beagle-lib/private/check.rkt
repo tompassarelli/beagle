@@ -5897,8 +5897,18 @@
          [else (infer-expr ref env)]))
      (define call-name
        (if (named-reference? ref) ref '<function>))
+     (define collection-transient-type
+       (and (symbol? fn)
+            (memq fn '(transient persistent!))
+            (= (length (call-form-args e)) 1)
+            (let ([argument-type
+                   (infer-expr (car (call-form-args e)) env)])
+              (and (type-app? argument-type)
+                   (memq (type-app-ctor argument-type) '(Map Set))
+                   (type-fn (list argument-type) #f argument-type)))))
      (define fn-type
        (cond
+         [collection-transient-type collection-transient-type]
          [(inferred-type-poly? raw-type) (instantiate-type raw-type)]
          [(type-poly? raw-type)
           (resolve-poly-call raw-type (call-form-args e) env)]
@@ -5925,7 +5935,8 @@
           (check-scalar-predicate-literal call-name (call-form-args e) e))
         (zonk-type
          (if (named-reference? ref)
-             (numeric-refine call-name arg-types (type-fn-ret fn-type))
+             (collection-refine call-name arg-types
+               (numeric-refine call-name arg-types (type-fn-ret fn-type)))
              (type-fn-ret fn-type)))]
        [(and (type-union? fn-type)
              (andmap type-fn? (type-union-alts fn-type)))
@@ -6506,6 +6517,15 @@
        [(memq 'float classes) (type-prim 'Float)]
        [(memq 'number classes) ((hash-ref BUILTIN-UNION-ALIASES 'Number))]
        [else (type-prim 'Int)])]))
+
+;; `reduce` returns its accumulator shape. Keeping that type lets the checker
+;; see a closed transient Map or Set at `persistent!`, while the Native Core
+;; ownership pass separately proves that the transient cannot escape.
+(define (collection-refine op arg-types declared)
+  (if (and (eq? (reference-leaf op) 'reduce)
+           (= (length arg-types) 3))
+      (cadr arg-types)
+      declared))
 
 ;; G5 — enum-aware equality. `=`/`not=` are typed (Any Any -> Bool), so the
 ;; per-arg enum check can't see an enum operand. Catch the common idiom

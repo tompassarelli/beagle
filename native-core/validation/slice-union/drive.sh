@@ -11,15 +11,20 @@ abi="${NATIVE_SLICE_ABI:-lp64}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-}"
-src="$here/fixture.bclj"
+src="$here/fixture.bgl"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-union.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"
 trap 'rm -rf "${scratch:?}"' EXIT
 mkdir -p "$art"
 
-"$repo/bin/beagle-ast" "$src" >"$scratch/fixture.ast.json"
+"$repo/bin/beagle-ast" \
+  --interface-sha256-out "$scratch/fixture.interface.sha256" \
+  "$src" >"$scratch/fixture.ast.json"
+fixture_interface_sha256="$(<"$scratch/fixture.interface.sha256")"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$scratch/fixture.ast.json" \
+  --input "$scratch/fixture.ast.json=native-core/validation/slice-union/fixture.bgl" \
+  --interface-sha256 \
+  "native-core/validation/slice-union/fixture.bgl=$fixture_interface_sha256" \
   --output "$scratch/fixture.facts"
 cp "$scratch/fixture.facts" "$art/fixture.facts"
 sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
@@ -29,6 +34,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/c11.bclj" \
   "$repo/native-core/src/native/slice.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
@@ -54,46 +60,58 @@ bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$art/report.txt\"
   (native.body-slice/emit-dual-slice! \"$scratch/fixture.facts\" \"fixture.union\"
-    \"native-core/validation/slice-union/fixture.bclj\" \"$art\"
+    \"native-core/validation/slice-union/fixture.bgl\" \"$art\"
     \"native-slice-union-v0\" \"numeric-int-double-less?\" 2 \"$abi\"))"
 
 cat "$art/report.txt"
-grep -Fq "lowered fn_44 vector-value? " "$art/report.txt"
-grep -Fq "lowered fn_45 vector-probe " "$art/report.txt"
-grep -Fq "lowered fn_46 int-vector? " "$art/report.txt"
-grep -Fq "lowered fn_47 text-ends-with? " "$art/report.txt"
-grep -Fq "lowered fn_48 maybe-int-if " "$art/report.txt"
-grep -Fq "lowered fn_49 maybe-int-when " "$art/report.txt"
-grep -Fq "lowered fn_50 empty-any-map " "$art/report.txt"
-grep -Fq "lowered fn_51 any-map-contains? " "$art/report.txt"
-grep -Fq "lowered fn_52 any-map-assoc " "$art/report.txt"
-grep -Fq "lowered fn_53 empty-any-set " "$art/report.txt"
-grep -Fq "lowered fn_54 any-set-contains? " "$art/report.txt"
-grep -Fq "lowered fn_55 any-set-conj " "$art/report.txt"
-grep -Fq "lowered fn_56 any-map-count " "$art/report.txt"
-grep -Fq "lowered fn_57 any-map-value " "$art/report.txt"
-grep -Fq "lowered fn_58 any-map-dissoc " "$art/report.txt"
-grep -Fq "lowered fn_59 any-set-count " "$art/report.txt"
-grep -Fq "lowered fn_60 any-set-disj " "$art/report.txt"
-grep -Fq "lowered fn_61 transient-any-map! " "$art/report.txt"
-grep -Fq "lowered fn_62 transient-any-set! " "$art/report.txt"
-grep -Fq "lowered fn_63 any-equal-int? " "$art/report.txt"
-grep -Fq "lowered fn_64 int-equal-any? " "$art/report.txt"
-grep -Fq "lowered fn_65 any-not-equal-int? " "$art/report.txt"
+function_index() {
+  local function="$1"
+  awk -v fn_name="$function" \
+    '$1 == "lowered" && $2 ~ /^fn_[0-9]+$/ && $3 == fn_name {
+       sub(/^fn_/, "", $2)
+       print $2
+       found = 1
+       exit
+     }
+     END { exit !found }' \
+    "$art/report.txt"
+}
+
+expect_lowered() {
+  local function="$1"
+  function_index "$function" >/dev/null || {
+    echo "drive.sh: lowered function missing: $function" >&2
+    exit 1
+  }
+}
+
+for function in \
+    vector-value? vector-probe int-vector? text-ends-with? maybe-int-if \
+    maybe-int-when empty-any-map any-map-contains? any-map-assoc empty-any-set \
+    any-set-contains? any-set-conj any-map-count any-map-value any-map-dissoc \
+    any-set-count any-set-disj transient-any-map! transient-any-set! \
+    any-equal-int? int-equal-any? any-not-equal-int?; do
+  expect_lowered "$function"
+done
 
 refusal="$scratch/mixed-value-refusal"
 mkdir -p "$refusal"
-"$repo/bin/beagle-ast" "$here/mixed_value_refusal.bclj" \
+"$repo/bin/beagle-ast" \
+  --interface-sha256-out "$refusal/fixture.interface.sha256" \
+  "$here/mixed_value_refusal.bgl" \
   >"$refusal/fixture.ast.json"
+refusal_interface_sha256="$(<"$refusal/fixture.interface.sha256")"
 bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-  --input "$refusal/fixture.ast.json" \
+  --input "$refusal/fixture.ast.json=native-core/validation/slice-union/mixed_value_refusal.bgl" \
+  --interface-sha256 \
+  "native-core/validation/slice-union/mixed_value_refusal.bgl=$refusal_interface_sha256" \
   --output "$refusal/fixture.facts"
 bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$refusal/report.txt\"
   (native.body-slice/emit-slice!
     \"$refusal/fixture.facts\" \"fixture.union-refusal\"
-    \"native-core/validation/slice-union/mixed_value_refusal.bclj\"
+    \"native-core/validation/slice-union/mixed_value_refusal.bgl\"
     \"$refusal\" \"native-slice-union-refusal-v0\" \"$abi\"))"
 cat "$refusal/report.txt"
 grep -Fq "TODO-NATIVE-EQUALITY-UNION-VALUE-SEMANTICS" \
@@ -119,17 +137,20 @@ fi
 
 build="$scratch/c"
 mkdir -p "$build"
-cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
+cp "$art/module_0.h" "$art/module_0.c" "$here/main.c" "$build/"
 cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
 
+any_function="$(function_index wrap-int)"
+nil_function="$(function_index logic-empty-or)"
+pair_function="$(function_index pair-copy-of)"
 any_type="$(sed -nE \
-  's/^(native_m0_type_[0-9]+) native_m0_fn_1\(.*/\1/p' \
+  "s/^(native_m0_type_[0-9]+) native_m0_fn_${any_function}\\(.*/\\1/p" \
   "$art/module_0.h")"
 nil_type="$(sed -nE \
-  's/^(native_m0_type_[0-9]+) native_m0_fn_15\(.*/\1/p' \
+  "s/^(native_m0_type_[0-9]+) native_m0_fn_${nil_function}\\(.*/\\1/p" \
   "$art/module_0.h")"
 pair_type="$(sed -nE \
-  's/^(native_m0_type_[0-9]+) native_m0_fn_7\(.*/\1/p' \
+  "s/^(native_m0_type_[0-9]+) native_m0_fn_${pair_function}\\(.*/\\1/p" \
   "$art/module_0.h")"
 if [[ -z "$any_type" || -z "$nil_type" || -z "$pair_type" ]]; then
   echo "drive.sh: could not resolve generated Any, Nil, and Pair types" >&2
@@ -139,6 +160,16 @@ type_definitions=(
   "-DSLICE_ANY_TYPE=$any_type"
   "-DSLICE_NIL_TYPE=$nil_type"
   "-DSLICE_PAIR_TYPE=$pair_type")
+mapfile -t source_functions \
+  < <(sed -nE 's/^\(defn ([^ ]+).*/\1/p' "$src")
+function_definitions=()
+for old_index in "${!source_functions[@]}"; do
+  current_index="$(function_index "${source_functions[$old_index]}")" || {
+    echo "drive.sh: lowered function missing for C harness: ${source_functions[$old_index]}" >&2
+    exit 1
+  }
+  function_definitions+=("-DSLICE_FN_${old_index}=native_m0_fn_${current_index}")
+done
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 
@@ -165,8 +196,11 @@ expect_abort() {
   fi
 }
 
+( cd "$build" && gcc "${strict[@]}" -c module_0.c native_shim.c )
 ( cd "$build" && gcc "${strict[@]}" "${type_definitions[@]}" \
-    -o probe_gcc module_0.c native_shim.c main.c )
+    "${function_definitions[@]}" -c main.c )
+( cd "$build" && gcc "${strict[@]}" \
+    -o probe_gcc module_0.o native_shim.o main.o )
 ( cd "$build" && ./probe_gcc )
 expect_abort probe_gcc mismatch "the mismatched union tag did not trap"
 expect_abort probe_gcc null "the null record reference did not trap"
@@ -189,8 +223,12 @@ find_clang() {
 
 clang_bin="$(find_clang || true)"
 if [ -n "$clang_bin" ]; then
+  ( cd "$build" && "$clang_bin" "${strict[@]}" \
+      -c module_0.c native_shim.c )
   ( cd "$build" && "$clang_bin" "${strict[@]}" "${type_definitions[@]}" \
-      -o probe_clang module_0.c native_shim.c main.c )
+      "${function_definitions[@]}" -c main.c )
+  ( cd "$build" && "$clang_bin" "${strict[@]}" \
+      -o probe_clang module_0.o native_shim.o main.o )
   ( cd "$build" && ./probe_clang )
   expect_abort probe_clang mismatch \
     "clang build did not trap on the mismatched union tag"

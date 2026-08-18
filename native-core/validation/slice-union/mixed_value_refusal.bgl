@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle
 (ns fixture.union-refusal)
 
 (defn map-or-int-equal? [(value (U (Map Int Int) Int))] Bool

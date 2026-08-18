@@ -1,10 +1,9 @@
-#lang beagle/clj
+#lang beagle
 ;; The coercion rule's own fixture: the smallest module in which widening into
 ;; the closure of Any and narrowing back out of it are both reachable from C.
 ;; store.types has no unguarded narrowing, so its slice cannot fire the trap.
-(ns fixture.union)
-
-(require clojure.string :as str)
+(ns fixture.union
+  (:require [clojure.string :as str]))
 
 (defrecord Pair [(left Int) (right Int)])
 
@@ -63,16 +62,10 @@
 (defn logic-or [(left Any) (right Any)] Any
   (or left right))
 
-(defn logic-three-and
-  [(left Any)
-   (middle Any)
-   (right Any)] Any
+(defn logic-three-and [(left Any) (middle Any) (right Any)] Any
   (and left middle right))
 
-(defn logic-three-or
-  [(left Any)
-   (middle Any)
-   (right Any)] Any
+(defn logic-three-or [(left Any) (middle Any) (right Any)] Any
   (or left middle right))
 
 (defn logic-false-or-int [(value Int)] Any
@@ -120,7 +113,7 @@
   (cond
     (string? value) (->ValueRow :string value nil nil nil nil nil)
     (integer? value) (->ValueRow :int nil value nil nil nil nil)
-    (number? value) (->ValueRow :float nil nil value nil nil nil)
+    (number? value) (->ValueRow :float nil nil (double value) nil nil nil)
     (boolean? value) (->ValueRow :bool nil nil nil value nil nil)
     (keyword? value) (->ValueRow :keyword nil nil nil nil value nil)
     (pair? value) (->ValueRow :pair nil nil nil nil nil value)
