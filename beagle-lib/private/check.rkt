@@ -478,6 +478,7 @@
 (struct beagle-diagnostic exn:fail (
   kind        ; symbol: 'arity 'type-mismatch 'return-type 'def-type 'let-binding
   details     ; hasheq with structured error data
+  fact        ; optional authoritative BeagleDiagnosticV2 fact
 ) #:transparent)
 
 (define (kind->error-code kind)
@@ -521,6 +522,118 @@
           'expected-type (type->jsexpr expected-type)
           'actual-type   (type->jsexpr actual-type)))
 
+(define (diagnostic-source-path src prog)
+  (define source (and src (src-loc-source src)))
+  (cond
+    [(path? source) (path->string source)]
+    [(string? source) source]
+    [else (format "module:~a" (program-namespace prog))]))
+
+(define (diagnostic-source-id prog)
+  ;; Physical paths are display anchors, never semantic identities. The
+  ;; namespace is the logical source identity already used by module facts.
+  (format "module:~a" (program-namespace prog)))
+
+(define (make-type-mismatch-diagnostic-fact details src)
+  ;; The first structured slice covers call-argument mismatches (E002). Other
+  ;; type-mismatch spellings keep their existing diagnostics until they have a
+  ;; typed payload and renderer of their own; V2 therefore never invents facts
+  ;; by parsing prose.
+  (define prog (current-check-program))
+  (define expected-type (hash-ref details 'expected-type #f))
+  (define actual-type (hash-ref details 'actual-type #f))
+  (and prog src
+       (program-source-bytes prog)
+       (hash? expected-type)
+       (hash? actual-type)
+       (hash-has-key? details 'function)
+       (hash-has-key? details 'arg-position)
+       (with-handlers ([exn:fail? (lambda (_) #f)])
+         (define profile
+           (semantic-profile-v1-for-target (program-target prog)))
+         (define source-path (diagnostic-source-path src prog))
+         (define source-id (diagnostic-source-id prog))
+         (define-values (text-facet semantic-facet)
+           (compute-source-facets-v1
+            (program-source-bytes prog)
+            #:source-path source-path
+            #:source-id source-id
+            #:semantic-profile profile))
+         (define source-text-id
+           (semantic-fact-v1-id (source-text-facet-v1-fact text-facet)))
+         (define source-semantic-id
+           (semantic-fact-v1-id
+            (source-semantic-facet-v1-fact semantic-facet)))
+         (define anchor
+           (diagnostic-source-anchor-v2
+            source-text-id
+            source-semantic-id
+            source-path
+            (src-loc-line src)
+            (src-loc-col src)
+            (src-loc-pos src)
+            (src-loc-span src)))
+         (define definition-ids
+           (hash-values (program-shadow-definition-fact-ids prog)))
+         (define relevant-fact-ids
+           (remove-duplicates
+            (append (list source-text-id source-semantic-id)
+                    definition-ids)))
+         (define expected (hash-ref details 'expected))
+         (define actual (hash-ref details 'actual))
+         (define related-causes
+           (list->vector
+            (if (pair? (hash-ref details 'suggestions '()))
+                (list "accessor-suggestion")
+                (list))))
+         (define syntax-node-id
+           (format "~a#~a/~a"
+                   source-text-id
+                   (or (src-loc-pos src) "?")
+                   (or (src-loc-span src) "?")))
+         (define typed-payload
+           (hasheq
+            'rule-id "TYPE-MISMATCH-ARGUMENT-V1"
+            'phase "type-check"
+            'classification "type-error"
+            'expected-type expected-type
+            'actual-type actual-type
+            'expected expected
+            'actual actual
+            'function (hash-ref details 'function)
+            'arg-position (hash-ref details 'arg-position)
+            'arg-expr (hash-ref details 'arg-expr 'null)
+            'root-cause
+            (format "argument ~a to ~a has type ~a, but the call requires ~a"
+                    (hash-ref details 'arg-position)
+                    (hash-ref details 'function)
+                    actual
+                    expected)
+            'related-causes related-causes
+            'lawful-next-edit
+            "Change the argument to the expected type, or correct the annotation."
+            'verification "Re-run the type checker for this exact source snapshot."
+            'syntax-node-id syntax-node-id))
+         (define checker
+           (checker-identity-fact-v1
+            profile "beagle/type-checker" "diagnostic:type-mismatch"))
+         (make-diagnostic-fact-v2
+          profile
+          (vector "DiagnosticSubjectV2"
+                  source-text-id
+                  (or (src-loc-pos src) "?")
+                  (or (src-loc-span src) "?"))
+          "E002"
+          typed-payload
+          relevant-fact-ids
+          (vector anchor)
+          checker
+          "FAIL"
+          (hasheq 'rule-id "TYPE-MISMATCH-ARGUMENT-V1"
+                  'source-text-fact-id source-text-id
+                  'source-semantic-fact-id source-semantic-id
+                  'syntax-node-id syntax-node-id)))))
+
 (define (raise-diag kind message details #:src [src #f])
   ;; When the form currently under type-check came from macro expansion
   ;; (current-macro-expansion-ctx is set by type-check-with-locs! for
@@ -559,11 +672,15 @@
                                        [(string? s) s]
                                        [else #f])))
         with-cause))
+  (define fact
+    (and (eq? effective-kind 'type-mismatch)
+         (make-type-mismatch-diagnostic-fact details+src src)))
   (raise (beagle-diagnostic
           (format "beagle: ~a" message)
           (current-continuation-marks)
           effective-kind
-          details+src)))
+          details+src
+          fact)))
 
 ;; --- "did you mean?" suggestions --------------------------------------------
 
@@ -9538,6 +9655,7 @@
          (struct-out purity-violation)
          beagle-diagnostic beagle-diagnostic?
          beagle-diagnostic-kind beagle-diagnostic-details
+         beagle-diagnostic-fact
          kind->error-code
          current-check-profile
          current-purity-enforcement

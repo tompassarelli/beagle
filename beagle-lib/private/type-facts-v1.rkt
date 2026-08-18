@@ -7,6 +7,7 @@
 (require racket/list
          racket/set
          racket/string
+         (only-in file/sha1 bytes->hex-string)
          "canonical-value-v1.rkt"
          "parse.rkt")
 
@@ -29,6 +30,24 @@
 (struct source-span-v1 (path line column position span) #:transparent)
 (struct source-text-facet-v1 (fact source-bytes spans) #:transparent)
 (struct source-semantic-facet-v1 (fact type-graph-input) #:transparent)
+
+;; Structured diagnostics are semantic facts, not an alternate error channel.
+;; The semantic fact below deliberately excludes checker-epoch evidence: that
+;; evidence lives in the attestation and derivation fields of the diagnostic
+;; wrapper, so a new checker can re-attest the same diagnostic identity.
+(struct diagnostic-source-anchor-v2
+  (source-text-fact-id source-semantic-fact-id path line column position span)
+  #:transparent)
+(struct diagnostic-repair-precondition-v2
+  (source-text-fact-id syntax-node-id expected-fact-id checker-epoch)
+  #:transparent)
+(struct diagnostic-repair-v2
+  (kind patch-digest patch idempotent? preconditions verification)
+  #:transparent)
+(struct diagnostic-fact-v2
+  (fact code typed-payload relevant-fact-ids source-anchors profile
+        attestation derivation repair)
+  #:transparent)
 
 (struct recursive-member-v1 (identity payload) #:transparent)
 (struct recursive-reference-v1 (member-identity) #:transparent)
@@ -297,6 +316,291 @@
    1
    canonical-payload-encoder-v1))
 
+(define (diagnostic-payload-v2-field payload key)
+  (unless (hash-has-key? payload key)
+    (fail 'BeagleDiagnosticV2
+          "diagnostic payload is missing a required field"
+          "field" key
+          "payload" payload))
+  (hash-ref payload key))
+
+(define (diagnostic-payload-v2? payload)
+  (and (hash? payload)
+       (for/and ([key (in-list '(code typed-payload relevant-fact-ids source-anchors))])
+         (hash-has-key? payload key))
+       (string? (hash-ref payload 'code))
+       (hash? (hash-ref payload 'typed-payload))
+       (vector? (hash-ref payload 'relevant-fact-ids))
+       (vector? (hash-ref payload 'source-anchors))))
+
+(define (encode-diagnostic-payload-v2 payload)
+  (unless (diagnostic-payload-v2? payload)
+    (fail 'BeagleDiagnosticV2
+          "malformed typed diagnostic payload"
+          "payload" payload))
+  (canonical-value-v1->bytes
+   (vector "BeagleDiagnosticPayloadV2" 1 payload)))
+
+(define DIAGNOSTIC-V2-ENCODER
+  (make-fact-kind-encoder-v1
+   "BeagleDiagnosticV2"
+   1
+   encode-diagnostic-payload-v2))
+
+(define (diagnostic-source-anchor-v2->canonical anchor)
+  (unless (diagnostic-source-anchor-v2? anchor)
+    (raise-argument-error 'diagnostic-source-anchor-v2->canonical
+                          "diagnostic-source-anchor-v2?"
+                          anchor))
+  (vector
+   "DiagnosticSourceAnchorV2"
+   (fact-id-v1 'diagnostic-source-anchor-v2->canonical
+               "source-text-fact-id"
+               (diagnostic-source-anchor-v2-source-text-fact-id anchor))
+   (fact-id-v1 'diagnostic-source-anchor-v2->canonical
+               "source-semantic-fact-id"
+               (diagnostic-source-anchor-v2-source-semantic-fact-id anchor))
+   (diagnostic-source-anchor-v2-line anchor)
+   (diagnostic-source-anchor-v2-column anchor)
+   (diagnostic-source-anchor-v2-position anchor)
+   (diagnostic-source-anchor-v2-span anchor)))
+
+(define (diagnostic-repair-v2->canonical repair)
+  (cond
+    [(not repair) #f]
+    [else
+     (unless (diagnostic-repair-v2? repair)
+       (raise-argument-error 'diagnostic-repair-v2->canonical
+                             "diagnostic-repair-v2? or #f"
+                             repair))
+     (define preconditions
+       (diagnostic-repair-v2-preconditions repair))
+     (unless (and (vector? preconditions)
+                  (positive? (vector-length preconditions))
+                  (for/and ([precondition (in-vector preconditions)])
+                    (diagnostic-repair-precondition-v2? precondition)))
+       (fail 'diagnostic-repair-v2->canonical
+             "repair descriptors require nonempty explicit preconditions"
+             "preconditions" preconditions))
+     (define patch (diagnostic-repair-v2-patch repair))
+     (define patch-digest (diagnostic-repair-v2-patch-digest repair))
+     (define canonical-patch-digest (canonical-value-v1-id patch))
+     (unless (equal? patch-digest canonical-patch-digest)
+       (fail 'diagnostic-repair-v2->canonical
+             "patch digest does not match the canonical patch"
+             "patch-digest" patch-digest
+             "expected" canonical-patch-digest))
+     (unless (boolean? (diagnostic-repair-v2-idempotent? repair))
+       (fail 'diagnostic-repair-v2->canonical
+             "repair idempotence must be a boolean"
+             "idempotent?" (diagnostic-repair-v2-idempotent? repair)))
+     (vector
+      "DiagnosticRepairV2"
+      (require-name 'diagnostic-repair-v2->canonical
+                    "kind"
+                    (diagnostic-repair-v2-kind repair))
+      (fact-id-v1 'diagnostic-repair-v2->canonical
+                  "patch-digest"
+                  patch-digest)
+      (canonical-value-v1->bytes patch)
+      (diagnostic-repair-v2-idempotent? repair)
+      (for/vector ([precondition (in-vector preconditions)])
+        (unless (diagnostic-repair-precondition-v2? precondition)
+          (raise-argument-error 'diagnostic-repair-v2->canonical
+                                "diagnostic-repair-precondition-v2?"
+                                precondition))
+        (vector
+         "DiagnosticRepairPreconditionV2"
+         (fact-id-v1 'diagnostic-repair-v2->canonical
+                     "source-text-fact-id"
+                     (diagnostic-repair-precondition-v2-source-text-fact-id
+                      precondition))
+         (require-name 'diagnostic-repair-v2->canonical
+                       "syntax-node-id"
+                       (diagnostic-repair-precondition-v2-syntax-node-id
+                        precondition))
+         (fact-id-v1 'diagnostic-repair-v2->canonical
+                     "expected-fact-id"
+                     (diagnostic-repair-precondition-v2-expected-fact-id
+                      precondition))
+         (require-name 'diagnostic-repair-v2->canonical
+                       "checker-epoch"
+                       (diagnostic-repair-precondition-v2-checker-epoch
+                        precondition))))
+      (require-name 'diagnostic-repair-v2->canonical
+                    "verification"
+                    (diagnostic-repair-v2-verification repair)))]))
+
+(define (make-diagnostic-fact-v2 semantic-profile subject code typed-payload
+                                 relevant-fact-ids source-anchors checker-fact
+                                 result evidence #:repair [repair #f])
+  (define who 'make-diagnostic-fact-v2)
+  (define ids (canonical-fact-id-vector-v1 who relevant-fact-ids))
+  (unless (and (string? code) (not (string=? code "")))
+    (fail who "diagnostic code must be a nonempty string" "code" code))
+  (unless (hash? typed-payload)
+    (raise-argument-error who "hash? typed-payload" typed-payload))
+  (define anchors
+    (if (vector? source-anchors)
+        source-anchors
+        (list->vector source-anchors)))
+  (unless (and (positive? (vector-length anchors))
+               (for/and ([anchor (in-vector anchors)])
+                 (diagnostic-source-anchor-v2? anchor)))
+    (fail who "diagnostics require at least one source anchor"
+          "source-anchors" source-anchors))
+  (unless (semantic-fact-v1? checker-fact)
+    (raise-argument-error who "semantic-fact-v1? checker-fact" checker-fact))
+  (canonical-value-v1->bytes result)
+  (canonical-value-v1->bytes evidence)
+  (define payload
+    (hash 'code code
+          'typed-payload typed-payload
+          'relevant-fact-ids ids
+          'source-anchors
+          (for/vector ([anchor (in-vector anchors)])
+            (diagnostic-source-anchor-v2->canonical anchor))
+          'repair (diagnostic-repair-v2->canonical repair)))
+  (define fact
+    (make-semantic-fact-v1
+     DIAGNOSTIC-V2-ENCODER semantic-profile subject payload))
+  (define attestation
+    (make-attestation-v1
+     (current-type-facts-checker-epoch-v1)
+     fact result
+     (hash 'code code
+           'using ids
+           'evidence evidence)))
+  (define derivation
+    (make-derivation-edge-v1
+     (semantic-fact-v1-id fact)
+     (semantic-fact-v1-id checker-fact)
+     ids
+     attestation))
+  (diagnostic-fact-v2
+   fact code typed-payload ids anchors semantic-profile attestation derivation
+   repair))
+
+(define (diagnostic-fact-v2-render-message diagnostic)
+  (unless (diagnostic-fact-v2? diagnostic)
+    (raise-argument-error 'diagnostic-fact-v2-render-message
+                          "diagnostic-fact-v2?"
+                          diagnostic))
+  (define payload (diagnostic-fact-v2-typed-payload diagnostic))
+  (format "beagle: call to ~a: arg ~a expected ~a, got ~a"
+          (hash-ref payload 'function)
+          (hash-ref payload 'arg-position)
+          (hash-ref payload 'expected)
+          (hash-ref payload 'actual)))
+
+(define (diagnostic-fact-v2-render-human diagnostic)
+  (define payload (diagnostic-fact-v2-typed-payload diagnostic))
+  (define anchor (vector-ref (diagnostic-fact-v2-source-anchors diagnostic) 0))
+  (define line (diagnostic-source-anchor-v2-line anchor))
+  (define column (diagnostic-source-anchor-v2-column anchor))
+  (define location
+    (if (and line column)
+        (format "~a:~a:~a"
+                (diagnostic-source-anchor-v2-path anchor)
+                line
+                (add1 column))
+        (diagnostic-source-anchor-v2-path anchor)))
+  (string-append
+   (format "error[~a]: ~a"
+           (diagnostic-fact-v2-code diagnostic)
+           (diagnostic-fact-v2-render-message diagnostic))
+   (format "\n  profile: ~a" (diagnostic-fact-v2-profile diagnostic))
+   (format "\n  --> ~a" location)
+   (format "\n  cause: ~a" (hash-ref payload 'root-cause))
+   (format "\n  expected: ~a" (hash-ref payload 'expected))
+   (format "\n  actual: ~a" (hash-ref payload 'actual))
+   (format "\n  next: ~a" (hash-ref payload 'lawful-next-edit))
+   (format "\n  verify: ~a" (hash-ref payload 'verification))
+   (format "\n  related: ~a"
+           (vector->list (hash-ref payload 'related-causes)))
+   (format "\n  derivation: ~a"
+           (derivation-edge-v1-id (diagnostic-fact-v2-derivation diagnostic)))))
+
+(define (diagnostic-json-value value)
+  ;; Racket's json library accepts lists, not the vectors used by the
+  ;; canonical fact envelope. Keep canonical storage untouched and normalize
+  ;; only at this projection boundary.
+  (cond
+    [(bytes? value) (string-append "hex:" (bytes->hex-string value))]
+    [(vector? value)
+     (for/list ([item (in-vector value)]) (diagnostic-json-value item))]
+    [(hash? value)
+     (for/hash ([(key item) (in-hash value)])
+       (values key (diagnostic-json-value item)))]
+    [(list? value) (map diagnostic-json-value value)]
+    [else value]))
+
+(define (diagnostic-fact-v2->jsexpr diagnostic)
+  (unless (diagnostic-fact-v2? diagnostic)
+    (raise-argument-error 'diagnostic-fact-v2->jsexpr
+                          "diagnostic-fact-v2?"
+                          diagnostic))
+  (define fact (diagnostic-fact-v2-fact diagnostic))
+  (define anchors (diagnostic-fact-v2-source-anchors diagnostic))
+  (define anchor->json
+    (lambda (anchor)
+      (hasheq 'sourceTextFactId
+              (diagnostic-source-anchor-v2-source-text-fact-id anchor)
+              'sourceSemanticFactId
+              (diagnostic-source-anchor-v2-source-semantic-fact-id anchor)
+              'path (diagnostic-source-anchor-v2-path anchor)
+              'line (or (diagnostic-source-anchor-v2-line anchor) 'null)
+              'column (or (diagnostic-source-anchor-v2-column anchor) 'null)
+              'position (or (diagnostic-source-anchor-v2-position anchor) 'null)
+              'span (or (diagnostic-source-anchor-v2-span anchor) 'null))))
+  (hasheq
+   'kind "BeagleDiagnosticV2"
+   'schemaVersion 2
+   'code (diagnostic-fact-v2-code diagnostic)
+   'profile (symbol->string (diagnostic-fact-v2-profile diagnostic))
+   'subject (diagnostic-json-value (semantic-fact-v1-subject fact))
+   'typedPayload (diagnostic-json-value
+                 (diagnostic-fact-v2-typed-payload diagnostic))
+   'relevantFactIds (diagnostic-json-value
+                     (diagnostic-fact-v2-relevant-fact-ids diagnostic))
+   'sourceAnchors (for/list ([anchor (in-vector anchors)]) (anchor->json anchor))
+     'repair (diagnostic-json-value
+            (if (diagnostic-fact-v2-repair diagnostic)
+                (let ([repair (diagnostic-fact-v2-repair diagnostic)])
+                  (hasheq
+                   'kind (diagnostic-repair-v2-kind repair)
+                   'patchDigest (diagnostic-repair-v2-patch-digest repair)
+                   'patch (diagnostic-repair-v2-patch repair)
+                   'idempotent (diagnostic-repair-v2-idempotent? repair)
+                   'preconditions
+                   (for/list ([precondition
+                               (in-vector
+                                (diagnostic-repair-v2-preconditions repair))])
+                     (hasheq
+                      'sourceTextFactId
+                      (diagnostic-repair-precondition-v2-source-text-fact-id
+                       precondition)
+                      'syntaxNodeId
+                      (diagnostic-repair-precondition-v2-syntax-node-id
+                       precondition)
+                      'expectedFactId
+                      (diagnostic-repair-precondition-v2-expected-fact-id
+                       precondition)
+                      'checkerEpoch
+                      (diagnostic-repair-precondition-v2-checker-epoch
+                       precondition)))
+                   'verification
+                   (diagnostic-repair-v2-verification repair)))
+                'null))
+   'semanticFactId (semantic-fact-v1-id fact)
+   'attestation (diagnostic-json-value
+                 (attestation-v1-envelope
+                  (diagnostic-fact-v2-attestation diagnostic)))
+   'derivation (diagnostic-json-value
+                (derivation-edge-v1-envelope
+                 (diagnostic-fact-v2-derivation diagnostic)))
+   'human (diagnostic-fact-v2-render-human diagnostic)))
+
 (define (syntax-children stx)
   (define value (syntax-e stx))
   (cond
@@ -516,6 +820,15 @@
  (struct-out source-text-facet-v1)
  (struct-out source-semantic-facet-v1)
  compute-source-facets-v1
+ DIAGNOSTIC-V2-ENCODER
+ (struct-out diagnostic-source-anchor-v2)
+ (struct-out diagnostic-repair-precondition-v2)
+ (struct-out diagnostic-repair-v2)
+ (struct-out diagnostic-fact-v2)
+ make-diagnostic-fact-v2
+ diagnostic-fact-v2-render-message
+ diagnostic-fact-v2-render-human
+ diagnostic-fact-v2->jsexpr
  (struct-out recursive-member-v1)
  (struct-out recursive-reference-v1)
  RECURSIVE-GROUP-V1-ENCODER

@@ -2,10 +2,10 @@
 # beagle-check-all: type-check multiple Beagle source files in one process.
 #
 # Usage:
-#   bin/beagle-check-all [--agent] [--profile 0|1|2|3] <file-or-dir> ...
+#   bin/beagle-check-all [--agent] [--json-v2] [--profile 0|1|2|3] <file-or-dir> ...
 #
 # Directories are expanded to their Beagle sources. Reports all errors,
-# exits 0 if all clean. Supports BEAGLE_ERROR_FORMAT=json.
+# exits 0 if all clean. Supports BEAGLE_ERROR_FORMAT=json and --json-v2.
 #
 # --agent:     suppress lint warnings, show only type errors in a clean,
 #              minimal format designed for LLM agent consumption.
@@ -25,7 +25,7 @@ for arg in "$@"; do
 done
 
 if [[ ${#args[@]} -lt 1 ]]; then
-    echo "usage: beagle-check-all [--agent] [--profile 0|1|2|3] <file-or-dir> ..." >&2
+    echo "usage: beagle-check-all [--agent] [--json-v2] [--profile 0|1|2|3] <file-or-dir> ..." >&2
     exit 2
 fi
 

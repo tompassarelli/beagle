@@ -80,6 +80,7 @@
              "checked-bundle.rkt"       ; exact-byte closed module closure + checked projection
              "defmacro.rkt"
              "diagnostic-kind.rkt"
+             "structured-diagnostics.rkt" ; BeagleDiagnosticV2 type-mismatch slice across all targets
              "expand-tool.rkt"          ; #32 — `beagle expand` reads+renders the full surface (canonical reader)
              "error-explanation.rkt"    ; in-compiler explanation registry
              "exhaustive-match-fix.rkt" ; missing-case clause-skeleton repair fix

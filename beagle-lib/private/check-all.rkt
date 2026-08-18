@@ -6,6 +6,7 @@
          "parse.rkt"
          "check.rkt"
          "error-format.rkt"
+         "type-facts-v1.rkt"
          "query.rkt"
          "blame.rkt"
          "lint.rkt"
@@ -268,7 +269,13 @@
     [(beagle-diagnostic? e)
      (define d (beagle-diagnostic-details e))
      (define kind (beagle-diagnostic-kind e))
-     (define msg (exn-message e))
+     ;; The covered E002 slice renders its current human line from the
+     ;; authoritative fact. Other diagnostics retain their existing message
+     ;; path until their own typed rendering is landed.
+     (define msg
+       (if (beagle-diagnostic-fact e)
+           (diagnostic-fact-v2-render-message (beagle-diagnostic-fact e))
+           (exn-message e)))
 
      ;; Prefer expression-level line/col from src-table over top-level form
      (define err-line (or (hash-ref d 'error-line #f) stx-line))
@@ -435,6 +442,27 @@
              'message (exn-message e)
              'source_line (or src-line 'null))]))
 
+(define (diagnostic->v2-json e stx path)
+  (define fact (and (beagle-diagnostic? e) (beagle-diagnostic-fact e)))
+  (if fact
+      (diagnostic-fact-v2->jsexpr fact)
+      ;; A V2 request is a publication-facing projection. An uncovered
+      ;; diagnostic is therefore reported as a separate policy fact instead of
+      ;; being silently downgraded to an untyped machine record.
+      (hasheq
+       'kind "PublicationPolicyV1"
+       'schemaVersion 1
+       'policy "block"
+       'reason "missing-human-rendering"
+       'diagnosticKind
+       (cond [(beagle-diagnostic? e)
+              (symbol->string (beagle-diagnostic-kind e))]
+             [(beagle-parse-error? e)
+              (symbol->string (beagle-parse-error-kind e))]
+             [else "compile-error"])
+       'file (or path 'null)
+       'message (exn-message e))))
+
 ;; --- batch checker ----------------------------------------------------------
 
 ;; An agent-error captures the essential fields for --agent summary output.
@@ -470,7 +498,7 @@
 (define (canonical-source-id path)
   (path->string (simplify-path (path->complete-path path))))
 
-(define (check-file-overlay files roots json? profile file-error-counts)
+(define (check-file-overlay files roots json? json-v2? profile file-error-counts)
   (define agent? (agent-mode?))
   (define error-count 0)
   (define agent-errors '())
@@ -495,6 +523,10 @@
     (when (hash-has-key? file-error-counts path)
       (hash-update! file-error-counts path add1 0))
     (cond
+      [json-v2?
+       (write-json (diagnostic->v2-json error loc-stx path) (current-error-port))
+       (newline (current-error-port))
+       (flush-output (current-error-port))]
       [agent?
        (set! agent-errors
              (cons (extract-agent-error error loc-stx path) agent-errors))]
@@ -695,8 +727,13 @@
      "usage: beagle-check-all [--profile 0|1|2|3] [--module-root LOGICAL=PHYSICAL]... <file-or-dir> ...\n")
     (exit 2))
 
+  (define json-v2-flag?
+    (or (member "--json-v2" args)
+        (equal? (getenv "BEAGLE_ERROR_FORMAT") "v2-jsonl")))
+  (define args-without-v2
+    (filter (lambda (arg) (not (string=? arg "--json-v2"))) args))
   (define-values (roots args-without-roots)
-    (parse-module-root-arguments args 'beagle-check-all))
+    (parse-module-root-arguments args-without-v2 'beagle-check-all))
   (define-values (profile file-args) (parse-profile-arg args-without-roots))
   (define files (expand-args file-args))
 
@@ -716,7 +753,7 @@
 
   (parameterize ([current-check-profile profile])
     (define-values (errors lint agent-errors parsed-programs)
-      (check-file-overlay files roots json? profile file-error-counts))
+      (check-file-overlay files roots json? json-v2-flag? profile file-error-counts))
     (set! total-errors errors)
     (set! total-lint lint)
     (set! all-agent-errors agent-errors)
@@ -790,4 +827,5 @@
 
   (exit (if (zero? total-errors) 0 1)))
 
-(provide run-check-all generate-fix-plan diagnostic->json)
+(provide run-check-all generate-fix-plan
+         format-diagnostic diagnostic->json diagnostic->v2-json)

@@ -2,7 +2,7 @@
 # beagle-check: type-check a beagle file without emitting Clojure.
 #
 # Usage:
-#   bin/beagle-check [--agent] [--profile 0|1|2|3]
+#   bin/beagle-check [--agent] [--json-v2] [--profile 0|1|2|3]
 #                    [--module-root LOGICAL=PHYSICAL]...
 #                    <source.bgl|.bclj|.bjs|.bnix>
 #
@@ -15,7 +15,8 @@
 #              0 = parse only, 1 = basic types, 2 = structural, 3 = full (default).
 #
 # Useful for fast feedback in iteration — no need to write a .clj file.
-# Pair with BEAGLE_ERROR_FORMAT=json for parseable error output:
+# Pair with BEAGLE_ERROR_FORMAT=json for the existing V1 record, or
+# --json-v2 for the authoritative typed diagnostic sibling:
 #   BEAGLE_ERROR_FORMAT=json bin/beagle-check examples/demo.bclj
 
 set -euo pipefail
@@ -23,12 +24,14 @@ source "$(dirname "$0")/_beagle-racket"
 
 # Parse flags
 AGENT=false
+JSON_V2=false
 PROFILE=""
 FILE=""
 MODULE_ROOT_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --agent) AGENT=true; shift ;;
+        --json-v2) JSON_V2=true; shift ;;
         --profile)
             if [[ $# -lt 2 ]]; then
                 echo "beagle-check: --profile requires an argument (0, 1, 2, or 3)" >&2
@@ -53,13 +56,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$FILE" ]]; then
-    echo "usage: beagle-check [--agent] [--profile 0|1|2|3] [--module-root LOGICAL=PHYSICAL]... <source.bgl|.bclj|.bjs|.bnix>" >&2
+    echo "usage: beagle-check [--agent] [--json-v2] [--profile 0|1|2|3] [--module-root LOGICAL=PHYSICAL]... <source.bgl|.bclj|.bjs|.bnix>" >&2
     exit 2
 fi
 
 EXTRA_ARGS=()
 if [[ "$AGENT" == true ]]; then
     export BEAGLE_AGENT_MODE=1
+fi
+if [[ "$JSON_V2" == true ]]; then
+    EXTRA_ARGS+=(--json-v2)
 fi
 if [[ -n "$PROFILE" ]]; then
     EXTRA_ARGS+=(--profile "$PROFILE")
