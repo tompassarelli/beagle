@@ -6,5 +6,16 @@
 (defn -main [(args (Vec String))] Int
   (let [(values (Vec provider/Item))
         [(provider/->Item 4) (provider/->Item 9)]
-        (mapped (Vec Int)) (mapv provider/item-value values)]
-    (if (and (= (count mapped) 2) (= (nth mapped 1) 9)) 0 1)))
+        (mapped (Vec Int)) (mapv provider/item-to-int values)
+        (filtered (Vec provider/Item))
+        (filterv provider/item-positive? values)
+        (all-positive Bool) (every? provider/item-positive? values)
+        (found (U Int Nil)) (some provider/item-present values)
+        (total Int) (reduce provider/item-add 0 values)]
+    (if (and (= (count mapped) 2)
+             (= (nth mapped 1) 9)
+             (= (count filtered) 2)
+             all-positive
+             (= found 9)
+             (= total 13))
+      0 1)))

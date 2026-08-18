@@ -2908,6 +2908,29 @@
 (defn fail-result [(state BodyStateV0) (detail String)] ExprResultV0
   (dead-result (state-fail state detail)))
 
+;; A statically resolved callback is lowered as an ordinary direct call at its
+;; loop body.  The native function id is already the ABI-stable identity used
+;; by normal call lowering; no function value or closure representation is
+;; introduced at the HOF boundary.
+(defn lower-static-callback-call
+  [(state BodyStateV0)
+   (owner core/NativeId)
+   (signature TypedFunctionV0)
+   (arguments (Vec core/NativeId))
+   (label String)]
+  ExprResultV0
+  (let [(result-id core/NativeId) (state-id state owner label)
+        (called BodyStateV0)
+        (state-emit (state-bump state)
+          (core/->CallInstruction
+            (core/->SsaValueV0 result-id
+              (typedfunctionv0-return-type signature))
+            (typedfunctionv0-id signature)
+            arguments nil
+            (core/->TokenFlowV0 [] [])))]
+    (->ExprResultV0 called result-id
+      (typedfunctionv0-return-type signature) false)))
+
 (defn state-id
   [(state BodyStateV0) (owner core/NativeId) (label String)] core/NativeId
   (lower-id "body"
@@ -10559,6 +10582,7 @@
    (callback-body (U core/NativeId Nil))
    (callback-source-parameter (U core/NativeId Nil))
    (callback-accessor AccessorHitV0)
+   (callback-signature (U TypedFunctionV0 Nil))
    (callback-return core/NativeId)
    (element-type core/NativeId)
    (collection-id core/NativeId)
@@ -10629,7 +10653,10 @@
                   (core/->SsaValueV0 item-id element-type)
                   collection-id header-index)))
             (callback-result ExprResultV0)
-            (if (accessorhitv0-found callback-accessor)
+            (if (some? callback-signature)
+              (lower-static-callback-call isolated owner
+                callback-signature [item-id] (str callee "-callback-call"))
+              (if (accessorhitv0-found callback-accessor)
               (let [(result-id core/NativeId)
                     (state-id isolated owner "mapv-accessor")]
                 (->ExprResultV0
@@ -10643,11 +10670,11 @@
                 (fail-result isolated
                   (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
                     " has no statically known callback body"))
-                (let [(callback-state BodyStateV0)
+                  (let [(callback-state BodyStateV0)
                       (bind-source-parameter-value env owner isolated
                         callback-source-parameter 0 item-id element-type)]
                   (lower-contextual-boundary env owner callback-state callback-body
-                    callback-return callback-return))))
+                    callback-return callback-return)))))
             (restored BodyStateV0)
             (with
               (state-with-flow-context (exprresultv0-state callback-result)
@@ -10732,6 +10759,7 @@
    (callee String)
    (callback-body core/NativeId)
    (callback-source-parameter core/NativeId)
+   (callback-signature (U TypedFunctionV0 Nil))
    (callback-return core/NativeId)
    (element-type core/NativeId)
    (collection-id core/NativeId)]
@@ -10817,11 +10845,16 @@
                   (core/->SsaValueV0 item-id element-type)
                   collection-id header-index)))
             (callback-state BodyStateV0)
-            (bind-source-parameter-value env owner isolated
-              callback-source-parameter 0 item-id element-type)
+            (if (some? callback-signature)
+              isolated
+              (bind-source-parameter-value env owner isolated
+                callback-source-parameter 0 item-id element-type))
             (callback-result ExprResultV0)
-            (lower-contextual-boundary env owner callback-state callback-body
-              callback-return callback-return)
+            (if (some? callback-signature)
+              (lower-static-callback-call isolated owner callback-signature
+                [item-id] (str callee "-callback-call"))
+              (lower-contextual-boundary env owner callback-state callback-body
+                callback-return callback-return))
             (callback-outer-state BodyStateV0)
             (with
               (state-with-flow-context (exprresultv0-state callback-result)
@@ -10980,7 +11013,7 @@
 
           :else
           (lower-eager-vector-collect env owner collection-state callee
-            nil nil accessor return-type element-type
+            nil nil accessor nil return-type element-type
             (exprresultv0-value-id collection)
             (exprresultv0-type-id collection)))))))
 
@@ -11000,24 +11033,42 @@
       (let [(callback-node core/NativeId) (nth args 0)
             (callback-kind String) (fact-text index callback-node "form-kind")
             (callback-name String) (fact-text index callback-node "name")
+            (callback-spelling String)
+            (source-reference-spelling index callback-node)
             (callback-accessor AccessorHitV0)
             (if (= "ref" callback-kind)
               (record-accessor types
                 (resolve-source-name index
                   (source-module-name index callback-node) callback-name))
               (accessor-miss))
+            (callback-signature (U TypedFunctionV0 Nil))
+              (if (= "ref" callback-kind)
+                (find-signature env callback-node callback-spelling)
+                nil)
             (callback-variadic Bool)
-            (not (nil? (index-first-object index callback-node "rest")))
+            (if (= "ref" callback-kind)
+              false
+              (not (nil? (index-first-object index callback-node "rest"))))
             (callback-body (U core/NativeId Nil))
             (index-first-object index callback-node "body")
+            (callback-body-node core/NativeId)
+            (if (some? callback-body) callback-body callback-node)
             (callback-return-source (U core/NativeId Nil))
             (index-first-object index callback-node "ret")
+            (callback-return-source-node core/NativeId)
+            (if (some? callback-return-source)
+              callback-return-source callback-node)
             (callback-source-parameters (Vec core/NativeId))
             (function-parameter-items index callback-node)
             (callback-owner core/NativeId)
             (state-id state owner (str callee "-callback"))
             (callback-resolution ParameterResolutionV0)
-            (resolve-parameters index callback-node callback-owner)
+            (if (= "ref" callback-kind)
+              (->ParameterResolutionV0
+                (if (some? callback-signature)
+                  (typedfunctionv0-parameters callback-signature)
+                  []) [] [] (some? callback-signature))
+              (resolve-parameters index callback-node callback-owner))
             (callback-parameters (Vec core/Parameter))
             (parameterresolutionv0-parameters callback-resolution)]
         (cond
@@ -11025,7 +11076,13 @@
           (lower-eager-vector-accessor-map env owner state callee
             (nth args 1) callback-accessor)
 
-          (not (= "fn" callback-kind))
+          (and (= "ref" callback-kind) (nil? callback-signature))
+          (fail-result state
+            (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
+              " has no native signature for " callback-spelling))
+
+          (and (not (= "ref" callback-kind))
+            (not (= "fn" callback-kind)))
           (fail-result state
             (str "TODO-NATIVE-VECTOR-HOF-CALLBACK: " callee
               " requires an anonymous function literal"))
@@ -11035,8 +11092,9 @@
             (str "TODO-NATIVE-VECTOR-HOF-VARIADIC: " callee
               " callbacks must have fixed arity"))
 
-          (or (not (= 1 (count callback-source-parameters)))
-              (not (= 1 (count callback-parameters))))
+          (or (not (= 1 (count callback-parameters)))
+              (and (= "fn" callback-kind)
+                (not (= 1 (count callback-source-parameters)))))
           (fail-result state
             (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-ARITY: " callee
               " callbacks take exactly one vector element"))
@@ -11046,19 +11104,23 @@
             (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-TYPES: " callee
               " callback parameters need closed native types"))
 
-          (nil? callback-body)
+          (and (= "fn" callback-kind) (nil? callback-body))
           (fail-result state
             (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-BODY: " callee
               " callback needs exactly one body form"))
 
-          (nil? callback-return-source)
+          (and (= "fn" callback-kind) (nil? callback-return-source))
           (fail-result state
             (str "TODO-NATIVE-VECTOR-HOF-CALLBACK-RETURN: " callee
               " callback needs a closed return annotation"))
 
           :else
           (let [(callback-return-resolution TypeResolutionV0)
-                (resolve-source-type index callback-return-source)
+                (if (some? callback-signature)
+                  (->TypeResolutionV0
+                    (typedfunctionv0-return-type callback-signature)
+                    [] [] true)
+                  (resolve-source-type index callback-return-source-node))
                 (callback-return core/NativeId)
                 (typeresolutionv0-type-id callback-return-resolution)
                 (element-type core/NativeId)
@@ -11107,14 +11169,19 @@
 
                       (or (= "mapv" callee) (= "filterv" callee))
                       (lower-eager-vector-collect env owner collection-state callee
-                        callback-body (nth callback-source-parameters 0)
-                        (accessor-miss) callback-return
+                        callback-body
+                        (if (= "fn" callback-kind)
+                          (nth callback-source-parameters 0) callback-node)
+                        (accessor-miss) callback-signature callback-return
                         element-type (exprresultv0-value-id collection)
                         (exprresultv0-type-id collection))
 
                       :else
                       (lower-eager-vector-predicate env owner collection-state callee
-                        callback-body (nth callback-source-parameters 0)
+                        callback-body-node
+                        (if (= "fn" callback-kind)
+                          (nth callback-source-parameters 0) callback-node)
+                        callback-signature
                         callback-return
                         element-type
                         (exprresultv0-value-id collection)))))))))))))
@@ -14567,23 +14634,47 @@
               (let [(callback-node core/NativeId) (nth args 0)
                     (callback-kind String)
                     (fact-text index callback-node "form-kind")
+                    (callback-spelling String)
+                    (source-reference-spelling index callback-node)
+                    (callback-signature (U TypedFunctionV0 Nil))
+                      (if (= "ref" callback-kind)
+                        (find-signature env callback-node callback-spelling)
+                        nil)
                     (callback-variadic Bool)
-                    (not
-                      (nil? (index-first-object index callback-node "rest")))
+                    (if (= "ref" callback-kind)
+                      false
+                      (not
+                        (nil? (index-first-object index callback-node "rest"))))
                     (callback-body (U core/NativeId Nil))
                     (index-first-object index callback-node "body")
+                    (callback-body-node core/NativeId)
+                    (if (some? callback-body) callback-body callback-node)
                     (callback-return-source (U core/NativeId Nil))
                     (index-first-object index callback-node "ret")
+                    (callback-return-source-node core/NativeId)
+                    (if (some? callback-return-source)
+                      callback-return-source callback-node)
                     (callback-source-parameters (Vec core/NativeId))
                     (function-parameter-items index callback-node)
                     (callback-owner core/NativeId)
                     (state-id state owner "reduce-callback")
                     (callback-resolution ParameterResolutionV0)
-                    (resolve-parameters index callback-node callback-owner)
+                    (if (= "ref" callback-kind)
+                      (->ParameterResolutionV0
+                        (if (some? callback-signature)
+                          (typedfunctionv0-parameters callback-signature)
+                          []) [] [] (some? callback-signature))
+                      (resolve-parameters index callback-node callback-owner))
                     (callback-parameters (Vec core/Parameter))
                     (parameterresolutionv0-parameters callback-resolution)]
                 (cond
-                  (not (= "fn" callback-kind))
+                  (and (= "ref" callback-kind) (nil? callback-signature))
+                  (fail-result state
+                    (str "TODO-NATIVE-REDUCE-CALLBACK: no native signature for "
+                      callback-spelling))
+
+                  (and (not (= "ref" callback-kind))
+                    (not (= "fn" callback-kind)))
                   (fail-result state
                     "TODO-NATIVE-REDUCE-CALLBACK: v0 requires an anonymous function literal")
 
@@ -14591,8 +14682,9 @@
                   (fail-result state
                     "TODO-NATIVE-REDUCE-VARIADIC: reduce callbacks must have fixed arity")
 
-                  (or (not (= 2 (count callback-source-parameters)))
-                      (not (= 2 (count callback-parameters))))
+                  (or (not (= 2 (count callback-parameters)))
+                      (and (= "fn" callback-kind)
+                        (not (= 2 (count callback-source-parameters)))))
                   (fail-result state
                     "TODO-NATIVE-REDUCE-CALLBACK-ARITY: reduce callbacks take accumulator and element")
 
@@ -14600,17 +14692,21 @@
                   (fail-result state
                     "TODO-NATIVE-REDUCE-CALLBACK-TYPES: both callback parameters need closed native types")
 
-                  (nil? callback-body)
+                  (and (= "fn" callback-kind) (nil? callback-body))
                   (fail-result state
                     "TODO-NATIVE-REDUCE-CALLBACK-BODY: callback needs exactly one body form")
 
-                  (nil? callback-return-source)
+                  (and (= "fn" callback-kind) (nil? callback-return-source))
                   (fail-result state
                     "TODO-NATIVE-REDUCE-CALLBACK-RETURN: callback needs a closed return annotation")
 
                   :else
                   (let [(callback-return TypeResolutionV0)
-                        (resolve-source-type index callback-return-source)
+                        (if (some? callback-signature)
+                          (->TypeResolutionV0
+                            (typedfunctionv0-return-type callback-signature)
+                            [] [] true)
+                          (resolve-source-type index callback-return-source-node))
                         (active-transient (U core/NativeId Nil))
                         (bodystatev0-transient-type state)
                         (active-kind String)
@@ -14752,17 +14848,24 @@
                                             (exprresultv0-value-id collection)
                                             header-index)))
                                       (callback-state BodyStateV0)
-                                      (bind-source-parameter-value env owner
+                                      (if (some? callback-signature)
+                                        isolated
                                         (bind-source-parameter-value env owner
-                                          isolated
-                                          (nth callback-source-parameters 0) 0
-                                          header-accumulator accumulator-type)
-                                        (nth callback-source-parameters 1) 1
-                                        item-id element-type)
+                                          (bind-source-parameter-value env owner
+                                            isolated
+                                            (nth callback-source-parameters 0) 0
+                                            header-accumulator accumulator-type)
+                                          (nth callback-source-parameters 1) 1
+                                          item-id element-type))
                                       (callback-result ExprResultV0)
-                                      (lower-contextual-boundary env owner
-                                        callback-state callback-body accumulator-type
-                                        accumulator-type)
+                                      (if (some? callback-signature)
+                                        (lower-static-callback-call isolated owner
+                                          callback-signature
+                                          [header-accumulator item-id]
+                                          "reduce-callback-call")
+                                        (lower-contextual-boundary env owner
+                                          callback-state callback-body-node accumulator-type
+                                          accumulator-type))
                                       (restored BodyStateV0)
                                       (with
                                         (state-with-flow-context
