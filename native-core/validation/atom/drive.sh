@@ -181,7 +181,7 @@ run_phase atom-source-materialization 180 bb -cp "$scratch/out" -e "
 for name in direct-update make-counter-cell make-vector-cell reset-counter! \
     update-counter! assoc-counter! assoc-counter-map! append-value! \
     append-values! local-any-cell make-any-cell any-deref any-reset! \
-    any-swap! any-cas! counter-cas!; do
+    any-swap! any-cas! callable-cell-value counter-cas!; do
   awk -v name="$name" \
     '$1 == "lowered" && $3 == name { found = 1 } END { exit !found }' \
     "$scratch/source-report.txt" || {
