@@ -1749,8 +1749,8 @@
   (number? d) {"jsk" "literal" "kind" "number" "value" d}
   (= d "true") {"jsk" "literal" "kind" "bool" "value" true}
   (= d "false") {"jsk" "literal" "kind" "bool" "value" false}
-  (= d "null") {"jsk" "literal" "kind" "null" "value" "null"}
-  (= d "undefined") {"jsk" "literal" "kind" "undefined" "value" "undefined"}
+  (= d "null") {"jsk" "literal" "kind" "null"}
+  (= d "undefined") {"jsk" "literal" "kind" "undefined"}
   (= d "this") {"jsk" "ident" "name" "this"}
   (jsq-splice-sym? d) (let [sk (jsq-splice-kind d)
    kind (nth sk 0)]
@@ -2568,6 +2568,7 @@
   (expect! "cond :else canonicalizes to ref else (oracle parity)" (let [node (parse-expr* ["cond" [BRACKET-TAG "x" "a"] [BRACKET-TAG ":else" "b"]])]
   (= (get (nth (get node "clauses") 1) "test") {"node" "ref" "name" "else"})))
   (expect! "literal: nil (null) — no value key (ast-json parity)" (= (parse-expr* nil) {"node" "literal" "kind" "nil"}))
+  (expect! "js/quote null and undefined omit sentinel values (ast-json parity)" (and (= (pj-expr-impl! "null") {"jsk" "literal" "kind" "null"}) (= (pj-expr-impl! "undefined") {"jsk" "literal" "kind" "undefined"})))
   (expect! "literal: nil symbol" (= (get (parse-expr* "nil") "kind") "nil"))
   (expect! "literal: keyword" (= (parse-expr* ":name") {"node" "literal" "kind" "keyword" "value" "name"}))
   (expect! "literal: string datum" (= (parse-expr* ["#%string" "hi"]) {"node" "literal" "kind" "string" "value" "hi"}))

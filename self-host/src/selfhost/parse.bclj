@@ -3299,9 +3299,9 @@
     (= d "false")
     {"jsk" "literal" "kind" "bool" "value" false}
     (= d "null")
-    {"jsk" "literal" "kind" "null" "value" "null"}
+    {"jsk" "literal" "kind" "null"}
     (= d "undefined")
-    {"jsk" "literal" "kind" "undefined" "value" "undefined"}
+    {"jsk" "literal" "kind" "undefined"}
     (= d "this")
     {"jsk" "ident" "name" "this"}
     (jsq-splice-sym? d)
@@ -4945,6 +4945,10 @@
       (= (get (nth (get node "clauses") 1) "test") {"node" "ref" "name" "else"})))
   (expect! "literal: nil (null) — no value key (ast-json parity)"
     (= (parse-expr* nil) {"node" "literal" "kind" "nil"}))
+  (expect! "js/quote null and undefined omit sentinel values (ast-json parity)"
+    (and (= (pj-expr-impl! "null") {"jsk" "literal" "kind" "null"})
+         (= (pj-expr-impl! "undefined")
+            {"jsk" "literal" "kind" "undefined"})))
   (expect! "literal: nil symbol" (= (get (parse-expr* "nil") "kind") "nil"))
   (expect! "literal: keyword"
     (= (parse-expr* ":name") {"node" "literal" "kind" "keyword" "value" "name"}))
