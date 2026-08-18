@@ -1,0 +1,76 @@
+#lang beagle
+(ns native.s2-dynamic-projection)
+
+(defn direct-map [(value Any)] Int
+  (if (map? value)
+    (let [item (get value :number 0)
+          updated (assoc value :extra 9)]
+      (if (and (contains? updated :number) (integer? item))
+        item
+        0))
+    0))
+
+(defn short-map [(value Any)] Int
+  (if (and (map? value) (contains? value :number))
+    (count (keys value))
+    0))
+
+(defn direct-vector [(value Any)] Int
+  (if (vector? value) (count value) 0))
+
+(defn short-vector [(value Any)] Int
+  (if (and (vector? value) (> (count value) 2))
+    (let [item (nth value 0)
+          changed (assoc value 0 9)
+          joined (into (subvec changed 0 1) (subvec value 1 3))]
+      (if (and (= (count joined) 3) (integer? item)) item 0))
+    0))
+
+(defn direct-set [(value Any)] Int
+  (if (set? value) (count value) 0))
+
+(defn short-set [(value Any)] Int
+  (if (and (set? value) (contains? value 2))
+    (let [items (vec value)
+          doubled (into items items)]
+      (do
+        (doseq [item items]
+          (integer? item))
+        (reduce
+          (fn [(total Int) (item Any)] Int
+            (if (integer? item) (+ total item) total))
+          0
+          doubled)))
+    0))
+
+(defn direct-text [(value Any)] Int
+  (if (string? value) (count (str/trim value)) 0))
+
+(defn short-text [(value Any)] Int
+  (if (and (string? value) (str/includes? value "EAGLE"))
+    (count (str/lower-case (str/trim value)))
+    0))
+
+(defn cond-projection [(value Any)] Int
+  (cond
+    (map? value) (count (keys value))
+    (vector? value) (count (subvec value 0 1))
+    (set? value) (count (vec value))
+    (string? value) (count (str/trim value))
+    :else 0))
+
+(defn main [] Int
+  (if (and (= (direct-map {:number 7}) 7)
+           (= (short-map {:number 7}) 1)
+           (= (direct-vector [4 5 6]) 3)
+           (= (short-vector [4 5 6]) 4)
+           (= (direct-set #{1 2 3}) 3)
+           (= (short-set #{1 2 3}) 12)
+           (= (direct-text " ok ") 2)
+           (= (short-text "  BEAGLE  ") 6)
+           (= (cond-projection {:left 1 :right 2}) 2)
+           (= (cond-projection [8]) 1)
+           (= (cond-projection #{8}) 1)
+           (= (cond-projection " ok ") 2))
+    0
+    1))

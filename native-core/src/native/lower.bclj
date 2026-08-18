@@ -11112,6 +11112,12 @@
                     (accepted (Vec core/NativeId))
                     (cond
                       (scalar-predicate? callee) (scalar-predicate-types callee)
+                      (collection-predicate? callee)
+                      (filterv
+                        (fn [(candidate core/NativeId)] Bool
+                          (collection-predicate-type?
+                            (bodyenvv0-types env) callee candidate))
+                        possible)
                       (= "nil?" callee) [(type-id "Nil")]
                       (= "some?" callee)
                       (subtract-id-vectors possible [(type-id "Nil")])
@@ -15414,7 +15420,9 @@
         (= "kw-access" kind)
         (let [(keyword String) (fact-text index expr "keyword")
               (target-node (U core/NativeId Nil))
-              (index-first-object index expr "target")]
+              (index-first-object index expr "target")
+              (default-node (U core/NativeId Nil))
+              (index-first-object index expr "default")]
           (if (or (= "" keyword) (nil? target-node))
             (fail-result state
               "TODO-NATIVE-KEYWORD-ACCESS-SOURCE: keyword access needs a literal key and target")
@@ -15445,53 +15453,97 @@
                 (let [(key-type core/NativeId) (map-key-of types target-type)
                       (value-type core/NativeId) (map-value-of types target-type)
                       (result-type (U core/NativeId Nil))
-                      (nullable-value-type-of types value-type)
+                      (if (nil? default-node)
+                        (nullable-value-type-of types value-type)
+                        value-type)
                       (equality (U core/ConcreteEqualityV0 Nil))
                       (map-key-equality-for types key-type)]
                   (cond
-                    (not (same-id? key-type (keyword-type-id)))
-                    (fail-result current
-                      "TODO-NATIVE-KEYWORD-MAP-KEY: keyword access needs a Keyword-keyed map")
-
                     (nil? result-type)
                     (fail-result current
                       "TODO-NATIVE-KEYWORD-MAP-RESULT: keyword access needs the map's closed nullable value type")
 
                     (nil? equality)
                     (fail-result current
-                      "TODO-NATIVE-KEYWORD-MAP-EQUALITY: keyword access needs closed Keyword equality")
+                      "TODO-NATIVE-KEYWORD-MAP-EQUALITY: keyword access needs closed key equality")
 
                     :else
                     (let [(refinement (U KeywordFlowRefinementV0 Nil))
                           (find-keyword-refinement current
                             (exprresultv0-value-id target) target-type keyword
                             result-type)
-                          (key-id core/NativeId)
+                          (raw-key-id core/NativeId)
                           (state-id current owner "keyword-key")
-                          (keyed BodyStateV0)
+                          (raw-key-state BodyStateV0)
                           (state-emit (state-bump current)
                             (core/->AtomInstruction
-                              (core/->SsaValueV0 key-id (keyword-type-id))
+                              (core/->SsaValueV0 raw-key-id (keyword-type-id))
                               (core/->KeywordAtom keyword)))
-                          (result-id core/NativeId)
-                          (state-id keyed owner "keyword-get")
-                          (looked-up BodyStateV0)
-                          (state-emit (state-bump keyed)
-                            (core/->MapGetInstructionV0
-                              (core/->SsaValueV0 result-id result-type)
-                              (exprresultv0-value-id target) key-id nil equality))]
+                          (key ExprResultV0)
+                          (lower-boundary-coerce types owner raw-key-state
+                            raw-key-id (keyword-type-id) key-type)
+                          (keyed BodyStateV0) (exprresultv0-state key)
+                          (lookup ExprResultV0)
+                          (cond
+                            (state-blocked? keyed)
+                            (fail-result keyed
+                              "TODO-NATIVE-KEYWORD-MAP-KEY: keyword does not widen to the map key type")
+
+                            (not (same-id? key-type
+                                   (exprresultv0-type-id key)))
+                            (fail-result keyed
+                              "TODO-NATIVE-KEYWORD-MAP-KEY: keyword does not match the map key type")
+
+                            (nil? default-node)
+                            (let [(result-id core/NativeId)
+                                  (state-id keyed owner "keyword-get")]
+                              (->ExprResultV0
+                                (state-emit (state-bump keyed)
+                                  (core/->MapGetInstructionV0
+                                    (core/->SsaValueV0 result-id result-type)
+                                    (exprresultv0-value-id target)
+                                    (exprresultv0-value-id key) nil equality))
+                                result-id result-type false))
+
+                            :else
+                            (let [(default ExprResultV0)
+                                  (lower-contextual-boundary env owner keyed
+                                    default-node value-type value-type)
+                                  (settled BodyStateV0)
+                                  (exprresultv0-state default)]
+                              (cond
+                                (exprresultv0-terminated default) default
+                                (state-blocked? settled)
+                                (fail-result settled
+                                  "TODO-NATIVE-KEYWORD-MAP-DEFAULT: default does not match the map value type")
+                                :else
+                                (let [(result-id core/NativeId)
+                                      (state-id settled owner "keyword-get")]
+                                  (->ExprResultV0
+                                    (state-emit (state-bump settled)
+                                      (core/->MapGetInstructionV0
+                                        (core/->SsaValueV0 result-id result-type)
+                                        (exprresultv0-value-id target)
+                                        (exprresultv0-value-id key)
+                                        (exprresultv0-value-id default)
+                                        equality))
+                                    result-id result-type false)))))]
                       ;; The proof authorizes only a checked extraction; the
                       ;; repeated lookup still produces and checks its union tag.
-                      (if (nil? refinement)
-                        (->ExprResultV0 looked-up result-id result-type false)
+                      (if (or (nil? refinement)
+                            (exprresultv0-terminated lookup)
+                            (state-blocked? (exprresultv0-state lookup)))
+                        lookup
                         (let [(refined-type core/NativeId)
                               (keywordflowrefinementv0-result-type refinement)
                               (path VariantPathV0)
                               (variant-path-to-payload types result-type
                                 refined-type)]
                           (if (not (= 1 (variantpathv0-matches path)))
-                            (->ExprResultV0 looked-up result-id result-type false)
-                            (extract-variant-path owner looked-up result-id
+                            lookup
+                            (extract-variant-path owner
+                              (exprresultv0-state lookup)
+                              (exprresultv0-value-id lookup)
                               result-type "keyword-refined"
                               (variantpathv0-variants path))))))))
 
@@ -16482,9 +16534,20 @@
                                 receiver-expected
                                 (if (some? preserved-expected)
                                   preserved-expected equality-expected)))
-                            (argument ExprResultV0)
+                            (raw-argument ExprResultV0)
                             (lower-expr-expected env owner current argument-node
-                              argument-expected)]
+                              argument-expected)
+                            (argument ExprResultV0)
+                            (if (or (nil? receiver-expected)
+                                  (exprresultv0-terminated raw-argument)
+                                  (state-blocked?
+                                    (exprresultv0-state raw-argument)))
+                              raw-argument
+                              (lower-boundary-coerce types owner
+                                (exprresultv0-state raw-argument)
+                                (exprresultv0-value-id raw-argument)
+                                (exprresultv0-type-id raw-argument)
+                                receiver-expected))]
                         (if (exprresultv0-terminated argument)
                           (->ArgsResultV0 (exprresultv0-state argument) values
                             value-types true)
