@@ -21,6 +21,7 @@ PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
 AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
 SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
+EMIT_MANAGER="$BEAGLE_DIR/native-core/bin/emit-workers"
 PLATFORM_SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded"
 MODULE_SOURCE_ROOT_CLI="$BEAGLE_DIR/beagle-lib/private/module-source-root-cli.rkt"
 original_args=("$@")
@@ -36,6 +37,10 @@ core_kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
 }
 [[ -f "$SUPERVISOR" ]] || {
     echo "beagle build: bounded supervisor is unavailable: $SUPERVISOR" >&2
+    exit 2
+}
+[[ -x "$EMIT_MANAGER" ]] || {
+    echo "beagle build: emission manager is unavailable: $EMIT_MANAGER" >&2
     exit 2
 }
 if [[ "$native_route_selected" == 1 && ! -x "$PLATFORM_SUPERVISOR" ]]; then
@@ -1632,6 +1637,7 @@ export BEAGLE_CORE_ABI="$abi"
 export BEAGLE_CORE_SIMD_REQUIRED="$simd_required"
 export BEAGLE_CORE_EMIT_WORKERS="$emit_workers"
 export BEAGLE_CORE_EMIT_WORKERS_EXPLICIT="$emit_workers_explicit"
+export BEAGLE_CORE_EMIT_MANAGER="$EMIT_MANAGER"
 export BEAGLE_CORE_EMIT_COMPILED="$compiled"
 export BEAGLE_CORE_EMIT_SUPERVISOR="$SUPERVISOR"
 export BEAGLE_CORE_EMIT_RACKET="$RACKET"
@@ -1696,7 +1702,8 @@ bb -cp "$compiled" -e '
         (quote [java.nio.channels FileChannel])
         (quote [java.nio.charset StandardCharsets])
         (quote [java.nio.file CopyOption Files OpenOption Paths
-                StandardCopyOption StandardOpenOption]))
+                 StandardCopyOption StandardOpenOption])
+        (quote [java.util.concurrent TimeUnit]))
 
 (def report-path (System/getenv "BEAGLE_CORE_REPORT"))
 (def native-report-format "beagle-native-report/v1")
@@ -2254,10 +2261,14 @@ bb -cp "$compiled" -e '
    "         (quote [native.body-c17 :as body])\n"
    "         (quote [native.qbe :as qbe])\n"
    "         (quote [native.stages :as stages]))\n"
-   "(let [[backend wire-path worker-dir indexes-text abi-id] *command-line-args*\n"
+   "(let [[backend wire-path worker-dir indexes-text abi-id worker-index]\n"
+   "      *command-line-args*\n"
    "      result-path (str worker-dir \"/result\")\n"
    "      error-path (str worker-dir \"/error.txt\")]\n"
    "  (try\n"
+   "    (when (= worker-index\n"
+   "             (System/getenv \"BEAGLE_CORE_EMIT_FAIL_WORKER_INDEX\"))\n"
+   "      (throw (ex-info \"injected emission worker failure\" {})))\n"
    "    (let [program (stages/decode-native-core-program-wire-v1 (slurp wire-path))\n"
    "          indexes (mapv #(Long/parseLong %) (str/split indexes-text #\",\"))]\n"
    "      (when (nil? program)\n"
@@ -2315,51 +2326,106 @@ bb -cp "$compiled" -e '
          (or explicit?
              (>= function-count emission-parallel-threshold)))))
 
-(defn emission-worker-indexes [function-count worker-count worker-index]
-  (vec (range worker-index function-count worker-count)))
+(defn emission-manager-error [root]
+  (let [path (str root "/manager.stderr")]
+    (if (.isFile (File. path))
+      (str/trim (slurp path))
+      "manager produced no diagnostic")))
 
-(defn launch-emission-worker!
-  [backend wire-path function-count worker-count worker-index abi-id]
+(defn launch-emission-manager!
+  [backend wire-path function-count worker-count abi-id]
   (let [root (System/getenv "BEAGLE_CORE_EMIT_WORK_ROOT")
-        worker-dir (str root "/" backend "-" worker-index)
-        _created (.mkdirs (File. worker-dir))
-        indexes (emission-worker-indexes function-count worker-count worker-index)
-        index-argument (str/join "," indexes)
-        stdout-path (str worker-dir "/stdout.log")
-        stderr-path (str worker-dir "/stderr.log")
-        receipt-path (str worker-dir "/supervisor.receipt")
-        command [(System/getenv "BEAGLE_CORE_EMIT_RACKET")
+        stdout-path (str root "/manager.stdout")
+        stderr-path (str root "/manager.stderr")
+        command [(System/getenv "BEAGLE_CORE_EMIT_MANAGER")
+                 (System/getenv "BEAGLE_CORE_EMIT_RACKET")
                  (System/getenv "BEAGLE_CORE_EMIT_SUPERVISOR")
                  (System/getenv "BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS")
                  (System/getenv "BEAGLE_CORE_EMIT_KILL_GRACE_SECONDS")
-                 "--"
                  (System/getenv "BEAGLE_CORE_EMIT_BB")
-                 "-cp" (System/getenv "BEAGLE_CORE_EMIT_COMPILED")
-                 "-e" emission-worker-code
-                 backend wire-path worker-dir index-argument abi-id]
+                 (System/getenv "BEAGLE_CORE_EMIT_COMPILED")
+                 backend wire-path root (str function-count) (str worker-count)
+                 abi-id emission-worker-code]
         builder (ProcessBuilder. (into-array String command))]
-    (.put (.environment builder)
-          "BEAGLE_BOUNDED_COMPLETION_RECEIPT" receipt-path)
     (.redirectOutput builder (ProcessBuilder$Redirect/to (File. stdout-path)))
     (.redirectError builder (ProcessBuilder$Redirect/to (File. stderr-path)))
-    {:index worker-index
-     :worker-dir worker-dir
-     :receipt-path receipt-path
-     :process (.start builder)}))
+    {:root root :process (.start builder)}))
 
-(defn await-emission-worker [worker]
-  (let [status (.waitFor (:process worker))
-        receipt (if (.isFile (File. (:receipt-path worker)))
-                  (str/trim (slurp (:receipt-path worker)))
+(defn emission-manager-deadline-seconds [worker-timeout kill-grace]
+  (let [raw (or (System/getenv "BEAGLE_DEADLINE_SCALE") "1")
+        pieces (str/split raw #"/" -1)
+        scale (try
+                (case (count pieces)
+                  1 (Double/parseDouble (first pieces))
+                  2 (/ (Double/parseDouble (first pieces))
+                       (Double/parseDouble (second pieces)))
+                  Double/NaN)
+                (catch Exception _ Double/NaN))]
+    (when (or (Double/isNaN scale)
+              (Double/isInfinite scale)
+              (not (pos? scale)))
+      (throw
+       (ex-info
+        (str "BEAGLE_DEADLINE_SCALE must be a positive rational: " raw)
+        {:scale raw})))
+    (+ (long (Math/ceil (* worker-timeout scale))) kill-grace 30)))
+
+(defn await-emission-manager [stage-name manager]
+  (let [process (:process manager)
+        worker-timeout (Long/parseLong
+                         (System/getenv
+                          "BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS"))
+        kill-grace (Long/parseLong
+                     (System/getenv "BEAGLE_CORE_EMIT_KILL_GRACE_SECONDS"))
+        wait-seconds (emission-manager-deadline-seconds
+                      worker-timeout kill-grace)
+        exited? (.waitFor process wait-seconds TimeUnit/SECONDS)]
+    (when-not exited?
+      (.destroy process)
+      (when-not (.waitFor process kill-grace TimeUnit/SECONDS)
+        (.destroyForcibly process)
+        (.waitFor process kill-grace TimeUnit/SECONDS))
+      (throw
+       (ex-info
+        (str stage-name " emission manager exceeded its stage deadline")
+        {:stage stage-name :status :timeout})))
+    (let [status (.exitValue process)
+          receipt-path (str (:root manager) "/manager.receipt")
+          receipt (if (.isFile (File. receipt-path))
+                    (str/trim (slurp receipt-path))
+                    "")]
+      (when (or (not= status 0) (str/blank? receipt))
+        (throw
+         (ex-info
+          (str stage-name " emission manager failed: "
+               (emission-manager-error (:root manager)))
+          {:stage stage-name :status status :receipt receipt})))
+      receipt)))
+
+(defn read-emission-worker [backend worker-index]
+  (let [root (System/getenv "BEAGLE_CORE_EMIT_WORK_ROOT")
+        worker-dir (str root "/" backend "-" worker-index)
+        status-path (str worker-dir "/manager.status")
+        status (if (.isFile (File. status-path))
+                 (Long/parseLong (str/trim (slurp status-path)))
+                 -1)
+        receipt-path (str worker-dir "/supervisor.receipt")
+        receipt (if (.isFile (File. receipt-path))
+                  (str/trim (slurp receipt-path))
                   "")
         expected (if (= status 124)
                    "subtree-reaped-v0 timeout status=124"
                    (str "subtree-reaped-v0 exit status=" status))
-        result-path (str (:worker-dir worker) "/result")
+        result-path (str worker-dir "/result")
         result (if (.isFile (File. result-path))
                  (str/trim (slurp result-path))
                  "MISSING")]
-    (assoc worker :status status :receipt receipt :expected expected :result result)))
+    {:index worker-index
+     :worker-dir worker-dir
+     :status status
+     :receipt receipt
+     :expected expected
+     :result result}))
 
 (defn emission-worker-error [worker]
   (let [path (str (:worker-dir worker) "/error.txt")]
@@ -2370,7 +2436,7 @@ bb -cp "$compiled" -e '
           (str/trim (slurp stderr-path))
           "worker produced no diagnostic")))))
 
-(defn parallel-function-text [backend program abi-id]
+(defn parallel-function-text [stage-name backend program abi-id]
   (let [function-count (count (core/nativecoreprogram-functions program))
         requested (Long/parseLong (System/getenv "BEAGLE_CORE_EMIT_WORKERS"))
         worker-count (min requested function-count)]
@@ -2380,10 +2446,21 @@ bb -cp "$compiled" -e '
             wire-path (str root "/" backend ".native-program-wire-v1")
             _wire (spit wire-path
                         (stages/encode-native-core-program-wire-v1 program))
-            workers (mapv #(launch-emission-worker!
-                            backend wire-path function-count worker-count % abi-id)
-                          (range worker-count))
-            completed (mapv await-emission-worker workers)
+            manager (launch-emission-manager!
+                     backend wire-path function-count worker-count abi-id)
+            receipt (await-emission-manager stage-name manager)
+            expected-receipt (str "emission-manager-v0 reaped workers="
+                                  worker-count)
+            _receipt
+            (when-not (= receipt expected-receipt)
+              (throw
+               (ex-info
+                (str stage-name " emission manager receipt mismatch")
+                {:stage stage-name
+                 :receipt receipt
+                 :expected-receipt expected-receipt})))
+            completed (mapv #(read-emission-worker backend %)
+                            (range worker-count))
             failure (first
                      (filter #(or (not= (:receipt %) (:expected %))
                                   (not= (:status %) 0)
@@ -2396,9 +2473,10 @@ bb -cp "$compiled" -e '
             {:ok? false :detail (emission-worker-error failure)}
             (throw
              (ex-info
-              (str backend " emission worker " (:index failure) " failed: "
-                   (emission-worker-error failure))
+              (str stage-name " emission worker " (:index failure)
+                   " failed: " (emission-worker-error failure))
               {:backend backend
+               :stage stage-name
                :worker (:index failure)
                :status (:status failure)
                :receipt (:receipt failure)
@@ -2467,7 +2545,8 @@ bb -cp "$compiled" -e '
                            (emission-parallel? projected))
             result (cond
                  parallel?
-                 (let [batch (parallel-function-text "c17" projected abi-id)]
+                 (let [batch (parallel-function-text
+                              "materialization-c17" "c17" projected abi-id)]
                    (if (:ok? batch)
                      (body/materialize-program-plans-with-function-text
                       projected 0 abi-id [] (:text batch))
@@ -2510,7 +2589,9 @@ bb -cp "$compiled" -e '
   (start-stage! "materialization-wasm-bootstrap-c17")
   (let [parallel? (emission-parallel? projected)
         result (if parallel?
-                 (let [batch (parallel-function-text "c17" projected abi-id)]
+                 (let [batch (parallel-function-text
+                              "materialization-wasm-bootstrap-c17"
+                              "c17" projected abi-id)]
                    (if (:ok? batch)
                      (body/materialize-program-plans-with-function-text
                       projected 0 abi-id [] (:text batch))
@@ -2538,7 +2619,8 @@ bb -cp "$compiled" -e '
                  simd-required?
                  (qbe/materialize-program-with-simd projected 0 abi-id plan)
                  parallel?
-                 (let [batch (parallel-function-text "qbe" projected abi-id)]
+                 (let [batch (parallel-function-text
+                              "materialization-qbe" "qbe" projected abi-id)]
                    (if (:ok? batch)
                      (qbe/materialize-program-with-function-text
                       projected 0 abi-id (:text batch))

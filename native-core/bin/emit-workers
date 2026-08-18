@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+# Own and reap one parallel native-emission cohort. Babashka launches this one
+# manager instead of waiting on every worker through native-image's Java
+# Process implementation. Each worker still has its own subtree supervisor and
+# deadline; this manager records every exit only after Bash has reaped it.
+
+set -euo pipefail
+
+pids=()
+
+shutdown_workers() {
+  local pid
+  for pid in "${pids[@]}"; do
+    [[ -n "$pid" ]] || continue
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  for pid in "${pids[@]}"; do
+    [[ -n "$pid" ]] || continue
+    wait "$pid" 2>/dev/null || true
+  done
+}
+
+die() {
+  echo "beagle emission manager: $*" >&2
+  shutdown_workers
+  exit 2
+}
+
+[[ $# -eq 13 ]] || die "expected 13 arguments"
+
+racket="$1"
+supervisor="$2"
+worker_timeout="$3"
+kill_grace="$4"
+bb="$5"
+compiled="$6"
+backend="$7"
+wire_path="$8"
+root="$9"
+function_count="${10}"
+worker_count="${11}"
+abi_id="${12}"
+worker_code="${13}"
+
+[[ "$function_count" =~ ^[1-9][0-9]*$ ]] ||
+  die "function count must be positive"
+[[ "$worker_count" =~ ^[1-9][0-9]*$ ]] ||
+  die "worker count must be positive"
+((worker_count <= function_count)) ||
+  die "worker count exceeds function count"
+
+# Invoked by the signal trap below.
+# shellcheck disable=SC2329
+terminate_workers() {
+  trap - HUP INT TERM
+  shutdown_workers
+  exit 2
+}
+
+trap terminate_workers HUP INT TERM
+
+for ((worker_index = 0; worker_index < worker_count; worker_index++)); do
+  worker_dir="$root/$backend-$worker_index"
+  mkdir -p "$worker_dir" || die "could not create worker $worker_index directory"
+  indexes=""
+  for ((function_index = worker_index;
+       function_index < function_count;
+       function_index += worker_count)); do
+    indexes+="${indexes:+,}$function_index"
+  done
+  BEAGLE_BOUNDED_COMPLETION_RECEIPT="$worker_dir/supervisor.receipt" \
+    "$racket" "$supervisor" "$worker_timeout" "$kill_grace" -- \
+    "$bb" -cp "$compiled" -e "$worker_code" \
+    "$backend" "$wire_path" "$worker_dir" "$indexes" "$abi_id" \
+    "$worker_index" \
+    >"$worker_dir/stdout.log" 2>"$worker_dir/stderr.log" &
+  pids+=("$!")
+done
+
+for ((worker_index = 0; worker_index < worker_count; worker_index++)); do
+  if wait "${pids[$worker_index]}"; then
+    status=0
+  else
+    status=$?
+  fi
+  pids[worker_index]=""
+  printf '%s\n' "$status" >"$root/$backend-$worker_index/manager.status" ||
+    die "could not record worker $worker_index status"
+done
+
+receipt="$root/manager.receipt"
+temporary="$root/.manager.receipt.$$"
+printf 'emission-manager-v0 reaped workers=%s\n' "$worker_count" >"$temporary" ||
+  die "could not write completion receipt"
+mv -f -- "$temporary" "$receipt" || die "could not publish completion receipt"
+trap - HUP INT TERM
+exit 0

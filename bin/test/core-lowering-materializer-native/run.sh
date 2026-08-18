@@ -60,6 +60,10 @@ set -e
     }
 echo "$gate: platform supervisor normal and timeout receipts PASS"
 
+echo "$gate: emission manager lifecycle START"
+"$root/native-core/tests/emission_manager_gate.sh"
+echo "$gate: emission manager lifecycle PASS"
+
 # Every live emission target remains in this landing gate.  These are the same
 # focused suites used by the preceding projection seam, including both Nix
 # emission and Nix error behavior.
@@ -132,6 +136,31 @@ run_shadow() {
 }
 
 run_shadow 1
+
+failed_worker_log="$scratch/shadow-worker-failure.log"
+set +e
+env -u BEAGLE_NATIVE_COMPILER_BIN \
+    BEAGLE_CORE_COMPILED_OVERRIDE="$compiled_override" \
+    BEAGLE_CORE_BUILD_CACHE="$scratch/shadow-worker-failure-cache" \
+    BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS="$build_deadline" \
+    BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS="$build_deadline" \
+    BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS="$build_deadline" \
+    BEAGLE_CORE_EMIT_FAIL_WORKER_INDEX=2 \
+    "$root/bin/beagle-build-core" --materializer c17 \
+    --emit-workers 4 --out "$scratch/shadow-worker-failure" "$fixture" \
+    >"$failed_worker_log" 2>&1
+failed_worker_status=$?
+set -e
+if [[ "$failed_worker_status" == 0 ]] ||
+    ! grep -Fq \
+      'materialization-c17 emission worker 2 failed: clojure.lang.ExceptionInfo: injected emission worker failure' \
+      "$failed_worker_log"; then
+    echo "$gate: parent did not report the injected worker failure" >&2
+    cat "$failed_worker_log" >&2
+    exit 1
+fi
+echo "$gate: injected worker failure observed and reported PASS"
+
 for workers in 4 8 16; do
     run_shadow "$workers"
     diff -ru --no-dereference "$scratch/shadow-1" "$scratch/shadow-$workers" \
