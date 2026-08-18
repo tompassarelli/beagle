@@ -33,7 +33,12 @@ def validate_case(case, expected_id=None):
     if not case["rule"].get("text"):
         fail("case rule lacks decided text")
     expected = case["expected"]
-    if expected.get("kind") not in ("diagnostic", "canonical-output"):
+    if expected.get("kind") not in (
+        "diagnostic",
+        "canonical-output",
+        "named-diagnostic",
+        "named-diagnostic-assertion",
+    ):
         fail("case expected assertion is not canonical")
     source = case["input"].get("source")
     command = case["input"].get("command", {}).get("argv")
@@ -64,7 +69,10 @@ def run_case(case, compiler, repo_root):
         input_path = temp_root / (case["input"].get("fileName") or "input.bgl")
         input_path.parent.mkdir(parents=True, exist_ok=True)
         for file_entry in closure.get("files", []):
-            file_path = temp_root / file_entry["path"]
+            file_name = file_entry.get("fileName") or file_entry.get("path")
+            if not file_name:
+                fail("closure file missing fileName")
+            file_path = temp_root / file_name
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(file_entry["source"], encoding="utf-8")
         output_path = temp_root / "output"
@@ -85,16 +93,41 @@ def run_case(case, compiler, repo_root):
         )
         expected = case["expected"]
         combined = canonicalize(result.stdout + result.stderr, temp_root)
-        if result.returncode != expected.get("exitCode"):
+        expected_exit = expected.get("exitCode")
+        if expected_exit is None:
+            if expected["kind"] == "named-diagnostic":
+                expected_exit = 1
+            elif expected["kind"] == "named-diagnostic-assertion":
+                expected_exit = (
+                    1
+                    if expected.get("diagnosticCode") or expected.get("diagnostic")
+                    else 0
+                )
+            else:
+                expected_exit = 0
+        if result.returncode != expected_exit:
             detail = " ".join(combined.split())[:400]
             return "exit code {} (expected {}): {}".format(
-                result.returncode, expected.get("exitCode"), detail or "no diagnostic"
+                result.returncode, expected_exit, detail or "no diagnostic"
             )
-        if expected["kind"] == "diagnostic":
-            for field in ("code", "message", "diagnosticCore"):
+        if expected["kind"] in ("diagnostic", "named-diagnostic"):
+            fields = ("code", "message", "diagnosticCore")
+            if expected["kind"] == "named-diagnostic":
+                fields = ("identifier",)
+            for field in fields:
                 needle = expected.get(field)
                 if needle and needle not in combined:
                     return "diagnostic missing {}={!r}".format(field, needle)
+            return None
+        if expected["kind"] == "named-diagnostic-assertion":
+            needle = expected.get("diagnosticCode")
+            if needle and needle not in combined:
+                return "diagnostic missing diagnosticCode={!r}".format(needle)
+            diagnostic = expected.get("diagnostic")
+            if isinstance(diagnostic, dict):
+                needle = diagnostic.get("semanticErrorId")
+                if needle and needle not in combined:
+                    return "diagnostic missing semanticErrorId={!r}".format(needle)
             return None
         if canonicalize(result.stdout, temp_root) != normalize(expected.get("stdout", "")):
             return "stdout differs from canonical output: {!r}".format(result.stdout[:400])
