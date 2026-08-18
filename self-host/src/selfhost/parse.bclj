@@ -2915,7 +2915,8 @@
 
 ;; --- defn family --------------------------------------------------------------
 
-(defn- parse-defn-tail! [(name String) (after-name Any) (priv Bool)] Any
+(defn- parse-defn-tail!
+  [(name String) (after-name Any) (priv Bool) (whole Any)] Any
   (validate-identifier! name "definition")
   (cond
     (and (>= (count after-name) 1) (multi-arity-form? (nth after-name 0)))
@@ -2934,8 +2935,9 @@
         (mapv parse-expr* body-forms)
         priv))
     :else
-    (err! (str "malformed defn " name
-            " — expected (defn " name " [params] ReturnType body...)"))))
+    (err! (str
+            "malformed defn — expected (defn name \"doc\"? [params...] ReturnType body...) or multi-arity (defn name ([params] ReturnType body...) ...); got: "
+            (racket-written-datum whole)))))
 
 ;; Strip ["#%meta" mv name] name wrappers; ^:private marks private.
 (defn- meta-name? [(d Any)] Bool
@@ -3697,23 +3699,23 @@
             (string-datum? (nth rest-items 1))
             (>= (count rest-items) 3)
             (vector? (nth rest-items 1)))
-          (parse-defn-tail! name-form (subvec rest-items 2) priv0)
+          (parse-defn-tail! name-form (subvec rest-items 2) priv0 d)
           (meta-name? name-form)
-          (parse-defn-tail! (nth name-form 2) (subvec rest-items 1) true)
+          (parse-defn-tail! (nth name-form 2) (subvec rest-items 1) true d)
           (string? name-form)
           (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string"))
-            (parse-defn-tail! name-form (subvec rest-items 2) priv0)
-            (parse-defn-tail! name-form (subvec rest-items 1) priv0))
+            (parse-defn-tail! name-form (subvec rest-items 2) priv0 d)
+            (parse-defn-tail! name-form (subvec rest-items 1) priv0 d))
           :else
           (err! (str "malformed defn: " (str d)))))
       (and (= head "defn-") (>= (count rest-items) 2))
       (cond
         (meta-name? (nth rest-items 0))
-        (parse-defn-tail! (nth (nth rest-items 0) 2) (subvec rest-items 1) true)
+        (parse-defn-tail! (nth (nth rest-items 0) 2) (subvec rest-items 1) true d)
         (string? (nth rest-items 0))
         (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string"))
-          (parse-defn-tail! (nth rest-items 0) (subvec rest-items 2) true)
-          (parse-defn-tail! (nth rest-items 0) (subvec rest-items 1) true))
+          (parse-defn-tail! (nth rest-items 0) (subvec rest-items 2) true d)
+          (parse-defn-tail! (nth rest-items 0) (subvec rest-items 1) true d))
         :else
         (err! (str "malformed defn-: " (str d))))
       (and (= head "defrecord") (= (count rest-items) 2))
@@ -3800,7 +3802,7 @@
           (parse-type* (nth rest-items 1))
           (mapv parse-expr* (subvec rest-items 2))))
       (= head "fn")
-      (err! "fn needs (fn [params] ReturnType body...)")
+      (err! "fn needs a return type and body — write `(fn [params] ReturnType body...)`")
       (and (= head "let") (>= (count rest-items) 1))
       (make-let (parse-let-bindings! (nth rest-items 0))
         (mapv parse-expr* (subvec rest-items 1)))
@@ -5451,6 +5453,18 @@
   (expect! "single-arity defn with vec body is NOT multi-arity"
     (= (get (parse-expr* ["defn" "f" [BRACKET-TAG "a"] "Any" [BRACKET-TAG 1 2]]) "node")
       "defn"))
+  (expect! "malformed defn diagnostic renders the untouched whole datum"
+    (do
+      (reset-errors!)
+      (parse-expr* ["defn" "f" [BRACKET-TAG] ["first" true]])
+      (= (parse-errors)
+        ["malformed defn — expected (defn name \"doc\"? [params...] ReturnType body...) or multi-arity (defn name ([params] ReturnType body...) ...); got: '(defn f (#%brackets) (first true))"])))
+  (expect! "malformed fn diagnostic gives the exact repair spelling"
+    (do
+      (reset-errors!)
+      (parse-expr* ["fn" [BRACKET-TAG "value"] "Any"])
+      (= (parse-errors)
+        ["fn needs a return type and body — write `(fn [params] ReturnType body...)`"])))
   (expect! "target-case: cases sorted by target name; branches parse"
     (= (parse-expr* ["target-case" ":js" 2 ":clj" 1])
       {"node"

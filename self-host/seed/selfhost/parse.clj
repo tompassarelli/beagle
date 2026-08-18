@@ -1584,7 +1584,7 @@
   (err! (str "map literal: odd number of forms (expected key/value pair after position " (count pairs) ")"))
   (make-map pairs))))))
 
-(defn- parse-defn-tail! [^String name after-name ^Boolean priv]
+(defn- parse-defn-tail! [^String name after-name ^Boolean priv whole]
   (validate-identifier! name "definition")
   (cond
   (and (>= (count after-name) 1) (multi-arity-form? (nth after-name 0))) (make-defn-multi name (mapv parse-arity-clause! after-name) priv)
@@ -1593,7 +1593,7 @@
    tail (subvec after-name 2)
    body-forms (if (and (>= (count tail) 3) (= (nth tail 0) ":raises")) (subvec tail 2) tail)]
   (make-defn name (get parsed-params "params") (get parsed-params "rest-param") ret (mapv parse-expr* body-forms) priv))
-  :else (err! (str "malformed defn " name " — expected (defn " name " [params] ReturnType body...)"))))
+  :else (err! (str "malformed defn — expected (defn name \"doc\"? [params...] ReturnType body...) or multi-arity (defn name ([params] ReturnType body...) ...); got: " (racket-written-datum whole)))))
 
 (defn- ^Boolean meta-name? [d]
   (and (vector? d) (= (count d) 3) (= (nth d 0) "#%meta") (string? (nth d 2))))
@@ -1923,13 +1923,13 @@
   (and (= head "defn") (>= (count rest-items) 2)) (let [name-form (nth rest-items 0)
    priv0 false]
   (cond
-  (and (string? name-form) (not (keyword-sym? name-form)) (string-datum? (nth rest-items 1)) (>= (count rest-items) 3) (vector? (nth rest-items 1))) (parse-defn-tail! name-form (subvec rest-items 2) priv0)
-  (meta-name? name-form) (parse-defn-tail! (nth name-form 2) (subvec rest-items 1) true)
-  (string? name-form) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail! name-form (subvec rest-items 2) priv0) (parse-defn-tail! name-form (subvec rest-items 1) priv0))
+  (and (string? name-form) (not (keyword-sym? name-form)) (string-datum? (nth rest-items 1)) (>= (count rest-items) 3) (vector? (nth rest-items 1))) (parse-defn-tail! name-form (subvec rest-items 2) priv0 d)
+  (meta-name? name-form) (parse-defn-tail! (nth name-form 2) (subvec rest-items 1) true d)
+  (string? name-form) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail! name-form (subvec rest-items 2) priv0 d) (parse-defn-tail! name-form (subvec rest-items 1) priv0 d))
   :else (err! (str "malformed defn: " (str d)))))
   (and (= head "defn-") (>= (count rest-items) 2)) (cond
-  (meta-name? (nth rest-items 0)) (parse-defn-tail! (nth (nth rest-items 0) 2) (subvec rest-items 1) true)
-  (string? (nth rest-items 0)) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail! (nth rest-items 0) (subvec rest-items 2) true) (parse-defn-tail! (nth rest-items 0) (subvec rest-items 1) true))
+  (meta-name? (nth rest-items 0)) (parse-defn-tail! (nth (nth rest-items 0) 2) (subvec rest-items 1) true d)
+  (string? (nth rest-items 0)) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail! (nth rest-items 0) (subvec rest-items 2) true d) (parse-defn-tail! (nth rest-items 0) (subvec rest-items 1) true d))
   :else (err! (str "malformed defn-: " (str d))))
   (and (= head "defrecord") (= (count rest-items) 2)) (do
   (reject-reserved-type-name! (nth rest-items 0) "defrecord")
@@ -1964,7 +1964,7 @@
   (and (= head "fn") (>= (count rest-items) 1) (multi-arity-form? (nth rest-items 0))) (err! "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")
   (and (= head "fn") (>= (count rest-items) 3)) (let [parsed-params (parse-params! (nth rest-items 0))]
   (make-fn (get parsed-params "params") (get parsed-params "rest-param") (parse-type* (nth rest-items 1)) (mapv parse-expr* (subvec rest-items 2))))
-  (= head "fn") (err! "fn needs (fn [params] ReturnType body...)")
+  (= head "fn") (err! "fn needs a return type and body — write `(fn [params] ReturnType body...)`")
   (and (= head "let") (>= (count rest-items) 1)) (make-let (parse-let-bindings! (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
   (and (= head "binding") (>= (count rest-items) 1)) {"node" "binding" "bindings" (parse-let-bindings! (nth rest-items 0)) "body" (mapv parse-expr* (subvec rest-items 1))}
   (= head "binding") (err! (str "malformed binding — expected (binding [*var* val ...] body...); got: " (str d)))
@@ -2771,6 +2771,14 @@
   (expect! "multi-arity defn" (let [node (parse-expr* ["defn" "f" [[BRACKET-TAG] "String" ["#%string" "zero"]] [[BRACKET-TAG "x"] "Any" "x"]])]
   (and (= (get node "node") "defn-multi") (= (get node "name") "f") (= (count (get node "arities")) 2) (= (get (nth (get node "arities") 0) "rest") false))))
   (expect! "single-arity defn with vec body is NOT multi-arity" (= (get (parse-expr* ["defn" "f" [BRACKET-TAG "a"] "Any" [BRACKET-TAG 1 2]]) "node") "defn"))
+  (expect! "malformed defn diagnostic renders the untouched whole datum" (do
+  (reset-errors!)
+  (parse-expr* ["defn" "f" [BRACKET-TAG] ["first" true]])
+  (= (parse-errors) ["malformed defn — expected (defn name \"doc\"? [params...] ReturnType body...) or multi-arity (defn name ([params] ReturnType body...) ...); got: '(defn f (#%brackets) (first true))"])))
+  (expect! "malformed fn diagnostic gives the exact repair spelling" (do
+  (reset-errors!)
+  (parse-expr* ["fn" [BRACKET-TAG "value"] "Any"])
+  (= (parse-errors) ["fn needs a return type and body — write `(fn [params] ReturnType body...)`"])))
   (expect! "target-case: cases sorted by target name; branches parse" (= (parse-expr* ["target-case" ":js" 2 ":clj" 1]) {"node" "target-case" "cases" [{"target" "clj" "body" {"node" "literal" "kind" "number" "value" 1}} {"target" "js" "body" {"node" "literal" "kind" "number" "value" 2}}]}))
   (expect! "^:dynamic def sets the dynamic flag" (= (get (parse-expr* ["def" ["#%meta" ":dynamic" "*x*"] 1]) "dynamic") true))
   (expect! "^{:dynamic true} longhand sets the dynamic flag" (= (get (parse-expr* ["def" ["#%meta" [MAP-TAG ":dynamic" true] "*x*"] 1]) "dynamic") true))
