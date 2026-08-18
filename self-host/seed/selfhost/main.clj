@@ -215,6 +215,9 @@
 (defn- import-type-aliases [surfaces]
   (surface-type-aliases surfaces))
 
+(defn- import-nominal-type-names! [surfaces]
+  (reduce (fn [names surface] (into names (p/module-nominal-type-names! (get surface "datums") (get surface "prefix") (get surface "refer")))) {} surfaces))
+
 (defn- resolve-imports! [prog surfaces]
   (let [own-externs (get prog "externs")
    imported (reduce (fn [acc surface] (into acc (mapv (fn [extern] (assoc extern "synchronous" false "returnsSynchronousCallable" false)) (p/import-module-surface-with-aliases! (get surface "datums") (get surface "prefix") (get surface "refer") (get surface "imported-aliases"))))) [] surfaces)
@@ -237,7 +240,8 @@
    surfaces (load-import-surfaces! (p/discover-requires! datums) path target datums)
    imported-arities (import-parametric-arities! surfaces)
    imported-aliases (import-type-aliases surfaces)
-   prog (resolve-imports! (p/parse-program-with-syntax-and-imports! datums syntaxes imported-arities imported-aliases) surfaces)
+   imported-nominal-type-names (import-nominal-type-names! surfaces)
+   prog (resolve-imports! (p/parse-program-with-syntax-and-imports! datums syntaxes imported-arities imported-aliases imported-nominal-type-names) surfaces)
    perrs (p/parse-errors)]
   (if (> (count perrs) 0) (do
   (selfhost.rt/exit 1)

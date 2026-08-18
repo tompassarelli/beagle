@@ -419,6 +419,17 @@
 (defn- import-type-aliases [(surfaces Any)] Any
   (surface-type-aliases surfaces))
 
+(defn- import-nominal-type-names! [(surfaces Any)] (Map String Bool)
+  (reduce
+    (fn [(names Any) (surface Any)] Any
+      (into names
+        (p/module-nominal-type-names!
+          (get surface "datums")
+          (get surface "prefix")
+          (get surface "refer"))))
+    {}
+    surfaces))
+
 (defn- resolve-imports! [(prog Any) (surfaces Any)] Any
   (let [own-externs (get prog "externs")
         imported (reduce
@@ -499,9 +510,11 @@
                          datums)
         (imported-arities Any) (import-parametric-arities! surfaces)
         (imported-aliases Any) (import-type-aliases surfaces)
+        (imported-nominal-type-names Any) (import-nominal-type-names! surfaces)
         (prog Any) (resolve-imports!
                     (p/parse-program-with-syntax-and-imports!
-                      datums syntaxes imported-arities imported-aliases)
+                      datums syntaxes imported-arities imported-aliases
+                      imported-nominal-type-names)
                     surfaces)
         (perrs Any) (p/parse-errors)]
     ;; Racket raises on a parse diagnostic and exits nonzero. The self-host

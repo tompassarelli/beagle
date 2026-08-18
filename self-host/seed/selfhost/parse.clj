@@ -133,6 +133,35 @@
 (defn ^String extract-string [d]
   (if (string? d) d (nth d 1)))
 
+(defn- ^String racket-written-datum [datum]
+  (letfn [(render [value] (cond
+  (string-literal-datum? value) (let [raw (nth value 1)
+   escaped-backslash (str/replace raw "\\" "\\\\")
+   escaped-quote (str/replace escaped-backslash "\"" "\\\"")
+   escaped-newline (str/replace escaped-quote "\n" "\\n")
+   escaped-return (str/replace escaped-newline "\r" "\\r")
+   escaped-tab (str/replace escaped-return "\t" "\\t")
+   escaped-formfeed (str/replace escaped-tab "\f" "\\f")
+   escaped-backspace (str/replace escaped-formfeed "\b" "\\b")]
+  (str "\"" escaped-backspace "\""))
+  (and (vector? value) (= (count value) 2) (= (nth value 0) CHAR-TAG)) (let [code (nth value 1)]
+  (cond
+  (= code 8) "#\\backspace"
+  (= code 9) "#\\tab"
+  (= code 10) "#\\newline"
+  (= code 12) "#\\page"
+  (= code 13) "#\\return"
+  (= code 32) "#\\space"
+  :else (str "#\\" (char code))))
+  (vector? value) (str "(" (str/join " " (mapv render value)) ")")
+  (true? value) "true"
+  (false? value) "false"
+  (nil? value) "#f"
+  :else (str value)))]
+  (let [written (render datum)
+   quoted (or (string? datum) (and (vector? datum) (not (string-literal-datum? datum)) (not (and (= (count datum) 2) (= (nth datum 0) CHAR-TAG)))))]
+  (if quoted (str "'" written) written))))
+
 (def ^String UPPER "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 (defn- ^Boolean upper-case-start? [^String sym]
@@ -196,6 +225,12 @@
 
 (def TYPE-ALIASES (atom {}))
 
+(def PRELOADED-NOMINAL-TYPE-NAMES (atom {}))
+
+(def NOMINAL-TYPE-NAMES (atom {}))
+
+(def CURRENT-TYPE-VARS (atom []))
+
 (defn make-prim [^String name]
   {"kind" "prim" "name" name})
 
@@ -243,6 +278,16 @@
   (let [display-name (unqualified-type-name name)]
   (err! (str "parametric defunion " display-name " requires at least one type parameter; use (defunion " display-name " ...) for a non-parametric union"))))
 
+(defn- parse-type-with-vars! [t vars]
+  (let [before (deref CURRENT-TYPE-VARS)]
+  (reset! CURRENT-TYPE-VARS (into before vars))
+  (let [parsed (parse-type* t)]
+  (reset! CURRENT-TYPE-VARS before)
+  parsed)))
+
+(defn- ^Boolean jvm-qualified-class-name? [^String name]
+  (some? (re-matches #".*\\.[A-Z][A-Za-z0-9_]*$" name)))
+
 (defn parse-type! [t]
   (cond
   (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG)) (type-error! (if (has-item? (subvec t 1) "->") "arrow function types are not supported; write (Fn [ParamType ...] ReturnType)" "a vector is not a type expression; write (Fn [ParamType ...] ReturnType) for a function type"))
@@ -255,8 +300,8 @@
   (if (some? name) (do
   (reject-reserved-type-name! name "forall type parameter")))))
    vars (vec (filter (fn [x] (not (nil? x))) (mapv forall-entry-var raw-vars)))
-   bounds (reduce (fn [acc e] (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type! (nth e 2)) vars)) acc)) {} raw-vars)]
-  {"kind" "poly" "vars" vars "body" (varize-type (parse-type! (nth t 2)) vars) "bounds" (if (= (count bounds) 0) nil bounds)})
+   bounds (reduce (fn [acc e] (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type-with-vars! (nth e 2) vars) vars)) acc)) {} raw-vars)]
+  {"kind" "poly" "vars" vars "body" (varize-type (parse-type-with-vars! (nth t 2) vars) vars) "bounds" (if (= (count bounds) 0) nil bounds)})
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (= (nth t 0) "Dyn")) (make-app "Dyn" (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (has-item? PARAMETRIC-CTORS (nth t 0)) (some? (get (deref USER-PARAMETRIC-ARITIES) (nth t 0))))) (let [name (nth t 0)
@@ -269,6 +314,7 @@
   (type-arity-error! name expected actual)
   (make-prim "Any")) (make-app name (mapv parse-type! (subvec t 1)))))
   (and (string? t) (= t "Fn")) (type-error! "bare Fn is an incomplete function type; write (Fn [ParamType ...] ReturnType)")
+  (and (string? t) (has-item? (deref CURRENT-TYPE-VARS) t)) (make-type-var t)
   (and (string? t) (some? (get (deref TYPE-ALIASES) t))) (get (deref TYPE-ALIASES) t)
   (and (string? t) (some? (get (deref USER-PARAMETRIC-ARITIES) t))) (let [expected (get (deref USER-PARAMETRIC-ARITIES) t)]
   (type-arity-error! t expected 0)
@@ -283,8 +329,10 @@
   (make-union [(parse-type! base) (make-prim "Nil")]))
   (and (string? t) (= t "Number")) (make-union [(make-prim "Int") (make-prim "Float")])
   (and (string? t) (some? (get CLJ-ALIASES t))) (make-prim (get CLJ-ALIASES t))
-  (string? t) (make-prim t)
-  :else (make-prim "Any")))
+  (and (number? t) (int? t) (>= t 0)) (make-prim (str t))
+  (and (string? t) (or (contains? SCALAR-BACKING-PRIMITIVES t) (upper-case-start? t) (= true (get (deref NOMINAL-TYPE-NAMES) t)) (jvm-qualified-class-name? t))) (make-prim t)
+  (string? t) (type-error! (str "unknown type: " t))
+  :else (type-error! (str "bad type expression: " (racket-written-datum t)))))
 
 (reset! PARSE-TYPE-CELL parse-type!)
 
@@ -2140,6 +2188,9 @@
   (reset! PRELOADED-PARAMETRIC-ARITIES {})
   (reset! TYPE-ALIASES (deref PRELOADED-TYPE-ALIASES))
   (reset! PRELOADED-TYPE-ALIASES {})
+  (reset! NOMINAL-TYPE-NAMES (deref PRELOADED-NOMINAL-TYPE-NAMES))
+  (reset! PRELOADED-NOMINAL-TYPE-NAMES {})
+  (reset! CURRENT-TYPE-VARS [])
   (doseq [datum datums]
   (validate-reserved-type-declaration! datum))
   (doseq [name (keys (deref USER-PARAMETRIC-ARITIES))]
@@ -2251,21 +2302,25 @@
 (defn parse-program-with-parametric-arities! [datums imported-arities]
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
   (reset! PRELOADED-TYPE-ALIASES {})
+  (reset! PRELOADED-NOMINAL-TYPE-NAMES {})
   (parse-program! datums))
 
-(defn parse-program-with-imports! [datums imported-arities imported-aliases]
+(defn parse-program-with-imports! [datums imported-arities imported-aliases imported-nominal-type-names]
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
   (reset! PRELOADED-TYPE-ALIASES imported-aliases)
+  (reset! PRELOADED-NOMINAL-TYPE-NAMES imported-nominal-type-names)
   (parse-program! datums))
 
 (defn parse-program-with-syntax! [datums syntaxes]
   (reset! PROGRAM-SYNTAXES-PENDING syntaxes)
+  (reset! PRELOADED-NOMINAL-TYPE-NAMES {})
   (parse-program! datums))
 
-(defn parse-program-with-syntax-and-imports! [datums syntaxes imported-arities imported-aliases]
+(defn parse-program-with-syntax-and-imports! [datums syntaxes imported-arities imported-aliases imported-nominal-type-names]
   (reset! PROGRAM-SYNTAXES-PENDING syntaxes)
   (reset! PRELOADED-PARAMETRIC-ARITIES imported-arities)
   (reset! PRELOADED-TYPE-ALIASES imported-aliases)
+  (reset! PRELOADED-NOMINAL-TYPE-NAMES imported-nominal-type-names)
   (parse-program! datums))
 
 (defn- import-strip-export [d]
@@ -2306,6 +2361,14 @@
   (reduce (fn [out member] (let [member-name (member-type-name member)]
   (if (string? member-name) (assoc out member-name true) out))) with-union members))
   :else names)) names))) {} datums))
+
+(defn module-nominal-type-names! [datums ^String prefix refer-syms]
+  (let [local-names (module-local-type-names datums)
+   provider-ns (module-namespace datums)
+   refer-set (if (some? refer-syms) (reduce (fn [out name] (assoc out name true)) {} refer-syms) {})]
+  (reduce (fn [out name] (let [with-prefix (if (= prefix "") out (assoc out (str prefix "/" name) true))
+   with-provider (assoc with-prefix (str provider-ns "/" name) true)]
+  (if (= true (get refer-set name)) (assoc with-provider name true) with-provider))) {} (vec (keys local-names)))))
 
 (defn- qualify-provider-type [t ^String provider-ns local-type-names]
   (if (not (map? t)) t (let [kind (get t "kind")
@@ -2796,6 +2859,27 @@
   (reset-errors!)
   (and folded (= (count (parse-errors)) 0)))))
   (expect! "parse-type! primitive" (= (parse-type! "Int") {"kind" "prim" "name" "Int"}))
+  (expect! "parse-type! rejects an invalid compound with exact Racket datum text" (do
+  (reset-errors!)
+  (let [parsed (parse-type! ["get" ["get" ["#%string" "hello world"] ":y"] ":b"])
+   errors (parse-errors)]
+  (and (= (get parsed "kind") "invalid") (= (count errors) 1) (= (nth errors 0) "bad type expression: '(get (get \"hello world\" :y) :b)")))))
+  (expect! "parse-type! rejects an unknown lowercase name exactly" (do
+  (reset-errors!)
+  (let [parsed (parse-type! "g__1")
+   errors (parse-errors)]
+  (and (= (get parsed "kind") "invalid") (= (count errors) 1) (= (nth errors 0) "unknown type: g__1")))))
+  (expect! "parse-type! renders booleans with Beagle oracle spelling" (do
+  (reset-errors!)
+  (parse-type! ["if" true false])
+  (= (nth (parse-errors) 0) "bad type expression: '(if true false)")))
+  (expect! "parse-type! admits an uppercase nominal" (= (parse-type! "Widget") {"kind" "prim" "name" "Widget"}))
+  (expect! "parse-type! admits an exact registered qualified nominal" (let [prog (parse-program-with-imports! [["defn" "identity-widget" [BRACKET-TAG] "api/Widget" "nil"]] {} {} {"api/Widget" true})
+   errors (parse-errors)
+   form (nth (get prog "forms") 0)]
+  (and (= (count errors) 0) (= (get form "ret") {"kind" "prim" "name" "api/Widget"}))))
+  (expect! "parse-type! admits an active lowercase forall variable" (let [parsed (parse-type! ["forall" [BRACKET-TAG "item"] ["Fn" [BRACKET-TAG "item"] "item"]])]
+  (and (= (get parsed "kind") "poly") (= (get-in parsed ["body" "params" 0]) {"kind" "var" "name" "item"}) (= (get-in parsed ["body" "ret"]) {"kind" "var" "name" "item"}))))
   (expect! "parse-type! nullable" (let [t (parse-type! "String?")]
   (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
   (expect! "parse-type! fn" (let [t (parse-type! ["Fn" [BRACKET-TAG "Int"] "String"])]
@@ -2816,6 +2900,9 @@
   (expect! "parse-type! union" (let [t (parse-type! ["U" "Int" "String"])]
   (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
   (expect! "parse-type! clj alias Long" (= (parse-type! "Long") {"kind" "prim" "name" "Int"}))
+  (expect! "parse-type! declared alias resolves to its expansion" (let [prog (parse-program! [["defalias" "UserId" "String"] ["defn" "user-id" [BRACKET-TAG] "UserId" ["#%string" "id"]]])
+   form (nth (get prog "forms") 0)]
+  (and (= (count (parse-errors)) 0) (= (get form "ret") {"kind" "prim" "name" "String"}))))
   (expect! "local parametric type accepts exact arity" (let [_ (parse-program! [["defunion" ["Box" "T"] ["BoxValue" [BRACKET-TAG ["value" "T"]]]] ["defn" "keep" [BRACKET-TAG ["value" ["Box" "String"]]] ["Box" "String"] "value"]])]
   (= (count (parse-errors)) 0)))
   (expect! "local parametric type rejects bare use" (let [_ (parse-program! [["defunion" ["Box" "T"] ["BoxValue" [BRACKET-TAG ["value" "T"]]]] ["defn" "keep" [BRACKET-TAG ["value" "Box"]] "String" ["#%string" "bad"]]])
