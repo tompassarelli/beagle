@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# Run the full Core compiler contract with the self-hosted front end.
+#
+# This is a seam-3 driver. It deliberately keeps the public Core build flags
+# identical to bin/beagle-build-core while making the checked Core projection
+# come from the self-host compiler. The existing freeze/lower/obligation and
+# C17/QBE pipeline remains the single materializer authority until the native
+# compiler artifact is packaged by a later seam.
+#
+# Usage:
+#   beagle-self-compiler-core --materializer c17|qbe|wasm [...] --out DIR
+#     [--abi lp64|wasm32] [--entry NS/NAME]... [--simd]
+#     [--emit-workers N]
+#     [--module-root LOGICAL_PREFIX=PHYSICAL_DIRECTORY]... SOURCE.bgl...
+
+set -euo pipefail
+
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$BEAGLE_DIR/bin"
+MODULE_SOURCE_ROOT_CLI="$BEAGLE_DIR/beagle-lib/private/module-source-root-cli.rkt"
+source "$BIN/_beagle-racket"
+source "$BIN/_beagle-source-id"
+
+die() {
+    echo "beagle self-compiler-core: $*" >&2
+    exit 2
+}
+
+usage() {
+    sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+original_args=("$@")
+module_root_args=()
+sources=()
+after_double_dash=0
+while [[ $# -gt 0 ]]; do
+    if [[ "$after_double_dash" == 1 ]]; then
+        sources+=("$1")
+        shift
+        continue
+    fi
+    case "$1" in
+        --module-root)
+            [[ $# -ge 2 ]] || die "--module-root needs LOGICAL_PREFIX=PHYSICAL_DIRECTORY"
+            module_root_args+=(--module-root "$2")
+            shift 2
+            ;;
+        --module-root=*)
+            module_root_args+=(--module-root "${1#*=}")
+            shift
+            ;;
+        --out|--abi|--materializer|--entry|--emit-workers)
+            [[ $# -ge 2 ]] || die "$1 needs a value"
+            shift 2
+            ;;
+        --out=*|--abi=*|--materializer=*|--entry=*|--emit-workers=*)
+            shift
+            ;;
+        --simd|--help|-h)
+            [[ "$1" == "--help" || "$1" == "-h" ]] && { usage; exit 0; }
+            shift
+            ;;
+        --)
+            after_double_dash=1
+            shift
+            ;;
+        -*)
+            die "unknown option: $1 (try --help)"
+            ;;
+        *)
+            sources+=("$1")
+            shift
+            ;;
+    esac
+done
+
+[[ ${#sources[@]} -gt 0 ]] || die "provide at least one Core source path"
+for source in "${sources[@]}"; do
+    [[ -f "$source" ]] || die "source file not found: $source"
+done
+[[ -f "$MODULE_SOURCE_ROOT_CLI" ]] ||
+    die "module source root resolver is unavailable: $MODULE_SOURCE_ROOT_CLI"
+command -v python3 >/dev/null 2>&1 || die "required command is unavailable: python3"
+command -v bb >/dev/null 2>&1 || die "required command is unavailable: bb"
+
+# An explicitly empty BEAGLE_NATIVE_BIN selects the checked-in seed fallback,
+# matching self-host/README.md. A non-empty path must be executable.
+if [[ "${BEAGLE_NATIVE_BIN+x}" == x ]]; then
+    native_bin="$BEAGLE_NATIVE_BIN"
+else
+    native_bin=""
+    if [[ -x "$BEAGLE_DIR/self-host/native/beagle-selfhost" ]]; then
+        native_bin="$BEAGLE_DIR/self-host/native/beagle-selfhost"
+    fi
+fi
+if [[ -n "$native_bin" ]]; then
+    [[ -x "$native_bin" ]] || die "native self-host binary is unavailable: $native_bin"
+    native_command=("$native_bin")
+else
+    native_command=(bb -cp "$BEAGLE_DIR/self-host/seed" -m selfhost.main)
+fi
+
+normalized_sources=()
+source_ids=()
+for source in "${sources[@]}"; do
+    normalized_source="$(realpath "$source")"
+    normalized_sources+=("$normalized_source")
+    source_ids+=("$(beagle_source_id "$normalized_source")")
+done
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-self-compiler-core.XXXXXX")"
+cleanup() {
+    local rc=$?
+    rm -rf "${work:?}"
+    return "$rc"
+}
+trap cleanup EXIT
+
+closure_args=("${module_root_args[@]}")
+for index in "${!normalized_sources[@]}"; do
+    closure_args+=(--source "${normalized_sources[$index]}" "${source_ids[$index]}")
+done
+closure_fields="$work/module-source-closure.nul"
+"$RACKET" "$MODULE_SOURCE_ROOT_CLI" "${closure_args[@]}" >"$closure_fields"
+mapfile -d '' -t closure_values <"$closure_fields"
+[[ ${#closure_values[@]} -gt 0 && $(( ${#closure_values[@]} % 2 )) -eq 0 ]] ||
+    die "module source root resolver returned malformed closure fields"
+
+closure_sources=()
+closure_source_ids=()
+for ((index = 0; index < ${#closure_values[@]}; index += 2)); do
+    closure_sources+=("${closure_values[$index]}")
+    closure_source_ids+=("${closure_values[$((index + 1))]}")
+done
+
+bundle_args=()
+for source in "${closure_sources[@]}"; do
+    bundle_args+=(--source "$source")
+done
+frontend="$work/frontend"
+mkdir -p "$frontend"
+for index in "${!closure_sources[@]}"; do
+    ast="$frontend/source_${index}.ast.json"
+    "${native_command[@]}" ast --target core "${module_root_args[@]}" \
+        "${bundle_args[@]}" "${closure_sources[$index]}" >"$ast"
+    python3 - "$ast" "${closure_source_ids[$index]}" <<'PY'
+import json
+import pathlib
+import sys
+
+projection = json.loads(pathlib.Path(sys.argv[1]).read_text())
+expected = sys.argv[2]
+if projection.get("kind") != "beagle.checked-program":
+    raise SystemExit("self-host Core CLI returned a non-checked projection")
+if projection.get("phase") != "checked" or projection.get("target") != "core":
+    raise SystemExit("self-host Core CLI returned a non-Core checked projection")
+if projection.get("sourceId") != expected:
+    raise SystemExit(
+        f"self-host Core CLI source identity mismatch: expected {expected}, "
+        f"got {projection.get('sourceId')}"
+    )
+PY
+done
+
+# The source-facts contract carries the canonical interface digest, which is
+# distinct from the checked projection digest. Until the native checker owns
+# that digest calculation, obtain this metadata from the existing Core AST
+# oracle while keeping every checked program and every emitted compiler module
+# on the self-host path above.
+interface_bundle="$work/interface-bundle.json"
+"$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
+    "${normalized_sources[@]}" >"$interface_bundle"
+
+# Core source facts consume the canonical checked-program shape. Keep the
+# self-host projections above as the front-end admission check, then use the
+# bundle's canonical program payload for this existing facts ABI; the self-host
+# source-facts projector does not yet erase its checker-only annotations and
+# qualified surface names to the byte-exact Core wire shape.
+oracle_frontend="$work/oracle-frontend"
+mkdir -p "$oracle_frontend"
+python3 - "$interface_bundle" "$oracle_frontend" \
+    "${closure_source_ids[@]}" <<'PY'
+import json
+import pathlib
+import sys
+
+bundle = json.loads(pathlib.Path(sys.argv[1]).read_text())
+destination = pathlib.Path(sys.argv[2])
+modules = {module.get("source"): module for module in bundle.get("modules", [])}
+for index, source_id in enumerate(sys.argv[3:]):
+    module = modules.get(source_id)
+    if not isinstance(module, dict) or not isinstance(module.get("program"), dict):
+        raise SystemExit(f"Core CLI canonical bundle omitted program: {source_id}")
+    (destination / f"source_{index}.ast.json").write_text(
+        json.dumps(module["program"], sort_keys=True, separators=(",", ":")) + "\n"
+    )
+PY
+
+projector_args=()
+for index in "${!closure_sources[@]}"; do
+    interface_digest="$(python3 - "$interface_bundle" "${closure_source_ids[$index]}" <<'PY'
+import json
+import pathlib
+import sys
+
+bundle = json.loads(pathlib.Path(sys.argv[1]).read_text())
+expected = sys.argv[2]
+matches = [module for module in bundle.get("modules", [])
+           if module.get("source") == expected]
+if len(matches) != 1:
+    raise SystemExit(f"Core CLI interface metadata omitted source: {expected}")
+digest = matches[0].get("interfaceSha256")
+if not isinstance(digest, str) or not digest.startswith("sha256:"):
+    raise SystemExit(f"Core CLI interface metadata is malformed for: {expected}")
+print(digest)
+PY
+)"
+    projector_args+=(
+        --input "$oracle_frontend/source_${index}.ast.json=${closure_source_ids[$index]}"
+        --interface-sha256 "${closure_source_ids[$index]}=$interface_digest"
+    )
+done
+facts="$work/source.facts"
+bb "$BEAGLE_DIR/native-core/bin/source-facts.clj" \
+    "${projector_args[@]}" --output "$facts" --include-defs
+
+# The closure substrate is already self-host certified. Emit every Core
+# compiler module through that front end in parallel, then apply the same
+# provider-record import normalization used by the oracle projection route.
+core_modules=(
+    native-core/src/native/core.bclj
+    native-core/src/native/stages.bclj
+    native-core/src/native/simd.bclj
+    native-core/src/native/lower.bclj
+    native-core/src/native/obligations.bclj
+    native-core/src/native/c11.bclj
+    native-core/src/native/slice.bclj
+    native-core/src/native/unit_reuse.bclj
+    native-core/src/native/unit_compile.bclj
+    native-core/src/native/fold_c17.bclj
+    native-core/src/native/body_c17.bclj
+    native-core/src/native/body_slice.bclj
+    native-core/src/native/qbe.bclj
+)
+compiled="$work/compiled"
+mkdir -p "$compiled/native"
+native_core_bundle_args=()
+for module in "${core_modules[@]}"; do
+    native_core_bundle_args+=(--source "$BEAGLE_DIR/$module")
+done
+
+emit_pids=()
+for module in "${core_modules[@]}"; do
+    module_name="$(basename "$module" .bclj)"
+    (
+        BEAGLE_EMIT_SRCLOC=0 timeout --foreground \
+            "${BEAGLE_NATIVE_EMIT_TIMEOUT_SECONDS:-60}" \
+            "${native_command[@]}" emit --target clj \
+            "${native_core_bundle_args[@]}" "$BEAGLE_DIR/$module" \
+            >"$compiled/native/$module_name.clj" \
+            2>"$compiled/native/$module_name.emit.err"
+    ) &
+    emit_pids+=("$!")
+done
+emit_failure=0
+for pid in "${emit_pids[@]}"; do
+    wait "$pid" || emit_failure=1
+done
+if [[ "$emit_failure" == 1 ]]; then
+    for module in "${core_modules[@]}"; do
+        module_name="$(basename "$module" .bclj)"
+        if [[ -s "$compiled/native/$module_name.emit.err" ]]; then
+            sed -n '1,120p' "$compiled/native/$module_name.emit.err" >&2
+        fi
+    done
+    die "self-host Core compiler closure emission failed"
+fi
+rm -f -- "${compiled:?}"/native/*.emit.err
+
+core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
+    "$compiled/native/core.clj" | tr '\n' ' ')"
+for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+    generated="$compiled/native/$module.clj"
+    sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
+        "$generated"
+    awk -v imp="(import '[native.core $core_records])" \
+        '!seen && /^$/ { print imp; seen = 1 } { print }' \
+        "$generated" >"$generated.tmp"
+    mv "$generated.tmp" "$generated"
+done
+
+if [[ -n "${BEAGLE_SELF_COMPILER_COMPILED_OUT:-}" ]]; then
+    compiled_copy="$BEAGLE_SELF_COMPILER_COMPILED_OUT"
+    mkdir -p "$compiled_copy"
+    cp -a "$compiled/." "$compiled_copy/"
+fi
+
+# The core driver owns output staging and atomic publication. This wrapper only
+# supplies the authenticated self-host projections and keeps every public flag
+# and stream of the existing Core CLI unchanged.
+BEAGLE_CORE_FRONTEND_DIR="$frontend" \
+BEAGLE_CORE_FRONTEND_FACTS="$facts" \
+BEAGLE_CORE_COMPILED_OVERRIDE="$compiled" \
+    "$BIN/beagle-build-core" "${original_args[@]}"

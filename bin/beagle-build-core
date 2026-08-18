@@ -483,6 +483,13 @@ cache_key_material() {
 cache_root="${BEAGLE_CORE_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/build-core}"
 compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
 compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
+compiled_override="${BEAGLE_CORE_COMPILED_OVERRIDE:-}"
+if [[ -n "$compiled_override" ]]; then
+    [[ -d "$compiled_override" ]] ||
+        die "native Core compiler projection is unavailable: $compiled_override"
+    [[ -f "$compiled_override/native/core.clj" ]] ||
+        die "native Core compiler projection omitted native/core.clj: $compiled_override"
+fi
 core_result_cache_enabled=1
 core_result_cache_bypass_reason="untrusted-compiler"
 if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]] ||
@@ -749,6 +756,45 @@ else
 fi
 
 if [[ "$core_result_early_hit" != 1 && "$core_checkpoint_early_hit" != 1 ]]; then
+if [[ -n "${BEAGLE_CORE_FRONTEND_DIR:-}" ]]; then
+    frontend_dir="$BEAGLE_CORE_FRONTEND_DIR"
+    frontend_facts="${BEAGLE_CORE_FRONTEND_FACTS:-}"
+    [[ -d "$frontend_dir" ]] ||
+        die "native Core frontend directory is unavailable: $frontend_dir"
+    [[ -f "$frontend_facts" ]] ||
+        die "native Core frontend facts are unavailable: $frontend_facts"
+    cp -- "$frontend_facts" "$facts"
+    source_index=0
+    for source in "${normalized_sources[@]}"; do
+        ast="$frontend_dir/source_${source_index}.ast.json"
+        [[ -f "$ast" ]] ||
+            die "native Core frontend omitted checked AST for source: $source"
+        source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
+        [[ "${source_digest_befores[$source_index]}" == "$source_digest_after" ]] ||
+            die "source changed while its native checked projection was captured: $source"
+        python3 - "$ast" "${source_ids[$source_index]}" <<'PY'
+import json
+import pathlib
+import sys
+
+projection = json.loads(pathlib.Path(sys.argv[1]).read_text())
+expected_source_id = sys.argv[2]
+if projection.get("kind") != "beagle.checked-program":
+    raise SystemExit("native Core frontend returned a non-checked projection")
+if projection.get("phase") != "checked" or projection.get("target") != "core":
+    raise SystemExit("native Core frontend returned a non-Core checked projection")
+if projection.get("sourceId") != expected_source_id:
+    raise SystemExit(
+        "native Core frontend source identity mismatch: "
+        f"expected {expected_source_id}, got {projection.get('sourceId')}"
+    )
+PY
+        if $wasm_selected; then
+            wasm_checked_sources+=(--checked-source "$source" "$ast")
+        fi
+        source_index=$((source_index + 1))
+    done
+else
 bundle_ast="$work/source_bundle.ast.json"
 run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
     "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
@@ -822,6 +868,7 @@ for source in "${normalized_sources[@]}"; do
 done
 run_phase source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
     bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
+fi
 else
     facts="$work/artifacts/source.facts"
 fi
@@ -830,9 +877,9 @@ fi
 # program result. A full result key below names the exact generated projection
 # bytes in addition to the early input closure.
 cache_entry="$cache_root/$compiler_source_digest"
-compiled="$cache_entry/compiled"
+compiled="${compiled_override:-$cache_entry/compiled}"
 
-if [[ ! -f "$cache_entry/.complete" ]]; then
+if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
     compiled="$work/compiled"
     mkdir -p "$compiled"
     build_all_args=()
