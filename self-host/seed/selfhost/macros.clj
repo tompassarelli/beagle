@@ -526,8 +526,9 @@
   (= name "map") (if (< (count args) 2) (macro-eval-fail! "map expected a function and collection") (macro-map-values! (nth args 0) (subvec args 1)))
   (= name "map-indexed") (do
   (macro-require-arity! name args 2)
-  (let [items (macro-seq! (nth args 1) name)]
-  (mapv (fn [i] (macro-apply-fn! (nth args 0) [i (nth items i)])) (range (count items)))))
+  (let [items (macro-seq! (nth args 1) name)
+   indices (vec (range (count items)))]
+  (mapv (fn [i] (macro-apply-fn! (nth args 0) [i (nth items i)])) indices)))
   (= name "mapcat") (if (< (count args) 2) (macro-eval-fail! "mapcat expected a function and collection") (reduce (fn [items part] (if (macro-seq? part) (into items (macro-seq! part "mapcat: function result")) (macro-eval-fail! (str "mapcat: the function must return a list or vec, got: " (str part))))) [] (macro-map-values! (nth args 0) (subvec args 1))))
   (= name "reduce") (cond
   (= (count args) 2) (let [items (macro-seq! (nth args 1) name)]

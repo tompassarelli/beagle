@@ -731,7 +731,8 @@
   (and (app-type? aggregate) (= (get aggregate "name") "HVec")) (let [elems (get aggregate "args")]
   (if (> (count names) (count elems)) (do
   (destructure-type-error! pattern aggregate where (str "pattern requires " (count names) " positional values, but the tuple has " (count elems)))
-  (bind-destructure-any! env pattern owner)) (let [with-fixed (reduce (fn [out i] (bind-destructure-type! out (nth names i) (nth elems i) where owner)) env (range (count names)))]
+  (bind-destructure-any! env pattern owner)) (let [indices (vec (range (count names)))
+   with-fixed (reduce (fn [out i] (bind-destructure-type! out (nth names i) (nth elems i) where owner)) env indices)]
   (if (nil? rest-name) with-fixed (binder-env-assoc with-fixed owner rest-name (make-app "HVec" (subvec (vec elems) (count names))))))))
   (and (app-type? aggregate) (or (= (get aggregate "name") "Vec") (= (get aggregate "name") "List")) (= (count (get aggregate "args")) 1)) (let [elem-type (nullable-type (nth (get aggregate "args") 0))
    with-fixed (reduce (fn [out target] (bind-destructure-type! out target elem-type where owner)) env names)]

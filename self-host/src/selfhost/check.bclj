@@ -1768,10 +1768,11 @@
                 (str "pattern requires " (count names)
                   " positional values, but the tuple has " (count elems)))
               (bind-destructure-any! env pattern owner))
-            (let [with-fixed (reduce
+            (let [(indices (Vec Int)) (vec (range (count names)))
+                  with-fixed (reduce
                                (fn [(out Any) (i Int)] Any
                                  (bind-destructure-type! out (nth names i) (nth elems i) where owner))
-                               env (range (count names)))]
+                               env indices)]
               (if (nil? rest-name)
                 with-fixed
                 (binder-env-assoc with-fixed owner rest-name

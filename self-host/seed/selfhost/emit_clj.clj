@@ -239,8 +239,9 @@
    base (conj acc (str raw-name " " (emit-expr* (get binding "value"))))]
   (if (constraint-present? binding) (let [predicate-name (str "$beagle$constraint$predicate$" index)]
   (recur (+ index 1) (into base [(str predicate-name " " (emit-expr* (checked-binding-constraint binding))) (str "$beagle$constraint$checked-dynamic$" index " " (emit-guarded-binding-value binding predicate-name raw-name))]))) (recur (+ index 1) base)))))
+   dynamic-indices (vec (range (count bindings)))
    dynamic-bindings (mapv (fn [index] (let [binding (nth bindings index)]
-  (str (emit-binding-target! (get binding "name")) " " (if (constraint-present? binding) (str "$beagle$constraint$checked-dynamic$" index) (str "$beagle$constraint$raw-dynamic$" index))))) (range (count bindings)))]
+  (str (emit-binding-target! (get binding "name")) " " (if (constraint-present? binding) (str "$beagle$constraint$checked-dynamic$" index) (str "$beagle$constraint$raw-dynamic$" index))))) dynamic-indices)]
   (str "(let [" (str/join "\n       " capture-bindings) "]\n" "  (binding [" (str/join "\n            " dynamic-bindings) "]\n" "    " body-str "))")))
 
 (defn ^String emit-for-clauses! [clauses]

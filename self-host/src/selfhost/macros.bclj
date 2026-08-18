@@ -964,11 +964,12 @@
         (macro-map-values! (nth args 0) (subvec args 1)))
     (= name "map-indexed")
       (do (macro-require-arity! name args 2)
-          (let [items (macro-seq! (nth args 1) name)]
+          (let [items (macro-seq! (nth args 1) name)
+                (indices (Vec Int)) (vec (range (count items)))]
             (mapv
               (fn [(i Int)] Any
                 (macro-apply-fn! (nth args 0) [i (nth items i)]))
-              (range (count items)))))
+              indices)))
     (= name "mapcat")
       (if (< (count args) 2)
         (macro-eval-fail! "mapcat expected a function and collection")

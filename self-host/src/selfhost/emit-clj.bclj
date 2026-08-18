@@ -452,6 +452,7 @@
                          (str "$beagle$constraint$checked-dynamic$" index " "
                            (emit-guarded-binding-value binding predicate-name raw-name))])))
                   (recur (+ index 1) base)))))
+        (dynamic-indices (Vec Int)) (vec (range (count bindings)))
         dynamic-bindings
           (mapv (fn [(index Int)] String
                   (let [binding (nth bindings index)]
@@ -459,7 +460,7 @@
                       (if (constraint-present? binding)
                         (str "$beagle$constraint$checked-dynamic$" index)
                         (str "$beagle$constraint$raw-dynamic$" index)))))
-            (range (count bindings)))]
+            dynamic-indices)]
     (str "(let [" (str/join "\n       " capture-bindings) "]\n"
          "  (binding [" (str/join "\n            " dynamic-bindings) "]\n"
          "    " body-str "))")))
