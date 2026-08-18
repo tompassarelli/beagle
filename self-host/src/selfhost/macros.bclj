@@ -751,7 +751,7 @@
             (fn [(e Any) (i Int)] Any
               (assoc e (nth params i) (nth args i)))
             (get closure "env")
-            (range (count params)))]
+            (vec (range (count params))))]
       (macro-eval-body! (get closure "body") env))))
 
 (defn macro-map-values! [(fn-value Any) (colls Any)] Any

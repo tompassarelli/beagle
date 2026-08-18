@@ -1289,7 +1289,7 @@
         (fn [(index Int)] Any
           (scope-walk*
             (nth children index) table (conj (vec path) index) ctx))
-        (range (count children))))))
+        (vec (range (count children)))))))
 
 (defn- scope-walk-sequential-bindings!
   [(vector-value Any) (table Any) (path Any) (ctx Any)] Any

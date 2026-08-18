@@ -1180,7 +1180,7 @@
   (emit-loop-stmt-with! e bind-names (fn [^String value-str] (str "return " value-str ";"))))
 
 (defn ^String indent-str [depth]
-  (str/join "" (mapv (fn [x] " ") (range (* depth 2)))))
+  (str/join "" (mapv (fn [x] " ") (vec (range (* depth 2))))))
 
 (defn ^String escape-js-template-string [^String s]
   (str/replace (str/replace s "`" "\\`") "${" "\\${"))
