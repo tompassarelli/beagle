@@ -899,7 +899,9 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
         build_all_args+=("$BEAGLE_DIR/$relative")
     done
     run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
-        "$BIN/beagle-build-all" "${build_all_args[@]}" \
+        "$BIN/beagle-build-all" \
+        --module-root native-core/src="$BEAGLE_DIR/native-core/src" \
+        "${build_all_args[@]}" \
         --out "$compiled" >"$work/build.log" 2>&1 || {
             sed -n '1,200p' "$work/build.log" >&2
             exit 1
