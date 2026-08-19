@@ -10618,6 +10618,63 @@
             (core/->TokenFlowV0 [] [])))
         result-id (byte-source-type-id) false))))
 
+;; The runtime's digest identity is the "sha256:" prefixed lowercase hex text.
+;; The native primitive answers the bare hex, so the prefix is applied here and
+;; every caller of a selfhost digest shares this one spelling.
+(defn lower-prefixed-sha256
+  [(owner core/NativeId)
+   (state BodyStateV0)
+   (bytes-type core/NativeId)
+   (text-id core/NativeId)]
+  ExprResultV0
+  (let [bytes-id core/NativeId (state-id state owner "digest-bytes")
+        with-bytes BodyStateV0
+        (state-emit (state-bump state)
+          (core/->CodecPrimitiveInstructionV0
+            (core/->SsaValueV0 bytes-id bytes-type)
+            (core/->Utf8EncodeV0 (arena-value-id owner) text-id)))
+        hex-id core/NativeId (state-id with-bytes owner "digest-hex")
+        with-hex BodyStateV0
+        (state-emit (state-bump with-bytes)
+          (core/->CodecPrimitiveInstructionV0
+            (core/->SsaValueV0 hex-id (text-type-id))
+            (core/->Sha256BytesV0 (arena-value-id owner) bytes-id)))
+        prefix-id core/NativeId (state-id with-hex owner "digest-prefix")
+        with-prefix BodyStateV0
+        (state-emit (state-bump with-hex)
+          (core/->AtomInstruction
+            (core/->SsaValueV0 prefix-id (text-type-id))
+            (core/->TextAtom "sha256:")))
+        result-id core/NativeId (state-id with-prefix owner "digest")
+        joined BodyStateV0
+        (state-emit (state-bump with-prefix)
+          (core/->TextConcatInstruction
+            (core/->SsaValueV0 result-id (text-type-id))
+            (arena-value-id owner)
+            [prefix-id hex-id]))]
+    (->ExprResultV0 joined result-id (text-type-id) false)))
+
+(defn lower-source-sha256
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (let [types (Vec core/TypeDef) (bodyenvv0-types env)
+        byte-vector (U core/NativeId Nil) (vector-type-of types (int-type-id))]
+    (cond
+      (not (and (= 1 (count values)) (text-operand? (nth value-types 0))))
+      (fail-result state
+        "TODO-NATIVE-SOURCE-SHA256-OPERANDS: source-sha256 takes one Text source")
+
+      (nil? byte-vector)
+      (fail-result state
+        "TODO-NATIVE-SOURCE-SHA256-BYTES: the program declares no closed (Vec Int) carrier")
+
+      :else
+      (lower-prefixed-sha256 owner state byte-vector (nth values 0)))))
+
 ;; A source snapshot is the file's text together with its content digest. Both
 ;; are existing native primitives, so the snapshot is composed from the host
 ;; services already admitted rather than adding a second, differently shaped
@@ -10671,18 +10728,10 @@
                 [(nth values 0) limit-id]
                 (arena-value-id owner)
                 (core/->TokenFlowV0 [] [])))
-            bytes-id core/NativeId (state-id with-text owner "snapshot-bytes")
-            with-bytes BodyStateV0
-            (state-emit (state-bump with-text)
-              (core/->CodecPrimitiveInstructionV0
-                (core/->SsaValueV0 bytes-id bytes-type)
-                (core/->Utf8EncodeV0 (arena-value-id owner) text-id)))
-            digest-id core/NativeId (state-id with-bytes owner "snapshot-digest")
-            with-digest BodyStateV0
-            (state-emit (state-bump with-bytes)
-              (core/->CodecPrimitiveInstructionV0
-                (core/->SsaValueV0 digest-id (text-type-id))
-                (core/->Sha256BytesV0 (arena-value-id owner) bytes-id)))
+            digest ExprResultV0
+            (lower-prefixed-sha256 owner with-text bytes-type text-id)
+            digest-id core/NativeId (exprresultv0-value-id digest)
+            with-digest BodyStateV0 (exprresultv0-state digest)
             text-key-id core/NativeId
             (state-id with-digest owner "snapshot-text-key")
             with-text-key BodyStateV0
@@ -18426,6 +18475,9 @@
                 (= callee "selfhost.rt/read-source-snapshot")
                 (lower-read-source-snapshot env owner current values
                   value-types)
+
+                (= callee "selfhost.rt/source-sha256")
+                (lower-source-sha256 env owner current values value-types)
 
                 (host-filesystem-callee? callee)
                 (lower-host-filesystem-call owner current callee values value-types)
