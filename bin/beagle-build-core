@@ -1027,7 +1027,26 @@ fi
 # The hosted Core compiler projection is content-addressed separately from a
 # program result. A full result key below names the exact generated projection
 # bytes in addition to the early input closure.
-cache_entry="$cache_root/$compiler_source_digest"
+#
+# The projection is stored under the key of ITS OWN inputs, not under the whole
+# build key. `compiler_source_digest` additionally covers this driver, the
+# emission manager, the finalizer and the bounded-run supervisors — every one of
+# which consumes the projection rather than producing it, so folding them into
+# the projection's storage key discarded a multi-minute artifact on edits that
+# provably cannot change a byte of it. The projection owns the definition of its
+# own closure (`--print-key`), so there is exactly one such definition.
+#
+# The native route keeps `compiler_source_digest`: there the projection is
+# emitted by the inline loop below, so this driver's own bytes are a real input
+# to it, and the compiler artifact digest is already folded into that key.
+if [[ -n "$native_compiler_bin" ]]; then
+    projection_cache_key="$compiler_source_digest"
+else
+    projection_cache_key="$("$CORE_COMPILER_PROJECTION" --print-key)"
+    [[ "$projection_cache_key" =~ ^[0-9a-f]{64}$ ]] ||
+        die "Core compiler projection did not report a usable cache key"
+fi
+cache_entry="$cache_root/$projection_cache_key"
 compiled="${compiled_override:-$cache_entry/compiled}"
 : >"$work/build.log"
 

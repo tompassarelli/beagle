@@ -32,9 +32,14 @@ fi
 out=""
 log=""
 cache_requested=0
+print_key=0
 cache_root="${BEAGLE_CORE_COMPILER_CACHE:-${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}/beagle/core-compiler-projections}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --print-key)
+            print_key=1
+            shift
+            ;;
         --out)
             [[ $# -ge 2 ]] || { echo "beagle core compiler projection: --out needs a directory" >&2; exit 2; }
             out="$2"
@@ -87,7 +92,12 @@ done
     echo "beagle core compiler projection: build supervisor is unavailable" >&2
     exit 2
 }
-if [[ "$cache_requested" == 1 ]]; then
+if [[ "$print_key" == 1 ]]; then
+    [[ -z "$out" && "$cache_requested" == 0 ]] || {
+        echo "beagle core compiler projection: --print-key takes no other mode" >&2
+        exit 2
+    }
+elif [[ "$cache_requested" == 1 ]]; then
     [[ -z "$out" ]] || { echo "beagle core compiler projection: --cache and --out are mutually exclusive" >&2; exit 2; }
     [[ "$cache_root" == /* ]] || { echo "beagle core compiler projection: cache root must be absolute" >&2; exit 2; }
 else
@@ -96,7 +106,10 @@ else
     [[ ! -e "$out" ]] || { echo "beagle core compiler projection: --out already exists: $out" >&2; exit 2; }
 fi
 
-if [[ "${BEAGLE_CORE_COMPILER_PROJECTION_SUPERVISED:-0}" != 1 ]]; then
+# Reporting the key spawns nothing and must stay cheap: every build asks for it
+# before deciding whether the multi-minute construction is needed at all.
+if [[ "$print_key" != 1 &&
+      "${BEAGLE_CORE_COMPILER_PROJECTION_SUPERVISED:-0}" != 1 ]]; then
     supervised_args=()
     if [[ "$cache_requested" == 1 ]]; then
         supervised_args+=(--cache-root "$cache_root")
@@ -109,18 +122,30 @@ if [[ "${BEAGLE_CORE_COMPILER_PROJECTION_SUPERVISED:-0}" != 1 ]]; then
         "${supervised_args[@]}"
 fi
 
+# The closure of a compiled projection: the compiler-module sources, every
+# program that reads or transforms them on the way to the emitted Clojure, and
+# the toolchain pin that selects the Racket those programs run under. Nothing
+# downstream of emission belongs here — the build driver, the emission manager
+# and the finalizer consume the projection, so they cannot change its bytes.
 write_input_manifest() {
     local destination="$1" relative
     {
-        printf 'beagle-core-compiler-projection-input/v1\n'
+        printf 'beagle-core-compiler-projection-input/v2\n'
         for relative in "${sources[@]}" \
                         bin/beagle-core-compiler-projection \
                         bin/beagle-build-all \
                         bin/_beagle-racket \
+                        native-core/bin/run-bounded \
                         share/targets.sh flake.nix flake.lock; do
-            [[ -f "$root/$relative" ]] || continue
-            printf '%s %s\n' "$relative" \
-                "$(sha256sum "$root/$relative" | awk '{print $1}')"
+            # An absent input is its own key value: dropping a file must move
+            # the key rather than silently reproduce the key it had when
+            # present.
+            if [[ -f "$root/$relative" ]]; then
+                printf '%s %s\n' "$relative" \
+                    "$(sha256sum "$root/$relative" | awk '{print $1}')"
+            else
+                printf '%s absent\n' "$relative"
+            fi
         done
         find "$root/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
             LC_ALL=C sort -z | xargs -0 sha256sum |
@@ -128,6 +153,14 @@ write_input_manifest() {
                 '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
     } >"$destination"
 }
+
+if [[ "$print_key" == 1 ]]; then
+    key_work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-core-projection-key.XXXXXX")"
+    write_input_manifest "$key_work/input.manifest"
+    sha256sum "$key_work/input.manifest" | awk '{print $1}'
+    rm -rf "${key_work:?}"
+    exit 0
+fi
 
 expected_modules() {
     for source in "${sources[@]}"; do
