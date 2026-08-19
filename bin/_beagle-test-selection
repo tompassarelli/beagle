@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# Change-relevant test selection for bin/beagle-test.
+#
+# WHAT THIS IS FOR
+#
+# The gate runs every suite on every change: a one-line edit to the Nix emitter
+# runs the JavaScript behavioral suites and vice versa. That is the right
+# behavior for a RELEASE, and the wrong behavior for the dev loop, where the
+# same 535 seconds are paid for evidence the change could not possibly have
+# moved. This file maps a changed path to the suites that change can affect.
+#
+# THE SAFETY DIRECTION IS NOT SYMMETRIC
+#
+# A suite that was skipped and should have run is a defect that escapes. A
+# suite that ran and did not need to costs seconds. So every rule here is
+# written to OVER-include, and the final rule is:
+#
+#     a path this table does not recognize selects the FULL sweep.
+#
+# Narrowing is therefore an allowlist, never a denylist: to make a change
+# narrowable, someone has to add a rule and say why. Nothing narrows by
+# accident, and a new directory added to the repo tomorrow selects everything
+# until a human decides otherwise.
+#
+# The full sweep stays the DEFAULT. `bin/beagle test` is unchanged; narrowing
+# happens only when a caller asks for it with --changed, so nobody gets a
+# weaker check than the command they typed describes.
+
+# --- suite groups ----------------------------------------------------------
+#
+# A group is the set of active-tier suites one target's own surface can break.
+# Each group is a superset of "the emitter's own tests": a target's suites
+# include everything that reads that target's output, not only the file named
+# after the emitter.
+
+# Every emitter change also runs the cross-target emission floor. These suites
+# assert over ALL targets at once (the matrix, the conformance corpus, the
+# representation-soundness laws), so any single emitter can break them, and
+# they are the cheapest place a whole-emitter breakage shows up.
+BEAGLE_SUITES_EMISSION_FLOOR=(
+    emit.rkt            # shared emit surface, exercised by every target
+    emit-matrix.rkt     # cross-target emission matrix
+    conformance.rkt     # cross-target conformance corpus
+    rep-soundness.rkt   # representation soundness across targets
+    check.rkt           # the checker contract the emitters are handed
+)
+
+BEAGLE_SUITES_NIX=(
+    emit-nix.rkt
+    nix-emit-errors.rkt
+    nix-lints.rkt
+    nix-parse.rkt
+    nix-roundtrip.rkt
+    nix-import-roundtrip.rkt
+    validate-nix.rkt
+    check-all-nix.rkt
+    build-all-nix-reader.rkt
+)
+
+BEAGLE_SUITES_JS=(
+    emit-js-behavioral.rkt
+    second-order-contracts.rkt   # JS checker-contract coverage
+    ts-externs.rkt               # TypeScript declarations -> typed wrappers
+    export-xmodule.rkt           # js/export signature survival across modules
+)
+
+BEAGLE_SUITES_CLJ=(
+    emit-clj-behavioral.rkt
+)
+
+# Documentation is read by exactly these suites and by nothing else in the
+# active tier: the doc-span gate, the cheatsheet example gate, and the license
+# metadata gate. A prose edit cannot reach a compiler assertion.
+BEAGLE_SUITES_DOCS=(
+    docfill.rkt
+    cheatsheet.rkt
+    license-metadata.rkt
+)
+
+# --- gate phases -----------------------------------------------------------
+#
+# The four shell phases are not suites and are selected separately.
+#
+# checkout-first, qualified-ref-scaffold and consumer-smoke ALWAYS run. The
+# first two cost about a second each; the third is the only proof in the gate
+# that the route a real consumer takes still works, and it is 11-20s once the
+# native caches are warm. None of the three is worth reasoning about skipping.
+#
+# racket-scope is the exception, and it is selected, because it costs 58-80s
+# and asserts exactly one thing: that bin/_beagle-racket resolves the `beagle`
+# collection to THIS checkout in both the linked and the sibling layout. Its
+# inputs are the scope machinery itself, the package info files, and the small
+# set of scripts its fixture copies -- not the content of any compiler module.
+BEAGLE_PHASES_ALWAYS=(checkout-first qualified-ref-scaffold consumer-smoke)
+
+# --- change discovery ------------------------------------------------------
+
+# Everything not yet on main: the working tree (tracked edits AND untracked
+# new files) plus every commit since the merge base. A lane that has committed
+# its work is exactly as unlanded as one that has not, so both count.
+beagle_selection_changed_paths() {
+    local root="$1" base=""
+    local candidate
+    # A lane branched from something other than main names its own base. The
+    # default is still main, so nothing has to be configured to be correct.
+    for candidate in "${BEAGLE_TEST_SELECTION_BASE:-}" main origin/main; do
+        [[ -n "$candidate" ]] || continue
+        if base="$(git -C "$root" merge-base HEAD "$candidate" 2>/dev/null)"; then
+            [[ -n "$base" ]] && break
+        fi
+        base=""
+    done
+    if [[ -z "$base" ]]; then
+        return 1
+    fi
+    {
+        git -C "$root" diff --name-only "$base" -- 2>/dev/null
+        git -C "$root" diff --name-only HEAD -- 2>/dev/null
+        git -C "$root" ls-files --others --exclude-standard -- 2>/dev/null
+    } | sed '/^$/d' | sort -u
+}
+
+# --- the mapping table -----------------------------------------------------
+#
+# One path in, one decision out. First match wins, so the specific rules come
+# before the general ones and the last rule is the full sweep.
+#
+# A decision is a space-separated token list:
+#   full            run everything (also stops the whole narrowing attempt)
+#   group:NAME      add suite group NAME
+#   suite:FILE      add one named suite
+#   phase:NAME      add one gate phase
+#   none            this path cannot affect any gate phase
+beagle_selection_classify_path() {
+    local path="$1"
+    case "$path" in
+        # --- Nix target ---------------------------------------------------
+        beagle-lib/private/emit-nix*.rkt|\
+        beagle-lib/private/nixos-schema.rkt|\
+        beagle-lib/private/rename-nix.rkt|\
+        beagle-lib/private/validate-nix.rkt|\
+        beagle-lib/nix/*)
+            echo "group:nix" ;;
+
+        # --- JavaScript / TypeScript target -------------------------------
+        beagle-lib/private/emit-js*.rkt|\
+        beagle-lib/private/parse-js-quote.rkt|\
+        beagle-lib/private/emit-jst.rkt|\
+        beagle-lib/private/parse-jst.rkt|\
+        beagle-lib/private/js-*.rkt|\
+        beagle-lib/private/ts-externs.rkt|\
+        beagle-lib/js/*)
+            echo "group:js" ;;
+
+        # --- Clojure target -----------------------------------------------
+        beagle-lib/private/emit-clj.rkt|\
+        beagle-lib/private/facts-to-clj.rkt|\
+        beagle-lib/clj/*)
+            echo "group:clj" ;;
+
+        # --- a test file is its own reason to run ---------------------------
+        # Editing a suite selects that suite. It does NOT narrow anything
+        # else: a suite file is evidence about itself only.
+        beagle-test/tests/*.rkt)
+            echo "suite:${path##*/}" ;;
+        beagle-test/conformance/*)
+            echo "suite:conformance.rkt" ;;
+
+        # --- gate phase fixtures --------------------------------------------
+        # A phase directory under bin/test/ that the gate actually invokes
+        # selects that phase. The other 25 directories there are standalone
+        # probes this gate never runs, so editing one cannot change a gate
+        # verdict.
+        bin/test/racket-scope/*)          echo "phase:racket-scope" ;;
+        bin/test/checkout-first/*)        echo "phase:checkout-first" ;;
+        bin/test/qualified-ref-scaffold/*) echo "phase:qualified-ref-scaffold" ;;
+        bin/test/consumer-smoke/*)        echo "phase:consumer-smoke" ;;
+        bin/test/*)                       echo "none" ;;
+
+        # --- racket collection scope ----------------------------------------
+        bin/_beagle-racket|*/info.rkt|beagle/*|share/targets.sh)
+            echo "phase:racket-scope phase:checkout-first" ;;
+
+        # --- documentation ---------------------------------------------------
+        docs/*|*.md)
+            echo "group:docs" ;;
+
+        # --- everything else, including the whole shared core ----------------
+        # The checker, the type system, the reader, the stdlib tables, shared
+        # lowering, targets.rkt, the daemon, the build driver, flake.nix, the
+        # gate itself: all of it lands here, and all of it runs everything.
+        *)
+            echo "full" ;;
+    esac
+}
+
+# Short human-readable reason for a decision, so the report explains itself.
+beagle_selection_reason() {
+    case "$1" in
+        group:nix)  echo "Nix emitter surface" ;;
+        group:js)   echo "JavaScript/TypeScript emitter surface" ;;
+        group:clj)  echo "Clojure emitter surface" ;;
+        group:docs) echo "documentation read only by the doc/cheatsheet/license gates" ;;
+        suite:*)    echo "the suite's own file" ;;
+        phase:*)    echo "gate phase input" ;;
+        none)       echo "not an input to any gate phase" ;;
+        full)       echo "shared or unrecognized surface -- narrowing is not safe" ;;
+        *)          echo "unclassified" ;;
+    esac
+}
+
+# --- the active manifest, for validation and for the skipped list -----------
+
+beagle_selection_active_suites() {
+    local root="$1"
+    awk '
+        /\(active \. \(/ { inside = 1 }
+        /\(demoted \. \(/ { inside = 0 }
+        inside {
+            line = $0
+            sub(/;;.*/, "", line)
+            while (match(line, /"[^"]+"/)) {
+                token = substr(line, RSTART + 1, RLENGTH - 2)
+                if (token ~ /\.rkt$/ || token ~ /\.py$/) print token
+                line = substr(line, RSTART + RLENGTH)
+            }
+        }
+    ' "$root/beagle-test/tiers.rktd"
+}
+
+# --- selection --------------------------------------------------------------
+#
+# Sets, for the caller:
+#   BEAGLE_SELECTION_MODE     full | narrow
+#   BEAGLE_SELECTION_WHY      one sentence naming why, when the mode is full
+#   BEAGLE_SELECTION_SUITES   selected suite file names
+#   BEAGLE_SELECTION_PHASES   selected gate phases
+#   BEAGLE_SELECTION_TRACE    "path -> decision (reason)" lines
+beagle_selection_compute() {
+    local root="$1"
+    local -a paths=()
+    local path decision token
+    local -A suites=() phases=()
+
+    BEAGLE_SELECTION_MODE=full
+    BEAGLE_SELECTION_WHY=""
+    BEAGLE_SELECTION_SUITES=()
+    BEAGLE_SELECTION_PHASES=()
+    BEAGLE_SELECTION_TRACE=()
+
+    if ! mapfile -t paths < <(beagle_selection_changed_paths "$root"); then
+        BEAGLE_SELECTION_WHY="no merge base with main could be resolved, so the changed set is unknown"
+        return 0
+    fi
+    if ((${#paths[@]} == 0)); then
+        BEAGLE_SELECTION_WHY="no changed files against the merge base with main, so there is nothing to narrow on"
+        return 0
+    fi
+
+    for path in "${paths[@]}"; do
+        decision="$(beagle_selection_classify_path "$path")"
+        for token in $decision; do
+            BEAGLE_SELECTION_TRACE+=("$path -> $token ($(beagle_selection_reason "$token"))")
+            case "$token" in
+                full)
+                    BEAGLE_SELECTION_WHY="$path touches shared or unrecognized surface"
+                    return 0 ;;
+                group:nix)  for s in "${BEAGLE_SUITES_NIX[@]}"; do suites["$s"]=1; done
+                            for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done ;;
+                group:js)   for s in "${BEAGLE_SUITES_JS[@]}"; do suites["$s"]=1; done
+                            for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done ;;
+                group:clj)  for s in "${BEAGLE_SUITES_CLJ[@]}"; do suites["$s"]=1; done
+                            for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done ;;
+                group:docs) for s in "${BEAGLE_SUITES_DOCS[@]}"; do suites["$s"]=1; done ;;
+                suite:*)    suites["${token#suite:}"]=1 ;;
+                phase:*)    phases["${token#phase:}"]=1 ;;
+                none)       ;;
+            esac
+        done
+    done
+
+    local -a active=()
+    mapfile -t active < <(beagle_selection_active_suites "$root")
+    local -A active_set=()
+    for s in "${active[@]}"; do active_set["$s"]=1; done
+
+    # A selected name that the manifest does not carry is a defect in THIS
+    # table, not a reason to run a mystery file. Refuse rather than narrow.
+    for s in "${!suites[@]}"; do
+        if [[ -z "${active_set[$s]+set}" ]]; then
+            BEAGLE_SELECTION_MODE=full
+            BEAGLE_SELECTION_WHY="the selection table named $s, which is not in the active tier"
+            return 0
+        fi
+    done
+
+    BEAGLE_SELECTION_MODE=narrow
+    mapfile -t BEAGLE_SELECTION_SUITES < <(printf '%s\n' "${!suites[@]}" | sort)
+    local -A phase_set=()
+    for p in "${BEAGLE_PHASES_ALWAYS[@]}"; do phase_set["$p"]=1; done
+    for p in "${!phases[@]}"; do phase_set["$p"]=1; done
+    # Report phases in gate order, never in hash order.
+    BEAGLE_SELECTION_PHASES=()
+    for p in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; do
+        [[ -n "${phase_set[$p]+set}" ]] && BEAGLE_SELECTION_PHASES+=("$p")
+    done
+    return 0
+}
+
+# --- the report -------------------------------------------------------------
+
+beagle_selection_report() {
+    local root="$1"
+    local -a active=()
+    local s p
+    local -A selected=()
+
+    echo "beagle-test: ---- change-relevant selection ----"
+    if ((${#BEAGLE_SELECTION_TRACE[@]} > 0)); then
+        echo "beagle-test: changed paths and what each selects:"
+        for s in "${BEAGLE_SELECTION_TRACE[@]}"; do
+            echo "beagle-test:   $s"
+        done
+    fi
+    if [[ "$BEAGLE_SELECTION_MODE" == full ]]; then
+        echo "beagle-test: SELECTION=full -- $BEAGLE_SELECTION_WHY"
+        echo "beagle-test: running every phase and every active suite."
+        return 0
+    fi
+
+    for s in "${BEAGLE_SELECTION_SUITES[@]}"; do selected["$s"]=1; done
+    mapfile -t active < <(beagle_selection_active_suites "$root")
+
+    echo "beagle-test: SELECTION=narrow"
+    echo "beagle-test: phases selected (${#BEAGLE_SELECTION_PHASES[@]}/4): ${BEAGLE_SELECTION_PHASES[*]}"
+    for p in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; do
+        if [[ " ${BEAGLE_SELECTION_PHASES[*]} " != *" $p "* ]]; then
+            echo "beagle-test:   phase SKIPPED $p (no changed path is one of its inputs)"
+        fi
+    done
+    echo "beagle-test: suites selected (${#BEAGLE_SELECTION_SUITES[@]}/${#active[@]}):"
+    for s in "${BEAGLE_SELECTION_SUITES[@]}"; do
+        echo "beagle-test:   RUN  $s"
+    done
+    echo "beagle-test: suites skipped ($((${#active[@]} - ${#BEAGLE_SELECTION_SUITES[@]}))): no changed path maps to them"
+    for s in "${active[@]}"; do
+        [[ -n "${selected[$s]+set}" ]] || echo "beagle-test:   skip $s"
+    done
+    echo "beagle-test: NARROWED RUNS ARE NOT A RELEASE PROOF."
+    echo "beagle-test: the release gate is the plain command: bin/beagle test"
+}
+
+# Standalone: explain the selection for this checkout and run nothing.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    set -uo pipefail
+    beagle_selection_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    beagle_selection_compute "$beagle_selection_root"
+    beagle_selection_report "$beagle_selection_root"
+fi

@@ -9,6 +9,18 @@
 #   bin/beagle-test                         # active tier only (fast loop)
 #   bin/beagle-test --full                  # active + demoted tiers
 #   bin/beagle-test --include-gated         # also run gated tier (needs env vars)
+#   bin/beagle-test --changed               # only what the change can affect
+#   bin/beagle-test --explain-selection     # print that selection, run nothing
+#
+# --changed is the DEV LOOP. It reads the changed file set from git (working
+# tree plus every commit since the merge base with main), maps each path
+# through bin/_beagle-test-selection, and runs only the phases and suites that
+# change can affect. A path the table does not recognize -- the checker, the
+# type system, the reader, the stdlib tables, shared lowering, anything new --
+# selects the full sweep, so narrowing is an allowlist and never an accident.
+#
+# The RELEASE GATE is the plain command with no flag. It is unchanged, it is
+# still the default, and a narrowed run is not a substitute for it.
 #
 # Exit status is a CLASSIFICATION, not just a pass/fail bit:
 #
@@ -32,6 +44,17 @@ set -uo pipefail
 
 source "$(dirname "$0")/_beagle-cold-authority"
 
+# --explain-selection runs no test, so it takes no gate lock and needs no
+# Racket. It exists so a human can read WHY a suite would be selected or
+# skipped without paying for a gate run to find out.
+if [[ " $* " == *" --explain-selection "* ]]; then
+    source "$(dirname "$0")/_beagle-test-selection"
+    beagle_selection_explain_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    beagle_selection_compute "$beagle_selection_explain_root"
+    beagle_selection_report "$beagle_selection_explain_root"
+    exit 0
+fi
+
 if [[ "${BEAGLE_TEST_LOCKED:-0}" != 1 ]]; then
     BEAGLE_TEST_LOCK="${TMPDIR:-/tmp}/beagle-gate.lock"
     if ! flock -n "$BEAGLE_TEST_LOCK" -c ':'; then
@@ -43,6 +66,19 @@ fi
 source "$(dirname "$0")/_beagle-racket"
 
 BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# --changed is consumed here; everything else is forwarded to the tier runner
+# untouched, so the runner keeps seeing exactly the argv it always saw.
+BEAGLE_TEST_SELECT_CHANGED=0
+beagle_test_forward_args=()
+for beagle_test_arg in "$@"; do
+    if [[ "$beagle_test_arg" == "--changed" ]]; then
+        BEAGLE_TEST_SELECT_CHANGED=1
+    else
+        beagle_test_forward_args+=("$beagle_test_arg")
+    fi
+done
+set -- "${beagle_test_forward_args[@]+"${beagle_test_forward_args[@]}"}"
 
 # The parity driver runs this exact control path against a tiny hermetic gate
 # tree.  The override is deliberately double-keyed and test-only; ordinary and
@@ -114,6 +150,11 @@ declare -A BEAGLE_TEST_PHASE_DEADLINE=(
     [consumer-smoke]=600
     # honest 406s (load 6.4-8.0), 16 shards. ~2.2x.
     [tier-runner]=900
+    # The narrowed counterpart of tier-runner. A selection is a SUBSET of what
+    # tier-runner runs, so it can never honestly cost more; it keeps the same
+    # bound rather than a tighter one because the worst legal selection is a
+    # change to the one multi-minute suite itself.
+    [tier-selected]=900
     # Not a gate phase: the opt-in probe below deliberately breaches this.
     [synthetic-timeout]=1
 )
@@ -590,6 +631,26 @@ if [[ "${BEAGLE_TEST_SYNTHETIC_TIMEOUT:-0}" == 1 ]]; then
         "$BASH" -c 'sleep 30 & child=$!; printf "%s\n" "$child" >"$1"; wait "$child"' \
         bash "$synthetic_pid_file" || exit $?
     exit 0
+fi
+
+# --changed narrows the run to what the change can affect. The selection can
+# still come back "full", and then this path runs exactly the sweep below.
+if [[ "$BEAGLE_TEST_SELECT_CHANGED" == 1 ]]; then
+    source "$BEAGLE_ROOT/bin/_beagle-test-selection"
+    beagle_selection_compute "$BEAGLE_ROOT"
+    beagle_selection_report "$BEAGLE_ROOT"
+    if [[ "$BEAGLE_SELECTION_MODE" == narrow ]]; then
+        for beagle_test_phase in "${BEAGLE_SELECTION_PHASES[@]}"; do
+            run_beagle_test_phase "$beagle_test_phase" \
+                "$BEAGLE_ROOT/bin/test/$beagle_test_phase/run.sh" || exit $?
+        done
+        run_beagle_test_phase "tier-selected" \
+            "$BEAGLE_ROOT/bin/_beagle-test-selected-units" \
+            "${BEAGLE_SELECTION_SUITES[@]}" || exit $?
+        echo "beagle-test: narrowed run complete." \
+             "The release proof is the plain command: bin/beagle test" >&2
+        exit 0
+    fi
 fi
 
 # `exit $?` and not `exit 1`: this is the line that used to strand finished

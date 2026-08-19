@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Run the named beagle-test/tests files as raco-test units, in parallel.
+#
+# This is the narrowed counterpart of the tier runner's unit execution, and it
+# is deliberately the SAME unit: one `raco test FILE` child, routed through the
+# same content-keyed gate cache under the same id (the file name), with the
+# same per-child TMPDIR containment. Narrowing changes WHICH units run. It
+# never changes what a unit asserts.
+#
+# Argv is the list of test file names, relative to beagle-test/tests.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/bin/_beagle-racket"
+
+TESTS_DIR="$ROOT/beagle-test/tests"
+CACHE_WRAPPER="$ROOT/bin/_gate-cache-run"
+# query.rkt probes live daemon/process/socket behavior, so a traced filesystem
+# closure is not its identity. The tier runner excludes it from the cache and
+# so does this path.
+CACHE_INELIGIBLE=" query.rkt "
+
+if (($# == 0)); then
+    echo "beagle-test: no units selected" >&2
+    exit 2
+fi
+
+jobs="${BEAGLE_TEST_JOBS:-}"
+if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+    jobs="$(( $(nproc 2>/dev/null || echo 3) - 2 ))"
+fi
+((jobs >= 1)) || jobs=1
+((jobs <= 16)) || jobs=16
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-selected-units.XXXXXX")"
+trap 'rm -rf "${work:?}"' EXIT
+
+declare -A unit_by_pid=()
+declare -a live=()
+failed=()
+missing=()
+
+launch() {
+    local name="$1" index="$2"
+    local path="$TESTS_DIR/$name"
+    local log="$work/$index.log"
+    local child_tmp="$work/child-$index"
+    mkdir -p "$child_tmp"
+    local -a argv=("$RACO" test "$path")
+    if [[ -x "$CACHE_WRAPPER" && "$CACHE_INELIGIBLE" != *" $name "* ]]; then
+        argv=("$CACHE_WRAPPER" --domain raco-test --id "$name" -- "${argv[@]}")
+    fi
+    TMPDIR="$child_tmp" TMP="$child_tmp" TEMP="$child_tmp" \
+        "${argv[@]}" >"$log" 2>&1 &
+    local pid=$!
+    unit_by_pid["$pid"]="$index:$name"
+    live+=("$pid")
+}
+
+reap_one() {
+    local completed="" status entry index name pid
+    local -a next=()
+    set +e
+    wait -n -p completed "${live[@]}"
+    status=$?
+    set -e
+    if [[ -z "$completed" || -z "${unit_by_pid[$completed]+set}" ]]; then
+        echo "beagle-test: selected-unit wait contract failed" >&2
+        return 2
+    fi
+    entry="${unit_by_pid[$completed]}"
+    index="${entry%%:*}"
+    name="${entry#*:}"
+    for pid in "${live[@]}"; do
+        [[ "$pid" == "$completed" ]] || next+=("$pid")
+    done
+    live=("${next[@]}")
+    if ((status == 0)); then
+        printf 'PASS  %s\n' "$name"
+    else
+        printf 'FAIL  %s (exit %s)\n' "$name" "$status"
+        failed+=("$name")
+        sed "s/^/  [$name] /" "$work/$index.log"
+    fi
+    return 0
+}
+
+index=0
+for name in "$@"; do
+    if [[ ! -f "$TESTS_DIR/$name" ]]; then
+        missing+=("$name")
+        continue
+    fi
+    while ((${#live[@]} >= jobs)); do
+        reap_one || exit 2
+    done
+    launch "$name" "$index"
+    ((index++))
+done
+while ((${#live[@]} > 0)); do
+    reap_one || exit 2
+done
+
+if ((${#missing[@]} > 0)); then
+    printf 'beagle-test: selected unit is missing from the tests directory: %s\n' \
+        "${missing[*]}" >&2
+    exit 2
+fi
+
+printf '%s selected unit(s) ran, %s failed\n' "$index" "${#failed[@]}"
+((${#failed[@]} == 0)) || exit 1
+exit 0
