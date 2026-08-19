@@ -963,12 +963,19 @@
       true
       (if (id-in? allowed (nth ids index)) (recur (+ index 1)) false))))
 
+;; Membership is keyed by the canonical id value, so this stays exactly the
+;; predicate id-in? computes while remaining linear in the id count. Every
+;; emission call validates the whole program, in the coordinator and again in
+;; every parallel worker, so a linear-scan seen set made validation quadratic
+;; in program size and set the floor that parallel emission could not cross.
 (defn unique-ids? [(ids (Vec NativeId))] Bool
-  (loop [(index Int) 0 (seen (Vec NativeId)) []]
+  (loop [(index Int) 0 (seen (Map String Int)) {}]
     (if (>= index (count ids))
       true
-      (let [(current NativeId) (nth ids index)]
-        (if (id-in? seen current) false (recur (+ index 1) (conj seen current)))))))
+      (let [(value String) (nativeid-value (nth ids index))]
+        (if (contains? seen value)
+          false
+          (recur (+ index 1) (assoc seen value 1)))))))
 
 (defn canonical-parts [(parts (Vec String))] String
   (loop [(index Int) 0 (encoded-parts (Vec String)) []]

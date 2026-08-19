@@ -60,6 +60,21 @@ terminate_workers() {
 
 trap terminate_workers HUP INT TERM
 
+# Opt-in phase trace: absolute nanosecond stamps for the manager span and each
+# worker span, appended to the file named by BEAGLE_CORE_EMIT_TRACE. Nothing
+# outside the trace file changes, so emitted bytes stay identical.
+trace_path="${BEAGLE_CORE_EMIT_TRACE:-}"
+trace() {
+  [[ -n "$trace_path" ]] || return 0
+  printf '%s\t%s\t%s\n' "$(date +%s%N)" "$1" "${2:-}" >>"$trace_path"
+}
+
+if [[ -n "${BEAGLE_CORE_EMIT_WIRE_COPY:-}" ]]; then
+  cp -f -- "$wire_path" "$BEAGLE_CORE_EMIT_WIRE_COPY" 2>/dev/null || true
+fi
+
+trace manager-start "backend=$backend functions=$function_count workers=$worker_count"
+
 for ((worker_index = 0; worker_index < worker_count; worker_index++)); do
   worker_dir="$root/$backend-$worker_index"
   mkdir -p "$worker_dir" || die "could not create worker $worker_index directory"
@@ -69,6 +84,7 @@ for ((worker_index = 0; worker_index < worker_count; worker_index++)); do
        function_index += worker_count)); do
     indexes+="${indexes:+,}$function_index"
   done
+  trace worker-start "$worker_index"
   BEAGLE_BOUNDED_COMPLETION_RECEIPT="$worker_dir/supervisor.receipt" \
     "$racket" "$supervisor" "$worker_timeout" "$kill_grace" -- \
     "$bb" -cp "$compiled" -e "$worker_code" \
@@ -87,7 +103,10 @@ for ((worker_index = 0; worker_index < worker_count; worker_index++)); do
   pids[worker_index]=""
   printf '%s\n' "$status" >"$root/$backend-$worker_index/manager.status" ||
     die "could not record worker $worker_index status"
+  trace worker-reaped "$worker_index status=$status"
 done
+
+trace manager-end "workers=$worker_count"
 
 receipt="$root/manager.receipt"
 temporary="$root/.manager.receipt.$$"
