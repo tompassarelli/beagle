@@ -10615,6 +10615,105 @@
             (core/->TokenFlowV0 [] [])))
         result-id (byte-source-type-id) false))))
 
+;; A source snapshot is the file's text together with its content digest. Both
+;; are existing native primitives, so the snapshot is composed from the host
+;; services already admitted rather than adding a second, differently shaped
+;; host service that would have to return a dynamic value of its own.
+(defn lower-read-source-snapshot
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (let [types (Vec core/TypeDef) (bodyenvv0-types env)
+        carrier core/NativeId (slice-value-type-id)
+        snapshot-map (U core/NativeId Nil) (map-type-of types carrier carrier)
+        byte-vector (U core/NativeId Nil) (vector-type-of types (int-type-id))
+        equality (U core/ConcreteEqualityV0 Nil)
+        (map-key-equality-for types carrier)]
+    (cond
+      (not (and (= 1 (count values)) (text-operand? (nth value-types 0))))
+      (fail-result state
+        "TODO-NATIVE-SOURCE-SNAPSHOT-OPERANDS: read-source-snapshot takes one Text path")
+
+      (nil? snapshot-map)
+      (fail-result state
+        "TODO-NATIVE-SOURCE-SNAPSHOT-CARRIER: the program declares no dynamic map carrier")
+
+      (nil? byte-vector)
+      (fail-result state
+        "TODO-NATIVE-SOURCE-SNAPSHOT-BYTES: the program declares no closed (Vec Int) carrier")
+
+      (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-SOURCE-SNAPSHOT-KEY-EQUALITY: the dynamic carrier has no closed concrete key equality")
+
+      :else
+      (let [map-type core/NativeId snapshot-map
+            bytes-type core/NativeId byte-vector
+            key-equality core/ConcreteEqualityV0 equality
+            limit-id core/NativeId (state-id state owner "snapshot-limit")
+            with-limit BodyStateV0
+            (state-emit (state-bump state)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 limit-id (int-type-id))
+                (core/->I64Atom (bodyenvv0-whole-input-limit env))))
+            text-id core/NativeId (state-id with-limit owner "snapshot-text")
+            with-text BodyStateV0
+            (state-emit (state-bump with-limit)
+              (core/->ExternCallInstruction
+                (core/->SsaValueV0 text-id (text-type-id))
+                (host-whole-input-abi-id "read-file-bounded")
+                [(nth values 0) limit-id]
+                (arena-value-id owner)
+                (core/->TokenFlowV0 [] [])))
+            bytes-id core/NativeId (state-id with-text owner "snapshot-bytes")
+            with-bytes BodyStateV0
+            (state-emit (state-bump with-text)
+              (core/->CodecPrimitiveInstructionV0
+                (core/->SsaValueV0 bytes-id bytes-type)
+                (core/->Utf8EncodeV0 (arena-value-id owner) text-id)))
+            digest-id core/NativeId (state-id with-bytes owner "snapshot-digest")
+            with-digest BodyStateV0
+            (state-emit (state-bump with-bytes)
+              (core/->CodecPrimitiveInstructionV0
+                (core/->SsaValueV0 digest-id (text-type-id))
+                (core/->Sha256BytesV0 (arena-value-id owner) bytes-id)))
+            text-key-id core/NativeId
+            (state-id with-digest owner "snapshot-text-key")
+            with-text-key BodyStateV0
+            (state-emit (state-bump with-digest)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 text-key-id (text-type-id))
+                (core/->TextAtom "text")))
+            digest-key-id core/NativeId
+            (state-id with-text-key owner "snapshot-digest-key")
+            with-digest-key BodyStateV0
+            (state-emit (state-bump with-text-key)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 digest-key-id (text-type-id))
+                (core/->TextAtom "sourceSha256")))
+            coerced ArgsResultV0
+            (coerce-values-to-type types owner with-digest-key
+              [text-key-id digest-key-id text-id digest-id]
+              [(text-type-id) (text-type-id) (text-type-id) (text-type-id)]
+              carrier)
+            settled BodyStateV0 (argsresultv0-state coerced)
+            entries (Vec core/NativeId) (argsresultv0-values coerced)]
+        (if (state-blocked? settled)
+          (dead-result settled)
+          (let [map-id core/NativeId (state-id settled owner "snapshot-map")
+                built BodyStateV0
+                (state-emit (state-bump settled)
+                  (core/->MapLiteralInstructionV0
+                    (core/->SsaValueV0 map-id map-type)
+                    [(nth entries 0) (nth entries 1)]
+                    [(nth entries 2) (nth entries 3)]
+                    (arena-value-id owner) key-equality))]
+            (lower-boundary-coerce types owner built map-id map-type
+              carrier)))))))
+
 (defn lower-host-text-output-call
   [(owner core/NativeId)
    (state BodyStateV0)
@@ -18320,6 +18419,10 @@
 
                 (= callee "host.store/compile")
                 (lower-host-store-call owner current values value-types)
+
+                (= callee "selfhost.rt/read-source-snapshot")
+                (lower-read-source-snapshot env owner current values
+                  value-types)
 
                 (host-filesystem-callee? callee)
                 (lower-host-filesystem-call owner current callee values value-types)
