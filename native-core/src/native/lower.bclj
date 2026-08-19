@@ -23602,6 +23602,18 @@
               (host-filesystem-abi-id "wait-for-change"))
           (conj with-stdin (host-filesystem-wait-abi digest))
           with-stdin)
+        with-whole-input-file (Vec core/AbiDeclV0)
+        (if (any-function-calls-abi? functions
+              (host-whole-input-abi-id "read-file-bounded"))
+          (conj with-filesystem-wait
+            (host-whole-input-abi "read-file-bounded" digest))
+          with-filesystem-wait)
+        with-whole-input (Vec core/AbiDeclV0)
+        (if (any-function-calls-abi? functions
+              (host-whole-input-abi-id "read-stdin-bounded"))
+          (conj with-whole-input-file
+            (host-whole-input-abi "read-stdin-bounded" digest))
+          with-whole-input-file)
         process-abis (Vec core/AbiDeclV0) (host-process-abis digest)
         called-process-abis (Vec core/AbiDeclV0)
         (filterv
@@ -23609,7 +23621,7 @@
             (any-function-calls-abi? functions (core/abideclv0-id abi)))
           process-abis)
         with-process (Vec core/AbiDeclV0)
-        (vec (concat with-filesystem-wait called-process-abis))
+        (vec (concat with-whole-input called-process-abis))
         with-time-sleep (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions (host-time-sleep-abi-id))
           (conj with-process (host-time-sleep-abi digest))
@@ -25078,6 +25090,10 @@
                      (host-filesystem-abi-id "unlock")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "wait-for-change")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-whole-input-abi-id "read-file-bounded")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-whole-input-abi-id "read-stdin-bounded")) 1 0)
                (count
                  (filterv
                    (fn [abi core/AbiDeclV0] Bool
