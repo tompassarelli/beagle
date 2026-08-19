@@ -1219,11 +1219,30 @@ validate_recorded_core_result_pass() {
        "beagle-core-result/v1 $key $artifact_manifest_digest" ]]
 }
 
+# A C17 attestation hands back a RECEIPT, and the build finalizer requires that
+# receipt's compiler commit to equal the commit this build stamps into its own
+# native receipts (validate-c17!, native-core/validation/build-finalize.clj).
+# The commit is therefore part of what a C17 PASS is, not incidental to it, and
+# it belongs in the attestation's identity: a receipt minted at another commit
+# is not slower to reuse, it is impossible to reuse. The compiler tree is not
+# keyed separately because the result cache is enabled only on a clean checkout,
+# where the commit already names the tree.
+core_c17_attestation_key() {
+    local native_digest="$1"
+    printf 'beagle-core-c17-identity/v2\nnative-program-sha256 %s\ncompiler-commit %s\n' \
+        "$native_digest" "$compiler_commit" | sha256sum | awk '{print $1}'
+}
+
 use_core_c17_attestation_source() {
     local source_entry="$1" native_digest="$2" facts_digest="$3"
     local entry_map_digest="$4" report receipt header_digest source_digest
     [[ "$source_entry" != "$core_result_entry" ]] || return 1
     validate_recorded_core_result_pass "$source_entry" || return 1
+    # The keyed lookup below cannot reach a foreign commit, but the linear scan
+    # can, so the commit is proven here too. The manifest is bound to the entry's
+    # key by validate_recorded_core_result_pass.
+    grep -Fqx "compiler-commit $compiler_commit" \
+        "$source_entry/input.manifest" || return 1
     report="$source_entry/artifacts/report.txt"
     receipt="$source_entry/artifacts/c17.receipt"
     [[ -f "$report" && -f "$receipt" &&
@@ -1253,6 +1272,9 @@ use_core_c17_attestation_source() {
        "$(grep -c '^obligation-projection PASS ' "$report" || true)" == 10 ]] ||
         return 1
     ! grep -q '^pending ' "$report" || return 1
+    # The receipt is the artifact the finalizer validates against this build's
+    # commit; it encodes that commit as one canonical 52-byte string field.
+    grep -Fq "52:6:string:40:$compiler_commit" "$receipt" || return 1
     grep -Fq "sha256:$native_digest" "$receipt" || return 1
     grep -Fq "source-facts-sha256=$facts_digest" "$receipt" || return 1
     grep -Fq 'abi=lp64' "$receipt" || return 1
@@ -1275,10 +1297,10 @@ record_core_c17_attestation() {
     source_key="$(basename "$source_entry")"
     ready_digest="$(sha256sum "$source_entry/READY" | awk '{print $1}')"
     mkdir -p "$core_c17_attestation_root" "$cache_root/.result-tmp"
-    attestation="$core_c17_attestation_root/$native_digest"
+    attestation="$core_c17_attestation_root/$(core_c17_attestation_key "$native_digest")"
     staging="$(mktemp "$cache_root/.result-tmp/$native_digest.c17.XXXXXX")"
-    printf 'beagle-core-c17-pass/v1 %s %s %s\n' \
-        "$native_digest" "$source_key" "$ready_digest" >"$staging"
+    printf 'beagle-core-c17-pass/v2 %s %s %s %s\n' \
+        "$native_digest" "$compiler_commit" "$source_key" "$ready_digest" >"$staging"
     sync -f "$staging"
     [[ ! -e "$attestation" && ! -L "$attestation" ]] || rm -f -- "$attestation"
     ln "$staging" "$attestation"
@@ -1288,7 +1310,8 @@ record_core_c17_attestation() {
 
 reuse_core_c17_attestation() {
     local native_digest facts_digest entry_map_digest attestation
-    local format recorded_digest source_key ready_digest extra source_entry
+    local format recorded_digest recorded_commit source_key ready_digest extra
+    local source_entry
     [[ "$core_checkpoint_cache_hit" == 1 &&
        -n "${seen_materializers[c17]:-}" &&
        "$abi" == "lp64" && "$simd_required" == 0 ]] || return 1
@@ -1297,13 +1320,14 @@ reuse_core_c17_attestation() {
     facts_digest="$(sha256sum "$work/artifacts/source.facts" | awk '{print $1}')"
     entry_map_digest="$(sha256sum "$work/artifacts/native.entry-map" |
         awk '{print $1}')"
-    attestation="$core_c17_attestation_root/$native_digest"
+    attestation="$core_c17_attestation_root/$(core_c17_attestation_key "$native_digest")"
     if [[ -f "$attestation" && ! -L "$attestation" ]]; then
-        read -r format recorded_digest source_key ready_digest extra \
-            <"$attestation" || true
+        read -r format recorded_digest recorded_commit source_key ready_digest \
+            extra <"$attestation" || true
         source_entry="$core_result_root/$source_key"
-        if [[ "$format" == "beagle-core-c17-pass/v1" &&
+        if [[ "$format" == "beagle-core-c17-pass/v2" &&
               "$recorded_digest" == "$native_digest" &&
+              "$recorded_commit" == "$compiler_commit" &&
               "$source_key" =~ ^[0-9a-f]{64}$ &&
               "$ready_digest" =~ ^[0-9a-f]{64}$ &&
               -z "${extra:-}" &&
