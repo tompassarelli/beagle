@@ -81,17 +81,31 @@ BEAGLE_SUITES_DOCS=(
 #
 # The four shell phases are not suites and are selected separately.
 #
-# checkout-first, qualified-ref-scaffold and consumer-smoke ALWAYS run. The
-# first two cost about a second each; the third is the only proof in the gate
-# that the route a real consumer takes still works, and it is 11-20s once the
-# native caches are warm. None of the three is worth reasoning about skipping.
+# checkout-first and qualified-ref-scaffold ALWAYS run: about a second each,
+# and both are whole-checkout guards. Nothing is bought by reasoning about
+# skipping them.
 #
-# racket-scope is the exception, and it is selected, because it costs 58-80s
-# and asserts exactly one thing: that bin/_beagle-racket resolves the `beagle`
-# collection to THIS checkout in both the linked and the sibling layout. Its
-# inputs are the scope machinery itself, the package info files, and the small
-# set of scripts its fixture copies -- not the content of any compiler module.
-BEAGLE_PHASES_ALWAYS=(checkout-first qualified-ref-scaffold consumer-smoke)
+# racket-scope is selected. It costs 58-80s and asserts exactly one thing: that
+# bin/_beagle-racket resolves the `beagle` collection to THIS checkout in both
+# the linked and the sibling layout. Its inputs are the scope machinery itself,
+# the package info files, and the small set of scripts its fixture copies --
+# not the content of any compiler module.
+#
+# consumer-smoke is selected, and this is the one narrowing that is worth
+# reading carefully, because it is the most expensive phase in a narrowed run
+# (11-20s with warm native caches, 308s cold). What it runs is
+# `beagle build --materializer c17` and a native `--host program` build, and it
+# asserts NativeLoweringCompleteV0 on both. It is a proof about the NATIVE
+# lowering route end to end. It never invokes the Nix, JavaScript or Clojure
+# emitters, so a change confined to one of those cannot move its verdict --
+# and a change to the shared core that COULD move it is a full sweep already,
+# because the core is not in the narrowable allowlist at all.
+#
+# The Clojure bucket keeps it anyway. The Beagle Store integration this phase
+# drives is Clojure-hosted, and the reading that says a Clojure emitter change
+# cannot reach it is less certain than the same reading for Nix and
+# JavaScript. When the reading is less certain, run it.
+BEAGLE_PHASES_ALWAYS=(checkout-first qualified-ref-scaffold)
 
 # --- change discovery ------------------------------------------------------
 
@@ -178,8 +192,10 @@ beagle_selection_classify_path() {
         bin/test/*)                       echo "none" ;;
 
         # --- racket collection scope ----------------------------------------
+        # These are also what `bin/beagle` reads to start at all, so the
+        # consumer-facing native phase comes along.
         bin/_beagle-racket|*/info.rkt|beagle/*|share/targets.sh)
-            echo "phase:racket-scope phase:checkout-first" ;;
+            echo "phase:racket-scope phase:checkout-first phase:consumer-smoke" ;;
 
         # --- documentation ---------------------------------------------------
         docs/*|*.md)
@@ -270,7 +286,8 @@ beagle_selection_compute() {
                 group:js)   for s in "${BEAGLE_SUITES_JS[@]}"; do suites["$s"]=1; done
                             for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done ;;
                 group:clj)  for s in "${BEAGLE_SUITES_CLJ[@]}"; do suites["$s"]=1; done
-                            for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done ;;
+                            for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done
+                            phases[consumer-smoke]=1 ;;
                 group:docs) for s in "${BEAGLE_SUITES_DOCS[@]}"; do suites["$s"]=1; done ;;
                 suite:*)    suites["${token#suite:}"]=1 ;;
                 phase:*)    phases["${token#phase:}"]=1 ;;

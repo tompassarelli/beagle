@@ -9,11 +9,23 @@ a stale copy. (`bin/beagle` with no args prints the full command list.)
 ## Test
 
 ```
-bin/beagle test                        # run the active test tier
+bin/beagle test                        # the full sweep — the release gate
+bin/beagle test --changed              # dev loop: only what your change can affect
+bin/beagle test --explain-selection    # print that selection, run nothing
 source bin/_beagle-racket              # select Beagle's pinned Racket
 "$RACO" make beagle-lib/private/parse.rkt
 "$RACO" test beagle-test/tests/parse.rkt
 ```
+
+`--changed` reads the changed file set from git (working tree plus every commit
+since the merge base with main) and runs only the phases and suites those paths
+can affect. Selection is an ALLOWLIST: a path the table does not recognize —
+the checker, the type system, the reader, the stdlib tables, shared lowering,
+anything new — selects the full sweep. Only a genuinely target-local change
+narrows. The table and its reasons are `bin/_beagle-test-selection`.
+
+A narrowed run is a first pass, never a release proof. The release gate is the
+plain command with no flag, and it is unchanged.
 
 ### Read the gate's exit status before you believe it
 
