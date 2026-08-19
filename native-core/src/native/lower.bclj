@@ -8827,10 +8827,156 @@
         (and (some? payload) (vector-type? types payload))))
     (union-variants-of types value-type)))
 
+(defn map-variants-of
+  [(types (Vec core/TypeDef))
+   (value-type core/NativeId)]
+  (Vec core/TypeVariant)
+  (filterv
+    (fn [(variant core/TypeVariant)] Bool
+      (let [(payload (U core/NativeId Nil))
+            (core/typevariant-payload-type variant)]
+        (and (some? payload) (map-type? types payload))))
+    (union-variants-of types value-type)))
+
+(defn payloadless-variant-of
+  [(variants (Vec core/TypeVariant))] (U core/TypeVariant Nil)
+  (loop [(position Int) 0]
+    (if (>= position (count variants))
+      nil
+      (let [(variant core/TypeVariant) (nth variants position)]
+        (if (nil? (core/typevariant-payload-type variant))
+          variant
+          (recur (+ position 1)))))))
+
 (defn nth-dispatch-type [(value-type core/NativeId)] core/NativeId
   (if (same-id? value-type (type-id "Any"))
     (slice-value-type-id)
     value-type))
+
+;; A dynamic lookup dispatches on the carrier's own tag: the map arm reads the
+;; key, and every other arm answers the carrier's unit value, exactly as get
+;; does in Clojure on a value that is not associative.
+(defn lower-dynamic-map-get
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (source-id core/NativeId)
+   (carrier core/NativeId)
+   (key-id core/NativeId)]
+  ExprResultV0
+  (let [(variants (Vec core/TypeVariant)) (union-variants-of types carrier)
+        (map-variants (Vec core/TypeVariant)) (map-variants-of types carrier)
+        (absent (U core/TypeVariant Nil)) (payloadless-variant-of variants)]
+    (cond
+      (not (= 1 (count map-variants)))
+      (fail-result state
+        "TODO-NATIVE-DYNAMIC-MAP-CARRIER: the dynamic carrier has no single map arm")
+
+      (nil? absent)
+      (fail-result state
+        "TODO-NATIVE-DYNAMIC-MAP-ABSENT: the dynamic carrier has no unit arm for a missing key")
+
+      :else
+      (let [(map-variant core/TypeVariant) (nth map-variants 0)
+            (payload (U core/NativeId Nil))
+            (core/typevariant-payload-type map-variant)]
+        (if (nil? payload)
+          (fail-result state
+            "TODO-NATIVE-DYNAMIC-MAP-CARRIER: the map arm carries no map type")
+          (let [(map-type core/NativeId) payload
+                (equality (U core/ConcreteEqualityV0 Nil))
+                (map-key-equality-for types (map-key-of types map-type))]
+            (cond
+              (not (same-id? (map-key-of types map-type) carrier))
+              (fail-result state
+                "TODO-NATIVE-DYNAMIC-MAP-KEY: the carrier's map arm is not keyed by the carrier")
+
+              (not (same-id? (map-value-of types map-type) carrier))
+              (fail-result state
+                "TODO-NATIVE-DYNAMIC-MAP-VALUE: the carrier's map arm does not store the carrier")
+
+              (nil? equality)
+              (fail-result state
+                "TODO-NATIVE-DYNAMIC-MAP-KEY-EQUALITY: the carrier has no closed concrete key equality")
+
+              :else
+              (let [(absent-variant core/TypeVariant) absent
+                    (absent-id core/NativeId)
+                    (state-id state owner "dynamic-get-absent")
+                    (join-id core/NativeId) (state-id state owner "dynamic-get-join")
+                    (join-parameter core/NativeId)
+                    (state-id state owner "dynamic-get-value")
+                    (map-arm-id core/NativeId)
+                    (state-id state owner "dynamic-get-map-arm")
+                    (seeded BodyStateV0)
+                    (state-emit (state-bump state)
+                      (core/->UnionConstructInstruction
+                        (core/->SsaValueV0 absent-id carrier)
+                        (core/typevariant-id absent-variant) nil))
+                    (cases (Vec core/SwitchCaseV0))
+                    (loop [(position Int) 0
+                           (collected (Vec core/SwitchCaseV0)) []]
+                      (if (>= position (count variants))
+                        collected
+                        (let [(variant core/TypeVariant) (nth variants position)
+                              (is-map Bool)
+                              (same-id? (core/typevariant-id variant)
+                                (core/typevariant-id map-variant))
+                              (target core/NativeId)
+                              (if is-map
+                                map-arm-id
+                                (state-id state owner
+                                  (str "dynamic-get-miss-" position)))]
+                          (recur (+ position 1)
+                            (conj collected
+                              (core/->SwitchCaseV0
+                                (core/typevariant-id variant) target []))))))
+                    (switched BodyStateV0)
+                    (state-close (state-bump seeded)
+                      (core/->SwitchTerminator source-id cases))
+                    (armed BodyStateV0)
+                    (loop [(position Int) 0
+                           (current BodyStateV0) switched]
+                      (if (or (>= position (count variants))
+                              (state-blocked? current))
+                        current
+                        (let [(variant core/TypeVariant) (nth variants position)
+                              (is-map Bool)
+                              (same-id? (core/typevariant-id variant)
+                                (core/typevariant-id map-variant))
+                              (arm-id core/NativeId)
+                              (if is-map
+                                map-arm-id
+                                (state-id state owner
+                                  (str "dynamic-get-miss-" position)))
+                              (opened BodyStateV0)
+                              (state-open-block current arm-id [])]
+                          (if (not is-map)
+                            (recur (+ position 1)
+                              (state-close opened
+                                (core/->JumpTerminator join-id [absent-id])))
+                            (let [(extracted-id core/NativeId)
+                                  (state-id opened owner "dynamic-get-map")
+                                  (extracted BodyStateV0)
+                                  (state-emit (state-bump opened)
+                                    (core/->UnionExtractInstruction
+                                      (core/->SsaValueV0 extracted-id map-type)
+                                      source-id (core/typevariant-id variant)))
+                                  (result-id core/NativeId)
+                                  (state-id extracted owner "dynamic-get-result")
+                                  (read BodyStateV0)
+                                  (state-emit (state-bump extracted)
+                                    (core/->MapGetInstructionV0
+                                      (core/->SsaValueV0 result-id carrier)
+                                      extracted-id key-id absent-id equality))]
+                              (recur (+ position 1)
+                                (state-close read
+                                  (core/->JumpTerminator join-id
+                                    [result-id]))))))))
+                    (joined BodyStateV0)
+                    (state-open-block armed join-id
+                      [(core/->Parameter join-parameter carrier)])]
+                (->ExprResultV0 joined join-parameter carrier false)))))))))
 
 (defn lower-dynamic-vector-nth
   [(types (Vec core/TypeDef))
@@ -14847,6 +14993,65 @@
               (recur (+ position 1) (exprresultv0-state merged)
                 (exprresultv0-value-id merged)))))))))
 
+;; get-in owns its path literal: the path elements are lowered as keys against
+;; the carrier, never as one heterogeneous vector value.
+(defn lower-get-in-call
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (source core/NativeId)
+   (path core/NativeId)]
+  ExprResultV0
+  (let [(index SourceIndexV0) (bodyenvv0-index env)
+        (types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (items-node (U core/NativeId Nil)) (index-first-object index path "items")
+        (items (Vec core/NativeId))
+        (if (nil? items-node) [] (index-sequence-items index items-node))
+        (lowered ExprResultV0) (lower-expr env owner state source)
+        (carrier core/NativeId)
+        (nth-dispatch-type (exprresultv0-type-id lowered))]
+    (cond
+      (exprresultv0-terminated lowered) lowered
+
+      (state-blocked? (exprresultv0-state lowered))
+      (dead-result (exprresultv0-state lowered))
+
+      (= 0 (count items))
+      (fail-result (exprresultv0-state lowered)
+        "TODO-NATIVE-GET-IN-PATH: get-in lowers a literal non-empty path")
+
+      (not (= 1 (count (map-variants-of types carrier))))
+      (fail-result (exprresultv0-state lowered)
+        "TODO-NATIVE-GET-IN-OPERAND: get-in lowers a dynamic carrier that admits a map")
+
+      :else
+      (loop [(position Int) 0
+             (current BodyStateV0) (exprresultv0-state lowered)
+             (holder core/NativeId) (exprresultv0-value-id lowered)]
+        (if (>= position (count items))
+          (->ExprResultV0 current holder carrier false)
+          (let [(key ExprResultV0)
+                (lower-expr-expected env owner current (nth items position)
+                  carrier)
+                (key-state BodyStateV0) (exprresultv0-state key)]
+            (if (or (exprresultv0-terminated key) (state-blocked? key-state))
+              key
+              (let [(coerced ExprResultV0)
+                    (lower-boundary-coerce types owner key-state
+                      (exprresultv0-value-id key) (exprresultv0-type-id key)
+                      carrier)
+                    (coerced-state BodyStateV0) (exprresultv0-state coerced)]
+                (if (state-blocked? coerced-state)
+                  (dead-result coerced-state)
+                  (let [(step ExprResultV0)
+                        (lower-dynamic-map-get types owner coerced-state
+                          holder carrier (exprresultv0-value-id coerced))]
+                    (if (or (exprresultv0-terminated step)
+                            (state-blocked? (exprresultv0-state step)))
+                      step
+                      (recur (+ position 1) (exprresultv0-state step)
+                        (exprresultv0-value-id step)))))))))))))
+
 (defn lower-apply-call
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -16401,6 +16606,14 @@
                 (source-ref-named? index (nth args 0) "str")
                 (source-call-named? index (nth args 1) "repeat"))))
             (lower-apply-call env owner state expr args)
+
+            (and (= "get-in" callee) (= 2 (count args))
+              (= "vec" (fact-text index (nth args 1) "form-kind")))
+            (lower-get-in-call env owner state (nth args 0) (nth args 1))
+
+            (= "get-in" callee)
+            (fail-result state
+              "TODO-NATIVE-GET-IN-PATH: get-in lowers a literal non-empty path")
 
             (and (= "assoc" callee) (> (count args) 0)
               (or (source-ref-record? env state (nth args 0))
