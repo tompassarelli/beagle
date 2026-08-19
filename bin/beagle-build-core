@@ -629,10 +629,37 @@ if [[ "$dev_fact_reuse" == 1 ]]; then
     core_result_cache_bypass_reason="dev-fact-reuse"
 fi
 
-write_core_result_early_manifest() {
-    local destination="$1" index tool_path bb_path racket_path
-    bb_path="$(realpath "$(command -v bb)")"
+# The interpreter half of a build identity. It is re-derived on every
+# revalidation round, and booting two interpreters plus hashing a 50 MB Racket
+# binary costs ~176 ms a round. The memo is keyed on the RESOLVED interpreter
+# paths, and a `/nix/store` path is itself the content address of what it names:
+# an unchanged path there is proof of unchanged bytes, so the guard is intact.
+# An interpreter resolved outside the store carries no such proof and is re-read
+# every round.
+toolchain_identity_memo=""
+toolchain_identity_memo_key=""
+write_toolchain_identity() {
+    local racket_path bb_path key
     racket_path="$(realpath "$RACKET")"
+    bb_path="$(realpath "$(command -v bb)")"
+    key="$racket_path::$bb_path"
+    if [[ -z "$toolchain_identity_memo" ||
+          "$key" != "$toolchain_identity_memo_key" ||
+          "$racket_path" != /nix/store/* || "$bb_path" != /nix/store/* ]]; then
+        toolchain_identity_memo="$(
+            printf 'racket %q\n' "$($RACKET --version 2>&1 | sed -n '1p')"
+            printf 'racket-bin-sha256 %s\n' \
+                "$(sha256sum "$racket_path" | awk '{print $1}')"
+            printf 'bb %q\n' "$(bb --version 2>&1 | sed -n '1p')"
+            printf 'bb-bin-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
+        )"$'\n'
+        toolchain_identity_memo_key="$key"
+    fi
+    printf '%s' "$toolchain_identity_memo"
+}
+
+write_core_result_early_manifest() {
+    local destination="$1" index tool_path
     {
         printf 'beagle-core-result-early-input/v1\n'
         printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
@@ -646,11 +673,7 @@ write_core_result_early_manifest() {
             printf 'tool %q %s\n' "${tool_path#"$BEAGLE_DIR/"}" \
                 "$(sha256sum "$tool_path" | awk '{print $1}')"
         done
-        printf 'racket %q\n' "$($RACKET --version 2>&1 | sed -n '1p')"
-        printf 'racket-bin-sha256 %s\n' \
-            "$(sha256sum "$racket_path" | awk '{print $1}')"
-        printf 'bb %q\n' "$(bb --version 2>&1 | sed -n '1p')"
-        printf 'bb-bin-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
+        write_toolchain_identity
         for index in "${!source_ids[@]}"; do
             printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
                 "${source_digest_befores[$index]}"
@@ -1189,9 +1212,7 @@ if [[ -n "$native_compiler_bin" ]]; then
 fi
 
 write_core_result_input_manifest() {
-    local destination="$1" index tool_path bb_path racket_path
-    bb_path="$(realpath "$(command -v bb)")"
-    racket_path="$(realpath "$RACKET")"
+    local destination="$1" index tool_path
     {
         printf 'beagle-core-result-input/v1\n'
         printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
@@ -1208,11 +1229,7 @@ write_core_result_input_manifest() {
             printf 'tool %q %s\n' "${tool_path#"$BEAGLE_DIR/"}" \
                 "$(sha256sum "$tool_path" | awk '{print $1}')"
         done
-        printf 'racket %q\n' "$($RACKET --version 2>&1 | sed -n '1p')"
-        printf 'racket-bin-sha256 %s\n' \
-            "$(sha256sum "$racket_path" | awk '{print $1}')"
-        printf 'bb %q\n' "$(bb --version 2>&1 | sed -n '1p')"
-        printf 'bb-bin-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
+        write_toolchain_identity
         for index in "${!source_ids[@]}"; do
             printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
                 "${source_digest_befores[$index]}"
