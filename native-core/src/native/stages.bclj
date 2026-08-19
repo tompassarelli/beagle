@@ -692,8 +692,8 @@
   (canonical-record "native-core-program-wire-v1"
     [(native-wire-pr-str program) (encode-native-program-f64-atoms program)]))
 
-(defn decode-native-core-program-wire-v1
-  [(encoding String)] (U core/NativeCoreProgram Nil)
+(defn decode-native-core-program-wire-v1*
+  [(encoding String) (canonical-check? Bool)] (U core/NativeCoreProgram Nil)
   (let [(record (U NativeWireRecordV1 Nil))
         (required-native-wire-record encoding "native-core-program-wire-v1" 2)]
     (if (nil? record)
@@ -709,9 +709,24 @@
             (if (instance? native.core.NativeCoreProgram decoded)
               (let [(program core/NativeCoreProgram)
                     (restore-native-program-f64-atoms bits decoded)]
-                (if (= encoding (encode-native-core-program-wire-v1 program))
+                (if (or (not canonical-check?)
+                      (= encoding (encode-native-core-program-wire-v1 program)))
                   program nil))
               nil)))))))
+
+(defn decode-native-core-program-wire-v1
+  [(encoding String)] (U core/NativeCoreProgram Nil)
+  (decode-native-core-program-wire-v1* encoding true))
+
+;; The canonicality re-encode is only sound to skip when the caller can name the
+;; producer.  The one caller that can is an emission worker: its coordinator
+;; encoded this wire from the in-memory program moments earlier, in the same
+;; build, from the same compiler, into a private per-run directory that no cache
+;; reads or writes.  Structural admission — record shape, arity, EDN safety and
+;; `*read-eval*` false — still runs; only the whole-program re-encode is elided.
+(defn decode-trusted-native-core-program-wire-v1
+  [(encoding String)] (U core/NativeCoreProgram Nil)
+  (decode-native-core-program-wire-v1* encoding false))
 
 (defn encode-frozen-native-stage-wire-v1 [(frozen FrozenNativeStageV0)] String
   (let [(program core/NativeCoreProgram)
