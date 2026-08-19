@@ -15,14 +15,32 @@ if [[ "${BEAGLE_SIMD_F64_BOUNDED:-0}" != "1" ]]; then
   }
   receipt="$(mktemp "${TMPDIR:-/tmp}/simd-f64-receipt.XXXXXX")"
   trap 'rm -f -- "$receipt"' EXIT
+  # A deadline catches a HANG; it is not a speed limit. Honest cold cost is
+  # 175.4s / 186.3s / 189.6s (loads 11.5-23.3) and 162.3s in the cd07b761
+  # measurement table, 70s once the core build cache and bytecode are warm
+  # (load 7.7-9.1, 24 cores). The old 180s bound sat INSIDE that band, so it
+  # breached on a quiet box too — load was never the cause. 600s is ~3.2x the
+  # slowest honest run and still lands inside the 900s tier-runner phase
+  # deadline, so this supervisor keeps owning the subtree reap.
   if BEAGLE_SIMD_F64_BOUNDED=1 \
       BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
-      "$RACKET" "$supervisor" 180 5 -- "$0"; then
+      "$RACKET" "$supervisor" 600 5 -- "$0"; then
     rc=0
   else
     rc=$?
   fi
-  grep -Fqx "subtree-reaped-v0 exit status=$rc" "$receipt" || {
+  # The supervisor writes ONE of two receipts, and they mean different things:
+  # `timeout status=124` is a deadline breach (the machine), `exit status=N` is
+  # the fixture's own verdict (the code). Accepting only the second turned every
+  # breach into exit 125 "supervisor did not reap its subtree" — a harness
+  # contract failure — and destroyed the distinction the supervisor exists to
+  # draw. Every sibling driver here already reads both forms.
+  outcome="$(<"$receipt")"
+  if [[ "$outcome" == "subtree-reaped-v0 timeout status=124" && "$rc" -eq 124 ]]; then
+    echo "simd-f64 fixture: TIMEOUT status=124 (deadline exceeded, not a defect)" >&2
+    exit 124
+  fi
+  [[ "$outcome" == "subtree-reaped-v0 exit status=$rc" ]] || {
     echo "simd-f64 fixture: supervisor did not reap its subtree" >&2
     exit 125
   }
