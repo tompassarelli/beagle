@@ -3,6 +3,7 @@
 (require rackunit
          openssl/sha1
          racket/file
+         racket/future
          racket/list
          racket/path
          racket/port
@@ -283,11 +284,54 @@
            "duplicate phase name — a phase name is its scheduling id: ~s" name))
   (set! registered-phases (cons name registered-phases))
   (when (selected-phase? name)
+    (set-box! current-phase-name name)
     (eprintf "wasm-materializer-test: phase ~a START\n" name)
     (flush-output (current-error-port))
     (test-case name (thunk))
     (eprintf "wasm-materializer-test: phase ~a END\n" name)
     (flush-output (current-error-port))))
+
+;; A deadline breach and a product defect are different verdicts, and they never
+;; share an exit status (cd07b761). Every command below runs under
+;; native-core/bin/run-bounded.rkt, which exits 124 when it kills the command
+;; unfinished — a statement about the MACHINE, not about the code under test.
+;; Returning that as an ordinary value let `check-equal? code 0` report "the box
+;; was busy" as "your code is broken".
+(define diagnostic-status 124)
+
+;; The banner must reach the terminal, and a phase runs its commands with
+;; current-error-port parameterized to a string port that collects tool output.
+(define diagnostic-port (current-error-port))
+
+(define current-phase-name (box #f))
+
+(define (machine-load)
+  (with-handlers ([exn:fail? (lambda (_) "unknown")])
+    (car (string-split (call-with-input-file "/proc/loadavg" read-line)))))
+
+;; Classified BEFORE rackunit sees it. An unfinished command is UNPROVEN, not
+;; disproven: it must become neither a failure nor a pass, so it is reported and
+;; re-raised as the supervisor's own status rather than turned into an assertion
+;; outcome. The tier runner reads a unit's 124 as 'diagnostic (368b750e).
+(define (exit-diagnostic! program seconds)
+  (define (say line . values)
+    (apply fprintf diagnostic-port line values))
+  (say "~a\n" (make-string 66 #\=))
+  (say "wasm-materializer: DIAGNOSTIC -- NOT A PRODUCT FAILURE\n")
+  (say "  phase           ~a\n"
+       (or (unbox current-phase-name) "(shared fixture preparation)"))
+  (say "  command         ~a\n" (file-name-from-path program))
+  (say "  outcome         deadline exceeded; the command was killed unfinished\n")
+  (say "  deadline        ~as\n" seconds)
+  (say "  exit status     ~a (diagnostic); 1 is reserved for a product defect\n"
+       diagnostic-status)
+  (say "  machine load    ~a (~a cores)\n" (machine-load) (processor-count))
+  (say "\n")
+  (say "  This run is NOT evidence of a defect in the code under test, and\n")
+  (say "  it is not a pass either. Re-run it. Do not abandon the work.\n")
+  (say "~a\n" (make-string 66 #\=))
+  (flush-output diagnostic-port)
+  (exit diagnostic-status))
 
 (define (run-owned/bounded seconds program . arguments)
   ;; The phase supervisor is PID 1 in a private namespace, so it adopts and
@@ -301,9 +345,16 @@
   (define child-receipt
     (environment-variables-ref supervisor-env
                                #"BEAGLE_BOUNDED_COMPLETION_RECEIPT"))
-  (when child-receipt
-    (environment-variables-set! supervisor-env
-                                #"BEAGLE_BOUNDED_COMPLETION_RECEIPT" #f))
+  ;; This supervisor's own outcome receipt takes that slot. The status alone
+  ;; cannot say which of the two happened, because a command is free to exit
+  ;; 124 on its own account; `subtree-reaped-v0 timeout` is written only when
+  ;; the supervisor's deadline killed the work unfinished.
+  (define supervisor-receipt
+    (make-temporary-file "beagle-wasm-supervisor-receipt-~a"))
+  (environment-variables-set! supervisor-env
+                              #"BEAGLE_BOUNDED_COMPLETION_RECEIPT"
+                              (string->bytes/utf-8
+                               (path->string supervisor-receipt)))
   (define command
     (if child-receipt env-command program))
   (define command-arguments
@@ -338,7 +389,13 @@
   (thread-wait stderr-thread)
   (define status (subprocess-status process))
   (custodian-shutdown-all custodian)
-  (if completed? status 124))
+  (define breached?
+    (or (not completed?)
+        (and (= status diagnostic-status)
+             (subtree-reaped? supervisor-receipt))))
+  (delete-directory/files supervisor-receipt #:must-exist? #f)
+  (when breached? (exit-diagnostic! program seconds))
+  status)
 
 (define (run-bounded program . arguments)
   (parameterize ([current-directory repo-root])
@@ -524,7 +581,16 @@
                               (string->bytes/utf-8 (path->string runtime)))
   (environment-variables-set! env #"WASMTIME"
                               (string->bytes/utf-8 (path->string runtime)))
-  (environment-variables-set! env #"BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS" #"2")
+  ;; The fake wasi-clang stub synthesizes a Wasm module in pure bash, so what it
+  ;; costs is machine-wide FORK pressure, not its own work: measured worst 2.367s
+  ;; under 32 concurrent phases against 0.142s alone, so the old 2s bound sat
+  ;; below the work it timed. Two compiles at 30s still fit inside the 120s phase
+  ;; deadline below, so a hung compiler is caught by this bound rather than by
+  ;; the supervisor above it. Instantiate and identity keep their 2s: the same
+  ;; measurement puts their worst at 0.035s. Every phase that asserts a tool
+  ;; timeout passes its own shorter bound through extra-env, so none of these
+  ;; values decides how long a deliberate hang runs.
+  (environment-variables-set! env #"BEAGLE_WASM_COMPILE_TIMEOUT_SECONDS" #"30")
   (environment-variables-set! env #"BEAGLE_WASM_INSTANTIATE_TIMEOUT_SECONDS" #"2")
   (environment-variables-set! env #"BEAGLE_WASM_TOOL_IDENTITY_TIMEOUT_SECONDS" #"2")
   (environment-variables-set! env #"BEAGLE_WASM_KILL_GRACE_SECONDS" #"1")
