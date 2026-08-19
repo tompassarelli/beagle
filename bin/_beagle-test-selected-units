@@ -7,6 +7,14 @@
 # same per-child TMPDIR containment. Narrowing changes WHICH units run. It
 # never changes what a unit asserts.
 #
+# Exit status is a CLASSIFICATION, the same one the whole gate uses (cd07b761):
+#
+#   0    every selected unit ran and passed.
+#   1    a unit RAN TO COMPLETION and found a defect. GATING: fix the code.
+#   124  a unit exceeded a deadline and was killed unfinished. DIAGNOSTIC, NOT
+#        GATING: the run proved nothing about the code. It is not a pass either.
+#   2    harness contract failure (a missing unit, a broken wait contract).
+#
 # Argv is the list of test file names, relative to beagle-test/tests.
 set -uo pipefail
 
@@ -19,6 +27,13 @@ CACHE_WRAPPER="$ROOT/bin/_gate-cache-run"
 # closure is not its identity. The tier runner excludes it from the cache and
 # so does this path.
 CACHE_INELIGIBLE=" query.rkt "
+
+# A deadline breach is a statement about the MACHINE; a completed non-zero
+# status is the unit's own verdict on the CODE. These two never share an exit
+# status again (cd07b761), at any level of the gate.
+STATUS_DEFECT=1
+STATUS_DIAGNOSTIC=124
+CORES="$(nproc 2>/dev/null || printf 'unknown')"
 
 if (($# == 0)); then
     echo "beagle-test: no units selected" >&2
@@ -36,9 +51,97 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/beagle-selected-units.XXXXXX")"
 trap 'rm -rf "${work:?}"' EXIT
 
 declare -A unit_by_pid=()
+declare -A unit_started=()
 declare -a live=()
 failed=()
+breached=()
 missing=()
+
+# Every timing this path prints carries the machine load beside it, so a reader
+# can see WHY a unit ran long instead of guessing.
+machine_load() {
+    local one_minute
+    if read -r one_minute _ </proc/loadavg 2>/dev/null; then
+        printf '%s' "$one_minute"
+    else
+        printf 'unknown'
+    fi
+}
+
+# The three summaries `raco test` can print, and the ONLY evidence at this level
+# that a unit ran its assertions to completion. Same three forms, same
+# last-match-wins precedence, as the tier runner's parse-raco-summary.
+SUMMARY_RX='^([0-9]+ tests? passed|[0-9]+/[0-9]+ tests? failures?|[0-9]+ success\(es\) [0-9]+ failure\(s\) [0-9]+ error\(s\) [0-9]+ test\(s\) run)$'
+
+summary_kind() {
+    local log="$1" line kind=unknown
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[0-9]+\ tests?\ passed$ ]]; then
+            kind=pass
+        elif [[ "$line" =~ ^[0-9]+/[0-9]+\ tests?\ failures?$ ]]; then
+            kind=fail
+        elif [[ "$line" =~ ^[0-9]+\ success\(es\)\ ([0-9]+)\ failure\(s\)\ ([0-9]+)\ error\(s\)\ [0-9]+\ test\(s\)\ run$ ]]; then
+            if ((BASH_REMATCH[1] == 0 && BASH_REMATCH[2] == 0)); then
+                kind=pass
+            else
+                kind=fail
+            fi
+        fi
+    done < <(grep -E "$SUMMARY_RX" "$log" 2>/dev/null)
+    printf '%s' "$kind"
+}
+
+# A unit's exit status carries a classification this runner must not collapse,
+# and the number alone must never decide it (f0b2d641): a command is free to
+# exit 124 on its own account, so 124 is not self-identifying.
+#
+# The receipt that promotes a 124 is read by whoever OWNS the deadline, which is
+# never this file: a unit here is one bare `raco test FILE`, exactly as the tier
+# runner runs it, with no supervisor of its own. The supervisors live inside the
+# units — native-simd.rkt's drive.sh and wasm-materializer.rkt's run-owned/bounded
+# each check their own `subtree-reaped-v0 timeout status=124` receipt and exit
+# 124 only for a breach they actually observed (4f5a78b3, f0b2d641). Wrapping a
+# supervisor around the unit HERE would impose a deadline the tier runner does
+# not have and re-litigate a classification those receipts already settled, so
+# this level reads the classification rather than repeating it.
+#
+# What this level owns is the guard that makes reading it safe, and it is the
+# same one the tier runner applies: a COMPLETED FAILURE OUTRANKS A BREACH. A
+# unit that reported a raco summary of failures has evidence, and evidence the
+# run actually obtained never yields to the clock — which is also where a
+# command's own 124 surfaces, as the assertion that observed it. Getting that
+# order backwards would build a way to hide real defects behind a busy machine.
+classify_unit() {
+    local kind="$1" code="$2"
+    if [[ "$kind" == fail ]]; then
+        printf 'fail'
+    elif ((code == STATUS_DIAGNOSTIC)); then
+        printf 'diagnostic'
+    elif ((code == 0)); then
+        printf 'pass'
+    else
+        printf 'fail'
+    fi
+}
+
+# The banner exists because the distinction has to survive a reader who scrolled
+# past a screen of unit output and looked only at the end.
+diagnostic_banner() {
+    local name="$1" code="$2" wall="$3" load="$4"
+    printf '%s\n' "$(printf '=%.0s' {1..66})"
+    printf 'beagle-test: DIAGNOSTIC -- NOT A PRODUCT FAILURE\n'
+    printf '  unit            %s\n' "$name"
+    printf '  outcome         deadline exceeded; the unit was killed unfinished\n'
+    printf '  observed wall   %ss\n' "$wall"
+    printf '  machine load    %s (%s cores)\n' "$load" "$CORES"
+    printf '  exit status     %s (diagnostic); %s is reserved for a product defect\n' \
+        "$code" "$STATUS_DEFECT"
+    printf '\n'
+    printf '  An unfinished unit is UNPROVEN, not disproven. This run is NOT\n'
+    printf '  evidence of a defect in the code under test, and it is not a pass\n'
+    printf '  either. Re-run it. Do not abandon the work.\n'
+    printf '%s\n' "$(printf '=%.0s' {1..66})"
+}
 
 launch() {
     local name="$1" index="$2"
@@ -54,16 +157,18 @@ launch() {
         "${argv[@]}" >"$log" 2>&1 &
     local pid=$!
     unit_by_pid["$pid"]="$index:$name"
+    unit_started["$pid"]=$SECONDS
     live+=("$pid")
 }
 
 reap_one() {
-    local completed="" status entry index name pid
+    local completed="" status entry index name pid kind verdict wall load
     local -a next=()
-    set +e
+    # This script runs without errexit (see `set` above), so `wait -n`'s non-zero
+    # status is data, not a fault. Do not "restore" errexit here: turning it on
+    # would abort the run on the first grep that legitimately finds nothing.
     wait -n -p completed "${live[@]}"
     status=$?
-    set -e
     if [[ -z "$completed" || -z "${unit_by_pid[$completed]+set}" ]]; then
         echo "beagle-test: selected-unit wait contract failed" >&2
         return 2
@@ -71,19 +176,37 @@ reap_one() {
     entry="${unit_by_pid[$completed]}"
     index="${entry%%:*}"
     name="${entry#*:}"
+    wall=$((SECONDS - ${unit_started[$completed]}))
     for pid in "${live[@]}"; do
         [[ "$pid" == "$completed" ]] || next+=("$pid")
     done
     live=("${next[@]}")
-    if ((status == 0)); then
-        printf 'PASS  %s\n' "$name"
-    else
-        printf 'FAIL  %s (exit %s)\n' "$name" "$status"
-        failed+=("$name")
-        sed "s/^/  [$name] /" "$work/$index.log"
-    fi
+
+    kind="$(summary_kind "$work/$index.log")"
+    verdict="$(classify_unit "$kind" "$status")"
+    case "$verdict" in
+        pass)
+            printf 'PASS  %s\n' "$name"
+            ;;
+        diagnostic)
+            load="$(machine_load)"
+            printf 'DIAG  %s (exit %s, deadline breach -- not a failure)\n' \
+                "$name" "$status"
+            breached+=("$name")
+            diagnostic_banner "$name" "$status" "$wall" "$load"
+            sed "s/^/  [$name] /" "$work/$index.log"
+            ;;
+        *)
+            printf 'FAIL  %s (exit %s)\n' "$name" "$status"
+            failed+=("$name")
+            sed "s/^/  [$name] /" "$work/$index.log"
+            ;;
+    esac
     return 0
 }
+
+printf 'beagle-test: selected units START count=%s jobs=%s load=%s/%s\n' \
+    "$#" "$jobs" "$(machine_load)" "$CORES"
 
 index=0
 for name in "$@"; do
@@ -95,7 +218,7 @@ for name in "$@"; do
         reap_one || exit 2
     done
     launch "$name" "$index"
-    ((index++))
+    ((index++)) || true
 done
 while ((${#live[@]} > 0)); do
     reap_one || exit 2
@@ -107,6 +230,40 @@ if ((${#missing[@]} > 0)); then
     exit 2
 fi
 
-printf '%s selected unit(s) ran, %s failed\n' "$index" "${#failed[@]}"
-((${#failed[@]} == 0)) || exit 1
-exit 0
+# THE ORDERING RULE, and the single place this run's exit status is decided.
+#
+# A completed failure OUTRANKS a breach. If any unit ran to completion and
+# failed, the run FAILS whatever timed out beside it, and the breach is still
+# reported without deciding. Only a run whose sole non-passes are breaches
+# becomes diagnostic, and a breach is never turned into a pass.
+if ((${#failed[@]} > 0)); then
+    verdict=FAIL
+    gating=yes
+    terminal=$STATUS_DEFECT
+elif ((${#breached[@]} > 0)); then
+    verdict=DIAGNOSTIC
+    gating=no
+    terminal=$STATUS_DIAGNOSTIC
+else
+    verdict=PASS
+    gating=no
+    terminal=0
+fi
+
+printf '%s selected unit(s) ran, %s failed' "$index" "${#failed[@]}"
+if ((${#breached[@]} > 0)); then
+    printf ', %s diagnostic (deadline breach, not a failure)' "${#breached[@]}"
+fi
+printf '\n'
+if [[ "$verdict" == FAIL ]] && ((${#breached[@]} > 0)); then
+    printf 'The %s deadline breach(es) above are NOT gating; the %s failure(s) are.\n' \
+        "${#breached[@]}" "${#failed[@]}"
+fi
+if [[ "$verdict" == DIAGNOSTIC ]]; then
+    printf 'Exit %s is DIAGNOSTIC, not gating. Nothing here says the code is broken.\n' \
+        "$terminal"
+fi
+printf 'beagle-test: selected units VERDICT=%s gating=%s units=%s failed=%s diagnostic=%s exit=%s load=%s/%s\n' \
+    "$verdict" "$gating" "$index" "${#failed[@]}" "${#breached[@]}" \
+    "$terminal" "$(machine_load)" "$CORES"
+exit "$terminal"
