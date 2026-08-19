@@ -286,8 +286,32 @@
 
 (struct unit-result (label status passed total stderr-lines cached? wall-seconds)
   #:transparent)
-;; status ∈ '(pass fail error skip); cached? = green replayed from the
-;; gate-result cache (the same proof, not a new run)
+;; status ∈ '(pass fail diagnostic error skip); cached? = green replayed from
+;; the gate-result cache (the same proof, not a new run)
+;;
+;; 'diagnostic is a statement about the MACHINE, not about the code: the unit
+;; was killed at a deadline and never finished, so it proved nothing. It is not
+;; a failure and it is not converted to a pass.
+
+;; run-bounded.rkt's deadline breach, and the same number bin/beagle-test uses
+;; for a phase or worker killed unfinished. One vocabulary, one convention.
+(define deadline-breach-exit-code 124)
+
+;; A unit's exit status carries a classification the runner must not collapse.
+;;
+;; 124 means the child was SIGKILLed at its own deadline with the work
+;; unfinished; any other non-zero status is the fixture's own verdict on the
+;; code. A recorded failure summary still outranks a breach: evidence the run
+;; actually obtained never yields to the clock (cd07b761), so a unit that
+;; managed to report failures before it was killed is a failure, not a
+;; diagnostic. Getting that order backwards would build a way to hide real
+;; defects behind a busy machine.
+(define (classify-unit-status summary-kind code)
+  (cond
+    [(eq? summary-kind 'fail) 'fail]
+    [(= code deadline-breach-exit-code) 'diagnostic]
+    [(zero? code) 'pass]
+    [else 'fail]))
 
 ;; "1 test passed" is singular. Before sharding, no unit ever ran exactly one
 ;; test, so a plural-only pattern went unnoticed; every one-test shard would
@@ -442,13 +466,9 @@
      (define all-lines
        (filter (lambda (l) (not (regexp-match? cache-marker-rx l))) raw-lines))
      (define summary (parse-raco-summary all-lines))
-     (define status
-       (case (car summary)
-         [(pass) (if (zero? code) 'pass 'fail)]
-         [(fail) 'fail]
-         [(unknown) (if (zero? code) 'pass 'fail)]))
+     (define status (classify-unit-status (car summary) code))
      (unit-result (unit-label u) status (cadr summary) (caddr summary)
-                  (if (eq? status 'fail) all-lines '())
+                  (if (memq status '(fail diagnostic)) all-lines '())
                   (and cached? (eq? status 'pass))
                   wall-seconds)]))
 
@@ -877,7 +897,7 @@
 (define (datum->unit-result d path)
   (match d
     [(list (? string? label)
-           (and status (or 'pass 'fail 'error 'skip))
+           (and status (or 'pass 'fail 'diagnostic 'error 'skip))
            (? exact-nonnegative-integer? passed)
            (? exact-nonnegative-integer? total)
            (and lines (list (? string?) ...))
@@ -973,8 +993,24 @@
   (case s
     [(pass) "✓"]
     [(fail) "✗"]
+    [(diagnostic) "⏱"]
     [(skip) "—"]
     [else "?"]))
+
+(define (status-is? s) (lambda (r) (eq? (unit-result-status r) s)))
+
+;; THE ORDERING RULE, and the single place the run's exit status is decided.
+;;
+;; A completed failure OUTRANKS a breach. If any active unit ran to completion
+;; and failed, the run FAILS — a deadline breach elsewhere must never mask it,
+;; because a diagnostic that can hide a real defect is worse than the laundering
+;; it replaced. Only a run whose sole active non-passes are breaches becomes
+;; diagnostic, and a breach is never turned into a pass.
+(define (active-verdict active-results)
+  (cond
+    [(ormap (status-is? 'fail) active-results) 1]
+    [(ormap (status-is? 'diagnostic) active-results) deadline-breach-exit-code]
+    [else 0]))
 
 ;; Sharded unit labels are longer than a file name, so the name column widens
 ;; to fit them (bounded, so one pathological label cannot deform the report).
@@ -992,15 +1028,21 @@
             (unit-result-passed r)
             (unit-result-total r)
             (if (unit-result-cached? r) "  (cached)" "")))
-  (define failures
-    (filter (lambda (r) (eq? (unit-result-status r) 'fail)) results))
+  (define failures (filter (status-is? 'fail) results))
+  ;; Breaches are counted apart from failures, never inside them: a unit killed
+  ;; at its deadline is unfinished work, not a defect the tier found.
+  (define diagnostics (filter (status-is? 'diagnostic) results))
   (define cached
     (filter unit-result-cached? results))
-  (printf "  TOTAL: ~a/~a (~a ~a~a)\n\n"
+  (printf "  TOTAL: ~a/~a (~a ~a~a~a)\n\n"
           (apply + (map unit-result-passed results))
           (apply + (map unit-result-total results))
           (length failures)
           (if (= 1 (length failures)) "failure" "failures")
+          (if (null? diagnostics)
+              ""
+              (format ", ~a diagnostic (deadline breach, not a failure)"
+                      (length diagnostics)))
           (if (null? cached)
               ""
               (format ", ~a cached-green" (length cached)))))
@@ -1021,6 +1063,16 @@
                   (unit-result-label r)
                   (real->decimal-string (unit-result-wall-seconds r) 3)))
         (newline))))
+
+(define (print-unit-detail results)
+  (for ([r (in-list results)])
+    (printf "--- ~a ---\n" (unit-result-label r))
+    (for ([line (in-list (unit-result-stderr-lines r))]
+          [_ (in-naturals)]
+          #:break (>= _ 40))   ; cap per-unit detail
+      (when (positive? (string-length line))
+        (printf "  ~a\n" line)))
+    (newline)))
 
 (define (~truncate s n)
   (cond
@@ -1169,10 +1221,9 @@
        (printf "  · ~a\n" f))
      (newline)])
 
-  (define active-failures
-    (filter (lambda (r) (eq? (unit-result-status r) 'fail)) active-results))
-  (define demoted-failures
-    (filter (lambda (r) (eq? (unit-result-status r) 'fail)) demoted-results))
+  (define active-failures (filter (status-is? 'fail) active-results))
+  (define active-diagnostics (filter (status-is? 'diagnostic) active-results))
+  (define demoted-failures (filter (status-is? 'fail) demoted-results))
 
   ;; Debt visibility: surface BOTH this-run new failures AND total accumulated.
   (cond
@@ -1189,26 +1240,40 @@
   (cond
     [(positive? (length active-failures))
      (printf "=== ACTIVE FAILURE DETAIL ===\n\n")
-     (for ([r (in-list active-failures)])
-       (printf "--- ~a ---\n" (unit-result-label r))
-       (for ([line (in-list (unit-result-stderr-lines r))]
-             [_ (in-naturals)]
-             #:break (>= _ 40))   ; cap per-unit detail
-         (when (positive? (string-length line))
-           (printf "  ~a\n" line)))
-       (newline))])
+     (print-unit-detail active-failures)])
+
+  ;; Breach detail is printed in its own section, under its own heading, so a
+  ;; reader who scrolled past everything else cannot mistake it for a defect.
+  (cond
+    [(positive? (length active-diagnostics))
+     (printf "=== ACTIVE DIAGNOSTIC DETAIL -- NOT PRODUCT FAILURES ===\n\n")
+     (printf "These units were killed at a deadline and never finished. They are\n")
+     (printf "UNPROVEN, not disproven: this run is not evidence of a defect in\n")
+     (printf "them, and it is not a pass either.\n\n")
+     (print-unit-detail active-diagnostics)])
 
   (print-slow-tests active-results)
 
-  (cond
-    [(positive? (length active-failures))
-     (printf "BUILD FAILED — ~a active failure~a\n"
+  (define verdict (active-verdict active-results))
+  (case verdict
+    [(1)
+     (printf "BUILD FAILED — ~a active failure~a~a\n"
              (length active-failures)
-             (if (= 1 (length active-failures)) "" "s"))
-     (exit 1)]
+             (if (= 1 (length active-failures)) "" "s")
+             (if (null? active-diagnostics)
+                 ""
+                 (format " (~a deadline breach~a also reported, not gating)"
+                         (length active-diagnostics)
+                         (if (= 1 (length active-diagnostics)) "" "es"))))]
+    [(0)
+     (printf "BUILD OK — all active tests passing.\n")]
     [else
-     (printf "BUILD OK — all active tests passing.\n")
-     (exit 0)]))
+     (printf "BUILD DIAGNOSTIC — ~a active unit~a exceeded a deadline; none failed.\n"
+             (length active-diagnostics)
+             (if (= 1 (length active-diagnostics)) "" "s"))
+     (printf "Exit ~a is DIAGNOSTIC, not gating. Nothing here says the code is broken.\n"
+             verdict)])
+  (exit verdict))
 
 (define (units-for-worker-tiers active-units demoted-units gated-units spec)
   ;; One supervisor owns the complete sequential worker lane, so tier-local
@@ -1244,11 +1309,17 @@
   (define gated-results (map run-test-unit gated-units))
   (write-worker-output
    (worker-result-path) active-results demoted-results gated-results)
-  (exit
-   (if (for/or ([r (in-list active-results)])
-         (eq? (unit-result-status r) 'fail))
-       1
-       0)))
+  ;; Only a COMPLETED failure is reported through this process's exit status.
+  ;;
+  ;; A breached unit does not make its worker exit 124, and that is deliberate,
+  ;; not an oversight. 124 out of this process means "the shard itself was
+  ;; killed unfinished", which is the supervisor's word, not ours; bin/beagle-test
+  ;; reads it as a reason to stop the gate BEFORE the merge runs. A sibling
+  ;; shard's genuine failure would then never be reported — a diagnostic masking
+  ;; evidence the gate actually obtained, the exact inversion cd07b761 forbids.
+  ;; The breach travels in the worker result instead, and report-results applies
+  ;; the ordering rule once, over every shard, where it can see all of them.
+  (exit (if (= 1 (active-verdict active-results)) 1 0)))
 
 (define (merge-workers plan)
   (define count (resolve-jobs))
@@ -1498,6 +1569,46 @@
     (check-equal? (unit-result-stderr-lines (car merged))
                   '("first line" "  exact spacing")
                   "merge preserves failure lines verbatim"))
+
+  ;; A deadline breach is a statement about the machine, not about the code.
+  ;; The runner must not collapse the supervisor's 124 into a product verdict
+  ;; (cd07b761), and it must not let a breach outrank evidence it obtained.
+  (check-equal? (classify-unit-status 'unknown 124) 'diagnostic
+                "a unit killed at its deadline is diagnostic, not a failure")
+  (check-equal? (classify-unit-status 'pass 124) 'diagnostic
+                "a partial pass summary does not rescue a killed unit")
+  (check-equal? (classify-unit-status 'fail 124) 'fail
+                "a recorded failure outranks the breach that followed it")
+  (check-equal? (classify-unit-status 'fail 1) 'fail "a reported failure fails")
+  (check-equal? (classify-unit-status 'unknown 1) 'fail
+                "an ordinary non-zero status is still the fixture's verdict")
+  (check-equal? (classify-unit-status 'pass 0) 'pass "a clean unit passes")
+  (check-equal? (classify-unit-status 'unknown 0) 'pass
+                "a silent clean exit still passes")
+
+  ;; The ordering rule, at the run level: a completed failure outranks a breach,
+  ;; so a diagnostic can never hide a real defect.
+  (let ([passed (unit-result "p.rkt" 'pass 3 3 '() #f 0.1)]
+        [failed (unit-result "f.rkt" 'fail 1 2 '("boom") #f 0.1)]
+        [breached (unit-result "t.rkt" 'diagnostic 0 0 '("TIMEOUT") #f 0.1)])
+    (check-equal? (active-verdict (list passed)) 0 "a clean run exits 0")
+    (check-equal? (active-verdict (list passed failed)) 1
+                  "a completed failure gates the run")
+    (check-equal? (active-verdict (list passed breached)) 124
+                  "breaches alone make the run diagnostic, not failed")
+    (check-equal? (active-verdict (list breached failed)) 1
+                  "a breach never masks a completed failure")
+    (check-equal? (active-verdict (list failed breached)) 1
+                  "and the ordering does not depend on manifest position")
+    (check-equal? (active-verdict '()) 0 "an empty active tier exits 0"))
+
+  ;; A breach survives worker serialization with its detail intact. The merge is
+  ;; the only place that sees every shard, so if the envelope dropped the status
+  ;; the ordering rule above would have nothing to rule on.
+  (let* ([breached (unit-result "t.rkt" 'diagnostic 0 0 '("TIMEOUT status=124") #f 2.0)]
+         [restored (datum->unit-result (unit-result->datum breached) "in-memory")])
+    (check-equal? restored breached
+                  "the worker result envelope admits a diagnostic unit verbatim"))
 
   ;; A filesystem-closure cache cannot prove a live endpoint observation.
   (check-false (gate-cache-eligible-file? "query.rkt")

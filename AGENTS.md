@@ -39,14 +39,21 @@ beagle-test: VERDICT=PASS|FAIL|DIAGNOSTIC gating=yes|no phase=... exit=N load=..
 |---|---|---|---|
 | 0 | `PASS` | every phase ran and passed | land it |
 | 1 | `FAIL` | a phase **ran to completion** and found a defect | fix the code |
-| 124 | `DIAGNOSTIC` | a phase **exceeded its deadline** and was killed unfinished | re-run; do NOT touch the code |
+| 124 | `DIAGNOSTIC` | a phase **or a single test unit** exceeded its deadline and was killed unfinished | re-run; do NOT touch the code |
 | 2 | — | harness or supervisor contract failure | fix the harness |
 
-**A 124 is not a verdict on your work.** The phase never finished, so it proved
+**A 124 is not a verdict on your work.** The work never finished, so it proved
 nothing — usually the machine was simply busy (the verdict used to track load
 rather than code, and lane owners abandoned correct work over it). It is not a
 pass either: re-run it. Every phase line carries `wall=Ns load=<1min>/<cores>`
 so you can see for yourself.
+
+The tier runner draws the same distinction one level down. A test unit that
+was killed at its own deadline prints with a `⏱` glyph, is counted apart from
+failures, and is detailed under `ACTIVE DIAGNOSTIC DETAIL -- NOT PRODUCT
+FAILURES`. **A completed failure outranks a breach at every level**: if any
+unit ran to completion and failed, the run is `FAIL`/exit 1 no matter what
+timed out beside it, so a diagnostic can never hide a real defect.
 
 ## Check / build
 

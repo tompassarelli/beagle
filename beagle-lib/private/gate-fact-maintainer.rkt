@@ -664,6 +664,9 @@
     [(member normalized GATE-OBSERVATION-STATUSES-V1) normalized]
     [(equal? normalized "ERROR") "INFRA-ERROR"]
     [(equal? normalized "SKIP") "NOT-RUN"]
+    ;; A unit killed at its deadline never finished, so in this vocabulary it is
+    ;; NOT-RUN. It is emphatically not FAIL: nothing observed the code.
+    [(equal? normalized "DIAGNOSTIC") "NOT-RUN"]
     [else
      (raise-user-error 'gate-fact-maintainer
                        "unknown gate observation status: ~a" raw-status)]))

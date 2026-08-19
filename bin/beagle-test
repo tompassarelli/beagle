@@ -26,11 +26,16 @@
 #
 #   0    every phase ran and passed.
 #   1    a phase ran to completion and found a defect. GATING: fix the code.
-#   124  a phase exceeded its deadline and was killed unfinished. DIAGNOSTIC,
-#        NOT GATING: the run proved nothing about the code, most often because
-#        the machine was loaded. It is not a pass either — re-run it. Never
-#        read a 124 as "your work is bad".
+#   124  a deadline was exceeded and the work was killed unfinished — either a
+#        whole phase, or a test unit inside the tier runner. DIAGNOSTIC, NOT
+#        GATING: the run proved nothing about the code, most often because the
+#        machine was loaded. It is not a pass either — re-run it. Never read a
+#        124 as "your work is bad".
 #   2    harness or supervisor contract failure.
+#
+# A COMPLETED FAILURE OUTRANKS A BREACH, at every level. If anything ran to
+# completion and failed, the exit status is 1, whatever else timed out
+# alongside it. A diagnostic never masks evidence the gate actually obtained.
 #
 # The last line of output is a single greppable verdict:
 #   beagle-test: VERDICT=PASS|FAIL|DIAGNOSTIC gating=yes|no phase=... exit=N load=...
@@ -231,6 +236,31 @@ beagle_test_diagnostic_banner() {
         echo "  either. Do not abandon the work. Re-run when the machine is"
         echo "  quieter; if the phase is honestly this slow, that is a speed"
         echo "  defect in the phase, to be fixed rather than budgeted around."
+        echo "  phase log       $log"
+    } >&2
+    beagle_test_rule
+}
+
+# The phase ran to completion; a test UNIT inside it was killed at its own
+# deadline. Same classification, different subject, so it says so plainly
+# instead of claiming the phase was killed.
+beagle_test_unit_diagnostic_banner() {
+    local label="$1" wall="$2" load_start="$3" load_end="$4" log="$5"
+    beagle_test_rule
+    {
+        echo "beagle-test: DIAGNOSTIC -- NOT A PRODUCT FAILURE"
+        echo "  phase           $label"
+        echo "  outcome         the phase finished; one or more test UNITS were"
+        echo "                  killed at their own deadline and never finished"
+        echo "  observed wall   ${wall}s"
+        echo "  machine load    ${load_start} at start -> ${load_end} at end" \
+             "(${BEAGLE_TEST_CORES} cores)"
+        echo "  exit status     $BEAGLE_TEST_STATUS_DIAGNOSTIC (diagnostic);" \
+             "$BEAGLE_TEST_STATUS_DEFECT is reserved for a product defect"
+        echo
+        echo "  No active unit FAILED. A unit that ran out of time is UNPROVEN,"
+        echo "  not disproven, and a completed failure would have outranked it."
+        echo "  The units are named under ACTIVE DIAGNOSTIC DETAIL above."
         echo "  phase log       $log"
     } >&2
     beagle_test_rule
@@ -598,6 +628,16 @@ run_beagle_test_shards() {
     if [[ "$merge_status" -eq 0 ]]; then
         echo "beagle-test: phase tier-runner END status=0 wall=${wall_seconds}s load=${load_end}/${BEAGLE_TEST_CORES}" >&2
         BEAGLE_TEST_VERDICT_PHASE=""
+    elif [[ "$merge_status" -eq "$BEAGLE_TEST_STATUS_DIAGNOSTIC" ]]; then
+        # Every shard completed, and the merge — the one place that sees all of
+        # them — found that the only active non-passes were units killed at a
+        # deadline. Nothing failed, so nothing here is a product verdict. Had
+        # any unit actually failed, the merge would have exited 1 instead: a
+        # completed failure outranks a breach.
+        BEAGLE_TEST_KEEP_LOGS=1
+        echo "beagle-test: phase tier-runner UNIT-TIMEOUT status=$merge_status wall=${wall_seconds}s load=${load_end}/${BEAGLE_TEST_CORES}; stopping gate" >&2
+        beagle_test_unit_diagnostic_banner "tier-runner" \
+            "$wall_seconds" "$load_start" "$load_end" "$aggregate_log"
     else
         BEAGLE_TEST_KEEP_LOGS=1
         echo "beagle-test: phase tier-runner FAILED status=$merge_status wall=${wall_seconds}s load=${load_end}/${BEAGLE_TEST_CORES}; stopping gate" >&2
