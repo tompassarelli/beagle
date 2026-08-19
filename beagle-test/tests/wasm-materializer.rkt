@@ -48,33 +48,64 @@
 (define (sha256-hex bytes)
   (bytes->hex-string (sha256-bytes bytes)))
 
-(define (git-clean?)
+;; The trees a fixture build actually reads: the entry scripts, the compiler,
+;; the native Core materializer, the self-hosted stage, the shared target
+;; tables, and the Store. Anything outside this set — tests, docs, examples —
+;; cannot change what a fixture build produces.
+(define fixture-compiler-trees
+  '("bin" "beagle-lib" "native-core" "self-host" "share" "store"))
+
+(define (git-paths-clean? paths)
   (define sink (open-output-nowhere))
   (parameterize ([current-output-port sink]
                  [current-error-port sink])
-    (and (zero? (system*/exit-code git-command "-C" (path->string repo-root)
-                                    "diff" "--quiet" "--ignore-submodules" "--"))
-         (zero? (system*/exit-code git-command "-C" (path->string repo-root)
-                                    "diff" "--cached" "--quiet"
-                                    "--ignore-submodules" "--")))))
+    (and (zero? (apply system*/exit-code git-command "-C" (path->string repo-root)
+                       "diff" "--quiet" "--ignore-submodules" "--" paths))
+         (zero? (apply system*/exit-code git-command "-C" (path->string repo-root)
+                       "diff" "--cached" "--quiet" "--ignore-submodules" "--"
+                       paths)))))
 
-(define clean-revision
-  (and (git-clean?)
-       (let ([out (open-output-string)])
-         (define status
-           (parameterize ([current-output-port out]
-                          [current-error-port (open-output-nowhere)])
-             (system*/exit-code git-command "-C" (path->string repo-root)
-                                "rev-parse" "--verify" "HEAD")))
-         (and (zero? status) (string-trim (get-output-string out))))))
+(define (git-tree-id tree)
+  (define out (open-output-string))
+  (define status
+    (parameterize ([current-output-port out]
+                   [current-error-port (open-output-nowhere)])
+      (system*/exit-code git-command "-C" (path->string repo-root)
+                         "rev-parse" "--verify" (format "HEAD:~a" tree))))
+  (and (zero? status)
+       (let ([id (string-trim (get-output-string out))])
+         (and (regexp-match? #px"^[0-9a-f]{40}$" id) id))))
+
+;; A fixture is the output of running THIS compiler over a fixed source text,
+;; so its identity is the compiler's CONTENT — not the commit that happens to
+;; carry it. Keying on HEAD made every commit a miss, including a docs-only or
+;; test-only commit, which is the one condition the gate always runs in: a lane
+;; at a fresh commit. The cache then rebuilt all three fixtures on every run
+;; (71 entries / 63 MB of never-reused triples), and because a cold fixture
+;; build constructs the Core compiler projection, that miss cost ~320s and made
+;; sibling phases blocked on the shared fixture lock fail outright.
+;;
+;; Git tree object ids ARE content digests, so this is exact rather than
+;; approximate. A dirty compiler tree yields no key at all: `git rev-parse`
+;; reports committed content, so a working-tree edit would not be captured and
+;; the fixture must not be shared. A dirty TEST tree no longer disables the
+;; cache, because it cannot change what the compiler emits.
+(define compiler-identity
+  (and (git-paths-clean? fixture-compiler-trees)
+       (let ([ids (map git-tree-id fixture-compiler-trees)])
+         (and (andmap string? ids)
+              (string-join
+               (map (lambda (tree id) (format "~a=~a" tree id))
+                    fixture-compiler-trees ids)
+               " ")))))
 
 (define (fixture-cache-key kind source-text details)
-  (and clean-revision
+  (and compiler-identity
        (sha256-hex
         (string->bytes/utf-8
          (string-join
           (list fixture-cache-format
-                clean-revision
+                compiler-identity
                 kind
                 source-text
                 details
@@ -228,10 +259,23 @@
 (define phase-filter (env-phase-names "BEAGLE_WASM_TEST_PHASES"))
 (define expected-phases (env-phase-names "BEAGLE_WASM_TEST_EXPECT_PHASES"))
 
+;; Fixture preparation mode. The gate schedules this file's phases as separate
+;; PROCESSES that start together, and each one needs the same canonical
+;; fixtures. On a cold cache they therefore raced: one built while the rest sat
+;; on the exclusive fixture lock, and a waiter that outlasted the lock's delay
+;; failed the phase outright with "timed out acquiring shared base fixture
+;; lock" — an infrastructure artifact reported as a test failure. Building the
+;; fixtures once, before any worker forks, makes every phase a cache hit and
+;; leaves nothing to contend for. Nothing is asserted here; this mode runs no
+;; phase and exists only to populate the cache.
+(define prepare-fixtures-only?
+  (equal? (getenv "BEAGLE_WASM_TEST_PREPARE_FIXTURES") "1"))
+
 (define registered-phases '())          ; reverse registration order
 
 (define (selected-phase? name)
-  (or (not phase-filter) (and (member name phase-filter) #t)))
+  (and (not prepare-fixtures-only?)
+       (or (not phase-filter) (and (member name phase-filter) #t))))
 
 (define (phase-test name thunk)
   (when (member name registered-phases)
@@ -1816,6 +1860,16 @@ JS
       (lambda () (delete-directory/files scratch)))]))
 
 )
+
+;; --- fixture preparation ---------------------------------------------------
+;; Runs instead of the phases, never alongside them. Each builder publishes
+;; through the same shared cache the phases read, so one uncontended pass here
+;; replaces N contended ones across the worker processes.
+(when prepare-fixtures-only?
+  (canonical-base-fixture)
+  (canonical-buffer-fixture)
+  (canonical-wasm-generation)
+  (eprintf "wasm-materializer-test: shared fixtures prepared\n"))
 
 ;; --- shard coverage --------------------------------------------------------
 ;; The last form in the module: every phase-test above has registered by now,

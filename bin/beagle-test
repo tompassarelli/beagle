@@ -468,6 +468,26 @@ run_beagle_test_shards() {
     load_start="$(beagle_test_load)"
     started_seconds=$SECONDS
     echo "beagle-test: phase tier-runner START deadline=${deadline}s workers=$workers load=${load_start}/${BEAGLE_TEST_CORES}" >&2
+
+    # The Wasm suite's phases are separate processes that all start at once and
+    # all need the same canonical fixtures. Cold, they used to race: one built
+    # while the rest sat on the exclusive fixture lock, and a waiter that
+    # outlasted the lock's delay failed with "timed out acquiring shared base
+    # fixture lock" — contention reported as a product defect. Build them ONCE
+    # here, before anything forks, so every worker hits a warm cache. This is
+    # preparation, not a check: it asserts nothing, and a failure is left for
+    # the phases themselves to report against their own assertions rather than
+    # being reclassified into a gate verdict here.
+    local prepare_log="$BEAGLE_TEST_LOG_ROOT/tier-fixtures.log"
+    local prepare_started=$SECONDS
+    if BEAGLE_WASM_TEST_PREPARE_FIXTURES=1 \
+        "$RACKET" "$BEAGLE_ROOT/beagle-test/tests/wasm-materializer.rkt" \
+        >"$prepare_log" 2>&1; then
+        echo "beagle-test: tier-runner shared fixtures prepared wall=$((SECONDS - prepare_started))s load=$(beagle_test_load)/${BEAGLE_TEST_CORES}" >&2
+    else
+        echo "beagle-test: tier-runner shared fixture preparation did not complete (status=$?); phases will build their own. log=$prepare_log" >&2
+        BEAGLE_TEST_KEEP_LOGS=1
+    fi
     for ((i = 0; i < workers; i++)); do
         local log="$worker_root/worker-$i.log"
         local result="$worker_root/worker-$i.rktd"
