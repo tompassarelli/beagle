@@ -4637,6 +4637,74 @@
         (vec (concat (index-form-ids index "defn")
                (index-form-ids index "defn-multi")))))))
 
+(defn binder-binding-items
+  [(index SourceIndexV0) (node core/NativeId)] (Vec core/NativeId)
+  (let [(kind String) (fact-text index node "form-kind")]
+    (cond
+      (or (= "let" kind) (= "loop" kind))
+      (let [(bindings-node (U core/NativeId Nil))
+            (index-first-object index node "bindings")]
+        (if (nil? bindings-node)
+          []
+          (index-sequence-items index bindings-node)))
+
+      (or (= "defn" kind) (= "fn" kind) (= "letfn-entry" kind)
+        (= "arity-clause" kind) (= "protocol-method" kind)
+        (= "impl-method" kind))
+      (function-parameter-items index node)
+
+      :else [])))
+
+(defn binder-item-for-name
+  [(index SourceIndexV0) (node core/NativeId) (name String)]
+  (U core/NativeId Nil)
+  (let [(items (Vec core/NativeId)) (binder-binding-items index node)]
+    (loop [(position Int) 0]
+      (if (>= position (count items))
+        nil
+        (let [(item core/NativeId) (nth items position)]
+          (if (string-member? (source-parameter-bound-names index item) name)
+            item
+            (recur (+ position 1))))))))
+
+;; Only a lexical binder decides that a name is captured. A bare name is not a
+;; global merely because some other module in the closure defines a top-level
+;; function spelled the same way.
+(defn enclosing-binder-item
+  [(index SourceIndexV0)
+   (node core/NativeId)
+   (name String)
+   (fuel Int)]
+  (U core/NativeId Nil)
+  (if (<= fuel 0)
+    nil
+    (let [(parent (U core/NativeId Nil)) (source-parent index node)]
+      (if (nil? parent)
+        nil
+        (let [(item (U core/NativeId Nil))
+              (binder-item-for-name index parent name)]
+          (if (some? item)
+            item
+            (enclosing-binder-item index parent name (- fuel 1))))))))
+
+;; A bare symbol in callee position carries no inferred type, so a captured
+;; local function takes its type from the binder that owns it.
+(defn binder-item-type
+  [(index SourceIndexV0) (item core/NativeId)] (U core/NativeId Nil)
+  (let [(annotation (U core/NativeId Nil))
+        (index-first-object index item "ann")]
+    (if (some? annotation)
+      annotation
+      (let [(inferred (U core/NativeId Nil))
+            (index-first-object index item "inferred-type")]
+        (if (some? inferred)
+          inferred
+          (let [(value (U core/NativeId Nil))
+                (index-first-object index item "value")]
+            (if (nil? value)
+              nil
+              (index-first-object index value "inferred-type"))))))))
+
 (defn resolve-closure-captures
   [(index SourceIndexV0)
    (globals (Vec GlobalBindingV0))
@@ -4649,10 +4717,18 @@
       (if (>= position (count names))
         captures
         (let [name String (nth names position)
+              binder (U core/NativeId Nil)
+              (enclosing-binder-item index source name
+                (+ 1 (index-facts index)))
+              binder-type (U core/NativeId Nil)
+              (if (nil? binder) nil (binder-item-type index binder))
               source-type (U core/NativeId Nil)
-              (source-ref-type-source index source name
-                (+ 1 (index-facts index)))]
-          (if (or (global-or-function-name? index globals name)
+              (if (some? binder-type)
+                binder-type
+                (source-ref-type-source index source name
+                  (+ 1 (index-facts index))))]
+          (if (or (and (nil? binder)
+                    (global-or-function-name? index globals name))
                 (nil? source-type))
             (recur (+ position 1) captures)
             (let [resolution TypeResolutionV0
