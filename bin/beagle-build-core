@@ -1026,7 +1026,9 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
     # compiler projection cache.
     if [[ -n "$native_compiler_bin" ]]; then
         mkdir -p "$compiled"
-        run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
+        # Cold projection construction is a multi-minute phase, not a rebuild:
+        # any edit under bin/ invalidates compiler_source_digest and forces it.
+        run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-900}" \
             bash -c '
                 set -euo pipefail
                 out="$1"
@@ -1058,7 +1060,7 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
             }
         echo "beagle build: core-compiler-cache MISS $compiler_source_digest" >&2
     else
-        run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-180}" \
+        run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-900}" \
             "$CORE_COMPILER_PROJECTION" \
             --out "$compiled" --log "$work/build.log" || {
                 sed -n '1,200p' "$work/build.log" >&2
