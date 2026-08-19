@@ -10,7 +10,19 @@
 #   bin/beagle-test --full                  # active + demoted tiers
 #   bin/beagle-test --include-gated         # also run gated tier (needs env vars)
 #
-# Exits 0 if all active tests pass, 1 if any active failure.
+# Exit status is a CLASSIFICATION, not just a pass/fail bit:
+#
+#   0    every phase ran and passed.
+#   1    a phase ran to completion and found a defect. GATING: fix the code.
+#   124  a phase exceeded its deadline and was killed unfinished. DIAGNOSTIC,
+#        NOT GATING: the run proved nothing about the code, most often because
+#        the machine was loaded. It is not a pass either — re-run it. Never
+#        read a 124 as "your work is bad".
+#   2    harness or supervisor contract failure.
+#
+# The last line of output is a single greppable verdict:
+#   beagle-test: VERDICT=PASS|FAIL|DIAGNOSTIC gating=yes|no phase=... exit=N load=...
+#
 # Demoted failures DO NOT affect exit code (advisory only).
 #
 # IMPORTANT: use this script, not `raco test` directly, during iteration.
@@ -53,15 +65,92 @@ fi
 
 # Each phase has its own deadline and log. run-bounded.rkt is the accountable
 # process supervisor: it owns the phase subtree, publishes START/END/TIMEOUT
-# progress, and reaps descendants before returning. These budgets originate
-# from the quiet-box measurements (56.617s, 0.605s, 0.022s, 77.944s, and the
-# existing 357s active-tier baseline). Consumer smoke performs two sequential,
-# commit-keyed native builds, so the complete cold pair gets the fleet's
-# three-minute phase ceiling. The inner test/build deadlines remain unchanged.
+# progress, and reaps descendants before returning.
 BEAGLE_TEST_SUPERVISOR="$BEAGLE_ROOT/native-core/bin/run-bounded.rkt"
 BEAGLE_TEST_LOG_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/beagle-test-phase.XXXXXX")"
 BEAGLE_TEST_KEEP_LOGS=0
 BEAGLE_TEST_SHARD_PIDS=()
+
+# Exit-status contract, and the whole point of it: a deadline breach is a
+# statement about the MACHINE, a non-zero child status is a statement about the
+# CODE. Collapsing the first into the second is what taught lane owners their
+# correct work was bad. These two verdicts never share a status again.
+BEAGLE_TEST_STATUS_DEFECT=1     # a phase finished and found something wrong
+BEAGLE_TEST_STATUS_DIAGNOSTIC=124   # a phase never finished; it proved nothing
+BEAGLE_TEST_CORES="$(nproc 2>/dev/null || printf 'unknown')"
+BEAGLE_TEST_VERDICT_PHASE=""
+BEAGLE_TEST_PHASE_RAN=0
+
+# Phase deadlines, in seconds. Both the predeclared fact claims and the enforced
+# supervisor bound read THIS table: a claim that disagrees with the bound it
+# claims to describe is not a claim, and the two used to drift (consumer-smoke
+# was predeclared at 100s while 180s was enforced).
+#
+# What a deadline is FOR: catching a HANG. It is not a speed limit, and setting
+# it below what the work honestly costs does not make the work faster — it just
+# manufactures false failures and strands correct lanes, which is exactly what
+# happened here. So each bound below sits above the slowest honest run measured
+# on this machine, with the headroom stated.
+#
+# The 2-3 minute verification law is enforced somewhere else, on purpose: by the
+# NAMED SPEED DEFECTS in docs and in the commit that set these numbers, not by a
+# deadline that lies. Two phases are over the line today and are recorded as
+# defects to fix, not blessed:
+#   tier-runner    406s honest  — floored by ONE test, wasm-materializer.rkt
+#                                 #core-publication-preserv-db27b4 at 404s, so
+#                                 no amount of sharding brings it under 3 min.
+#   consumer-smoke 308s honest on a cold cache miss (11-20s when the native
+#                                 caches are prepared) — bimodal, and every lane
+#                                 that changes the source closure pays the slow
+#                                 side.
+declare -A BEAGLE_TEST_PHASE_DEADLINE=(
+    # honest 80s worst (cold bytecode, load 6.7-8.9); 58-65s warm. 2.2x.
+    [racket-scope]=180
+    # honest 1s. A 30s floor: process startup alone can eat a small budget.
+    [checkout-first]=30
+    # honest <1s. Same floor reasoning, smaller work.
+    [qualified-ref-scaffold]=15
+    # honest 11-20s prepared, 308s on a cold miss (load 7.1). ~2x the miss case.
+    [consumer-smoke]=600
+    # honest 406s (load 6.4-8.0), 16 shards. ~2.2x.
+    [tier-runner]=900
+    # Not a gate phase: the opt-in probe below deliberately breaches this.
+    [synthetic-timeout]=1
+)
+
+beagle_test_deadline() {
+    local phase="$1"
+    if [[ -z "${BEAGLE_TEST_PHASE_DEADLINE[$phase]+set}" ]]; then
+        echo "beagle-test: no deadline is declared for phase $phase" >&2
+        exit 2
+    fi
+    printf '%s' "${BEAGLE_TEST_PHASE_DEADLINE[$phase]}"
+}
+
+# The supervisor multiplies every deadline by BEAGLE_DEADLINE_SCALE. Reporting
+# the unscaled number next to an observed wall the reader can see is smaller
+# would be its own small lie, so say what was actually enforced.
+beagle_test_effective_deadline() {
+    local deadline="$1" scale="${BEAGLE_DEADLINE_SCALE:-}"
+    if [[ -z "$scale" || "$scale" == 1 ]]; then
+        printf '%ss' "$deadline"
+    else
+        printf '%ss (declared %ss x BEAGLE_DEADLINE_SCALE=%s)' \
+            "$(awk -v d="$deadline" -v s="$scale" 'BEGIN{printf "%g", d*s}')" \
+            "$deadline" "$scale"
+    fi
+}
+
+# Every timing this gate prints carries the machine load beside it, so a reader
+# can see WHY a phase ran long instead of guessing.
+beagle_test_load() {
+    local one_minute
+    if read -r one_minute _ </proc/loadavg 2>/dev/null; then
+        printf '%s' "$one_minute"
+    else
+        printf 'unknown'
+    fi
+}
 
 beagle_test_stop_shards() {
     local pid
@@ -76,6 +165,73 @@ beagle_test_stop_shards() {
     BEAGLE_TEST_SHARD_PIDS=()
 }
 
+# The banners exist because the distinction has to survive a reader who scrolled
+# past thousands of lines of phase output and looked at the last screen.
+beagle_test_rule() {
+    echo "==================================================================" >&2
+}
+
+beagle_test_diagnostic_banner() {
+    local label="$1" deadline="$2" wall="$3" load_start="$4" load_end="$5" log="$6"
+    beagle_test_rule
+    {
+        echo "beagle-test: DIAGNOSTIC -- NOT A PRODUCT FAILURE"
+        echo "  phase           $label"
+        echo "  outcome         deadline exceeded; the phase was killed unfinished"
+        echo "  deadline        $(beagle_test_effective_deadline "$deadline")"
+        echo "  observed wall   ${wall}s"
+        echo "  machine load    ${load_start} at start -> ${load_end} at breach" \
+             "(${BEAGLE_TEST_CORES} cores)"
+        echo "  exit status     $BEAGLE_TEST_STATUS_DIAGNOSTIC (diagnostic);" \
+             "$BEAGLE_TEST_STATUS_DEFECT is reserved for a product defect"
+        echo
+        echo "  An unfinished phase is UNPROVEN, not disproven. This run is NOT"
+        echo "  evidence of a defect in the code under test, and it is not a pass"
+        echo "  either. Do not abandon the work. Re-run when the machine is"
+        echo "  quieter; if the phase is honestly this slow, that is a speed"
+        echo "  defect in the phase, to be fixed rather than budgeted around."
+        echo "  phase log       $log"
+    } >&2
+    beagle_test_rule
+}
+
+beagle_test_defect_banner() {
+    local label="$1" status="$2" wall="$3" load_start="$4" load_end="$5" log="$6"
+    beagle_test_rule
+    {
+        echo "beagle-test: PRODUCT FAILURE -- the gate found a real defect"
+        echo "  phase           $label"
+        echo "  outcome         the phase RAN TO COMPLETION and reported failure"
+        echo "  exit status     $status"
+        echo "  observed wall   ${wall}s"
+        echo "  machine load    ${load_start} at start -> ${load_end} at end" \
+             "(${BEAGLE_TEST_CORES} cores)"
+        echo "  phase log       $log"
+    } >&2
+    beagle_test_rule
+}
+
+# One greppable terminal line. A caller that reads nothing else can branch on it.
+beagle_test_emit_verdict() {
+    local status="$1"
+    [[ "$BEAGLE_TEST_PHASE_RAN" == 1 ]] || return 0
+    case "$status" in
+        0)
+            echo "beagle-test: VERDICT=PASS exit=0 load=$(beagle_test_load)" >&2
+            ;;
+        "$BEAGLE_TEST_STATUS_DIAGNOSTIC")
+            echo "beagle-test: VERDICT=DIAGNOSTIC gating=no" \
+                 "phase=${BEAGLE_TEST_VERDICT_PHASE:-unknown}" \
+                 "reason=deadline-exceeded exit=$status load=$(beagle_test_load)" >&2
+            ;;
+        *)
+            echo "beagle-test: VERDICT=FAIL gating=yes" \
+                 "phase=${BEAGLE_TEST_VERDICT_PHASE:-unknown}" \
+                 "reason=product-defect exit=$status load=$(beagle_test_load)" >&2
+            ;;
+    esac
+}
+
 beagle_test_cleanup() {
     local status=$?
     beagle_test_stop_shards
@@ -84,6 +240,7 @@ beagle_test_cleanup() {
     else
         rm -rf -- "${BEAGLE_TEST_LOG_ROOT:?}"
     fi
+    beagle_test_emit_verdict "$status"
     exit "$status"
 }
 trap beagle_test_cleanup EXIT
@@ -183,9 +340,11 @@ beagle_test_fact_write_shard_receipt() {
 
 run_beagle_test_phase() {
     local label="$1"
-    local deadline="$2"
-    shift 2
+    local deadline
+    deadline="$(beagle_test_deadline "$1")"
+    shift 1
     local slug log receipt status tee_status
+    local load_start load_end started wall
     local -a pipeline_status
     slug="$(beagle_test_slug "$label")"
     log="$BEAGLE_TEST_LOG_ROOT/$slug.log"
@@ -195,7 +354,11 @@ run_beagle_test_phase() {
         echo "beagle-test: fact claim observation write failed for $label" >&2
     fi
 
-    echo "beagle-test: phase $label START deadline=${deadline}s log=$log receipt=$receipt" >&2
+    BEAGLE_TEST_PHASE_RAN=1
+    BEAGLE_TEST_VERDICT_PHASE="$label"
+    load_start="$(beagle_test_load)"
+    started=$SECONDS
+    echo "beagle-test: phase $label START deadline=${deadline}s load=${load_start}/${BEAGLE_TEST_CORES} log=$log receipt=$receipt" >&2
     set +e
     BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
         "$RACKET" "$BEAGLE_TEST_SUPERVISOR" "$deadline" 5 -- "$@" 2>&1 |
@@ -204,18 +367,25 @@ run_beagle_test_phase() {
     status="${pipeline_status[0]}"
     tee_status="${pipeline_status[1]}"
     set -e
+    wall=$((SECONDS - started))
+    load_end="$(beagle_test_load)"
 
     if [[ "$tee_status" -ne 0 ]]; then
         status="$tee_status"
     fi
-    if [[ "$status" -eq 124 ]]; then
+    if [[ "$status" -eq "$BEAGLE_TEST_STATUS_DIAGNOSTIC" ]]; then
         BEAGLE_TEST_KEEP_LOGS=1
-        echo "beagle-test: phase $label TIMEOUT status=124; stopping gate" >&2
+        echo "beagle-test: phase $label TIMEOUT status=$status wall=${wall}s load=${load_end}/${BEAGLE_TEST_CORES}; stopping gate" >&2
+        beagle_test_diagnostic_banner \
+            "$label" "$deadline" "$wall" "$load_start" "$load_end" "$log"
     elif [[ "$status" -ne 0 ]]; then
         BEAGLE_TEST_KEEP_LOGS=1
-        echo "beagle-test: phase $label FAILED status=$status; stopping gate" >&2
+        echo "beagle-test: phase $label FAILED status=$status wall=${wall}s load=${load_end}/${BEAGLE_TEST_CORES}; stopping gate" >&2
+        beagle_test_defect_banner \
+            "$label" "$status" "$wall" "$load_start" "$load_end" "$log"
     else
-        echo "beagle-test: phase $label END status=0" >&2
+        echo "beagle-test: phase $label END status=0 wall=${wall}s load=${load_end}/${BEAGLE_TEST_CORES}" >&2
+        BEAGLE_TEST_VERDICT_PHASE=""
     fi
     if ! beagle_test_fact_write_observation "$label" "$slug" "$status" "$log" "$receipt"; then
         echo "beagle-test: fact result observation write failed for $label" >&2
@@ -224,12 +394,13 @@ run_beagle_test_phase() {
 }
 
 run_beagle_test_shards() {
-    local deadline="$1"
-    shift
+    local deadline
+    deadline="$(beagle_test_deadline tier-runner)"
     local runner="$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt"
     local worker_root="$BEAGLE_TEST_LOG_ROOT/tier-workers"
     local workers count_status i pid completed_pid status receipt expected
     local aggregate_log aggregate_receipt merge_status tee_status terminal_status started_seconds wall_seconds
+    local load_start load_end
     local -a live next_live pipeline_status
     local -A worker_by_pid
 
@@ -251,8 +422,11 @@ run_beagle_test_shards() {
         return 2
     fi
 
+    BEAGLE_TEST_PHASE_RAN=1
+    BEAGLE_TEST_VERDICT_PHASE="tier-runner"
+    load_start="$(beagle_test_load)"
     started_seconds=$SECONDS
-    echo "beagle-test: phase tier-runner START deadline=${deadline}s workers=$workers" >&2
+    echo "beagle-test: phase tier-runner START deadline=${deadline}s workers=$workers load=${load_start}/${BEAGLE_TEST_CORES}" >&2
     for ((i = 0; i < workers; i++)); do
         local log="$worker_root/worker-$i.log"
         local result="$worker_root/worker-$i.rktd"
@@ -306,12 +480,16 @@ run_beagle_test_shards() {
             echo "beagle-test: shard tier-runner[$i/$workers] END status=0" >&2
         elif [[ "$status" -eq 1 && -f "$worker_root/worker-$i.rktd" ]]; then
             echo "beagle-test: shard tier-runner[$i/$workers] END status=1 (test failure recorded for merge)" >&2
-        elif [[ "$status" -eq 124 ]]; then
-            echo "beagle-test: shard tier-runner[$i/$workers] TIMEOUT status=124" >&2
-            terminal_status=124
+        elif [[ "$status" -eq "$BEAGLE_TEST_STATUS_DIAGNOSTIC" ]]; then
+            echo "beagle-test: shard tier-runner[$i/$workers] TIMEOUT status=$status load=$(beagle_test_load)/${BEAGLE_TEST_CORES}" >&2
+            terminal_status="$BEAGLE_TEST_STATUS_DIAGNOSTIC"
         else
-            echo "beagle-test: shard tier-runner[$i/$workers] FAILED status=$status" >&2
-            [[ "$terminal_status" -eq 124 ]] || terminal_status="$status"
+            echo "beagle-test: shard tier-runner[$i/$workers] FAILED status=$status load=$(beagle_test_load)/${BEAGLE_TEST_CORES}" >&2
+            # A shard that RAN TO COMPLETION and reported failure found a real
+            # defect, so it outranks a sibling shard's deadline breach. A
+            # diagnostic must never mask evidence the gate actually obtained;
+            # the breach is still reported below, it just does not decide.
+            terminal_status="$status"
         fi
     done
 
@@ -326,7 +504,16 @@ run_beagle_test_shards() {
         beagle_test_fact_write_shard_receipt \
             "$workers" "$worker_root" "$aggregate_receipt" || true
         wall_seconds=$((SECONDS - started_seconds))
-        echo "beagle-test: phase tier-runner FAILED status=$terminal_status wall=${wall_seconds}s; stopping gate" >&2
+        load_end="$(beagle_test_load)"
+        if [[ "$terminal_status" -eq "$BEAGLE_TEST_STATUS_DIAGNOSTIC" ]]; then
+            echo "beagle-test: phase tier-runner TIMEOUT status=$terminal_status wall=${wall_seconds}s load=${load_end}/${BEAGLE_TEST_CORES}; stopping gate" >&2
+            beagle_test_diagnostic_banner "tier-runner" "$deadline" \
+                "$wall_seconds" "$load_start" "$load_end" "$worker_root"
+        else
+            echo "beagle-test: phase tier-runner FAILED status=$terminal_status wall=${wall_seconds}s load=${load_end}/${BEAGLE_TEST_CORES}; stopping gate" >&2
+            beagle_test_defect_banner "tier-runner" "$terminal_status" \
+                "$wall_seconds" "$load_start" "$load_end" "$worker_root"
+        fi
         beagle_test_fact_write_observation \
             "tier-runner" "tier-runner" "$terminal_status" "$aggregate_log" "$aggregate_receipt" || true
         return "$terminal_status"
@@ -346,11 +533,15 @@ run_beagle_test_shards() {
     set -e
     [[ "$tee_status" -eq 0 ]] || merge_status="$tee_status"
     wall_seconds=$((SECONDS - started_seconds))
+    load_end="$(beagle_test_load)"
     if [[ "$merge_status" -eq 0 ]]; then
-        echo "beagle-test: phase tier-runner END status=0 wall=${wall_seconds}s" >&2
+        echo "beagle-test: phase tier-runner END status=0 wall=${wall_seconds}s load=${load_end}/${BEAGLE_TEST_CORES}" >&2
+        BEAGLE_TEST_VERDICT_PHASE=""
     else
         BEAGLE_TEST_KEEP_LOGS=1
-        echo "beagle-test: phase tier-runner FAILED status=$merge_status wall=${wall_seconds}s; stopping gate" >&2
+        echo "beagle-test: phase tier-runner FAILED status=$merge_status wall=${wall_seconds}s load=${load_end}/${BEAGLE_TEST_CORES}; stopping gate" >&2
+        beagle_test_defect_banner "tier-runner" "$merge_status" \
+            "$wall_seconds" "$load_start" "$load_end" "$aggregate_log"
     fi
     if ! beagle_test_fact_write_observation \
         "tier-runner" "tier-runner" "$merge_status" "$aggregate_log" "$aggregate_receipt"; then
@@ -361,20 +552,15 @@ run_beagle_test_shards() {
 
 beagle_test_fact_write_declared_claims() {
     local runner="$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt"
+    local phase
+    for phase in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; do
+        beagle_test_fact_write_claim \
+            "$phase" "$(beagle_test_deadline "$phase")" "$phase" \
+            "$BEAGLE_ROOT/bin/test/$phase/run.sh" || return 1
+    done
     beagle_test_fact_write_claim \
-        "racket-scope" 70 "racket-scope" \
-        "$BEAGLE_ROOT/bin/test/racket-scope/run.sh" || return 1
-    beagle_test_fact_write_claim \
-        "checkout-first" 5 "checkout-first" \
-        "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || return 1
-    beagle_test_fact_write_claim \
-        "qualified-ref-scaffold" 2 "qualified-ref-scaffold" \
-        "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || return 1
-    beagle_test_fact_write_claim \
-        "consumer-smoke" 100 "consumer-smoke" \
-        "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || return 1
-    beagle_test_fact_write_claim \
-        "tier-runner" 420 "tier-runner" "$runner" "$@" || return 1
+        "tier-runner" "$(beagle_test_deadline tier-runner)" "tier-runner" \
+        "$runner" "$@" || return 1
     "$RACKET" "$runner" "$@" \
         --write-fact-claims "$BEAGLE_GATE_FACT_OBSERVATION_DIR/tier-claims.rktd"
 }
@@ -400,18 +586,21 @@ fi
 if [[ "${BEAGLE_TEST_SYNTHETIC_TIMEOUT:-0}" == 1 ]]; then
     synthetic_pid_file="$BEAGLE_TEST_LOG_ROOT/synthetic-child.pid"
     BEAGLE_TEST_KEEP_LOGS=1
-    run_beagle_test_phase "synthetic-timeout" 1 \
+    run_beagle_test_phase "synthetic-timeout" \
         "$BASH" -c 'sleep 30 & child=$!; printf "%s\n" "$child" >"$1"; wait "$child"' \
-        bash "$synthetic_pid_file" || exit 1
+        bash "$synthetic_pid_file" || exit $?
     exit 0
 fi
 
-run_beagle_test_phase "racket-scope" 70 \
-    "$BEAGLE_ROOT/bin/test/racket-scope/run.sh" || exit 1
-run_beagle_test_phase "checkout-first" 5 \
-    "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit 1
-run_beagle_test_phase "qualified-ref-scaffold" 2 \
-    "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit 1
-run_beagle_test_phase "consumer-smoke" 180 \
-    "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit 1
-run_beagle_test_shards 420 "$@" || exit $?
+# `exit $?` and not `exit 1`: this is the line that used to strand finished
+# work. Collapsing the supervisor's 124 into 1 told a lane owner the code was
+# broken when the only thing that had happened was that the box was busy.
+run_beagle_test_phase "racket-scope" \
+    "$BEAGLE_ROOT/bin/test/racket-scope/run.sh" || exit $?
+run_beagle_test_phase "checkout-first" \
+    "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit $?
+run_beagle_test_phase "qualified-ref-scaffold" \
+    "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit $?
+run_beagle_test_phase "consumer-smoke" \
+    "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit $?
+run_beagle_test_shards "$@" || exit $?

@@ -15,6 +15,27 @@ source bin/_beagle-racket              # select Beagle's pinned Racket
 "$RACO" test beagle-test/tests/parse.rkt
 ```
 
+### Read the gate's exit status before you believe it
+
+The gate CLASSIFIES its outcome. The last line of output is the verdict:
+
+```
+beagle-test: VERDICT=PASS|FAIL|DIAGNOSTIC gating=yes|no phase=... exit=N load=...
+```
+
+| exit | verdict | means | do |
+|---|---|---|---|
+| 0 | `PASS` | every phase ran and passed | land it |
+| 1 | `FAIL` | a phase **ran to completion** and found a defect | fix the code |
+| 124 | `DIAGNOSTIC` | a phase **exceeded its deadline** and was killed unfinished | re-run; do NOT touch the code |
+| 2 | — | harness or supervisor contract failure | fix the harness |
+
+**A 124 is not a verdict on your work.** The phase never finished, so it proved
+nothing — usually the machine was simply busy (the verdict used to track load
+rather than code, and lane owners abandoned correct work over it). It is not a
+pass either: re-run it. Every phase line carries `wall=Ns load=<1min>/<cores>`
+so you can see for yourself.
+
 ## Check / build
 
 ```
