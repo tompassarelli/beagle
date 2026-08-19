@@ -743,8 +743,10 @@ if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
         echo "beagle build: core-result-alias MISS $core_result_early_key" >&2
     fi
     flock -u "$core_result_alias_lock_fd"
+elif [[ "$core_result_cache_enabled" != 1 ]]; then
+    echo "beagle build: core-result-alias BYPASS $core_result_cache_bypass_reason" >&2
 else
-    echo "beagle build: core-result-alias BYPASS unavailable" >&2
+    echo "beagle build: core-result-alias BYPASS wasm-materializer" >&2
 fi
 
 if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
@@ -802,8 +804,12 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
         echo "beagle build: core-checkpoint-alias MISS $core_checkpoint_early_key" >&2
     fi
     flock -u "$core_checkpoint_alias_lock_fd"
+elif [[ "$core_result_early_hit" == 1 ]]; then
+    echo "beagle build: core-checkpoint-alias SERVED-BY-RESULT-ALIAS $core_result_early_key" >&2
+elif [[ "$core_result_cache_enabled" != 1 ]]; then
+    echo "beagle build: core-checkpoint-alias BYPASS $core_result_cache_bypass_reason" >&2
 else
-    echo "beagle build: core-checkpoint-alias BYPASS unavailable" >&2
+    echo "beagle build: core-checkpoint-alias BYPASS checkpoint-ineligible" >&2
 fi
 
 if [[ "$core_result_early_hit" != 1 && "$core_checkpoint_early_hit" != 1 ]]; then
@@ -1553,6 +1559,11 @@ if [[ "$core_result_cache_enabled" == 1 &&
     if [[ "$core_result_cache_hit" != 1 ]]; then
         echo "beagle build: core-result-cache MISS $core_result_key" >&2
     fi
+elif [[ "$core_result_early_hit" == 1 ]]; then
+    # The alias already served this result; the keyed lookup is redundant, not
+    # bypassed. Saying BYPASS here would report the disabled-cache reason on a
+    # run whose cache demonstrably hit.
+    echo "beagle build: core-result-cache SERVED-BY-ALIAS $core_result_key" >&2
 else
     echo "beagle build: core-result-cache BYPASS $core_result_cache_bypass_reason" >&2
 fi
@@ -1613,7 +1624,11 @@ if [[ "$core_result_cache_hit" != 1 && "$core_result_cache_enabled" == 1 &&
         echo "beagle build: core-checkpoint MISS $core_checkpoint_key" >&2
     fi
 elif [[ "$core_result_cache_hit" != 1 ]]; then
-    echo "beagle build: core-checkpoint BYPASS unavailable" >&2
+    if [[ "$core_result_cache_enabled" != 1 ]]; then
+        echo "beagle build: core-checkpoint BYPASS $core_result_cache_bypass_reason" >&2
+    else
+        echo "beagle build: core-checkpoint BYPASS checkpoint-ineligible" >&2
+    fi
 fi
 
 if [[ "$core_result_cache_hit" != 1 ]]; then
@@ -3705,13 +3720,21 @@ if [[ "$core_result_cache_enabled" == 1 ]]; then
     fi
 fi
 
-run_phase native-receipts "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
-    bb -cp "$compiled" "$FINALIZER" native-index "$work/native.receipts.index" \
-    "$work/artifacts/native.receipts" "$work/artifacts/module.native-program" \
-    >"$work/native-receipts.log" 2>&1 || {
-        sed -n '1,120p' "$work/native-receipts.log" >&2
-        die "canonical Native Core receipt validation failed"
-    }
+# A served result entry carries exactly the bytes that passed this check when
+# the entry was published, and the entry's own artifacts.sha256 was re-checked
+# file by file during lookup. Re-deriving the receipt index from identical
+# bytes cannot reach a different verdict, and its output is never read again.
+if [[ "$core_result_cache_hit" == 1 ]]; then
+    echo "beagle build: phase native-receipts SKIP (validated at cache publication)" >&2
+else
+    run_phase native-receipts "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+        bb -cp "$compiled" "$FINALIZER" native-index "$work/native.receipts.index" \
+        "$work/artifacts/native.receipts" "$work/artifacts/module.native-program" \
+        >"$work/native-receipts.log" 2>&1 || {
+            sed -n '1,120p' "$work/native-receipts.log" >&2
+            die "canonical Native Core receipt validation failed"
+        }
+fi
 native_digest="$(sha256sum "$work/artifacts/module.native-program" | awk '{print $1}')"
 printf '%s\n' "$native_digest" \
     >"$work/artifacts/module.native-program.sha256"
@@ -3864,7 +3887,7 @@ for source_index in "${!source_snapshot_paths[@]}"; do
 done
 stage_file "$work/artifacts/report.txt" report.txt
 
-manifest_args=(manifest "$install/build.manifest")
+manifest_args=(manifest-verify-staged "$install/build.manifest" "$install")
 declare -A receipt_seen=()
 for receipt in "${receipt_names[@]}"; do
     [[ -z "${receipt_seen[$receipt]:-}" ]] || continue
@@ -3877,15 +3900,9 @@ while IFS= read -r staged_name; do
 done < <(printf '%s\n' "${!staged_names[@]}" | LC_ALL=C sort)
 run_phase staged-manifest "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
     bb -cp "$compiled" "$FINALIZER" "${manifest_args[@]}" \
-    >"$work/manifest.log" 2>&1 || {
-        sed -n '1,120p' "$work/manifest.log" >&2
-        die "could not construct canonical build manifest"
-    }
-run_phase staged-verifier "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
-    bb -cp "$compiled" "$FINALIZER" verify-staged "$install" \
     >"$work/staged-manifest.digest" 2>"$work/staged-verifier.log" || {
         sed -n '1,120p' "$work/staged-verifier.log" >&2
-        die "staged generation did not verify"
+        die "staged generation did not verify against its canonical build manifest"
     }
 mapfile -t staged_manifest_digests <"$work/staged-manifest.digest"
 [[ ${#staged_manifest_digests[@]} -eq 1 &&

@@ -601,6 +601,18 @@
           manifest (stages/->BuildManifestV0 receipts artifacts)]
       (write-text! output (stages/encode-build-manifest manifest)))
 
+    ;; Building the manifest and verifying the tree it seals are adjacent and
+    ;; share a process image; splitting them costs one bounded-supervisor boot
+    ;; for work that is a single sequential step.
+    "manifest-verify-staged"
+    (let [[staged & option-tail] tail
+          options (parse-options option-tail)
+          receipts (artifact-hashes (:receipt options))
+          artifacts (artifact-hashes (:artifact options))
+          manifest (stages/->BuildManifestV0 receipts artifacts)]
+      (write-text! output (stages/encode-build-manifest manifest))
+      (println (validate-staged! staged)))
+
     "verify-generation"
     (validate-generation! output)
 
