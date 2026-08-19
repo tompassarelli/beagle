@@ -60,21 +60,77 @@ fi
 # every OTHER collection (base, rackunit, cnf-*, …) resolving via the pkg links.
 # An exact package link already has the right identity. Replacing it would mix
 # setup-compiled package identities with symlink-scoped identities in one load.
+#
+# The probe below is a whole Racket VM (0.54s measured, 9.1 CS) that computes
+# nothing but a fact already fixed by ($RACKET, this root, the pkg link table).
+# It ran once per top-level bin/* invocation and was 52% of `beagle check` on a
+# two-line file (1.255s cold -> 0.604s with the answer already in hand), so the
+# verdict is stamped. Every recheck below is a pure bash test — no fork. A stamp
+# that is unreadable, torn, or stale only costs one probe; it can never route a
+# `require` at the wrong checkout, because any verdict that is not exactly
+# `native` takes the scoping branch, which pins this root explicitly.
 if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT" ]]; then
-    _beagle_scope_probe="$("$RACKET" -e '
-      (displayln (path->string (collection-file-path "parse.rkt" "beagle" "private")))
-      (displayln (path->string (collection-path "beagle" "tests")))
-    ' 2>/dev/null || true)"
-    _beagle_scope_lib="${_beagle_scope_probe%%$'\n'*}"
-    _beagle_scope_test="${_beagle_scope_probe#*$'\n'}"
-    _beagle_scope_lib="$(realpath "$_beagle_scope_lib" 2>/dev/null || true)"
-    _beagle_scope_test="$(realpath "$_beagle_scope_test" 2>/dev/null || true)"
-    _beagle_expected_lib="$(realpath "$BEAGLE_ROOT/beagle-lib/private/parse.rkt" 2>/dev/null || true)"
-    _beagle_expected_test="$(realpath "$BEAGLE_ROOT/beagle-test/tests" 2>/dev/null || true)"
+    _bscope_stamp="$BEAGLE_ROOT/.beagle/scope-stamp"
+    _bscope_verdict=""
+    if [[ -f "$_bscope_stamp" ]]; then
+        _bscope_racket=""
+        IFS=$'\t' read -r _bscope_racket _bscope_verdict < "$_bscope_stamp" || true
+        # Only three things move this verdict, so only three are checked. The
+        # racket is keyed in the stamp. The pkg link table decides where
+        # `beagle` resolves, so any links.rktd newer than the stamp re-probes.
+        # And the native branch requires BOTH of these paths to resolve, so
+        # either one disappearing must fall back to scoping. Deliberately NOT
+        # keyed on directory mtimes: `beagle-lib/` changes on every edit while
+        # the verdict does not, and keying on it would re-probe all day.
+        if [[ "$_bscope_racket" != "$RACKET" ]] ||
+           [[ ! -e "$BEAGLE_ROOT/beagle-lib/private/parse.rkt" ]] ||
+           [[ ! -e "$BEAGLE_ROOT/beagle-test/tests" ]]; then
+            _bscope_verdict=""
+        else
+            for _bscope_dep in \
+                "$HOME/.local/share/racket"/*/links.rktd \
+                "${RACKET%/*}/../share/racket/links.rktd"; do
+                if [[ -e "$_bscope_dep" && "$_bscope_dep" -nt "$_bscope_stamp" ]]; then
+                    _bscope_verdict=""
+                    break
+                fi
+            done
+        fi
+        unset _bscope_racket _bscope_dep
+    fi
 
-    if [[ -n "$_beagle_expected_lib" && -n "$_beagle_expected_test" \
-          && "$_beagle_scope_lib" == "$_beagle_expected_lib" \
-          && "$_beagle_scope_test" == "$_beagle_expected_test" ]]; then
+    if [[ -z "$_bscope_verdict" ]]; then
+        _beagle_scope_probe="$("$RACKET" -e '
+          (displayln (path->string (collection-file-path "parse.rkt" "beagle" "private")))
+          (displayln (path->string (collection-path "beagle" "tests")))
+        ' 2>/dev/null || true)"
+        _beagle_scope_lib="${_beagle_scope_probe%%$'\n'*}"
+        _beagle_scope_test="${_beagle_scope_probe#*$'\n'}"
+        _beagle_scope_lib="$(realpath "$_beagle_scope_lib" 2>/dev/null || true)"
+        _beagle_scope_test="$(realpath "$_beagle_scope_test" 2>/dev/null || true)"
+        _beagle_expected_lib="$(realpath "$BEAGLE_ROOT/beagle-lib/private/parse.rkt" 2>/dev/null || true)"
+        _beagle_expected_test="$(realpath "$BEAGLE_ROOT/beagle-test/tests" 2>/dev/null || true)"
+
+        if [[ -n "$_beagle_expected_lib" && -n "$_beagle_expected_test" \
+              && "$_beagle_scope_lib" == "$_beagle_expected_lib" \
+              && "$_beagle_scope_test" == "$_beagle_expected_test" ]]; then
+            _bscope_verdict="native"
+        else
+            _bscope_verdict="scoped"
+        fi
+        # Published by rename so a concurrent reader sees one whole verdict or
+        # the previous one, never a half-written line.
+        if mkdir -p "$BEAGLE_ROOT/.beagle" 2>/dev/null &&
+           printf '%s\t%s\n' "$RACKET" "$_bscope_verdict" \
+               > "$_bscope_stamp.$$" 2>/dev/null; then
+            mv -f "$_bscope_stamp.$$" "$_bscope_stamp" 2>/dev/null ||
+                rm -f "$_bscope_stamp.$$" 2>/dev/null || true
+        fi
+        unset _beagle_scope_probe _beagle_scope_lib _beagle_scope_test
+        unset _beagle_expected_lib _beagle_expected_test
+    fi
+
+    if [[ "$_bscope_verdict" == "native" ]]; then
         export _BEAGLE_SCOPE_ROOT="$BEAGLE_ROOT"
     else
         _bscope="$BEAGLE_ROOT/.beagle/scope"
@@ -90,8 +146,7 @@ if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT
         fi
         unset _bscope
     fi
-    unset _beagle_scope_probe _beagle_scope_lib _beagle_scope_test
-    unset _beagle_expected_lib _beagle_expected_test
+    unset _bscope_stamp _bscope_verdict
 fi
 
 # --- Compiled-closure freshness gate -----------------------------------------
