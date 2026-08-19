@@ -25,7 +25,8 @@ if [[ ! -f "$src" ]]; then
   echo "drive.sh: selected Beagle Store source is missing: $src" >&2
   exit 1
 fi
-"$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$src" >"$scratch/types.ast.json"
 logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/types.ast.json")"
 bb "$here/ast-facts.clj" \

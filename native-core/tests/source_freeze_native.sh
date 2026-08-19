@@ -19,7 +19,7 @@ run_case() {
   mkdir -p "$case_dir/artifacts"
   printf 'source-freeze path case %s: START from %s\n' "$label" "$cwd"
   store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
-  source_path="$store_checkout/src/fram/types.bgl"
+  source_path="$store_checkout/src/store/types.bgl"
   module_root="store/src=$store_checkout/src"
   [[ -f "$source_path" ]] || {
     echo "source_freeze_native.sh: Store source is missing: $source_path" >&2

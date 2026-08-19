@@ -9,7 +9,7 @@ source "$repo/native-core/validation/native-compiler-route.sh"
 
 art="${NATIVE_SLICE_ARTIFACTS:-}"
 store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
-src="$store_checkout/src/fram/types.bgl"
+src="$store_checkout/src/store/types.bgl"
 module_root="store/src=$store_checkout/src"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types-full-selected.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"

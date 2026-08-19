@@ -7,7 +7,7 @@
        result (lower/freeze-source-stage
                 source
                 "source-freeze-path-test"
-                ["profile=3" "module=fram.types" "slice=Instant"])]
+                ["profile=3" "module=store.types" "slice=Instant"])]
    (spit report-path
      (if (instance? native.lower.SourceFreezeAcceptedV0 result)
        "stage source-freeze ACCEPTED\n"

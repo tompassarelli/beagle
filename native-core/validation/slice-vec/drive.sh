@@ -27,9 +27,12 @@ for upstream in "$src" "$dep"; do
   echo "drive.sh: upstream Beagle Store source is missing: $upstream" >&2
   exit 1
 done
-"$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
-"$repo/bin/beagle-ast" "$dep" >"$scratch/store.ast.json"
-"$repo/bin/beagle-ast" "$here/vec_probe.bclj" >"$scratch/probe.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$src" >"$scratch/types.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$dep" >"$scratch/store.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$here/vec_probe.bclj" >"$scratch/probe.ast.json"
 types_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/types.ast.json")"
 store_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \

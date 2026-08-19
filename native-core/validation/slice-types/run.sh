@@ -3,7 +3,7 @@ set -euo pipefail
 
 types_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 store_checkout="$("$types_root/native-core/validation/store-checkout.sh")"
-types_source="$store_checkout/src/fram/types.bgl"
+types_source="$store_checkout/src/store/types.bgl"
 types_module_root="store/src=$store_checkout/src"
 types_scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types.XXXXXX")"
 types_output="${NATIVE_SLICE_ARTIFACTS:-$types_scratch/artifacts}"

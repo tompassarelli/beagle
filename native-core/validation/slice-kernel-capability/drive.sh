@@ -26,9 +26,12 @@ for source in "$types_file" "$kernel_file" "$probe_file"; do
 done
 mkdir -p "$art" "$scratch/generated"
 
-"$repo/bin/beagle-ast" "$types_file" >"$scratch/types.ast.json"
-"$repo/bin/beagle-ast" "$kernel_file" >"$scratch/kernel.ast.json"
-"$repo/bin/beagle-ast" "$probe_file" >"$scratch/probe.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$types_file" >"$scratch/types.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$kernel_file" >"$scratch/kernel.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$probe_file" >"$scratch/probe.ast.json"
 types_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/types.ast.json")"
 kernel_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \

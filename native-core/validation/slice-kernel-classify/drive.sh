@@ -28,8 +28,10 @@ done
 [[ -f "$probe_file" ]] || die "probe is unavailable: $probe_file"
 mkdir -p "$art" "$scratch/generated"
 
-"$repo/bin/beagle-ast" "$source_file" >"$scratch/kernel.ast.json"
-"$repo/bin/beagle-ast" "$probe_file" >"$scratch/probe.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$source_file" >"$scratch/kernel.ast.json"
+"$repo/bin/beagle-ast" --module-root "store/src=$store_checkout/src" \
+  "$probe_file" >"$scratch/probe.ast.json"
 source_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/kernel.ast.json")"
 probe_logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \

@@ -20,7 +20,7 @@ run_case() {
   (
     cd "$cwd"
     store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
-    source="$store_checkout/src/fram/types.bgl"
+    source="$store_checkout/src/store/types.bgl"
     mkdir -p "$scratch"
     "$repo/bin/beagle-facts" --module-root "store/src=$store_checkout/src" \
       "$source" >"$scratch/facts.raw"

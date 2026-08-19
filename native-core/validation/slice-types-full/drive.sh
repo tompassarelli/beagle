@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drive store:src/fram/types.bgl through the whole native pipeline and emit the
+# Drive store:src/store/types.bgl through the whole native pipeline and emit the
 # C17 projection of its record ABI.
 #
 #   beagle-ast -> source facts -> frozen source program -> typed program
@@ -20,7 +20,7 @@ if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]]; then
 fi
 art="${NATIVE_SLICE_ARTIFACTS:-}"
 store_checkout="$("$repo/native-core/validation/store-checkout.sh")"
-src="$store_checkout/src/fram/types.bgl"
+src="$store_checkout/src/store/types.bgl"
 module_root="store/src=$store_checkout/src"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-types-full.XXXXXX")"
 [[ -n "$art" ]] || art="$scratch/artifacts"
@@ -54,7 +54,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
 bb -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
-  (native.slice/emit-slice! \"$scratch/types.facts\" \"fram.types\"
+  (native.slice/emit-slice! \"$scratch/types.facts\" \"store.types\"
     \"$logical\" \"$art\" \"native-slice-types-full-v0\" \"$abi\"))"
 
 cat "$art/report.txt"
