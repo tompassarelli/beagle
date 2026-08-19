@@ -8993,12 +8993,15 @@
     (if (= 0 (count vector-variants))
       (fail-result state
         "TODO-NATIVE-NTH-OPERAND: nth needs a native vector or a union carrying one")
-      (let [(element-type (U core/NativeId Nil))
+      (let [(arm-vector (U core/NativeId Nil))
             (core/typevariant-payload-type (nth vector-variants 0))]
-        (if (nil? element-type)
+        (if (nil? arm-vector)
           (fail-result state
             "TODO-NATIVE-NTH-RESULT: union vector arms have no element type")
-          (let [(element-type core/NativeId) element-type
+          ;; The arm payload is the vector; an indexed read answers its element.
+          (let [(vector-payload core/NativeId) arm-vector
+                (element-type core/NativeId)
+                (vector-element-of types vector-payload)
                 (same-elements Bool)
                 (every?
                   (fn [(variant core/TypeVariant)] Bool
@@ -9006,7 +9009,7 @@
                           (core/typevariant-payload-type variant)]
                       (if (nil? payload)
                         false
-                        (same-id? element-type payload))))
+                        (same-id? vector-payload payload))))
                   vector-variants)]
             (if (not same-elements)
               (fail-result state
