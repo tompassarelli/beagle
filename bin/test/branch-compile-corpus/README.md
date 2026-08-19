@@ -51,7 +51,7 @@ focused unit gate then extracts exact compiler payloads, selects the expected
 
 The tracked oracle records:
 
-- exact module source and true module-interface-v8 digests from `ast-bundle`;
+- exact module source and true module-interface-v9 digests from `ast-bundle`;
 - emitted semantic-unit IDs, provenance-free content digests, and resolved
   direct read sets from `source.facts`;
 - source, typed, native, and epoch frozen-stage digests;
@@ -98,8 +98,25 @@ not a production incremental cache.
 
 ## Current verdict
 
-The corrected oracle was measured on semantic-unit compiler checkpoint
-`b63f8f0a43391541598eac77d0830370c799a335`.
+The oracle was re-minted to carry the v9 module interface schema introduced by
+`55f3fbe848fdfd19a733e13c5e66ff66cacb44b0`, which raised
+`INTERFACE-SCHEMA-VERSION` from 8 to 9 and added an effects field to every
+interface binding. The schema version is bound into the interface digest and
+every module publishes bindings, so every module's interface digest moved and
+carried the derived stage, bundle, `source.facts`, and frozen native-program
+digests with it. Module sources, semantic-unit identities, contents and read
+sets, function identities and encodings, and the emitted C17 were all
+unaffected.
+
+The three assertions below are unchanged from the original measurement at
+`b63f8f0a43391541598eac77d0830370c799a335`: `churn.tsv` — which case changes
+which identity — is byte-identical across the re-mint, so only absolute digest
+values moved, never the invalidation relation this corpus exists to freeze.
+
+The recorded identities deliberately bind no compiler commit (commit-bound
+receipt and generation hashes go to the ignored `context.tsv`), so a change
+elsewhere in the compiler tree does not by itself move them. Only a change that
+reaches the recorded digests does.
 
 - Comment/layout changes exact source provenance only at the semantic-unit
   layer: all nine unit IDs, content digests, and read sets remain identical.
