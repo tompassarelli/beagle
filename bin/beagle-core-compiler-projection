@@ -128,23 +128,49 @@ fi
 # downstream of emission belongs here — the build driver, the emission manager
 # and the finalizer consume the projection, so they cannot change its bytes.
 write_input_manifest() {
-    local destination="$1" relative
+    local destination="$1" relative digest_index input_index
+    local -a inputs present_inputs present_flags digests
+    inputs=("${sources[@]}"
+            bin/beagle-core-compiler-projection
+            bin/beagle-build-all
+            bin/_beagle-racket
+            native-core/bin/run-bounded
+            share/targets.sh flake.nix flake.lock)
+    # Presence is decided once and the hash list is built from that same
+    # decision, so a file appearing or vanishing mid-scan cannot slide the
+    # digests out of step with the names they label. Every build asks for this
+    # key before deciding whether the multi-minute construction is needed, and
+    # hashing a file at a time cost three processes each.
+    present_inputs=()
+    present_flags=()
+    for relative in "${inputs[@]}"; do
+        if [[ -f "$root/$relative" ]]; then
+            present_flags+=(1)
+            present_inputs+=("$root/$relative")
+        else
+            present_flags+=(0)
+        fi
+    done
+    digests=()
+    if ((${#present_inputs[@]} > 0)); then
+        mapfile -t digests < <(sha256sum "${present_inputs[@]}" | awk '{print $1}')
+        ((${#digests[@]} == ${#present_inputs[@]})) || {
+            echo "beagle core compiler projection: hashed ${#digests[@]} of ${#present_inputs[@]} key inputs" >&2
+            exit 2
+        }
+    fi
     {
         printf 'beagle-core-compiler-projection-input/v2\n'
-        for relative in "${sources[@]}" \
-                        bin/beagle-core-compiler-projection \
-                        bin/beagle-build-all \
-                        bin/_beagle-racket \
-                        native-core/bin/run-bounded \
-                        share/targets.sh flake.nix flake.lock; do
+        digest_index=0
+        for input_index in "${!inputs[@]}"; do
             # An absent input is its own key value: dropping a file must move
             # the key rather than silently reproduce the key it had when
             # present.
-            if [[ -f "$root/$relative" ]]; then
-                printf '%s %s\n' "$relative" \
-                    "$(sha256sum "$root/$relative" | awk '{print $1}')"
+            if [[ "${present_flags[$input_index]}" == 1 ]]; then
+                printf '%s %s\n' "${inputs[$input_index]}" "${digests[$digest_index]}"
+                digest_index=$((digest_index + 1))
             else
-                printf '%s absent\n' "$relative"
+                printf '%s absent\n' "${inputs[$input_index]}"
             fi
         done
         find "$root/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |

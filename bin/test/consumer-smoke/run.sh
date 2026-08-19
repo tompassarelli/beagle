@@ -87,4 +87,13 @@ grep -Fqx 'result PASS' "$store_artifact/report.txt" ||
   die "Store-shaped Atom fixture native report did not pass"
 printf 'consumer smoke: Store-shaped Atom native completeness ok\n'
 
+# Two consumers building the same thing at once is the ordinary case, not an
+# exotic one, and the Core result cache lock is what decides whether the second
+# one waits for the first build's whole compile. This runs here because the
+# cache above is already warm: the gate needs a real compile to probe, not a
+# multi-minute compiler projection.
+BEAGLE_CORE_LOCK_GATE_BEAGLE="$beagle_cli" \
+  "$repo/native-core/tests/core_result_lock_gate.sh" "$cache_root" ||
+  die "concurrent Core builds contend on the result cache lock"
+
 echo "consumer smoke: PASS"

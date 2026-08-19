@@ -238,6 +238,35 @@ run_phase_leaf() {
     return "$rc"
 }
 
+# The Core result cache lock guards two SEPARATE critical sections, not one:
+# the pre-build lookup (which retires a corrupt entry in place) and each
+# publication (which renames a validated staging tree into its final name).
+# It used to be taken for the lookup and never released on any path, so one
+# `exec {fd}>` held it until the process exited. A Wasm build always reaches
+# the lookup, because `wasm_selected` bypasses the alias fast path above it, so
+# a cold Wasm build held the lock through materialization and any same-key
+# sibling waited out the whole `-w` window and then died. Each section now
+# takes it and gives it back, and a publication that finds a peer's identical
+# entry already in place validates and adopts it instead of failing.
+core_result_lock_fd=""
+core_result_lock_held=0
+acquire_core_result_lock() {
+    local phase="$1"
+    [[ -n "$core_result_lock_fd" ]] || return 0
+    [[ "$core_result_lock_held" == 0 ]] || return 0
+    run_phase_leaf "$phase" "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
+        "$core_result_lock_fd" ||
+        die "timed out acquiring the Core result cache lock ($phase)"
+    core_result_lock_held=1
+}
+release_core_result_lock() {
+    [[ -n "$core_result_lock_fd" ]] || return 0
+    [[ "$core_result_lock_held" == 1 ]] || return 0
+    core_result_lock_held=0
+    flock -u "$core_result_lock_fd"
+}
+
 out=""
 abi="lp64"
 materializers=()
@@ -551,34 +580,67 @@ core_modules=()
 mapfile -t core_modules < <("$CORE_COMPILER_PROJECTION" --list-sources)
 [[ ${#core_modules[@]} -gt 0 ]] || die "Core compiler projection source list is empty"
 
+# One `sha256sum` for a whole list of files, one digest per line in ARGUMENT
+# ORDER, so a caller can zip the digests back onto its own list. Hashing a file
+# at a time through a command substitution costs three processes each; a build
+# identity covers 26 such files and is re-derived on every revalidation round,
+# which is where most of a warm rebuild's process count came from. The digests
+# are identical either way — this changes how many processes read the files,
+# never which files are read.
+sha256_digests_in_order() {
+    sha256sum "$@" | awk '{ print $1 }'
+}
+
 # Every tracked file that can change emitted bytes is hashed here by content,
 # so a modified worktree misses on the file it modified instead of being locked
 # out of the cache wholesale. `native-core/shim/*` is deliberately absent: those
 # bytes are restaged from the worktree on every run including a cache hit, and
 # nothing reads them during emission, so they can never be served stale.
 cache_key_material() {
-    local relative
-    for relative in "${core_modules[@]}" \
-                    bin/beagle-build-core \
-                    bin/beagle-core-compiler-projection \
-                    bin/beagle-build-all \
-                    bin/beagle-build \
-                    bin/_beagle-racket \
-                    bin/_beagle-source-id \
-                    native-core/bin/emit-workers \
-                    native-core/bin/run-bounded \
-                    native-core/bin/run-bounded.rkt \
-                    native-core/validation/build-finalize.clj \
-                    share/targets.sh \
-                    flake.nix \
-                    flake.lock; do
+    local relative digest_index input_index
+    local -a key_inputs present_inputs present_flags digests
+    key_inputs=("${core_modules[@]}"
+                bin/beagle-build-core
+                bin/beagle-core-compiler-projection
+                bin/beagle-build-all
+                bin/beagle-build
+                bin/_beagle-racket
+                bin/_beagle-source-id
+                native-core/bin/emit-workers
+                native-core/bin/run-bounded
+                native-core/bin/run-bounded.rkt
+                native-core/validation/build-finalize.clj
+                share/targets.sh
+                flake.nix
+                flake.lock)
+    # Presence is decided ONCE and the hash list is built from that same
+    # decision, so a file appearing or vanishing mid-scan cannot slide the
+    # digests out of step with the names they label.
+    present_inputs=()
+    present_flags=()
+    for relative in "${key_inputs[@]}"; do
+        if [[ -f "$BEAGLE_DIR/$relative" ]]; then
+            present_flags+=(1)
+            present_inputs+=("$BEAGLE_DIR/$relative")
+        else
+            present_flags+=(0)
+        fi
+    done
+    digests=()
+    if ((${#present_inputs[@]} > 0)); then
+        mapfile -t digests < <(sha256_digests_in_order "${present_inputs[@]}")
+        ((${#digests[@]} == ${#present_inputs[@]})) ||
+            die "cache key hashing returned ${#digests[@]} digests for ${#present_inputs[@]} inputs"
+    fi
+    digest_index=0
+    for input_index in "${!key_inputs[@]}"; do
         # An absent input is its own key value, so deleting one moves the key
         # rather than failing the build.
-        if [[ -f "$BEAGLE_DIR/$relative" ]]; then
-            printf '%s %s\n' "$relative" \
-                "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
+        if [[ "${present_flags[$input_index]}" == 1 ]]; then
+            printf '%s %s\n' "${key_inputs[$input_index]}" "${digests[$digest_index]}"
+            digest_index=$((digest_index + 1))
         else
-            printf '%s absent\n' "$relative"
+            printf '%s absent\n' "${key_inputs[$input_index]}"
         fi
     done
     find "$BEAGLE_DIR/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
@@ -658,32 +720,60 @@ write_toolchain_identity() {
     printf '%s' "$toolchain_identity_memo"
 }
 
+# The tools every build identity names, hashed in one process instead of one
+# command substitution each. Both identity manifests emit this same block.
+identity_tools=("$PROJECTOR" "$AST_VERIFIER" "$MODULE_SOURCE_ROOT_CLI"
+                "$BIN/beagle-ast")
+write_identity_tool_lines() {
+    local tool_index
+    local -a digests
+    mapfile -t digests < <(sha256_digests_in_order "${identity_tools[@]}")
+    ((${#digests[@]} == ${#identity_tools[@]})) ||
+        die "tool hashing returned ${#digests[@]} digests for ${#identity_tools[@]} tools"
+    for tool_index in "${!identity_tools[@]}"; do
+        printf 'tool %q %s\n' "${identity_tools[$tool_index]#"$BEAGLE_DIR/"}" \
+            "${digests[$tool_index]}"
+    done
+}
+
+# The two build identities -- the early one, which names what is known before
+# the compiler projection exists, and the whole-result one -- differ only in
+# their header. Everything from the compiler digests down to the materializer
+# list was written out twice, in two functions a thousand lines apart, and a key
+# input added to one of them and missed in the other is exactly the
+# under-inclusion that makes a cache hit unsound. There is now one copy of each
+# shared half, so an input cannot land in one identity and not the other.
+write_identity_compiler_lines() {
+    printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
+    if [[ -n "$native_compiler_digest" ]]; then
+        printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
+    fi
+}
+
+write_identity_selection_lines() {
+    local index
+    printf 'abi %q\nsimd %s\n' "$abi" "$simd_required"
+    write_identity_tool_lines
+    write_toolchain_identity
+    for index in "${!source_ids[@]}"; do
+        printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
+            "${source_digest_befores[$index]}"
+    done
+    for index in "${!entries[@]}"; do
+        printf 'entry %06d %q\n' "$index" "${entries[$index]}"
+    done
+    for index in "${!materializers[@]}"; do
+        printf 'materializer %06d %q\n' "$index" "${materializers[$index]}"
+    done
+}
+
 write_core_result_early_manifest() {
-    local destination="$1" index tool_path
+    local destination="$1"
     {
         printf 'beagle-core-result-early-input/v1\n'
-        printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
-        if [[ -n "$native_compiler_digest" ]]; then
-            printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
-        fi
+        write_identity_compiler_lines
         printf 'compiler-commit %s\n' "$compiler_commit"
-        printf 'abi %q\nsimd %s\n' "$abi" "$simd_required"
-        for tool_path in "$PROJECTOR" "$AST_VERIFIER" \
-                         "$MODULE_SOURCE_ROOT_CLI" "$BIN/beagle-ast"; do
-            printf 'tool %q %s\n' "${tool_path#"$BEAGLE_DIR/"}" \
-                "$(sha256sum "$tool_path" | awk '{print $1}')"
-        done
-        write_toolchain_identity
-        for index in "${!source_ids[@]}"; do
-            printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
-                "${source_digest_befores[$index]}"
-        done
-        for index in "${!entries[@]}"; do
-            printf 'entry %06d %q\n' "$index" "${entries[$index]}"
-        done
-        for index in "${!materializers[@]}"; do
-            printf 'materializer %06d %q\n' "$index" "${materializers[$index]}"
-        done
+        write_identity_selection_lines
     } >"$destination"
 }
 
@@ -695,8 +785,14 @@ write_core_checkpoint_identity() {
     grep -v '^materializer [0-9]' "$result_identity" >"$destination"
 }
 
-validate_core_result_early_closure() {
-    local expected_input="$1" current_input="$2" source_index current_digest
+# What both closure revalidations prove before they re-derive their manifest:
+# every snapshotted source still hashes to what it hashed to, HEAD has not
+# moved, and the compiler tree still hashes to the key this build committed to.
+# This is re-derived, never memoized: a revalidation that trusts an earlier
+# answer proves nothing, and each caller runs it on the far side of a lock wait
+# that another build could have used to change the tree.
+validate_identity_closure_prefix() {
+    local source_index current_digest
     for source_index in "${!source_snapshot_paths[@]}"; do
         current_digest="$(sha256sum "${source_snapshot_paths[$source_index]}" |
             awk '{print $1}')"
@@ -706,7 +802,12 @@ validate_core_result_early_closure() {
     [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
        "$compiler_commit" ]] || return 1
     [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
-       "$compiler_source_digest" ]] || return 1
+       "$compiler_source_digest" ]]
+}
+
+validate_core_result_early_closure() {
+    local expected_input="$1" current_input="$2"
+    validate_identity_closure_prefix || return 1
     write_core_result_early_manifest "$current_input"
     cmp -s "$expected_input" "$current_input"
 }
@@ -1212,49 +1313,21 @@ if [[ -n "$native_compiler_bin" ]]; then
 fi
 
 write_core_result_input_manifest() {
-    local destination="$1" index tool_path
+    local destination="$1"
     {
         printf 'beagle-core-result-input/v1\n'
-        printf 'compiler-source-sha256 %s\n' "$compiler_source_digest"
-        if [[ -n "$native_compiler_digest" ]]; then
-            printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
-        fi
+        write_identity_compiler_lines
         printf 'compiler-projection-sha256 %s\n' "$compiled_digest"
         printf 'compiler-commit %s\n' "$compiler_commit"
         printf 'source-facts-sha256 %s\n' \
             "$(sha256sum "$facts" | awk '{print $1}')"
-        printf 'abi %q\nsimd %s\n' "$abi" "$simd_required"
-        for tool_path in "$PROJECTOR" "$AST_VERIFIER" \
-                         "$MODULE_SOURCE_ROOT_CLI" "$BIN/beagle-ast"; do
-            printf 'tool %q %s\n' "${tool_path#"$BEAGLE_DIR/"}" \
-                "$(sha256sum "$tool_path" | awk '{print $1}')"
-        done
-        write_toolchain_identity
-        for index in "${!source_ids[@]}"; do
-            printf 'source %06d %q %s\n' "$index" "${source_ids[$index]}" \
-                "${source_digest_befores[$index]}"
-        done
-        for index in "${!entries[@]}"; do
-            printf 'entry %06d %q\n' "$index" "${entries[$index]}"
-        done
-        for index in "${!materializers[@]}"; do
-            printf 'materializer %06d %q\n' "$index" "${materializers[$index]}"
-        done
+        write_identity_selection_lines
     } >"$destination"
 }
 
 validate_core_result_input_closure() {
-    local expected_input="$1" current_input="$2" source_index current_digest
-    for source_index in "${!source_snapshot_paths[@]}"; do
-        current_digest="$(sha256sum "${source_snapshot_paths[$source_index]}" |
-            awk '{print $1}')"
-        [[ "$current_digest" == "${source_snapshot_digests[$source_index]}" ]] ||
-            return 1
-    done
-    [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
-       "$compiler_commit" ]] || return 1
-    [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
-       "$compiler_source_digest" ]] || return 1
+    local expected_input="$1" current_input="$2" current_digest
+    validate_identity_closure_prefix || return 1
     current_digest="$(
         cd "$compiled"
         find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum |
@@ -1263,6 +1336,19 @@ validate_core_result_input_closure() {
     [[ "$current_digest" == "$compiled_digest" ]] || return 1
     write_core_result_input_manifest "$current_input"
     cmp -s "$expected_input" "$current_input"
+}
+
+# A content stamp over an entire staged directory: every file's path and bytes,
+# in one deterministic order, folded to one digest. Cheap enough to take twice
+# around a lock that a full re-verification cannot be.
+staged_tree_stamp() {
+    local root="$1"
+    (
+        cd "$root"
+        find . -mindepth 1 -type f -print0 |
+            LC_ALL=C sort -z |
+            xargs -0 -r sha256sum
+    ) | sha256sum | awk '{print $1}'
 }
 
 write_core_result_artifact_manifest() {
@@ -1694,10 +1780,7 @@ if [[ "$core_result_cache_enabled" == 1 &&
         "$cache_root/.result-locks" "$cache_root/.result-tmp" \
         "$cache_root/.checkpoint-tmp"
     exec {core_result_lock_fd}>"$cache_root/.result-locks/$core_result_key.lock"
-    run_phase_leaf core-result-cache-lock \
-        "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
-        flock -x -w "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}" \
-        "$core_result_lock_fd" || die "timed out acquiring the Core result cache lock"
+    acquire_core_result_lock core-result-cache-lock
     if [[ "$core_checkpoint_early_hit" == 1 ]]; then
         validate_core_result_early_closure "$core_result_early_input" \
             "$work/core-checkpoint-early-input.before-result-lookup" ||
@@ -1794,6 +1877,12 @@ elif [[ "$core_result_cache_hit" != 1 ]]; then
         echo "beagle build: core-checkpoint BYPASS checkpoint-ineligible" >&2
     fi
 fi
+
+# End of the lookup critical section: every read, every corruption retirement,
+# and every alias retirement the lock exists to serialize has happened. What
+# follows is compilation, which is exactly what a sibling must not be made to
+# wait behind. Each publication takes the lock again for its own rename.
+release_core_result_lock
 
 if [[ "$core_result_cache_hit" != 1 ]]; then
 core_c17_attestation_report=""
@@ -3725,6 +3814,7 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
       "$core_checkpoint_cache_hit" != 1 &&
       -f "$work/core-checkpoint-stage/frozen-native-stage.wire-v1" &&
       -f "$work/core-checkpoint-stage/qbe-frozen-native-stage.wire-v1" ]]; then
+    acquire_core_result_lock core-checkpoint-publish-lock
     validate_core_result_input_closure "$core_result_input" \
         "$work/core-checkpoint-input.before-publish" ||
         die "Core checkpoint input closure changed before publication"
@@ -3785,14 +3875,29 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
         die "new Core checkpoint failed wire validation"
     sync -f "$core_checkpoint_staging"
     core_checkpoint_entry="$core_checkpoint_root/$core_checkpoint_key"
-    [[ ! -e "$core_checkpoint_entry" ]] ||
-        die "Core checkpoint appeared while its result lock was held"
-    mv "$core_checkpoint_staging" "$core_checkpoint_entry"
-    core_checkpoint_staging=""
-    sync -f "$core_checkpoint_root"
+    # A peer that built the identical checkpoint while this build compiled has
+    # already published it under this same content key. Adopting its entry is
+    # exactly a cache hit: the key IS the digest of the input manifest, and the
+    # entry is put through the same full structural and wire validation a
+    # lookup applies before it is trusted.
+    if [[ -e "$core_checkpoint_entry" ]]; then
+        validate_core_checkpoint_entry "$core_checkpoint_entry" \
+            "$core_checkpoint_input" "$core_checkpoint_key" ||
+            die "Core checkpoint appeared under its publication lock and did not validate"
+        validate_core_checkpoint_wire "$core_checkpoint_entry" \
+            "$work/core-checkpoint-peer-wire.log" ||
+            die "Core checkpoint appeared under its publication lock and did not decode"
+        rm -rf -- "${core_checkpoint_staging:?}"
+        core_checkpoint_staging=""
+        echo "beagle build: core-checkpoint PUBLISHED-BY-PEER $core_checkpoint_key" >&2
+    else
+        mv "$core_checkpoint_staging" "$core_checkpoint_entry"
+        core_checkpoint_staging=""
+        sync -f "$core_checkpoint_root"
+        echo "beagle build: core-checkpoint PUBLISHED $core_checkpoint_key" >&2
+    fi
     record_core_checkpoint_wire_attestation "$core_checkpoint_entry" ||
         die "failed to record the published Core checkpoint wire PASS"
-    echo "beagle build: core-checkpoint PUBLISHED $core_checkpoint_key" >&2
 
     validate_core_result_early_closure "$core_result_early_input" \
         "$work/core-result-early-input.before-checkpoint-alias-publish" ||
@@ -3839,6 +3944,7 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
         core_checkpoint_alias_staging=""
     fi
     flock -u "$core_checkpoint_alias_publish_lock_fd"
+    release_core_result_lock
 fi
 
 if [[ $runner_rc -ne 0 ]]; then
@@ -4075,6 +4181,7 @@ mapfile -t staged_manifest_digests <"$work/staged-manifest.digest"
     die "staged verifier returned malformed manifest identity"
 marker_digest="${staged_manifest_digests[0]}"
 printf '%s\n' "$marker_digest" >"$install/build.manifest.sha256"
+staged_stamp_before="$(staged_tree_stamp "$install")"
 
 exec {publish_lock_fd}>"$out/.beagle-publish.lock"
 # flock on an already-open fd is one execve that forks nothing: a leaf phase.
@@ -4086,16 +4193,17 @@ for source_index in "${!source_snapshot_paths[@]}"; do
        "${source_snapshot_digests[$source_index]}" ]] ||
         die "source changed while waiting for the output commit lock"
 done
-run_phase_leaf locked-staged-verifier "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
-    bb -cp "$compiled" "$FINALIZER" verify-staged "$install" \
-    >"$work/locked-manifest.digest" 2>"$work/locked-verifier.log" || {
-        sed -n '1,120p' "$work/locked-verifier.log" >&2
-        die "staged generation changed before publication"
-    }
-mapfile -t locked_manifest_digests <"$work/locked-manifest.digest"
-[[ ${#locked_manifest_digests[@]} -eq 1 &&
-   "${locked_manifest_digests[0]}" == "$marker_digest" ]] ||
-    die "staged manifest identity changed before publication"
+# The staged tree was fully verified above -- manifest name rules, every
+# artifact digest, the native receipt chain, the C17 receipt. This check exists
+# for one narrower question: did anything change while this build waited on the
+# output commit lock? Re-running the whole verifier answered it by re-deriving
+# a verdict that is a pure function of these bytes, at the cost of a second
+# babashka boot loading the finalizer. Comparing the tree's own content stamp
+# answers the same question directly and is strictly stronger: identical bytes
+# force the identical verdict, and the stamp also covers staged files the
+# manifest does not name.
+[[ "$(staged_tree_stamp "$install")" == "$staged_stamp_before" ]] ||
+    die "staged generation changed before publication"
 
 if [[ "$core_result_cache_enabled" == 1 ]]; then
     if [[ "$core_result_early_hit" == 1 ||
@@ -4110,6 +4218,7 @@ if [[ "$core_result_cache_enabled" == 1 ]]; then
     fi
 fi
 if [[ "$core_result_publish_pending" == 1 ]]; then
+    acquire_core_result_lock core-result-publish-lock
     core_result_staging="$(mktemp -d \
         "$cache_root/.result-tmp/$core_result_key.XXXXXX")"
     cp -- "$core_result_input" "$core_result_staging/input.manifest"
@@ -4123,11 +4232,22 @@ if [[ "$core_result_publish_pending" == 1 ]]; then
         "$artifact_manifest_digest" >"$core_result_staging/READY"
     validate_core_result_entry "$core_result_staging" "$core_result_input" \
         "$core_result_key" || die "new Core result cache entry failed validation"
-    [[ ! -e "$core_result_entry" ]] ||
-        die "Core result cache entry appeared while its lock was held"
-    mv "$core_result_staging" "$core_result_entry"
+    # As for the checkpoint above: a peer holding the identical key may have
+    # published first. Its entry is validated against THIS build's own input
+    # manifest and key before it is adopted, which is the same proof a cache
+    # hit rests on.
+    if [[ -e "$core_result_entry" ]]; then
+        validate_core_result_entry "$core_result_entry" "$core_result_input" \
+            "$core_result_key" ||
+            die "Core result cache entry appeared under its publication lock and did not validate"
+        rm -rf -- "${core_result_staging:?}"
+        echo "beagle build: core-result-cache PUBLISHED-BY-PEER $core_result_key" >&2
+    else
+        mv "$core_result_staging" "$core_result_entry"
+    fi
     core_result_staging=""
     core_result_publish_pending=0
+    release_core_result_lock
 fi
 
 if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false &&
