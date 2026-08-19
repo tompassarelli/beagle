@@ -66,15 +66,6 @@
     (list (p 'String))
     #f
     (type-union (list (p 'Int) (p 'Nil))))
-   ;; Native Core dispatches record and union shapes with explicit `instance?`
-   ;; tests rather than `match` (see native/fold_c17.bclj), so the contract is
-   ;; core vocabulary, not a hosted-only borrowing. It mirrors the Clojure
-   ;; target's declaration exactly.
-   'instance?
-   (type-fn
-    (list (p 'Any) (p 'Any))
-    #f
-    (p 'Bool))
    (q 'host.fs 'path-kind)
    (type-fn
     (list (p 'String))
