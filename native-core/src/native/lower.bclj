@@ -14696,6 +14696,157 @@
               exit-id [])
             header-output result-type false))))))
 
+;; No native instruction merges two maps. The key and value carriers of an
+;; insertion-ordered map are index-aligned, so merge walks them together and
+;; assocs each entry onto the accumulator; a later map therefore wins.
+(defn lower-map-merge-one
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (accumulator core/NativeId)
+   (map-type core/NativeId)
+   (source-id core/NativeId)]
+  ExprResultV0
+  (let [(types (Vec core/TypeDef)) (bodyenvv0-types env)
+        (key-type core/NativeId) (map-key-of types map-type)
+        (value-type core/NativeId) (map-value-of types map-type)
+        (key-vector-type (U core/NativeId Nil)) (vector-type-of types key-type)
+        (value-vector-type (U core/NativeId Nil))
+        (vector-type-of types value-type)
+        (equality (U core/ConcreteEqualityV0 Nil))
+        (map-key-equality-for types key-type)]
+    (cond
+      (nil? key-vector-type)
+      (fail-result state
+        "TODO-NATIVE-MERGE-KEY-VECTOR: the program declares no Vec carrier for map keys")
+
+      (nil? value-vector-type)
+      (fail-result state
+        "TODO-NATIVE-MERGE-VALUE-VECTOR: the program declares no Vec carrier for map values")
+
+      (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-MERGE-KEY-EQUALITY: merge needs closed concrete key equality")
+
+      :else
+      (let [(key-vector-id core/NativeId) (state-id state owner "merge-keys")
+            (with-keys BodyStateV0)
+            (state-emit (state-bump state)
+              (core/->MapKeysInstructionV0
+                (core/->SsaValueV0 key-vector-id key-vector-type)
+                source-id (arena-value-id owner)))
+            (value-vector-id core/NativeId)
+            (state-id with-keys owner "merge-values")
+            (with-values BodyStateV0)
+            (state-emit (state-bump with-keys)
+              (core/->MapValuesInstructionV0
+                (core/->SsaValueV0 value-vector-id value-vector-type)
+                source-id (arena-value-id owner)))
+            (length-id core/NativeId) (state-id with-values owner "merge-length")
+            (zero-id core/NativeId) (state-id with-values owner "merge-zero")
+            (header-id core/NativeId) (state-id with-values owner "merge-header")
+            (body-id core/NativeId) (state-id with-values owner "merge-body")
+            (exit-id core/NativeId) (state-id with-values owner "merge-exit")
+            (header-index core/NativeId) (state-id with-values owner "merge-index")
+            (header-output core/NativeId) (state-id with-values owner "merge-output")
+            (prepared BodyStateV0)
+            (state-emit
+              (state-emit (state-bump with-values)
+                (core/->VecLengthInstruction
+                  (core/->SsaValueV0 length-id (int-type-id)) key-vector-id))
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            (entered BodyStateV0)
+            (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator header-id [zero-id accumulator]))
+              header-id
+              [(core/->Parameter header-index (int-type-id))
+               (core/->Parameter header-output map-type)])
+            (has-entry core/NativeId) (state-id entered owner "merge-has-entry")
+            (compared BodyStateV0)
+            (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-entry (bool-type-id))
+                (core/->CompareLtI64V0 true) header-index length-id))
+            (branched BodyStateV0)
+            (state-open-block
+              (state-close compared
+                (core/->BranchTerminator has-entry body-id exit-id))
+              body-id [])
+            (entry-key core/NativeId) (state-id branched owner "merge-entry-key")
+            (with-key BodyStateV0)
+            (state-emit (state-bump branched)
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 entry-key key-type)
+                key-vector-id header-index))
+            (entry-value core/NativeId)
+            (state-id with-key owner "merge-entry-value")
+            (with-value BodyStateV0)
+            (state-emit (state-bump with-key)
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 entry-value value-type)
+                value-vector-id header-index))
+            (next-output core/NativeId)
+            (state-id with-value owner "merge-next-output")
+            (assoced BodyStateV0)
+            (state-emit (state-bump with-value)
+              (core/->MapAssocInstructionV0
+                (core/->SsaValueV0 next-output map-type)
+                header-output entry-key entry-value
+                (arena-value-id owner) equality))
+            (one-id core/NativeId) (state-id assoced owner "merge-one")
+            (with-one BodyStateV0)
+            (state-emit (state-bump assoced)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 one-id (int-type-id))
+                (core/->I64Atom 1)))
+            (next-index ExprResultV0)
+            (lower-checked-arith with-one owner "+" header-index one-id)
+            (next-state BodyStateV0) (exprresultv0-state next-index)]
+        (if (state-blocked? next-state)
+          (dead-result next-state)
+          (->ExprResultV0
+            (state-open-block
+              (state-close (state-bump next-state)
+                (core/->JumpTerminator header-id
+                  [(exprresultv0-value-id next-index) next-output]))
+              exit-id [])
+            header-output map-type false))))))
+
+(defn lower-merge-values
+  [(env BodyEnvV0)
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (let [(map-type core/NativeId) (nth value-types 0)
+        (uniform Bool)
+        (loop [(position Int) 1]
+          (cond
+            (>= position (count value-types)) true
+            (same-id? (nth value-types position) map-type)
+            (recur (+ position 1))
+            :else false))]
+    (if (not uniform)
+      (fail-result state
+        "TODO-NATIVE-MERGE-OPERANDS: merge lowers closed maps that share one native type")
+      (loop [(position Int) 1
+             (current BodyStateV0) state
+             (holder core/NativeId) (nth values 0)]
+        (if (>= position (count values))
+          (->ExprResultV0 current holder map-type false)
+          (let [(merged ExprResultV0)
+                (lower-map-merge-one env owner current holder map-type
+                  (nth values position))]
+            (if (or (exprresultv0-terminated merged)
+                    (state-blocked? (exprresultv0-state merged)))
+              merged
+              (recur (+ position 1) (exprresultv0-state merged)
+                (exprresultv0-value-id merged)))))))))
+
 (defn lower-apply-call
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -18328,6 +18479,14 @@
                 (= "get" callee)
                 (fail-result current
                   "TODO-NATIVE-GET-OPERANDS: get lowers a closed map, key, and optional typed default")
+
+                (and (= "merge" callee) (> (count values) 0)
+                  (map-type? types (nth value-types 0)))
+                (lower-merge-values env owner current values value-types)
+
+                (= "merge" callee)
+                (fail-result current
+                  "TODO-NATIVE-MERGE-OPERANDS: merge lowers closed maps that share one native type")
 
                 (and (= "contains?" callee) (= 2 (count values))
                   (map-type? types (nth value-types 0)))
