@@ -1,0 +1,18 @@
+[package]
+name = "run-bounded"
+version = "0.1.0"
+edition = "2021"
+description = "Bounded process-tree supervisor for the Beagle build"
+license = "MIT OR Apache-2.0"
+
+# No dependencies on purpose: the kernel interfaces this needs are declared
+# directly, so the binary builds offline from tracked sources alone.
+[dependencies]
+
+[[bin]]
+name = "run-bounded"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
