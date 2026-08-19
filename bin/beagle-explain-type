@@ -2,7 +2,8 @@
 # beagle-explain-type: project the checker's inferred types back into surface.
 #
 # Usage:
-#   beagle-explain-type FILE [NAME] [--level clean|inferred|all]
+#   beagle-explain-type [--module-root LOGICAL=PHYSICAL]...
+#     FILE [NAME] [--level clean|inferred|all]
 #
 # clean    = the source as written (no types in the text)
 # inferred = source + `: T` on un-annotated let-bindings (inferred on demand)

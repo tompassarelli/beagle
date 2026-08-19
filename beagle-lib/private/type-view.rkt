@@ -11,7 +11,8 @@
 ;; pure function of the checked program. This is beagle's delaborator — the
 ;; inverse of elaboration (cf. Lean's PrettyPrinter/Delaborator).
 ;;
-;; CLI:  beagle-explain-type FILE [NAME] [--level clean|inferred|all]
+;; CLI:  beagle-explain-type [--module-root LOGICAL=PHYSICAL]...
+;;         FILE [NAME] [--level clean|inferred|all]
 
 (require racket/list
          racket/string
@@ -19,7 +20,10 @@
          "parse.rkt"
          "check.rkt"
          "types.rkt"
-         "ast.rkt")
+         "ast.rkt"
+         "module-overlay-check.rkt"
+         "module-source-root.rkt"
+         "module-source-root-cli.rkt")
 
 (provide explain-type)
 
@@ -180,17 +184,69 @@
 
 ;; --- entry ------------------------------------------------------------------
 
+;; A file whose requires cross module boundaries cannot be typed from itself
+;; alone: the checker needs the providers too. With --module-root declared, the
+;; view is taken from the same closed overlay check every other build entry
+;; point uses, and the target module's checked Program is selected out of it.
+;; Its Program is parsed from the snapshot's bytes, so syntax positions still
+;; index the file text exactly as the single-file route's do.
+;;
+;; Unlike the single-file route this is all-or-nothing: a closure that does not
+;; check yields no Programs at all, so the partial-view tolerance below cannot
+;; apply and the diagnostics are reported instead of being swallowed.
+(define (checked-closure-program path roots)
+  (define source-id (module-source-logical-id-for-path roots path))
+  (define closure
+    (resolve-module-source-closure
+     (list (module-source-input source-id path))
+     roots))
+  (define checked
+    (check-module-source-closure closure #:emit? #f #:capture-types? #t))
+  (unless (overlay-check-result-ok? checked)
+    (error
+     'beagle-explain-type
+     "module closure did not check~a~a"
+     (if (null? (overlay-check-result-diagnostics checked)) "" ":\n")
+     (string-join
+      (for/list ([diagnostic
+                  (in-list (overlay-check-result-diagnostics checked))])
+        (format "~a: ~a: ~a"
+                (or (overlay-diagnostic-source diagnostic) "<bundle>")
+                (overlay-diagnostic-phase diagnostic)
+                (overlay-diagnostic-message diagnostic)))
+      "\n")))
+  (define selected
+    (for/first ([module (in-list (overlay-check-result-modules checked))]
+                #:when (equal? (format "~a" (checked-overlay-module-source module))
+                               (format "~a" source-id)))
+      module))
+  (unless selected
+    (error
+     'beagle-explain-type
+     "source is absent from the checked closure: ~a"
+     source-id))
+  (checked-overlay-module-program selected))
+
 ;; Returns a string (the rendered view) or raises a user error.
-(define (explain-type path #:name [name #f] #:level [level "clean"] #:write? [write? #f])
+(define (explain-type path
+                      #:name [name #f]
+                      #:level [level "clean"]
+                      #:write? [write? #f]
+                      #:module-roots [module-roots '()])
   ;; Normalize CRLF->LF so substring offsets align with syntax-position
   ;; (Racket counts a CRLF as a single position). LF files are unchanged.
   (define text (regexp-replace* #rx"\r\n" (file->string path) "\n"))
-  (define stxs (read-beagle-syntax path))
-  (define prog (parse-program stxs #:source-path path))
-  ;; check WITH type capture (opt-in) to populate the per-node type table.
-  ;; Errors are tolerated — a file with a type error still yields partial
-  ;; inferred types.
-  (type-check-with-locs! prog (lambda (e stx) (void)) #:capture-types? #t)
+  (define prog
+    (cond
+      [(pair? module-roots) (checked-closure-program path module-roots)]
+      [else
+       (define stxs (read-beagle-syntax path))
+       (define p (parse-program stxs #:source-path path))
+       ;; check WITH type capture (opt-in) to populate the per-node type table.
+       ;; Errors are tolerated — a file with a type error still yields partial
+       ;; inferred types.
+       (type-check-with-locs! p (lambda (e stx) (void)) #:capture-types? #t)
+       p]))
   (define src-tbl (or (program-src-table prog) (make-hasheq)))
   (define ty-tbl  (or (program-type-table prog) (make-hasheq)))
   (define-values (form form-stx)
@@ -222,7 +278,11 @@
 ;; --- CLI --------------------------------------------------------------------
 
 (module+ main
-  (define args (vector->list (current-command-line-arguments)))
+  (define all-args (vector->list (current-command-line-arguments)))
+  ;; --module-root is parsed by the shared CLI helper, so its spelling,
+  ;; repeatability, and arity error are identical to every other entry point.
+  (define-values (module-roots args)
+    (parse-module-root-arguments all-args 'beagle-explain-type))
   ;; manual parse so --level works in any position
   (define level
     (let loop ([a args])
@@ -241,11 +301,15 @@
   (define eff-level (if (and write? (string=? level "clean")) "inferred" level))
   (cond
     [(null? positional)
-     (eprintf "usage: beagle-explain-type FILE [NAME] [--level clean|inferred|all] [--write]\n")
+     (eprintf "usage: beagle-explain-type [--module-root LOGICAL=PHYSICAL]... FILE [NAME] [--level clean|inferred|all] [--write]\n")
      (exit 2)]
     [else
      (define file (car positional))
      (define name (and (pair? (cdr positional)) (cadr positional)))
      (with-handlers ([exn:fail? (lambda (e) (eprintf "~a\n" (exn-message e)) (exit 1))])
-       (display (explain-type file #:name name #:level eff-level #:write? write?))
+       (display (explain-type file
+                              #:name name
+                              #:level eff-level
+                              #:write? write?
+                              #:module-roots module-roots))
        (newline))]))

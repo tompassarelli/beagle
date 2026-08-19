@@ -6,8 +6,10 @@
 
 (require rackunit
          racket/file
+         racket/path
          racket/string
          beagle/private/type-view
+         beagle/private/module-source-root
          beagle/private/parse)
 
 (define SRC
@@ -169,3 +171,96 @@
     (lambda (f)
       (check-exn #rx"--write supports only --level inferred"
                  (lambda () (explain-type f #:name "process" #:level "all" #:write? #t))))))
+
+;; --- multi-module trees (--module-root) -------------------------------------
+;;
+;; A binding whose type only exists across a module boundary cannot be viewed
+;; from the file alone: the checker needs the provider too. #:module-roots
+;; routes the view through the same closed overlay check the build uses.
+
+(define LEAF-TEXT
+  (string-append
+   "#lang beagle/clj\n"
+   "(ns viewlib.leaf)\n"
+   "(defn width [(value String)] Int 7)\n"))
+
+(define ENTRY-TEXT
+  (string-append
+   "#lang beagle/clj\n"
+   "(ns viewapp.entry (:require [viewlib.leaf :as leaf]))\n"
+   "(defn measure [(value String)] Int\n"
+   "  (let [w (leaf/width value)]\n"
+   "    (+ w 1)))\n"))
+
+;; Two roots, so repeatability is exercised the way a real tree uses it.
+(define (with-module-tree thunk)
+  (define tree (make-temporary-file "type-view-tree-~a" 'directory))
+  (define app-root (build-path tree "app"))
+  (define lib-root (build-path tree "lib"))
+  (define entry (build-path app-root "viewapp" "entry.bclj"))
+  (define leaf (build-path lib-root "viewlib" "leaf.bclj"))
+  (define (write-source! path text)
+    (make-directory* (path-only path))
+    (call-with-output-file path
+      (lambda (o) (display text o)) #:exists 'truncate/replace))
+  (dynamic-wind
+   (lambda ()
+     (write-source! entry ENTRY-TEXT)
+     (write-source! leaf LEAF-TEXT))
+   (lambda ()
+     (thunk entry
+            (list (parse-module-source-root (format "app/src=~a" app-root))
+                  (parse-module-source-root (format "lib/src=~a" lib-root)))))
+   (lambda () (delete-directory/files tree))))
+
+(test-case "without module roots a cross-module file cannot be viewed at all"
+  (with-module-tree
+    (lambda (entry roots)
+      (check-exn #rx"could not be resolved|module root"
+                 (lambda ()
+                   (explain-type entry #:name "measure" #:level "inferred"))))))
+
+(test-case "module roots resolve the provider and the cross-module type appears"
+  (with-module-tree
+    (lambda (entry roots)
+      (define out
+        (explain-type entry #:name "measure" #:level "inferred"
+                      #:module-roots roots))
+      ;; `w` is typed only because viewlib.leaf/width resolved.
+      (check-true (string-contains? out "(w Int) (leaf/width value)")
+                  (format "expected cross-module inferred type; got:\n~a" out))
+      ;; the authored boundary annotation is untouched
+      (check-true (string-contains? out "[(value String)]") out))))
+
+(test-case "clean view with module roots is still verbatim source"
+  (with-module-tree
+    (lambda (entry roots)
+      (define out
+        (explain-type entry #:name "measure" #:level "clean"
+                      #:module-roots roots))
+      (check-true (string-contains? ENTRY-TEXT out)
+                  "clean view must be verbatim source text")
+      (check-false (string-contains? out "(w Int)")
+                   "clean must NOT inject inferred annotations"))))
+
+(test-case "--write on a multi-module tree is additive, re-parses, and is idempotent"
+  (with-module-tree
+    (lambda (entry roots)
+      (define before (file->string entry))
+      (explain-type entry #:name "measure" #:level "inferred"
+                    #:write? #t #:module-roots roots)
+      (define after (file->string entry))
+      (check-true (string-contains? after "(w Int) (leaf/width value)") after)
+      ;; purely additive: unwrapping the one injected binder recovers the
+      ;; original file byte-for-byte — nothing else moved.
+      (check-equal? (regexp-replace* #px"\\(w Int\\)" after "w") before)
+      ;; still real surface, not a debug view. (parse-program is not the probe
+      ;; here: this file's requires cannot resolve without its closure, which
+      ;; is exactly what the re-run below exercises.)
+      (check-not-exn (lambda () (read-beagle-syntax entry)))
+      ;; promoting again changes nothing: the binding is now annotated. Getting
+      ;; here at all re-reads, re-parses, and re-checks the written file in its
+      ;; closure — a corrupt write-back could not survive it.
+      (explain-type entry #:name "measure" #:level "inferred"
+                    #:write? #t #:module-roots roots)
+      (check-equal? (file->string entry) after))))
