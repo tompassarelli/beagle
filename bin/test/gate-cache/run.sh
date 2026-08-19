@@ -407,6 +407,89 @@ out18f="$(dcross "$coD" dep)"
 [[ "$out18f" == *cached-green* ]]
 check ".dep: D replays again once the .dep matches; no negative poisoned it" $?
 
+# t19: a supervisor receipt path is a LOCATION, and a location is not an input.
+# run-bounded.rkt takes BEAGLE_BOUNDED_COMPLETION_RECEIPT as the file to write
+# its own `subtree-reaped-v0` outcome to, and beagle-test mints that path under
+# a per-run `mktemp -d`. Keyed by VALUE, every gate invocation therefore handed
+# every unit a path that had never existed before, so every identity was
+# single-use and no stored result was ever reachable again.
+#
+# PRESENCE still keys, because presence is read: wasm-materializer.rkt's
+# `run-owned/bounded` branches on whether the variable is set, forwarding an
+# inherited receipt to the command under test and taking a fresh one for its own
+# supervisor. Set and unset are genuinely different runs and must stay different
+# identities.
+#
+# Each negative below asserts the NEW OUTPUT as well as the absence of the
+# cached-green marker. A miss on its own proves nothing — a run that failed for
+# an unrelated reason also fails to say cached-green — so every "must miss"
+# check also requires the freshly changed input to appear in the output, which
+# only a real re-execution can produce.
+receipt_gate() {  # RECEIPT-PATH, or empty for unset
+    if [[ -n "$1" ]]; then
+        BEAGLE_BOUNDED_COMPLETION_RECEIPT="$1" \
+            "$WRAP" --domain test --id receipt --watch "$sandbox" -- \
+            "$sandbox/gate.sh" 2>&1
+    else
+        env -u BEAGLE_BOUNDED_COMPLETION_RECEIPT \
+            "$WRAP" --domain test --id receipt --watch "$sandbox" -- \
+            "$sandbox/gate.sh" 2>&1
+    fi
+}
+receipt_path() { printf '/tmp/beagle-test-phase.%s/tier-workers/worker-%s.receipt' "$1" "$2"; }
+
+out19="$(receipt_gate "$(receipt_path aaaaaa 0)")"
+[[ "$out19" == *"gate ok"* && "$out19" != *cached-green* ]]
+check "receipt: cold run under a receipt path stores" $?
+
+out19b="$(receipt_gate "$(receipt_path bbbbbb 9)")"
+[[ "$out19b" == *cached-green* && "$out19b" == *"gate ok"* ]]
+check "receipt: a never-before-seen receipt path replays the stored proof" $?
+
+out19c="$(receipt_gate "")"
+[[ "$out19c" != *cached-green* && "$out19c" == *"gate ok"* ]]
+check "receipt: UNSET is a different identity than set (presence still keys)" $?
+out19d="$(receipt_gate "")"
+[[ "$out19d" == *cached-green* ]]
+check "receipt: the unset identity earns its own proof" $?
+out19e="$(receipt_gate "$(receipt_path cccccc 2)")"
+[[ "$out19e" == *cached-green* ]]
+check "receipt: the unset run did not disturb the set identity" $?
+
+# Exactly two identities for this id, however many receipt paths were used: one
+# for set, one for unset. This is the direct anti-regression assertion — putting
+# the value back into the key material makes this count grow with the paths.
+receipt_identities="$(grep -lx 'id=receipt' "$BEAGLE_GATE_CACHE"/test/*/*/meta 2>/dev/null |
+                      xargs -r -n1 dirname | xargs -r -n1 dirname |
+                      LC_ALL=C sort -u | wc -l)"
+[[ "$receipt_identities" == 2 ]]
+check "receipt: many receipt paths collapse to two identities (set, unset)" $?
+
+# The teeth. Neutralizing the value must not have cost the closure any of its
+# record kinds, so change a real input of each kind and require a miss.
+echo "input-v2-receipt" > "$sandbox/data/in.txt"
+out19f="$(receipt_gate "$(receipt_path dddddd 1)")"
+[[ "$out19f" != *cached-green* && "$out19f" == *"input-v2-receipt"* ]]
+check "receipt: a changed file input still MISSES" $?
+
+receipt_gate "$(receipt_path eeeeee 3)" > /dev/null
+echo "fix3" > "$sandbox/fixtures/three.txt"
+out19g="$(receipt_gate "$(receipt_path ffffff 4)")"
+[[ "$out19g" != *cached-green* && "$out19g" == *three.txt* ]]
+check "receipt: a changed directory listing still MISSES" $?
+
+receipt_gate "$(receipt_path aaabbb 5)" > /dev/null
+rm -f "$sandbox/feature.flag"
+out19h="$(receipt_gate "$(receipt_path cccddd 6)")"
+[[ "$out19h" != *cached-green* && "$out19h" != *"flag on"* ]]
+check "receipt: a probed file that vanished still MISSES" $?
+
+# And the closure is still live in both directions: restore nothing, re-run, and
+# the newly proven state replays under yet another unseen receipt path.
+out19i="$(receipt_gate "$(receipt_path eeefff 7)")"
+[[ "$out19i" == *cached-green* ]]
+check "receipt: the newly earned proof replays under a fresh receipt path" $?
+
 echo
 if [[ $failures -gt 0 ]]; then
     echo "gate-cache tests: $failures FAILED"

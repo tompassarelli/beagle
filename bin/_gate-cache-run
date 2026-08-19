@@ -264,11 +264,27 @@ normalize_content() {
 # BEAGLE_GATE_* stays out (the cache's own controls are not the run's inputs).
 # _BEAGLE_RACKET is load-bearing: it selects the interpreter without reading
 # the flake, so it must key the result itself.
+#
+# BEAGLE_BOUNDED_COMPLETION_RECEIPT keys on PRESENCE, never on its value. The
+# value names the file run-bounded.rkt writes its own `subtree-reaped-v0`
+# outcome to — an OUTPUT of the supervisor ABOVE the traced command, minted by
+# beagle-test under a per-run `mktemp -d` and never read by the command itself
+# (it is scratch under /tmp, so the closure excludes it too). Keyed by value it
+# handed every unit a path that had never existed before, so every identity was
+# single-use and no stored result was ever reachable again.
+#
+# Presence stays in the key because presence is READ: wasm-materializer.rkt's
+# `run-owned/bounded` branches on whether the variable is set, prefixing the
+# command under test with `env BEAGLE_BOUNDED_COMPLETION_RECEIPT=…` and taking
+# a fresh receipt for its own supervisor. Set and unset therefore run different
+# argv, and must not share a proof.
 
 env_material() {
     env | LC_ALL=C sort | grep -E \
         '^(BEAGLE_[A-Z0-9_]+|_BEAGLE_RACKET|PLT[A-Z0-9_]*|NATIVE_[A-Z0-9_]+|BEAGLE_STORE_[A-Z0-9_]+|WASI[A-Z0-9_]*|WASMTIME|QBE[A-Z0-9_]*|CI|NIXOS_[A-Z0-9_]+|LANG|LC_[A-Z]+)=' |
-        grep -v '^BEAGLE_GATE_' | normalize
+        grep -v '^BEAGLE_GATE_' |
+        sed 's|^BEAGLE_BOUNDED_COMPLETION_RECEIPT=.*|BEAGLE_BOUNDED_COMPLETION_RECEIPT=<set>|' |
+        normalize
     return 0
 }
 
@@ -596,13 +612,27 @@ err_f="$scratch/stderr"
 # the run. The classifier's arguments travel as environment: strace hands the
 # `-o |CMD` string to `sh -c` with its own environment, so `sh` expands them and
 # no path has to survive being spelled inside a nested quoting level.
+#
+# --seccomp-bpf makes the KERNEL decide which syscalls stop the tracee, instead
+# of stopping on every syscall and discarding the uninteresting ones in
+# userspace. The cost this removes is ptrace stop overhead, which is the whole
+# cost: a tier file traces ~468k events to yield ~4k closure records, and
+# splitting tracer from classifier showed the classifier was not the bind.
+#
+# It REQUIRES -f, and it is incompatible with -b/--detach-on and
+# --syscall-limit, so neither may join this command line. A filter that cannot
+# be installed is not an error — strace falls back to stopping on everything —
+# so the failure mode is the old cost, never a thinner trace. The one thing that
+# would thin a trace is a tracee carrying its own seccomp filter outranking
+# SECCOMP_RET_TRACE, whose syscalls strace never sees; a closure derived from an
+# unseen read would be under-keyed. Nothing under test installs one.
 start_ts=$(date +%s)
 set +e
 TMPDIR="$child_tmp" TMP="$child_tmp" TEMP="$child_tmp" \
 BEAGLE_GATE_CACHE_INNER=1 \
 _GC_LAUNCH_CWD="$launch_cwd" _GC_RACKET_PREFIX="$racket_prefix" \
 _GC_CLASSIFIER="$classifier" _GC_RECORDS="$records" _GC_CLASSIFY_LOG="$classifier_log" \
-strace -f -qq -s 500 --decode-fds=path -e trace=%file,%process,fchdir \
+strace -f --seccomp-bpf -qq -s 500 --decode-fds=path -e trace=%file,%process,fchdir \
     -o '|exec awk -v launch_cwd="$_GC_LAUNCH_CWD" -v rkpfx="$_GC_RACKET_PREFIX" -f "$_GC_CLASSIFIER" >"$_GC_RECORDS" 2>"$_GC_CLASSIFY_LOG"' \
     -- "${cmd[@]}" 2> "$err_f" | tee "$out_f"
 status=${PIPESTATUS[0]}
