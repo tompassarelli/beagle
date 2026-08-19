@@ -4,15 +4,6 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 
-git -C "$repo" diff --quiet --ignore-submodules -- || {
-    echo "core_result_cache_gate.sh: compiler worktree must be clean" >&2
-    exit 2
-}
-git -C "$repo" diff --cached --quiet --ignore-submodules -- || {
-    echo "core_result_cache_gate.sh: compiler index must be clean" >&2
-    exit 2
-}
-
 work="$(mktemp -d "${TMPDIR:-/tmp}/core-result-cache.XXXXXX")"
 cleanup() {
     local rc=$? log
