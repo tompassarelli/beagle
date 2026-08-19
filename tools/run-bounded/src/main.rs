@@ -141,16 +141,35 @@ fn positive_seconds(text: &OsStr, name: &str) -> u64 {
 
 /// A malformed scale is a contract failure, never a silent 1: a check whose
 /// bound came from a typo is not bounded.
-fn deadline_scale() -> f64 {
-    match env::var("BEAGLE_DEADLINE_SCALE") {
-        Err(_) => 1.0,
-        Ok(raw) if raw.is_empty() => 1.0,
-        Ok(raw) => match raw.parse::<f64>() {
-            Ok(value) if value.is_finite() && value > 0.0 => value,
-            _ => fail(&format!(
-                "BEAGLE_DEADLINE_SCALE must be a positive rational: {raw}"
-            )),
-        },
+///
+/// Returns the multiplier and the operator's own text. The text is what the
+/// START line reports, so an exact rational reads back as it was written.
+fn deadline_scale() -> (f64, String) {
+    let raw = match env::var("BEAGLE_DEADLINE_SCALE") {
+        Err(_) => return (1.0, String::from("1")),
+        Ok(raw) if raw.is_empty() => return (1.0, String::from("1")),
+        Ok(raw) => raw,
+    };
+    match parse_rational(&raw) {
+        Some(value) if value.is_finite() && value > 0.0 => (value, raw),
+        _ => fail(&format!(
+            "BEAGLE_DEADLINE_SCALE must be a positive rational: {raw}"
+        )),
+    }
+}
+
+/// Accepts what the incumbent Racket supervisor accepts, which is a Racket
+/// number: decimals AND exact fractions such as `3/2`. Rejecting a fraction
+/// here would turn a valid CI scale into a contract failure.
+fn parse_rational(raw: &str) -> Option<f64> {
+    let text = raw.trim();
+    match text.split_once('/') {
+        None => text.parse::<f64>().ok(),
+        Some((numerator, denominator)) => {
+            let numerator = numerator.trim().parse::<f64>().ok()?;
+            let denominator = denominator.trim().parse::<f64>().ok()?;
+            (denominator != 0.0).then(|| numerator / denominator)
+        }
     }
 }
 
@@ -505,7 +524,7 @@ fn main() {
     }
     let seconds = positive_seconds(&arguments[0], "deadline");
     let grace = positive_seconds(&arguments[1], "kill grace");
-    let scale = deadline_scale();
+    let (scale, scale_text) = deadline_scale();
 
     // A setup failure must not leave a prior invocation's successful outcome
     // looking current to the caller.
@@ -538,7 +557,7 @@ fn main() {
         String::new()
     } else {
         format!(
-            " scale={scale} effective-deadline={}s",
+            " scale={scale_text} effective-deadline={}s",
             seconds as f64 * scale
         )
     };
