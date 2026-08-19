@@ -551,6 +551,11 @@ core_modules=()
 mapfile -t core_modules < <("$CORE_COMPILER_PROJECTION" --list-sources)
 [[ ${#core_modules[@]} -gt 0 ]] || die "Core compiler projection source list is empty"
 
+# Every tracked file that can change emitted bytes is hashed here by content,
+# so a modified worktree misses on the file it modified instead of being locked
+# out of the cache wholesale. `native-core/shim/*` is deliberately absent: those
+# bytes are restaged from the worktree on every run including a cache hit, and
+# nothing reads them during emission, so they can never be served stale.
 cache_key_material() {
     local relative
     for relative in "${core_modules[@]}" \
@@ -559,9 +564,22 @@ cache_key_material() {
                     bin/beagle-build-all \
                     bin/beagle-build \
                     bin/_beagle-racket \
-                    share/targets.sh; do
-        printf '%s %s\n' "$relative" \
-            "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
+                    bin/_beagle-source-id \
+                    native-core/bin/emit-workers \
+                    native-core/bin/run-bounded \
+                    native-core/bin/run-bounded.rkt \
+                    native-core/validation/build-finalize.clj \
+                    share/targets.sh \
+                    flake.nix \
+                    flake.lock; do
+        # An absent input is its own key value, so deleting one moves the key
+        # rather than failing the build.
+        if [[ -f "$BEAGLE_DIR/$relative" ]]; then
+            printf '%s %s\n' "$relative" \
+                "$(sha256sum "$BEAGLE_DIR/$relative" | awk '{print $1}')"
+        else
+            printf '%s absent\n' "$relative"
+        fi
     done
     find "$BEAGLE_DIR/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
         LC_ALL=C sort -z |
@@ -598,9 +616,10 @@ if [[ -n "$compiled_override" ]]; then
 fi
 core_result_cache_enabled=1
 core_result_cache_bypass_reason="untrusted-compiler"
-if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]] ||
-   ! git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- ||
-   ! git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules --; then
+# A dirty worktree is cacheable: `cache_key_material` closes over every input
+# by content, so a modified file misses on its own digest. The commit still
+# gates because it is embedded in the artifact through BEAGLE_CORE_COMMIT.
+if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]]; then
     core_result_cache_enabled=0
 fi
 if [[ "$dev_fact_reuse" == 1 ]]; then
@@ -663,8 +682,6 @@ validate_core_result_early_closure() {
     done
     [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
        "$compiler_commit" ]] || return 1
-    git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- || return 1
-    git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules -- || return 1
     [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
        "$compiler_source_digest" ]] || return 1
     write_core_result_early_manifest "$current_input"
@@ -1200,8 +1217,6 @@ validate_core_result_input_closure() {
     done
     [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
        "$compiler_commit" ]] || return 1
-    git -C "$BEAGLE_DIR" diff --quiet --ignore-submodules -- || return 1
-    git -C "$BEAGLE_DIR" diff --cached --quiet --ignore-submodules -- || return 1
     [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
        "$compiler_source_digest" ]] || return 1
     current_digest="$(
@@ -1298,18 +1313,26 @@ validate_recorded_core_result_pass() {
        "beagle-core-result/v1 $key $artifact_manifest_digest" ]]
 }
 
-# A C17 attestation hands back a RECEIPT, and the build finalizer requires that
-# receipt's compiler commit to equal the commit this build stamps into its own
-# native receipts (validate-c17!, native-core/validation/build-finalize.clj).
-# The commit is therefore part of what a C17 PASS is, not incidental to it, and
-# it belongs in the attestation's identity: a receipt minted at another commit
-# is not slower to reuse, it is impossible to reuse. The compiler tree is not
-# keyed separately because the result cache is enabled only on a clean checkout,
-# where the commit already names the tree.
+# A C17 attestation hands back a RECEIPT and the emitted C17 itself, and the
+# build finalizer requires that receipt's compiler commit to equal the commit
+# this build stamps into its own native receipts (validate-c17!,
+# native-core/validation/build-finalize.clj). The commit is therefore part of
+# what a C17 PASS is, not incidental to it, and it belongs in the attestation's
+# identity: a receipt minted at another commit is not slower to reuse, it is
+# impossible to reuse.
+#
+# The compiler tree is keyed here too, and must be. The native program digest
+# names the program FROZEN BEFORE ANY MATERIALIZER RUNS, so it does not move
+# when a C17 materializer stage changes -- native/body_c17, native/fold_c17 and
+# native/c11 all emit downstream of that freeze. The commit cannot stand in for
+# the tree either, because the result cache no longer requires a clean checkout.
+# Without compiler-source-sha256 an edited C17 emitter would hand this build the
+# previous emitter's module_0.c under an unchanged key.
 core_c17_attestation_key() {
     local native_digest="$1"
-    printf 'beagle-core-c17-identity/v2\nnative-program-sha256 %s\ncompiler-commit %s\n' \
-        "$native_digest" "$compiler_commit" | sha256sum | awk '{print $1}'
+    printf 'beagle-core-c17-identity/v3\nnative-program-sha256 %s\ncompiler-commit %s\ncompiler-source-sha256 %s\n' \
+        "$native_digest" "$compiler_commit" "$compiler_source_digest" |
+        sha256sum | awk '{print $1}'
 }
 
 use_core_c17_attestation_source() {
@@ -1317,10 +1340,12 @@ use_core_c17_attestation_source() {
     local entry_map_digest="$4" report receipt header_digest source_digest
     [[ "$source_entry" != "$core_result_entry" ]] || return 1
     validate_recorded_core_result_pass "$source_entry" || return 1
-    # The keyed lookup below cannot reach a foreign commit, but the linear scan
-    # can, so the commit is proven here too. The manifest is bound to the entry's
-    # key by validate_recorded_core_result_pass.
+    # The keyed lookup below cannot reach a foreign commit or a foreign compiler
+    # tree, but the linear scan can, so both are proven here too. The manifest is
+    # bound to the entry's key by validate_recorded_core_result_pass.
     grep -Fqx "compiler-commit $compiler_commit" \
+        "$source_entry/input.manifest" || return 1
+    grep -Fqx "compiler-source-sha256 $compiler_source_digest" \
         "$source_entry/input.manifest" || return 1
     report="$source_entry/artifacts/report.txt"
     receipt="$source_entry/artifacts/c17.receipt"
