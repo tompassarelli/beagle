@@ -208,6 +208,19 @@ run_phase() {
 # command's name. Use this only where the command is known to be a single
 # execve that spawns nothing (flock taking an already-open fd is the case this
 # exists for); anything that might fork stays on the supervisor.
+#
+# The claim is discharged by evidence, not by reading: the build was traced at
+# clone/clone3/vfork return values (not just execve, which misses a fork that
+# never execs) and the tree reconstructed. module-source-closure, source-facts,
+# ast-verify-N, native-receipts, staged-manifest, and locked-staged-verifier
+# spawned ZERO descendants, and module-source-root-cli.rkt, source-facts.clj,
+# verify-checked-ast.rkt, and build-finalize.clj hold no spawn call site (the
+# two apparent hits in build-finalize.clj are string literals naming
+# wasm.materializer.sh, not calls). ast-verify-N is one phase PER SOURCE FILE,
+# so it is the one that scales.
+#
+# ast-bundle, core-compiler, core-lowering, core-checkpoint-wire, and
+# wasm-materializer genuinely fork and MUST keep real tree containment.
 run_phase_leaf() {
     local name="$1"
     local seconds="$2"
@@ -513,7 +526,7 @@ for source_index in "${!explicit_normalized_sources[@]}"; do
     )
 done
 closure_fields_path="$work/module-source-closure.fields"
-run_phase module-source-closure "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
+run_phase_leaf module-source-closure "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
     "$RACKET" "$MODULE_SOURCE_ROOT_CLI" "${closure_args[@]}" \
     >"$closure_fields_path"
 mapfile -d '' -t closure_fields <"$closure_fields_path"
@@ -969,7 +982,7 @@ for source in "${normalized_sources[@]}"; do
     [[ "${source_digest_befores[$source_index]}" == "$source_digest_after" ]] ||
         die "source changed while its checked projection was captured: $source"
     ast_metadata="$work/source_${source_index}.metadata"
-    run_phase "ast-verify-$source_index" \
+    run_phase_leaf "ast-verify-$source_index" \
         "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
         "$RACKET" "$AST_VERIFIER" "$ast" "$source" >"$ast_metadata"
     mapfile -d '' -t checked_fields <"$ast_metadata"
@@ -987,7 +1000,7 @@ for source in "${normalized_sources[@]}"; do
     fi
     source_index=$((source_index + 1))
 done
-run_phase source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
+run_phase_leaf source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
     bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
 fi
 else
@@ -3815,7 +3828,7 @@ fi
 if [[ "$core_result_cache_hit" == 1 ]]; then
     echo "beagle build: phase native-receipts SKIP (validated at cache publication)" >&2
 else
-    run_phase native-receipts "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+    run_phase_leaf native-receipts "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
         bb -cp "$compiled" "$FINALIZER" native-index "$work/native.receipts.index" \
         "$work/artifacts/native.receipts" "$work/artifacts/module.native-program" \
         >"$work/native-receipts.log" 2>&1 || {
@@ -3986,7 +3999,7 @@ while IFS= read -r staged_name; do
     [[ -n "${receipt_seen[$staged_name]:-}" ]] && continue
     manifest_args+=(--artifact "$staged_name" "$install/$staged_name")
 done < <(printf '%s\n' "${!staged_names[@]}" | LC_ALL=C sort)
-run_phase staged-manifest "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+run_phase_leaf staged-manifest "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
     bb -cp "$compiled" "$FINALIZER" "${manifest_args[@]}" \
     >"$work/staged-manifest.digest" 2>"$work/staged-verifier.log" || {
         sed -n '1,120p' "$work/staged-verifier.log" >&2
@@ -4009,7 +4022,7 @@ for source_index in "${!source_snapshot_paths[@]}"; do
        "${source_snapshot_digests[$source_index]}" ]] ||
         die "source changed while waiting for the output commit lock"
 done
-run_phase locked-staged-verifier "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+run_phase_leaf locked-staged-verifier "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
     bb -cp "$compiled" "$FINALIZER" verify-staged "$install" \
     >"$work/locked-manifest.digest" 2>"$work/locked-verifier.log" || {
         sed -n '1,120p' "$work/locked-verifier.log" >&2
