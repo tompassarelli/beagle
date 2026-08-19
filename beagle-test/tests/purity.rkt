@@ -344,7 +344,14 @@
               left (transient xs)
               right (transient ys)]
          (recur (+ index 1) (conj! left index) left))))
-   '(aliased-loop)))
+   '(aliased-loop))
+  ;; A transient bound in a `let` and never consumed is abandoned at the
+  ;; closing brace: its lexical handle is gone and no `persistent!` ever froze
+  ;; it. This case and `discarded` above are the two directions of the same
+  ;; scope-close rule, so they are asserted together.
+  (check-equal?
+   (violations '(defn unconsumed [xs] Any (let [owner (transient xs)] nil)))
+   '(unconsumed)))
 
 (test-case "module effect edges honor lexical binding identity"
   (define p

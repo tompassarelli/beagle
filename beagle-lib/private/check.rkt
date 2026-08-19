@@ -6449,9 +6449,19 @@
      (check-effectful-sort-comparator! e env)
      (define ref (call-form-fn e))
      (define fn ref)
+     ;; A DOTTED call on the nix target is an attrset descent into a
+     ;; host-provided attrset (`lib.mkEnableOption`, `pkgs.writeShellScriptBin`),
+     ;; not a name whose meaning a semantic contract could supply: `pkgs` and
+     ;; `lib` expose a host-sized surface that cannot be enumerated with
+     ;; declare-extern. Such calls are governed instead by the nix dotted-root
+     ;; rule below, which requires the ROOT to resolve to a binding in scope and
+     ;; mirrors nix's own --parse scope check. Bare names on nix, and every name
+     ;; on every other target, still require a contract.
      (when (and (symbol? fn)
                 (not (call-form-env-ref env e #f))
                 (not (set-member? COMPILE-TIME-CALLS fn))
+                (not (and (eq? (current-check-target) 'nix)
+                          (nix-dotted-root fn)))
                 (not (string-contains? (symbol->string fn) "/")))
        (define suggestion (call-name-suggestion fn env))
        (raise-diag
@@ -8732,6 +8742,21 @@
                (eq? (owner-status state origin) 'live))
              'live
              'dead)))]))
+  ;; A transient acquired inside a `let`/`loop` scope must be consumed before
+  ;; that scope closes. An owner still live at the closing brace is unreachable
+  ;; afterwards — its lexical handle is gone — so dropping it silently would
+  ;; un-enforce the `!`-ownership contract for every scope-local transient.
+  ;; Owners inherited from the enclosing scope are excluded: the outer scope
+  ;; still owns them and closes them itself. `join-states` already collapses a
+  ;; branch disagreement to 'dead, so a loop owner transferred by `recur` is
+  ;; not mistaken for an abandoned one here.
+  (define (close-local-owners outer-state inner-state node)
+    (define local-live
+      (for/seteq ([(origin status) (in-hash (purity-state-owners inner-state))]
+                  #:unless (hash-has-key? (purity-state-owners outer-state) origin)
+                  #:unless (eq? status 'dead))
+        origin))
+    (escape-origins inner-state local-live node))
   (define (analyze-sequence body state)
     (cond
       [(null? body) (values state (seteq))]
@@ -9021,7 +9046,8 @@
        (define bound (analyze-bindings (let-form-bindings value) state))
        (define-values (after-body origins)
          (analyze-sequence (let-form-body value) bound))
-       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+       (define closed (close-local-owners state after-body value))
+       (values (struct-copy purity-state closed [scope outer-scope]) origins)]
       [(loop-form? value)
        (define outer-scope (purity-state-scope state))
        (define bound (analyze-bindings (loop-form-bindings value) state))
@@ -9030,7 +9056,8 @@
              ([current-recur-targets
                (map let-binding-name (loop-form-bindings value))])
            (analyze-sequence (loop-form-body value) bound)))
-       (values (struct-copy purity-state after-body [scope outer-scope]) origins)]
+       (define closed (close-local-owners state after-body value))
+       (values (struct-copy purity-state closed [scope outer-scope]) origins)]
       [(recur-form? value)
        (define targets (current-recur-targets))
        (cond
