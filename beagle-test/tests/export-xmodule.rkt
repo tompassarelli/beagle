@@ -149,6 +149,26 @@
     (program->module-interface prog #:source-id "top-level-libspec.bjs"))
   (check-equal? (module-interface-requires interface) requires))
 
+(test-case "module interfaces carry verbatim public ESM names"
+  (define prog (fixture-program "public-esm-names.bjs"))
+  (type-check! prog)
+  (define interface
+    (program->module-interface prog #:source-id "public-esm-names.bjs"))
+  (check-equal?
+   (module-interface-public-esm-exports interface)
+   (hasheq 'send-message "send-message"
+           'wire_name "wire_name"))
+  (check-equal?
+   (module-interface-public-esm-name interface 'send-message)
+   "send-message")
+  (check-false
+   (module-interface-public-esm-name interface 'private-helper))
+  (define native
+    (car (module-interface-requires interface)))
+  (check-equal?
+   (require-entry-identity native)
+   (module-identity 'native-esm "@scope/package/subpath")))
+
 (test-case "a correct call to a js/export'd function still checks"
   (check-not-exn (lambda () (check-file "ok.bjs"))))
 

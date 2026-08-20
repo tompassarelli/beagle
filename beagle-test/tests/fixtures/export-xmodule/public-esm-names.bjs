@@ -1,0 +1,11 @@
+#lang beagle/js
+
+(require '["@scope/package/subpath" :as package])
+
+(js/export
+  (defn send-message [text String] String text))
+
+(js/export
+  (defn wire_name [text String] String text))
+
+(defn private-helper [text String] String text)

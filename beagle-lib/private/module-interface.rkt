@@ -16,11 +16,9 @@
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 10)
-;; V10 is the complete Beagle import boundary: finalized bindings, macros,
-;; type/record/error contracts, dynamic-var status, and canonical import
-;; identities all participate in the interface digest.  Unchanged interfaces
-;; can therefore prune reverse users.
+(define INTERFACE-SCHEMA-VERSION 11)
+;; V11 adds the exact public ESM name for every published JavaScript binding.
+;; Native ESM imports and their identities remain part of the same digest.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
@@ -41,7 +39,7 @@
   #:transparent)
 (struct interface-protocol-contract (name methods) #:transparent)
 (struct module-interface
-  (schema-version namespace target bindings macros macro-fingerprints
+  (schema-version namespace target bindings public-esm-exports macros macro-fingerprints
                   type-declarations type-exports record-contracts errors requires
                   dynamic-vars digest source-digest source-id)
   #:transparent)
@@ -428,6 +426,13 @@
       [(jst-export? form) #t]
       [(with-meta? form) (loop (with-meta-expr form))]
       [else #f])))
+
+(define (public-esm-exports-for prog ast-bindings bindings)
+  (if (eq? (program-target prog) 'js)
+      (for/hasheq ([name (in-list (sort (hash-keys ast-bindings) symbol<?))]
+                   #:when (hash-has-key? bindings name))
+        (values name (symbol->string name)))
+      (hasheq)))
 
 (define (publication-effective-definition-types prog provisional?)
   (cond
@@ -1108,7 +1113,7 @@
 (define (interface-canonical-datum
          namespace target gen-class? bindings macro-fingerprints
          type-declarations type-exports record-contracts errors requires
-         dynamic-vars)
+         dynamic-vars public-esm-exports)
   `(module-interface
     (schema ,INTERFACE-SCHEMA-VERSION)
     (consumer-pruning-safe
@@ -1121,6 +1126,10 @@
                           (sort requires symbol<?
                                 #:key require-entry-ns))])
          (require-entry->canonical-datum entry)))
+    (public-esm-exports
+     ,@(for/list ([name (in-list (sort (hash-keys public-esm-exports)
+                                        symbol<?))])
+         (list name (hash-ref public-esm-exports name))))
     (bindings
      ,@(for/list ([name (in-list (sort (hash-keys bindings) symbol<?))])
          (define binding (hash-ref bindings name))
@@ -1366,6 +1375,10 @@
           local-type-names)]))))
   (define qualified-candidate-bindings (qualify-bindings bindings))
   (define qualified-bindings (qualify-bindings conformed-bindings))
+  (define public-esm-exports
+    (public-esm-exports-for prog ast-bindings qualified-bindings))
+  (define candidate-public-esm-exports
+    (public-esm-exports-for prog ast-bindings qualified-candidate-bindings))
   (define canonical
     (interface-canonical-datum
      (program-namespace prog)
@@ -1378,7 +1391,8 @@
      record-contracts
      errors
      (program-requires prog)
-     dynamic-vars))
+     dynamic-vars
+     public-esm-exports))
   (define implementation-canonical
     (and
      (not provisional?)
@@ -1394,7 +1408,8 @@
       record-contracts
       errors
       (program-requires prog)
-      dynamic-vars)))
+      dynamic-vars
+      candidate-public-esm-exports)))
   (define source-canonical
     `(module-program
       (interface ,canonical)
@@ -1408,6 +1423,7 @@
      (program-namespace prog)
      (program-target prog)
      qualified-bindings
+     public-esm-exports
      macros
      macro-fingerprints
      qualified-type-declarations
@@ -1464,6 +1480,9 @@
 
 (define (module-interface-binding-ref interface name [failure #f])
   (hash-ref (module-interface-bindings interface) name failure))
+
+(define (module-interface-public-esm-name interface name [failure #f])
+  (hash-ref (module-interface-public-esm-exports interface) name failure))
 
 (define (module-interface-type-export? interface name)
   (hash-has-key? (module-interface-type-exports interface) name))
@@ -1673,6 +1692,7 @@
  module-interface-conformance
  module-interface-export?
  module-interface-binding-ref
+ module-interface-public-esm-name
  module-interface-type-export?
  module-interface-type-export-ref
  module-interface-record-contract-ref
