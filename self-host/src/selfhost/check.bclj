@@ -1148,26 +1148,27 @@
       (reference-map-assoc
         (reference-map-assoc
           (reference-map-assoc
-            {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
-             "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
-             "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
-             "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
-                               nil FLOAT-TYPE)}
-            "host.fs/real-path"
+            (reference-map-assoc
+              {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
+               "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
+               "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
+               "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
+                                 nil FLOAT-TYPE)}
+              "host.fs/real-path"
+              (make-fn [(make-prim "String")] nil
+                (make-prim "host.fs/RealPathResult")))
+            "host.fs/mtime-nanoseconds"
             (make-fn [(make-prim "String")] nil
-              (make-prim "host.fs/RealPathResult")))
-          "host.fs/mtime-nanoseconds"
+              (make-prim "host.fs/MtimeNanosecondsResult")))
+          "host.fs/create-temporary-sibling"
           (make-fn [(make-prim "String")] nil
-            (make-prim "host.fs/MtimeNanosecondsResult")))
-        "host.fs/create-temporary-sibling"
-        (make-fn [(make-prim "String")] nil
-          (make-prim "host.fs/CreateTemporarySiblingResult")))
-      "host.stdin/read-text-bounded"
-      (make-fn [INT-TYPE] nil
-        (make-prim "host.stdin/ReadTextBoundedResult")))
-    "host.fs/rename-file"
-    (make-fn [(make-prim "String") (make-prim "String")] nil
-      (make-prim "host.fs/RenameFileResult")))
+            (make-prim "host.fs/CreateTemporarySiblingResult")))
+        "host.stdin/read-text-bounded"
+        (make-fn [INT-TYPE] nil
+          (make-prim "host.stdin/ReadTextBoundedResult")))
+      "host.fs/rename-file"
+      (make-fn [(make-prim "String") (make-prim "String")] nil
+        (make-prim "host.fs/RenameFileResult")))
     "host.fs/remove-file"
     (make-fn [(make-prim "String")] nil
       (make-prim "host.fs/RemoveFileResult"))))
