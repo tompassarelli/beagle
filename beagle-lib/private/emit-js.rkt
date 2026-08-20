@@ -172,13 +172,13 @@
               ;; array/string/unknown -> .length
               [else (format "~a.length" (emit-expr coll))])]))
        #f)]
-    [(empty?) (if (= n 1) (format "(~a.length === 0)" (emit-expr (car args))) #f)]
-    [(first) (if (= n 1) (format "~a[0]" (emit-expr (car args))) #f)]
+    [(empty?) (if (= n 1) (runtime-call "empty_p" args) #f)]
+    [(first) (if (= n 1) (runtime-call "first" args) #f)]
     [(second) (if (= n 1) (format "~a[1]" (emit-expr (car args))) #f)]
     [(last) (if (= n 1)
                 (format "(() => { const _x = ~a; return _x[_x.length - 1]; })()" (emit-expr (car args)))
                 #f)]
-    [(rest) (if (= n 1) (format "~a.slice(1)" (emit-expr (car args))) #f)]
+    [(rest) (if (= n 1) (runtime-call "rest" args) #f)]
     [(nth) (cond
              [(= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args)))]
              [(= n 3) (format "(() => { const _x = ~a, _i = ~a; return _x[_i] != null ? _x[_i] : ~a; })()"
@@ -194,16 +194,9 @@
                (for/fold ([acc (emit-set-as-hamt (car args))]) ([x (in-list (cdr args))])
                  (use-hamt! "hamtSetAdd")
                  (format "hamtSetAdd(~a, ~a)" acc (emit-expr x)))]
-              ;; conj scalars onto a NATIVE set -> a Set (NOT an array)
-              [(eq? (coll-kind (car args)) 'set)
+              [else
                (tally-rep! 'native)
-               (format "new Set([...~a, ~a])"
-                       (emit-expr (car args))
-                       (string-join (map emit-expr (cdr args)) ", "))]
-              [else (tally-rep! 'native)
-                    (format "[...~a, ~a]"
-                            (emit-expr (car args))
-                            (string-join (map emit-expr (cdr args)) ", "))])]
+               (runtime-call "conj_value" args)])]
     [(assoc) (cond
                [(not (and (>= n 3) (odd? n))) #f]
                ;; compound-keyed -> fold hamtMapAssoc (coerce a native coll input)
@@ -217,10 +210,19 @@
                         (loop (format "hamtMapAssoc(~a, ~a, ~a)"
                                       acc (emit-expr (car kvs)) (emit-expr (cadr kvs)))
                               (cddr kvs)))))]
-               [else (tally-rep! 'native)
-                     (format "({...~a, ~a})"
-                             (emit-expr (car args))
-                             (emit-kv-entries (cdr args)))])]
+               [else
+                (tally-rep! 'native)
+                (let loop ([acc (emit-expr (car args))]
+                           [kvs (cdr args)])
+                  (if (null? kvs)
+                      acc
+                      (loop
+                       (runtime-render-call
+                        "assoc_value"
+                        (list acc
+                              (emit-expr (car kvs))
+                              (emit-expr (cadr kvs))))
+                       (cddr kvs))))])]
     [(inc) (if (= n 1) (format "(~a + 1)" (emit-expr (car args))) #f)]
     [(dec) (if (= n 1) (format "(~a - 1)" (emit-expr (car args))) #f)]
     [(abs) (if (= n 1) (format "Math.abs(~a)" (emit-expr (car args))) #f)]
@@ -281,10 +283,7 @@
                (use-hamt! "hamtSetAdd")
                (format "~a.reduce((_s, _x) => hamtSetAdd(_s, _x), ~a)"
                        (emit-expr (cadr args)) (emit-set-as-hamt (car args)))]
-              ;; into a NATIVE set of scalars -> a Set
-              [(eq? (coll-kind (car args)) 'set)
-               (format "new Set([...~a, ...~a])" (emit-expr (car args)) (emit-expr (cadr args)))]
-              [else (format "[...~a, ...~a]" (emit-expr (car args)) (emit-expr (cadr args)))])]
+              [else (runtime-call "into_value" args)])]
     [(concat) (format "[].concat(~a)" (string-join (map emit-expr args) ", "))]
     [(apply) (if (>= n 2) (emit-apply-call args) #f)]
     [(identity) (if (= n 1) (emit-expr (car args)) #f)]
@@ -439,14 +438,20 @@
                      (string-join (map (lambda (a) (format "~a(..._args)" (emit-expr a))) args) ", "))
              #f)]
     ;; --- type predicates -------------------------------------------------------
-    [(vector?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
+    [(vector?)
+     (if (= n 1)
+         (begin
+           (use-runtime!)
+           (format "(($beagle$value) => Array.isArray($beagle$value) && !$$bc$list_p($beagle$value) && !$$bc$seq_p($beagle$value))(~a)"
+                   (emit-expr (car args))))
+         #f)]
     [(map?) (if (= n 1)
                 (format "(() => { const _x = ~a; return typeof _x === 'object' && _x !== null && !Array.isArray(_x); })()"
                         (emit-expr (car args)))
                 #f)]
     [(set?) (if (= n 1) (format "(~a instanceof Set)" (emit-expr (car args))) #f)]
     [(sequential?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
-    [(seq?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
+    [(seq?) (if (= n 1) (runtime-call "seq_p" args) #f)]
     [(coll?) (if (= n 1)
                  (format "(() => { const _x = ~a; return Array.isArray(_x) || (typeof _x === 'object' && _x !== null); })()"
                          (emit-expr (car args)))
@@ -472,9 +477,7 @@
     [(clj->js) (if (= n 1) (host-call "clj_to_js" args) #f)]
     [(js->clj) (if (= n 1) (host-call "js_to_clj" args) #f)]
     [(not=) (if (= n 2) (format "(~a !== ~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
-    [(seq) (if (= n 1)
-               (format "(() => { const _x = ~a; return _x.length > 0 ? _x : null; })()" (emit-expr (car args)))
-               #f)]
+    [(seq) (if (= n 1) (runtime-call "seq" args) #f)]
     ;; --- runtime helpers (beagle/core.js) -------------------------------------
     [(range)       (runtime-call "range" args)]
     [(remove)      (if (= n 2) (runtime-call "remove" args) #f)]
@@ -482,7 +485,19 @@
     [(every?)      (if (= n 2) (runtime-call "every_p" args) #f)]
     [(keep)        (if (= n 2) (runtime-call "keep" args) #f)]
     [(map-indexed) (if (= n 2) (runtime-call "map_indexed" args) #f)]
-    [(assoc-in)    (if (= n 3) (runtime-call "assoc_in" args) #f)]
+    [(assoc-in)
+     (cond
+       [(not (= n 3)) #f]
+       [(eq? (classify-rep (car args)) 'hmap)
+        (use-runtime!)
+        (use-hamt! "hamtMapAssoc")
+        (use-hamt! "hamtMapGet")
+        (format
+         "(($beagle$map, $beagle$path, $beagle$value) => { if ($beagle$path.length === 0) return $beagle$value; const [$beagle$key, ...$beagle$rest] = $beagle$path; return hamtMapAssoc($beagle$map, $beagle$key, $beagle$rest.length === 0 ? $beagle$value : $$bc$assoc_in(hamtMapGet($beagle$map, $beagle$key, null), $beagle$rest, $beagle$value)); })(~a, ~a, ~a)"
+         (emit-expr (car args))
+         (emit-expr (cadr args))
+         (emit-expr (caddr args)))]
+       [else (runtime-call "assoc_in" args)])]
     [(update-in)   (if (= n 3) (runtime-call "update_in" args) #f)]
     [(select-keys) (if (= n 2) (runtime-call "select_keys" args) #f)]
     [(merge-with)  (if (>= n 2) (runtime-call "merge_with" args) #f)]
@@ -501,7 +516,7 @@
                     (format "(() => { const _x = ~a; return _x[Math.floor(Math.random() * _x.length)]; })()" (emit-expr (car args)))
                     #f)]
     [(shuffle) (if (= n 1) (format "[...~a].sort(() => Math.random() - 0.5)" (emit-expr (car args))) #f)]
-    [(list?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
+    [(list?) (if (= n 1) (runtime-call "list_p" args) #f)]
     [(boolean?) (if (= n 1) (format "(typeof ~a === 'boolean')" (emit-expr (car args))) #f)]
     [(any?) (if (= n 1) "true" #f)]
     [(symbol?) (if (= n 1) (runtime-call "symbol_p" args) #f)]
@@ -588,18 +603,19 @@
     ;; --- more collection ops ---------------------------------------------------
     [(get-in)     (if (= n 2) (runtime-call "get_in" args) #f)]
     [(vector) (format "[~a]" (string-join (map emit-expr args) ", "))]
-    [(list) (format "[~a]" (string-join (map emit-expr args) ", "))]
-    [(hash-map) (if (even? n)
-                    (format "{~a}" (emit-kv-entries args))
-                    #f)]
-    [(hash-set) (format "new Set([~a])" (string-join (map emit-expr args) ", "))]
+    [(list) (runtime-call "list" args)]
+    [(hash-map) (if (even? n) (runtime-call "map_value" args) #f)]
+    [(hash-set)
+     (runtime-render-call
+      "set_value"
+      (list (format "[~a]" (string-join (map emit-expr args) ", "))))]
     [(take-nth)     (if (= n 2) (runtime-call "take_nth" args) #f)]
     [(keep-indexed) (if (= n 2) (runtime-call "keep_indexed" args) #f)]
     [(reductions)   (if (>= n 2) (runtime-call "reductions" args) #f)]
     [(replace)      (if (= n 2) (runtime-call "replace" args) #f)]
     [(max-key)      (if (>= n 2) (runtime-call "max_key" args) #f)]
     [(min-key)      (if (>= n 2) (runtime-call "min_key" args) #f)]
-    [(next) (if (= n 1) (format "(() => { const _s = ~a.slice(1); return _s.length > 0 ? _s : null; })()" (emit-expr (car args))) #f)]
+    [(next) (if (= n 1) (runtime-call "next" args) #f)]
     [(empty) (if (= n 1) (format "(Array.isArray(~a) ? [] : {})" (emit-expr (car args))) #f)]
     ;; --- IO / formatting -------------------------------------------------------
     [(newline) (if (= n 0) "console.log()" #f)]
@@ -753,7 +769,7 @@
     ;; still belongs to the enclosing function.
     [(letfn-form? e) (contains-await? (letfn-form-body e))]
     ;; Await may sit beneath any expression container, including typed-JS
-    ;; forms such as js/call and js/set!. Structural descent keeps new forms
+    ;; direct member calls and assignments. Structural descent keeps new forms
     ;; from silently emitting await into a synchronous function.
     [(pair? e)
      (or (expr-has-await? (car e))
@@ -1203,6 +1219,12 @@
 (define (runtime-call js-name args)
   (use-runtime!)
   (format "$$bc$~a(~a)" js-name (string-join (map emit-expr args) ", ")))
+
+;; Rendered arguments are used when a dispatcher call folds over an already
+;; emitted accumulator or adapts a JavaScript collection expression.
+(define (runtime-render-call js-name rendered-args)
+  (use-runtime!)
+  (format "$$bc$~a(~a)" js-name (string-join rendered-args ", ")))
 
 ;; Explicit JavaScript host values live in a separate runtime module from
 ;; persistent Beagle values. The import set is derived from emitted calls, so a
@@ -3425,7 +3447,8 @@
       (if (= (length body) 1)
           (emit-expr (car body))
           (format "(() => { ~a })()" (emit-body-return body "")))))
-  (emit-for-clauses clauses body-str contexts))
+  (runtime-render-call "eager_seq"
+                       (list (emit-for-clauses clauses body-str contexts))))
 
 (define (emit-for-clauses clauses body-str contexts)
   (match clauses

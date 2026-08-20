@@ -193,8 +193,8 @@
      (check-runtime-route js "list_p")
      (check-runtime-route js "seq_p")
      (check-true
-      (and (string-contains? js "!$$bc$list_p(x)")
-           (string-contains? js "!$$bc$seq_p(x)"))
+      (and (string-contains? js "!$$bc$list_p(")
+           (string-contains? js "!$$bc$seq_p("))
       (format "vector? must exclude branded list/sequence arrays in:\n~a" js)))
 
    (test-case "indexed assoc and list builders route through category dispatch"
