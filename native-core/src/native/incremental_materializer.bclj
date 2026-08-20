@@ -1,0 +1,263 @@
+#lang beagle/clj
+(ns native.incremental-materializer
+  (:require [native.core :as core]
+            [native.stages :as stages]
+            [native.lower :as lower]
+            [native.body-c17 :as c17]
+            [native.qbe :as qbe]))
+
+
+(defrecord CompileFactKeyV1
+  [stage String
+   result-key String
+   compiler-context String
+   profile String
+   unit-id String])
+
+(defrecord CompileFactV1
+  [key CompileFactKeyV1
+   content-id String
+   payload-byte-count Int
+   payload-sha256 String
+   payload String])
+
+(defrecord CheckedMaterializationRequestV1
+  [frozen-source stages/FrozenSourceStageV1
+   result-key String
+   compiler-context String
+   profile String
+   unit-id String
+   configuration (Vec String)
+   abi core/AbiProfileV0
+   module-index Int
+   targets (Vec String)
+   warm-facts (Vec CompileFactV1)])
+
+(defrecord ArtifactFileV1
+  [name String
+   payload String
+   content-id String
+   payload-byte-count Int
+   payload-sha256 String])
+
+(defrecord TargetArtifactV1
+  [target String
+   files (Vec ArtifactFileV1)
+   encoding String
+   digest String])
+
+(defunion TargetMaterializationV1
+  (TargetMaterializedV1 [artifact TargetArtifactV1])
+  (TargetMaterializationRejectedV1
+    [target String
+     detail String]))
+
+(defunion CheckedMaterializationResultV1
+  (CheckedMaterializationWarmV1 [facts (Vec CompileFactV1)])
+  (CheckedMaterializationBuiltV1
+    [frozen-typed stages/FrozenTypedStageV0
+     frozen-native stages/FrozenNativeStageV0
+     artifacts (Vec TargetArtifactV1)
+     facts-to-append (Vec CompileFactV1)])
+  (CheckedMaterializationRejectedV1
+    [stage String
+     code String
+     detail String]))
+
+(defn compile-fact-key=
+  [left CompileFactKeyV1
+   right CompileFactKeyV1] Bool
+  (and (= (compilefactkeyv1-stage left) (compilefactkeyv1-stage right))
+    (= (compilefactkeyv1-result-key left)
+      (compilefactkeyv1-result-key right))
+    (= (compilefactkeyv1-compiler-context left)
+      (compilefactkeyv1-compiler-context right))
+    (= (compilefactkeyv1-profile left) (compilefactkeyv1-profile right))
+    (= (compilefactkeyv1-unit-id left) (compilefactkeyv1-unit-id right))))
+
+(defn fact-payload-valid? [fact CompileFactV1] Bool
+  (let [payload String (compilefactv1-payload fact)
+        digest String (stages/content-digest payload)]
+    (and (= digest (compilefactv1-content-id fact))
+      (= digest (compilefactv1-payload-sha256 fact))
+      (= (count (stages/utf8-bytes payload))
+        (compilefactv1-payload-byte-count fact)))))
+
+(defn target-stage [target String] String
+  (str "native-materialization-" target "-v1"))
+
+(defn target-supported? [target String] Bool
+  (or (= target "c17") (= target "qbe")))
+
+(defn targets-valid? [targets (Vec String)] Bool
+  (and (> (count targets) 0)
+    (every? target-supported? targets)
+    (= (count targets) (count (distinct targets)))))
+
+(defn key-for
+  [request CheckedMaterializationRequestV1
+   stage String] CompileFactKeyV1
+  (->CompileFactKeyV1 stage
+    (checkedmaterializationrequestv1-result-key request)
+    (checkedmaterializationrequestv1-compiler-context request)
+    (checkedmaterializationrequestv1-profile request)
+    (checkedmaterializationrequestv1-unit-id request)))
+
+(defn fact-for
+  [facts (Vec CompileFactV1)
+   key CompileFactKeyV1] (U CompileFactV1 Nil)
+  (some
+    (fn [fact CompileFactV1] (U CompileFactV1 Nil)
+      (if (and (compile-fact-key= key (compilefactv1-key fact))
+            (fact-payload-valid? fact))
+        fact nil))
+    facts))
+
+(defn exact-warm-target-facts [request CheckedMaterializationRequestV1] (U (Vec CompileFactV1) Nil)
+  (loop [position Int 0
+         collected (Vec CompileFactV1) []]
+    (if (>= position (count (checkedmaterializationrequestv1-targets request)))
+      collected
+      (let [target String (nth (checkedmaterializationrequestv1-targets request) position)
+            fact (U CompileFactV1 Nil) (fact-for (checkedmaterializationrequestv1-warm-facts request)
+              (key-for request (target-stage target)))]
+        (if (nil? fact)
+          nil
+          (recur (+ position 1) (conj collected fact)))))))
+
+(defn artifact-file
+  [name String
+   payload String] ArtifactFileV1
+  (let [digest String (stages/content-digest payload)]
+    (->ArtifactFileV1 name payload digest
+      (count (stages/utf8-bytes payload)) digest)))
+
+(defn encode-artifact-files [files (Vec ArtifactFileV1)] String
+  (stages/canonical-vector "native-artifact-files-v1"
+    (mapv
+      (fn [file ArtifactFileV1] String
+        (stages/canonical-record "native-artifact-file-v1"
+          [(artifactfilev1-name file) (artifactfilev1-payload file)]))
+      files)))
+
+(defn target-artifact
+  [target String
+   files (Vec ArtifactFileV1)] TargetArtifactV1
+  (let [encoding String (encode-artifact-files files)]
+    (->TargetArtifactV1 target files encoding
+      (stages/content-digest encoding))))
+
+(defn compile-fact
+  [key CompileFactKeyV1
+   payload String] CompileFactV1
+  (let [digest String (stages/content-digest payload)]
+    (->CompileFactV1 key digest (count (stages/utf8-bytes payload))
+      digest payload)))
+
+(defn materialize-target
+  [program core/NativeCoreProgram
+   target String
+   module-index Int
+   abi-id String] TargetMaterializationV1
+  (if (= target "c17")
+    (let [result c17/BodyMaterializationV0 (c17/materialize-program-for-abi program module-index abi-id)]
+      (if (c17/materialization-ok? result)
+        (let [artifact c17/BodyArtifactV0 (c17/materialization-artifact result)]
+          (->TargetMaterializedV1
+            (target-artifact target
+              [(artifact-file (c17/bodyartifactv0-header-name artifact)
+                 (c17/bodyartifactv0-header-text artifact))
+               (artifact-file (c17/bodyartifactv0-source-name artifact)
+                 (c17/bodyartifactv0-source-text artifact))])))
+        (->TargetMaterializationRejectedV1 target
+          (c17/materialization-detail result))))
+    (let [result qbe/QbeMaterialization (qbe/materialize-program program module-index abi-id)]
+      (if (qbe/materialization-ok? result)
+        (let [artifact qbe/QbeArtifact (qbe/materialization-artifact result)]
+          (->TargetMaterializedV1
+            (target-artifact target
+              [(artifact-file (qbe/qbeartifact-module-name artifact)
+                 (qbe/qbeartifact-module-text artifact))])))
+        (->TargetMaterializationRejectedV1 target
+          (qbe/materialization-detail result))))))
+
+(defn materialize-targets
+  [program core/NativeCoreProgram
+   targets (Vec String)
+   module-index Int
+   abi-id String] (U (Vec TargetArtifactV1) TargetMaterializationRejectedV1)
+  (loop [position Int 0
+         artifacts (Vec TargetArtifactV1) []]
+    (if (>= position (count targets))
+      artifacts
+      (let [result TargetMaterializationV1 (materialize-target program (nth targets position) module-index abi-id)]
+        (if (instance? native.incremental_materializer.TargetMaterializedV1 result)
+          (recur (+ position 1)
+            (conj artifacts (targetmaterializedv1-artifact result)))
+          result)))))
+
+(defn artifact-facts
+  [request CheckedMaterializationRequestV1
+   artifacts (Vec TargetArtifactV1)] (Vec CompileFactV1)
+  (mapv
+    (fn [artifact TargetArtifactV1] CompileFactV1
+      (compile-fact
+        (key-for request (target-stage (targetartifactv1-target artifact)))
+        (targetartifactv1-encoding artifact)))
+    artifacts))
+
+(defn materialize-checked-bundle [request CheckedMaterializationRequestV1] CheckedMaterializationResultV1
+  (cond
+    (< (checkedmaterializationrequestv1-module-index request) 0)
+    (->CheckedMaterializationRejectedV1 "request" "INVALID-MODULE-INDEX"
+      "module index must be nonnegative")
+
+    (not (targets-valid? (checkedmaterializationrequestv1-targets request)))
+    (->CheckedMaterializationRejectedV1 "request" "INVALID-TARGETS"
+      "targets must be a nonempty duplicate-free vector of c17 or qbe")
+
+    :else
+    (let [warm (U (Vec CompileFactV1) Nil) (exact-warm-target-facts request)]
+      (if (some? warm)
+        (->CheckedMaterializationWarmV1 warm)
+        (let [typing lower/TypingResultV0 (lower/lower-typed-stage
+                (checkedmaterializationrequestv1-frozen-source request)
+                (checkedmaterializationrequestv1-compiler-context request)
+                (checkedmaterializationrequestv1-configuration request))]
+          (if (not (instance? native.lower.TypingAcceptedV0 typing))
+            (->CheckedMaterializationRejectedV1 "source-to-typed"
+              "TYPING-REJECTED" "checked source bundle did not lower to typed Core")
+            (let [frozen-typed stages/FrozenTypedStageV0 (lower/typingacceptedv0-frozen typing)
+                  native lower/NativeLoweringResultV0 (lower/lower-native-stage frozen-typed
+                    (lower/typingacceptedv0-slice typing)
+                    (checkedmaterializationrequestv1-compiler-context request)
+                    (checkedmaterializationrequestv1-configuration request)
+                    (checkedmaterializationrequestv1-abi request))]
+              (if (not (instance? native.lower.NativeLoweringCompleteV0 native))
+                (->CheckedMaterializationRejectedV1 "typed-to-native"
+                  "NATIVE-LOWERING-PENDING"
+                  "typed bundle retains undischarged native obligations")
+                (let [frozen-native stages/FrozenNativeStageV0 (lower/nativeloweringcompletev0-frozen native)
+                      program core/NativeCoreProgram (stages/nativestagev0-program
+                        (stages/frozennativestagev0-stage frozen-native))
+                      materialized (U (Vec TargetArtifactV1) TargetMaterializationRejectedV1) (materialize-targets program
+                        (checkedmaterializationrequestv1-targets request)
+                        (checkedmaterializationrequestv1-module-index request)
+                        (core/abiprofilev0-id
+                          (checkedmaterializationrequestv1-abi request)))]
+                  (if (instance?
+                        native.incremental_materializer.TargetMaterializationRejectedV1
+                        materialized)
+                    (->CheckedMaterializationRejectedV1 "materialization"
+                      "MATERIALIZER-REJECTED"
+                      (targetmaterializationrejectedv1-detail materialized))
+                    (let [artifacts (Vec TargetArtifactV1) materialized
+                          typed-fact CompileFactV1 (compile-fact (key-for request "typed-stage-v1")
+                            (stages/frozentypedstagev0-encoding frozen-typed))
+                          native-fact CompileFactV1 (compile-fact (key-for request "native-stage-v1")
+                            (stages/encode-frozen-native-stage-wire-v1
+                              frozen-native))]
+                      (->CheckedMaterializationBuiltV1 frozen-typed frozen-native
+                        artifacts
+                        (vec (concat [typed-fact native-fact]
+                               (artifact-facts request artifacts)))))))))))))))

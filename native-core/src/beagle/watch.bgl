@@ -1,0 +1,83 @@
+#lang beagle
+(ns beagle.watch)
+
+(defrecord WatchConfig
+  [(store-log String)
+   (space-id String)
+   (stage String)
+   (result-key String)
+   (compiler-context String)
+   (profile String)
+   (unit-id String)
+   (source-paths (Vec String))
+   (max-source-bytes Int)])
+
+(defrecord ChangedSource
+  [(path String)
+   (present Bool)
+   (content-id String)
+   (bytes (Vec Int))])
+
+(defunion SourceReadResult
+  (SourceRead [(source ChangedSource)])
+  (SourceReadError [(errno Int)]))
+
+(defalias MaterializeChanged
+  (Fn [WatchConfig ChangedSource] Int))
+
+(defn absent-content-id [(path String)] String
+  (sha256-bytes (utf8-encode (str "absent:" path))))
+
+(defn read-changed-source
+  [(path String)
+   (max-source-bytes Int)] SourceReadResult
+  (match (host.fs/read-text-bounded path max-source-bytes)
+    [(host.fs/ReadTextBoundedOk text)
+     (let [(bytes (Vec Int)) (utf8-encode text)]
+       (->SourceRead
+         (->ChangedSource path true (sha256-bytes bytes) bytes)))]
+    [(host.fs/ReadTextBoundedError errno)
+     (if (= errno 2)
+       (->SourceRead
+         (->ChangedSource path false (absent-content-id path) []))
+       (->SourceReadError errno))]))
+
+(defn materialize-path
+  [(config WatchConfig)
+   (path String)
+   (materialize-changed MaterializeChanged)] Int
+  (match (read-changed-source path (watchconfig-max-source-bytes config))
+    [(SourceRead source) (materialize-changed config source)]
+    [(SourceReadError errno) errno]))
+
+(defn materialize-initial
+  [(config WatchConfig)
+   (materialize-changed MaterializeChanged)] Int
+  (let [(paths (Vec String)) (watchconfig-source-paths config)]
+    (loop [offset Int 0]
+      (if (= offset (count paths))
+        0
+        (let [(status Int)
+              (materialize-path config (nth paths offset) materialize-changed)]
+          (if (= status 0)
+            (recur (inc offset))
+            status))))))
+
+(defn run
+  [(config WatchConfig)
+   (materialize-changed MaterializeChanged)] Int
+  (let [(initial-status Int)
+        (materialize-initial config materialize-changed)]
+    (if (not= initial-status 0)
+      initial-status
+      (loop [events Int 0]
+        (match (host.fs/wait-for-change
+                 (watchconfig-source-paths config))
+          [(host.fs/WaitForChangeOk path)
+           (let [(status Int)
+                 (materialize-path config path materialize-changed)]
+             (if (= status 0)
+               (recur (inc events))
+               status))]
+          [(host.fs/WaitForChangeError errno)
+           (if (= errno 4) 0 errno)])))))
