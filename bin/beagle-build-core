@@ -181,7 +181,7 @@ stop_ast_verify_workers() {
 
 run_ast_verifier_pool() {
     local source_count="${#normalized_sources[@]}"
-    local worker_count="$emit_workers"
+    local worker_count=4
     local deadline="${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}"
     local next_index=0 failure_seen=0 failure_cutoff=-1
     local finished_pid="" finished_index="" status=0 expected_receipt=""

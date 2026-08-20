@@ -218,12 +218,12 @@ interface fixture/s2.bgl=sha256:000000000000000000000000000000000000000000000000
 EXPECTED
 cmp "$scratch/expected-order" "$scratch/completion-a/projector-order"
 
-run_case failure forward 7 \
-    FAKE_FAIL_0=7 FAKE_FAIL_1=9 FAKE_HANG_2=1
-grep -Fq 'phase ast-verify-0 ERROR (7)' "$scratch/failure/stderr"
-grep -Fq 'phase ast-verify-1 ERROR (9)' "$scratch/failure/stderr"
+run_case failure forward 17 \
+    FAKE_FAIL_0=17 FAKE_FAIL_1=19 FAKE_HANG_2=1
+grep -Fq 'phase ast-verify-0 ERROR (17)' "$scratch/failure/stderr"
+grep -Fq 'phase ast-verify-1 ERROR (19)' "$scratch/failure/stderr"
 grep -Fq 'phase ast-verify-2 CANCELLED (143)' "$scratch/failure/stderr"
-grep -Fq 'ast-verify-0 status=7' "$scratch/failure/stderr"
+grep -Fq 'ast-verify-0 status=17' "$scratch/failure/stderr"
 [[ -f "$scratch/failure/term-2" ]]
 
 echo 'ast-verify-parallel: PASS overlap=3 ordered=stable failure=source-0 siblings=reaped'
