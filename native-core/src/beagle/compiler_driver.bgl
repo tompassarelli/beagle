@@ -100,9 +100,8 @@
    compiler-context String
    closure-digest String
    profile Keyword
-   root-resource t/Term
-   module-identities (Vec String)
-   module-projections (Vec (Vec t/Triple))])
+   initial-root-candidate t/Term
+   propositions (Vec t/Triple)])
 
 (defunion ProgramAdmissionPlanResult
   (ProgramAdmissionPlanned [plan ProgramAdmissionPlan])
@@ -222,14 +221,9 @@
              (if (not= 1 (count matches))
                (->FactClosureRejected 65
                  "checked module must have exactly one raw bundle at its exact source path")
-               (let [raw facts/SyntaxFactBundle (first matches)]
-                 (if (not= (facts/syntaxfactbundle-namespace raw)
-                           (facts/syntaxfactbundle-namespace bundle))
-                   (->FactClosureRejected 65
-                     "raw and normalized module namespace declarations disagree")
-                   (recur (rest remaining)
-                     (conj checked-modules
-                       (->CheckedModuleFacts raw bundle checked)))))))]
+               (recur (rest remaining)
+                 (conj checked-modules
+                   (->CheckedModuleFacts (first matches) bundle checked)))))]
           [(checker/CheckRejected rejection)
            (->FactClosureRejected 65
              (str (checker/checkrejection-rule rejection) ": "
@@ -242,7 +236,7 @@
 (defn length-framed [value String] String
   (str (count (utf8-encode value)) ":" value))
 
-(defn initial-program-root-resource
+(defn initial-program-root-candidate
   [space-id String
    compiler-context String
    closure-digest String
@@ -254,10 +248,26 @@
          (length-framed closure-digest)
          (length-framed entry-namespace))))
 
-(defn program-admission-root-value [plan ProgramAdmissionPlan] Any
-  (programadmissionplan-root-resource plan))
+(defn program-admission-seed-value [plan ProgramAdmissionPlan] Any
+  (programadmissionplan-initial-root-candidate plan))
 
 (defn program-term-value [value t/Term] Any value)
+
+(defn append-unique-program-proposition
+  [propositions (Vec t/Triple)
+   proposition t/Triple] (Vec t/Triple)
+  (if (some?
+        (some
+          (fn [candidate t/Triple] t/Triple?
+            (if (= candidate proposition) candidate nil))
+          propositions))
+    propositions
+    (conj propositions proposition)))
+
+(defn merge-program-propositions
+  [propositions (Vec t/Triple)
+   projected (Vec t/Triple)] (Vec t/Triple)
+  (reduce append-unique-program-proposition propositions projected))
 
 (defn plan-program-admission
   [config CompileSourceConfig
@@ -265,8 +275,7 @@
    entry-namespace String] ProgramAdmissionPlanResult
   (loop [remaining (Vec CheckedModuleFacts)
          (checkedfactclosure-modules checked)
-         identities (Vec String) []
-         projections (Vec (Vec t/Triple)) []]
+         propositions (Vec t/Triple) []]
     (if (empty? remaining)
       (let [syntax facts/SyntaxFactClosure
             (checkedfactclosure-syntax checked)
@@ -281,10 +290,9 @@
             compiler-context
             closure-digest
             program-profile
-            (initial-program-root-resource
+            (initial-program-root-candidate
               space-id compiler-context closure-digest entry-namespace)
-            identities
-            projections)))
+            propositions)))
       (let [module CheckedModuleFacts (first remaining)
             normalized facts/SyntaxFactBundle
             (checkedmodulefacts-syntax module)
@@ -300,8 +308,8 @@
             [(program-projection/ProgramProjected projected)
              (recur
                (vec (rest remaining))
-               (conj identities namespace)
-               (conj projections
+               (merge-program-propositions
+                 propositions
                  (program-projection/programmoduleprojection-propositions
                    projected)))]))))))
 
@@ -537,8 +545,7 @@
   (match (store (->CompileStoreAdmitProgram plan))
     [(CompileStoreFailure code detail) (->CompileStoreFailure code detail)]
     [(CompileStoreProgramAdmitted root-resource root-version)
-     (if (and (= (program-term-value root-resource)
-                 (program-admission-root-value plan))
+     (if (and (t/term? (program-term-value root-resource))
               (>= root-version 0))
        (store
          (->CompileStoreLookup
@@ -546,7 +553,7 @@
            (programadmissionplan-space-id plan)
            (compilequery-admitted query)))
        (->CompileStoreFailure 74
-         "Store admitted a different ProgramRoot or a negative version"))]
+         "Store returned an invalid ProgramRoot or a negative version"))]
     [(CompileStoreCold)
      (->CompileStoreFailure 74
        "Store omitted ProgramRoot admission before compile lookup")]

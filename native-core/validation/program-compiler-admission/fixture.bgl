@@ -81,19 +81,25 @@
           nil))
       propositions)))
 
-(defn canonical-projections?
-  [projections (Vec (Vec t/Triple))] Bool
-  (every?
-    (fn [module-propositions (Vec t/Triple)] Bool
-      (every? t/triple? module-propositions))
-    projections))
+(defn proposition-count
+  [propositions (Vec t/Triple)
+   t1 Any
+   t2 Any
+   t3 Any] Int
+  (reduce
+    (fn [total Int proposition t/Triple] Int
+      (if (and (= t1 (t/triple-t1 proposition))
+               (and (= t2 (t/triple-t2 proposition))
+                    (= t3 (t/triple-t3 proposition))))
+        (inc total)
+        total))
+    0
+    propositions))
 
 (defn plan-valid? [plan driver/ProgramAdmissionPlan] Bool
-  (let [identities (Vec String)
-        (driver/programadmissionplan-module-identities plan)
-        projections (Vec (Vec t/Triple))
-        (driver/programadmissionplan-module-projections plan)
-        root Any (driver/program-admission-root-value plan)
+  (let [propositions (Vec t/Triple)
+        (driver/programadmissionplan-propositions plan)
+        seed Any (driver/program-admission-seed-value plan)
         closure String (driver/programadmissionplan-closure-digest plan)
         context String (driver/programadmissionplan-compiler-context plan)]
     (and (= "fixture.store" (driver/programadmissionplan-store-log plan))
@@ -101,45 +107,50 @@
         (and (= bootstrap/default-compiler-context-id context)
           (and (= (bootstrap/content-id "fixture-closure") closure)
             (and (= :program (driver/programadmissionplan-profile plan))
-              (and (= [first-namespace second-namespace] identities)
-                (and (= 2 (count projections))
-                  (and (canonical-projections? projections)
+              (and (every? t/triple? propositions)
+                (and
+                  (proposition-present?
+                    propositions first-namespace :member_of :modules)
+                  (and
+                    (proposition-present?
+                      propositions first-namespace :represented_by first-source)
                     (and
                       (proposition-present?
-                        (nth projections 0)
-                        first-namespace :represented_by first-source)
+                        propositions second-namespace :member_of :modules)
                       (and
                         (proposition-present?
-                          (nth projections 1)
-                          second-namespace :represented_by second-source)
+                          propositions second-namespace :represented_by second-source)
                         (and
                           (not
                             (proposition-present?
-                              (nth projections 0)
-                              first-path :represented_by first-source))
+                              propositions first-path :represented_by first-source))
                           (and
-                            (= root
-                              (driver/initial-program-root-resource
-                                "space-a" context closure first-namespace))
+                            (= 1
+                              (proposition-count
+                                propositions :member_of :member_of :relationships))
                             (and
-                              (not= root
-                                (driver/initial-program-root-resource
-                                  "space-b" context closure first-namespace))
+                              (= seed
+                                (driver/initial-program-root-candidate
+                                  "space-a" context closure first-namespace))
                               (and
-                                (not= root
-                                  (driver/initial-program-root-resource
-                                    "space-a" (bootstrap/content-id "other-compiler")
-                                    closure first-namespace))
+                                (not= seed
+                                  (driver/initial-program-root-candidate
+                                    "space-b" context closure first-namespace))
                                 (and
-                                  (not= root
-                                    (driver/initial-program-root-resource
-                                      "space-a" context
-                                      (bootstrap/content-id "other-closure")
-                                      first-namespace))
-                                  (not= root
-                                    (driver/initial-program-root-resource
-                                      "space-a" context closure
-                                      second-namespace)))))))))))))))))))
+                                  (not= seed
+                                    (driver/initial-program-root-candidate
+                                      "space-a" (bootstrap/content-id "other-compiler")
+                                      closure first-namespace))
+                                  (and
+                                    (not= seed
+                                      (driver/initial-program-root-candidate
+                                        "space-a" context
+                                        (bootstrap/content-id "other-closure")
+                                        first-namespace))
+                                    (not= seed
+                                      (driver/initial-program-root-candidate
+                                        "space-a" context closure
+                                        second-namespace))))))))))))))))))))
 
 (def trace (Atom (Vec Keyword)) (atom []))
 
@@ -153,7 +164,7 @@
     [(driver/CompileStoreAdmitProgram plan)
      (note! :admit)
      (driver/->CompileStoreProgramAdmitted
-       (driver/programadmissionplan-root-resource plan) 0)]
+       (driver/programadmissionplan-initial-root-candidate plan) 0)]
     [(driver/CompileStoreLookup store-log space-id query)
      (note! :lookup-cold)
      (driver/->CompileStoreCold)]
@@ -166,7 +177,7 @@
     [(driver/CompileStoreAdmitProgram plan)
      (note! :admit)
      (driver/->CompileStoreProgramAdmitted
-       (driver/programadmissionplan-root-resource plan) 7)]
+       (driver/programadmissionplan-initial-root-candidate plan) 7)]
     [(driver/CompileStoreLookup store-log space-id query)
      (note! :lookup-warm)
      (match (fact-profile/admit-and-identify-result
@@ -184,14 +195,14 @@
     [(driver/CompileStoreAppend store-log space-id result artifact)
      (driver/->CompileStoreFailure 70 "unexpected append")]))
 
-(defn wrong-root-store!
+(defn existing-root-store!
   [request driver/CompileStoreRequest] driver/CompileStoreResponse
   (match request
     [(driver/CompileStoreAdmitProgram plan)
      (note! :admit)
-     (driver/->CompileStoreProgramAdmitted "other-root" 0)]
+     (driver/->CompileStoreProgramAdmitted "existing-program-root" 4)]
     [(driver/CompileStoreLookup store-log space-id query)
-     (note! :lookup-should-not-run)
+     (note! :lookup-existing)
      (driver/->CompileStoreCold)]
     [(driver/CompileStoreAppend store-log space-id result artifact)
      (driver/->CompileStoreFailure 70 "unexpected append")]))
@@ -202,7 +213,7 @@
     [(driver/CompileStoreAdmitProgram plan)
      (note! :admit)
      (driver/->CompileStoreProgramAdmitted
-       (driver/programadmissionplan-root-resource plan) -1)]
+       (driver/programadmissionplan-initial-root-candidate plan) -1)]
     [(driver/CompileStoreLookup store-log space-id query)
      (note! :lookup-should-not-run)
      (driver/->CompileStoreCold)]
@@ -248,9 +259,9 @@
           (driver/lookup-admitted-program plan query warm-store!)
           warm-order (Vec Keyword) (deref trace)]
       (reset! trace [])
-      (let [wrong-response driver/CompileStoreResponse
-            (driver/lookup-admitted-program plan query wrong-root-store!)
-            wrong-order (Vec Keyword) (deref trace)]
+      (let [existing-response driver/CompileStoreResponse
+            (driver/lookup-admitted-program plan query existing-root-store!)
+            existing-order (Vec Keyword) (deref trace)]
         (reset! trace [])
         (let [negative-response driver/CompileStoreResponse
               (driver/lookup-admitted-program plan query negative-version-store!)
@@ -259,7 +270,8 @@
                     (= [:admit :lookup-cold] cold-order))
             (and (and (warm-rejected? warm-response)
                       (= [:admit :lookup-warm] warm-order))
-              (and (and (failure? wrong-response) (= [:admit] wrong-order))
+              (and (and (cold? existing-response)
+                        (= [:admit :lookup-existing] existing-order))
                 (and (failure? negative-response)
                      (= [:admit] negative-order))))))))))
 
@@ -294,13 +306,27 @@
 (defn evaluate-modules!
   [first PreparedModule
    second PreparedModule] Int
-  (let [closure facts/SyntaxFactClosure (test-closure first second)]
-    (match (driver/check-fact-closure
-             closure
-             [(preparedmodule-raw first) (preparedmodule-raw second)])
-      [(driver/FactClosureRejected code detail) 13]
-      [(driver/FactClosureChecked checked)
-       (evaluate-plan! closure checked)])))
+  (if (not
+        (and (nil?
+               (facts/syntaxfactbundle-namespace
+                 (preparedmodule-raw first)))
+          (and (nil?
+                 (facts/syntaxfactbundle-namespace
+                   (preparedmodule-raw second)))
+            (and (= first-namespace
+                     (facts/syntaxfactbundle-namespace
+                       (preparedmodule-normalized first)))
+                 (= second-namespace
+                    (facts/syntaxfactbundle-namespace
+                      (preparedmodule-normalized second)))))))
+    18
+    (let [closure facts/SyntaxFactClosure (test-closure first second)]
+      (match (driver/check-fact-closure
+               closure
+               [(preparedmodule-raw first) (preparedmodule-raw second)])
+        [(driver/FactClosureRejected code detail) 13]
+        [(driver/FactClosureChecked checked)
+         (evaluate-plan! closure checked)]))))
 
 (defn main! [args (Vec String)] Int
   (match (prepare-module first-path first-source)
