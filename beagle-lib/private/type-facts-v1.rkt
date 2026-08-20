@@ -240,15 +240,8 @@
 (define (derivation-edge-v1-id edge)
   (canonical-value-v1-id (derivation-edge-v1-envelope edge)))
 
-(define DEFINITION-SCHEME-V1-ENCODER
-  (make-fact-kind-encoder-v1
-   "DefinitionSchemeV1"
-   1
-   canonical-payload-encoder-v1))
-
 ;; Schema 2 extends the existing definition-signature kind with the reserved
-;; first-mint effects/obligations slot.  The old encoder remains exported for
-;; decoding and fixture compatibility; newly minted signatures use V2.
+;; first-mint effects/obligations slot.
 (define DEFINITION-SCHEME-V2-ENCODER
   (make-fact-kind-encoder-v1
    "DefinitionSchemeV1"
@@ -1057,7 +1050,6 @@
  derivation-edge-v1-canonical-bytes
  derivation-edge-v1-id
  current-type-facts-checker-epoch-v1
- DEFINITION-SCHEME-V1-ENCODER
  DEFINITION-SCHEME-V2-ENCODER
  CHECKER-IDENTITY-V1-ENCODER
  INTERFACE-REVISION-V1-ENCODER
