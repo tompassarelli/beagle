@@ -1072,6 +1072,7 @@ PY
 else
 bundle_ast="$work/source_bundle.ast.json"
 run_phase "ast-bundle" "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-60}" \
+    env BEAGLE_DEV_FACT_STORE="$dev_fact_store" \
     "$BIN/beagle-ast" --bundle "${module_root_args[@]}" \
     "${explicit_normalized_sources[@]}" >"$bundle_ast"
 

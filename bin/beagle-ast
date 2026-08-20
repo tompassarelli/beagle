@@ -88,6 +88,50 @@ done
 # collection link (which lacks it).
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+reuse=0
+[[ "$bundle" == 1 &&
+   "${BEAGLE_CHECKED_AST_REUSE:-1}" != 0 &&
+   "${BEAGLE_FACT_REUSE_FORBIDDEN:-0}" != 1 ]] && reuse=1
+ast_store="${BEAGLE_CHECKED_AST_STORE:-${BEAGLE_DEV_FACT_STORE:-$BEAGLE_ROOT/.beagle/dev-compile-facts.storelog}}"
+ast_profile="beagle-ast-v2"
+ast_unit="$(if [[ "$bundle" == 1 ]]; then echo bundle; else echo single; fi)"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/beagle-ast.XXXXXX")"
+trap 'rm -rf "${tmp_dir:?}"' EXIT
+
+closure_fields="$tmp_dir/closure-fields"
+if [[ "$reuse" == 1 ]]; then
+    if [[ -n "${BEAGLE_AST_CLOSURE_FIELDS:-}" ]]; then
+        cp -- "${BEAGLE_AST_CLOSURE_FIELDS}" "$closure_fields"
+    else
+        closure_cli="$BEAGLE_ROOT/beagle-lib/private/module-source-root-cli.rkt"
+        closure_args=()
+        for spec in "${module_root_specs[@]}"; do closure_args+=(--module-root "$spec"); done
+        for src in "${sources[@]}"; do
+            src_abs="$(realpath "$src")"
+            closure_args+=(--source "$src_abs" "$(beagle_source_id "$src_abs" "${module_root_specs[@]}")")
+        done
+        "$RACKET" "$closure_cli" "${closure_args[@]}" >"$closure_fields"
+    fi
+    source_hashes="$tmp_dir/source-hashes"
+    : >"$source_hashes"
+    while IFS= read -r -d '' physical && IFS= read -r -d '' logical; do
+        printf '%s\0%s\0' "$logical" "$(sha256sum -- "$physical" | awk '{print $1}')" >>"$source_hashes"
+    done <"$closure_fields"
+    compiler_context="sha256:$(sha256sum "$0" "$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt" "$BEAGLE_ROOT/beagle-lib/private/module-interface.rkt" "$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt" "$BEAGLE_ROOT/beagle-lib/private/module-source-root.rkt" | awk '{print $1}' | sha256sum | awk '{print $1}')"
+    key_input="$tmp_dir/key-input"
+    printf 'checked-ast-bundle-v2\0%s\0' "$compiler_context" >"$key_input"
+    for spec in "${module_root_specs[@]}"; do
+        printf 'module-root\0%s\0' "${spec%%=*}" >>"$key_input"
+    done
+    cat "$source_hashes" >>"$key_input"
+    result_key="sha256:$(sha256sum "$key_input" | awk '{print $1}')"
+    mkdir -p "$(dirname "$ast_store")"
+    if bb -cp "$BEAGLE_ROOT/store/out" "$BEAGLE_ROOT/bin/_beagle-checked-ast-store.clj" query "$ast_store" "$result_key" "$compiler_context" "$ast_profile" "$ast_unit" >"$tmp_dir/hit" 2>/dev/null; then
+        cat "$tmp_dir/hit"
+        exit 0
+    fi
+fi
+
 source_args=()
 for src in "${sources[@]}"; do
     src_abs="$(realpath "$src")"
@@ -97,6 +141,7 @@ for src in "${sources[@]}"; do
     )
 done
 
+projection="$tmp_dir/projection"
 "$RACKET" -e "
 (require json
          racket/list
@@ -183,4 +228,17 @@ done
 (write-json (hasheq 'schemaVersion 2 'modules modules))
 (newline)
 " -- "$bundle" "$interface_sha256_out" "${#module_root_specs[@]}" \
-    "${module_root_specs[@]}" "${source_args[@]}"
+    "${module_root_specs[@]}" "${source_args[@]}" >"$projection"
+
+if [[ "$reuse" == 1 ]]; then
+    source_hashes_after="$tmp_dir/source-hashes-after"
+    : >"$source_hashes_after"
+    while IFS= read -r -d '' physical && IFS= read -r -d '' logical; do
+        [[ -f "$physical" ]] || break
+        printf '%s\0%s\0' "$logical" "$(sha256sum -- "$physical" | awk '{print $1}')" >>"$source_hashes_after"
+    done <"$closure_fields"
+    if cmp -s "$source_hashes" "$source_hashes_after"; then
+        bb -cp "$BEAGLE_ROOT/store/out" "$BEAGLE_ROOT/bin/_beagle-checked-ast-store.clj" append "$ast_store" "$result_key" "$compiler_context" "$ast_profile" "$ast_unit" "$projection"
+    fi
+fi
+cat "$projection"
