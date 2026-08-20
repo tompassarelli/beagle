@@ -207,7 +207,7 @@ int main(void) {
     return 3;
   }
   /* The callee allocates into the arena its caller hands it, so the same
-     bound holds one frame down — and only because the arena is a per-call
+     bound holds one call down — and only because the arena is a per-call
      operand the epoch stage could retarget. */
   if (caller_derived_small != caller_derived_large) {
     fprintf(stderr, "main.c: caller-derived watermark grew\n");

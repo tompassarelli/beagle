@@ -28,13 +28,13 @@
 (defn empty-positions [] (Vec Int)
   (let [(seed (Vec Int)) []] seed))
 
-(defn frame-operation-count [(frame t/TransactionFrame)] Int
-  (count (t/transactionframe-operations frame)))
+(defn record-operation-count [(record t/TransactionRecord)] Int
+  (count (t/transactionrecord-operations record)))
 
-(defn frame-operation-at
-  [(frame t/TransactionFrame)
+(defn record-operation-at
+  [(record t/TransactionRecord)
    (position Int)] t/CommitOperation
-  (nth (t/transactionframe-operations frame) position))
+  (nth (t/transactionrecord-operations record) position))
 
 (defn any-values-equal? [(left (Vec Any)) (right (Vec Any))] Bool
   (= left right))

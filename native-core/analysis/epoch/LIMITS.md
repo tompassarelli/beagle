@@ -88,7 +88,7 @@ annotation. It is a label and never changes the verdict.
 `identity` is `domain`, `incidental`, or `unknown`. Domain types are records or
 unions declared by domain namespaces, stage records, and explicit stage
 products. Diagnostic, error, refusal, measurement, replay-result, load-result,
-frames-result, and control records are incidental. Unresolved types remain
+records-result and control records are incidental. Unresolved types remain
 unknown.
 
 ## Enumeration and source limits

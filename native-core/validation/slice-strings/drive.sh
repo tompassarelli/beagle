@@ -95,7 +95,7 @@ echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + refusal traps ok"
 # epoch close is a free(), which only a sanitizer can hold to account: the
 # clean (non-refusal) run therefore also runs under ASan + UBSan.
 sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all
-          -fno-omit-frame-pointer -g)
+          -g)
 ( cd "$build" && gcc "${strict[@]}" "${sanitize[@]}" -o probe_gcc_san \
     module_0.c native_shim.c main.c )
 ( cd "$build" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \

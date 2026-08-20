@@ -152,7 +152,7 @@
    (->PrimSpecV0 "ty-OperationRow" "t/OperationRow")
    (->PrimSpecV0 "ty-ActiveBucket" "t/ActiveBucket")
    (->PrimSpecV0 "ty-CommitOperation" "t/CommitOperation")
-   (->PrimSpecV0 "ty-TransactionFrame" "t/TransactionFrame")
+   (->PrimSpecV0 "ty-TransactionRecord" "t/TransactionRecord")
    (->PrimSpecV0 "ty-TermStore" "t/TermStore")
    (->PrimSpecV0 "ty-TermStoreDump" "t/TermStoreDump")
    (->PrimSpecV0 "ty-Fold" "Fold")])
@@ -168,7 +168,7 @@
    (->AppSpecV0 "ty-VecOperationRow" "Vec" ["ty-OperationRow"])
    (->AppSpecV0 "ty-VecActiveBucket" "Vec" ["ty-ActiveBucket"])
    (->AppSpecV0 "ty-VecCommitOperation" "Vec" ["ty-CommitOperation"])
-   (->AppSpecV0 "ty-VecTransactionFrame" "Vec" ["ty-TransactionFrame"])
+   (->AppSpecV0 "ty-VecTransactionRecord" "Vec" ["ty-TransactionRecord"])
    (->AppSpecV0 "ty-AtomTermStore" "Atom" ["ty-TermStore"])])
 
 ;; `T?` in the Beagle Store source is a two-arm optional; the source projection carries
@@ -226,7 +226,7 @@
    (->RecordSpecV0 "rec-CommitOperation" "CommitOperation"
      [(->FieldSpecV0 "action" "ty-Keyword")
       (->FieldSpecV0 "proposition" "ty-Triple")])
-   (->RecordSpecV0 "rec-TransactionFrame" "TransactionFrame"
+   (->RecordSpecV0 "rec-TransactionRecord" "TransactionRecord"
      [(->FieldSpecV0 "sequence" "ty-Int")
       (->FieldSpecV0 "operations" "ty-VecCommitOperation")])
    (->RecordSpecV0 "rec-TermStore" "TermStore"
@@ -255,19 +255,19 @@
 ;; three operations typed-to-native lowering implements, so each stays an
 ;; explicit obligation rather than a fabricated body.
 (def function-specs (Vec FunctionSpecV0)
-  [(->FunctionSpecV0 "fn-transaction-frame" "transaction-frame"
+  [(->FunctionSpecV0 "fn-transaction-record" "transaction-record"
      [(->FieldSpecV0 "sequence" "ty-Int")
       (->FieldSpecV0 "operations" "ty-VecCommitOperation")]
-     "ty-TransactionFrame")
+     "ty-TransactionRecord")
    (->FunctionSpecV0 "fn-max-sequence" "max-sequence"
-     [(->FieldSpecV0 "frames" "ty-VecTransactionFrame")]
+     [(->FieldSpecV0 "records" "ty-VecTransactionRecord")]
      "ty-Int")
    (->FunctionSpecV0 "fn-project" "project"
      [(->FieldSpecV0 "ctx" "ty-AtomTermStore")]
      "ty-Fold")
    (->FunctionSpecV0 "fn-fold" "fold!"
      [(->FieldSpecV0 "space-id" "ty-String")
-      (->FieldSpecV0 "frames" "ty-VecTransactionFrame")]
+      (->FieldSpecV0 "records" "ty-VecTransactionRecord")]
      "ty-Fold")
    (->FunctionSpecV0 "fn-refold" "refold!"
      [(->FieldSpecV0 "space-id" "ty-String")

@@ -179,7 +179,7 @@ echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run ok"
 # The sanitizers are the point of this driver: the promoted Text is read after
 # its epoch was destroyed, which is a use-after-free unless promote copied.
 sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all
-          -fno-omit-frame-pointer -g)
+          -g)
 
 ( cd "$build" && gcc "${strict[@]}" "${sanitize[@]}" -o probe_gcc_san "${sources[@]}" )
 ( cd "$build" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \

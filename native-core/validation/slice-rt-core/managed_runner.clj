@@ -14,7 +14,7 @@
     (throw (ex-info "managed rt_core oracle expected an exception"
       {:subject subject :case case-name}))
     (catch clojure.lang.ExceptionInfo error
-      (when-not (and (= true (:fram/doctor-refusal (ex-data error)))
+      (when-not (and (= true (:beagle/doctor-refusal (ex-data error)))
                   (str/includes? (.getMessage error) message-fragment))
         (throw error))
       (println (str "rt-core\t" subject "\t" case-name "\tPASS")))))

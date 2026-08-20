@@ -107,7 +107,7 @@ clang_bin="$(find_clang || true)"
 # close is a free(), so a value that outlived its epoch is a use-after-free and
 # nothing but ASan sees it.
 sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all
-          -fno-omit-frame-pointer -g)
+          -g)
 
 ( cd "$build" && gcc "${strict[@]}" "${sanitize[@]}" -o probe_gcc_san "${sources[@]}" )
 ( cd "$build" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \

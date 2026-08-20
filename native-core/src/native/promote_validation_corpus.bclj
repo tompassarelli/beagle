@@ -177,7 +177,7 @@
         (lowered-epoch-free Int) (count-in pre-stage "promoted-count" true)
         (lowered-epoch-free-copies Int) (count-in pre-stage "promoted-count" false)
         ;; The stage's no-op rewrite: the parameter is the caller's, older than
-        ;; anything this frame allocates, so its promote becomes a plain copy.
+        ;; anything this call allocates, so its promote becomes a plain copy.
         (derived-parameter-promotes Int)
         (count-in derived "promoted-parameter" true)
         (derived-parameter-copies Int)

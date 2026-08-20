@@ -14,7 +14,7 @@
    fn_32 render-text-vector  fn_33 print-text-vector
    fn_34 render-text-map  fn_35 print-text-map
    fn_36 render-printable  fn_37 print-printable
-   fn_38 render-framed-printable
+   fn_38 render-wrapped-printable
    fn_39 dynamic-keyword  fn_40 literal-assert  fn_41 literal-retract
    type_1 Int  type_2 Bool  type_3 Float  type_4 Text  type_5 Keyword
    type_8 Nil  type_9 Map  type_10 Vec  type_11 Printable */

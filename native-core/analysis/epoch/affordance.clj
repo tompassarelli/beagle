@@ -1913,7 +1913,7 @@
 ;; (RpcError, QueryError, TransactionReplayResult, TermCodecMeasure,
 ;;  QueryControl ...).
 (def incidental-record-rx
-  #"(?i)(error|diagnostic|refused|measure|replayresult|loadresult|framesresult|control)")
+  #"(?i)(error|diagnostic|refused|measure|replayresult|loadresult|recordsresult|control)")
 (def container-type-names
   #{"Atom" "Vec" "Set" "Map" "Option" "Queue" "Seq" "List"})
 (def scalar-type-names

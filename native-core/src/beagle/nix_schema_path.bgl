@@ -18,7 +18,7 @@
 (defrecord PathSuggestion
   [(path String) (distance Int)])
 
-(defrecord SourceFrame
+(defrecord SourceStackEntry
   [(kind Keyword)
    (items Int)
    (prefix String)
@@ -44,8 +44,8 @@
       (= kind :unquote)
       (= kind :unquote-splicing)))
 
-(defn map-frame? [(frame SourceFrame)] Bool
-  (= (sourceframe-kind frame) :map/open))
+(defn map-stack-entry? [(entry SourceStackEntry)] Bool
+  (= (sourcestackentry-kind entry) :map/open))
 
 (defn string-prefix? [(value String) (prefix String)] Bool
   (and (>= (count value) (count prefix))
@@ -81,84 +81,84 @@
           (str/includes? segment ".") segment
           :else nil)))))
 
-(defn occurrence-from-frame
-  [(document SourceDocument) (frame SourceFrame)]
+(defn occurrence-from-entry
+  [(document SourceDocument) (entry SourceStackEntry)]
   OptionPathOccurrence?
-  (let [(path String?) (sourceframe-pending-path frame)]
+  (let [(path String?) (sourcestackentry-pending-path entry)]
     (if (nil? path)
       nil
       (->OptionPathOccurrence
         (sourcedocument-source-id document)
         path
-        (sourceframe-pending-offset frame)))))
+        (sourcestackentry-pending-offset entry)))))
 
-(defn append-frame-occurrence
+(defn append-entry-occurrence
   [(document SourceDocument)
-   (frame SourceFrame)
+   (entry SourceStackEntry)
    (ignored-roots (Vec String))
    (occurrences (Vec OptionPathOccurrence))]
   (Vec OptionPathOccurrence)
   (let [(occurrence OptionPathOccurrence?)
-        (occurrence-from-frame document frame)]
+        (occurrence-from-entry document entry)]
     (if (nil? occurrence)
       occurrences
-      (if (or (sourceframe-ignored frame)
+      (if (or (sourcestackentry-ignored entry)
               (ignored-path?
                 (optionpathoccurrence-path occurrence)
                 ignored-roots))
         occurrences
         (conj occurrences occurrence)))))
 
-(defn frame-value-ignored?
-  [(frame SourceFrame) (ignored-roots (Vec String))]
+(defn entry-value-ignored?
+  [(entry SourceStackEntry) (ignored-roots (Vec String))]
   Bool
-  (let [(path String?) (sourceframe-pending-path frame)]
-    (or (sourceframe-ignored frame)
+  (let [(path String?) (sourcestackentry-pending-path entry)]
+    (or (sourcestackentry-ignored entry)
         (and (some? path) (ignored-path? path ignored-roots)))))
 
-(defn completed-map-item [(frame SourceFrame)] SourceFrame
-  (->SourceFrame
-    (sourceframe-kind frame)
-    (inc (sourceframe-items frame))
-    (sourceframe-prefix frame)
-    (sourceframe-ignored frame)
+(defn completed-map-item [(entry SourceStackEntry)] SourceStackEntry
+  (->SourceStackEntry
+    (sourcestackentry-kind entry)
+    (inc (sourcestackentry-items entry))
+    (sourcestackentry-prefix entry)
+    (sourcestackentry-ignored entry)
     nil
     -1))
 
 (defn complete-parent-container
-  [(frames (Vec SourceFrame))]
-  (Vec SourceFrame)
-  (if (empty? frames)
-    frames
-    (let [(index Int) (dec (count frames))
-          (parent SourceFrame) (nth frames index)]
-      (if (map-frame? parent)
-        (assoc frames index (completed-map-item parent))
-        frames))))
+  [(stack (Vec SourceStackEntry))]
+  (Vec SourceStackEntry)
+  (if (empty? stack)
+    stack
+    (let [(index Int) (dec (count stack))
+          (parent SourceStackEntry) (nth stack index)]
+      (if (map-stack-entry? parent)
+        (assoc stack index (completed-map-item parent))
+        stack))))
 
 (defn consume-map-atom
   [(document SourceDocument)
    (ignored-roots (Vec String))
-   (frame SourceFrame)
+   (entry SourceStackEntry)
    (event reader/ReaderEvent)
    (occurrences (Vec OptionPathOccurrence))]
   (Vec OptionPathOccurrence)
-  (if (= (mod (sourceframe-items frame) 2) 0)
+  (if (= (mod (sourcestackentry-items entry) 2) 0)
     occurrences
-    (append-frame-occurrence document frame ignored-roots occurrences)))
+    (append-entry-occurrence document entry ignored-roots occurrences)))
 
-(defn map-frame-after-atom
-  [(frame SourceFrame) (event reader/ReaderEvent)]
-  SourceFrame
-  (if (= (mod (sourceframe-items frame) 2) 0)
-    (->SourceFrame
-      (sourceframe-kind frame)
-      (inc (sourceframe-items frame))
-      (sourceframe-prefix frame)
-      (sourceframe-ignored frame)
-      (keyword-path (sourceframe-prefix frame) event)
+(defn map-entry-after-atom
+  [(entry SourceStackEntry) (event reader/ReaderEvent)]
+  SourceStackEntry
+  (if (= (mod (sourcestackentry-items entry) 2) 0)
+    (->SourceStackEntry
+      (sourcestackentry-kind entry)
+      (inc (sourcestackentry-items entry))
+      (sourcestackentry-prefix entry)
+      (sourcestackentry-ignored entry)
+      (keyword-path (sourcestackentry-prefix entry) event)
       (reader/readerevent-offset event))
-    (completed-map-item frame)))
+    (completed-map-item entry)))
 
 (defn scan-option-path-events
   [(document SourceDocument)
@@ -166,10 +166,10 @@
    (events (Vec reader/ReaderEvent))]
   OptionPathExtraction
   (loop [(remaining (Vec reader/ReaderEvent)) events
-         (frames (Vec SourceFrame)) []
+         (stack (Vec SourceStackEntry)) []
          (occurrences (Vec OptionPathOccurrence)) []]
     (if (empty? remaining)
-      (if (empty? frames)
+      (if (empty? stack)
         (->OptionPaths occurrences)
         (->OptionPathError
           (sourcedocument-source-id document)
@@ -185,69 +185,69 @@
             "metadata forms are not supported by option-path extraction")
 
           (event-prefix? kind)
-          (recur (rest remaining) frames occurrences)
+          (recur (rest remaining) stack occurrences)
 
           (event-opening? kind)
-          (if (empty? frames)
+          (if (empty? stack)
             (recur
               (rest remaining)
-              (conj frames (->SourceFrame kind 0 "" false nil -1))
+              (conj stack (->SourceStackEntry kind 0 "" false nil -1))
               occurrences)
-            (let [(parent SourceFrame) (peek frames)
-                  (parent-map Bool) (map-frame? parent)
+            (let [(parent SourceStackEntry) (peek stack)
+                  (parent-map Bool) (map-stack-entry? parent)
                   (value-position Bool)
-                  (and parent-map (= (mod (sourceframe-items parent) 2) 1))
+                  (and parent-map (= (mod (sourcestackentry-items parent) 2) 1))
                   (value-ignored Bool)
                   (if value-position
-                    (frame-value-ignored? parent ignored-roots)
-                    (sourceframe-ignored parent))
+                    (entry-value-ignored? parent ignored-roots)
+                    (sourcestackentry-ignored parent))
                   (child-prefix String)
                   (if (and value-position
                            (= kind :map/open)
-                           (some? (sourceframe-pending-path parent)))
-                    (or (sourceframe-pending-path parent) "")
+                           (some? (sourcestackentry-pending-path parent)))
+                    (or (sourcestackentry-pending-path parent) "")
                     "")
                   (next-occurrences (Vec OptionPathOccurrence))
                   (if (and value-position (not= kind :map/open))
-                    (append-frame-occurrence
+                    (append-entry-occurrence
                       document parent ignored-roots occurrences)
                     occurrences)]
               (recur
                 (rest remaining)
-                (conj frames
-                  (->SourceFrame kind 0 child-prefix value-ignored nil -1))
+                (conj stack
+                  (->SourceStackEntry kind 0 child-prefix value-ignored nil -1))
                 next-occurrences)))
 
           (event-closing? kind)
-          (if (empty? frames)
+          (if (empty? stack)
             (->OptionPathError
               (sourcedocument-source-id document)
               (reader/readerevent-offset event)
               "unexpected source container close")
-            (let [(frame SourceFrame) (peek frames)]
-              (if (and (map-frame? frame)
-                       (not= (mod (sourceframe-items frame) 2) 0))
+            (let [(entry SourceStackEntry) (peek stack)]
+              (if (and (map-stack-entry? entry)
+                       (not= (mod (sourcestackentry-items entry) 2) 0))
                 (->OptionPathError
                   (sourcedocument-source-id document)
                   (reader/readerevent-offset event)
                   "map requires an even number of forms")
                 (recur
                   (rest remaining)
-                  (complete-parent-container (pop frames))
+                  (complete-parent-container (pop stack))
                   occurrences))))
 
           :else
-          (if (empty? frames)
-            (recur (rest remaining) frames occurrences)
-            (let [(index Int) (dec (count frames))
-                  (frame SourceFrame) (nth frames index)]
-              (if (map-frame? frame)
+          (if (empty? stack)
+            (recur (rest remaining) stack occurrences)
+            (let [(index Int) (dec (count stack))
+                  (entry SourceStackEntry) (nth stack index)]
+              (if (map-stack-entry? entry)
                 (recur
                   (rest remaining)
-                  (assoc frames index (map-frame-after-atom frame event))
+                  (assoc stack index (map-entry-after-atom entry event))
                   (consume-map-atom
-                    document ignored-roots frame event occurrences))
-                (recur (rest remaining) frames occurrences)))))))))
+                    document ignored-roots entry event occurrences))
+                (recur (rest remaining) stack occurrences)))))))))
 
 (defn extract-nix-option-paths
   [(document SourceDocument) (ignored-roots (Vec String))]

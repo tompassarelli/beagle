@@ -59,7 +59,7 @@ gcc -std=c17 -Wall -Wextra -Werror \
 echo "GCC C17 PASS"
 
 "$types_clang_bin" -std=c17 -Wall -Wextra -Werror \
-  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  -fsanitize=address,undefined \
   -I"$types_output" -I"$types_root/native-core/shim" \
   "$types_output/main.c" "$types_output/module_0.c" \
   "$types_root/native-core/shim/native_shim.c" \

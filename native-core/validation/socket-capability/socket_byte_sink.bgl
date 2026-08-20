@@ -2,12 +2,12 @@
 (ns native.socket-byte-sink)
 
 
-(def frame-octets (Vec Int) [0 0 0 4 112 111 110 103])
+(def packet-octets (Vec Int) [0 0 0 4 112 111 110 103])
 
-(defn write-frame [(peer-fd Int)] Int
+(defn write-packet [(peer-fd Int)] Int
   (do
     (host.socket/write-bounded
       peer-fd
-      (native.bytes/from-ints-bounded frame-octets 8)
+      (native.bytes/from-ints-bounded packet-octets 8)
       8)
     0))

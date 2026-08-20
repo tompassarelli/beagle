@@ -3,7 +3,7 @@
    fn_60 bucket-size          fn_61 bucket-position-at
    fn_62 bucket-with-position fn_63 append-position
    fn_64 position-pair        fn_65 empty-positions
-   fn_66 frame-operation-count fn_67 frame-operation-at
+   fn_66 record-operation-count fn_67 record-operation-at
    fn_68 any-values-equal?   fn_69 increment-value
    fn_70 decrement-value     fn_71 mask-values
    fn_72 xor-values          fn_73 shifted-value
@@ -124,14 +124,14 @@ int main(int argc, char **argv) {
   };
   operations = native_vec_push(&arena, operations, &assert_operation, INT64_C(56), (size_t)8);
   operations = native_vec_push(&arena, operations, &retract_operation, INT64_C(56), (size_t)8);
-  native_m0_type_31 frame = { INT64_C(3), operations };
-  if (native_m0_fn_66(frame) != INT64_C(2)) {
+  native_m0_type_31 record = { INT64_C(3), operations };
+  if (native_m0_fn_66(record) != INT64_C(2)) {
     return 8;
   }
   if (!native_text_eq(
-          native_m0_fn_67(frame, INT64_C(0)).field_0, assert_action)
+          native_m0_fn_67(record, INT64_C(0)).field_0, assert_action)
       || !native_text_eq(
-          native_m0_fn_67(frame, INT64_C(1)).field_0, retract_action)) {
+          native_m0_fn_67(record, INT64_C(1)).field_0, retract_action)) {
     return 10;
   }
 

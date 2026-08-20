@@ -108,7 +108,7 @@ gcc -std=c17 -Wall -Wextra -Werror \
 "$scratch/gcc-store"
 
 "$clang_bin" -std=c17 -Wall -Wextra -Werror \
-  -fsanitize=address,undefined -fno-omit-frame-pointer \
+  -fsanitize=address,undefined \
   -I"$art" -I"$repo/native-core/shim" \
   "$art/main.c" "$art/module_0.c" "$repo/native-core/shim/native_shim.c" \
   -o "$scratch/clang-store-sanitized"

@@ -189,7 +189,7 @@ def write_receipt(receipt: str | None, timed_out: bool, status: int) -> None:
     )
 
 
-def record_interruption(signum: int, _frame: object) -> None:
+def record_interruption(signum: int, _call_state: object) -> None:
     global interrupted_signal
     interrupted_signal = signum
 

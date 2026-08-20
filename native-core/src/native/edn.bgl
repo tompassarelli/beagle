@@ -21,11 +21,11 @@
   (EdnEncoded [(text String)])
   (EdnEncodeError [(event-index Int) (message String)]))
 
-(defrecord DecodeFrame
+(defrecord DecodeStackEntry
   [(kind Keyword) (items Int)])
 
 (defunion ValueCount
-  (ValueCounted [(frames (Vec DecodeFrame)) (roots Int)])
+  (ValueCounted [(stack (Vec DecodeStackEntry)) (roots Int)])
   (ValueCountRejected [(token Bool)]))
 
 (defunion EncodeExpectation
@@ -45,18 +45,18 @@
   (ValueEncodeRejected [(message String)]))
 
 (defn count-value
-  [(frames (Vec DecodeFrame)) (roots Int)] ValueCount
-  (if (empty? frames)
+  [(stack (Vec DecodeStackEntry)) (roots Int)] ValueCount
+  (if (empty? stack)
     (if (= roots 0)
-      (->ValueCounted frames 1)
+      (->ValueCounted stack 1)
       (->ValueCountRejected true))
-    (let [(index Int) (dec (count frames))
-          (frame DecodeFrame) (nth frames index)]
+    (let [(index Int) (dec (count stack))
+          (entry DecodeStackEntry) (nth stack index)]
       (->ValueCounted
-        (assoc frames index
-          (->DecodeFrame
-            (decodeframe-kind frame)
-            (inc (decodeframe-items frame))))
+        (assoc stack index
+          (->DecodeStackEntry
+            (decodestackentry-kind entry)
+            (inc (decodestackentry-items entry))))
         roots))))
 
 (defn decimal-digit? [(character String)] Bool
@@ -89,7 +89,7 @@
       (loop [(remaining (Vec reader/ReaderEvent))
              (reader/datumread-events read)
              (events (Vec EdnEvent)) []
-             (frames (Vec DecodeFrame)) []
+             (stack (Vec DecodeStackEntry)) []
              (roots Int) 0]
         (if (empty? remaining)
           (if (= roots 1)
@@ -101,12 +101,12 @@
                 (offset Int) (reader/readerevent-offset event)]
             (cond
               (or (= kind :map/open) (= kind :vector/open))
-              (match (count-value frames roots)
+              (match (count-value stack roots)
                 [(ValueCountRejected token)
                  (->EdnDecodeError offset
                    "unexpected data after EDN value")]
-                [(ValueCounted counted-frames counted-roots)
-                 (let [(frame-kind Keyword)
+                [(ValueCounted counted-stack counted-roots)
+                 (let [(entry-kind Keyword)
                        (if (= kind :map/open) :map :vector)
                        (semantic EdnEvent)
                        (if (= kind :map/open)
@@ -114,79 +114,79 @@
                          (->EdnVectorStart offset))]
                    (recur (rest remaining)
                      (conj events semantic)
-                     (conj counted-frames (->DecodeFrame frame-kind 0))
+                     (conj counted-stack (->DecodeStackEntry entry-kind 0))
                      counted-roots))])
 
               (= kind :map/close)
-              (if (empty? frames)
+              (if (empty? stack)
                 (->EdnDecodeError offset "unexpected map end event")
-                (let [(frame DecodeFrame) (peek frames)]
+                (let [(entry DecodeStackEntry) (peek stack)]
                   (cond
-                    (not= (decodeframe-kind frame) :map)
+                    (not= (decodestackentry-kind entry) :map)
                     (->EdnDecodeError offset "unexpected map end event")
 
-                    (not= (mod (decodeframe-items frame) 2) 0)
+                    (not= (mod (decodestackentry-items entry) 2) 0)
                     (->EdnDecodeError offset
                       "map requires an even number of forms")
 
                     :else
                     (recur (rest remaining)
                       (conj events (->EdnMapEnd offset))
-                      (pop frames) roots))))
+                      (pop stack) roots))))
 
               (= kind :vector/close)
-              (if (or (empty? frames)
-                      (not= (decodeframe-kind (peek frames)) :vector))
+              (if (or (empty? stack)
+                      (not= (decodestackentry-kind (peek stack)) :vector))
                 (->EdnDecodeError offset "unexpected vector end event")
                 (recur (rest remaining)
                   (conj events (->EdnVectorEnd offset))
-                  (pop frames) roots))
+                  (pop stack) roots))
 
               (= kind :keyword)
               (if (or (<= (count value) 1)
                       (and (> (count value) 1)
                            (= (subs value 1 2) ":")))
                 (->EdnDecodeError offset "keyword requires a name")
-                (match (count-value frames roots)
+                (match (count-value stack roots)
                   [(ValueCountRejected token)
                    (->EdnDecodeError offset
                      "unexpected data after EDN value")]
-                  [(ValueCounted counted-frames counted-roots)
+                  [(ValueCounted counted-stack counted-roots)
                    (recur (rest remaining)
                      (conj events
                        (->EdnKeyword offset
                          (keyword (subs value 1 (count value)))))
-                     counted-frames counted-roots)]))
+                     counted-stack counted-roots)]))
 
               (= kind :string)
-              (match (count-value frames roots)
+              (match (count-value stack roots)
                 [(ValueCountRejected token)
                  (->EdnDecodeError offset
                    "unexpected data after EDN value")]
-                [(ValueCounted counted-frames counted-roots)
+                [(ValueCounted counted-stack counted-roots)
                  (recur (rest remaining)
                    (conj events (->EdnString offset value))
-                   counted-frames counted-roots)])
+                   counted-stack counted-roots)])
 
               (= kind :boolean)
-              (match (count-value frames roots)
+              (match (count-value stack roots)
                 [(ValueCountRejected token)
                  (->EdnDecodeError offset
                    "unexpected data after EDN value")]
-                [(ValueCounted counted-frames counted-roots)
+                [(ValueCounted counted-stack counted-roots)
                  (recur (rest remaining)
                    (conj events (->EdnBoolean offset (= value "true")))
-                   counted-frames counted-roots)])
+                   counted-stack counted-roots)])
 
               (= kind :nil)
-              (match (count-value frames roots)
+              (match (count-value stack roots)
                 [(ValueCountRejected token)
                  (->EdnDecodeError offset
                    "unexpected data after EDN value")]
-                [(ValueCounted counted-frames counted-roots)
+                [(ValueCounted counted-stack counted-roots)
                  (recur (rest remaining)
                    (conj events (->EdnNil offset))
-                   counted-frames counted-roots)])
+                   counted-stack counted-roots)])
 
               (= kind :symbol)
               (if (not (integer-token? value))
@@ -195,14 +195,14 @@
                 (let [(parsed (U Int Nil)) (parse-long value)]
                   (if (nil? parsed)
                     (->EdnDecodeError offset "integer is outside Int range")
-                    (match (count-value frames roots)
+                    (match (count-value stack roots)
                       [(ValueCountRejected token)
                        (->EdnDecodeError offset
                          "unexpected data after EDN value")]
-                      [(ValueCounted counted-frames counted-roots)
+                      [(ValueCounted counted-stack counted-roots)
                        (recur (rest remaining)
                          (conj events (->EdnInteger offset parsed))
-                         counted-frames counted-roots)]))))
+                         counted-stack counted-roots)]))))
 
               :else
               (->EdnDecodeError offset "unsupported EDN form"))))))))

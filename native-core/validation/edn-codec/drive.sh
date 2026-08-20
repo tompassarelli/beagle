@@ -41,8 +41,8 @@ representative='{:tx 1, :op "assert", :values [true nil -2], :title "line\n☺"}
 "$scratch/edn-codec-test" contract "$representative"
 
 actual="$($scratch/edn-codec-test roundtrip \
-  ' { :tx 1 :op "assert" :l "@mark-a" :p "window" :r "@w42" :frame "wm-mark" :ts "1970-01-01T00:00:00Z" } ')"
-expected='{:tx 1, :op "assert", :l "@mark-a", :p "window", :r "@w42", :frame "wm-mark", :ts "1970-01-01T00:00:00Z"}'
+  ' { :tx 1 :op "assert" :l "@mark-a" :p "window" :r "@w42" :record "wm-mark" :ts "1970-01-01T00:00:00Z" } ')"
+expected='{:tx 1, :op "assert", :l "@mark-a", :p "window", :r "@w42", :record "wm-mark", :ts "1970-01-01T00:00:00Z"}'
 [[ "$actual" == "$expected" ]] || die "canonical marks line changed"
 
 [[ "$($scratch/edn-codec-test diagnose '{:a}')" == \

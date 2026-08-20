@@ -2988,7 +2988,7 @@
 (defrecord VariantPathV0 [(matches Int) (variants (Vec core/TypeVariant))])
 
 ;; One live `loop`: the SSA header block whose block-parameters ARE the typed
-;; accumulators. `recur` is a Jump back to this header, so the innermost frame
+;; accumulators. `recur` is a Jump back to this header, so the innermost state
 ;; is the lexical recur target and a nested loop shadows its parent.
 (defrecord TransientLoopOwnerV0
   [(slot Int)
@@ -2997,7 +2997,7 @@
    (current-id core/NativeId)
    (live Bool)])
 
-(defrecord LoopFrameV0
+(defrecord LoopStateV0
   [(header-id core/NativeId)
    (parameters (Vec core/Parameter))
    (bindings (Vec core/NativeId))
@@ -3014,7 +3014,7 @@
    (counter Int)
    (locals (Vec LocalBindingV0))
    (failure String)
-   (loop-frames (Vec LoopFrameV0))
+   (loop-states (Vec LoopStateV0))
    (keyword-refinements (Vec KeywordFlowRefinementV0))
    (value-refinements (Vec ValueFlowRefinementV0))
    (transient-type (U core/NativeId Nil))])
@@ -3243,12 +3243,14 @@
       [:keyword-refinements keyword-refinements])
     [:value-refinements value-refinements]))
 
-(defn state-push-loop [(state BodyStateV0) (frame LoopFrameV0)] BodyStateV0
-  (with state [:loop-frames (conj (bodystatev0-loop-frames state) frame)]))
+(defn state-push-loop [(state BodyStateV0) (loop-state LoopStateV0)] BodyStateV0
+  (with state [:loop-states (conj (bodystatev0-loop-states state) loop-state)]))
 
-(defn current-loop [(state BodyStateV0)] (U LoopFrameV0 Nil)
-  (let [(frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)]
-    (if (= 0 (count frames)) nil (nth frames (- (count frames) 1)))))
+(defn current-loop [(state BodyStateV0)] (U LoopStateV0 Nil)
+  (let [(loop-states (Vec LoopStateV0)) (bodystatev0-loop-states state)]
+    (if (= 0 (count loop-states))
+      nil
+      (nth loop-states (- (count loop-states) 1)))))
 
 (defn find-local
   [(locals (Vec LocalBindingV0)) (name String)] (U LocalBindingV0 Nil)
@@ -3333,37 +3335,38 @@
 
 (defn current-transient-loop-owner-position
   [(state BodyStateV0) (name String)] Int
-  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
-    (if (nil? frame)
+  (let [(loop-state (U LoopStateV0 Nil)) (current-loop state)]
+    (if (nil? loop-state)
       -1
       (transient-loop-owner-position-in
-        (loopframev0-transient-owners frame) name))))
+        (loopstatev0-transient-owners loop-state) name))))
 
 (defn current-transient-loop-owner
   [(state BodyStateV0) (name String)] (U TransientLoopOwnerV0 Nil)
-  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)
+  (let [(loop-state (U LoopStateV0 Nil)) (current-loop state)
         (position Int) (current-transient-loop-owner-position state name)]
-    (if (or (nil? frame) (< position 0))
+    (if (or (nil? loop-state) (< position 0))
       nil
-      (nth (loopframev0-transient-owners frame) position))))
+      (nth (loopstatev0-transient-owners loop-state) position))))
 
 (defn state-replace-current-transient-loop-owner
   [(state BodyStateV0)
    (position Int)
    (replacement TransientLoopOwnerV0)]
   BodyStateV0
-  (let [(frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)]
-    (if (= 0 (count frames))
+  (let [(loop-states (Vec LoopStateV0)) (bodystatev0-loop-states state)]
+    (if (= 0 (count loop-states))
       state
-      (let [(frame-position Int) (- (count frames) 1)
-            (frame LoopFrameV0) (nth frames frame-position)
+      (let [(state-position Int) (- (count loop-states) 1)
+            (loop-state LoopStateV0) (nth loop-states state-position)
             (owners (Vec TransientLoopOwnerV0))
-            (loopframev0-transient-owners frame)
-            (updated LoopFrameV0)
-            (->LoopFrameV0 (loopframev0-header-id frame)
-              (loopframev0-parameters frame) (loopframev0-bindings frame)
+            (loopstatev0-transient-owners loop-state)
+            (updated LoopStateV0)
+            (->LoopStateV0 (loopstatev0-header-id loop-state)
+              (loopstatev0-parameters loop-state) (loopstatev0-bindings loop-state)
               (assoc owners position replacement))]
-        (with state [:loop-frames (assoc frames frame-position updated)])))))
+        (with state [:loop-states
+                     (assoc loop-states state-position updated)])))))
 
 (defn state-update-current-transient-loop-owner
   [(state BodyStateV0)
@@ -3371,11 +3374,11 @@
    (current-id core/NativeId)
    (live Bool)]
   BodyStateV0
-  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
-    (if (nil? frame)
+  (let [(loop-state (U LoopStateV0 Nil)) (current-loop state)]
+    (if (nil? loop-state)
       state
       (let [(owner TransientLoopOwnerV0)
-            (nth (loopframev0-transient-owners frame) position)]
+            (nth (loopstatev0-transient-owners loop-state) position)]
         (state-replace-current-transient-loop-owner state position
           (->TransientLoopOwnerV0
             (transientloopownerv0-slot owner)
@@ -3397,21 +3400,21 @@
       (same-id? (transientloopownerv0-current-id left)
         (transientloopownerv0-current-id right)))))
 
-(defn transient-loop-frames-compatible?
-  [(left (Vec LoopFrameV0)) (right (Vec LoopFrameV0))] Bool
+(defn transient-loop-states-compatible?
+  [(left (Vec LoopStateV0)) (right (Vec LoopStateV0))] Bool
   (and (= (count left) (count right))
-    (loop [(frame-position Int) 0]
-      (if (>= frame-position (count left))
+    (loop [(state-position Int) 0]
+      (if (>= state-position (count left))
         true
-        (let [(left-frame LoopFrameV0) (nth left frame-position)
-              (right-frame LoopFrameV0) (nth right frame-position)
+        (let [(left-state LoopStateV0) (nth left state-position)
+              (right-state LoopStateV0) (nth right state-position)
               (left-owners (Vec TransientLoopOwnerV0))
-              (loopframev0-transient-owners left-frame)
+              (loopstatev0-transient-owners left-state)
               (right-owners (Vec TransientLoopOwnerV0))
-              (loopframev0-transient-owners right-frame)]
+              (loopstatev0-transient-owners right-state)]
           (if (and
-                (same-id? (loopframev0-header-id left-frame)
-                  (loopframev0-header-id right-frame))
+                (same-id? (loopstatev0-header-id left-state)
+                  (loopstatev0-header-id right-state))
                 (= (count left-owners) (count right-owners))
                 (loop [(owner-position Int) 0]
                   (if (>= owner-position (count left-owners))
@@ -3421,15 +3424,15 @@
                           (nth right-owners owner-position))
                       (recur (+ owner-position 1))
                       false))))
-            (recur (+ frame-position 1))
+            (recur (+ state-position 1))
             false))))))
 
 (defn transient-loop-owners-closed? [(state BodyStateV0)] Bool
-  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
-    (if (nil? frame)
+  (let [(loop-state (U LoopStateV0 Nil)) (current-loop state)]
+    (if (nil? loop-state)
       true
       (let [(owners (Vec TransientLoopOwnerV0))
-            (loopframev0-transient-owners frame)]
+            (loopstatev0-transient-owners loop-state)]
         (loop [(position Int) 0]
           (if (>= position (count owners))
             true
@@ -6427,7 +6430,7 @@
       (instance? native.core.ValueToTextInstructionV0 instruction)
       ;; A promote's copy is an allocation into its destination arena: the
       ;; function must declare the allocate effect and acquire an arena for
-      ;; it, and rule E3 must count it against a caller handing this frame an
+      ;; it, and rule E3 must count it against a caller handing this call an
       ;; epoch it will destroy.
       (instance? native.core.PromoteInstructionV0 instruction)
       (and (instance? native.core.CodecPrimitiveInstructionV0 instruction)
@@ -11425,7 +11428,7 @@
 
 ;; Captured SSA locals remain dominated, but recur cannot cross an fn boundary.
 (defn state-enter-inline-callback [(state BodyStateV0)] BodyStateV0
-  (with state [:loop-frames []]))
+  (with state [:loop-states []]))
 
 ;; Callback annotations own empty-literal shapes and every value crossing them.
 (defn lower-contextual-boundary
@@ -11508,7 +11511,7 @@
       (fail-result state
         "TODO-NATIVE-MAPV-RESULT: the module declares no Vec of the callback return type")
       (let [(outer-locals (Vec LocalBindingV0)) (bodystatev0-locals state)
-            (outer-frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)
+            (outer-loop-states (Vec LoopStateV0)) (bodystatev0-loop-states state)
             (outer-refinements (Vec KeywordFlowRefinementV0))
             (bodystatev0-keyword-refinements state)
             (outer-values (Vec ValueFlowRefinementV0))
@@ -11589,7 +11592,7 @@
             (with
               (state-with-flow-context (exprresultv0-state callback-result)
                 outer-locals outer-refinements outer-values)
-              [:loop-frames outer-frames])]
+              [:loop-states outer-loop-states])]
         (cond
           (state-blocked? restored) (dead-result restored)
 
@@ -11703,7 +11706,7 @@
 
       :else
       (let [(outer-locals (Vec LocalBindingV0)) (bodystatev0-locals state)
-            (outer-frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)
+            (outer-loop-states (Vec LoopStateV0)) (bodystatev0-loop-states state)
             (outer-refinements (Vec KeywordFlowRefinementV0))
             (bodystatev0-keyword-refinements state)
             (outer-values (Vec ValueFlowRefinementV0))
@@ -11769,7 +11772,7 @@
             (with
               (state-with-flow-context (exprresultv0-state callback-result)
                 outer-locals outer-refinements outer-values)
-              [:loop-frames outer-frames])]
+              [:loop-states outer-loop-states])]
         (cond
           (state-blocked? callback-outer-state) (dead-result callback-outer-state)
 
@@ -11796,7 +11799,7 @@
                 (with
                   (state-with-flow-context (exprresultv0-state condition)
                     outer-locals outer-refinements outer-values)
-                  [:loop-frames outer-frames])]
+                  [:loop-states outer-loop-states])]
             (if (state-blocked? restored)
               (dead-result restored)
               (let [(one-id core/NativeId)
@@ -12256,7 +12259,8 @@
                       (exprresultv0-value-id container)
                       (accessorhitv0-field-id accessor))))
                 (outer-locals (Vec LocalBindingV0)) (bodystatev0-locals read)
-                (outer-frames (Vec LoopFrameV0)) (bodystatev0-loop-frames read)
+                (outer-loop-states (Vec LoopStateV0))
+                (bodystatev0-loop-states read)
                 (outer-refinements (Vec KeywordFlowRefinementV0))
                 (bodystatev0-keyword-refinements read)
                 (outer-values (Vec ValueFlowRefinementV0))
@@ -12271,7 +12275,7 @@
                 (with
                   (state-with-flow-context (exprresultv0-state updater-result)
                     outer-locals outer-refinements outer-values)
-                  [:loop-frames outer-frames])]
+                  [:loop-states outer-loop-states])]
             (cond
               (state-blocked? restored) (dead-result restored)
 
@@ -12971,8 +12975,8 @@
                                 (arena-value-id owner)))
                             (outer-locals (Vec LocalBindingV0))
                             (bodystatev0-locals with-vectors)
-                            (outer-frames (Vec LoopFrameV0))
-                            (bodystatev0-loop-frames with-vectors)
+                            (outer-loop-states (Vec LoopStateV0))
+                            (bodystatev0-loop-states with-vectors)
                             (outer-refinements (Vec KeywordFlowRefinementV0))
                             (bodystatev0-keyword-refinements with-vectors)
                             (outer-values (Vec ValueFlowRefinementV0))
@@ -13055,7 +13059,7 @@
                               (state-with-flow-context
                                 (exprresultv0-state callback-result)
                                 outer-locals outer-refinements outer-values)
-                              [:loop-frames outer-frames])]
+                              [:loop-states outer-loop-states])]
                         (cond
                           (state-blocked? restored) (dead-result restored)
 
@@ -13710,13 +13714,14 @@
    (owner-position Int)]
   ExprResultV0
   (let [(index SourceIndexV0) (bodyenvv0-index env)
-        (frame (U LoopFrameV0 Nil)) (current-loop state)]
-    (if (or (nil? frame) (< owner-position 0)
-          (>= owner-position (count (loopframev0-transient-owners frame))))
+        (loop-state (U LoopStateV0 Nil)) (current-loop state)]
+    (if (or (nil? loop-state) (< owner-position 0)
+          (>= owner-position
+            (count (loopstatev0-transient-owners loop-state))))
       (fail-result state
         "TODO-NATIVE-TRANSIENT-STALE: conj! receiver has no live loop owner")
       (let [(loop-owner TransientLoopOwnerV0)
-            (nth (loopframev0-transient-owners frame) owner-position)
+            (nth (loopstatev0-transient-owners loop-state) owner-position)
             (root-name String)
             (if (= 0 (count args)) ""
               (transient-call-root-owner-name index (nth args 0)))
@@ -13869,13 +13874,14 @@
    (expected (U core/NativeId Nil))
    (owner-position Int)]
   ExprResultV0
-  (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
-    (if (or (nil? frame) (< owner-position 0)
-          (>= owner-position (count (loopframev0-transient-owners frame))))
+  (let [(loop-state (U LoopStateV0 Nil)) (current-loop state)]
+    (if (or (nil? loop-state) (< owner-position 0)
+          (>= owner-position
+            (count (loopstatev0-transient-owners loop-state))))
       (fail-result state
         "TODO-NATIVE-TRANSIENT-STALE: persistent! receiver has no loop owner")
       (let [(loop-owner TransientLoopOwnerV0)
-            (nth (loopframev0-transient-owners frame) owner-position)]
+            (nth (loopstatev0-transient-owners loop-state) owner-position)]
         (cond
           (not (= 1 (count args)))
           (fail-result state
@@ -14443,8 +14449,8 @@
                       (bodystatev0-keyword-refinements base)
                       (outer-values (Vec ValueFlowRefinementV0))
                       (bodystatev0-value-refinements base)
-                      (outer-frames (Vec LoopFrameV0))
-                      (bodystatev0-loop-frames base)
+                      (outer-loop-states (Vec LoopStateV0))
+                      (bodystatev0-loop-states base)
                       (then-id core/NativeId) (state-id base owner "then")
                       (else-id core/NativeId) (state-id base owner "else")
                       (join-id core/NativeId) (state-id base owner "join")
@@ -14471,7 +14477,7 @@
                       (state-refine-for-condition env owner
                         (state-with-flow-context
                           (with (state-open-block after-then else-id [])
-                            [:loop-frames outer-frames])
+                            [:loop-states outer-loop-states])
                           outer-locals outer-keywords outer-values)
                         condition-node false)
                       (else-block-start Int) (count (bodystatev0-blocks else-start))
@@ -14494,25 +14500,26 @@
                       (else-end Int) (count (bodystatev0-blocks after-else))
                       (then-live Bool) (not (exprresultv0-terminated then-result))
                       (else-live Bool) (not (exprresultv0-terminated else-result))
-                      (then-frames (Vec LoopFrameV0))
-                      (bodystatev0-loop-frames (exprresultv0-state then-result))
-                      (else-frames (Vec LoopFrameV0))
-                      (bodystatev0-loop-frames (exprresultv0-state else-result))
-                      (selected-frames (Vec LoopFrameV0))
+                      (then-loop-states (Vec LoopStateV0))
+                      (bodystatev0-loop-states (exprresultv0-state then-result))
+                      (else-loop-states (Vec LoopStateV0))
+                      (bodystatev0-loop-states (exprresultv0-state else-result))
+                      (selected-loop-states (Vec LoopStateV0))
                       (cond
-                        (and then-live else-live) then-frames
-                        then-live then-frames
-                        else-live else-frames
-                        :else outer-frames)
-                      (frames-compatible Bool)
+                        (and then-live else-live) then-loop-states
+                        then-live then-loop-states
+                        else-live else-loop-states
+                        :else outer-loop-states)
+                      (states-compatible Bool)
                       (or (not (and then-live else-live))
-                        (transient-loop-frames-compatible? then-frames else-frames))
+                        (transient-loop-states-compatible?
+                          then-loop-states else-loop-states))
                       (settled BodyStateV0)
-                      (if frames-compatible
+                      (if states-compatible
                         (with
                           (state-with-flow-context after-else
                             outer-locals outer-keywords outer-values)
-                          [:loop-frames selected-frames])
+                          [:loop-states selected-loop-states])
                         (state-fail after-else
                           "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP: live if arms disagree on transient ownership"))
                       (result-type core/NativeId)
@@ -14696,7 +14703,8 @@
               (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
               (body-node (U core/NativeId Nil)) (index-first-object index expr "body")
               (outer-locals (Vec LocalBindingV0)) (bodystatev0-locals state)
-              (outer-frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)
+              (outer-loop-states (Vec LoopStateV0))
+              (bodystatev0-loop-states state)
               (owner-specs (Vec TransientLoopOwnerSpecV0))
               (transient-loop-owner-specs index items)
               (direct-transient-count Int)
@@ -14897,7 +14905,7 @@
                       (body ExprResultV0)
                       (lower-expr-expected env owner
                         (state-push-loop bound
-                          (->LoopFrameV0 header-id parameters
+                          (->LoopStateV0 header-id parameters
                             (loopinitsv0-bindings inits) transient-owners))
                         body-node expected)
                       (body-state BodyStateV0) (exprresultv0-state body)
@@ -14912,21 +14920,22 @@
                   ;; without recur, in whatever block that exit left open
                   (->ExprResultV0
                     (with (with checked-body-state [:locals outer-locals])
-                      [:loop-frames outer-frames])
+                      [:loop-states outer-loop-states])
                     (exprresultv0-value-id body)
                     (exprresultv0-type-id body)
                     (exprresultv0-terminated body)))))))
 
         (= "recur" kind)
-        (let [(frame (U LoopFrameV0 Nil)) (current-loop state)]
-          (if (nil? frame)
+        (let [(loop-state (U LoopStateV0 Nil)) (current-loop state)]
+          (if (nil? loop-state)
             (fail-result state
               "TODO-NATIVE-RECUR-OUTSIDE-LOOP: recur has no enclosing loop header")
             (let [(args-node (U core/NativeId Nil))
                   (index-first-object index expr "args")
                   (args (Vec core/NativeId))
                   (if (nil? args-node) [] (index-sequence-items index args-node))
-                  (parameters (Vec core/Parameter)) (loopframev0-parameters frame)
+                  (parameters (Vec core/Parameter))
+                  (loopstatev0-parameters loop-state)
                   (lowered ArgsResultV0)
                   (loop [(position Int) 0
                          (current BodyStateV0) state
@@ -14945,10 +14954,11 @@
                   (current BodyStateV0) (argsresultv0-state lowered)
                   (values (Vec core/NativeId)) (argsresultv0-values lowered)
                   (value-types (Vec core/NativeId)) (argsresultv0-value-types lowered)
-                  (current-frame (U LoopFrameV0 Nil)) (current-loop current)
+                  (current-loop-state (U LoopStateV0 Nil))
+                  (current-loop current)
                   (current-owners (Vec TransientLoopOwnerV0))
-                  (if (nil? current-frame) []
-                    (loopframev0-transient-owners current-frame))
+                  (if (nil? current-loop-state) []
+                    (loopstatev0-transient-owners current-loop-state))
                   (owner-transfer-valid Bool)
                   (loop [(owner-position Int) 0]
                     (if (>= owner-position (count current-owners))
@@ -15024,7 +15034,7 @@
                             guard-state
                             (recur (+ position 1)
                               (guard-binding-value env owner guard-state
-                                (nth (loopframev0-bindings frame) position)
+                                (nth (loopstatev0-bindings loop-state) position)
                                 (nth (argsresultv0-values copied) position)
                                 (nth value-types position)))))]
                     (if (state-blocked? guarded)
@@ -15045,7 +15055,8 @@
                                       true)))))]
                         (->ExprResultV0
                         (state-close transferred
-                          (core/->JumpTerminator (loopframev0-header-id frame)
+                          (core/->JumpTerminator
+                            (loopstatev0-header-id loop-state)
                             (argsresultv0-values copied)))
                         (lower-id "body" ["recur"])
                         (type-id "LowerFailure") true)))))))))
@@ -15069,7 +15080,8 @@
                   (recur (+ position 1))
                   :else position))
               (outer-locals (Vec LocalBindingV0)) (bodystatev0-locals state)
-              (outer-frames (Vec LoopFrameV0)) (bodystatev0-loop-frames state)
+              (outer-loop-states (Vec LoopStateV0))
+              (bodystatev0-loop-states state)
               (outer-refinements (Vec KeywordFlowRefinementV0))
               (bodystatev0-keyword-refinements state)
               (outer-values (Vec ValueFlowRefinementV0))
@@ -15206,7 +15218,7 @@
                               (with
                                 (state-with-flow-context (exprresultv0-state body)
                                   outer-locals outer-refinements outer-values)
-                                [:loop-frames outer-frames])]
+                                [:loop-states outer-loop-states])]
                           (cond
                             (state-blocked? restored) (dead-result restored)
                             (exprresultv0-terminated body)
@@ -15955,8 +15967,8 @@
                                 :else
                                 (let [(outer-locals (Vec LocalBindingV0))
                                       (bodystatev0-locals collection-state)
-                                      (outer-frames (Vec LoopFrameV0))
-                                      (bodystatev0-loop-frames collection-state)
+                                      (outer-loop-states (Vec LoopStateV0))
+                                      (bodystatev0-loop-states collection-state)
                                       (outer-refinements (Vec KeywordFlowRefinementV0))
                                       (bodystatev0-keyword-refinements collection-state)
                                       (outer-values (Vec ValueFlowRefinementV0))
@@ -16047,7 +16059,7 @@
                                         (state-with-flow-context
                                           (exprresultv0-state callback-result)
                                           outer-locals outer-refinements outer-values)
-                                        [:loop-frames outer-frames])]
+                                        [:loop-states outer-loop-states])]
                                   (cond
                                     (state-blocked? restored) (dead-result restored)
                                     (exprresultv0-terminated callback-result)
@@ -23920,8 +23932,8 @@
 (defn epoch-marked? [(marks (Map String Bool)) (value-id core/NativeId)] Bool
   (= true (get marks (id-value value-id))))
 
-;; Escape seeds: values a function hands past its own frame. Store operands,
-;; atom-cell traffic, call and extern arguments (a missing callee summary
+;; Escape seeds: values a function hands past its own activation record. Store
+;; operands, atom-cell traffic, call and extern arguments (a missing callee summary
 ;; means retained — the v2 lesson), returns, and trap payloads.
 (defn epoch-escape-seeds [(function core/FunctionDef)] (Map String Bool)
   (loop [(block-position Int) 0
@@ -24034,8 +24046,8 @@
                 (let [(instruction core/Instruction) (nth instructions position)]
                   (recur (+ position 1) instructions
                     ;; promote is the one copying barrier in the walk: what
-                    ;; leaves the frame is the copy, so the source keeps its
-                    ;; own escape status and stays eligible for an epoch.
+                    ;; leaves the activation record is the copy, so the source
+                    ;; keeps its own escape status and stays eligible for an epoch.
                     (if (and (epoch-marked? inner
                                (core/instruction-result-id instruction))
                           (not (instance? native.core.PromoteInstructionV0
@@ -24090,10 +24102,11 @@
 ;; arena is a per-call operand rather than a per-function singleton.
 ;;
 ;; The fixpoint decreases from "all safe": a call-graph cycle whose members are
-;; each locally safe is safe, because local safety says a frame's allocations
-;; never leave that frame, which composes over any call depth including cyclic
-;; ones. Nothing here needs the missing-summary default, because a missing
-;; callee (an id no FunctionDef in the program owns) is simply not safe.
+;; each locally safe is safe, because local safety says an activation record's
+;; allocations never leave that record, which composes over any call depth
+;; including cyclic ones. Nothing here needs the missing-summary default,
+;; because a missing callee (an id no FunctionDef in the program owns) is
+;; simply not safe.
 (defn function-callee-ids [(function core/FunctionDef)] (Vec core/NativeId)
   (loop [(block-position Int) 0
          (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
@@ -24528,7 +24541,7 @@
 
 ;; A Buffer handle is bound to the durable root arena that created it. Because
 ;; every internal call forwards its current arena unless the epoch stage
-;; redirects that call, this requirement propagates through callers: a frame
+;; redirects that call, this requirement propagates through callers: a call
 ;; with no direct Buffer instruction still requires the root when one of its
 ;; callees uses a Buffer.
 (defn root-arena-required-pass

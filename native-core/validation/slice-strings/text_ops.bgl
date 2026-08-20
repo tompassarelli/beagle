@@ -108,7 +108,7 @@
   [(value (U String Int Float Bool Keyword Nil (Vec String)))] String
   (pr-str value))
 
-(defn render-framed-printable
+(defn render-wrapped-printable
   [(prefix String)
    (value (U String Int Float Bool Keyword Nil (Vec String)))
    (suffix Int)] String
