@@ -65,6 +65,7 @@
 (defrecord SyntaxFactBundle
   [path String
    namespace String?
+   source-text String
    source-digest String
    profile String
    facts (Vec CompilerFact)
@@ -120,3 +121,11 @@
         (if (or (< order 0) (<= order previous))
           false
           (recur (+ index 1) order))))))
+
+(defn source-for-path [root SyntaxFactClosure path String] String?
+  (some
+    (fn [module SyntaxFactBundle] String?
+      (if (= path (syntaxfactbundle-path module))
+        (syntaxfactbundle-source-text module)
+        nil))
+    (syntaxfactclosure-modules root)))

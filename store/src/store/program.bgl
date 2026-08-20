@@ -1,0 +1,354 @@
+#lang beagle
+
+(ns store.program
+  (:require [store.kernel :as kernel]
+            [store.types :as t]))
+
+;; ProgramRoot is an immutable Store-versioned view.  Assertion occurrences
+;; remain Store history and never become fields of this semantic root. Canonical
+;; Triples are authority; represented source text is their lossless deterministic
+;; tooling projection.
+(defrecord ProgramRoot
+  [space-id String
+   root-resource t/Term
+   store-version Int
+   profile t/Term
+   propositions (Vec t/Triple)])
+
+(defunion ProgramAdmission
+  (ProgramAdmitted [root ProgramRoot])
+  (ProgramRejected
+    [code Keyword
+     detail String]))
+
+(def member-of Keyword :member_of)
+(def contains Keyword :contains)
+(def represented-by Keyword :represented_by)
+(def refers-to Keyword :refers_to)
+(def depends-on Keyword :depends_on)
+(def derived-from Keyword :derived_from)
+(def admitted-by Keyword :admitted_by)
+(def includes Keyword :includes)
+(def has-span Keyword :has_span)
+(def named Keyword :named)
+(def declares-at Keyword :declares_at)
+(def through-byte Keyword :through_byte)
+
+(def relationships Keyword :relationships)
+(def profiles Keyword :profiles)
+(def profile-rules Keyword :profile_rules)
+(def program-roots Keyword :program_roots)
+(def modules Keyword :modules)
+(def bindings Keyword :bindings)
+(def references Keyword :references)
+(def fact-profile-kind String "fact-oriented")
+
+;; ProgramRoot keeps a closed Term field; this bridge works around Beagle's
+;; current inability to pass a recursive Dyn through a module boundary.
+(defn root-resource-value [root ProgramRoot] Any
+  (programroot-root-resource root))
+(defn profile-value [root ProgramRoot] Any
+  (programroot-profile root))
+
+(defn proposition-present?
+  [root ProgramRoot
+   t1 Any
+   t2 Any
+   t3 Any] Bool
+  (some?
+    (some
+      (fn [proposition t/Triple] t/Triple?
+        (if (and (= t1 (t/triple-t1 proposition))
+                 (and (= t2 (t/triple-t2 proposition))
+                      (= t3 (t/triple-t3 proposition))))
+          proposition
+          nil))
+      (programroot-propositions root))))
+
+(defn relation-declared?
+  [root ProgramRoot
+   relation Keyword] Bool
+  (proposition-present? root relation member-of relationships))
+
+(defn required-vocabulary-present? [root ProgramRoot] Bool
+  (and (relation-declared? root member-of)
+       (and (relation-declared? root contains)
+            (and (relation-declared? root represented-by)
+                 (and (relation-declared? root refers-to)
+                      (and (relation-declared? root depends-on)
+                           (and (relation-declared? root derived-from)
+                                (and (relation-declared? root admitted-by)
+                                     (and (relation-declared? root includes)
+                                          (and (relation-declared? root has-span)
+                                               (and (relation-declared? root named)
+                                                    (and (relation-declared? root declares-at)
+                                                         (relation-declared? root through-byte)))))))))))))
+
+(defn kernel-fact-normal-form-valid? [root ProgramRoot] Bool
+  (let [triples (Vec t/Triple) (programroot-propositions root)
+        space-id String (programroot-space-id root)]
+    (empty? (kernel/lint-declared-profile triples space-id))))
+
+(defn source-for-module
+  [root ProgramRoot
+   module Any] String?
+  (loop [remaining (Vec t/Triple) (programroot-propositions root)
+         matches Int 0
+         found String ""]
+    (if (empty? remaining)
+      (if (= matches 1) found nil)
+      (let [proposition t/Triple (first remaining)]
+        (if (and (= module (t/triple-t1 proposition))
+                 (and (= represented-by (t/triple-t2 proposition))
+                      (string? (t/triple-t3 proposition))))
+          (recur (rest remaining) (inc matches) (t/triple-t3 proposition))
+          (recur (rest remaining) matches found))))))
+
+(defn source-module?
+  [root ProgramRoot
+   module Any] Bool
+  (and (t/atom? module)
+       (and (proposition-present? root module member-of modules)
+            (and (proposition-present?
+                   root (root-resource-value root) contains module)
+                 (some? (source-for-module root module))))))
+
+(defn represented-sources-valid? [root ProgramRoot] Bool
+  (loop [remaining (Vec t/Triple) (programroot-propositions root)
+         module-count Int 0]
+    (if (empty? remaining)
+      (> module-count 0)
+      (let [proposition t/Triple (first remaining)
+            relation Any (t/triple-t2 proposition)
+            t1 Any (t/triple-t1 proposition)
+            t3 Any (t/triple-t3 proposition)]
+        (cond
+          (and (= relation member-of) (= t3 modules))
+          (if (source-module? root t1)
+            (recur (rest remaining) (inc module-count))
+            false)
+
+          (= relation represented-by)
+          (if (and (string? t3) (source-module? root t1))
+            (recur (rest remaining) module-count)
+            false)
+
+          :else (recur (rest remaining) module-count))))))
+
+(defn span-valid? [span Any] Bool
+  (and (t/triple? span)
+       (and (integer? (t/triple-t1 span))
+            (and (= through-byte (t/triple-t2 span))
+                 (and (integer? (t/triple-t3 span))
+                      (and (>= (t/triple-t1 span) 0)
+                           (<= (t/triple-t1 span) (t/triple-t3 span))))))))
+
+(defn span-valid-for-module?
+  [root ProgramRoot
+   module Any
+   span Any] Bool
+  (let [source String? (source-for-module root module)]
+    (and (some? source)
+         (and (span-valid? span)
+              (<= (t/triple-t3 span) (count (utf8-encode source)))))))
+
+(defn containing-source-module
+  [root ProgramRoot
+   resource Any] Any?
+  (loop [remaining (Vec t/Triple) (programroot-propositions root)
+         matches Int 0
+         found Any nil]
+    (if (empty? remaining)
+      (if (= matches 1) found nil)
+      (let [proposition t/Triple (first remaining)
+            module Any (t/triple-t1 proposition)]
+        (if (and (= contains (t/triple-t2 proposition))
+                 (and (= resource (t/triple-t3 proposition))
+                      (source-module? root module)))
+          (recur (rest remaining) (inc matches) module)
+          (recur (rest remaining) matches found))))))
+
+(defn source-located-reference?
+  [root ProgramRoot
+   reference Any] Bool
+  (and (t/triple? reference)
+       (let [module Any (t/triple-t1 reference)
+             span Any (t/triple-t3 reference)]
+         (and (= has-span (t/triple-t2 reference))
+              (and (source-module? root module)
+                   (and (span-valid-for-module? root module span)
+                        (and (proposition-present? root module contains reference)
+                             (proposition-present?
+                               root reference member-of references))))))))
+
+;; Triple fields are Any at the Store ABI boundary. These accessors return a
+;; value only after the complete structural reference and source-span check.
+(defn reference-module
+  [root ProgramRoot
+   reference Any] Any?
+  (if (source-located-reference? root reference)
+    (t/triple-t1 reference)
+    nil))
+
+(defn reference-span
+  [root ProgramRoot
+   reference Any] Any?
+  (if (source-located-reference? root reference)
+    (t/triple-t3 reference)
+    nil))
+
+(defn binding-span-valid?
+  [root ProgramRoot
+   module Any
+   binding Any] Bool
+  (some?
+    (some
+      (fn [proposition t/Triple] t/Triple?
+        (if (and (= binding (t/triple-t1 proposition))
+                 (and (= has-span (t/triple-t2 proposition))
+                      (span-valid-for-module?
+                        root module (t/triple-t3 proposition))))
+          proposition
+          nil))
+      (programroot-propositions root))))
+
+(defn binding-identity-for-module?
+  [module Any
+   binding Any] Bool
+  (and (t/triple? binding)
+       (and (= module (t/triple-t1 binding))
+            (and (= declares-at (t/triple-t2 binding))
+                 (and (integer? (t/triple-t3 binding))
+                      (>= (t/triple-t3 binding) 0))))))
+
+(defn binding-valid?
+  [root ProgramRoot
+   binding Any] Bool
+  (let [module Any? (containing-source-module root binding)]
+    (and (some? module)
+         (and (binding-identity-for-module? module binding)
+              (and (proposition-present? root binding member-of bindings)
+                   (and (some?
+                          (some
+                            (fn [proposition t/Triple] t/Triple?
+                              (if (and (= binding (t/triple-t1 proposition))
+                                       (and (= named (t/triple-t2 proposition))
+                                            (string? (t/triple-t3 proposition))))
+                                proposition
+                                nil))
+                            (programroot-propositions root)))
+                        (binding-span-valid? root module binding)))))))
+
+(defn semantic-anchors-valid? [root ProgramRoot] Bool
+  (loop [remaining (Vec t/Triple) (programroot-propositions root)]
+    (if (empty? remaining)
+      true
+      (let [proposition t/Triple (first remaining)
+            relation Any (t/triple-t2 proposition)
+            t1 Any (t/triple-t1 proposition)
+            t3 Any (t/triple-t3 proposition)]
+        (cond
+          (= relation refers-to)
+          (if (and (source-located-reference? root t1)
+                   (binding-valid? root t3))
+            (recur (rest remaining))
+            false)
+
+          (and (= relation member-of) (= t3 references))
+          (if (and (source-located-reference? root t1)
+                   (some?
+                     (some
+                       (fn [candidate t/Triple] t/Triple?
+                         (if (and (= t1 (t/triple-t1 candidate))
+                                  (= refers-to (t/triple-t2 candidate)))
+                           candidate
+                           nil))
+                       (programroot-propositions root))))
+            (recur (rest remaining))
+            false)
+
+          (and (= relation member-of) (= t3 bindings))
+          (if (binding-valid? root t1)
+            (recur (rest remaining))
+            false)
+
+          :else (recur (rest remaining)))))))
+
+(defn profile-anchor-valid? [root ProgramRoot] Bool
+  (let [space-id String (programroot-space-id root)
+        profile Any (profile-value root)
+        resource Any (root-resource-value root)]
+    (and (> (count (programroot-space-id root)) 0)
+         (and (>= (programroot-store-version root) 0)
+              (and (t/atom? resource)
+                   (and (proposition-present?
+                          root space-id kernel/profile-anchor
+                          (kernel/profile-header
+                            profile fact-profile-kind
+                            kernel/observe-profile-mode))
+                        (and (proposition-present?
+                               root profile kernel/profile-includes
+                               kernel/fact-normal-form-profile-rule)
+                             (and (proposition-present?
+                                    root profile member-of profiles)
+                                  (and (some?
+                                         (some
+                                           (fn [proposition t/Triple] t/Triple?
+                                             (let [rule Any (t/triple-t3 proposition)]
+                                               (if (and
+                                                     (= profile
+                                                        (t/triple-t1 proposition))
+                                                     (and
+                                                       (= includes
+                                                          (t/triple-t2 proposition))
+                                                       (and
+                                                         (t/atom? rule)
+                                                         (proposition-present?
+                                                           root rule member-of
+                                                           profile-rules))))
+                                                 proposition
+                                                 nil)))
+                                           (programroot-propositions root)))
+                                       (and (proposition-present?
+                                              root resource member-of program-roots)
+                                            (proposition-present?
+                                              root resource admitted-by
+                                              profile)))))))))))
+
+(defn validate-root [root ProgramRoot] ProgramAdmission
+  (cond
+    [(not (profile-anchor-valid? root))
+     (->ProgramRejected :program-model/profile-scope
+       "root must name the exact Store FNF profile at a nonnegative version")]
+    [(not (kernel-fact-normal-form-valid? root))
+     (->ProgramRejected :program-model/fact-normal-form
+       "root propositions must pass Store kernel FNF admission and lint")]
+    [(not (and (required-vocabulary-present? root)
+               (and (represented-sources-valid? root)
+                    (semantic-anchors-valid? root))))
+     (->ProgramRejected :program-model/profile-shape
+       "relationship membership, source representation, containment, and references must be explicit Triples")]
+    [:else (->ProgramAdmitted root)]))
+
+(defn admitted-root? [root ProgramRoot] Bool
+  (match (validate-root root)
+    [(ProgramAdmitted admitted) true]
+    [(ProgramRejected code detail) false]))
+
+(defn next-root
+  [current ProgramRoot
+   next-resource t/Term
+   propositions (Vec t/Triple)] ProgramAdmission
+  (let [next-resource-value Any next-resource
+        candidate ProgramRoot (->ProgramRoot
+          (programroot-space-id current)
+          next-resource
+          (inc (programroot-store-version current))
+          (programroot-profile current)
+          propositions)]
+    (if (proposition-present?
+          candidate next-resource-value derived-from
+          (root-resource-value current))
+      (validate-root candidate)
+      (->ProgramRejected :program-model/missing-derivation
+        "the next root must explicitly derive from the current root"))))

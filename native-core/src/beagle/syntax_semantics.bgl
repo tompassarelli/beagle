@@ -271,6 +271,7 @@
         (facts/->SyntaxFactBundle
           (facts/syntaxfactbundle-path bundle)
           (namespace-name rows)
+          (facts/syntaxfactbundle-source-text bundle)
           (facts/syntaxfactbundle-source-digest bundle)
           (facts/syntaxfactbundle-profile bundle)
           (semanticstate-rows state)

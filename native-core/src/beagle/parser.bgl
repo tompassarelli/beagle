@@ -280,6 +280,8 @@
 (defn encode-module [bundle facts/SyntaxFactBundle] String
   (str "module|" (facts/syntaxfactbundle-path bundle) "|"
     (or (facts/syntaxfactbundle-namespace bundle) "") "|"
+    (count (facts/syntaxfactbundle-source-text bundle)) ":"
+    (facts/syntaxfactbundle-source-text bundle) "|"
     (facts/syntaxfactbundle-source-digest bundle) "|"
     (facts/syntaxfactbundle-profile bundle) "\n"
     (reduce (fn

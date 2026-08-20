@@ -14,12 +14,12 @@
     (facts/->FactText value) (span path)))
 
 (def dep-bundle facts/SyntaxFactBundle
-  (facts/->SyntaxFactBundle "dep.bgl" "dep" "sha256:dep"
+  (facts/->SyntaxFactBundle "dep.bgl" "dep" "(ns dep)" "sha256:dep"
     "native-core" [(syntax-row "dep.bgl" "dep-root" "def")]
     [] []))
 
 (def app-bundle facts/SyntaxFactBundle
-  (facts/->SyntaxFactBundle "app.bgl" "app" "sha256:app"
+  (facts/->SyntaxFactBundle "app.bgl" "app" "(ns app)" "sha256:app"
     "native-core" [(syntax-row "app.bgl" "app-root" "call")]
     [(facts/->ImportEdgeFact 0 "app" "dep" nil [] (span "app.bgl"))]
     []))

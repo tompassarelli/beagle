@@ -51,7 +51,8 @@
     (facts/->FactText type-name) span))
 
 (defn fixture-closure [] facts/SyntaxFactClosure
-  (let [bundle facts/SyntaxFactBundle (facts/->SyntaxFactBundle "fixture.bgl" "fixture.js" "sha256:source" "core"
+  (let [bundle facts/SyntaxFactBundle (facts/->SyntaxFactBundle "fixture.bgl" "fixture.js"
+          "#lang beagle\n(ns fixture.js)\n" "sha256:source" "core"
           [(fact 0 "t-int" "type-name")
            (text 1 "t-int" "Int")
            (fact 2 "answer-body" "integer-literal")

@@ -383,7 +383,7 @@
            rows (Vec facts/CompilerFact) (factstate-facts emitted)]
        (if (facts/canonical-fact-order? rows)
          (facts/->FactsRead
-           (facts/->SyntaxFactBundle path nil source-digest profile rows [] []))
+           (facts/->SyntaxFactBundle path nil source source-digest profile rows [] []))
          (fact-error path source 0 :syntax/fact-order
                      "syntax facts must have strictly increasing order")))]
     [(AssemblyFailed offset message)

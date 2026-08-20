@@ -6,7 +6,8 @@
 (def span facts/SourceSpan (facts/->SourceSpan "smoke.bgl" 0 1 1 0))
 
 (defn smoke-bundle [] facts/SyntaxFactBundle
-  (facts/->SyntaxFactBundle "smoke.bgl" "smoke" "sha256:smoke" "core"
+  (facts/->SyntaxFactBundle "smoke.bgl" "smoke" "#lang beagle\n(ns smoke)\n"
+    "sha256:smoke" "core"
     [(facts/syntax-node-fact 0 "t-string" (facts/->FactText "type-name") span)
      (facts/syntax-value-fact 1 "t-string" 0 (facts/->FactText "String") span)
      (facts/syntax-node-fact 2 "t-vec" (facts/->FactText "type-application") span)

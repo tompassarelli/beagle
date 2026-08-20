@@ -1,0 +1,92 @@
+#lang beagle
+
+(ns store.program-model-fixture
+  (:require [store.kernel :as kernel]
+            [store.program :as program]
+            [store.types :as t]))
+
+(def profile String "program-profile-v1")
+(def rule String "fnf-rule-v1")
+(def space-id String "program-fixture")
+(def root String "program-root-7")
+(def module-a String "module-a")
+(def module-b String "module-b")
+(def binding-a t/Triple (t/triple module-a program/declares-at 0))
+(def binding-b t/Triple (t/triple module-b program/declares-at 0))
+(def span-a t/Triple (t/triple 22 program/through-byte 28))
+(def span-b t/Triple (t/triple 22 program/through-byte 28))
+(def reference-a t/Triple (t/triple module-a program/has-span span-a))
+
+(def source-a String
+  "#lang beagle\n(ns sample.a)\n;; helper comment\n(defn helper [x Int] Int x)\n")
+(def source-b String
+  "#lang beagle\n(ns sample.b)\n(defn helper [x Int] Int x)\n")
+
+(defn relationship-declarations [] (Vec t/Triple)
+  [(t/triple program/member-of program/member-of program/relationships)
+   (t/triple program/contains program/member-of program/relationships)
+   (t/triple program/represented-by program/member-of program/relationships)
+   (t/triple program/refers-to program/member-of program/relationships)
+   (t/triple program/depends-on program/member-of program/relationships)
+   (t/triple program/derived-from program/member-of program/relationships)
+   (t/triple program/admitted-by program/member-of program/relationships)
+   (t/triple program/includes program/member-of program/relationships)
+   (t/triple program/has-span program/member-of program/relationships)
+   (t/triple program/named program/member-of program/relationships)
+   (t/triple program/declares-at program/member-of program/relationships)
+   (t/triple program/through-byte program/member-of program/relationships)])
+
+(defn content-propositions [] (Vec t/Triple)
+  [(t/triple space-id kernel/profile-anchor
+     (kernel/profile-header profile program/fact-profile-kind
+       kernel/observe-profile-mode))
+   (kernel/profile-rule profile kernel/fact-normal-form-profile-rule)
+   (t/triple profile program/member-of program/profiles)
+   (t/triple profile program/includes rule)
+   (t/triple rule program/member-of program/profile-rules)
+   (t/triple root program/member-of program/program-roots)
+   (t/triple root program/admitted-by profile)
+   (t/triple root program/contains module-a)
+   (t/triple root program/contains module-b)
+   (t/triple module-a program/member-of program/modules)
+   (t/triple module-b program/member-of program/modules)
+   (t/triple module-a program/represented-by source-a)
+   (t/triple module-b program/represented-by source-b)
+   (t/triple binding-a program/member-of program/bindings)
+   (t/triple binding-b program/member-of program/bindings)
+   (t/triple module-a program/contains binding-a)
+   (t/triple module-b program/contains binding-b)
+   (t/triple binding-a program/named "helper")
+   (t/triple binding-b program/named "helper")
+   (t/triple binding-a program/has-span span-a)
+   (t/triple binding-b program/has-span span-b)
+   (t/triple module-a program/contains reference-a)
+   (t/triple reference-a program/member-of program/references)
+   (t/triple reference-a program/refers-to binding-a)
+   (t/triple module-b program/depends-on module-a)])
+
+(defn canonical-root [] program/ProgramRoot
+  (program/->ProgramRoot space-id root 7 profile
+    (into (relationship-declarations) (content-propositions))))
+
+(defn main [] Int
+  (let [candidate program/ProgramRoot (canonical-root)]
+    (if (and (program/admitted-root? candidate)
+             (and (= source-a (program/source-for-module candidate module-a))
+                  (and (= space-id (program/programroot-space-id candidate))
+                       (and (= module-a
+                          (program/reference-module candidate reference-a))
+                       (and (= span-a
+                               (program/reference-span candidate reference-a))
+                            (and (= 7 (program/programroot-store-version candidate))
+                                 (and (t/atom?
+                                        (program/root-resource-value candidate))
+                                      (and (t/triple?
+                                             (first
+                                               (program/programroot-propositions candidate)))
+                                           (not=
+                                             (program/root-resource-value candidate)
+                                             (first
+                                               (program/programroot-propositions candidate)))))))))))
+      0
+      1)))
