@@ -1,0 +1,33 @@
+#lang beagle
+(ns native-checker.fixture
+  (:require [beagle.checker :as checker]
+            [beagle.frontend-facts :as facts]))
+
+(def span facts/SourceSpan (facts/->SourceSpan "smoke.bgl" 0 1 1 0))
+
+(defn smoke-bundle [] facts/SyntaxFactBundle
+  (facts/->SyntaxFactBundle "smoke.bgl" "smoke" "sha256:smoke" "core"
+    [(facts/syntax-node-fact 0 "t-string" (facts/->FactText "type-name") span)
+     (facts/syntax-value-fact 1 "t-string" 0 (facts/->FactText "String") span)
+     (facts/syntax-node-fact 2 "t-vec" (facts/->FactText "type-application") span)
+     (facts/syntax-value-fact 3 "t-vec" 0 (facts/->FactText "Vec") span)
+     (facts/syntax-edge-fact 4 "t-vec" 0 "t-string" span)
+     (facts/syntax-node-fact 5 "arg" (facts/->FactText "binding") span)
+     (facts/syntax-value-fact 6 "arg" 0 (facts/->FactText "args") span)
+     (facts/syntax-edge-fact 7 "arg" 0 "t-vec" span)
+     (facts/syntax-node-fact 8 "t-int" (facts/->FactText "type-name") span)
+     (facts/syntax-value-fact 9 "t-int" 0 (facts/->FactText "Int") span)
+     (facts/syntax-node-fact 10 "body" (facts/->FactText "integer-literal") span)
+     (facts/syntax-value-fact 11 "body" 0 (facts/->FactInt 0) span)
+     (facts/syntax-node-fact 12 "main" (facts/->FactText "function") span)
+     (facts/syntax-value-fact 13 "main" 0 (facts/->FactText "main") span)
+     (facts/syntax-edge-fact 14 "main" 0 "arg" span)
+     (facts/syntax-edge-fact 15 "main" 1 "t-int" span)
+     (facts/syntax-edge-fact 16 "main" 2 "body" span)]
+    [] []))
+
+(defn main [args (Vec String)] Int
+  (match (checker/check-facts (smoke-bundle))
+    [(checker/FactsChecked checked)
+     (if (= 3 (count (checker/checkedfacts-lowerings checked))) 0 1)]
+    [(checker/CheckRejected rejection) 2]))

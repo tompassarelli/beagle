@@ -1,0 +1,233 @@
+#lang beagle
+(ns beagle.checker
+  (:require [beagle.frontend-facts :as facts]))
+
+(defrecord TypeClaim
+  [subject String
+   category String
+   type-name String
+   rule String
+   span facts/SourceSpan?])
+
+(defrecord CheckedFacts
+  [propositions (Vec facts/TypePropositionFact)
+   evidence (Vec facts/TypeEvidenceFact)
+   lowerings (Vec facts/OrderedLoweringFact)
+   iterations Int])
+
+(defrecord CheckRejection
+  [rule String
+   subject String
+   detail String
+   span facts/SourceSpan?])
+
+(defunion CheckResult
+  (FactsChecked [result CheckedFacts])
+  (CheckRejected [rejection CheckRejection]))
+
+(defn fact-text [fact facts/CompilerFact] String?
+  (match (facts/compilerfact-value fact)
+    [(facts/FactText value) value]
+    [(facts/FactNodeRef node-id) nil]
+    [(facts/FactBool value) nil]
+    [(facts/FactInt value) nil]
+    [(facts/FactNil) nil]))
+
+(defn fact-node [fact facts/CompilerFact] String?
+  (match (facts/compilerfact-value fact)
+    [(facts/FactNodeRef node-id) node-id]
+    [(facts/FactText value) nil]
+    [(facts/FactBool value) nil]
+    [(facts/FactInt value) nil]
+    [(facts/FactNil) nil]))
+
+(defn find-text
+  [rows (Vec facts/CompilerFact) relation Keyword subject String slot Int] String?
+  (loop [remaining (Vec facts/CompilerFact) rows]
+    (if (empty? remaining)
+      nil
+      (let [fact facts/CompilerFact (first remaining)]
+        (if (and (= relation (facts/compilerfact-relation fact))
+                 (= subject (facts/compilerfact-subject fact))
+                 (= slot (facts/compilerfact-slot fact)))
+          (fact-text fact)
+          (recur (rest remaining)))))))
+
+(defn find-node
+  [rows (Vec facts/CompilerFact) subject String slot Int] String?
+  (loop [remaining (Vec facts/CompilerFact) rows]
+    (if (empty? remaining)
+      nil
+      (let [fact facts/CompilerFact (first remaining)]
+        (if (and (= :syntax/edge (facts/compilerfact-relation fact))
+                 (= subject (facts/compilerfact-subject fact))
+                 (= slot (facts/compilerfact-slot fact)))
+          (fact-node fact)
+          (recur (rest remaining)))))))
+
+(defn claim-type
+  [claims (Vec TypeClaim) subject String category String] String?
+  (loop [remaining (Vec TypeClaim) claims]
+    (if (empty? remaining)
+      nil
+      (let [claim TypeClaim (first remaining)]
+        (if (and (= subject (typeclaim-subject claim))
+                 (= category (typeclaim-category claim)))
+          (typeclaim-type-name claim)
+          (recur (rest remaining)))))))
+
+(defn claim-known? [claims (Vec TypeClaim) candidate TypeClaim] Bool
+  (some? (claim-type claims
+           (typeclaim-subject candidate)
+           (typeclaim-category candidate))))
+
+(defn render-type-application [constructor String argument String] String
+  (str "(" constructor " " argument ")"))
+
+(defn derive-claim
+  [rows (Vec facts/CompilerFact) claims (Vec TypeClaim) fact facts/CompilerFact]
+  TypeClaim?
+  (if (not= :syntax/node (facts/compilerfact-relation fact))
+    nil
+    (let [subject String (facts/compilerfact-subject fact)
+          kind String? (fact-text fact)
+          span facts/SourceSpan? (facts/compilerfact-span fact)]
+      (cond
+        (= kind "type-name")
+        (let [name String? (find-text rows :syntax/value subject 0)]
+          (if (nil? name) nil
+            (->TypeClaim subject "annotation" name "type/name" span)))
+
+        (= kind "type-application")
+        (let [constructor String? (find-text rows :syntax/value subject 0)
+              argument-node String? (find-node rows subject 0)
+              argument String? (if (nil? argument-node) nil
+                                  (claim-type claims argument-node "annotation"))]
+          (if (or (nil? constructor) (nil? argument)) nil
+            (->TypeClaim subject "annotation"
+              (render-type-application constructor argument)
+              "type/application" span)))
+
+        (= kind "integer-literal")
+        (->TypeClaim subject "value" "Int" "literal/integer" span)
+
+        (= kind "binding")
+        (let [annotation-node String? (find-node rows subject 0)
+              annotation String? (if (nil? annotation-node) nil
+                                   (claim-type claims annotation-node "annotation"))]
+          (if (nil? annotation) nil
+            (->TypeClaim subject "value" annotation "binding/annotation" span)))
+
+        (= kind "function")
+        (let [parameter-node String? (find-node rows subject 0)
+              return-node String? (find-node rows subject 1)
+              body-node String? (find-node rows subject 2)
+              parameter-type String? (if (nil? parameter-node) nil
+                                       (claim-type claims parameter-node "value"))
+              return-type String? (if (nil? return-node) nil
+                                    (claim-type claims return-node "annotation"))
+              body-type String? (if (nil? body-node) nil
+                                  (claim-type claims body-node "value"))]
+          (if (or (nil? parameter-type)
+                  (nil? return-type)
+                  (nil? body-type)
+                  (not= return-type body-type))
+            nil
+            (->TypeClaim subject "value" return-type
+              "function/declared-return" span)))
+
+        :else nil))))
+
+(defn derive-pass
+  [rows (Vec facts/CompilerFact) claims (Vec TypeClaim)] (Vec TypeClaim)
+  (loop [remaining (Vec facts/CompilerFact) rows
+         current (Vec TypeClaim) claims]
+    (if (empty? remaining)
+      current
+      (let [candidate TypeClaim? (derive-claim rows current (first remaining))]
+        (recur (rest remaining)
+          (if (or (nil? candidate) (claim-known? current candidate))
+            current
+            (conj current candidate)))))))
+
+(defn reach-fixed-point
+  [rows (Vec facts/CompilerFact)] CheckedFacts
+  (loop [claims (Vec TypeClaim) []
+         iterations Int 0]
+    (let [next (Vec TypeClaim) (derive-pass rows claims)]
+      (if (= (count next) (count claims))
+        (let [propositions (Vec facts/TypePropositionFact)
+              (loop [remaining (Vec TypeClaim) next order Int 0 result (Vec facts/TypePropositionFact) []]
+                (if (empty? remaining)
+                  result
+                  (let [claim TypeClaim (first remaining)
+                        proposition-id String
+                        (str "sha256:" (sha256-bytes (utf8-encode
+                          (str (typeclaim-subject claim) ":" (typeclaim-category claim)
+                               ":" (typeclaim-type-name claim)))))]
+                    (recur (rest remaining) (+ order 1)
+                      (conj result (facts/->TypePropositionFact order proposition-id
+                        (typeclaim-subject claim) (typeclaim-rule claim)
+                        (typeclaim-type-name claim) (typeclaim-span claim)))))))
+              evidence (Vec facts/TypeEvidenceFact)
+              (loop [remaining (Vec facts/TypePropositionFact) propositions
+                     result (Vec facts/TypeEvidenceFact) []]
+                (if (empty? remaining)
+                  result
+                  (let [p facts/TypePropositionFact (first remaining)]
+                    (recur (rest remaining)
+                      (conj result (facts/->TypeEvidenceFact
+                        (facts/typepropositionfact-order p)
+                        (facts/typepropositionfact-proposition-id p)
+                        (facts/typepropositionfact-subject p) true
+                        (facts/typepropositionfact-rule p)
+                        (facts/typepropositionfact-span p)))))))
+              lowerings (Vec facts/OrderedLoweringFact)
+              (loop [remaining (Vec TypeClaim) next order Int 0 result (Vec facts/OrderedLoweringFact) []]
+                (if (empty? remaining)
+                  result
+                  (let [claim TypeClaim (first remaining)]
+                    (recur (rest remaining) (+ order 1)
+                      (if (= "value" (typeclaim-category claim))
+                        (conj result (facts/->OrderedLoweringFact order :lowering/fact
+                          (typeclaim-subject claim) 0
+                          (facts/->FactText (typeclaim-type-name claim))
+                          (typeclaim-span claim)))
+                        result)))))]
+          (->CheckedFacts propositions evidence lowerings iterations))
+        (recur next (+ iterations 1))))))
+
+(defn unresolved-function
+  [rows (Vec facts/CompilerFact) checked CheckedFacts] CheckRejection?
+  (loop [remaining (Vec facts/CompilerFact) rows]
+    (if (empty? remaining)
+      nil
+      (let [fact facts/CompilerFact (first remaining)
+            kind String? (fact-text fact)]
+        (if (and (= :syntax/node (facts/compilerfact-relation fact))
+                 (= kind "function")
+                 (nil? (reduce
+                   (fn [found String? proposition facts/TypePropositionFact] String?
+                     (if (some? found) found
+                       (if (= (facts/compilerfact-subject fact)
+                              (facts/typepropositionfact-subject proposition))
+                         (facts/typepropositionfact-detail proposition) nil)))
+                   nil
+                   (checkedfacts-propositions checked))))
+          (->CheckRejection "function/type" (facts/compilerfact-subject fact)
+            "function parameter, declared return, and body type did not resolve compatibly"
+            (facts/compilerfact-span fact))
+          (recur (rest remaining)))))))
+
+(defn check-facts [bundle facts/SyntaxFactBundle] CheckResult
+  (if (not (facts/canonical-fact-order? (facts/syntaxfactbundle-facts bundle)))
+    (->CheckRejected
+      (->CheckRejection "facts/order" ""
+        "syntax facts must have strictly increasing nonnegative order" nil))
+    (let [checked CheckedFacts
+          (reach-fixed-point (facts/syntaxfactbundle-facts bundle))
+          rejection CheckRejection?
+          (unresolved-function (facts/syntaxfactbundle-facts bundle) checked)]
+      (if (nil? rejection)
+        (->FactsChecked checked)
+        (->CheckRejected rejection)))))
