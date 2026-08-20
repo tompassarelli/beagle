@@ -744,7 +744,8 @@
    operations (Vec t/CommitOperation)] t/Triple
   (commit-boundary!
    ctx operations
-   (commit-metadata "store.legacy-api/v1" canonical-shape-schema-id nil)))
+   (commit-metadata "store.txn/v1" canonical-shape-schema-id
+                    "store-schema-v1")))
 
 (defn replay-transaction-result!
   [ctx (Atom t/TermStore)

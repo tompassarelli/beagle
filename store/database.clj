@@ -44,7 +44,9 @@
     :attestation canonical-validator}})
 
 (defn- canonical-validate-commit! [operations metadata]
-  (let [metadata (or metadata (default-commit-metadata "store.legacy-api/v1" nil))
+  (let [metadata (or metadata
+                     (default-commit-metadata "store.txn/v1"
+                                              "store-schema-v1"))
         validation (:validation-attestation metadata)]
     (when-not (and (map? metadata)
                    (string? (:producer metadata))

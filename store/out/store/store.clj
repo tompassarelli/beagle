@@ -457,7 +457,7 @@
   (append-transaction! ctx (store-next-sequence (deref ctx)) operations validated)))
 
 (defn commit-transaction! [ctx operations]
-  (commit-boundary! ctx operations (commit-metadata "store.legacy-api/v1" canonical-shape-schema-id nil)))
+  (commit-boundary! ctx operations (commit-metadata "store.txn/v1" canonical-shape-schema-id "store-schema-v1")))
 
 (defn ^TransactionReplayResult replay-transaction-result! [ctx record]
   (if (and (t/transaction-record? record) (and (>= (t/transactionrecord-sequence record) 0) (valid-operations? (t/transactionrecord-operations record)))) (append-transaction-result! ctx (t/transactionrecord-sequence record) (t/transactionrecord-operations record)) (transaction-replay-error :invalid-transaction-record "store: invalid transaction record")))

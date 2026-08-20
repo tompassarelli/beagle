@@ -135,9 +135,12 @@
          "`find` is a relation-name string (not a rule-head map); rules carry "
          "`head` and `body` objects. Aggregate queries instead use a `find` object "
          "with `rel`, `group`, and `agg`. "
-         "A term is {:var \"x\"} or a constant; base relations are fact(l,p,r), "
-         "fact-id(cid,l,p,r), and predicate(pid,spelling,canonical,cardinality,value-kind) "
-         "(the pre-rename names triple/fact are accepted as aliases). "
+         "A term is {:var \"x\"} or a constant; base relations are "
+         "triple(t1,t2,t3), occurrence(coordinate,action,proposition), "
+         "withdrawal(retraction,assertion), text-match(entity,attribute,needle), "
+         "text-phrase(entity,attribute,needle), text-substring(entity,attribute,needle), "
+         "text-stem(entity,attribute,needle), and "
+         "text-search(entity,attribute,needle,score). "
          "Recursion and stratified negation are supported; the query is validated before it runs.")
        [(->Param "query" "object" true)]
        :query
