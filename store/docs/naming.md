@@ -19,7 +19,7 @@ The deciding prior is Datalog: a fact is a proposition present in the evaluated 
 **Retired 2026-08-07:** the Worlds service is deleted from the tree. `world`
 and the bare historical name `version` name no current module or primitive and
 are spent for new naming. The live closed-wire operation `:rpc/version` is
-unrelated and remains current. Durable FRAMLOG data that service wrote
+unrelated and remains current. Durable Store transaction-log data that service wrote
 (`evidence.world`, `world.record`, `world.version:`) keeps its spelling:
 respelling stored predicates is a data migration, not a rename.
 
@@ -127,7 +127,7 @@ Assertion identity    occurrence coordinate
 
 Current Float behavior is a documented exception to the intended Atom ruling;
 see N4 in [guarantees](guarantees.md#wire). Host interning makes NaN unequal to
-itself and equates `+0.0` with `-0.0`, while FRAMRPC canonicalizes NaN and
+itself and equates `+0.0` with `-0.0`, while Store RPC canonicalizes NaN and
 distinguishes signed zero. The ruling stands, but the core does not yet satisfy
 it for Float.
 
@@ -158,9 +158,9 @@ The thing was every remaining `ns/name` family after normalization. An inventory
 - **Historical code** (`provider/*`, `world/*`, `worlds/*`) retained spelling because rewriting a service awaiting retirement buys no queryable structure.
 - **Closed wire tags** (`authority/*`, `store/*`, `store.defcheck/*`, `lease/*`, `query/*`) retained spelling because a change is wire versioning, not ontology normalization.
 
-The deciding prior is boundary ownership: at that revision no in-scope family was written verbatim to a configured live store, so nine fixtures and zero stores changed. Replan if a configured non-test `worlds/invoke-plan-to!` caller, an external corpus carrying `worlds/*` or `provider/*`, or a FRAMRPC tag rename appears.
+The deciding prior is boundary ownership: at that revision no in-scope family was written verbatim to a configured live store, so nine fixtures and zero stores changed. Replan if a configured non-test `worlds/invoke-plan-to!` caller, an external corpus carrying `worlds/*` or `provider/*`, or a Store RPC tag rename appears.
 
-**Discharged 2026-08-07:** the `world/*` and `worlds/*` spelling condition is closed by deletion — the service awaiting retirement was retired, so no shipped module carries those families. The surviving spellings are test fixture labels and durable FRAMLOG predicates, both already out of scope here, so the replan trigger cannot fire.
+**Discharged 2026-08-07:** the `world/*` and `worlds/*` spelling condition is closed by deletion — the service awaiting retirement was retired, so no shipped module carries those families. The surviving spellings are test fixture labels and durable Store transaction-log predicates, both already out of scope here, so the replan trigger cannot fire.
 
 ## positions of the Triple — t1/t2/t3 — chosen 2026-08-04
 
@@ -170,7 +170,7 @@ The names do not change the binary wire, where triples encode as positional tagg
 
 Rejected bench:
 
-- **zero-based slot vocabulary** — combines a frame-language word with array-offset indexing, a hybrid with no single tradition behind it.
+- **zero-based slot vocabulary** — combines a packet-language word with array-offset indexing, a hybrid with no single tradition behind it.
 - **`s0`/`s1`/`s2`** — an abbreviation that needs a correction sentence.
 - **bare `0`/`1`/`2`** — ungreppable and unpronounceable in prose.
 - **one-based slot vocabulary** — keeps the invented word while changing only the defensible part.
@@ -247,7 +247,7 @@ names the parent's sealed segments plus a fresh tail of its own, and the two
 lines then differ only in what they append afterwards. It promises no ordering
 between branches and no merge. It is durable on-disk vocabulary — the
 `store.branch` module, `<log>.refs/` and `<log>.branches/` beside the store, and
-the `framref/v1` and `framfork/v1` format tags.
+the `revision-ref/v1` and `branch-fork/v1` format tags.
 
 This reverses the [world](#world--chosen-2026-07-26-retired-2026-08-07) bench,
 which rejected **branch** as describing mechanics rather than what is branching.

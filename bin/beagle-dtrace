@@ -313,7 +313,7 @@ def server_loop():
         t = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
         t.start()
 
-def shutdown(signum, frame):
+def shutdown(signum, call_state):
     print(f"\n  Collector shutting down. Total spans: {span_count}", file=sys.stderr)
     sys.exit(0)
 

@@ -5,7 +5,7 @@ onto Beagle Store's, states every difference that will bite, and lists what is h
 not here yet.
 
 **Scope.** Everything below describes the native engine — the Beagle sources
-behind `bin/beagle store` and `bin/beagle-store-server` — and the closed FRAMRPC v2 (wire
+behind `bin/beagle store` and `bin/beagle-store-server` — and the closed Store RPC v2 (wire
 version 2.0) surface it serves. The retained JVM route differs in several
 compatibility behaviors, called out inline rather than averaged away: it
 retains text indexes across requests, writes transaction metadata, filters its
@@ -34,7 +34,7 @@ occurrence(
   ("Alice", :contactable_at, "alice@example.com"))
 ```
 
-That row is the direct history interface. FRAMLOG physically stores the action
+That row is the direct history interface. The Store transaction log physically stores the action
 and recursive proposition content. A successful retraction also yields
 `withdrawal(retraction-coordinate, assertion-coordinate)`, a system relation
 to the exact earlier assertion occurrence it cancelled.
@@ -83,21 +83,21 @@ inside the structural content: the nested Term has to remain stable
 | `:db/isComponent`, cascade retract | Nothing | **Absent** |
 | `retractEntity`, retract by pattern | Only exact-proposition retraction exists | **Absent** |
 | Retraction semantics | Withdraws the newest live equal occurrence and records its exact target. A retraction with no live match still records an occurrence and advances the version, but reports `stateChanged = false` and creates no withdrawal | **Different** |
-| Transaction metadata | The JVM route writes `:kernel/recorded-at` and `:kernel/asserted-by` about the tx coordinate. A FRAMRPC action carries a proposition and a subject policy — nothing else | **JVM route only** |
+| Transaction metadata | The JVM route writes `:kernel/recorded-at` and `:kernel/asserted-by` about the tx coordinate. A Store RPC action carries a proposition and a subject policy — nothing else | **JVM route only** |
 | Legacy effective supersession | Native liveness follows assertions and exact retractions. The retained JVM route additionally treats a live `:kernel/supersedes` proposition as suppressing its target occurrence | **Retained JVM compatibility only** |
 | `d/history`, `d/as-of`, `d/since` | The `occurrence` and `withdrawal` relations plus `:query/current`, `:query/as-of U`, `:query/since L upper`. Native applies `(L,U]` to every base relation. The retained JVM route lower-bounds only `occurrence` and `withdrawal`, leaving `triple` and text at upper snapshot `U`. Page cursors pin their snapshot | **Present, route-sensitive** (`Q6`) |
-| `d/with` | Nothing on the wire. In-process staged builder reads are the read-side analogue | **Absent from FRAMRPC** |
+| `d/with` | Nothing on the wire. In-process staged builder reads are the read-side analogue | **Absent from Store RPC** |
 | Tempids | `txn/mint!` hands out `(tx-coordinate, :mint-ordinal, n)`. Builder-local while you build, durable once the transaction commits | **Different** |
 | AVET, range scans | Rotations index single positions and position pairs by equality only. Comparisons run as post-filters over bound rows | **Absent** |
 | Query language | Structured, typed Datalog: rules or ordered strata, semi-naive fixpoint, stratified negation, aggregates. Not `:find`/`:where` text, and the evaluator never parses a query string ([query reference](query-reference.md)) | **Different** |
-| Pull | An app-layer projection (`store:src/pull.bclj`), not a FRAMRPC operation | **Different layer** |
+| Pull | An app-layer projection (`store:src/pull.bclj`), not a Store RPC operation | **Different layer** |
 | Excision | Retention exists as sealed epochs and typed unavailable/expired errors, but active-log compaction and retention policy are ungated (`Q7`) | **Partial** |
 
 One structural note behind several rows: `store.schema` is an **in-process**
 layer used by embedded callers and the JVM checkout. The official Bun
 `@tompassarelli/beagle-store-rpc/schema` entry point is the corresponding remote
 application layer: it compiles cardinality replacement, uniqueness checks, and
-guarded updates into ordinary reads plus an `expected-version` FRAMRPC batch.
+guarded updates into ordinary reads plus an `expected-version` Store RPC batch.
 The wire remains deliberately kernel-level, so clients that bypass that entry
 point can still write propositions that violate an application's constraints.
 
@@ -149,7 +149,7 @@ Each row is a work order, not a caveat to be argued away.
   provides correct unique create/upsert and guarded updates for writes routed
   through it, including duplicate-owner rejection and conflict retries. Beagle Store
   still has no stored uniqueness declaration or kernel admission rule, so
-  arbitrary FRAMRPC writes can bypass that application constraint. Engine-wide
+  arbitrary Store RPC writes can bypass that application constraint. Engine-wide
   enforcement also wants an index Beagle Store does not have — see the next row.
 - **No value-ordered index.** Equality-prefix probes cover attribute and
   attribute+value lookup in one hop, which is the common Datomic AVET use, but
@@ -160,7 +160,7 @@ Each row is a work order, not a caveat to be argued away.
 - **`value_kind` is a hint.** Declared and used by projections, checked by
   nothing.
 - **Transaction metadata is not on the wire.** If you need actor or wall-clock
-  time from a FRAMRPC client, assert it as ordinary propositions about the
+  time from a Store RPC client, assert it as ordinary propositions about the
   occurrence coordinate.
 - **Text-index retention is JVM-route only** (`Q3a`). The native engine
   rebuilds the text source per query, plan-gated.
@@ -193,5 +193,5 @@ knowledge.
 | `d/as-of` / `d/since` | The `:query/as-of` and `:query/since` selectors. Native since restricts every base relation to `(L,U]`; the retained JVM route restricts only `occurrence` and `withdrawal` and leaves `triple` and text at `U` |
 | `d/with` | A staged builder read, in process only |
 | Paging | Native cursors are operation-specific and snapshot-pinned. Unpaged `rpc/query` refuses above 248 rows with `:term-depth-exceeded`; `rpc/scan` has a 200-row unpaged/page maximum, refuses larger unpaged results with `:rpc/native-page-required`, and emits `:rpc/native-scan-cursor`; unpaged `rpc/occurrences` silently returns only its first 248 rows, so page it. The retained JVM route instead refuses all three oversized unpaged reads with `:term-depth-exceeded` and syntactically accepts page limits through 4096, still subject to the codec depth bound |
-| Bulk load | Batches have a 247-action depth ceiling and must also fit the exact predicted response byte limit; a batch commits as one frame or not at all (`A1`, `N3`) |
+| Bulk load | Batches have a 247-action depth ceiling and must also fit the exact predicted response byte limit; a batch commits as one transaction record or not at all (`A1`, `N3`) |
 | "Did my write land" | The mutation receipt returns occurrence coordinates, and `expected-version` gives you OCC: a stale or future version fails `:rpc/conflict` without moving the version (`I2`) |

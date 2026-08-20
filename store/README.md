@@ -64,7 +64,7 @@ Committing proposition content creates an occurrence with a coordinate and an
 occurrences. A successful content retraction withdraws the newest live equal
 assertion occurrence; another equal occurrence remains live if one exists. A
 no-match retraction still records an occurrence and advances the version, but
-reports `stateChanged = false` and creates no withdrawal. FRAMLOG stores these
+reports `stateChanged = false` and creates no withdrawal. The Store transaction log stores these
 signed operations; the query engine exposes them as
 `occurrence(coordinate, action, proposition)` and exposes a successful targeted
 retraction as `withdrawal(retraction, assertion)`.
@@ -91,7 +91,7 @@ primitive or a code type. See the [naming ledger](docs/naming.md).
 - [Ontology](docs/ontology.md) — modeling rules, the canonical normalized example, profiles, and semantic hints.
 - [Guarantees](docs/guarantees.md) — guarantees, concurrency, workload envelope, and client obligations.
 - [Naming ledger](docs/naming.md) — durable naming verdicts and rejected alternatives.
-- [Bun FRAMRPC client](clients/bun/README.md) — the complete direct builder and application data plane.
+- [Bun Store RPC client](clients/bun/README.md) — the complete direct builder and application data plane.
 - [Isolation and deployment](docs/isolation-and-deployment.md) — trust domains, the three deployment shapes, and the wasm embed contract.
 - [Coming from Datomic](docs/coming-from-datomic.md) — the datom-to-occurrence bridge, the exact-difference table, and the honest not-yet list.
 - [Tool catalog](docs/tool-catalog.md) — exactly five public MCP data verbs.
@@ -105,7 +105,7 @@ there is no standalone install step. Run these commands from the Beagle root.
 
 ```console
 $ export BEAGLE_STORE_SPACE_ID=store-demo
-$ export BEAGLE_STORE_LOG=/tmp/store-demo.framlog
+$ export BEAGLE_STORE_LOG=/tmp/store-demo.storelog
 $ export BEAGLE_STORE_SERVER_RUNTIME=jvm-dev  # explicit checkout fallback
 $ bin/beagle store up
 $ bin/beagle store tell :contactable_at :member_of :contact_relations
@@ -121,7 +121,7 @@ Bare `Alice` is local CLI shorthand for the String `"@Alice"`; the quoted
 arguments above preserve the exact canonical-example Strings. Keywords,
 numbers, recursive three-element vectors, and `{:instant [seconds nanos]}` are
 lowered to Terms before the socket opens. EDN is only human CLI syntax. The live
-engine wire is binary FRAMRPC.
+engine wire is binary Store RPC.
 
 ## Runtime surfaces
 
@@ -129,16 +129,16 @@ engine wire is binary FRAMRPC.
   requires `BEAGLE_STORE_NATIVE_ARTIFACT_DIR` to name a READY artifact containing
   the native server executable; it never falls back silently. `jvm-oracle` and
   `jvm-dev` are explicit retained routes. The launched server owns one database
-  (`SpaceId` plus `history.framlog`), accepts FRAMRPC v2's closed data surface
+  (`SpaceId` plus `history.storelog`), accepts Store RPC v2's closed data surface
   of thirteen operations (exact wire version 2.0), and holds writer authority
   for its active lifetime. The native server additionally accepts the separately named
   `rpc/checkpoint` operator capability.
 - `bin/beagle store` routes public data commands (`tell`, `retract`, `show`, `query`,
-  `scan`, `occurrences`, `version`, `status`, and `validate`) over FRAMRPC.
+  `scan`, `occurrences`, `version`, `status`, and `validate`) over Store RPC.
   Explicit local migration/projection/admin commands are separate from that
   wire path.
 - `bin/beagle-store-backup` is the Bun-first native operator path. It takes a live
-  checkpoint, copies the exact durable FRAMLOG prefix at that cutoff, and
+  checkpoint, copies the exact durable Store transaction-log prefix at that cutoff, and
   publishes a canonical hash manifest with the SpaceId, served version, and
   exact native artifact READY receipt. It does not add an application data
   operation or treat the derived snapshot image as authoritative backup data.
@@ -148,7 +148,7 @@ engine wire is binary FRAMRPC.
 - `clients/bun/store-rpc.mjs` is the official zero-dependency Bun 1.3.13+ client for
   direct builder and application traffic. It preserves recursive Terms,
   batches, versions, occurrence replay, paging/cursors, snapshot selectors,
-  and leases across all thirteen FRAMRPC v2 data operations. Its optional
+  and leases across all thirteen Store RPC v2 data operations. Its optional
   `@tompassarelli/beagle-store-rpc/schema` entry point composes those operations into
   occurrence-correct single-value replacement, unique creation/upsert,
   identity-resolved guarded updates, and mixed create/update transactions
@@ -157,11 +157,11 @@ engine wire is binary FRAMRPC.
   `storeNativeCheckpoint` operator capability used by `beagle-store-backup`; that
   capability is deliberately absent from the ordinary `storeClient` object.
 - The Cloudflare shim accepts closed JSON with tagged recursive Terms and lowers
-  it to FRAMRPC. It does not accept EDN or an untyped escape hatch.
+  it to Store RPC. It does not accept EDN or an untyped escape hatch.
 - The engine also links as a library: `native/store.h` publishes embedding ABI
   v1 (`libbeagle_store.a`, `libbeagle_store.so`), and `--host wasm-embed` links the same ABI
   into a wasm32 module an isolate embeds with no server and no socket. Both
-  take one canonical FRAMRPC v2 frame in and give one out, and the wasm engine
+  take one canonical Store RPC v2 packet in and give one out, and the wasm engine
   answers byte-for-byte what the native library answers. See
   [isolation and deployment](docs/isolation-and-deployment.md#the-wasm-embed-contract).
 
@@ -182,7 +182,7 @@ withdrawal. The exact executable contracts live in
 [`tests/triple_query_test.clj`](tests/triple_query_test.clj).
 
 The engine is pre-1.0. There is no engine access control: isolate by process,
-network, SpaceId, and FRAMLOG, and put authenticated public edges in front.
+network, SpaceId, and Store transaction log, and put authenticated public edges in front.
 The concurrency receipts cover one machine and one writer; they are not
 distributed consensus.
 

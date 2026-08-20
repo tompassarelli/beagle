@@ -4,7 +4,7 @@ This document specifies the current structured Datalog plan, its relations, oper
 
 The CLI accepts one EDN map and JSON adapters accept the equivalent JSON; both
 lower [Terms](glossary.md#semantic-kernel), variables, and controls before
-FRAMRPC v2. The evaluator never parses query text. Use
+Store RPC v2. The evaluator never parses query text. Use
 `bin/beagle store query '<edn>'` or MCP `ask`.
 
 ## Values and relations

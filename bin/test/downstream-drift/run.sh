@@ -116,7 +116,7 @@ printf ';;\n' > "$R/src/store/types.bclj"                  # store.bclj MISSING
 mk_repo "$R"
 REG="$BASE/reg-vanished.rktd"
 cat > "$REG" <<EOF
-((consumer (name "store") (repo-env "DRIFT_FRAM") (repo-default "$R") (target "clj")
+((consumer (name "store") (repo-env "DRIFT_STORE") (repo-default "$R") (target "clj")
   (enumerators ((enumerator (kind bash-for-list) (source "build.sh") (loop-var "m")
                 (template "src/store/{}.bclj") (shape-markers ("for m in")))))))
 EOF

@@ -236,7 +236,7 @@ kind of evidence.
 
 ---
 
-## 12. Thesis framing
+## 12. Thesis context
 
 Value semantics belong to the language contract rather than an accidental host
 representation. The current JavaScript evidence is narrower than cross-target

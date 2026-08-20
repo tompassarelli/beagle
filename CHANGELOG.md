@@ -154,7 +154,7 @@ The surface stopped accreting. v0.16 locks beagle's authoring layer to a three-s
 - Keyword access is a single canonical AST node regardless of spelling — emitters and checkers see one shape (2eb7baa).
 - Clj and Cljs emitters promoted to the active tier in `beagle-test/tiers.rktd`; default `bin/beagle test` run now covers them.
 - Bare divergent forms now raise with a "use `(prefix/...)`" hint instead of silently emitting (parse.rkt:1577).
-- README reframed around the typed authoring IR and the three-statement generative spec.
+- README recast around the typed authoring IR and the three-statement generative spec.
 
 ### Removed
 

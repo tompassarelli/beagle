@@ -87,9 +87,6 @@ arities.
 The mandatory native source-freeze and full typed-stage gates could not start:
 `native-core/validation/store-checkout.sh` requires
 `~/code/store/pins/24309a05927a59d7d495292a3b15a7e9b2adaf2c`, but the Store
-repository and pin are absent. The same object ID exists only as an immutable
-Fram pin whose source is `fram:src/fram/types.bgl`, not the required
-`store:src/store/types.bgl`; substituting that renamed corpus would not execute
-the declared gate. Restore the exact Store pin, then rerun both gates. Because
+repository and pin are absent. Restore the exact Store pin, then rerun both gates. Because
 main is moving for the release repair, landing also requires a rebase and a
 fresh rerun of every gate against the rebased commit.

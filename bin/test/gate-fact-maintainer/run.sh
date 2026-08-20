@@ -254,7 +254,7 @@ run_candidate() {
     local old_observations="$scratch/$name.old-observations"
     local first_observations="$scratch/$name.fact-first-observations"
     local second_observations="$scratch/$name.fact-second-observations"
-    local store="$facts_root/$name.framlog"
+    local store="$facts_root/$name.storelog"
     local old_status first_status second_status
     echo "gate-fact-maintainer parity: candidate $name"
     mkdir -p "$(dirname "$repo")"
@@ -297,7 +297,7 @@ run_candidate() {
 }
 
 no_op_repo="$scratch/cases/no-op"
-no_op_store="$facts_root/no-op.framlog"
+no_op_store="$facts_root/no-op.storelog"
 no_op_audit="$scratch/no-op.oracle.log"
 no_op_observations="$scratch/no-op.old-observations"
 
@@ -310,7 +310,7 @@ run_miss_case() {
     local output="$scratch/miss-$label.log"
     local expected_audit="$scratch/miss-$label.expected-audit"
     local actual_audit="$scratch/miss-$label.actual-audit"
-    local miss_store="$facts_root/miss-$label.framlog"
+    local miss_store="$facts_root/miss-$label.storelog"
     mkdir -p "$observations"
     cp "$no_op_store" "$miss_store"
     set_gate_environment "$no_op_repo" "$observations" "miss-$label" "$audit"
@@ -395,7 +395,7 @@ wait_workers
 
 launch_worker "miss unresolved-route" 45 run_miss_case \
     unresolved-route route-unresolved \
-    BEAGLE_GATE_FACT_QUERY_STORE="$facts_root/unresolved-route.framlog"
+    BEAGLE_GATE_FACT_QUERY_STORE="$facts_root/unresolved-route.storelog"
 launch_worker "miss unknown-kind" 45 run_miss_case \
     unknown-kind unknown-fact-kind \
     BEAGLE_GATE_FACT_QUERY_INJECT_UNKNOWN_KIND=1

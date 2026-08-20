@@ -5,7 +5,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 corpus="$repo/bin/test/branch-compile-corpus/corpus"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-dev-fact-compile.XXXXXX")"
-store="$scratch/dev-facts.framlog"
+store="$scratch/dev-facts.storelog"
 
 cleanup() {
   rm -rf -- "${scratch:?}"

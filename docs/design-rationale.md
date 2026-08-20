@@ -8,7 +8,7 @@
 
 These are the boundaries that explain what Beagle is for:
 
-- **Not a schema language or general validation framework** — static type
+- **Not a schema language or general validation system** — static type
   information erases, and only an explicitly authored binding constraint emits
   its local predicate guard. There is no schema/spec registry or conforming
   runtime.

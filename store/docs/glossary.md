@@ -67,27 +67,27 @@ propositions and is never a primitive or storage type.
 
 ## Storage and query
 
-**FRAMLOG** — The authoritative binary append-only history for one SpaceId.
+**Store transaction log** — The authoritative binary append-only history for one SpaceId.
 
-**fold / replay** — Applying ordered FRAMLOG transactions to reconstruct logical version, occurrence liveness, live propositions, and indexes.
+**fold / replay** — Applying ordered Store transaction-log transactions to reconstruct logical version, occurrence liveness, live propositions, and indexes.
 
 **snapshot** — An immutable `{version, root}` query view published by the writer.
 
 **checkpoint** — A derived, prefix-bound FRI2 image used to accelerate historical reconstruction; invalid checkpoints fall back to canonical replay.
 
-**snapshot image** — A derived whole-store image written beside the FRAMLOG by `rpc/checkpoint` and installed at boot so replay resumes at its watermark; invalid or discontinuous images degrade to a full fold. Distinct from the FRI2 checkpoint above, which serves historical queries rather than boot.
+**snapshot image** — A derived whole-store image written beside the Store transaction log by `rpc/checkpoint` and installed at boot so replay resumes at its watermark; invalid or discontinuous images degrade to a full fold. Distinct from the FRI2 checkpoint above, which serves historical queries rather than boot.
 
-**epoch** — An inclusive transaction-sequence range sealed as a canonical FRAMLOG segment and named by a fingerprinted range manifest.
+**epoch** — An inclusive transaction-sequence range sealed as a canonical Store transaction-log segment and named by a fingerprinted range manifest.
 
 **rotation** — A disposable index of live occurrences by individual Triple positions and position pairs; `SPO`/`POS`/`OSP` are private physical names.
 
 **projection** — A rebuildable view of Terms or occurrences, including query relations, profiles, and indexes; never authoritative history.
 
-**SpaceId** — The immutable identity binding a server, its FRAMLOG, and every accepted request into one database trust domain.
+**SpaceId** — The immutable identity binding a server, its Store transaction log, and every accepted request into one database trust domain.
 
 ## Wire and deployment
 
-**FRAMRPC v2** — Beagle Store's private binary protocol, wire version 2.0, for typed
+**Store RPC v2** — Beagle Store's private binary protocol, wire version 2.0, for typed
 recursive Terms and a closed data surface of thirteen operations, plus the
 separately named native `rpc/checkpoint` operator capability.
 

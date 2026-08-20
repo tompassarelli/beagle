@@ -154,7 +154,7 @@ case "${BEAGLE_DEV_FACT_REUSE:-0}" in
         ;;
     *) die "BEAGLE_DEV_FACT_REUSE must be 0 or 1" ;;
 esac
-dev_fact_store="${BEAGLE_DEV_FACT_STORE:-$BEAGLE_DIR/.beagle/dev-compile-facts.framlog}"
+dev_fact_store="${BEAGLE_DEV_FACT_STORE:-$BEAGLE_DIR/.beagle/dev-compile-facts.storelog}"
 if [[ "$dev_fact_reuse" == 1 && "$dev_fact_store" != /* ]]; then
     die "BEAGLE_DEV_FACT_STORE must be an absolute path"
 fi

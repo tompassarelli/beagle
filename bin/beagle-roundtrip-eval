@@ -5,7 +5,7 @@
 # For Nix corpora: compares drvPath (build instructions) per host across the
 # original flake vs the converted-then-emitted twin flake. The byte-identity
 # metric (see beagle-roundtrip-nix) is a parallel diagnostic, not the
-# primary signal — see lab/journal/log/028 for the reframe rationale.
+# primary signal — see lab/journal/log/028 for the revised rationale.
 #
 # Usage:
 #   bin/beagle-roundtrip-eval <corpus-dir>

@@ -158,7 +158,7 @@ Similarity is retrieval guidance, never identity or a kernel primitive:
 
 1. Prefer explicit shared structure. Relate items to the same domain Term and derive relatedness by a deterministic join.
 2. When affinity is genuine but not co-reference, assert it as an ordinary proposition and attach score and provenance to its occurrence.
-3. Keep embeddings in a disposable index versioned to its source snapshot; FRAMLOG remains authoritative.
+3. Keep embeddings in a disposable index versioned to its source snapshot; the Store transaction log remains authoritative.
 
 For example, after declaring `:is_similar_to` with the normalization rule above,
 let `op` denote the occurrence coordinate returned for the first proposition:

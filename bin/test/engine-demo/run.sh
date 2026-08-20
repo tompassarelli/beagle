@@ -44,11 +44,11 @@ W="$(mktemp -d)"; trap 'rm -rf "${W:?}" "${RESOLVE_OUT:?}"' EXIT
 chk "current target exists exactly once and replacement is absent" \
     "[ \"\$(grep -hF '(def $TARGET' '$TARGET_FILE' | wc -l)\" -eq 1 ] && ! grep -Rqw '$REPLACEMENT' '$SRC'"
 chk "two current real Beagle Store modules consume the target with these exact forms" \
-    "grep -Fq '(def term-codec-v1-depth-limit Int limits/$TARGET)' '$SRC/framrpc.bclj' && grep -Fq '(def rpc-v2-max-term-depth Int limits/$TARGET)' '$SRC/store/native_wire_codec.bgl'"
+    "grep -Fq '(def term-codec-v1-depth-limit Int limits/$TARGET)' '$SRC/store_rpc.bclj' && grep -Fq '(def rpc-v2-max-term-depth Int limits/$TARGET)' '$SRC/store/native_wire_codec.bgl'"
 
 mkdir -p "$W/slice"
 sed '1s/^#lang beagle$/#lang beagle\/clj/' "$TARGET_FILE" > "$W/slice/rpc_limits.bclj"
-cat > "$W/slice/framrpc_consumer.bclj" <<EOF
+cat > "$W/slice/store_rpc_consumer.bclj" <<EOF
 #lang beagle/clj
 (ns engine-demo.store.rpc)
 (require store.rpc-limits :as limits)
@@ -60,7 +60,7 @@ cat > "$W/slice/native_wire_consumer.bclj" <<EOF
 (require store.rpc-limits :as limits)
 (def rpc-v2-max-term-depth Int limits/$TARGET)
 EOF
-SOURCES=("$W/slice/rpc_limits.bclj" "$W/slice/framrpc_consumer.bclj" "$W/slice/native_wire_consumer.bclj")
+SOURCES=("$W/slice/rpc_limits.bclj" "$W/slice/store_rpc_consumer.bclj" "$W/slice/native_wire_consumer.bclj")
 EXPECTED="engine-demo.store.rpc engine-demo.native-wire-codec"
 
 # ---- REASON: scope-correct call graph over the bounded current seam -----------------

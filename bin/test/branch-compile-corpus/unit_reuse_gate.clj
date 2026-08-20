@@ -62,7 +62,7 @@
   (require! (instance? native.unit_reuse.NativeUnitWireRejectedV1 result)
             (str detail " was accepted")))
 
-(defn framing-cuts [encoding]
+(defn packet-cuts [encoding]
   (vec
    (filter
     #(< % (count encoding))
@@ -755,19 +755,19 @@
                  (:typed-units baseline))
           encoding (unit/typedunitv0-encoding smallest-typed)
           unit-id (unit/typedunitv0-unit-id smallest-typed)]
-      (doseq [cut (framing-cuts encoding)]
+      (doseq [cut (packet-cuts encoding)]
         (require-typed-rejected!
          (typed-wire-result (subs encoding 0 cut) unit-id)
-         (str "typed framing-boundary truncation at " cut))))
+         (str "typed packet-boundary truncation at " cut))))
     (let [smallest-native
           (apply min-key #(count (unit/nativeunitv0-encoding %))
                  (:native-units baseline))
           encoding (unit/nativeunitv0-encoding smallest-native)
           unit-id (unit/nativeunitv0-unit-id smallest-native)]
-      (doseq [cut (framing-cuts encoding)]
+      (doseq [cut (packet-cuts encoding)]
         (require-native-rejected!
          (native-wire-result (subs encoding 0 cut) unit-id)
-         (str "native framing-boundary truncation at " cut))))
+         (str "native packet-boundary truncation at " cut))))
     (let [typed-fields (record-fields typed-encoding)
           unknown-outer
           (stages/canonical-record "typed-unit-wire-v1-unknown" typed-fields)
