@@ -8,7 +8,7 @@
 (defn syntax-command [(args (Vec String))] Int
   (if (= 1 (count args))
     (match (driver/read-source-path (first args))
-      [(SourceAccepted source) 0]
+      [(SourceAccepted) 0]
       [(SourceRejected code path offset detail)
        (do
          (host.stderr/write-line

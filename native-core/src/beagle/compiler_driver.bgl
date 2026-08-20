@@ -4,13 +4,8 @@
 
 (def max-source-bytes Int 67108864)
 
-(defrecord AdmittedSource
-  [(path String)
-   (text String)
-   (events (Vec reader/ReaderEvent))])
-
 (defunion SourceAdmission
-  (SourceAccepted [(source AdmittedSource)])
+  SourceAccepted
   (SourceRejected
     [(code Int) (path String) (offset Int) (detail String)]))
 
@@ -36,8 +31,7 @@
   (let [(read reader/DatumRead) (reader/read-events text)
         (error String?) (reader/datumread-error read)]
     (if (nil? error)
-      (->SourceAccepted
-        (->AdmittedSource path text (reader/datumread-events read)))
+      (->SourceAccepted)
       (->SourceRejected 65 path (reader/datumread-error-offset read) error))))
 
 (defn read-source-path [(path String)] SourceAdmission
