@@ -51,7 +51,7 @@ exec 9<>"$store_log"
 flock -x 9
 set +e
 "$program_executable" "$space" "$store_log" inspect "$base_root" 1 \
-  >"$scratch/locked.stdout" 2>"$scratch/locked.stderr"
+  >"$scratch/locked.stdout" 2>"$scratch/locked.stderr" 9>&-
 locked_status=$?
 set -e
 flock -u 9
