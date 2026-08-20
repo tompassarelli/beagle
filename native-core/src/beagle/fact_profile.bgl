@@ -245,7 +245,7 @@
                             (resultadmissionrequest-target request)
                             (resultadmissionrequest-materializer-content-id request)
                             status artifact diagnostic)
-               (digest String) (result-digest normalized)]
+               digest String (result-digest normalized)]
            (->ResultAdmitted
              (->AdmittedResultClosure digest query
                (resultadmissionrequest-target normalized)

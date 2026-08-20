@@ -188,14 +188,18 @@
   [query CompileQuery
    config linker/ArtifactLinkConfigV1
    artifact linker/TargetArtifactV1] CompileBundleResult
-  (match (linker/write-and-link config artifact)
-    [(linker/ArtifactLinkedV1 executable-path)
-     (->CompileBundleMaterialized
-       (compile-query-id query)
-       (linker/targetartifactv1-digest artifact)
-       executable-path)]
-    [(linker/ArtifactLinkErrorV1 code detail)
-     (->CompileBundleError code detail)]))
+  (match (linker/encode-artifact-envelope artifact)
+    [(linker/ArtifactEnvelopeErrorV1 detail)
+     (->CompileBundleError 65 detail)]
+    [(linker/ArtifactEnvelopeReadyV1 artifact-content-id payload)
+     (match (linker/write-and-link config artifact)
+       [(linker/ArtifactLinkedV1 executable-path)
+        (->CompileBundleMaterialized
+          (compile-query-id query)
+          artifact-content-id
+          executable-path)]
+       [(linker/ArtifactLinkErrorV1 code detail)
+        (->CompileBundleError code detail)])]))
 
 (defn checked-module-results
   [closure CheckedFactClosure] (Vec checker/CheckedFacts)
@@ -331,14 +335,17 @@
   (match (profile/admit-canonical-result result)
     [(profile/ResultRejected code detail) false]
     [(profile/ResultAdmitted admitted)
-     (and (= "ok" (profile/admittedresultclosure-status admitted))
-          (= (compile-query-id query)
-             (profile/admittedqueryclosure-query-digest
-               (profile/admittedresultclosure-query admitted)))
-          (= (linker/targetartifactv1-target artifact)
-             (profile/admittedresultclosure-target admitted))
-          (= (linker/targetartifactv1-digest artifact)
-             (profile/admittedresultclosure-artifact-content-id admitted)))]))
+     (match (linker/encode-artifact-envelope artifact)
+       [(linker/ArtifactEnvelopeErrorV1 detail) false]
+       [(linker/ArtifactEnvelopeReadyV1 artifact-content-id payload)
+        (and (= "ok" (profile/admittedresultclosure-status admitted))
+             (= (compile-query-id query)
+                (profile/admittedqueryclosure-query-digest
+                  (profile/admittedresultclosure-query admitted)))
+             (= (linker/targetartifactv1-target artifact)
+                (profile/admittedresultclosure-target admitted))
+             (= artifact-content-id
+                (profile/admittedresultclosure-artifact-content-id admitted)))])]))
 
 (defn append-query-artifact
   [query CompileQuery
@@ -367,17 +374,21 @@
    artifact linker/TargetArtifactV1
    config linker/ArtifactLinkConfigV1
    store CompileStore] CompileBundleResult
-  (match (profile/admit-and-identify-result
-           (profile/->ResultAdmissionRequest
-             (compilequery-admitted query)
-             (linker/targetartifactv1-target artifact)
-             bootstrap/materializer-capability-content-id
-             "ok"
-             (linker/targetartifactv1-digest artifact)
-             nil))
-    [(profile/ResultRejected code detail) (->CompileBundleError 65 detail)]
-    [(profile/ResultAdmitted result)
-     (append-query-artifact query result artifact config store)]))
+  (match (linker/encode-artifact-envelope artifact)
+    [(linker/ArtifactEnvelopeErrorV1 detail)
+     (->CompileBundleError 65 detail)]
+    [(linker/ArtifactEnvelopeReadyV1 artifact-content-id payload)
+     (match (profile/admit-and-identify-result
+              (profile/->ResultAdmissionRequest
+                (compilequery-admitted query)
+                (linker/targetartifactv1-target artifact)
+                bootstrap/materializer-capability-content-id
+                "ok"
+                artifact-content-id
+                nil))
+       [(profile/ResultRejected code detail) (->CompileBundleError 65 detail)]
+       [(profile/ResultAdmitted result)
+        (append-query-artifact query result artifact config store)])]))
 
 (defn compile-cold-query
   [query CompileQuery
