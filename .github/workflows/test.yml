@@ -238,18 +238,14 @@ jobs:
       # scope-correctness proof (a change to mod_a/helper must NOT blast mod_b's
       # same-named helper). This is the load-bearing test for the thesis that
       # graph-backed repair beats text-backed repair. (babashka installed above.)
-      # beagle-callgraph RENTS the scope-correct call-graph engine (resolve.clj),
-      # which was FOLDED into the store repo at store/chartroom (beagle source
-      # code-intelligence, renting store's public fact+Datalog API). The absorbed
-      # source ships inside store, so CHARTROOM points at store/chartroom.
       - name: Graph-native cascade — scope-correctness gate
-        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CHARTROOM="$GITHUB_WORKSPACE/store/chartroom" bin/test/cascade-graph/run.sh
+        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" bin/test/cascade-graph/run.sh
 
       # Reasoning call-graph cross-module completeness: the call graph is derived from the
       # converged resolver (refers_to), so qualified cross-module calls (a/f, m/f) resolve
       # and the blast radius is NOT silently emptied. Guards the dangerous "0 callers" lie.
       - name: Reasoning call-graph — cross-module completeness gate
-        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CHARTROOM="$GITHUB_WORKSPACE/store/chartroom" bin/test/callgraph-xmodule/run.sh
+        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" bin/test/callgraph-xmodule/run.sh
 
       # Move 3: code can be fact-canonical. The loop .bclj -> lossless facts ->
       # (through a real Beagle Store store) -> facts -> byte-stable .bclj is datum-identical
@@ -259,27 +255,27 @@ jobs:
         run: CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/store/src" BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" bin/test/code-as-facts/run.sh
 
       - name: Beagle Store scope-correct rename
-        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CHARTROOM="$GITHUB_WORKSPACE/store/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/store/src" bin/test/code-as-facts/rename.sh
+        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/store/src" bin/test/code-as-facts/rename.sh
 
       # Delete as a graph op: the no-orphaned-references invariant. A safe delete omits
       # the form + its subtree and renumbers siblings (no truncation); a delete that
       # would orphan a reference (this module or a consumer) is refused, fail-closed.
       - name: Delete as a graph op — no-orphaned-references invariant
-        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CHARTROOM="$GITHUB_WORKSPACE/store/chartroom" bin/test/code-as-facts/delete.sh
+        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" bin/test/code-as-facts/delete.sh
 
       # NL -> edit authoring layer: prose intent -> a structured edit (data an agent
       # emits) -> the engine (rename/delete) -> recompile-gated commit, else fail closed.
       - name: NL-to-edit authoring layer — recompile-gated transaction
-        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CHARTROOM="$GITHUB_WORKSPACE/store/chartroom" bin/test/code-as-facts/authoring.sh
+        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" bin/test/code-as-facts/authoring.sh
 
       # Graph-native AUTHORING (the dogfood at the root): upsert-form (add/replace a def)
       # and set-body are FACT operations on the AST-facts, not text patches — scope-correct
       # by identity (an authored ref resolves through refers_to), recompile-gated, fail-closed.
       - name: Authoring-as-facts — upsert-form + set-body verbs
-        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CHARTROOM="$GITHUB_WORKSPACE/store/chartroom" bin/test/code-as-facts/authoring-verbs.sh
+        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" bin/test/code-as-facts/authoring-verbs.sh
 
       # One engine, both pillars, on REAL code: the blast radius (REASON) of store.store/value!
       # predicts the cross-module reach of renaming it (REPAIR), and the repaired tree
       # recompiles — both derived from the same converged refers_to resolver.
       - name: Engine demo — reason + repair consistent on real store/src
-        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CHARTROOM="$GITHUB_WORKSPACE/store/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/store/src" bin/test/engine-demo/run.sh
+        run: BEAGLE_STORE_OUT="$GITHUB_WORKSPACE/store/out" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/store/src" bin/test/engine-demo/run.sh
