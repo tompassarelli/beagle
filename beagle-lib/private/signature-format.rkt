@@ -21,23 +21,49 @@
                      path (string->bytes/utf-8 source)))])
     (struct-copy layout-edit edit [path (path->string path)])))
 
+(define (layout-edits-overlap? left right)
+  (define left-start (layout-edit-offset left))
+  (define left-end (+ left-start (string-length (layout-edit-before left))))
+  (define right-start (layout-edit-offset right))
+  (define right-end (+ right-start (string-length (layout-edit-before right))))
+  (and (< left-start right-end) (< right-start left-end)))
+
+(define (non-overlapping-layout-edits edits)
+  ;; Nested binding vectors can both need a rewrite. Apply owner regions first,
+  ;; then let the convergence loop reparse before rewriting children inside the
+  ;; owner's canonical source slice.
+  (for/fold ([selected '()])
+            ([edit
+              (in-list
+               (sort edits
+                     (lambda (left right)
+                       (define left-size (string-length (layout-edit-before left)))
+                       (define right-size (string-length (layout-edit-before right)))
+                       (or (> left-size right-size)
+                           (and (= left-size right-size)
+                                (< (layout-edit-offset left)
+                                   (layout-edit-offset right)))))))])
+    (if (ormap (lambda (prior) (layout-edits-overlap? edit prior)) selected)
+        selected
+        (cons edit selected))))
+
 (define (converged-signature-layout path source)
   (let loop ([candidate source]
              [passes '()]
              [seen (hash source #t)])
     (define edits (signature-layout-edits-for-source path candidate))
-    (define next-passes (cons edits passes))
     (cond
       [(null? edits)
-       (values candidate (apply append (reverse next-passes)))]
+       (values candidate (apply append (reverse passes)))]
       [(ormap (lambda (edit) (not (layout-edit-safe? edit))) edits)
-       (values candidate (apply append (reverse next-passes)))]
+       (values candidate (apply append (reverse (cons edits passes))))]
       [else
-       (define next (apply-signature-layout-edits candidate edits))
+       (define pass-edits (non-overlapping-layout-edits edits))
+       (define next (apply-signature-layout-edits candidate pass-edits))
        (when (hash-has-key? seen next)
          (raise-user-error 'beagle-fmt
                            "signature formatting did not converge for ~a" path))
-       (loop next next-passes (hash-set seen next #t))])))
+       (loop next (cons pass-edits passes) (hash-set seen next #t))])))
 
 (define (analyze-file path-like)
   (define path

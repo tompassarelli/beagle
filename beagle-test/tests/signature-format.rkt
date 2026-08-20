@@ -147,6 +147,44 @@
     (check-equal? actual (cdr source+expected))
     (check-equal? (length edits) 1)))
 
+(test-case "nested binding rewrites converge without overlapping edits"
+  (define source
+    (string-append
+     "(let [f (Fn [Int Int] Int) (fn [x Int y Int] Int (+ x y)) "
+     "z Int 2] (f z z))\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [f (Fn [Int Int] Int) (fn\n"
+       "                             [x Int\n"
+       "                              y Int] Int\n"
+       "                             (+ x y))\n"
+       "      z Int 2]\n"
+       "  (f z z))\n")))))
+
+(test-case "legacy local pairs preserve nested initializer layout"
+  (define source
+    "(let [f (fn [x Int y Int] Int (+ x y)) z 2] (f z z))\n")
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [f (fn\n"
+       "          [x Int\n"
+       "           y Int] Int\n"
+       "          (+ x y))\n"
+       "      z 2]\n"
+       "  (f z z))\n")))))
+
 (test-case "width never changes a single-pair signature"
   (define name (make-string 120 #\f))
   (define source (format "(defn ~a [x Int] Int x)\n" name))

@@ -595,12 +595,13 @@
   (define subs (stx-subs vector-stx))
   (define items (and subs (cdr subs)))
   (and items
-       (let ([legacy? (and (pair? items)
-                           (structured-binding? (->datum (car items))))])
+       (let ([flat? (and (pair? items)
+                         (pair? (cdr items))
+                         (type-expression-datum? (->datum (cadr items))))])
          (let loop ([rest items] [acc '()])
            (cond
              [(null? rest) (reverse acc)]
-             [legacy?
+             [(not flat?)
               (and (>= (length rest) 2)
                    (loop (cddr rest)
                          (cons (spanning-entry
@@ -645,6 +646,13 @@
        (set! pending-space? #t)]
       [else (emit! (token-text tok) (token-type tok))]))
   (string-trim (get-output-string out)))
+
+(define (fragment->source tokens start end)
+  (apply string-append
+         (for/list ([tok (in-list tokens)]
+                    #:when (and (>= (token-offset tok) start)
+                                (<= (token-end tok) end)))
+           (token-text tok))))
 
 (define (line-comment-in-range? tokens start end)
   (for/or ([tok (in-list tokens)])
@@ -736,7 +744,8 @@
   (case style
     [(legacy) (= (length datum) 3)]
     [(legacy-rest) (= (length (cadr datum)) 3)]
-    [(legacy-triple) (= (length (car datum)) 3)]
+    [(legacy-triple)
+     (and (list? (car datum)) (= (length (car datum)) 3))]
     [else #f]))
 
 (define (canonical-entry-text tokens entry start end col [suffix-width 0])
@@ -751,12 +760,32 @@
     [(legacy-triple)
      (define source-stxs
        (syntax-property entry 'beagle-binding-entry-source-stxs))
+     (define declaration (car source-stxs))
      (string-append
-      (legacy-declaration-text tokens (car source-stxs))
+      (if (structured-binding? (->datum declaration))
+          (legacy-declaration-text tokens declaration)
+          (fragment->inline tokens
+                            (syntax-start-offset declaration)
+                            (syntax-end-offset declaration tokens)))
+      " "
+      (fragment->source tokens
+                        (syntax-start-offset (cadr source-stxs))
+                        (syntax-end-offset (cadr source-stxs) tokens)))]
+    [(flat-triple)
+     (define source-stxs
+       (syntax-property entry 'beagle-binding-entry-source-stxs))
+     (string-append
+      (fragment->inline tokens
+                        (syntax-start-offset (car source-stxs))
+                        (syntax-end-offset (car source-stxs) tokens))
       " "
       (fragment->inline tokens
                         (syntax-start-offset (cadr source-stxs))
-                        (syntax-end-offset (cadr source-stxs) tokens)))]
+                        (syntax-end-offset (cadr source-stxs) tokens))
+      " "
+      (fragment->source tokens
+                        (syntax-start-offset (caddr source-stxs))
+                        (syntax-end-offset (caddr source-stxs) tokens)))]
     [else inline]))
 
 (define (canonical-vector-text tokens open close entries continuation-col
