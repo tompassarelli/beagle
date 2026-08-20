@@ -26,6 +26,12 @@
   [types (Vec core/TypeDef)
    layouts (Vec core/LayoutDef)])
 
+(defrecord SliceRowIndexV0
+  [first-texts (Map String String)
+   node-objects (Map String (Vec String))
+   form-nodes (Map String (Vec String))
+   semantic-roots (Vec String)])
+
 (defn char-at
   [text String
    index Int] String
@@ -191,6 +197,66 @@
             (conj objects (slicefactv0-object row))
             objects))))))
 
+(defn row-key [subject String predicate String] String
+  (str (count subject) ":" subject predicate))
+
+;; Build every lookup source-program needs in one encounter-ordered pass. Text
+;; lookups retain the first matching text row; node-object and form vectors keep
+;; all matching rows in their original order.
+(defn build-row-index [rows (Vec SliceFactV0)] SliceRowIndexV0
+  (loop [position Int 0
+         first-texts (Map String String) {}
+         node-objects (Map String (Vec String)) {}
+         form-nodes (Map String (Vec String)) {}
+         semantic-roots (Vec String) []
+         semantic-seen (Map String Bool) {}]
+    (if (>= position (count rows))
+      (->SliceRowIndexV0 first-texts node-objects form-nodes semantic-roots)
+      (let [row SliceFactV0 (nth rows position)
+            subject String (slicefactv0-subject row)
+            predicate String (slicefactv0-predicate row)
+            text? Bool (text-row? row)
+            value String (if text? (row-text row) "")
+            key String (row-key subject predicate)
+            prior-objects (U (Vec String) Nil) (get node-objects key)
+            objects (Vec String) (if (nil? prior-objects) [] prior-objects)
+            prior-form-nodes (U (Vec String) Nil) (get form-nodes value)
+            forms (Vec String) (if (nil? prior-form-nodes) [] prior-form-nodes)
+            new-semantic-root? Bool
+            (and text?
+              (= "semantic-unit-sha256" predicate)
+              (not (= true (get semantic-seen subject))))]
+        (recur (+ position 1)
+          (if (and text? (not (contains? first-texts key)))
+            (assoc first-texts key value)
+            first-texts)
+          (if text?
+            node-objects
+            (assoc node-objects key (conj objects (slicefactv0-object row))))
+          (if (and text? (= "form-kind" predicate))
+            (assoc form-nodes value (conj forms subject))
+            form-nodes)
+          (if new-semantic-root? (conj semantic-roots subject) semantic-roots)
+          (if new-semantic-root? (assoc semantic-seen subject true) semantic-seen))))))
+
+(defn indexed-first-text
+  [index SliceRowIndexV0
+   subject String
+   predicate String] (U String Nil)
+  (get (slicerowindexv0-first-texts index) (row-key subject predicate)))
+
+(defn indexed-node-objects
+  [index SliceRowIndexV0
+   subject String
+   predicate String] (Vec String)
+  (let [objects (U (Vec String) Nil)
+        (get (slicerowindexv0-node-objects index) (row-key subject predicate))]
+    (if (nil? objects) [] objects)))
+
+(defn indexed-form-node-names [index SliceRowIndexV0 kind String] (Vec String)
+  (let [names (U (Vec String) Nil) (get (slicerowindexv0-form-nodes index) kind)]
+    (if (nil? names) [] names)))
+
 (defn form-node-names
   [rows (Vec SliceFactV0)
    kind String] (Vec String)
@@ -206,16 +272,16 @@
             (conj selected (slicefactv0-subject row))
             selected))))))
 
-(defn source-module
-  [rows (Vec SliceFactV0)
+(defn indexed-source-module
+  [index SliceRowIndexV0
    root-name String
    fallback-name String
    fallback-path String] stages/SourceModuleV1
-  (let [declared-name (U String Nil) (row-first-text rows root-name "namespace")
-        declared-path (U String Nil) (row-first-text rows root-name "relative-path")
-        source-digest (U String Nil) (row-first-text rows root-name "source-sha256")
-        projection-digest (U String Nil) (row-first-text rows root-name "checked-projection-sha256")
-        interface-digest (U String Nil) (row-first-text rows root-name "interface-sha256")
+  (let [declared-name (U String Nil) (indexed-first-text index root-name "namespace")
+        declared-path (U String Nil) (indexed-first-text index root-name "relative-path")
+        source-digest (U String Nil) (indexed-first-text index root-name "source-sha256")
+        projection-digest (U String Nil) (indexed-first-text index root-name "checked-projection-sha256")
+        interface-digest (U String Nil) (indexed-first-text index root-name "interface-sha256")
         module-name String (if (or (nil? declared-name) (= "" declared-name)) fallback-name declared-name)
         relative-path String (if (or (nil? declared-path) (= "" declared-path)) fallback-path declared-path)]
     (stages/->SourceModuleV1
@@ -227,16 +293,16 @@
       (if (nil? interface-digest) "" interface-digest)
       (node-id root-name))))
 
-(defn source-modules
-  [rows (Vec SliceFactV0)
+(defn indexed-source-modules
+  [index SliceRowIndexV0
    fallback-name String
    fallback-path String] (Vec stages/SourceModuleV1)
-  (let [roots (Vec String) (form-node-names rows "module-root")]
+  (let [roots (Vec String) (indexed-form-node-names index "module-root")]
     (if (= 0 (count roots))
-      [(source-module rows "0" fallback-name fallback-path)]
+      [(indexed-source-module index "0" fallback-name fallback-path)]
       (mapv
         (fn [root-name String] stages/SourceModuleV1
-          (source-module rows root-name fallback-name fallback-path))
+          (indexed-source-module index root-name fallback-name fallback-path))
         roots))))
 
 (defn source-module-id
@@ -271,16 +337,16 @@
           (core/nativeid-value (node-id node-name)))
         node-names))))
 
-(defn source-unit
-  [rows (Vec SliceFactV0)
+(defn indexed-source-unit
+  [index SliceRowIndexV0
    modules (Vec stages/SourceModuleV1)
    root-name String] stages/SourceUnitV0
-  (let [kind (U String Nil) (row-first-text rows root-name "semantic-unit-kind")
-        name (U String Nil) (row-first-text rows root-name "semantic-unit-name")
-        module-name (U String Nil) (row-first-text rows root-name "semantic-unit-module")
-        semantic-digest (U String Nil) (row-first-text rows root-name "semantic-unit-sha256")
+  (let [kind (U String Nil) (indexed-first-text index root-name "semantic-unit-kind")
+        name (U String Nil) (indexed-first-text index root-name "semantic-unit-name")
+        module-name (U String Nil) (indexed-first-text index root-name "semantic-unit-module")
+        semantic-digest (U String Nil) (indexed-first-text index root-name "semantic-unit-sha256")
         root core/NativeId (node-id root-name)
-        read-names (Vec String) (sort (row-node-objects rows root-name "semantic-read"))]
+        read-names (Vec String) (sort (indexed-node-objects index root-name "semantic-read"))]
     (stages/->SourceUnitV0
       root
       (source-module-id modules (if (nil? module-name) "" module-name))
@@ -290,18 +356,18 @@
       root
       (sorted-node-ids read-names))))
 
-(defn source-units
-  [rows (Vec SliceFactV0)
+(defn indexed-source-units
+  [index SliceRowIndexV0
    modules (Vec stages/SourceModuleV1)] (Vec stages/SourceUnitV0)
   (mapv
     (fn [root-name String] stages/SourceUnitV0
-      (source-unit rows modules root-name))
-    (semantic-unit-node-names rows)))
+      (indexed-source-unit index modules root-name))
+    (slicerowindexv0-semantic-roots index)))
 
-(defn source-imports [rows (Vec SliceFactV0)] (Vec core/NativeId)
+(defn indexed-source-imports [index SliceRowIndexV0] (Vec core/NativeId)
   (mapv
     (fn [node-name String] core/NativeId (node-id node-name))
-    (form-node-names rows "import")))
+    (indexed-form-node-names index "import")))
 
 ;; Node "0" is the program root. New projections carry one module root per AST;
 ;; old facts without module metadata remain a single-module source program.
@@ -310,15 +376,16 @@
    module-name String
    relative-path String] stages/SourceStageV1
   (let [root core/NativeId (node-id "0")
+        index SliceRowIndexV0 (build-row-index rows)
         nodes (Vec stages/TermNodeV0) (vec (concat (marker-nodes (node-names rows))
                (text-nodes (text-values rows))
                (fact-nodes rows)))
-        modules (Vec stages/SourceModuleV1) (source-modules rows module-name relative-path)]
+        modules (Vec stages/SourceModuleV1) (indexed-source-modules index module-name relative-path)]
     (stages/->SourceStageV1
       (stages/->TermGraphV0 root nodes)
       modules
-      (source-units rows modules)
-      (source-imports rows)
+      (indexed-source-units index modules)
+      (indexed-source-imports index)
       [])))
 
 (defn type-field-refs [definition core/TypeDef] (Vec core/NativeId)
