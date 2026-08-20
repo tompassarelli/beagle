@@ -4,10 +4,10 @@
 ;; Self-hosted AST definitions — matches beagle-lib/private/ast.rkt.
 ;; AST node constructors, tag utilities, symbol predicates.
 ;; Uses plain string-keyed maps with a "node" discriminator rather than classes.
-(require selfhost.rt)
+(require [selfhost.rt])
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 

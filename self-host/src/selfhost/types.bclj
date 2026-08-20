@@ -5,10 +5,10 @@
 ;; Type AST constructors, parser, compatibility checker, formatter.
 ;; Produces/consumes the JSON type format from ast-json.rkt.
 
-(require selfhost.rt)
+(require [selfhost.rt])
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 

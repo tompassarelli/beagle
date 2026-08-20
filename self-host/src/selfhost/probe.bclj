@@ -1,7 +1,7 @@
 #lang beagle/clj
 (ns selfhost.probe)
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 ;; probe 1: string-keyed map literal (PoC AST nodes use string keys)
 (def NODE (Map String Any) {"node" "if" "depth" 0})

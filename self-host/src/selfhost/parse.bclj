@@ -31,12 +31,12 @@
 ;; expansion; ordinary AST emission remains source-location free by contract.
 ;; Non-clj target surfaces (nix reader macros / nix-* forms) remain outside the
 ;; self-host emitter's current clj-only responsibility.
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
-(require selfhost.rt)
+(require [selfhost.rt])
 
-(require selfhost.macros :as mac)
-(require selfhost.ast :as syntax)
+(require [selfhost.macros :as mac])
+(require [selfhost.ast :as syntax])
 
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 

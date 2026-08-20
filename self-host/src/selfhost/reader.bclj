@@ -17,11 +17,11 @@
 ;;   symbol -> plain string ("nil" -> "nil"); keyword -> ":name" string;
 ;;   true/false -> booleans; number -> int unless TEXT has "."/exponent.
 
-(require selfhost.rt)
-(require selfhost.ast :as ast)
+(require [selfhost.rt])
+(require [selfhost.ast :as ast])
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 (def STRING-TAG String "#%string")
 (def BRACKET-TAG String "#%brackets")

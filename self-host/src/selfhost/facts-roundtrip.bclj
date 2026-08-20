@@ -3,13 +3,13 @@
 (ns selfhost.facts-roundtrip "Lossless Beagle source ↔ fact-triple roundtrip.")
 
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
-(require selfhost.rt)
+(require [selfhost.rt])
 
-(require selfhost.reader :as rd)
+(require [selfhost.reader :as rd])
 
-(require selfhost.ast :as ast)
+(require [selfhost.ast :as ast])
 
 (declare-extern selfhost.rt/slurp-file (Fn [String] String))
 

@@ -5,11 +5,11 @@
   check-program! (Fn [Any] Any) returning a vector of error strings (empty =
   accepted). Registry state and diagnostics live in the module-level STATE atom;
   mutating functions carry a `!`.")
-(require selfhost.rt)
+(require [selfhost.rt])
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 (declare-extern selfhost.rt/getenv (Fn [String] Any))
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 ;; --- structural references --------------------------------------------------
 

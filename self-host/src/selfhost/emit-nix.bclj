@@ -13,8 +13,8 @@
 ;; pattern literals are raw datums). ast-json serializes map keys via expr->json
 ;; (so a `:k` key arrives as {node:literal,kind:keyword,value:"k"}, a bare-symbol
 ;; interp key as {node:ref}). emit-key / emit-datum here reverse-map that.
-(require clojure.string :as str)
-(require selfhost.ast :as syntax)
+(require [clojure.string :as str])
+(require [selfhost.ast :as syntax])
 
 ;; --- module state -------------------------------------------------------------
 ;; depth-threaded emitter hub (SCI rejects forward refs; helpers defined BEFORE

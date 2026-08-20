@@ -4,9 +4,9 @@
   Canonical defmacro bodies run in a pure compile-time evaluator over raw
   syntax. Template substitution remains only for internal fixtures.")
 
-(require clojure.string :as str)
-(require selfhost.rt)
-(require selfhost.ast :as ast)
+(require [clojure.string :as str])
+(require [selfhost.rt])
+(require [selfhost.ast :as ast])
 
 (declare-extern selfhost.rt/eprint (Fn [String] Nil))
 

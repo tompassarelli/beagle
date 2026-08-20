@@ -8,8 +8,8 @@
 ;; Input: program AST as string-keyed maps/vectors (ast-json.rkt encoding).
 ;; No srcloc metadata is ever emitted (parity target minted BEAGLE_EMIT_SRCLOC=0).
 
-(require clojure.string :as str)
-(require selfhost.ast :as syntax)
+(require [clojure.string :as str])
+(require [selfhost.ast :as syntax])
 
 ;; --- module state (reset per emit-program!) -----------------------------------
 
