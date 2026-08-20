@@ -1,0 +1,143 @@
+#lang beagle
+(ns beagle.fact-profile)
+
+(defrecord CompileQueryFact
+  [order Int
+   relation Keyword
+   subject String
+   slot Int
+   value String])
+
+(defrecord QueryAdmissionRequest
+  [source-closure-digest String
+   compiler-context String
+   profile String
+   targets (Vec String)
+   rules-content-id String
+   schema-content-id String])
+
+(defrecord AdmittedQueryClosure
+  [query-digest String
+   source-closure-digest String
+   compiler-context String
+   profile String
+   targets (Vec String)
+   rules-content-id String
+   schema-content-id String
+   facts (Vec CompileQueryFact)])
+
+(defunion QueryAdmission
+  (QueryAdmitted [closure AdmittedQueryClosure])
+  (QueryRejected [code Keyword detail String]))
+
+(defn content-id? [value String] Bool
+  (some? (re-matches #"sha256:[0-9a-f]{64}" value)))
+
+(defn supported-profile? [profile String] Bool
+  (or (= profile "lp64") (= profile "wasm32")))
+
+(defn query-part [value String] String
+  (str (count value) ":" value))
+
+(defn targets-encoding [targets (Vec String)] String
+  (reduce
+    (fn [encoding String target String] String
+      (str encoding (query-part target)))
+    ""
+    targets))
+
+(defn query-digest [request QueryAdmissionRequest targets (Vec String)] String
+  (let [encoding String
+        (str (query-part "compile")
+             (query-part (queryadmissionrequest-source-closure-digest request))
+             (query-part (queryadmissionrequest-compiler-context request))
+             (query-part (queryadmissionrequest-profile request))
+             (query-part (targets-encoding targets))
+             (query-part (queryadmissionrequest-rules-content-id request))
+             (query-part (queryadmissionrequest-schema-content-id request)))]
+    (str "sha256:" (sha256-bytes (utf8-encode encoding)))))
+
+(defn contains-string? [values (Vec String) value String] Bool
+  (loop [index Int 0]
+    (if (>= index (count values))
+      false
+      (if (= value (nth values index))
+        true
+        (recur (+ index 1))))))
+
+(defn insert-sorted [values (Vec String) value String] (Vec String)
+  (loop [index Int 0 prefix (Vec String) []]
+    (if (>= index (count values))
+      (conj prefix value)
+      (let [current String (nth values index)]
+        (if (neg? (compare value current))
+          (reduce conj (conj prefix value) (subvec values index))
+          (recur (+ index 1) (conj prefix current)))))))
+
+(defn sorted-unique-targets [targets (Vec String)] (Vec String)
+  (reduce
+    (fn [ordered (Vec String) target String] (Vec String)
+      (insert-sorted ordered target))
+    []
+    targets))
+
+(defn valid-targets? [targets (Vec String)] Bool
+  (loop [index Int 0 seen (Vec String) []]
+    (if (>= index (count targets))
+      (not= 0 (count targets))
+      (let [target String (nth targets index)]
+        (if (or (= "" target) (contains-string? seen target))
+          false
+          (recur (+ index 1) (conj seen target)))))))
+
+(defn canonical-query-facts
+  [digest String request QueryAdmissionRequest targets (Vec String)]
+  (Vec CompileQueryFact)
+  (let [base (Vec CompileQueryFact)
+        [(->CompileQueryFact 0 :query/kind digest 0 "compile")
+         (->CompileQueryFact 1 :query/source digest 0
+           (queryadmissionrequest-source-closure-digest request))
+         (->CompileQueryFact 2 :query/compiler digest 0
+           (queryadmissionrequest-compiler-context request))
+         (->CompileQueryFact 3 :query/profile digest 0
+           (queryadmissionrequest-profile request))]]
+    (loop [position Int 0 facts (Vec CompileQueryFact) base]
+      (if (>= position (count targets))
+        (conj
+          (conj facts
+            (->CompileQueryFact (+ 4 position) :query/rules digest 0
+              (queryadmissionrequest-rules-content-id request)))
+          (->CompileQueryFact (+ 5 position) :query/schema digest 0
+            (queryadmissionrequest-schema-content-id request)))
+        (recur (+ position 1)
+          (conj facts
+            (->CompileQueryFact (+ 4 position) :query/target digest position
+              (nth targets position))))))))
+
+(defn admit-and-identify-query [request QueryAdmissionRequest] QueryAdmission
+  (let [targets (Vec String) (queryadmissionrequest-targets request)]
+    (cond
+      (not (content-id? (queryadmissionrequest-source-closure-digest request)))
+      (->QueryRejected :query/invalid-source "source closure digest must be a lower-case sha256 content ID")
+      (not (content-id? (queryadmissionrequest-compiler-context request)))
+      (->QueryRejected :query/invalid-compiler "compiler context must be a lower-case sha256 content ID")
+      (not (content-id? (queryadmissionrequest-rules-content-id request)))
+      (->QueryRejected :query/invalid-rules "rules content ID must be a lower-case sha256 content ID")
+      (not (content-id? (queryadmissionrequest-schema-content-id request)))
+      (->QueryRejected :query/invalid-schema "schema content ID must be a lower-case sha256 content ID")
+      (not (supported-profile? (queryadmissionrequest-profile request)))
+      (->QueryRejected :query/unknown-profile "profile must be lp64 or wasm32")
+      (not (valid-targets? targets))
+      (->QueryRejected :query/invalid-targets "targets must be non-empty, non-empty strings with no duplicates")
+      :else
+      (let [ordered (Vec String) (sorted-unique-targets targets)
+            digest String (query-digest request ordered)]
+        (->QueryAdmitted
+          (->AdmittedQueryClosure digest
+            (queryadmissionrequest-source-closure-digest request)
+            (queryadmissionrequest-compiler-context request)
+            (queryadmissionrequest-profile request)
+            ordered
+            (queryadmissionrequest-rules-content-id request)
+            (queryadmissionrequest-schema-content-id request)
+            (canonical-query-facts digest request ordered)))))))
