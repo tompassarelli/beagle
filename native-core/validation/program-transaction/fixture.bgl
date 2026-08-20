@@ -1,192 +1,325 @@
 #lang beagle
 (ns native.program-transaction-fixture
-  (:require [beagle.program-transaction :as transaction]
+  (:require [beagle.program-read :as read]
+            [beagle.program-transaction :as transaction]
+            [store.kernel :as kernel]
+            [store.program :as program]
             [store.types :as t]))
 
+(def space-id String "program-space")
 (def profile String "program-profile-v1")
-(def base-root String "root-v7")
-(def next-root String "root-v8")
+(def rule String "program-admission")
+(def base-root-resource String "root-v7")
+(def next-root-resource String "root-v8")
+(def collision-root-resource String "root-collision")
 (def module String "module-a")
-(def selected-binding String "binding-top-helper")
-(def shadowed-binding String "binding-local-helper")
+(def selected-binding t/Triple
+  (t/triple module program/declares-at 0))
+(def shadowed-binding t/Triple
+  (t/triple module program/declares-at 1))
+(def independent-binding t/Triple
+  (t/triple module program/declares-at 2))
 (def dependent String "binding-dependent")
 (def shadowed-dependent String "binding-shadowed")
-(def source String
-  "(def helper helper)\n(def shadow helper helper)\n\"helper\" ; helper\n")
-(def projected String
-  "(def renamed renamed)\n(def shadow helper helper)\n\"helper\" ; helper\n")
 
-(def selected-span t/Triple (t/triple 5 transaction/through-byte 11))
-(def shadowed-span t/Triple (t/triple 32 transaction/through-byte 38))
+(def source String
+  "(def helper helper)\n(def shadow helper helper)\n(def independent independent)\n\"helper\" ; helper\n")
+(def projected String
+  "(def renamed renamed)\n(def shadow helper helper)\n(def independent independent)\n\"helper\" ; helper\n")
+
+(def selected-span t/Triple
+  (t/triple 5 program/through-byte 11))
+(def shadowed-span t/Triple
+  (t/triple 32 program/through-byte 38))
+(def independent-span t/Triple
+  (t/triple 52 program/through-byte 63))
 (def selected-reference t/Triple
-  (t/triple module transaction/has-span
-    (t/triple 12 transaction/through-byte 18)))
+  (t/triple module program/has-span
+    (t/triple 12 program/through-byte 18)))
 (def shadowed-reference t/Triple
-  (t/triple module transaction/has-span
-    (t/triple 39 transaction/through-byte 45)))
+  (t/triple module program/has-span
+    (t/triple 39 program/through-byte 45)))
+(def independent-reference t/Triple
+  (t/triple module program/has-span
+    (t/triple 64 program/through-byte 75)))
 
 (def projected-selected-span t/Triple
-  (t/triple 5 transaction/through-byte 12))
+  (t/triple 5 program/through-byte 12))
 (def projected-shadowed-span t/Triple
-  (t/triple 34 transaction/through-byte 40))
+  (t/triple 34 program/through-byte 40))
+(def projected-independent-span t/Triple
+  (t/triple 54 program/through-byte 65))
 (def projected-selected-reference t/Triple
-  (t/triple module transaction/has-span
-    (t/triple 13 transaction/through-byte 20)))
+  (t/triple module program/has-span
+    (t/triple 13 program/through-byte 20)))
 (def projected-shadowed-reference t/Triple
-  (t/triple module transaction/has-span
-    (t/triple 41 transaction/through-byte 47)))
+  (t/triple module program/has-span
+    (t/triple 41 program/through-byte 47)))
+(def projected-independent-reference t/Triple
+  (t/triple module program/has-span
+    (t/triple 66 program/through-byte 77)))
 
-(defn rel [relation Keyword] t/Triple
-  (t/triple relation transaction/member-of transaction/relationships))
+(defn relationship [relation Keyword] t/Triple
+  (t/triple relation program/member-of program/relationships))
+
+(def vocabulary-and-profile (Vec t/Triple)
+  [(relationship program/member-of)
+   (relationship program/contains)
+   (relationship program/represented-by)
+   (relationship program/refers-to)
+   (relationship program/depends-on)
+   (relationship program/derived-from)
+   (relationship program/admitted-by)
+   (relationship program/includes)
+   (relationship program/has-span)
+   (relationship program/through-byte)
+   (relationship program/named)
+   (relationship program/declares-at)
+   (t/triple profile kernel/profile-includes
+     kernel/fact-normal-form-profile-rule)
+   (t/triple profile program/member-of program/profiles)
+   (t/triple profile program/includes rule)
+   (t/triple rule program/member-of program/profile-rules)])
 
 (def propositions (Vec t/Triple)
-  [(rel transaction/member-of)
-   (rel transaction/contains)
-   (rel transaction/represented-by)
-   (rel transaction/refers-to)
-   (rel transaction/depends-on)
-   (rel transaction/derived-from)
-   (rel transaction/admitted-by)
-   (rel transaction/has-span)
-   (rel transaction/through-byte)
-   (rel transaction/named)
-   (t/triple profile transaction/member-of transaction/profiles)
-   (t/triple base-root transaction/member-of transaction/program-roots)
-   (t/triple base-root transaction/admitted-by profile)
-   (t/triple base-root transaction/contains module)
-   (t/triple module transaction/represented-by source)
-   (t/triple module transaction/contains selected-binding)
-   (t/triple module transaction/contains shadowed-binding)
-   (t/triple module transaction/contains dependent)
-   (t/triple module transaction/contains shadowed-dependent)
-   (t/triple module transaction/contains selected-reference)
-   (t/triple module transaction/contains shadowed-reference)
-   (t/triple selected-binding transaction/member-of transaction/bindings)
-   (t/triple shadowed-binding transaction/member-of transaction/bindings)
-   (t/triple selected-binding transaction/named "helper")
-   (t/triple shadowed-binding transaction/named "helper")
-   (t/triple selected-binding transaction/has-span selected-span)
-   (t/triple shadowed-binding transaction/has-span shadowed-span)
-   (t/triple selected-reference transaction/member-of transaction/references)
-   (t/triple shadowed-reference transaction/member-of transaction/references)
-   (t/triple selected-reference transaction/refers-to selected-binding)
-   (t/triple shadowed-reference transaction/refers-to shadowed-binding)
-   (t/triple dependent transaction/depends-on selected-binding)
-   (t/triple shadowed-dependent transaction/depends-on shadowed-binding)])
+  (into vocabulary-and-profile
+    [(t/triple
+       space-id kernel/profile-anchor
+       (kernel/profile-header
+         profile program/fact-profile-kind kernel/observe-profile-mode))
+     (t/triple
+       base-root-resource program/member-of program/program-roots)
+     (t/triple base-root-resource program/admitted-by profile)
+     (t/triple base-root-resource program/contains module)
+     (t/triple module program/member-of program/modules)
+     (t/triple module program/represented-by source)
+     (t/triple module program/contains selected-binding)
+     (t/triple module program/contains shadowed-binding)
+     (t/triple module program/contains independent-binding)
+     (t/triple module program/contains dependent)
+     (t/triple module program/contains shadowed-dependent)
+     (t/triple module program/contains selected-reference)
+     (t/triple module program/contains shadowed-reference)
+     (t/triple module program/contains independent-reference)
+     (t/triple
+       selected-binding program/member-of program/bindings)
+     (t/triple
+       shadowed-binding program/member-of program/bindings)
+     (t/triple
+       independent-binding program/member-of program/bindings)
+     (t/triple selected-binding program/named "helper")
+     (t/triple shadowed-binding program/named "helper")
+     (t/triple independent-binding program/named "independent")
+     (t/triple selected-binding program/has-span selected-span)
+     (t/triple shadowed-binding program/has-span shadowed-span)
+     (t/triple independent-binding program/has-span independent-span)
+     (t/triple
+       selected-reference program/member-of program/references)
+     (t/triple
+       shadowed-reference program/member-of program/references)
+     (t/triple
+       independent-reference program/member-of program/references)
+     (t/triple
+       selected-reference program/refers-to selected-binding)
+     (t/triple
+       shadowed-reference program/refers-to shadowed-binding)
+     (t/triple
+       independent-reference program/refers-to independent-binding)
+     (t/triple dependent program/depends-on selected-binding)
+     (t/triple
+       shadowed-dependent program/depends-on shadowed-binding)]))
 
-(defn admitted-overlay? [overlay (Vec t/Triple)] Bool
+(def base-root program/ProgramRoot
+  (program/->ProgramRoot
+    space-id base-root-resource 7 profile propositions))
+
+(def source-anchors (Vec read/ProgramSourceAnchor)
+  [(read/->ProgramSourceAnchor
+     module selected-binding transaction/binding-anchor selected-span)
+   (read/->ProgramSourceAnchor
+     module shadowed-binding transaction/binding-anchor shadowed-span)
+   (read/->ProgramSourceAnchor
+     module independent-binding transaction/binding-anchor independent-span)
+   (read/->ProgramSourceAnchor
+     module selected-reference transaction/reference-anchor selected-binding)
+   (read/->ProgramSourceAnchor
+     module shadowed-reference transaction/reference-anchor shadowed-binding)
+   (read/->ProgramSourceAnchor
+     module independent-reference transaction/reference-anchor
+     independent-binding)])
+
+(def scope-bindings (Vec read/ProgramScopeBinding)
+  [(read/->ProgramScopeBinding module shadowed-binding "helper")
+   (read/->ProgramScopeBinding
+     module independent-binding "independent")])
+
+(def selection read/ProgramRenameSelection
+  (read/->ProgramRenameSelection
+    selected-binding module "helper" selected-span
+    [selected-reference] [dependent] source-anchors scope-bindings))
+
+(defn admitted-overlay? [candidate program/ProgramRoot] Bool
+  (let [overlay (Vec t/Triple)
+        (program/programroot-propositions candidate)]
+    (and
+      (program/admitted-root? candidate)
+      (= space-id (program/programroot-space-id candidate))
+      (= 8 (program/programroot-store-version candidate))
+      (= next-root-resource (program/root-resource-value candidate))
+      (transaction/proposition-live?
+        overlay
+        (t/triple
+          next-root-resource program/derived-from base-root-resource))
+      (transaction/proposition-live?
+        overlay
+        (t/triple selected-binding program/named "renamed"))
+      (not
+        (transaction/proposition-live?
+          overlay
+          (t/triple selected-binding program/named "helper")))
+      (transaction/proposition-live?
+        overlay
+        (t/triple shadowed-binding program/named "helper"))
+      (transaction/proposition-live?
+        overlay
+        (t/triple independent-binding program/named "independent"))
+      (transaction/proposition-live?
+        overlay
+        (t/triple module program/represented-by projected))
+      (transaction/proposition-live?
+        overlay
+        (t/triple selected-binding program/has-span projected-selected-span))
+      (transaction/proposition-live?
+        overlay
+        (t/triple shadowed-binding program/has-span projected-shadowed-span))
+      (transaction/proposition-live?
+        overlay
+        (t/triple
+          independent-binding program/has-span projected-independent-span))
+      (transaction/proposition-live?
+        overlay
+        (t/triple module program/contains projected-selected-reference))
+      (transaction/proposition-live?
+        overlay
+        (t/triple
+          projected-selected-reference program/refers-to selected-binding))
+      (transaction/proposition-live?
+        overlay
+        (t/triple module program/contains projected-shadowed-reference))
+      (transaction/proposition-live?
+        overlay
+        (t/triple
+          projected-shadowed-reference program/refers-to shadowed-binding))
+      (transaction/proposition-live?
+        overlay
+        (t/triple module program/contains projected-independent-reference))
+      (transaction/proposition-live?
+        overlay
+        (t/triple
+          projected-independent-reference program/refers-to
+          independent-binding))
+      (not
+        (transaction/proposition-live?
+          overlay
+          (t/triple module program/contains selected-reference)))
+      (not
+        (transaction/proposition-live?
+          overlay
+          (t/triple module program/contains shadowed-reference)))
+      (not
+        (transaction/proposition-live?
+          overlay
+          (t/triple module program/contains independent-reference)))
+      (transaction/proposition-live?
+        overlay
+        (t/triple dependent program/depends-on selected-binding))
+      (transaction/proposition-live?
+        overlay
+        (t/triple
+          shadowed-dependent program/depends-on shadowed-binding)))))
+
+(defn collision-rejected? [] Bool
+  (match
+    (transaction/plan-rename
+      base-root collision-root-resource selection "independent")
+    [(transaction/RenameRejected code detail)
+     (= code :rename/name-collision)]
+    [(transaction/RenamePlanned planned preview) false]))
+
+(defn commit-boundary-valid?
+  [planned transaction/ProgramTransaction
+   candidate program/ProgramRoot] Bool
   (and
-    (transaction/proposition-live?
-      overlay
-      (t/triple next-root transaction/member-of transaction/program-roots))
-    (transaction/proposition-live?
-      overlay
-      (t/triple next-root transaction/admitted-by profile))
-    (transaction/proposition-live?
-      overlay
-      (t/triple next-root transaction/derived-from base-root))
-    (transaction/proposition-live?
-      overlay
-      (t/triple selected-binding transaction/named "renamed"))
-    (not
-      (transaction/proposition-live?
-        overlay
-        (t/triple selected-binding transaction/named "helper")))
-    (transaction/proposition-live?
-      overlay
-      (t/triple shadowed-binding transaction/named "helper"))
-    (transaction/proposition-live?
-      overlay
-      (t/triple module transaction/represented-by projected))
-    (transaction/proposition-live?
-      overlay
-      (t/triple selected-binding transaction/has-span
-        projected-selected-span))
-    (transaction/proposition-live?
-      overlay
-      (t/triple shadowed-binding transaction/has-span
-        projected-shadowed-span))
-    (transaction/proposition-live?
-      overlay
-      (t/triple module transaction/contains projected-selected-reference))
-    (transaction/proposition-live?
-      overlay
-      (t/triple projected-selected-reference
-        transaction/refers-to selected-binding))
-    (transaction/proposition-live?
-      overlay
-      (t/triple module transaction/contains projected-shadowed-reference))
-    (transaction/proposition-live?
-      overlay
-      (t/triple projected-shadowed-reference
-        transaction/refers-to shadowed-binding))
-    (not
-      (transaction/proposition-live?
-        overlay
-        (t/triple module transaction/contains selected-reference)))
-    (not
-      (transaction/proposition-live?
-        overlay
-        (t/triple module transaction/contains shadowed-reference)))))
+    (match (transaction/verify-rematerialized planned base-root)
+      [(transaction/RematerializationRejected code detail) true]
+      [(transaction/RematerializationVerified verified) false])
+    (match (transaction/verify-rematerialized planned candidate)
+      [(transaction/RematerializationRejected code detail) false]
+      [(transaction/RematerializationVerified verified)
+       (and
+         (match
+           (transaction/prepare-commit verified "other-space" 7)
+           [(transaction/CommitConflict
+              expected-space observed-space expected-version observed-version)
+            (and
+              (= space-id expected-space)
+              (= "other-space" observed-space)
+              (= 7 expected-version)
+              (= 7 observed-version))]
+           [(transaction/CommitReady
+              ready-space expected-version ready-root operations) false])
+         (match
+           (transaction/prepare-commit verified space-id 7)
+           [(transaction/CommitConflict
+              expected-space observed-space expected-version observed-version)
+            false]
+           [(transaction/CommitReady
+              ready-space expected-version ready-root operations)
+            (and
+              (= space-id ready-space)
+              (= 7 expected-version)
+              (= candidate ready-root)
+              (= 32 (count operations)))])
+         (match
+           (transaction/commit-receipt
+             planned (t/transaction-coordinate space-id 8))
+           [(transaction/CommitReceiptRejected code detail) false]
+           [(transaction/CommitReceiptAccepted receipt)
+            (and
+              (= next-root-resource
+                (transaction/programcommitreceipt-root receipt))
+              (= 8
+                (transaction/programcommitreceipt-served-version receipt))
+              (= 32
+                (count
+                  (transaction/programcommitreceipt-occurrences receipt))))]))]))))
 
 (defn planned-case [] Bool
-  (let [source-anchors (Vec transaction/SourceAnchor)
-        [(transaction/->SourceAnchor
-           module selected-binding transaction/binding-anchor selected-span)
-         (transaction/->SourceAnchor
-           module shadowed-binding transaction/binding-anchor shadowed-span)
-         (transaction/->SourceAnchor
-           module selected-reference transaction/reference-anchor
-           selected-binding)
-         (transaction/->SourceAnchor
-           module shadowed-reference transaction/reference-anchor
-           shadowed-binding)]
-        selection transaction/RenameSelection
-        (transaction/->RenameSelection
-          selected-binding [module] [selected-reference] [dependent]
-          source-anchors)]
-    (match
-      (transaction/plan-rename
-        base-root next-root 7 profile propositions selection
-        "renamed" admitted-overlay?)
-    [(RenameRejected code detail) false]
-    [(RenamePlanned planned preview)
-     (let [deltas (Vec transaction/SourceDelta)
+  (match
+    (transaction/plan-rename
+      base-root next-root-resource selection "renamed")
+    [(transaction/RenameRejected code detail) false]
+    [(transaction/RenamePlanned planned preview)
+     (let [candidate program/ProgramRoot
+           (transaction/programtransaction-candidate-root planned)
+           deltas (Vec transaction/SourceDelta)
            (transaction/renamepreview-source-deltas preview)
            references (Vec Any)
            (transaction/renamepreview-references preview)
            invalidated (Vec Any)
            (transaction/renamepreview-invalidated preview)]
        (and
+         (= candidate (transaction/renamepreview-candidate-root preview))
          (= 1 (count deltas))
          (= projected
            (transaction/sourcedelta-after (first deltas)))
          (= [selected-reference] references)
          (= [dependent] invalidated)
-         (= 24
+         (= 32
            (count
              (transaction/programtransaction-operations planned)))
-         (match (transaction/prepare-commit planned 8)
-           [(CommitConflict expected observed)
-            (and (= 7 expected) (= 8 observed))]
-           [(CommitReady expected operations) false])
-         (match (transaction/prepare-commit planned 7)
-           [(CommitConflict expected observed) false]
-           [(CommitReady expected operations)
-            (= 24 (count operations))])
-         (match
-           (transaction/commit-receipt
-             planned (t/transaction-coordinate "program-space" 8))
-           [(CommitReceiptRejected code detail) false]
-           [(CommitReceiptAccepted receipt)
-            (and
-              (= next-root
-                (transaction/programcommitreceipt-root receipt))
-              (= 8
-                (transaction/programcommitreceipt-served-version receipt))
-              (= 24
-                (count
-                  (transaction/programcommitreceipt-occurrences receipt))))]))))])))
+         (admitted-overlay? candidate)
+         (commit-boundary-valid? planned candidate)))]))
 
 (defn main [] Int
-  (if (planned-case) 0 1))
+  (if (and (collision-rejected?) (planned-case)) 0 1))
