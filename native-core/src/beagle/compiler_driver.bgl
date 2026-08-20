@@ -40,7 +40,10 @@
   (CompileQueryAdmissionRejected [code Keyword detail String]))
 
 (defunion CompileBundleResult
-  (CompileBundleWarm [content-id String])
+  (CompileBundleWarm
+    [content-id String
+     artifact-id String
+     executable-path String])
   (CompileBundleMaterialized
     [content-id String
      artifact-id String
@@ -66,6 +69,47 @@
 (defunion CheckFactClosureResult
   (FactClosureChecked [closure CheckedFactClosure])
   (FactClosureRejected [code Int detail String]))
+
+(defunion CompileArtifactResult
+  (CompileArtifactReady [artifact linker/TargetArtifactV1])
+  (CompileArtifactRejected [code Int detail String]))
+
+(defunion CompileQueryEvaluation
+  CompileQueryEvaluationReady
+  (CompileQueryEvaluationRejected [code Int detail String]))
+
+(defrecord CompileSourceConfig
+  [source-path String
+   output-directory String
+   store-log String
+   space-id String
+   c-compiler String
+   qbe-compiler String])
+
+(defunion CompileStoreRequest
+  (CompileStoreLookup
+    [store-log String
+     space-id String
+     query profile/AdmittedQueryClosure])
+  (CompileStoreAppend
+    [store-log String
+     space-id String
+     result profile/AdmittedResultClosure
+     artifact linker/TargetArtifactV1]))
+
+(defunion CompileStoreResponse
+  CompileStoreCold
+  (CompileStoreWarm
+    [result profile/AdmittedResultClosure
+     artifact linker/TargetArtifactV1])
+  (CompileStoreWarmRejected
+    [result profile/AdmittedResultClosure
+     detail String])
+  CompileStorePersisted
+  (CompileStoreFailure [code Int detail String]))
+
+(defalias CompileStore
+  (Fn [CompileStoreRequest] CompileStoreResponse))
 
 (defn compile-query
   [request CompileBundleRequest] CompileQueryAdmissionResult
@@ -160,16 +204,15 @@
       (checkedmodulefacts-checked module))
     (checkedfactclosure-modules closure)))
 
-(defn materialize-and-link
+(defn materialize-query
   [query CompileQuery
    checked CheckedFactClosure
    entry-namespace String
-   entry-definition String
-   config linker/ArtifactLinkConfigV1] CompileBundleResult
+   entry-definition String] CompileArtifactResult
   (let [targets (Vec String)
         (compilebundlerequest-targets (compilequery-request query))]
     (if (not= 1 (count targets))
-      (->CompileBundleError 64
+      (->CompileArtifactRejected 64
         "native compile requires exactly one materialization target")
       (match (materializer/materialize
                (materializer/->FactMaterializationRequest
@@ -180,9 +223,296 @@
                  entry-namespace
                  entry-definition))
         [(materializer/FactMaterializationRejected code detail)
-         (->CompileBundleError code detail)]
+         (->CompileArtifactRejected code detail)]
         [(materializer/FactMaterialized artifact)
-         (link-query-artifact query config artifact)]))))
+         (->CompileArtifactReady artifact)]))))
+
+(defn scheduler-relation-present?
+  [facts (Vec scheduler/RuleFactV1) relation String] Bool
+  (some?
+    (some
+      (fn [fact scheduler/RuleFactV1] scheduler/RuleFactV1?
+        (if (= relation (scheduler/rulefactv1-relation fact)) fact nil))
+      facts)))
+
+(defn scheduler-first-key [facts (Vec scheduler/RuleFactV1)] String
+  (if (empty? facts) "" (scheduler/rulefactv1-key (first facts))))
+
+(defn produce-stage-fact
+  [facts (Vec scheduler/RuleFactV1)
+   input-relation String
+   output-relation String
+   payload String] scheduler/RuleEvaluationV1
+  (if (scheduler-relation-present? facts input-relation)
+    (scheduler/->RuleProducedV1
+      [(scheduler/->RuleFactV1 output-relation
+         (scheduler-first-key facts) payload)])
+    (scheduler/->RuleProducedV1 [])))
+
+(defn stage-content-id [query CompileQuery relation String] String
+  (str "sha256:"
+    (sha256-bytes
+      (utf8-encode (str (compile-query-id query) ":" relation)))))
+
+(defn evaluate-compile-rule
+  [query CompileQuery
+   artifact linker/TargetArtifactV1
+   rule scheduler/RuleSpecV1
+   rule-facts (Vec scheduler/RuleFactV1)] scheduler/RuleEvaluationV1
+  (let [rule-id String (scheduler/rulespecv1-id rule)]
+    (cond
+      (= rule-id bootstrap/grammar-rule-content-id)
+      (produce-stage-fact rule-facts "query/source" "compiler/syntax"
+        (facts/syntaxfactclosure-closure-digest
+          (compilebundlerequest-syntax (compilequery-request query))))
+
+      (= rule-id bootstrap/macro-rule-content-id)
+      (produce-stage-fact rule-facts "compiler/syntax" "compiler/expanded"
+        (stage-content-id query "compiler/expanded"))
+
+      (= rule-id bootstrap/type-rule-content-id)
+      (produce-stage-fact rule-facts "compiler/expanded" "compiler/typed"
+        (stage-content-id query "compiler/typed"))
+
+      (= rule-id bootstrap/lowering-rule-content-id)
+      (produce-stage-fact rule-facts "compiler/typed" "compiler/native"
+        (stage-content-id query "compiler/native"))
+
+      (= rule-id bootstrap/materializer-rule-content-id)
+      (produce-stage-fact rule-facts "compiler/native"
+        bootstrap/compiler-artifact-relation
+        (linker/targetartifactv1-digest artifact))
+
+      :else
+      (scheduler/->RuleRejectedV1
+        (scheduler/->RuleErrorV1
+          rule-id
+          (scheduler/rulespecv1-source-span rule)
+          :compile/unknown-rule
+          "compile query received a rule outside its admitted rule set")))))
+
+(defn evaluate-materialized-query
+  [query CompileQuery
+   artifact linker/TargetArtifactV1] CompileQueryEvaluation
+  (match (bootstrap-query/evaluate-admitted-query
+           (compilequery-admitted query)
+           (fn [rule scheduler/RuleSpecV1
+                rule-facts (Vec scheduler/RuleFactV1)]
+             scheduler/RuleEvaluationV1
+             (evaluate-compile-rule query artifact rule rule-facts)))
+    [(bootstrap-query/AdmittedQueryRejectedV1 code detail)
+     (->CompileQueryEvaluationRejected 65 detail)]
+    [(bootstrap-query/AdmittedQueryEvaluatedV1 query-digest result)
+     (match result
+       [(FixedPointReachedV1 reached-facts evidence steps)
+        (->CompileQueryEvaluationReady)]
+       [(FixedPointBoundReachedV1 reached-facts evidence steps bound)
+        (->CompileQueryEvaluationRejected 70
+          "compile query exceeded its fixed-point step bound")]
+       [(FixedPointFailedV1 reached-facts evidence steps error)
+        (->CompileQueryEvaluationRejected 65
+          (scheduler/ruleerrorv1-message error))])]))
+
+(defn link-warm-query-artifact
+  [query CompileQuery
+   config linker/ArtifactLinkConfigV1
+   artifact linker/TargetArtifactV1] CompileBundleResult
+  (match (link-query-artifact query config artifact)
+    [(CompileBundleError code detail) (->CompileBundleError code detail)]
+    [(CompileBundleWarm content-id artifact-id executable-path)
+     (->CompileBundleWarm content-id artifact-id executable-path)]
+    [(CompileBundleMaterialized content-id artifact-id executable-path)
+     (->CompileBundleWarm content-id artifact-id executable-path)]))
+
+(defn warm-result-valid?
+  [query CompileQuery
+   result profile/AdmittedResultClosure
+   artifact linker/TargetArtifactV1] Bool
+  (match (profile/admit-canonical-result result)
+    [(profile/ResultRejected code detail) false]
+    [(profile/ResultAdmitted admitted)
+     (and (= "ok" (profile/admittedresultclosure-status admitted))
+          (= (compile-query-id query)
+             (profile/admittedqueryclosure-query-digest
+               (profile/admittedresultclosure-query admitted)))
+          (= (linker/targetartifactv1-target artifact)
+             (profile/admittedresultclosure-target admitted))
+          (= (linker/targetartifactv1-digest artifact)
+             (profile/admittedresultclosure-artifact-content-id admitted)))]))
+
+(defn append-query-artifact
+  [query CompileQuery
+   result profile/AdmittedResultClosure
+   artifact linker/TargetArtifactV1
+   config linker/ArtifactLinkConfigV1
+   store CompileStore] CompileBundleResult
+  (match (store
+           (->CompileStoreAppend
+             (compilebundlerequest-store-log (compilequery-request query))
+             (compilebundlerequest-space-id (compilequery-request query))
+             result
+             artifact))
+    [(CompileStorePersisted) (link-query-artifact query config artifact)]
+    [(CompileStoreFailure code detail) (->CompileBundleError code detail)]
+    [(CompileStoreCold)
+     (->CompileBundleError 74
+       "Store did not acknowledge the compile result append")]
+    [(CompileStoreWarm warm-result warm-artifact)
+     (->CompileBundleError 74 "Store returned a warm result during append")]
+    [(CompileStoreWarmRejected rejected detail)
+     (->CompileBundleError 74 "Store returned a rejection during result append")]))
+
+(defn compile-admitted-artifact
+  [query CompileQuery
+   artifact linker/TargetArtifactV1
+   config linker/ArtifactLinkConfigV1
+   store CompileStore] CompileBundleResult
+  (match (profile/admit-and-identify-result
+           (profile/->ResultAdmissionRequest
+             (compilequery-admitted query)
+             (linker/targetartifactv1-target artifact)
+             bootstrap/materializer-capability-content-id
+             "ok"
+             (linker/targetartifactv1-digest artifact)
+             nil))
+    [(profile/ResultRejected code detail) (->CompileBundleError 65 detail)]
+    [(profile/ResultAdmitted result)
+     (append-query-artifact query result artifact config store)]))
+
+(defn compile-cold-query
+  [query CompileQuery
+   checked CheckedFactClosure
+   entry-namespace String
+   entry-definition String
+   config linker/ArtifactLinkConfigV1
+   store CompileStore] CompileBundleResult
+  (match (materialize-query query checked entry-namespace entry-definition)
+    [(CompileArtifactRejected code detail) (->CompileBundleError code detail)]
+    [(CompileArtifactReady artifact)
+     (match (evaluate-materialized-query query artifact)
+       [(CompileQueryEvaluationRejected code detail)
+        (->CompileBundleError code detail)]
+       [(CompileQueryEvaluationReady)
+        (compile-admitted-artifact query artifact config store)])]))
+
+(defn compile-stored-query
+  [query CompileQuery
+   checked CheckedFactClosure
+   entry-namespace String
+   entry-definition String
+   config linker/ArtifactLinkConfigV1
+   store CompileStore] CompileBundleResult
+  (match (store
+           (->CompileStoreLookup
+             (compilebundlerequest-store-log (compilequery-request query))
+             (compilebundlerequest-space-id (compilequery-request query))
+             (compilequery-admitted query)))
+    [(CompileStoreFailure code detail) (->CompileBundleError code detail)]
+    [(CompileStoreWarm result artifact)
+     (if (warm-result-valid? query result artifact)
+       (link-warm-query-artifact query config artifact)
+       (->CompileBundleError 65 "Store returned a noncanonical warm result"))]
+    [(CompileStoreWarmRejected result detail)
+     (match (profile/admit-canonical-result result)
+       [(profile/ResultRejected code invalid-detail)
+        (->CompileBundleError 65 invalid-detail)]
+       [(profile/ResultAdmitted admitted)
+        (if (= "rejected" (profile/admittedresultclosure-status admitted))
+          (->CompileBundleError 65 detail)
+          (->CompileBundleError 65
+            "Store returned a non-rejected result as a rejection"))])]
+    [(CompileStoreCold)
+     (compile-cold-query query checked entry-namespace entry-definition
+       config store)]
+    [(CompileStorePersisted)
+     (->CompileBundleError 74
+       "Store returned an append acknowledgment during lookup")]))
+
+(defn entry-namespace [closure facts/SyntaxFactClosure] String?
+  (let [entry-path String (facts/syntaxfactclosure-entry-path closure)]
+    (some
+      (fn [bundle facts/SyntaxFactBundle] String?
+        (if (= entry-path (facts/syntaxfactbundle-path bundle))
+          (facts/syntaxfactbundle-namespace bundle)
+          nil))
+      (facts/syntaxfactclosure-modules closure))))
+
+(defn compile-checked-source
+  [config CompileSourceConfig
+   syntax facts/SyntaxFactClosure
+   checked CheckedFactClosure
+   namespace String
+   store CompileStore] CompileBundleResult
+  (let [path String (compilesourceconfig-source-path config)
+        request CompileBundleRequest
+        (->CompileBundleRequest
+          (compilesourceconfig-store-log config)
+          (compilesourceconfig-space-id config)
+          bootstrap/default-compiler-context-id
+          bootstrap/default-profile
+          [bootstrap/default-target-id]
+          bootstrap/default-rule-set-content-id
+          bootstrap/compiler-schema-content-id
+          [path]
+          syntax)]
+    (match (compile-query request)
+      [(CompileQueryAdmissionRejected code detail)
+       (->CompileBundleError 65 detail)]
+      [(CompileQueryReady query)
+       (let [layout bootstrap/NativeArtifactLayoutV1
+             (bootstrap/native-artifact-layout
+               (compilesourceconfig-output-directory config))
+             link-config linker/ArtifactLinkConfigV1
+             (linker/->ArtifactLinkConfigV1
+               (str (compilesourceconfig-output-directory config) "/artifacts")
+               (bootstrap/nativeartifactlayoutv1-executable-path layout)
+               (compilesourceconfig-c-compiler config)
+               (compilesourceconfig-qbe-compiler config))]
+         (compile-stored-query query checked namespace "main"
+           link-config store))])))
+
+(defn compile-closed-source
+  [config CompileSourceConfig
+   syntax facts/SyntaxFactClosure
+   store CompileStore] CompileBundleResult
+  (match (check-fact-closure syntax)
+    [(FactClosureRejected code detail) (->CompileBundleError code detail)]
+    [(FactClosureChecked checked)
+     (let [namespace String? (entry-namespace syntax)]
+       (if (nil? namespace)
+         (->CompileBundleError 65 "entry source does not declare a namespace")
+         (compile-checked-source config syntax checked namespace store)))]))
+
+(defn compile-source
+  [config CompileSourceConfig
+   store CompileStore] CompileBundleResult
+  (let [path String (compilesourceconfig-source-path config)]
+    (match (read-source-facts path "native-core")
+      [(SourceFactsRejected code detail) (->CompileBundleError code detail)]
+      [(SourceFactsRead bundle)
+       (match (close-source-facts path
+                [(parser/->ExplicitFactSourceV1
+                   bundle (parser/package-authority))])
+         [(SourceFactsClosureRejected code detail)
+          (->CompileBundleError code detail)]
+         [(SourceFactsClosed syntax)
+          (compile-closed-source config syntax store)])])))
+
+(defn materialize-and-link
+  [query CompileQuery
+   checked CheckedFactClosure
+   entry-namespace String
+   entry-definition String
+   config linker/ArtifactLinkConfigV1] CompileBundleResult
+  (match (materialize-query query checked entry-namespace entry-definition)
+    [(CompileArtifactRejected code detail)
+     (->CompileBundleError code detail)]
+    [(CompileArtifactReady artifact)
+     (match (evaluate-materialized-query query artifact)
+       [(CompileQueryEvaluationRejected code detail)
+        (->CompileBundleError code detail)]
+       [(CompileQueryEvaluationReady)
+        (link-query-artifact query config artifact)])]))
 
 (defn admit-source-text [path String text String] SourceAdmission
   (let [(read reader/DatumRead) (reader/read-events text)

@@ -3,7 +3,9 @@
   (:require [beagle.compiler-driver :as driver]))
 
 (defn write-usage [] Nil
-  (host.stderr/write-line "usage: beagle syntax SOURCE"))
+  (do
+    (host.stderr/write-line "usage: beagle syntax SOURCE")
+    (host.stderr/write-line "       beagle compile SOURCE --out OUT")))
 
 (defn syntax-command [args (Vec String)] Int
   (if (= 1 (count args))
@@ -17,6 +19,47 @@
              (str path ": " detail)))
          code)])
     (do (write-usage) 64)))
+
+(defn compile-command
+  [args (Vec String)
+   store driver/CompileStore] Int
+  (if (and (= 3 (count args)) (= "--out" (nth args 1)))
+    (let [source String (nth args 0)
+          output String (nth args 2)
+          config driver/CompileSourceConfig
+          (driver/->CompileSourceConfig
+            source
+            output
+            (str output "/beagle-store.log")
+            "compiler"
+            "cc"
+            "")]
+      (match (driver/compile-source config store)
+        [(driver/CompileBundleWarm content-id artifact-id executable-path) 0]
+        [(driver/CompileBundleMaterialized content-id artifact-id executable-path) 0]
+        [(driver/CompileBundleError code detail)
+         (do
+           (host.stderr/write-line (str "beagle: compile failed: " detail))
+           code)]))
+    (do (write-usage) 64)))
+
+(defn main-with-store
+  [args (Vec String)
+   store driver/CompileStore] Int
+  (if (empty? args)
+    (do (write-usage) 64)
+    (let [command String (first args)
+          command-args (Vec String) (subvec args 1)]
+      (cond
+        (= command "syntax") (syntax-command command-args)
+        (= command "compile") (compile-command command-args store)
+        (or (= command "--help") (= command "-h"))
+        (do (write-usage) 0)
+        :else
+        (do
+          (host.stderr/write-line (str "beagle: unknown command: " command))
+          (write-usage)
+          64)))))
 
 (defn -main [args (Vec String)] Int
   (if (empty? args)
