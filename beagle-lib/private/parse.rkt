@@ -20,6 +20,7 @@
          ;; rejecting `clojure.string` and friends.
          (only-in "stdlib-types.rkt" stdlib-for-target)
          "ast.rkt"
+         "callable-arity.rkt"
          "module-interface.rkt"
          "parse-jst.rkt"
          "parse-js-quote.rkt"
@@ -2966,7 +2967,9 @@
   (define-values (return-type _raises body)
     (parse-signature-tail (car rest) (cdr rest) (stx-tail subs 2)
                           #:raises? #f #:context "multi-arity clause"))
-  (arity-clause parsed rest-p return-type body))
+  (store-src!
+   (arity-clause parsed rest-p return-type body)
+   (and (syntax? clause) (stx->src-loc clause))))
 
 ;; A second top-level parameter vector in a single-arity `defn` tail is the
 ;; retired flattened multi-arity spelling. Detect the stray declaration form
@@ -3505,13 +3508,19 @@
 (register-combiner! 'fn
   (lambda (d subs)
     (match d
-      ;; Multi-arity anonymous fn — `(fn ([] x) ([a] y))`. Until `fn-multi`
-      ;; lands across parse/check/emit, reject the structural clause form with
-      ;; a pointed, actionable error.
       [(list 'fn first-clause rest-clauses ...)
        #:when (multi-arity-form? first-clause)
-       (raise-parse-error 'bad-form
-         "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")]
+       (define arities
+         (map parse-arity-clause
+              (or (stx-tail subs 1)
+                  (cons first-clause rest-clauses))))
+       (make-callable-shape
+        (for/list ([arity (in-list arities)])
+          (callable-clause-shape
+           (length (arity-clause-params arity))
+           (and (arity-clause-rest-param arity) #t)
+           arity)))
+       (fn-multi arities)]
       [(list 'fn params-form return-type body body-rest ...)
        (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
          (define-values (effective-return _raises parsed-body)

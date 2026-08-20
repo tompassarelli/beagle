@@ -1249,6 +1249,7 @@
 (struct defn-multi  (name arities private? doc)               #:transparent)
 (struct arity-clause (params rest-param return-type body)    #:transparent)
 (struct fn-form     (params rest-param return-type body)    #:transparent)
+(struct fn-multi    (arities)                                #:transparent)
 (struct let-form    (bindings body)                         #:transparent)
 ;; binding-form: Clojure `(binding [*x* v …] body…)` — dynamic-extent
 ;; rebinding of dynamic vars. bindings is a list of let-binding (type #f);
@@ -1643,7 +1644,7 @@
  ;; Core AST
  (struct-out qualified-ref)
  (struct-out ns-decl)
- (struct-out def-form) (struct-out defn-form) (struct-out fn-form)
+ (struct-out def-form) (struct-out defn-form) (struct-out fn-form) (struct-out fn-multi)
  (struct-out let-form) (struct-out binding-form) (struct-out if-form) (struct-out cond-form) (struct-out cond-clause)
  (struct-out when-form) (struct-out do-form) (struct-out call-form) (struct-out vec-form)
  (struct-out js-host-array) (struct-out js-host-object)
