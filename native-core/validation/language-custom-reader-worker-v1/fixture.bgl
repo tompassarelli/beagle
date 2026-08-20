@@ -1,0 +1,539 @@
+#lang beagle
+(ns native.language-custom-reader-worker-v1-fixture
+  (:require [beagle.language-capsule-v1 :as capsule]
+            [beagle.language-reader-protocol-v1 :as protocol]
+            [beagle.language-custom-reader-worker-v1 :as worker]))
+
+(def payload String "opaque-reader-payload")
+(def payload-start Int 40)
+
+(defn fixture-identity-v1 [label String] capsule/SemanticIdentityV1
+  (capsule/semantic-identity-v1
+    "fixture/language-custom-reader-worker-v1"
+    [label]))
+
+(defn fixture-content-id-v1 [label String] String
+  (capsule/semanticidentityv1-content-id
+    (fixture-identity-v1 label)))
+
+(def reader-component capsule/ComponentIdentityV1
+  (capsule/component-identity-v1
+    :reader
+    (fixture-content-id-v1 "reader-artifact")
+    (fixture-content-id-v1 "reader-closure")))
+
+(def reader-protocol capsule/ProtocolIdentityV1
+  (capsule/protocol-identity-v1
+    :reader
+    (fixture-content-id-v1 "reader-protocol")
+    (fixture-content-id-v1 "reader-abi")))
+
+(def opaque-capsule capsule/LanguageCapsuleV1
+  (capsule/language-capsule-v1
+    (fixture-content-id-v1 "manifest")
+    :opaque
+    [reader-component]
+    [reader-protocol]
+    (fixture-content-id-v1 "deterministic-options")
+    []))
+
+(def source-slice protocol/SourceSliceV1
+  (protocol/source-slice-v1
+    payload
+    payload-start
+    (+ payload-start (count (utf8-encode payload)))
+    (fixture-identity-v1 "provenance")
+    true))
+
+(def reader-request protocol/ReaderRequestV1
+  (protocol/->ReaderRequestV1
+    source-slice
+    (capsule/languagecapsulev1-semantic-identity opaque-capsule)
+    reader-component
+    reader-protocol))
+
+(def empty-grant capsule/CapabilityGrantV1
+  (capsule/capability-grant-v1
+    []
+    []
+    (fixture-content-id-v1 "admission-policy")
+    (worker/empty-immutable-resource-set-id-v1)))
+
+(def generous-limits worker/CustomReaderWorkerLimitsV1
+  (worker/->CustomReaderWorkerLimitsV1
+    128
+    4096
+    8
+    8
+    8
+    512
+    8
+    1000
+    1048576
+    1000))
+
+(defn worker-request-with-resolved-v1
+  [language-capsule capsule/LanguageCapsuleV1
+   request protocol/ReaderRequestV1
+   grant capsule/CapabilityGrantV1
+   resolved-capsule capsule/SemanticIdentityV1
+   resolved-component capsule/SemanticIdentityV1
+   resolved-protocol capsule/SemanticIdentityV1
+   resolved-grant capsule/SemanticIdentityV1
+   limits worker/CustomReaderWorkerLimitsV1]
+  worker/CustomReaderWorkerRequestV1
+  (worker/->CustomReaderWorkerRequestV1
+    language-capsule
+    request
+    grant
+    resolved-capsule
+    resolved-component
+    resolved-protocol
+    resolved-grant
+    limits))
+
+(defn worker-request-v1
+  [language-capsule capsule/LanguageCapsuleV1
+   request protocol/ReaderRequestV1
+   grant capsule/CapabilityGrantV1
+   limits worker/CustomReaderWorkerLimitsV1]
+  worker/CustomReaderWorkerRequestV1
+  (worker-request-with-resolved-v1
+    language-capsule
+    request
+    grant
+    (capsule/languagecapsulev1-semantic-identity language-capsule)
+    (capsule/componentidentityv1-identity
+      (protocol/readerrequestv1-reader-component request))
+    (capsule/protocolidentityv1-identity
+      (protocol/readerrequestv1-reader-protocol request))
+    (capsule/capabilitygrantv1-identity grant)
+    limits))
+
+(def base-worker-request worker/CustomReaderWorkerRequestV1
+  (worker-request-v1
+    opaque-capsule reader-request empty-grant generous-limits))
+
+(defn candidate-v1
+  [request protocol/ReaderRequestV1
+   events (Vec protocol/ReaderIrEventV1)
+   diagnostics (Vec protocol/ReaderDiagnosticV1)]
+  protocol/ReaderProductCandidateV1
+  (let [slice protocol/SourceSliceV1 (protocol/readerrequestv1-source-slice request)
+        bytes (Vec Int) (protocol/reader-ir-bytes-v1 events)
+        original protocol/ReaderByteSpanV1 (protocol/->ReaderByteSpanV1
+          (protocol/sourceslicev1-start-byte slice)
+          (protocol/sourceslicev1-end-byte slice))
+        generated protocol/ReaderByteSpanV1 (protocol/->ReaderByteSpanV1 0 (count bytes))
+        source-map (Vec protocol/ReaderSourceMapEntryV1) [(protocol/->ReaderSourceMapEntryV1 0 original generated)]]
+    (protocol/->ReaderProductCandidateV1
+      (protocol/reader-ir-identity-v1 events)
+      bytes
+      events
+      (protocol/provenance-map-identity-v1 request source-map)
+      source-map
+      diagnostics)))
+
+(def base-events (Vec protocol/ReaderIrEventV1)
+  [(protocol/->ReaderIrEventV1 :atom "opaque" "opaque" 1)])
+
+(def base-candidate protocol/ReaderProductCandidateV1
+  (candidate-v1 reader-request base-events []))
+
+(defn supervisor-receipt-v1
+  [request worker/CustomReaderWorkerRequestV1
+   candidate protocol/ReaderProductCandidateV1]
+  worker/CustomReaderNativeSupervisorReceiptV1
+  (let [reader-request-value protocol/ReaderRequestV1 (worker/customreaderworkerrequestv1-reader-request request)
+        grant capsule/CapabilityGrantV1 (worker/customreaderworkerrequestv1-grant request)]
+    (worker/custom-reader-native-supervisor-receipt-v1
+      (worker/customreaderworkerrequestv1-resolved-capsule-identity request)
+      (worker/customreaderworkerrequestv1-resolved-grant-identity request)
+      (worker/customreaderworkerrequestv1-resolved-reader-component-identity
+        request)
+      (worker/customreaderworkerrequestv1-resolved-reader-protocol-identity
+        request)
+      (protocol/sourceslicev1-payload-content-id
+        (protocol/readerrequestv1-source-slice reader-request-value))
+      (capsule/capabilitygrantv1-immutable-resource-set-id grant)
+      (worker/customreaderworkerrequestv1-limits request)
+      (protocol/readerproductcandidatev1-canonical-ir-id candidate)
+      (protocol/readerproductcandidatev1-provenance-map-id candidate)
+      (worker/diagnostic-envelope-identity-v1
+        (protocol/readerproductcandidatev1-diagnostics candidate))
+      :enforced)))
+
+(defn complete-v1
+  [request worker/CustomReaderWorkerRequestV1
+   candidate protocol/ReaderProductCandidateV1]
+  worker/CustomReaderWorkerResultV1
+  (worker/complete-one-shot-custom-reader-v1
+    request candidate (supervisor-receipt-v1 request candidate)))
+
+(defn rejected-with-code-v1?
+  [result worker/CustomReaderWorkerResultV1
+   code Keyword] Bool
+  (match result
+    [(worker/CustomReaderWorkerAcceptedV1 verified) false]
+    [(worker/CustomReaderWorkerRejectedV1 diagnostics)
+     (and (> (count diagnostics) 0)
+          (= code
+             (protocol/readerdiagnosticv1-code (first diagnostics))))]))
+
+(defn capsule-v1
+  [reader-kind Keyword
+   requested-capabilities (Vec capsule/SemanticIdentityV1)] capsule/LanguageCapsuleV1
+  (capsule/language-capsule-v1
+    (fixture-content-id-v1 "manifest")
+    reader-kind
+    [reader-component]
+    [reader-protocol]
+    (fixture-content-id-v1 "deterministic-options")
+    requested-capabilities))
+
+(defn reader-request-v1
+  [language-capsule capsule/LanguageCapsuleV1
+   component capsule/ComponentIdentityV1
+   protocol-identity capsule/ProtocolIdentityV1]
+  protocol/ReaderRequestV1
+  (protocol/->ReaderRequestV1
+    source-slice
+    (capsule/languagecapsulev1-semantic-identity language-capsule)
+    component
+    protocol-identity))
+
+(defn candidate-for-request-v1
+  [request protocol/ReaderRequestV1]
+  protocol/ReaderProductCandidateV1
+  (candidate-v1 request base-events []))
+
+(defn capability-and-resource-rejection-case-v1 [] Bool
+  (let [forbidden-capability capsule/SemanticIdentityV1 (capsule/capability-request-identity-v1
+          :network
+          (fixture-content-id-v1 "ambient-network")
+          (fixture-content-id-v1 "ambient-network-options"))
+        requested-capsule capsule/LanguageCapsuleV1 (capsule-v1 :opaque [forbidden-capability])
+        requested-request protocol/ReaderRequestV1 (reader-request-v1
+          requested-capsule reader-component reader-protocol)
+        requested-grant capsule/CapabilityGrantV1 (capsule/capability-grant-v1
+          [forbidden-capability]
+          []
+          (fixture-content-id-v1 "admission-policy")
+          (worker/empty-immutable-resource-set-id-v1))
+        requested-worker worker/CustomReaderWorkerRequestV1 (worker-request-v1
+          requested-capsule requested-request requested-grant generous-limits)
+        requested-candidate protocol/ReaderProductCandidateV1 (candidate-for-request-v1 requested-request)
+        granted-grant capsule/CapabilityGrantV1 (capsule/capability-grant-v1
+          []
+          [forbidden-capability]
+          (fixture-content-id-v1 "admission-policy")
+          (worker/empty-immutable-resource-set-id-v1))
+        granted-worker worker/CustomReaderWorkerRequestV1 (worker-request-v1
+          opaque-capsule reader-request granted-grant generous-limits)
+        resource-grant capsule/CapabilityGrantV1 (capsule/capability-grant-v1
+          []
+          []
+          (fixture-content-id-v1 "admission-policy")
+          (fixture-content-id-v1 "ambient-resource-set"))
+        resource-worker worker/CustomReaderWorkerRequestV1 (worker-request-v1
+          opaque-capsule reader-request resource-grant generous-limits)]
+    (and
+      (rejected-with-code-v1?
+        (complete-v1 requested-worker requested-candidate)
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1 granted-worker base-candidate)
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1 resource-worker base-candidate)
+        :reader/custom-worker-policy))))
+
+(defn non-opaque-rejection-case-v1 [] Bool
+  (let [shared-capsule capsule/LanguageCapsuleV1 (capsule-v1 :shared-datum [])
+        shared-request protocol/ReaderRequestV1 (reader-request-v1
+          shared-capsule reader-component reader-protocol)
+        shared-worker worker/CustomReaderWorkerRequestV1 (worker-request-v1
+          shared-capsule shared-request empty-grant generous-limits)]
+    (rejected-with-code-v1?
+      (complete-v1
+        shared-worker (candidate-for-request-v1 shared-request))
+      :reader/custom-worker-policy)))
+
+(defn identity-mismatch-rejection-case-v1 [] Bool
+  (let [wrong-identity capsule/SemanticIdentityV1 (fixture-identity-v1 "wrong-resolved-identity")
+        capsule-identity capsule/SemanticIdentityV1 (capsule/languagecapsulev1-semantic-identity opaque-capsule)
+        component-identity capsule/SemanticIdentityV1 (capsule/componentidentityv1-identity reader-component)
+        protocol-identity capsule/SemanticIdentityV1 (capsule/protocolidentityv1-identity reader-protocol)
+        grant-identity capsule/SemanticIdentityV1 (capsule/capabilitygrantv1-identity empty-grant)
+        wrong-resolved-capsule worker/CustomReaderWorkerRequestV1 (worker-request-with-resolved-v1
+          opaque-capsule reader-request empty-grant wrong-identity
+          component-identity protocol-identity grant-identity generous-limits)
+        wrong-resolved-component worker/CustomReaderWorkerRequestV1 (worker-request-with-resolved-v1
+          opaque-capsule reader-request empty-grant capsule-identity
+          wrong-identity protocol-identity grant-identity generous-limits)
+        wrong-resolved-protocol worker/CustomReaderWorkerRequestV1 (worker-request-with-resolved-v1
+          opaque-capsule reader-request empty-grant capsule-identity
+          component-identity wrong-identity grant-identity generous-limits)
+        wrong-resolved-grant worker/CustomReaderWorkerRequestV1 (worker-request-with-resolved-v1
+          opaque-capsule reader-request empty-grant capsule-identity
+          component-identity protocol-identity wrong-identity generous-limits)
+        wrong-capsule-request protocol/ReaderRequestV1 (protocol/->ReaderRequestV1
+          source-slice wrong-identity reader-component reader-protocol)
+        wrong-request-binding worker/CustomReaderWorkerRequestV1 (worker-request-with-resolved-v1
+          opaque-capsule wrong-capsule-request empty-grant capsule-identity
+          component-identity protocol-identity grant-identity generous-limits)
+        other-component capsule/ComponentIdentityV1 (capsule/component-identity-v1
+          :reader
+          (fixture-content-id-v1 "other-reader-artifact")
+          (fixture-content-id-v1 "other-reader-closure"))
+        wrong-component-request protocol/ReaderRequestV1 (reader-request-v1
+          opaque-capsule other-component reader-protocol)
+        wrong-component-binding worker/CustomReaderWorkerRequestV1 (worker-request-v1
+          opaque-capsule wrong-component-request empty-grant generous-limits)
+        other-protocol capsule/ProtocolIdentityV1 (capsule/protocol-identity-v1
+          :reader
+          (fixture-content-id-v1 "other-reader-protocol")
+          (fixture-content-id-v1 "other-reader-abi"))
+        wrong-protocol-request protocol/ReaderRequestV1 (reader-request-v1
+          opaque-capsule reader-component other-protocol)
+        wrong-protocol-binding worker/CustomReaderWorkerRequestV1 (worker-request-v1
+          opaque-capsule wrong-protocol-request empty-grant generous-limits)]
+    (and
+      (rejected-with-code-v1?
+        (complete-v1 wrong-resolved-capsule base-candidate)
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1 wrong-resolved-component base-candidate)
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1 wrong-resolved-protocol base-candidate)
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1 wrong-resolved-grant base-candidate)
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1
+          wrong-request-binding
+          (candidate-for-request-v1 wrong-capsule-request))
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1
+          wrong-component-binding
+          (candidate-for-request-v1 wrong-component-request))
+        :reader/custom-worker-policy)
+      (rejected-with-code-v1?
+        (complete-v1
+          wrong-protocol-binding
+          (candidate-for-request-v1 wrong-protocol-request))
+        :reader/custom-worker-policy))))
+
+(defn limits-v1
+  [max-input Int
+   max-output Int
+   max-events Int
+   max-source-map Int
+   max-diagnostics Int
+   max-diagnostic-bytes Int
+   max-depth Int] worker/CustomReaderWorkerLimitsV1
+  (worker/->CustomReaderWorkerLimitsV1
+    max-input
+    max-output
+    max-events
+    max-source-map
+    max-diagnostics
+    max-diagnostic-bytes
+    max-depth
+    1000
+    1048576
+    1000))
+
+(defn limit-rejected-v1?
+  [limits worker/CustomReaderWorkerLimitsV1
+   candidate protocol/ReaderProductCandidateV1] Bool
+  (let [request worker/CustomReaderWorkerRequestV1 (worker-request-v1
+          opaque-capsule reader-request empty-grant limits)]
+    (rejected-with-code-v1?
+      (complete-v1 request candidate)
+      :reader/custom-worker-limit)))
+
+(defn structural-limit-rejection-case-v1 [] Bool
+  (let [warning-diagnostic protocol/ReaderDiagnosticV1 (protocol/->ReaderDiagnosticV1
+          :reader/custom-warning
+          :warning
+          "bounded diagnostic"
+          (protocol/->ReaderByteSpanV1
+            (protocol/sourceslicev1-start-byte source-slice)
+            (protocol/sourceslicev1-end-byte source-slice)))
+        diagnostic-candidate protocol/ReaderProductCandidateV1 (candidate-v1 reader-request base-events [warning-diagnostic])]
+    (and
+      (limit-rejected-v1?
+        (limits-v1 0 4096 8 8 8 512 8)
+        base-candidate)
+      (limit-rejected-v1?
+        (limits-v1 128 0 8 8 8 512 8)
+        base-candidate)
+      (limit-rejected-v1?
+        (limits-v1 128 4096 0 8 8 512 8)
+        base-candidate)
+      (limit-rejected-v1?
+        (limits-v1 128 4096 8 0 8 512 8)
+        base-candidate)
+      (limit-rejected-v1?
+        (limits-v1 128 4096 8 8 0 512 8)
+        diagnostic-candidate)
+      (limit-rejected-v1?
+        (limits-v1 128 4096 8 8 8 0 8)
+        diagnostic-candidate)
+      (limit-rejected-v1?
+        (limits-v1 128 4096 8 8 8 512 0)
+        base-candidate))))
+
+(defn public-protocol-rejection-case-v1 [] Bool
+  (let [bytes (Vec Int) (protocol/readerproductcandidatev1-canonical-ir-bytes base-candidate)
+        events (Vec protocol/ReaderIrEventV1) (protocol/readerproductcandidatev1-canonical-ir-events base-candidate)
+        source-map (Vec protocol/ReaderSourceMapEntryV1) (protocol/readerproductcandidatev1-source-map base-candidate)
+        provenance-map-id capsule/SemanticIdentityV1 (protocol/readerproductcandidatev1-provenance-map-id base-candidate)
+        wrong-canonical-id protocol/ReaderProductCandidateV1 (protocol/->ReaderProductCandidateV1
+          (fixture-identity-v1 "wrong-canonical-ir")
+          bytes
+          events
+          provenance-map-id
+          source-map
+          [])
+        invalid-utf8 protocol/ReaderProductCandidateV1 (protocol/->ReaderProductCandidateV1
+          (protocol/readerproductcandidatev1-canonical-ir-id base-candidate)
+          [255]
+          events
+          provenance-map-id
+          source-map
+          [])
+        original protocol/ReaderByteSpanV1 (protocol/->ReaderByteSpanV1
+          (- (protocol/sourceslicev1-start-byte source-slice) 1)
+          (protocol/sourceslicev1-end-byte source-slice))
+        generated protocol/ReaderByteSpanV1 (protocol/readersourcemapentryv1-generated-origin
+          (first source-map))
+        invalid-source-map (Vec protocol/ReaderSourceMapEntryV1) [(protocol/->ReaderSourceMapEntryV1 0 original generated)]
+        bad-source-map protocol/ReaderProductCandidateV1 (protocol/->ReaderProductCandidateV1
+          (protocol/readerproductcandidatev1-canonical-ir-id base-candidate)
+          bytes
+          events
+          (protocol/provenance-map-identity-v1
+            reader-request invalid-source-map)
+          invalid-source-map
+          [])
+        invalid-diagnostic protocol/ReaderDiagnosticV1 (protocol/->ReaderDiagnosticV1
+          :reader/bad-origin
+          :warning
+          "outside payload"
+          original)
+        bad-diagnostics protocol/ReaderProductCandidateV1 (protocol/->ReaderProductCandidateV1
+          (protocol/readerproductcandidatev1-canonical-ir-id base-candidate)
+          bytes
+          events
+          provenance-map-id
+          source-map
+          [invalid-diagnostic])]
+    (and
+      (rejected-with-code-v1?
+        (complete-v1 base-worker-request wrong-canonical-id)
+        :reader/invalid-product)
+      (rejected-with-code-v1?
+        (complete-v1 base-worker-request invalid-utf8)
+        :reader/invalid-product)
+      (rejected-with-code-v1?
+        (complete-v1 base-worker-request bad-source-map)
+        :reader/invalid-product)
+      (rejected-with-code-v1?
+        (complete-v1 base-worker-request bad-diagnostics)
+        :reader/invalid-product))))
+
+(defn supervisor-receipt-rejection-case-v1 [] Bool
+  (let [request protocol/ReaderRequestV1 (worker/customreaderworkerrequestv1-reader-request
+          base-worker-request)
+        grant capsule/CapabilityGrantV1 (worker/customreaderworkerrequestv1-grant base-worker-request)
+        wrong-decision worker/CustomReaderNativeSupervisorReceiptV1 (worker/custom-reader-native-supervisor-receipt-v1
+          (worker/customreaderworkerrequestv1-resolved-capsule-identity
+            base-worker-request)
+          (worker/customreaderworkerrequestv1-resolved-grant-identity
+            base-worker-request)
+          (worker/customreaderworkerrequestv1-resolved-reader-component-identity
+            base-worker-request)
+          (worker/customreaderworkerrequestv1-resolved-reader-protocol-identity
+            base-worker-request)
+          (protocol/sourceslicev1-payload-content-id
+            (protocol/readerrequestv1-source-slice request))
+          (capsule/capabilitygrantv1-immutable-resource-set-id grant)
+          generous-limits
+          (protocol/readerproductcandidatev1-canonical-ir-id base-candidate)
+          (protocol/readerproductcandidatev1-provenance-map-id base-candidate)
+          (worker/diagnostic-envelope-identity-v1 [])
+          :not-enforced)
+        changed-diagnostic protocol/ReaderDiagnosticV1 (protocol/->ReaderDiagnosticV1
+          :reader/custom-warning
+          :warning
+          "changed after supervisor receipt"
+          (protocol/->ReaderByteSpanV1
+            (protocol/sourceslicev1-start-byte source-slice)
+            (protocol/sourceslicev1-end-byte source-slice)))
+        changed-candidate protocol/ReaderProductCandidateV1 (candidate-v1 reader-request base-events [changed-diagnostic])
+        base-supervisor worker/CustomReaderNativeSupervisorReceiptV1 (supervisor-receipt-v1 base-worker-request base-candidate)]
+    (and
+      (rejected-with-code-v1?
+        (worker/complete-one-shot-custom-reader-v1
+          base-worker-request base-candidate wrong-decision)
+        :reader/custom-worker-supervisor)
+      (rejected-with-code-v1?
+        (worker/complete-one-shot-custom-reader-v1
+          base-worker-request changed-candidate base-supervisor)
+        :reader/custom-worker-supervisor))))
+
+(defn accepted-empty-capability-opaque-case-v1 [] Bool
+  (match (complete-v1 base-worker-request base-candidate)
+    [(worker/CustomReaderWorkerRejectedV1 diagnostics) false]
+    [(worker/CustomReaderWorkerAcceptedV1 verified)
+     (let [product protocol/ReaderProductV1 (worker/customreaderworkerverifiedv1-product verified)
+           receipt capsule/ExecutionReceiptV1 (worker/customreaderworkerverifiedv1-receipt verified)]
+       (and
+         (= (protocol/readerproductv1-canonical-ir-id product)
+            (protocol/readerproductcandidatev1-canonical-ir-id
+              base-candidate))
+         (= (capsule/executionreceiptv1-capsule-identity receipt)
+            (capsule/languagecapsulev1-semantic-identity opaque-capsule))
+         (= (capsule/executionreceiptv1-grant-identity receipt)
+            (capsule/capabilitygrantv1-identity empty-grant))
+         (= (capsule/executionreceiptv1-reader-component-identity receipt)
+            (capsule/componentidentityv1-identity reader-component))
+         (= (capsule/executionreceiptv1-payload-content-id receipt)
+            (protocol/sourceslicev1-payload-content-id source-slice))
+         (= (capsule/executionreceiptv1-immutable-resource-set-id receipt)
+            (worker/empty-immutable-resource-set-id-v1))
+         (= (capsule/executionreceiptv1-result-content-id receipt)
+            (capsule/semanticidentityv1-content-id
+              (protocol/readerproductcandidatev1-canonical-ir-id
+                base-candidate)))))]))
+
+(defn deterministic-receipt-identity-case-v1 [] Bool
+  (match (complete-v1 base-worker-request base-candidate)
+    [(worker/CustomReaderWorkerRejectedV1 diagnostics) false]
+    [(worker/CustomReaderWorkerAcceptedV1 first-verified)
+     (match (complete-v1 base-worker-request base-candidate)
+       [(worker/CustomReaderWorkerRejectedV1 diagnostics) false]
+       [(worker/CustomReaderWorkerAcceptedV1 second-verified)
+        (= (capsule/executionreceiptv1-identity
+             (worker/customreaderworkerverifiedv1-receipt first-verified))
+           (capsule/executionreceiptv1-identity
+             (worker/customreaderworkerverifiedv1-receipt
+               second-verified)))])]))
+
+(defn main [] Int
+  (if (and
+        (accepted-empty-capability-opaque-case-v1)
+        (capability-and-resource-rejection-case-v1)
+        (non-opaque-rejection-case-v1)
+        (identity-mismatch-rejection-case-v1)
+        (structural-limit-rejection-case-v1)
+        (public-protocol-rejection-case-v1)
+        (supervisor-receipt-rejection-case-v1)
+        (deterministic-receipt-identity-case-v1))
+    0
+    1))

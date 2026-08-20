@@ -1,0 +1,364 @@
+#lang beagle
+(ns beagle.language-custom-reader-worker-v1
+  (:require [beagle.language-capsule-v1 :as capsule]
+            [beagle.language-reader-protocol-v1 :as reader]))
+
+(defrecord CustomReaderWorkerLimitsV1
+  [max-input-bytes Int
+   max-output-bytes Int
+   max-events Int
+   max-source-map-entries Int
+   max-diagnostics Int
+   max-diagnostic-bytes Int
+   max-depth Int
+   cpu-budget-units Int
+   memory-byte-limit Int
+   wall-time-limit-ms Int])
+
+(defrecord CustomReaderWorkerRequestV1
+  [capsule capsule/LanguageCapsuleV1
+   reader-request reader/ReaderRequestV1
+   grant capsule/CapabilityGrantV1
+   resolved-capsule-identity capsule/SemanticIdentityV1
+   resolved-reader-component-identity capsule/SemanticIdentityV1
+   resolved-reader-protocol-identity capsule/SemanticIdentityV1
+   resolved-grant-identity capsule/SemanticIdentityV1
+   limits CustomReaderWorkerLimitsV1])
+
+(defrecord CustomReaderNativeSupervisorReceiptV1
+  [identity capsule/SemanticIdentityV1
+   capsule-identity capsule/SemanticIdentityV1
+   grant-identity capsule/SemanticIdentityV1
+   reader-component-identity capsule/SemanticIdentityV1
+   reader-protocol-identity capsule/SemanticIdentityV1
+   payload-content-id String
+   immutable-resource-set-id String
+   limits CustomReaderWorkerLimitsV1
+   candidate-canonical-ir-id capsule/SemanticIdentityV1
+   candidate-provenance-map-id capsule/SemanticIdentityV1
+   candidate-diagnostics-envelope-id capsule/SemanticIdentityV1
+   decision Keyword])
+
+(defrecord CustomReaderWorkerVerifiedV1
+  [product reader/ReaderProductV1
+   receipt capsule/ExecutionReceiptV1
+   supervisor-receipt CustomReaderNativeSupervisorReceiptV1])
+
+(defunion CustomReaderWorkerResultV1
+  (CustomReaderWorkerAcceptedV1 [verified CustomReaderWorkerVerifiedV1])
+  (CustomReaderWorkerRejectedV1 [diagnostics (Vec reader/ReaderDiagnosticV1)]))
+
+(defn empty-immutable-resource-set-id-v1 [] String
+  (capsule/semanticidentityv1-content-id
+    (capsule/semantic-identity-v1
+      "beagle/custom-reader/immutable-resource-set/v1"
+      [])))
+
+(defn custom-reader-worker-limits-encoding-v1 [limits CustomReaderWorkerLimitsV1] String
+  (str
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-max-input-bytes limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-max-output-bytes limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-max-events limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-max-source-map-entries limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-max-diagnostics limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-max-diagnostic-bytes limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-max-depth limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-cpu-budget-units limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-memory-byte-limit limits)))
+    (capsule/canonical-part-v1
+      (str (customreaderworkerlimitsv1-wall-time-limit-ms limits)))))
+
+(defn diagnostic-envelope-encoding-v1
+  [diagnostics (Vec reader/ReaderDiagnosticV1)] String
+  (reduce
+    (fn
+      [encoding String
+       diagnostic reader/ReaderDiagnosticV1] String
+      (let [origin reader/ReaderByteSpanV1 (reader/readerdiagnosticv1-original-origin diagnostic)]
+        (str
+          encoding
+          (capsule/canonical-part-v1
+            (str (reader/readerdiagnosticv1-code diagnostic)))
+          (capsule/canonical-part-v1
+            (str (reader/readerdiagnosticv1-severity diagnostic)))
+          (capsule/canonical-part-v1
+            (reader/readerdiagnosticv1-message diagnostic))
+          (capsule/canonical-part-v1
+            (str (reader/readerbytespanv1-start-byte origin)))
+          (capsule/canonical-part-v1
+            (str (reader/readerbytespanv1-end-byte origin))))))
+    (str "beagle-custom-reader-diagnostics/v1"
+         (capsule/canonical-part-v1 (str (count diagnostics))))
+    diagnostics))
+
+(defn diagnostic-envelope-identity-v1
+  [diagnostics (Vec reader/ReaderDiagnosticV1)] capsule/SemanticIdentityV1
+  (capsule/semantic-identity-v1
+    "beagle/custom-reader/diagnostic-envelope/v1"
+    [(diagnostic-envelope-encoding-v1 diagnostics)]))
+
+(defn custom-reader-native-supervisor-receipt-v1
+  [capsule-identity capsule/SemanticIdentityV1
+   grant-identity capsule/SemanticIdentityV1
+   reader-component-identity capsule/SemanticIdentityV1
+   reader-protocol-identity capsule/SemanticIdentityV1
+   payload-content-id String
+   immutable-resource-set-id String
+   limits CustomReaderWorkerLimitsV1
+   candidate-canonical-ir-id capsule/SemanticIdentityV1
+   candidate-provenance-map-id capsule/SemanticIdentityV1
+   candidate-diagnostics-envelope-id capsule/SemanticIdentityV1
+   decision Keyword] CustomReaderNativeSupervisorReceiptV1
+  (let [identity capsule/SemanticIdentityV1 (capsule/semantic-identity-v1
+          "beagle/custom-reader/native-supervisor-receipt/v1"
+          [(capsule/semanticidentityv1-content-id capsule-identity)
+           (capsule/semanticidentityv1-content-id grant-identity)
+           (capsule/semanticidentityv1-content-id reader-component-identity)
+           (capsule/semanticidentityv1-content-id reader-protocol-identity)
+           payload-content-id
+           immutable-resource-set-id
+           (custom-reader-worker-limits-encoding-v1 limits)
+           (capsule/semanticidentityv1-content-id candidate-canonical-ir-id)
+           (capsule/semanticidentityv1-content-id candidate-provenance-map-id)
+           (capsule/semanticidentityv1-content-id
+             candidate-diagnostics-envelope-id)
+           (str decision)])]
+    (->CustomReaderNativeSupervisorReceiptV1
+      identity capsule-identity grant-identity reader-component-identity
+      reader-protocol-identity payload-content-id immutable-resource-set-id
+      limits candidate-canonical-ir-id candidate-provenance-map-id
+      candidate-diagnostics-envelope-id decision)))
+
+(defn custom-reader-worker-limits-valid-v1? [limits CustomReaderWorkerLimitsV1] Bool
+  (and
+    (>= (customreaderworkerlimitsv1-max-input-bytes limits) 0)
+    (>= (customreaderworkerlimitsv1-max-output-bytes limits) 0)
+    (>= (customreaderworkerlimitsv1-max-events limits) 0)
+    (>= (customreaderworkerlimitsv1-max-source-map-entries limits) 0)
+    (>= (customreaderworkerlimitsv1-max-diagnostics limits) 0)
+    (>= (customreaderworkerlimitsv1-max-diagnostic-bytes limits) 0)
+    (>= (customreaderworkerlimitsv1-max-depth limits) 0)
+    (> (customreaderworkerlimitsv1-cpu-budget-units limits) 0)
+    (> (customreaderworkerlimitsv1-memory-byte-limit limits) 0)
+    (> (customreaderworkerlimitsv1-wall-time-limit-ms limits) 0)))
+
+(defn component-member-v1?
+  [component capsule/ComponentIdentityV1
+   components (Vec capsule/ComponentIdentityV1)] Bool
+  (some
+    (fn [member capsule/ComponentIdentityV1] Bool
+      (= member component))
+    components))
+
+(defn protocol-member-v1?
+  [protocol capsule/ProtocolIdentityV1
+   protocols (Vec capsule/ProtocolIdentityV1)] Bool
+  (some
+    (fn [member capsule/ProtocolIdentityV1] Bool
+      (= member protocol))
+    protocols))
+
+(defn custom-reader-worker-request-valid-v1? [worker-request CustomReaderWorkerRequestV1] Bool
+  (let [language-capsule capsule/LanguageCapsuleV1 (customreaderworkerrequestv1-capsule worker-request)
+        request reader/ReaderRequestV1 (customreaderworkerrequestv1-reader-request worker-request)
+        grant capsule/CapabilityGrantV1 (customreaderworkerrequestv1-grant worker-request)
+        component capsule/ComponentIdentityV1 (reader/readerrequestv1-reader-component request)
+        protocol capsule/ProtocolIdentityV1 (reader/readerrequestv1-reader-protocol request)
+        capsule-identity capsule/SemanticIdentityV1 (capsule/languagecapsulev1-semantic-identity language-capsule)
+        component-identity capsule/SemanticIdentityV1 (capsule/componentidentityv1-identity component)
+        protocol-identity capsule/SemanticIdentityV1 (capsule/protocolidentityv1-identity protocol)
+        grant-identity capsule/SemanticIdentityV1 (capsule/capabilitygrantv1-identity grant)
+        empty-requested capsule/SemanticIdentityV1 (capsule/requested-capability-set-identity-v1 [])
+        empty-granted capsule/SemanticIdentityV1 (capsule/granted-capability-set-identity-v1 [])
+        empty-resources String (empty-immutable-resource-set-id-v1)
+        canonical-capsule-identity capsule/SemanticIdentityV1 (capsule/capsule-semantic-identity-v1
+          (capsule/languagecapsulev1-manifest-content-id language-capsule)
+          (capsule/languagecapsulev1-reader-kind language-capsule)
+          (capsule/languagecapsulev1-components language-capsule)
+          (capsule/languagecapsulev1-protocols language-capsule)
+          (capsule/languagecapsulev1-deterministic-options-id language-capsule)
+          (capsule/languagecapsulev1-requested-capabilities language-capsule))
+        canonical-grant capsule/CapabilityGrantV1 (capsule/capability-grant-v1
+          []
+          []
+          (capsule/capabilitygrantv1-admission-policy-content-id grant)
+          empty-resources)]
+    (and
+      (= :opaque (capsule/languagecapsulev1-reader-kind language-capsule))
+      (= 0
+         (count
+           (capsule/languagecapsulev1-requested-capabilities language-capsule)))
+      (= capsule-identity canonical-capsule-identity)
+      (= capsule-identity
+         (customreaderworkerrequestv1-resolved-capsule-identity worker-request))
+      (= capsule-identity (reader/readerrequestv1-capsule-identity request))
+      (= component-identity
+         (customreaderworkerrequestv1-resolved-reader-component-identity
+           worker-request))
+      (= protocol-identity
+         (customreaderworkerrequestv1-resolved-reader-protocol-identity
+           worker-request))
+      (= grant-identity
+         (customreaderworkerrequestv1-resolved-grant-identity worker-request))
+      (component-member-v1?
+        component
+        (capsule/languagecapsulev1-components language-capsule))
+      (protocol-member-v1?
+        protocol
+        (capsule/languagecapsulev1-protocols language-capsule))
+      (= empty-requested
+         (capsule/capabilitygrantv1-requested-capability-set-identity grant))
+      (= empty-granted
+         (capsule/capabilitygrantv1-granted-capability-set-identity grant))
+      (= empty-resources
+         (capsule/capabilitygrantv1-immutable-resource-set-id grant))
+      (= grant-identity
+         (capsule/capabilitygrantv1-identity canonical-grant))
+      (custom-reader-worker-limits-valid-v1?
+        (customreaderworkerrequestv1-limits worker-request)))))
+
+(defn diagnostic-bytes-v1
+  [diagnostics (Vec reader/ReaderDiagnosticV1)] Int
+  (reduce
+    (fn
+      [size Int
+       diagnostic reader/ReaderDiagnosticV1] Int
+      (+ size
+         (count
+           (utf8-encode
+             (reader/readerdiagnosticv1-message diagnostic)))))
+    0
+    diagnostics))
+
+(defn event-depths-within-limit-v1?
+  [events (Vec reader/ReaderIrEventV1)
+   max-depth Int] Bool
+  (every?
+    (fn [event reader/ReaderIrEventV1] Bool
+      (let [depth Int (reader/readerireventv1-depth event)]
+        (and (>= depth 0) (<= depth max-depth))))
+    events))
+
+(defn custom-reader-candidate-within-limits-v1?
+  [worker-request CustomReaderWorkerRequestV1
+   candidate reader/ReaderProductCandidateV1] Bool
+  (let [request reader/ReaderRequestV1 (customreaderworkerrequestv1-reader-request worker-request)
+        slice reader/SourceSliceV1 (reader/readerrequestv1-source-slice request)
+        limits CustomReaderWorkerLimitsV1 (customreaderworkerrequestv1-limits worker-request)
+        events (Vec reader/ReaderIrEventV1) (reader/readerproductcandidatev1-canonical-ir-events candidate)
+        source-map (Vec reader/ReaderSourceMapEntryV1) (reader/readerproductcandidatev1-source-map candidate)
+        diagnostics (Vec reader/ReaderDiagnosticV1) (reader/readerproductcandidatev1-diagnostics candidate)]
+    (and
+      (<= (count (utf8-encode (reader/sourceslicev1-payload slice)))
+          (customreaderworkerlimitsv1-max-input-bytes limits))
+      (<= (count
+            (reader/readerproductcandidatev1-canonical-ir-bytes candidate))
+          (customreaderworkerlimitsv1-max-output-bytes limits))
+      (<= (count events)
+          (customreaderworkerlimitsv1-max-events limits))
+      (<= (count source-map)
+          (customreaderworkerlimitsv1-max-source-map-entries limits))
+      (<= (count diagnostics)
+          (customreaderworkerlimitsv1-max-diagnostics limits))
+      (<= (diagnostic-bytes-v1 diagnostics)
+          (customreaderworkerlimitsv1-max-diagnostic-bytes limits))
+      (event-depths-within-limit-v1?
+        events
+        (customreaderworkerlimitsv1-max-depth limits)))))
+
+(defn custom-reader-supervisor-receipt-valid-v1?
+  [worker-request CustomReaderWorkerRequestV1
+   candidate reader/ReaderProductCandidateV1
+   supervisor-receipt CustomReaderNativeSupervisorReceiptV1] Bool
+  (let [request reader/ReaderRequestV1 (customreaderworkerrequestv1-reader-request worker-request)
+        grant capsule/CapabilityGrantV1 (customreaderworkerrequestv1-grant worker-request)
+        expected CustomReaderNativeSupervisorReceiptV1 (custom-reader-native-supervisor-receipt-v1
+          (customreaderworkerrequestv1-resolved-capsule-identity worker-request)
+          (customreaderworkerrequestv1-resolved-grant-identity worker-request)
+          (customreaderworkerrequestv1-resolved-reader-component-identity
+            worker-request)
+          (customreaderworkerrequestv1-resolved-reader-protocol-identity
+            worker-request)
+          (reader/sourceslicev1-payload-content-id
+            (reader/readerrequestv1-source-slice request))
+          (capsule/capabilitygrantv1-immutable-resource-set-id grant)
+          (customreaderworkerrequestv1-limits worker-request)
+          (reader/readerproductcandidatev1-canonical-ir-id candidate)
+          (reader/readerproductcandidatev1-provenance-map-id candidate)
+          (diagnostic-envelope-identity-v1
+            (reader/readerproductcandidatev1-diagnostics candidate))
+          :enforced)]
+    (= expected supervisor-receipt)))
+
+(defn custom-reader-worker-rejection-v1
+  [worker-request CustomReaderWorkerRequestV1
+   code Keyword
+   message String] CustomReaderWorkerResultV1
+  (let [slice reader/SourceSliceV1 (reader/readerrequestv1-source-slice
+          (customreaderworkerrequestv1-reader-request worker-request))
+        start Int (reader/sourceslicev1-start-byte slice)]
+    (->CustomReaderWorkerRejectedV1
+      [(reader/->ReaderDiagnosticV1
+         code
+         :error
+         message
+         (reader/->ReaderByteSpanV1 start start))])))
+
+(defn complete-one-shot-custom-reader-v1
+  [worker-request CustomReaderWorkerRequestV1
+   candidate reader/ReaderProductCandidateV1
+   supervisor-receipt CustomReaderNativeSupervisorReceiptV1] CustomReaderWorkerResultV1
+  (let [request reader/ReaderRequestV1 (customreaderworkerrequestv1-reader-request worker-request)]
+    (cond
+      (not (custom-reader-worker-request-valid-v1? worker-request))
+      (custom-reader-worker-rejection-v1
+        worker-request
+        :reader/custom-worker-policy
+        "custom reader requires one resolved opaque capsule with canonical empty capability and immutable-resource grants")
+
+      (not
+        (custom-reader-candidate-within-limits-v1?
+          worker-request candidate))
+      (custom-reader-worker-rejection-v1
+        worker-request
+        :reader/custom-worker-limit
+        "custom reader input, output, event, source-map, diagnostic, or depth limit exceeded")
+
+      (not
+        (custom-reader-supervisor-receipt-valid-v1?
+          worker-request candidate supervisor-receipt))
+      (custom-reader-worker-rejection-v1
+        worker-request
+        :reader/custom-worker-supervisor
+        "trusted native supervisor receipt does not bind the resolved request, limits, and one-shot candidate")
+
+      :else
+      (match (reader/accept-reader-product-v1 request candidate)
+        [(reader/ReaderProductRejectedV1 diagnostics)
+         (->CustomReaderWorkerRejectedV1 diagnostics)]
+        [(reader/ReaderProductAcceptedV1 product)
+         (let [language-capsule capsule/LanguageCapsuleV1 (customreaderworkerrequestv1-capsule worker-request)
+               grant capsule/CapabilityGrantV1 (customreaderworkerrequestv1-grant worker-request)
+               component capsule/ComponentIdentityV1 (reader/readerrequestv1-reader-component request)
+               slice reader/SourceSliceV1 (reader/readerrequestv1-source-slice request)
+               result-content-id String (capsule/semanticidentityv1-content-id
+                 (reader/readerproductv1-canonical-ir-id product))
+               execution-receipt capsule/ExecutionReceiptV1 (capsule/execution-receipt-v1
+                 language-capsule
+                 grant
+                 component
+                 (reader/sourceslicev1-payload-content-id slice)
+                 (empty-immutable-resource-set-id-v1)
+                 result-content-id)]
+           (->CustomReaderWorkerAcceptedV1
+             (->CustomReaderWorkerVerifiedV1
+               product execution-receipt supervisor-receipt)))]))))
