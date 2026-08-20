@@ -9,6 +9,7 @@
 
 (defrecord CompileFactKeyV1
   [stage String
+   target String?
    result-key String
    compiler-context String
    profile String
@@ -68,6 +69,7 @@
   [left CompileFactKeyV1
    right CompileFactKeyV1] Bool
   (and (= (compilefactkeyv1-stage left) (compilefactkeyv1-stage right))
+    (= (compilefactkeyv1-target left) (compilefactkeyv1-target right))
     (= (compilefactkeyv1-result-key left)
       (compilefactkeyv1-result-key right))
     (= (compilefactkeyv1-compiler-context left)
@@ -83,9 +85,6 @@
       (= (count (stages/utf8-bytes payload))
         (compilefactv1-payload-byte-count fact)))))
 
-(defn target-stage [target String] String
-  (str "native-materialization-" target "-v1"))
-
 (defn target-supported? [target String] Bool
   (or (= target "c17") (= target "qbe")))
 
@@ -96,8 +95,9 @@
 
 (defn key-for
   [request CheckedMaterializationRequestV1
-   stage String] CompileFactKeyV1
-  (->CompileFactKeyV1 stage
+   stage String
+   target String?] CompileFactKeyV1
+  (->CompileFactKeyV1 stage target
     (checkedmaterializationrequestv1-result-key request)
     (checkedmaterializationrequestv1-compiler-context request)
     (checkedmaterializationrequestv1-profile request)
@@ -120,7 +120,7 @@
       collected
       (let [target String (nth (checkedmaterializationrequestv1-targets request) position)
             fact (U CompileFactV1 Nil) (fact-for (checkedmaterializationrequestv1-warm-facts request)
-              (key-for request (target-stage target)))]
+              (key-for request "materialize" target))]
         (if (nil? fact)
           nil
           (recur (+ position 1) (conj collected fact)))))))
@@ -202,7 +202,7 @@
   (mapv
     (fn [artifact TargetArtifactV1] CompileFactV1
       (compile-fact
-        (key-for request (target-stage (targetartifactv1-target artifact)))
+        (key-for request "materialize" (targetartifactv1-target artifact))
         (targetartifactv1-encoding artifact)))
     artifacts))
 
@@ -252,9 +252,9 @@
                       "MATERIALIZER-REJECTED"
                       (targetmaterializationrejectedv1-detail materialized))
                     (let [artifacts (Vec TargetArtifactV1) materialized
-                          typed-fact CompileFactV1 (compile-fact (key-for request "typed-stage-v1")
+                          typed-fact CompileFactV1 (compile-fact (key-for request "typed" nil)
                             (stages/frozentypedstagev0-encoding frozen-typed))
-                          native-fact CompileFactV1 (compile-fact (key-for request "native-stage-v1")
+                          native-fact CompileFactV1 (compile-fact (key-for request "native" nil)
                             (stages/encode-frozen-native-stage-wire-v1
                               frozen-native))]
                       (->CheckedMaterializationBuiltV1 frozen-typed frozen-native
