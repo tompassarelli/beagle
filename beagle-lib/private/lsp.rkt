@@ -548,22 +548,22 @@
 (define (prefix-at-position path line col)
   (define content (or (hash-ref open-docs (path->uri path) #f)
                       (and (file-exists? path) (file->string path))))
-  (when (not content) #f)
-  (define lines (string-split content "\n" #:trim? #f))
-  (cond
-    [(>= line (length lines)) #f]
-    [else
-     (define ln (list-ref lines line))
-     (define word-chars
-       (string->list "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-?!<>*/+.:"))
-     (define (word-char? c) (member c word-chars))
-     (define start
-       (let loop ([i col])
-         (if (and (> i 0) (word-char? (string-ref ln (sub1 i))))
-             (loop (sub1 i))
-             i)))
-     (if (= start col) #f
-         (substring ln start col))]))
+  (and content
+       (let ([lines (string-split content "\n" #:trim? #f)])
+         (cond
+           [(>= line (length lines)) #f]
+           [else
+            (define ln (list-ref lines line))
+            (define word-chars
+              (string->list "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-?!<>*/+.:"))
+            (define (word-char? c) (member c word-chars))
+            (define start
+              (let loop ([i col])
+                (if (and (> i 0) (word-char? (string-ref ln (sub1 i))))
+                    (loop (sub1 i))
+                    i)))
+            (if (= start col) #f
+                (substring ln start col))]))))
 
 (define (collect-completions path prefix)
   (define items '())

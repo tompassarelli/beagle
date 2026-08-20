@@ -2,9 +2,18 @@
 
 (require rackunit
          racket/file
+         racket/runtime-path
          (only-in "../../beagle-lib/private/lsp.rkt"
                   collect-completions
                   lookup-symbol-info))
+
+(define-runtime-path lsp-module "../../beagle-lib/private/lsp.rkt")
+
+(define handle-completion
+  (begin
+    (dynamic-require lsp-module #f)
+    (parameterize ([current-namespace (module->namespace lsp-module)])
+      (eval 'handle-completion))))
 
 (define (write-source! path source)
   (call-with-output-file path
@@ -66,3 +75,12 @@
         (collect-completions (path->string path) "brok")
         "broken")))
     (lambda () (delete-file path))))
+
+(test-case "LSP completion is empty for a missing document"
+  (define path (make-temporary-file "beagle-lsp-missing-~a.bclj"))
+  (delete-file path)
+  (check-equal?
+   (handle-completion
+    (hasheq 'textDocument (hasheq 'uri (string-append "file://" (path->string path)))
+            'position (hasheq 'line 0 'character 0)))
+   '()))
