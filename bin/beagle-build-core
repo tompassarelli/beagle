@@ -2161,6 +2161,16 @@ bb -cp "$compiled" -e '
       (mapcat #(resolved-definition-nodes definitions index module-name %) references)
       (mapcat #(resolved-definition-nodes definitions index module-name %) types)))))
 
+(defn dependency-resolver [definitions index]
+  (let [cache (volatile! {})]
+    (fn [definition]
+      (let [identity (id-value definition)]
+        (if (contains? @cache identity)
+          (get @cache identity)
+          (let [dependencies (vec (dependency-nodes definitions index definition))]
+            (vswap! cache assoc identity dependencies)
+            dependencies))))))
+
 (defn source-node-name-index [rows]
   (reduce
    (fn [names row]
@@ -2176,13 +2186,9 @@ bb -cp "$compiled" -e '
    {}
    rows))
 
-(defn semantic-read-set-rows [rows]
-  (let [source (slice/source-program rows "native.module" "source.facts")
-        index (lower/build-source-index
-               (stages/sourcestagev1-terms source)
-               (stages/sourcestagev1-modules source))
-        definitions (definitions-by-key index)
-        node-names (source-node-name-index rows)
+(defn semantic-read-set-rows
+  [rows index selected dependency-for]
+  (let [node-names (source-node-name-index rows)
         reads
         (vec
          (mapcat
@@ -2192,7 +2198,7 @@ bb -cp "$compiled" -e '
                   dependencies
                   (sort-by id-value
                            (remove #(= definition-id (id-value %))
-                                   (dependency-nodes definitions index definition)))]
+                                   (dependency-for definition)))]
               (when-not subject
                 (throw (ex-info "semantic unit has no source-fact node name"
                                 {:definition definition-id})))
@@ -2205,19 +2211,20 @@ bb -cp "$compiled" -e '
                                       :dependency (id-value dependency)})))
                    (slice/->SliceFactV0 subject "semantic-read" "n" object)))
                dependencies)))
-          (sort-by id-value (definition-nodes index))))]
+          (sort-by id-value
+                   (filter #(contains? selected (id-value %))
+                           (definition-nodes index)))))]
     (vec (concat rows reads))))
 
-(defn reachable-definition-ids [definitions index seeds]
-  (loop [queue (vec seeds) selected #{}]
+(defn reachable-definition-ids [dependency-for seeds]
+  (loop [queue (into clojure.lang.PersistentQueue/EMPTY seeds) selected #{}]
     (if (empty? queue)
       selected
-      (let [definition (first queue)
+      (let [definition (peek queue)
             identity (id-value definition)]
         (if (contains? selected identity)
-          (recur (vec (rest queue)) selected)
-          (recur (vec (concat (rest queue)
-                              (dependency-nodes definitions index definition)))
+          (recur (pop queue) selected)
+          (recur (into (pop queue) (dependency-for definition))
                  (conj selected identity)))))))
 
 (defn definition-sequence-names [rows]
@@ -2259,13 +2266,13 @@ bb -cp "$compiled" -e '
              edges))
          {}
          rows)]
-    (loop [queue ["0"] reached #{}]
+    (loop [queue (conj clojure.lang.PersistentQueue/EMPTY "0") reached #{}]
       (if (empty? queue)
         reached
-        (let [node (first queue)]
+        (let [node (peek queue)]
           (if (contains? reached node)
-            (recur (vec (rest queue)) reached)
-            (recur (vec (concat (rest queue) (get children node [])))
+            (recur (pop queue) reached)
+            (recur (into (pop queue) (get children node []))
                    (conj reached node))))))))
 
 (defn projected-rows [rows selected]
@@ -2336,20 +2343,23 @@ bb -cp "$compiled" -e '
           (recur (rest remaining) (conj seeds (first matches))))))))
 
 (defn project-entry-rows [rows entries strict-entry-abi?]
-  (if (empty? entries)
-    {:ok? true :rows rows}
-    (let [source (slice/source-program rows "native.module" "source.facts")
-          index (lower/build-source-index
-                 (stages/sourcestagev1-terms source)
-                 (stages/sourcestagev1-modules source))
-          definitions (definitions-by-key index)
-          seeds (entry-seeds definitions index entries strict-entry-abi?)]
-      (if-not (:ok? seeds)
-        seeds
+  (let [source (slice/source-program rows "native.module" "source.facts")
+        index (lower/build-source-index
+               (stages/sourcestagev1-terms source)
+               (stages/sourcestagev1-modules source))
+        definitions (definitions-by-key index)
+        dependency-for (dependency-resolver definitions index)
+        seeds (if (empty? entries)
+                {:ok? true :seeds (definition-nodes index)}
+                (entry-seeds definitions index entries strict-entry-abi?))]
+    (if-not (:ok? seeds)
+      seeds
+      (let [selected (reachable-definition-ids dependency-for (:seeds seeds))]
         {:ok? true
-         :rows (projected-rows rows
-                               (reachable-definition-ids definitions index
-                                                         (:seeds seeds)))}))))
+         :rows (if (empty? entries) rows (projected-rows rows selected))
+         :index index
+         :selected selected
+         :dependency-for dependency-for}))))
 
 (defn source-definition-count [rows]
   (reduce + (map #(count (slice/form-node-names rows %))
@@ -3603,7 +3613,9 @@ bb -cp "$compiled" -e '
          :report (str "stage source-projection REJECTED\n"
                       "entry-error " (:detail projection) "\n"
                       "result FAIL entry projection\n")})
-      (let [rows (semantic-read-set-rows (:rows projection))
+      (let [rows (semantic-read-set-rows
+                  (:rows projection) (:index projection)
+                  (:selected projection) (:dependency-for projection))
             projected-facts (rows-text rows)
             _ (spit projected-facts-path projected-facts)
             configuration ["profile=3" (str "abi=" abi-id)
