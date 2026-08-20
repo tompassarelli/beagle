@@ -1222,12 +1222,22 @@ if [[ -z "$compiled_override" && ! -f "$cache_entry/.complete" ]]; then
             }
         echo "beagle build: core-compiler-cache MISS $compiler_source_digest" >&2
     else
+        projection_path_file="$work/core-compiler-projection.path"
         run_phase core-compiler "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-900}" \
-            "$CORE_COMPILER_PROJECTION" \
-            --out "$compiled" --log "$work/build.log" || {
+            "$CORE_COMPILER_PROJECTION" --cache >"$projection_path_file" || {
                 sed -n '1,200p' "$work/build.log" >&2
                 exit 1
             }
+        mapfile -t cached_projection_paths <"$projection_path_file"
+        [[ ${#cached_projection_paths[@]} -eq 1 &&
+           -n "${cached_projection_paths[0]}" ]] ||
+            die "Core compiler projection cache returned a malformed path"
+        compiled="${cached_projection_paths[0]}"
+        [[ -d "$compiled" && ! -L "$compiled" &&
+           -f "$compiled/native/core.clj" &&
+           "$(basename -- "$(dirname -- "$compiled")")" == \
+               "$projection_cache_key" ]] ||
+            die "Core compiler projection cache returned the wrong keyed entry"
     fi
 
     # Generated Clojure needs provider records referred and imported until the
