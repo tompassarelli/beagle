@@ -21498,9 +21498,31 @@
       (layoutmeasurev0-closed measure)
       (layoutmeasurev0-detail measure))))
 
+(def native-lowering-workers Int 22)
+
+;; Hosted concurrency is deliberately isolated behind an Any boundary. Each
+;; future owns one contiguous input batch, and forcing in batch order restores
+;; the exact serial mapv order for frozen output and surfaced failures.
+(defn ordered-native-mapv [(operation Any) (values Any)] Any
+  (let [items Any (vec values)
+        item-count Int (count items)]
+    (if (< item-count 32)
+      (mapv operation items)
+      (let [worker-count Int (min native-lowering-workers item-count)
+            batch-size Int (quot (+ item-count (- worker-count 1)) worker-count)
+            batches Any (mapv vec (partition-all batch-size items))
+            pending Any
+            (mapv
+              (fn [batch Any] Any
+                (future-call (fn [] Any (mapv operation batch))))
+              batches)]
+        (vec
+          (mapcat identity
+            (mapv (fn [result Any] Any (force result)) pending)))))))
+
 (defn resolve-layouts
   [(types (Vec core/TypeDef)) (abi core/AbiProfileV0)] (Vec LayoutResolutionV0)
-  (mapv
+  (ordered-native-mapv
     (fn [definition core/TypeDef] LayoutResolutionV0
       (resolve-layout types definition abi))
     types))
@@ -21758,7 +21780,7 @@
 
 (defn lower-ready-functions
   [(functions (Vec TypedFunctionV0))] (Vec core/FunctionDef)
-  (mapv
+  (ordered-native-mapv
     (fn [function TypedFunctionV0] core/FunctionDef
       (lower-ready-function function))
     (ready-functions functions)))
@@ -23798,37 +23820,37 @@
    (obligation-results (Vec core/ObligationResult))]
   (Vec stages/TermNodeV0)
   (let [type-nodes (Vec stages/TermNodeV0)
-        (mapv
+        (ordered-native-mapv
           (fn [definition core/TypeDef] stages/TermNodeV0
             (stages/->TermNodeV0 (core/typedef-id definition)
               (stages/->TextTermV0 (encode-type-def definition))))
           types)
         effect-nodes (Vec stages/TermNodeV0)
-        (mapv
+        (ordered-native-mapv
           (fn [effect core/EffectDef] stages/TermNodeV0
             (stages/->TermNodeV0 (core/effectdef-id effect)
               (stages/->TextTermV0 (encode-effect effect))))
           effects)
         layout-nodes (Vec stages/TermNodeV0)
-        (mapv
+        (ordered-native-mapv
           (fn [layout core/LayoutDef] stages/TermNodeV0
             (stages/->TermNodeV0 (core/layoutdef-id layout)
               (stages/->TextTermV0 (encode-layout-def layout))))
           layouts)
         function-nodes (Vec stages/TermNodeV0)
-        (mapv
+        (ordered-native-mapv
           (fn [function core/FunctionDef] stages/TermNodeV0
             (stages/->TermNodeV0 (core/functiondef-id function)
               (stages/->TextTermV0 (encode-native-function function))))
           functions)
         abi-nodes (Vec stages/TermNodeV0)
-        (mapv
+        (ordered-native-mapv
           (fn [abi core/AbiDeclV0] stages/TermNodeV0
             (stages/->TermNodeV0 (core/abideclv0-id abi)
               (stages/->TextTermV0 (encode-abi abi))))
           abis)
         obligation-nodes (Vec stages/TermNodeV0)
-        (mapv
+        (ordered-native-mapv
           (fn [result core/ObligationResult] stages/TermNodeV0
             (let [id core/NativeId
                   (lower-id "obligation"
