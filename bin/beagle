@@ -50,7 +50,6 @@ Author:
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
   doctor [--deep]           Is the authoring loop online and working?
-  watch BUILD-ARGS...       Foreground exact-closure incremental Core build
 
 Query (the compiler is the source of truth):
   sig <fn> <path...>        Typed signature
@@ -326,7 +325,6 @@ case "$cmd" in
             -m selfhost.main facts-roundtrip "$@"
         ;;
     daemon)          exec "$BIN/beagle-daemon" "$@" ;;
-    watch)           exec "$BIN/beagle-watch" "$@" ;;
     promote)         exec "$BIN/beagle-promote" "$@" ;;
     native-exe)      exec "$BIN/beagle-native-exe" "$@" ;;
     test)            exec "$BIN/beagle-test" "$@" ;;
