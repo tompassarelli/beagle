@@ -1,7 +1,12 @@
 #lang beagle
 (ns beagle.compiler-driver
-  (:require [beagle.datum-reader :as reader]
-            [beagle.frontend-facts :as facts]))
+  (:require [beagle.artifact-linker :as linker]
+            [beagle.checker :as checker]
+            [beagle.datum-reader :as reader]
+            [beagle.frontend-facts :as facts]
+            [beagle.parser :as parser]
+            [beagle.parser-reader :as parser-reader]
+            [beagle.syntax-semantics :as semantics]))
 
 (def max-source-bytes Int 67108864)
 
@@ -17,6 +22,7 @@
    profile String
    targets (Vec String)
    rule-set-id String
+   schema-content-id String
    source-paths (Vec String)
    syntax facts/SyntaxFactClosure])
 
@@ -40,6 +46,26 @@
      executable-path String])
   (CompileBundleError [code Int detail String]))
 
+(defunion ReadSourceFactsResult
+  (SourceFactsRead [bundle facts/SyntaxFactBundle])
+  (SourceFactsRejected [code Int detail String]))
+
+(defunion CloseSourceFactsResult
+  (SourceFactsClosed [closure facts/SyntaxFactClosure])
+  (SourceFactsClosureRejected [code Int detail String]))
+
+(defrecord CheckedModuleFacts
+  [syntax facts/SyntaxFactBundle
+   checked checker/CheckedFacts])
+
+(defrecord CheckedFactClosure
+  [syntax facts/SyntaxFactClosure
+   modules (Vec CheckedModuleFacts)])
+
+(defunion CheckFactClosureResult
+  (FactClosureChecked [closure CheckedFactClosure])
+  (FactClosureRejected [code Int detail String]))
+
 (defn query-part [value String] String
   (str (count value) ":" value))
 
@@ -61,7 +87,8 @@
              (query-part (compilebundlerequest-profile request))
              (query-part
                (targets-encoding (compilebundlerequest-targets request)))
-             (query-part (compilebundlerequest-rule-set-id request)))]
+             (query-part (compilebundlerequest-rule-set-id request))
+             (query-part (compilebundlerequest-schema-content-id request)))]
     (str "sha256:" (sha256-bytes (utf8-encode encoding)))))
 
 (defn compile-query-facts
@@ -79,9 +106,14 @@
            (compilebundlerequest-profile request))]]
     (loop [position Int 0 emitted (Vec CompileQueryFact) base]
       (if (>= position (count targets))
-        (conj emitted
-          (->CompileQueryFact (+ 4 position) :query/rules query-id 0
-            (compilebundlerequest-rule-set-id request)))
+        (let [rules-order Int (+ 4 position)
+              with-rules (Vec CompileQueryFact)
+              (conj emitted
+                (->CompileQueryFact rules-order :query/rules query-id 0
+                  (compilebundlerequest-rule-set-id request)))]
+          (conj with-rules
+            (->CompileQueryFact (+ rules-order 1) :query/schema query-id 0
+              (compilebundlerequest-schema-content-id request))))
         (recur (+ position 1)
           (conj emitted
             (->CompileQueryFact (+ 4 position) :query/target query-id position
@@ -90,6 +122,70 @@
 (defn compile-query [request CompileBundleRequest] CompileQuery
   (let [query-id String (compile-query-id request)]
     (->CompileQuery query-id (compile-query-facts query-id request) request)))
+
+(defn fact-errors-detail [errors (Vec facts/FactError)] String
+  (if (empty? errors)
+    "source fact projection rejected without an error"
+    (facts/facterror-message (first errors))))
+
+(defn read-source-facts
+  [path String profile String] ReadSourceFactsResult
+  (match (host.fs/read-text-bounded path max-source-bytes)
+    [(host.fs/ReadTextBoundedError errno)
+     (->SourceFactsRejected errno (str "read failed: " path))]
+    [(host.fs/ReadTextBoundedOk text)
+     (let [source-digest String
+           (str "sha256:" (sha256-bytes (utf8-encode text)))]
+       (match (parser-reader/facts-from-source
+                path text source-digest profile)
+         [(facts/FactsRead bundle)
+          (match (semantics/normalize bundle)
+            [(facts/FactsRead normalized) (->SourceFactsRead normalized)]
+            [(facts/FactsRejected errors)
+             (->SourceFactsRejected 65 (fact-errors-detail errors))])]
+         [(facts/FactsRejected errors)
+          (->SourceFactsRejected 65 (fact-errors-detail errors))]))]))
+
+(defn close-source-facts
+  [entry-path String
+   sources (Vec parser/ExplicitFactSourceV1)] CloseSourceFactsResult
+  (match (parser/parse-explicit-bundle
+           (parser/->ExplicitFactBundleV1 entry-path sources))
+    [(parser/ExplicitBundleParsedV1 closure)
+     (->SourceFactsClosed closure)]
+    [(parser/ExplicitBundleRejectedV1 errors)
+     (->SourceFactsClosureRejected 65 (fact-errors-detail errors))]))
+
+(defn check-fact-closure
+  [syntax facts/SyntaxFactClosure] CheckFactClosureResult
+  (loop [remaining (Vec facts/SyntaxFactBundle)
+         (facts/syntaxfactclosure-modules syntax)
+         checked-modules (Vec CheckedModuleFacts) []]
+    (if (empty? remaining)
+      (->FactClosureChecked (->CheckedFactClosure syntax checked-modules))
+      (let [bundle facts/SyntaxFactBundle (first remaining)]
+        (match (checker/check-facts bundle)
+          [(checker/FactsChecked checked)
+           (recur (rest remaining)
+             (conj checked-modules (->CheckedModuleFacts bundle checked)))]
+          [(checker/CheckRejected rejection)
+           (->FactClosureRejected 65
+             (str (checker/checkrejection-rule rejection) ": "
+                  (checker/checkrejection-subject rejection) ": "
+                  (checker/checkrejection-detail rejection)))])))))
+
+(defn link-query-artifact
+  [query CompileQuery
+   config linker/ArtifactLinkConfigV1
+   artifact linker/TargetArtifactV1] CompileBundleResult
+  (match (linker/write-and-link config artifact)
+    [(linker/ArtifactLinkedV1 executable-path)
+     (->CompileBundleMaterialized
+       (compilequery-query-id query)
+       (linker/targetartifactv1-digest artifact)
+       executable-path)]
+    [(linker/ArtifactLinkErrorV1 code detail)
+     (->CompileBundleError code detail)]))
 
 (defn admit-source-text [path String text String] SourceAdmission
   (let [(read reader/DatumRead) (reader/read-events text)
