@@ -268,7 +268,10 @@
        (str "[#float " (float-to-bits float-value) " :bits]"))]
     [:else (str value)]))
 
-(defn render-term [value t/Term] String (render-term-any value))
+(defn- term-value [value t/Term] Any value)
+
+(defn render-term [value t/Term] String
+  (render-term-any (term-value value)))
 
 (defn- variable [name String] d/QueryTerm (d/variable name))
 
@@ -389,10 +392,11 @@
 
 (defn- exact-profile
   [root-resource t/Term propositions (Vec t/Triple)] t/Term?
-  (let [matches (Vec t/Triple)
+  (let [root-value Any (term-value root-resource)
+        matches (Vec t/Triple)
         (filterv
           (fn [proposition t/Triple] Bool
-            (and (= root-resource (t/triple-t1 proposition))
+            (and (= root-value (t/triple-t1 proposition))
                  (= program/admitted-by (t/triple-t2 proposition))))
           propositions)]
     (if (= 1 (count matches))
@@ -426,14 +430,15 @@
 
 (defn- profile-rules
   [profile t/Term propositions (Vec t/Triple)] (Vec Any)
-  (reduce
-    (fn [rules (Vec Any) proposition t/Triple] (Vec Any)
-      (if (and (= profile (t/triple-t1 proposition))
-               (= program/includes (t/triple-t2 proposition)))
-        (let [rule Any (t/triple-t3 proposition)]
-          (if (value-present? rules rule) rules (conj rules rule)))
-        rules))
-    empty-any propositions))
+  (let [profile-value Any (term-value profile)]
+    (reduce
+      (fn [rules (Vec Any) proposition t/Triple] (Vec Any)
+        (if (and (= profile-value (t/triple-t1 proposition))
+                 (= program/includes (t/triple-t2 proposition)))
+          (let [rule Any (t/triple-t3 proposition)]
+            (if (value-present? rules rule) rules (conj rules rule)))
+          rules))
+      empty-any propositions)))
 
 (defn- root-proposition?
   [proposition t/Triple
@@ -443,16 +448,17 @@
    rules (Vec Any)] Bool
   (let [subject Any (t/triple-t1 proposition)
         relation Any (t/triple-t2 proposition)
-        object Any (t/triple-t3 proposition)]
+        object Any (t/triple-t3 proposition)
+        profile-value Any (term-value profile)]
     (or
       (value-present? closure subject)
       (and (= subject space-id)
            (and (= relation kernel/profile-anchor)
                 (= object
                    (kernel/profile-header
-                     profile program/fact-profile-kind
+                     profile-value program/fact-profile-kind
                      kernel/observe-profile-mode))))
-      (and (= subject profile)
+      (and (= subject profile-value)
            (or (and (= relation kernel/profile-includes)
                     (= object kernel/fact-normal-form-profile-rule))
                (or (and (= relation program/member-of)
@@ -498,7 +504,7 @@
                       (->RootSnapshot root present-occurrences
                         present-withdrawals)))))]))))]))
 
-(defn- admit-loaded-root
+(defn- admit-loaded-root!
   [store server/Store space-id String root-resource t/Term version Int
    include-history Bool propositions (Vec t/Triple)] RootLoadResult
   (let [profile t/Term? (exact-profile root-resource propositions)]
@@ -532,7 +538,7 @@
        (if (nil? propositions)
          (->RootLoadRejected "triple(t1,t2,t3) returned a malformed row")
          (let [present-propositions (Vec t/Triple) propositions]
-           (admit-loaded-root store space-id root-resource version
+           (admit-loaded-root! store space-id root-resource version
              include-history present-propositions))))]))
 
 (defn- terms-lines [values (Vec Any)] (Vec String)
@@ -817,11 +823,38 @@
                                  (transaction/programcommitreceipt-served-version
                                    receipt))])))]))))))))])))
 
+(defn- plan-rename-term
+  [root program/ProgramRoot next-root t/Term binding t/Term
+   new-name String] transaction/RenamePlan
+  (let [next-value Any (term-value next-root)
+        binding-value Any (term-value binding)]
+    (cond
+      [(string? next-value)
+       (transaction/plan-rename root next-value binding-value new-name)]
+      [(integer? next-value)
+       (transaction/plan-rename root next-value binding-value new-name)]
+      [(and (number? next-value) (not (integer? next-value)))
+       (let [next-float Float (double next-value)]
+         (transaction/plan-rename root next-float binding-value new-name))]
+      [(boolean? next-value)
+       (transaction/plan-rename root next-value binding-value new-name)]
+      [(keyword? next-value)
+       (transaction/plan-rename root next-value binding-value new-name)]
+      [(t/instant? next-value)
+       (let [next-instant t/Instant next-value]
+         (transaction/plan-rename root next-instant binding-value new-name))]
+      [(t/triple? next-value)
+       (let [next-triple t/Triple next-value]
+         (transaction/plan-rename root next-triple binding-value new-name))]
+      [:else
+       (transaction/->RenameRejected
+         :rename/invalid-term "next root identity must be a Store Term")])))
+
 (defn- execute-rename!
   [store-result server/StoreResult store server/Store log-path String
    root program/ProgramRoot next-root t/Term binding t/Term new-name String
    commit Bool] ExecutionResult
-  (match (transaction/plan-rename root next-root binding new-name)
+  (match (plan-rename-term root next-root binding new-name)
     [(transaction/RenameRejected code detail)
      (->ExecutionFailed 65 detail)]
     [(transaction/RenamePlanned planned preview)
@@ -924,42 +957,32 @@
                      store-result store log-path (rootsnapshot-root snapshot)
                      next-root binding new-name commit)])])])])])))
 
-(defn- mutation-command? [command ProgramCommand] Bool
-  (match command
-    [(Rename root version next-root binding new-name commit) commit]
-    [(Inspect root version) false]
-    [(Definition root version name) false]
-    [(References root version target) false]
-    [(Impact root version changed) false]
-    [(History root version proposition) false]))
-
 (defn- open-existing-store!
   [path String space-id String] server/StoreResult
   (let [source ByteSource
         (host.fs/read-byte-source-bounded-or-die
-          path adapter/max-store-log-bytes)]
-    (server/server-store-boot! path space-id source (subvec source 0 0))))
+          path adapter/max-store-log-bytes)
+        opened server/StoreResult
+        (server/server-store-boot! path space-id source (subvec source 0 0))]
+    (if (= (count source) (server/storeresult-valid-log-bytes opened))
+      opened
+      (adapter/failed-store
+        "Store log contains an incomplete or unrecognized byte tail"))))
 
 (defn- execute-locked!
   [invocation ProgramInvocation] ExecutionResult
   (let [path String (programinvocation-log-path invocation)
-        mutating Bool
-        (mutation-command? (programinvocation-command invocation))
         store-result server/StoreResult
-        (if mutating
-          (adapter/open-store! path (programinvocation-space-id invocation))
-          (open-existing-store! path (programinvocation-space-id invocation)))
+        (open-existing-store! path (programinvocation-space-id invocation))
         store-value server/Store? (server/storeresult-store store-result)]
     (if (or (not= server/status-ok (server/storeresult-status store-result))
             (nil? store-value))
       (->ExecutionFailed 74
         (or (server/storeresult-error store-result) "could not open Store log"))
       (let [boot-error String?
-            (if mutating
-              (adapter/persist-boot! path store-result)
-              (if (empty? (server/storeresult-boot-append store-result))
-                nil
-                "read-only program command requires an initialized Store log"))]
+            (if (empty? (server/storeresult-boot-append store-result))
+              nil
+              "program command requires an initialized Store log")]
         (if (some? boot-error)
           (->ExecutionFailed 74
             (or boot-error "could not open Store at a durable version"))
@@ -976,7 +999,7 @@
 (defn- execute-catching! [invocation ProgramInvocation] ExecutionResult
   (try
     (execute-locked! invocation)
-    (catch (problem Exception)
+    (catch Exception problem
       (->ExecutionFailed 70 (str "native program command failed: " problem)))))
 
 (defn- run-locked! [invocation ProgramInvocation] Int
@@ -993,14 +1016,17 @@
            [(host.fs/UnlockOk) (report-result result)]))])))
 
 (defn- run-invocation! [invocation ProgramInvocation] Int
-  (if (mutation-command? (programinvocation-command invocation))
-    (match (host.fs/append-text (programinvocation-log-path invocation) "")
-      [(host.fs/AppendTextError errno)
-       (report-result (->ExecutionFailed 74 "could not create Store log"))]
-      [(host.fs/AppendTextOk) (run-locked! invocation)])
-    (run-locked! invocation)))
+  (try
+    (let [path String (programinvocation-log-path invocation)
+          preflight ByteSource
+          (host.fs/read-byte-source-bounded-or-die
+            path adapter/max-store-log-bytes)]
+      (run-locked! invocation))
+    (catch Exception problem
+      (report-result
+        (->ExecutionFailed 74 "Store log is absent or unreadable")))))
 
-(defn main [args (Vec String)] Int
+(defn -main [args (Vec String)] Int
   (let [invocation ProgramInvocation? (parse-args args)]
     (if (nil? invocation)
       (do (host.stderr/write-line usage) 64)
