@@ -169,7 +169,7 @@
    constraint (if (nil? parts) nil (:constraint parts))]
   (recur ks2 (conj acc [:bind (collect-bind-syms ctx view binding) v (collect-or-vals ctx view binding) constraint]))))))))
 
-(defn frame-of [ctx view bsyms]
+(defn context-of [ctx view bsyms]
   (reduce (fn [acc b] (assoc acc (sv ctx view b) b)) {} bsyms))
 
 (defn match-pat-binds [ctx view pat]

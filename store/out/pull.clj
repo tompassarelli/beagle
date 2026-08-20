@@ -93,7 +93,7 @@
   (integer? subpattern) (if (> subpattern 1) [{key (dec subpattern)}] [])
   (= subpattern :...) [{key :...}]
   :else []))
-          (recur-target [target subpattern depth visited] (if (> (inc depth) max-depth) {:fram/id (nm-of target) :fram/truncated true} (node target (nm-of target) subpattern (inc depth) visited)))
+          (recur-target [target subpattern depth visited] (if (> (inc depth) max-depth) {:store/id (nm-of target) :store/truncated true} (node target (nm-of target) subpattern (inc depth) visited)))
           (elem [acc left depth visited element] (cond
   (= element :*) (reduce (fn [result predicate] (let [pname (s/predicate-name schema predicate)]
   (if (reserved-pred? pname) result (let [value (values pname predicate left)]
@@ -114,11 +114,11 @@
   (if (seq rendered) (assoc result key (if (= "single" (s/cardinality schema key)) (first rendered) rendered)) result))))))) acc (keys element))
   :else acc))
           (node [subject name requested depth visited] (cond
-  (contains? visited subject) {:fram/id name :fram/cycle true}
-  (>= (deref state) max-nodes) {:fram/id name :fram/truncated true}
+  (contains? visited subject) {:store/id name :store/cycle true}
+  (>= (deref state) max-nodes) {:store/id name :store/truncated true}
   :else (do
   (swap! state (fn [count] (inc count)))
-  (reduce (fn [acc element] (elem acc subject depth (conj visited subject) element)) {:fram/id name} requested))))]
+  (reduce (fn [acc element] (elem acc subject depth (conj visited subject) element)) {:store/id name} requested))))]
   (let [one (fn [name] (let [subject (s/resolve-name schema name)]
-  (if (nil? subject) {:fram/id name} (node subject name pattern 0 #{}))))]
+  (if (nil? subject) {:store/id name} (node subject name pattern 0 #{}))))]
   (if (vector? root) (mapv (fn [name] (one name)) root) (one root))))))))

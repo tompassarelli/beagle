@@ -334,9 +334,9 @@
 (defn ^Rotation project! [ctx]
   (projected! (store/space-id ctx) (store/current-sequence ctx) (store/live-occurrences ctx)))
 
-(defn- pending-with-frame [pending ^String space-id frame]
-  (let [coordinate (t/transaction-coordinate space-id (t/transactionframe-sequence frame))
-   operations (t/transactionframe-operations frame)]
+(defn- pending-with-record [pending ^String space-id record]
+  (let [coordinate (t/transaction-coordinate space-id (t/transactionrecord-sequence record))
+   operations (t/transactionrecord-operations record)]
   (loop [built pending
    ordinal 0]
   (if (>= ordinal (count operations)) built (let [operation (nth operations ordinal)
@@ -344,16 +344,16 @@
   (recur (conj built (t/operation-occurrence (t/occurrence-coordinate coordinate ordinal) (t/commitoperation-action operation) proposition)) (inc ordinal)))))))
 
 (defn ^Rotation staged [^Rotation rotation ^String space-id sequence operations]
-  (assoc rotation :pending (pending-with-frame (rotation-pending rotation) space-id (t/->TransactionFrame sequence operations))))
+  (assoc rotation :pending (pending-with-record (rotation-pending rotation) space-id (t/->TransactionRecord sequence operations))))
 
 (defn ^Rotation refresh! [^Rotation rotation ctx]
   (let [space (store/space-id ctx)
    target (store/current-sequence ctx)
    pinned (rotation-version rotation)]
-  (if (not (= space (rotation-space-id rotation))) (throw (ex-info "store: rotation belongs to a different space" {:type :rotation-space-mismatch})) (if (> pinned target) (throw (ex-info "store: rotation is ahead of the store it projects" {:type :rotation-ahead-of-store})) (if (= pinned target) rotation (let [frames (store/transaction-frames-between (deref ctx) pinned target)
+  (if (not (= space (rotation-space-id rotation))) (throw (ex-info "store: rotation belongs to a different space" {:type :rotation-space-mismatch})) (if (> pinned target) (throw (ex-info "store: rotation is ahead of the store it projects" {:type :rotation-ahead-of-store})) (if (= pinned target) rotation (let [records (store/transaction-records-between (deref ctx) pinned target)
    pending (loop [built (rotation-pending rotation)
    position 0]
-  (if (>= position (count frames)) built (recur (pending-with-frame built space (nth frames position)) (inc position))))
+  (if (>= position (count records)) built (recur (pending-with-record built space (nth records position)) (inc position))))
    advanced (->Rotation (rotation-space-id rotation) target (rotation-events rotation) (rotation-by-occurrence rotation) (rotation-spo rotation) (rotation-pos rotation) (rotation-osp rotation) pending)]
   (if (> (count pending) pending-fold-cap) (projected! space target (all-occurrences advanced)) advanced)))))))
 

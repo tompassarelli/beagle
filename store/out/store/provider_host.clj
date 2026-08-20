@@ -131,7 +131,7 @@
   (if (and (boot-ok? boot) (= 1 (count matches))) (first matches) (throw (ex-info "provider capability was not selected at boot" {:type :provider/not-selected})))))
 
 (defn ^ProviderAction provider-action [operation proposition policy]
-  (if (and (or (= operation :rpc/assert) (= operation :rpc/retract)) (or (= policy :rpc/subject-any) (= policy :rpc/subject-existing))) (->ProviderAction operation proposition policy) (throw (ex-info "provider action is outside the FRAMRPC mutation seam" {:type :provider/invalid-action}))))
+  (if (and (or (= operation :rpc/assert) (= operation :rpc/retract)) (or (= policy :rpc/subject-any) (= policy :rpc/subject-existing))) (->ProviderAction operation proposition policy) (throw (ex-info "provider action is outside the Store RPC mutation seam" {:type :provider/invalid-action}))))
 
 (defn ^ProviderStage provider-stage [capability-value stage result]
   (->ProviderStage capability-value stage result))
@@ -191,7 +191,7 @@
   (not (plan-capability? plan capability-value)) (throw (ex-info "provider plan capability does not match the boot-selected provider" {:type :provider/capability-mismatch}))
   :else (let [request (plan-request space plan)]
   (if request (let [response (executor request)]
-  (if (and (t/rpc-response? response) (response-matches-request? request response)) (->ProviderInvocation descriptor-value request response) (throw (ex-info "provider executor returned a mismatched FRAMRPC response" {:type :provider/response-mismatch})))) (throw (ex-info "accepted provider plan did not lower to FRAMRPC" {:type :provider/request-missing})))))))
+  (if (and (t/rpc-response? response) (response-matches-request? request response)) (->ProviderInvocation descriptor-value request response) (throw (ex-info "provider executor returned a mismatched Store RPC response" {:type :provider/response-mismatch})))) (throw (ex-info "accepted provider plan did not lower to Store RPC" {:type :provider/request-missing})))))))
 
 (defn ^ProviderInvocation invoke-plan-to! [descriptors enabled capability-value ^String address port ^String space ^ProviderPlan plan]
   (invoke-plan-with! descriptors enabled capability-value space plan (fn [request] (rt/native-request-to! address port request))))

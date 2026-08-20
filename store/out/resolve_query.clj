@@ -19,11 +19,11 @@
   (let [mn (rm/module-name ctx view ents)]
   (if (some? mn) mn (str/replace (str (last (str/split src SLASH-RE))) EXT-RE ""))))
 
-(defn- defn-meta-of [ctx view srcs file-modframe ents-of]
-  (reduce (fn [acc ^String src] (let [frame (get file-modframe src {})
+(defn- defn-meta-of [ctx view srcs file-module-context ents-of]
+  (reduce (fn [acc ^String src] (let [module-context (get file-module-context src {})
    label (src-label ctx view src (get ents-of src []))]
-  (reduce (fn [a nm] (let [leaf (get frame nm)]
-  (assoc a leaf {:key (str src "#" (str leaf)) :file src :module label :name nm}))) acc (set (keys frame))))) {} srcs))
+  (reduce (fn [a nm] (let [leaf (get module-context nm)]
+  (assoc a leaf {:key (str src "#" (str leaf)) :file src :module label :name nm}))) acc (set (keys module-context))))) {} srcs))
 
 (defn- callers-of [ctx view BOUND REFERS srcs ents-of defn-meta]
   (reduce (fn [acc ^String src] (reduce (fn [a form] (let [d (rm/unwrap-def ctx view form)
@@ -37,8 +37,8 @@
   (if (and (some? cl) (contains? defn-meta cl)) (conj b [cl cc]) b)) b))) a (vec (rest (rr/ordered-children ctx d))))
   :else a))) acc (rm/forms-of ctx view (get ents-of src [])))) [] srcs))
 
-(defn call-edges [ctx view BOUND REFERS srcs file-modframe ents-of]
-  (let [defn-meta (defn-meta-of ctx view srcs file-modframe ents-of)
+(defn call-edges [ctx view BOUND REFERS srcs file-module-context ents-of]
+  (let [defn-meta (defn-meta-of ctx view srcs file-module-context ents-of)
    defn-set (set (keys defn-meta))
    callers (callers-of ctx view BOUND REFERS srcs ents-of defn-meta)
    edges (reduce (fn [acc pair] (let [caller-leaf (nth pair 0)

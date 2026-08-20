@@ -79,17 +79,17 @@
 
 (defn rpcresponse-payload [r] (:payload r))
 
-(defrecord RpcFrameV2 [kind flags request-id request response])
+(defrecord StoreRpcPacketV2 [kind flags request-id request response])
 
-(defn rpcframev2-kind [r] (:kind r))
+(defn storerpcpacketv2-kind [r] (:kind r))
 
-(defn rpcframev2-flags [r] (:flags r))
+(defn storerpcpacketv2-flags [r] (:flags r))
 
-(defn rpcframev2-request-id [r] (:request-id r))
+(defn storerpcpacketv2-request-id [r] (:request-id r))
 
-(defn rpcframev2-request [r] (:request r))
+(defn storerpcpacketv2-request [r] (:request r))
 
-(defn rpcframev2-response [r] (:response r))
+(defn storerpcpacketv2-response [r] (:response r))
 
 (defrecord TermCodecMeasure [bytes nodes])
 
@@ -121,8 +121,8 @@
 (defn ^Boolean rpc-response? [v]
   (instance? RpcResponse v))
 
-(defn ^Boolean rpc-frame-v2? [v]
-  (instance? RpcFrameV2 v))
+(defn ^Boolean store-rpc-packet-v2? [v]
+  (instance? StoreRpcPacketV2 v))
 
 (defn rpc-page-request-cursor-value [^RpcPageRequest v]
   (rpcpagerequest-cursor v))
@@ -211,11 +211,11 @@
 
 (defn commitmetadata-validation-attestation [r] (:validation-attestation r))
 
-(defrecord TransactionFrame [sequence operations])
+(defrecord TransactionRecord [sequence operations])
 
-(defn transactionframe-sequence [r] (:sequence r))
+(defn transactionrecord-sequence [r] (:sequence r))
 
-(defn transactionframe-operations [r] (:operations r))
+(defn transactionrecord-operations [r] (:operations r))
 
 (defrecord OperationOccurrence [coordinate action proposition])
 
@@ -284,8 +284,8 @@
 (defn ^Boolean commit-metadata? [v]
   (instance? CommitMetadata v))
 
-(defn ^Boolean transaction-frame? [v]
-  (instance? TransactionFrame v))
+(defn ^Boolean transaction-record? [v]
+  (instance? TransactionRecord v))
 
 (defn ^Boolean term-store-dump? [v]
   (instance? TermStoreDump v))

@@ -19,4 +19,4 @@ s 21-query-since2-final.bin 1409 :rpc/query
 s 22-occurrences-since2-final.bin 1471 :rpc/query
 q 25-text-all.bin 1247 :rpc/query
 s 26-text-since-early.bin 1333 :rpc/query
-t 27-checkpoint.bin 81 :rpc/checkpoint
+t 27-checkpoint.bin 82 :rpc/checkpoint

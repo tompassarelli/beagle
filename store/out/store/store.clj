@@ -14,7 +14,7 @@
 
 (def empty-commit-operations [])
 
-(def empty-transaction-frames [])
+(def empty-transaction-records [])
 
 (def empty-active-buckets [])
 
@@ -40,15 +40,15 @@
 
 (defn transactionreplayresult-message [r] (:message r))
 
-(defrecord TransactionFramesResult [ok frames code message])
+(defrecord TransactionRecordsResult [ok records code message])
 
-(defn transactionframesresult-ok [r] (:ok r))
+(defn transactionrecordsresult-ok [r] (:ok r))
 
-(defn transactionframesresult-frames [r] (:frames r))
+(defn transactionrecordsresult-records [r] (:records r))
 
-(defn transactionframesresult-code [r] (:code r))
+(defn transactionrecordsresult-code [r] (:code r))
 
-(defn transactionframesresult-message [r] (:message r))
+(defn transactionrecordsresult-message [r] (:message r))
 
 (def initial-slots 64)
 
@@ -312,8 +312,8 @@
 (defn- ^Boolean valid-operations? [operations]
   (and (pos? (count operations)) (every? (fn [operation] (valid-commit-operation? operation)) operations)))
 
-(defn transaction-frame [sequence operations]
-  (if (and (>= sequence 0) (valid-operations? operations)) (t/->TransactionFrame sequence operations) (throw (ex-info "store: transaction frame requires a non-negative sequence and operations" {:type :invalid-transaction-frame}))))
+(defn transaction-record [sequence operations]
+  (if (and (>= sequence 0) (valid-operations? operations)) (t/->TransactionRecord sequence operations) (throw (ex-info "store: transaction record requires a non-negative sequence and operations" {:type :invalid-transaction-record}))))
 
 (def ^String canonical-validator "store/canonical-validator-v1")
 
@@ -436,7 +436,7 @@
 (defn- ^TransactionReplayResult append-transaction-result! [ctx sequence operations]
   (let [before (deref ctx)]
   (cond
-  (not (valid-operations? operations)) (transaction-replay-error :invalid-transaction-frame "store: transaction requires at least one valid operation")
+  (not (valid-operations? operations)) (transaction-replay-error :invalid-transaction-record "store: transaction requires at least one valid operation")
   (< sequence (store-next-sequence before)) (transaction-replay-error :nonmonotonic-transaction-sequence "store: transaction sequence must advance within its space")
   (> sequence max-transaction-sequence) (transaction-replay-unclassified-error)
   :else (do
@@ -445,7 +445,7 @@
 
 (defn- append-transaction! [ctx sequence operations metadata]
   (let [before (deref ctx)]
-  (if (not (and (valid-operations? operations) (t/commit-metadata? metadata))) (throw (ex-info "store: transaction requires at least one valid operation" {:type :invalid-transaction-frame})) (if (< sequence (store-next-sequence before)) (throw (ex-info "store: transaction sequence must advance within its space" {:type :nonmonotonic-transaction-sequence})) (let [final-store (append-valid-transaction! ctx sequence operations)]
+  (if (not (and (valid-operations? operations) (t/commit-metadata? metadata))) (throw (ex-info "store: transaction requires at least one valid operation" {:type :invalid-transaction-record})) (if (< sequence (store-next-sequence before)) (throw (ex-info "store: transaction sequence must advance within its space" {:type :nonmonotonic-transaction-sequence})) (let [final-store (append-valid-transaction! ctx sequence operations)]
   (t/transaction-coordinate (t/termstore-space-id final-store) sequence))))))
 
 (defn- canonical-validate-commit! [operations metadata]
@@ -459,13 +459,13 @@
 (defn commit-transaction! [ctx operations]
   (commit-boundary! ctx operations (commit-metadata "store.legacy-api/v1" canonical-shape-schema-id nil)))
 
-(defn ^TransactionReplayResult replay-transaction-result! [ctx frame]
-  (if (and (t/transaction-frame? frame) (and (>= (t/transactionframe-sequence frame) 0) (valid-operations? (t/transactionframe-operations frame)))) (append-transaction-result! ctx (t/transactionframe-sequence frame) (t/transactionframe-operations frame)) (transaction-replay-error :invalid-transaction-frame "store: invalid transaction frame")))
+(defn ^TransactionReplayResult replay-transaction-result! [ctx record]
+  (if (and (t/transaction-record? record) (and (>= (t/transactionrecord-sequence record) 0) (valid-operations? (t/transactionrecord-operations record)))) (append-transaction-result! ctx (t/transactionrecord-sequence record) (t/transactionrecord-operations record)) (transaction-replay-error :invalid-transaction-record "store: invalid transaction record")))
 
 (defn ^TransactionReplayResult append-replayed-transaction! [ctx sequence actions handles]
   (let [before (deref ctx)]
   (cond
-  (or (empty? actions) (not= (count actions) (count handles))) (transaction-replay-error :invalid-transaction-frame "store: transaction requires at least one valid operation")
+  (or (empty? actions) (not= (count actions) (count handles))) (transaction-replay-error :invalid-transaction-record "store: transaction requires at least one valid operation")
   (< sequence (store-next-sequence before)) (transaction-replay-error :nonmonotonic-transaction-sequence "store: transaction sequence must advance within its space")
   (> sequence max-transaction-sequence) (transaction-replay-unclassified-error)
   :else (let [first-operation (count (store-operations before))
@@ -483,8 +483,8 @@
   (reset! (t/termstore-next-sequence appended) (inc sequence))
   (transaction-replay-ok))))))
 
-(defn replay-transaction! [ctx frame]
-  (if (and (t/transaction-frame? frame) (and (>= (t/transactionframe-sequence frame) 0) (valid-operations? (t/transactionframe-operations frame)))) (append-transaction! ctx (t/transactionframe-sequence frame) (t/transactionframe-operations frame) (commit-metadata "store.replay/v1" canonical-shape-schema-id nil)) (throw (ex-info "store: invalid transaction frame" {:type :invalid-transaction-frame}))))
+(defn replay-transaction! [ctx record]
+  (if (and (t/transaction-record? record) (and (>= (t/transactionrecord-sequence record) 0) (valid-operations? (t/transactionrecord-operations record)))) (append-transaction! ctx (t/transactionrecord-sequence record) (t/transactionrecord-operations record) (commit-metadata "store.replay/v1" canonical-shape-schema-id nil)) (throw (ex-info "store: invalid transaction record" {:type :invalid-transaction-record}))))
 
 (defn- occurrence-at [store operation-position]
   (let [row (nth (store-operations store) operation-position)]
@@ -512,13 +512,13 @@
    end (if (>= end-transaction (count transactions)) (count operations) (t/transactionrow-first-operation (nth transactions end-transaction)))]
   [start end]))
 
-(defn transaction-frames-between [store lower-exclusive upper-inclusive]
+(defn transaction-records-between [store lower-exclusive upper-inclusive]
   (let [transactions (store-transactions store)
    first (first-transaction-after transactions lower-exclusive)
    end (first-transaction-after transactions upper-inclusive)]
   (mapv (fn [row] (let [start (t/transactionrow-first-operation row)
    stop (+ start (t/transactionrow-operation-count row))]
-  (t/->TransactionFrame (t/transactionrow-sequence row) (mapv (fn [operation] (t/->CommitOperation (t/operationrow-action operation) (resolve-triple-handle store (t/operationrow-triple-handle operation)))) (subvec (store-operations store) start stop))))) (subvec transactions first end))))
+  (t/->TransactionRecord (t/transactionrow-sequence row) (mapv (fn [operation] (t/->CommitOperation (t/operationrow-action operation) (resolve-triple-handle store (t/operationrow-triple-handle operation)))) (subvec (store-operations store) start stop))))) (subvec transactions first end))))
 
 (defn operation-postings [store]
   (loop [position 0
@@ -639,11 +639,11 @@
    operation-count-value (t/transactionrow-operation-count row)]
   (if (and (> sequence previous-sequence) (and (= first-operation operation-position) (and (pos? operation-count-value) (and (<= operation-count-value (- (count operations) first-operation)) (valid-operation-slice? operations triple-count sequence first-operation operation-count-value))))) (recur (inc transaction-position) (+ operation-position operation-count-value) sequence) false)))))
 
-(defn- ^TransactionFramesResult transaction-frames-ok [frames]
-  (->TransactionFramesResult true frames nil nil))
+(defn- ^TransactionRecordsResult transaction-records-ok [records]
+  (->TransactionRecordsResult true records nil nil))
 
-(defn- ^TransactionFramesResult transaction-frames-error [code ^String message]
-  (->TransactionFramesResult false empty-transaction-frames code message))
+(defn- ^TransactionRecordsResult transaction-records-error [code ^String message]
+  (->TransactionRecordsResult false empty-transaction-records code message))
 
 (defn- operation-handle-error [store]
   (let [atoms (store-atoms store)
@@ -653,9 +653,9 @@
   (if (>= position (count operations)) nil (let [handle (t/operationrow-triple-handle (nth operations position))
    handle-position-value (handle-position handle)]
   (cond
-  (< handle 0) (transaction-frames-error :invalid-term-handle "store: term handle does not resolve")
-  (atom-handle? handle) (if (< handle-position-value (count atoms)) (transaction-frames-error :invalid-operation-handle "store: operation handle does not resolve to Triple") (transaction-frames-error :invalid-term-handle "store: term handle does not resolve"))
-  (>= handle-position-value (count triples)) (transaction-frames-error :invalid-term-handle "store: term handle does not resolve")
+  (< handle 0) (transaction-records-error :invalid-term-handle "store: term handle does not resolve")
+  (atom-handle? handle) (if (< handle-position-value (count atoms)) (transaction-records-error :invalid-operation-handle "store: operation handle does not resolve to Triple") (transaction-records-error :invalid-term-handle "store: term handle does not resolve"))
+  (>= handle-position-value (count triples)) (transaction-records-error :invalid-term-handle "store: term handle does not resolve")
   :else (recur (inc position))))))))
 
 (defn- ^Boolean valid-atom-rows? [rows]
@@ -667,8 +667,8 @@
    previous-sequence 0]
   (if (>= position (count transactions)) nil (let [sequence (t/transactionrow-sequence (nth transactions position))]
   (cond
-  (< sequence 0) (transaction-frames-error :invalid-transaction-frame "store: invalid transaction frame")
-  (<= sequence previous-sequence) (transaction-frames-error :nonmonotonic-transaction-sequence "store: transaction sequence must advance within its space")
+  (< sequence 0) (transaction-records-error :invalid-transaction-record "store: invalid transaction record")
+  (<= sequence previous-sequence) (transaction-records-error :nonmonotonic-transaction-sequence "store: transaction sequence must advance within its space")
   :else (recur (inc position) sequence))))))
 
 (defn- resolve-valid-handle [store handle]
@@ -680,7 +680,7 @@
   (let [row (nth (store-triples store) (handle-position handle))]
   (t/->Triple (resolve-valid-handle store (t/triplerow-t1 row)) (resolve-valid-handle store (t/triplerow-t2 row)) (resolve-valid-handle store (t/triplerow-t3 row)))))
 
-(defn- valid-transaction-frame-at [store transaction-position]
+(defn- valid-transaction-record-at [store transaction-position]
   (let [row (nth (store-transactions store) transaction-position)
    start (t/transactionrow-first-operation row)
    stop (+ start (t/transactionrow-operation-count row))
@@ -688,28 +688,28 @@
    current empty-commit-operations]
   (if (>= position stop) current (let [operation (nth (store-operations store) position)]
   (recur (inc position) (conj current (t/->CommitOperation (t/operationrow-action operation) (resolve-valid-triple-handle store (t/operationrow-triple-handle operation))))))))]
-  (t/->TransactionFrame (t/transactionrow-sequence row) operations)))
+  (t/->TransactionRecord (t/transactionrow-sequence row) operations)))
 
-(defn- valid-transaction-frames-between [store lower-exclusive upper-inclusive]
+(defn- valid-transaction-records-between [store lower-exclusive upper-inclusive]
   (let [transactions (store-transactions store)
    first (first-transaction-after transactions lower-exclusive)
    end (first-transaction-after transactions upper-inclusive)]
   (loop [position first
-   frames empty-transaction-frames]
-  (if (>= position end) frames (recur (inc position) (conj frames (valid-transaction-frame-at store position)))))))
+   records empty-transaction-records]
+  (if (>= position end) records (recur (inc position) (conj records (valid-transaction-record-at store position)))))))
 
-(defn ^TransactionFramesResult transaction-frames-between-result [store lower-exclusive upper-inclusive]
+(defn ^TransactionRecordsResult transaction-records-between-result [store lower-exclusive upper-inclusive]
   (let [atoms (store-atoms store)
    triples (store-triples store)
    transactions (store-transactions store)
    operations (store-operations store)]
   (cond
-  (> lower-exclusive upper-inclusive) (transaction-frames-error :invalid-transaction-frame "store: transaction frame range is invalid")
-  (not (valid-space-id? (t/termstore-space-id store))) (transaction-frames-error :invalid-space-id "store: TermStore requires a non-empty SpaceId")
-  (< (store-next-sequence store) 1) (transaction-frames-error :invalid-transaction-frame "store: invalid transaction frame")
+  (> lower-exclusive upper-inclusive) (transaction-records-error :invalid-transaction-record "store: transaction record range is invalid")
+  (not (valid-space-id? (t/termstore-space-id store))) (transaction-records-error :invalid-space-id "store: TermStore requires a non-empty SpaceId")
+  (< (store-next-sequence store) 1) (transaction-records-error :invalid-transaction-record "store: invalid transaction record")
   :else (let [handle-error (operation-handle-error store)]
-  (if (some? handle-error) handle-error (if (not (valid-atom-rows? atoms)) (transaction-frames-error :invalid-term "store: triple contains a value outside Term") (if (not (valid-triple-rows? (count atoms) triples)) (transaction-frames-error :invalid-term-handle "store: term handle does not resolve") (let [sequence-error (history-sequence-error transactions)]
-  (if (some? sequence-error) sequence-error (if (not (valid-history-rows? transactions operations (count triples) (store-next-sequence store))) (transaction-frames-error :invalid-transaction-frame "store: invalid transaction frame") (transaction-frames-ok (valid-transaction-frames-between store lower-exclusive upper-inclusive))))))))))))
+  (if (some? handle-error) handle-error (if (not (valid-atom-rows? atoms)) (transaction-records-error :invalid-term "store: triple contains a value outside Term") (if (not (valid-triple-rows? (count atoms) triples)) (transaction-records-error :invalid-term-handle "store: term handle does not resolve") (let [sequence-error (history-sequence-error transactions)]
+  (if (some? sequence-error) sequence-error (if (not (valid-history-rows? transactions operations (count triples) (store-next-sequence store))) (transaction-records-error :invalid-transaction-record "store: invalid transaction record") (transaction-records-ok (valid-transaction-records-between store lower-exclusive upper-inclusive))))))))))))
 
 (defn- rebuild-operation-state! [store]
   (let [operations (store-operations store)

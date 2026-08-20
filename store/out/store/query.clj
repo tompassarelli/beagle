@@ -278,7 +278,10 @@
   (projection-or-raise (project-with-history-result! propositions occurrences withdrawals)))
 
 (defn- set-union [left right]
-  (reduce (fn [acc ^String value] (conj acc value)) left right))
+  (into left right))
+
+(defn- ordered-names [names]
+  (sort (vec names)))
 
 (defn- empty-string-set []
   #{})
@@ -297,7 +300,7 @@
   (reduce (fn [acc term] (if (d/query-term? term) acc (conj acc (query-error :query-invalid-term (str context " contains an invalid QueryTerm"))))) [] terms))
 
 (defn- unbound-errors [terms bound ^String context]
-  (reduce (fn [acc ^String name] (if (contains? bound name) acc (conj acc (query-error :query-unbound-variable (str context " variable '" name "' is not bound"))))) [] (term-vars terms)))
+  (reduce (fn [acc ^String name] (if (contains? bound name) acc (conj acc (query-error :query-unbound-variable (str context " variable '" name "' is not bound"))))) [] (ordered-names (term-vars terms))))
 
 (defn- head-arities [rules]
   (reduce (fn [acc rule] (let [relation (d/rule-head-relation rule)]
@@ -410,7 +413,7 @@
   (if (>= position (count strata)) errors (let [stratum (nth strata position)
    current (derived-relations stratum)
    available (set-union lower current)
-   errors2 (reduce (fn [acc rule] (reduce (fn [inner ^String relation] (if (and (contains? all-derived relation) (not (contains? available relation))) (conj inner (query-error :query-forward-reference (str "relation '" relation "' is defined only in a later stratum"))) inner)) acc (positive-relations rule))) errors stratum)]
+   errors2 (reduce (fn [acc rule] (reduce (fn [inner ^String relation] (if (and (contains? all-derived relation) (not (contains? available relation))) (conj inner (query-error :query-forward-reference (str "relation '" relation "' is defined only in a later stratum"))) inner)) acc (ordered-names (positive-relations rule)))) errors stratum)]
   (recur (inc position) (set-union lower current) errors2)))))
 
 (defn- find-errors [^FindSpec find derived arities]
@@ -550,40 +553,14 @@
    validation-errors (validate-plan! plan)]
   (if (empty? validation-errors) (->CompileResult plan []) (->CompileResult nil validation-errors)))))))
 
-(defn- ^String length-key [^String tag ^String value]
-  (str tag (count value) ":" value))
-
 (defn ^String term-key [value]
-  (cond
-  (string? value) (let [text value]
-  (length-key "s" text))
-  (integer? value) (let [integer-value value]
-  (str "i" integer-value ";"))
-  (number? value) (let [float-value (double value)]
-  (str "f" float-value ";"))
-  (boolean? value) (let [bool-value value]
-  (if bool-value "b1;" "b0;"))
-  (keyword? value) (let [keyword-value value]
-  (length-key "k" (str keyword-value)))
-  (t/instant? value) (let [instant-value value]
-  (str "m" (t/instant-epoch-seconds instant-value) ":" (t/instant-nanos instant-value) ";"))
-  (t/triple? value) (let [triple-value value
-   t1 (term-key (t/triple-t1 triple-value))
-   t2 (term-key (t/triple-t2 triple-value))
-   t3 (term-key (t/triple-t3 triple-value))]
-  (str "t" (count t1) ":" t1 (count t2) ":" t2 (count t3) ":" t3))
-  :else "x0:"))
+  (d/term-key value))
 
 (defn ^String row-key [row]
-  (reduce (fn [^String acc value] (let [key (term-key value)]
-  (str acc (count key) ":" key))) "r" row))
+  (d/row-key row))
 
 (defn- order-row-vector [rows]
-  (let [by-key (reduce (fn [acc row] (assoc acc (row-key row) row)) {} rows)
-   keys (reduce (fn [acc row] (conj acc (row-key row))) [] rows)]
-  (mapv (fn [^String key] (let [row (get by-key key)]
-  (if (some? row) (let [present row]
-  present) []))) (vec (sort keys)))))
+  (d/order-row-vector rows))
 
 (defn- ordered-rows [rows]
   (order-row-vector (vec rows)))

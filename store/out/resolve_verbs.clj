@@ -8,7 +8,7 @@
             [resolve-render :as rv]
             [clojure.edn :as edn]))
 
-(defrecord Verb [ctx view KIND Vp srcs capture-only? emit-srcs reject reject2 warn emit extract out-path def-binding typeframe modframe forms-of module-name parse-require capture-refs ultimate BOUND REFERS wrapper-of form-for-victim descendants retire reresolve ents mint register scope-srcs fn-facts FIXED exit])
+(defrecord Verb [ctx view KIND Vp srcs capture-only? emit-srcs reject reject2 warn emit extract out-path def-binding type-context module-context forms-of module-name parse-require capture-refs ultimate BOUND REFERS wrapper-of form-for-victim descendants retire reresolve ents mint register scope-srcs fn-facts FIXED exit])
 
 (defn verb-ctx [r] (:ctx r))
 
@@ -38,9 +38,9 @@
 
 (defn verb-def-binding [r] (:def-binding r))
 
-(defn verb-typeframe [r] (:typeframe r))
+(defn verb-type-context [r] (:type-context r))
 
-(defn verb-modframe [r] (:modframe r))
+(defn verb-module-context [r] (:module-context r))
 
 (defn verb-forms-of [r] (:forms-of r))
 
@@ -97,7 +97,7 @@
   (warn (str "REJECTED — `" new "` already names a binding in " src " (rename-doesn't-collide; no facts mutated)."))
   (reject 3))))
   (doseq [src target-srcs]
-  (if (and (some? (get (get (:typeframe v) src) old)) (not (upper-first? new))) (do
+  (if (and (some? (get (get (:type-context v) src) old)) (not (upper-first? new))) (do
   (warn (str "REJECTED — `" new "` is not a valid (Capitalized) type name " "(beagle type-name shape; no facts mutated)."))
   (reject 3))))
   (doseq [src target-srcs]
@@ -105,7 +105,7 @@
   (if (some? B) (do
   (let [crefs (:capture-refs v)
    fo (:forms-of v)
-   caps (vec (mapcat (fn [^String s] (vec (mapcat (fn [f] (vec (crefs f (list (get (:modframe v) s)) B new))) (vec (fo s))))) srcs))]
+   caps (vec (mapcat (fn [^String s] (vec (mapcat (fn [f] (vec (crefs f (list (get (:module-context v) s)) B new))) (vec (fo s))))) srcs))]
   (if (> (count caps) 0) (do
   (warn (str "REJECTED — renaming `" old "` -> `" new "` would be CAPTURED by a local `" new "` in scope at " (count caps) " reference(s) (no-capture; no facts mutated)."))
   (reject 4))))))))
@@ -642,7 +642,7 @@
    extract-file (:extract-file env)
    out-path (:out-path env)]
   (->Verb (:ctx env) (:view env) (:KIND env) (:Vp env) (vec (:srcs env)) (:capture-only? env) (vec (:emit-srcs env)) (fn [code] (reject! code)) (fn [code detail] (reject! code detail)) (fn [line] (binding [*out* *err*]
-  (println line))) (:author-emit env) (fn [^String src] (extract-file src (out-path src))) out-path (:def-binding env) (:typeframe env) (:modframe env) (:forms-of env) (:module-name env) (:parse-require env) (:capture-refs env) (:ultimate env) (:BOUND env) (:REFERS env) (:wrapper-of env) (:form-for-victim env) (:descendants env) (:retire env) (:reresolve env) (:ents env) (:mint env) (:register env) (:scope-srcs env) (:fn-facts env) (:FIXED env) (fn [code] (System/exit code)))))
+  (println line))) (:author-emit env) (fn [^String src] (extract-file src (out-path src))) out-path (:def-binding env) (:type-context env) (:module-context env) (:forms-of env) (:module-name env) (:parse-require env) (:capture-refs env) (:ultimate env) (:BOUND env) (:REFERS env) (:wrapper-of env) (:form-for-victim env) (:descendants env) (:retire env) (:reresolve env) (:ents env) (:mint env) (:register env) (:scope-srcs env) (:fn-facts env) (:FIXED env) (fn [code] (System/exit code)))))
 
 (defn run-cli! [env args]
   (let [mode (first args)

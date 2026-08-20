@@ -26,11 +26,11 @@
             [resolve-core :as rc]    ; M1 Cut A: the CRDT order-key algebra + form vocabulary, in Beagle
             [resolve-read :as rr]    ; M1 Cut B: the view-relative read layer + ordered-tree navigation, in Beagle
             [resolve-binds :as rb]   ; M1 Cut C: what a binding form binds (patterns, params, let/for vectors)
-            [resolve-modules :as rm] ; M1 Cut D: one module's frame + its import/export surface
+            [resolve-modules :as rm] ; M1 Cut D: one module's context + its import/export surface
             [resolve-render :as rv]  ; M1 Cut E: render a node back to source + the anchor search
             [resolve-query :as rq]   ; M1 Cut F: the code queries — call graph, blast closure, dead private
             [resolve-walk :as rw]    ; M1 Cut G: the lexical walk — every reference to its nearest binding
-            [resolve-corpus :as rco] ; M1 Cut L: the corpus/store frame + fresh/warm resolver pipelines
+            [resolve-corpus :as rco] ; M1 Cut L: the corpus/store context + fresh/warm resolver pipelines
             [resolve-mint :as rmi]   ; M1 Cut I: the mint/author layer — a datum enters the store as facts
             [resolve-verbs :as rvb]))  ; M1 Cut H: the authoring verbs — an edit is a fact operation
 
@@ -56,7 +56,7 @@
 ;; a foreign id into store B (the load-bearing seam GATE B guards).
 ;; S2: `ctx` is the TermStore atom exposed to store-level callers; `rctx` is the
 ;; authoring/read Graph over that same store. `tx` and `SUP` have no successor in
-;; the frame store: transactions are frames, and retractions create occurrence-native
+;; the context store: transactions are records, and retractions create occurrence-native
 ;; withdrawal records. They survive ONLY as bound Vars for the external shim surface.
 (def ^:dynamic ctx nil)
 (def ^:dynamic rctx nil)
@@ -88,20 +88,20 @@
 ;; the inherited edges. Bound false by do-edit-min => corpus tables only, no walk. The
 ;; CLI/text path + cold materialize leave it true (verbatim whole-corpus resolution).
 (def ^:dynamic *resolve-walk?* true)
-;; *corpus-scope* — restrict corpus-from-store!'s EXPENSIVE per-module FRAME builds
+;; *corpus-scope* — restrict corpus-from-store!'s EXPENSIVE per-module CONTEXT builds
 ;; (module-defs/types/accessors) to this set of module-name strings, while still
 ;; deriving the full src/module list + the cheap cross-module export/type/accessor
 ;; export tables for EVERY module. A verb that edits ONE module (set-body/upsert-form)
-;; only reads its OWN module's frame (def-binding/form-for-victim), so building 11
-;; modules' frames is waste. nil => full frames for every module (verbatim behavior;
-;; rename, which walks consumers' require/frame tables cross-module, leaves it nil).
+;; only reads its OWN module's context (def-binding/form-for-victim), so building 11
+;; modules' contexts is waste. nil => full contexts for every module (verbatim behavior;
+;; rename, which walks consumers' require/context tables cross-module, leaves it nil).
 (def ^:dynamic *corpus-scope* nil)
 ;; *corpus-cache* — when bound (by the server), the module->entity-ids map to use INSTEAD of the
 ;; O(total) name-fact reduce in corpus-from-store!. The server maintains it incrementally (add the
 ;; commit's new named nodes to their module — O(delta)), so the per-verb corpus build drops from
-;; O(total-app) to O(edited-module-frame). Valid because the verb's clone == the committed store at
+;; O(total-app) to O(edited-module-context). Valid because the verb's clone == the committed store at
 ;; clone time, which the cache reflects. nil => full reduce (cold path, reads, the CLI). Just the
-;; `groups` map (module-src -> [entity-ids]); frames are still derived (scoped) from it.
+;; `groups` map (module-src -> [entity-ids]); contexts are still derived (scoped) from it.
 (def ^:dynamic *corpus-cache* nil)
 (def ^:dynamic file->ents (atom {}))
 
@@ -238,11 +238,11 @@
 (defn param-binds       [bracket] (rb/param-binds rctx *view* bracket))     ; parameter names from [(x T) y]
 ;; let/loop bindings are SEQUENTIAL — binding i's value (and :or defaults) see bindings
 ;; 0..i-1. let-bind-pairs returns ORDERED entries [bind-syms value-node or-default-vals]
-;; so walk/capture can build the frame incrementally (a flat outer-scope walk misses
+;; so walk/capture can build the context incrementally (a flat outer-scope walk misses
 ;; sibling shadowing — a real capture / mis-resolve bug).
 (defn let-bind-pairs    [bracket] (rb/let-bind-pairs rctx *view* bracket))
 (defn for-bind-pairs    [bracket] (rb/for-bind-pairs rctx *view* bracket))  ; [:bind syms vnode orvals] | [:expr node]
-(defn frame-of          [bsyms]   (rb/frame-of rctx *view* bsyms))
+(defn context-of        [bsyms]   (rb/context-of rctx *view* bsyms))
 (defn match-pat-binds   [pat]     (rb/match-pat-binds rctx *view* pat))     ; the NON-head leaves of a (Ctor a b) pattern
 
 ;; --- the lexical walk: resolve each reference to its nearest binding ---------
@@ -283,8 +283,8 @@
 (defn walk-quasi [node scope quoted?] (rw/walk-quasi! (walk-env) node (vec scope) quoted? rw/walk! rw/walk-quasi-seq!))
 (defn walk-quasi-seq [children scope quoted?] (rw/walk-quasi-seq! (walk-env) (vec children) (vec scope) quoted? rw/walk!))
 
-;; module frame = all top-level defs (so forward references resolve) ----------
-;; M1 Cut D — one module's frame + its import/export surface is now Beagle
+;; module context = all top-level defs (so forward references resolve) --------
+;; M1 Cut D — one module's context + its import/export surface is now Beagle
 ;; (src/resolve_modules.bclj). Wrappers as in Cuts B/C; the entity list comes out
 ;; of the ^:dynamic `file->ents` atom here and is handed over explicitly.
 (defn unwrap-def [form] (rm/unwrap-def rctx *view* form))
@@ -302,16 +302,16 @@
 (defn module-accessors [src] (rm/module-accessors rctx *view* (rco/file-entities file->ents src)))  ; {"point-x" -> [Point-name-leaf "x"]}
 
 ;; --- corpus tables (DYNAMIC, inert root) ------------------------------------
-;; The loaded sources + every frame/export table derived from them. INERT at root
+;; The loaded sources + every context/export table derived from them. INERT at root
 ;; (nil / empty), COMPUTED inside `resolve-edn!` from the FRESHLY-loaded srcs of
 ;; the bound store. Functions that read these (def-binding, make-xresolve,
 ;; re-resolve!, the mode dispatch) read the dynamic value at call time, so they
 ;; see the per-run tables — never a stale load-time global.
 (def ^:dynamic srcs [])
-(def ^:dynamic file-modframe {})
-(def ^:dynamic file-typeframe {})
+(def ^:dynamic file-module-context {})
+(def ^:dynamic file-type-context {})
 (def ^:dynamic file-accessors {})
-(defn def-binding [src nm] (rco/def-binding file-modframe file-typeframe src nm))  ; value OR type
+(defn def-binding [src nm] (rco/def-binding file-module-context file-type-context src nm))  ; value OR type
 ;; module-name -> {exported-name -> binding-node}
 ;; beagle modules carry an (ns ...) form but export IMPLICITLY (no js/export), so
 ;; fall back to ALL top-level defs as the export surface. JS modules with explicit
@@ -345,12 +345,12 @@
 ;; is why the ^:dynamic *xresolve*/*tresolve*/*aresolve* are no longer rebound on
 ;; this path — the module builds each src's three resolvers itself. re-resolve! still
 ;; binds them, and reads them through walk-env.
-(defn walk-corpus [] (rco/walk-corpus (vec srcs) file-modframe file-typeframe file-accessors (rco/file-entity-map file->ents)))
+(defn walk-corpus [] (rco/walk-corpus (vec srcs) file-module-context file-type-context file-accessors (rco/file-entity-map file->ents)))
 (defn cbind! [L target] (rw/cbind! (walk-env) L target))
 (defn resolve-comment [e src] (rw/resolve-comment! (walk-env) (walk-corpus) e src))
 (defn walk-comments [src] (rw/walk-comments! (walk-env) (walk-corpus) src))
 ;; the lexical walk over a CHOSEN subset of srcs (reads bound tables). The
-;; cross-module tables (global-exports / file-typeframe / ...) are already bound
+;; cross-module tables (global-exports / file-type-context / ...) are already bound
 ;; from the WHOLE corpus, so each walked module's imports resolve against every
 ;; other module's exports exactly as a full walk would — we just restrict WHICH
 ;; modules we re-walk (and re-write refers_to for). This is the resolver half of
@@ -373,10 +373,10 @@
 (defn lift-bound-to-refers! [] (rco/lift-bound-to-refers! rctx KIND BOUND REFERS))
 
 (defn- install-corpus-tables! [tables]
-  (let [[modframe typeframe accessors exports type-exports accessor-exports]
+  (let [[module-context type-context accessors exports type-exports accessor-exports]
         (rco/corpus-table-values tables)]
-    (set! file-modframe modframe)
-    (set! file-typeframe typeframe)
+    (set! file-module-context module-context)
+    (set! file-type-context type-context)
     (set! file-accessors accessors)
     (set! global-exports exports)
     (set! global-type-exports type-exports)
@@ -471,7 +471,7 @@
             CTOR (:CTOR ids) ACC (:ACC ids)
             n-resolved (atom 0) n-unresolved (atom 0) n-xmod (atom 0) n-type (atom 0) n-comment (atom 0)
             n-forms-walked (atom 0) walked-modules (atom #{})
-            srcs [] file-modframe {} file-typeframe {} file-accessors {}
+            srcs [] file-module-context {} file-type-context {} file-accessors {}
             global-exports {} global-type-exports {} global-accessor-exports {}]
       (let [result (with-authoring-writes! context body)]
         (when (pos? (txn/operation-count (rr/builder context)))
@@ -500,7 +500,7 @@
 ;; same kind/v/fN facts an --emit-edn projection has, PLUS a `name` fact
 ;; `@<module>#<int>` (store.schema/name!). Grouping there is by the name prefix,
 ;; not by load-edn's per-src tracking — so the ONLY thing that differs from the
-;; EDN path is how the corpus structure (file->ents/srcs + frame/export tables)
+;; EDN path is how the corpus structure (file->ents/srcs + context/export tables)
 ;; is DERIVED. Everything downstream (module-defs/forms-of/run-resolution!/...)
 ;; reads file->ents + ctx, which are the bound store, so it is reused verbatim.
 ;; ============================================================================
@@ -509,7 +509,7 @@
   (rco/name->module nm))
 ;; corpus-from-store! — from the BOUND, already-populated store, derive the SAME
 ;; corpus structure resolve-edn! computes from EDN: file->ents grouped by module,
-;; srcs = the module list, then the per-module frame/export tables (reusing
+;; srcs = the module list, then the per-module context/export tables (reusing
 ;; module-defs/module-types/module-accessors/module-exports/module-name — they
 ;; read @file->ents + ctx, which now ARE the warm store). `set!` (not root) so
 ;; nothing leaks past the binding scope, exactly like resolve-edn!.
@@ -674,28 +674,28 @@
 ;; logic in src/resolve_mint.bclj). Renaming def B to `new` is UNSOUND if a
 ;; reference to B would, after rendering as `new`, be captured by a LOCAL binding
 ;; `new` in scope at that reference — e.g. (def src 1)(defn f [dst] (+ dst src)),
-;; rename src->dst yields (+ dst dst). It reuses walk's EXACT frame construction,
+;; rename src->dst yields (+ dst dst). It reuses walk's EXACT context construction,
 ;; so the check is scope-precise. `scope` is vec'd here: the module threads
 ;; cons-lists, Cut G's walk (and now this) uses an innermost-first vector.
 (defn capture-refs [node scope B new] (rmi/capture-refs (mint-env) node (vec scope) B new))
 
 ;; --- authoring support (used by the upsert-form / set-body case arms) -------
-;; re-resolve!: after a mint, the module frame is stale (a new def, or a new body's
-;; references). Recompute every module's frame + re-walk forms so fresh references
+;; re-resolve!: after a mint, the module context is stale (a new def, or a new body's
+;; references). Recompute every module's context + re-walk forms so fresh references
 ;; carry refers_to. Idempotent — bind! only adds an edge where one resolves.
-;; PARTIAL port (M1 Cut I): the three per-src frame tables come from
-;; rmi/re-resolve-frames; the `binding` of *xresolve*/*tresolve*/*aresolve* IS the
+;; PARTIAL port (M1 Cut I): the three per-src context tables come from
+;; rmi/re-resolve-contexts; the `binding` of *xresolve*/*tresolve*/*aresolve* IS the
 ;; dynamic scope the re-walk reads and cannot change namespace, so it stays here.
 (defn re-resolve! []
-  (let [frames    (rmi/re-resolve-frames (vec srcs) module-defs module-types module-accessors)
-        modframe  (:modframe frames)
-        typeframe (:typeframe frames)
-        accessors (:accessors frames)]
+  (let [contexts       (rmi/re-resolve-contexts (vec srcs) module-defs module-types module-accessors)
+        module-context (:module-context contexts)
+        type-context   (:type-context contexts)
+        accessors      (:accessors contexts)]
     (doseq [src srcs]
       (binding [*xresolve* (make-xresolve src)
-                *tresolve* (fn [nm] (get (get typeframe src) nm))
+                *tresolve* (fn [nm] (get (get type-context src) nm))
                 *aresolve* (fn [nm] (get (get accessors src) nm))]
-        (walk-all (forms-of src) (list (get modframe src)))
+        (walk-all (forms-of src) (list (get module-context src)))
         (walk-comments src)))))
 ;; author-emit! — project every src, then report to stderr (M1 Cut I; the report
 ;; lines in src/resolve_mint.bclj). `detail` is printed as a VALUE, never str'd.
@@ -709,7 +709,7 @@
 ;; named functions so BOTH drivers can run them: the TEXT path (-main, over
 ;; resolve-edn! of emit-edn(text)) AND the GRAPH path (run-verb-warm!, over a
 ;; LOG-booted warm store via resolve-warm-store!). They are store-agnostic by
-;; construction — they read the dynamic ctx/tx/SUP/srcs/frame tables and write
+;; construction — they read the dynamic ctx/tx/SUP/srcs/context tables and write
 ;; via the assertion/retraction helpers and mint-datum!, never touching text — so the same code
 ;; runs unchanged under either binding scope.
 ;;
@@ -870,7 +870,7 @@
                       (author-emit-scoped! resolve-out project-srcs op detail))
        :extract-file extract-file!
        :out-path output-path
-       :def-binding def-binding :typeframe file-typeframe :modframe file-modframe
+       :def-binding def-binding :type-context file-type-context :module-context file-module-context
        :forms-of forms-of :module-name module-name :parse-require parse-require
        :capture-refs capture-refs :ultimate ultimate :BOUND BOUND :REFERS REFERS
        :wrapper-of wrapper-of :form-for-victim form-for-victim
@@ -955,7 +955,7 @@
 ;; run-verb-warm! — THE GRAPH EDIT PATH. Run an authoring verb over a LOG-booted
 ;; warm store (NOT emit-edn of text). `store` is `(migrate-flat->co code.log)`'s
 ;; :store; resolve-warm-store! binds ctx=store + tx + the store-local value-ids +
-;; corpus-from-store! (srcs/frames derived from the store's `name` facts), runs
+;; corpus-from-store! (srcs/contexts derived from the store's `name` facts), runs
 ;; the lexical walk, then invokes our body. Inside that scope we bind
 ;; *project-srcs* to the affected module and call the SAME verb function the text
 ;; path calls — asserting/withdrawing structural propositions against log-resident node identity,
@@ -997,7 +997,7 @@
 ;; concern-overlap and who-calls").
 
 ;; call-edges — scope-correct defn->defn edges over the CURRENTLY BOUND corpus
-;; (srcs/file-modframe + materialized refers_to must already be in scope — call under
+;; (srcs/file-module-context + materialized refers_to must already be in scope — call under
 ;; with-resolve-read / resolve-edn!). A "call" is any resolved reference inside a
 ;; top-level defn's body whose binding (via refers_to, transitively) is itself a
 ;; top-level defn; the caller is that enclosing defn. Edges are keyed on the binding's
@@ -1006,9 +1006,9 @@
 ;; {:defn-meta {leaf -> {:key :file :module :name}} :edges [[caller-leaf callee-leaf]]
 ;; :defn-set #{leaf}} — the server joins footprint @concern->@node against :edges; the
 ;; CLI maps leaf->:key for JSON.
-(defn call-edges [] (rq/call-edges rctx *view* BOUND REFERS (vec srcs) file-modframe (rco/file-entity-map file->ents)))
+(defn call-edges [] (rq/call-edges rctx *view* BOUND REFERS (vec srcs) file-module-context (rco/file-entity-map file->ents)))
 
-;; blast-closure — transitive blast radius over a set of [caller callee] edges via Fram
+;; blast-closure — transitive blast radius over a set of [caller callee] edges via Store
 ;; Datalog: blast(D) = {x | x transitively calls D} = D's transitive callers (who breaks
 ;; if D changes). Edge keys are any hashable (node-ids for the warm path, "src#leaf"
 ;; strings for JSON). Returns {:reaches #{[x y]} :blast {callee -> #{transitive-callers}}}.

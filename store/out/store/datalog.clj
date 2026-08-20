@@ -229,8 +229,8 @@
   (cond
   (and (= error-type :store-query-abort) (some? steps)) {:type :store-query-abort :code code :reason (queryevaluationerror-reason error-value) :steps steps :max-steps (queryevaluationerror-max-steps error-value) :timeout-ms (queryevaluationerror-timeout-ms error-value)}
   (= error-type :store-query-abort) {:type :store-query-abort :code code}
-  (and (= error-type :query-text-index-limit) (some? bytes)) {:type :query-text-index-limit :fram/code code :bytes bytes :maximum (queryevaluationerror-maximum error-value)}
-  :else {:type error-type :fram/code code})))
+  (and (= error-type :query-text-index-limit) (some? bytes)) {:type :query-text-index-limit :store/code code :bytes bytes :maximum (queryevaluationerror-maximum error-value)}
+  :else {:type error-type :store/code code})))
 
 (defn raise-query-evaluation-error [^QueryEvaluationError error-value]
   (throw (ex-info (queryevaluationerror-message error-value) (query-evaluation-error-data error-value))))
@@ -539,6 +539,44 @@
 (defn events-after-sequence [events lower-exclusive]
   (if (< lower-exclusive 0) events (filterv (fn [event] (event-after-sequence? event lower-exclusive)) events)))
 
+(defn- ^String length-key [^String tag ^String value]
+  (str tag (count value) ":" value))
+
+(defn ^String term-key [value]
+  (cond
+  (string? value) (let [text value]
+  (length-key "s" text))
+  (integer? value) (let [integer-value value]
+  (str "i" integer-value ";"))
+  (number? value) (let [float-value (double value)]
+  (str "f" float-value ";"))
+  (boolean? value) (let [bool-value value]
+  (if bool-value "b1;" "b0;"))
+  (keyword? value) (let [keyword-value value]
+  (length-key "k" (str keyword-value)))
+  (t/instant? value) (let [instant-value value]
+  (str "m" (t/instant-epoch-seconds instant-value) ":" (t/instant-nanos instant-value) ";"))
+  (t/triple? value) (let [triple-value value
+   t1 (term-key (t/triple-t1 triple-value))
+   t2 (term-key (t/triple-t2 triple-value))
+   t3 (term-key (t/triple-t3 triple-value))]
+  (str "t" (count t1) ":" t1 (count t2) ":" t2 (count t3) ":" t3))
+  :else "x0:"))
+
+(defn ^String row-key [row]
+  (reduce (fn [^String acc value] (let [key (term-key value)]
+  (str acc (count key) ":" key))) "r" row))
+
+(defn order-row-vector [rows]
+  (let [by-key (reduce (fn [acc row] (assoc acc (row-key row) row)) {} rows)
+   keys (reduce (fn [acc row] (conj acc (row-key row))) [] rows)]
+  (mapv (fn [^String key] (let [row (get by-key key)]
+  (if (some? row) (let [present row]
+  present) []))) (vec (sort keys)))))
+
+(defn- ordered-rows [rows]
+  (order-row-vector (vec rows)))
+
 (defn- ^CandidateSource candidate-source-add [^String relation ^CandidateSource source tuple]
   (let [handle (count (candidatesource-rows source))
    with-row (assoc source :rows (conj (candidatesource-rows source) tuple))]
@@ -548,16 +586,16 @@
   (reduce (fn [^CandidateSource current tuple] (candidate-source-add relation current tuple)) source tuples))
 
 (defn ^CandidateSource withdrawal-candidate-source [root lower-exclusive upper-inclusive]
-  (candidate-source-add-rows withdrawal-relation (empty-candidate-source) (set (store/withdrawal-tuples-between root lower-exclusive upper-inclusive))))
+  (candidate-source-add-rows withdrawal-relation (empty-candidate-source) (ordered-rows (set (store/withdrawal-tuples-between root lower-exclusive upper-inclusive)))))
 
 (defn- build-candidate-sources [db relations seed]
-  (reduce (fn [sources ^String relation] (if (contains? sources relation) sources (assoc sources relation (candidate-source-add-rows relation (empty-candidate-source) (get db relation #{}))))) seed relations))
+  (reduce (fn [sources ^String relation] (if (contains? sources relation) sources (assoc sources relation (candidate-source-add-rows relation (empty-candidate-source) (ordered-rows (get db relation #{})))))) seed relations))
 
 (defn- add-delta-sources [sources delta relations]
   (reduce (fn [current ^String relation] (let [tuples (get delta relation #{})
    existing (get current relation)
    base (if (instance? CandidateSource existing) existing (empty-candidate-source))]
-  (if (empty? tuples) current (assoc current relation (candidate-source-add-rows relation base tuples))))) sources relations))
+  (if (empty? tuples) current (assoc current relation (candidate-source-add-rows relation base (ordered-rows tuples)))))) sources relations))
 
 (defn ^Boolean text-relation-needle-valid?! [^String relation needle]
   (cond
@@ -690,7 +728,7 @@
   (recur (inc position) (rest remaining) (if (and (= :relation (literal-kind literal)) (not (literal-negated literal)) (contains? delta-relations (literal-relation literal))) (conj positions position) positions))))))
 
 (defn- positive-relation-names [rules]
-  (vec (sort (reduce (fn [relations ^Rule value] (reduce (fn [current ^Literal literal] (if (and (= :relation (literal-kind literal)) (not (literal-negated literal))) (conj current (literal-relation literal)) current)) relations (rule-body value))) #{} rules))))
+  (vec (sort (vec (reduce (fn [relations ^Rule value] (reduce (fn [current ^Literal literal] (if (and (= :relation (literal-kind literal)) (not (literal-negated literal))) (conj current (literal-relation literal)) current)) relations (rule-body value))) #{} rules)))))
 
 (defn- body-results-pinned! [db sources delta delta-sources body pin ^QueryEvaluationContext context]
   (loop [position 0
@@ -712,12 +750,12 @@
   (if (query-evaluation-context-open? context) (recur (rest remaining) (reduce (fn [current subst] (conj current (ground head subst))) derived substitutions)) #{}))))))
 
 (defn- db-new-only [candidate db relations]
-  (reduce (fn [delta ^String relation] (let [new-tuples (reduce (fn [rows-value tuple] (if (contains? (get db relation #{}) tuple) rows-value (conj rows-value tuple))) #{} (get candidate relation #{}))]
+  (reduce (fn [delta ^String relation] (let [new-tuples (reduce (fn [rows-value tuple] (if (contains? (get db relation #{}) tuple) rows-value (conj rows-value tuple))) #{} (vec (get candidate relation #{})))]
   (if (empty? new-tuples) delta (assoc delta relation new-tuples)))) {} relations))
 
 (defn- db-merge-delta [db delta relations]
   (reduce (fn [current ^String relation] (let [new-tuples (get delta relation #{})]
-  (if (empty? new-tuples) current (update current relation (fn [known] (reduce (fn [rows-value tuple] (conj rows-value tuple)) (or known #{}) new-tuples)))))) db relations))
+  (if (empty? new-tuples) current (update current relation (fn [known] (reduce (fn [rows-value tuple] (conj rows-value tuple)) (or known #{}) (vec new-tuples))))))) db relations))
 
 (defn- ^Boolean delta-empty? [delta relations]
   (loop [remaining relations]
@@ -731,7 +769,7 @@
   (if (or (empty? remaining) (not (query-evaluation-context-open? context))) current (let [value (first remaining)
    relation (rule-head-relation value)
    derived (derive-rule-delta! db sources delta delta-sources delta-set value context)]
-  (if (query-evaluation-context-open? context) (recur (rest remaining) (update current relation (fn [known] (reduce (fn [rows-value tuple] (conj rows-value tuple)) (or known #{}) derived)))) current))))]
+  (if (query-evaluation-context-open? context) (recur (rest remaining) (update current relation (fn [known] (reduce (fn [rows-value tuple] (conj rows-value tuple)) (or known #{}) (vec derived))))) current))))]
   (if (query-evaluation-context-open? context) (db-new-only candidate db relations) {})))
 
 (defn- fixpoint-with-candidates-context! [db0 rules candidates ^QueryEvaluationContext context]
@@ -745,7 +783,7 @@
   (if (or (empty? remaining) (not (query-evaluation-context-open? context))) current (let [value (first remaining)
    relation (rule-head-relation value)
    derived (derive-rule-indexed! db0 initial-sources value context)]
-  (if (query-evaluation-context-open? context) (recur (rest remaining) (update current relation (fn [known] (reduce (fn [rows-value tuple] (conj rows-value tuple)) (or known #{}) derived)))) current))))]
+  (if (query-evaluation-context-open? context) (recur (rest remaining) (update current relation (fn [known] (reduce (fn [rows-value tuple] (conj rows-value tuple)) (or known #{}) (vec derived))))) current))))]
   (if (not (query-evaluation-context-open? context)) seeded (let [delta0 (db-new-only seeded db0 relations)
    seeded-sources (add-delta-sources initial-sources delta0 read-relations)]
   (loop [db seeded
@@ -811,7 +849,7 @@
   (contains? heads relation) (conj acc (str "stratum " index ": negated '" relation "' is also derived in the same stratum"))
   (not (contains? lower relation)) (conj acc (str "stratum " index ": negated '" relation "' is not a base or lower-stratum relation"))
   :else acc)) problems (negated-relations stratum))]
-  (recur (+ index 1) (reduce (fn [acc ^String relation] (conj acc relation)) lower heads) problems2)))))
+  (recur (+ index 1) (reduce (fn [acc ^String relation] (conj acc relation)) lower (vec heads)) problems2)))))
 
 (defn facts [db ^String relation]
   (vec (get db relation #{})))

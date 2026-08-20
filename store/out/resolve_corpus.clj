@@ -54,8 +54,8 @@
 
 (defn corpushost-state [r] (:state r))
 
-(defn walk-corpus [srcs modframe typeframe accessors ents]
-  (rw/->Corpus srcs modframe typeframe accessors ents))
+(defn walk-corpus [srcs module-context type-context accessors ents]
+  (rw/->Corpus srcs module-context type-context accessors ents))
 
 (defn name->module [nm]
   (if (string? nm) (let [hit (re-matches MODULE-NAME-RE nm)]
@@ -127,7 +127,7 @@
   (if (= "1" (System/getenv "BEAGLE_STORE_PROF")) (do
   (let [profile (:profile state)
    t-done (System/nanoTime)]
-  (profile (format "  corpus-from-store!: groups=%.1fms frames+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- t-done t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state)))))))
+  (profile (format "  corpus-from-store!: groups=%.1fms contexts+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- t-done t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state)))))))
   tables)))
 
 (def ^String RESOLVE-SPACE "resolve")
@@ -178,11 +178,11 @@
 (defn file-entity-map [file-ents]
   (deref file-ents))
 
-(defn def-binding [modframe typeframe src nm]
-  (or (get (get modframe src) nm) (get (get typeframe src) nm)))
+(defn def-binding [module-context type-context src nm]
+  (or (get (get module-context src) nm) (get (get type-context src) nm)))
 
 (defn corpus-table-values [tables]
-  [(:modframe tables) (:typeframe tables) (:accessors tables) (:exports tables) (:type-exports tables) (:accessor-exports tables)])
+  [(:module-context tables) (:type-context tables) (:accessors tables) (:exports tables) (:type-exports tables) (:accessor-exports tables)])
 
 (defn table-srcs [tables]
   (:srcs tables))

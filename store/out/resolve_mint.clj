@@ -125,8 +125,8 @@
 (defn- nn [e]
   e)
 
-(defn- push [frame scope]
-  (into [frame] scope))
+(defn- push [context scope]
+  (into [context] scope))
 
 (defn- ^Boolean renders-as-tracked-name? [^Mint m node]
   (and (empty? (ri/by-subject-predicate (:ctx m) (nn node) (:FIXED m))) (nil? (rr/pred-val (:ctx m) (:view m) node "qualifier"))))
@@ -139,17 +139,17 @@
    k (rr/kind-of ctx view node)]
   (cond
   (= "symbol" k) (let [target (rr/refers-target ctx view BOUND REFERS node)]
-  (if (and (some? target) (= B (rv/ultimate ctx view BOUND REFERS target)) (renders-as-tracked-name? m node) (some? (some (fn [frame] (get frame newnm)) scope))) [node] []))
+  (if (and (some? target) (= B (rv/ultimate ctx view BOUND REFERS target)) (renders-as-tracked-name? m node) (some? (some (fn [context] (get context newnm)) scope))) [node] []))
   (= "list" k) (let [kids (rr/ordered-children ctx node)
    head (str (rr/head-sym ctx view node))
    brk? (fn [candidate] (rb/brackets? ctx view candidate))
    capture-all (fn [nodes active-scope] (reduce (fn [acc child] (into acc (capture-refs m child active-scope B newnm))) [] nodes))
    cap-signature (fn [signature arity-scope] (let [params (:params signature)
-   frame (rb/frame-of ctx view (if (nil? params) [] (rb/param-binds ctx view params)))
+   context (rb/context-of ctx view (if (nil? params) [] (rb/param-binds ctx view params)))
    constraints (if (nil? params) [] (rb/param-constraint-nodes ctx view params))
    or-vals (if (nil? params) [] (reduce (fn [acc binding] (into acc (rb/collect-or-vals ctx view binding))) [] (vec (rest (rr/ordered-children ctx params)))))
    body (vec (:body signature))]
-  (into (into (capture-all constraints arity-scope) (capture-all or-vals arity-scope)) (capture-all body (push frame arity-scope)))))
+  (into (into (capture-all constraints arity-scope) (capture-all or-vals arity-scope)) (capture-all body (push context arity-scope)))))
    cap-arity (fn [forms ^Boolean macro? arity-scope] (cap-signature (rb/signature-parts ctx view forms macro? false) arity-scope))
    cap-field-constraints (fn [fields field-scope] (if (or (nil? fields) (not (brk? fields))) [] (capture-all (rb/param-constraint-nodes ctx view fields) field-scope)))
    cap-method-constraints (fn [raw-method method-scope] (let [method (rr/unwrap-meta ctx view raw-method)]
@@ -185,7 +185,7 @@
    after-defaults (into captures (capture-all or-vals active-scope))
    after-constraint (if (some? constraint) (into after-defaults (capture-refs m constraint active-scope B newnm)) after-defaults)
    after-value (if (some? value-node) (into after-constraint (capture-refs m value-node active-scope B newnm)) after-constraint)]
-  [(push (rb/frame-of ctx view binds) active-scope) after-value])) [scope []] pairs)
+  [(push (rb/context-of ctx view binds) active-scope) after-value])) [scope []] pairs)
    final-scope (nth state 0)
    binding-captures (nth state 1)]
   (into binding-captures (capture-all (vec (drop 2 kids)) final-scope)))
@@ -200,19 +200,19 @@
    after-defaults (into captures (capture-all or-vals active-scope))
    after-constraint (if (some? constraint) (into after-defaults (capture-refs m constraint active-scope B newnm)) after-defaults)
    after-value (if (some? value-node) (into after-constraint (capture-refs m value-node active-scope B newnm)) after-constraint)]
-  [(push (rb/frame-of ctx view binds) active-scope) after-value])))) [scope []] entries)
+  [(push (rb/context-of ctx view binds) active-scope) after-value])))) [scope []] entries)
    final-scope (nth state 0)
    binding-captures (nth state 1)]
   (into binding-captures (capture-all (vec (drop 2 kids)) final-scope)))
   (contains? rc/MATCH-FORMS head) (reduce (fn [acc clause] (if (brk? clause) (let [clause-children (vec (rest (rr/ordered-children ctx clause)))
    pattern (nth clause-children 0 nil)
    body (vec (rest clause-children))
-   frame (rb/frame-of ctx view (rb/match-pat-binds ctx view pattern))]
-  (into (into acc (capture-refs m pattern scope B newnm)) (capture-all body (push frame scope)))) acc)) (capture-refs m (nth kids 1 nil) scope B newnm) (vec (drop 2 kids)))
+   context (rb/context-of ctx view (rb/match-pat-binds ctx view pattern))]
+  (into (into acc (capture-refs m pattern scope B newnm)) (capture-all body (push context scope)))) acc)) (capture-refs m (nth kids 1 nil) scope B newnm) (vec (drop 2 kids)))
   (= "letfn" head) (let [bracket (nth kids 1 nil)
    fnlists (if (and (some? bracket) (brk? bracket)) (vec (filter (fn [form] (= "list" (rr/kind-of ctx view form))) (vec (rest (rr/ordered-children ctx bracket))))) [])
-   frame (rb/frame-of ctx view (vec (keep (fn [form] (nth (rr/ordered-children ctx form) 0 nil)) fnlists)))
-   body-scope (push frame scope)
+   context (rb/context-of ctx view (vec (keep (fn [form] (nth (rr/ordered-children ctx form) 0 nil)) fnlists)))
+   body-scope (push context scope)
    function-captures (reduce (fn [acc form] (into acc (cap-arity (vec (rest (rr/ordered-children ctx form))) false body-scope))) [] fnlists)]
   (into function-captures (capture-all (vec (drop 2 kids)) body-scope)))
   (contains? #{"extend-type" "extend-protocol"} head) (reduce (fn [acc raw-item] (let [item (rr/unwrap-meta ctx view raw-item)]
@@ -228,9 +228,9 @@
   (into initial (capture-all body scope)))
   (= "as->" head) (let [init (nth kids 1 nil)
    name-node (nth kids 2 nil)
-   frame (rb/frame-of ctx view (if (some? (rr/sym-val ctx view name-node)) [(nn name-node)] []))
+   context (rb/context-of ctx view (if (some? (rr/sym-val ctx view name-node)) [(nn name-node)] []))
    initial (if (some? init) (capture-refs m init scope B newnm) [])]
-  (into initial (capture-all (vec (drop 3 kids)) (push frame scope))))
+  (into initial (capture-all (vec (drop 3 kids)) (push context scope))))
   :else (capture-all kids scope)))
   :else [])))
 
@@ -297,11 +297,11 @@
   (let [f outp]
   (into [(str "================ authoring: " op " ================") detail] (mapv (fn [^String s] (str "projected -> " (f s) "   <- " s)) srcs))))
 
-(defn re-resolve-frames [srcs mdefs mtypes maccs]
+(defn re-resolve-contexts [srcs mdefs mtypes maccs]
   (let [fd mdefs
    ft mtypes
    fa maccs]
-  {:modframe (reduce (fn [acc ^String s] (assoc acc s (fd s))) {} srcs) :typeframe (reduce (fn [acc ^String s] (assoc acc s (ft s))) {} srcs) :accessors (reduce (fn [acc ^String s] (assoc acc s (fa s))) {} srcs)}))
+  {:module-context (reduce (fn [acc ^String s] (assoc acc s (fd s))) {} srcs) :type-context (reduce (fn [acc ^String s] (assoc acc s (ft s))) {} srcs) :accessors (reduce (fn [acc ^String s] (assoc acc s (fa s))) {} srcs)}))
 
 (def STRUCTURAL-SEG-RE (re-pattern "seg\\d+"))
 

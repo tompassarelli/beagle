@@ -40,13 +40,13 @@
 
 (defn walk-ares [r] (:ares r))
 
-(defrecord Corpus [srcs modframe typeframe accessors ents])
+(defrecord Corpus [srcs module-context type-context accessors ents])
 
 (defn corpus-srcs [r] (:srcs r))
 
-(defn corpus-modframe [r] (:modframe r))
+(defn corpus-module-context [r] (:module-context r))
 
-(defn corpus-typeframe [r] (:typeframe r))
+(defn corpus-type-context [r] (:type-context r))
 
 (defn corpus-accessors [r] (:accessors r))
 
@@ -95,8 +95,8 @@
   (if (>= i (count scope)) nil (let [hit (get (nth scope i) nm)]
   (if (nil? hit) (recur (inc i)) hit)))))
 
-(defn- push [frame scope]
-  (into [frame] scope))
+(defn- push [context scope]
+  (into [context] scope))
 
 (defn bind! [^Walk w L target]
   (do
@@ -171,7 +171,7 @@
    binds (rb/param-binds (:ctx w) (:view w) params)
    constraints (rb/param-constraint-nodes (:ctx w) (:view w) params)
    or-vals (reduce (fn [acc binding] (into acc (rb/collect-or-vals (:ctx w) (:view w) binding))) [] (vec (rest (kids w params))))
-   frame (rb/frame-of (:ctx w) (:view w) binds)
+   context (rb/context-of (:ctx w) (:view w) binds)
    return-type (:return-type signature)
    raises-type (:raises-type signature)]
   (do
@@ -183,7 +183,7 @@
   (walk-type! w raises-type)))
   (walk-all! w constraints scope wf)
   (walk-all! w or-vals scope wf)
-  (walk-all! w (:body signature) (push frame scope) wf))))))
+  (walk-all! w (:body signature) (push context scope) wf))))))
 
 (defn walk-fn-arity! [^Walk w forms scope wf ^Boolean macro?]
   (walk-fn-signature! w (rb/signature-parts (:ctx w) (:view w) forms macro? false) scope wf macro?))
@@ -194,9 +194,9 @@
   (let [nm (sv w node)
    qualifier (sq w node)
    outer (if (empty? scope) [] (vec (butlast scope)))
-   modframe (if (empty? scope) nil (last scope))
+   module-context (if (empty? scope) nil (last scope))
    inner (if (nil? qualifier) (scope-lookup outer nm) nil)
-   mod-hit (if (nil? qualifier) (get modframe nm) nil)]
+   mod-hit (if (nil? qualifier) (get module-context nm) nil)]
   (cond
   (some? inner) nil
   (some? mod-hit) (bind! w node mod-hit)
@@ -382,7 +382,7 @@
   (walk! w constraint sc)))
   (if (some? vnode) (do
   (walk! w vnode sc)))
-  (push (rb/frame-of (:ctx w) (:view w) bsyms) sc)))) scope pairs)]
+  (push (rb/context-of (:ctx w) (:view w) bsyms) sc)))) scope pairs)]
   (walk-all! w (vec (drop 2 ks)) final walk!))
   (contains? rc/FOR-FORMS hs) (let [bracket (nth ks 1 nil)
    ok (and (some? bracket) (brk? w bracket))
@@ -401,7 +401,7 @@
   (walk! w constraint sc)))
   (if (some? vnode) (do
   (walk! w vnode sc)))
-  (push (rb/frame-of (:ctx w) (:view w) bsyms) sc))))) scope entries)]
+  (push (rb/context-of (:ctx w) (:view w) bsyms) sc))))) scope entries)]
   (walk-all! w (vec (drop 2 ks)) final walk!))
   (contains? rc/MATCH-FORMS hs) (do
   (walk! w (nth ks 1 nil) scope)
@@ -411,11 +411,11 @@
    body (vec (rest cc))]
   (do
   (walk-pat-heads! w pat scope walk!)
-  (walk-all! w body (push (rb/frame-of (:ctx w) (:view w) (rb/match-pat-binds (:ctx w) (:view w) pat)) scope) walk!)))))
+  (walk-all! w body (push (rb/context-of (:ctx w) (:view w) (rb/match-pat-binds (:ctx w) (:view w) pat)) scope) walk!)))))
   (= "letfn" hs) (let [bracket (nth ks 1 nil)
    fnlists (if (and (some? bracket) (brk? w bracket)) (vec (filter (fn [f] (= "list" (kd w f))) (vec (rest (kids w bracket))))) [])
-   frame (rb/frame-of (:ctx w) (:view w) (vec (keep (fn [f] (nth (kids w f) 0 nil)) fnlists)))
-   bodyscope (push frame scope)]
+   context (rb/context-of (:ctx w) (:view w) (vec (keep (fn [f] (nth (kids w f) 0 nil)) fnlists)))
+   bodyscope (push context scope)]
   (do
   (doseq [fl fnlists]
   (walk-fn-arity! w (vec (rest (kids w fl))) bodyscope walk! false))
@@ -423,11 +423,11 @@
   (contains? rc/EXTEND-FORMS hs) (walk-extension! w ks scope walk!)
   (= "as->" hs) (let [init (nth ks 1 nil)
    name (nth ks 2 nil)
-   frame (rb/frame-of (:ctx w) (:view w) (if (some? (sv w name)) [name] []))]
+   context (rb/context-of (:ctx w) (:view w) (if (some? (sv w name)) [name] []))]
   (do
   (if (some? init) (do
   (walk! w init scope)))
-  (walk-all! w (vec (drop 3 ks)) (push frame scope) walk!)))
+  (walk-all! w (vec (drop 3 ks)) (push context scope) walk!)))
   :else (walk-all! w ks scope walk!)))
   :else nil)))
 
@@ -437,8 +437,8 @@
   (swap! (:ncomment w) (fn [n] (inc n)))))
 
 (defn- def-binding [^Corpus cp src nm]
-  (let [v (get (get (:modframe cp) src) nm)]
-  (if (some? v) v (get (get (:typeframe cp) src) nm))))
+  (let [v (get (get (:module-context cp) src) nm)]
+  (if (some? v) v (get (get (:type-context cp) src) nm))))
 
 (defn resolve-comment! [^Walk w ^Corpus cp e src]
   (doseq [seg (vec (filter (fn [s] (= "symbol" (kd w s))) (rr/ordered-segs (:ctx w) e)))]
@@ -454,7 +454,7 @@
   (resolve-comment! w cp e src)))
 
 (defn- ^Walk for-src [^Walk w ^Corpus cp src xres-for]
-  (->Walk (:ctx w) (:view w) (:REFERS w) (:BOUND w) (:FIXED w) (:QUAL w) (:CTOR w) (:ACC w) (:nres w) (:nunres w) (:nxmod w) (:ntype w) (:ncomment w) (xres-for src) (fn [nm] (get (get (:typeframe cp) src) nm)) (fn [nm] (get (get (:accessors cp) src) nm))))
+  (->Walk (:ctx w) (:view w) (:REFERS w) (:BOUND w) (:FIXED w) (:QUAL w) (:CTOR w) (:ACC w) (:nres w) (:nunres w) (:nxmod w) (:ntype w) (:ncomment w) (xres-for src) (fn [nm] (get (get (:type-context cp) src) nm)) (fn [nm] (get (get (:accessors cp) src) nm))))
 
 (defn run-resolution-over! [^Walk w ^Corpus cp walk-srcs xres-for n-forms walked]
   (doseq [src walk-srcs]
@@ -464,7 +464,7 @@
   (do
   (swap! walked conj src)
   (swap! n-forms + (count forms))
-  (walk-all! w2 forms [(get (:modframe cp) src)] walk!)
+  (walk-all! w2 forms [(get (:module-context cp) src)] walk!)
   (walk-comments! w2 cp src)))))
 
 (defn run-resolution! [^Walk w ^Corpus cp xres-for n-forms walked]
@@ -475,7 +475,7 @@
    named (vec (filter (fn [s] (some? (rm/module-name ctx view (vec (get ents-of s []))))) srcs))
    by-mod (fn [f] (reduce (fn [m s] (let [ents (vec (get ents-of s []))]
   (assoc m (rm/module-name ctx view ents) (f ents)))) {} named))]
-  {:modframe (per (fn [ents] (rm/module-defs ctx view ents))) :typeframe (per (fn [ents] (rm/module-types ctx view ents))) :accessors (per (fn [ents] (rm/module-accessors ctx view ents))) :exports (by-mod (fn [ents] (let [e (rm/module-exports ctx view ents)]
+  {:module-context (per (fn [ents] (rm/module-defs ctx view ents))) :type-context (per (fn [ents] (rm/module-types ctx view ents))) :accessors (per (fn [ents] (rm/module-accessors ctx view ents))) :exports (by-mod (fn [ents] (let [e (rm/module-exports ctx view ents)]
   (if (empty? e) (rm/module-defs ctx view ents) e)))) :type-exports (by-mod (fn [ents] (rm/module-types ctx view ents))) :accessor-exports (by-mod (fn [ents] (rm/module-accessors ctx view ents)))}))
 
 (defn warm-groups [ctx cache name->module]
@@ -485,10 +485,10 @@
 
 (defn scoped-corpus-tables [ctx view groups scope]
   (let [srcs (vec (keys groups))
-   frame-srcs (if (some? scope) (vec (filter scope srcs)) srcs)
-   per-frame (fn [f] (reduce (fn [table src] (assoc table src (f (vec (get groups src []))))) {} frame-srcs))
+   context-srcs (if (some? scope) (vec (filter scope srcs)) srcs)
+   per-context (fn [f] (reduce (fn [table src] (assoc table src (f (vec (get groups src []))))) {} context-srcs))
    named (vec (filter (fn [src] (some? (rm/module-name ctx view (vec (get groups src []))))) srcs))
    by-module (fn [f] (if (some? scope) {} (reduce (fn [table src] (let [ents (vec (get groups src []))]
   (assoc table (rm/module-name ctx view ents) (f ents)))) {} named)))]
-  {:srcs srcs :modframe (per-frame (fn [ents] (rm/module-defs ctx view ents))) :typeframe (per-frame (fn [ents] (rm/module-types ctx view ents))) :accessors (per-frame (fn [ents] (rm/module-accessors ctx view ents))) :exports (by-module (fn [ents] (let [exports (rm/module-exports ctx view ents)]
+  {:srcs srcs :module-context (per-context (fn [ents] (rm/module-defs ctx view ents))) :type-context (per-context (fn [ents] (rm/module-types ctx view ents))) :accessors (per-context (fn [ents] (rm/module-accessors ctx view ents))) :exports (by-module (fn [ents] (let [exports (rm/module-exports ctx view ents)]
   (if (empty? exports) (rm/module-defs ctx view ents) exports)))) :type-exports (by-module (fn [ents] (rm/module-types ctx view ents))) :accessor-exports (by-module (fn [ents] (rm/module-accessors ctx view ents)))}))

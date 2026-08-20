@@ -14,7 +14,8 @@
 (defn emit! [name entry op payload & {:keys [page]}]
   (let [id (swap! next-id inc)
         request (w/rpc-request! space op nil page nil payload)
-        bytes (w/encode-rpc-packet-v2! (w/rpc-request-packet id request))]
+        bytes (w/store-rpc-encode-packet-v2!
+               (w/store-rpc-request-packet id request))]
     (io/copy bytes (io/file out-dir (str name ".bin")))
     (swap! manifest conj (str entry " " name ".bin " (alength bytes) " " op))
     (println (format "%-26s %-2s %8d bytes id=%d op=%s" name entry

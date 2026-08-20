@@ -15,7 +15,7 @@
            [java.util Arrays]
            [java.util HexFormat]))
 
-(def ^String MAGIC "FRAMFRI2")
+(def ^String MAGIC "BEAGLEFRI2")
 
 (def FMT 2)
 
@@ -323,7 +323,7 @@
 (defn- read-atoms! [buffer]
   (let [row-count (read-count! buffer "AtomRow count" 5)]
   (mapv (fn [position] (let [term (read-term-row! buffer)]
-  (if (t/triple? term) (fail "fri: AtomRow decoded as Triple" :invalid-fri-cache) (atom-row term)))) (range row-count))))
+  (if (t/triple? term) (fail "fri: AtomRow decoded as Triple" :invalid-fri-cache) (atom-row term)))) (vec (range row-count)))))
 
 (defn- initial-handles [atoms]
   (into {} (map-indexed (fn [position row] [(atom-value row) (atom-handle position)]) atoms)))
@@ -342,15 +342,15 @@
 
 (defn- read-transactions! [buffer]
   (let [row-count (read-count! buffer "TransactionRow count" 24)]
-  (mapv (fn [position] (t/->TransactionRow (read-i64-le! buffer "transaction sequence") (read-i64-le! buffer "first operation") (read-i64-le! buffer "operation count"))) (range row-count))))
+  (mapv (fn [position] (t/->TransactionRow (read-i64-le! buffer "transaction sequence") (read-i64-le! buffer "first operation") (read-i64-le! buffer "operation count"))) (vec (range row-count)))))
 
 (defn- read-operations! [buffer]
   (let [row-count (read-count! buffer "OperationRow count" 25)]
-  (mapv (fn [position] (t/->OperationRow (read-i64-le! buffer "operation transaction") (read-i64-le! buffer "operation ordinal") (code-action (read-u8! buffer "operation action")) (read-i64-le! buffer "operation handle"))) (range row-count))))
+  (mapv (fn [position] (t/->OperationRow (read-i64-le! buffer "operation transaction") (read-i64-le! buffer "operation ordinal") (code-action (read-u8! buffer "operation action")) (read-i64-le! buffer "operation handle"))) (vec (range row-count)))))
 
 (defn- read-index! [buffer width]
   (let [row-count (read-count! buffer "slot index row count" (* width 8))]
-  (mapv (fn [position] (mapv (fn [field] (read-i64-le! buffer "slot index handle")) (range width))) (range row-count))))
+  (mapv (fn [position] (mapv (fn [field] (read-i64-le! buffer "slot index handle")) (vec (range width)))) (vec (range row-count)))))
 
 (defn- read-indexes! [buffer]
   (mapv (fn [width] (read-index! buffer width)) [2 2 2 3 3 3]))
@@ -433,7 +433,7 @@
    stored-fingerprint (:fingerprint envelope)
    stored-position (:source-position envelope)
    stored-sha (:payload-sha envelope)]
-  (if (not (= stored-space (cachesource-space-id source))) (fail "fri: cache belongs to a different SpaceId" :cache-space-mismatch) (if (not (and (= stored-fingerprint (cachesource-fingerprint source)) (= stored-position (cachesource-valid-bytes source)))) (fail "fri: cache does not match the canonical FRAMLOG prefix" :cache-source-mismatch) (if (not (Arrays/equals stored-sha (sha256-bytes payload))) (fail "fri: cache payload checksum mismatch" :invalid-fri-cache) (let [cache-data (read-payload! payload stored-space)
+  (if (not (= stored-space (cachesource-space-id source))) (fail "fri: cache belongs to a different SpaceId" :cache-space-mismatch) (if (not (and (= stored-fingerprint (cachesource-fingerprint source)) (= stored-position (cachesource-valid-bytes source)))) (fail "fri: cache does not match the canonical Beagle Store log prefix" :cache-source-mismatch) (if (not (Arrays/equals stored-sha (sha256-bytes payload))) (fail "fri: cache payload checksum mismatch" :invalid-fri-cache) (let [cache-data (read-payload! payload stored-space)
    dump (:dump cache-data)
    ctx (validate-dump! dump source)]
   (->CacheImage source dump (:indexes cache-data) ctx)))))))

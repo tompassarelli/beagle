@@ -68,7 +68,7 @@
   (->TextError :query-text-index-limit :query-text-index-limit message bytes maximum true))
 
 (defn text-error-data [^TextError error]
-  (if (texterror-limit-data error) {:type (texterror-type error) :fram/code (texterror-code error) :bytes (texterror-bytes error) :maximum (texterror-maximum error)} {:type (texterror-type error) :code (texterror-code error)}))
+  (if (texterror-limit-data error) {:type (texterror-type error) :store/code (texterror-code error) :bytes (texterror-bytes error) :maximum (texterror-maximum error)} {:type (texterror-type error) :code (texterror-code error)}))
 
 (defn raise-text-error [^TextError error]
   (throw (ex-info (texterror-message error) (text-error-data error))))
@@ -125,7 +125,7 @@
    postings (loop [handle 0
    current empty-postings]
   (if (>= handle row-count) current (let [value (t/triple-t3 (nth rows handle))]
-  (recur (inc handle) (if (string? value) (reduce (fn [index ^String token] (assoc index token (conj (get index token []) handle))) current (token-set! value)) current)))))
+  (recur (inc handle) (if (string? value) (reduce (fn [index ^String token] (assoc index token (conj (get index token []) handle))) current (tokenize! value)) current)))))
    weight (+ 112 (* 14 row-count) (postings-weight postings))
    error (index-limit-error weight maximum)]
   (if error (->TextCandidateSourceResult false nil error) (->TextCandidateSourceResult true (->TextCandidateSource rows postings weight) (no-text-error)))))

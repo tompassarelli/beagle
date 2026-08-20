@@ -1,5 +1,5 @@
 (ns store.code-reader
-  "Version-pinned code snapshots and Beagle projections over FRAMRPC v2."
+  "Version-pinned code snapshots and Beagle projections over Store RPC v2."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]

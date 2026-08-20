@@ -18,20 +18,20 @@
 
 (defn fold-dump [r] (:dump r))
 
-(defn transaction-frame [sequence operations]
-  (store/transaction-frame sequence operations))
+(defn transaction-record [sequence operations]
+  (store/transaction-record sequence operations))
 
-(defn max-sequence [frames]
-  (reduce (fn [maximum frame] (let [sequence (t/transactionframe-sequence frame)]
-  (if (> sequence maximum) sequence maximum))) 0 frames))
+(defn max-sequence [records]
+  (reduce (fn [maximum record] (let [sequence (t/transactionrecord-sequence record)]
+  (if (> sequence maximum) sequence maximum))) 0 records))
 
 (defn- ^Fold project [ctx]
   (->Fold (store/space-id ctx) (store/occurrences ctx) (store/withdrawals ctx) (store/live-occurrences ctx) (store/live-propositions ctx) (store/current-sequence ctx) (store/dump-term-store ctx)))
 
-(defn ^Fold fold! [^String space-id frames]
+(defn ^Fold fold! [^String space-id records]
   (let [ctx (store/new-term-store space-id)]
-  (doseq [frame frames]
-  (store/replay-transaction! ctx frame))
+  (doseq [record records]
+  (store/replay-transaction! ctx record))
   (project ctx)))
 
 (defn ^Fold refold! [^String space-id dump]

@@ -101,13 +101,13 @@
    edge-pred "calls-defn"
    operations (mapv (fn [e] (c/assert-operation (t/triple (node-term (nth e 0)) edge-pred (node-term (nth e 1))))) edges)
    _load (if (pos? (count operations)) (do
-  (c/commit-transaction! ctx operations)))
+  (c/commit-boundary! ctx operations (c/commit-metadata "store.codegraph/closure-v1" "store/CommitOperationV1" "codegraph-v1"))))
    t0 (System/currentTimeMillis)
    db (d/run-rules! (c/live-propositions ctx) [(d/rule "reaches" [(d/variable "x") (d/variable "y")] [(d/relation-literal d/triple-relation [(d/variable "x") (d/constant edge-pred) (d/variable "y")])]) (d/rule "reaches" [(d/variable "x") (d/variable "z")] [(d/relation-literal d/triple-relation [(d/variable "x") (d/constant edge-pred) (d/variable "y")]) (d/relation-literal "reaches" [(d/variable "y") (d/variable "z")])])])
    dl-reaches (set (d/facts db "reaches"))
    t1 (System/currentTimeMillis)
    truth (reduce + (mapv (fn [k] (count (transitive fadj k))) defn-keys))]
-  (println (str "\nFram Datalog transitive closure: " (count dl-reaches) " reaches-pairs in " (- t1 t0) " ms" "  (in-process closure: " truth " pairs — " (if (= (count dl-reaches) truth) "MATCH" "DIVERGE") ")"))))
+  (println (str "\nBeagle Store Datalog transitive closure: " (count dl-reaches) " reaches-pairs in " (- t1 t0) " ms" "  (in-process closure: " truth " pairs — " (if (= (count dl-reaches) truth) "MATCH" "DIVERGE") ")"))))
 
 (defn bench-a! [by-name radj]
   (println "\n================ BENCHMARK A — caller precision on collisions ================")

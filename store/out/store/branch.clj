@@ -5,13 +5,13 @@
            [java.security MessageDigest]
            [java.util.zip CRC32]))
 
-(def ^String ref-format "framref/v1")
+(def ^String ref-format "revision-ref/v1")
 
-(def ^String fork-marker-format "framfork/v1")
+(def ^String fork-marker-format "branch-fork/v1")
 
-(def ^String reseal-marker-format "framreseal/v1")
+(def ^String reseal-marker-format "branch-reseal/v1")
 
-(def ^String branch-revision-format "frambranch-revision/v2")
+(def ^String branch-revision-format "branch-revision/v2")
 
 (def ^String default-branch "main")
 
@@ -84,7 +84,7 @@
 (defn resealmarker-ref-identity [r] (:ref-identity r))
 
 (defn- fail [^String message code]
-  (throw (ex-info message {:type code :fram/code code})))
+  (throw (ex-info message {:type code :store-log/code code})))
 
 (defn ^Boolean valid-segment-name? [^String value]
   (some? (re-matches #"[0-9a-f]{64}" value)))

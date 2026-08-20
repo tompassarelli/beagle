@@ -127,12 +127,12 @@
     (warn (str path " — skipped (could not parse): " (.getMessage error)))
     [])))
 
-(defn- number-frames [triples]
+(defn- number-records [triples]
   (loop [position 0
-   frames []]
-  (if (>= position (count triples)) frames (recur (+ position 1) (conj frames (fold/transaction-frame (+ position 1) [(store/assert-operation (nth triples position))]))))))
+   records []]
+  (if (>= position (count triples)) records (recur (+ position 1) (conj records (fold/transaction-record (+ position 1) [(store/assert-operation (nth triples position))]))))))
 
 (defn load-corpus [^String threads-dir]
   (let [files (store.rt/list-md threads-dir)
    triples (reduce (fn [acc ^String path] (vec (concat acc (safe-file->triples path)))) [] files)]
-  (number-frames (normalize-predicate-triples triples))))
+  (number-records (normalize-predicate-triples triples))))
