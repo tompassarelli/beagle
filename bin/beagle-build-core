@@ -1980,7 +1980,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
         (quote [java.nio.charset StandardCharsets])
         (quote [java.nio.file CopyOption Files OpenOption Paths
                  StandardCopyOption StandardOpenOption])
-        (quote [java.util.concurrent TimeUnit]))
+        (quote [java.util.concurrent Callable Executors TimeUnit]))
 
 (def report-path (System/getenv "BEAGLE_CORE_REPORT"))
 (def native-report-format "beagle-native-report/v1")
@@ -2184,17 +2184,40 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
       (mapcat #(resolved-definition-nodes definitions index module-name %) references)
       (mapcat #(resolved-definition-nodes definitions index module-name %) types)))))
 
-(defn dependency-resolver [definitions index]
-  (let [cache (volatile! {})
-        definition-ids (set (map id-value (definition-nodes index)))]
-    (fn [definition]
-      (let [identity (id-value definition)]
-        (if (contains? @cache identity)
-          (get @cache identity)
-          (let [dependencies
-                (vec (dependency-nodes definitions index definition definition-ids))]
-            (vswap! cache assoc identity dependencies)
-            dependencies))))))
+(def projection-parallelism
+  (max 1
+       (min 22
+            (- (.availableProcessors (Runtime/getRuntime)) 2))))
+
+(defn ordered-parallel-mapv [operation values]
+  (let [items (vec values)]
+    (if (or (= 1 projection-parallelism) (< (count items) 2))
+      (mapv operation items)
+      (let [pool (Executors/newFixedThreadPool projection-parallelism)
+            futures
+            (mapv
+             (fn [item]
+               (.submit
+                pool
+                (reify Callable
+                  (call [_] (operation item)))))
+             items)]
+        (try
+          (mapv #(.get %) futures)
+          (finally
+            (.shutdownNow pool)))))))
+
+(defn dependency-projection [definitions index]
+  (let [ordered (vec (sort-by id-value (definition-nodes index)))
+        definition-ids (set (map id-value ordered))
+        entries
+        (ordered-parallel-mapv
+         (fn [definition]
+           [(id-value definition)
+            (vec (dependency-nodes
+                  definitions index definition definition-ids))])
+         ordered)]
+    {:ordered ordered :by-id (into {} entries)}))
 
 (defn source-node-name-index [rows]
   (reduce
@@ -2212,36 +2235,39 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
    rows))
 
 (defn semantic-read-set-rows
-  [rows index selected dependency-for]
+  [rows selected ordered-definitions dependencies-by-id]
   (let [node-names (source-node-name-index rows)
+        selected-definitions
+        (filterv #(contains? selected (id-value %)) ordered-definitions)
         reads
         (vec
          (mapcat
-          (fn [definition]
-            (let [definition-id (id-value definition)
-                  subject (get node-names definition-id)
-                  dependencies
-                  (sort-by id-value
-                           (remove #(= definition-id (id-value %))
-                                   (dependency-for definition)))]
-              (when-not subject
-                (throw (ex-info "semantic unit has no source-fact node name"
-                                {:definition definition-id})))
-              (mapv
-               (fn [dependency]
-                 (let [object (get node-names (id-value dependency))]
-                   (when-not object
-                     (throw (ex-info "semantic read has no source-fact node name"
-                                     {:definition definition-id
-                                      :dependency (id-value dependency)})))
-                   (slice/->SliceFactV0 subject "semantic-read" "n" object)))
-               dependencies)))
-          (sort-by id-value
-                   (filter #(contains? selected (id-value %))
-                           (definition-nodes index)))))]
+          identity
+          (ordered-parallel-mapv
+           (fn [definition]
+             (let [definition-id (id-value definition)
+                   subject (get node-names definition-id)
+                   dependencies
+                   (sort-by id-value
+                            (remove #(= definition-id (id-value %))
+                                    (get dependencies-by-id definition-id [])))]
+               (when-not subject
+                 (throw (ex-info "semantic unit has no source-fact node name"
+                                 {:definition definition-id})))
+               (mapv
+                (fn [dependency]
+                  (let [object (get node-names (id-value dependency))]
+                    (when-not object
+                      (throw
+                       (ex-info "semantic read has no source-fact node name"
+                                {:definition definition-id
+                                 :dependency (id-value dependency)})))
+                    (slice/->SliceFactV0 subject "semantic-read" "n" object)))
+                dependencies)))
+           selected-definitions)))]
     (vec (concat rows reads))))
 
-(defn reachable-definition-ids [dependency-for seeds]
+(defn reachable-definition-ids [dependencies-by-id seeds]
   (loop [queue (into clojure.lang.PersistentQueue/EMPTY seeds) selected #{}]
     (if (empty? queue)
       selected
@@ -2249,7 +2275,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
             identity (id-value definition)]
         (if (contains? selected identity)
           (recur (pop queue) selected)
-          (recur (into (pop queue) (dependency-for definition))
+          (recur (into (pop queue) (get dependencies-by-id identity []))
                  (conj selected identity)))))))
 
 (defn definition-sequence-names [rows]
@@ -2373,18 +2399,19 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                (stages/sourcestagev1-terms source)
                (stages/sourcestagev1-modules source))
         definitions (definitions-by-key index)
-        dependency-for (dependency-resolver definitions index)
+        dependencies (dependency-projection definitions index)
         seeds (if (empty? entries)
-                {:ok? true :seeds (definition-nodes index)}
+                {:ok? true :seeds (:ordered dependencies)}
                 (entry-seeds definitions index entries strict-entry-abi?))]
     (if-not (:ok? seeds)
       seeds
-      (let [selected (reachable-definition-ids dependency-for (:seeds seeds))]
+      (let [selected
+            (reachable-definition-ids (:by-id dependencies) (:seeds seeds))]
         {:ok? true
          :rows (if (empty? entries) rows (projected-rows rows selected))
-         :index index
          :selected selected
-         :dependency-for dependency-for}))))
+         :ordered-definitions (:ordered dependencies)
+         :dependencies-by-id (:by-id dependencies)}))))
 
 (defn source-definition-count [rows]
   (reduce + (map #(count (slice/form-node-names rows %))
@@ -3658,8 +3685,9 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
             (or cached-projected-facts
                 (rows-text
                  (semantic-read-set-rows
-                  (:rows projection) (:index projection)
-                  (:selected projection) (:dependency-for projection))))
+                  (:rows projection) (:selected projection)
+                  (:ordered-definitions projection)
+                  (:dependencies-by-id projection))))
             _cache-publish
             (when (nil? cached-projected-facts)
               (semantic-cache/append!
