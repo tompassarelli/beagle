@@ -3,10 +3,10 @@
 # authoring setup. Skills/AGENTS.md are model-discretion (can be forgotten);
 # this hook is harness-enforced at startup, resume, clear, and compact.
 #
-# In a Beagle project it: (1) starts a throttled, non-blocking authoring-loop
-# revive, and (2) injects source-aware authoring context. Repeated resumes in
-# one session are silent; clear/compact re-inject because they rebuild context.
-# Outside a Beagle project it is a fast no-op (a few globs, no heavy work).
+# In a Beagle project it injects source-aware authoring context without running
+# compiler health or revival commands. Repeated resumes in one session are
+# silent; clear/compact re-inject because they rebuild context. Outside a Beagle
+# project it is a fast no-op (a few globs, no heavy work).
 set -uo pipefail
 
 # Drain before every decision, including the kill-switch. Keep active-path input
@@ -42,7 +42,7 @@ if [ -r "$switchboard_activity" ]; then
 fi
 
 # Clean-room / experiment kill-switch (opt-OUT), owner-local: when guards are
-# OFF this hook no-ops — no daemon revive, no authoring context injected — so
+# OFF this hook no-ops — no authoring context is injected — so
 # a controlled run keeps an identical neutral session surface across all arms.
 # Engaged by env AGENT_NO_AUTHORING_HOOKS (or the CLAUDE_NO_AUTHORING_HOOKS
 # compatibility alias): any value but 0/false = OFF; 0/false forces guards
@@ -124,7 +124,6 @@ state_hash() {
   fi
 }
 
-dir_key="$(printf '%s' "$dir" | state_hash)"
 session_marker=""
 if [ -n "$session_id" ]; then
   session_key="$(printf '%s\0%s' "$session_id" "$dir" | state_hash)"
@@ -201,79 +200,19 @@ is_beagle() {
   return 1
 }
 
-# No Beagle Store command may run before the cheap project-context gate. SessionStart
-# is global, so an ordinary non-Beagle checkout must remain a pure no-op.
+# SessionStart is global, so an ordinary non-Beagle checkout must remain a pure
+# no-op.
 is_beagle || exit 0
-
-# Resolve the `beagle` CLI robustly — beagle tools are NOT on the global PATH;
-# they live in the checkout (direnv-activated) or are reached via $BEAGLE_PATH.
-# Try, in order: $BEAGLE_PATH/bin, the canonical ~/code/beagle checkout, PATH.
-# (The canonical checkout's beagle self-resolves racket via its own .direnv,
-# so it runs from any cwd.) We invoke `beagle doctor`, the unified CLI.
-beagle=""
-[ -n "${BEAGLE_PATH:-}" ] && [ -x "$BEAGLE_PATH/bin/beagle" ] && beagle="$BEAGLE_PATH/bin/beagle"
-[ -z "$beagle" ] && [ -x "$HOME/code/beagle/bin/beagle" ] && beagle="$HOME/code/beagle/bin/beagle"
-[ -z "$beagle" ] && command -v beagle >/dev/null 2>&1 && beagle="$(command -v beagle)"
-if [ -z "$beagle" ]; then
-  exit 0
-fi
-
-# --- functional handshake + self-heal (NON-BLOCKING, THROTTLED revive) -------
-# SessionStart can arrive several times in quick succession. A per-checkout
-# advisory lock makes launch admission atomic; its fd is inherited by the
-# detached doctor, so a crash releases it automatically. The timestamp adds a
-# cooldown after completion without ever becoming a permanent lock.
-warm_started=0
-warm_ttl="${BEAGLE_SESSION_WARM_TTL_SECONDS:-300}"
-case "$warm_ttl" in ""|*[!0-9]*) warm_ttl=300 ;; esac
-maybe_start_warm() {
-  [ "$state_ready" -eq 1 ] || return 0
-  command -v flock >/dev/null 2>&1 || return 0
-  command -v setsid >/dev/null 2>&1 || return 0
-
-  local lock="$state_dir/warm-$dir_key.lock"
-  local stamp="$state_dir/warm-$dir_key.stamp"
-  local now last
-  exec 9>"$lock" 2>/dev/null || return 0
-  if ! flock -n 9; then
-    exec 9>&-
-    return 0
-  fi
-
-  now="$(date +%s)"
-  last="$(cat "$stamp" 2>/dev/null || true)"
-  case "$last" in ""|*[!0-9]*) last=0 ;; esac
-  if [ $((now - last)) -lt "$warm_ttl" ]; then
-    flock -u 9
-    exec 9>&-
-    return 0
-  fi
-
-  printf '%s\n' "$now" >"$stamp" 2>/dev/null || true
-  # fd 9 stays inherited by the child until doctor exits; closing the parent's
-  # copy below cannot release the child-held lock.
-  setsid "$beagle" doctor --revive --quiet "$dir" \
-    >"$state_dir/revive-$dir_key.log" 2>&1 </dev/null 9>&9 &
-  warm_started=1
-  disown 2>/dev/null || true
-  exec 9>&-
-}
-maybe_start_warm
 
 prepare_context_mode
 if [ "$context_mode" = none ]; then
   exit 0
 fi
 
-warm_ctx=""
-if [ "$warm_started" -eq 1 ]; then
-  warm_ctx=" A background \`beagle doctor --revive --quiet\` check was started for this checkout."
-fi
-
 if [ "$context_mode" = compact ]; then
-  ctx="Beagle authoring context restored after compaction. Before the next Beagle edit, run \`beagle doctor --deep\`; treat compiler and PostToolUse repair feedback as authoritative.${warm_ctx}"
+  ctx="Beagle authoring context restored after compaction. Existing fast health evidence or passing functional canaries authorize editing; trust compiler and PostToolUse repair feedback. Run \`beagle doctor --deep\` only after concrete degraded feedback that would affect the edit loop."
 else
-  ctx="Beagle authoring is active.${warm_ctx} YOU (the agent) own authoring-loop health, not the user. Before the first Beagle edit, run \`beagle doctor --deep\` and self-heal if degraded. Treat the compiler as source of truth (query Beagle tools; never trust a static form/type/stdlib list), and trust the PostToolUse repair hook's per-edit feedback. If this project has no repair hook, scaffold it with \`beagle init --hooks\`."
+  ctx="Beagle authoring is active. YOU (the agent) own authoring-loop health, not the user. Existing fast health evidence or passing functional canaries authorize editing; do not add a pre-edit gate. Treat the compiler as source of truth and PostToolUse repair feedback as authoritative. Run \`beagle doctor --deep\` only after concrete degraded feedback affecting this edit loop, use \`beagle doctor --revive\` only when diagnosis identifies daemon failure, and use \`beagle init --hooks\` only when the project actually lacks required feedback. Never repeat doctor merely to turn status text green."
 fi
 # Inject into session context via the SessionStart additionalContext channel.
 python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$ctx"

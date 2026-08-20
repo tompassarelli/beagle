@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic lifecycle/idempotency tests for beagle-session-start.sh.
+# Hermetic activation/lifecycle tests for beagle-session-start.sh.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -17,7 +17,6 @@ touch "$PROJECT/main.bnix"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'printf "%s\n" "$*" >>"$BEAGLE_TEST_TRACE"' \
-  'sleep "${BEAGLE_TEST_HOLD:-0.15}"' \
   >"$FAKE_BEAGLE/bin/beagle"
 chmod +x "$FAKE_BEAGLE/bin/beagle"
 
@@ -57,28 +56,6 @@ trace_count() {
   else printf '0\n'; fi
 }
 
-wait_for_trace_count() {
-  local expected="$1" attempts=0
-  while [ "$attempts" -lt 100 ]; do
-    [ "$(trace_count)" -ge "$expected" ] && return 0
-    sleep 0.02
-    attempts=$((attempts + 1))
-  done
-  return 1
-}
-
-wait_for_warm_unlock() {
-  local lock attempts=0
-  lock="$(find "$STATE" -maxdepth 1 -name 'warm-*.lock' -print -quit)"
-  [ -n "$lock" ] || return 1
-  while [ "$attempts" -lt 100 ]; do
-    if flock -n "$lock" true 2>/dev/null; then return 0; fi
-    sleep 0.02
-    attempts=$((attempts + 1))
-  done
-  return 1
-}
-
 event_json() {
   python3 -c '
 import json
@@ -100,7 +77,6 @@ run_hook_raw() {
       BEAGLE_PATH="$FAKE_BEAGLE" \
       BEAGLE_SESSION_STATE_DIR="$STATE" \
       BEAGLE_TEST_TRACE="$TRACE" \
-      BEAGLE_TEST_HOLD="${BEAGLE_TEST_HOLD:-0.15}" \
       BEAGLE_SWITCHBOARD_ACTIVITY_LIB="${BEAGLE_SWITCHBOARD_ACTIVITY_LIB:-$SCRATCH/missing-switchboard-activity.sh}" \
       AUTHORING_KILLSWITCH_STATE="$SCRATCH/killswitch.state" \
       "$HOOK"
@@ -118,24 +94,25 @@ else
 fi
 first_ctx="$(context_of "$first")"
 assert_contains "$first_ctx" 'Beagle authoring is active.' 'startup injects the full handshake'
-assert_contains "$first_ctx" 'beagle doctor --deep' 'startup uses the canonical doctor command'
-assert_contains "$first_ctx" 'background `beagle doctor --revive --quiet` check was started' \
-  'only the warm-lock winner announces a background check'
-if wait_for_trace_count 1; then ok 'startup launches one non-blocking revive'
-else not_ok 'startup launches one non-blocking revive'; fi
+assert_contains "$first_ctx" 'Existing fast health evidence or passing functional canaries authorize editing' \
+  'startup accepts proportional health evidence'
+assert_contains "$first_ctx" 'beagle doctor --deep` only after concrete degraded feedback' \
+  'startup reserves deep doctor for concrete degradation'
+assert_not_contains "$first_ctx" 'Before the first Beagle edit' \
+  'startup does not impose a first-edit ritual'
+if [ "$(trace_count)" -eq 0 ]; then ok 'startup runs no Beagle command'
+else not_ok "startup runs no Beagle command (count=$(trace_count))"; fi
 
 resume="$(run_hook_raw session-a resume "$PROJECT")"
 assert_empty "$resume" 'resume in the same session is silent'
-if [ "$(trace_count)" -eq 1 ]; then ok 'resume does not launch another revive'
-else not_ok "resume does not launch another revive (count=$(trace_count))"; fi
+if [ "$(trace_count)" -eq 0 ]; then ok 'resume runs no Beagle command'
+else not_ok "resume runs no Beagle command (count=$(trace_count))"; fi
 
 second_session="$(run_hook_raw session-b startup "$PROJECT")"
 second_ctx="$(context_of "$second_session")"
 assert_contains "$second_ctx" 'Beagle authoring is active.' 'a new session receives the full handshake'
-assert_not_contains "$second_ctx" 'background `beagle doctor --revive --quiet` check was started' \
-  'a throttled session does not claim the daemon is warming'
-if [ "$(trace_count)" -eq 1 ]; then ok 'per-checkout throttle spans session ids'
-else not_ok "per-checkout throttle spans session ids (count=$(trace_count))"; fi
+if [ "$(trace_count)" -eq 0 ]; then ok 'a new session runs no Beagle command'
+else not_ok "a new session runs no Beagle command (count=$(trace_count))"; fi
 
 first_resume="$(run_hook_raw session-resume-first resume "$PROJECT")"
 first_resume_ctx="$(context_of "$first_resume")"
@@ -148,40 +125,14 @@ compact="$(run_hook_raw session-a compact "$PROJECT")"
 compact_ctx="$(context_of "$compact")"
 assert_contains "$compact_ctx" 'after compaction' 'compact restores concise authoring context'
 assert_not_contains "$compact_ctx" 'Beagle authoring is active.' 'compact does not repeat the full handshake'
-if [ "$(trace_count)" -eq 1 ]; then ok 'compact remains inside the warm throttle'
-else not_ok "compact remains inside the warm throttle (count=$(trace_count))"; fi
+assert_contains "$compact_ctx" 'only after concrete degraded feedback' \
+  'compact preserves the proportional recovery rule'
 
 clear="$(run_hook_raw session-a clear "$PROJECT")"
 clear_ctx="$(context_of "$clear")"
 assert_contains "$clear_ctx" 'Beagle authoring is active.' 'clear restores the full handshake'
-assert_not_contains "$clear_ctx" 'background `beagle doctor --revive --quiet` check was started' \
-  'clear does not misreport a throttled revive'
-
-if wait_for_warm_unlock; then ok 'detached doctor releases the advisory lock'
-else not_ok 'detached doctor releases the advisory lock'; fi
-
-# With the cooldown disabled, simultaneous SessionStart events still admit one
-# doctor because the detached child inherits the advisory lock.
-BEAGLE_TEST_HOLD=0.3 BEAGLE_SESSION_WARM_TTL_SECONDS=0 \
-  run_hook_raw session-race-a startup "$PROJECT" >"$SCRATCH/race-a.out" &
-race_a=$!
-BEAGLE_TEST_HOLD=0.3 BEAGLE_SESSION_WARM_TTL_SECONDS=0 \
-  run_hook_raw session-race-b startup "$PROJECT" >"$SCRATCH/race-b.out" &
-race_b=$!
-wait "$race_a" "$race_b"
-if wait_for_trace_count 2 && [ "$(trace_count)" -eq 2 ]; then
-  ok 'simultaneous starts launch exactly one additional revive'
-else
-  not_ok "simultaneous starts launch exactly one additional revive (count=$(trace_count))"
-fi
-race_warm_count=0
-for output in "$SCRATCH/race-a.out" "$SCRATCH/race-b.out"; do
-  if grep -Fq 'background `beagle doctor --revive --quiet` check was started' "$output"; then
-    race_warm_count=$((race_warm_count + 1))
-  fi
-done
-if [ "$race_warm_count" -eq 1 ]; then ok 'exactly one racing hook reports the won warm launch'
-else not_ok "exactly one racing hook reports the won warm launch (count=$race_warm_count)"; fi
+if [ "$(trace_count)" -eq 0 ]; then ok 'clear runs no Beagle command'
+else not_ok "clear runs no Beagle command (count=$(trace_count))"; fi
 
 plain="$(run_hook_raw session-plain startup "$PLAIN")"
 assert_empty "$plain" 'a non-Beagle checkout is silent'
@@ -234,6 +185,7 @@ invalid="$(
 invalid_ctx="$(context_of "$invalid")"
 assert_contains "$invalid_ctx" 'Beagle authoring is active.' 'invalid stdin falls back safely to process cwd'
 
-if wait_for_warm_unlock; then :; fi
+if [ "$(trace_count)" -eq 0 ]; then ok 'all activation paths avoid startup compiler ceremony'
+else not_ok "all activation paths avoid startup compiler ceremony (count=$(trace_count))"; fi
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
