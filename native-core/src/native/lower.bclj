@@ -10125,7 +10125,8 @@
                 (core/->SsaValueV0 limit-id (int-type-id))
                 (core/->I64Atom (bodyenvv0-whole-input-limit env))))
             result-id core/NativeId (state-id with-limit owner "whole-input")
-            arguments (if file? [(nth values 0) limit-id] [limit-id])]
+            arguments (Vec core/NativeId)
+            (if file? [(nth values 0) limit-id] [limit-id])]
         (->ExprResultV0
           (state-emit with-limit
             (core/->ExternCallInstruction
