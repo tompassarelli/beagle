@@ -214,9 +214,9 @@
            (resultadmissionrequest-status request))]]
     (if (= "ok" (resultadmissionrequest-status request))
       (conj base (->CompileQueryFact 4 :result/artifact digest 0
-                   (resultadmissionrequest-artifact-content-id request)))
+                   (or (resultadmissionrequest-artifact-content-id request) "")))
       (conj base (->CompileQueryFact 4 :result/diagnostic digest 0
-                   (resultadmissionrequest-diagnostic-content-id request))))))
+                   (or (resultadmissionrequest-diagnostic-content-id request) ""))))))
 
 (defn admit-and-identify-result [request ResultAdmissionRequest] ResultAdmission
   (match (admit-canonical-query (resultadmissionrequest-query request))
@@ -240,7 +240,8 @@
               (or (some? artifact) (nil? diagnostic) (not (content-id? diagnostic))))
          (->ResultRejected :result/invalid-diagnostic "rejected results require exactly one diagnostic content ID")
          :else
-         (let [normalized (->ResultAdmissionRequest query
+         (let [normalized ResultAdmissionRequest
+               (->ResultAdmissionRequest query
                             (resultadmissionrequest-target request)
                             (resultadmissionrequest-materializer-content-id request)
                             status artifact diagnostic)
