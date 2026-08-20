@@ -149,7 +149,7 @@
   [xs Any
    x Any] Int
   (let [n (count xs)]
-    (loop [i 0] (cond (>= i n) -1 (= (nth xs i) x) i :else (recur (+ i 1))))))
+    (loop [i Int 0] (cond (>= i n) -1 (= (nth xs i) x) i :else (recur (+ i 1))))))
 
 (defn- has-item?
   [xs Any
@@ -1442,9 +1442,9 @@
    scope Any
    binding-kind String
    path Any] Any
-  (let [scoped (syntax-add-scope! value scope)
-        variant (get scoped "variant")
-        children (scope-sequence-children scoped)]
+  (let [scoped Any (syntax-add-scope! value scope)
+        variant Any (get scoped "variant")
+        children Any (scope-sequence-children scoped)]
     (cond
       (= variant "ident")
         (if (= (get (get scoped "payload") "leaf") "&")
@@ -1452,7 +1452,7 @@
           (bind-identifier! scoped table binding-kind path))
 
       (= variant "vector")
-        (let [state (reduce
+        (let [state Any (reduce
                 (fn
                   [current Any
                    index Int] Any
@@ -1591,7 +1591,7 @@
    table Any
    path Any
    ctx Any] Any
-  (let [items (scope-sequence-children vector-value)]
+  (let [items Any (scope-sequence-children vector-value)]
     (loop [index Int 0
            out Any []
            current Any table
@@ -1630,12 +1630,12 @@
    table Any
    path Any
    ctx Any] Any
-  (let [children (scope-sequence-children value)
-        scoped-bindings
+  (let [children Any (scope-sequence-children value)
+        scoped-bindings Any
         (scope-walk-sequential-bindings!
           (nth children 1) table (conj (vec path) 1) ctx)
         body-indices (Vec Int) (vec (range 2 (count children)))
-        body
+        body Any
         (mapv
           (fn [index Int] Any
             (scope-walk*
@@ -1655,7 +1655,7 @@
    table Any
    path Any
    ctx Any] Any
-  (let [children (scope-sequence-children params)]
+  (let [children Any (scope-sequence-children params)]
     (letfn [(target-bound-names [value Any] Any
           (let [variant (get value "variant")
                 nested (scope-sequence-children value)]
@@ -1693,20 +1693,20 @@
           (if (scope-typed-declaration?! value)
             (target-bound-names (nth (scope-sequence-children value) 0))
             (target-bound-names value)))]
-      (let [declarations
+      (let [declarations Any
         (filterv
           (fn [item Any] Bool
             (not (= (scope-syntax-datum! item) "&")))
           children)
-        first-declaration
+        first-declaration Any
         (if (> (count declarations) 0) (nth declarations 0) nil)
-        legacy? (and (some? first-declaration)
+        legacy? Bool (and (some? first-declaration)
                   (scope-typed-declaration?! first-declaration))
-        flat? (and (not legacy?)
+        flat? Bool (and (not legacy?)
                 (> (count declarations) 1)
                 (type-expression-datum?
                   (scope-syntax-datum! (nth declarations 1))))
-        logical-declarations
+        logical-declarations Any
         (if (or legacy? (not flat?))
           (filterv
             (fn [item Any] Bool
@@ -1720,14 +1720,14 @@
                 (recur (+ index 1) out)
               :else
                 (recur (+ index 2) (conj out (nth children index))))))
-        all-bound
+        all-bound Any
         (reduce
           (fn
             [names Any
              item Any] Any
             (into names (declaration-bound-names item)))
           [] logical-declarations)
-        duplicate
+        duplicate Any
         (loop [remaining Any all-bound
                seen Any {}]
           (if (= (count remaining) 0)
@@ -1737,12 +1737,12 @@
                 name
                 (recur (subvec (vec remaining) 1)
                   (assoc seen name true))))))
-        _ (when (some? duplicate)
+        _ Any (when (some? duplicate)
             (err! (str "parameter list binds `" duplicate
                     "` more than once; every nested destructuring name and :as alias must be unique")))
-        scope (syntax/fresh-scope-id! "parameter")
+        scope Any (syntax/fresh-scope-id! "parameter")
         indices (Vec Int) (vec (range (count children)))
-        state
+        state Any
         (if (or legacy? (not flat?))
           (reduce
             (fn
@@ -1804,7 +1804,7 @@
              (> (count children) 0)
              (= (get (nth children 0) "variant") "vector"))
       (let [indices (Vec Int) (vec (range (count children)))
-            params
+            params Any
             (scope-walk-params!
               (nth children 0) table (conj (vec path) 0) ctx)]
         (rebuild-scope-sequence! clause
@@ -1827,8 +1827,8 @@
    path Any
    ctx Any
    name-index Any] Any
-  (let [children (scope-sequence-children value)
-        params-index (+ (if (nil? name-index) 0 (int name-index)) 1)
+  (let [children Any (scope-sequence-children value)
+        params-index Int (+ (if (nil? name-index) 0 (int name-index)) 1)
         indices (Vec Int) (vec (range (count children)))]
     (cond
       (or (>= params-index (count children))
@@ -1855,10 +1855,10 @@
             indices))
 
       :else
-        (let [params (scope-walk-params!
+        (let [params Any (scope-walk-params!
                 (nth children params-index) table
                 (conj (vec path) params-index) ctx)
-              return-index (+ params-index 1)]
+              return-index Int (+ params-index 1)]
           (rebuild-scope-sequence! value
             (mapv
               (fn [index Int] Any
@@ -1880,15 +1880,15 @@
    table Any
    path Any
    ctx Any] Any
-  (let [children (scope-sequence-children value)
-        functions (nth children 1)
-        fn-values (scope-sequence-children functions)
-        scope (syntax/fresh-scope-id! "letfn")
+  (let [children Any (scope-sequence-children value)
+        functions Any (nth children 1)
+        fn-values Any (scope-sequence-children functions)
+        scope Any (syntax/fresh-scope-id! "letfn")
         fn-indices (Vec Int) (vec (range (count fn-values)))
         rendered-indices (Vec Int)
           (vec (range (count fn-values)))
         body-indices (Vec Int) (vec (range 2 (count children)))
-        named
+        named Any
         (reduce
           (fn
             [state Any
@@ -1905,7 +1905,7 @@
                "table" (get bound "table")}))
           {"values" [] "table" table}
           fn-indices)
-        rendered-functions
+        rendered-functions Any
         (rebuild-scope-sequence! functions
           (mapv
             (fn [index Int] Any
@@ -1913,7 +1913,7 @@
                 (syntax-add-scope! (nth (get named "values") index) scope)
                 (get named "table") (conj (vec path) 1 index) ctx 0))
             rendered-indices))
-        body
+        body Any
         (mapv
           (fn [index Int] Any
             (scope-walk*
@@ -1931,11 +1931,11 @@
    table Any
    path Any
    ctx Any] Any
-  (let [children (scope-sequence-children value)
-        clauses (nth children 1)
-        items (scope-sequence-children clauses)
+  (let [children Any (scope-sequence-children value)
+        clauses Any (nth children 1)
+        items Any (scope-sequence-children clauses)
         body-indices (Vec Int) (vec (range 2 (count children)))
-        state
+        state Any
         (loop [index Int 0
                out Any []
                current Any table
@@ -1982,7 +1982,7 @@
               {"children" (into out (subvec (vec items) index))
                "table" current
                "scopes" region-scopes}))
-        body
+        body Any
         (mapv
           (fn [index Int] Any
             (scope-walk*
@@ -2000,11 +2000,11 @@
    table Any
    path Any
    ctx Any] Any
-  (let [children (scope-sequence-children value)
-        bindings
+  (let [children Any (scope-sequence-children value)
+        bindings Any
         (scope-walk-sequential-bindings!
           (nth children 1) table (conj (vec path) 1) ctx)
-        head (scope-syntax-datum! (nth children 0))
+        head Any (scope-syntax-datum! (nth children 0))
         indices (Vec Int) (vec (range (count children)))]
     (rebuild-scope-sequence! value
       (mapv
@@ -2031,9 +2031,9 @@
    binder-index Int
    body-start Int
    binding-kind String] Any
-  (let [children (scope-sequence-children value)
-        scope (syntax/fresh-scope-id! binding-kind)
-        bound
+  (let [children Any (scope-sequence-children value)
+        scope Any (syntax/fresh-scope-id! binding-kind)
+        bound Any
         (scope-bind-declaration!
           (nth children binder-index) table scope binding-kind
           (conj (vec path) binder-index))
@@ -2057,19 +2057,19 @@
    table Any
    path Any
    ctx Any] Any
-  (let [children (scope-sequence-children value)
-        init (nth children 1)
-        name (nth children 2)
-        steps (subvec (vec children) 3)
-        span (syntax/beagle-syntax-span value)
-        scopes (syntax/beagle-syntax-scopes value)
-        origin (syntax/beagle-syntax-origin value)
-        properties (syntax/beagle-syntax-properties value)
-        generated (fn [datum Any] Any
+  (let [children Any (scope-sequence-children value)
+        init Any (nth children 1)
+        name Any (nth children 2)
+        steps Any (subvec (vec children) 3)
+        span Any (syntax/beagle-syntax-span value)
+        scopes Any (syntax/beagle-syntax-scopes value)
+        origin Any (syntax/beagle-syntax-origin value)
+        properties Any (syntax/beagle-syntax-properties value)
+        generated Any (fn [datum Any] Any
           (syntax/datum->beagle-syntax!
             datum span scopes origin properties))
-        values (into [init] steps)
-        expansion (loop [index Int (- (count values) 1)
+        values Any (into [init] steps)
+        expansion Any (loop [index Int (- (count values) 1)
                          result Any name]
                     (if (< index 0)
             result
@@ -2080,8 +2080,8 @@
                    [name (nth values index)] span scopes origin properties)
                  result]
                 span scopes origin properties))))
-        resolved (scope-walk* expansion table path ctx)
-        surface (syntax/make-syntax-list!
+        resolved Any (scope-walk* expansion table path ctx)
+        surface Any (syntax/make-syntax-list!
           (into
             [(nth children 0)
              (scope-walk* init table (conj (vec path) 1) ctx)
@@ -2289,7 +2289,7 @@
           (if (= head "or")
             {"value" pattern "table" table}
             (let [indices (Vec Int) (vec (range 1 (count children)))
-                  state
+                  state Any
                   (reduce
                     (fn
                       [current Any
@@ -2313,15 +2313,15 @@
    table Any
    path Any
    ctx Any] Any
-  (let [children (scope-sequence-children value)
+  (let [children Any (scope-sequence-children value)
         clause-indices (Vec Int) (vec (range 2 (count children)))
-        clauses
+        clauses Any
         (mapv
           (fn [index Int] Any
-            (let [clause (nth children index)
-                  clause-children (scope-sequence-children clause)
-                  scope (syntax/fresh-scope-id! "pattern")
-                  pattern
+            (let [clause Any (nth children index)
+                  clause-children Any (scope-sequence-children clause)
+                  scope Any (syntax/fresh-scope-id! "pattern")
+                  pattern Any
                   (scope-walk-pattern!
                     (nth clause-children 0) table scope
                     (conj (vec path) index 0))
@@ -2418,7 +2418,7 @@
          (has-item? META-FORMS (nth datum 0)))))
 
 (defn- expand-and-resolve-program-syntax! [syntaxes Any] Any
-  (let [module-scope (syntax/fresh-scope-id! "module")
+  (let [module-scope Any (syntax/fresh-scope-id! "module")
         indices (Vec Int) (vec (range (count syntaxes)))]
     (mapv
       (fn [index Int] Any
@@ -2684,13 +2684,13 @@
 (defn parse-params! [params-form Any] Any
   (let [items Any (unwrap-items params-form)
         n Int (count items)
-        amp-index (index-of-item items "&")
-        before (if (= amp-index -1) items (subvec items 0 amp-index))
-        after (if (= amp-index -1) [] (subvec items (+ amp-index 1)))
-        fixed-style (binding-style before)
-        rest-style (binding-style after)
-        style (or fixed-style rest-style "inferred")
-        _ (when (and (some? fixed-style)
+        amp-index Int (index-of-item items "&")
+        before Any (if (= amp-index -1) items (subvec items 0 amp-index))
+        after Any (if (= amp-index -1) [] (subvec items (+ amp-index 1)))
+        fixed-style Any (binding-style before)
+        rest-style Any (binding-style after)
+        style Any (or fixed-style rest-style "inferred")
+        _ Any (when (and (some? fixed-style)
                      (some? rest-style)
                      (not (= fixed-style rest-style))
                      (not (and (has-item? ["legacy" "flat"] fixed-style)
@@ -2698,7 +2698,7 @@
                                (= (count after) 1)
                                (string? (nth after 0)))))
             (mixed-bindings! "parameter"))
-        fixed
+        fixed Any
         (cond
           (= style "inferred")
           (mapv
@@ -2758,7 +2758,7 @@
                         (parse-binding-form! binder "parameter")
                         (parse-type* (nth before (+ i 1)))
                         nil))))))))
-        rest-param
+        rest-param Any
         (if (= amp-index -1)
           nil
           (cond
@@ -2793,8 +2793,8 @@
                   (do
                     (err! "rest parameter must bind one name, not a destructuring pattern")
                     nil))))))
-        parsed {"params" fixed "rest-param" rest-param}
-        all-bound
+        parsed Any {"params" fixed "rest-param" rest-param}
+        all-bound Any
         (into
           (vec
             (apply concat
@@ -2802,7 +2802,7 @@
           (if (nil? (get parsed "rest-param"))
             []
             (binding-target-bound-names (get parsed "rest-param"))))
-        duplicate
+        duplicate Any
         (loop [remaining Any all-bound
                seen Any {}]
           (if (= (count remaining) 0)
@@ -3728,7 +3728,7 @@
     (map-tagged? mv)
     (let [kvs (map-body mv)
           n (count kvs)]
-      (loop [i 0]
+      (loop [i Int 0]
         (cond
           (>= (+ i 1) n)
           false
