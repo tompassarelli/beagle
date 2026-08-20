@@ -1,0 +1,39 @@
+#lang beagle
+
+(ns store.native-compile
+  (:require [beagle.fact-profile :as fact-profile]))
+
+;; Store accepts only the compiler's typed admission products.  The native
+;; adapter converts its structured C fields to these requests; this module
+;; deliberately owns no second query or result identity scheme.
+(defn admit-query!
+  [(source-closure-digest String)
+   (compiler-context String)
+   (profile String)
+   (targets (Vec String))
+   (rules-content-id String)
+   (schema-content-id String)] fact-profile/QueryAdmission
+  (fact-profile/admit-and-identify-query
+   (fact-profile/->QueryAdmissionRequest
+    source-closure-digest compiler-context profile targets rules-content-id
+    schema-content-id)))
+
+(defn revalidate-query!
+  [(closure fact-profile/AdmittedQueryClosure)] fact-profile/QueryAdmission
+  (fact-profile/admit-canonical-query closure))
+
+(defn admit-result!
+  [(query fact-profile/AdmittedQueryClosure)
+   (target String)
+   (materializer-content-id String)
+   (status String)
+   (artifact-content-id String?)
+   (diagnostic-content-id String?)] fact-profile/ResultAdmission
+  (fact-profile/admit-and-identify-result
+   (fact-profile/->ResultAdmissionRequest
+    query target materializer-content-id status artifact-content-id
+    diagnostic-content-id)))
+
+(defn revalidate-result!
+  [(closure fact-profile/AdmittedResultClosure)] fact-profile/ResultAdmission
+  (fact-profile/admit-canonical-result closure))
