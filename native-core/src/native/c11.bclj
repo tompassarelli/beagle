@@ -2,8 +2,8 @@
 (ns native.c11)
 
 
-(require native.core :as core)
-(require native.simd :as simd)
+(require [native.core :as core])
+(require [native.simd :as simd])
 
 ;; A `match` arm names a variant bare, so a variant defined in native.core has
 ;; to be a resolvable class here or the module will not load; importing them is
