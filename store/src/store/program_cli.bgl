@@ -1,7 +1,26 @@
 #lang beagle
-;; Process arguments stay textual until the Store Term decoder admits them.
-;; Parsing a spelling must never manufacture program vocabulary or membership.
-(ns store.program-cli)
+
+;; Native command boundary for the fact-oriented program profile. Persisted
+;; content remains canonical Store Triple data; every other record below is a
+;; transient command, view, or transition result.
+(ns store.program-cli
+  (:require [beagle.datum-reader :as datum-reader]
+            [beagle.frontend-facts :as facts]
+            [beagle.parser-reader :as parser-reader]
+            [beagle.program-projection :as projection]
+            [beagle.program-read :as read]
+            [beagle.program-transaction :as transaction]
+            [store.compiler-adapter :as adapter]
+            [store.datalog :as d]
+            [store.kernel :as kernel]
+            [store.native-dispatch :as dispatch]
+            [store.native-query-ops :as query-ops]
+            [store.native-server :as server]
+            [store.program :as program]
+            [store.query :as query]
+            [store.schema :as schema]
+            [store.store :as term-store]
+            [store.types :as t]))
 
 (def usage String
   (str
@@ -10,42 +29,61 @@
    "       beagle program SPACE_ID LOG_PATH references ROOT VERSION TERM\n"
    "       beagle program SPACE_ID LOG_PATH impact ROOT VERSION TERM\n"
    "       beagle program SPACE_ID LOG_PATH history ROOT VERSION TRIPLE\n"
-   "       beagle program SPACE_ID LOG_PATH rename ROOT VERSION BINDING NEW --preview|--commit"))
+   "       beagle program SPACE_ID LOG_PATH rename ROOT VERSION NEXT_ROOT BINDING NEW --preview|--commit"))
 
 (defunion ProgramCommand
-  (Inspect
-    [root-text String
-     store-version Int])
-  (Definition
-    [root-text String
-     store-version Int
-     exact-name String])
-  (References
-    [root-text String
-     store-version Int
-     target-text String])
-  (Impact
-    [root-text String
-     store-version Int
-     changed-text String])
-  (History
-    [root-text String
-     store-version Int
-     proposition-text String])
+  (Inspect [root-text String store-version Int])
+  (Definition [root-text String store-version Int exact-name String])
+  (References [root-text String store-version Int target-text String])
+  (Impact [root-text String store-version Int changed-text String])
+  (History [root-text String store-version Int proposition-text String])
   (Rename
     [root-text String
      store-version Int
+     next-root-text String
      binding-text String
      new-name String
      commit Bool]))
 
 (defrecord ProgramInvocation
-  [space-id String
-   log-path String
-   command ProgramCommand])
+  [space-id String log-path String command ProgramCommand])
 
-(defn- present? [value String] Bool
-  (not (= value "")))
+(defrecord TermFrame [values (Vec Any)])
+(defrecord TermSyntaxMarker [name String])
+(defrecord TermBuildState
+  [frames (Vec TermFrame) root Any roots Int])
+(defunion TermParseResult
+  (TermParsed [term t/Term])
+  (TermParseRejected [detail String]))
+(defunion TermBuildResult
+  (TermBuildAccepted [state TermBuildState])
+  (TermBuildRejected [detail String]))
+
+(defrecord RootSnapshot
+  [root program/ProgramRoot
+   occurrences (Vec t/OperationOccurrence)
+   withdrawals (Vec t/Withdrawal)])
+(defunion RootLoadResult
+  (RootLoaded [snapshot RootSnapshot])
+  (RootLoadRejected [detail String]))
+(defunion RowsResult
+  (RowsReady [rows (Vec d/Tuple)])
+  (RowsRejected [detail String]))
+(defunion RematerializeResult
+  (Rematerialized [root program/ProgramRoot])
+  (RematerializeRejected [detail String]))
+(defunion ExecutionResult
+  (ExecutionComplete [lines (Vec String)])
+  (ExecutionFailed [status Int detail String]))
+
+(def empty-any (Vec Any) [])
+(def empty-frames (Vec TermFrame) [])
+(def empty-lines (Vec String) [])
+(def empty-triples (Vec t/Triple) [])
+(def empty-occurrences (Vec t/OperationOccurrence) [])
+(def empty-withdrawals (Vec t/Withdrawal) [])
+
+(defn- present? [value String] Bool (not= value ""))
 
 (defn- all-present? [values (Vec String)] Bool
   (every? present? values))
@@ -59,45 +97,33 @@
         parsed-version Int? (parse-version (nth args 4))
         store-version Int (or parsed-version 0)]
     (cond
-      [(and (= verb "inspect")
-            (= (count args) 5)
-            (present? (nth args 3))
-            (some? parsed-version))
+      [(and (= verb "inspect") (= (count args) 5)
+            (present? (nth args 3)) (some? parsed-version))
        (->Inspect (nth args 3) store-version)]
-
-      [(and (= verb "definition")
-            (= (count args) 6)
+      [(and (= verb "definition") (= (count args) 6)
             (all-present? [(nth args 3) (nth args 5)])
             (some? parsed-version))
        (->Definition (nth args 3) store-version (nth args 5))]
-
-      [(and (= verb "references")
-            (= (count args) 6)
+      [(and (= verb "references") (= (count args) 6)
             (all-present? [(nth args 3) (nth args 5)])
             (some? parsed-version))
        (->References (nth args 3) store-version (nth args 5))]
-
-      [(and (= verb "impact")
-            (= (count args) 6)
+      [(and (= verb "impact") (= (count args) 6)
             (all-present? [(nth args 3) (nth args 5)])
             (some? parsed-version))
        (->Impact (nth args 3) store-version (nth args 5))]
-
-      [(and (= verb "history")
-            (= (count args) 6)
+      [(and (= verb "history") (= (count args) 6)
             (all-present? [(nth args 3) (nth args 5)])
             (some? parsed-version))
        (->History (nth args 3) store-version (nth args 5))]
-
-      [(and (= verb "rename")
-            (= (count args) 8)
-            (all-present? [(nth args 3) (nth args 5) (nth args 6)])
+      [(and (= verb "rename") (= (count args) 9)
+            (all-present?
+              [(nth args 3) (nth args 5) (nth args 6) (nth args 7)])
             (some? parsed-version)
-            (or (= (nth args 7) "--preview")
-                (= (nth args 7) "--commit")))
+            (or (= (nth args 8) "--preview")
+                (= (nth args 8) "--commit")))
        (->Rename (nth args 3) store-version (nth args 5) (nth args 6)
-                 (= (nth args 7) "--commit"))]
-
+                 (nth args 7) (= (nth args 8) "--commit"))]
       [:else nil])))
 
 (defn parse-args [args (Vec String)] ProgramInvocation?
@@ -110,11 +136,873 @@
         nil))
     nil))
 
-;; Dispatch is added only after ProgramRoot, reads, and ProgramTransaction land.
-;; Until then this entry is exercised only by its private native seam check.
+(defn- build-error [detail String] TermBuildResult
+  (->TermBuildRejected detail))
+
+(defn- add-value
+  [state TermBuildState value Any] TermBuildResult
+  (let [frames (Vec TermFrame) (termbuildstate-frames state)]
+    (if (empty? frames)
+      (if (not (t/term? value))
+        (build-error "value is outside Store Term")
+        (if (= 0 (termbuildstate-roots state))
+          (->TermBuildAccepted
+            (->TermBuildState frames value 1))
+          (build-error "expected exactly one Store Term")))
+      (let [index Int (dec (count frames))
+            frame TermFrame (nth frames index)]
+        (->TermBuildAccepted
+          (->TermBuildState
+            (assoc frames index
+              (->TermFrame (conj (termframe-values frame) value)))
+            (termbuildstate-root state)
+            (termbuildstate-roots state)))))))
+
+(defn- tagged-atom [values (Vec Any)] Any?
+  (let [tag Any (nth values 0)
+        middle Any (nth values 1)
+        tail Any (nth values 2)]
+    (if (not (instance? TermSyntaxMarker tag))
+      nil
+      (let [marker TermSyntaxMarker tag
+            name String (termsyntaxmarker-name marker)]
+        (cond
+          [(and (= name "#float")
+                (and (integer? middle) (= tail :bits)))
+           (float-from-bits middle)]
+          [(and (= name "#instant")
+                (and (integer? middle) (integer? tail)))
+           (if (and (>= tail 0) (< tail 1000000000))
+             (t/instant middle tail)
+             nil)]
+          [:else nil])))))
+
+(defn- close-triple [state TermBuildState] TermBuildResult
+  (let [frames (Vec TermFrame) (termbuildstate-frames state)]
+    (if (empty? frames)
+      (build-error "unexpected closing vector")
+      (let [frame TermFrame (peek frames)
+            values (Vec Any) (termframe-values frame)]
+        (if (not= 3 (count values))
+          (build-error "recursive Triple syntax requires exactly three vector elements")
+          (let [atom Any (tagged-atom values)
+                a Any (nth values 0)
+                b Any (nth values 1)
+                c Any (nth values 2)]
+            (if (some? atom)
+              (add-value
+                (->TermBuildState (pop frames)
+                  (termbuildstate-root state) (termbuildstate-roots state))
+                atom)
+              (if (and (t/term? a) (and (t/term? b) (t/term? c)))
+              (let [ta t/Term a tb t/Term b tc t/Term c]
+                (add-value
+                  (->TermBuildState (pop frames)
+                    (termbuildstate-root state) (termbuildstate-roots state))
+                  (t/triple ta tb tc)))
+                (build-error
+                  "vector must be a Triple, [#float BITS :bits], or [#instant SECONDS NANOS]")))))))))
+
+(defn- consume-term-event
+  [state TermBuildState event datum-reader/ReaderEvent] TermBuildResult
+  (let [kind Keyword (datum-reader/readerevent-kind event)
+        value String (datum-reader/readerevent-value event)]
+    (cond
+    [(= kind :vector/open)
+     (->TermBuildAccepted
+       (->TermBuildState
+         (conj (termbuildstate-frames state) (->TermFrame empty-any))
+         (termbuildstate-root state) (termbuildstate-roots state)))]
+    [(= kind :vector/close) (close-triple state)]
+    [(= kind :keyword)
+     (if (and (> (count value) 1) (not= ":" value))
+       (add-value state (keyword (subs value 1 (count value))))
+       (build-error "keyword requires a name"))]
+    [(= kind :string) (add-value state value)]
+    [(= kind :boolean) (add-value state (= value "true"))]
+    [(= kind :symbol)
+     (let [integer Int? (parse-long value)]
+       (if (some? integer)
+         (add-value state integer)
+         (if (or (= value "#float") (= value "#instant"))
+           (add-value state (->TermSyntaxMarker value))
+           (build-error "unsupported atom spelling in Store Term"))))]
+    [:else (build-error "unsupported form in Store Term")])))
+
+(defn parse-term [text String] TermParseResult
+  (let [read-result datum-reader/DatumRead (datum-reader/read-events text)
+        read-error String? (datum-reader/datumread-error read-result)]
+    (if (some? read-error)
+      (->TermParseRejected
+        (str "invalid Store Term at byte "
+          (datum-reader/datumread-error-offset read-result) ": "
+          (or read-error "invalid syntax")))
+      (loop [remaining (Vec datum-reader/ReaderEvent)
+             (datum-reader/datumread-events read-result)
+            state TermBuildState (->TermBuildState empty-frames nil 0)]
+       (if (empty? remaining)
+         (let [root Any (termbuildstate-root state)]
+           (if (and (empty? (termbuildstate-frames state))
+                    (and (= 1 (termbuildstate-roots state)) (t/term? root)))
+             (let [term t/Term root] (->TermParsed term))
+             (->TermParseRejected "expected one complete Store Term")))
+         (match (consume-term-event state (first remaining))
+           [(TermBuildRejected detail) (->TermParseRejected detail)]
+           [(TermBuildAccepted next-state)
+            (recur (vec (rest remaining)) next-state)]))))))
+
+(defn- render-term-any [value Any] String
+  (cond
+    [(t/triple? value)
+     (str "[" (render-term-any (t/triple-t1 value)) " "
+          (render-term-any (t/triple-t2 value)) " "
+          (render-term-any (t/triple-t3 value)) "]")]
+    [(string? value) (datum-reader/render-string-literal value)]
+    [(boolean? value) (if value "true" "false")]
+    [(t/instant? value)
+     (let [instant t/Instant value]
+       (str "[#instant " (t/instant-epoch-seconds instant) " "
+         (t/instant-nanos instant) "]"))]
+    [(and (number? value) (not (integer? value)))
+     (let [float-value Float (double value)]
+       (str "[#float " (float-to-bits float-value) " :bits]"))]
+    [:else (str value)]))
+
+(defn render-term [value t/Term] String (render-term-any value))
+
+(defn- variable [name String] d/QueryTerm (d/variable name))
+
+(defn- relation-plan
+  [base-relation String names (Vec String)] query/QueryPlan
+  (let [arguments (Vec d/QueryTerm) (mapv variable names)
+        result-relation String "program-cli-result"]
+    (query/query-plan
+      (query/relation-find result-relation)
+      [[(d/rule result-relation arguments
+          [(d/relation-literal base-relation arguments)])]])))
+
+(def triple-plan query/QueryPlan
+  (relation-plan d/triple-relation ["t1" "t2" "t3"]))
+(def occurrence-plan query/QueryPlan
+  (relation-plan d/occurrence-relation ["coordinate" "action" "proposition"]))
+(def withdrawal-plan query/QueryPlan
+  (relation-plan d/withdrawal-relation ["retraction" "assertion"]))
+
+(defn- rows-at!
+  [store server/Store version Int plan query/QueryPlan] RowsResult
+  (let [session schema/Session (server/store-session store)
+        root (Atom t/TermStore) (schema/store-of session)
+        head Int (term-store/current-sequence root)]
+    (if (> version head)
+      (->RowsRejected
+        (str "Store version " version " is newer than head " head))
+      (let [context query-ops/ReadContext (query-ops/new-read-context)
+            view query-ops/QueryView
+            (query-ops/query-view!
+              context session (query-ops/->QueryBounds version -1))]
+        (if (not (query-ops/read-context-ok? context))
+          (->RowsRejected "could not open the requested Store version")
+          (let [execution query/QueryExecutionResult
+                (query-ops/query-rows!
+                  view plan query-ops/default-query-timeout-ms)
+                result query/QueryResult?
+                (query/execution-query-result execution)]
+            (if (nil? result)
+              (->RowsRejected "native Store query did not produce rows")
+              (let [present query/QueryResult result]
+                (if (query/result-ok? present)
+                  (->RowsReady (query/result-rows present))
+                  (->RowsRejected "native Store query rejected the plan"))))))))))
+
+(defn- triples-from-rows
+  [rows (Vec d/Tuple)] (U (Vec t/Triple) Nil)
+  (loop [remaining (Vec d/Tuple) rows values (Vec t/Triple) empty-triples]
+    (if (empty? remaining)
+      values
+      (let [row d/Tuple (first remaining)]
+        (if (= 3 (count row))
+          (let [candidate Any (t/->Triple
+                  (nth row 0) (nth row 1) (nth row 2))]
+            (if (and (t/triple? candidate) (t/term? candidate))
+              (let [triple t/Triple candidate]
+                (recur (vec (rest remaining)) (conj values triple)))
+              nil))
+          nil)))))
+
+(defn- occurrences-from-rows
+  [rows (Vec d/Tuple)] (U (Vec t/OperationOccurrence) Nil)
+  (loop [remaining (Vec d/Tuple) rows
+         values (Vec t/OperationOccurrence) empty-occurrences]
+    (if (empty? remaining)
+      values
+      (let [row d/Tuple (first remaining)]
+        (if (and (= 3 (count row))
+                 (and (t/triple? (nth row 0))
+                      (and (keyword? (nth row 1)) (t/triple? (nth row 2)))))
+          (let [coordinate t/Triple (nth row 0)
+                action Keyword (nth row 1)
+                proposition t/Triple (nth row 2)
+                occurrence Any (t/->OperationOccurrence
+                  coordinate action proposition)]
+            (if (t/operation-occurrence? occurrence)
+              (let [typed t/OperationOccurrence occurrence]
+                (recur (vec (rest remaining)) (conj values typed)))
+              nil))
+          nil)))))
+
+(defn- find-occurrence
+  [occurrences (Vec t/OperationOccurrence) coordinate t/Triple]
+  t/OperationOccurrence?
+  (some
+    (fn [occurrence t/OperationOccurrence] t/OperationOccurrence?
+      (if (= coordinate (t/operationoccurrence-coordinate occurrence))
+        occurrence nil))
+    occurrences))
+
+(defn- withdrawals-from-rows
+  [rows (Vec d/Tuple)
+   occurrences (Vec t/OperationOccurrence)] (U (Vec t/Withdrawal) Nil)
+  (loop [remaining (Vec d/Tuple) rows
+         values (Vec t/Withdrawal) empty-withdrawals]
+    (if (empty? remaining)
+      values
+      (let [row d/Tuple (first remaining)]
+        (if (and (= 2 (count row))
+                 (and (t/triple? (nth row 0)) (t/triple? (nth row 1))))
+          (let [retraction-coordinate t/Triple (nth row 0)
+                assertion-coordinate t/Triple (nth row 1)
+                retraction t/OperationOccurrence?
+                (find-occurrence occurrences retraction-coordinate)
+                assertion t/OperationOccurrence?
+                (find-occurrence occurrences assertion-coordinate)]
+            (if (and (some? retraction) (some? assertion))
+              (let [present-retraction t/OperationOccurrence retraction
+                    present-assertion t/OperationOccurrence assertion
+                    withdrawal Any
+                    (t/->Withdrawal present-retraction present-assertion)]
+                (if (t/withdrawal? withdrawal)
+                  (let [typed t/Withdrawal withdrawal]
+                    (recur (vec (rest remaining)) (conj values typed)))
+                  nil))
+              nil))
+          nil)))))
+
+(defn- exact-profile
+  [root-resource t/Term propositions (Vec t/Triple)] t/Term?
+  (let [matches (Vec t/Triple)
+        (filterv
+          (fn [proposition t/Triple] Bool
+            (and (= root-resource (t/triple-t1 proposition))
+                 (= program/admitted-by (t/triple-t2 proposition))))
+          propositions)]
+    (if (= 1 (count matches))
+      (let [profile Any (t/triple-t3 (nth matches 0))]
+        (if (t/term? profile) profile nil))
+      nil)))
+
+(defn- value-present? [values (Vec Any) target Any] Bool
+  (some?
+    (some
+      (fn [value Any] Any? (if (= value target) value nil))
+      values)))
+
+(defn- root-closure
+  [root-resource t/Term propositions (Vec t/Triple)] (Vec Any)
+  (loop [known (Vec Any) [root-resource]]
+    (let [expanded (Vec Any)
+          (reduce
+            (fn [values (Vec Any) proposition t/Triple] (Vec Any)
+              (let [subject Any (t/triple-t1 proposition)
+                    object Any (t/triple-t3 proposition)]
+                (if (and (= program/contains (t/triple-t2 proposition))
+                         (and (value-present? known subject)
+                              (not (value-present? values object))))
+                  (conj values object)
+                  values)))
+            known propositions)]
+      (if (= (count expanded) (count known))
+        known
+        (recur expanded)))))
+
+(defn- profile-rules
+  [profile t/Term propositions (Vec t/Triple)] (Vec Any)
+  (reduce
+    (fn [rules (Vec Any) proposition t/Triple] (Vec Any)
+      (if (and (= profile (t/triple-t1 proposition))
+               (= program/includes (t/triple-t2 proposition)))
+        (let [rule Any (t/triple-t3 proposition)]
+          (if (value-present? rules rule) rules (conj rules rule)))
+        rules))
+    empty-any propositions))
+
+(defn- root-proposition?
+  [proposition t/Triple
+   closure (Vec Any)
+   space-id String
+   profile t/Term
+   rules (Vec Any)] Bool
+  (let [subject Any (t/triple-t1 proposition)
+        relation Any (t/triple-t2 proposition)
+        object Any (t/triple-t3 proposition)]
+    (or
+      (value-present? closure subject)
+      (and (= subject space-id)
+           (and (= relation kernel/profile-anchor)
+                (= object
+                   (kernel/profile-header
+                     profile program/fact-profile-kind
+                     kernel/observe-profile-mode))))
+      (and (= subject profile)
+           (or (and (= relation kernel/profile-includes)
+                    (= object kernel/fact-normal-form-profile-rule))
+               (or (and (= relation program/member-of)
+                        (= object program/profiles))
+                   (and (= relation program/includes)
+                        (value-present? rules object)))))
+      (and (value-present? rules subject)
+           (and (= relation program/member-of)
+                (= object program/profile-rules)))
+      (and (= relation program/member-of)
+           (= object program/relationships)))))
+
+(defn- root-scoped-propositions
+  [space-id String root-resource t/Term profile t/Term
+   propositions (Vec t/Triple)] (Vec t/Triple)
+  (let [closure (Vec Any) (root-closure root-resource propositions)
+        rules (Vec Any) (profile-rules profile propositions)]
+    (filterv
+      (fn [proposition t/Triple] Bool
+        (root-proposition? proposition closure space-id profile rules))
+      propositions)))
+
+(defn- load-history!
+  [store server/Store version Int root program/ProgramRoot] RootLoadResult
+  (match (rows-at! store version occurrence-plan)
+    [(RowsRejected detail) (->RootLoadRejected detail)]
+    [(RowsReady occurrence-rows)
+     (let [occurrences (U (Vec t/OperationOccurrence) Nil)
+           (occurrences-from-rows occurrence-rows)]
+       (if (nil? occurrences)
+         (->RootLoadRejected "occurrence relation returned a malformed row")
+         (let [present-occurrences (Vec t/OperationOccurrence) occurrences]
+           (match (rows-at! store version withdrawal-plan)
+             [(RowsRejected detail) (->RootLoadRejected detail)]
+             [(RowsReady withdrawal-rows)
+              (let [withdrawals (U (Vec t/Withdrawal) Nil)
+                    (withdrawals-from-rows withdrawal-rows present-occurrences)]
+                (if (nil? withdrawals)
+                  (->RootLoadRejected
+                    "withdrawal relation returned a malformed row")
+                  (let [present-withdrawals (Vec t/Withdrawal) withdrawals]
+                    (->RootLoaded
+                      (->RootSnapshot root present-occurrences
+                        present-withdrawals)))))]))))]))
+
+(defn- admit-loaded-root
+  [store server/Store space-id String root-resource t/Term version Int
+   include-history Bool propositions (Vec t/Triple)] RootLoadResult
+  (let [profile t/Term? (exact-profile root-resource propositions)]
+    (if (nil? profile)
+      (->RootLoadRejected
+        "root must have exactly one explicit admitted_by profile Triple")
+      (let [present-profile t/Term profile
+            scoped-propositions (Vec t/Triple)
+            (root-scoped-propositions
+              space-id root-resource present-profile propositions)
+            candidate program/ProgramRoot
+            (program/->ProgramRoot
+              space-id root-resource version present-profile
+              scoped-propositions)]
+        (match (program/validate-root candidate)
+          [(program/ProgramRejected code detail) (->RootLoadRejected detail)]
+          [(program/ProgramAdmitted admitted)
+           (if include-history
+             (load-history! store version admitted)
+             (->RootLoaded
+               (->RootSnapshot admitted empty-occurrences empty-withdrawals)))])))))
+
+(defn- load-root!
+  [store server/Store space-id String root-resource t/Term version Int
+   include-history Bool] RootLoadResult
+  (match (rows-at! store version triple-plan)
+    [(RowsRejected detail) (->RootLoadRejected detail)]
+    [(RowsReady triple-rows)
+     (let [propositions (U (Vec t/Triple) Nil)
+           (triples-from-rows triple-rows)]
+       (if (nil? propositions)
+         (->RootLoadRejected "triple(t1,t2,t3) returned a malformed row")
+         (let [present-propositions (Vec t/Triple) propositions]
+           (admit-loaded-root store space-id root-resource version
+             include-history present-propositions))))]))
+
+(defn- terms-lines [values (Vec Any)] (Vec String)
+  (mapv render-term-any values))
+
+(defn- triple-lines [values (Vec t/Triple)] (Vec String)
+  (mapv (fn [value t/Triple] String (render-term-any value)) values))
+
+(defn- history-lines [history read/ProgramHistory] (Vec String)
+  (into
+    (mapv
+      (fn [occurrence t/OperationOccurrence] String
+        (str "occurrence "
+          (render-term-any (t/operationoccurrence-coordinate occurrence)) " "
+          (t/operationoccurrence-action occurrence) " "
+          (render-term-any (t/operationoccurrence-proposition occurrence))))
+      (read/programhistory-occurrences history))
+    (mapv
+      (fn [withdrawal t/Withdrawal] String
+        (str "withdrawal "
+          (render-term-any
+            (t/operationoccurrence-coordinate
+              (t/withdrawal-retraction withdrawal))) " "
+          (render-term-any
+            (t/operationoccurrence-coordinate
+              (t/withdrawal-assertion withdrawal)))))
+      (read/programhistory-withdrawals history))))
+
+(defn- without-propositions
+  [propositions (Vec t/Triple) removed (Vec t/Triple)] (Vec t/Triple)
+  (filterv
+    (fn [candidate t/Triple] Bool
+      (not (transaction/proposition-live? removed candidate)))
+    propositions))
+
+(defn- add-propositions
+  [propositions (Vec t/Triple) added (Vec t/Triple)] (Vec t/Triple)
+  (reduce
+    (fn [current (Vec t/Triple) proposition t/Triple] (Vec t/Triple)
+      (if (transaction/proposition-live? current proposition)
+        current (conj current proposition)))
+    propositions added))
+
+(defn- projected-module
+  [module t/Term source String] projection/ProgramProjectionResult
+  (let [path String (render-term module)
+        digest String (str "sha256:" (sha256-bytes (utf8-encode source)))]
+    (match (parser-reader/facts-from-source path source digest "program")
+      [(facts/FactsRead bundle) (projection/project-module module bundle)]
+      [(facts/FactsRejected errors)
+       (projection/->ProgramProjectionRejected
+         :program-projection/read "canonical source could not be parsed")])))
+
+(defn- projection-propositions
+  [result projection/ProgramProjectionResult] (U (Vec t/Triple) Nil)
+  (match result
+    [(projection/ProgramProjectionRejected code detail) nil]
+    [(projection/ProgramProjected projected)
+     (projection/programmoduleprojection-propositions projected)]))
+
+(defn- rematerialize-delta
+  [candidate (Vec t/Triple)
+   delta transaction/SourceDelta] (U (Vec t/Triple) Nil)
+  (let [module-value Any (transaction/sourcedelta-module delta)]
+    (if (not (t/term? module-value))
+      nil
+      (let [module t/Term module-value
+            before (U (Vec t/Triple) Nil)
+            (projection-propositions
+              (projected-module module (transaction/sourcedelta-before delta)))
+            after (U (Vec t/Triple) Nil)
+            (projection-propositions
+              (projected-module module (transaction/sourcedelta-after delta)))]
+        (if (and (some? before) (some? after))
+          (let [before-values (Vec t/Triple) before
+                after-values (Vec t/Triple) after]
+            (add-propositions
+              (without-propositions
+                (without-propositions candidate before-values) after-values)
+              after-values))
+          nil)))))
+
+(defn- next-root-transition
+  [base program/ProgramRoot next-root t/Term
+   propositions (Vec t/Triple)] (Vec t/Triple)
+  (let [base-resource Any (program/root-resource-value base)
+        profile Any (program/profile-value base)
+        with-root (Vec t/Triple)
+        (add-propositions propositions
+          [(t/triple next-root program/member-of program/program-roots)
+           (t/triple next-root program/admitted-by profile)
+           (t/triple next-root program/derived-from base-resource)])]
+    (reduce
+      (fn [current (Vec t/Triple) proposition t/Triple] (Vec t/Triple)
+        (if (and (= base-resource (t/triple-t1 proposition))
+                 (= program/contains (t/triple-t2 proposition)))
+          (add-propositions current
+            [(t/triple next-root program/contains (t/triple-t3 proposition))])
+          current))
+      with-root (program/programroot-propositions base))))
+
+(defn- rematerialize
+  [planned transaction/ProgramTransaction] RematerializeResult
+  (let [base program/ProgramRoot
+        (transaction/programtransaction-base-root planned)
+        candidate program/ProgramRoot
+        (transaction/programtransaction-candidate-root planned)
+        next-root-value Any (program/root-resource-value candidate)
+        initial (Vec t/Triple) (program/programroot-propositions base)]
+    (if (not (t/term? next-root-value))
+      (->RematerializeRejected "candidate root identity is outside Store Term")
+      (let [next-root t/Term next-root-value]
+    (loop [remaining (Vec transaction/SourceDelta)
+           (transaction/programtransaction-source-deltas planned)
+           propositions (Vec t/Triple) initial]
+      (if (empty? remaining)
+        (let [transitioned (Vec t/Triple)
+              (next-root-transition base next-root propositions)]
+          (->Rematerialized
+            (program/->ProgramRoot
+              (program/programroot-space-id base)
+              next-root
+              (inc (program/programroot-store-version base))
+              (program/programroot-profile base)
+              transitioned)))
+        (let [next (U (Vec t/Triple) Nil)
+              (rematerialize-delta propositions (first remaining))]
+          (if (nil? next)
+            (->RematerializeRejected
+              "canonical source reparse or projection failed")
+            (let [present (Vec t/Triple) next]
+              (recur (vec (rest remaining)) present))))))))))
+
+(defn- preview-lines [preview transaction/RenamePreview] (Vec String)
+  (into
+    [(str "root "
+       (render-term-any
+         (program/root-resource-value
+           (transaction/renamepreview-candidate-root preview))))
+     (str "binding "
+       (render-term-any (transaction/renamepreview-selected-binding preview)))
+     (str "rename "
+       (datum-reader/render-string-literal
+         (transaction/renamepreview-old-name preview)) " "
+       (datum-reader/render-string-literal
+         (transaction/renamepreview-new-name preview)))]
+    (into
+      (mapv
+        (fn [delta transaction/SourceDelta] String
+          (str "source " (render-term-any (transaction/sourcedelta-module delta))
+            " " (datum-reader/render-string-literal
+                   (transaction/sourcedelta-after delta))))
+        (transaction/renamepreview-source-deltas preview))
+      (mapv
+        (fn [dependent Any] String
+          (str "invalidate " (render-term-any dependent)))
+        (transaction/renamepreview-invalidated preview)))))
+
+(defn- rpc-action [operation t/CommitOperation] t/Triple
+  (dispatch/rpc-record
+    :rpc/action
+    [(if (= t/assert-action (t/commitoperation-action operation))
+       :rpc/assert :rpc/retract)
+     (t/commitoperation-proposition operation)
+     :rpc/subject-any]))
+
+(defn- response-transaction-coordinate
+  [response t/RpcResponse operation-count Int] t/Triple?
+  (let [payload Any (t/rpc-response-payload-value response)
+        mutation dispatch/ValuesResult
+        (dispatch/read-record payload :rpc/mutation-result 1)]
+    (if (not (dispatch/valuesresult-ok mutation))
+      nil
+      (let [fields (Vec Any) (dispatch/valuesresult-values mutation)
+            listed dispatch/ValuesResult (dispatch/read-list (nth fields 0))]
+        (if (not (dispatch/valuesresult-ok listed))
+          nil
+          (let [results (Vec Any) (dispatch/valuesresult-values listed)]
+            (if (not= operation-count (count results))
+              nil
+              (loop [remaining (Vec Any) results index Int 0
+                     transaction-coordinate t/Triple? nil]
+                (if (empty? remaining)
+                  transaction-coordinate
+                  (let [parsed dispatch/ValuesResult
+                        (dispatch/read-record
+                          (first remaining) :rpc/action-result 3)]
+                    (if (not (dispatch/valuesresult-ok parsed))
+                      nil
+                      (let [parts (Vec Any) (dispatch/valuesresult-values parsed)
+                            occurrence Any (nth parts 2)]
+                        (if (not (and (= index (nth parts 0))
+                                      (and (= true (nth parts 1))
+                                           (and
+                                             (t/occurrence-coordinate? occurrence)
+                                             (= index
+                                               (t/triple-t3 occurrence))))))
+                          nil
+                          (let [coordinate t/Triple occurrence
+                                tx-value Any (t/triple-t1 coordinate)]
+                            (if (not (t/transaction-coordinate? tx-value))
+                              nil
+                              (let [tx t/Triple tx-value]
+                                (if (and (some? transaction-coordinate)
+                                         (not= transaction-coordinate tx))
+                                  nil
+                                  (recur (vec (rest remaining)) (inc index) tx))))))))))))))))))
+
+(defn- commit!
+  [store-result server/StoreResult store server/Store log-path String
+   planned transaction/ProgramTransaction
+   verified transaction/VerifiedRematerialization] ExecutionResult
+  (let [session schema/Session (server/store-session store)
+        observed-space-id String
+        (term-store/space-id (schema/store-of session))
+        observed-version Int
+        (term-store/current-sequence (schema/store-of session))]
+    (match (transaction/prepare-commit
+             verified
+             observed-space-id
+             observed-version)
+      [(transaction/CommitConflict
+         expected-space observed-space expected-version present-version)
+       (->ExecutionFailed 75
+         (str "Store version conflict: expected " expected-version
+              ", observed " present-version))]
+      [(transaction/CommitReady space-id expected-version candidate operations)
+       (let [actions (Vec Any) (mapv rpc-action operations)
+             payload t/Triple
+             (dispatch/rpc-record
+               :rpc/batch [(dispatch/rpc-list actions) :rpc/none])
+             request t/RpcRequest
+             (t/->RpcRequest
+               space-id :rpc/batch expected-version nil nil payload)
+             packet t/StoreRpcPacketV2
+             (t/->StoreRpcPacketV2 :request 0 1 request nil)
+             dispatched server/ResponseResult
+             (server/dispatch-request!
+               store-result store (server/->Request packet) 0)
+             response-wrapper server/Response?
+             (server/responseresult-response dispatched)]
+         (if (or (not= server/status-ok
+                       (server/responseresult-status dispatched))
+                 (nil? response-wrapper))
+           (->ExecutionFailed 74
+             (or (server/responseresult-error dispatched)
+                 "native Store dispatch failed"))
+           (let [present-wrapper server/Response response-wrapper
+                 response t/RpcResponse?
+                 (t/storerpcpacketv2-response
+                   (server/response-packet present-wrapper))]
+             (if (nil? response)
+               (->ExecutionFailed 74 "native Store response omitted its payload")
+               (let [present-response t/RpcResponse response
+                     coordinate t/Triple?
+                     (response-transaction-coordinate
+                       present-response (count operations))]
+                 (if (or (some? (t/rpcresponse-error present-response))
+                         (or (not= (inc expected-version)
+                                   (t/rpcresponse-served-version present-response))
+                             (or (not (server/responseresult-state-changed dispatched))
+                                 (nil? coordinate))))
+                   (->ExecutionFailed 74 "native Store rejected the atomic rename batch")
+                   (let [present-coordinate t/Triple coordinate]
+                     (match (transaction/commit-receipt
+                              planned present-coordinate)
+                       [(transaction/CommitReceiptRejected code detail)
+                        (->ExecutionFailed 74 detail)]
+                       [(transaction/CommitReceiptAccepted receipt)
+                        (let [append-error String?
+                              (adapter/append-log!
+                                log-path
+                                (server/responseresult-append-bytes dispatched))]
+                          (if (some? append-error)
+                            (->ExecutionFailed 74
+                              (or append-error "Store append failed"))
+                            (->ExecutionComplete
+                              [(str "committed "
+                                 (render-term-any
+                                   (transaction/programcommitreceipt-root receipt))
+                                 " "
+                                 (transaction/programcommitreceipt-served-version
+                                   receipt))])))]))))))))])))
+
+(defn- execute-rename!
+  [store-result server/StoreResult store server/Store log-path String
+   root program/ProgramRoot next-root t/Term binding t/Term new-name String
+   commit Bool] ExecutionResult
+  (match (transaction/plan-rename root next-root binding new-name)
+    [(transaction/RenameRejected code detail)
+     (->ExecutionFailed 65 detail)]
+    [(transaction/RenamePlanned planned preview)
+     (match (rematerialize planned)
+       [(RematerializeRejected detail) (->ExecutionFailed 65 detail)]
+       [(Rematerialized canonical)
+        (match (transaction/verify-rematerialized planned canonical)
+          [(transaction/RematerializationRejected code detail)
+           (->ExecutionFailed 65 detail)]
+          [(transaction/RematerializationVerified verified)
+           (if commit
+             (commit! store-result store log-path planned verified)
+             (->ExecutionComplete (preview-lines preview)))])])]))
+
+(defn- execute-command!
+  [store-result server/StoreResult store server/Store
+   invocation ProgramInvocation] ExecutionResult
+  (let [space-id String (programinvocation-space-id invocation)
+        log-path String (programinvocation-log-path invocation)
+        command ProgramCommand (programinvocation-command invocation)]
+    (match command
+      [(Inspect root-text version)
+       (match (parse-term root-text)
+         [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+         [(TermParsed root-resource)
+          (match (load-root! store space-id root-resource version false)
+            [(RootLoadRejected detail) (->ExecutionFailed 65 detail)]
+            [(RootLoaded snapshot)
+             (->ExecutionComplete
+               (triple-lines (read/inspect (rootsnapshot-root snapshot))))])])]
+      [(Definition root-text version exact-name)
+       (match (parse-term root-text)
+         [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+         [(TermParsed root-resource)
+          (match (load-root! store space-id root-resource version false)
+            [(RootLoadRejected detail) (->ExecutionFailed 65 detail)]
+            [(RootLoaded snapshot)
+             (->ExecutionComplete
+               (terms-lines
+                 (read/definition (rootsnapshot-root snapshot) exact-name)))])])]
+      [(References root-text version target-text)
+       (match (parse-term root-text)
+         [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+         [(TermParsed root-resource)
+          (match (parse-term target-text)
+            [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+            [(TermParsed target)
+             (match (load-root! store space-id root-resource version false)
+               [(RootLoadRejected detail) (->ExecutionFailed 65 detail)]
+               [(RootLoaded snapshot)
+                (->ExecutionComplete
+                  (terms-lines
+                    (read/references (rootsnapshot-root snapshot) target)))])])])]
+      [(Impact root-text version changed-text)
+       (match (parse-term root-text)
+         [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+         [(TermParsed root-resource)
+          (match (parse-term changed-text)
+            [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+            [(TermParsed changed)
+             (match (load-root! store space-id root-resource version false)
+               [(RootLoadRejected detail) (->ExecutionFailed 65 detail)]
+               [(RootLoaded snapshot)
+                (->ExecutionComplete
+                  (terms-lines
+                    (read/impact (rootsnapshot-root snapshot) changed)))])])])]
+      [(History root-text version proposition-text)
+       (match (parse-term root-text)
+         [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+         [(TermParsed root-resource)
+          (match (parse-term proposition-text)
+            [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+            [(TermParsed proposition)
+             (if (not (t/triple? proposition))
+               (->ExecutionFailed 64 "history requires a recursive Triple")
+               (let [proposition-value t/Triple proposition]
+                 (match (load-root! store space-id root-resource version true)
+                   [(RootLoadRejected detail) (->ExecutionFailed 65 detail)]
+                   [(RootLoaded snapshot)
+                    (->ExecutionComplete
+                      (history-lines
+                        (read/history
+                          (rootsnapshot-root snapshot) proposition-value
+                          (rootsnapshot-occurrences snapshot)
+                          (rootsnapshot-withdrawals snapshot))))])))] )])]
+      [(Rename root-text version next-root-text binding-text new-name commit)
+       (match (parse-term root-text)
+         [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+         [(TermParsed root-resource)
+          (match (parse-term next-root-text)
+            [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+            [(TermParsed next-root)
+             (match (parse-term binding-text)
+               [(TermParseRejected detail) (->ExecutionFailed 64 detail)]
+               [(TermParsed binding)
+                (match (load-root! store space-id root-resource version false)
+                  [(RootLoadRejected detail) (->ExecutionFailed 65 detail)]
+                  [(RootLoaded snapshot)
+                   (execute-rename!
+                     store-result store log-path (rootsnapshot-root snapshot)
+                     next-root binding new-name commit)])])])])])))
+
+(defn- mutation-command? [command ProgramCommand] Bool
+  (match command
+    [(Rename root version next-root binding new-name commit) commit]
+    [(Inspect root version) false]
+    [(Definition root version name) false]
+    [(References root version target) false]
+    [(Impact root version changed) false]
+    [(History root version proposition) false]))
+
+(defn- open-existing-store!
+  [path String space-id String] server/StoreResult
+  (let [source ByteSource
+        (host.fs/read-byte-source-bounded-or-die
+          path adapter/max-store-log-bytes)]
+    (server/server-store-boot! path space-id source (subvec source 0 0))))
+
+(defn- execute-locked!
+  [invocation ProgramInvocation] ExecutionResult
+  (let [path String (programinvocation-log-path invocation)
+        mutating Bool
+        (mutation-command? (programinvocation-command invocation))
+        store-result server/StoreResult
+        (if mutating
+          (adapter/open-store! path (programinvocation-space-id invocation))
+          (open-existing-store! path (programinvocation-space-id invocation)))
+        store-value server/Store? (server/storeresult-store store-result)]
+    (if (or (not= server/status-ok (server/storeresult-status store-result))
+            (nil? store-value))
+      (->ExecutionFailed 74
+        (or (server/storeresult-error store-result) "could not open Store log"))
+      (let [boot-error String?
+            (if mutating
+              (adapter/persist-boot! path store-result)
+              (if (empty? (server/storeresult-boot-append store-result))
+                nil
+                "read-only program command requires an initialized Store log"))]
+        (if (some? boot-error)
+          (->ExecutionFailed 74
+            (or boot-error "could not open Store at a durable version"))
+          (let [store server/Store store-value]
+            (execute-command! store-result store invocation)))))))
+
+(defn- report-result [result ExecutionResult] Int
+  (match result
+    [(ExecutionFailed status detail)
+     (do (host.stderr/write-line (str "beagle program: " detail)) status)]
+    [(ExecutionComplete lines)
+     (do (doseq [line lines] (host.stdout/write-line line)) 0)]))
+
+(defn- execute-catching! [invocation ProgramInvocation] ExecutionResult
+  (try
+    (execute-locked! invocation)
+    (catch (problem Exception)
+      (->ExecutionFailed 70 (str "native program command failed: " problem)))))
+
+(defn- run-locked! [invocation ProgramInvocation] Int
+  (let [path String (programinvocation-log-path invocation)]
+    (match (host.fs/lock-exclusive path)
+      [(host.fs/LockExclusiveError errno)
+       (report-result (->ExecutionFailed 75 "Store log is absent or locked"))]
+      [(host.fs/LockExclusiveOk descriptor)
+       (let [result ExecutionResult (execute-catching! invocation)
+             release host.fs/UnlockResult (host.fs/unlock descriptor)]
+         (match release
+           [(host.fs/UnlockError errno)
+            (report-result (->ExecutionFailed 74 "could not unlock Store log"))]
+           [(host.fs/UnlockOk) (report-result result)]))])))
+
+(defn- run-invocation! [invocation ProgramInvocation] Int
+  (if (mutation-command? (programinvocation-command invocation))
+    (match (host.fs/append-text (programinvocation-log-path invocation) "")
+      [(host.fs/AppendTextError errno)
+       (report-result (->ExecutionFailed 74 "could not create Store log"))]
+      [(host.fs/AppendTextOk) (run-locked! invocation)])
+    (run-locked! invocation)))
+
 (defn main [args (Vec String)] Int
-  (if (some? (parse-args args))
-    0
-    (do
-      (host.stderr/write-line usage)
-      64)))
+  (let [invocation ProgramInvocation? (parse-args args)]
+    (if (nil? invocation)
+      (do (host.stderr/write-line usage) 64)
+      (let [present ProgramInvocation invocation]
+        (run-invocation! present)))))
