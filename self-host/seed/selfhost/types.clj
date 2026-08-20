@@ -179,7 +179,7 @@
 
 (defn parse-type! [t]
   (cond
-  (and (vector? t) (> (count t) 0) (= (nth t 0) "#%brackets")) (invalid-type! (if (> (index-of2 (subvec t 1) "->") -1) "arrow function types are not supported; write (Fn [ParamType ...] ReturnType)" "a vector is not a type expression; write (Fn [ParamType ...] ReturnType) for a function type"))
+  (and (vector? t) (> (count t) 0) (= (nth t 0) "#%brackets")) (invalid-type! "a vector is not a type expression; write (Fn [ParamType ...] ReturnType) for a function type")
   (and (vector? t) (= (count t) 3) (= (nth t 0) "Fn") (vector? (nth t 1)) (> (count (nth t 1)) 0) (= (nth (nth t 1) 0) "#%brackets")) (parse-fn-params! (subvec (nth t 1) 1) (nth t 2))
   (and (vector? t) (> (count t) 0) (= (nth t 0) "Fn")) (invalid-type! "function type requires exactly (Fn [ParamType ...] ReturnType)")
   (and (vector? t) (= (count t) 3) (= (nth t 0) "forall")) (let [vars-form (nth t 1)
@@ -314,9 +314,6 @@
   (expect! "pt: CLJ alias Long" (= (parse-type! "Long") (make-prim "Int")))
   (expect! "pt: fn type" (= (parse-type! ["Fn" ["#%brackets" "Int"] "String"]) (make-fn [(make-prim "Int")] nil (make-prim "String"))))
   (expect! "pt: variadic fn" (= (parse-type! ["Fn" ["#%brackets" "Int" "&" "String"] "Bool"]) (make-fn [(make-prim "Int")] (make-prim "String") (make-prim "Bool"))))
-  (expect! "pt: retired arrow fn rejects" (let [before (count (type-parse-errors))
-   invalid (parse-type! ["#%brackets" "Int" "->" "String"])]
-  (and (= (get invalid "kind") "invalid") (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: malformed Fn rejects" (let [before (count (type-parse-errors))
    invalid (parse-type! ["Fn" "Int" "String"])]
   (and (= (get invalid "kind") "invalid") (= (count (type-parse-errors)) (+ before 1)))))

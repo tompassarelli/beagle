@@ -59,7 +59,8 @@
 (defn metadata-reference-key [key]
   (if (string? key) (let [text key
    index (str/last-index-of text "/")]
-  (if (and (some? index) (> index 0) (< index (- (count text) 1))) ["qualified-ref" (subs text 0 index) (subs text (+ index 1))] text)) key))
+  (if (some? index) (let [offset index]
+  (if (and (> offset 0) (< offset (- (count text) 1))) ["qualified-ref" (subs text 0 offset) (subs text (+ offset 1))] text)) text)) key))
 
 (defn structuralize-reference-table [table]
   (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (vec (keys table))))
@@ -67,7 +68,8 @@
 (defn reference-key-leaf [key]
   (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) (nth key 2) (if (string? key) (let [text key
    index (str/last-index-of text "/")]
-  (if (nil? index) text (subs text (+ index 1)))) key)))
+  (if (nil? index) text (let [offset index]
+  (subs text (+ offset 1))))) key)))
 
 (def ^String HEX-DIGITS "0123456789abcdef")
 

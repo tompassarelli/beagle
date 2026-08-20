@@ -306,7 +306,6 @@
   (if (nil? (deref AUTHORED-REFINEMENT)) (do
   (reset! AUTHORED-REFINEMENT refinement)))
   refinement)
-  (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG)) (type-error! (if (has-item? (subvec t 1) "->") "arrow function types are not supported; write (Fn [ParamType ...] ReturnType)" "a vector is not a type expression; write (Fn [ParamType ...] ReturnType) for a function type"))
   (and (vector? t) (> (count t) 0) (= (nth t 0) "Fn")) (if (and (= (count t) 3) (bracketed? (nth t 1))) (parse-fn-type-items! (bracket-body (nth t 1)) (nth t 2)) (do
   (type-error! "function type requires exactly (Fn [ParamType ...] ReturnType)")))
   (and (vector? t) (= (count t) 3) (= (nth t 0) "forall")) (let [vars-form (nth t 1)
@@ -1716,7 +1715,7 @@
   (if if-form? ["let" binding ["if" test (nth rest-items 0) (nth rest-items 1)]] ["let" binding ["if" test (vec (concat ["do"] rest-items))]])) (let [g (fresh-lowered-sym! "bind")
    inner (vec (concat [BRACKET-TAG] binder-part [g]))
    test (binding-cond-test head g)]
-  (if if-form? ["let" [BRACKET-TAG g value] ["if" test ["let" inner (nth rest-items 0)] (nth rest-items 1)]] ["let" [BRACKET-TAG g value] ["if" test ["let" inner (vec (concat ["do"] rest-items))]]])))))))
+  (if if-form? ["let" [BRACKET-TAG g "Any" value] ["if" test ["let" inner (nth rest-items 0)] (nth rest-items 1)]] ["let" [BRACKET-TAG g "Any" value] ["if" test ["let" inner (vec (concat ["do"] rest-items))]]])))))))
 
 (defn parse-simple-defunion! [^String name raw-members]
   (reject-reserved-type-name! name "defunion")
@@ -2907,7 +2906,7 @@
   (reset-errors!)
   (parse-expr* ["fn" [BRACKET-TAG "x"]])
   (> (count (parse-errors)) 0)))
-  (expect! "let with bindings" (let [node (parse-expr* ["let" [BRACKET-TAG "x" 1 "y" 2] ["+" "x" "y"]])]
+  (expect! "let with bindings" (let [node (parse-expr* ["let" [BRACKET-TAG "x" "Int" 1 "y" "Int" 2] ["+" "x" "y"]])]
   (and (= (get node "node") "let") (= (count (get node "bindings")) 2) (= (get (nth (get node "bindings") 0) "name") "x") (= (get (nth (get node "bindings") 1) "name") "y"))))
   (expect! "let with flat typed triples" (let [node (parse-expr* ["let" [BRACKET-TAG "x" "Int" 1 "y" "Int" 2] ["+" "x" "y"]])]
   (and (= (count (get node "bindings")) 2) (= (get (get (nth (get node "bindings") 0) "ann") "name") "Int") (= (get (get (nth (get node "bindings") 1) "ann") "name") "Int"))))
@@ -2931,7 +2930,7 @@
   (and (= (get node "node") "if") (= (get (get node "cond") "name") "c") (= (get (get node "then") "name") "e") (= (get (get node "else") "name") "t"))))
   (expect! "do" (let [node (parse-expr* ["do" "a" "b"])]
   (and (= (get node "node") "do") (= (count (get node "body")) 2))))
-  (expect! "loop" (let [node (parse-expr* ["loop" [BRACKET-TAG "i" 0] ["recur" ["+" "i" 1]]])]
+  (expect! "loop" (let [node (parse-expr* ["loop" [BRACKET-TAG "i" "Int" 0] ["recur" ["+" "i" 1]]])]
   (and (= (get node "node") "loop") (= (count (get node "bindings")) 1) (= (get (nth (get node "bindings") 0) "name") "i"))))
   (expect! "loop with a flat typed triple" (let [node (parse-expr* ["loop" [BRACKET-TAG "i" "Int" 0] ["recur" ["+" "i" 1]]])]
   (= (get (get (nth (get node "bindings") 0) "ann") "name") "Int")))
@@ -3199,7 +3198,7 @@
    names (mapv (fn [entry] (get entry "name")) surface)
    map-entry (first (filterv (fn [entry] (= (get entry "name") "map->Point")) surface))]
   (and (= names ["->Point" "map->Point" "point-x"]) (= (get map-entry "type") (make-fn-type [(make-prim "Any")] nil (make-prim "Point"))))))
-  (expect! "scope resolution separates macro, caller, and nested capture zones" (let [prog (parse-program! [["defmacro" "around" [BRACKET-TAG "body"] ["quasiquote" ["let" [BRACKET-TAG "tmp" 1] ["do" "tmp" ["unquote" "body"]]]]] ["defn" "capture" [BRACKET-TAG ["tmp" "Int"]] "Int" ["around" ["do" "tmp" ["let" [BRACKET-TAG "tmp" 2] "tmp"]]]]])
+  (expect! "scope resolution separates macro, caller, and nested capture zones" (let [prog (parse-program! [["defmacro" "around" [BRACKET-TAG "body"] ["quasiquote" ["let" [BRACKET-TAG "tmp" "Int" 1] ["do" "tmp" ["unquote" "body"]]]]] ["defn" "capture" [BRACKET-TAG "tmp" "Int"] "Int" ["around" ["do" "tmp" ["let" [BRACKET-TAG "tmp" "Int" 2] "tmp"]]]]])
    form (nth (get prog "forms") 0)
    param (nth (get form "params") 0)
    outer (nth (get form "body") 0)
@@ -3215,13 +3214,15 @@
    outer-id (get outer-binding "bindingId")
    inner-id (get inner-binding "bindingId")]
   (and (string? param-id) (string? outer-id) (string? inner-id) (not= param-id outer-id) (not= outer-id inner-id) (not= param-id inner-id) (str/starts-with? outer-id "introduced-") (contains? outer-use "providerId") (nil? (get outer-use "providerId")) (contains? caller-use "providerId") (nil? (get caller-use "providerId")) (contains? inner-use "providerId") (nil? (get inner-use "providerId")) (= (get outer-use "refersTo") outer-id) (= (get caller-use "refersTo") param-id) (= (get inner-use "refersTo") inner-id))))
-  (expect! "binding-conditional synthesized test preserves the lexical edge" (let [prog (parse-program! [["defn" "keep" [BRACKET-TAG] "Int" ["if-let" [BRACKET-TAG "x" 1] "x" 0]]])
+  (expect! "binding-conditional synthesized test preserves the lexical edge" (let [prog (parse-program! [["defn" "keep" [BRACKET-TAG] "Int" ["if-let" [BRACKET-TAG "x" "Int" 1] "x" 0]]])
    form (nth (get prog "forms") 0)
    outer (nth (get form "body") 0)
-   binding (nth (get outer "bindings") 0)
+   outer-binding (nth (get outer "bindings") 0)
    conditional (nth (get outer "body") 0)
-   binding-id (get binding "bindingId")]
-  (and (string? binding-id) (= (get (get conditional "cond") "refersTo") binding-id) (= (get (get conditional "then") "refersTo") binding-id))))
+   inner (get conditional "then")
+   inner-binding (nth (get inner "bindings") 0)
+   binding-id (get inner-binding "bindingId")]
+  (and (str/starts-with? (get outer-binding "name") "bind__") (= (get (get conditional "cond") "name") (get outer-binding "name")) (string? binding-id) (= (get (nth (get inner "body") 0) "refersTo") binding-id))))
   (expect! "parse-program syntax membrane expands a nested caller form" (let [datums [["defmacro" "identity" [BRACKET-TAG "form"] "form"] ["def" "out" ["identity" ["+" 1 2]]]]
    syntaxes (mapv (fn [datum] (syntax/datum->beagle-syntax! datum nil syntax/EMPTY-SCOPE-SET nil {})) datums)
    prog (parse-program-with-syntax! datums syntaxes)

@@ -64,7 +64,7 @@
   (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
 
 (defn- ordered-keys [table]
-  (vec (sort (vec (keys table)))))
+  (vec (sort-by reference->string (vec (keys table)))))
 
 (def ANY {"kind" "prim" "name" "Any"})
 
@@ -481,7 +481,7 @@
 
 (def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
 
-(def CORE-STDLIB (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE) "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE) "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE) "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE] nil FLOAT-TYPE)} "host.fs/real-path" (make-fn [(make-prim "String")] nil (make-prim "host.fs/RealPathResult"))) "host.fs/mtime-nanoseconds" (make-fn [(make-prim "String")] nil (make-prim "host.fs/MtimeNanosecondsResult"))) "host.fs/create-temporary-sibling" (make-fn [(make-prim "String")] nil (make-prim "host.fs/CreateTemporarySiblingResult"))) "host.stdin/read-text-bounded" (make-fn [INT-TYPE] nil (make-prim "host.stdin/ReadTextBoundedResult"))) "host.fs/rename-file" (make-fn [(make-prim "String") (make-prim "String")] nil (make-prim "host.fs/RenameFileResult"))) "host.fs/remove-file" (make-fn [(make-prim "String")] nil (make-prim "host.fs/RemoveFileResult"))))
+(def CORE-STDLIB (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE) "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE) "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE) "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE] nil FLOAT-TYPE)} "host.fs/mtime-nanoseconds" (make-fn [(make-prim "String")] nil (make-prim "host.fs/MtimeNanosecondsResult"))) "host.fs/create-temporary-sibling" (make-fn [(make-prim "String")] nil (make-prim "host.fs/CreateTemporarySiblingResult"))) "host.fs/rename-file" (make-fn [(make-prim "String") (make-prim "String")] nil (make-prim "host.fs/RenameFileResult"))) "host.fs/remove-file" (make-fn [(make-prim "String")] nil (make-prim "host.fs/RemoveFileResult"))))
 
 (defn install-core-result-union! [^String union-name variants]
   (swap! STATE assoc-in ["union-members" union-name] (mapv (fn [variant] (get variant "name")) variants))
@@ -493,10 +493,8 @@
   nil)
 
 (defn install-core-filesystem-result-unions! []
-  (install-core-result-union! "host.fs/RealPathResult" [{"name" "host.fs/RealPathOk" "fields" [[":path" (make-prim "String")]]} {"name" "host.fs/RealPathError" "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/MtimeNanosecondsResult" [{"name" "host.fs/MtimeNanosecondsOk" "fields" [[":nanoseconds" INT-TYPE]]} {"name" "host.fs/MtimeNanosecondsError" "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/CreateTemporarySiblingResult" [{"name" "host.fs/CreateTemporarySiblingOk" "fields" [[":path" (make-prim "String")]]} {"name" "host.fs/CreateTemporarySiblingError" "fields" [[":errno" INT-TYPE]]}])
-  (install-core-result-union! "host.stdin/ReadTextBoundedResult" [{"name" "host.stdin/ReadTextBoundedOk" "fields" [[":text" (make-prim "String")]]} {"name" "host.stdin/ReadTextBoundedOverflow" "fields" []} {"name" "host.stdin/ReadTextBoundedError" "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/RenameFileResult" [{"name" "host.fs/RenameFileOk" "fields" []} {"name" "host.fs/RenameFileError" "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/RemoveFileResult" [{"name" "host.fs/RemoveFileOk" "fields" []} {"name" "host.fs/RemoveFileError" "fields" [[":errno" INT-TYPE]]}])
   nil)

@@ -495,7 +495,6 @@
   (expect! "Core renders as bare #lang beagle" (= (target-lang-line "core") "#lang beagle"))
   (expect! "hosted targets render with explicit language paths" (= (target-lang-line "clj") "#lang beagle/clj"))
   (expect! "unknown targets have no language path" (nil? (target-lang-line "missing")))
-  (expect! "structural typed binding reads as one nested declaration" (= (rd1 "[(x Point) y]") [BRACKET-TAG ["x" "Point"] "y"]))
   (expect! "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
   (and (= (nth result 0) "declare-extern") (= (nth result 1) "fetch") (= (nth result 2) ["Fn" [BRACKET-TAG "String"] ["Promise" "Any"]]))))
   (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))

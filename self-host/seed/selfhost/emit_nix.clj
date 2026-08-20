@@ -654,49 +654,49 @@
    n (count args)
    fname (call-fn-name e)
    pw (fn [a] (paren-wrap (emit-expr* a depth) a))
-   E (fn [a] (emit-expr* a depth))]
+   emit (fn [a] (emit-expr* a depth))]
   (cond
-  (and (qualified-reference=? fn-expr "bgl" "promote") (= n 1)) (E (nth args 0))
+  (and (qualified-reference=? fn-expr "bgl" "promote") (= n 1)) (emit (nth args 0))
   (and (some? fname) (= fname "not") (= n 1)) (str "!" (pw (nth args 0)))
-  (and (some? fname) (= fname "mod") (= n 2)) (let [a (E (nth args 0))
-   b (E (nth args 1))]
+  (and (some? fname) (= fname "mod") (= n 2)) (let [a (emit (nth args 0))
+   b (emit (nth args 1))]
   (str "(" a " - (" a " / " b ") * " b ")"))
   (and (some? fname) (some? (nix-infix-op fname))) (let [op (nix-infix-op fname)]
   (cond
   (= n 2) (str "(" (pw (nth args 0)) " " op " " (pw (nth args 1)) ")")
   (and (= n 1) (or (= fname "-") (= fname "not"))) (str "(" (if (= fname "not") "!" "-") (pw (nth args 0)) ")")
   :else (str "(" (str/join (str " " op " ") (mapv pw args)) ")")))
-  (and (some? fname) (= fname "str")) (str "(" (str/join " + " (mapv E args)) ")")
+  (and (some? fname) (= fname "str")) (str "(" (str/join " + " (mapv emit args)) ")")
   (and (some? fname) (= fname "count")) (str "builtins.length " (pw (nth args 0)))
   (and (some? fname) (= fname "map")) (str "builtins.map " (pw (nth args 0)) " " (pw (nth args 1)))
   (and (some? fname) (= fname "filter")) (str "builtins.filter " (pw (nth args 0)) " " (pw (nth args 1)))
-  (and (some? fname) (= fname "concat")) (if (= n 2) (str "(" (E (nth args 0)) " ++ " (E (nth args 1)) ")") (str "(" (str/join " ++ " (mapv E args)) ")"))
-  (and (some? fname) (= fname "merge")) (if (= n 2) (str "(" (E (nth args 0)) " // " (E (nth args 1)) ")") (str "(" (str/join " // " (mapv E args)) ")"))
-  (and (some? fname) (= fname "get")) (if (< n 2) (str "builtins.getAttr " (str/join " " (mapv E args))) (let [key-arg (nth args 1)
+  (and (some? fname) (= fname "concat")) (if (= n 2) (str "(" (emit (nth args 0)) " ++ " (emit (nth args 1)) ")") (str "(" (str/join " ++ " (mapv emit args)) ")"))
+  (and (some? fname) (= fname "merge")) (if (= n 2) (str "(" (emit (nth args 0)) " // " (emit (nth args 1)) ")") (str "(" (str/join " // " (mapv emit args)) ")"))
+  (and (some? fname) (= fname "get")) (if (< n 2) (str "builtins.getAttr " (str/join " " (mapv emit args))) (let [key-arg (nth args 1)
    target-str (pw (nth args 0))]
-  (if (get-is-keyword? key-arg) (str target-str "." (keyword-selection-field (nth args 0) (get key-arg "value"))) (str target-str ".\"${" (E key-arg) "}\""))))
-  (and (some? fname) (= fname "assoc")) (if (>= n 3) (str "(" (E (nth args 0)) " // { " (E (nth args 1)) " = " (E (nth args 2)) "; })") "/* assoc needs 3 args */ null")
-  (and (some? fname) (= fname "nil?")) (str "(" (E (nth args 0)) " == null)")
-  (and (some? fname) (= fname "some?")) (str "(" (E (nth args 0)) " != null)")
+  (if (get-is-keyword? key-arg) (str target-str "." (keyword-selection-field (nth args 0) (get key-arg "value"))) (str target-str ".\"${" (emit key-arg) "}\""))))
+  (and (some? fname) (= fname "assoc")) (if (>= n 3) (str "(" (emit (nth args 0)) " // { " (emit (nth args 1)) " = " (emit (nth args 2)) "; })") "/* assoc needs 3 args */ null")
+  (and (some? fname) (= fname "nil?")) (str "(" (emit (nth args 0)) " == null)")
+  (and (some? fname) (= fname "some?")) (str "(" (emit (nth args 0)) " != null)")
   (and (some? fname) (= fname "string?")) (str "(builtins.isString " (pw (nth args 0)) ")")
   (and (some? fname) (= fname "int?")) (str "(builtins.isInt " (pw (nth args 0)) ")")
   (and (some? fname) (= fname "list?")) (str "(builtins.isList " (pw (nth args 0)) ")")
   (and (some? fname) (= fname "map?")) (str "(builtins.isAttrs " (pw (nth args 0)) ")")
-  (and (some? fname) (= fname "inc")) (str "(" (E (nth args 0)) " + 1)")
-  (and (some? fname) (= fname "dec")) (str "(" (E (nth args 0)) " - 1)")
+  (and (some? fname) (= fname "inc")) (str "(" (emit (nth args 0)) " + 1)")
+  (and (some? fname) (= fname "dec")) (str "(" (emit (nth args 0)) " - 1)")
   (and (some? fname) (= fname "first")) (str "builtins.head " (pw (nth args 0)))
   (and (some? fname) (= fname "rest")) (str "builtins.tail " (pw (nth args 0)))
   (and (some? fname) (= fname "keys")) (str "builtins.attrNames " (pw (nth args 0)))
   (and (some? fname) (= fname "vals")) (str "builtins.attrValues " (pw (nth args 0)))
-  (and (some? fname) (= fname "contains?")) (if (>= n 2) (str "(builtins.hasAttr " (E (nth args 1)) " " (pw (nth args 0)) ")") "null")
+  (and (some? fname) (= fname "contains?")) (if (>= n 2) (str "(builtins.hasAttr " (emit (nth args 1)) " " (pw (nth args 0)) ")") "null")
   (and (some? fname) (= fname "range")) (cond
-  (= n 1) (str "builtins.genList (x: x) " (E (nth args 0)))
-  (= n 2) (str "builtins.genList (x: x + " (E (nth args 0)) ") (" (E (nth args 1)) " - " (E (nth args 0)) ")")
+  (= n 1) (str "builtins.genList (x: x) " (emit (nth args 0)))
+  (= n 2) (str "builtins.genList (x: x + " (emit (nth args 0)) ") (" (emit (nth args 1)) " - " (emit (nth args 0)) ")")
   :else "null")
   (and (some? fname) (= fname "println")) (str "builtins.trace " (pw (nth args 0)) " null")
   (qualified-reference? fn-expr) (let [nix-name (mangle-qualified-name fn-expr)]
   (if (= 0 n) (str nix-name " null") (str nix-name " " (str/join " " (mapv pw args)))))
-  :else (let [fn-str (E fn-expr)]
+  :else (let [fn-str (emit fn-expr)]
   (if (= 0 n) (str fn-str " null") (str fn-str " " (str/join " " (mapv pw args))))))))
 
 (def DERIVATION-REQUIRED-ONE-OF #{":pname" ":name"})
