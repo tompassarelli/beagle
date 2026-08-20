@@ -1,0 +1,54 @@
+#lang beagle
+(ns compiler-import-closure.fixture
+  (:require [beagle.frontend-facts :as facts]
+            [beagle.parser-reader :as parser-reader]
+            [beagle.syntax-semantics :as semantics]))
+
+(def import-source String
+  "#lang beagle\n(ns app.main (:require [dep.one :as one] [dep.two]))\n(require [dep.three :as three])\n(defn main [args (Vec String)] Int 0)\n")
+
+(def unsupported-source String
+  "#lang beagle\n(ns app.main (:require [dep.one :refer [value]]))\n(defn main [args (Vec String)] Int 0)\n")
+
+(defn imports-normalized? [ignored Int] Bool
+  (match (parser-reader/facts-from-source
+           "app/main.bgl" import-source "sha256:imports" "native-core")
+    [(facts/FactsRejected errors) false]
+    [(facts/FactsRead raw)
+     (match (semantics/normalize raw)
+       [(facts/FactsRejected errors) false]
+       [(facts/FactsRead normalized)
+        (let [imports (Vec facts/ImportEdgeFact)
+              (facts/syntaxfactbundle-imports normalized)
+              first-edge facts/ImportEdgeFact (nth imports 0)
+              second-edge facts/ImportEdgeFact (nth imports 1)
+              third-edge facts/ImportEdgeFact (nth imports 2)]
+          (and (= 3 (count imports))
+               (= 0 (facts/importedgefact-order first-edge))
+               (= "app.main" (facts/importedgefact-importer first-edge))
+               (= "dep.one" (facts/importedgefact-required first-edge))
+               (= "one" (facts/importedgefact-alias first-edge))
+               (= 1 (facts/importedgefact-order second-edge))
+               (= "dep.two" (facts/importedgefact-required second-edge))
+               (nil? (facts/importedgefact-alias second-edge))
+               (= 2 (facts/importedgefact-order third-edge))
+               (= "dep.three" (facts/importedgefact-required third-edge))
+               (= "three" (facts/importedgefact-alias third-edge))))])]))
+
+(defn unsupported-rejected? [ignored Int] Bool
+  (match (parser-reader/facts-from-source
+           "app/main.bgl" unsupported-source "sha256:unsupported" "native-core")
+    [(facts/FactsRejected errors) false]
+    [(facts/FactsRead raw)
+     (match (semantics/normalize raw)
+       [(facts/FactsRejected errors)
+        (and (= 1 (count errors))
+             (= :semantics/require-option
+                (facts/facterror-code (first errors))))]
+       [(facts/FactsRead normalized) false])]))
+
+(defn main [args (Vec String)] Int
+  (if (and (imports-normalized? 0)
+           (unsupported-rejected? 0))
+    0
+    1))

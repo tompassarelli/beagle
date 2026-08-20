@@ -14,6 +14,10 @@
   (SemanticProduced [emission SemanticEmission])
   (SemanticRejected [error facts/FactError]))
 
+(defunion ImportCollectionResult
+  (ImportsCollected [imports (Vec facts/ImportEdgeFact)])
+  (ImportsRejected [error facts/FactError]))
+
 (defn fallback-span [bundle facts/SyntaxFactBundle] facts/SourceSpan
   (facts/->SourceSpan (facts/syntaxfactbundle-path bundle) 0 0 0 0))
 
@@ -262,21 +266,130 @@
             (if (nil? name-node) nil (node-value rows name-node)))
           (recur (rest remaining)))))))
 
+(defn import-error
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)
+   subject String code Keyword message String] ImportCollectionResult
+  (->ImportsRejected
+    (facts/->FactError (node-span bundle rows subject) code message)))
+
+(defn append-require-spec
+  [bundle facts/SyntaxFactBundle
+   rows (Vec facts/CompilerFact)
+   importer String
+   subject String
+   order Int
+   imports (Vec facts/ImportEdgeFact)] ImportCollectionResult
+  (let [required-node String? (edge-target rows subject 0)
+        required String?
+        (if (nil? required-node) nil (node-value rows required-node))]
+    (if (or (not= "vector" (node-kind rows subject))
+            (nil? required-node)
+            (not= "symbol" (node-kind rows required-node))
+            (nil? required))
+      (import-error bundle rows subject :semantics/require-spec
+        "require libspec must be a vector beginning with a namespace symbol")
+      (loop [slot Int 1 alias String? nil]
+        (let [option-node String? (edge-target rows subject slot)]
+          (if (nil? option-node)
+            (->ImportsCollected
+              (conj imports
+                (facts/->ImportEdgeFact order importer required alias []
+                  (node-span bundle rows subject))))
+            (let [option String? (node-value rows option-node)
+                  value-node String? (edge-target rows subject (+ slot 1))]
+              (if (and (= ":as" option)
+                       (nil? alias)
+                       (some? value-node)
+                       (= "symbol" (node-kind rows value-node))
+                       (some? (node-value rows value-node)))
+                (recur (+ slot 2) (node-value rows value-node))
+                (import-error bundle rows subject :semantics/require-option
+                  "require libspec supports one canonical :as alias")))))))))
+
+(defn append-require-clause
+  [bundle facts/SyntaxFactBundle
+   rows (Vec facts/CompilerFact)
+   importer String
+   clause String
+   first-spec-slot Int
+   imports (Vec facts/ImportEdgeFact)] ImportCollectionResult
+  (loop [slot Int first-spec-slot collected (Vec facts/ImportEdgeFact) imports]
+    (let [spec String? (edge-target rows clause slot)]
+      (if (nil? spec)
+        (->ImportsCollected collected)
+        (match (append-require-spec bundle rows importer spec (count collected) collected)
+          [(ImportsRejected error) (->ImportsRejected error)]
+          [(ImportsCollected next-imports)
+           (recur (+ slot 1) next-imports)])))))
+
+(defn append-namespace-requires
+  [bundle facts/SyntaxFactBundle
+   rows (Vec facts/CompilerFact)
+   importer String
+   namespace-form String
+   imports (Vec facts/ImportEdgeFact)] ImportCollectionResult
+  (loop [slot Int 2 collected (Vec facts/ImportEdgeFact) imports]
+    (let [clause String? (edge-target rows namespace-form slot)]
+      (if (nil? clause)
+        (->ImportsCollected collected)
+        (if (and (= "list" (node-kind rows clause))
+                 (= ":require" (form-head rows clause)))
+          (match (append-require-clause bundle rows importer clause 1 collected)
+            [(ImportsRejected error) (->ImportsRejected error)]
+            [(ImportsCollected next-imports)
+             (recur (+ slot 1) next-imports)])
+          (recur (+ slot 1) collected))))))
+
+(defn collect-imports
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)] ImportCollectionResult
+  (let [importer String? (namespace-name rows)]
+    (if (nil? importer)
+      (import-error bundle rows "" :semantics/namespace
+        "source must declare a namespace before imports can be normalized")
+      (loop [remaining (Vec facts/CompilerFact) rows
+             collected (Vec facts/ImportEdgeFact) []]
+        (if (empty? remaining)
+          (->ImportsCollected collected)
+          (let [fact facts/CompilerFact (first remaining)
+                subject String (facts/compilerfact-subject fact)]
+            (if (and (= :syntax/node (facts/compilerfact-relation fact))
+                     (= "list" (fact-text fact)))
+              (cond
+                (= "ns" (form-head rows subject))
+                (match (append-namespace-requires
+                         bundle rows importer subject collected)
+                  [(ImportsRejected error) (->ImportsRejected error)]
+                  [(ImportsCollected next-imports)
+                   (recur (rest remaining) next-imports)])
+
+                (= "require" (form-head rows subject))
+                (match (append-require-clause
+                         bundle rows importer subject 1 collected)
+                  [(ImportsRejected error) (->ImportsRejected error)]
+                  [(ImportsCollected next-imports)
+                   (recur (rest remaining) next-imports)])
+
+                :else (recur (rest remaining) collected))
+              (recur (rest remaining) collected))))))))
+
 (defn normalize-facts
   [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)] facts/FactReadResult
   (loop [remaining (Vec facts/CompilerFact) rows
          state SemanticState (->SemanticState [] 0)]
     (if (empty? remaining)
-      (facts/->FactsRead
-        (facts/->SyntaxFactBundle
-          (facts/syntaxfactbundle-path bundle)
-          (namespace-name rows)
-          (facts/syntaxfactbundle-source-text bundle)
-          (facts/syntaxfactbundle-source-digest bundle)
-          (facts/syntaxfactbundle-profile bundle)
-          (semanticstate-rows state)
-          (facts/syntaxfactbundle-imports bundle)
-          (facts/syntaxfactbundle-rewrites bundle)))
+      (match (collect-imports bundle rows)
+        [(ImportsRejected error) (facts/->FactsRejected [error])]
+        [(ImportsCollected imports)
+         (facts/->FactsRead
+           (facts/->SyntaxFactBundle
+             (facts/syntaxfactbundle-path bundle)
+             (namespace-name rows)
+             (facts/syntaxfactbundle-source-text bundle)
+             (facts/syntaxfactbundle-source-digest bundle)
+             (facts/syntaxfactbundle-profile bundle)
+             (semanticstate-rows state)
+             imports
+             (facts/syntaxfactbundle-rewrites bundle)))])
       (let [fact facts/CompilerFact (first remaining)
             subject String (facts/compilerfact-subject fact)]
         (if (and (= :syntax/node (facts/compilerfact-relation fact))
