@@ -121,10 +121,18 @@
         (= :invalid-branch-ref
            (error-code
             #(branch/parse-ref
+             (branch/print-ref
+              (branch/->RefDocument
+               "ref-codec-space"
+               [(branch/->SegmentRecord hash-a 8 1 4096)]))))))
+(check! "a segment range cannot start at zero and end in a transaction"
+        (= :invalid-branch-ref
+           (error-code
+            #(branch/parse-ref
               (branch/print-ref
                (branch/->RefDocument
                 "ref-codec-space"
-                [(branch/->SegmentRecord hash-a 8 1 4096)]))))))
+                [(branch/->SegmentRecord hash-a 0 1 4096)]))))))
 (check! "a malformed segment name is refused"
         (= :invalid-branch-ref
            (error-code

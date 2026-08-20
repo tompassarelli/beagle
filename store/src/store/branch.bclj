@@ -248,8 +248,9 @@
           [:else
            (let [start Int (parse-count (nth fields 2) "segment start sequence")
                  end Int (parse-count (nth fields 3) "segment end sequence")]
-             (if (< end start)
-               (fail (str "branch ref segment ends before it begins: " sha256)
+             (if (or (< end start)
+                     (not= (zero? start) (zero? end)))
+               (fail (str "branch ref segment has an invalid transaction range: " sha256)
                      :invalid-branch-ref)
                (->SegmentRecord sha256 start end
                                 (parse-count (nth fields 4)
