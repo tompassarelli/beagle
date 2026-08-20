@@ -6123,7 +6123,7 @@
       (parse-expr* ["fn" [BRACKET-TAG "x"]])
       (> (count (parse-errors)) 0)))
   (expect! "let with bindings"
-    (let [node (parse-expr* ["let" [BRACKET-TAG "x" 1 "y" 2] ["+" "x" "y"]])]
+    (let [node (parse-expr* ["let" [BRACKET-TAG "x" "Int" 1 "y" "Int" 2] ["+" "x" "y"]])]
       (and (= (get node "node") "let")
         (= (count (get node "bindings")) 2)
         (= (get (nth (get node "bindings") 0) "name") "x")
@@ -6187,7 +6187,7 @@
     (let [node (parse-expr* ["do" "a" "b"])]
       (and (= (get node "node") "do") (= (count (get node "body")) 2))))
   (expect! "loop"
-    (let [node (parse-expr* ["loop" [BRACKET-TAG "i" 0] ["recur" ["+" "i" 1]]])]
+    (let [node (parse-expr* ["loop" [BRACKET-TAG "i" "Int" 0] ["recur" ["+" "i" 1]]])]
       (and (= (get node "node") "loop")
         (= (count (get node "bindings")) 1)
         (= (get (nth (get node "bindings") 0) "name") "i"))))
@@ -6847,12 +6847,16 @@
               ["if-let" [BRACKET-TAG "x" "Int" 1] "x" 0]]])
           form (nth (get prog "forms") 0)
           outer (nth (get form "body") 0)
-          binding (nth (get outer "bindings") 0)
+          outer-binding (nth (get outer "bindings") 0)
           conditional (nth (get outer "body") 0)
-          binding-id (get binding "bindingId")]
-      (and (string? binding-id)
-           (= (get (get conditional "cond") "refersTo") binding-id)
-           (= (get (get conditional "then") "refersTo") binding-id))))
+          inner (get conditional "then")
+          inner-binding (nth (get inner "bindings") 0)
+          binding-id (get inner-binding "bindingId")]
+      (and (str/starts-with? (get outer-binding "name") "bind__")
+           (= (get (get conditional "cond") "name")
+              (get outer-binding "name"))
+           (string? binding-id)
+           (= (get (nth (get inner "body") 0) "refersTo") binding-id))))
   (expect! "parse-program syntax membrane expands a nested caller form"
     (let [datums [["defmacro" "identity" [BRACKET-TAG "form"] "form"]
            ["def" "out" ["identity" ["+" 1 2]]]]
