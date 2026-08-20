@@ -95,10 +95,10 @@
   (let [cut1 Int? (str/index-of v "|")]
     (if (nil? cut1)
       (lease-invalid)
-      (let [holder String (subs v 0 cut1) tail String (subs v (+ cut1 1)) cut2 Int? (str/index-of tail "|")]
+      (let [cut1-position Int cut1 holder String (subs v 0 cut1-position) tail String (subs v (+ cut1-position 1)) cut2 Int? (str/index-of tail "|")]
         (if (nil? cut2)
           (lease-invalid)
-          (let [exp-s String (subs tail 0 cut2) epoch-s String (subs tail (+ cut2 1)) extra Int? (str/index-of epoch-s "|")]
+          (let [cut2-position Int cut2 exp-s String (subs tail 0 cut2-position) epoch-s String (subs tail (+ cut2-position 1)) extra Int? (str/index-of epoch-s "|")]
             (if (some? extra)
               (lease-invalid)
               (let [exp Int? (parse-long exp-s) epoch Int? (parse-long epoch-s)]
@@ -106,7 +106,8 @@
                   (lease-invalid)
                   (if (nil? epoch)
                     (lease-invalid)
-                    (->LeaseParts holder exp epoch true)))))))))))
+                    (let [present-exp Int exp present-epoch Int epoch]
+                      (->LeaseParts holder present-exp present-epoch true))))))))))))
 
 (def lease-schema-lines (Vec String)
   ["@lease cardinality single" "@lease value_kind literal"])
