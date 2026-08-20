@@ -268,3 +268,4 @@ const store_host_v1 *store_wasm_host_v1(void);
 #endif
 
 #endif
+

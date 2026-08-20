@@ -1453,3 +1453,4 @@ printf 'beagle-store-native-build/v1 %s\n' "$closure_hash" >"$stage/READY"
 mv "$stage" "$artifact_dir"
 stage=""
 printf '%s\n' "$artifact_dir"
+
