@@ -723,6 +723,11 @@ int32_t native_host_filesystem_make_parent_directories_v0(
     const native_capability *capability, uint64_t path);
 int32_t native_host_filesystem_append_text_v0(
     const native_capability *capability, uint64_t path, uint64_t text);
+/* Appends raw octets without text conversion. Returns EINVAL when any Vec Int
+   element lies outside 0..255. */
+int32_t native_host_filesystem_append_bytes_v0(
+    const native_capability *capability, uint64_t path,
+    const native_vec *bytes);
 /* Follows the path and returns its modification time as Unix-epoch
    nanoseconds, or EOVERFLOW when the host timestamp cannot fit Int. */
 int32_t native_host_filesystem_mtime_nanoseconds_v0(

@@ -125,6 +125,11 @@
     (list (p 'String) (p 'String))
     #f
     (p 'host.fs/AppendTextResult))
+   (q 'host.fs 'append-bytes)
+   (type-fn
+    (list (p 'String) (type-app 'Vec (list (p 'Int))))
+    #f
+    (p 'host.fs/AppendBytesResult))
    (q 'host.fs 'mtime-nanoseconds)
    (type-fn
     (list (p 'String))
@@ -327,6 +332,12 @@
     (list
      (list 'host.fs/AppendTextOk '())
      (list 'host.fs/AppendTextError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/AppendBytesResult
+    (list
+     (list 'host.fs/AppendBytesOk '())
+     (list 'host.fs/AppendBytesError
            (list (cons ':errno (p 'Int))))))
    (list
     'host.fs/MtimeNanosecondsResult

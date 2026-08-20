@@ -1366,6 +1366,10 @@
       (= name "host.fs/AppendTextOk")) "ok"
     (and (same-id? target-type (filesystem-nil-outcome-type-id))
       (= name "host.fs/AppendTextError")) "error"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/AppendBytesOk")) "ok"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/AppendBytesError")) "error"
     (and (same-id? target-type (filesystem-int-outcome-type-id))
       (= name "host.fs/MtimeNanosecondsOk")) "ok"
     (and (same-id? target-type (filesystem-int-outcome-type-id))
@@ -1546,6 +1550,10 @@
       (filesystem-outcome-types) [] true)
 
     (= "host.fs/AppendTextResult" spelling)
+    (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/AppendBytesResult" spelling)
     (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
       (filesystem-outcome-types) [] true)
 
@@ -2568,6 +2576,7 @@
       (= name "host.fs/write-text-atomic")
       (= name "host.fs/make-parent-directories")
       (= name "host.fs/append-text")
+      (= name "host.fs/append-bytes")
       (= name "host.fs/mtime-nanoseconds")
       (= name "host.fs/create-temporary-sibling")
       (= name "host.fs/rename-file")
@@ -2588,6 +2597,7 @@
     (= name "host.fs/write-text-atomic") "write-text-atomic"
     (= name "host.fs/make-parent-directories") "make-parent-directories"
     (= name "host.fs/append-text") "append-text"
+    (= name "host.fs/append-bytes") "append-bytes"
     (= name "host.fs/mtime-nanoseconds") "mtime-nanoseconds"
     (= name "host.fs/create-temporary-sibling") "create-temporary-sibling"
     (= name "host.fs/rename-file") "rename-file"
@@ -2609,6 +2619,7 @@
       (same-id? candidate
         (host-filesystem-abi-id "make-parent-directories"))
       (same-id? candidate (host-filesystem-abi-id "append-text"))
+      (same-id? candidate (host-filesystem-abi-id "append-bytes"))
       (same-id? candidate (host-filesystem-abi-id "mtime-nanoseconds"))
       (same-id? candidate
         (host-filesystem-abi-id "create-temporary-sibling"))
@@ -10093,6 +10104,12 @@
     (and (= 2 (count value-types))
       (text-operand? (nth value-types 0))
       (text-operand? (nth value-types 1)))
+
+    (= callee "host.fs/append-bytes")
+    (and (= 2 (count value-types))
+      (text-operand? (nth value-types 0))
+      (same-id? (nth value-types 1)
+        (closed-vector-type-id (int-type-id))))
 
     (= callee "host.fs/unlock")
     (and (= 1 (count value-types))
@@ -20997,6 +21014,7 @@
               (index-has-callee? index "host.fs/write-text-atomic")
               (index-has-callee? index "host.fs/make-parent-directories")
               (index-has-callee? index "host.fs/append-text")
+              (index-has-callee? index "host.fs/append-bytes")
               (index-has-callee? index "host.fs/mtime-nanoseconds")
               (index-has-callee? index "host.fs/create-temporary-sibling")
               (index-has-callee? index "host.fs/rename-file")
@@ -22187,6 +22205,17 @@
     true
     layouts-digest))
 
+(defn host-filesystem-append-bytes-abi
+  [(layouts-digest String)] core/AbiDeclV0
+  (host-filesystem-abi
+    "append-bytes"
+    "native_host_filesystem_append_bytes_v0"
+    [(borrowed-abi-value "path" (text-type-id))
+     (borrowed-abi-value "bytes" (closed-vector-type-id (int-type-id)))]
+    (filesystem-nil-outcome-type-id)
+    false
+    layouts-digest))
+
 (defn host-whole-input-abi [(operation String) (layouts-digest String)]
   core/AbiDeclV0
   (core/->AbiDeclV0
@@ -22627,11 +22656,17 @@
               (host-filesystem-abi-id "append-text"))
           (conj with-filesystem-parents (nth filesystem-abis 5))
           with-filesystem-parents)
+        with-filesystem-append-bytes (Vec core/AbiDeclV0)
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "append-bytes"))
+          (conj with-filesystem-append
+            (host-filesystem-append-bytes-abi digest))
+          with-filesystem-append)
         with-filesystem-lock (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions
               (host-filesystem-abi-id "lock-exclusive"))
-          (conj with-filesystem-append (nth filesystem-abis 6))
-          with-filesystem-append)
+          (conj with-filesystem-append-bytes (nth filesystem-abis 6))
+          with-filesystem-append-bytes)
         with-filesystem (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions
               (host-filesystem-abi-id "unlock"))
