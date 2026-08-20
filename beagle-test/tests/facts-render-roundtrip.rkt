@@ -252,3 +252,94 @@
    (gap-case "G9 java.time schema map round-trips"
              "(def s {:min (. LocalTime -MIN) :max (. LocalTime -MAX)})\n"
              #:has '("(. LocalTime -MIN)" "(. LocalTime -MAX)") #:no '("|.|"))))
+
+;; Interior line comments are facts anchored to the innermost structural node.
+;; Layout may reflow, but neither comments nor code may move across one another.
+(define (strip-ws text)
+  (regexp-replace* #rx"[ \t\r\n]" text ""))
+
+(define (interior-case name source)
+  (test-case name
+    (define rendered (render-roundtrip source))
+    (check-equal?
+     (strip-ws rendered)
+     (strip-ws source)
+     (format
+      "token stream diverged (comment lost, moved, or swallowed code):\n--- source\n~a\n--- rendered\n~a"
+      source rendered))
+    (check-equal?
+     (render-roundtrip rendered)
+     rendered
+     (format "render is not a fixed point on a commented form:\n~a" rendered))))
+
+(run-tests
+ (test-suite
+  "facts render — interior comments"
+
+  (interior-case
+   "leading, interstitial, and trailing comments inside one form"
+   (string-append
+    "#lang beagle/clj\n\n"
+    ";; file header\n"
+    "(defn f [x Int] Int\n"
+    "  ;; leading above the body\n"
+    "  (let [a Int 1 ; trailing inside the binding vector\n"
+    "        b Int 2]\n"
+    "    ;; leading on a body form\n"
+    "    (+ a b) ; trailing on a body form\n"
+    "    ;; own line before the closing paren\n"
+    "    ))\n\n"
+    ";; between forms\n"
+    "(def g Int 1) ; trailing on a top-level form\n\n"
+    ";; file footer\n"))
+
+  (interior-case
+   "comment as the first thing inside a form"
+   "(def v (Vec Int) [;; why this vector\n        1 2 3])\n")
+
+  (interior-case
+   "consecutive interior comment lines"
+   "(defn f [] Int ;; one\n  ;; two\n  ;; three\n  1)\n")
+
+  (interior-case
+   "semicolon inside a string is not a comment"
+   "(defn f [x String] String\n  ;; a note\n  (str \"a ; not a comment\" x))\n")
+
+  (interior-case
+   "interior comment beside a regex literal"
+   "(def r Any\n  ;; matches a semicolon\n  #\";\")\n")
+
+  (interior-case
+   "interior comment inside a nested bracket vector"
+   "(def m (Vec Int) [1\n        ;; about two\n        2])\n")
+
+  ;; Map-reader children share the container location, so the comment survives
+  ;; at that container boundary even though its element-relative order may drift.
+  (test-case "comment inside a position-erased literal survives"
+    (define source "(def m Any {:a 1\n        ;; about b\n        :b 2})\n")
+    (define rendered (render-roundtrip source))
+    (check-true (string-contains? rendered ";; about b") rendered)
+    (check-equal? (render-roundtrip rendered) rendered))
+
+  ;; File wrapper = 1, synthetic head = 2, first form = 3. A larger anchor
+  ;; therefore proves the comment is attached below the top-level form.
+  (test-case "interior comment anchors to an interior node"
+    (define source (make-temporary-file "crt-anchor-~a.bclj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file source #:exists 'truncate
+          (lambda (out)
+            (display "(defn f [] Int\n  ;; interior\n  (g 1))\n" out)))
+        (define-values (status stdout stderr)
+          (run "--emit-edn" (path->string source)))
+        (check-equal? status 0 stderr)
+        (define anchors
+          (for/list ([line (in-list (string-split stdout "\n"))]
+                     #:when (regexp-match #rx"\"comment0\"" line))
+            (string->number
+             (cadr (regexp-match #rx"^\\[([0-9]+)" line)))))
+        (check-equal? (length anchors) 1 stdout)
+        (check-true (> (car anchors) 3) stdout))
+      (lambda ()
+        (when (file-exists? source) (delete-file source)))))))

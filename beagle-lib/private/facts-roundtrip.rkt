@@ -361,6 +361,88 @@
           (loop (add1 k) (cons (cons (hash-ref (hash-ref props cid) "placement") (comment-text props cid)) acc)))
         (reverse acc))))
 
+;; A datum position carrying comments: leading above, trailing on the same line,
+;; and inner immediately before the closing delimiter. The wrapper also marks a
+;; dirty subtree, so the current canonical formatter remains untouched for every
+;; comment-free form.
+(struct cmt (datum leading trailing inner) #:transparent)
+
+(define (uncmt datum)
+  (if (cmt? datum) (uncmt (cmt-datum datum)) datum))
+
+(define (strip-comment-wrappers datum)
+  (cond
+    [(cmt? datum) (strip-comment-wrappers (cmt-datum datum))]
+    [(pair? datum)
+     (cons (strip-comment-wrappers (car datum))
+           (strip-comment-wrappers (cdr datum)))]
+    [(vector? datum)
+     (list->vector
+      (map strip-comment-wrappers (vector->list datum)))]
+    [else datum]))
+
+(define (subtree-comments datum)
+  (cond
+    [(cmt? datum)
+     (append (cmt-leading datum)
+             (subtree-comments (cmt-datum datum))
+             (cmt-inner datum)
+             (cmt-trailing datum))]
+    [(pair? datum)
+     (append (subtree-comments (car datum))
+             (subtree-comments (cdr datum)))]
+    [(vector? datum)
+     (append-map subtree-comments (vector->list datum))]
+    [else '()]))
+
+;; Build only dirty paths recursively. Clean subtrees retain make-edn-build's
+;; representation and therefore continue through the existing canonical path.
+(define (make-commented-build props)
+  (define base (make-edn-build props))
+  (define dirty (make-hash))
+  (define (dirty? id)
+    (cond
+      [(hash-ref dirty id #f) => (lambda (value) (eq? value 'yes))]
+      [else
+       (hash-set! dirty id 'no)
+       (define value
+         (or (pair? (comments-of props id))
+             (for/or ([child (in-list (structural-kids props id))])
+               (dirty? child))))
+       (hash-set! dirty id (if value 'yes 'no))
+       value]))
+  (define (build id)
+    (cond
+      [(not (dirty? id)) (base id)]
+      [else
+       (define node (hash-ref props id))
+       (define kind (hash-ref node "kind"))
+       (define core
+         (cond
+           [(member kind '("symbol" "string" "keyword" "bool" "char" "number" "other"))
+            (decode-leaf kind (hash-ref node "v"))]
+           [(equal? kind "nil") '()]
+           [(or (equal? kind "list") (equal? kind "vector"))
+            (define elements
+              (map build (ordered-slot-children node)))
+            (define tail
+              (if (hash-has-key? node "tail")
+                  (build (hash-ref node "tail"))
+                  '()))
+            (define value (foldr cons tail elements))
+            (if (equal? kind "vector") (list->vector value) value)]
+           [else (error 'commented-build "unknown kind ~a" kind)]))
+       (define comments (comments-of props id))
+       (define (placed placement)
+         (for/list ([comment (in-list comments)]
+                    #:when (equal? (car comment) placement))
+           (cdr comment)))
+       (cmt core
+            (placed "leading")
+            (placed "trailing")
+            (placed "inner-trailing"))]))
+  build)
+
 ;; datum -> idiomatic beagle source text. Inverts the reader's desugaring
 ;; (`[...]` -> (#%brackets ...), `{...}` -> (#%map ...)) so the rendering
 ;; re-reads to the identical program — proving text is a faithful VIEW.
@@ -956,21 +1038,154 @@
 (define (datum->pretty d [col 0])
   (datum->pretty/context (canonicalize-beagle-datum d) col 'normal))
 
+;; A line comment owns the remainder of its line. Comment-aware rendering is
+;; intentionally separate from datum->pretty: only dirty forms enter this path,
+;; while every clean form keeps the current structural-layout implementation.
+(define (ends-newline? text)
+  (and (> (string-length text) 0)
+       (char=? (string-ref text (sub1 (string-length text))) #\newline)))
+
+(define (join-commented-lines base pieces pad)
+  (for/fold ([out base]) ([piece (in-list pieces)])
+    (string-append out (if (ends-newline? out) "" "\n") pad piece)))
+
+(define (close-after-comments body inner col pad close)
+  (define filled
+    (for/fold ([out body]) ([comment (in-list inner)])
+      (string-append out
+                     (if (ends-newline? out) "" "\n")
+                     pad comment "\n")))
+  (string-append filled
+                 (if (ends-newline? filled)
+                     (make-string col #\space)
+                     "")
+                 close))
+
+(define (commented-source datum)
+  (datum->src/raw (strip-comment-wrappers datum)))
+
+(define (commented-datum->pretty datum [col 0] [ctx 'normal])
+  (cond
+    [(cmt? datum)
+     (define pad (make-string col #\space))
+     (define core
+       (commented-pp-core (cmt-datum datum) col ctx (cmt-inner datum)))
+     (string-append
+      (apply string-append
+             (for/list ([comment (in-list (cmt-leading datum))])
+               (string-append comment "\n" pad)))
+      (for/fold ([out core]) ([comment (in-list (cmt-trailing datum))])
+        (string-append out
+                       (if (ends-newline? out) pad " ")
+                       comment "\n")))]
+    [else (datum->pretty/context datum col ctx)]))
+
+(define (commented-pp-core datum col ctx inner)
+  (define-values (open close elements) (pp-seq-parts datum))
+  (cond
+    [(prefix-macro datum)
+     => (lambda (prefix)
+          (string-append
+           prefix
+           (commented-datum->pretty
+            (cadr datum) (+ col (string-length prefix)) 'data)))]
+    [(hash-prefix datum)
+     => (lambda (prefix)
+          (string-append
+           prefix
+           (commented-datum->pretty
+            (cadr datum) (+ col (string-length prefix)) 'data)))]
+    [(and (meta-form? datum) (not (cmt? (cadr datum))))
+     (define prefix (string-append "^" (commented-source (cadr datum)) " "))
+     (string-append
+      prefix
+      (commented-datum->pretty
+       (caddr datum) (+ col (string-length prefix)) ctx))]
+    ;; A dirty atom, dotted pair, or reader form cannot place comments between
+    ;; structural children. Hoist the lexemes above it without losing tokens.
+    [(not open)
+     (define comments (append (subtree-comments datum) inner))
+     (if (null? comments)
+         (commented-source datum)
+         (let ([pad (make-string col #\space)])
+           (string-append
+            (apply string-append
+                   (for/list ([comment (in-list comments)])
+                     (string-append comment "\n" pad)))
+            (commented-source datum))))]
+    [(null? elements)
+     (close-after-comments
+      open inner col (make-string (+ col BODY-INDENT) #\space) close)]
+    [(and (string=? open "(") (symbol? (car elements)))
+     (define head (car elements))
+     (define after (cdr elements))
+     (define clean-after (map strip-comment-wrappers after))
+     (define limit
+       (min (context-head-keep ctx head clean-after) (length after)))
+     (define keep
+       (let scan ([index 0] [remaining after])
+         (cond
+           [(or (>= index limit) (null? remaining) (cmt? (car remaining))) index]
+           [else (scan (add1 index) (cdr remaining))])))
+     (define body-pad (make-string (+ col BODY-INDENT) #\space))
+     (define clean-parent (strip-comment-wrappers datum))
+     (close-after-comments
+      (join-commented-lines
+       (string-append
+        open
+        (commented-source head)
+        (apply string-append
+               (for/list ([element (in-list (take after keep))])
+                 (string-append " " (commented-source element)))))
+       (for/list ([element (in-list (drop after keep))]
+                  [index (in-naturals (add1 keep))])
+         (define clean-element (strip-comment-wrappers element))
+         (commented-datum->pretty
+          element
+          (+ col BODY-INDENT)
+          (grammar-child-context clean-parent ctx index clean-element)))
+       body-pad)
+      inner col body-pad close)]
+    [else
+     (define inner-col (+ col (string-length open)))
+     (define pad (make-string inner-col #\space))
+     (define clean-parent (strip-comment-wrappers datum))
+     (close-after-comments
+      (join-commented-lines
+       (string-append
+        open
+        (commented-datum->pretty
+         (car elements)
+         inner-col
+         (grammar-child-context
+          clean-parent ctx 0 (strip-comment-wrappers (car elements)))))
+       (for/list ([element (in-list (cdr elements))]
+                  [index (in-naturals 1)])
+         (commented-datum->pretty
+          element
+          inner-col
+          (grammar-child-context
+           clean-parent ctx index (strip-comment-wrappers element))))
+       pad)
+      inner col pad close)]))
+
 (define (read-edn-triples path)
   (for/list ([line (in-list (file->lines path))]
              #:when (and (> (string-length line) 0) (char=? (string-ref line 0) #\[)))
     (read (open-input-string line))))
 
 ;; ============================================================================
-;; Phase 6 — comments as resolved references (LINE comments, top level).
-;; The reader DROPS comments, so we recover them from the source TEXT by srcloc:
-;; a `;` outside every form's span is a top-level comment. Each is tokenized into
-;; text + symbol-candidate SEGMENTS and attached to the FOLLOWING form (leading)
-;; / the PRECEDING form on the same line (trailing) / the file wrapper. A symbol
+;; Phase 6 — comments as resolved references (LINE comments, anywhere in a form).
+;; The reader DROPS comments, so we recover them from source text and srclocs. A
+;; `;` outside every lexeme span starts a line comment; one inside a string, char,
+;; pipe symbol, or regex remains text. Each comment is attached to the innermost
+;; enclosing node: trailing on the preceding child on the same line, leading on
+;; the following child, or inner-trailing on the containing delimiter. The file
+;; wrapper is the outermost container, preserving the existing top-level rule. A
 ;; segment can carry refers_to and rename like code; text renders verbatim — so a
 ;; doc comment's identifier mentions follow a rename, while substrings and quoted
 ;; "strings" do not. SCOPE: line comments only (block #| |# is a follow-up);
-;; comments INSIDE a form are not yet captured; layout reflows (text+placement).
+;; layout reflows (text+placement).
 ;; ============================================================================
 (define (sym-char? c)                   ; a char that may constitute a beagle identifier
   (and (or (char-alphabetic? c) (char-numeric? c)
@@ -984,12 +1199,6 @@
   (lambda (off)
     (let loop ([k (sub1 (vector-length starts))])
       (if (and (> k 0) (> (vector-ref starts k) off)) (loop (sub1 k)) (add1 k)))))
-(define (src-lines src)                 ; (listof (cons line-start-offset line-text-without-newline))
-  (let loop ([i 0] [start 0] [acc '()])
-    (cond
-      [(>= i (string-length src)) (reverse (cons (cons start (substring src start i)) acc))]
-      [(char=? (string-ref src i) #\newline) (loop (add1 i) (add1 i) (cons (cons start (substring src start i)) acc))]
-      [else (loop (add1 i) start acc)])))
 ;; syntax-position is file-relative when the file carries #lang (the usual case);
 ;; when it does NOT (e.g. a rendered intermediate leading with (define-target ...)),
 ;; the reader injects a synthetic #lang prefix and positions shift by its length.
@@ -1012,39 +1221,193 @@
             (let eol ([j i]) (if (and (< j n) (not (char=? (string-ref src j) #\newline))) (eol (add1 j)) (loop j)))]
            [else i])))
      (- (sub1 first-pos) first-form-off)]))
-(define (form-spans stxs shift)         ; (listof (list stx-index start end)) for forms WITH srcloc
-  ;; a form can carry a position but a #f span (e.g. a top-level beagle/nix
-  ;; brace-map) — guard both, else (+ start #f) crashes emit. A spanless form just
-  ;; gets no comment attachment (graceful).
-  (for/list ([s (in-list stxs)] [i (in-naturals)] #:when (and (syntax-position s) (syntax-span s)))
-    (define start (- (sub1 (syntax-position s)) shift))
-    (list i start (+ start (syntax-span s)))))
-(define (in-any-span? off spans)
-  (for/or ([sp (in-list spans)]) (and (>= off (cadr sp)) (< off (caddr sp)))))
-(define (capture-comments src spans)    ; (listof (cons offset lexeme)) — first out-of-span `;`..EOL per line
-  (for*/list ([ln (in-list (src-lines src))]
-              [hit (in-value
-                    (let ([start (car ln)] [text (cdr ln)])
-                      (let scan ([j 0])
-                        (cond
-                          [(>= j (string-length text)) #f]
-                          [(and (char=? (string-ref text j) #\;) (not (in-any-span? (+ start j) spans)))
-                           (cons (+ start j) (string-trim (substring text j) #:left? #f))]
-                          [else (scan (add1 j))]))))]
-              #:when hit)
-    hit))
-(define (classify-comments comments spans src)  ; -> (listof (list placement anchor-spec lexeme))
-  (define line-of (make-line-of src))
-  (for/list ([c (in-list comments)])
-    (define o (car c)) (define lex (cdr c))
-    (define preceding (for/fold ([b #f]) ([sp (in-list spans)])
-                        (if (and (<= (caddr sp) o) (or (not b) (> (caddr sp) (caddr b)))) sp b)))
-    (define following (for/fold ([b #f]) ([sp (in-list spans)])
-                        (if (and (>= (cadr sp) o) (or (not b) (< (cadr sp) (cadr b)))) sp b)))
+(define (structural-kids props id)
+  (define node (hash-ref props id (make-hash)))
+  (append (ordered-slot-children node)
+          (let ([tail (hash-ref node "tail" #f)])
+            (if tail (list tail) '()))))
+
+(define (node-kind props id)
+  (hash-ref (hash-ref props id (make-hash)) "kind" #f))
+
+(define (container-node? props id)
+  (and (member (node-kind props id) '("list" "vector")) #t))
+
+;; Reader-minted marker heads have no lexeme of their own. They cannot anchor a
+;; comment because they disappear when the source spelling is reconstructed.
+(define reader-marker-names
+  '("#%brackets" "#%map" "#%set" "#%regex" "#%meta"
+    "#%discard" "#%js" "#%symbolic-val"
+    "quote" "quasiquote" "unquote" "unquote-splicing" "syntax"
+    "reader-conditional" "reader-conditional-splice" "fn"))
+
+(define (symbol-node-text props id)
+  (define node (hash-ref props id (make-hash)))
+  (and (equal? (hash-ref node "kind" #f) "symbol")
+       (let ([value (hash-ref node "v" #f)])
+         (cond
+           [(symbol? value) (symbol->string value)]
+           [(string? value)
+            (define decoded (decode-leaf "symbol" value))
+            (and (symbol? decoded) (symbol->string decoded))]
+           [else #f]))))
+
+;; Current readers give a structural reader marker the enclosing form's full
+;; span (for example, #%brackets owns `[... ]`). It is still synthetic: its
+;; source slice does not spell the marker name and must neither mask comments
+;; nor receive them as an anchor. Real source forms such as `(quote x)` keep a
+;; head slice that exactly spells `quote`, so they remain ordinary nodes.
+(define (synthetic-marker? props extents src id)
+  (define node (hash-ref props id (make-hash)))
+  (define name (symbol-node-text props id))
+  (define extent (hash-ref extents id #f))
+  (and (not (container-node? props id))
+       (or (not (number? (hash-ref node "span" #f)))
+           (and name
+                (member name reader-marker-names)
+                (or (not extent)
+                    (< (car extent) 0)
+                    (> (cdr extent) (string-length src))
+                    (not (string=? (substring src (car extent) (cdr extent))
+                                   name)))))))
+
+(define (marker-head? props id name)
+  (define children (ordered-children props id))
+  (and (pair? children)
+       (equal? (symbol-node-text props (car children)) name)))
+
+;; Bracket/map/set/anonymous-function readers may mint a container with a start
+;; but no span. Derive its end by scanning past the final child and trivia to the
+;; closing delimiter, so a comment before that delimiter stays inside it.
+(define (close-scan src from)
+  (define length (string-length src))
+  (let loop ([index from])
     (cond
-      [(and preceding (= (line-of (sub1 (caddr preceding))) (line-of o))) (list "trailing" (car preceding) lex)]
-      [following (list "leading" (car following) lex)]
-      [else (list "trailing" 'file lex)])))            ; own-line comment after the last form -> file footer
+      [(>= index length) from]
+      [(or (char-whitespace? (string-ref src index))
+           (char=? (string-ref src index) #\,))
+       (loop (add1 index))]
+      [(char=? (string-ref src index) #\;)
+       (let end-of-line ([next index])
+         (if (and (< next length)
+                  (not (char=? (string-ref src next) #\newline)))
+             (end-of-line (add1 next))
+             (loop next)))]
+      [(memv (string-ref src index) '(#\) #\] #\})) (add1 index)]
+      [else from])))
+
+(define (node-extents props shift src)
+  (define extents (make-hash))
+  (define seen (make-hash))
+  (define (visit id)
+    (cond
+      [(hash-ref seen id #f) (hash-ref extents id #f)]
+      [else
+       (hash-set! seen id #t)
+       (define node (hash-ref props id (make-hash)))
+       (define position (hash-ref node "pos" #f))
+       (define span (hash-ref node "span" #f))
+       (define start
+         (and (number? position) (- (sub1 position) shift)))
+       (define child-extents
+         (filter pair?
+                 (for/list ([child (in-list (structural-kids props id))])
+                   (visit child))))
+       (define extent
+         (cond
+           [(and start (number? span)) (cons start (+ start span))]
+           [start
+            (cons start
+                  (close-scan
+                   src
+                   (if (null? child-extents)
+                       (add1 start)
+                       (apply max (map cdr child-extents)))))]
+           [else #f]))
+       (when extent (hash-set! extents id extent))
+       extent]))
+  (for ([id (in-list (hash-keys props))]) (visit id))
+  extents)
+
+;; Mask leaf lexemes, plus regex containers whose pattern semicolons are text.
+(define (lexeme-mask props extents src)
+  (define mask (make-vector (max 1 (string-length src)) #f))
+  (for ([(id extent) (in-hash extents)]
+        #:when (or (not (container-node? props id))
+                   (marker-head? props id "#%regex"))
+        #:unless (synthetic-marker? props extents src id))
+    (for ([index (in-range (max 0 (car extent))
+                           (min (string-length src) (cdr extent)))])
+      (vector-set! mask index #t)))
+  mask)
+
+(define (capture-comments src mask)
+  (define length (string-length src))
+  (let loop ([index 0] [comments '()])
+    (cond
+      [(>= index length) (reverse comments)]
+      [(and (char=? (string-ref src index) #\;)
+            (not (vector-ref mask index)))
+       (let end-of-line ([next index])
+         (if (and (< next length)
+                  (not (char=? (string-ref src next) #\newline)))
+             (end-of-line (add1 next))
+             (loop next
+                   (cons
+                    (cons index
+                          (string-trim
+                           (substring src index next) #:left? #f))
+                    comments))))]
+      [else (loop (add1 index) comments)])))
+
+(define (classify-comments comments props extents root src)
+  (define line-of (make-line-of src))
+  (define containers
+    (for/list ([(id extent) (in-hash extents)]
+               #:when (container-node? props id))
+      (list id (car extent) (cdr extent))))
+  (define kids-cache (make-hash))
+  (define (anchor-kids container-id)
+    (hash-ref!
+     kids-cache container-id
+     (lambda ()
+       (for/list ([child (in-list (structural-kids props container-id))]
+                  #:when (and (hash-ref extents child #f)
+                              (not (synthetic-marker? props extents src child))))
+         (cons child (hash-ref extents child))))))
+  (for/list ([c (in-list comments)])
+    (define offset (car c))
+    (define lexeme (cdr c))
+    (define container
+      (for/fold ([best #f]) ([candidate (in-list containers)])
+        (if (and (>= offset (second candidate))
+                 (< offset (third candidate))
+                 (or (not best)
+                     (< (- (third candidate) (second candidate))
+                        (- (third best) (second best)))))
+            candidate
+            best)))
+    (define container-id (if container (first container) root))
+    (define children (anchor-kids container-id))
+    (define preceding
+      (for/fold ([best #f]) ([child (in-list children)])
+        (if (and (<= (cddr child) offset)
+                 (or (not best) (> (cddr child) (cddr best))))
+            child
+            best)))
+    (define following
+      (for/fold ([best #f]) ([child (in-list children)])
+        (if (and (>= (cadr child) offset)
+                 (or (not best) (< (cadr child) (cadr best))))
+            child
+            best)))
+    (cond
+      [(and preceding
+            (= (line-of (sub1 (cddr preceding))) (line-of offset)))
+       (list "trailing" (car preceding) lexeme)]
+      [following (list "leading" (car following) lexeme)]
+      [(equal? container-id root) (list "trailing" root lexeme)]
+      [else (list "inner-trailing" container-id lexeme)])))
 (define (tokenize-comment lex)          ; (listof (cons 'text|'symbol string)), text-runs merged
   (define n (string-length lex))
   (define raw
@@ -1070,13 +1433,12 @@
 (define (format-fact s p o)            ; one EDN triple; obj int=node-ref, string=literal
   (if (integer? o) (format "[~a ~a ~a]" s (edn-string p) o)
       (format "[~a ~a ~a]" s (edn-string p) (edn-string o))))
-(define (comment-edn-lines comments form-node root fresh!)
+(define (comment-edn-lines comments fresh!)
   (define lines '())
   (define (add! s p o) (set! lines (cons (format-fact s p o) lines)))
   (define cidx (make-hash))             ; anchor node -> next comment index
   (for ([c (in-list comments)])
-    (define placement (first c)) (define spec (second c)) (define lex (third c))
-    (define anchor (if (eq? spec 'file) root (form-node spec)))
+    (define placement (first c)) (define anchor (second c)) (define lex (third c))
     (define k (hash-ref cidx anchor 0)) (hash-set! cidx anchor (add1 k))
     (define cid (fresh!))
     (add! cid "kind" "comment") (add! cid "style" "line") (add! cid "placement" placement)
@@ -1102,13 +1464,14 @@
   (define src (file->string path))
   (define-values (root triples) (stx->facts (datum->syntax #f (cons 'beagle-file stxs))))
   (define props (triples->props triples))
-  (define root-kids (ordered-children props root)) ; [beagle-file-sym, form0-node, form1-node, ...]
-  (define (form-node i) (list-ref root-kids (add1 i)))
-  (define spans (form-spans stxs (port->file-shift src stxs)))
-  (define comments (classify-comments (capture-comments src spans) spans src))
+  (define extents (node-extents props (port->file-shift src stxs) src))
+  (define comments
+    (classify-comments
+     (capture-comments src (lexeme-mask props extents src))
+     props extents root src))
   (define next (box (add1 (max-id triples))))
   (define (fresh!) (define v (unbox next)) (set-box! next (add1 v)) v)
-  (define clines (comment-edn-lines comments form-node root fresh!))
+  (define clines (comment-edn-lines comments fresh!))
   (values stxs root triples props (append (triples->edn-lines triples) clines)))
 
 (define (emit-edn-file path)
@@ -1159,18 +1522,16 @@
 (define (render-edn edn-path)
   (define props (triples->props (read-edn-triples edn-path)))
   (define root (edn-root props))
-  (define build (make-edn-build props))
+  (define build (make-commented-build props))
   (define wrapped?                                  ; root is the (beagle-file ...) wrapper?
     (and root (beagle-file-wrapper? props root)))
   (define form-ids (if wrapped? (cdr (ordered-children props root)) (list root)))
   (define (lead cs)  (filter (lambda (c) (equal? (car c) "leading"))  cs))
   (define (trail cs) (filter (lambda (c) (equal? (car c) "trailing")) cs))
-  (define (block fid)                               ; leading comments (own lines) + form + trailing (same line)
-    (define cs (comments-of props fid))
-    (string-append
-      (apply string-append (map (lambda (c) (string-append (cdr c) "\n")) (lead cs)))
-      (datum->pretty (build fid) 0)
-      (apply string-append (map (lambda (c) (string-append " " (cdr c))) (trail cs)))))
+  ;; Every interior or form-level comment rides the dirty datum wrappers. Strip
+  ;; the newline demanded by a final line comment before joining top-level blocks.
+  (define (block fid)
+    (regexp-replace #rx"\n+$" (commented-datum->pretty (build fid) 0) ""))
   (define file-cs (if wrapped? (comments-of props root) '()))   ; file header/footer comments
   ;; #17: a leading (define-target X) form is how read-beagle-syntax canonicalizes
   ;; a language selection. Render it BACK as the canonical `#lang` header line
@@ -1178,12 +1539,13 @@
   ;; is not a module and `bin/beagle check` rejects it. Round-trips faithfully:
   ;; read-beagle-syntax re-canonicalizes `#lang` → (define-target X), so the form
   ;; set is unchanged through the graph.
-  (define first-built (and (pair? form-ids) (build (car form-ids))))
+  (define first-built
+    (and (pair? form-ids) (uncmt (build (car form-ids)))))
   (define lang-line
     (and (pair? first-built)
-         (eq? (car first-built) 'define-target)
+         (eq? (uncmt (car first-built)) 'define-target)
          (pair? (cdr first-built))
-         (let ([lang (lang-for-target-id (cadr first-built))])
+         (let ([lang (lang-for-target-id (uncmt (cadr first-built)))])
            (and lang (format "#lang ~a" lang)))))
   (define body-ids (if lang-line (cdr form-ids) form-ids))
   (define rendered (string-join

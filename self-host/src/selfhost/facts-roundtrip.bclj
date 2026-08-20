@@ -164,6 +164,8 @@
    loc Any] Any
   (let [children (get node "children")]
     (assoc node
+      "loc-replaced"
+      true
       "loc"
       loc
       "children"
@@ -177,6 +179,8 @@
   (let [children (get node "children")
         bool? (= (get node "kind") "bool")]
     (assoc node
+      "loc-replaced"
+      true
       "kind"
       (if bool? "symbol" (get node "kind"))
       "value"
@@ -302,7 +306,12 @@
         next (get result "pos")
         loc (source-loc src start next)
         value (nth (get result "value") 1)
-        children [(synthetic-leaf "#%regex" loc) (make-node "string" value loc nil)]]
+        children [(synthetic-leaf "#%regex" loc)
+                  (assoc (make-node "string" value loc nil)
+                    "scan-start"
+                    start
+                    "scan-end"
+                    next)]]
     (assoc (list-node children loc) "next" next)))
 
 (defn- set-node
@@ -399,7 +408,21 @@
         expanded (list-node [(synthetic-leaf "fn" loc) params body] loc)]
     (assoc expanded "next" (get result "pos"))))
 
+(defn- with-scan-end [node Any] Any
+  (assoc node
+    "scan-start"
+    (get (get node "loc") "source-start")
+    "scan-end"
+    (get node "next")))
+
+(declare scan-datum*)
+
 (defn scan-datum
+  [src String
+   pos Int] Any
+  (with-scan-end (scan-datum* src pos)))
+
+(defn- scan-datum*
   [src String
    pos Int] Any
   (let [p (rd/skip-ws src pos)
@@ -575,130 +598,199 @@
 (defn- emit-node!
   [node Any
    counter Any
-   out Any] Int
+   out Any
+   index Any] Int
   (let [id (fresh-id! counter)
         kind (get node "kind")
         children (get node "children")]
     (add-fact! out id "kind" kind)
-    (if (some? children)
-      (doseq [indexed (map-indexed vector children)]
-        (let [slot (nth indexed 0)
-              child (nth indexed 1)
-              child-id (emit-node! child counter out)]
-          (add-fact! out id (slot-predicate slot child-id) child-id)))
-      (when (not= kind "nil")
-        (add-fact! out id "v" (encoded-value kind (get node "value")))))
-    (emit-loc! out id (get node "loc"))
-    id))
+    (let [kids (if (some? children)
+                 (reduce (fn
+                           [ids Any
+                            indexed Any] Any
+                           (let [slot (nth indexed 0)
+                                 child (nth indexed 1)
+                                 child-id (emit-node! child counter out index)]
+                             (add-fact! out id (slot-predicate slot child-id) child-id)
+                             (conj ids child-id)))
+                   []
+                   (map-indexed vector children))
+                 [])]
+      (when (and (nil? children) (not= kind "nil"))
+        (add-fact! out id "v" (encoded-value kind (get node "value"))))
+      (emit-loc! out id (get node "loc"))
+      (swap! index
+        assoc
+        id
+        {"start" (get node "scan-start")
+         "end" (get node "scan-end")
+         "kids" kids
+         "container" (some? children)
+         "anchorable" (not= true (get node "loc-replaced"))})
+      id)))
 
-(defn- form-spans
-  [forms Any
-   shift Int] Any
-  (loop [i Int 0
-         out Any []]
-    (if (>= i (count forms))
-      out
-      (let [loc (get (nth forms i) "loc")
-            pos (get loc "pos")
-            span (get loc "span")
-            source-start (get loc "source-start")
-            source-end (get loc "source-end")]
-        (recur (+ i 1)
-          (cond
-            (and (some? source-start) (some? source-end))
-            (conj out [i source-start source-end])
-            (and (some? pos) (some? span))
-            (let [position Int pos
-                  span-width Int span]
-              (conj out [i (- position 1 shift)
-                         (+ (- position 1 shift) span-width)]))
-            :else
-            out))))))
-
-(defn- in-span?
-  [off Int
-   spans Any] Bool
-  (loop [i Int 0]
-    (if (>= i (count spans))
-      false
-      (let [span (nth spans i)]
-        (if (and (>= off (nth span 1)) (< off (nth span 2)))
-          true
-          (recur (+ i 1)))))))
-
-(defn- source-lines [src String] Any
-  (loop [i Int 0
-         start Int 0
-         out Any []]
-    (cond
-      (>= i (count src))
-      (conj out [start (subs src start i)])
-      (= (rd/char-at src i) "\n")
-      (recur (+ i 1) (+ i 1) (conj out [start (subs src start i)]))
-      :else
-      (recur (+ i 1) start out))))
+;; Every leaf lexeme masks semicolons that are source text rather than comments.
+;; Coalescing the extents lets line-comments walk source and spans once.
+(defn- lexeme-spans [index Any] Any
+  (let [raw (reduce (fn
+                      [out Any
+                       entry Any] Any
+                      (let [extent (nth entry 1)
+                            start (get extent "start")
+                            end (get extent "end")]
+                        (if (and (not= true (get extent "container"))
+                              (some? start)
+                              (some? end))
+                          (conj out [start end])
+                          out)))
+              []
+              index)]
+    (reduce (fn
+              [out Any
+               span Any] Any
+              (if (> (count out) 0)
+                (let [prior Any (peek out)
+                      span-start Int (nth span 0)
+                      span-end Int (nth span 1)
+                      prior-start Int (nth prior 0)
+                      prior-end Int (nth prior 1)]
+                  (if (<= span-start prior-end)
+                    (conj (pop out) [prior-start (max prior-end span-end)])
+                    (conj out span)))
+                (conj out span)))
+      []
+      (sort-by (fn [span Any] Any (nth span 0)) raw))))
 
 (defn- line-comments
   [src String
    spans Any] Any
-  (reduce (fn
-            [out Any
-             line Any] Any
-            (let [start Int (nth line 0)
-                  text String (nth line 1)
-                  hit Any (loop [j Int 0]
-                            (cond
-                              (>= j (count text)) nil
-                              (and (= (rd/char-at text j) ";")
-                                (not (in-span? (+ start j) spans))) j
-                              :else (recur (+ j 1))))]
-              (if (some? hit)
-                (let [hit-offset Int hit]
-                  (conj out [(+ start hit-offset) (str/trimr (subs text hit-offset))]))
-                out)))
-    []
-    (source-lines src)))
+  (loop [offset Int 0
+         span-index Int 0
+         out Any []]
+    (if (>= offset (count src))
+      out
+      (let [next-span (loop [index Int span-index]
+                        (if (< index (count spans))
+                          (let [span Any (nth spans index)
+                                end Int (nth span 1)]
+                            (if (<= end offset)
+                              (recur (+ index 1))
+                              index))
+                          index))
+            masked? (if (< next-span (count spans))
+                      (let [span Any (nth spans next-span)
+                            start Int (nth span 0)]
+                        (<= start offset))
+                      false)]
+        (if (and (= (rd/char-at src offset) ";") (not masked?))
+          (let [end (loop [index Int offset]
+                      (if (and (< index (count src))
+                            (not= (rd/char-at src index) "\n"))
+                        (recur (+ index 1))
+                        index))]
+            (recur end next-span
+              (conj out [offset (str/trimr (subs src offset end))])))
+          (recur (+ offset 1) next-span out))))))
 
 (defn- line-number
   [src String
    off Int] Int
   (nth (line-col src off) 0))
 
-(defn- nearest-preceding
-  [off Int
-   spans Any] Any
-  (loop [i Int 0
-         best Any nil]
-    (if (>= i (count spans))
-      best
-      (let [span (nth spans i)]
-        (recur (+ i 1)
-          (if (and (<= (nth span 2) off) (or (nil? best) (> (nth span 2) (nth best 2))))
-            span
-            best))))))
+(defn- innermost-container
+  [index Any
+   offset Int] Any
+  (reduce (fn
+            [best Any
+             entry Any] Any
+            (let [id (nth entry 0)
+                  extent (nth entry 1)
+                  raw-start (get extent "start")
+                  raw-end (get extent "end")
+                  current (if (some? best) (get index best) nil)]
+              (if (and (= true (get extent "container"))
+                    (= true (get extent "anchorable"))
+                    (some? raw-start)
+                    (some? raw-end))
+                (let [start Int raw-start
+                      end Int raw-end]
+                  (if (and (<= start offset)
+                        (< offset end)
+                        (if (nil? current)
+                          true
+                          (let [current-start Int (get current "start")
+                                current-end Int (get current "end")]
+                            (< (- end start) (- current-end current-start)))))
+                    id
+                    best))
+                best)))
+    nil
+    index))
 
-(defn- nearest-following
-  [off Int
-   spans Any] Any
-  (loop [i Int 0
-         best Any nil]
-    (if (>= i (count spans))
-      best
-      (let [span (nth spans i)]
-        (recur (+ i 1)
-          (if (and (>= (nth span 1) off) (or (nil? best) (< (nth span 1) (nth best 1))))
-            span
-            best))))))
+(defn- anchor-kids
+  [index Any
+   container-id Any] Any
+  (filterv (fn [child Any] Bool
+             (let [extent (get index child)]
+               (and (some? (get extent "start"))
+                 (some? (get extent "end"))
+                 (= true (get extent "anchorable")))))
+    (get (get index container-id) "kids")))
 
 (defn- classify-comments
   [src String
-   spans Any] Any
-  (mapv (fn [comment Any] Any (let [off (nth comment 0)
-                                    text (nth comment 1)
-                                    before (nearest-preceding off spans)
-                                    after (nearest-following off spans)]
-                                (cond (and (some? before) (let [before-end Int (nth before 2)] (= (line-number src (- before-end 1)) (line-number src off)))) ["trailing" (nth before 0) text] (some? after) ["leading" (nth after 0) text] :else ["trailing" "file" text])))
-    (line-comments src spans)))
+   index Any
+   root Int
+   comments Any] Any
+  (mapv (fn [comment Any] Any
+          (let [offset Int (nth comment 0)
+                text String (nth comment 1)
+                container Any (innermost-container index offset)
+                container-id Any (if (some? container) container root)
+                kids Any (anchor-kids index container-id)
+                before Any (reduce (fn
+                                     [best Any
+                                      child Any] Any
+                                     (let [extent Any (get index child)
+                                           end Int (get extent "end")
+                                           current Any (if (some? best) (get index best) nil)
+                                           current-end Any (if (some? current) (get current "end") nil)]
+                                       (if (and (<= end offset)
+                                         (or (nil? current-end)
+                                           (let [best-end Int current-end]
+                                             (> end best-end))))
+                                     child
+                                     best)))
+                         nil
+                         kids)
+                after Any (reduce (fn
+                                    [best Any
+                                     child Any] Any
+                                    (let [extent Any (get index child)
+                                          start Int (get extent "start")
+                                          current Any (if (some? best) (get index best) nil)
+                                          current-start Any (if (some? current) (get current "start") nil)]
+                                      (if (and (>= start offset)
+                                        (or (nil? current-start)
+                                          (let [best-start Int current-start]
+                                            (< start best-start))))
+                                    child
+                                    best)))
+                        nil
+                        kids)]
+            (cond
+              (and (some? before)
+                (let [before-end Int (get (get index before) "end")]
+                  (= (line-number src (- before-end 1))
+                    (line-number src offset))))
+              ["trailing" before text]
+              (some? after)
+              ["leading" after text]
+              (= container-id root)
+              ["trailing" root text]
+              :else
+              ["inner-trailing" container-id text])))
+    comments))
 
 (defn- symbol-char? [ch String] Bool
   (some? (re-matches #"[\p{L}\p{N}_\-*+!?<>=/.&%$]" ch)))
@@ -726,16 +818,13 @@
 
 (defn- emit-comments!
   [comments Any
-   form-ids Any
-   root Int
    counter Any
    out Any] Nil
   (let [indexes (atom {})]
     (doseq [comment comments]
       (let [placement Any (nth comment 0)
-            spec Any (nth comment 1)
+            anchor Int (nth comment 1)
             text String (nth comment 2)
-            anchor Int (if (= spec "file") root (nth form-ids spec))
             idx Int (get (deref indexes) anchor 0)
             cid Int (fresh-id! counter)]
         (swap! indexes assoc anchor (+ idx 1))
@@ -755,21 +844,35 @@
 (defn- projection-lines! [src String] Any
   (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src))
         _line-cols (reset! LINE-COLS (build-line-cols src))
-        shift 0
         forms (located-program src)
         counter (atom 0)
         out (atom [])
+        index (atom {})
         root (fresh-id! counter)
         head (synthetic-leaf "beagle-file" nil)]
     (add-fact! out root "kind" "list")
-    (let [head-id (emit-node! head counter out)]
+    (let [head-id (emit-node! head counter out index)]
       (add-fact! out root (slot-predicate 0 head-id) head-id))
     (let [form-ids (loop [i Int 0
                           ids Any []]
-                     (if (>= i (count forms)) ids (let [id (emit-node! (nth forms i) counter out)] (add-fact! out root (slot-predicate (+ i 1) id) id) (recur (+ i 1) (conj ids id)))))]
-      (emit-comments! (classify-comments src (form-spans forms shift))
-        form-ids
+                     (if (>= i (count forms))
+                       ids
+                       (let [id (emit-node! (nth forms i) counter out index)]
+                         (add-fact! out root (slot-predicate (+ i 1) id) id)
+                         (recur (+ i 1) (conj ids id)))))]
+      ;; The synthetic file wrapper is the outermost classification boundary.
+      (swap! index
+        assoc
         root
+        {"start" nil
+         "end" nil
+         "kids" form-ids
+         "container" false
+         "anchorable" false})
+      (emit-comments! (classify-comments src
+                        (deref index)
+                        root
+                        (line-comments src (lexeme-spans (deref index))))
         counter
         out))
     (deref out)))
@@ -897,8 +1000,42 @@
       [])))
 
 ;; --- reader datum -> deterministic source ----------------------------------
+(def CMT-TAG String "#%comment-anchor")
+
+(defn- commented? [datum Any] Bool
+  (and (vector? datum)
+    (= (count datum) 5)
+    (= (nth datum 0) CMT-TAG)))
+
+(defn- strip-comment-wrappers [datum Any] Any
+  (cond
+    (commented? datum)
+    (strip-comment-wrappers (nth datum 1))
+    (vector? datum)
+    (mapv (fn [item Any] Any (strip-comment-wrappers item)) datum)
+    :else
+    datum))
+
+(defn- subtree-comments [datum Any] Any
+  (cond
+    (commented? datum)
+    (into (into (into (nth datum 2)
+                       (subtree-comments (nth datum 1)))
+                 (nth datum 4))
+      (nth datum 3))
+    (vector? datum)
+    (reduce (fn
+              [out Any
+               item Any] Any
+              (into out (subtree-comments item)))
+      []
+      datum)
+    :else
+    []))
+
 (defn- datum-list? [datum Any] Bool
   (and (vector? datum)
+    (not (commented? datum))
     (not (tagged-string? datum))
     (not (and (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)))
     (not (and (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG)))))
@@ -1381,11 +1518,10 @@
    keep Int
    col Int
    pad String] String
-  (let [inline-signature String
-        (reduce (fn
-                  [out String
-                   item Any] String
-                  (str out " " (datum-source item)))
+  (let [inline-signature String (reduce (fn
+                                          [out String
+                                           item Any] String
+                                          (str out " " (datum-source item)))
           (str "(" (datum-source (nth (list-items parent) 0)))
           (subvec after 0 keep))
         signature-over-width? Bool (> (+ col (count inline-signature)) 80)]
@@ -1474,6 +1610,175 @@
    col Int] String
   (datum-pretty-context datum col "normal"))
 
+;; Comment-aware formatting is a separate dirty path. Comment-free forms keep
+;; datum-pretty-context exactly, including the current structural-signature law.
+(defn- ends-newline? [text String] Bool
+  (and (> (count text) 0)
+    (= (rd/char-at text (- (count text) 1)) "\n")))
+
+(defn- commented-source [datum Any] String
+  (datum-source (strip-comment-wrappers datum)))
+
+(defn- join-commented-lines
+  [base String
+   items Any
+   pad String] String
+  (reduce (fn
+            [out String
+             item String] String
+            (str out (if (ends-newline? out) "" "\n") pad item))
+    base
+    items))
+
+(defn- close-after-comments
+  [body String
+   inner Any
+   col Int
+   pad String
+   close String] String
+  (let [filled (reduce (fn
+                         [out String
+                          comment String] String
+                         (str out
+                           (if (ends-newline? out) "" "\n")
+                           pad
+                           comment
+                           "\n"))
+                 body
+                 inner)]
+    (str filled (if (ends-newline? filled) (spaces col) "") close)))
+
+(declare commented-pretty-core)
+
+(defn- commented-datum-pretty
+  [datum Any
+   col Int
+   ctx String] String
+  (if (commented? datum)
+    (let [core (commented-pretty-core (nth datum 1) col ctx (nth datum 4))
+          pad (spaces col)
+          leading (reduce (fn
+                            [out String
+                             comment String] String
+                            (str out comment "\n" pad))
+                    ""
+                    (nth datum 2))]
+      (str leading
+        (reduce (fn
+                  [out String
+                   comment String] String
+                  (str out (if (ends-newline? out) pad " ") comment "\n"))
+          core
+          (nth datum 3))))
+    (datum-pretty-context datum col ctx)))
+
+(defn- commented-pretty-core
+  [datum Any
+   col Int
+   ctx String
+   inner Any] String
+  (let [parts (sequence-parts datum)]
+    (cond
+      (some? (prefix-text datum))
+      (let [prefix String (prefix-text datum)]
+        (str prefix
+          (commented-datum-pretty
+            (nth datum 1) (+ col (count prefix)) "data")))
+      (some? (hash-prefix-text datum))
+      (let [prefix String (hash-prefix-text datum)]
+        (str prefix
+          (commented-datum-pretty
+            (nth datum 1) (+ col (count prefix)) "data")))
+      (and (metadata-form? datum) (not (commented? (nth datum 1))))
+      (let [prefix (str "^" (commented-source (nth datum 1)) " ")]
+        (str prefix
+          (commented-datum-pretty
+            (nth datum 2) (+ col (count prefix)) ctx)))
+      (nil? parts)
+      (let [comments (into (subtree-comments datum) inner)
+            pad (spaces col)]
+        (str (reduce (fn
+                       [out String
+                        comment String] String
+                       (str out comment "\n" pad))
+               ""
+               comments)
+          (commented-source datum)))
+      (= (count (get parts "items")) 0)
+      (close-after-comments
+        (get parts "open")
+        inner
+        col
+        (spaces (+ col 2))
+        (get parts "close"))
+      (and (= (get parts "open") "(")
+        (string? (nth (get parts "items") 0)))
+      (let [items (get parts "items")
+            head (nth items 0)
+            after (subvec items 1)
+            clean-after (mapv (fn [item Any] Any (strip-comment-wrappers item)) after)
+            limit (min (context-head-keep ctx head clean-after) (count after))
+            keep (loop [index Int 0]
+                   (if (or (>= index limit) (commented? (nth after index)))
+                     index
+                     (recur (+ index 1))))
+            body (subvec after keep)
+            pad (spaces (+ col 2))
+            clean-parent (strip-comment-wrappers datum)
+            signature (str "("
+                        (commented-source head)
+                        (reduce (fn
+                                  [out String
+                                   item Any] String
+                                  (str out " " (commented-source item)))
+                          ""
+                          (subvec after 0 keep)))
+            rendered-body (mapv (fn [indexed Any] String
+                                  (let [body-index Int (nth indexed 0)
+                                        item Any (nth indexed 1)
+                                        child-index Int (+ keep body-index 1)]
+                                    (commented-datum-pretty
+                                      item
+                                      (+ col 2)
+                                      (grammar-child-context
+                                        clean-parent
+                                        ctx
+                                        child-index
+                                        (strip-comment-wrappers item)))))
+                            (map-indexed vector body))]
+        (close-after-comments
+          (join-commented-lines signature rendered-body pad)
+          inner
+          col
+          pad
+          (get parts "close")))
+      :else
+      (let [items (get parts "items")
+            inner-col (+ col (count (get parts "open")))
+            pad (spaces inner-col)
+            clean-parent (strip-comment-wrappers datum)
+            rendered (mapv (fn [indexed Any] String
+                             (let [index Int (nth indexed 0)
+                                   item Any (nth indexed 1)]
+                               (commented-datum-pretty
+                                 item
+                                 inner-col
+                                 (grammar-child-context
+                                   clean-parent
+                                   ctx
+                                   index
+                                   (strip-comment-wrappers item)))))
+                       (map-indexed vector items))]
+        (close-after-comments
+          (join-commented-lines
+            (str (get parts "open") (nth rendered 0))
+            (subvec rendered 1)
+            pad)
+          inner
+          col
+          pad
+          (get parts "close"))))))
+
 ;; --- comments and render ----------------------------------------------------
 (defn- comment-text
   [props Any
@@ -1500,21 +1805,52 @@
    placement String] Any
   (filterv (fn [comment Any] Bool (= (nth comment 0) placement)) comments))
 
+(defn- comment-texts
+  [comments Any
+   placement String] Any
+  (mapv (fn [comment Any] String (nth comment 1))
+    (comments-with comments placement)))
+
+(defn- mark-dirty!
+  [props Any
+   id Any
+   cache Any] Bool
+  (let [child-dirty? (reduce (fn
+                               [found Bool
+                                child Any] Bool
+                               (or found (mark-dirty! props child cache)))
+                       false
+                       (ordered-children props id))
+        value (or child-dirty? (> (count (node-comments props id)) 0))]
+    (swap! cache assoc id value)
+    value))
+
+(defn- build-commented
+  [props Any
+   id Any
+   dirty Any] Any
+  (if (not= true (get dirty id))
+    (build-datum props id)
+    (let [node (get props id)
+          kind (get node "kind")
+          core (if (or (= kind "list") (= kind "vector"))
+                 (mapv (fn [child Any] Any
+                         (build-commented props child dirty))
+                   (ordered-children props id))
+                 (build-datum props id))
+          comments (node-comments props id)]
+      [CMT-TAG
+       core
+       (comment-texts comments "leading")
+       (comment-texts comments "trailing")
+       (comment-texts comments "inner-trailing")])))
+
 (defn- rendered-block
   [props Any
-   id Int] String
-  (let [comments (node-comments props id)
-        leading (comments-with comments "leading")
-        trailing (comments-with comments "trailing")
-        lead-text (reduce (fn
-                            [out String
-                             c Any] String
-                            (str out (nth c 1) "\n")) "" leading)
-        trail-text (reduce (fn
-                             [out String
-                              c Any] String
-                             (str out " " (nth c 1))) "" trailing)]
-    (str lead-text (datum-pretty (build-datum props id) 0) trail-text)))
+   id Int
+   dirty Any] String
+  (str/trimr (commented-datum-pretty
+               (build-commented props id dirty) 0 "normal")))
 
 (defn render-edn! [path String] Nil
   (let [props (triples-props (read-triples path))
@@ -1529,7 +1865,10 @@
         file-comments (if wrapped? (node-comments props root) [])
         header (mapv (fn [c Any] String (nth c 1)) (comments-with file-comments "leading"))
         footer (mapv (fn [c Any] String (nth c 1)) (comments-with file-comments "trailing"))
-        blocks (mapv (fn [id Any] String (rendered-block props id)) body-ids)
+        dirty (atom {})
+        _marked (mark-dirty! props root dirty)
+        marks (deref dirty)
+        blocks (mapv (fn [id Any] String (rendered-block props id marks)) body-ids)
         rendered (str/join "\n\n" (into (into header blocks) footer))]
     (if (some? lang-line)
       (print (str lang-line "\n\n" rendered "\n"))
