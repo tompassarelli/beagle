@@ -151,6 +151,63 @@
     [(diag) (vector-ref result 5)]
     [else #f]))
 
+;; Parse a fixture while retaining both the normalized program and the original
+;; reader syntax.  The latter is the location authority: normalized nodes may
+;; borrow an authored span, but they may not invent a line/column/offset/span
+;; tuple that never occurred in the input.
+(define (parse-fixture-program source)
+  (define fixture (write-fixture source))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define forms (read-beagle-syntax fixture))
+      (values (parse-program forms) forms))
+    (lambda ()
+      (delete-file fixture))))
+
+(define (src-loc-key loc)
+  (list (src-loc-line loc)
+        (src-loc-col loc)
+        (src-loc-pos loc)
+        (src-loc-span loc)))
+
+;; Collect every precise authored source span recursively.  A normalization may
+;; reuse one of these spans for a generated container, but never a positional
+;; tuple that has no authored anchor in the input it models.
+(define (authored-span-keys stx)
+  (append
+   (let ([loc (stx->src-loc stx)])
+     (if loc (list (src-loc-key loc)) '()))
+   (append-map authored-span-keys (or (stx-subs stx) '()))))
+
+;; This is intentionally the normalized-expression spine, not every AST
+;; record.  The selected constructors are exactly the canonical shapes made by
+;; when/if-let/threading rewrites: they are the first nodes a checker or emitter
+;; sees after surface syntax has disappeared.
+(define (normalized-node? value)
+  (or (defn-form? value)
+      (param? value)
+      (let-form? value)
+      (let-binding? value)
+      (if-form? value)
+      (do-form? value)
+      (call-form? value)
+      (threading-marker? value)))
+
+(define (normalized-descendants value)
+  (cond
+    [(normalized-node? value)
+     (cons value
+           (append-map normalized-descendants
+                       (cdr (vector->list (struct->vector value)))))]
+    [(pair? value)
+     (append (normalized-descendants (car value))
+             (normalized-descendants (cdr value)))]
+    [else '()]))
+
+(define (node-kind node)
+  (format "~s" (vector-ref (struct->vector node) 0)))
+
 ;; =============================================================================
 ;; Benchmark entries
 ;; =============================================================================
@@ -518,6 +575,45 @@
     (check-equal? (effective-col result) 4
                   (format "~a: expected column 4 (the `(g …)` call), got ~v"
                           id (effective-col result)))))
+
+;; --- Normalized-node completeness ------------------------------------------
+
+(test-case "normalized nodes retain one exact authored source span"
+  ;; Every surface form below disappears during parse.  The resulting AST is
+  ;; the canonical shape consumed by checking and emission, so this catches a
+  ;; location loss before it can degrade into a top-level diagnostic fallback.
+  (define-values
+    (prog forms)
+    (parse-fixture-program
+     "(defn inc1 [(n Int)] Int (+ n 1))
+(defn normalized [(opt Int?)] Int
+  (when true 0)
+  (if-let [bound opt]
+    (-> bound (inc1))
+    0)
+  (some-> opt (inc1))
+  (as-> opt it (inc1 it))
+  (cond-> opt true (inc1)))"))
+  (define authored-spans
+    (for/fold ([spans '()]) ([form (in-list forms)])
+      (append (authored-span-keys form) spans)))
+  (define src-table (program-src-table prog))
+  (define normalized-nodes
+    (append-map normalized-descendants (program-forms prog)))
+  (check-true (pair? normalized-nodes)
+              "the fixture must produce normalized AST nodes")
+  (for ([node (in-list normalized-nodes)])
+    (define loc (hash-ref src-table node #f))
+    (check-true (src-loc? loc)
+                (format "~a lost its source location during normalization"
+                        (node-kind node)))
+    (when (src-loc? loc)
+      (check-true (loc-blamable? loc)
+                  (format "~a retained only a non-blamable synthetic location"
+                          (node-kind node)))
+      (check-not-false (member (src-loc-key loc) authored-spans)
+                       (format "~a points outside an exact authored span: ~v"
+                               (node-kind node) loc)))))
 
 ;; --- Origin / canonical model (Lean SourceInfo 3-state) ---------------------
 
