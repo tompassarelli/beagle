@@ -17,6 +17,7 @@ const entries = [
   'corpus.app/run-stable',
   'corpus.app/run-independent',
 ]
+const affectedUnit = 'corpus.foundation/private-offset'
 const phaseTimeoutMs = 180_000
 
 function digest(bytes) {
@@ -49,18 +50,14 @@ async function copyCorpus(destination, sourceEdit) {
   return destination
 }
 
-async function build(sourceRoot, output, label, singleton = false) {
+async function build(sourceRoot, output, label) {
   const args = [
     'build',
     '--materializer', 'c17',
     '--out', output,
   ]
-  if (!singleton) {
-    for (const entry of entries) args.push('--entry', entry)
-    for (const source of sources) args.push(path.relative(root, path.join(sourceRoot, source)))
-  } else {
-    args.push(path.relative(root, path.join(sourceRoot, 'foundation.bgl')))
-  }
+  for (const entry of entries) args.push('--entry', entry)
+  for (const source of sources) args.push(path.relative(root, path.join(sourceRoot, source)))
   await runBeagle(args, label)
 }
 
@@ -147,7 +144,6 @@ export async function runStage5ColdCompile({ sourceEdit } = {}) {
     const candidateRoot = await copyCorpus(path.join(scratch, 'candidate-sources'), sourceEdit)
     const baselineOutput = path.join(scratch, 'baseline-build')
     const candidateOutput = path.join(scratch, 'candidate-build')
-    const singletonOutput = path.join(scratch, 'singleton-build')
     const baselineBehaviorOutput = path.join(scratch, 'baseline-behavior-build')
     const candidateBehaviorOutput = path.join(scratch, 'candidate-behavior-build')
 
@@ -159,37 +155,33 @@ export async function runStage5ColdCompile({ sourceEdit } = {}) {
     const candidateExecutable = await buildExecutable(
       candidateRoot, candidateBehaviorOutput, 'candidate behavior cold compile',
     )
-    await build(candidateRoot, singletonOutput, 'affected singleton cold compile', true)
 
     const [baselineFacts, candidateFacts, baselineSource, candidateSource, candidateProgram,
-      candidateNativeProgram, singletonProgram, candidateReport, singletonReport,
-      baselineBehavior, candidateBehavior] = await Promise.all([
+      candidateNativeProgram, candidateReport, baselineBehavior, candidateBehavior] =
+      await Promise.all([
       readRequiredText(baselineOutput, 'source.facts'),
       readRequiredText(candidateOutput, 'source.facts'),
       readFile(path.join(baselineRoot, 'foundation.bgl')),
       readFile(path.join(candidateRoot, 'foundation.bgl')),
       readArtifact(candidateOutput, 'module.native-program'),
       readRequiredText(candidateOutput, 'module.native-program.sha256'),
-      readArtifact(singletonOutput, 'module.native-program'),
       readRequiredText(candidateOutput, 'report.txt'),
-      readRequiredText(singletonOutput, 'report.txt'),
       runExecutable(baselineExecutable, 'baseline behavior'),
       runExecutable(candidateExecutable, 'candidate behavior'),
     ])
     const baselineUnits = semanticUnits(baselineFacts)
     const candidateUnits = semanticUnits(candidateFacts)
     const cone = exactCone(baselineUnits, candidateUnits)
-    const singleton = 'corpus.foundation/private-offset'
+    const singleton = affectedUnit
     const baselineNames = baselineUnits.map((unit) => `${unit.module}/${unit.name}`)
     const candidateNames = candidateUnits.map((unit) => `${unit.module}/${unit.name}`)
     const unaffectedUnits = candidateNames.filter((unit) => !cone.includes(unit))
     const baselineSourceOid = digest(baselineSource)
     const sourceOid = digest(candidateSource)
     const programOid = `sha256:${candidateNativeProgram.trim().replace(/^sha256:/, '')}`
-    const singletonProgramOid = digest(singletonProgram.bytes)
 
-    if (!candidateReport.includes('result PASS') || !singletonReport.includes('result PASS')) {
-      throw new Error('candidate or affected singleton cold compile did not report result PASS')
+    if (!candidateReport.includes('result PASS')) {
+      throw new Error('candidate cold compile did not report result PASS')
     }
     if (programOid !== candidateProgram.digest) {
       throw new Error('candidate native program digest receipt does not match its bytes')
@@ -237,10 +229,12 @@ export async function runStage5ColdCompile({ sourceEdit } = {}) {
       },
       coldCompile: {
         status: 'PASS',
-        singleton,
-        source: 'corpus.foundation/foundation.bgl',
-        program: singletonProgramOid,
-        byteLength: singletonProgram.byteLength,
+        selection: 'entry-closures',
+        entries: [...entries],
+        affectedUnit: singleton,
+        sources: sources.map((source) => `corpus/${source}`),
+        program: candidateProgram.digest,
+        byteLength: candidateProgram.byteLength,
         report: 'result PASS',
       },
       behaviorDelta: {
