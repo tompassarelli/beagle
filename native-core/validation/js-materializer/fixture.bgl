@@ -1,0 +1,148 @@
+#lang beagle
+(ns js-materializer.fixture
+  (:require [beagle.checker :as checker]
+            [beagle.frontend-facts :as facts]
+            [beagle.js-materializer :as materializer]))
+
+(def span facts/SourceSpan (facts/->SourceSpan "fixture.bgl" 0 1 1 0))
+
+(defn fact
+  [order Int
+   subject String
+   kind String] facts/CompilerFact
+  (facts/syntax-node-fact order subject (facts/->FactText kind) span))
+
+(defn text
+  [order Int
+   subject String
+   value String] facts/CompilerFact
+  (facts/syntax-value-fact order subject 0 (facts/->FactText value) span))
+
+(defn edge
+  [order Int
+   subject String
+   slot Int
+   target String] facts/CompilerFact
+  (facts/syntax-edge-fact order subject slot target span))
+
+(defn integer
+  [order Int
+   subject String
+   value Int] facts/CompilerFact
+  (facts/syntax-value-fact order subject 0 (facts/->FactInt value) span))
+
+(defn accepted
+  [order Int
+   subject String
+   type-name String] facts/TypePropositionFact
+  (facts/->TypePropositionFact order (str "p-" subject) subject "fixture/type"
+    type-name span))
+
+(defn evidence
+  [order Int
+   subject String] facts/TypeEvidenceFact
+  (facts/->TypeEvidenceFact order (str "p-" subject) subject true "fixture" span))
+
+(defn lower
+  [order Int
+   subject String
+   type-name String] facts/OrderedLoweringFact
+  (facts/->OrderedLoweringFact order :lowering/fact subject 0
+    (facts/->FactText type-name) span))
+
+(defn fixture-closure [] facts/SyntaxFactClosure
+  (let [bundle facts/SyntaxFactBundle (facts/->SyntaxFactBundle "fixture.bgl" "fixture.js" "sha256:source" "core"
+          [(fact 0 "t-int" "type-name")
+           (text 1 "t-int" "Int")
+           (fact 2 "answer-body" "integer-literal")
+           (integer 3 "answer-body" 7)
+           (fact 4 "answer" "function")
+           (text 5 "answer" "answer")
+           (edge 6 "answer" 1 "t-int")
+           (edge 7 "answer" 2 "answer-body")
+           (fact 8 "value" "binding")
+           (text 9 "value" "value")
+           (edge 10 "value" 0 "t-int")
+           (fact 11 "increment-body" "integer-literal")
+           (integer 12 "increment-body" 1)
+           (fact 13 "increment" "function")
+           (text 14 "increment" "increment")
+           (edge 15 "increment" 0 "value")
+           (edge 16 "increment" 1 "t-int")
+           (edge 17 "increment" 2 "increment-body")
+           (fact 18 "call-argument" "integer-literal")
+           (integer 19 "call-argument" 7)
+           (fact 20 "call-body" "direct-call")
+           (text 21 "call-body" "increment")
+           (edge 22 "call-body" 0 "call-argument")
+           (fact 23 "call-increment" "function")
+           (text 24 "call-increment" "callIncrement")
+           (edge 25 "call-increment" 1 "t-int")
+           (edge 26 "call-increment" 2 "call-body")
+           (fact 27 "t-string" "type-name")
+           (text 28 "t-string" "String")
+           (fact 29 "greeting-body" "string-literal")
+           (text 30 "greeting-body" "hello")
+           (fact 31 "greeting" "function")
+           (text 32 "greeting" "greeting")
+           (edge 33 "greeting" 1 "t-string")
+           (edge 34 "greeting" 2 "greeting-body")]
+          [] [])]
+    (facts/->SyntaxFactClosure "fixture.bgl" [bundle] "sha256:closure" [])))
+
+(defn fixture-checked [] checker/CheckedFacts
+  (checker/->CheckedFacts
+    [(accepted 0 "answer" "Int")
+     (accepted 1 "increment" "Int")
+     (accepted 2 "call-increment" "Int")
+     (accepted 3 "call-body" "Int")
+     (accepted 4 "greeting" "String")
+     (accepted 5 "greeting-body" "String")]
+    [(evidence 0 "answer")
+     (evidence 1 "increment")
+     (evidence 2 "call-increment")
+     (evidence 3 "call-body")
+     (evidence 4 "greeting")
+     (evidence 5 "greeting-body")]
+    [(lower 0 "answer-body" "Int")
+     (lower 1 "value" "Int")
+     (lower 2 "increment-body" "Int")
+     (lower 3 "call-argument" "Int")]
+    0))
+
+(def expected-payload String
+  "// beagle namespace: fixture.js\nexport function answer() {\n  return 7;\n}\nexport function increment(value) {\n  return 1;\n}\nexport function callIncrement() {\n  return increment(7);\n}\nexport function greeting() {\n  return \"hello\";\n}\n")
+
+(def expected-content-id String
+  (str "sha256:" (sha256-bytes (utf8-encode expected-payload))))
+
+(defn byte-fixture-passes? [] Bool
+  (match (materializer/materialize
+           (fixture-closure) [(fixture-checked)]
+           (materializer/->JavaScriptTargetProfile "es-module"))
+    [(materializer/JavaScriptMaterialized artifact)
+     (and (= expected-payload (materializer/javascriptartifact-payload artifact))
+          (= expected-content-id (materializer/javascriptartifact-content-id artifact))
+          (= expected-content-id (materializer/javascriptartifact-payload-sha256 artifact))
+          (= (count (utf8-encode expected-payload))
+             (materializer/javascriptartifact-payload-byte-count artifact))
+          (= (str "sha256:" (sha256-bytes
+                (utf8-encode (materializer/javascriptartifact-encoding artifact))))
+             (materializer/javascriptartifact-digest artifact)))]
+    [(materializer/JavaScriptMaterializationRejected code detail) false]))
+
+(defn emitted-source [] String?
+  (match (materializer/materialize
+           (fixture-closure) [(fixture-checked)]
+           (materializer/->JavaScriptTargetProfile "es-module"))
+    [(materializer/JavaScriptMaterialized artifact)
+     (materializer/javascriptartifact-payload artifact)]
+    [(materializer/JavaScriptMaterializationRejected code detail) nil]))
+
+(defn main [args (Vec String)] Int
+  (if (and (= 1 (count args)) (= "--emit-source" (first args)))
+    (let [source String? (emitted-source)]
+      (if (nil? source)
+        1
+        (do (println source) 0)))
+    (if (byte-fixture-passes?) 0 1)))
