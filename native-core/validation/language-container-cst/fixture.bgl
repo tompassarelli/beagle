@@ -1,0 +1,131 @@
+#lang beagle
+(ns native.language-container-cst-fixture
+  (:require [beagle.language-container-cst :as container]))
+
+(def first-payload String
+  "(def users UsersTable ...)\n BGL_MAIN\nBGL_MAIN extra\n;; ☺ remains exact\n")
+
+(def second-payload String
+  "SELECT id FROM users WHERE active = true;\n  #lang is payload here\n")
+
+(def repeated-source String
+  (str "; leading trivia\n  #lang indented-is-trivia\n\n"
+       "#lang bgl shop main\n"
+       "  :in []\n"
+       "  :out [[users UsersTable]]\n"
+       "  :end BGL_MAIN\n"
+       first-payload
+       "BGL_MAIN\n"
+       "\n; between regions\n"
+       "#lang bjs shop ui\n"
+       "  :in [[users main users UsersTable]]\n"
+       "  :out [[html String]]\n"
+       "  :end BJS_UI\n"
+       second-payload
+       "BJS_UI\n"
+       "; trailing trivia\n"))
+
+(def malformed-source String
+  (str "lead\n"
+       "#lang bgl missing-region\n"
+       "  :in []\n"
+       "  :out []\n"
+       "  :end BAD\n"
+       "ignored malformed body\n"
+       "#lang bnix recovered main\n"
+       "  :in []\n"
+       "  :out [[value String]]\n"
+       "  :end GOOD\n"
+       "{not reader input}\n"
+       "GOOD\n"))
+
+(def unterminated-source String
+  (str "#lang acme/sql@sha256:0123456789abcdef module main\n"
+       "  :in []\n"
+       "  :out [[rows Rows]]\n"
+       "  :end SQL_END\n"
+       "SELECT * FROM records;\n"
+       "SQL_END extra\n"
+       "#lang bgl this later-boundary\n"
+       "  :in []\n"
+       "  :out []\n"
+       "  :end NEVER_REOPENED\n"))
+
+(defn repeated-case [] Bool
+  (let [result container/LanguageContainerCstV1 (container/scan-container repeated-source)
+        regions (Vec container/ContainerRegionV1) (container/languagecontainercstv1-regions result)
+        first-region container/ContainerRegionV1 (nth regions 0)
+        second-region container/ContainerRegionV1 (nth regions 1)
+        first-header container/ContainerHeaderV1 (container/containerregionv1-header first-region)
+        second-header container/ContainerHeaderV1 (container/containerregionv1-header second-region)
+        first-span container/ContainerSpanV1 (container/containerregionv1-payload-span first-region)]
+    (and (= repeated-source (container/render-exact result))
+         (= 0 (count (container/languagecontainercstv1-diagnostics result)))
+         (= 2 (count regions))
+         (= "main" (container/containerheaderv1-region-name first-header))
+         (= "ui" (container/containerheaderv1-region-name second-header))
+         (= "[[users main users UsersTable]]"
+            (container/containerheaderv1-inputs-text second-header))
+         (= first-payload (container/containerregionv1-payload first-region))
+         (= second-payload (container/containerregionv1-payload second-region))
+         (= "BGL_MAIN\n"
+            (container/containerregionv1-closing-fence-raw first-region))
+         (= first-payload (container/span-text repeated-source first-span))
+         (> (container/containerspanv1-end-byte first-span)
+            (container/containerspanv1-end first-span))
+         (container/containerregionv1-terminated first-region)
+         (container/containerregionv1-terminated second-region))))
+
+(defn collision-case [] Bool
+  (let [payload String "BGL_CANON\nBGL_CANON_1\nBGL_CANON_2 extra\n BGL_CANON_2\n"
+        selected String (container/select-canonical-fence "BGL_CANON" payload)
+        canonical String (container/canonical-fence "bgl" payload)]
+    (and (= "BGL_CANON_2" selected)
+         (= selected (container/select-canonical-fence "BGL_CANON" payload))
+         (not (container/standalone-line? payload selected))
+         (container/valid-fence? canonical)
+         (not (container/standalone-line? payload canonical)))))
+
+(defn malformed-recovery-case [] Bool
+  (let [result container/LanguageContainerCstV1 (container/scan-container malformed-source)
+        regions (Vec container/ContainerRegionV1) (container/languagecontainercstv1-regions result)
+        diagnostics (Vec container/ContainerDiagnosticV1) (container/languagecontainercstv1-diagnostics result)
+        diagnostic container/ContainerDiagnosticV1 (first diagnostics)
+        region container/ContainerRegionV1 (first regions)
+        header container/ContainerHeaderV1 (container/containerregionv1-header region)
+        rejected String (container/span-text malformed-source
+                             (container/containerdiagnosticv1-span diagnostic))]
+    (and (= malformed-source (container/render-exact result))
+         (= 1 (count diagnostics))
+         (= 1 (count regions))
+         (= :container/malformed-header
+            (container/containerdiagnosticv1-code diagnostic))
+         (str/starts-with? rejected "#lang bgl missing-region\n")
+         (str/ends-with? rejected "ignored malformed body\n")
+         (= "recovered" (container/containerheaderv1-module-id header))
+         (= "{not reader input}\n"
+            (container/containerregionv1-payload region)))))
+
+(defn unterminated-recovery-case [] Bool
+  (let [result container/LanguageContainerCstV1 (container/scan-container unterminated-source)
+        regions (Vec container/ContainerRegionV1) (container/languagecontainercstv1-regions result)
+        diagnostics (Vec container/ContainerDiagnosticV1) (container/languagecontainercstv1-diagnostics result)
+        region container/ContainerRegionV1 (first regions)
+        diagnostic container/ContainerDiagnosticV1 (first diagnostics)]
+    (and (= unterminated-source (container/render-exact result))
+         (= 1 (count regions))
+         (= 1 (count diagnostics))
+         (= :container/unterminated-region
+            (container/containerdiagnosticv1-code diagnostic))
+         (not (container/containerregionv1-terminated region))
+         (str/ends-with?
+           (container/containerregionv1-payload region)
+           "  :end NEVER_REOPENED\n"))))
+
+(defn main [args (Vec String)] Int
+  (if (and (repeated-case)
+           (collision-case)
+           (malformed-recovery-case)
+           (unterminated-recovery-case))
+    0
+    1))

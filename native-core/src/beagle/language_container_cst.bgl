@@ -1,0 +1,484 @@
+#lang beagle
+(ns beagle.language-container-cst)
+
+(defrecord ContainerSpanV1
+  [start Int
+   end Int
+   start-byte Int
+   end-byte Int])
+
+(defrecord ContainerLineV1
+  [start Int
+   content-end Int
+   end Int
+   content String
+   raw String
+   has-lf Bool])
+
+(defrecord ContainerHeaderV1
+  [language-ref String
+   module-id String
+   region-name String
+   inputs-text String
+   outputs-text String
+   fence String
+   raw String
+   span ContainerSpanV1
+   fence-declaration-span ContainerSpanV1])
+
+(defrecord ContainerRegionV1
+  [header ContainerHeaderV1
+   payload String
+   closing-fence-raw String
+   raw String
+   span ContainerSpanV1
+   payload-span ContainerSpanV1
+   closing-fence-span ContainerSpanV1
+   terminated Bool])
+
+(defrecord ContainerDiagnosticV1
+  [code Keyword
+   message String
+   span ContainerSpanV1])
+
+(defunion ContainerPieceV1
+  (ContainerTriviaV1
+    [text String
+     span ContainerSpanV1])
+  (ContainerRegionPieceV1 [region ContainerRegionV1]))
+
+(defrecord LanguageContainerCstV1
+  [source String
+   pieces (Vec ContainerPieceV1)
+   regions (Vec ContainerRegionV1)
+   diagnostics (Vec ContainerDiagnosticV1)])
+
+(defunion HeaderScanV1
+  (HeaderAcceptedV1
+    [header ContainerHeaderV1
+     next-offset Int])
+  (HeaderRejectedV1
+    [diagnostic ContainerDiagnosticV1
+     recovery-offset Int]))
+
+(defunion RegionScanV1
+  (RegionAcceptedV1
+    [region ContainerRegionV1
+     next-offset Int])
+  (RegionMalformedV1
+    [diagnostic ContainerDiagnosticV1
+     recovery-offset Int])
+  (RegionUnterminatedV1
+    [region ContainerRegionV1
+     diagnostic ContainerDiagnosticV1]))
+
+(defn character-at
+  [source String
+   offset Int] String
+  (subs source offset (+ offset 1)))
+
+(defn container-span
+  [source String
+   start Int
+   end Int] ContainerSpanV1
+  (->ContainerSpanV1 start
+                     end
+                     (count (utf8-encode (subs source 0 start)))
+                     (count (utf8-encode (subs source 0 end)))))
+
+(defn line-at
+  [source String
+   start Int] ContainerLineV1
+  (loop [cursor Int start]
+    (if (>= cursor (count source))
+      (->ContainerLineV1 start cursor cursor
+                         (subs source start cursor)
+                         (subs source start cursor)
+                         false)
+      (if (= (character-at source cursor) "\n")
+        (->ContainerLineV1 start cursor (inc cursor)
+                           (subs source start cursor)
+                           (subs source start (inc cursor))
+                           true)
+        (recur (inc cursor))))))
+
+(defn language-boundary-line? [line ContainerLineV1] Bool
+  (let [content String (containerlinev1-content line)]
+    (and (>= (count content) 5)
+         (= "#lang" (subs content 0 5))
+         (or (= (count content) 5)
+             (= " " (character-at content 5))
+             (= "\t" (character-at content 5))))))
+
+(defn next-language-boundary
+  [source String
+   start Int] Int
+  (loop [offset Int start]
+    (if (>= offset (count source))
+      (count source)
+      (let [line ContainerLineV1 (line-at source offset)]
+        (if (language-boundary-line? line)
+          offset
+          (recur (containerlinev1-end line)))))))
+
+(defn strict-space-words [text String] (Vec String)
+  (if (= text "")
+    []
+    (loop [cursor Int 0
+           word-start Int 0
+           words (Vec String) []]
+      (if (= cursor (count text))
+        (if (= word-start cursor)
+          []
+          (conj words (subs text word-start cursor)))
+        (if (= (character-at text cursor) " ")
+          (if (= word-start cursor)
+            []
+            (recur (inc cursor)
+                   (inc cursor)
+                   (conj words (subs text word-start cursor))))
+          (recur (inc cursor) word-start words))))))
+
+(defn characters-from?
+  [text String
+   alphabet String] Bool
+  (loop [cursor Int 0]
+    (if (= cursor (count text))
+      (> cursor 0)
+      (if (str/includes? alphabet (character-at text cursor))
+        (recur (inc cursor))
+        false))))
+
+(def name-characters String
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_./")
+
+(def capsule-characters String
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_./:+")
+
+(def fence-start-characters String
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
+
+(def fence-characters String
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
+
+(defn valid-name? [value String] Bool
+  (characters-from? value name-characters))
+
+(defn at-count [value String] Int
+  (loop [cursor Int 0
+         total Int 0]
+    (if (= cursor (count value))
+      total
+      (recur (inc cursor)
+             (if (= (character-at value cursor) "@")
+               (inc total)
+               total)))))
+
+(defn at-offset [value String] Int
+  (loop [cursor Int 0]
+    (if (= cursor (count value))
+      -1
+      (if (= (character-at value cursor) "@")
+        cursor
+        (recur (inc cursor))))))
+
+(defn valid-language-ref? [value String] Bool
+  (if (or (= value "bgl")
+          (= value "bclj")
+          (= value "bjs")
+          (= value "bnix"))
+    true
+    (let [separator Int (at-offset value)]
+      (and (= 1 (at-count value))
+           (> separator 0)
+           (< separator (dec (count value)))
+           (valid-name? (subs value 0 separator))
+           (characters-from? (subs value (inc separator) (count value))
+                             capsule-characters)))))
+
+(defn valid-fence? [value String] Bool
+  (and (> (count value) 0)
+       (str/includes? fence-start-characters (character-at value 0))
+       (loop [cursor Int 1]
+         (if (= cursor (count value))
+           true
+           (if (str/includes? fence-characters (character-at value cursor))
+             (recur (inc cursor))
+             false)))))
+
+(defn header-vector? [value String] Bool
+  (if (or (< (count value) 2)
+          (not= (character-at value 0) "[")
+          (not= (character-at value (dec (count value))) "]"))
+    false
+    (loop [cursor Int 0
+           stack (Vec String) []]
+      (if (= cursor (count value))
+        (empty? stack)
+        (let [character String (character-at value cursor)]
+          (cond
+            (or (= character "{")
+                (= character "}")
+                (= character "\"")
+                (= character "'")
+                (= character "`")
+                (= character "~")
+                (= character "\\")
+                (= character ";")
+                (= character "#")
+                (= character ",")
+                (= character "\t"))
+            false
+
+            (or (= character "[") (= character "("))
+            (recur (inc cursor) (conj stack character))
+
+            (or (= character "]") (= character ")"))
+            (if (empty? stack)
+              false
+              (let [opened String (peek stack)]
+                (if (or (and (= opened "[") (= character "]"))
+                        (and (= opened "(") (= character ")")))
+                  (if (and (= 1 (count stack))
+                           (not= cursor (dec (count value))))
+                    false
+                    (recur (inc cursor) (pop stack)))
+                  false)))
+
+            :else
+            (if (empty? stack)
+              false
+              (recur (inc cursor) stack))))))))
+
+(defn line-prefix-value
+  [line ContainerLineV1
+   prefix String] String
+  (let [content String (containerlinev1-content line)]
+    (if (and (> (count content) (count prefix))
+             (= prefix (subs content 0 (count prefix))))
+      (subs content (count prefix) (count content))
+      "")))
+
+(defn rejected-header
+  [source String
+   start Int
+   first-line-end Int
+   message String] HeaderScanV1
+  (let [recovery Int (next-language-boundary source first-line-end)]
+    (->HeaderRejectedV1
+      (->ContainerDiagnosticV1
+        :container/malformed-header
+        message
+        (container-span source start recovery))
+      recovery)))
+
+(defn scan-header
+  [source String
+   start Int] HeaderScanV1
+  (let [language-line ContainerLineV1 (line-at source start)
+        input-line ContainerLineV1 (line-at source (containerlinev1-end language-line))
+        output-line ContainerLineV1 (line-at source (containerlinev1-end input-line))
+        fence-line ContainerLineV1 (line-at source (containerlinev1-end output-line))
+        words (Vec String) (strict-space-words (containerlinev1-content language-line))
+        inputs String (line-prefix-value input-line "  :in ")
+        outputs String (line-prefix-value output-line "  :out ")
+        fence String (line-prefix-value fence-line "  :end ")]
+    (cond
+      (or (not (containerlinev1-has-lf language-line))
+          (not= 4 (count words))
+          (not= "#lang" (first words)))
+      (rejected-header source start (containerlinev1-end language-line)
+                       "expected #lang LANGUAGE MODULE REGION followed by LF")
+
+      (not (valid-language-ref? (nth words 1)))
+      (rejected-header source start (containerlinev1-end language-line)
+                       "invalid language reference")
+
+      (or (not (valid-name? (nth words 2)))
+          (not (valid-name? (nth words 3))))
+      (rejected-header source start (containerlinev1-end language-line)
+                       "invalid module or region name")
+
+      (or (not (containerlinev1-has-lf input-line))
+          (= inputs "")
+          (not (header-vector? inputs)))
+      (rejected-header source start (containerlinev1-end language-line)
+                       "expected an exact two-space :in vector header line")
+
+      (or (not (containerlinev1-has-lf output-line))
+          (= outputs "")
+          (not (header-vector? outputs)))
+      (rejected-header source start (containerlinev1-end language-line)
+                       "expected an exact two-space :out vector header line")
+
+      (or (not (containerlinev1-has-lf fence-line))
+          (= fence "")
+          (not (valid-fence? fence)))
+      (rejected-header source start (containerlinev1-end language-line)
+                       "expected an exact two-space :end ASCII fence header line")
+
+      :else
+      (let [header-end Int (containerlinev1-end fence-line)]
+        (->HeaderAcceptedV1
+          (->ContainerHeaderV1
+            (nth words 1)
+            (nth words 2)
+            (nth words 3)
+            inputs
+            outputs
+            fence
+            (subs source start header-end)
+            (container-span source start header-end)
+            (container-span source
+                            (containerlinev1-start fence-line)
+                            header-end))
+          header-end)))))
+
+(defn closing-fence-offset
+  [source String
+   start Int
+   fence String] Int
+  (loop [offset Int start]
+    (if (>= offset (count source))
+      -1
+      (let [line ContainerLineV1 (line-at source offset)]
+        (if (and (= fence (containerlinev1-content line))
+                 (containerlinev1-has-lf line))
+          offset
+          (recur (containerlinev1-end line)))))))
+
+(defn scan-region
+  [source String
+   start Int] RegionScanV1
+  (match (scan-header source start)
+    [(HeaderRejectedV1 diagnostic recovery-offset)
+     (->RegionMalformedV1 diagnostic recovery-offset)]
+    [(HeaderAcceptedV1 header payload-start)
+     (let [closing-start Int (closing-fence-offset source payload-start
+                                 (containerheaderv1-fence header))]
+       (if (< closing-start 0)
+         (let [end Int (count source)
+               region ContainerRegionV1 (->ContainerRegionV1
+                 header
+                 (subs source payload-start end)
+                 ""
+                 (subs source start end)
+                 (container-span source start end)
+                 (container-span source payload-start end)
+                 (container-span source end end)
+                 false)]
+           (->RegionUnterminatedV1
+             region
+             (->ContainerDiagnosticV1
+               :container/unterminated-region
+               "valid region header has no exact standalone closing fence line"
+               (container-span source start end))))
+         (let [closing-line ContainerLineV1 (line-at source closing-start)
+               end Int (containerlinev1-end closing-line)]
+           (->RegionAcceptedV1
+             (->ContainerRegionV1
+               header
+               (subs source payload-start closing-start)
+               (containerlinev1-raw closing-line)
+               (subs source start end)
+               (container-span source start end)
+               (container-span source payload-start closing-start)
+               (container-span source closing-start end)
+               true)
+             end))))]))
+
+(defn append-trivia
+  [source String
+   pieces (Vec ContainerPieceV1)
+   start Int
+   end Int] (Vec ContainerPieceV1)
+  (if (= start end)
+    pieces
+    (conj pieces
+          (->ContainerTriviaV1 (subs source start end)
+                               (container-span source start end)))))
+
+(defn scan-container [source String] LanguageContainerCstV1
+  (loop [cursor Int 0
+         pieces (Vec ContainerPieceV1) []
+         regions (Vec ContainerRegionV1) []
+         diagnostics (Vec ContainerDiagnosticV1) []]
+    (if (>= cursor (count source))
+      (->LanguageContainerCstV1 source pieces regions diagnostics)
+      (let [boundary Int (next-language-boundary source cursor)]
+        (if (= boundary (count source))
+          (->LanguageContainerCstV1
+            source
+            (append-trivia source pieces cursor boundary)
+            regions
+            diagnostics)
+          (let [before (Vec ContainerPieceV1) (append-trivia source pieces cursor boundary)]
+            (match (scan-region source boundary)
+              [(RegionAcceptedV1 region next-offset)
+               (recur next-offset
+                      (conj before (->ContainerRegionPieceV1 region))
+                      (conj regions region)
+                      diagnostics)]
+              [(RegionMalformedV1 diagnostic recovery-offset)
+               (recur recovery-offset
+                      (append-trivia source before boundary recovery-offset)
+                      regions
+                      (conj diagnostics diagnostic))]
+              [(RegionUnterminatedV1 region diagnostic)
+               (->LanguageContainerCstV1
+                 source
+                 (conj before (->ContainerRegionPieceV1 region))
+                 (conj regions region)
+                 (conj diagnostics diagnostic))])))))))
+
+(defn standalone-line?
+  [payload String
+   candidate String] Bool
+  (loop [offset Int 0]
+    (if (> offset (count payload))
+      false
+      (let [line ContainerLineV1 (line-at payload offset)]
+        (if (= candidate (containerlinev1-content line))
+          true
+          (if (>= (containerlinev1-end line) (count payload))
+            false
+            (recur (containerlinev1-end line))))))))
+
+(defn select-canonical-fence
+  [base String
+   payload String] String
+  (let [safe-base String (if (valid-fence? base) base "BGL")]
+    (loop [suffix Int 0]
+      (let [candidate String (if (= suffix 0) safe-base (str safe-base "_" suffix))]
+        (if (standalone-line? payload candidate)
+          (recur (inc suffix))
+          candidate)))))
+
+(defn canonical-fence
+  [language-ref String
+   payload String] String
+  (select-canonical-fence
+    (str "BGL_"
+         (sha256-bytes
+           (utf8-encode
+             (str "beagle-language-container-fence-v1:"
+                  (count language-ref) ":" language-ref ":" payload))))
+    payload))
+
+(defn span-text
+  [source String
+   span ContainerSpanV1] String
+  (subs source (containerspanv1-start span) (containerspanv1-end span)))
+
+(defn render-piece [piece ContainerPieceV1] String
+  (match piece
+    [(ContainerTriviaV1 text span) text]
+    [(ContainerRegionPieceV1 region) (containerregionv1-raw region)]))
+
+(defn render-exact [container LanguageContainerCstV1] String
+  (loop [remaining (Vec ContainerPieceV1) (languagecontainercstv1-pieces container)
+         rendered String ""]
+    (if (empty? remaining)
+      rendered
+      (recur (rest remaining)
+             (str rendered (render-piece (first remaining)))))))
