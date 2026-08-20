@@ -3,18 +3,18 @@
 
 
 (defrecord CorpusResult
-  [(valid-accepted Bool)
-   (duplicate-rejected Bool)
-   (allowed-rejected Bool)
-   (reference-rejected Bool)
-   (missing-terminator-rejected Bool)
-   (double-terminator-rejected Bool)
-   (ssa-rejected Bool)
-   (canonical-deterministic Bool)
-   (canonical-separated Bool)
-   (i64-f64-distinct Bool)])
+  [valid-accepted Bool
+   duplicate-rejected Bool
+   allowed-rejected Bool
+   reference-rejected Bool
+   missing-terminator-rejected Bool
+   double-terminator-rejected Bool
+   ssa-rejected Bool
+   canonical-deterministic Bool
+   canonical-separated Bool
+   i64-f64-distinct Bool])
 
-(defn corpus-id [(name String)] core/NativeId
+(defn corpus-id [name String] core/NativeId
   (core/canonical-id "native-core-v0-corpus" [name]))
 
 (def corpus-i64-type core/TypeDef
@@ -460,8 +460,7 @@
     []
     []))
 
-(defn buffer-program-with-instructions
-  [(instructions (Vec core/Instruction))] core/NativeCoreProgram
+(defn buffer-program-with-instructions [instructions (Vec core/Instruction)] core/NativeCoreProgram
   (with buffer-program
     [:functions
      [(with buffer-function

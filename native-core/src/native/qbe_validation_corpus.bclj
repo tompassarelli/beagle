@@ -7,7 +7,7 @@
             [native.qbe :as qbe]))
 
 
-(defn fixture-id [(name String)] core/NativeId
+(defn fixture-id [name String] core/NativeId
   (core/canonical-id "native-c11-fixture-v0" [name]))
 
 (def fixture-i64-type core/TypeDef
@@ -90,7 +90,7 @@
 ;; union aggregates, multi-block control flow, block parameters, arena
 ;; allocation, stores, and an intra-module call.
 
-(defn slice-id [(name String)] core/NativeId
+(defn slice-id [name String] core/NativeId
   (core/canonical-id "native-qbe-fixture-v0" [name]))
 
 (def slice-i64-type core/TypeDef
@@ -908,7 +908,7 @@
 ;; This fixture is materialized by validation/atom through C17. QBE must reject
 ;; the same frozen program until it has a lock-aware state calling convention.
 
-(defn atom-fixture-id [(name String)] core/NativeId
+(defn atom-fixture-id [name String] core/NativeId
   (core/canonical-id "native-atom-fixture-v0" [name]))
 
 (def atom-i64-type core/TypeDef
@@ -1175,17 +1175,18 @@
     [(atom-fixture-id "cap-state")]))
 
 (defn atom-abi-value
-  [(name String) (type-id core/NativeId)] core/AbiValueV0
+  [name String
+   type-id core/NativeId] core/AbiValueV0
   (core/->AbiValueV0 name type-id (core/->BorrowedV0 true) nil))
 
 (defn atom-export-abi
-  [(name String)
-   (function-id core/NativeId)
-   (symbol String)
-   (parameters (Vec core/AbiValueV0))
-   (result-type core/NativeId)
-   (effects (Vec core/NativeId))
-   (capabilities (Vec core/NativeId))] core/AbiDeclV0
+  [name String
+   function-id core/NativeId
+   symbol String
+   parameters (Vec core/AbiValueV0)
+   result-type core/NativeId
+   effects (Vec core/NativeId)
+   capabilities (Vec core/NativeId)] core/AbiDeclV0
   (core/->AbiDeclV0
     (atom-fixture-id (str "abi-" name))
     function-id
@@ -1257,7 +1258,7 @@
 ;; Scalar checked arithmetic is shared frozen-IR vocabulary. This program keeps
 ;; the result scalar so each materializer must implement the operation itself;
 ;; lowered source programs retain their Outcome-valued control-flow contract.
-(defn numeric-id [(name String)] core/NativeId
+(defn numeric-id [name String] core/NativeId
   (core/canonical-id "native-qbe-numeric-v0" [name]))
 
 (def numeric-i64-type core/TypeDef
@@ -1269,9 +1270,9 @@
     (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
 
 (defn numeric-operation
-  [(name String)
-   (left core/NativeId)
-   (right core/NativeId)] core/CheckedOperationV0
+  [name String
+   left core/NativeId
+   right core/NativeId] core/CheckedOperationV0
   (cond
     (= name "sub") (core/->CheckedSubI64V0 left right)
     (= name "mul") (core/->CheckedMulI64V0 left right)
@@ -1280,12 +1281,12 @@
     :else (core/->CheckedModI64V0 left right)))
 
 (defn numeric-function
-  [(position String)
-   (name String)] core/FunctionDef
-  (let [(left core/NativeId) (numeric-id (str position "-left"))
-        (right core/NativeId) (numeric-id (str position "-right"))
-        (result core/NativeId) (numeric-id (str position "-result"))
-        (block core/NativeId) (numeric-id (str position "-block"))]
+  [position String
+   name String] core/FunctionDef
+  (let [left core/NativeId (numeric-id (str position "-left"))
+        right core/NativeId (numeric-id (str position "-right"))
+        result core/NativeId (numeric-id (str position "-result"))
+        block core/NativeId (numeric-id (str position "-block"))]
     (core/->FunctionDef (numeric-id (str "fn-" position)) name
       [(core/->Parameter left (numeric-id "type-i64"))
        (core/->Parameter right (numeric-id "type-i64"))]
@@ -1317,12 +1318,12 @@
 
 ;; --- materialization ------------------------------------------------------
 
-(defn require-artifact [(result qbe/QbeMaterialization)] qbe/QbeArtifact
+(defn require-artifact [result qbe/QbeMaterialization] qbe/QbeArtifact
   (match result
     [(QbeSuccess value) (qbe/qbesuccess-artifact result)]
     [(QbeFailure value) (throw (ex-info (qbe/qbefailure-detail result) {}))]))
 
-(defn explicitly-refused? [(program core/NativeCoreProgram)] Bool
+(defn explicitly-refused? [program core/NativeCoreProgram] Bool
   (and (core/validationreport-passed (core/validate-program program))
     (match (qbe/materialize-program program 3 "lp64")
       [(QbeSuccess value) false]
@@ -1566,7 +1567,7 @@
     "  return 0;\n"
     "}\n"))
 
-(defn emit-fixture! [(directory String)] Nil
+(defn emit-fixture! [directory String] Nil
   (if fixture-deterministic?
     (do
       (spit (str directory "/" (qbe/qbeartifact-module-name fixture-artifact))

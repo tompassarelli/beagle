@@ -24,7 +24,7 @@
 (require native.obligations :as obligations)
 (require native.stages :as stages)
 
-(defn epoch-id [(label String)] core/NativeId
+(defn epoch-id [label String] core/NativeId
   (core/canonical-id "native-epoch-fixture-v0" [label]))
 
 (defn epoch-types [] (Vec core/TypeDef)
@@ -49,7 +49,7 @@
     (lower/arena-region-id)
     true))
 
-(defn root-arena-instruction [(label String)] core/Instruction
+(defn root-arena-instruction [label String] core/Instruction
   (core/->ArenaInstruction
     (core/->SsaValueV0 (epoch-id (str label "-arena"))
       (lower/arena-handle-type-id))
@@ -61,9 +61,9 @@
 ;; A hand-built epoch open: the shape lower/epoch-rewrite-function mints, so
 ;; the emitter sees no difference between an inferred and a written epoch.
 (defn epoch-open-instruction
-  [(label String)
-   (region core/NativeId)
-   (token core/NativeId)] core/Instruction
+  [label String
+   region core/NativeId
+   token core/NativeId] core/Instruction
   (core/->ArenaInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/arena-handle-type-id))
     region
@@ -72,20 +72,22 @@
       [(core/->ResourceTokenV0 token (core/->RegionTokenV0 region))])))
 
 (defn epoch-close-instruction
-  [(label String)
-   (arena core/NativeId)
-   (token core/NativeId)] core/Instruction
+  [label String
+   arena core/NativeId
+   token core/NativeId] core/Instruction
   (core/->ArenaCloseInstructionV0
     (core/->SsaValueV0 (epoch-id label) (lower/arena-handle-type-id))
     arena
     (core/->TokenFlowV0 [token] [])))
 
-(defn text-literal-instruction [(label String)] core/Instruction
+(defn text-literal-instruction [label String] core/Instruction
   (core/->AtomInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/text-type-id))
     (core/->TextAtom "epoch")))
 
-(defn i64-literal-instruction [(label String) (value Int)] core/Instruction
+(defn i64-literal-instruction
+  [label String
+   value Int] core/Instruction
   (core/->AtomInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/int-type-id))
     (core/->I64Atom value)))
@@ -93,9 +95,9 @@
 ;; "epoch" twice: ten bytes, so a copy that shared the source's storage would
 ;; read freed memory the moment the epoch closes.
 (defn concat-instruction
-  [(label String)
-   (arena core/NativeId)
-   (literal core/NativeId)] core/Instruction
+  [label String
+   arena core/NativeId
+   literal core/NativeId] core/Instruction
   (core/->TextConcatInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/text-type-id))
     arena
@@ -146,9 +148,9 @@
 ;; on the arena being a per-call operand.
 
 (defn trim-instruction
-  [(label String)
-   (arena core/NativeId)
-   (source core/NativeId)] core/Instruction
+  [label String
+   arena core/NativeId
+   source core/NativeId] core/Instruction
   (core/->TextBuiltinInstruction
     (core/->SsaValueV0 (epoch-id label) (lower/text-type-id))
     (core/->TextTrimV0 arena source)))
@@ -299,11 +301,11 @@
 ;; --- Programs
 
 (defn epoch-program
-  [(label String)
-   (functions (Vec core/FunctionDef))
-   (regions (Vec core/RegionDef))
-   (effects (Vec core/EffectDef))] core/NativeCoreProgram
-  (let [(types (Vec core/TypeDef)) (epoch-types)]
+  [label String
+   functions (Vec core/FunctionDef)
+   regions (Vec core/RegionDef)
+   effects (Vec core/EffectDef)] core/NativeCoreProgram
+  (let [types (Vec core/TypeDef) (epoch-types)]
     (core/->NativeCoreProgram
       (epoch-id label)
       nil
@@ -315,17 +317,17 @@
       (lower/collect-layouts
         (lower/resolve-layouts types (core/abi-profile-lp64)))
       functions
-      (mapv (fn [(effect core/EffectDef)] core/NativeId
+      (mapv (fn [effect core/EffectDef] core/NativeId
               (core/effectdef-id effect))
         effects)
-      (mapv (fn [(region core/RegionDef)] core/NativeId
+      (mapv (fn [region core/RegionDef] core/NativeId
               (core/regiondef-id region))
         regions)
       [(lower/allocate-capability-id)]
       []
       [])))
 
-(defn epoch-child-region [(region core/NativeId)] core/RegionDef
+(defn epoch-child-region [region core/NativeId] core/RegionDef
   (core/->RegionDef region (core/->ArenaRegion true) (lower/arena-region-id)))
 
 (def probe-program core/NativeCoreProgram
@@ -363,23 +365,21 @@
 ;; --- The probe through the stage, under both assignments
 
 (defn frozen-of
-  [(label String)
-   (program core/NativeCoreProgram)] stages/FrozenNativeStageV0
-  (let [(root core/NativeId) (epoch-id (str label "-terms"))
-        (stage stages/NativeStageV0)
-        (stages/->NativeStageV0
+  [label String
+   program core/NativeCoreProgram] stages/FrozenNativeStageV0
+  (let [root core/NativeId (epoch-id (str label "-terms"))
+        stage stages/NativeStageV0 (stages/->NativeStageV0
           (stages/->TermGraphV0 root
             [(stages/->TermNodeV0 root
                (stages/->TextTermV0 "native-stage-v0"))])
           (str "sha256:" label)
           program
           [])
-        (encoding String) (stages/encode-native-stage stage)]
+        encoding String (stages/encode-native-stage stage)]
     (stages/->FrozenNativeStageV0 stage encoding
       (stages/content-digest encoding))))
 
-(defn staged-program
-  [(result lower/EpochLoweringResultV0)] core/NativeCoreProgram
+(defn staged-program [result lower/EpochLoweringResultV0] core/NativeCoreProgram
   (stages/nativestagev0-program
     (stages/frozennativestagev0-stage (lower/epoch-result-frozen result))))
 
@@ -413,11 +413,11 @@
 
 ;; --- Obligation verdicts
 
-(defn nine-pass? [(program core/NativeCoreProgram)] Bool
+(defn nine-pass? [program core/NativeCoreProgram] Bool
   (every? obligations/obligation-passed?
     (obligations/validate-native-core-program program (core/abi-profile-lp64))))
 
-(defn epoch-sound? [(program core/NativeCoreProgram)] Bool
+(defn epoch-sound? [program core/NativeCoreProgram] Bool
   (obligations/obligation-passed? (obligations/epoch-soundness program)))
 
 (def probe-derived-minted Int
@@ -434,8 +434,7 @@
 
 ;; --- Materialization
 
-(defn require-artifact
-  [(result body/BodyMaterializationV0)] body/BodyArtifactV0
+(defn require-artifact [result body/BodyMaterializationV0] body/BodyArtifactV0
   (if (body/materialization-ok? result)
     (body/materialization-artifact result)
     (throw (ex-info (body/materialization-detail result) {}))))
@@ -458,14 +457,18 @@
 (def caller-identity-artifact body/BodyArtifactV0
   (require-artifact (body/materialize-program caller-identity-program 5)))
 
-(defn write-artifact! [(directory String) (artifact body/BodyArtifactV0)] Nil
+(defn write-artifact!
+  [directory String
+   artifact body/BodyArtifactV0] Nil
   (do
     (spit (str directory "/" (body/bodyartifactv0-header-name artifact))
       (body/bodyartifactv0-header-text artifact))
     (spit (str directory "/" (body/bodyartifactv0-source-name artifact))
       (body/bodyartifactv0-source-text artifact))))
 
-(defn verdict-line [(label String) (passed Bool)] String
+(defn verdict-line
+  [label String
+   passed Bool] String
   (str label " " (if passed "PASS" "FAIL") "\n"))
 
 (def report-text String
@@ -509,7 +512,7 @@
     (nine-pass? caller-derived-program)
     (nine-pass? caller-identity-program)))
 
-(defn emit-fixtures! [(directory String)] Nil
+(defn emit-fixtures! [directory String] Nil
   (do
     (write-artifact! directory probe-derived-artifact)
     (write-artifact! directory probe-identity-artifact)

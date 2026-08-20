@@ -197,7 +197,9 @@
             (conj objects (slicefactv0-object row))
             objects))))))
 
-(defn row-key [subject String predicate String] String
+(defn row-key
+  [subject String
+   predicate String] String
   (str (count subject) ":" subject predicate))
 
 ;; Build every lookup source-program needs in one encounter-ordered pass. Text
@@ -222,8 +224,7 @@
             objects (Vec String) (if (nil? prior-objects) [] prior-objects)
             prior-form-nodes (U (Vec String) Nil) (get form-nodes value)
             forms (Vec String) (if (nil? prior-form-nodes) [] prior-form-nodes)
-            new-semantic-root? Bool
-            (and text?
+            new-semantic-root? Bool (and text?
               (= "semantic-unit-sha256" predicate)
               (not (= true (get semantic-seen subject))))]
         (recur (+ position 1)
@@ -249,11 +250,12 @@
   [index SliceRowIndexV0
    subject String
    predicate String] (Vec String)
-  (let [objects (U (Vec String) Nil)
-        (get (slicerowindexv0-node-objects index) (row-key subject predicate))]
+  (let [objects (U (Vec String) Nil) (get (slicerowindexv0-node-objects index) (row-key subject predicate))]
     (if (nil? objects) [] objects)))
 
-(defn indexed-form-node-names [index SliceRowIndexV0 kind String] (Vec String)
+(defn indexed-form-node-names
+  [index SliceRowIndexV0
+   kind String] (Vec String)
   (let [names (U (Vec String) Nil) (get (slicerowindexv0-form-nodes index) kind)]
     (if (nil? names) [] names)))
 
