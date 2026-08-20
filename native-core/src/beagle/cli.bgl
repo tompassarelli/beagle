@@ -5,7 +5,7 @@
 (defn write-usage [] Nil
   (host.stderr/write-line "usage: beagle syntax SOURCE"))
 
-(defn syntax-command [(args (Vec String))] Int
+(defn syntax-command [args (Vec String)] Int
   (if (= 1 (count args))
     (match (driver/read-source-path (first args))
       [(SourceAccepted) 0]
@@ -18,7 +18,7 @@
          code)])
     (do (write-usage) 64)))
 
-(defn -main [(args (Vec String))] Int
+(defn -main [args (Vec String)] Int
   (if (empty? args)
     (do (write-usage) 64)
     (let [(command String) (first args)

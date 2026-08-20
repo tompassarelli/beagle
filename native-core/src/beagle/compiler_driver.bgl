@@ -1,6 +1,7 @@
 #lang beagle
 (ns beagle.compiler-driver
-  (:require [beagle.datum-reader :as reader]))
+  (:require [beagle.datum-reader :as reader]
+            [beagle.frontend-facts :as facts]))
 
 (def max-source-bytes Int 67108864)
 
@@ -10,31 +11,94 @@
     [(code Int) (path String) (offset Int) (detail String)]))
 
 (defrecord CompileBundleRequest
-  [(store-log String)
-   (space-id String)
-   (stage String)
-   (result-key String)
-   (compiler-context String)
-   (profile String)
-   (unit-id String)
-   (source-paths (Vec String))
-   (changed-path String)
-   (changed-content-id String)
-   (changed-bytes (Vec Int))])
+  [store-log String
+   space-id String
+   compiler-context String
+   profile String
+   targets (Vec String)
+   rule-set-id String
+   source-paths (Vec String)
+   syntax facts/SyntaxFactClosure])
+
+(defrecord CompileQueryFact
+  [order Int
+   relation Keyword
+   subject String
+   slot Int
+   value String])
+
+(defrecord CompileQuery
+  [query-id String
+   facts (Vec CompileQueryFact)
+   request CompileBundleRequest])
 
 (defunion CompileBundleResult
-  (Warm [(content-id String)])
-  (Materialized [(content-id String) (artifact-id String)])
-  (Error [(code Int) (detail String)]))
+  (CompileBundleWarm [content-id String])
+  (CompileBundleMaterialized
+    [content-id String
+     artifact-id String
+     executable-path String])
+  (CompileBundleError [code Int detail String]))
 
-(defn admit-source-text [(path String) (text String)] SourceAdmission
+(defn query-part [value String] String
+  (str (count value) ":" value))
+
+(defn targets-encoding [targets (Vec String)] String
+  (reduce
+    (fn [encoding String target String] String
+      (str encoding (query-part target)))
+    ""
+    targets))
+
+(defn compile-query-id [request CompileBundleRequest] String
+  (let [syntax facts/SyntaxFactClosure
+        (compilebundlerequest-syntax request)
+        encoding String
+        (str (query-part "compile")
+             (query-part (facts/syntaxfactclosure-closure-digest syntax))
+             (query-part
+               (compilebundlerequest-compiler-context request))
+             (query-part (compilebundlerequest-profile request))
+             (query-part
+               (targets-encoding (compilebundlerequest-targets request)))
+             (query-part (compilebundlerequest-rule-set-id request)))]
+    (str "sha256:" (sha256-bytes (utf8-encode encoding)))))
+
+(defn compile-query-facts
+  [query-id String request CompileBundleRequest] (Vec CompileQueryFact)
+  (let [syntax facts/SyntaxFactClosure
+        (compilebundlerequest-syntax request)
+        targets (Vec String) (compilebundlerequest-targets request)
+        base (Vec CompileQueryFact)
+        [(->CompileQueryFact 0 :query/kind query-id 0 "compile")
+         (->CompileQueryFact 1 :query/source query-id 0
+           (facts/syntaxfactclosure-closure-digest syntax))
+         (->CompileQueryFact 2 :query/compiler query-id 0
+           (compilebundlerequest-compiler-context request))
+         (->CompileQueryFact 3 :query/profile query-id 0
+           (compilebundlerequest-profile request))]]
+    (loop [position Int 0 emitted (Vec CompileQueryFact) base]
+      (if (>= position (count targets))
+        (conj emitted
+          (->CompileQueryFact (+ 4 position) :query/rules query-id 0
+            (compilebundlerequest-rule-set-id request)))
+        (recur (+ position 1)
+          (conj emitted
+            (->CompileQueryFact (+ 4 position) :query/target query-id position
+              (nth targets position))))))))
+
+(defn compile-query [request CompileBundleRequest] CompileQuery
+  (let [query-id String (compile-query-id request)]
+    (->CompileQuery query-id (compile-query-facts query-id request) request)))
+
+(defn admit-source-text [path String text String] SourceAdmission
   (let [(read reader/DatumRead) (reader/read-events text)
         (error String?) (reader/datumread-error read)]
     (if (nil? error)
       (->SourceAccepted)
       (->SourceRejected 65 path (reader/datumread-error-offset read) error))))
 
-(defn read-source-path [(path String)] SourceAdmission
+(defn read-source-path [path String] SourceAdmission
   (match (host.fs/read-text-bounded path max-source-bytes)
     [(host.fs/ReadTextBoundedOk text) (admit-source-text path text)]
     [(host.fs/ReadTextBoundedError errno)

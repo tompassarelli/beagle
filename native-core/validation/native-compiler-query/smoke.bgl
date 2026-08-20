@@ -1,4 +1,4 @@
 #lang beagle
 (ns smoke)
-(defn main [(args (Vec String))] Int
+(defn main [args (Vec String)] Int
   0)
