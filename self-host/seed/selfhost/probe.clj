@@ -28,11 +28,12 @@
 (defn tail [d]
   (if (and (vector? d) (> (count d) 0)) (subvec d 1) []))
 
-(defn -main [& args]
+(defn -main [& $beagle$rest$host]
+  (let [args (vec $beagle$rest$host)]
   (println (str "collect=" (collect! [1 2 3])))
   (println (str "char-at=" (char-at "hello" 1) "|" (char-at "hello" 99) "|"))
   (println (str "substring2=" (substring2 "hello" 1 3) "|" (substring2 "hello" 3 99)))
   (println (str "to-int=" (to-int "42") "," (to-int "xx")))
   (println (str "node-kind=" (node-kind NODE)))
   (println (str "tail=" (tail ["a" "b" "c"])))
-  (println (str "join=" (str/join " " ["x" "y"]))))
+  (println (str "join=" (str/join " " ["x" "y"])))))

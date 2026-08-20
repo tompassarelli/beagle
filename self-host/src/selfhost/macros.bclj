@@ -34,7 +34,7 @@
   (reset! MACRO-ERRORS [])
   nil)
 
-(defn- macro-err! [(msg String)] Any
+(defn- macro-err! [msg String] Any
   (swap! MACRO-ERRORS conj msg)
   (selfhost.rt/eprint (str "beagle: " msg "\n"))
   ;; the `nil` symbol datum parses to a nil literal and is not a datum-pair,
@@ -43,20 +43,20 @@
 
 ;; --- expansion provenance ----------------------------------------------------
 
-(defn- syntax-source-bytes [(value Any)] Any
-  (let [properties
-        (if (ast/beagle-syntax? value)
+(defn- syntax-source-bytes [value Any] Any
+  (let [properties (if (ast/beagle-syntax? value)
           (ast/beagle-syntax-properties value)
           nil)
         reader (if (map? properties) (get properties "reader") nil)]
     (if (map? reader) (get reader "sourceBytes") nil)))
 
-(defn make-root-ctx! [(name String) (call-syntax Any)] Any
-  (let [call-span
-        (if (ast/beagle-syntax? call-syntax)
+(defn make-root-ctx!
+  [name String
+   call-syntax Any] Any
+  (let [call-span Any (if (ast/beagle-syntax? call-syntax)
           (ast/beagle-syntax-span call-syntax)
           nil)
-        origin (ast/make-expansion-origin! name call-span nil)]
+        origin Any (ast/make-expansion-origin! name call-span nil)]
     {"macro-name" name
      "depth" 0
      "parent" nil
@@ -65,19 +65,22 @@
      "source-bytes" (syntax-source-bytes call-syntax)
      "call-syntax" call-syntax}))
 
-(defn push-ctx! [(parent Any) (name String) (call-syntax Any)] Any
+(defn push-ctx!
+  [parent Any
+   name String
+   call-syntax Any] Any
   (let [parent-depth Int (get parent "depth")
-        call-span
+        call-span Any
         (if (ast/beagle-syntax? call-syntax)
           (ast/beagle-syntax-span call-syntax)
           nil)
-        call-origin
+        call-origin Any
         (if (ast/beagle-syntax? call-syntax)
           (ast/beagle-syntax-origin call-syntax)
           nil)
-        parent-origin
+        parent-origin Any
         (if (some? call-origin) call-origin (get parent "origin"))
-        origin (ast/make-expansion-origin! name call-span parent-origin)]
+        origin Any (ast/make-expansion-origin! name call-span parent-origin)]
     {"macro-name" name
      "depth" (+ 1 parent-depth)
      "parent" parent
@@ -86,14 +89,14 @@
      "source-bytes" (syntax-source-bytes call-syntax)
      "call-syntax" call-syntax}))
 
-(defn collect-chain-lines [(ctx Any)] (Vec String)
+(defn collect-chain-lines [ctx Any] (Vec String)
   (if (nil? ctx)
     []
     (into
       [(str "  in macro: " (get ctx "macro-name") " (depth " (get ctx "depth") ")")]
       (collect-chain-lines (get ctx "parent")))))
 
-(defn format-expansion-chain [(ctx Any)] String
+(defn format-expansion-chain [ctx Any] String
   (let [all-lines (collect-chain-lines ctx)
         n (count all-lines)]
     (if (<= n 10)
@@ -112,17 +115,18 @@
   (reset! LOWERING-COUNTER 0)
   nil)
 
-(defn fresh-lowered-sym! [(base String)] String
+(defn fresh-lowered-sym! [base String] String
   (let [n Int (deref LOWERING-COUNTER)]
     (swap! LOWERING-COUNTER inc)
     (str base "__" n)))
 
 ;; --- datum helpers (arrays as cons lists) ------------------------------------
 
-(defn macro-datum [(value Any)] Any
+(defn macro-datum [value Any] Any
   (if (not (ast/beagle-syntax? value))
     value
-    (let [variant (get value "variant") payload (get value "payload")]
+    (let [variant (get value "variant")
+          payload (get value "payload")]
       (cond
         (= variant "atom") payload
         (= variant "ident") (ast/structural-name->symbol payload)
@@ -134,37 +138,41 @@
           ["unquote-splicing" (macro-datum payload)]
         :else value))))
 
-(defn syntax-list? [(value Any)] Bool
+(defn syntax-list? [value Any] Bool
   (and (ast/beagle-syntax? value) (= (get value "variant") "list")))
 
-(defn syntax-vector? [(value Any)] Bool
+(defn syntax-vector? [value Any] Bool
   (and (ast/beagle-syntax? value) (= (get value "variant") "vector")))
 
-(defn datum-pair? [(d Any)] Bool
+(defn datum-pair? [d Any] Bool
   (let [datum (macro-datum d)]
     (and (vector? datum) (> (count datum) 0))))
 
-(defn datum-car [(d Any)] Any
+(defn datum-car [d Any] Any
   (if (or (syntax-list? d) (syntax-vector? d))
     (macro-datum (nth (get d "payload") 0))
     (nth d 0)))
 
-(defn datum-cdr [(d Any)] Any
+(defn datum-cdr [d Any] Any
   (if (or (syntax-list? d) (syntax-vector? d))
     (subvec (get d "payload") 1)
     (subvec d 1)))
 
-(defn datum-cons [(h Any) (t Any)] Any
+(defn datum-cons
+  [h Any
+   t Any] Any
   (if (vector? t)
     (into [h] t)
     [h t]))
 
-(defn datum-append [(a Any) (b Any)] Any
+(defn datum-append
+  [a Any
+   b Any] Any
   (into a b))
 
 ;; --- strip-reader-tags -------------------------------------------------------
 
-(defn strip-reader-tags [(datum Any)] Any
+(defn strip-reader-tags [datum Any] Any
   (cond
     (and (datum-pair? datum) (= (datum-car datum) "quote"))
       datum
@@ -183,13 +191,12 @@
 (defn make-macro-registry [] Any (atom {}))
 
 (defn register-macro-with-syntax!
-  [(reg Any)
-   (name String)
-   (kind String)
-   (params (Vec String))
-   (template Any)
-   (template-syntax Any)]
-  Nil
+  [reg Any
+   name String
+   kind String
+   params (Vec String)
+   template Any
+   template-syntax Any] Nil
   (when (not (nil? (get (deref reg) name)))
     (selfhost.rt/eprint (str "beagle: duplicate macro definition: " name "\n")))
   (if (and (not= kind "safe") (not= kind "defmacro"))
@@ -199,12 +206,11 @@
         nil)
       (let [amp-pos Int
               (or (clojure.core/first (keep-indexed (fn
-                                                     [(i Int)
-                                                      (x String)]
-                                                     Any
-                                                     (if (= x "&") i nil)) params)) -1)
-          fixed-params (if (> amp-pos -1) (subvec params 0 amp-pos) params)
-          rest-param (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
+                                                      [i Int
+                                                       x String] Any
+                                                      (if (= x "&") i nil)) params)) -1)
+          fixed-params Any (if (> amp-pos -1) (subvec params 0 amp-pos) params)
+          rest-param Any (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
       (swap! reg assoc name
         {"kind" kind
          "fixed-params" fixed-params
@@ -219,27 +225,29 @@
       nil)))
 
 (defn register-macro!
-  [(reg Any)
-   (name String)
-   (kind String)
-   (params (Vec String))
-   (template Any)]
-  Nil
+  [reg Any
+   name String
+   kind String
+   params (Vec String)
+   template Any] Nil
   (register-macro-with-syntax! reg name kind params template nil))
 
-(defn lookup-macro [(reg Any) (name String)] Any
+(defn lookup-macro
+  [reg Any
+   name String] Any
   (get (deref reg) name))
 
 ;; --- bindings ----------------------------------------------------------------
 
 (defn make-bindings
-  [(fixed-params (Vec String))
-   (fixed-args (Vec Any))
-   (rest-name Any)
-   (rest-args (Vec Any))]
-  Any
-  (let [base (reduce (fn [acc Any i Int] Any
-                        (assoc acc (nth fixed-params i) (nth fixed-args i)))
+  [fixed-params (Vec String)
+   fixed-args (Vec Any)
+   rest-name Any
+   rest-args (Vec Any)] Any
+  (let [base (reduce (fn
+                       [acc Any
+                        i Int] Any
+                       (assoc acc (nth fixed-params i) (nth fixed-args i)))
                       {} (vec (range (count fixed-params))))]
     (if (not (nil? rest-name))
       (assoc base rest-name rest-args)
@@ -252,17 +260,19 @@
 
 (declare macro-eval! macro-apply-fn! macro-match-syntax-pattern!)
 
-(defn macro-eval-fail! [(msg String)] Any
+(defn macro-eval-fail! [msg String] Any
   (throw (ex-info (str "macro-eval: " msg) {})))
 
-(defn macro-string? [(value Any)] Bool
+(defn macro-string? [value Any] Bool
   (let [datum (macro-datum value)]
     (and (datum-pair? datum)
          (= (count datum) 2)
          (= (datum-car datum) STRING-TAG)
          (string? (nth datum 1)))))
 
-(defn macro-string! [(value Any) (who String)] String
+(defn macro-string!
+  [value Any
+   who String] String
   (let [datum (macro-datum value)]
     (cond
       (macro-string? datum) (nth datum 1)
@@ -271,21 +281,21 @@
         (macro-eval-fail!
           (str who " expected a string or symbol, got: " (str datum))))))
 
-(defn macro-display [(value Any)] String
+(defn macro-display [value Any] String
   (let [datum (macro-datum value)]
     (cond
       (macro-string? datum) (nth datum 1)
       (string? datum) datum
       :else (str datum))))
 
-(defn macro-truthy? [(value Any)] Bool
+(defn macro-truthy? [value Any] Bool
   (let [datum (macro-datum value)]
     (and (some? datum) (not= datum false))))
 
-(defn macro-seq? [(value Any)] Bool
+(defn macro-seq? [value Any] Bool
   (or (syntax-list? value) (syntax-vector? value) (vector? value)))
 
-(defn reader-tagged-datum? [(value Any)] Bool
+(defn reader-tagged-datum? [value Any] Bool
   (and (datum-pair? value)
        (or (= (datum-car value) BRACKET-TAG)
            (= (datum-car value) MAP-TAG)
@@ -295,17 +305,19 @@
 ;; The self-host runtime represents every source sequence as a host vector.
 ;; Preserve the source delimiter distinction through the reader tags instead
 ;; of exposing that implementation detail to defmacro authors.
-(defn macro-list-datum? [(value Any)] Bool
+(defn macro-list-datum? [value Any] Bool
   (or (syntax-list? value)
       (let [datum (macro-datum value)]
         (and (vector? datum) (not (reader-tagged-datum? datum))))))
 
-(defn macro-vector-datum? [(value Any)] Bool
+(defn macro-vector-datum? [value Any] Bool
   (or (syntax-vector? value)
       (let [datum (macro-datum value)]
         (and (datum-pair? datum) (= (datum-car datum) BRACKET-TAG)))))
 
-(defn macro-seq! [(value Any) (who String)] Any
+(defn macro-seq!
+  [value Any
+   who String] Any
   (cond
     (syntax-list? value) (get value "payload")
     (syntax-vector? value) (get value "payload")
@@ -319,20 +331,23 @@
 ;; --- syntax-match -----------------------------------------------------------
 
 (defn macro-pattern-form?
-  [(pattern Any) (head String) (arity Int)] Bool
+  [pattern Any
+   head String
+   arity Int] Bool
   (and (vector? pattern)
        (= (count pattern) arity)
        (= (nth pattern 0) head)))
 
 (defn macro-pattern-capture-name!
-  [(pattern Any) (form-name String)] String
+  [pattern Any
+   form-name String] String
   (if (and (macro-pattern-form? pattern form-name 2)
            (string? (nth pattern 1)))
     (nth pattern 1)
     (macro-eval-fail!
       (str "invalid " form-name " pattern: " (str pattern)))))
 
-(defn macro-sequence-pattern! [(pattern Any)] Any
+(defn macro-sequence-pattern! [pattern Any] Any
   (cond
     (and (vector? pattern) (= (count pattern) 0))
       {"category" "list" "items" []}
@@ -350,13 +365,14 @@
       (macro-eval-fail!
         (str "invalid pattern category: " (str (nth pattern 0))))))
 
-(defn macro-tail-splice-pattern? [(pattern Any)] Bool
+(defn macro-tail-splice-pattern? [pattern Any] Bool
   (and (vector? pattern)
        (> (count pattern) 0)
        (= (nth pattern 0) "tail-splice")))
 
 (defn macro-validate-syntax-pattern!
-  [(pattern Any) (tail-position Bool)] Nil
+  [pattern Any
+   tail-position Bool] Nil
   (cond
     (macro-pattern-form? pattern "literal" 2) nil
     (macro-pattern-form? pattern "capture" 2)
@@ -399,7 +415,7 @@
                   (macro-validate-syntax-pattern! item tail)
                   (recur (+ index 1))))))))))
 
-(defn macro-syntax-sequence [(value Any)] Any
+(defn macro-syntax-sequence [value Any] Any
   (cond
     (syntax-list? value)
       (let [children (get value "payload")]
@@ -420,9 +436,9 @@
     :else nil))
 
 (defn macro-match-pattern-items!
-  [(patterns Any) (values Any)] Any
-  (let [tail
-        (and (> (count patterns) 0)
+  [patterns Any
+   values Any] Any
+  (let [tail (and (> (count patterns) 0)
              (macro-tail-splice-pattern?
                (nth patterns (- (count patterns) 1))))
         fixed-count (if tail (- (count patterns) 1) (count patterns))]
@@ -430,7 +446,8 @@
           (< (count values) fixed-count)
           (not= (count values) fixed-count))
       nil
-      (loop [index Int 0 captures Any {}]
+      (loop [index Int 0
+             captures Any {}]
         (if (= index fixed-count)
           (if tail
             (assoc
@@ -440,14 +457,15 @@
                 "tail-splice")
               (subvec values fixed-count))
             captures)
-          (let [matched
-                (macro-match-syntax-pattern!
+          (let [matched (macro-match-syntax-pattern!
                   (nth patterns index) (nth values index))]
             (if (nil? matched)
               nil
               (recur (+ index 1) (merge captures matched)))))))))
 
-(defn macro-match-syntax-pattern! [(pattern Any) (value Any)] Any
+(defn macro-match-syntax-pattern!
+  [pattern Any
+   value Any] Any
   (cond
     (macro-pattern-form? pattern "literal" 2)
       (if (= (macro-datum value) (macro-datum (nth pattern 1))) {} nil)
@@ -470,7 +488,7 @@
             (get expected "items") (get actual "items"))
           nil))))
 
-(defn macro-syntax-match-clause! [(clause Any)] Any
+(defn macro-syntax-match-clause! [clause Any] Any
   (if (and (vector? clause)
            (= (count clause) 3)
            (= (nth clause 0) BRACKET-TAG))
@@ -478,7 +496,9 @@
     (macro-eval-fail!
       (str "expected [pattern body], got: " (str clause)))))
 
-(defn macro-eval-syntax-match! [(parts Any) (env Any)] Any
+(defn macro-eval-syntax-match!
+  [parts Any
+   env Any] Any
   (if (< (count parts) 2)
     (macro-eval-fail!
       "expected a subject and at least one [pattern body] clause")
@@ -494,29 +514,33 @@
             (macro-eval-fail!
               (str "no pattern matched: " (str (macro-datum subject))))
             (let [clause (macro-syntax-match-clause! (nth remaining 0))
-                  captures
-                  (macro-match-syntax-pattern!
+                  captures (macro-match-syntax-pattern!
                     (get clause "pattern") subject)]
               (if (nil? captures)
                 (recur (subvec remaining 1))
                 (macro-eval!
                   (get clause "body") (merge env captures))))))))))
 
-(defn macro-env-lookup! [(env Any) (name String)] Any
+(defn macro-env-lookup!
+  [env Any
+   name String] Any
   (if (clojure.core/contains? env name)
     (get env name)
     (macro-eval-fail! (str "unbound: " name))))
 
-(defn macro-builtin [(name String)] Any
+(defn macro-builtin [name String] Any
   {"kind" "builtin" "name" name})
 
-(defn macro-closure [(params Any) (body Any) (env Any)] Any
+(defn macro-closure
+  [params Any
+   body Any
+   env Any] Any
   {"kind" "closure" "params" params "body" body "env" env})
 
-(defn macro-builtin? [(value Any)] Bool
+(defn macro-builtin? [value Any] Bool
   (and (map? value) (= (get value "kind") "builtin")))
 
-(defn macro-closure? [(value Any)] Bool
+(defn macro-closure? [value Any] Bool
   (and (map? value) (= (get value "kind") "closure")))
 
 (def MACRO-BUILTIN-NAMES (Vec String)
@@ -533,18 +557,26 @@
 
 (defn make-macro-env [] Any
   (reduce
-    (fn [env Any name String] Any
+    (fn
+      [env Any
+       name String] Any
       (assoc env name (macro-builtin name)))
     {"true" true "false" false "nil" []}
     MACRO-BUILTIN-NAMES))
 
-(defn macro-eval-body! [(body Any) (env Any)] Any
-  (loop [forms Any body result Any nil]
+(defn macro-eval-body!
+  [body Any
+   env Any] Any
+  (loop [forms Any body
+         result Any nil]
     (if (= (count forms) 0)
       result
       (recur (subvec forms 1) (macro-eval! (nth forms 0) env)))))
 
-(defn macro-eval-quasiquote! [(template Any) (env Any) (depth Int)] Any
+(defn macro-eval-quasiquote!
+  [template Any
+   env Any
+   depth Int] Any
   (cond
     (not (datum-pair? template)) template
     (= (datum-car template) "quasiquote")
@@ -562,7 +594,8 @@
         ["unquote-splicing"
          (macro-eval-quasiquote! (nth template 1) env (- depth 1))])
     :else
-      (loop [items Any template result Any []]
+      (loop [items Any template
+             result Any []]
         (if (= (count items) 0)
           result
           (let [item (nth items 0)]
@@ -577,14 +610,16 @@
                 (subvec items 1)
                 (conj result (macro-eval-quasiquote! item env depth)))))))))
 
-(defn macro-eval-let! [(parts Any) (env Any)] Any
+(defn macro-eval-let!
+  [parts Any
+   env Any] Any
   (if (= (count parts) 0)
     (macro-eval-fail! "let needs a binding vector")
     (let [bindings (macro-seq! (nth parts 0) "let bindings")
           body (subvec parts 1)
-          bound
-          (loop [items Any bindings e Any env]
-            (cond
+          bound (loop [items Any bindings
+                       e Any env]
+                  (cond
               (= (count items) 0) e
               (and (>= (count items) 2)
                    (vector? (nth items 0))
@@ -606,7 +641,9 @@
                   (str "bad let binding: " (str (nth items 0))))))]
       (macro-eval-body! body bound))))
 
-(defn macro-eval-if! [(parts Any) (env Any)] Any
+(defn macro-eval-if!
+  [parts Any
+   env Any] Any
   (if (< (count parts) 2)
     (macro-eval-fail! "if needs a test and then expression")
     (if (macro-truthy? (macro-eval! (nth parts 0) env))
@@ -615,10 +652,12 @@
         (macro-eval! (nth parts 2) env)
         nil))))
 
-(defn macro-cond-else? [(form Any)] Bool
+(defn macro-cond-else? [form Any] Bool
   (or (= form ":else") (= form "else")))
 
-(defn macro-eval-flat-cond! [(clauses Any) (env Any)] Any
+(defn macro-eval-flat-cond!
+  [clauses Any
+   env Any] Any
   (cond
     (= (count clauses) 0) nil
     (= (count clauses) 1)
@@ -632,7 +671,9 @@
           (macro-eval! result-form env)
           (macro-eval-flat-cond! (subvec clauses 2) env)))))
 
-(defn macro-eval-bracket-cond! [(clauses Any) (env Any)] Any
+(defn macro-eval-bracket-cond!
+  [clauses Any
+   env Any] Any
   (if (= (count clauses) 0)
     nil
     (let [clause (datum-cdr (nth clauses 0))]
@@ -645,9 +686,10 @@
           (macro-eval-body! (subvec clause 1) env)
           (macro-eval-bracket-cond! (subvec clauses 1) env))))))
 
-(defn macro-eval-cond! [(clauses Any) (env Any)] Any
-  (let [bracket-count
-        (count
+(defn macro-eval-cond!
+  [clauses Any
+   env Any] Any
+  (let [bracket-count (count
           (filterv
             (fn [clause Any] Bool
               (and (datum-pair? clause)
@@ -661,9 +703,10 @@
         (macro-eval-fail!
           "cond cannot mix bracket clauses with flat test/expression pairs"))))
 
-(defn macro-fn-params! [(raw Any)] Any
+(defn macro-fn-params! [raw Any] Any
   (let [items (macro-seq! raw "fn params")]
-    (loop [rest-items Any items params Any []]
+    (loop [rest-items Any items
+           params Any []]
       (cond
         (= (count rest-items) 0) params
         (= (nth rest-items 0) "&")
@@ -680,7 +723,9 @@
           (macro-eval-fail!
             (str "bad fn param: " (str (nth rest-items 0))))))))
 
-(defn macro-eval-fn! [(parts Any) (env Any)] Any
+(defn macro-eval-fn!
+  [parts Any
+   env Any] Any
   (if (< (count parts) 3)
     (macro-eval-fail! "fn needs a parameter vector, return type, and body")
     (macro-closure
@@ -688,7 +733,9 @@
       (subvec parts 2)
       env)))
 
-(defn macro-eval! [(expr Any) (env Any)] Any
+(defn macro-eval!
+  [expr Any
+   env Any] Any
   (cond
     (ast/beagle-syntax? expr) expr
     (or (number? expr) (boolean? expr) (nil? expr)) expr
@@ -697,7 +744,8 @@
       (if (str/starts-with? expr ":") expr (macro-env-lookup! env expr))
     (not (datum-pair? expr)) expr
     :else
-      (let [head (datum-car expr) parts (datum-cdr expr)]
+      (let [head (datum-car expr)
+            parts (datum-cdr expr)]
         (cond
           (= head "let") (macro-eval-let! parts env)
           (= head "if") (macro-eval-if! parts env)
@@ -729,35 +777,42 @@
               "unquote-splicing (`~@`) outside a quasiquote template")
           :else
             (let [fn-value (macro-eval! head env)
-                  arg-values
-                  (mapv (fn [arg Any] Any (macro-eval! arg env)) parts)]
+                  arg-values (mapv (fn [arg Any] Any (macro-eval! arg env)) parts)]
               (macro-apply-fn! fn-value arg-values))))))
 
-(defn macro-require-arity! [(name String) (args Any) (expected Int)] Nil
+(defn macro-require-arity!
+  [name String
+   args Any
+   expected Int] Nil
   (when (not= (count args) expected)
     (macro-eval-fail!
       (str name " expected " (str expected) " argument(s), got "
            (str (count args)))))
   nil)
 
-(defn macro-apply-closure! [(closure Any) (args Any)] Any
+(defn macro-apply-closure!
+  [closure Any
+   args Any] Any
   (let [params (get closure "params")]
     (when (not= (count params) (count args))
       (macro-eval-fail!
         (str "fn expected " (str (count params)) " argument(s), got "
              (str (count args)))))
-    (let [env
-          (let [indices (Vec Int) (vec (range (count params)))]
+    (let [env (let [indices (Vec Int) (vec (range (count params)))]
             (reduce
-              (fn [e Any i Int] Any
+              (fn
+                [e Any
+                 i Int] Any
                 (assoc e (nth params i) (nth args i)))
               (get closure "env")
               indices))]
       (macro-eval-body! (get closure "body") env))))
 
-(defn macro-map-values! [(fn-value Any) (colls Any)] Any
-  (let [seqs (mapv (fn [xs Any] Any (macro-seq! xs "map")) colls)
-        width (if (= (count seqs) 0)
+(defn macro-map-values!
+  [fn-value Any
+   colls Any] Any
+  (let [seqs Any (mapv (fn [xs Any] Any (macro-seq! xs "map")) colls)
+        width Int (if (= (count seqs) 0)
                 0
                 (reduce min (mapv count seqs)))
         indices (Vec Int) (vec (range width))]
@@ -768,9 +823,11 @@
           (mapv (fn [xs Any] Any (nth xs i)) seqs)))
       indices)))
 
-(defn macro-distinct-values [(items Any)] Any
+(defn macro-distinct-values [items Any] Any
   (reduce
-    (fn [result Any item Any] Any
+    (fn
+      [result Any
+       item Any] Any
       (if (some?
             (some
               (fn [seen Any] Any
@@ -781,12 +838,16 @@
     []
     items))
 
-(defn macro-all-distinct? [(items Any)] Bool
+(defn macro-all-distinct? [items Any] Bool
   (= (count items) (count (macro-distinct-values items))))
 
-(defn macro-format-value! [(format-value Any) (args Any)] Any
+(defn macro-format-value!
+  [format-value Any
+   args Any] Any
   (let [fmt (macro-string! format-value "format")]
-    (loop [i Int 0 arg-i Int 0 out String ""]
+    (loop [i Int 0
+           arg-i Int 0
+           out String ""]
       (if (>= i (count fmt))
         (if (= arg-i (count args))
           [STRING-TAG out]
@@ -808,7 +869,9 @@
                   (recur (+ i 1) arg-i (str out ch))))
             (recur (+ i 1) arg-i (str out ch))))))))
 
-(defn macro-number-fold! [(name String) (args Any)] Any
+(defn macro-number-fold!
+  [name String
+   args Any] Any
   (let [numbers (mapv macro-datum args)]
     (cond
     (= name "+") (reduce + 0 numbers)
@@ -823,11 +886,14 @@
         :else (reduce - (nth numbers 0) (subvec numbers 1)))
     :else (macro-eval-fail! (str "unknown numeric function: " name)))))
 
-(defn macro-ordered? [(name String) (args Any)] Bool
+(defn macro-ordered?
+  [name String
+   args Any] Bool
   (loop [items Any (mapv macro-datum args)]
     (if (< (count items) 2)
       true
-      (let [a (nth items 0) b (nth items 1)
+      (let [a (nth items 0)
+            b (nth items 1)
             ok (cond
                  (= name "<") (< a b)
                  (= name ">") (> a b)
@@ -835,7 +901,7 @@
                  :else (>= a b))]
         (if ok (recur (subvec items 1)) false)))))
 
-(defn macro-syntax-binding-datum [(raw Any)] Any
+(defn macro-syntax-binding-datum [raw Any] Any
   (let [datum (macro-datum raw)]
     (if (and (macro-vector-datum? datum)
              (= (count datum) 2)
@@ -845,17 +911,17 @@
       (nth datum 1)
       datum)))
 
-(defn macro-syntax-binding-form? [(syntax Any)] Bool
+(defn macro-syntax-binding-form? [syntax Any] Bool
   (or (string? syntax)
       (macro-vector-datum? syntax)
       (and (datum-pair? syntax) (= (datum-car syntax) MAP-TAG))))
 
-(defn macro-typed-syntax-datum? [(syntax Any)] Bool
+(defn macro-typed-syntax-datum? [syntax Any] Bool
   (and (vector? syntax)
        (or (= (count syntax) 2) (= (count syntax) 3))
        (macro-syntax-binding-form? (nth syntax 0))))
 
-(defn macro-syntax-name! [(raw Any)] Any
+(defn macro-syntax-name! [raw Any] Any
   (let [syntax (macro-syntax-binding-datum raw)]
     (cond
       (macro-typed-syntax-datum? syntax) (nth syntax 0)
@@ -865,7 +931,7 @@
           (str "syntax-name expected a binding form or (binding-form Type [constraint]) datum, got: "
                (str syntax))))))
 
-(defn macro-syntax-type! [(raw Any)] Any
+(defn macro-syntax-type! [raw Any] Any
   (let [syntax (macro-syntax-binding-datum raw)]
     (if (macro-typed-syntax-datum? syntax)
       (nth syntax 1)
@@ -873,7 +939,7 @@
         (str "syntax-type expected a (binding-form Type [constraint]) datum, got: "
              (str syntax))))))
 
-(defn macro-syntax-constraint! [(raw Any)] Any
+(defn macro-syntax-constraint! [raw Any] Any
   (let [syntax (macro-syntax-binding-datum raw)]
     (if (macro-typed-syntax-datum? syntax)
       (if (= (count syntax) 3) (nth syntax 2) [])
@@ -885,7 +951,7 @@
 ;; original collection, zero-based index, and stray declaration datum; the
 ;; outer expansion boundary reports the authored message without normalizing or
 ;; repartitioning the collection.
-(defn macro-syntax-error-at! [(args Any)] Any
+(defn macro-syntax-error-at! [args Any] Any
   (if (< (count args) 2)
     (macro-eval-fail! "syntax-error-at expected a collection and index")
     (let [collection (nth args 0)
@@ -908,13 +974,17 @@
                "index" index
                "form" form})))))))
 
-(defn macro-make-binding-form! [(name String) (args Any)] Any
+(defn macro-make-binding-form!
+  [name String
+   args Any] Any
   (if (or (= (count args) 2) (= (count args) 3))
     args
     (macro-eval-fail!
       (str name " expected 2 or 3 argument(s), got " (str (count args))))))
 
-(defn macro-apply-builtin! [(name String) (args Any)] Any
+(defn macro-apply-builtin!
+  [name String
+   args Any] Any
   (cond
     (= name "list") args
     (= name "cons")
@@ -924,7 +994,9 @@
       (into [BRACKET-TAG] args)
     (or (= name "append") (= name "concat"))
       (reduce
-        (fn [items Any value Any] Any
+        (fn
+          [items Any
+           value Any] Any
           (into items (macro-seq! value name)))
         [] args)
     (or (= name "first") (= name "second") (= name "third"))
@@ -964,7 +1036,7 @@
         (macro-map-values! (nth args 0) (subvec args 1)))
     (= name "map-indexed")
       (do (macro-require-arity! name args 2)
-          (let [items (macro-seq! (nth args 1) name)
+          (let [items Any (macro-seq! (nth args 1) name)
                 indices (Vec Int) (vec (range (count items)))]
             (mapv
               (fn [i Int] Any
@@ -974,7 +1046,9 @@
       (if (< (count args) 2)
         (macro-eval-fail! "mapcat expected a function and collection")
         (reduce
-          (fn [items Any part Any] Any
+          (fn
+            [items Any
+             part Any] Any
             (if (macro-seq? part)
               (into items (macro-seq! part "mapcat: function result"))
               (macro-eval-fail!
@@ -990,13 +1064,17 @@
               (macro-eval-fail!
                 "reduce without an initial value needs a non-empty collection")
               (reduce
-                (fn [acc Any item Any] Any
+                (fn
+                  [acc Any
+                   item Any] Any
                   (macro-apply-fn! (nth args 0) [acc item]))
                 (nth items 0)
                 (subvec items 1))))
         (= (count args) 3)
           (reduce
-            (fn [acc Any item Any] Any
+            (fn
+              [acc Any
+               item Any] Any
               (macro-apply-fn! (nth args 0) [acc item]))
             (nth args 1)
             (macro-seq! (nth args 2) name))
@@ -1013,7 +1091,9 @@
     (= name "filter")
       (do (macro-require-arity! name args 2)
           (reduce
-            (fn [items Any item Any] Any
+            (fn
+              [items Any
+               item Any] Any
               (if (macro-apply-fn! (nth args 0) [item])
                 (conj items item)
                 items))
@@ -1047,7 +1127,8 @@
               (macro-eval-fail!
                 (str "partition: size must be a positive integer, got: "
                      (str size)))
-              (loop [rest-items Any items result Any []]
+              (loop [rest-items Any items
+                     result Any []]
                 (if (< (count rest-items) size)
                   result
                   (recur
@@ -1144,7 +1225,9 @@
     :else
       (macro-eval-fail! (str "unknown builtin: " name))))
 
-(defn macro-apply-fn! [(fn-value Any) (args Any)] Any
+(defn macro-apply-fn!
+  [fn-value Any
+   args Any] Any
   (cond
     (macro-builtin? fn-value)
       (macro-apply-builtin! (get fn-value "name") args)
@@ -1155,12 +1238,17 @@
 
 ;; --- substitute (template expansion core) ------------------------------------
 
-(defn splice-into-list [(head Any) (tail Any)] Any
+(defn splice-into-list
+  [head Any
+   tail Any] Any
   (if (and (datum-pair? head) (= (datum-car head) "splice-marker"))
     (datum-append (datum-cdr head) tail)
     (datum-cons head tail)))
 
-(defn substitute [(template Any) (bindings Any) (rest-name Any)] Any
+(defn substitute
+  [template Any
+   bindings Any
+   rest-name Any] Any
   (cond
     ;; (splice name) where name is bound to a list
     (and (datum-pair? template) (= (count template) 2)
@@ -1190,25 +1278,27 @@
 ;; --- expand-macro! (dispatch) ------------------------------------------------
 
 (defn expand-template-macro!
-  [(reg Any) (m Any) (name String) (args (Vec Any)) (ctx Any)] Any
-  (let [fixed (get m "fixed-params")
-        rest-name (get m "rest-param")
-        kind (get m "kind")
-        template (get m "template")
-        introduction-scope (ast/fresh-scope-id! "macro-introduction")
-        restorations (atom [])
-        scoped-args
-        (mapv
+  [reg Any
+   m Any
+   name String
+   args (Vec Any)
+   ctx Any] Any
+  ;; arity errors: record + return an INERT datum (Racket raises + aborts
+  ;; here). Returning the form unexpanded would keep it a macro-application,
+  ;; which parse-list-form! re-dispatches into expand-fully! forever (the
+  ;; depth cap only bounds a single pass, not the outer parse retry).
+  (let [fixed Any (get m "fixed-params")
+        rest-name Any (get m "rest-param")
+        kind Any (get m "kind")
+        template Any (get m "template")
+        introduction-scope Any (ast/fresh-scope-id! "macro-introduction")
+        restorations Any (atom [])
+        scoped-args Any (mapv
           (fn [arg Any] Any
             (ast/beagle-syntax-flip-scope!
               arg introduction-scope restorations true))
           args)
-        output
-        (cond
-      ;; arity errors: record + return an INERT datum (Racket raises + aborts
-      ;; here). Returning the form unexpanded would keep it a macro-application,
-      ;; which parse-list-form! re-dispatches into expand-fully! forever (the
-      ;; depth cap only bounds a single pass, not the outer parse retry).
+        output Any (cond
       (and (some? rest-name) (< (count scoped-args) (count fixed)))
         (macro-err!
           (str "macro " name ": expected at least " (str (count fixed))
@@ -1221,14 +1311,16 @@
         (let [fixed-args (subvec scoped-args 0 (count fixed))
               rest-args (subvec scoped-args (count fixed))]
           (if (= kind "defmacro")
-            (let [env0 (make-macro-env)
+            (let [env0 Any (make-macro-env)
                   indices (Vec Int) (vec (range (count fixed)))
-                  env (reduce
-                        (fn [e Any i Int] Any
+                  env Any (reduce
+                        (fn
+                          [e Any
+                           i Int] Any
                           (assoc e (nth fixed i) (nth fixed-args i)))
                         env0
                         indices)
-                  env+rest (if (some? rest-name)
+                  env+rest Any (if (some? rest-name)
                              (assoc env rest-name rest-args)
                              env)]
               (try
@@ -1243,13 +1335,11 @@
                            (str (datum-cons name args)) chain))))))
             (let [bindings (make-bindings fixed fixed-args rest-name rest-args)]
               (substitute template bindings rest-name)))))
-        call-syntax (if (nil? ctx) nil (get ctx "call-syntax"))
-        reader
-        (if (ast/beagle-syntax? call-syntax)
+        call-syntax Any (if (nil? ctx) nil (get ctx "call-syntax"))
+        reader Any (if (ast/beagle-syntax? call-syntax)
           (get (ast/beagle-syntax-properties call-syntax) "reader")
           nil)
-        properties
-        (if (some? reader)
+        properties Any (if (some? reader)
           {"reader" reader "generated-by" name}
           {"generated-by" name})]
     (ast/beagle-syntax-flip-scope!
@@ -1263,22 +1353,23 @@
       restorations
       false)))
 
-(defn expand-macro! [(reg Any) (name String) (args (Vec Any)) (ctx Any)] Any
-  (let [syntax-input
-        (and (every? ast/beagle-syntax? args)
+(defn expand-macro!
+  [reg Any
+   name String
+   args (Vec Any)
+   ctx Any] Any
+  (let [syntax-input Bool (and (every? ast/beagle-syntax? args)
              (or (> (count args) 0)
                  (and (some? ctx)
                       (ast/beagle-syntax? (get ctx "call-syntax")))))
-        syntax-args
-        (if syntax-input
+        syntax-args Any (if syntax-input
           args
           (mapv
             (fn [arg Any] Any
               (ast/datum->beagle-syntax!
                 arg nil ast/EMPTY-SCOPE-SET nil {}))
             args))
-        call-syntax
-        (if (and (some? ctx) (ast/beagle-syntax? (get ctx "call-syntax")))
+        call-syntax Any (if (and (some? ctx) (ast/beagle-syntax? (get ctx "call-syntax")))
           (get ctx "call-syntax")
           (ast/make-syntax-list!
             (into
@@ -1286,20 +1377,20 @@
                  name nil ast/EMPTY-SCOPE-SET nil {})]
               syntax-args)
             nil ast/EMPTY-SCOPE-SET nil {}))
-        effective-ctx
-        (if (some? ctx) ctx (make-root-ctx! name call-syntax))
-        m (lookup-macro reg name)]
+        effective-ctx Any (if (some? ctx) ctx (make-root-ctx! name call-syntax))
+        m Any (lookup-macro reg name)]
     (if (nil? m)
       (do (selfhost.rt/eprint (str "beagle: no macro named " name "\n"))
           (datum-cons name args))
-      (let [result
-            (expand-template-macro!
+      (let [result (expand-template-macro!
               reg m name syntax-args effective-ctx)]
         (if syntax-input result (macro-datum result))))))
 
 ;; --- macro-application? ------------------------------------------------------
 
-(defn macro-application? [(reg Any) (datum Any)] Bool
+(defn macro-application?
+  [reg Any
+   datum Any] Bool
   (let [raw (macro-datum datum)]
     (and (datum-pair? raw)
          (string? (datum-car raw))
@@ -1309,17 +1400,21 @@
 
 (declare expand-fully-syntax!)
 
-(defn- syntax-children-identical? [(before Any) (after Any)] Bool
+(defn- syntax-children-identical?
+  [before Any
+   after Any] Bool
   (and (= (count before) (count after))
        (every?
          (fn [i Int] Bool (identical? (nth before i) (nth after i)))
          (range (count before)))))
 
 (defn- expand-syntax-children!
-  [(reg Any) (value Any) (depth Int) (ctx Any)] Any
+  [reg Any
+   value Any
+   depth Int
+   ctx Any] Any
   (let [children (get value "payload")
-        expanded
-        (mapv
+        expanded (mapv
           (fn [child Any] Any
             (expand-fully-syntax! reg child depth ctx))
           children)]
@@ -1340,7 +1435,10 @@
           (ast/beagle-syntax-properties value))))))
 
 (defn expand-fully-syntax!
-  [(reg Any) (value Any) (depth Int) (ctx Any)] Any
+  [reg Any
+   value Any
+   depth Int
+   ctx Any] Any
   (cond
     (>= depth MAX-EXPANSION-DEPTH)
       (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
@@ -1352,8 +1450,7 @@
                " (possible infinite recursion)" chain)))
     (macro-application? reg value)
       (let [name (datum-car value)
-            args
-            (if (syntax-list? value)
+            args (if (syntax-list? value)
               (subvec (get value "payload") 1)
               (mapv
                 (fn [arg Any] Any
@@ -1361,8 +1458,7 @@
                     arg (ast/beagle-syntax-span value)
                     ast/EMPTY-SCOPE-SET nil {}))
                 (datum-cdr (macro-datum value))))
-            next-ctx
-            (if (nil? ctx)
+            next-ctx (if (nil? ctx)
               (make-root-ctx! name value)
               (push-ctx! ctx name value))
             expanded (expand-macro! reg name args next-ctx)]
@@ -1371,10 +1467,13 @@
       (expand-syntax-children! reg value depth ctx)
     :else value))
 
-(defn expand-fully! [(reg Any) (datum Any) (depth Int) (ctx Any)] Any
+(defn expand-fully!
+  [reg Any
+   datum Any
+   depth Int
+   ctx Any] Any
   (let [syntax-input (ast/beagle-syntax? datum)
-        syntax-value
-        (if syntax-input
+        syntax-value (if syntax-input
           datum
           (ast/datum->beagle-syntax!
             datum nil ast/EMPTY-SCOPE-SET nil {}))
@@ -1386,7 +1485,9 @@
 (def passes Any (atom []))
 (def failures Any (atom []))
 
-(defn- expect! [(label String) (result Bool)] Nil
+(defn- expect!
+  [label String
+   result Bool] Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
@@ -1530,10 +1631,8 @@
            (= (macro-syntax-constraint! map-binding) "valid-point?"))))
 
   (let [collection [BRACKET-TAG ["id" "String"] "valid-id-wire?"]
-        syntax-index
-          (ast/make-syntax-atom! 1 nil ast/EMPTY-SCOPE-SET nil {})
-        rejected
-          (try
+        syntax-index (ast/make-syntax-atom! 1 nil ast/EMPTY-SCOPE-SET nil {})
+        rejected (try
             (macro-syntax-error-at!
               [collection syntax-index [STRING-TAG "Invalid field declaration"]])
             false
@@ -1635,13 +1734,11 @@
   (let [reg (make-macro-registry)
         call-span (ast/make-source-span! "caller.bclj" 20 38 2 0)
         child-span (ast/make-source-span! "caller.bclj" 30 37 2 10)
-        child
-        (ast/datum->beagle-syntax!
+        child (ast/datum->beagle-syntax!
           ["+" 1 2]
           child-span ast/EMPTY-SCOPE-SET nil
           {"reader" (ast/make-reader-metadata "(+ 1 2)" "paren")})
-        call
-        (ast/make-syntax-list!
+        call (ast/make-syntax-list!
           [(ast/datum->beagle-syntax!
              "identity" call-span ast/EMPTY-SCOPE-SET nil {})
            child]
@@ -1659,8 +1756,7 @@
 
   (let [reg (make-macro-registry)
         call-span (ast/make-source-span! "caller.bclj" 40 53 4 2)
-        call
-        (ast/datum->beagle-syntax!
+        call (ast/datum->beagle-syntax!
           ["outer" "value"]
           call-span ast/EMPTY-SCOPE-SET nil
           {"reader" (ast/make-reader-metadata "(outer value)" "paren")})]

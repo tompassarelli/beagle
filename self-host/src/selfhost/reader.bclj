@@ -32,10 +32,15 @@
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
-(defn char-at [(s String) (i Int)] String
+(defn char-at
+  [s String
+   i Int] String
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
-(defn substring2 [(s String) (a Int) (b Int)] String
+(defn substring2
+  [s String
+   a Int
+   b Int] String
   (let [n (count s)
         lo (if (< a 0) 0 (if (> a n) n a))
         hi (if (< b lo) lo (if (> b n) n b))]
@@ -45,21 +50,21 @@
 
 ;; `,` is Clojure whitespace (reader-impl.rkt maps #\, to #\space) — NOT
 ;; unquote; unquote is `~` / `~@`.
-(defn whitespace? [(ch String)] Bool
+(defn whitespace? [ch String] Bool
   (or (= ch " ") (= ch "\n") (= ch "\r") (= ch "\t") (= ch ",")))
 
-(defn newline? [(ch String)] Bool
+(defn newline? [ch String] Bool
   (or (= ch "\n") (= ch "\r")))
 
 ;; digit?/hex-val classify a 1-char string by lexicographic compare — for
 ;; single chars (compare "5" "0") == the char-code difference (== 5), so
 ;; contiguous ranges 0-9 / a-f / A-F map straight to their numeric value.
-(defn digit? [(ch String)] Bool
+(defn digit? [ch String] Bool
   (and (= (count ch) 1)
        (>= (compare ch "0") 0)
        (<= (compare ch "9") 0)))
 
-(defn delimiter? [(ch String)] Bool
+(defn delimiter? [ch String] Bool
   (or (whitespace? ch)
       (= ch "(") (= ch ")") (= ch "[") (= ch "]")
       (= ch "{") (= ch "}") (= ch "\"") (= ch ";")
@@ -68,19 +73,25 @@
 
 ;; --- result helper -----------------------------------------------------------
 
-(defn make-result [(value Any) (pos Int)] Any
+(defn make-result
+  [value Any
+   pos Int] Any
   {"value" value "pos" pos})
 
 ;; --- whitespace and comment skipping -----------------------------------------
 
-(defn skip-line-comment [(src String) (pos Int)] Int
+(defn skip-line-comment
+  [src String
+   pos Int] Int
   (let [len (count src)]
     (loop [j pos]
       (if (or (>= j len) (newline? (char-at src j)))
         (if (and (< j len) (= (char-at src j) "\n")) (+ j 1) j)
         (recur (+ j 1))))))
 
-(defn skip-ws [(src String) (pos Int)] Int
+(defn skip-ws
+  [src String
+   pos Int] Int
   (let [len (count src)]
     (loop [i pos]
       (if (>= i len) i
@@ -92,7 +103,7 @@
 
 ;; --- string literal reader ---------------------------------------------------
 
-(defn decode-escape [(ch String)] String
+(defn decode-escape [ch String] String
   (cond
     (= ch "n") "\n"
     (= ch "t") "\t"
@@ -107,7 +118,7 @@
     ;; documented gaps, not decoded.
     :else ch))
 
-(defn hex-val [(c String)] Int
+(defn hex-val [c String] Int
   (cond
     (and (>= (compare c "0") 0) (<= (compare c "9") 0)) (compare c "0")
     (and (>= (compare c "a") 0) (<= (compare c "f") 0))
@@ -117,7 +128,9 @@
     :else 0))
 
 ;; \uXXXX -> the char. i points at the first hex digit.
-(defn decode-u4 [(src String) (i Int)] Int
+(defn decode-u4
+  [src String
+   i Int] Int
   (+ (* 4096 (hex-val (char-at src i)))
      (* 256 (hex-val (char-at src (+ i 1))))
      (* 16 (hex-val (char-at src (+ i 2))))
@@ -129,7 +142,7 @@
 ;;   \uXXXX       — 4-hex-digit Unicode escape (suffix starts with "u", length 5)
 ;;   single char  — any single-character suffix (its code point)
 ;;   unknown      — 65533 (replacement character U+FFFD)
-(defn decode-char-lit [(suffix String)] Int
+(defn decode-char-lit [suffix String] Int
   (cond
     (= suffix "space")     32
     (= suffix "tab")       9
@@ -144,9 +157,12 @@
         (int (first ch)))
     :else 65533))
 
-(defn read-string-literal [(src String) (pos Int)] Any
+(defn read-string-literal
+  [src String
+   pos Int] Any
   (let [len (count src)]
-    (loop [i Int (+ pos 1) buf (Vec String) []]
+    (loop [i Int (+ pos 1)
+           buf (Vec String) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated string\n")
@@ -164,9 +180,12 @@
 ;; --- regex reader (#"...") — preserves backslash escapes ---------------------
 ;; Unlike a string, a regex keeps `\d` as `\d` (matches Racket's
 ;; read-regex-pattern). pos points at the opening ".
-(defn read-regex-literal [(src String) (pos Int)] Any
+(defn read-regex-literal
+  [src String
+   pos Int] Any
   (let [len (count src)]
-    (loop [i Int (+ pos 1) buf (Vec String) []]
+    (loop [i Int (+ pos 1)
+           buf (Vec String) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated regex literal\n")
@@ -180,24 +199,31 @@
 
 ;; --- raw string reader (#r"..." / #r#"..."# / #r##"..."## ) ------------------
 
-(defn count-hashes [(src String) (pos Int)] Int
-  (loop [i pos n 0]
+(defn count-hashes
+  [src String
+   pos Int] Int
+  (loop [i pos
+         n 0]
     (if (and (< i (count src)) (= (char-at src i) "#"))
       (recur (+ i 1) (+ n 1))
       n)))
 
-(defn hashes-str [(n Int)] String
-  (loop [k n acc ""]
+(defn hashes-str [n Int] String
+  (loop [k n
+         acc ""]
     (if (<= k 0) acc (recur (- k 1) (str acc "#")))))
 
-(defn read-raw-string [(src String) (pos Int)] Any
+(defn read-raw-string
+  [src String
+   pos Int] Any
   (let [hc (count-hashes src pos)
         open-pos (+ pos hc)
         len (count src)]
     (if (or (>= open-pos len) (not= (char-at src open-pos) "\""))
       (do (selfhost.rt/eprint "beagle reader: expected '\"' after #r hashes\n")
           (make-result "" open-pos))
-      (loop [i Int (+ open-pos 1) buf (Vec String) []]
+      (loop [i Int (+ open-pos 1)
+             buf (Vec String) []]
         (if (>= i len)
           (make-result [STRING-TAG (str/join "" buf)] i)
           (if (= (char-at src i) "\"")
@@ -212,16 +238,24 @@
 ;; 1.0 stays Float. Consumes an optional leading "-" so negative ints/floats,
 ;; and exponent forms (1e5, 1.5e-3), parse in one pass.
 
-(defn num-value [(src String) (start Int) (end Int) (is-float Bool)] Any
+(defn num-value
+  [src String
+   start Int
+   end Int
+   is-float Bool] Any
   (let [text (subs src start end)]
     (if is-float
       (let [n (parse-double text)] (if (nil? n) 0.0 n))
       (let [n (parse-long text)] (if (nil? n) 0 n)))))
 
-(defn read-number [(src String) (pos Int)] Any
+(defn read-number
+  [src String
+   pos Int] Any
   (let [len (count src)
         start (if (= (char-at src pos) "-") (+ pos 1) pos)]
-    (loop [i start has-dot false has-exp false]
+    (loop [i start
+           has-dot false
+           has-exp false]
       (if (>= i len)
         (make-result (num-value src pos i (or has-dot has-exp)) i)
         (let [ch (char-at src i)]
@@ -246,7 +280,9 @@
 
 ;; --- symbol reader -----------------------------------------------------------
 
-(defn read-symbol-text [(src String) (pos Int)] Any
+(defn read-symbol-text
+  [src String
+   pos Int] Any
   (let [len (count src)]
     (loop [i pos]
       (if (>= i len)
@@ -255,7 +291,7 @@
           (make-result (subs src pos i) i)
           (recur (+ i 1)))))))
 
-(defn classify-atom [(text String)] Any
+(defn classify-atom [text String] Any
   ;; Qualified symbols remain one reader datum. The parser owns the sole slash
   ;; decomposition once the datum enters a semantic reference position.
   (cond
@@ -269,9 +305,13 @@
 ;; Clojure/SCI target (which resolves top-to-bottom) can compile them.
 (declare read-datum)
 
-(defn read-delimited [(src String) (pos Int) (close String)] Any
+(defn read-delimited
+  [src String
+   pos Int
+   close String] Any
   (let [len (count src)]
-    (loop [p Int (skip-ws src pos) items (Vec Any) []]
+    (loop [p Int (skip-ws src pos)
+           items (Vec Any) []]
       (cond
         (>= p len)
           (do (selfhost.rt/eprint
@@ -288,7 +328,9 @@
 
 ;; --- hash dispatch (#{ #" #r etc.) -------------------------------------------
 
-(defn read-hash-dispatch [(src String) (pos Int)] Any
+(defn read-hash-dispatch
+  [src String
+   pos Int] Any
   (let [len (count src)]
     (if (>= (+ pos 1) len)
       (make-result "#" (+ pos 1))
@@ -308,7 +350,9 @@
 
 ;; --- main datum reader -------------------------------------------------------
 
-(defn read-datum [(src String) (pos Int)] Any
+(defn read-datum
+  [src String
+   pos Int] Any
   (let [p (skip-ws src pos)
         len (count src)]
     (if (>= p len) nil
@@ -420,8 +464,11 @@
 
 (def SOURCE-LOCATIONS Any (atom []))
 
-(defn- build-source-locations [(src String)] Any
-  (loop [i 0 line 1 column 0 locations [[1 0]]]
+(defn- build-source-locations [src String] Any
+  (loop [i Int 0
+         line Int 1
+         column Int 0
+         locations Any [[1 0]]]
     (if (>= i (count src))
       locations
       (if (newline? (char-at src i))
@@ -430,36 +477,49 @@
           (+ i 1) line (+ column 1)
           (conj locations [line (+ column 1)]))))))
 
-(defn- source-line-column [(src String) (pos Int)] Any
+(defn- source-line-column
+  [src String
+   pos Int] Any
   (let [locations (deref SOURCE-LOCATIONS)]
     (if (and (>= pos 0) (< pos (count locations)))
       (nth locations pos)
       [1 pos])))
 
-(defn- syntax-span! [(src String) (source-id Any) (start Int) (end Int)] Any
+(defn- syntax-span!
+  [src String
+   source-id Any
+   start Int
+   end Int] Any
   (let [location (source-line-column src start)]
     (ast/make-source-span!
       source-id start end (nth location 0) (nth location 1))))
 
 (defn- syntax-properties
-  [(src String) (start Int) (end Int) (delimiter Any)] Any
+  [src String
+   start Int
+   end Int
+   delimiter Any] Any
   {"reader" (ast/make-reader-metadata (subs src start end) delimiter)})
 
 (defn- syntax-head!
-  [(name String) (span Any) (properties Any)] Any
+  [name String
+   span Any
+   properties Any] Any
   (ast/datum->beagle-syntax!
     name span ast/EMPTY-SCOPE-SET nil properties))
 
 (defn- attach-syntax!
-  [(src String) (source-id Any) (start Int) (result Any)] Any
+  [src String
+   source-id Any
+   start Int
+   result Any] Any
   (if (nil? result)
     nil
     (let [end (get result "pos")
           value (get result "value")
           ch (char-at src start)
           children (or (get result "syntaxChildren") [])
-          delimiter
-          (cond
+          delimiter (cond
             (= ch "(") "paren"
             (= ch "[") "bracket"
             (= ch "{") "brace"
@@ -472,8 +532,7 @@
             :else "atom")
           span (syntax-span! src source-id start end)
           properties (syntax-properties src start end delimiter)
-          syntax
-          (cond
+          syntax (cond
             (= ch "(")
               (ast/make-syntax-list!
                 children span ast/EMPTY-SCOPE-SET nil properties)
@@ -512,7 +571,10 @@
       (assoc result "syntax" syntax))))
 
 (defn- read-syntax-delimited!
-  [(src String) (pos Int) (close String) (source-id Any)] Any
+  [src String
+   pos Int
+   close String
+   source-id Any] Any
   (let [len (count src)]
     (loop [p Int (skip-ws src pos)
            items (Vec Any) []
@@ -534,15 +596,16 @@
                 (conj syntaxes (get result "syntax")))))))))
 
 (defn- read-syntax-hash-dispatch!
-  [(src String) (pos Int) (source-id Any)] Any
+  [src String
+   pos Int
+   source-id Any] Any
   (let [len (count src)]
     (if (>= (+ pos 1) len)
       (make-result "#" (+ pos 1))
       (let [nxt (char-at src (+ pos 1))]
         (cond
           (= nxt "{")
-            (let [result
-                  (read-syntax-delimited! src (+ pos 2) "}" source-id)]
+            (let [result (read-syntax-delimited! src (+ pos 2) "}" source-id)]
               (assoc
                 (make-result
                   (into [SET-TAG] (get result "value"))
@@ -556,27 +619,26 @@
                 (get sym-result "value") (get sym-result "pos"))))))))
 
 (defn read-syntax-datum!
-  [(src String) (pos Int) (source-id Any)] Any
+  [src String
+   pos Int
+   source-id Any] Any
   (let [p (skip-ws src pos)
         len (count src)]
     (if (>= p len)
       nil
       (let [ch (char-at src p)
-            result
-            (cond
+            result (cond
               (= ch "(")
                 (read-syntax-delimited! src (+ p 1) ")" source-id)
               (= ch "[")
-                (let [inner
-                      (read-syntax-delimited! src (+ p 1) "]" source-id)]
+                (let [inner (read-syntax-delimited! src (+ p 1) "]" source-id)]
                   (assoc
                     (make-result
                       (into [BRACKET-TAG] (get inner "value"))
                       (get inner "pos"))
                     "syntaxChildren" (get inner "syntaxChildren")))
               (= ch "{")
-                (let [inner
-                      (read-syntax-delimited! src (+ p 1) "}" source-id)]
+                (let [inner (read-syntax-delimited! src (+ p 1) "}" source-id)]
                   (assoc
                     (make-result
                       (into [MAP-TAG] (get inner "value"))
@@ -611,8 +673,7 @@
                       "syntaxChildren" [(get inner "syntax")])))
               (= ch "~")
                 (let [splicing (= (char-at src (+ p 1)) "@")
-                      inner
-                      (read-syntax-datum!
+                      inner (read-syntax-datum!
                         src (+ p (if splicing 2 1)) source-id)]
                   (if (nil? inner)
                     (make-result
@@ -628,8 +689,7 @@
                 (let [meta-r (read-syntax-datum! src (+ p 1) source-id)]
                   (if (nil? meta-r)
                     nil
-                    (let [form-r
-                          (read-syntax-datum!
+                    (let [form-r (read-syntax-datum!
                             src (get meta-r "pos") source-id)]
                       (if (nil? form-r)
                         nil
@@ -662,7 +722,7 @@
 ;; --- #lang line parser -------------------------------------------------------
 
 ;; Mirrors beagle:beagle-lib/private/targets.rkt; the seed cannot load Racket.
-(defn lang-target [(lang-text String)] Any
+(defn lang-target [lang-text String] Any
   (cond
     (= lang-text "beagle") "core"
     (= lang-text "beagle/clj") "clj"
@@ -670,17 +730,17 @@
     (= lang-text "beagle/nix") "nix"
     :else nil))
 
-(defn target-lang-line [(target String)] Any
+(defn target-lang-line [target String] Any
   (cond
     (= target "core") "#lang beagle"
     (or (= target "clj") (= target "js") (= target "nix"))
       (str "#lang beagle/" target)
     :else nil))
 
-(defn parse-lang-line [(src String)] Any
+(defn parse-lang-line [src String] Any
   (let [len (count src)]
     (if (str/starts-with? src "#lang")
-      (loop [i 5]
+      (loop [i Int 5]
         (if (or (>= i len) (newline? (char-at src i)))
           {"target" (lang-target (str/trim (substring2 src 5 i)))
            "pos" (if (and (< i len) (= (char-at src i) "\n")) (+ i 1) i)}
@@ -690,11 +750,12 @@
 ;; --- top-level entry points --------------------------------------------------
 
 ;; read-all: whole-file read, keeping the #lang target (used by tests).
-(defn read-all [(src String)] Any
+(defn read-all [src String] Any
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
         start-pos (get lang-info "pos")]
-    (loop [p Int (skip-ws src start-pos) datums (Vec Any) []]
+    (loop [p Int (skip-ws src start-pos)
+           datums (Vec Any) []]
       (if (>= p (count src))
         {"target" target "datums" datums}
         (let [result (read-datum src p)]
@@ -704,8 +765,8 @@
                    (conj datums (get result "value")))))))))
 
 ;; Does the datum stream already carry an explicit (define-target ...) form?
-(defn- has-define-target? [(datums Any)] Bool
-  (loop [i 0]
+(defn- has-define-target? [datums Any] Bool
+  (loop [i Int 0]
     (if (>= i (count datums)) false
       (let [d (nth datums i)]
         (if (and (vector? d) (> (count d) 0) (= (nth d 0) "define-target"))
@@ -718,7 +779,7 @@
 ;; target by prepending a synthetic define-target for non-clj languages that
 ;; lack an explicit one. clj is the parser default (and the reader tests pin no
 ;; injection for it); an explicit define-target already present wins.
-(defn read-program [(src String)] Any
+(defn read-program [src String] Any
   (let [all (read-all src)
         target (get all "target")
         datums (get all "datums")]
@@ -731,16 +792,16 @@
 ;; immutable syntax tree together. Synthetic target declarations deliberately
 ;; have no source span; all authored forms retain exact slices.
 (defn read-program-with-syntax!
-  [(src String) (source-id Any)] Any
+  [src String
+   source-id Any] Any
   (reset! SOURCE-LOCATIONS (build-source-locations src))
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
         start-pos (get lang-info "pos")
-        read-result
-        (loop [p Int (skip-ws src start-pos)
-               datums (Vec Any) []
-               syntaxes (Vec Any) []]
-          (if (>= p (count src))
+        read-result (loop [p Int (skip-ws src start-pos)
+                           datums (Vec Any) []
+                           syntaxes (Vec Any) []]
+                      (if (>= p (count src))
             {"datums" datums "syntaxes" syntaxes}
             (let [result (read-syntax-datum! src p source-id)]
               (if (nil? result)
@@ -768,15 +829,17 @@
 (def passes Any (atom []))
 (def failures Any (atom []))
 
-(defn- expect! [(label String) (result Bool)] Nil
+(defn- expect!
+  [label String
+   result Bool] Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
 
-(defn- rd [(src String)] Any
+(defn- rd [src String] Any
   (get (read-all src) "datums"))
 
-(defn- rd1 [(src String)] Any
+(defn- rd1 [src String] Any
   (nth (rd src) 0))
 
 (defn run-tests! [] Int
@@ -895,9 +958,6 @@
   (expect! "unknown targets have no language path"
     (nil? (target-lang-line "missing")))
 
-  (expect! "structural typed binding reads as one nested declaration"
-    (= (rd1 "[(x Point) y]")
-       [BRACKET-TAG ["x" "Point"] "y"]))
   (expect! "declare-extern with fn type"
     (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
       (and (= (nth result 0) "declare-extern")

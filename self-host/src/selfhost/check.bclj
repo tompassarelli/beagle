@@ -13,22 +13,22 @@
 
 ;; --- structural references --------------------------------------------------
 
-(defn qualified-reference? [(ref Any)] Bool
+(defn qualified-reference? [ref Any] Bool
   (and (map? ref)
     (string? (get ref "qualifier"))
     (string? (get ref "name"))))
 
-(defn named-reference? [(ref Any)] Bool
+(defn named-reference? [ref Any] Bool
   (or (string? ref)
     (and (map? ref) (= (get ref "node") "ref")
       (string? (get ref "name")))))
 
-(defn resolved-reference? [(ref Any)] Bool
+(defn resolved-reference? [ref Any] Bool
   (and (map? ref)
        (= (get ref "node") "ref")
        (string? (get ref "refersTo"))))
 
-(defn structural-reference-key [(ref Any)] Any
+(defn structural-reference-key [ref Any] Any
   (if (qualified-reference? ref)
     ["qualified-ref" (get ref "qualifier") (get ref "name")
      (get ref "providerId")]
@@ -37,26 +37,30 @@
       ref)))
 
 (defn make-qualified-ref
-  [(qualifier String) (name String) (provider-id Any)] Any
+  [qualifier String
+   name String
+   provider-id Any] Any
   {"node" "ref" "qualifier" qualifier "name" name
    "providerId" provider-id})
 
-(defn reference-key [(ref Any)] Any
+(defn reference-key [ref Any] Any
   (cond
     (resolved-reference? ref) (get ref "refersTo")
     :else (structural-reference-key ref)))
 
-(defn reference-providerless-key [(ref Any)] Any
+(defn reference-providerless-key [ref Any] Any
   (if (qualified-reference? ref)
     ["qualified-ref" (get ref "qualifier") (get ref "name") nil]
     (reference-key ref)))
 
-(defn reference-map-ref [(table Any) (ref Any) (fallback Any)] Any
+(defn reference-map-ref
+  [table Any
+   ref Any
+   fallback Any] Any
   (let [exact (get table (reference-key ref))]
     (if (some? exact)
       exact
-      (let [structural
-            (if (resolved-reference? ref)
+      (let [structural (if (resolved-reference? ref)
               (get table (structural-reference-key ref)) nil)]
         (if (some? structural)
           structural
@@ -66,7 +70,7 @@
               (if (some? providerless) providerless fallback))
             fallback))))))
 
-(defn string-qualified-reference [(spelling String)] Any
+(defn string-qualified-reference [spelling String] Any
   (let [separator (U Int Nil) (str/last-index-of spelling "/")]
     (if (and (some? separator)
           (> separator 0)
@@ -77,43 +81,50 @@
         nil)
       nil)))
 
-(defn reference-map-assoc [(table Any) (ref Any) (value Any)] Any
+(defn reference-map-assoc
+  [table Any
+   ref Any
+   value Any] Any
   (let [with-exact (assoc table (reference-key ref) value)
-        with-providerless
-        (if (and (qualified-reference? ref)
+        with-providerless (if (and (qualified-reference? ref)
               (some? (get ref "providerId")))
           (assoc with-exact (reference-providerless-key ref) value)
           with-exact)
-        structural
-        (if (string? ref) (string-qualified-reference ref) nil)]
+        structural (if (string? ref) (string-qualified-reference ref) nil)]
     (if (nil? structural)
       with-providerless
       (assoc with-providerless (reference-key structural) value))))
 
-(defn reference->string [(ref Any)] String
+(defn reference->string [ref Any] String
   (cond
     (qualified-reference? ref)
     (str (get ref "qualifier") "/" (get ref "name"))
     (and (map? ref) (string? (get ref "name"))) (get ref "name")
     :else (str ref)))
 
-(defn reference-leaf [(ref Any)] Any
+(defn reference-leaf [ref Any] Any
   (if (map? ref) (get ref "name") ref))
 
-(defn binder-binding-id [(owner Any) (name String)] Any
+(defn binder-binding-id
+  [owner Any
+   name String] Any
   (let [direct (get owner "bindingId")
         identities (get owner "bindingIds")]
     (if (string? direct) direct (get identities name))))
 
-(defn binder-env-assoc [(env Any) (owner Any) (name String) (value Any)] Any
+(defn binder-env-assoc
+  [env Any
+   owner Any
+   name String
+   value Any] Any
   (let [with-name (assoc env name value)
         id (binder-binding-id owner name)]
     (if (string? id) (assoc with-name id value) with-name)))
 
-(defn local-reference-key [(value Any)] Any
+(defn local-reference-key [value Any] Any
   (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
 
-(defn- ordered-keys [(table Any)] Any
+(defn- ordered-keys [table Any] Any
   (vec (sort (vec (keys table)))))
 
 ;; --- type constructors (inlined from types.bjs) ------------------------------
@@ -123,22 +134,30 @@
 (def BOOL-TYPE Any {"kind" "prim" "name" "Bool"})
 (def INFERENCE-BOTTOM Any nil)
 
-(defn make-prim [(name String)] Any
+(defn make-prim [name String] Any
   {"kind" "prim" "name" name})
 
-(defn make-fn [(params (Vec Any)) (rest-type Any) (ret Any)] Any
+(defn make-fn
+  [params (Vec Any)
+   rest-type Any
+   ret Any] Any
   {"kind" "fn" "params" params "rest" rest-type "ret" ret})
 
-(defn make-app [(ctor String) (args (Vec Any))] Any
+(defn make-app
+  [ctor String
+   args (Vec Any)] Any
   {"kind" "app" "name" ctor "args" args})
 
-(defn make-union [(members (Vec Any))] Any
+(defn make-union [members (Vec Any)] Any
   {"kind" "union" "members" members})
 
-(defn make-var [(name String)] Any
+(defn make-var [name String] Any
   {"kind" "var" "name" name})
 
-(defn make-poly [(vars Any) (body Any) (bounds Any)] Any
+(defn make-poly
+  [vars Any
+   body Any
+   bounds Any] Any
   {"kind" "poly" "vars" vars "body" body "bounds" bounds})
 
 ;; Numeric tower. Oracle (types.rkt) has Int <: Number / Float <: Number and
@@ -239,36 +258,36 @@
 
 ;; --- type predicates ---------------------------------------------------------
 
-(defn prim? [(t Any)] Bool
+(defn prim? [t Any] Bool
   (and (not (nil? t)) (not= (get t "kind") nil) (= (get t "kind") "prim")))
 
-(defn fn-type? [(t Any)] Bool
+(defn fn-type? [t Any] Bool
   (and (not (nil? t)) (= (get t "kind") "fn")))
 
-(defn app-type? [(t Any)] Bool
+(defn app-type? [t Any] Bool
   (and (not (nil? t)) (= (get t "kind") "app")))
 
-(defn union-type? [(t Any)] Bool
+(defn union-type? [t Any] Bool
   (and (not (nil? t)) (= (get t "kind") "union")))
 
-(defn var-type? [(t Any)] Bool
+(defn var-type? [t Any] Bool
   (and (not (nil? t)) (= (get t "kind") "var")))
 
-(defn poly-type? [(t Any)] Bool
+(defn poly-type? [t Any] Bool
   (and (not (nil? t)) (= (get t "kind") "poly")))
 
-(defn any-type? [(t Any)] Bool
+(defn any-type? [t Any] Bool
   (and (prim? t) (= (get t "name") "Any")))
 
-(defn dynamic-type? [(t Any)] Bool
+(defn dynamic-type? [t Any] Bool
   (and (app-type? t) (= (get t "name") "Dyn")))
 
-(defn nil-type? [(t Any)] Bool
+(defn nil-type? [t Any] Bool
   (and (prim? t) (= (get t "name") "Nil")))
 
 ;; Binding constraints are executable contracts, so `Any` anywhere in either
 ;; the declared input or predicate signature makes the boundary unknowable.
-(defn type-contains-any? [(t Any)] Bool
+(defn type-contains-any? [t Any] Bool
   (cond
     (nil? t) false
     (prim? t) (= (get t "name") "Any")
@@ -292,22 +311,23 @@
 ;; them into ordinary forall variables.
 (def INFERENCE-VAR-PREFIX String "#%definition/")
 
-(defn inference-var? [(t Any)] Bool
+(defn inference-var? [t Any] Bool
   (and (var-type? t)
        (str/starts-with? (get t "name") INFERENCE-VAR-PREFIX)))
 
 (defn fresh-inference-var! [] Any
-  (let [counter Int
-        (get (deref STATE) "definition-inference-counter" 0)]
+  (let [counter Int (get (deref STATE) "definition-inference-counter" 0)]
     (swap! STATE assoc "definition-inference-counter" (+ counter 1))
     (make-var (str INFERENCE-VAR-PREFIX counter))))
 
-(defn inference-binding [(t Any)] Any
+(defn inference-binding [t Any] Any
   (if (inference-var? t)
     (get-in (deref STATE) ["definition-inference-bindings" (get t "name")])
     nil))
 
-(defn inference-var-occurs? [(name String) (t Any)] Bool
+(defn inference-var-occurs?
+  [name String
+   t Any] Bool
   (cond
     (nil? t) false
     (inference-var? t)
@@ -330,7 +350,7 @@
                  (get t "members")))
     :else false))
 
-(defn prune-inference-type [(t Any)] Any
+(defn prune-inference-type [t Any] Any
   (cond
     (nil? t) nil
     (inference-var? t)
@@ -352,7 +372,9 @@
       (make-union (mapv prune-inference-type (get t "members")))
     :else t))
 
-(defn bind-inference-var! [(variable Any) (value Any)] Nil
+(defn bind-inference-var!
+  [variable Any
+   value Any] Nil
   (let [resolved (prune-inference-type value)
         name (get variable "name")]
     (when (and (not (and (inference-var? resolved)
@@ -363,7 +385,9 @@
         ["definition-inference-bindings" name] resolved)))
   nil)
 
-(defn unify-inference-types! [(left Any) (right Any)] Nil
+(defn unify-inference-types!
+  [left Any
+   right Any] Nil
   (let [a (prune-inference-type left)
         b (prune-inference-type right)]
     (cond
@@ -397,7 +421,7 @@
       :else nil))
   nil)
 
-(defn type-contains-inference-var? [(t Any)] Bool
+(defn type-contains-inference-var? [t Any] Bool
   (let [resolved (prune-inference-type t)]
     (cond
       (nil? resolved) false
@@ -416,11 +440,11 @@
 
 ;; --- type->string ------------------------------------------------------------
 
-(defn reader-atom-type-text? [(text String)] Bool
+(defn reader-atom-type-text? [text String] Bool
   (and (> (count text) 0)
        (nil? (re-find #"[\\s\\[\\](){}\";,]" text))))
 
-(defn type->string [(t Any)] String
+(defn type->string [t Any] String
   (cond
     (nil? t) "?"
     (prim? t) (get t "name")
@@ -472,7 +496,7 @@
 
 ;; --- unqualify ---------------------------------------------------------------
 
-(defn unqualify-name [(name String)] String
+(defn unqualify-name [name String] String
   (let [idx (U Int Nil) (str/index-of name "/")]
     (if (some? idx)
       (let [offset Int idx]
@@ -486,7 +510,9 @@
 ;; what keeps the mutable-cell invariance hole closed. Unqualifies prim names so
 ;; a record referenced through an alias still equals itself. Mirrors the oracle
 ;; type-invariant-equal? (types.rkt).
-(defn type-invariant-equal? [(a Any) (b Any)] Bool
+(defn type-invariant-equal?
+  [a Any
+   b Any] Bool
   (cond
     (and (prim? a) (prim? b))
       (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
@@ -508,7 +534,8 @@
 ;; --- type-compatible? --------------------------------------------------------
 
 (defn nominal-union-has-member?
-  [(union-name String) (member-name String)] Bool
+  [union-name String
+   member-name String] Bool
   (let [members (get-in (deref STATE) ["union-members" union-name])]
     (and (not (nil? members))
          (boolean
@@ -518,12 +545,14 @@
                           (unqualify-name member-name))))
                  members)))))
 
-(defn parametric-member-view? [(value Any)] Bool
+(defn parametric-member-view? [value Any] Bool
   (and (app-type? value)
        (not (nil? (get-in (deref STATE)
                    ["parametric-member-union" (get value "name")])))))
 
-(defn type-compatible? [(actual Any) (expected Any)] Bool
+(defn type-compatible?
+  [actual Any
+   expected Any] Bool
   (cond
     (or (nil? actual) (nil? expected)) true
     (any-type? actual) true
@@ -667,12 +696,16 @@
 
 ;; --- type-equal? -------------------------------------------------------------
 
-(defn type-equal? [(a Any) (b Any)] Bool
+(defn type-equal?
+  [a Any
+   b Any] Bool
   (and (prim? a) (prim? b) (= (get a "name") (get b "name"))))
 
 ;; --- merge-types -------------------------------------------------------------
 
-(defn merge-types [(t1 Any) (t2 Any)] Any
+(defn merge-types
+  [t1 Any
+   t2 Any] Any
   (cond
     (and (nil? t1) (nil? t2)) INFERENCE-BOTTOM
     (nil? t1) t2
@@ -690,7 +723,9 @@
       (let [flat1 (if (union-type? t1) (get t1 "members") [t1])
             flat2 (if (union-type? t2) (get t2 "members") [t2])
             all (into (vec flat1) flat2)
-            deduped (reduce (fn [acc Any t Any] Any
+            deduped (reduce (fn
+                              [acc Any
+                               t Any] Any
                               (if (boolean (some (fn [a Any] Bool (type-compatible? t a)) acc))
                                 acc
                                 (conj acc t)))
@@ -699,26 +734,30 @@
           (nth deduped 0)
           (make-union deduped)))))
 
-(defn merge-types-list [(types (Vec Any))] Any
+(defn merge-types-list [types (Vec Any)] Any
   (if (= (count types) 0)
     ANY
-    (reduce (fn [acc Any t Any] Any (merge-types acc t))
+    (reduce (fn
+              [acc Any
+               t Any] Any
+              (merge-types acc t))
             (nth types 0) types)))
 
-(defn nullable-type [(t Any)] Any
+(defn nullable-type [t Any] Any
   (make-union [t NIL-TYPE]))
 
 ;; --- remove-from-union -------------------------------------------------------
 
-(defn remove-from-union [(current-type Any) (remove-type Any)] Any
+(defn remove-from-union
+  [current-type Any
+   remove-type Any] Any
   (cond
     (any-type? current-type) current-type
     (dynamic-type? current-type)
       (let [removed (if (dynamic-type? remove-type)
                       (get remove-type "args")
                       [remove-type])
-            remaining
-              (filterv
+            remaining (filterv
                 (fn [alternative Any] Bool
                   (not (boolean
                     (some
@@ -742,7 +781,7 @@
 
 ;; --- infer-literal-type ------------------------------------------------------
 
-(defn infer-literal-type [(e Any)] Any
+(defn infer-literal-type [e Any] Any
   (let [kind (get e "kind")]
     (cond
       (= kind "string")  (make-prim "String")
@@ -758,7 +797,7 @@
 ;; A 2-arg `(if c t)` (and the when/when-let/when-some/some-> lowerings) stores
 ;; JSON false as its absent else, matching the oracle AST. An explicit source
 ;; `false` parses as a ref, so the sentinel remains unambiguous and types as Nil.
-(defn synthetic-absent-else? [(e Any)] Bool
+(defn synthetic-absent-else? [e Any] Bool
   (false? e))
 
 ;; Element type of a collection literal (vec / map key / map value). Mirrors the
@@ -766,7 +805,7 @@
 ;; every other element is compatible with it, else Any. Numerics are NOT widened
 ;; here — a `[1 1.0]` literal is (Vec Any), not (Vec Float); numeric widening is
 ;; a control-flow-join concern (merge-types), never a collection-element one.
-(defn collection-elem-type [(types (Vec Any))] Any
+(defn collection-elem-type [types (Vec Any)] Any
   (if (and (> (count types) 0)
            (not (any-type? (nth types 0)))
            (every? (fn [t Any] Bool (type-compatible? t (nth types 0))) (drop 1 types)))
@@ -779,14 +818,14 @@
 ;; also stays Float; every other `/` keeps its declared Any because integer
 ;; division can produce Ratio. The stdlib signature and check-args! enforce
 ;; numeric operands before this return refinement runs.
-(defn numeric-arithmetic-op? [(op String)] Bool
+(defn numeric-arithmetic-op? [op String] Bool
   (or (= op "+") (= op "-") (= op "*") (= op "/")))
 
-(defn numeric-preserving-op? [(op String)] Bool
+(defn numeric-preserving-op? [op String] Bool
   (or (= op "+") (= op "-") (= op "*") (= op "inc") (= op "dec")
       (= op "min") (= op "max") (= op "abs")))
 
-(defn numeric-class [(t Any)] String
+(defn numeric-class [t Any] String
   (cond
     (and (prim? t) (= (get t "name") "Int")) "int"
     (and (prim? t) (= (get t "name") "Float")) "float"
@@ -800,7 +839,10 @@
       "number"
     :else "other"))
 
-(defn numeric-refine [(op String) (arg-types (Vec Any)) (declared Any)] Any
+(defn numeric-refine
+  [op String
+   arg-types (Vec Any)
+   declared Any] Any
   (cond
     (not (or (numeric-preserving-op? op) (= op "/"))) declared
     (not (or (any-type? declared)
@@ -831,7 +873,10 @@
   #{"Atom" "Buffer" "TransientVec" "JsMap"})
 
 (defn infer-type-var-bindings-context!
-  [(expected Any) (actual Any) (bindings Any) (invariant-context? Bool)] Nil
+  [expected Any
+   actual Any
+   bindings Any
+   invariant-context? Bool] Nil
   (cond
     (or (nil? expected) (nil? actual)) nil
     (and invariant-context? (var-type? expected) (any-type? actual))
@@ -871,10 +916,15 @@
 
     :else nil))
 
-(defn infer-type-var-bindings! [(expected Any) (actual Any) (bindings Any)] Nil
+(defn infer-type-var-bindings!
+  [expected Any
+   actual Any
+   bindings Any] Nil
   (infer-type-var-bindings-context! expected actual bindings false))
 
-(defn apply-type-bindings [(t Any) (bindings Any)] Any
+(defn apply-type-bindings
+  [t Any
+   bindings Any] Any
   (cond
     (nil? t) nil
     (var-type? t)
@@ -914,7 +964,7 @@
 (def IMPORTED-CALLABLE-SYNCHRONIZATION-KEY String
   "$beagle$selfhost$imported-callable-synchronization")
 
-(defn emit-diag! [(msg String)] Nil
+(defn emit-diag! [msg String] Nil
   (swap! STATE update "diagnostics" conj msg)
   nil)
 
@@ -928,10 +978,10 @@
    "js-in" "js/in?"
    "js-typeof" "js/typeof"})
 
-(defn js-target-form-name [(value Any)] Any
+(defn js-target-form-name [value Any] Any
   (if (map? value) (get JS-TARGET-FORM-NAMES (get value "node")) nil))
 
-(defn invalid-js-target-form? [(value Any)] Bool
+(defn invalid-js-target-form? [value Any] Bool
   (let [name (js-target-form-name value)]
     (and (not (nil? name))
       (not (= (get (deref STATE) "target") "js")))))
@@ -1110,9 +1160,11 @@
     "replace-first" (make-fn [(make-prim "String") ANY ANY]
                       nil (make-prim "String"))}})
 
-(defn hosted-require-contracts [(requires Any)] Any
+(defn hosted-require-contracts [requires Any] Any
   (reduce
-    (fn [env Any require-spec Any] Any
+    (fn
+      [env Any
+       require-spec Any] Any
       (let [namespace (get require-spec "ns")
             contracts (get HOSTED-NAMESPACE-CONTRACTS namespace)
             alias (get require-spec "alias")
@@ -1120,9 +1172,10 @@
             referred (get require-spec "refer")]
         (if (nil? contracts)
           env
-          (let [qualified
-                (reduce
-                  (fn [out Any member Any] Any
+          (let [qualified (reduce
+                  (fn
+                    [out Any
+                     member Any] Any
                     (reference-map-assoc out
                       (make-qualified-ref prefix member namespace)
                       (get contracts member)))
@@ -1130,7 +1183,9 @@
                   (ordered-keys contracts))]
             (if (vector? referred)
               (reduce
-                (fn [out Any member Any] Any
+                (fn
+                  [out Any
+                   member Any] Any
                   (let [contract (get contracts member)]
                     (if (nil? contract) out (assoc out member contract))))
                 qualified
@@ -1166,8 +1221,8 @@
       (make-prim "host.fs/RemoveFileResult"))))
 
 (defn install-core-result-union!
-  [(union-name String) (variants (Vec Any))]
-  Nil
+  [union-name String
+   variants (Vec Any)] Nil
   (swap! STATE assoc-in ["union-members" union-name]
     (mapv (fn [variant Any] String (get variant "name")) variants))
   (doseq [variant variants]
@@ -1175,7 +1230,9 @@
           fields (get variant "fields")]
       (swap! STATE assoc-in ["record-fields" name]
         (reduce
-          (fn [out Any field Any] Any
+          (fn
+            [out Any
+             field Any] Any
             (assoc out (nth field 0) (nth field 1)))
           {}
           fields))
@@ -1204,7 +1261,7 @@
       "fields" [[":errno" INT-TYPE]]}])
   nil)
 
-(defn target-stdlib [(target String)] Any
+(defn target-stdlib [target String] Any
   (cond
     (= target "core") (merge STDLIB CORE-STDLIB)
     (= target "js") (merge STDLIB JS-ATOM-STDLIB)
@@ -1220,7 +1277,7 @@
   {["Socket" "connect"] true
    ["java.net.Socket" "connect"] true})
 
-(defn jvm-instance-position-method? [(ref Any)] Bool
+(defn jvm-instance-position-method? [ref Any] Bool
   (and (qualified-reference? ref)
     (= true
       (get JVM-INSTANCE-POSITION-METHODS
@@ -1232,15 +1289,15 @@
 ;; (and x ...) pattern): defn/fn/defn-multi rest, kw-access default, try
 ;; finally, case default, if-let else, condp default. The era .bjs assumed
 ;; null. Normalize false -> nil at every optional-field read.
-(defn opt-field [(x Any)] Any
+(defn opt-field [x Any] Any
   (if (= x false) nil x))
 
 (declare infer-expr! infer-expr-expected! check-atom-ctor! check-hvec-literal!)
 
-(defn param-binding-target [(p Any)] Any
+(defn param-binding-target [p Any] Any
   (if (= (get p "type") "param") (get p "name") p))
 
-(defn destructure-bound-names [(pattern Any)] Any
+(defn destructure-bound-names [pattern Any] Any
   (let [target (param-binding-target pattern)
         t (get target "type")]
     (cond
@@ -1256,7 +1313,7 @@
         (if (nil? rest-name) base (conj base rest-name)))
       :else [])))
 
-(defn binding-target->string [(target Any)] String
+(defn binding-target->string [target Any] String
   (if (string? target)
     target
     (let [names (destructure-bound-names target)]
@@ -1264,10 +1321,12 @@
         "<binding>"
         (str "[" (str/join " " names) "]")))))
 
-(defn binding-constraint [(binding Any)] Any
+(defn binding-constraint [binding Any] Any
   (opt-field (get binding "constraint")))
 
-(defn remember-binding-constraint-proof! [(binding Any) (proved? Bool)] Nil
+(defn remember-binding-constraint-proof!
+  [binding Any
+   proved? Bool] Nil
   (let [check-id (get binding BINDING-CHECK-ID-KEY)]
     (when (not (nil? check-id))
       (swap! STATE assoc-in
@@ -1280,7 +1339,9 @@
 ;; call in a predicate must have a positive local/imported/extern proof. The
 ;; generic structural walk is deliberate: it catches Beagle and typed-JS AST
 ;; variants without reconstructing semantic declarations from adjacent values.
-(defn constraint-value-synchronous? [(value Any) (proofs Any)] Bool
+(defn constraint-value-synchronous?
+  [value Any
+   proofs Any] Bool
   (cond
     (vector? value)
       (every?
@@ -1352,23 +1413,32 @@
 
     :else true))
 
-(defn callable-form-clauses [(form Any)] Any
+(defn callable-form-clauses [form Any] Any
   (cond
     (= (get form "node") "defn") [form]
     (= (get form "node") "defn-multi") (get form "arities")
     :else []))
 
-(defn callable-clause-synchronous? [(clause Any) (proofs Any)] Bool
+(defn callable-clause-synchronous?
+  [clause Any
+   proofs Any] Bool
   (and
     (constraint-value-synchronous? (get clause "params") proofs)
     (constraint-value-synchronous? (opt-field (get clause "rest")) proofs)
     (constraint-value-synchronous? (get clause "body") proofs)))
 
-(defn program-callable-synchronization [(prog Any)] Any
+;; Source `declare-extern` is a typed host boundary. Recursive
+;; import facts are authoritative and must not be overwritten by
+;; the compatibility extern projection of the same qualified or
+;; referred name.
+;; Greatest fixed point. Removed local names remain explicitly false so a
+;; caller cannot reinterpret them as an unknown/synchronous host function.
+(defn program-callable-synchronization [prog Any] Any
   (let [forms (get prog "forms")
-        local-definitions
-          (reduce
-            (fn [out Any raw-form Any] Any
+        local-definitions (reduce
+            (fn
+              [out Any
+               raw-form Any] Any
               (let [form (if (= (get raw-form "node") "with-meta")
                            (get raw-form "expr")
                            raw-form)
@@ -1379,9 +1449,10 @@
             {}
             forms)
         imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
-        imported-proofs
-          (reduce
-            (fn [out Any entry Any] Any
+        imported-proofs (reduce
+            (fn
+              [out Any
+               entry Any] Any
               (if (and (map? entry)
                        (string? (get entry "name"))
                        (boolean? (get entry "synchronous")))
@@ -1390,13 +1461,10 @@
                 out))
             {}
             imported)
-        external-proofs
-          (reduce
-            (fn [out Any entry Any] Any
-              ;; Source `declare-extern` is a typed host boundary. Recursive
-              ;; import facts are authoritative and must not be overwritten by
-              ;; the compatibility extern projection of the same qualified or
-              ;; referred name.
+        external-proofs (reduce
+            (fn
+              [out Any
+               entry Any] Any
               (if (and (string? (get entry "name"))
                        (nil? (reference-map-ref out (get entry "name") nil)))
                 (reference-map-assoc out (get entry "name")
@@ -1404,28 +1472,28 @@
                 out))
             imported-proofs
             (get prog "externs"))
-        builtin-proofs
-          (reduce
-            (fn [out Any name Any] Any
+        builtin-proofs (reduce
+            (fn
+              [out Any
+               name Any] Any
               (assoc out name true))
             external-proofs
             (ordered-keys (target-stdlib (get prog "target"))))
-        assumed
-          (reduce
-            (fn [out Any name Any] Any
+        assumed (reduce
+            (fn
+              [out Any
+               name Any] Any
               (assoc out name true))
             builtin-proofs
             (ordered-keys local-definitions))]
-    ;; Greatest fixed point. Removed local names remain explicitly false so a
-    ;; caller cannot reinterpret them as an unknown/synchronous host function.
     (loop [proofs assumed]
-      (let [next
-              (reduce
-                (fn [out Any name Any] Any
+      (let [next (reduce
+                (fn
+                  [out Any
+                   name Any] Any
                   (let [form (get local-definitions name)
                         clauses (callable-form-clauses form)
-                        synchronous?
-                          (every?
+                        synchronous? (every?
                             (fn [clause Any] Bool
                               (callable-clause-synchronous? clause proofs))
                             clauses)]
@@ -1434,7 +1502,7 @@
                 (ordered-keys local-definitions))]
         (if (= next proofs) next (recur next))))))
 
-(defn function-valued-type? [(type Any)] Bool
+(defn function-valued-type? [type Any] Bool
   (let [body (if (poly-type? type) (get type "body") type)]
     (cond
       (fn-type? body) true
@@ -1443,7 +1511,7 @@
              (every? function-valued-type? (get body "members")))
       :else false)))
 
-(defn definition-returns-callable? [(form Any)] Bool
+(defn definition-returns-callable? [form Any] Bool
   (let [clauses (callable-form-clauses form)]
     (and (> (count clauses) 0)
          (every?
@@ -1454,7 +1522,10 @@
 (declare callable-value-synchronous?)
 
 (defn callable-body-tail-synchronous?
-  [(body Any) (callable-proofs Any) (return-proofs Any) (aliases Any)] Bool
+  [body Any
+   callable-proofs Any
+   return-proofs Any
+   aliases Any] Bool
   (and (vector? body)
        (> (count body) 0)
        (callable-value-synchronous?
@@ -1462,7 +1533,10 @@
          callable-proofs return-proofs aliases)))
 
 (defn callable-value-synchronous?
-  [(value Any) (callable-proofs Any) (return-proofs Any) (aliases Any)] Bool
+  [value Any
+   callable-proofs Any
+   return-proofs Any
+   aliases Any] Bool
   (cond
     (and (map? value) (= (get value "node") "ref"))
       (let [key (reference-key value)]
@@ -1512,9 +1586,10 @@
 
     (and (map? value) (= (get value "node") "let"))
       (let [bindings (get value "bindings")
-            final-aliases
-              (reduce
-                (fn [env Any binding Any] Any
+            final-aliases (reduce
+                (fn
+                  [env Any
+                   binding Any] Any
                   (let [target (get binding "name")
                         proof (callable-value-synchronous?
                                 (get binding "value")
@@ -1533,12 +1608,16 @@
 
     :else false))
 
+;; Greatest fixed point: recursive factories remain proven only when every
+;; return path retains positive callable-value provenance.
 (defn program-returns-synchronous-callable
-  [(prog Any) (callable-proofs Any)] Any
+  [prog Any
+   callable-proofs Any] Any
   (let [forms (get prog "forms")
-        local-definitions
-          (reduce
-            (fn [out Any raw-form Any] Any
+        local-definitions (reduce
+            (fn
+              [out Any
+               raw-form Any] Any
               (let [form (if (= (get raw-form "node") "with-meta")
                            (get raw-form "expr")
                            raw-form)]
@@ -1550,9 +1629,10 @@
             {}
             forms)
         imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
-        imported-proofs
-          (reduce
-            (fn [out Any entry Any] Any
+        imported-proofs (reduce
+            (fn
+              [out Any
+               entry Any] Any
               (if (and (map? entry)
                        (string? (get entry "name"))
                        (boolean? (get entry "returnsSynchronousCallable")))
@@ -1561,9 +1641,10 @@
                 out))
             {}
             imported)
-        external-proofs
-          (reduce
-            (fn [out Any entry Any] Any
+        external-proofs (reduce
+            (fn
+              [out Any
+               entry Any] Any
               (let [name (get entry "name")]
                 (if (and (string? name)
                       (nil? (reference-map-ref out name nil)))
@@ -1572,20 +1653,20 @@
                   out)))
             imported-proofs
             (get prog "externs"))
-        assumed
-          (reduce
-            (fn [out Any name Any] Any (assoc out name true))
+        assumed (reduce
+            (fn
+              [out Any
+               name Any] Any
+              (assoc out name true))
             external-proofs
             (ordered-keys local-definitions))]
-    ;; Greatest fixed point: recursive factories remain proven only when every
-    ;; return path retains positive callable-value provenance.
     (loop [proofs assumed]
-      (let [next
-              (reduce
-                (fn [out Any name Any] Any
+      (let [next (reduce
+                (fn
+                  [out Any
+                   name Any] Any
                   (let [form (get local-definitions name)
-                        proven?
-                          (every?
+                        proven? (every?
                             (fn [clause Any] Bool
                               (let [body (get clause "body")]
                                 (and (vector? body)
@@ -1601,7 +1682,9 @@
                 (ordered-keys local-definitions))]
         (if (= next proofs) next (recur next))))))
 
-(defn constraint-synchronization-proof [(predicate Any) (env Any)] Bool
+(defn constraint-synchronization-proof
+  [predicate Any
+   env Any] Bool
   (let [proofs (get env "#%callable-synchronous")
         return-proofs (get env "#%returns-synchronous-callable")]
     (cond
@@ -1624,15 +1707,16 @@
 
       :else false)))
 
-(defn constraint-callable-resolution! [(inferred Any) (effective Any)] Any
+(defn constraint-callable-resolution!
+  [inferred Any
+   effective Any] Any
   (if (poly-type? inferred)
     (let [body (get inferred "body")
           bindings (atom {})]
       (when (and (fn-type? body) (= (count (get body "params")) 1))
         (infer-type-var-bindings! (nth (get body "params") 0) effective bindings))
       (let [bounds (get inferred "bounds")
-            bounds-ok?
-              (or (nil? bounds)
+            bounds-ok? (or (nil? bounds)
                   (every?
                     (fn [var Any] Bool
                       (let [bound (get bounds var)
@@ -1646,12 +1730,11 @@
     {"type" inferred "bounds-ok" true}))
 
 (defn binding-constraint-error!
-  [(target Any)
-   (declared Any)
-   (predicate-type Any)
-   (context String)
-   (reason String)]
-  Nil
+  [target Any
+   declared Any
+   predicate-type Any
+   context String
+   reason String] Nil
   (let [binding-name (binding-target->string target)
         expected (if (nil? declared)
                    "(Fn [DeclaredType] Bool)"
@@ -1666,13 +1749,12 @@
 ;; and every sibling parameter remain out of scope until all constraints at the
 ;; boundary have been validated.
 (defn check-binding-constraint!
-  [(owner Any)
-   (declared Any)
-   (effective Any)
-   (predicate Any)
-   (env Any)
-   (context String)]
-  Nil
+  [owner Any
+   declared Any
+   effective Any
+   predicate Any
+   env Any
+   context String] Nil
   (if (nil? predicate)
     (remember-binding-constraint-proof! owner false)
     (do
@@ -1732,7 +1814,7 @@
                 (remember-binding-constraint-proof! owner true))))))
   nil)))
 
-(defn destructure-default-exprs [(pattern Any)] Any
+(defn destructure-default-exprs [pattern Any] Any
   (let [target (param-binding-target pattern)
         t (get target "type")]
     (cond
@@ -1742,7 +1824,7 @@
       (vec (apply concat (mapv destructure-default-exprs (get target "names"))))
       :else [])))
 
-(defn parametric-def-for-app [(t Any)] Any
+(defn parametric-def-for-app [t Any] Any
   (if (app-type? t)
     (let [ctor (get t "name")
           direct (get-in (deref STATE) ["parametric-unions" ctor])
@@ -1754,7 +1836,9 @@
           (get-in (deref STATE) ["parametric-unions" union-name]))))
     nil))
 
-(defn resolve-parametric-field-type! [(field-type Any) (aggregate Any)] Any
+(defn resolve-parametric-field-type!
+  [field-type Any
+   aggregate Any] Any
   (let [pdef (parametric-def-for-app aggregate)]
     (if (nil? pdef)
       field-type
@@ -1765,7 +1849,9 @@
           (swap! bindings assoc (nth params i) (nth args i)))
         (apply-type-bindings field-type bindings)))))
 
-(defn member-view-type [(member-name String) (target-type Any)] Any
+(defn member-view-type
+  [member-name String
+   target-type Any] Any
   (let [pdef (parametric-def-for-app target-type)
         members (if (nil? pdef) [] (get pdef "members"))]
     (if (and (not (nil? pdef))
@@ -1774,7 +1860,7 @@
       (make-app member-name (get target-type "args"))
       (make-prim member-name))))
 
-(defn record-field-map-for-type [(aggregate Any)] Any
+(defn record-field-map-for-type [aggregate Any] Any
   (cond
     (prim? aggregate)
     (get-in (deref STATE) ["record-fields" (get aggregate "name")])
@@ -1782,7 +1868,7 @@
     (get-in (deref STATE) ["record-fields" (get aggregate "name")])
     :else nil))
 
-(defn nominal-union-members [(aggregate Any)] Any
+(defn nominal-union-members [aggregate Any] Any
   (cond
     (prim? aggregate)
     (get-in (deref STATE) ["union-members" (get aggregate "name")])
@@ -1790,7 +1876,9 @@
     (get-in (deref STATE) ["union-members" (get aggregate "name")])
     :else nil))
 
-(defn record-field-type-for! [(aggregate Any) (keyword String)] Any
+(defn record-field-type-for!
+  [aggregate Any
+   keyword String] Any
   (let [field-map (record-field-map-for-type aggregate)]
     (if (not (nil? field-map))
       (if (contains? field-map keyword)
@@ -1817,13 +1905,21 @@
               nil)))))))
 
 (defn destructure-type-error!
-  [(pattern Any) (aggregate Any) (where String) (message String)] Nil
+  [pattern Any
+   aggregate Any
+   where String
+   message String] Nil
   (emit-diag! (str "beagle: " where " destructuring "
                 (if (= (get pattern "type") "map-destructure") "map" "sequential")
                 ": " message " (aggregate type " (type->string aggregate) ")")))
 
-(defn bind-destructure-any! [(env Any) (pattern Any) (owner Any)] Any
-  (let [out (reduce (fn [acc Any name String] Any
+(defn bind-destructure-any!
+  [env Any
+   pattern Any
+   owner Any] Any
+  (let [out (reduce (fn
+                      [acc Any
+                       name String] Any
                       (binder-env-assoc acc owner name ANY))
               env (destructure-bound-names pattern))]
     (doseq [default (destructure-default-exprs pattern)]
@@ -1834,7 +1930,11 @@
 ;; type recursively onto every bound name; do not collapse a typed pattern to
 ;; blanket Any. Explicit `(pattern Any)` remains the dynamic boundary.
 (defn bind-destructure-type!
-  [(env Any) (pattern Any) (aggregate Any) (where String) (owner Any)] Any
+  [env Any
+   pattern Any
+   aggregate Any
+   where String
+   owner Any] Any
   (cond
     (string? pattern)
     (binder-env-assoc env owner pattern aggregate)
@@ -1855,8 +1955,10 @@
                   " positional values, but the tuple has " (count elems)))
               (bind-destructure-any! env pattern owner))
             (let [indices (Vec Int) (vec (range (count names)))
-                  with-fixed (reduce
-                               (fn [out Any i Int] Any
+                  with-fixed Any (reduce
+                               (fn
+                                 [out Any
+                                  i Int] Any
                                  (bind-destructure-type! out (nth names i) (nth elems i) where owner))
                                env indices)]
               (if (nil? rest-name)
@@ -1868,8 +1970,10 @@
           (or (= (get aggregate "name") "Vec") (= (get aggregate "name") "List"))
           (= (count (get aggregate "args")) 1))
         (let [elem-type (nullable-type (nth (get aggregate "args") 0))
-              with-fixed (reduce
-                           (fn [out Any target Any] Any
+              with-fixed Any (reduce
+                           (fn
+                             [out Any
+                              target Any] Any
                              (bind-destructure-type! out target elem-type where owner))
                            env names)]
           (if (nil? rest-name)
@@ -1902,7 +2006,9 @@
           (bind-destructure-any! env pattern owner))
         (let [defaults (get pattern "or")
               projection (reduce
-                           (fn [state Any name String] Any
+                           (fn
+                             [state Any
+                              name String] Any
                              (let [keyword (str ":" name)
                                    default-entry (first
                                                    (filterv
@@ -1946,7 +2052,7 @@
 
     :else env))
 
-(defn param-type-or-any [(p Any)] Any
+(defn param-type-or-any [p Any] Any
   (let [t (get p "type")]
     (cond
       (= t "param")
@@ -1955,7 +2061,7 @@
       (= t "seq-destructure") ANY
       :else ANY)))
 
-(defn inference-param-type! [(p Any)] Any
+(defn inference-param-type! [p Any] Any
   (let [kind (get p "type")]
     (cond
       (and (= kind "param") (not (nil? (get p "ann")))) (get p "ann")
@@ -1963,30 +2069,32 @@
       ;; Untyped destructuring does not identify one scalar input type.
       :else ANY)))
 
-(defn vec-aggregate-type? [(t Any)] Bool
+(defn vec-aggregate-type? [t Any] Bool
   (and (app-type? t)
        (= (get t "name") "Vec")
        (= (count (get t "args")) 1)))
 
-(defn rest-param-call-element-type [(rest-param Any)] Any
+(defn rest-param-call-element-type [rest-param Any] Any
   (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
     (if (vec-aggregate-type? authored)
       (nth (get authored "args") 0)
       ANY)))
 
-(defn inference-rest-call-element-type! [(rest-param Any)] Any
+(defn inference-rest-call-element-type! [rest-param Any] Any
   (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
     (if (vec-aggregate-type? authored)
       (nth (get authored "args") 0)
       (fresh-inference-var!))))
 
-(defn rest-param-body-type [(rest-param Any)] Any
+(defn rest-param-body-type [rest-param Any] Any
   (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
     (if (vec-aggregate-type? authored)
       authored
       (make-app "Vec" [(rest-param-call-element-type rest-param)]))))
 
-(defn check-rest-annotation! [(rest-param Any) (context String)] Nil
+(defn check-rest-annotation!
+  [rest-param Any
+   context String] Nil
   (when (not (nil? rest-param))
     (let [authored (get rest-param "ann")]
       (when (and (not (nil? authored)) (not (vec-aggregate-type? authored)))
@@ -1996,7 +2104,10 @@
             "(Vec Element), got " (type->string authored))))))
   nil)
 
-(defn extend-with-params! [(env Any) (params (Vec Any)) (rest-param Any)] Any
+(defn extend-with-params!
+  [env Any
+   params (Vec Any)
+   rest-param Any] Any
   (let [all-params (if (nil? rest-param)
                      (vec params)
                      (conj (vec params) rest-param))
@@ -2020,7 +2131,9 @@
             "parameter"))))
     (let [indices (Vec Int) (vec (range (count all-params)))]
       (reduce
-      (fn [out Any i Int] Any
+      (fn
+        [out Any
+         i Int] Any
         (let [p (nth all-params i)
               target (param-binding-target p)
               effective (nth effective-types i)]
@@ -2033,9 +2146,13 @@
 ;; infer-expr! is mutually recursive with the helpers below (and register-*!);
 ;; beagle/clj has no `declare` combiner, but a passthrough (declare ...) emits a
 ;; Clojure (declare ...) so the forward ref resolves at load time.
-(defn extend-with-let-bindings! [(env Any) (bindings (Vec Any))] Any
+(defn extend-with-let-bindings!
+  [env Any
+   bindings (Vec Any)] Any
   (reduce
-    (fn [out Any b Any] Any
+    (fn
+      [out Any
+       b Any] Any
       (let [declared (get b "ann")
             inferred (infer-expr-expected! (get b "value") out declared)
             bname (get b "name")]
@@ -2068,7 +2185,7 @@
               (if (not (nil? declared)) declared inferred))))))
     env bindings))
 
-(defn collection-element-type [(collection-type Any)] Any
+(defn collection-element-type [collection-type Any] Any
   (cond
     (and (app-type? collection-type)
       (or (= (get collection-type "name") "Vec")
@@ -2092,7 +2209,9 @@
   {"nil?" "Nil" "string?" "String" "number?" "Number" "integer?" "Int"
    "keyword?" "Keyword" "symbol?" "Symbol" "boolean?" "Bool"})
 
-(defn type-matches-predicate? [(value Any) (predicate-name String)] Bool
+(defn type-matches-predicate?
+  [value Any
+   predicate-name String] Bool
   (cond
     (= predicate-name "Number")
       (and (prim? value)
@@ -2101,10 +2220,11 @@
     :else
       (and (prim? value) (= (get value "name") predicate-name))))
 
-(defn predicate-narrowing-type [(current Any) (predicate-name String)] Any
+(defn predicate-narrowing-type
+  [current Any
+   predicate-name String] Any
   (if (dynamic-type? current)
-    (let [matches
-          (filterv
+    (let [matches (filterv
             (fn [alternative Any] Bool
               (type-matches-predicate? alternative predicate-name))
             (get current "args"))]
@@ -2116,7 +2236,9 @@
       NUMBER-TYPE
       (make-prim predicate-name))))
 
-(defn extract-narrowing [(cond-expr Any) (env Any)] Any
+(defn extract-narrowing
+  [cond-expr Any
+   env Any] Any
   (cond
     (not= (get cond-expr "node") "call") {"var" nil "type" nil "negated" false}
 
@@ -2132,8 +2254,7 @@
                (= (count args) 1)
                (= (get (nth args 0) "node") "ref"))
             (let [var-name (local-reference-key (nth args 0))
-                  narrowed
-                    (predicate-narrowing-type
+                  narrowed (predicate-narrowing-type
                       (get env var-name ANY)
                       (get TYPE-PREDICATES fn-name))]
               (if (some? narrowed)
@@ -2149,7 +2270,8 @@
 
           (and (not (nil? fn-name)) (or (= fn-name "=") (= fn-name "not="))
                (= (count args) 2))
-            (let [a1 (nth args 0) a2 (nth args 1)
+            (let [a1 (nth args 0)
+                  a2 (nth args 1)
                   neg (= fn-name "not=")]
               (cond
                 (and (= (get a1 "node") "ref")
@@ -2170,41 +2292,46 @@
 
           :else {"var" nil "type" nil "negated" false}))))
 
-(defn type-could-be-false? [(t Any)] Bool
+(defn type-could-be-false? [t Any] Bool
   (cond
     (any-type? t) true
     (prim? t) (= (get t "name") "Bool")
     (union-type? t)
-      (reduce (fn [acc Bool m Any] Bool (or acc (type-could-be-false? m)))
+      (reduce (fn
+                [acc Bool
+                 m Any] Bool
+                (or acc (type-could-be-false? m)))
               false (get t "members"))
     :else false))
 
-(defn call-fn-name [(e Any)] Any
+(defn call-fn-name [e Any] Any
   (let [ref (if (= (get e "node") "call") (get e "fn") nil)]
     (if (named-reference? ref) (reference-leaf ref) nil)))
 
-(defn call-fn-ref [(e Any)] Any
+(defn call-fn-ref [e Any] Any
   (if (= (get e "node") "call")
     (let [fn-ref (get e "fn")]
       (if (named-reference? fn-ref) fn-ref nil))
     nil))
 
-(defn unqualified-member-name [(name String)] String
+(defn unqualified-member-name [name String] String
   (let [dot-index (U Int Nil) (str/last-index-of name ".")
         slash-index (U Int Nil) (str/last-index-of name "/")
-        separator (cond
+        separator (U Int Nil) (cond
                     (nil? dot-index) slash-index
                     (nil? slash-index) dot-index
                     (> dot-index slash-index) dot-index
                     :else slash-index)]
     (if (nil? separator) name (subs name (+ separator 1)))))
 
-(defn string-in? [(values Any) (wanted String)] Bool
+(defn string-in?
+  [values Any
+   wanted String] Bool
   (boolean (some (fn [value String] Bool (= value wanted)) values)))
 
 ;; Return the closed nominal alternatives represented by a type, including a
 ;; nominal union nested in a structural `(U NominalUnion Nil)`.
-(defn closed-union-members [(value Any)] Any
+(defn closed-union-members [value Any] Any
   (let [nominal (cond
                   (prim? value)
                     (get-in (deref STATE) ["union-members" (get value "name")])
@@ -2227,20 +2354,25 @@
         [(get value "name")]
 
       (union-type? value)
-        (reduce (fn [members Any alternative Any] Any
+        (reduce (fn
+                  [members Any
+                   alternative Any] Any
                   (into members (closed-union-members alternative)))
                 [] (get value "members"))
 
       :else [])))
 
-(defn canonical-union-member-name [(written String) (target-type Any)] Any
+(defn canonical-union-member-name
+  [written String
+   target-type Any] Any
   (let [members (closed-union-members target-type)]
     (if (string-in? members written)
       written
       (let [base (unqualified-member-name written)
-            matches
-              (reduce (fn [found Any member String] Any
-                        (if (and (= base (unqualified-member-name member))
+            matches (reduce (fn
+                              [found Any
+                               member String] Any
+                              (if (and (= base (unqualified-member-name member))
                                  (not (string-in? found member)))
                           (conj found member)
                           found))
@@ -2249,7 +2381,9 @@
 
 ;; Remove a member only from a closed union. `Any` is open and must retain its
 ;; false-branch width.
-(defn subtract-union-member [(current Any) (member-name String)] Any
+(defn subtract-union-member
+  [current Any
+   member-name String] Any
   (cond
     (any-type? current) current
 
@@ -2271,12 +2405,13 @@
 
     :else (remove-from-union current (make-prim member-name))))
 
-(defn unstable-binding-keys [(value Any)] Any
+(defn unstable-binding-keys [value Any] Any
   (cond
     (map? value)
-      (let [nested
-            (reduce (fn [found Any child Any] Any
-                      (merge found (unstable-binding-keys child)))
+      (let [nested (reduce (fn
+                             [found Any
+                              child Any] Any
+                             (merge found (unstable-binding-keys child)))
                     {} (vals value))
             target (if (= (get value "node") "set!")
                      (get value "target") nil)]
@@ -2285,13 +2420,17 @@
           nested))
 
     (vector? value)
-      (reduce (fn [found Any child Any] Any
+      (reduce (fn
+                [found Any
+                 child Any] Any
                 (merge found (unstable-binding-keys child)))
               {} value)
 
     :else {}))
 
-(defn stable-scrutinee-key [(target Any) (env Any)] Any
+(defn stable-scrutinee-key
+  [target Any
+   env Any] Any
   (let [key (if (= (get target "node") "ref")
               (local-reference-key target) nil)
         dynamic-vars (get env "#%dynamic-vars")]
@@ -2302,7 +2441,9 @@
       key
       nil)))
 
-(defn instance-narrowings [(cond-expr Any) (env Any)] Any
+(defn instance-narrowings
+  [cond-expr Any
+   env Any] Any
   (let [fn-name (call-fn-name cond-expr)
         args (get cond-expr "args")]
     (if (and (= fn-name "instance?")
@@ -2329,12 +2470,18 @@
 ;; bare-ref truthiness (no else-narrow to Nil when the non-nil remainder could
 ;; itself be false) and the extract-narrowing predicates. Only env-bound
 ;; locals narrow.
-(defn test-narrowings [(cond-expr Any) (env Any)] Any
+(defn test-narrowings
+  [cond-expr Any
+   env Any] Any
   (let [fn-name (call-fn-name cond-expr)
         args (get cond-expr "args")
         instance-result (instance-narrowings cond-expr env)
-        fold-branch (fn [xs Any pick-then Bool] Any
-                      (reduce (fn [acc Any a Any] Any
+        fold-branch (fn
+                      [xs Any
+                       pick-then Bool] Any
+                      (reduce (fn
+                                [acc Any
+                                 a Any] Any
                                 (let [tn (test-narrowings a (merge env acc))]
                                   (merge acc (get tn (if pick-then "then" "else")))))
                               {} xs))]
@@ -2381,7 +2528,9 @@
                     {"then" neg "else" pos}
                     {"then" pos "else" neg})))))))))
 
-(defn narrow-env-for-condition [(env Any) (cond-expr Any)] Any
+(defn narrow-env-for-condition
+  [env Any
+   cond-expr Any] Any
   (let [tn (test-narrowings cond-expr env)]
     {"then" (merge env (get tn "then"))
      "else" (merge env (get tn "else"))}))
@@ -2389,7 +2538,10 @@
 ;; --- match arm narrowing -----------------------------------------------------
 
 (defn narrow-env-for-match
-  [(clause Any) (target-type Any) (env Any) (scrutinee Any)] Any
+  [clause Any
+   target-type Any
+   env Any
+   scrutinee Any] Any
   (let [pat (get clause "pattern")]
     (cond
       (= (get pat "type") "record")
@@ -2406,7 +2558,9 @@
                           (member-view-type rec-name target-type)))
               indices (Vec Int) (vec (range (count bindings)))]
           (if (not (nil? field-map))
-            (reduce (fn [arm-env Any i Int] Any
+            (reduce (fn
+                      [arm-env Any
+                       i Int] Any
                       (let [b (nth bindings i)
                             kw (if (not (nil? field-order))
                                  (if (< i (count field-order)) (nth field-order i) nil)
@@ -2430,7 +2584,9 @@
 
 ;; --- match exhaustiveness ----------------------------------------------------
 
-(defn check-match-exhaustiveness! [(target-type Any) (clauses (Vec Any))] Nil
+(defn check-match-exhaustiveness!
+  [target-type Any
+   clauses (Vec Any)] Nil
   (let [union-name (cond
                      (prim? target-type) (get target-type "name")
                      (app-type? target-type) (get target-type "name")
@@ -2439,12 +2595,13 @@
                         (get-in (deref STATE) ["union-members" union-name])
                         nil)]
     (when (not (nil? union-members))
-      (let [matched-types (reduce (fn [acc Any c Any] Any
+      (let [matched-types (reduce (fn
+                                    [acc Any
+                                     c Any] Any
                                     (let [pat (get c "pattern")]
                                       (if (= (get pat "type") "record")
                                         (let [written (get pat "name")
-                                              canonical
-                                                (canonical-union-member-name
+                                              canonical (canonical-union-member-name
                                                   written target-type)]
                                           (conj acc
                                             (if (nil? canonical)
@@ -2462,7 +2619,9 @@
 
 ;; --- keyword field lookup ----------------------------------------------------
 
-(defn lookup-kw-field-type [(kw String) (target-type Any)] Any
+(defn lookup-kw-field-type
+  [kw String
+   target-type Any] Any
   (cond
     (and (prim? target-type)
          (not (nil? (get-in (deref STATE) ["record-fields" (get target-type "name")]))))
@@ -2474,12 +2633,11 @@
 ;; --- resolve polymorphic call ------------------------------------------------
 
 (defn resolve-poly-call-expected!
-  [(poly-t Any)
-   (args (Vec Any))
-   (env Any)
-   (expected-result Any)
-   (require-complete? Bool)]
-  Any
+  [poly-t Any
+   args (Vec Any)
+   env Any
+   expected-result Any
+   require-complete? Bool] Any
   (let [body (get poly-t "body")
         bindings (atom {})
         arg-types (mapv (fn [a Any] Any (infer-expr! a env)) args)
@@ -2517,7 +2675,10 @@
                         " without an expected result type")))))
     (apply-type-bindings body bindings)))
 
-(defn resolve-poly-call! [(poly-t Any) (args (Vec Any)) (env Any)] Any
+(defn resolve-poly-call!
+  [poly-t Any
+   args (Vec Any)
+   env Any] Any
   (resolve-poly-call-expected! poly-t args env nil false))
 
 ;; --- last-expr-type! ----------------------------------------------------------
@@ -2528,19 +2689,25 @@
 ;; Mirror check.rkt last-expr-type and make it loud. Qualified (`mod/name`) and
 ;; dotted (`config.x`) names are exempted — the oracle canonicalizes those
 ;; against the env / nixos schema, resolution selfhost doesn't model here.
-(defn bare-swallowed-ref? [(e Any) (env Any)] Bool
+(defn bare-swallowed-ref?
+  [e Any
+   env Any] Bool
   (and (= (get e "node") "ref")
        (not (qualified-reference? e))
        (nil? (reference-map-ref env e nil))
        (nil? (str/index-of (get e "name") "."))))
 
 (defn last-expr-type-expected!
-  [(body (Vec Any)) (env Any) (expected-result Any)] Any
+  [body (Vec Any)
+   env Any
+   expected-result Any] Any
   (let [n (count body)
         indices (Vec Int) (vec (range n))]
     (if (= n 0)
       ANY
-      (reduce (fn [acc Any i Int] Any
+      (reduce (fn
+                [acc Any
+                 i Int] Any
                 (let [e (nth body i)]
                   (when (and (< i (- n 1)) (bare-swallowed-ref? e env))
                     (emit-diag! (str "beagle: bare symbol `" (get e "name")
@@ -2554,12 +2721,16 @@
                     (infer-expr! e env))))
               ANY indices))))
 
-(defn last-expr-type! [(body (Vec Any)) (env Any)] Any
+(defn last-expr-type!
+  [body (Vec Any)
+   env Any] Any
   (last-expr-type-expected! body env nil))
 
 ;; --- check-args! --------------------------------------------------------------
 
-(defn enum-member-violation [(expected Any) (arg Any)] Any
+(defn enum-member-violation
+  [expected Any
+   arg Any] Any
   (if (and (prim? expected)
         (= (get arg "node") "literal")
         (= (get arg "kind") "keyword"))
@@ -2574,7 +2745,7 @@
         nil))
     nil))
 
-(defn emit-enum-member-violation! [(violation Any)] Nil
+(defn emit-enum-member-violation! [violation Any] Nil
   (emit-diag! (str "beagle: " (get violation "value")
                " is not a member of enum "
                (get violation "enum")
@@ -2584,14 +2755,18 @@
 
 ;; Equality has Any-typed stdlib parameters, so validate a literal keyword
 ;; against an enum-typed reference explicitly, in either operand order.
-(defn check-enum-comparison! [(fn-name Any) (args (Vec Any)) (env Any)] Nil
+(defn check-enum-comparison!
+  [fn-name Any
+   args (Vec Any)
+   env Any] Nil
   (let [leaf (reference-leaf fn-name)]
     (when (and (or (= leaf "=") (= leaf "not=")) (= (count args) 2))
-      (let [check-side! (fn [value-expr Any keyword-expr Any] Nil
+      (let [check-side! (fn
+                          [value-expr Any
+                           keyword-expr Any] Nil
                           (when (= (get value-expr "node") "ref")
                             (let [value-type (infer-expr! value-expr env)
-                                  violation
-                                  (enum-member-violation value-type keyword-expr)]
+                                  violation (enum-member-violation value-type keyword-expr)]
                               (when (some? violation)
                                 (emit-enum-member-violation! violation))))
                           nil)]
@@ -2608,7 +2783,10 @@
 ;; The per-arg message is "arg N" for BOTH fixed and rest positions (oracle
 ;; check-one-arg does not distinguish a "rest arg").
 (defn check-args!
-  [(fn-name Any) (fn-t Any) (args (Vec Any)) (env Any)] (Vec Any)
+  [fn-name Any
+   fn-t Any
+   args (Vec Any)
+   env Any] (Vec Any)
   (let [fixed (get fn-t "params")
         rest-t (get fn-t "rest")
         n-fixed (count fixed)
@@ -2625,8 +2803,7 @@
                            actual (if expected-atom?
                                     expected
                                     (infer-expr! (nth args i) env))
-                           enum-violation
-                             (enum-member-violation expected (nth args i))]
+                           enum-violation (enum-member-violation expected (nth args i))]
                        (when (not expected-atom?)
                          (unify-inference-types! actual expected))
                        (let [actual (prune-inference-type actual)
@@ -2659,9 +2836,13 @@
 
 ;; --- infer-cond-clauses! ------------------------------------------------------
 
-(defn infer-cond-clauses! [(clauses (Vec Any)) (env Any)] Any
+(defn infer-cond-clauses!
+  [clauses (Vec Any)
+   env Any] Any
   (let [final (reduce
-                (fn [state Any c Any] Any
+                (fn
+                  [state Any
+                   c Any] Any
                   (let [test (get c "test")
                         cur-env (get state "env")]
                     (infer-expr! test cur-env)
@@ -2676,16 +2857,16 @@
 
 ;; === register-record =========================================================
 
-(defn fields-have-constraints? [(fields Any)] Bool
+(defn fields-have-constraints? [fields Any] Bool
   (boolean
     (some (fn [field Any] Bool
             (not (nil? (binding-constraint field))))
       fields)))
 
-(defn record-validator-symbol [(name String)] String
+(defn record-validator-symbol [name String] String
   (str "$beagle$record$" name "$validate"))
 
-(defn install-imported-record-contracts! [(contracts Any)] Nil
+(defn install-imported-record-contracts! [contracts Any] Nil
   (doseq [contract contracts]
     (let [name (get contract "name")
           fields (get contract "fields")
@@ -2722,12 +2903,11 @@
 ;; are its alias-qualified members. Install that nominal relation before
 ;; checking the consumer so match patterns can resolve a written bare member to
 ;; its provider record contract.
-(defn install-imported-union-contracts! [(externs Any)] Nil
+(defn install-imported-union-contracts! [externs Any] Nil
   (doseq [external externs]
     (let [name (get external "name")
           external-type (get external "type")
-          alternatives
-            (if (union-type? external-type)
+          alternatives (if (union-type? external-type)
               (get external-type "members") [])]
       (when (and (string? name)
                  (> (count alternatives) 0)
@@ -2738,20 +2918,26 @@
             alternatives)))))
   nil)
 
-(defn register-record-validator! [(name String) (fields Any)] Nil
+(defn register-record-validator!
+  [name String
+   fields Any] Nil
   (when (fields-have-constraints? fields)
     (swap! STATE assoc-in
       ["record-validators" name]
       (record-validator-symbol name)))
   nil)
 
-(defn remember-record-update! [(with-node Any) (contract Any)] Nil
+(defn remember-record-update!
+  [with-node Any
+   contract Any] Nil
   (let [check-id (get with-node WITH-CHECK-ID-KEY)]
     (when (not (nil? check-id))
       (swap! STATE assoc-in ["record-updates" check-id] contract)))
   nil)
 
-(defn remember-record-field-access! [(access-node Any) (contract Any)] Nil
+(defn remember-record-field-access!
+  [access-node Any
+   contract Any] Nil
   (let [check-id (get access-node KW-ACCESS-CHECK-ID-KEY)]
     (when (not (nil? check-id))
       (swap! STATE assoc-in
@@ -2759,15 +2945,22 @@
         contract)))
   nil)
 
-(defn register-record! [(name String) (fields (Vec Any)) (env Any)] Any
+(defn register-record!
+  [name String
+   fields (Vec Any)
+   env Any] Any
   (let [rec-type (make-prim name)
         name-lower (str/lower-case name)
-        field-map (reduce (fn [m Any f Any] Any
+        field-map (reduce (fn
+                            [m Any
+                             f Any] Any
                             (assoc m (str ":" (get f "name"))
                                    (if (nil? (get f "ann")) ANY (get f "ann"))))
                           {} fields)
         field-order (mapv (fn [f Any] String (str ":" (get f "name"))) fields)
-        env1 (reduce (fn [e Any f Any] Any
+        env1 (reduce (fn
+                       [e Any
+                        f Any] Any
                        (assoc e (str name-lower "-" (get f "name"))
                               (make-fn [rec-type] nil (if (nil? (get f "ann")) ANY (get f "ann")))))
                      env fields)
@@ -2782,14 +2975,18 @@
 
 ;; === register-union ==========================================================
 
+;; Core bare members are payloadless variants. Hosted targets reserve bare
+;; members for pre-declared records and receive no synthetic constructor.
 (defn register-nullary-union-members!
-  [(members (Vec Any)) (type-params Any) (env Any)] Any
-  ;; Core bare members are payloadless variants. Hosted targets reserve bare
-  ;; members for pre-declared records and receive no synthetic constructor.
+  [members (Vec Any)
+   type-params Any
+   env Any] Any
   (if (not (= (get (deref STATE) "target") "core"))
     env
     (reduce
-      (fn [out Any member String] Any
+      (fn
+        [out Any
+         member String] Any
         (let [ctor (str "->" member)]
           (if (some? (get out ctor))
             out
@@ -2801,18 +2998,19 @@
       env members)))
 
 (defn register-union!
-  [(name String)
-   (members (Vec Any))
-   (type-params Any)
-   (member-fields Any)
-   (env Any)]
-  Any
+  [name String
+   members (Vec Any)
+   type-params Any
+   member-fields Any
+   env Any] Any
   (do
     (swap! STATE assoc-in ["union-members" name] members)
     (if (or (nil? type-params) (= (count type-params) 0))
       (let [env1 (assoc env name (make-union (mapv (fn [m Any] Any (make-prim m)) members)))
             env2 (if (not (nil? member-fields))
-                   (reduce (fn [e Any m Any] Any
+                   (reduce (fn
+                             [e Any
+                              m Any] Any
                              (let [fields (get member-fields m)]
                                (if (not (nil? fields)) (register-record! m fields e) e)))
                      env1 members)
@@ -2824,12 +3022,16 @@
         (doseq [member members]
           (swap! STATE assoc-in ["parametric-member-union" member] name))
         (let [env2 (if (not (nil? member-fields))
-          (reduce (fn [e Any m Any] Any
+          (reduce (fn
+                    [e Any
+                     m Any] Any
                     (let [fields (get member-fields m)]
                       (if (not (nil? fields))
                         (let [m-type (make-prim m)
                               m-lower (str/lower-case m)
-                              field-map (reduce (fn [fm Any f Any] Any
+                              field-map (reduce (fn
+                                                  [fm Any
+                                                   f Any] Any
                                                   (assoc fm (str ":" (get f "name"))
                                                          (if (nil? (get f "ann")) ANY (get f "ann"))))
                                                 {} fields)
@@ -2838,7 +3040,9 @@
                                                        (if (nil? (get f "ann")) ANY (get f "ann"))) fields)
                                                nil m-type)
                               e1 (assoc e (str "->" m) (make-poly type-params ctor-fn nil))
-                              e2 (reduce (fn [ee Any f Any] Any
+                              e2 (reduce (fn
+                                           [ee Any
+                                            f Any] Any
                                            (assoc ee (str m-lower "-" (get f "name"))
                                                   (make-poly type-params
                                                              (make-fn [m-type] nil
@@ -2861,7 +3065,10 @@
 ;; is the only way to build an HVec value). Returns true when it applies (raising
 ;; per-arity / per-element diagnostics), false otherwise so the caller falls back
 ;; to type-compatible?. Mirrors the oracle check-hvec-literal (check.rkt).
-(defn check-hvec-literal! [(value Any) (expected Any) (env Any)] Bool
+(defn check-hvec-literal!
+  [value Any
+   expected Any
+   env Any] Bool
   (if (and (app-type? expected) (= (get expected "name") "HVec")
            (not (nil? value)) (= (get value "node") "vec"))
     (let [items (get value "items")
@@ -2882,7 +3089,10 @@
 ;; Fresh constructors may adopt an expected structural type before aliases
 ;; exist. Recurse through unions and tuple literals without weakening the
 ;; invariant Atom type seen by existing references.
-(defn fresh-value-compatible?! [(value Any) (expected Any) (env Any)] Bool
+(defn fresh-value-compatible?!
+  [value Any
+   expected Any
+   env Any] Bool
   (cond
     (union-type? expected)
     (boolean (some (fn [alt Any] Bool
@@ -2908,7 +3118,10 @@
 ;; the constructor literal — existing references stay INVARIANT (a fresh cell has
 ;; no aliases, so adoption is sound). Returns true when it applies; false so the
 ;; caller falls back to type-compatible?.
-(defn check-atom-ctor! [(value Any) (expected Any) (env Any)] Bool
+(defn check-atom-ctor!
+  [value Any
+   expected Any
+   env Any] Bool
   (if (and (app-type? expected) (= (get expected "name") "Atom")
            (= (count (get expected "args")) 1)
            (not (nil? value)) (= (call-fn-name value) "atom")
@@ -2922,19 +3135,21 @@
       true)
     false))
 
-(defn js-selector-name [(key Any)] Any
+(defn js-selector-name [key Any] Any
   (if (= (get key "node") "js-selector") (get key "name") nil))
 
-(defn js-vec-type? [(receiver-type Any)] Bool
+(defn js-vec-type? [receiver-type Any] Bool
   (and (app-type? receiver-type)
     (= (get receiver-type "name") "Vec")
     (= (count (get receiver-type "args")) 1)))
 
-(defn js-record-type? [(receiver-type Any)] Bool
+(defn js-record-type? [receiver-type Any] Bool
   (or (not (nil? (record-field-map-for-type receiver-type)))
     (not (nil? (nominal-union-members receiver-type)))))
 
-(defn js-builtin-receiver-name [(_receiver Any) (receiver-type Any)] Any
+(defn js-builtin-receiver-name
+  [_receiver Any
+   receiver-type Any] Any
   (cond
     (and (prim? receiver-type) (= (get receiver-type "name") "JsMath"))
     "Math"
@@ -2967,7 +3182,9 @@
 ;; language built-ins contribute positive contracts only: their JavaScript
 ;; prototypes remain open, so an unregistered selector still degrades to Any.
 (defn lookup-js-static-member!
-  [(receiver Any) (receiver-type Any) (selector String)] Any
+  [receiver Any
+   receiver-type Any
+   selector String] Any
   (let [builtin (js-builtin-receiver-name receiver receiver-type)]
     (cond
       (js-record-type? receiver-type)
@@ -2986,10 +3203,8 @@
 
       (not (nil? builtin))
       (let [contract (get-in JS-BUILTIN-MEMBER-CONTRACTS [builtin selector])
-            resolved-contract
-              (if (and (= builtin "Map") (not (nil? contract)))
-                (let [bindings
-                        (atom {"K" (nth (get receiver-type "args") 0)
+            resolved-contract (if (and (= builtin "Map") (not (nil? contract)))
+                (let [bindings (atom {"K" (nth (get receiver-type "args") 0)
                                "V" (nth (get receiver-type "args") 1)})]
                   (apply-type-bindings contract bindings))
                 contract)]
@@ -2998,12 +3213,11 @@
       :else {"closed" false "type" nil "owner" nil})))
 
 (defn infer-js-member-call!
-  [(selector String)
-   (owner String)
-   (member-type Any)
-   (args (Vec Any))
-   (env Any)]
-  Any
+  [selector String
+   owner String
+   member-type Any
+   args (Vec Any)
+   env Any] Any
   (cond
     (poly-type? member-type)
     (let [resolved (resolve-poly-call! member-type args env)]
@@ -3029,12 +3243,11 @@
       ANY)))
 
 (defn infer-js-member!
-  [(operation String)
-   (receiver Any)
-   (key Any)
-   (trailing (Vec Any))
-   (env Any)]
-  Any
+  [operation String
+   receiver Any
+   key Any
+   trailing (Vec Any)
+   env Any] Any
   (let [receiver-type (infer-expr! receiver env)
         selector (js-selector-name key)]
     (cond
@@ -3074,7 +3287,10 @@
             selector (get resolved "owner") member-type trailing env))))))
 
 (defn infer-js-new-expected!
-  [(callee Any) (args (Vec Any)) (env Any) (expected-result Any)] Any
+  [callee Any
+   args (Vec Any)
+   env Any
+   expected-result Any] Any
   (let [raw-contract (infer-expr! callee env)
         contract (if (poly-type? raw-contract)
                    (resolve-poly-call-expected!
@@ -3088,16 +3304,24 @@
         (doseq [arg args] (infer-expr! arg env))
         ANY))))
 
-(defn infer-js-new! [(callee Any) (args (Vec Any)) (env Any)] Any
+(defn infer-js-new!
+  [callee Any
+   args (Vec Any)
+   env Any] Any
   (infer-js-new-expected! callee args env nil))
 
-(defn infer-expr-expected! [(e Any) (env Any) (expected-result Any)] Any
+(defn infer-expr-expected!
+  [e Any
+   env Any
+   expected-result Any] Any
   (if (and (not (nil? expected-result)) (= (get e "node") "js-new"))
     (infer-js-new-expected!
       (get e "callee") (get e "args") env expected-result)
     (infer-expr! e env)))
 
-(defn infer-expr! [(e Any) (env Any)] Any
+(defn infer-expr!
+  [e Any
+   env Any] Any
   (cond
     (nil? e) ANY
 
@@ -3250,7 +3474,9 @@
           (last-expr-type! (get e "body") env))
 
     (= (get e "node") "letfn")
-      (let [body-env (reduce (fn [be Any f Any] Any
+      (let [body-env (reduce (fn
+                               [be Any
+                                f Any] Any
                                (let [rp (opt-field (get f "rest"))
                                      p-types (mapv param-type-or-any (get f "params"))
                                      rtype (if (not (nil? rp))
@@ -3275,8 +3501,7 @@
                 et (if (or (nil? (get e "else")) (synthetic-absent-else? (get e "else")))
                      NIL-TYPE
                      (infer-expr! (get e "else") else-env))
-                literal-bool
-                (cond
+                literal-bool (cond
                   (and (map? condition)
                        (= (get condition "node") "ref")
                        (or (= (get condition "name") "true")
@@ -3459,7 +3684,9 @@
 
     (= (get e "node") "for")
       (let [body-env (reduce
-                       (fn [be Any c Any] Any
+                       (fn
+                         [be Any
+                          c Any] Any
                          (let [ct (get c "type")]
                            (cond
                              (= ct "binding")
@@ -3497,7 +3724,9 @@
 
     (= (get e "node") "doseq")
       (let [body-env (reduce
-                       (fn [be Any c Any] Any
+                       (fn
+                         [be Any
+                          c Any] Any
                          (let [ct (get c "type")]
                            (cond
                              (= ct "binding")
@@ -3538,8 +3767,7 @@
             scrutinee (stable-scrutinee-key (get e "target") env)
             clauses (get e "clauses")
             arm-types (mapv (fn [c Any] Any
-                              (let [arm-env
-                                    (narrow-env-for-match
+                              (let [arm-env (narrow-env-for-match
                                       c target-type env scrutinee)]
                                 (last-expr-type! (get c "body") arm-env)))
                             clauses)]
@@ -3573,8 +3801,7 @@
                            (prim? target-type) (get target-type "name")
                            (app-type? target-type) (get target-type "name")
                            :else nil)
-            record-contract
-              (if (and (string? nominal-name)
+            record-contract (if (and (string? nominal-name)
                     (not (nil?
                       (get-in (deref STATE) ["record-fields" nominal-name]))))
                 {"recordName" nominal-name}
@@ -3680,7 +3907,9 @@
     ;; (f x)) likewise — arg 2 only runs when arg 1 was falsy). Result is Any.
     (and (= (get e "node") "call")
          (or (= (call-fn-name e) "and") (= (call-fn-name e) "or")))
-      (do (reduce (fn [acc Any a Any] Any
+      (do (reduce (fn
+                    [acc Any
+                     a Any] Any
                     (let [env* (merge env acc)]
                       (infer-expr! a env*)
                       (let [tn (test-narrowings a env*)]
@@ -3798,7 +4027,9 @@
 
     (= (get e "node") "nix-fn-set")
       (let [formals (get e "formals")
-            body-env (reduce (fn [out Any formal Any] Any
+            body-env (reduce (fn
+                               [out Any
+                                formal Any] Any
                                (assoc out (get formal "name") ANY))
                        env formals)
             at-name (get e "at-name")
@@ -3833,6 +4064,11 @@
 
 ;; clojure.core's built-in dynamic vars — dynamic on the clj target only
 ;; (check.rkt seeds these so idiomatic `(binding [*out* …] …)` passes).
+;; ^:dynamic registry (check.rkt dyn-vars): names of `(def ^:dynamic
+;; …)` forms, consulted by `binding` to reject non-dynamic targets.
+;; Stashed under a #% sentinel key that no surface ref can collide
+;; with. clj builtins seed below (after the form pre-pass, so a user
+;; def of *out* keeps its declared type).
 (def CLJ-BUILTIN-DYNAMIC-VARS (Vec String)
   ["*out*" "*err*" "*in*" "*ns*" "*print-length*" "*print-level*"
    "*print-readably*" "*print-dup*" "*print-meta*" "*flush-on-newline*"
@@ -3841,7 +4077,7 @@
    "*data-readers*" "*default-data-reader-fn*" "*compile-path*"
    "*source-path*" "*clojure-version*" "*agent*"])
 
-(defn build-initial-env! [(prog Any)] Any
+(defn build-initial-env! [prog Any] Any
   (let [core-target? (= (get prog "target") "core")
         _ (if core-target? (install-core-filesystem-result-unions!) nil)
         externs (get prog "externs")
@@ -3850,46 +4086,48 @@
         target-stdlib (merge base-stdlib
                         (hosted-require-contracts (get prog "requires" [])))
         env-with-externs (if (not (nil? externs))
-                           (reduce (fn [env Any ext Any] Any
+                           (reduce (fn
+                                     [env Any
+                                      ext Any] Any
                                      (reference-map-assoc
                                        env (get ext "name") (get ext "type")))
                                    target-stdlib externs)
                            target-stdlib)
-        ;; ^:dynamic registry (check.rkt dyn-vars): names of `(def ^:dynamic
-        ;; …)` forms, consulted by `binding` to reject non-dynamic targets.
-        ;; Stashed under a #% sentinel key that no surface ref can collide
-        ;; with. clj builtins seed below (after the form pre-pass, so a user
-        ;; def of *out* keeps its declared type).
-        dyn-from-defs (reduce (fn [acc Any f Any] Any
+        dyn-from-defs (reduce (fn
+                                [acc Any
+                                 f Any] Any
                                 (if (and (= (get f "node") "def")
                                          (= (get f "dynamic") true))
                                   (assoc acc (get f "name") true)
                                   acc))
                               {} forms)
         dyn-vars (if (= (get prog "target") "clj")
-                   (reduce (fn [acc Any nm String] Any
+                   (reduce (fn
+                             [acc Any
+                              nm String] Any
                              (assoc acc nm true))
                            dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS)
                    dyn-from-defs)
         env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
         env-with-externs (if (= (get prog "target") "clj")
-                           (reduce (fn [env Any nm String] Any
+                           (reduce (fn
+                                     [env Any
+                                      nm String] Any
                                      (if (nil? (get env nm))
                                        (assoc env nm ANY)
                                        env))
                                    env-with-externs CLJ-BUILTIN-DYNAMIC-VARS)
                            env-with-externs)
-        callable-synchronization
-          (program-callable-synchronization prog)
-        returns-synchronous-callable
-          (program-returns-synchronous-callable prog callable-synchronization)
-        env-with-externs
-          (assoc env-with-externs
+        callable-synchronization (program-callable-synchronization prog)
+        returns-synchronous-callable (program-returns-synchronous-callable prog callable-synchronization)
+        env-with-externs (assoc env-with-externs
             "#%callable-synchronous" callable-synchronization
             "#%returns-synchronous-callable"
               returns-synchronous-callable)]
     (reduce
-      (fn [env Any raw-form Any] Any
+      (fn
+        [env Any
+         raw-form Any] Any
         (let [form (if (= (get raw-form "node") "with-meta")
                      (get raw-form "expr")
                      raw-form)
@@ -3941,7 +4179,9 @@
                 [] (get form "member-fields") env)
             (= node "defprotocol")
               (reduce
-                (fn [protocol-env Any method Any] Any
+                (fn
+                  [protocol-env Any
+                   method Any] Any
                   (let [rest-param (opt-field (get method "rest"))]
                     (assoc protocol-env
                       (get method "name")
@@ -3967,15 +4207,19 @@
 ;; program-scoped, monomorphic pass. A pending definition is retried only after
 ;; another value became concrete, which makes forward references independent of
 ;; source order. Explicit Any remains an authored boundary.
-(defn value-definition? [(form Any)] Bool
+(defn value-definition? [form Any] Bool
   (or (= (get form "node") "def") (= (get form "node") "defonce")))
 
-(defn unwrap-definition [(form Any)] Any
+(defn unwrap-definition [form Any] Any
   (if (= (get form "node") "with-meta") (get form "expr") form))
 
-(defn definition-type-table [(prog Any) (env Any)] Any
+(defn definition-type-table
+  [prog Any
+   env Any] Any
   (reduce
-    (fn [out Any raw-form Any] Any
+    (fn
+      [out Any
+       raw-form Any] Any
       (let [form (unwrap-definition raw-form)
             node (get form "node")
             name (get form "name")]
@@ -3992,7 +4236,10 @@
   ["A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M"
    "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z"])
 
-(defn rewrite-inference-vars! [(t Any) (mapping Any) (names Any)] Any
+(defn rewrite-inference-vars!
+  [t Any
+   mapping Any
+   names Any] Any
   (let [resolved (prune-inference-type t)]
     (cond
       (inference-var? resolved)
@@ -4028,7 +4275,7 @@
             (get resolved "members")))
       :else resolved)))
 
-(defn generalize-inference-type! [(t Any)] Any
+(defn generalize-inference-type! [t Any] Any
   (let [mapping (atom {})
         names (atom [])
         body (rewrite-inference-vars! t mapping names)]
@@ -4036,18 +4283,21 @@
       body
       (make-poly (deref names) body nil))))
 
-(defn callable-definition? [(form Any)] Bool
+(defn callable-definition? [form Any] Bool
   (or (= (get form "node") "defn") (= (get form "node") "defn-multi")))
 
-(defn callable-clauses [(form Any)] Any
+(defn callable-clauses [form Any] Any
   (if (= (get form "node") "defn") [form] (get form "arities")))
 
-(defn signature-alternatives [(signature Any)] Any
+(defn signature-alternatives [signature Any] Any
   (let [resolved (prune-inference-type signature)]
     (if (union-type? resolved) (get resolved "members") [resolved])))
 
 (defn extend-with-effective-params!
-  [(env Any) (params Any) (rest-param Any) (signature Any)] Any
+  [env Any
+   params Any
+   rest-param Any
+   signature Any] Any
   (let [all-params (if (nil? rest-param)
                      (vec params)
                      (conj (vec params) rest-param))
@@ -4058,7 +4308,9 @@
                             (make-app "Vec" [(get signature "rest")])))
         indices (Vec Int) (vec (range (count all-params)))]
     (reduce
-      (fn [out Any i Int] Any
+      (fn
+        [out Any
+         i Int] Any
         (let [parameter (nth all-params i)
               target (param-binding-target parameter)
               effective (nth effective-types i)]
@@ -4068,7 +4320,9 @@
       env
       indices)))
 
-(defn constrain-callable-definitions! [(prog Any) (env Any)] Nil
+(defn constrain-callable-definitions!
+  [prog Any
+   env Any] Nil
   (doseq [raw-form (get prog "forms")]
     (let [form (unwrap-definition raw-form)]
       (when (callable-definition? form)
@@ -4085,9 +4339,14 @@
               (unify-inference-types! actual (get signature "ret"))))))))
   nil)
 
-(defn finalize-callable-definition-types! [(prog Any) (env Any) (types Any)] Any
+(defn finalize-callable-definition-types!
+  [prog Any
+   env Any
+   types Any] Any
   (reduce
-    (fn [state Any raw-form Any] Any
+    (fn
+      [state Any
+       raw-form Any] Any
       (let [form (unwrap-definition raw-form)]
         (if (callable-definition? form)
           (let [name (get form "name")
@@ -4098,10 +4357,13 @@
     {"env" env "types" types}
     (get prog "forms")))
 
-(defn infer-value-definition-types! [(prog Any) (initial-env Any)] Any
-  (let [pending
-          (reduce
-            (fn [out Any raw-form Any] Any
+(defn infer-value-definition-types!
+  [prog Any
+   initial-env Any] Any
+  (let [pending (reduce
+            (fn
+              [out Any
+               raw-form Any] Any
               (let [form (unwrap-definition raw-form)]
                 (if (and (value-definition? form) (nil? (get form "ann")))
                   (conj out form)
@@ -4109,13 +4371,15 @@
             []
             (get prog "forms"))]
     (loop [env initial-env
-           types definition-type-table prog initial-env
+           types definition-type-table
+           prog initial-env
            remaining pending]
       (if (= (count remaining) 0)
         {"env" env "types" types "ok" true}
-        (let [step
-                (reduce
-                  (fn [state Any form Any] Any
+        (let [step (reduce
+                  (fn
+                    [state Any
+                     form Any] Any
                     (if (= true (get state "failed"))
                       state
                       (let [before-diags (get (deref STATE) "diagnostics")
@@ -4169,7 +4433,9 @@
                "types" (get step "types")
                "ok" false})))))))
 
-(defn infer-definition-types! [(prog Any) (initial-env Any)] Any
+(defn infer-definition-types!
+  [prog Any
+   initial-env Any] Any
   (let [before-provisional (get (deref STATE) "diagnostics")]
     ;; The first pass lets callable constraints inform value initializers. Any
     ;; diagnostic it encounters is provisional and is reproduced by the final
@@ -4186,7 +4452,9 @@
             "ok" true))
         values))))
 
-(defn check-core-function-abis! [(prog Any) (types Any)] Nil
+(defn check-core-function-abis!
+  [prog Any
+   types Any] Nil
   (when (= (get prog "target") "core")
     (doseq [raw-form (get prog "forms")]
       (let [form (unwrap-definition raw-form)
@@ -4204,7 +4472,10 @@
   nil)
 
 (defn check-parameter-declarations!
-  [(params Any) (rest-param Any) (env Any) (context String)] Nil
+  [params Any
+   rest-param Any
+   env Any
+   context String] Nil
   (check-rest-annotation! rest-param context)
   (doseq [p params]
     (when (= (get p "type") "param")
@@ -4226,7 +4497,10 @@
       context))
   nil)
 
-(defn check-field-declarations! [(fields Any) (env Any) (context String)] Nil
+(defn check-field-declarations!
+  [fields Any
+   env Any
+   context String] Nil
   (doseq [field fields]
     (check-binding-constraint!
       field
@@ -4240,7 +4514,7 @@
 (def NUMERIC-SCALAR-BACKINGS Any
   #{"Int" "Float" "U8" "U16" "U32" "U64" "I8" "I16" "I32" "F32"})
 
-(defn check-scalar-predicate-declarations! [(scalar Any)] Nil
+(defn check-scalar-predicate-declarations! [scalar Any] Nil
   (let [predicates (get scalar "predicates")
         backing (get scalar "backing")
         backing-name (if (prim? backing) (get backing "name") (str backing))]
@@ -4254,7 +4528,9 @@
             ") requires a numeric backing type; got " backing-name)))))
   nil)
 
-(defn declared-return-compatible? [(actual Any) (expected Any)] Bool
+(defn declared-return-compatible?
+  [actual Any
+   expected Any] Bool
   (or (nil? expected)
       (type-compatible? actual expected)
       (and (app-type? expected)
@@ -4262,7 +4538,10 @@
            (= (count (get expected "args")) 1)
            (type-compatible? actual (nth (get expected "args") 0)))))
 
-(defn check-method-body! [(method Any) (env Any) (context String)] Nil
+(defn check-method-body!
+  [method Any
+   env Any
+   context String] Nil
   (let [rest-param (opt-field (get method "rest"))
         body-env (extend-with-params! env (get method "params") rest-param)
         body (get method "body")
@@ -4275,20 +4554,26 @@
           ", got " (type->string actual)))))
   nil)
 
-(defn check-extend-type! [(form Any) (env Any)] Nil
+(defn check-extend-type!
+  [form Any
+   env Any] Nil
   (doseq [impl (get form "impls")]
     (doseq [method (get impl "methods")]
       (check-method-body! method env "method")))
   nil)
 
-(defn check-js-class! [(form Any) (env Any)] Nil
+(defn check-js-class!
+  [form Any
+   env Any] Nil
   (doseq [method (get form "methods")]
     (check-method-body! method env "js/method"))
   nil)
 
 ;; === check-form! (top-level dispatch) =========================================
 
-(defn check-form! [(form Any) (env Any)] Nil
+(defn check-form!
+  [form Any
+   env Any] Nil
   (let [node (get form "node")]
     (cond
       (= node "def") (do (infer-expr! form env) nil)
@@ -4340,14 +4625,14 @@
 
 (def NIX-QUALIFIED-PREFIXES Any ["lib." "builtins." "pkgs."])
 
-(defn nix-dotted-root [(s String)] Any
+(defn nix-dotted-root [s String] Any
   ;; root before the first dot; nil for keyword (`:k`), no dot, or empty root.
   (if (str/starts-with? s ":")
     nil
     (let [i (U Int Nil) (str/index-of s ".")]
       (if (or (nil? i) (= i 0)) nil (subs s 0 i)))))
 
-(defn nix-qualified? [(ref Any)] Bool
+(defn nix-qualified? [ref Any] Bool
   (let [text (if (map? ref) (get ref "name") ref)]
   (or (qualified-reference? ref)
     (and (string? text)
@@ -4360,7 +4645,9 @@
 ;; Collect every bound name (over-collection is safe — it only suppresses a
 ;; rejection). Any map "name" field is a potential binder; nix/with-cfg adds
 ;; `cfg`. Quoted data is code-as-data, skipped.
-(defn nix-collect-bound [(x Any) (acc Any)] Any
+(defn nix-collect-bound
+  [x Any
+   acc Any] Any
   (cond
     (map? x)
       (if (= (get x "node") "quoted")
@@ -4368,12 +4655,21 @@
         (let [nm (get x "name")
               acc1 (if (string? nm) (conj acc nm) acc)
               acc2 (if (= (get x "node") "nix-with-cfg") (conj acc1 "cfg") acc1)]
-          (reduce (fn [a Any v Any] Any (nix-collect-bound v a)) acc2 (vec (vals x)))))
+          (reduce (fn
+                    [a Any
+                     v Any] Any
+                    (nix-collect-bound v a)) acc2 (vec (vals x)))))
     (vector? x)
-      (reduce (fn [a Any v Any] Any (nix-collect-bound v a)) acc x)
+      (reduce (fn
+                [a Any
+                 v Any] Any
+                (nix-collect-bound v a)) acc x)
     :else acc))
 
-(defn nix-free-dotted-walk! [(x Any) (under-with Bool) (bound Any)] Nil
+(defn nix-free-dotted-walk!
+  [x Any
+   under-with Bool
+   bound Any] Nil
   (cond
     (map? x)
       (let [node (get x "node")]
@@ -4405,10 +4701,13 @@
       (do (doseq [v x] (nix-free-dotted-walk! v under-with bound)) nil)
     :else nil))
 
-(defn check-nix-free-dotted! [(prog Any)] Nil
+(defn check-nix-free-dotted! [prog Any] Nil
   (when (= (get prog "target") "nix")
     (let [forms (get prog "forms")
-          bound (reduce (fn [a Any f Any] Any (nix-collect-bound f a)) #{} forms)]
+          bound (reduce (fn
+                          [a Any
+                           f Any] Any
+                          (nix-collect-bound f a)) #{} forms)]
       (doseq [form forms]
         (nix-free-dotted-walk! form false bound))))
   nil)
@@ -4424,26 +4723,38 @@
 
 (def LOWER-ALPHA String "abcdefghijklmnopqrstuvwxyz")
 
-(defn- lower-alpha-first? [(s String)] Bool
+(defn- lower-alpha-first? [s String] Bool
   (and (> (count s) 0)
        (some? (str/index-of LOWER-ALPHA (subs s 0 1)))))
 
-(defn collect-references [(x Any) (acc Any)] Any
+(defn collect-references
+  [x Any
+   acc Any] Any
   (cond
     (map? x)
       (let [acc1 (if (= (get x "node") "ref")
                    (conj acc x)
                    acc)]
-        (reduce (fn [a Any v Any] Any (collect-references v a)) acc1 (vec (vals x))))
+        (reduce (fn
+                  [a Any
+                   v Any] Any
+                  (collect-references v a)) acc1 (vec (vals x))))
     (vector? x)
-      (reduce (fn [a Any v Any] Any (collect-references v a)) acc x)
+      (reduce (fn
+                [a Any
+                 v Any] Any
+                (collect-references v a)) acc x)
     :else acc))
 
-(defn check-qualified-resolution! [(prog Any) (env Any)] Nil
+(defn check-qualified-resolution!
+  [prog Any
+   env Any] Nil
   (let [target (get prog "target")]
     (when (= target "clj")
       (let [required (reduce
-                       (fn [m Any r Any] Any
+                       (fn
+                         [m Any
+                          r Any] Any
                          (let [ns (get r "ns")
                                alias (get r "alias")
                                m1 (assoc m ns true)]
@@ -4451,7 +4762,10 @@
                              (assoc m1 alias true)
                              m1)))
                        {"str" true} (get prog "requires"))
-            refs (reduce (fn [a Any f Any] Any (collect-references f a))
+            refs (reduce (fn
+                           [a Any
+                            f Any] Any
+                           (collect-references f a))
                    [] (get prog "forms"))
             seen (atom {})
             bad (atom [])]
@@ -4499,31 +4813,45 @@
 (def TRANSIENT-FAMILY Any
   (assoc TRANSIENT-MUTATORS "persistent!" true))
 
-(defn bang-name? [(name Any)] Bool
+(defn bang-name? [name Any] Bool
   (and (string? name) (str/ends-with? name "!")))
 
-(defn marker-add [(markers Any) (marker Any)] Any
+(defn marker-add
+  [markers Any
+   marker Any] Any
   (if (or (nil? marker)
           (boolean (some (fn [present Any] Bool (= present marker)) markers)))
     markers
     (conj markers marker)))
 
-(defn origins-union [(left Any) (right Any)] Any
-  (reduce (fn [out Any origin Any] Any (assoc out origin true))
+(defn origins-union
+  [left Any
+   right Any] Any
+  (reduce (fn
+            [out Any
+             origin Any] Any
+            (assoc out origin true))
           left (ordered-keys right)))
 
-(defn purity-result [(state Any) (origins Any)] Any
+(defn purity-result
+  [state Any
+   origins Any] Any
   {"state" state "origins" origins})
 
-(defn purity-note [(state Any) (marker Any)] Any
+(defn purity-note
+  [state Any
+   marker Any] Any
   (assoc state "markers" (marker-add (get state "markers") marker)))
 
-(defn purity-fresh-id [(state Any)] Any
+(defn purity-fresh-id [state Any] Any
   (let [next-id Int (get state "next-id")]
     {"id" next-id
      "state" (assoc state "next-id" (+ next-id 1))}))
 
-(defn purity-bind-name [(state Any) (name String) (origins Any)] Any
+(defn purity-bind-name
+  [state Any
+   name String
+   origins Any] Any
   (let [fresh (purity-fresh-id state)
         next (get fresh "state")]
     (assoc next "scope"
@@ -4532,35 +4860,52 @@
          "origins" origins
          "lambda-depth" (get next "lambda-depth")}))))
 
-(defn purity-owner-status [(state Any) (origin Any)] String
+(defn purity-owner-status
+  [state Any
+   origin Any] String
   (let [status (get (get state "owners") origin)]
     (if (nil? status) "absent" status)))
 
-(defn purity-origins-live? [(state Any) (origins Any)] Bool
+(defn purity-origins-live?
+  [state Any
+   origins Any] Bool
   (and (> (count origins) 0)
        (every? (fn [origin Any] Bool
                  (= (purity-owner-status state origin) "live"))
                (ordered-keys origins))))
 
-(defn purity-set-origin-status [(state Any) (origins Any) (status String)] Any
+(defn purity-set-origin-status
+  [state Any
+   origins Any
+   status String] Any
   (assoc state "owners"
-    (reduce (fn [owners Any origin Any] Any
+    (reduce (fn
+              [owners Any
+               origin Any] Any
               (assoc owners origin status))
             (get state "owners") (ordered-keys origins))))
 
-(defn purity-escape-origins [(state Any) (origins Any) (node Any)] Any
+(defn purity-escape-origins
+  [state Any
+   origins Any
+   node Any] Any
   (if (= 0 (count origins))
     state
     (purity-set-origin-status
       (purity-note state "transient-escape") origins "dead")))
 
-(defn purity-direct-transient-call? [(value Any) (state Any)] Bool
+(defn purity-direct-transient-call?
+  [value Any
+   state Any] Bool
   (and (= (get value "node") "call")
        (= (call-fn-name value) "transient")
        (not (contains? (get state "scope") "transient"))
        (not (contains? (get state "globals") "transient"))))
 
-(defn purity-direct-primitive-call? [(value Any) (name String) (state Any)] Bool
+(defn purity-direct-primitive-call?
+  [value Any
+   name String
+   state Any] Bool
   (and (= (get value "node") "call")
        (= (call-fn-name value) name)
        (not (contains? (get state "scope") name))
@@ -4568,7 +4913,9 @@
 
 (def FRESH-TRANSIENT-ROOT Any {"fresh-transient-root" true})
 
-(defn purity-conj-pipeline-root [(value Any) (state Any)] Any
+(defn purity-conj-pipeline-root
+  [value Any
+   state Any] Any
   (if (and (purity-direct-primitive-call? value "conj!" state)
            (> (count (get value "args")) 0))
     (let [receiver (first (get value "args"))]
@@ -4578,39 +4925,60 @@
         :else (purity-conj-pipeline-root receiver state)))
     nil))
 
-(defn purity-binding-acquires-owner? [(target Any) (value Any) (state Any)] Bool
+(defn purity-binding-acquires-owner?
+  [target Any
+   value Any
+   state Any] Bool
   (and (string? target)
        (or (purity-direct-transient-call? value state)
            (let [root (purity-conj-pipeline-root value state)]
              (or (= root FRESH-TRANSIENT-ROOT) (= root target))))))
 
 (defn purity-bind-target
-  [(state Any) (target Any) (origins Any) (node Any) (acquire Bool)] Any
+  [state Any
+   target Any
+   origins Any
+   node Any
+   acquire Bool] Any
   (let [names (destructure-bound-names target)
         simple (and (string? target) (= (count names) 1))
         keep-owner (and simple acquire)
         prepared (if (and (not keep-owner) (> (count origins) 0))
                    (purity-escape-origins state origins node)
                    state)]
-    (reduce (fn [next Any name String] Any
+    (reduce (fn
+              [next Any
+               name String] Any
               (purity-bind-name next name (if keep-owner origins {})))
             prepared names)))
 
-(defn purity-restore-scope [(state Any) (scope Any)] Any
+(defn purity-restore-scope
+  [state Any
+   scope Any] Any
   (assoc state "scope" scope))
 
-(defn purity-copy-path-state [(base Any) (counter-source Any)] Any
+(defn purity-copy-path-state
+  [base Any
+   counter-source Any] Any
   (assoc base "next-id" (get counter-source "next-id")))
 
-(defn purity-join-states [(base Any) (states Any)] Any
+(defn purity-join-states
+  [base Any
+   states Any] Any
   (let [origin-ids (reduce
-                     (fn [ids Any state Any] Any
-                       (reduce (fn [out Any origin Any] Any
+                     (fn
+                       [ids Any
+                        state Any] Any
+                       (reduce (fn
+                                 [out Any
+                                  origin Any] Any
                                  (assoc out origin true))
                                ids (ordered-keys (get state "owners"))))
                      {} states)
         owners (reduce
-                 (fn [out Any origin Any] Any
+                 (fn
+                   [out Any
+                    origin Any] Any
                    (assoc out origin
                      (if (every? (fn [state Any] Bool
                                    (= (purity-owner-status state origin) "live"))
@@ -4618,11 +4986,15 @@
                        "live"
                        "dead")))
                  {} (ordered-keys origin-ids))
-        max-id (reduce (fn [current Int state Any] Int
+        max-id (reduce (fn
+                         [current Int
+                          state Any] Int
                          (let [candidate (get state "next-id")]
                            (if (> candidate current) candidate current)))
                        (get base "next-id") states)
-        all-markers (reduce (fn [markers Any state Any] Any
+        all-markers (reduce (fn
+                              [markers Any
+                               state Any] Any
                               (reduce marker-add markers (get state "markers")))
                             (get base "markers") states)]
     (assoc (assoc (assoc base "owners" owners) "next-id" max-id)
@@ -4630,40 +5002,60 @@
 
 (declare purity-analyze)
 
-(defn purity-analyze-sequence [(body Any) (state Any)] Any
+(defn purity-analyze-sequence
+  [body Any
+   state Any] Any
   (if (= 0 (count body))
     (purity-result state {})
-    (loop [remaining Any body current Any state]
+    (loop [remaining Any body
+           current Any state]
       (let [result (purity-analyze (first remaining) current)]
         (if (= 1 (count remaining))
           result
           (recur (rest remaining) (get result "state")))))))
 
-(defn purity-analyze-and-escape [(value Any) (state Any) (node Any)] Any
+(defn purity-analyze-and-escape
+  [value Any
+   state Any
+   node Any] Any
   (let [result (purity-analyze value state)]
     (purity-escape-origins
       (get result "state") (get result "origins") node)))
 
 (defn purity-analyze-js-member
-  [(receiver Any) (key Any) (trailing Any) (node Any) (state Any)] Any
+  [receiver Any
+   key Any
+   trailing Any
+   node Any
+   state Any] Any
   (let [children (into [receiver]
                    (into
                      (if (= (get key "node") "js-selector") [] [key])
                      trailing))]
     (reduce
-      (fn [next Any child Any] Any
+      (fn
+        [next Any
+         child Any] Any
         (purity-analyze-and-escape child next node))
       state children)))
 
-(defn purity-analyze-defaults [(state Any) (target Any)] Any
-  (reduce (fn [next Any default Any] Any
+(defn purity-analyze-defaults
+  [state Any
+   target Any] Any
+  (reduce (fn
+            [next Any
+             default Any] Any
             (purity-analyze-and-escape default next default))
           state (destructure-default-exprs target)))
 
 (defn purity-analyze-bindings
-  [(bindings Any) (state Any) (allow-acquire Bool)] Any
+  [bindings Any
+   state Any
+   allow-acquire Bool] Any
   (reduce
-    (fn [next Any binding Any] Any
+    (fn
+      [next Any
+       binding Any] Any
       (let [target (get binding "name")
             acquire (and allow-acquire
                          (string? target)
@@ -4680,20 +5072,29 @@
           (if acquire origins {}) binding acquire)))
     state bindings))
 
-(defn purity-bind-params [(state Any) (params Any) (rest-param Any)] Any
+(defn purity-bind-params
+  [state Any
+   params Any
+   rest-param Any] Any
   (let [all-params (if (or (nil? rest-param) (false? rest-param))
                      params
                      (conj (vec params) rest-param))]
     (reduce
-      (fn [next Any param Any] Any
+      (fn
+        [next Any
+         param Any] Any
         (let [target (param-binding-target param)
               after-defaults (purity-analyze-defaults next target)]
           (purity-bind-target after-defaults target {} param false)))
       state all-params)))
 
-(defn purity-analyze-branches [(branches Any) (state Any)] Any
+(defn purity-analyze-branches
+  [branches Any
+   state Any] Any
   (let [summary (reduce
-                  (fn [acc Any branch Any] Any
+                  (fn
+                    [acc Any
+                     branch Any] Any
                     (let [branch-base (purity-copy-path-state
                                         state (get acc "counter"))
                           result (purity-analyze-sequence branch branch-base)]
@@ -4708,7 +5109,9 @@
       (purity-join-states state (get summary "states"))
       (get summary "origins"))))
 
-(defn purity-analyze-cond-clauses [(clauses Any) (state Any)] Any
+(defn purity-analyze-cond-clauses
+  [clauses Any
+   state Any] Any
   (loop [remaining Any clauses
          fallthrough Any state
          results Any []
@@ -4734,10 +5137,15 @@
                    (origins-union origins (get result "origins")))))))))
 
 (defn purity-analyze-comprehension
-  [(clauses Any) (body Any) (state Any) (collects Bool)] Any
+  [clauses Any
+   body Any
+   state Any
+   collects Bool] Any
   (let [outer-scope (get state "scope")
         bound (reduce
-                (fn [next Any clause Any] Any
+                (fn
+                  [next Any
+                   clause Any] Any
                   (let [kind (get clause "type")]
                     (cond
                       (= kind "binding")
@@ -4763,12 +5171,12 @@
                     after-body)]
     (purity-result (purity-restore-scope completed outer-scope) {})))
 
-(defn purity-map-pair-children [(pairs Any)] Any
+(defn purity-map-pair-children [pairs Any] Any
   (vec (apply concat
          (mapv (fn [pair Any] Any [(get pair "key") (get pair "val")])
                pairs))))
 
-(defn purity-unknown-children [(value Any)] Any
+(defn purity-unknown-children [value Any] Any
   (cond
     (vector? value) value
     (not (map? value)) []
@@ -4783,14 +5191,20 @@
       (into [(get value "target")] (get value "forms"))
     :else (vals value)))
 
-(defn purity-analyze-unknown [(value Any) (state Any)] Any
+(defn purity-analyze-unknown
+  [value Any
+   state Any] Any
   (purity-result
-    (reduce (fn [next Any child Any] Any
+    (reduce (fn
+              [next Any
+               child Any] Any
               (purity-analyze-and-escape child next value))
             state (purity-unknown-children value))
     {}))
 
-(defn purity-analyze-call [(call Any) (state Any)] Any
+(defn purity-analyze-call
+  [call Any
+   state Any] Any
   (let [ref (call-fn-ref call)
         name (reference-leaf ref)
         display (reference->string ref)
@@ -4805,7 +5219,9 @@
     (cond
       (and (not qualified?) (= name "transient") (not primitive-shadowed))
         (let [after-args (reduce
-                           (fn [next Any arg Any] Any
+                           (fn
+                             [next Any
+                              arg Any] Any
                              (purity-analyze-and-escape arg next call))
                            state args)
               fresh (purity-fresh-id after-args)
@@ -4824,7 +5240,9 @@
               valid (purity-origins-live? after-owner owner-origins)
               marked (if valid after-owner (purity-note after-owner name))
               after-rest (reduce
-                           (fn [next Any arg Any] Any
+                           (fn
+                             [next Any
+                              arg Any] Any
                              (purity-analyze-and-escape arg next call))
                            marked (if (> (count args) 0) (rest args) []))]
           (cond
@@ -4845,12 +5263,14 @@
                              marked
                              (purity-analyze-and-escape fn-expr marked call))
               after-args (reduce
-                           (fn [next Any arg Any] Any
+                           (fn
+                             [next Any
+                              arg Any] Any
                              (purity-analyze-and-escape arg next call))
                            after-callee args)]
           (purity-result after-args {})))))
 
-(defn purity-pattern-bound-names [(pattern Any)] Any
+(defn purity-pattern-bound-names [pattern Any] Any
   (let [kind (get pattern "type")]
     (cond
       (= kind "var") [(get pattern "name")]
@@ -4862,12 +5282,18 @@
               (get pattern "entries"))
       :else [])))
 
-(defn purity-bind-names [(state Any) (names Any)] Any
-  (reduce (fn [next Any name String] Any
+(defn purity-bind-names
+  [state Any
+   names Any] Any
+  (reduce (fn
+            [next Any
+             name String] Any
             (purity-bind-name next name {}))
           state names))
 
-(defn purity-analyze [(value Any) (state Any)] Any
+(defn purity-analyze
+  [value Any
+   state Any] Any
   (cond
     (vector? value) (purity-analyze-unknown value state)
     (not (map? value)) (purity-result state {})
@@ -4918,11 +5344,10 @@
             (let [targets (get state "recur-targets")]
               (if (nil? targets)
                 (purity-analyze-unknown value state)
-                (let [analyzed
-                       (loop [remaining Any (get value "args")
-                              next Any state
-                              results Any []]
-                         (if (= 0 (count remaining))
+                (let [analyzed (loop [remaining Any (get value "args")
+                                      next Any state
+                                      results Any []]
+                                 (if (= 0 (count remaining))
                            {"state" next "results" results}
                            (let [arg (first remaining)
                                  result (purity-analyze arg next)]
@@ -4932,12 +5357,11 @@
                                       {"arg" arg
                                        "origins" (get result "origins")})))))
                       after-args (get analyzed "state")
-                      transferred
-                       (loop [remaining-targets Any targets
-                              remaining-results Any (get analyzed "results")
-                              next Any after-args
-                              seen Any {}]
-                         (if (or (= 0 (count remaining-targets))
+                      transferred (loop [remaining-targets Any targets
+                                         remaining-results Any (get analyzed "results")
+                                         next Any after-args
+                                         seen Any {}]
+                                    (if (or (= 0 (count remaining-targets))
                                  (= 0 (count remaining-results)))
                            {"state" next "seen" seen}
                            (let [target (first remaining-targets)
@@ -4952,7 +5376,9 @@
                                                (get binding "origins"))
                                  prior-still-live
                                    (reduce
-                                     (fn [live Any origin Any] Any
+                                     (fn
+                                       [live Any
+                                        origin Any] Any
                                        (if (= (purity-owner-status next origin)
                                               "dead")
                                          live
@@ -5026,7 +5452,9 @@
                   after-test (purity-analyze-and-escape
                                (get value "test") after-pred value)
                   summary (reduce
-                            (fn [acc Any clause Any] Any
+                            (fn
+                              [acc Any
+                               clause Any] Any
                               (let [fallthrough (get acc "fallthrough")
                                     after-clause-test (purity-analyze-and-escape
                                                         (get clause "test")
@@ -5078,11 +5506,15 @@
           (= node "letfn")
             (let [outer-scope (get state "scope")
                   fn-scope (reduce
-                             (fn [next Any fn-def Any] Any
+                             (fn
+                               [next Any
+                                fn-def Any] Any
                                (purity-bind-name next (get fn-def "name") {}))
                              state (get value "fns"))
                   after-fns (reduce
-                              (fn [next Any fn-def Any] Any
+                              (fn
+                                [next Any
+                                 fn-def Any] Any
                                 (let [lambda-depth Int
                                         (get next "lambda-depth")
                                       nested (assoc next "lambda-depth"
@@ -5111,7 +5543,9 @@
             ;; lexical binding. Calls in the body therefore retain their normal
             ;; module/local resolution and effect propagation.
             (let [after-bindings (reduce
-                                   (fn [next Any binding Any] Any
+                                   (fn
+                                     [next Any
+                                      binding Any] Any
                                      (purity-analyze-and-escape
                                        (get binding "value") next binding))
                                    state (get value "bindings"))]
@@ -5174,7 +5608,9 @@
           (= node "js-new")
             (purity-result
               (reduce
-                (fn [next Any child Any] Any
+                (fn
+                  [next Any
+                   child Any] Any
                   (purity-analyze-and-escape child next value))
                 state
                 (into [(get value "callee")] (get value "args")))
@@ -5232,7 +5668,9 @@
             (let [outer-scope (get state "scope")
                   normal (purity-analyze-sequence (get value "body") state)
                   catches (reduce
-                            (fn [acc Any clause Any] Any
+                            (fn
+                              [acc Any
+                               clause Any] Any
                               (let [base (purity-copy-path-state
                                            (get normal "state")
                                            (get acc "counter"))
@@ -5263,7 +5701,9 @@
             (let [after-target (purity-analyze-and-escape
                                  (get value "target") state value)
                   summary (reduce
-                            (fn [acc Any clause Any] Any
+                            (fn
+                              [acc Any
+                               clause Any] Any
                               (let [base (purity-copy-path-state
                                            after-target (get acc "counter"))
                                     bound (purity-bind-names base
@@ -5286,7 +5726,9 @@
               (= node "def") (= node "defonce"))
             (let [marked (purity-note state "definition-publication")
                   live (reduce
-                         (fn [origins Any origin Any] Any
+                         (fn
+                           [origins Any
+                            origin Any] Any
                            (if (= (purity-owner-status marked origin) "live")
                              (assoc origins origin true)
                              origins))
@@ -5296,13 +5738,12 @@
           :else (purity-analyze-unknown value state)))))
 
 (defn analyze-expression-effects
-  [(body Any)
-   (known Any)
-   (params Any)
-   (rest-param Any)
-   (globals Any)
-   (result-escapes Bool)]
-  Any
+  [body Any
+   known Any
+   params Any
+   rest-param Any
+   globals Any
+   result-escapes Bool] Any
   (let [initial (purity-bind-params
                   {"scope" {}
                    "owners" {}
@@ -5319,13 +5760,17 @@
                       (get result "state"))]
     (get final-state "markers")))
 
-(defn collect-markers [(body Any) (known Any)] Any
+(defn collect-markers
+  [body Any
+   known Any] Any
   (analyze-expression-effects body known [] nil {} true))
 
-(defn effective-markers [(body Any) (known Any)] Any
+(defn effective-markers
+  [body Any
+   known Any] Any
   (collect-markers body known))
 
-(defn purity-definition-form [(form Any)] Any
+(defn purity-definition-form [form Any] Any
   (let [node (get form "node")]
     (cond
       (or (= node "js-export") (= node "js-export-default"))
@@ -5338,9 +5783,11 @@
         (nth (get form "args") 0)
       :else form)))
 
-(defn collect-purity-defs [(prog Any)] Any
+(defn collect-purity-defs [prog Any] Any
   (reduce
-    (fn [defs Any raw-form Any] Any
+    (fn
+      [defs Any
+       raw-form Any] Any
       (let [form (purity-definition-form raw-form)
             node (get form "node")]
         (cond
@@ -5360,12 +5807,16 @@
           :else defs)))
     [] (get prog "forms")))
 
-(defn purity-global-bindings [(prog Any)] Any
-  (let [externs (reduce (fn [names Any entry Any] Any
+(defn purity-global-bindings [prog Any] Any
+  (let [externs (reduce (fn
+                          [names Any
+                           entry Any] Any
                           (assoc names (get entry "name") true))
                         {} (get prog "externs"))]
     (reduce
-      (fn [names Any raw-form Any] Any
+      (fn
+        [names Any
+         raw-form Any] Any
         (let [form (purity-definition-form raw-form)
               node (get form "node")]
           (if (or (= node "defn") (= node "defn-multi")
@@ -5374,12 +5825,17 @@
             names)))
       externs (get prog "forms"))))
 
-(defn definition-effect-markers [(definition Any) (known Any) (globals Any)] Any
+;; One multi-arity definition is one purity boundary, but each clause is
+;; analyzed independently and retains its own ordered witnesses. Do not
+;; deduplicate equal markers across clauses.
+(defn definition-effect-markers
+  [definition Any
+   known Any
+   globals Any] Any
   (reduce
-    (fn [markers Any clause Any] Any
-      ;; One multi-arity definition is one purity boundary, but each clause is
-      ;; analyzed independently and retains its own ordered witnesses. Do not
-      ;; deduplicate equal markers across clauses.
+    (fn
+      [markers Any
+       clause Any] Any
       (into markers
         (analyze-expression-effects
           (get clause "body") known
@@ -5387,9 +5843,13 @@
           globals true)))
     [] (get definition "clauses")))
 
-(defn derive-effectful-defs [(defs Any) (globals Any)] Any
+(defn derive-effectful-defs
+  [defs Any
+   globals Any] Any
   (loop [known {}]
-    (let [next (reduce (fn [acc Any definition Any] Any
+    (let [next (reduce (fn
+                         [acc Any
+                          definition Any] Any
                          (if (> (count (definition-effect-markers
                                         definition known globals)) 0)
                            (assoc acc (get definition "name") true)
@@ -5397,7 +5857,9 @@
                        known defs)]
       (if (= next known) known (recur next)))))
 
-(defn purity-severity-for [(mode Any) (profile Any)] String
+(defn purity-severity-for
+  [mode Any
+   profile Any] String
   (cond
     (= mode "off") "off"
     (= mode "warn") (if (= profile "3") "error" "warn")
@@ -5408,11 +5870,15 @@
     (selfhost.rt/getenv "BEAGLE_PURITY")
     (selfhost.rt/getenv "BEAGLE_CHECK_PROFILE")))
 
-(defn purity-message [(name String) (markers Any)] String
+(defn purity-message
+  [name String
+   markers Any] String
   (str "purity leak: '" name "' has no '!' suffix but its body uses "
        (str/join ", " markers) " — rename to '" name "!' or remove the effect"))
 
-(defn check-purity-with-severity! [(prog Any) (severity String)] Nil
+(defn check-purity-with-severity!
+  [prog Any
+   severity String] Nil
   (when (not (= severity "off"))
     (let [defs (collect-purity-defs prog)
           globals (purity-global-bindings prog)
@@ -5430,18 +5896,22 @@
                 (emit-diag! message))))))))
   nil)
 
-(defn check-purity! [(prog Any)] Nil
+(defn check-purity! [prog Any] Nil
   (when (not (= (selfhost.rt/getenv "BEAGLE_CHECK_PROFILE") "0"))
     (check-purity-with-severity! prog (purity-severity)))
   nil)
 
 ;; === type-check! (mutates STATE; returns {diagnostics count}) =================
 
-(defn tag-semantic-node-ids-from [(value Any) (next-id Int)] Any
+(defn tag-semantic-node-ids-from
+  [value Any
+   next-id Int] Any
   (cond
     (vector? value)
       (reduce
-        (fn [state Any item Any] Any
+        (fn
+          [state Any
+           item Any] Any
           (let [tagged (tag-semantic-node-ids-from item (get state "next"))]
             {"value" (conj (get state "value") (get tagged "value"))
              "next" (get tagged "next")}))
@@ -5451,8 +5921,7 @@
     (map? value)
       (let [with-node? (= (get value "node") "with")
             kw-access-node? (= (get value "node") "kw-access")
-            binding-owner?
-              (or (= (get value "type") "param")
+            binding-owner? (or (= (get value "type") "param")
                   (and (contains? value "name")
                        (contains? value "constraint")
                        (or (contains? value "value")
@@ -5461,9 +5930,10 @@
             semantic-node? (or with-node? kw-access-node? binding-owner?)
             own-id (if semantic-node? next-id nil)
             child-start (if semantic-node? (+ next-id 1) next-id)
-            tagged
-              (reduce
-                (fn [state Any key Any] Any
+            tagged (reduce
+                (fn
+                  [state Any
+                   key Any] Any
                   (if (or (= key WITH-CHECK-ID-KEY)
                           (= key KW-ACCESS-CHECK-ID-KEY)
                           (= key BINDING-CHECK-ID-KEY))
@@ -5475,8 +5945,7 @@
                        "next" (get child "next")})))
                 {"value" {} "next" child-start}
                 (ordered-keys value))
-            tagged-value
-              (cond
+            tagged-value (cond
                 with-node?
                   (assoc (get tagged "value") WITH-CHECK-ID-KEY own-id)
                 kw-access-node?
@@ -5488,15 +5957,14 @@
 
     :else {"value" value "next" next-id}))
 
-(defn tag-semantic-node-ids [(prog Any)] Any
+(defn tag-semantic-node-ids [prog Any] Any
   (get (tag-semantic-node-ids-from prog 0) "value"))
 
 (defn decorate-tagged-value
-  [(value Any)
-   (record-updates Any)
-   (record-field-accesses Any)
-   (binding-constraint-proofs Any)]
-  Any
+  [value Any
+   record-updates Any
+   record-field-accesses Any
+   binding-constraint-proofs Any] Any
   (cond
     (and (map? value) (= (get value "node") "ascription"))
       (decorate-tagged-value
@@ -5514,9 +5982,10 @@
       (let [with-check-id (get value WITH-CHECK-ID-KEY)
             kw-check-id (get value KW-ACCESS-CHECK-ID-KEY)
             binding-check-id (get value BINDING-CHECK-ID-KEY)
-            decorated
-              (reduce
-                (fn [out Any key Any] Any
+            decorated (reduce
+                (fn
+                  [out Any
+                   key Any] Any
                   (if (or (= key WITH-CHECK-ID-KEY)
                           (= key KW-ACCESS-CHECK-ID-KEY)
                           (= key BINDING-CHECK-ID-KEY)
@@ -5531,19 +6000,17 @@
                         binding-constraint-proofs))))
                 {}
                 (ordered-keys value))]
-        (let [definition-types
-                (get (deref STATE) "effective-definition-types")
+        (let [definition-types (get (deref STATE) "effective-definition-types")
               node (get value "node")
               name (get value "name")
-              decorated
-                (if (and (string? name)
+              decorated (if (and (string? name)
                          (or (= node "def") (= node "defonce")
                              (= node "defn") (= node "defn-multi"))
                          (contains? definition-types name))
                   (assoc decorated "effectiveType"
                     (get definition-types name))
                   decorated)]
-        (cond
+          (cond
           (= (get value "node") "with")
             (assoc decorated "recordUpdate"
               (get record-updates with-check-id))
@@ -5557,7 +6024,9 @@
 
     :else value))
 
-(defn- substitute-contract-vars [(t Any) (replacements Any)] Any
+(defn- substitute-contract-vars
+  [t Any
+   replacements Any] Any
   (cond
     (nil? t) nil
     (var-type? t) (get replacements (get t "name") t)
@@ -5578,8 +6047,10 @@
                 (substitute-contract-vars member replacements))
           (get t "members")))
     (poly-type? t)
-      (let [nested
-            (reduce (fn [out Any name String] Any (dissoc out name))
+      (let [nested (reduce (fn
+                             [out Any
+                              name String] Any
+                             (dissoc out name))
               replacements (get t "vars"))]
         (make-poly
           (get t "vars")
@@ -5587,15 +6058,15 @@
           (get t "bounds")))
     :else t))
 
-(defn- freshen-contract-implementation! [(scheme Any)] Any
+(defn- freshen-contract-implementation! [scheme Any] Any
   (if (poly-type? scheme)
-    (let [replacements
-          (reduce (fn [out Any name String] Any
-                    (assoc out name (fresh-inference-var!)))
+    (let [replacements (reduce (fn
+                                 [out Any
+                                  name String] Any
+                                 (assoc out name (fresh-inference-var!)))
             {} (get scheme "vars"))
           raw-bounds (get scheme "bounds")
-          bounds
-          (if (map? raw-bounds)
+          bounds (if (map? raw-bounds)
             (mapv
               (fn [name String] Any
                 [(get replacements name)
@@ -5606,18 +6077,21 @@
        "bounds" bounds})
     {"instance" scheme "bounds" []}))
 
-(defn- rigid-declared-contract [(scheme Any)] Any
+(defn- rigid-declared-contract [scheme Any] Any
   (if (poly-type? scheme)
-    (let [replacements
-          (reduce
-            (fn [out Any name String] Any
+    (let [replacements (reduce
+            (fn
+              [out Any
+               name String] Any
               (assoc out name (make-prim (str "#%contract-rigid/" name))))
             {}
             (get scheme "vars"))]
       (substitute-contract-vars (get scheme "body") replacements))
     scheme))
 
-(defn- implementation-refines-declared?! [(inferred Any) (declared Any)] Bool
+(defn- implementation-refines-declared?!
+  [inferred Any
+   declared Any] Bool
   (let [fresh (freshen-contract-implementation! inferred)
         instance (get fresh "instance")
         expected (rigid-declared-contract declared)]
@@ -5630,27 +6104,34 @@
                    (type-compatible? solved (nth entry 1)))))
            (get fresh "bounds")))))
 
-(defn- named-surface [(surface Any)] Any
+(defn- named-surface [surface Any] Any
   (reduce
-    (fn [out Any entry Any] Any
+    (fn
+      [out Any
+       entry Any] Any
       (assoc out (get entry "name") (get entry "type")))
     {}
     surface))
 
-(defn- same-name-set? [(left Any) (right Any)] Bool
+(defn- same-name-set?
+  [left Any
+   right Any] Bool
   (and (= (count (ordered-keys left)) (count (ordered-keys right)))
        (every? (fn [name String] Bool (contains? right name)) (ordered-keys left))))
 
-(defn- sorted-names [(table Any)] Any
+(defn- sorted-names [table Any] Any
   (vec (sort (vec (keys table)))))
 
-(defn- check-declared-module-contract! [(prog Any) (effective Any)] Nil
+(defn- check-declared-module-contract!
+  [prog Any
+   effective Any] Nil
   (let [declared (get prog "declared-contract")]
     (when (map? declared)
       (let [raw (named-surface (get prog "inferred-public-surface" []))
-            inferred
-            (reduce
-              (fn [out Any name String] Any
+            inferred (reduce
+              (fn
+                [out Any
+                 name String] Any
                 (assoc out name (get effective name (get raw name))))
               {}
               (ordered-keys raw))]
@@ -5673,7 +6154,7 @@
               (swap! STATE assoc "conformed-contract-projection" declared)))))))
   nil)
 
-(defn type-check! [(prog Any)] Any
+(defn type-check! [prog Any] Any
   (let [checked-input (tag-semantic-node-ids prog)
         unstable-bindings (unstable-binding-keys checked-input)]
     (reset! STATE {"record-fields" {}
@@ -5726,7 +6207,7 @@
 ;; Bang-named per the `!`-purity lint: the checker is atom-backed (type-check!),
 ;; so the boundary carries the marker. Racket counterpart: type-check!.
 
-(defn check-program! [(prog Any)] Any
+(defn check-program! [prog Any] Any
   (get (type-check! prog) "diagnostics"))
 
 ;; Return the checked wire projection produced by the immediately preceding
@@ -5735,7 +6216,7 @@
 ;; access owns an always-present `recordFieldAccess` contract (or nil for a
 ;; non-record target). Emitters consume these semantic objects directly; they
 ;; never reconstruct them from adjacent forms or local registries.
-(defn decorate-checked-program! [(prog Any)] Any
+(defn decorate-checked-program! [prog Any] Any
   (let [state (deref STATE)]
     (if (= prog (get state "input-program"))
       (get state "checked-program")
@@ -5744,9 +6225,11 @@
           "decorate-checked-program! requires the program most recently passed to check-program!"
           {})))))
 
-(defn local-record-names [(prog Any)] Any
+(defn local-record-names [prog Any] Any
   (reduce
-    (fn [names Any form Any] Any
+    (fn
+      [names Any
+       form Any] Any
       (let [node (get form "node")]
         (cond
           (= node "record")
@@ -5765,7 +6248,7 @@
 ;; Export provider-owned record contracts only after a successful check. A
 ;; consumer receives the checked field types and exact provider validator ABI;
 ;; it never guesses constraint presence from raw adjacent declarations.
-(defn export-checked-record-contracts! [(prog Any)] Any
+(defn export-checked-record-contracts! [prog Any] Any
   (let [state (deref STATE)]
     (if (not (= prog (get state "input-program")))
       (throw
@@ -5790,7 +6273,7 @@
 ;; Checked providers publish both ordinary call synchronization and the
 ;; distinct effect of a returned callable. Import resolution preserves both
 ;; facts for alias-qualified and explicitly referred spellings.
-(defn export-checked-callable-synchronization! [(prog Any)] Any
+(defn export-checked-callable-synchronization! [prog Any] Any
   (let [state (deref STATE)]
     (if (not (= prog (get state "input-program")))
       (throw
@@ -5798,10 +6281,11 @@
           "export-checked-callable-synchronization! requires the program most recently passed to check-program!"
           {}))
       (let [proofs (program-callable-synchronization prog)
-            return-proofs
-              (program-returns-synchronous-callable prog proofs)]
+            return-proofs (program-returns-synchronous-callable prog proofs)]
         (reduce
-          (fn [out Any raw-form Any] Any
+          (fn
+            [out Any
+             raw-form Any] Any
             (let [form (if (= (get raw-form "node") "with-meta")
                          (get raw-form "expr")
                          raw-form)
@@ -5822,96 +6306,150 @@
 
 ;; === test data helpers =======================================================
 
-(defn make-lit [(kind String) (value Any)] Any
+(defn make-lit
+  [kind String
+   value Any] Any
   {"node" "literal" "kind" kind "value" value})
 
-(defn make-ref [(name String)] Any
+(defn make-ref [name String] Any
   {"node" "ref" "name" name})
 
-(defn make-def-node [(name String) (ann Any) (value Any)] Any
+(defn make-def-node
+  [name String
+   ann Any
+   value Any] Any
   {"node" "def" "name" name "ann" ann "value" value})
 
 (defn make-defn-node
-  [(name String) (params (Vec Any)) (ret Any) (body (Vec Any))] Any
+  [name String
+   params (Vec Any)
+   ret Any
+   body (Vec Any)] Any
   {"node" "defn" "name" name "params" params "rest" false
    "ret" ret "body" body "private" false})
 
-(defn make-param [(name Any) (ann Any)] Any
+(defn make-param
+  [name Any
+   ann Any] Any
   {"type" "param" "name" name "ann" ann})
 
-(defn make-constrained-param [(name Any) (ann Any) (constraint Any)] Any
+(defn make-constrained-param
+  [name Any
+   ann Any
+   constraint Any] Any
   {"type" "param" "name" name "ann" ann "constraint" constraint})
 
-(defn make-seq-target [(names Any) (rest-name Any)] Any
+(defn make-seq-target
+  [names Any
+   rest-name Any] Any
   {"type" "seq-destructure" "names" names "rest" rest-name})
 
-(defn make-map-target [(keys Any) (as-name Any) (defaults Any)] Any
+(defn make-map-target
+  [keys Any
+   as-name Any
+   defaults Any] Any
   {"type" "map-destructure" "keys" keys "as" as-name "or" defaults})
 
-(defn make-record-node [(name String) (fields Any)] Any
+(defn make-record-node
+  [name String
+   fields Any] Any
   {"node" "record" "name" name "fields" fields})
 
-(defn make-call [(fn-name String) (args (Vec Any))] Any
+(defn make-call
+  [fn-name String
+   args (Vec Any)] Any
   {"node" "call" "fn" {"node" "ref" "name" fn-name} "args" args})
 
-(defn make-static-call [(qualifier String) (name String) (args (Vec Any))] Any
+(defn make-static-call
+  [qualifier String
+   name String
+   args (Vec Any)] Any
   {"node" "static-call" "qualifier" qualifier "name" name
    "providerId" nil "args" args})
 
-(defn make-js-selector [(name String)] Any
+(defn make-js-selector [name String] Any
   {"node" "js-selector" "name" name})
 
-(defn make-js-get-node [(receiver Any) (key Any)] Any
+(defn make-js-get-node
+  [receiver Any
+   key Any] Any
   {"node" "js-get" "receiver" receiver "key" key})
 
-(defn make-js-call-node [(receiver Any) (key Any) (args (Vec Any))] Any
+(defn make-js-call-node
+  [receiver Any
+   key Any
+   args (Vec Any)] Any
   {"node" "js-call" "receiver" receiver "key" key "args" args})
 
-(defn make-if-node [(cond-expr Any) (then-expr Any) (else-expr Any)] Any
+(defn make-if-node
+  [cond-expr Any
+   then-expr Any
+   else-expr Any] Any
   {"node" "if" "cond" cond-expr "then" then-expr "else" else-expr})
 
-(defn make-let-node [(bindings (Vec Any)) (body (Vec Any))] Any
+(defn make-let-node
+  [bindings (Vec Any)
+   body (Vec Any)] Any
   {"node" "let" "bindings" bindings "body" body})
 
-(defn make-loop-node [(bindings (Vec Any)) (body (Vec Any))] Any
+(defn make-loop-node
+  [bindings (Vec Any)
+   body (Vec Any)] Any
   {"node" "loop" "bindings" bindings "body" body})
 
-(defn make-recur-node [(args (Vec Any))] Any
+(defn make-recur-node [args (Vec Any)] Any
   {"node" "recur" "args" args})
 
-(defn make-let-binding [(name Any) (ann Any) (value Any)] Any
+(defn make-let-binding
+  [name Any
+   ann Any
+   value Any] Any
   {"name" name "ann" ann "value" value})
 
 (defn make-constrained-let-binding
-  [(name Any) (ann Any) (constraint Any) (value Any)] Any
+  [name Any
+   ann Any
+   constraint Any
+   value Any] Any
   {"name" name "ann" ann "constraint" constraint "value" value})
 
-(defn make-vec-node [(items (Vec Any))] Any
+(defn make-vec-node [items (Vec Any)] Any
   {"node" "vec" "items" items})
 
-(defn make-map-node [(pairs (Vec Any))] Any
+(defn make-map-node [pairs (Vec Any)] Any
   {"node" "map" "pairs" pairs})
 
-(defn make-map-pair [(key Any) (val Any)] Any
+(defn make-map-pair
+  [key Any
+   val Any] Any
   {"key" key "val" val})
 
-(defn make-set!-node [(target Any) (value Any)] Any
+(defn make-set!-node
+  [target Any
+   value Any] Any
   {"node" "set!" "target" target "value" value})
 
-(defn make-prog [(forms (Vec Any))] Any
+(defn make-prog [forms (Vec Any)] Any
   {"namespace" "test" "target" "js"
    "forms" forms "externs" [] "requires" []})
 
-(defn make-prog-with-externs [(forms Any) (externs Any)] Any
+(defn make-prog-with-externs
+  [forms Any
+   externs Any] Any
   {"namespace" "test" "target" "js"
    "forms" forms "externs" externs "requires" []})
 
-(defn make-with-node [(target Any) (field String) (value Any)] Any
+(defn make-with-node
+  [target Any
+   field String
+   value Any] Any
   {"node" "with"
    "target" target
    "updates" [{"field" field "value" value}]})
 
-(defn diagnostics-include? [(diagnostics Any) (fragment String)] Bool
+(defn diagnostics-include?
+  [diagnostics Any
+   fragment String] Bool
   (boolean
     (some (fn [message String] Bool (str/includes? message fragment))
       diagnostics)))
@@ -5921,9 +6459,14 @@
 (def passes Any (atom []))
 (def failures Any (atom []))
 
-(defn- json-eq [(a Any) (b Any)] Bool (= a b))
+(defn- json-eq
+  [a Any
+   b Any] Bool
+  (= a b))
 
-(defn- expect! [(label String) (result Bool)] Nil
+(defn- expect!
+  [label String
+   result Bool] Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
@@ -5961,8 +6504,7 @@
          "lexical:test:2:0:x" (make-prim "Int")})
       (make-prim "Int")))
   (expect! "binder environments publish the resolver-selected identity"
-    (let [parameter
-          (assoc (make-param "x" (make-prim "String"))
+    (let [parameter (assoc (make-param "x" (make-prim "String"))
             "bindingId" "lexical:test:3:0:x")
           env (extend-with-params! {} [parameter] nil)]
       (json-eq
@@ -6017,8 +6559,7 @@
         "call to js/call .render: arg 1 expected Int, got String")))
 
   (expect! "js-member: polymorphic callable record field resolves result"
-    (let [identity-type
-            (make-poly ["T"]
+    (let [identity-type (make-poly ["T"]
               (make-fn [(make-var "T")] nil (make-var "T")) nil)
           record (make-record-node "Callable"
                    [(make-param "apply" identity-type)])
@@ -6899,8 +7440,7 @@
     (do (swap! STATE assoc "union-members" {"Shape" ["Circle" "Rect"]})
         (swap! STATE assoc "unstable-bindings" {})
         (let [env {"shape" (make-prim "Shape") "#%dynamic-vars" {}}
-              narrowed
-                (instance-narrowings
+              narrowed (instance-narrowings
                   (make-call "instance?"
                     [(make-ref "native.core.Circle") (make-ref "shape")])
                   env)]
@@ -6941,8 +7481,7 @@
   (expect! "infer: nix-fn-set checks defaults and body"
     (do
       (swap! STATE assoc "diagnostics" [])
-      (let [t1
-            (infer-expr!
+      (let [t1 (infer-expr!
               {"node" "nix-fn-set"
                "formals"
                [{"name" "config" "default" false}
@@ -7045,8 +7584,7 @@
              "omitted type did not resolve to a concrete monomorphic type"))))
 
   (expect! "definition inference: row-22 defonce keeps the causal nth diagnostic"
-    (let [initializer
-            (make-call "nth"
+    (let [initializer (make-call "nth"
               [(make-call "*"
                  [(make-lit "number" 65535) (make-lit "float" 0.5)])
                (make-call "-" [(make-lit "number" 256)])])
@@ -7060,8 +7598,7 @@
                "omitted type did not resolve")))))
 
   (expect! "definition inference: row-29 def keeps the causal nth diagnostic"
-    (let [if-let-value
-            (make-let-node
+    (let [if-let-value (make-let-node
               [(make-let-binding "w__5" nil (make-lit "float" 100.0))]
               [(make-if-node
                  (make-ref "w__5")
@@ -7100,8 +7637,7 @@
     (let [prog (make-prog [(make-def-node "x" (make-prim "String") (make-lit "number" 42))])]
       (> (count (check-program! prog)) 0)))
   (expect! "ascription checks and erases into the checked projection"
-    (let [prog
-          (make-prog
+    (let [prog (make-prog
             [(make-def-node "x" nil
                {"node" "ascription"
                 "expr" (make-lit "number" 42)
@@ -7112,8 +7648,7 @@
         (= (get (get (nth (get checked "forms") 0) "value") "node")
           "literal"))))
   (expect! "ascription rejects a mismatched expression"
-    (let [prog
-          (make-prog
+    (let [prog (make-prog
             [(make-def-node "x" nil
                {"node" "ascription"
                 "expr" (make-lit "string" "no")
@@ -7121,8 +7656,7 @@
       (diagnostics-include? (check-program! prog)
         "ascription: expected Int, got String")))
   (expect! "refinement syntax is rejected with E031"
-    (let [refinement
-          {"kind" "refinement" "base" (make-prim "Int")
+    (let [refinement {"kind" "refinement" "base" (make-prim "Int")
            "predicate" [">" "x" 0] "placement" "inline"}
           prog (assoc (make-prog []) "authored-refinement" refinement)]
       (diagnostics-include? (check-program! prog) "E031")))
@@ -7170,8 +7704,7 @@
 
   (expect! "defcontract: exact export set conforms"
     (let [scheme (make-fn [(make-prim "Int")] nil (make-prim "Int"))
-          prog
-          (assoc
+          prog (assoc
             (assoc (make-prog []) "declared-contract" {"id" scheme})
             "inferred-public-surface" [{"name" "id" "type" scheme}])
           diagnostics (check-program! prog)]
@@ -7180,8 +7713,7 @@
               {"id" scheme}))))
   (expect! "defcontract: mismatched export set rejects with E030"
     (let [scheme (make-fn [(make-prim "Int")] nil (make-prim "Int"))
-          prog
-          (assoc
+          prog (assoc
             (assoc (make-prog []) "declared-contract" {"id" scheme})
             "inferred-public-surface" [{"name" "other" "type" scheme}])
           diagnostics (check-program! prog)]
@@ -7189,24 +7721,18 @@
            (diagnostics-include? diagnostics "[E030]")
            (diagnostics-include? diagnostics "export set"))))
   (expect! "defcontract: inferred forall refines monomorphic declaration"
-    (let [declared
-          (make-fn [(make-prim "Int")] nil (make-prim "Int"))
-          inferred
-          (make-poly ["A"]
+    (let [declared (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+          inferred (make-poly ["A"]
             (make-fn [(make-var "A")] nil (make-var "A")) nil)
-          prog
-          (assoc
+          prog (assoc
             (assoc (make-prog []) "declared-contract" {"id" declared})
             "inferred-public-surface" [{"name" "id" "type" inferred}])]
       (= (count (check-program! prog)) 0)))
   (expect! "defcontract: monomorphic implementation rejects forall declaration"
-    (let [inferred
-          (make-fn [(make-prim "Int")] nil (make-prim "Int"))
-          declared
-          (make-poly ["A"]
+    (let [inferred (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+          declared (make-poly ["A"]
             (make-fn [(make-var "A")] nil (make-var "A")) nil)
-          prog
-          (assoc
+          prog (assoc
             (assoc (make-prog []) "declared-contract" {"id" declared})
             "inferred-public-surface" [{"name" "id" "type" inferred}])
           diagnostics (check-program! prog)]
@@ -7622,8 +8148,7 @@
            (not (contains? (nth params 1) BINDING-CHECK-ID-KEY)))))
 
   (expect! "constraint: polymorphic predicate bound enforced"
-    (let [bounded-predicate
-            (make-poly ["T"]
+    (let [bounded-predicate (make-poly ["T"]
               (make-fn [(make-var "T")] nil BOOL-TYPE)
               {"T" NUMBER-TYPE})
           prog (make-prog-with-externs

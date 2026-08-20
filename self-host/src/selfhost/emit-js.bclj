@@ -48,60 +48,88 @@
 (def stmt-inline-ref Any (atom nil))
 (def form-ref Any (atom nil))
 
-(defn emit-expr*! [(e Any)] String
+(defn emit-expr*! [e Any] String
   (let [f (Fn [Any] String) (deref emit-expr-ref)]
     (reset! ctx "expr")
     (f e)))
 
-(defn emit-body-return* [(exprs Any) (indent String)] String
+(defn emit-body-return*
+  [exprs Any
+   indent String] String
   (let [f (Fn [Any String] String) (deref body-return-ref)] (f exprs indent)))
 
 ;; forward ref: emit-body-stmts (defined earlier) recurses into emit-stmt-inline!
-(defn emit-stmt-inline* [(e Any) (indent String)] String
+(defn emit-stmt-inline*
+  [e Any
+   indent String] String
   (let [f (Fn [Any String] String) (deref stmt-inline-ref)] (f e indent)))
 
-(defn emit-form* [(f Any)] String
+(defn emit-form* [f Any] String
   (let [g (Fn [Any] String) (deref form-ref)] (g f)))
 
 ;; js/quote (js-ast) recursion hubs
 (def ajs-expr-ref Any (atom nil))
 (def ajs-stmt-ref Any (atom nil))
 (def ajs-block-ref Any (atom nil))
-(defn ajs-stmt* [(n Any) (depth Int)] String (let [f (Fn [Any Int] String) (deref ajs-stmt-ref)] (f n depth)))
-(defn ajs-block* [(n Any) (depth Int)] String (let [f (Fn [Any Int] String) (deref ajs-block-ref)] (f n depth)))
+(defn ajs-stmt*
+  [n Any
+   depth Int] String
+  (let [f (Fn [Any Int] String) (deref ajs-stmt-ref)] (f n depth)))
+(defn ajs-block*
+  [n Any
+   depth Int] String
+  (let [f (Fn [Any Int] String) (deref ajs-block-ref)] (f n depth)))
 
 ;; --- bound-var / inline-scope helpers -----------------------------------------
 
-(defn bound? [(n String)] Bool
+(defn bound? [n String] Bool
   (contains? (deref bound-vars) n))
 
-(defn add-names [(m Any) (names Any)] Any
-  (reduce (fn [acc Any n String] Any (assoc acc n true)) m names))
+(defn add-names
+  [m Any
+   names Any] Any
+  (reduce (fn
+            [acc Any
+             n String] Any
+            (assoc acc n true)) m names))
 
-(defn with-bound! [(names Any) (thunk Any)] String
+(defn with-bound!
+  [names Any
+   thunk Any] String
   (let [saved (deref bound-vars)]
     (reset! bound-vars (add-names saved names))
     (let [r String (thunk)]
       (reset! bound-vars saved)
       r)))
 
-(defn add-types [(m Any) (entries Any)] Any
-  (reduce (fn [acc Any entry Any] Any
-            (let [name (get entry "name") ann (get entry "ann")]
+(defn add-types
+  [m Any
+   entries Any] Any
+  (reduce (fn
+            [acc Any
+             entry Any] Any
+            (let [name (get entry "name")
+                  ann (get entry "ann")]
               (if (or (nil? ann) (false? ann)) acc (assoc acc name ann))))
           m entries))
 
-(defn param-type-entries [(params Any) (rest-p Any)] Any
+(defn param-type-entries
+  [params Any
+   rest-p Any] Any
   (let [base (filterv (fn [p Any] Bool
                         (and (= (get p "type") "param")
                           (string? (get p "name")))) params)]
     (if (or (nil? rest-p) (false? rest-p)) base (conj base rest-p))))
 
-(defn binding-type-entries [(bindings Any)] Any
+(defn binding-type-entries [bindings Any] Any
   (filterv (fn [b Any] Bool (string? (get b "name"))) bindings))
 
-(defn with-bound-types! [(names Any) (entries Any) (thunk Any)] String
-  (let [saved-bound (deref bound-vars) saved-types (deref type-env)]
+(defn with-bound-types!
+  [names Any
+   entries Any
+   thunk Any] String
+  (let [saved-bound (deref bound-vars)
+        saved-types (deref type-env)]
     (reset! bound-vars (add-names saved-bound names))
     (reset! type-env (add-types saved-types entries))
     (let [r String (thunk)]
@@ -109,7 +137,11 @@
       (reset! bound-vars saved-bound)
       r)))
 
-(defn with-emission-env! [(bound Any) (types Any) (renames Any) (thunk Any)] Any
+(defn with-emission-env!
+  [bound Any
+   types Any
+   renames Any
+   thunk Any] Any
   (let [saved-bound (deref bound-vars)
         saved-types (deref type-env)
         saved-renames (deref rename-env)]
@@ -128,7 +160,10 @@
     n))
 
 (defn with-pattern-default-env!
-  [(bound Any) (types Any) (renames Any) (thunk Any)] Any
+  [bound Any
+   types Any
+   renames Any
+   thunk Any] Any
   (let [saved-bound (deref pattern-default-bound)
         saved-types (deref pattern-default-types)
         saved-renames (deref pattern-default-renames)]
@@ -156,7 +191,7 @@
 
 ;; Punctuation shared by binding and property names. Bindings escape authored
 ;; `_` for collision resistance; authored JS property labels preserve it.
-(defn mangle-punctuation [(s String)] String
+(defn mangle-punctuation [s String] String
   (str/replace
     (str/replace
       (str/replace
@@ -171,30 +206,34 @@
       "<" "_lt")
     "%" "_pct"))
 
-(defn mangle-chars [(s String)] String
+(defn mangle-chars [s String] String
   (mangle-punctuation (str/replace s "_" "__")))
 
-(defn mangle-str [(s String)] String
+(defn mangle-str [s String] String
   (let [m (mangle-chars s)]
     (if (contains? JS-RESERVED m) (str m "$") m)))
 
-(defn mangle-name [(s String)] String (mangle-str s))
-(defn mangle-prop [(s String)] String (mangle-punctuation s))
+(defn mangle-name [s String] String (mangle-str s))
+(defn mangle-prop [s String] String (mangle-punctuation s))
 
 ;; --- structural references --------------------------------------------------
 
-(defn qualified-reference? [(ref Any)] Bool
+(defn qualified-reference? [ref Any] Bool
   (and (map? ref)
     (string? (get ref "qualifier"))
     (string? (get ref "name"))))
 
 (defn qualified-reference=?
-  [(ref Any) (qualifier String) (name String)] Bool
+  [ref Any
+   qualifier String
+   name String] Bool
   (and (qualified-reference? ref)
     (= (get ref "qualifier") qualifier)
     (= (get ref "name") name)))
 
-(defn qualified-reference-same-binding? [(left Any) (right Any)] Bool
+(defn qualified-reference-same-binding?
+  [left Any
+   right Any] Bool
   (and (qualified-reference? left)
     (qualified-reference? right)
     (= (get left "qualifier") (get right "qualifier"))
@@ -203,11 +242,11 @@
       (nil? (get right "providerId"))
       (= (get left "providerId") (get right "providerId")))))
 
-(defn qualified-member-constructor? [(ref Any)] Bool
+(defn qualified-member-constructor? [ref Any] Bool
   (and (qualified-reference? ref)
     (str/starts-with? (get ref "name") "->")))
 
-(defn qualified-module-binding [(ref Any)] Any
+(defn qualified-module-binding [ref Any] Any
   (let [provider (get ref "providerId")
         by-provider (if (string? provider)
                       (get (deref module-bindings) provider)
@@ -217,7 +256,8 @@
       (get (deref module-bindings) (get ref "qualifier")))))
 
 (defn emit-qualified-reference
-  [(ref Any) (constructor? Bool)] String
+  [ref Any
+   constructor? Bool] String
   (let [authored (get ref "name")
         runtime-member (if (and constructor? (str/starts-with? authored "->"))
                          (subs authored 2)
@@ -230,14 +270,14 @@
       (string? binding) (str binding "." member)
       :else (str (mangle-name qualifier) "." member))))
 
-(defn reference-key [(ref Any)] Any
+(defn reference-key [ref Any] Any
   (if (qualified-reference? ref)
     ["qualified-ref" (get ref "qualifier") (get ref "name")]
     (if (map? ref) (get ref "name") ref)))
 
 ;; Checked-program metadata remains a JSON object keyed by authored spelling.
 ;; Convert that legacy ABI key once, before emitter-internal record lookup.
-(defn metadata-reference-key [(key Any)] Any
+(defn metadata-reference-key [key Any] Any
   (if (string? key)
     (let [index (U Int Nil) (str/last-index-of key "/")]
       (if (and (some? index)
@@ -247,7 +287,7 @@
         key))
     key))
 
-(defn metadata-reference [(spelling Any)] Any
+(defn metadata-reference [spelling Any] Any
   (let [key (metadata-reference-key spelling)]
     (if (and (vector? key)
           (= 3 (count key))
@@ -256,19 +296,25 @@
        "providerId" nil}
       spelling)))
 
-(defn structuralize-reference-table [(table Any)] Any
+(defn structuralize-reference-table [table Any] Any
   (reduce
-    (fn [out Any key Any] Any
+    (fn
+      [out Any
+       key Any] Any
       (assoc out (metadata-reference-key key) (get table key)))
     {} (vec (keys table))))
 
-(defn record-fields-ref [(table Any) (ref Any)] Any
+(defn record-fields-ref
+  [table Any
+   ref Any] Any
   (get table (reference-key ref)))
 
-(defn qualified-set-member? [(values Any) (ref Any)] Bool
+(defn qualified-set-member?
+  [values Any
+   ref Any] Bool
   (contains? values (reference-key ref)))
 
-(defn resolved-name [(name Any)] String
+(defn resolved-name [name Any] String
   (if (qualified-reference? name)
     (emit-qualified-reference name false)
     (let [resolved (get (deref rename-env) name)]
@@ -277,7 +323,7 @@
 ;; kw->prop: strip a leading ":" if present, then mangle. Map-literal keys arrive
 ;; already-stripped ("k"); with/kw-access fields arrive as ":price". PROPERTY
 ;; position -> char-mangle only, never the reserved-word `$` suffix.
-(defn kw->prop [(kw String)] String
+(defn kw->prop [kw String] String
   (if (str/starts-with? kw ":")
     (mangle-prop (subs kw 1))
     (mangle-prop kw)))
@@ -286,11 +332,11 @@
 
 (def HEX String "0123456789abcdef")
 
-(defn hex2 [(code Int)] String
+(defn hex2 [code Int] String
   (str (subs HEX (quot code 16) (+ (quot code 16) 1))
        (subs HEX (mod code 16) (+ (mod code 16) 1))))
 
-(defn js-escape-char [(c String)] String
+(defn js-escape-char [c String] String
   (let [cs Any c
         code Any (int (first cs))]
     (cond
@@ -305,22 +351,23 @@
       (or (< code 32) (= code 127)) (str "\\x" (hex2 code))
       :else c)))
 
-(defn js-string-lit [(s String)] String
+(defn js-string-lit [s String] String
   (let [n (count s)]
-    (loop [i Int 0 acc (Vec String) ["\""]]
+    (loop [i Int 0
+           acc (Vec String) ["\""]]
       (if (>= i n)
         (str/join "" (conj acc "\""))
         (recur (+ i 1) (conj acc (js-escape-char (subs s i (+ i 1)))))))))
 
-(defn js-member-identifier? [(s String)] Bool
+(defn js-member-identifier? [s String] Bool
   (some? (re-matches #"[A-Za-z_$][A-Za-z0-9_$]*" s)))
 
-(defn js-selector-suffix [(name String)] String
+(defn js-selector-suffix [name String] String
   (if (js-member-identifier? name)
     (str "." name)
     (str "[" (js-string-lit name) "]")))
 
-(defn js-postfix-base? [(e Any)] Bool
+(defn js-postfix-base? [e Any] Bool
   (if (not (map? e))
     (or (string? e) (boolean? e))
     (let [node (get e "node")]
@@ -337,28 +384,30 @@
         (= node "ascription") (js-postfix-base? (get e "expr"))
         :else false))))
 
-(defn emit-js-postfix-base! [(e Any)] String
+(defn emit-js-postfix-base! [e Any] String
   (let [rendered (emit-expr*! e)]
     (if (js-postfix-base? e) rendered (str "(" rendered ")"))))
 
-(defn emit-js-member! [(receiver Any) (key Any)] String
+(defn emit-js-member!
+  [receiver Any
+   key Any] String
   (let [receiver-str (emit-js-postfix-base! receiver)]
     (if (= (get key "node") "js-selector")
       (str receiver-str (js-selector-suffix (get key "name")))
       (str receiver-str "[" (emit-expr*! key) "]"))))
 
-(defn js-constructor-reference? [(e Any)] Bool
+(defn js-constructor-reference? [e Any] Bool
   (and (map? e)
     (contains? #{"ref" "js-dot" "js-get"} (get e "node"))))
 
-(defn emit-js-unary-operand! [(e Any)] String
+(defn emit-js-unary-operand! [e Any] String
   (let [rendered (emit-expr*! e)
         node (get e "node")]
     (if (or (= node "fn") (= node "await") (= node "js-spread"))
       (str "(" rendered ")")
       rendered)))
 
-(defn emit-js-number [(v Any)] String (str v))
+(defn emit-js-number [v Any] String (str v))
 
 ;; --- operator tables (js-capabilities.rkt) ------------------------------------
 
@@ -369,8 +418,8 @@
 
 (def JS-UNARY-OPS Any {"not" "!" "-" "-"})
 
-(defn js-infix? [(s String)] Bool (contains? JS-INFIX-OPS s))
-(defn js-unary? [(s String)] Bool (contains? JS-UNARY-OPS s))
+(defn js-infix? [s String] Bool (contains? JS-INFIX-OPS s))
+(defn js-unary? [s String] Bool (contains? JS-UNARY-OPS s))
 
 (def JS-VALUE-WRAPPERS Any
   {"inc" "((_x) => (_x + 1))"
@@ -421,14 +470,14 @@
 
 ;; ast-json guards optional slots with (and x (serialize x)); an absent slot
 ;; arrives as JSON false, not null.
-(defn absent? [(x Any)] Bool (or (nil? x) (false? x)))
+(defn absent? [x Any] Bool (or (nil? x) (false? x)))
 
 ;; --- binding constraints -----------------------------------------------------
 
-(defn binding-target [(binding Any)] Any
+(defn binding-target [binding Any] Any
   (get binding "name"))
 
-(defn binding-constraint [(binding Any)] Any
+(defn binding-constraint [binding Any] Any
   (let [constraint (get binding "constraint")
         present? (not (absent? constraint))]
     (when (deref checked-program-ref)
@@ -448,12 +497,14 @@
             {})))))
     (if present? constraint nil)))
 
-(defn exact-object-keys? [(value Any) (expected Any)] Bool
+(defn exact-object-keys?
+  [value Any
+   expected Any] Bool
   (and (map? value)
        (= (count (keys value)) (count expected))
        (every? (fn [key String] Bool (contains? value key)) expected)))
 
-(defn valid-record-update-contract? [(contract Any)] Bool
+(defn valid-record-update-contract? [contract Any] Bool
   (and (exact-object-keys?
          contract ["recordName" "fieldOrder" "validator"])
        (string? (get contract "recordName"))
@@ -462,7 +513,7 @@
        (or (nil? (get contract "validator"))
            (string? (get contract "validator")))))
 
-(defn record-update-contract [(node Any)] Any
+(defn record-update-contract [node Any] Any
   (when (and (deref checked-program-ref)
              (not (contains? node "recordUpdate")))
     (throw (ex-info
@@ -474,7 +525,7 @@
         "checked with node has an invalid recordUpdate semantic contract" {})))
     contract))
 
-(defn record-field-access-contract [(node Any)] Any
+(defn record-field-access-contract [node Any] Any
   (when (and (deref checked-program-ref)
              (not (contains? node "recordFieldAccess")))
     (throw (ex-info
@@ -487,8 +538,8 @@
         "checked kw-access has an invalid recordFieldAccess semantic contract" {})))
     contract))
 
-(defn binding-target-label [(binding Any)] String
-  (letfn [(label [(target Any)] String
+(defn binding-target-label [binding Any] String
+  (letfn [(label [target Any] String
             (cond
               (string? target) target
               (= (get target "type") "seq-destructure")
@@ -506,7 +557,7 @@
               :else (str target)))]
     (label (binding-target binding))))
 
-(defn constraint-contains-async? [(node Any)] Bool
+(defn constraint-contains-async? [node Any] Bool
   (cond
     (vector? node)
       (> (count (filterv constraint-contains-async? node)) 0)
@@ -521,15 +572,19 @@
             (> (count (filterv constraint-contains-async? (vec (vals node)))) 0)))
     :else false))
 
-(defn binding-constraint-has-await? [(binding Any)] Bool
+(defn binding-constraint-has-await? [binding Any] Bool
   (let [constraint (binding-constraint binding)]
     (and (not (nil? constraint)) (constraint-contains-async? constraint))))
 
-(defn params-have-constraint-await? [(params Any) (rest-p Any)] Bool
+(defn params-have-constraint-await?
+  [params Any
+   rest-p Any] Bool
   (let [bindings (if (absent? rest-p) params (conj (vec params) rest-p))]
     (> (count (filterv binding-constraint-has-await? bindings)) 0)))
 
-(defn emit-binding-constraint-statement! [(binding Any) (source String)] Any
+(defn emit-binding-constraint-statement!
+  [binding Any
+   source String] Any
   (let [constraint (binding-constraint binding)]
     (cond
       (nil? constraint) nil
@@ -543,7 +598,7 @@
 
 ;; ast-json encodes an absent `if`/`if-some` else as expr->json(#f) = a literal
 ;; false-bool node (as well as JSON false / null). Match emit-clj else-less-if?.
-(defn else-less-if? [(els Any)] Bool
+(defn else-less-if? [els Any] Bool
   (or (nil? els) (false? els)
       (and (map? els) (= (get els "node") "literal") (= (get els "kind") "bool") (false? (get els "value")))))
 
@@ -551,7 +606,7 @@
 ;; await is the js/await static-call. Descends control-flow + call args but NOT
 ;; fn bodies (an inner arrow's await doesn't make the outer fn async).
 
-(defn expr-has-await? [(e Any)] Bool
+(defn expr-has-await? [e Any] Bool
   (if (not (map? e))
     false
     (let [node (get e "node")
@@ -642,20 +697,22 @@
         (= node "rescue") (or (expr-has-await? (get e "expr")) (expr-has-await? (get e "fallback")))
         :else false))))
 
-(defn contains-await? [(exprs Any)] Bool
+(defn contains-await? [exprs Any] Bool
   (> (count (filterv (fn [e Any] Bool (expr-has-await? e)) exprs)) 0))
 
 ;; --- IIFE helpers -------------------------------------------------------------
 
-(defn iife [(body-str String) (async? Bool)] String
+(defn iife
+  [body-str String
+   async? Bool] String
   (if async? (str "(async () => { " body-str " })()") (str "(() => { " body-str " })()")))
 
-(defn await-async-iife [(s String)] String
+(defn await-async-iife [s String] String
   (if (str/starts-with? s "(async () => ") (str "await " s) s))
 
-(defn leading-brace? [(s String)] Bool
+(defn leading-brace? [s String] Bool
   (let [n (count s)]
-    (loop [i 0]
+    (loop [i Int 0]
       (if (>= i n) false
         (let [c (subs s i (+ i 1))]
           (cond
@@ -670,11 +727,11 @@
    "I8" true "I16" true "I32" true
    "String" true "Bool" true "Keyword" true})
 
-(defn unqualify-type-name [(name String)] String
+(defn unqualify-type-name [name String] String
   (let [index (U Int Nil) (str/last-index-of name "/")]
     (if (nil? index) name (subs name (+ index 1)))))
 
-(defn node-static-type [(node Any)] Any
+(defn node-static-type [node Any] Any
   (if (map? node)
     (let [inferred (get node "inferredType")
           effective (get node "effectiveType")
@@ -686,7 +743,7 @@
         projected))
     nil))
 
-(defn scalar-eq-safe-node? [(node Any)] Bool
+(defn scalar-eq-safe-node? [node Any] Bool
   (if (map? node)
     (let [node-type (node-static-type node)]
       (and (map? node-type)
@@ -696,7 +753,7 @@
              (unqualify-type-name (get node-type "name")))))
     false))
 
-(defn poly-read-type? [(t Any)] Bool
+(defn poly-read-type? [t Any] Bool
   (and (not (nil? t))
        (or (= (get t "kind") "var")
            (= (get t "kind") "union")
@@ -706,13 +763,13 @@
 ;; table.  Preserve the native default for unclassified expressions, but honor
 ;; explicit binding annotations: Any/type-vars/unions are polymorphic reads and
 ;; must use the same $$bc dispatch as the oracle.
-(defn classify-rep [(e Any)] String
+(defn classify-rep [e Any] String
   (if (and (map? e) (= (get e "node") "ref")
            (poly-read-type? (get (deref type-env) (get e "name"))))
     "poly"
     "native"))
 
-(defn coll-kind [(node Any)] String
+(defn coll-kind [node Any] String
   (if (map? node)
     (let [n (get node "node")]
       (cond (= n "set") "set" (= n "vec") "vec" (= n "map") "map" :else "unknown"))
@@ -720,10 +777,10 @@
 
 ;; --- params / destructure -----------------------------------------------------
 
-(defn param-binding-target [(p Any)] Any
+(defn param-binding-target [p Any] Any
   (if (= (get p "type") "param") (get p "name") p))
 
-(defn names-from-target [(name Any)] Any
+(defn names-from-target [name Any] Any
   (let [target (param-binding-target name)]
     (if (string? target)
       [target]
@@ -738,14 +795,16 @@
               (if (absent? r) base (conj base r)))
           :else [])))))
 
-(defn names-from-param [(p Any)] Any
+(defn names-from-param [p Any] Any
   (names-from-target p))
 
-(defn binding-names-from-params [(params Any) (rest-p Any)] Any
+(defn binding-names-from-params
+  [params Any
+   rest-p Any] Any
   (let [base (vec (apply concat (mapv names-from-param params)))]
     (if (absent? rest-p) base (into base (names-from-param rest-p)))))
 
-(defn emit-destructure! [(p Any)] Any
+(defn emit-destructure! [p Any] Any
   (let [target (param-binding-target p)
         t (get target "type")]
     (cond
@@ -774,50 +833,68 @@
             (str "[" names ", ..." (mangle-name rest-name) "]")))
       :else nil)))
 
-(defn emit-js-param! [(p Any)] String
+(defn emit-js-param! [p Any] String
   (let [target (param-binding-target p)
         d (emit-destructure! target)]
     (if (nil? d) (mangle-name target) d)))
 
-(defn emit-binding-target! [(name Any)] String
+(defn emit-binding-target! [name Any] String
   (let [target (param-binding-target name)]
     (if (string? target)
       (resolved-name target)
       (let [d (emit-destructure! target)]
         (if (nil? d) (mangle-name (get target "name")) d)))))
 
-(defn param-bindings [(params Any) (rest-p Any)] Any
+(defn param-bindings
+  [params Any
+   rest-p Any] Any
   (if (absent? rest-p) (vec params) (conj (vec params) rest-p)))
 
-(defn bindings-have-constraints? [(bindings Any)] Bool
+(defn bindings-have-constraints? [bindings Any] Bool
   (> (count (filterv (fn [binding Any] Bool
                        (not (nil? (binding-constraint binding)))) bindings)) 0))
 
-(defn hidden-binding-renames [(bindings Any) (prefix String) (base Any)] Any
+(defn hidden-binding-renames
+  [bindings Any
+   prefix String
+   base Any] Any
   (reduce
-    (fn [renames Any entry Any] Any
+    (fn
+      [renames Any
+       entry Any] Any
       (let [binding (nth entry 1)
             i (nth entry 0)]
         (reduce
-          (fn [inner Any name String] Any
+          (fn
+            [inner Any
+             name String] Any
             (assoc inner name (str "$beagle$" prefix "$" i "$" (mangle-name name))))
           renames
           (names-from-target (get binding "name")))))
     base
-    (vec (map-indexed (fn [i Int binding Any] Any [i binding]) bindings))))
+    (vec (map-indexed (fn
+                        [i Int
+                         binding Any] Any
+                        [i binding]) bindings))))
 
-(defn callable-param-renames [(params Any) (rest-p Any)] Any
+(defn callable-param-renames
+  [params Any
+   rest-p Any] Any
   (let [bindings (param-bindings params rest-p)]
     (if (bindings-have-constraints? bindings)
       (hidden-binding-renames bindings "param" (deref rename-env))
       (deref rename-env))))
 
-(defn emit-js-params! [(params Any) (rest-p Any)] String
+(defn emit-js-params!
+  [params Any
+   rest-p Any] String
   (let [bindings (param-bindings params rest-p)
         hide-all? (bindings-have-constraints? bindings)
         fixed (str/join ", "
                 (map-indexed
-                  (fn [i Int p Any] String
+                  (fn
+                    [i Int
+                     p Any] String
                     (let [target (param-binding-target p)]
                       (if (and (not hide-all?) (string? target))
                         (emit-js-param! p)
@@ -828,14 +905,18 @@
       (let [rest-name (if hide-all? "$beagle$param$rest" (emit-js-param! rest-p))]
         (if (= fixed "") (str "..." rest-name) (str fixed ", ..." rest-name))))))
 
-(defn emit-pattern-binding-statements! [(target Any) (source String)] Any
+(defn emit-pattern-binding-statements!
+  [target Any
+   source String] Any
   (cond
     (string? target)
       [(str "let " (resolved-name target) " = " source ";")]
     (= (get target "type") "seq-destructure")
       (let [fixed (vec (apply concat
                         (map-indexed
-                          (fn [i Int item Any] Any
+                          (fn
+                            [i Int
+                             item Any] Any
                             (emit-pattern-binding-statements! item (str source "[" i "]")))
                           (get target "names"))))
             rest-name (get target "rest")]
@@ -872,11 +953,16 @@
         (into with-as fields))
     :else []))
 
-(defn emit-js-param-setup! [(params Any) (rest-p Any) (renames Any)] Any
+(defn emit-js-param-setup!
+  [params Any
+   rest-p Any
+   renames Any] Any
   (let [bindings (param-bindings params rest-p)
         hide-all? (bindings-have-constraints? bindings)
         sources (map-indexed
-                  (fn [i Int binding Any] String
+                  (fn
+                    [i Int
+                     binding Any] String
                     (cond
                       (and (not (absent? rest-p)) (= i (count params)))
                         (if hide-all? "$beagle$param$rest" (emit-js-param! rest-p))
@@ -887,21 +973,24 @@
         checks (vec (filterv
                       (fn [s Any] Bool (not (nil? s)))
                       (map-indexed
-                        (fn [i Int binding Any] Any
+                        (fn
+                          [i Int
+                           binding Any] Any
                           (emit-binding-constraint-statement! binding (nth sources i)))
                         bindings)))
         outer-bound (deref bound-vars)
         outer-types (deref type-env)
         outer-renames (deref rename-env)
-        projections
-          (with-emission-env!
+        projections (with-emission-env!
             (add-names outer-bound (binding-names-from-params params rest-p))
             (add-types outer-types (param-type-entries params rest-p))
             renames
             (fn [] Any
               (vec (apply concat
                 (map-indexed
-                  (fn [i Int binding Any] Any
+                  (fn
+                    [i Int
+                     binding Any] Any
                     (let [target (param-binding-target binding)
                           source (nth sources i)]
                       (cond
@@ -916,13 +1005,15 @@
 
 ;; --- records / enums / unions / deferror / defscalar --------------------------
 
-(defn field-names-of [(fields Any)] Any
+(defn field-names-of [fields Any] Any
   (mapv (fn [f Any] String (get f "name")) fields))
 
-(defn record-validator-name [(name String)] String
+(defn record-validator-name [name String] String
   (str "$beagle$record$" (mangle-name name) "$validate"))
 
-(defn emit-record-validator! [(name String) (fields Any)] Any
+(defn emit-record-validator!
+  [name String
+   fields Any] Any
   (let [checks (vec (filterv
                       (fn [check Any] Bool (not (nil? check)))
                       (mapv
@@ -936,43 +1027,53 @@
         (str/join "\n  " checks)
         "\n  return $beagle$record;\n}"))))
 
-(defn emit-record! [(f Any)] String
+(defn emit-record! [f Any] String
+  ;; PARAMS/accessor-name are bindings; object KEYS + reads are PROPERTY
+  ;; positions (char-mangle only, no `$`). Keep shorthand `{x}` when the
+  ;; two spellings coincide (non-reserved) so output stays byte-identical.
+  ;; Keep installed locals hidden too. An authored field name may also name
+  ;; its predicate; a later `const field` would otherwise capture that
+  ;; predicate through JavaScript's whole-block TDZ.
   (let [name (get f "name")
         declarations (get f "fields")
         fields (field-names-of declarations)
         constrained? (bindings-have-constraints? declarations)
         name-mangled (mangle-name name)
-        ;; PARAMS/accessor-name are bindings; object KEYS + reads are PROPERTY
-        ;; positions (char-mangle only, no `$`). Keep shorthand `{x}` when the
-        ;; two spellings coincide (non-reserved) so output stays byte-identical.
         field-raw-params (map-indexed
-                           (fn [i Int field String] String
+                           (fn
+                             [i Int
+                              field String] String
                              (if constrained? (str "$beagle$field$" i) (mangle-name field)))
                            fields)
-        ;; Keep installed locals hidden too. An authored field name may also
-        ;; name its predicate; a later `const field` would otherwise capture
-        ;; that predicate through JavaScript's whole-block TDZ.
         field-params (map-indexed
-                       (fn [i Int field String] String
+                       (fn
+                         [i Int
+                          field String] String
                          (if constrained?
                            (str "$beagle$field$" i "$" (mangle-name field))
                            (mangle-name field)))
                        fields)
         field-props (mapv mangle-prop fields)
         field-installs (if constrained?
-                         (map-indexed (fn [i Int field-name String] String
+                         (map-indexed (fn
+                                        [i Int
+                                         field-name String] String
                                         (str "const " field-name " = " (nth field-raw-params i) ";"))
                            field-params)
                          [])
         field-checks (vec (filterv
                             (fn [check Any] Bool (not (nil? check)))
                             (map-indexed
-                              (fn [i Int field Any] Any
+                              (fn
+                                [i Int
+                                 field Any] Any
                                 (emit-binding-constraint-statement!
                                   field (nth field-raw-params i)))
                               declarations)))
         field-entries (map-indexed
-                        (fn [i Int prop String] String
+                        (fn
+                          [i Int
+                           prop String] String
                           (let [param (nth field-params i)]
                             (if (= prop param) param (str prop ": " param))))
                         field-props)
@@ -985,38 +1086,50 @@
                      (if (= 0 (count field-installs)) "" (str (str/join "\n  " field-installs) "\n  "))
                      "return " frozen ";\n}")
         accessors (map-indexed
-                    (fn [i Int prop String] String
+                    (fn
+                      [i Int
+                       prop String] String
                       (str "function "
                            (mangle-str (str (str/lower-case name) "-" (nth fields i)))
                            "(r) { return r." prop "; }"))
                     field-props)]
     (str/join "\n\n" (into (if (nil? validator) [] [validator]) (into [factory] accessors)))))
 
-(defn emit-tagged-factory! [(member-name String) (fields Any)] String
+(defn emit-tagged-factory!
+  [member-name String
+   fields Any] String
+  ;; Params are bindings (suffixed); object keys are properties (no `$`).
   (let [m-str (mangle-name member-name)
         raw-fields (field-names-of fields)
         constrained? (bindings-have-constraints? fields)
-        ;; params are BINDINGS (suffixed); object KEYS are PROPERTIES (no `$`).
         field-raw-params (map-indexed
-                           (fn [i Int field String] String
+                           (fn
+                             [i Int
+                              field String] String
                              (if constrained? (str "$beagle$field$" i) (mangle-name field)))
                            raw-fields)
         field-params (map-indexed
-                       (fn [i Int field String] String
+                       (fn
+                         [i Int
+                          field String] String
                          (if constrained?
                            (str "$beagle$field$" i "$" (mangle-name field))
                            (mangle-name field)))
                        raw-fields)
         field-props (mapv mangle-prop raw-fields)]
     (let [installs (if constrained?
-                     (map-indexed (fn [i Int field-name String] String
+                     (map-indexed (fn
+                                    [i Int
+                                     field-name String] String
                                     (str "const " field-name " = " (nth field-raw-params i) ";"))
                        field-params)
                      [])
           field-checks (vec (filterv
                               (fn [check Any] Bool (not (nil? check)))
                               (map-indexed
-                                (fn [i Int field Any] Any
+                                (fn
+                                  [i Int
+                                   field Any] Any
                                   (emit-binding-constraint-statement!
                                     field (nth field-raw-params i)))
                                 fields)))
@@ -1025,7 +1138,9 @@
                        (js-string-lit member-name)
                        (if (= 0 (count field-params)) ""
                          (str ", " (str/join ", " (map-indexed
-                                            (fn [i Int prop String] String
+                                            (fn
+                                              [i Int
+                                               prop String] String
                                               (str prop ": " (nth field-params i)))
                                             field-props))))
                        " })")
@@ -1035,17 +1150,19 @@
                     (if (= 0 (count installs)) "" (str (str/join " " installs) " "))
                     "return " frozen "; }")
           accessors (map-indexed
-                     (fn [i Int prop String] String
+                     (fn
+                       [i Int
+                        prop String] String
                        (str "function " (mangle-str (str (str/lower-case member-name) "-" (nth raw-fields i)))
                             "(r) { return r." prop "; }"))
                      field-props)]
       (str/join "\n\n" (into (if (nil? validator) [] [validator]) (into [factory] accessors))))))
 
-(defn emit-defenum [(f Any)] String
+(defn emit-defenum [f Any] String
   (str "const " (mangle-name (get f "name")) "_values = new Set(["
        (str/join ", " (mapv (fn [v Any] String (js-string-lit v)) (get f "values"))) "]);"))
 
-(defn emit-defunion! [(f Any)] String
+(defn emit-defunion! [f Any] String
   (let [name (mangle-name (get f "name"))
         members (get f "members")
         comment (str "// " name " = " (str/join " | " (mapv mangle-name members)))
@@ -1055,7 +1172,7 @@
       (str comment "\n"
            (str/join "\n" (mapv (fn [m String] String (emit-tagged-factory! m (vec (get mf m)))) members))))))
 
-(defn emit-deferror! [(f Any)] String
+(defn emit-deferror! [f Any] String
   (let [name (mangle-name (get f "name"))
         members (get f "members")
         comment (str "// error " name " = " (str/join " | " (mapv mangle-name members)))
@@ -1063,7 +1180,7 @@
     (str comment "\n"
          (str/join "\n" (mapv (fn [m String] String (emit-tagged-factory! m (vec (get mf m)))) members)))))
 
-(defn emit-defscalar [(f Any)] String
+(defn emit-defscalar [f Any] String
   (let [name (get f "name")
         predicates (get f "predicates")]
     (if (= 0 (count predicates))
@@ -1086,7 +1203,7 @@
 
 ;; --- quoted values ------------------------------------------------------------
 
-(defn emit-quoted [(d Any)] String
+(defn emit-quoted [d Any] String
   (cond
     (string? d) (js-string-lit d)
     (boolean? d) (if d "true" "false")
@@ -1105,7 +1222,7 @@
 
 ;; --- call-name resolution + core-call -----------------------------------------
 
-(defn emit-ref-name [(ref Any)] String
+(defn emit-ref-name [ref Any] String
   (if (qualified-reference? ref)
     (emit-qualified-reference ref false)
     (let [name (if (map? ref) (get ref "name") ref)]
@@ -1115,7 +1232,7 @@
         (contains? JS-VALUE-WRAPPERS name) (get JS-VALUE-WRAPPERS name)
         :else (mangle-name name)))))
 
-(defn emit-call-fn-name [(ref Any)] String
+(defn emit-call-fn-name [ref Any] String
   (if (qualified-reference? ref)
     (emit-qualified-reference ref (qualified-member-constructor? ref))
     (let [name (if (map? ref) (get ref "name") ref)]
@@ -1124,10 +1241,12 @@
         (str/starts-with? name "->") (mangle-str (subs name 2))
         :else (mangle-name name)))))
 
-(defn emit-args-list [(args Any)] String
+(defn emit-args-list [args Any] String
   (str/join ", " (mapv emit-expr*! args)))
 
-(defn emit-core-call! [(fn-sym String) (args Any)] Any
+(defn emit-core-call!
+  [fn-sym String
+   args Any] Any
   (let [n (count args)
         a0 (if (> n 0) (emit-expr*! (nth args 0)) "")
         a1 (if (> n 1) (emit-expr*! (nth args 1)) "")
@@ -1249,7 +1368,9 @@
     (swap! match-counter inc)
     (str "_match_" n)))
 
-(defn emit-pat-literal-test-js [(pat Any) (tmp String)] String
+(defn emit-pat-literal-test-js
+  [pat Any
+   tmp String] String
   (let [val (get pat "value")]
     (cond
       (and (map? val) (= (get val "type") "symbol"))
@@ -1261,14 +1382,18 @@
       (nil? val) (str tmp " == null")
       :else (str tmp " === " (str val)))))
 
-(defn emit-match-body! [(body Any) (extra Any)] String
+(defn emit-match-body!
+  [body Any
+   extra Any] String
   (with-bound! extra
     (fn [] String
       (if (= (count body) 1)
         (str "return " (emit-expr*! (nth body 0)) ";")
         (emit-body-return* body "")))))
 
-(defn emit-match-arm! [(clause Any) (tmp String)] String
+(defn emit-match-arm!
+  [clause Any
+   tmp String] String
   (let [pat (get clause "pattern")
         body (get clause "body")
         pt (get pat "type")]
@@ -1292,7 +1417,8 @@
               test (str tmp "._tag === " (js-string-lit rec-name))]
           (if (or (= 0 (count bindings)) (nil? fields))
             (str "if (" test ") { " (emit-match-body! body []) " } else")
-            (let [let-strs (loop [i Int 0 acc (Vec String) []]
+            (let [let-strs (loop [i Int 0
+                                  acc (Vec String) []]
                              (if (or (>= i (count bindings)) (>= i (count fields))) acc
                                (recur (+ i 1)
                                       (conj acc (str "const " (mangle-name (get (nth bindings i) "name"))
@@ -1314,7 +1440,7 @@
             (str "if (" test ") { " (str/join " " binds) " " (emit-match-body! body bnames) " } else")))
       :else (str "{ " (emit-match-body! body []) " }"))))
 
-(defn emit-match! [(e Any)] String
+(defn emit-match! [e Any] String
   (let [target-str (emit-expr*! (get e "target"))
         tmp (fresh-match-sym!)
         clauses (get e "clauses")
@@ -1331,7 +1457,7 @@
 
 ;; --- with (record update) -----------------------------------------------------
 
-(defn emit-with! [(e Any)] String
+(defn emit-with! [e Any] String
   (let [target-str (emit-expr*! (get e "target"))
         updates (mapv (fn [u Any] String
                         (str (kw->prop (get u "field")) ": " (emit-expr*! (get u "value")))) (get e "updates"))]
@@ -1354,9 +1480,14 @@
 
 ;; --- set! target collection (collect-set!-target-syms) ------------------------
 
-(defn walk-set! [(e Any) (acc Any)] Any
+(defn walk-set!
+  [e Any
+   acc Any] Any
   (if (not (map? e))
-    (if (vector? e) (reduce (fn [a Any x Any] Any (walk-set! x a)) acc e) acc)
+    (if (vector? e) (reduce (fn
+                              [a Any
+                               x Any] Any
+                              (walk-set! x a)) acc e) acc)
     (let [node (get e "node")]
       (cond
         (= node "set!")
@@ -1367,27 +1498,42 @@
         (= node "call") (walk-set! (get e "args") (walk-set! (get e "fn") acc))
         (= node "if") (walk-set! (get e "else") (walk-set! (get e "then") (walk-set! (get e "cond") acc)))
         (= node "let") (walk-set! (get e "body")
-                         (reduce (fn [a Any b Any] Any
+                         (reduce (fn
+                                   [a Any
+                                    b Any] Any
                                    (let [a2 (walk-set! (get b "value") a)
                                          constraint (binding-constraint b)]
                                      (if (nil? constraint) a2 (walk-set! constraint a2))))
                            acc (get e "bindings")))
         (= node "when") (walk-set! (get e "body") (walk-set! (get e "cond") acc))
         (= node "do") (walk-set! (get e "body") acc)
-        (= node "cond") (reduce (fn [a Any c Any] Any
+        (= node "cond") (reduce (fn
+                                  [a Any
+                                   c Any] Any
                                   (walk-set! (get c "body") (walk-set! (get c "test") a))) acc (get e "clauses"))
         (= node "loop") (walk-set! (get e "body")
-                          (reduce (fn [a Any b Any] Any
+                          (reduce (fn
+                                    [a Any
+                                     b Any] Any
                                     (let [a2 (walk-set! (get b "value") a)
                                           constraint (binding-constraint b)]
                                       (if (nil? constraint) a2 (walk-set! constraint a2))))
                             acc (get e "bindings")))
         (= node "match") (walk-set! (get e "target")
-                           (reduce (fn [a Any c Any] Any (walk-set! (get c "body") a)) acc (get e "clauses")))
-        (= node "try") (reduce (fn [a Any c Any] Any (walk-set! (get c "body") a))
+                           (reduce (fn
+                                     [a Any
+                                      c Any] Any
+                                     (walk-set! (get c "body") a)) acc (get e "clauses")))
+        (= node "try") (reduce (fn
+                                 [a Any
+                                  c Any] Any
+                                 (walk-set! (get c "body") a))
                                (walk-set! (get e "body") acc) (get e "catches"))
         (= node "vec") (walk-set! (get e "items") acc)
-        (= node "with") (reduce (fn [a Any u Any] Any (walk-set! (get u "value") a))
+        (= node "with") (reduce (fn
+                                  [a Any
+                                   u Any] Any
+                                  (walk-set! (get u "value") a))
                           (walk-set! (get e "target") acc) (get e "updates"))
         (= node "js-selector") acc
         (or (= node "js-get") (= node "js-delete") (= node "js-in"))
@@ -1415,23 +1561,22 @@
         (= node "js-typeof") (walk-set! (get e "expr") acc)
         :else acc))))
 
-(defn collect-set!-syms! [(body Any)] Any (walk-set! body []))
+(defn collect-set!-syms! [body Any] Any (walk-set! body []))
 
 ;; --- let bindings -------------------------------------------------------------
 
 (defn emit-let-binding-stmts!
-  [(binding Any)
-   (val-str String)
-   (mutable? Bool)
-   (aggregate-slot String)
-   (force-slot? Bool)
-   (pre-bound Any)
-   (pre-types Any)
-   (pre-renames Any)
-   (post-bound Any)
-   (post-types Any)
-   (post-renames Any)]
-  Any
+  [binding Any
+   val-str String
+   mutable? Bool
+   aggregate-slot String
+   force-slot? Bool
+   pre-bound Any
+   pre-types Any
+   pre-renames Any
+   post-bound Any
+   post-types Any
+   post-renames Any] Any
   (let [target (get binding "name")
         kw (if mutable? "let" "const")
         needs-slot? (or force-slot? (not (string? target))
@@ -1453,34 +1598,36 @@
     (into declaration (into (if (nil? check) [] [check]) installs))))
 
 (defn emit-js-argument-binding-setup!
-  [(binding Any)
-   (source String)
-   (slot String)
-   (pre-bound Any)
-   (pre-types Any)
-   (pre-renames Any)
-   (post-bound Any)
-   (post-types Any)
-   (post-renames Any)]
-  Any
+  [binding Any
+   source String
+   slot String
+   pre-bound Any
+   pre-types Any
+   pre-renames Any
+   post-bound Any
+   post-types Any
+   post-renames Any] Any
   (emit-let-binding-stmts! binding source false slot false
     pre-bound pre-types pre-renames post-bound post-types post-renames))
 
-(defn let-names-of [(bindings Any)] Any
+(defn let-names-of [bindings Any] Any
   (vec (apply concat (mapv (fn [b Any] Any (names-from-target (get b "name"))) bindings))))
 
-(defn shadows-inline? [(names Any)] Bool
+(defn shadows-inline? [names Any] Bool
   (> (count (filterv (fn [n String] Bool (contains? (deref inline-scope) n)) names)) 0))
 
-(defn emit-let-bind-info! [(bindings Any) (body Any)] Any
+(defn emit-let-bind-info!
+  [bindings Any
+   body Any] Any
   (let [mutated (collect-set!-syms! body)
         constrained-sequence? (bindings-have-constraints? bindings)]
     (loop [remaining (vec bindings)
            i 0
            strings []
            bound (deref bound-vars)
-           types deref type-env
-           renames deref rename-env]
+           types deref
+           type-env renames
+           deref rename-env]
       (if (= 0 (count remaining))
         {"strs" strings "bound" bound "types" types "renames" renames}
         (let [binding (nth remaining 0)
@@ -1491,7 +1638,9 @@
               post-types (add-types types [binding])
               id (if constrained-sequence? (next-constrained-binding-id!) i)
               post-renames (reduce
-                             (fn [next Any name String] Any
+                             (fn
+                               [next Any
+                                name String] Any
                                (assoc next name
                                  (if constrained-sequence?
                                    (str "$beagle$constrained$binding$" id "$" (mangle-name name))
@@ -1512,7 +1661,7 @@
 
 ;; --- statement / return body machinery ----------------------------------------
 
-(defn emit-expr-stmt! [(e Any)] String
+(defn emit-expr-stmt! [e Any] String
   (reset! ctx "stmt")
   (let [s (await-async-iife (emit-expr*! e))]
     (if (str/ends-with? s ";") s (str s ";"))))
@@ -1520,10 +1669,12 @@
 ;; Statement-context body: route each form through emit-stmt-inline! so
 ;; effect-position ctrl-flow (if/cond/when/let/do) lowers to idiomatic
 ;; statements recursively rather than value-position ternary/IIFE.
-(defn emit-body-stmts [(exprs Any) (indent String)] String
+(defn emit-body-stmts
+  [exprs Any
+   indent String] String
   (str/join (str "\n" indent) (mapv (fn [e Any] String (emit-stmt-inline* e indent)) exprs)))
 
-(defn stmt-inline? [(e Any)] Bool
+(defn stmt-inline? [e Any] Bool
   (if (not (map? e))
     false
     (let [node (get e "node")]
@@ -1537,18 +1688,19 @@
 ;; --- for / doseq --------------------------------------------------------------
 
 (defn extend-for-binding-env
-  [(binding Any)
-   (prefix String)
-   (index Int)
-   (bound Any)
-   (types Any)
-   (renames Any)]
-  Any
+  [binding Any
+   prefix String
+   index Int
+   bound Any
+   types Any
+   renames Any] Any
   (let [names (names-from-target (get binding "name"))
         post-bound (add-names bound names)
         post-types (add-types types [binding])
         post-renames (reduce
-                       (fn [next Any name String] Any
+                       (fn
+                         [next Any
+                          name String] Any
                          (assoc next name
                            (if (nil? (binding-constraint binding))
                              (mangle-name name)
@@ -1557,15 +1709,14 @@
     {"bound" post-bound "types" post-types "renames" post-renames}))
 
 (defn emit-for-binding-setup!
-  [(binding Any)
-   (source String)
-   (pre-bound Any)
-   (pre-types Any)
-   (pre-renames Any)
-   (post-bound Any)
-   (post-types Any)
-   (post-renames Any)]
-  Any
+  [binding Any
+   source String
+   pre-bound Any
+   pre-types Any
+   pre-renames Any
+   post-bound Any
+   post-types Any
+   post-renames Any] Any
   (let [target (get binding "name")
         constrained? (not (nil? (binding-constraint binding)))
         check (with-emission-env! pre-bound pre-types pre-renames
@@ -1580,7 +1731,11 @@
                        :else [])))]
     (into (if (nil? check) [] [check]) installs)))
 
-(defn emit-for-body! [(body Any) (bound Any) (types Any) (renames Any)] String
+(defn emit-for-body!
+  [body Any
+   bound Any
+   types Any
+   renames Any] String
   (with-emission-env! bound types renames
     (fn [] Any
       (if (= (count body) 1)
@@ -1588,13 +1743,12 @@
         (str "(() => { " (emit-body-return* body "") " })()")))))
 
 (defn emit-for-clauses!
-  [(clauses Any)
-   (body Any)
-   (bound Any)
-   (types Any)
-   (renames Any)
-   (index Int)]
-  String
+  [clauses Any
+   body Any
+   bound Any
+   types Any
+   renames Any
+   index Int] String
   (if (= 0 (count clauses))
     (emit-for-body! body bound types renames)
     (let [clause (nth clauses 0)
@@ -1616,18 +1770,18 @@
                 collection (with-emission-env! bound types renames
                              (fn [] Any (emit-expr*! (get clause "expr"))))]
             (if (and (> (count remaining) 0) (= (get (nth remaining 0) "type") "when"))
+              ;; A binding with setup (destructuring/defaults/constraint) must
+              ;; perform that binding operation exactly once per source item,
+              ;; so filter-before-body ordering is preserved by carrying a
+              ;; delayed producer through the filter. Without setup there is
+              ;; nothing to share, and plain filter-then-map is the same
+              ;; evaluation in the idiomatic shape.
               (let [guard (nth remaining 0)
                     after (subvec remaining 1)
                     test (with-emission-env! post-bound post-types post-renames
                            (fn [] Any (emit-expr*! (get guard "test"))))
                     inner (emit-for-clauses! after body post-bound post-types post-renames (+ index 1))
                     entry "$beagle$filtered$entry"]
-                ;; A binding with setup (destructuring/defaults/constraint) must
-                ;; perform that binding operation exactly once per source item,
-                ;; so filter-before-body ordering is preserved by carrying a
-                ;; delayed producer through the filter. Without setup there is
-                ;; nothing to share, and plain filter-then-map is the same
-                ;; evaluation in the idiomatic shape.
                 (if (= 0 (count setup))
                   (str collection ".filter((" arg ") => " test
                     ").map((" arg ") => " inner ")")
@@ -1647,11 +1801,11 @@
             (str "(() => { " (str/join " " (get info "strs")) " return " inner "; })()"))
         :else (throw (ex-info "unsupported for clause combination" {}))))))
 
-(defn emit-for! [(e Any)] String
+(defn emit-for! [e Any] String
   (emit-for-clauses! (vec (get e "clauses")) (get e "body")
     (deref bound-vars) (deref type-env) (deref rename-env) 0))
 
-(defn emit-doseq! [(e Any)] String
+(defn emit-doseq! [e Any] String
   (let [clauses (vec (get e "clauses"))]
     (when (or (not (= 1 (count clauses)))
               (not (= (get (nth clauses 0) "type") "binding")))
@@ -1682,13 +1836,18 @@
         (str "for (const " arg " of " collection ") {\n  " inner-body "\n}")
         (str collection ".forEach((" arg ") => {\n  " inner-body "\n});")))))
 
-(defn emit-stmt-inline! [(e Any) (indent String)] String
+(defn emit-stmt-inline!
+  [e Any
+   indent String] String
   (if (not (map? e))
     (emit-expr-stmt! e)
-    (let [node (get e "node") inner (str indent "  ")]
+    (let [node (get e "node")
+          inner (str indent "  ")]
       (cond
         (= node "let")
-          (let [bindings (get e "bindings") body (get e "body") lnames (let-names-of bindings)]
+          (let [bindings (get e "bindings")
+                body (get e "body")
+                lnames (let-names-of bindings)]
             (if (shadows-inline? lnames)
               (emit-expr-stmt! e)
               (let [info (emit-let-bind-info! bindings body)
@@ -1703,7 +1862,8 @@
         (= node "when")
           (str "if (" (emit-expr*! (get e "cond")) ") {\n" inner (emit-body-stmts (get e "body") inner) "\n" indent "}")
         (= node "when-let")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name"))]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))]
             (with-bound! [(get e "name")]
               (fn [] String
                 (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner
@@ -1730,13 +1890,18 @@
             (str/join " else " parts))
         :else (emit-expr-stmt! e)))))
 
-(defn emit-return-position! [(e Any) (indent String)] String
+(defn emit-return-position!
+  [e Any
+   indent String] String
   (if (not (map? e))
     (str "return " (emit-expr*! e) ";")
-    (let [node (get e "node") inner (str indent "  ")]
+    (let [node (get e "node")
+          inner (str indent "  ")]
       (cond
         (= node "let")
-          (let [bindings (get e "bindings") body (get e "body") lnames (let-names-of bindings)]
+          (let [bindings (get e "bindings")
+                body (get e "body")
+                lnames (let-names-of bindings)]
             (if (shadows-inline? lnames)
               (str "return " (emit-expr*! e) ";")
               (let [info (emit-let-bind-info! bindings body)
@@ -1752,19 +1917,23 @@
         (= node "when")
           (str "if (" (emit-expr*! (get e "cond")) ") {\n" inner (emit-body-return* (get e "body") inner) "\n" indent "}")
         (= node "when-let")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name"))]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))]
             (with-bound! [(get e "name")]
               (fn [] String
                 (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner
                      (emit-body-return* (get e "body") inner) "\n" indent "}"))))
         (= node "when-some")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name"))]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))]
             (with-bound! [(get e "name")]
               (fn [] String
                 (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner
                      (emit-body-return* (get e "body") inner) "\n" indent "}"))))
         (= node "if-let")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name")) el (get e "else")]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))
+                el (get e "else")]
             (with-bound! [(get e "name")]
               (fn [] String
                 (let [then-str (emit-return-position! (get e "then") inner)
@@ -1772,7 +1941,8 @@
                   (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner
                        then-str "\n" indent "} else {\n" inner else-str "\n" indent "}")))))
         (= node "if-some")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name"))]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))]
             (with-bound! [(get e "name")]
               (fn [] String
                 (let [then-str (emit-return-position! (get e "then") inner)
@@ -1789,7 +1959,9 @@
                "\n" indent "} else {\n" inner (emit-return-position! (get e "else") inner) "\n" indent "}")
         :else (str "return " (emit-expr*! e) ";")))))
 
-(defn emit-body-return! [(exprs Any) (indent String)] String
+(defn emit-body-return!
+  [exprs Any
+   indent String] String
   (cond
     (= 0 (count exprs)) ""
     (= 1 (count exprs)) (emit-return-position! (nth exprs 0) indent)
@@ -1802,7 +1974,7 @@
 
 ;; --- loop / recur -------------------------------------------------------------
 
-(defn logical-call? [(e Any)] Bool
+(defn logical-call? [e Any] Bool
   (and (map? e)
        (= (get e "node") "call")
        (let [f (get e "fn")]
@@ -1810,7 +1982,7 @@
               (= (get f "node") "ref")
               (or (= (get f "name") "and") (= (get f "name") "or"))))))
 
-(defn expr-contains-recur? [(e Any)] Bool
+(defn expr-contains-recur? [e Any] Bool
   (if (not (map? e))
     false
     (let [node (get e "node")
@@ -1829,17 +2001,16 @@
                               (let [el (get e "else")] (if (absent? el) false (expr-contains-recur? el))))
         :else false))))
 
-(defn body-contains-recur? [(body Any)] Bool
+(defn body-contains-recur? [body Any] Bool
   (> (count (filterv (fn [e Any] Bool (expr-contains-recur? e)) body)) 0))
 
 (defn build-sequential-binding-contexts
-  [(bindings Any)
-   (prefix String)
-   (hide-all? Bool)
-   (initial-bound Any)
-   (initial-types Any)
-   (initial-renames Any)]
-  Any
+  [bindings Any
+   prefix String
+   hide-all? Bool
+   initial-bound Any
+   initial-types Any
+   initial-renames Any] Any
   (loop [remaining (vec bindings)
          i 0
          contexts []
@@ -1853,7 +2024,9 @@
             post-bound (add-names bound names)
             post-types (add-types types [binding])
             post-renames (reduce
-                           (fn [next Any name String] Any
+                           (fn
+                             [next Any
+                              name String] Any
                              (assoc next name
                                (if hide-all?
                                  (str "$beagle$" prefix "$" i "$" (mangle-name name))
@@ -1865,7 +2038,9 @@
         (recur (subvec remaining 1) (+ i 1) (conj contexts context)
                post-bound post-types post-renames)))))
 
-(defn emit-context-install! [(context Any) (source String)] Any
+(defn emit-context-install!
+  [context Any
+   source String] Any
   (let [binding (get context "binding")
         target (get binding "name")]
     (with-emission-env!
@@ -1877,12 +2052,16 @@
             (get context "pre-bound") (get context "pre-types") (get context "pre-renames")
             (fn [] Any (emit-pattern-binding-statements! target source))))))))
 
-(defn emit-recur-stmts! [(e Any) (bind-names Any)] String
+(defn emit-recur-stmts!
+  [e Any
+   bind-names Any] String
   (let [args (get e "args")
-        temps (loop [i Int 0 acc (Vec String) []]
+        temps (loop [i Int 0
+                     acc (Vec String) []]
                 (if (>= i (count args)) acc
                   (recur (+ i 1) (conj acc (str "const _recur_" i " = " (emit-expr*! (nth args i)) ";")))))
-        assigns (loop [i Int 0 acc (Vec String) []]
+        assigns (loop [i Int 0
+                       acc (Vec String) []]
                   (if (>= i (count bind-names)) acc
                     (recur (+ i 1) (conj acc (str (nth bind-names i) " = _recur_" i ";")))))
         contexts (deref loop-binding-contexts)]
@@ -1890,7 +2069,9 @@
       (str (str/join " " (into temps assigns)) " continue;")
       (let [candidate-setups (vec (apply concat
                                (map-indexed
-                                 (fn [i Int context Any] Any
+                                 (fn
+                                   [i Int
+                                    context Any] Any
                                    (let [source (str "_recur_" i)
                                          check (with-emission-env!
                                                  (get context "pre-bound")
@@ -1909,12 +2090,14 @@
     (swap! logical-counter inc)
     (str "_logical_" n)))
 
-(defn clj-truthy-test [(value-str String)] String
+(defn clj-truthy-test [value-str String] String
   (str value-str " !== false && " value-str " != null"))
 
 ;; Logical loop tails lower as statements because recur never has a JS value.
 (defn emit-loop-stmt-with!
-  [(e Any) (bind-names Any) (emit-value (Fn [String] String))] String
+  [e Any
+   bind-names Any
+   emit-value (Fn [String] String)] String
   (if (not (map? e))
     (emit-value (emit-expr*! e))
     (let [node (get e "node")]
@@ -1922,7 +2105,7 @@
         (logical-call? e)
           (let [op (get (get e "fn") "name")
                 identity-value (if (= op "and") "true" "null")]
-            (letfn [(walk [(remaining Any)] String
+            (letfn [(walk [remaining Any] String
                       (cond
                         (= 0 (count remaining)) (emit-value identity-value)
                         (= 1 (count remaining))
@@ -1948,12 +2131,14 @@
               (str "if (" cond-str ") { " then-str " } else { " (emit-value "null") " }")
               (str "if (" cond-str ") { " then-str " } else { " (emit-loop-stmt-with! el bind-names emit-value) " }")))
         (and (= node "let") (body-contains-recur? (get e "body")))
-          (let [bindings (get e "bindings") body (get e "body")
+          (let [bindings (get e "bindings")
+                body (get e "body")
                 info (emit-let-bind-info! bindings body)
                 binding-strs (get info "strs")]
             (with-emission-env! (get info "bound") (get info "types") (get info "renames")
               (fn [] Any
-                (let [forms body n (count forms)
+                (let [forms body
+                      n (count forms)
                       side (subvec forms 0 (- n 1))
                       side-str (str/join " " (mapv (fn [x Any] String (emit-expr-stmt! x)) side))
                       tail (emit-loop-stmt-with! (nth forms (- n 1)) bind-names emit-value)]
@@ -1968,8 +2153,7 @@
                 seq-body (fn [forms Any] String
                            (let [n (count forms)
                                  side (subvec forms 0 (- n 1))
-                                 side-str (str/join " " (mapv (fn
-                                                                [(x Any)] String (emit-expr-stmt! x)) side))]
+                                 side-str (str/join " " (mapv (fn [x Any] String (emit-expr-stmt! x)) side))]
                              (str (if (> n 1) (str side-str " ") "")
                                   (emit-loop-stmt-with! (nth forms (- n 1)) bind-names emit-value))))
                 parts (mapv (fn [c Any] String
@@ -1980,38 +2164,42 @@
             (str (str/join " else " parts)
                  (if has-else "" (str " else { " (emit-value "null") " }"))))
         (and (= node "do") (body-contains-recur? (get e "body")))
-          (let [forms (get e "body") n (count forms)
+          (let [forms (get e "body")
+                n (count forms)
                 side (subvec forms 0 (- n 1))
                 side-str (str/join " " (mapv (fn [x Any] String (emit-expr-stmt! x)) side))]
             (str side-str " " (emit-loop-stmt-with! (nth forms (- n 1)) bind-names emit-value)))
         (= node "recur") (emit-recur-stmts! e bind-names)
         :else (emit-value (emit-expr*! e))))))
 
-(defn emit-loop-stmt! [(e Any) (bind-names Any)] String
+(defn emit-loop-stmt!
+  [e Any
+   bind-names Any] String
   (emit-loop-stmt-with! e bind-names (fn [value-str String] String (str "return " value-str ";"))))
 
 ;; --- js/quote emission (port of beagle-lib/private/emit-js-quote.rkt) ---------
 
-(defn indent-str [(depth Int)] String
+(defn indent-str [depth Int] String
   (let [spaces (Vec Int) (vec (range (* depth 2)))]
     (str/join "" (mapv (fn [x Any] String " ") spaces))))
 
-(defn escape-js-template-string [(s String)] String
+(defn escape-js-template-string [s String] String
   (str/replace (str/replace s "`" "\\`") "${" "\\${"))
 
-(defn ajs-ident [(s String)] String (mangle-name s))
+(defn ajs-ident [s String] String (mangle-name s))
 
-(defn ajs-params [(params Any)] String
+(defn ajs-params [params Any] String
   (str/join ", "
     (mapv (fn [p Any] String
             (if (string? p) (ajs-ident p) (str "..." (ajs-ident (get p "spread"))))) params)))
 
 ;; expression dispatch
-(defn ajs-expr! [(n Any)] String
+(defn ajs-expr! [n Any] String
   (let [k (get n "jsk")]
     (cond
       (= k "literal")
-        (let [kind (get n "kind") v (get n "value")]
+        (let [kind (get n "kind")
+              v (get n "value")]
           (cond
             (= kind "string") (js-string-lit v)
             (= kind "number") (str v)
@@ -2032,7 +2220,8 @@
       (= k "index")
         (str (ajs-expr! (get n "object")) "[" (ajs-expr! (get n "idx")) "]")
       (= k "arrow")
-        (let [params-str (ajs-params (get n "params")) body (get n "body")]
+        (let [params-str (ajs-params (get n "params"))
+              body (get n "body")]
           (if (and (map? body) (= (get body "jsk") "block"))
             (str "(" params-str ") => " (ajs-block* body 0))
             (str "(" params-str ") => " (ajs-expr! body))))
@@ -2053,12 +2242,14 @@
       (= k "object")
         (str "{" (str/join ", "
                (mapv (fn [p Any] String
-                       (let [key (get p "key") val (get p "val")]
+                       (let [key (get p "key")
+                             val (get p "val")]
                          (cond
                            (= (get key "jsk") "ident")
                              ;; KEY is a property (mangle-prop); VALUE ident is a
                              ;; binding ref (mangle-name). Shorthand only when equal.
-                             (let [kk (mangle-prop (get key "name")) vv (ajs-expr! val)]
+                             (let [kk (mangle-prop (get key "name"))
+                                   vv (ajs-expr! val)]
                                (if (and (= (get val "jsk") "ident") (= kk (ajs-ident (get val "name")))) kk (str kk ": " vv)))
                            (= (get key "jsk") "literal") (str (ajs-expr! key) ": " (ajs-expr! val))
                            :else (str "[" (ajs-expr! key) "]: " (ajs-expr! val))))) (get n "pairs"))) "}")
@@ -2071,13 +2262,17 @@
              "(" (ajs-params (get n "params")) ") " (ajs-block* (get n "body") 0))
       :else (str "/* js/quote: unhandled node " k " */"))))
 
-(defn ajs-function-decl [(n Any) (depth Int)] String
+(defn ajs-function-decl
+  [n Any
+   depth Int] String
   (let [ind (indent-str depth)]
     (str ind (if (get n "export") "export " "") (if (get n "async") "async " "")
          "function " (ajs-ident (get n "name")) "(" (ajs-params (get n "params")) ") "
          (ajs-block* (get n "body") depth))))
 
-(defn ajs-method [(n Any) (depth Int)] String
+(defn ajs-method
+  [n Any
+   depth Int] String
   (let [ind (indent-str depth)
         kind (get n "kind")
         kind-prefix (cond (= kind "get") "get " (= kind "set") "set " :else "")
@@ -2085,7 +2280,9 @@
     (str ind (if (get n "static") "static " "") (if (get n "async") "async " "") kind-prefix
          name-str "(" (ajs-params (get n "params")) ") " (ajs-block* (get n "body") depth))))
 
-(defn ajs-class-decl! [(n Any) (depth Int)] String
+(defn ajs-class-decl!
+  [n Any
+   depth Int] String
   (let [ind (indent-str depth)
         ext (get n "extends")
         extends-str (if (absent? ext) "" (str " extends " (ajs-expr! ext)))
@@ -2093,8 +2290,11 @@
         methods-str (str/join "\n\n" (mapv (fn [m Any] String (ajs-method m inner)) (get n "methods")))]
     (str ind "class " (ajs-ident (get n "name")) extends-str " {\n" methods-str "\n" ind "}")))
 
-(defn ajs-stmt! [(n Any) (depth Int)] String
-  (let [ind (indent-str depth) k (get n "jsk")]
+(defn ajs-stmt!
+  [n Any
+   depth Int] String
+  (let [ind (indent-str depth)
+        k (get n "jsk")]
     (cond
       (= k "block") (str/join "\n" (mapv (fn [s Any] String (ajs-stmt* s depth)) (get n "stmts")))
       (= k "const") (str ind "const " (ajs-ident (get n "name")) " = " (ajs-expr! (get n "value")) ";")
@@ -2102,7 +2302,9 @@
       (= k "assign") (str ind (ajs-expr! (get n "target")) " = " (ajs-expr! (get n "value")) ";")
       (= k "return") (if (absent? (get n "expr")) (str ind "return;") (str ind "return " (ajs-expr! (get n "expr")) ";"))
       (= k "if")
-        (let [test-str (ajs-expr! (get n "test")) then-str (ajs-block* (get n "then") depth) el (get n "else")]
+        (let [test-str (ajs-expr! (get n "test"))
+              then-str (ajs-block* (get n "then") depth)
+              el (get n "else")]
           (if (absent? el)
             (str ind "if (" test-str ") " then-str)
             (str ind "if (" test-str ") " then-str " else " (ajs-block* el depth))))
@@ -2125,14 +2327,18 @@
       (= k "splice-stmts") (str ind (emit-expr*! (get n "bexpr")))
       :else (str ind (ajs-expr! n) ";"))))
 
-(defn ajs-block [(n Any) (depth Int)] String
+(defn ajs-block
+  [n Any
+   depth Int] String
   (let [inner (+ depth 1)
         stmts (if (and (map? n) (= (get n "jsk") "block")) (get n "stmts") [n])
         body (str/join "\n" (mapv (fn [s Any] String (ajs-stmt* s inner)) stmts))
         ind (indent-str depth)]
     (str "{\n" body "\n" ind "}")))
 
-(defn emit-js-ast-node! [(node Any) (depth Int)] String
+(defn emit-js-ast-node!
+  [node Any
+   depth Int] String
   (let [k (get node "jsk")]
     (cond
       (= k "block") (str/join "\n" (mapv (fn [s Any] String (ajs-stmt! s depth)) (get node "stmts")))
@@ -2142,7 +2348,7 @@
 
 ;; --- fn / call / expression dispatcher ----------------------------------------
 
-(defn emit-fn! [(e Any)] String
+(defn emit-fn! [e Any] String
   (let [params (emit-js-params! (get e "params") (get e "rest"))
         body (get e "body")
         async? (or (params-have-constraint-await? (get e "params") (get e "rest"))
@@ -2169,25 +2375,27 @@
               (str/join " " (into setup [(emit-body-return* body "")]))
               " }"))))))
 
-(defn emit-eq-pairs! [(args Any)] String
+(defn emit-eq-pairs! [args Any] String
   (let [n (count args)
         rendered (mapv emit-expr*! args)]
     (str/join " && "
-      (loop [i Int 0 acc (Vec String) []]
+      (loop [i Int 0
+             acc (Vec String) []]
         (if (>= i (- n 1)) acc
           (let [left (nth args i)
                 right (nth args (+ i 1))
                 left-str (nth rendered i)
                 right-str (nth rendered (+ i 1))
-                comparison
-                  (if (and (scalar-eq-safe-node? left)
+                comparison (if (and (scalar-eq-safe-node? left)
                            (scalar-eq-safe-node? right))
                     (str left-str " === " right-str)
                     (str "$$bc$equiv(" left-str ", " right-str ")"))]
             (recur (+ i 1) (conj acc comparison))))))))
 
-(defn emit-call! [(e Any)] String
-  (let [fn-expr (get e "fn") args (get e "args") n (count args)]
+(defn emit-call! [e Any] String
+  (let [fn-expr (get e "fn")
+        args (get e "args")
+        n (count args)]
     (if (= (get fn-expr "node") "ref")
       (let [fname (get fn-expr "name")
             qualified? (qualified-reference? fn-expr)]
@@ -2212,7 +2420,7 @@
               (if (not (nil? core)) core (str (emit-call-fn-name fname) "(" (emit-args-list args) ")")))))
       (str "(" (emit-expr*! fn-expr) ")(" (emit-args-list args) ")"))))
 
-(defn emit-expr! [(e Any)] String
+(defn emit-expr! [e Any] String
   (if (not (map? e))
     (cond
       (string? e) (js-string-lit e)
@@ -2245,31 +2453,38 @@
           (iife (str "if (" (emit-expr*! (get e "cond")) ") { " (emit-body-return* (get e "body") "") " }")
                 (or (expr-has-await? (get e "cond")) (contains-await? (get e "body"))))
         (= node "when-let")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name"))]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))]
             (with-bound! [(get e "name")]
               (fn [] String
                 (iife (str "const " name " = " val-str "; if (" name " != null) { " (emit-body-return* (get e "body") "") " }")
                       (or (expr-has-await? (get e "expr")) (contains-await? (get e "body")))))))
         (= node "when-some")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name"))]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))]
             (with-bound! [(get e "name")]
               (fn [] String
                 (iife (str "const " name " = " val-str "; if (" name " != null) { " (emit-body-return* (get e "body") "") " }")
                       (or (expr-has-await? (get e "expr")) (contains-await? (get e "body")))))))
         (= node "if-let")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name")) el (get e "else")]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))
+                el (get e "else")]
             (with-bound! [(get e "name")]
               (fn [] String
-                (let [then-str (emit-expr*! (get e "then")) else-str (if (absent? el) "null" (emit-expr*! el))]
+                (let [then-str (emit-expr*! (get e "then"))
+                      else-str (if (absent? el) "null" (emit-expr*! el))]
                   (iife (str "const " name " = " val-str "; if (" name " != null) { return " then-str
                              "; } else { return " else-str "; }")
                         (or (expr-has-await? (get e "expr")) (expr-has-await? (get e "then"))
                             (if (absent? el) false (expr-has-await? el))))))))
         (= node "if-some")
-          (let [val-str (emit-expr*! (get e "expr")) name (mangle-name (get e "name"))]
+          (let [val-str (emit-expr*! (get e "expr"))
+                name (mangle-name (get e "name"))]
             (with-bound! [(get e "name")]
               (fn [] String
-                (let [then-str (emit-expr*! (get e "then")) else-str (emit-expr*! (get e "else"))]
+                (let [then-str (emit-expr*! (get e "then"))
+                      else-str (emit-expr*! (get e "else"))]
                   (iife (str "const " name " = " val-str "; if (" name " != null) { return " then-str
                              "; } else { return " else-str "; }")
                         (or (expr-has-await? (get e "expr")) (expr-has-await? (get e "then")) (expr-has-await? (get e "else"))))))))
@@ -2287,7 +2502,8 @@
                 complete (if (and (> (count clauses) 0) (else? (nth clauses (- (count clauses) 1)))) parts (conj parts "null"))]
             (str "(" (str/join " : " complete) ")"))
         (= node "let")
-          (let [bindings (get e "bindings") body (get e "body")
+          (let [bindings (get e "bindings")
+                body (get e "body")
                 has-await (or (contains-await? (mapv (fn [b Any] Any (get b "value")) bindings))
                               (> (count (filterv binding-constraint-has-await? bindings)) 0)
                               (contains-await? body))
@@ -2296,7 +2512,8 @@
             (with-emission-env! (get info "bound") (get info "types") (get info "renames")
               (fn [] Any (iife (str (str/join " " bind-strs) " " (emit-body-return* body "")) has-await))))
         (= node "loop")
-          (let [bindings (get e "bindings") body (get e "body")
+          (let [bindings (get e "bindings")
+                body (get e "body")
                 constrained? (bindings-have-constraints? bindings)
                 has-await (or (contains-await? (mapv (fn [b Any] Any (get b "value")) bindings))
                               (> (count (filterv binding-constraint-has-await? bindings)) 0)
@@ -2305,7 +2522,9 @@
                 outer-types (deref type-env)
                 outer-renames (deref rename-env)
                 bind-names (map-indexed
-                             (fn [i Int b Any] String
+                             (fn
+                               [i Int
+                                b Any] String
                                (let [target (get b "name")]
                                  (if (and (not constrained?) (string? target))
                                    (mangle-name target)
@@ -2322,7 +2541,9 @@
                 bind-strs (if constrained?
                             (vec (apply concat
                               (map-indexed
-                                (fn [i Int context Any] Any
+                                (fn
+                                  [i Int
+                                   context Any] Any
                                   (let [binding (get context "binding")
                                         slot (nth bind-names i)
                                         rhs (with-emission-env!
@@ -2342,7 +2563,9 @@
                                         (emit-context-install! context slot)))))
                                 (get init-info "contexts"))))
                             (map-indexed
-                              (fn [i Int binding Any] String
+                              (fn
+                                [i Int
+                                 binding Any] String
                                 (str "let " (nth bind-names i) " = "
                                   (with-emission-env! outer-bound outer-types outer-renames
                                     (fn [] Any (await-async-iife
@@ -2350,7 +2573,9 @@
                               bindings))
                 iteration-setups (vec (apply concat
                                    (map-indexed
-                                     (fn [i Int context Any] Any
+                                     (fn
+                                       [i Int
+                                        context Any] Any
                                        (let [target (get (get context "binding") "name")]
                                          (if (or constrained? (not (string? target)))
                                            (emit-context-install! context (nth bind-names i))
@@ -2462,40 +2687,44 @@
                               (> (count (filterv (fn [c Any] Bool (contains-await? (get c "body"))) (get e "catches"))) 0))]
             (iife (str "try {\n    " body-str "\n  } " (str/join " " catch-strs) finally-str) has-await))
         (= node "condp")
-          (let [pred (emit-expr*! (get e "pred")) test-val (emit-expr*! (get e "test"))
+          (let [pred (emit-expr*! (get e "pred"))
+                test-val (emit-expr*! (get e "test"))
                 clause-strs (mapv (fn [c Any] String
                                     (str pred "(" (emit-expr*! (get c "test")) ", " test-val ") ? " (emit-expr*! (get c "body")))) (get e "clauses"))
-                dflt (get e "default") default-str (if (absent? dflt) "null" (emit-expr*! dflt))]
+                dflt (get e "default")
+                default-str (if (absent? dflt) "null" (emit-expr*! dflt))]
             (str (str/join " : " clause-strs) " : " default-str))
         (= node "match") (emit-match! e)
         (= node "with") (emit-with! e)
         (= node "set!")
-          (let [target (get e "target") val (emit-expr*! (get e "value"))]
+          (let [target (get e "target")
+                val (emit-expr*! (get e "value"))]
             (if (= (get target "node") "ref")
               (str "(" (resolved-name (get target "name")) " = " val ")")
               (throw (ex-info
                 "set! emission requires a lexical binding target" {}))))
         (= node "letfn")
-          (let [fns (get e "fns") body (get e "body")
+          (let [fns (get e "fns")
+                body (get e "body")
                 fn-names (mapv (fn [f Any] String (get f "name")) fns)
                 has-await (contains-await? body)]
             (with-bound! fn-names
               (fn [] String
                 (let [fn-strs (mapv (fn [f Any] String
                                     (let [fb (binding-names-from-params (get f "params") (get f "rest"))
-                                            fa? (or (params-have-constraint-await? (get f "params") (get f "rest"))
+                                          fa? (or (params-have-constraint-await? (get f "params") (get f "rest"))
                                                     (contains-await? (get f "body")))
-                                            pre-bound (deref bound-vars)
-                                            pre-types (deref type-env)
-                                            renames (callable-param-renames (get f "params") (get f "rest"))
-                                            setup (emit-js-param-setup! (get f "params") (get f "rest") renames)
-                                            emitted-body (with-emission-env!
+                                          pre-bound (deref bound-vars)
+                                          pre-types (deref type-env)
+                                          renames (callable-param-renames (get f "params") (get f "rest"))
+                                          setup (emit-js-param-setup! (get f "params") (get f "rest") renames)
+                                          emitted-body (with-emission-env!
                                                            (add-names pre-bound fb)
                                                            (add-types pre-types
                                                              (param-type-entries (get f "params") (get f "rest")))
                                                            renames
                                                            (fn [] Any (emit-body-return* (get f "body") "")))]
-                                        (str (if fa? "async " "") "function " (mangle-name (get f "name"))
+                                      (str (if fa? "async " "") "function " (mangle-name (get f "name"))
                                              "(" (emit-js-params! (get f "params") (get f "rest")) ") { "
                                              (str/join " " (into setup [emitted-body]))
                                              " }"))) fns)]
@@ -2524,7 +2753,7 @@
 
 ;; --- top-level forms ----------------------------------------------------------
 
-(defn emit-form! [(f Any)] String
+(defn emit-form! [f Any] String
   (let [node (get f "node")]
     (cond
       (= node "def") (str "const " (mangle-name (get f "name")) " = " (emit-expr*! (get f "value")) ";")
@@ -2547,13 +2776,16 @@
                    (str/join "\n  "
                      (into setup [(emit-body-return* (get f "body") "  ")]))) ) "\n}"))
       (= node "defn-multi")
-        (let [name (mangle-name (get f "name")) arities (get f "arities")
+        (let [name (mangle-name (get f "name"))
+              arities (get f "arities")
               async? (> (count (filterv
                                  (fn [a Any] Bool
                                    (or (params-have-constraint-await? (get a "params") (get a "rest"))
                                        (contains-await? (get a "body")))) arities)) 0)
               branches (mapv (fn [a Any] String
-                               (let [ps (get a "params") np (count ps) rest? (get a "rest")
+                               (let [ps (get a "params")
+                                     np (count ps)
+                                     rest? (get a "rest")
                                      bindings (param-bindings ps rest?)
                                      abound (binding-names-from-params ps rest?)
                                      pre-bound (deref bound-vars)
@@ -2564,14 +2796,15 @@
                                      post-renames (if (bindings-have-constraints? bindings)
                                                     (hidden-binding-renames bindings "arity" pre-renames)
                                                     (reduce (fn
-                                                              [(next Any)
-                                                               (n String)]
-                                                              Any
+                                                              [next Any
+                                                               n String] Any
                                                               (assoc next n (mangle-name n)))
                                                       pre-renames abound))
                                      fixed (vec (apply concat
                                                (map-indexed
-                                                 (fn [i Int p Any] Any
+                                                 (fn
+                                                   [i Int
+                                                    p Any] Any
                                                    (emit-js-argument-binding-setup! p
                                                      (str "$beagle$args[" i "]")
                                                      (str "$beagle$arg$" i)
@@ -2611,18 +2844,21 @@
 
 ;; --- module header + program --------------------------------------------------
 
-(defn last-seg [(s String)] String
+(defn last-seg [s String] String
   (let [idx (U Int Nil) (str/last-index-of s ".")]
     (if (nil? idx)
       s
       (let [offset Int idx]
         (subs s (+ offset 1))))))
 
-(defn relative-js-path [(importer String) (imported String)] String
+(defn relative-js-path
+  [importer String
+   imported String] String
   (let [imp-parts (str/split importer #"\.")
         imp-dir (if (= 0 (count imp-parts)) [] (subvec imp-parts 0 (- (count imp-parts) 1)))
         tgt (str/split imported #"\.")]
-    (loop [d imp-dir t tgt]
+    (loop [d imp-dir
+           t tgt]
       (if (and (> (count d) 0) (> (count t) 0) (= (nth d 0) (nth t 0)))
         (recur (subvec d 1) (subvec t 1))
         (let [ups (mapv (fn [x Any] String "..") d)
@@ -2632,13 +2868,17 @@
 
 ;; Beagle namespaces are dotted. A slash instead marks a bare npm package
 ;; subpath, whose filename and extension are already the exact ESM specifier.
-(defn bare-js-module-specifier? [(ns-str String)] Bool
+(defn bare-js-module-specifier? [ns-str String] Bool
   (or (str/starts-with? ns-str "@")
       (str/includes? ns-str "/")
       (not (str/includes? ns-str "."))))
 
-(defn emit-require-line [(importer String) (r Any) (macros Any)] String
-  (let [ns-str (get r "ns") refer (get r "refer")
+(defn emit-require-line
+  [importer String
+   r Any
+   macros Any] String
+  (let [ns-str (get r "ns")
+        refer (get r "refer")
         module-path (if (bare-js-module-specifier? ns-str)
                       ns-str
                       (relative-js-path importer ns-str))]
@@ -2646,18 +2886,25 @@
       (let [runtime-refer (filterv (fn [nm String] Bool (not (contains? macros nm))) refer)]
         (if (= 0 (count runtime-refer)) ""
           (str "import { " (str/join ", " (mapv mangle-name runtime-refer)) " } from '" module-path "';")))
-      (let [alias0 (get r "alias") alias (if (absent? alias0) (last-seg ns-str) alias0)]
+      (let [alias0 (get r "alias")
+            alias (if (absent? alias0) (last-seg ns-str) alias0)]
         (str "import * as " (mangle-name alias) " from '" module-path "';")))))
 
-(defn emit-module-header [(prog Any)] String
-  (let [importer (get prog "namespace") rs (get prog "requires")
+(defn emit-module-header [prog Any] String
+  (let [importer (get prog "namespace")
+        rs (get prog "requires")
         macros (let [m (get prog "macros")] (if (absent? m) {} m))
         lines (filterv (fn [s String] Bool (not (= s "")))
                        (mapv (fn [r Any] String (emit-require-line importer r macros)) rs))]
     (if (= 0 (count lines)) "" (str (str/join "\n" lines) "\n"))))
 
-(defn collect-top-names [(forms Any) (requires Any) (externs Any)] Any
-  (let [from-forms (reduce (fn [acc Any f Any] Any
+(defn collect-top-names
+  [forms Any
+   requires Any
+   externs Any] Any
+  (let [from-forms (reduce (fn
+                             [acc Any
+                              f Any] Any
                              (let [node (get f "node")]
                                (cond
                                  (or (= node "def") (= node "defonce") (= node "defn") (= node "defn-multi")
@@ -2667,16 +2914,20 @@
                                    (qualified-reference=? f "js" "export"))
                                    (let [inner (nth (get f "args") 0)] (assoc acc (get inner "name") true))
                                  :else acc))) {} forms)
-        with-refers (reduce (fn [acc Any r Any] Any
+        with-refers (reduce (fn
+                              [acc Any
+                               r Any] Any
                               (let [refer (get r "refer")]
                                 (if (and refer (not (false? refer))) (add-names acc refer) acc))) from-forms requires)]
     (if (absent? externs)
       with-refers
       (add-names with-refers (mapv (fn [x Any] String (get x "name")) externs)))))
 
-(defn build-module-bindings [(requires Any)] Any
+(defn build-module-bindings [requires Any] Any
   (reduce
-    (fn [bindings Any entry Any] Any
+    (fn
+      [bindings Any
+       entry Any] Any
       (let [namespace (get entry "ns")
             alias0 (get entry "alias")
             alias (if (absent? alias0) (last-seg namespace) alias0)
@@ -2684,7 +2935,7 @@
         (assoc (assoc bindings namespace binding) alias binding)))
     {} requires))
 
-(defn register-tables! [(forms Any)] Nil
+(defn register-tables! [forms Any] Nil
   (doseq [f forms]
     (let [node (get f "node")]
       (cond
@@ -2700,7 +2951,8 @@
                   (swap! record-fields assoc m (field-names-of (vec (get mf m))))
                   (swap! record-field-bindings assoc m (vec (get mf m)))))))
         (= node "defscalar")
-          (let [nm (get f "name") predicates (get f "predicates")]
+          (let [nm (get f "name")
+                predicates (get f "predicates")]
             (when (= 0 (count predicates))
               (swap! scalar-fns assoc (str "->" nm) true))
             (swap! scalar-fns assoc (str (str/lower-case nm) "-value") true))
@@ -2718,7 +2970,7 @@
   (reset! ajs-block-ref ajs-block)
   nil)
 
-(defn emit-program! [(prog Any)] String
+(defn emit-program! [prog Any] String
   (let [prog (syntax/lower-binding-output-identities prog)]
   (install-refs!)
   (reset! record-fields
@@ -2766,16 +3018,23 @@
 (def passes Any (atom []))
 (def failures Any (atom []))
 
-(defn expect! [(label String) (result Bool)] Nil
+(defn expect!
+  [label String
+   result Bool] Nil
   (if result (do (swap! passes conj true) nil) (do (swap! failures conj label) nil))
   nil)
 
-(defn appears-before? [(text String) (left String) (right String)] Bool
+(defn appears-before?
+  [text String
+   left String
+   right String] Bool
   (let [left-index (U Int Nil) (str/index-of text left)
         right-index (U Int Nil) (str/index-of text right)]
     (and (not (nil? left-index)) (not (nil? right-index)) (< left-index right-index))))
 
-(defn appears-once? [(text String) (needle String)] Bool
+(defn appears-once?
+  [text String
+   needle String] Bool
   (= (- (count text) (count (str/replace text needle ""))) (count needle)))
 
 (defn run-tests! [] Int
@@ -2833,8 +3092,7 @@
       (reset! type-env
         {"left" {"kind" "prim" "name" "Int"}
          "right" {"kind" "prim" "name" "Int"}})
-      (let [emitted
-              (emit-call!
+      (let [emitted (emit-call!
                 {"node" "call"
                  "fn" {"node" "ref" "name" "="}
                  "args" [{"node" "ref" "name" "left"}
@@ -2877,8 +3135,7 @@
   (expect! "js/new preserves qualified constructor references"
     (do
       (reset! module-bindings {"three.core" "THREE" "T" "THREE"})
-      (let [result
-              (= (emit-expr! {"node" "js-new"
+      (let [result (= (emit-expr! {"node" "js-new"
                                "callee" {"node" "ref" "qualifier" "T"
                                          "name" "Scene"
                                          "providerId" "three.core"}
@@ -2915,8 +3172,7 @@
     (do
       (reset! record-fields
         (structuralize-reference-table {"models/Account" ["id"]}))
-      (let [result
-              (= (emit-match-arm!
+      (let [result (= (emit-match-arm!
                    {"pattern" {"type" "record" "qualifier" "models"
                                 "name" "Account" "providerId" nil
                                 "bindings" [{"name" "id"}]}
@@ -2961,8 +3217,7 @@
                   {"node" "literal" "kind" "number" "value" 3}]})
       "(() => { const _a = cell; const _old = _a.value; _a.value = (step)(_old, 3); for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _a.value); return _a.value; })()"))
   (expect! "atom: reset! evaluates cell then value exactly once"
-    (let [emitted
-            (emit-expr!
+    (let [emitted (emit-expr!
               {"node" "call" "fn" {"node" "ref" "name" "reset!"}
                "args" [{"node" "call"
                          "fn" {"node" "ref" "name" "cell!"} "args" []}
@@ -2972,8 +3227,7 @@
         (appears-once? emitted "value_bang()")
         (appears-before? emitted "cell_bang()" "value_bang()"))))
   (expect! "atom: swap! evaluates cell, callback, then args exactly once"
-    (let [emitted
-            (emit-expr!
+    (let [emitted (emit-expr!
               {"node" "call" "fn" {"node" "ref" "name" "swap!"}
                "args" [{"node" "call"
                          "fn" {"node" "ref" "name" "cell!"} "args" []}

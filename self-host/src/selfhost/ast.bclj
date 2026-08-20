@@ -11,10 +11,15 @@
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
-(defn char-at [(s String) (i Int)] String
+(defn char-at
+  [s String
+   i Int] String
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
-(defn substring2 [(s String) (a Int) (b Int)] String
+(defn substring2
+  [s String
+   a Int
+   b Int] String
   (let [n (count s)
         lo (if (< a 0) 0 (if (> a n) n a))
         hi (if (< b lo) lo (if (> b n) n b))]
@@ -28,25 +33,27 @@
 
 ;; --- tag utilities ---------------------------------------------------------------
 
-(defn bracketed? [(d Any)] Bool
+(defn bracketed? [d Any] Bool
   (and (vector? d) (> (count d) 0) (= (nth d 0) BRACKET-TAG)))
 
-(defn bracket-body [(d Any)] Any
+(defn bracket-body [d Any] Any
   (if (vector? d) (subvec d 1) []))
 
-(defn map-tagged? [(d Any)] Bool
+(defn map-tagged? [d Any] Bool
   (and (vector? d) (> (count d) 0) (= (nth d 0) MAP-TAG)))
 
-(defn map-body [(d Any)] Any
+(defn map-body [d Any] Any
   (if (vector? d) (subvec d 1) []))
 
-(defn set-tagged? [(d Any)] Bool
+(defn set-tagged? [d Any] Bool
   (and (vector? d) (> (count d) 0) (= (nth d 0) SET-TAG)))
 
-(defn set-body [(d Any)] Any
+(defn set-body [d Any] Any
   (if (vector? d) (subvec d 1) []))
 
-(defn unwrap-items [(d Any) (what String)] Any
+(defn unwrap-items
+  [d Any
+   what String] Any
   (cond
     (bracketed? d) (bracket-body d)
     (vector? d) d
@@ -54,36 +61,36 @@
 
 ;; --- symbol predicates -------------------------------------------------------
 
-(defn dot-method-sym? [(sym String)] Bool
+(defn dot-method-sym? [sym String] Bool
   (and (> (count sym) 1) (= (char-at sym 0) ".")))
 
-(defn upper-case-char? [(code Int)] Bool
+(defn upper-case-char? [code Int] Bool
   (and (>= code 65) (<= code 90)))
 
-(defn qualified-ref? [(ref Any)] Bool
+(defn qualified-ref? [ref Any] Bool
   (and (map? ref)
        (= (get ref "node") "ref")
        (string? (get ref "qualifier"))
        (string? (get ref "name"))))
 
-(defn static-method-ref? [(ref Any)] Bool
+(defn static-method-ref? [ref Any] Bool
   (and (qualified-ref? ref)
        (let [qualifier (get ref "qualifier")]
          (and (> (count qualifier) 0)
               (or (upper-case-char? (int (.charAt qualifier 0)))
                   (= qualifier "js"))))))
 
-(defn dynamic-var-sym? [(sym String)] Bool
+(defn dynamic-var-sym? [sym String] Bool
   (and (>= (count sym) 3)
        (= (char-at sym 0) "*")
        (= (char-at sym (- (count sym) 1)) "*")))
 
-(defn constructor-sym? [(sym String)] Bool
+(defn constructor-sym? [sym String] Bool
   (and (> (count sym) 1)
        (upper-case-char? (int (.charAt sym 0)))
        (= (char-at sym (- (count sym) 1)) ".")))
 
-(defn keyword-sym? [(sym String)] Bool
+(defn keyword-sym? [sym String] Bool
   (and (> (count sym) 1) (= (char-at sym 0) ":")))
 
 ;; --- macro-facing immutable syntax objects ----------------------------------
@@ -100,12 +107,12 @@
   (reset! SCOPE-COUNTER 0)
   nil)
 
-(defn fresh-scope-id! [(scope-kind String)] Any
+(defn fresh-scope-id! [scope-kind String] Any
   (let [serial (deref SCOPE-COUNTER)]
     (swap! SCOPE-COUNTER inc)
     {"kind" "scope-id" "serial" serial "scopeKind" scope-kind}))
 
-(defn scope-id? [(value Any)] Bool
+(defn scope-id? [value Any] Bool
   (and (map? value)
        (= (get value "kind") "scope-id")
        (int? (get value "serial"))
@@ -115,39 +122,52 @@
 ;; identity-preserving without leaking those serials into checked output.
 (def EMPTY-SCOPE-SET Any [])
 
-(defn scope-set? [(value Any)] Bool
+(defn scope-set? [value Any] Bool
   (and (vector? value) (every? scope-id? value)))
 
-(defn scope-set-member? [(scopes Any) (scope Any)] Bool
+(defn scope-set-member?
+  [scopes Any
+   scope Any] Bool
   (contains? (set scopes) scope))
 
-(defn scope-set-add [(scopes Any) (scope Any)] Any
+(defn scope-set-add
+  [scopes Any
+   scope Any] Any
   (if (scope-set-member? scopes scope) scopes (conj (vec scopes) scope)))
 
-(defn scope-set-remove [(scopes Any) (scope Any)] Any
+(defn scope-set-remove
+  [scopes Any
+   scope Any] Any
   (filterv (fn [candidate Any] Bool (not= candidate scope)) scopes))
 
-(defn scope-set-flip [(scopes Any) (scope Any)] Any
+(defn scope-set-flip
+  [scopes Any
+   scope Any] Any
   (if (scope-set-member? scopes scope)
     (scope-set-remove scopes scope)
     (scope-set-add scopes scope)))
 
-(defn scope-set-subset? [(left Any) (right Any)] Bool
+(defn scope-set-subset?
+  [left Any
+   right Any] Bool
   (every? (fn [scope Any] Bool (scope-set-member? right scope)) left))
 
-(defn make-binding-id! [(stable String)] Any
+(defn make-binding-id! [stable String] Any
   {"kind" "binding-id" "stable" stable})
 
-(defn binding-id? [(value Any)] Bool
+(defn binding-id? [value Any] Bool
   (and (map? value)
        (= (get value "kind") "binding-id")
        (string? (get value "stable"))))
 
-(defn binding-id-stable [(value Any)] String
+(defn binding-id-stable [value Any] String
   (get value "stable"))
 
 (defn make-scope-binding!
-  [(id Any) (name Any) (scopes Any) (binding-kind String)] Any
+  [id Any
+   name Any
+   scopes Any
+   binding-kind String] Any
   (when (not (binding-id? id))
     (syntax-contract-error! "make-scope-binding" "id must be a binding id"))
   (when (not (structural-name? name))
@@ -163,15 +183,18 @@
 
 (def EMPTY-BINDING-TABLE Any {})
 
-(defn binding-table-bindings-for [(table Any) (name Any)] Any
+(defn binding-table-bindings-for
+  [table Any
+   name Any] Any
   (or (get table name) []))
 
-(defn binding-table-add! [(table Any) (binding Any)] Any
+(defn binding-table-add!
+  [table Any
+   binding Any] Any
   (let [name (get binding "name")
         scopes (get binding "scopes")
         existing (binding-table-bindings-for table name)
-        duplicate
-        (first
+        duplicate (first
           (filterv
             (fn [candidate Any] Bool
               (= (get candidate "scopes") scopes))
@@ -182,19 +205,21 @@
         "duplicate binding for the same structural name and scope set"))
     (assoc table name (conj (vec existing) binding))))
 
-(defn- proper-scope-subset? [(left Any) (right Any)] Bool
+(defn- proper-scope-subset?
+  [left Any
+   right Any] Bool
   (and (scope-set-subset? left right) (not= left right)))
 
-(defn resolve-scoped-identifier! [(table Any) (identifier Any)] Any
+(defn resolve-scoped-identifier!
+  [table Any
+   identifier Any] Any
   (let [name (get identifier "payload")
         use-scopes (get identifier "scopes")
-        applicable
-        (filterv
+        applicable (filterv
           (fn [candidate Any] Bool
             (scope-set-subset? (get candidate "scopes") use-scopes))
           (binding-table-bindings-for table name))
-        maxima
-        (filterv
+        maxima (filterv
           (fn [candidate Any] Bool
             (not
               (some
@@ -213,11 +238,17 @@
          "name" name
          "bindingIds" (set (mapv (fn [entry Any] Any (get entry "id")) maxima))})))
 
-(defn- syntax-contract-error! [(who String) (message String)] Any
+(defn- syntax-contract-error!
+  [who String
+   message String] Any
   (throw (ex-info (str who ": " message) {})))
 
 (defn make-source-span!
-  [(source Any) (start Int) (end Int) (line Int) (column Int)] Any
+  [source Any
+   start Int
+   end Int
+   line Int
+   column Int] Any
   (when (or (< start 0) (< end start) (< line 0) (< column 0))
     (syntax-contract-error! "make-source-span" "invalid source range"))
   {"kind" "source-span"
@@ -227,16 +258,20 @@
    "line" line
    "column" column})
 
-(defn source-span? [(value Any)] Bool
+(defn source-span? [value Any] Bool
   (and (map? value) (= (get value "kind") "source-span")))
 
-(defn make-reader-metadata [(source-bytes String) (delimiter Any)] Any
+(defn make-reader-metadata
+  [source-bytes String
+   delimiter Any] Any
   {"kind" "reader-metadata"
    "sourceBytes" source-bytes
    "delimiter" delimiter})
 
 (defn make-structural-name!
-  [(qualifier Any) (leaf String) (provider-id Any)] Any
+  [qualifier Any
+   leaf String
+   provider-id Any] Any
   (when (or (not (string? leaf)) (= leaf ""))
     (syntax-contract-error! "make-structural-name" "leaf must be a name"))
   {"kind" "structural-name"
@@ -244,12 +279,12 @@
    "leaf" leaf
    "providerId" provider-id})
 
-(defn structural-name? [(value Any)] Bool
+(defn structural-name? [value Any] Bool
   (and (map? value)
        (= (get value "kind") "structural-name")
        (string? (get value "leaf"))))
 
-(defn symbol->structural-name! [(symbol String)] Any
+(defn symbol->structural-name! [symbol String] Any
   (let [slash (U Int Nil) (str/index-of symbol "/")]
     (if (and (some? slash) (> slash 0) (< (+ slash 1) (count symbol)))
       (make-structural-name!
@@ -258,12 +293,15 @@
         nil)
       (make-structural-name! nil symbol nil))))
 
-(defn structural-name->symbol [(name Any)] String
+(defn structural-name->symbol [name Any] String
   (if (some? (get name "qualifier"))
     (str (get name "qualifier") "/" (get name "leaf"))
     (get name "leaf")))
 
-(defn make-expansion-origin! [(macro-id String) (call-span Any) (parent Any)] Any
+(defn make-expansion-origin!
+  [macro-id String
+   call-span Any
+   parent Any] Any
   (when (and (some? call-span) (not (source-span? call-span)))
     (syntax-contract-error!
       "make-expansion-origin" "call span must be a source span"))
@@ -277,7 +315,11 @@
    "parent" parent})
 
 (defn- ensure-syntax-context!
-  [(who String) (span Any) (scopes Any) (origin Any) (properties Any)] Nil
+  [who String
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Nil
   (when (and (some? span) (not (source-span? span)))
     (syntax-contract-error! who "span must be a source span"))
   (when (not (scope-set? scopes))
@@ -290,13 +332,12 @@
   nil)
 
 (defn- make-syntax-value!
-  [(variant String)
-   (payload Any)
-   (span Any)
-   (scopes Any)
-   (origin Any)
-   (properties Any)]
-  Any
+  [variant String
+   payload Any
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (ensure-syntax-context! variant span scopes origin properties)
   {"kind" "syntax"
    "variant" variant
@@ -307,18 +348,30 @@
    "properties" properties})
 
 (defn make-syntax-atom!
-  [(datum Any) (span Any) (scopes Any) (origin Any) (properties Any)] Any
+  [datum Any
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (make-syntax-value! "atom" datum span scopes origin properties))
 
 (defn make-syntax-ident!
-  [(name Any) (span Any) (scopes Any) (origin Any) (properties Any)] Any
+  [name Any
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (when (not (structural-name? name))
     (syntax-contract-error!
       "make-syntax-ident" "name must be a structural name"))
   (make-syntax-value! "ident" name span scopes origin properties))
 
 (defn make-syntax-list!
-  [(children Any) (span Any) (scopes Any) (origin Any) (properties Any)] Any
+  [children Any
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (when (or (not (vector? children))
             (not (every? beagle-syntax? children)))
     (syntax-contract-error!
@@ -326,7 +379,11 @@
   (make-syntax-value! "list" children span scopes origin properties))
 
 (defn make-syntax-vector!
-  [(children Any) (span Any) (scopes Any) (origin Any) (properties Any)] Any
+  [children Any
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (when (or (not (vector? children))
             (not (every? beagle-syntax? children)))
     (syntax-contract-error!
@@ -334,17 +391,20 @@
   (make-syntax-value! "vector" children span scopes origin properties))
 
 (defn make-syntax-quote!
-  [(datum Any) (span Any) (scopes Any) (origin Any) (properties Any)] Any
+  [datum Any
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (make-syntax-value! "quote" datum span scopes origin properties))
 
 (defn make-syntax-unquote!
-  [(child Any)
-   (splicing Bool)
-   (span Any)
-   (scopes Any)
-   (origin Any)
-   (properties Any)]
-  Any
+  [child Any
+   splicing Bool
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (when (not (beagle-syntax? child))
     (syntax-contract-error!
       "make-syntax-unquote" "child must be a syntax value"))
@@ -352,35 +412,37 @@
     (if splicing "unquote-splicing" "unquote")
     child span scopes origin properties))
 
-(defn beagle-syntax? [(value Any)] Bool
+(defn beagle-syntax? [value Any] Bool
   (and (map? value) (= (get value "kind") "syntax")))
 
-(defn beagle-syntax-span [(value Any)] Any (get value "span"))
+(defn beagle-syntax-span [value Any] Any (get value "span"))
 
-(defn beagle-syntax-origin [(value Any)] Any (get value "origin"))
+(defn beagle-syntax-origin [value Any] Any (get value "origin"))
 
-(defn beagle-syntax-properties [(value Any)] Any (get value "properties"))
+(defn beagle-syntax-properties [value Any] Any (get value "properties"))
 
-(defn beagle-syntax-property [(value Any) (key String)] Any
+(defn beagle-syntax-property
+  [value Any
+   key String] Any
   (get (beagle-syntax-properties value) key))
 
-(defn beagle-syntax-scopes [(value Any)] Any (get value "scopes"))
+(defn beagle-syntax-scopes [value Any] Any (get value "scopes"))
 
-(defn beagle-syntax-binding-id [(value Any)] Any
+(defn beagle-syntax-binding-id [value Any] Any
   (beagle-syntax-property value "binding-id"))
 
-(defn syntax-children [(value Any)] Any
+(defn syntax-children [value Any] Any
   (let [variant (get value "variant")]
     (if (or (= variant "list") (= variant "vector"))
       (get value "payload")
       [])))
 
-(defn string-literal-datum? [(datum Any)] Bool
+(defn string-literal-datum? [datum Any] Bool
   (and (vector? datum)
        (= (count datum) 2)
        (= (nth datum 0) "#%string")))
 
-(defn inert-atom-datum? [(datum Any)] Bool
+(defn inert-atom-datum? [datum Any] Bool
   (or (string-literal-datum? datum)
       (and (vector? datum)
            (> (count datum) 0)
@@ -388,7 +450,11 @@
                (= (nth datum 0) "#%char")))))
 
 (defn datum->beagle-syntax!
-  [(datum Any) (span Any) (scopes Any) (origin Any) (properties Any)] Any
+  [datum Any
+   span Any
+   scopes Any
+   origin Any
+   properties Any] Any
   (cond
     (beagle-syntax? datum) datum
     (and (string? datum) (not (keyword-sym? datum)))
@@ -424,8 +490,9 @@
     :else
       (make-syntax-atom! datum span scopes origin properties)))
 
-(defn beagle-syntax->datum! [(value Any)] Any
-  (let [variant (get value "variant") payload (get value "payload")]
+(defn beagle-syntax->datum! [value Any] Any
+  (let [variant (get value "variant")
+        payload (get value "payload")]
     (cond
       (= variant "atom") payload
       (= variant "ident") (structural-name->symbol payload)
@@ -440,7 +507,9 @@
         (syntax-contract-error!
           "beagle-syntax->datum" "unknown syntax variant"))))
 
-(defn- restored-syntax [(restorations Any) (value Any)] Any
+(defn- restored-syntax
+  [restorations Any
+   value Any] Any
   (if (nil? restorations)
     nil
     (loop [entries Any (deref restorations)]
@@ -455,9 +524,11 @@
 ;; Exact antiquoted syntax is restored by identity; generated syntax gains the
 ;; introduction scope on the output flip.
 (defn beagle-syntax-flip-scope!
-  [(value Any) (scope Any) (restorations Any) (record-original Bool)] Any
-  (let [restored
-        (if record-original nil (restored-syntax restorations value))]
+  [value Any
+   scope Any
+   restorations Any
+   record-original Bool] Any
+  (let [restored (if record-original nil (restored-syntax restorations value))]
     (if (some? restored)
       restored
       (let [variant (get value "variant")
@@ -466,8 +537,7 @@
             scopes (scope-set-flip (beagle-syntax-scopes value) scope)
             origin (beagle-syntax-origin value)
             properties (beagle-syntax-properties value)
-            rebuilt
-            (cond
+            rebuilt (cond
               (= variant "atom")
                 (make-syntax-atom! payload span scopes origin properties)
               (= variant "ident")
@@ -505,10 +575,12 @@
           (swap! restorations conj {"flipped" rebuilt "original" value}))
         rebuilt))))
 
-(defn introduced-binding-id? [(id Any)] Bool
+(defn introduced-binding-id? [id Any] Bool
   (and (string? id) (str/starts-with? id "introduced-")))
 
-(defn binding-id-output-name [(id Any) (authored-name String)] String
+(defn binding-id-output-name
+  [id Any
+   authored-name String] String
   (if (not (introduced-binding-id? id))
     authored-name
     (let [parts (str/split id #":")
@@ -520,14 +592,15 @@
 ;; Checked AST keeps authored spellings and lexical edges. Target emitters call
 ;; this pure projection once, immediately before rendering, so only introduced
 ;; identities receive collision-proof output spellings.
-(defn lower-binding-target-output [(target Any) (identities Any)] Any
+(defn lower-binding-target-output
+  [target Any
+   identities Any] Any
   (cond
     (string? target)
       (binding-id-output-name (get identities target) target)
     (not (map? target)) target
     (= (get target "type") "map-destructure")
-      (let [lower-name
-            (fn [name Any] Any
+      (let [lower-name (fn [name Any] Any
               (if (string? name)
                 (binding-id-output-name (get identities name) name)
                 name))]
@@ -551,14 +624,15 @@
         (lower-binding-target-output (get target "rest") identities))
     :else target))
 
-(defn lower-binding-output-identities [(value Any)] Any
+(defn lower-binding-output-identities [value Any] Any
   (cond
     (vector? value) (mapv lower-binding-output-identities value)
     (not (map? value)) value
     :else
-      (let [lowered
-            (reduce
-              (fn [out Any key Any] Any
+      (let [lowered (reduce
+              (fn
+                [out Any
+                 key Any] Any
                 (assoc out key
                   (lower-binding-output-identities (get value key))))
               {}
@@ -606,210 +680,321 @@
 ;; Each returns a plain string-keyed map with a "node" discriminator matching
 ;; ast-json.rkt.
 
-(defn make-ns-decl [(name String)] Any
+(defn make-ns-decl [name String] Any
   {"node" "ns" "name" name})
 
-(defn make-def [(name String) (ann Any) (value Any)] Any
+(defn make-def
+  [name String
+   ann Any
+   value Any] Any
   {"node" "def" "name" name "ann" ann "value" value})
 
-(defn make-defonce [(name String) (ann Any) (value Any)] Any
+(defn make-defonce
+  [name String
+   ann Any
+   value Any] Any
   {"node" "defonce" "name" name "ann" ann "value" value})
 
 (defn make-defn
-  [(name String)
-   (params (Vec Any))
-   (rest-param Any)
-   (ret Any)
-   (body (Vec Any))
-   (private- Bool)]
-  Any
+  [name String
+   params (Vec Any)
+   rest-param Any
+   ret Any
+   body (Vec Any)
+   private- Bool] Any
   {"node" "defn" "name" name "params" params "rest-param" rest-param
    "ret" ret "body" body "private" private-})
 
-(defn make-defn-multi [(name String) (arities (Vec Any)) (private- Bool)] Any
+(defn make-defn-multi
+  [name String
+   arities (Vec Any)
+   private- Bool] Any
   {"node" "defn-multi" "name" name "arities" arities "private" private-})
 
 (defn make-fn
-  [(params (Vec Any)) (rest-param Any) (ret Any) (body (Vec Any))] Any
+  [params (Vec Any)
+   rest-param Any
+   ret Any
+   body (Vec Any)] Any
   {"node" "fn" "params" params "rest-param" rest-param "ret" ret "body" body})
 
-(defn make-let [(bindings (Vec Any)) (body (Vec Any))] Any
+(defn make-let
+  [bindings (Vec Any)
+   body (Vec Any)] Any
   {"node" "let" "bindings" bindings "body" body})
 
-(defn make-if [(test Any) (then-expr Any) (else-expr Any)] Any
+(defn make-if
+  [test Any
+   then-expr Any
+   else-expr Any] Any
   {"node" "if" "test" test "then" then-expr "else" else-expr})
 
-(defn make-cond [(clauses (Vec Any))] Any
+(defn make-cond [clauses (Vec Any)] Any
   {"node" "cond" "clauses" clauses})
 
-(defn make-when [(test Any) (body (Vec Any))] Any
+(defn make-when
+  [test Any
+   body (Vec Any)] Any
   {"node" "when" "test" test "body" body})
 
-(defn make-do [(body (Vec Any))] Any
+(defn make-do [body (Vec Any)] Any
   {"node" "do" "body" body})
 
-(defn make-call [(fn-name Any) (args (Vec Any))] Any
+(defn make-call
+  [fn-name Any
+   args (Vec Any)] Any
   {"node" "call" "fn" fn-name "args" args})
 
 (defn make-qualified-ref
-  [(qualifier String) (name String) (provider-id Any)] Any
+  [qualifier String
+   name String
+   provider-id Any] Any
   {"node" "ref" "qualifier" qualifier "name" name
    "providerId" provider-id})
 
-(defn make-ref [(name String)] Any
+(defn make-ref [name String] Any
   {"node" "ref" "name" name})
 
-(defn make-literal [(kind String) (value Any)] Any
+(defn make-literal
+  [kind String
+   value Any] Any
   {"node" "literal" "kind" kind "value" value})
 
-(defn make-vec [(items (Vec Any))] Any
+(defn make-vec [items (Vec Any)] Any
   {"node" "vec" "items" items})
 
-(defn make-quoted [(datum Any)] Any
+(defn make-quoted [datum Any] Any
   {"node" "quoted" "datum" datum})
 
-(defn make-unsafe [(code String)] Any
+(defn make-unsafe [code String] Any
   {"node" "unsafe" "code" code})
 
-(defn make-regex [(pattern String)] Any
+(defn make-regex [pattern String] Any
   {"node" "regex" "pattern" pattern})
 
-(defn make-loop [(bindings (Vec Any)) (body (Vec Any))] Any
+(defn make-loop
+  [bindings (Vec Any)
+   body (Vec Any)] Any
   {"node" "loop" "bindings" bindings "body" body})
 
-(defn make-recur [(args (Vec Any))] Any
+(defn make-recur [args (Vec Any)] Any
   {"node" "recur" "args" args})
 
-(defn make-for [(clauses (Vec Any)) (body Any)] Any
+(defn make-for
+  [clauses (Vec Any)
+   body Any] Any
   {"node" "for" "clauses" clauses "body" body})
 
-(defn make-record [(name String) (fields (Vec Any))] Any
+(defn make-record
+  [name String
+   fields (Vec Any)] Any
   {"node" "record" "name" name "fields" fields})
 
-(defn make-method-call [(method String) (target Any) (args (Vec Any))] Any
+(defn make-method-call
+  [method String
+   target Any
+   args (Vec Any)] Any
   {"node" "method-call" "method" method "target" target "args" args})
 
-(defn make-static-call [(class-method Any) (args (Vec Any))] Any
+(defn make-static-call
+  [class-method Any
+   args (Vec Any)] Any
   {"node" "static-call" "class-method" class-method "args" args})
 
-(defn make-js-selector [(name String)] Any
+(defn make-js-selector [name String] Any
   {"node" "js-selector" "name" name})
 
-(defn make-js-get [(receiver Any) (key Any)] Any
+(defn make-js-get
+  [receiver Any
+   key Any] Any
   {"node" "js-get" "receiver" receiver "key" key})
 
-(defn make-js-call [(receiver Any) (key Any) (args (Vec Any))] Any
+(defn make-js-call
+  [receiver Any
+   key Any
+   args (Vec Any)] Any
   {"node" "js-call" "receiver" receiver "key" key "args" args})
 
-(defn make-js-set [(receiver Any) (key Any) (value Any)] Any
+(defn make-js-set
+  [receiver Any
+   key Any
+   value Any] Any
   {"node" "js-set" "receiver" receiver "key" key "value" value})
 
-(defn make-js-new [(callee Any) (args (Vec Any))] Any
+(defn make-js-new
+  [callee Any
+   args (Vec Any)] Any
   {"node" "js-new" "callee" callee "args" args})
 
-(defn make-js-delete [(receiver Any) (key Any)] Any
+(defn make-js-delete
+  [receiver Any
+   key Any] Any
   {"node" "js-delete" "receiver" receiver "key" key})
 
-(defn make-js-in [(receiver Any) (key Any)] Any
+(defn make-js-in
+  [receiver Any
+   key Any] Any
   {"node" "js-in" "receiver" receiver "key" key})
 
-(defn make-js-typeof [(expr Any)] Any
+(defn make-js-typeof [expr Any] Any
   {"node" "js-typeof" "expr" expr})
 
-(defn make-map [(pairs (Vec Any))] Any
+(defn make-map [pairs (Vec Any)] Any
   {"node" "map" "pairs" pairs})
 
-(defn make-set [(items (Vec Any))] Any
+(defn make-set [items (Vec Any)] Any
   {"node" "set" "items" items})
 
-(defn make-kw-access [(kw String) (target Any) (fallback Any)] Any
+(defn make-kw-access
+  [kw String
+   target Any
+   fallback Any] Any
   {"node" "kw-access" "kw" kw "target" target "default" fallback})
 
-(defn make-try [(body (Vec Any)) (catches (Vec Any)) (finally-body Any)] Any
+(defn make-try
+  [body (Vec Any)
+   catches (Vec Any)
+   finally-body Any] Any
   {"node" "try" "body" body "catches" catches "finally" finally-body})
 
-(defn make-catch [(exception-type String) (name String) (body (Vec Any))] Any
+(defn make-catch
+  [exception-type String
+   name String
+   body (Vec Any)] Any
   {"node" "catch" "exception-type" exception-type "name" name "body" body})
 
-(defn make-doseq [(clauses (Vec Any)) (body (Vec Any))] Any
+(defn make-doseq
+  [clauses (Vec Any)
+   body (Vec Any)] Any
   {"node" "doseq" "clauses" clauses "body" body})
 
-(defn make-case [(test Any) (clauses (Vec Any)) (fallback Any)] Any
+(defn make-case
+  [test Any
+   clauses (Vec Any)
+   fallback Any] Any
   {"node" "case" "test" test "clauses" clauses "default" fallback})
 
-(defn make-match [(target Any) (clauses (Vec Any))] Any
+(defn make-match
+  [target Any
+   clauses (Vec Any)] Any
   {"node" "match" "target" target "clauses" clauses})
 
-(defn make-with [(target Any) (updates (Vec Any))] Any
+(defn make-with
+  [target Any
+   updates (Vec Any)] Any
   {"node" "with" "target" target "updates" updates})
 
-(defn make-defrecord [(name String) (fields (Vec Any))] Any
+(defn make-defrecord
+  [name String
+   fields (Vec Any)] Any
   {"node" "defrecord" "name" name "fields" fields})
 
-(defn make-defenum [(name String) (values (Vec String))] Any
+(defn make-defenum
+  [name String
+   values (Vec String)] Any
   {"node" "defenum" "name" name "values" values})
 
 (defn make-defunion
-  [(name String)
-   (members (Vec String))
-   (type-params Any)
-   (member-fields Any)]
-  Any
+  [name String
+   members (Vec String)
+   type-params Any
+   member-fields Any] Any
   {"node" "defunion" "name" name "members" members
    "type-params" type-params "member-fields" member-fields})
 
 (defn make-deferror
-  [(name String) (members (Vec String)) (member-fields Any)] Any
+  [name String
+   members (Vec String)
+   member-fields Any] Any
   {"node" "deferror" "name" name "members" members "member-fields" member-fields})
 
-(defn make-defscalar [(name String) (backing Any) (predicates (Vec Any))] Any
+(defn make-defscalar
+  [name String
+   backing Any
+   predicates (Vec Any)] Any
   {"node" "defscalar" "name" name "backing" backing "predicates" predicates})
 
-(defn make-when-let [(name String) (expr Any) (body (Vec Any))] Any
+(defn make-when-let
+  [name String
+   expr Any
+   body (Vec Any)] Any
   {"node" "when-let" "name" name "expr" expr "body" body})
 
-(defn make-if-let [(name String) (expr Any) (then-body Any) (else-body Any)] Any
+(defn make-if-let
+  [name String
+   expr Any
+   then-body Any
+   else-body Any] Any
   {"node" "if-let" "name" name "expr" expr "then" then-body "else" else-body})
 
-(defn make-when-some [(name String) (expr Any) (body (Vec Any))] Any
+(defn make-when-some
+  [name String
+   expr Any
+   body (Vec Any)] Any
   {"node" "when-some" "name" name "expr" expr "body" body})
 
 (defn make-if-some
-  [(name String) (expr Any) (then-body Any) (else-body Any)] Any
+  [name String
+   expr Any
+   then-body Any
+   else-body Any] Any
   {"node" "if-some" "name" name "expr" expr "then" then-body "else" else-body})
 
 (defn make-condp
-  [(pred-fn String) (test-expr Any) (clauses (Vec Any)) (fallback Any)] Any
+  [pred-fn String
+   test-expr Any
+   clauses (Vec Any)
+   fallback Any] Any
   {"node" "condp" "pred-fn" pred-fn "test-expr" test-expr "clauses" clauses "default" fallback})
 
-(defn make-dotimes [(name String) (count-expr Any) (body (Vec Any))] Any
+(defn make-dotimes
+  [name String
+   count-expr Any
+   body (Vec Any)] Any
   {"node" "dotimes" "name" name "count-expr" count-expr "body" body})
 
-(defn make-letfn [(fns (Vec Any)) (body (Vec Any))] Any
+(defn make-letfn
+  [fns (Vec Any)
+   body (Vec Any)] Any
   {"node" "letfn" "fns" fns "body" body})
 
-(defn make-set! [(target Any) (value Any)] Any
+(defn make-set!
+  [target Any
+   value Any] Any
   {"node" "set!" "target" target "value" value})
 
-(defn make-await [(expr Any)] Any
+(defn make-await [expr Any] Any
   {"node" "await" "expr" expr})
 
-(defn make-block-string [(text String) (tag String)] Any
+(defn make-block-string
+  [text String
+   tag String] Any
   {"node" "block-string" "text" text "tag" tag})
 
 ;; --- param constructors ------------------------------------------------------
 
-(defn make-param [(name Any) (ann Any) (constraint Any)] Any
+(defn make-param
+  [name Any
+   ann Any
+   constraint Any] Any
   {"type" "param" "name" name "ann" ann "constraint" constraint})
 
 (defn make-map-destructure
-  [(keys (Vec String)) (as-name Any) (or-defaults Any)] Any
+  [keys (Vec String)
+   as-name Any
+   or-defaults Any] Any
   {"type" "map-destructure" "keys" keys "as" as-name "or" or-defaults})
 
-(defn make-seq-destructure [(names (Vec Any)) (rest-name Any)] Any
+(defn make-seq-destructure
+  [names (Vec Any)
+   rest-name Any] Any
   {"type" "seq-destructure" "names" names "rest" rest-name})
 
-(defn make-let-binding [(name Any) (ann Any) (constraint Any) (value Any)] Any
+(defn make-let-binding
+  [name Any
+   ann Any
+   constraint Any
+   value Any] Any
   {"name" name "ann" ann "constraint" constraint "value" value})
 
 ;; --- pattern constructors ----------------------------------------------------
@@ -817,61 +1002,82 @@
 (defn make-pat-wildcard [] Any
   {"pattern" "wildcard"})
 
-(defn make-pat-literal [(value Any)] Any
+(defn make-pat-literal [value Any] Any
   {"pattern" "literal" "value" value})
 
-(defn make-pat-record [(type-name Any) (bindings (Vec Any))] Any
+(defn make-pat-record
+  [type-name Any
+   bindings (Vec Any)] Any
   {"pattern" "record" "type-name" type-name "bindings" bindings})
 
-(defn make-pat-map [(entries (Vec Any))] Any
+(defn make-pat-map [entries (Vec Any)] Any
   {"pattern" "map" "entries" entries})
 
-(defn make-pat-var [(name String)] Any
+(defn make-pat-var [name String] Any
   {"pattern" "var" "name" name})
 
 ;; --- Nix AST constructors ----------------------------------------------------
 
-(defn make-nix-inherit [(names (Vec String))] Any
+(defn make-nix-inherit [names (Vec String)] Any
   {"node" "nix-inherit" "names" names})
 
-(defn make-nix-inherit-from [(ns-expr Any) (names (Vec String))] Any
+(defn make-nix-inherit-from
+  [ns-expr Any
+   names (Vec String)] Any
   {"node" "nix-inherit-from" "ns-expr" ns-expr "names" names})
 
-(defn make-nix-with [(ns-expr Any) (body Any)] Any
+(defn make-nix-with
+  [ns-expr Any
+   body Any] Any
   {"node" "nix-with" "ns-expr" ns-expr "body" body})
 
-(defn make-nix-rec-attrs [(pairs (Vec Any))] Any
+(defn make-nix-rec-attrs [pairs (Vec Any)] Any
   {"node" "nix-rec-attrs" "pairs" pairs})
 
-(defn make-nix-assert [(cond-expr Any) (body Any)] Any
+(defn make-nix-assert
+  [cond-expr Any
+   body Any] Any
   {"node" "nix-assert" "cond-expr" cond-expr "body" body})
 
-(defn make-nix-get-or [(base Any) (path Any) (fallback Any)] Any
+(defn make-nix-get-or
+  [base Any
+   path Any
+   fallback Any] Any
   {"node" "nix-get-or" "base" base "path" path "default" fallback})
 
-(defn make-nix-has-attr [(base Any) (path Any)] Any
+(defn make-nix-has-attr
+  [base Any
+   path Any] Any
   {"node" "nix-has-attr" "base" base "path" path})
 
-(defn make-nix-search-path [(name String)] Any
+(defn make-nix-search-path [name String] Any
   {"node" "nix-search-path" "name" name})
 
-(defn make-nix-interpolated-string [(parts (Vec Any))] Any
+(defn make-nix-interpolated-string [parts (Vec Any)] Any
   {"node" "nix-interpolated-string" "parts" parts})
 
-(defn make-nix-multiline-string [(lines (Vec Any))] Any
+(defn make-nix-multiline-string [lines (Vec Any)] Any
   {"node" "nix-multiline-string" "lines" lines})
 
-(defn make-nix-path [(path String)] Any
+(defn make-nix-path [path String] Any
   {"node" "nix-path" "path" path})
 
 (defn make-nix-fn-set
-  [(formals (Vec Any)) (rest Bool) (at-name Any) (body Any)] Any
+  [formals (Vec Any)
+   rest Bool
+   at-name Any
+   body Any] Any
   {"node" "nix-fn-set" "formals" formals "rest" rest "at-name" at-name "body" body})
 
-(defn make-nix-pipe [(direction String) (lhs Any) (rhs Any)] Any
+(defn make-nix-pipe
+  [direction String
+   lhs Any
+   rhs Any] Any
   {"node" "nix-pipe" "direction" direction "lhs" lhs "rhs" rhs})
 
-(defn make-nix-impl [(lhs Any) (rhs Any)] Any
+(defn make-nix-impl
+  [lhs Any
+   rhs Any] Any
   {"node" "nix-impl" "lhs" lhs "rhs" rhs})
 
 ;; --- program -----------------------------------------------------------------
@@ -880,24 +1086,23 @@
 (def DEFAULT-NAMESPACE String "beagle.user")
 
 (defn make-program
-  [(namespace String)
-   (target String)
-   (forms (Vec Any))
-   (externs Any)
-   (requires (Vec Any))]
-  Any
+  [namespace String
+   target String
+   forms (Vec Any)
+   externs Any
+   requires (Vec Any)] Any
   {"namespace" namespace "target" target
    "forms" forms "externs" externs "requires" requires})
 
 ;; --- identifier validation ---------------------------------------------------
 
-(defn validate-identifier [(sym String)] Bool
+(defn validate-identifier [sym String] Bool
   (let [bad-chars ";'\"` (){}[],"]
     (and (not (str/starts-with? sym "$beagle$"))
       (every? (fn [c String] Bool (nil? (str/index-of bad-chars c)))
         (map str (seq sym))))))
 
-(defn validate-module-path [(path String)] Bool
+(defn validate-module-path [path String] Bool
   (and (every? (fn [c String] Bool
                  (let [code (int (.charAt c 0))]
                    (or (upper-case-char? code)
@@ -912,7 +1117,9 @@
 (def passes Any (atom []))
 (def failures Any (atom []))
 
-(defn- expect! [(label String) (result Bool)] Nil
+(defn- expect!
+  [label String
+   result Bool] Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))

@@ -1,5 +1,6 @@
 (ns selfhost.reader
   (:require [selfhost.rt :as rt]
+            [selfhost.ast :as ast]
             [clojure.string :as str]))
 
 (def ^String STRING-TAG "#%string")
@@ -13,8 +14,6 @@
 (def ^String REGEX-TAG "#%regex")
 
 (def ^String CHAR-TAG "#%char")
-
-(def ^String ANN-MARKER "#%:")
 
 (defn ^String char-at [^String s i]
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
@@ -36,9 +35,6 @@
 
 (defn ^Boolean delimiter? [^String ch]
   (or (whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch ";") (= ch "~") (= ch "^")))
-
-(defn ^Boolean token-delimiter? [^String ch]
-  (or (delimiter? ch) (= ch ":")))
 
 (defn make-result [value pos]
   {"value" value "pos" pos})
@@ -71,8 +67,10 @@
 (defn hex-val [^String c]
   (cond
   (and (>= (compare c "0") 0) (<= (compare c "9") 0)) (compare c "0")
-  (and (>= (compare c "a") 0) (<= (compare c "f") 0)) (+ 10 (compare c "a"))
-  (and (>= (compare c "A") 0) (<= (compare c "F") 0)) (+ 10 (compare c "A"))
+  (and (>= (compare c "a") 0) (<= (compare c "f") 0)) (let [offset (compare c "a")]
+  (+ 10 offset))
+  (and (>= (compare c "A") 0) (<= (compare c "F") 0)) (let [offset (compare c "A")]
+  (+ 10 offset))
   :else 0))
 
 (defn decode-u4 [^String src i]
@@ -87,7 +85,8 @@
   (= suffix "formfeed") 12
   (= suffix "backspace") 8
   (and (= (count suffix) 5) (= (char-at suffix 0) "u")) (decode-u4 suffix 1)
-  (= (count suffix) 1) (int (.charAt suffix 0))
+  (= (count suffix) 1) (let [ch (char-at suffix 0)]
+  (int (first ch)))
   :else 65533))
 
 (defn read-string-literal [^String src pos]
@@ -164,15 +163,6 @@
   (loop [i pos]
   (if (>= i len) (make-result (subs src pos i) i) (if (delimiter? (char-at src i)) (make-result (subs src pos i) i) (recur (+ i 1)))))))
 
-(defn read-token-text [^String src pos]
-  (let [len (count src)]
-  (loop [i pos]
-  (if (>= i len) (make-result (subs src pos i) i) (if (token-delimiter? (char-at src i)) (make-result (subs src pos i) i) (recur (+ i 1)))))))
-
-(defn read-lt-token [^String src pos]
-  (let [len (count src)]
-  (if (and (= (char-at src (+ pos 1)) ":") (or (>= (+ pos 2) len) (delimiter? (char-at src (+ pos 2))))) (make-result "<:" (+ pos 2)) (read-token-text src pos))))
-
 (defn classify-atom [^String text]
   (cond
   (= text "true") true
@@ -237,11 +227,6 @@
   (selfhost.rt/eprint "beagle reader: unexpected EOF after `^` metadata (needs a target form to attach to)\n")
   nil) (make-result ["#%meta" (get meta-r "value") (get form-r "value")] (get form-r "pos"))))))
   (or (digit? ch) (and (= ch "-") (< (+ p 1) len) (digit? (char-at src (+ p 1))))) (read-number src p)
-  (and (= ch ":") (or (>= (+ p 1) len) (delimiter? (char-at src (+ p 1))))) (make-result ANN-MARKER (+ p 1))
-  (= ch ":") (let [sym-result (read-symbol-text src (+ p 1))]
-  (make-result (str ":" (get sym-result "value")) (get sym-result "pos")))
-  (= ch "<") (let [sym-result (read-lt-token src p)]
-  (make-result (classify-atom (get sym-result "value")) (get sym-result "pos")))
   (or (= ch ")") (= ch "]") (= ch "}")) (do
   (selfhost.rt/eprint (str "beagle reader: unexpected '" ch "'\n"))
   nil)
@@ -249,9 +234,120 @@
    sfx (get sfx-result "value")
    code (decode-char-lit sfx)]
   (make-result [CHAR-TAG code] (get sfx-result "pos")))
-  :else (let [sym-result (read-token-text src p)
+  :else (let [sym-result (read-symbol-text src p)
    text (get sym-result "value")]
   (make-result (classify-atom text) (get sym-result "pos"))))))))
+
+(declare read-syntax-datum!)
+
+(def SOURCE-LOCATIONS (atom []))
+
+(defn- build-source-locations [^String src]
+  (loop [i 0
+   line 1
+   column 0
+   locations [[1 0]]]
+  (if (>= i (count src)) locations (if (newline? (char-at src i)) (recur (+ i 1) (+ line 1) 0 (conj locations [(+ line 1) 0])) (recur (+ i 1) line (+ column 1) (conj locations [line (+ column 1)]))))))
+
+(defn- source-line-column [^String src pos]
+  (let [locations (deref SOURCE-LOCATIONS)]
+  (if (and (>= pos 0) (< pos (count locations))) (nth locations pos) [1 pos])))
+
+(defn- syntax-span! [^String src source-id start end]
+  (let [location (source-line-column src start)]
+  (ast/make-source-span! source-id start end (nth location 0) (nth location 1))))
+
+(defn- syntax-properties [^String src start end delimiter]
+  {"reader" (ast/make-reader-metadata (subs src start end) delimiter)})
+
+(defn- syntax-head! [^String name span properties]
+  (ast/datum->beagle-syntax! name span ast/EMPTY-SCOPE-SET nil properties))
+
+(defn- attach-syntax! [^String src source-id start result]
+  (if (nil? result) nil (let [end (get result "pos")
+   value (get result "value")
+   ch (char-at src start)
+   children (or (get result "syntaxChildren") [])
+   delimiter (cond
+  (= ch "(") "paren"
+  (= ch "[") "bracket"
+  (= ch "{") "brace"
+  (and (= ch "#") (= (char-at src (+ start 1)) "{")) "set"
+  (= ch "'") "quote"
+  (= ch "`") "quasiquote"
+  (and (= ch "~") (= (char-at src (+ start 1)) "@")) "unquote-splicing"
+  (= ch "~") "unquote"
+  :else "atom")
+   span (syntax-span! src source-id start end)
+   properties (syntax-properties src start end delimiter)
+   syntax (cond
+  (= ch "(") (ast/make-syntax-list! children span ast/EMPTY-SCOPE-SET nil properties)
+  (= ch "[") (ast/make-syntax-vector! children span ast/EMPTY-SCOPE-SET nil properties)
+  (= ch "{") (ast/make-syntax-list! (into [(syntax-head! MAP-TAG span properties)] children) span ast/EMPTY-SCOPE-SET nil properties)
+  (and (= ch "#") (= (char-at src (+ start 1)) "{")) (ast/make-syntax-list! (into [(syntax-head! SET-TAG span properties)] children) span ast/EMPTY-SCOPE-SET nil properties)
+  (= ch "'") (ast/make-syntax-quote! (if (> (count value) 1) (nth value 1) nil) span ast/EMPTY-SCOPE-SET nil properties)
+  (or (= ch "~") (and (= ch "~") (= (char-at src (+ start 1)) "@"))) (ast/make-syntax-unquote! (if (> (count children) 0) (nth children 0) (ast/datum->beagle-syntax! nil span ast/EMPTY-SCOPE-SET nil properties)) (= delimiter "unquote-splicing") span ast/EMPTY-SCOPE-SET nil properties)
+  (or (= ch "`") (= ch "@") (= ch "^")) (let [head (nth value 0)]
+  (ast/make-syntax-list! (into [(syntax-head! head span properties)] children) span ast/EMPTY-SCOPE-SET nil properties))
+  :else (ast/datum->beagle-syntax! value span ast/EMPTY-SCOPE-SET nil properties))]
+  (assoc result "syntax" syntax))))
+
+(defn- read-syntax-delimited! [^String src pos ^String close source-id]
+  (let [len (count src)]
+  (loop [p (skip-ws src pos)
+   items []
+   syntaxes []]
+  (cond
+  (>= p len) (do
+  (selfhost.rt/eprint (str "beagle reader: expected " close " before EOF\n"))
+  (assoc (make-result items p) "syntaxChildren" syntaxes))
+  (= (char-at src p) close) (assoc (make-result items (+ p 1)) "syntaxChildren" syntaxes)
+  :else (let [result (read-syntax-datum! src p source-id)]
+  (if (nil? result) (assoc (make-result items p) "syntaxChildren" syntaxes) (recur (skip-ws src (get result "pos")) (conj items (get result "value")) (conj syntaxes (get result "syntax")))))))))
+
+(defn- read-syntax-hash-dispatch! [^String src pos source-id]
+  (let [len (count src)]
+  (if (>= (+ pos 1) len) (make-result "#" (+ pos 1)) (let [nxt (char-at src (+ pos 1))]
+  (cond
+  (= nxt "{") (let [result (read-syntax-delimited! src (+ pos 2) "}" source-id)]
+  (assoc (make-result (into [SET-TAG] (get result "value")) (get result "pos")) "syntaxChildren" (get result "syntaxChildren")))
+  (= nxt "\"") (read-regex-literal src (+ pos 1))
+  (= nxt "r") (read-raw-string src (+ pos 2))
+  :else (let [sym-result (read-symbol-text src pos)]
+  (make-result (get sym-result "value") (get sym-result "pos"))))))))
+
+(defn read-syntax-datum! [^String src pos source-id]
+  (let [p (skip-ws src pos)
+   len (count src)]
+  (if (>= p len) nil (let [ch (char-at src p)
+   result (cond
+  (= ch "(") (read-syntax-delimited! src (+ p 1) ")" source-id)
+  (= ch "[") (let [inner (read-syntax-delimited! src (+ p 1) "]" source-id)]
+  (assoc (make-result (into [BRACKET-TAG] (get inner "value")) (get inner "pos")) "syntaxChildren" (get inner "syntaxChildren")))
+  (= ch "{") (let [inner (read-syntax-delimited! src (+ p 1) "}" source-id)]
+  (assoc (make-result (into [MAP-TAG] (get inner "value")) (get inner "pos")) "syntaxChildren" (get inner "syntaxChildren")))
+  (= ch "\"") (read-string-literal src p)
+  (= ch "#") (read-syntax-hash-dispatch! src p source-id)
+  (= ch "'") (let [inner (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? inner) (make-result ["quote" nil] (+ p 1)) (assoc (make-result ["quote" (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "`") (let [inner (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? inner) (make-result ["quasiquote" nil] (+ p 1)) (assoc (make-result ["quasiquote" (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "@") (let [inner (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? inner) (make-result ["deref" nil] (+ p 1)) (assoc (make-result ["deref" (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "~") (let [splicing (= (char-at src (+ p 1)) "@")
+   inner (read-syntax-datum! src (+ p (if splicing 2 1)) source-id)]
+  (if (nil? inner) (make-result [(if splicing "unquote-splicing" "unquote") nil] (+ p (if splicing 2 1))) (assoc (make-result [(if splicing "unquote-splicing" "unquote") (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
+  (= ch "^") (let [meta-r (read-syntax-datum! src (+ p 1) source-id)]
+  (if (nil? meta-r) nil (let [form-r (read-syntax-datum! src (get meta-r "pos") source-id)]
+  (if (nil? form-r) nil (assoc (make-result ["#%meta" (get meta-r "value") (get form-r "value")] (get form-r "pos")) "syntaxChildren" [(get meta-r "syntax") (get form-r "syntax")])))))
+  (or (digit? ch) (and (= ch "-") (< (+ p 1) len) (digit? (char-at src (+ p 1))))) (read-number src p)
+  (or (= ch ")") (= ch "]") (= ch "}")) nil
+  (= ch "\\") (let [sfx-result (read-symbol-text src (+ p 1))
+   code (decode-char-lit (get sfx-result "value"))]
+  (make-result [CHAR-TAG code] (get sfx-result "pos")))
+  :else (let [sym-result (read-symbol-text src p)]
+  (make-result (classify-atom (get sym-result "value")) (get sym-result "pos"))))]
+  (attach-syntax! src source-id p result)))))
 
 (defn lang-target [^String lang-text]
   (cond
@@ -292,6 +388,20 @@
    datums (get all "datums")]
   (if (and (some? target) (not= target "clj") (not (has-define-target? datums))) (into [["define-target" target]] datums) datums)))
 
+(defn read-program-with-syntax! [^String src source-id]
+  (reset! SOURCE-LOCATIONS (build-source-locations src))
+  (let [lang-info (parse-lang-line src)
+   target (get lang-info "target")
+   start-pos (get lang-info "pos")
+   read-result (loop [p (skip-ws src start-pos)
+   datums []
+   syntaxes []]
+  (if (>= p (count src)) {"datums" datums "syntaxes" syntaxes} (let [result (read-syntax-datum! src p source-id)]
+  (if (nil? result) {"datums" datums "syntaxes" syntaxes} (recur (skip-ws src (get result "pos")) (conj datums (get result "value")) (conj syntaxes (get result "syntax")))))))
+   datums (get read-result "datums")
+   syntaxes (get read-result "syntaxes")]
+  (if (and (some? target) (not= target "clj") (not (has-define-target? datums))) {"datums" (into [["define-target" target]] datums) "syntaxes" (into [(ast/datum->beagle-syntax! ["define-target" target] nil ast/EMPTY-SCOPE-SET nil {"reader" (ast/make-reader-metadata "" "synthetic")})] syntaxes)} {"datums" datums "syntaxes" syntaxes})))
+
 (def passes (atom []))
 
 (def failures (atom []))
@@ -321,20 +431,14 @@
   (expect! "symbol" (= (rd1 "foo") "foo"))
   (expect! "nil symbol" (= (rd1 "nil") "nil"))
   (expect! "keyword" (= (rd1 ":name") ":name"))
-  (expect! "standalone colon at EOF is the annotation marker" (= (rd1 ":") ANN-MARKER))
-  (expect! "legacy type marker :-" (= (rd1 ":-") ":-"))
-  (expect! "return marker ->" (= (rd1 "->") "->"))
   (expect! "auto-resolved keyword ::kw stays one keyword" (= (rd1 "::kw") "::kw"))
-  (expect! "keyword unaffected by the marker split" (= (rd1 ":foo") ":foo"))
-  (expect! "x:Int reads as symbol + keyword" (= (rd "x:Int") ["x" ":Int"]))
-  (expect! "postfix marker splits mid-token" (= (rd "x: Int") ["x" ANN-MARKER "Int"]))
-  (expect! "postfix marker with no space" (= (rd "x:Int") ["x" ":Int"]))
+  (expect! "keyword" (= (rd1 ":foo") ":foo"))
   (expect! "<: stays one symbol" (= (rd1 "<:") "<:"))
   (expect! "<: inside a forall bound" (= (rd1 "(forall [T <: Num] T)") ["forall" [BRACKET-TAG "T" "<:" "Num"] "T"]))
   (expect! "< unchanged" (= (rd1 "(< a b)") ["<" "a" "b"]))
   (expect! "<= unchanged" (= (rd1 "(<= a b)") ["<=" "a" "b"]))
   (expect! "<- unchanged" (= (rd1 "<-") "<-"))
-  (expect! "<:foo is < then keyword" (= (rd "<:foo") ["<" ":foo"]))
+  (expect! "<:foo is one symbol" (= (rd1 "<:foo") "<:foo"))
   (expect! "char literal \\: unaffected" (= (rd1 "\\:") [CHAR-TAG 58]))
   (expect! "string literal" (= (rd1 "\"hello\"") [STRING-TAG "hello"]))
   (expect! "string with escapes" (= (rd1 "\"a\\nb\"") [STRING-TAG "a\nb"]))
@@ -391,28 +495,20 @@
   (expect! "Core renders as bare #lang beagle" (= (target-lang-line "core") "#lang beagle"))
   (expect! "hosted targets render with explicit language paths" (= (target-lang-line "clj") "#lang beagle/clj"))
   (expect! "unknown targets have no language path" (nil? (target-lang-line "missing")))
-  (expect! "defn form postfix params" (let [result (rd1 "(defn foo [x: Int] -> String x)")]
-  (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ANN-MARKER "Int"]) (= (nth result 3) "->") (= (nth result 4) "String") (= (nth result 5) "x"))))
-  (expect! "defn form postfix params, space before colon" (= (rd1 "(defn foo [x : Int] -> String x)") (rd1 "(defn foo [x: Int] -> String x)")))
-  (expect! "defrecord postfix fields" (= (rd1 "(defrecord Point [x: Int y: Int])") ["defrecord" "Point" [BRACKET-TAG "x" ANN-MARKER "Int" "y" ANN-MARKER "Int"]]))
-  (expect! "def postfix annotation" (= (rd1 "(def greeting: String \"hi\")") ["def" "greeting" ANN-MARKER "String" [STRING-TAG "hi"]]))
-  (expect! "mixed param vector" (= (rd1 "[a: Int b c: String]") [BRACKET-TAG "a" ANN-MARKER "Int" "b" "c" ANN-MARKER "String"]))
-  (expect! "defn form flat params" (let [result (rd1 "(defn foo [x :- Int] :- String x)")]
-  (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int"]) (= (nth result 3) ":-") (= (nth result 4) "String") (= (nth result 5) "x"))))
-  (expect! "defrecord flat fields" (let [result (rd1 "(defrecord Point [x :- Int y :- Int])")]
-  (and (= (nth result 0) "defrecord") (= (nth result 1) "Point") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int" "y" ":-" "Int"]))))
-  (expect! "def with string value" (let [result (rd1 "(def greeting :- String \"hello\")")]
-  (and (= (nth result 0) "def") (= (nth result 1) "greeting") (= (nth result 2) ":-") (= (nth result 3) "String") (= (nth result 4) [STRING-TAG "hello"]))))
-  (expect! "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch [String -> (Promise Any)])")]
-  (and (= (nth result 0) "declare-extern") (= (nth result 1) "fetch") (= (nth result 2) [BRACKET-TAG "String" "->" ["Promise" "Any"]]))))
+  (expect! "structural typed binding reads as one nested declaration" (= (rd1 "[(x Point) y]") [BRACKET-TAG ["x" "Point"] "y"]))
+  (expect! "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
+  (and (= (nth result 0) "declare-extern") (= (nth result 1) "fetch") (= (nth result 2) ["Fn" [BRACKET-TAG "String"] ["Promise" "Any"]]))))
   (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))
   (expect! "property access" (= (rd1 "(.-length arr)") [".-length" "arr"]))
   (expect! "static call" (= (rd1 "(Math/abs x)") ["Math/abs" "x"]))
+  (expect! "qualified symbol stays intact for semantic parse lowering" (= (rd1 "odd.ns/->thing?!") "odd.ns/->thing?!"))
+  (expect! "quoted qualified symbol stays literal data" (= (rd1 "'odd.ns/->thing?!") ["quote" "odd.ns/->thing?!"]))
   (expect! "qualified require alias" (= (rd1 "(:tx a)") [":tx" "a"]))
   (expect! "threading macro" (= (rd1 "(-> x inc str)") ["->" "x" "inc" "str"]))
   (expect! "negative number in list" (= (rd1 "(+ x -5)") ["+" "x" -5]))
   (expect! "minus as symbol" (= (rd1 "(- 5 3)") ["-" 5 3]))
   (expect! "dot method symbol" (= (rd1 ".charAt") ".charAt"))
+  (expect! "static JavaScript selector remains a dot-prefixed token" (= (rd1 "(js/get obj .raw_name)") ["js/get" "obj" ".raw_name"]))
   (expect! "dynamic var" (= (rd1 "*state*") "*state*"))
   (expect! "constructor symbol" (= (rd1 "Point.") "Point."))
   (expect! "empty list" (= (rd1 "()") []))
@@ -425,8 +521,8 @@
   (expect! "keyword :else in map" (= (rd1 "{:else true}") [MAP-TAG ":else" true]))
   (expect! "str concat call" (let [result (rd1 "(str \"Hello, \" name \"!\")")]
   (and (= (nth result 0) "str") (= (nth result 1) [STRING-TAG "Hello, "]) (= (nth result 2) "name") (= (nth result 3) [STRING-TAG "!"]))))
-  (expect! "full clj header" (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(define-mode strict)")]
-  (and (= (get result "target") "clj") (= (count (get result "datums")) 2) (= (nth (nth (get result "datums") 0) 0) "ns") (= (nth (nth (get result "datums") 1) 0) "define-mode"))))
+  (expect! "full clj header" (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(def x 1)")]
+  (and (= (get result "target") "clj") (= (count (get result "datums")) 2) (= (nth (nth (get result "datums") 0) 0) "ns") (= (nth (nth (get result "datums") 1) 0) "def"))))
   (expect! "read-program returns datum vector" (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)") [["ns" "app"] ["def" "x" 1]]))
   (expect! "read-program: clj target injects NO define-target (parser default)" (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
   (expect! "read-program: Core prepends (define-target core)" (= (read-program "#lang beagle\n(def x 1)") [["define-target" "core"] ["def" "x" 1]]))
@@ -435,6 +531,13 @@
   (expect! "read-program: explicit define-target present -> no double injection" (= (read-program "#lang beagle/js\n(define-target js)\n(ns app)") [["define-target" "js"] ["ns" "app"]]))
   (expect! "read-datum returns value+pos" (let [r (read-datum "42 rest" 0)]
   (and (= (get r "value") 42) (= (get r "pos") 2))))
+  (expect! "syntax reader keeps exact caller bytes and child span" (let [source "#lang beagle/clj\n(identity (+ 1 2))"
+   result (read-program-with-syntax! source "reader-fixture.bclj")
+   call-syntax (nth (get result "syntaxes") 0)
+   child (nth (get call-syntax "payload") 1)
+   reader (get (ast/beagle-syntax-properties child) "reader")
+   span (ast/beagle-syntax-span child)]
+  (and (= (get reader "sourceBytes") "(+ 1 2)") (= (get span "start") 27) (= (get span "end") 34))))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  READER: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

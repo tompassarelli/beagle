@@ -67,23 +67,28 @@
 
 (def MODULE-RESOLUTION Any (atom {"providers" {} "roots" []}))
 
-(defn- split-dots [(s String)] Any
-  (loop [i Int 0 start Int 0 acc Any []]
+(defn- split-dots [s String] Any
+  (loop [i Int 0
+         start Int 0
+         acc Any []]
     (cond
       (>= i (count s)) (conj acc (subs s start i))
       (= (subs s i (+ i 1)) ".") (recur (+ i 1) (+ i 1) (conj acc (subs s start i)))
       :else (recur (+ i 1) start acc))))
 
 ;; module-source-root.rkt namespace-relative-source-id: `-` -> `_`, `.` -> `/`.
-(defn- ns-relative-source-path [(ns String) (extension String)] String
-  (loop [i Int 0 acc String ""]
+(defn- ns-relative-source-path
+  [ns String
+   extension String] String
+  (loop [i Int 0
+         acc String ""]
     (if (>= i (count ns))
       (str acc extension)
       (let [c (subs ns i (+ i 1))]
         (recur (+ i 1)
           (str acc (cond (= c ".") "/" (= c "-") "_" :else c)))))))
 
-(defn- source-extension [(path String)] String
+(defn- source-extension [path String] String
   (loop [i Int (- (count path) 1)]
     (cond
       (< i 0) ""
@@ -91,7 +96,9 @@
       (= (subs path i (+ i 1)) ".") (subs path i (count path))
       :else (recur (- i 1)))))
 
-(defn- ns-token-end [(text String) (start Int)] Int
+(defn- ns-token-end
+  [text String
+   start Int] Int
   (loop [i Int start]
     (if (>= i (count text))
       i
@@ -103,10 +110,11 @@
 ;; First line-initial `(ns NAME` — the same lightweight projection
 ;; bin/beagle-build uses to derive output paths. Exact verification happens at
 ;; load time against the parsed module's declared namespace.
-(defn- declared-ns-of-source [(path String)] Any
+(defn- declared-ns-of-source [path String] Any
   (let [text (selfhost.rt/slurp-file path)
         n (count text)]
-    (loop [i Int 0 bol Bool true]
+    (loop [i Int 0
+           bol Bool true]
       (cond
         (>= i n) nil
         (and bol (<= (+ i 4) n) (= (subs text i (+ i 4)) "(ns "))
@@ -115,7 +123,7 @@
             (if (> end start) (subs text start end) nil))
         :else (recur (+ i 1) (= (subs text i (+ i 1)) "\n"))))))
 
-(defn- module-declared-ns [(datums Any)] Any
+(defn- module-declared-ns [datums Any] Any
   (loop [i Int 0]
     (if (>= i (count datums))
       nil
@@ -125,9 +133,11 @@
           (nth d 1)
           (recur (+ i 1)))))))
 
-(defn- declared-extern-names [(datums Any)] Any
+(defn- declared-extern-names [datums Any] Any
   (reduce
-    (fn [names Any d Any] Any
+    (fn
+      [names Any
+       d Any] Any
       (if (and (vector? d) (>= (count d) 2) (= (nth d 0) "declare-extern"))
         (let [head (nth d 1)]
           (cond
@@ -140,7 +150,7 @@
     []
     datums))
 
-(defn- parse-module-root-spec! [(spec String)] Any
+(defn- parse-module-root-spec! [spec String] Any
   (let [eq (loop [i Int 0]
              (cond
                (>= i (count spec)) -1
@@ -155,7 +165,9 @@
       {"logical" (subs spec 0 eq)
        "dir" (subs spec (+ eq 1) (count spec))})))
 
-(defn- register-bundle-source! [(providers Any) (path String)] Any
+(defn- register-bundle-source!
+  [providers Any
+   path String] Any
   (if (not (selfhost.rt/file-exists? path))
     (do (selfhost.rt/eprint
           (str "beagle [module]: bundle source does not exist: " path "\n"))
@@ -171,23 +183,31 @@
             providers
             (assoc providers ns (conj existing absolute))))))))
 
-(defn- install-module-resolution! [(root-specs Any) (source-paths Any)] Nil
+(defn- install-module-resolution!
+  [root-specs Any
+   source-paths Any] Nil
   (reset! MODULE-RESOLUTION
     {"providers" (reduce register-bundle-source! {} source-paths)
      "roots" (mapv parse-module-root-spec! root-specs)})
   nil)
 
-(defn- join-comma [(xs Any)] String
+(defn- join-comma [xs Any] String
   (reduce
-    (fn [acc String x String] String
+    (fn
+      [acc String
+       x String] String
       (if (= acc "") x (str acc ", " x)))
     ""
     xs))
 
-(defn- root-candidate-paths [(rn String) (importer-extension String)] Any
+(defn- root-candidate-paths
+  [rn String
+   importer-extension String] Any
   (let [relative (ns-relative-source-path rn importer-extension)]
     (reduce
-      (fn [hits Any root Any] Any
+      (fn
+        [hits Any
+         root Any] Any
         (let [candidate (str (get root "dir") "/" relative)]
           (if (selfhost.rt/file-exists? candidate)
             (conj hits candidate)
@@ -197,7 +217,9 @@
 
 ;; Provider path, or nil when the closed contract supplies no source; the
 ;; caller decides whether nil is authorized (host/extern) or a rejection.
-(defn- resolve-required-source! [(rn String) (source-path String)] Any
+(defn- resolve-required-source!
+  [rn String
+   source-path String] Any
   (let [providers (get (get (deref MODULE-RESOLUTION) "providers") rn [])]
     (cond
       (> (count providers) 1)
@@ -224,7 +246,7 @@
           (= (count candidates) 1) (nth candidates 0)
           :else nil)))))
 
-(defn- contains-dot? [(s String)] Bool
+(defn- contains-dot? [s String] Bool
   (loop [i Int 0]
     (cond
       (>= i (count s)) false
@@ -234,13 +256,18 @@
 ;; Narrower than the oracle on purpose (see self-host/README.md): the oracle
 ;; also admits typed-stdlib-catalog host namespaces; the self-host driver
 ;; admits the prefix-exempt families and bare JS modules only.
-(defn- host-required-ns? [(rn String) (target String)] Bool
+(defn- host-required-ns?
+  [rn String
+   target String] Bool
   (or (str/starts-with? rn "clojure.")
       (str/starts-with? rn "babashka.")
       (and (= target "js") (not (contains-dot? rn)))))
 
 (defn- extern-authorized-require?
-  [(extern-names Any) (rn String) (prefix String) (refer-syms Any)] Bool
+  [extern-names Any
+   rn String
+   prefix String
+   refer-syms Any] Bool
   (if (and (some? refer-syms) (> (count refer-syms) 0))
     (every?
       (fn [name String] Bool
@@ -261,24 +288,31 @@
            extern-names))
        0)))
 
-(defn- dedup-externs [(xs Any)] Any
-  (loop [i Int 0 seen Any {} acc Any []]
+(defn- dedup-externs [xs Any] Any
+  (loop [i Int 0
+         seen Any {}
+         acc Any []]
     (if (>= i (count xs))
       acc
-      (let [e (nth xs i) nm (get e "name")]
+      (let [e (nth xs i)
+            nm (get e "name")]
         (if (= true (get seen nm))
           (recur (+ i 1) seen acc)
           (recur (+ i 1) (assoc seen nm true) (conj acc e)))))))
 
-(defn- surface-type-aliases [(surfaces Any)] Any
+(defn- surface-type-aliases [surfaces Any] Any
   (reduce
-    (fn [aliases Any surface Any] Any
+    (fn
+      [aliases Any
+       surface Any] Any
       (into aliases (get surface "type-aliases" {})))
     {}
     surfaces))
 
 (defn- checked-module-surface!
-  [(path String) (target String) (imported-aliases Any)] Any
+  [path String
+   target String
+   imported-aliases Any] Any
   (let [absolute-path (selfhost.rt/abs-path path)
         cache-key (str target "\n" absolute-path)
         cached (get (deref MODULE-SURFACE-CACHE) cache-key)]
@@ -307,8 +341,7 @@
                   (str "beagle [check]: " err "\n")))
               (selfhost.rt/exit 1)
               nil)
-            (let [surface
-                    {"datums" (get snapshot "datums")
+            (let [surface {"datums" (get snapshot "datums")
                      "type-aliases"
                        (p/module-type-aliases-with-imports!
                          (get snapshot "datums")
@@ -326,14 +359,15 @@
 (declare load-import-surfaces*!)
 
 (defn- load-import-surfaces*!
-  [(requires Any)
-   (source-path String)
-   (target String)
-   (extern-names Any)
-   (seen-paths Any)]
-  Any
+  [requires Any
+   source-path String
+   target String
+   extern-names Any
+   seen-paths Any] Any
   (reduce
-    (fn [surfaces Any r Any] Any
+    (fn
+      [surfaces Any
+       r Any] Any
       (let [ns (get r "ns")
             alias (get r "alias")
             refer (get r "refer")
@@ -358,19 +392,15 @@
                         "\n"))
                     (selfhost.rt/exit 1)
                     surfaces)
-                  (let [dependency-surfaces
-                          (load-import-surfaces*!
+                  (let [dependency-surfaces (load-import-surfaces*!
                             (p/discover-requires! datums)
                             path
                             target
                             (declared-extern-names datums)
                             (assoc seen-paths absolute-path true))
-                        imported-aliases
-                          (surface-type-aliases dependency-surfaces)
-                        checked-surface
-                          (checked-module-surface! path target imported-aliases)
-                        type-aliases
-                          (p/module-type-aliases-with-imports!
+                        imported-aliases (surface-type-aliases dependency-surfaces)
+                        checked-surface (checked-module-surface! path target imported-aliases)
+                        type-aliases (p/module-type-aliases-with-imports!
                             datums prefix refer-syms imported-aliases)]
                     (conj surfaces
                       (assoc checked-surface
@@ -397,7 +427,10 @@
     requires))
 
 (defn- load-import-surfaces!
-  [(requires Any) (source-path String) (target String) (datums Any)] Any
+  [requires Any
+   source-path String
+   target String
+   datums Any] Any
   (load-import-surfaces*!
     requires
     source-path
@@ -405,9 +438,11 @@
     (declared-extern-names datums)
     {(selfhost.rt/abs-path source-path) true}))
 
-(defn- import-parametric-arities! [(surfaces Any)] Any
+(defn- import-parametric-arities! [surfaces Any] Any
   (reduce
-    (fn [arities Any surface Any] Any
+    (fn
+      [arities Any
+       surface Any] Any
       (into arities
         (p/module-parametric-arities!
           (get surface "datums")
@@ -416,12 +451,14 @@
     {}
     surfaces))
 
-(defn- import-type-aliases [(surfaces Any)] Any
+(defn- import-type-aliases [surfaces Any] Any
   (surface-type-aliases surfaces))
 
-(defn- import-nominal-type-names! [(surfaces Any)] (Map String Bool)
+(defn- import-nominal-type-names! [surfaces Any] (Map String Bool)
   (reduce
-    (fn [names Any surface Any] Any
+    (fn
+      [names Any
+       surface Any] Any
       (into names
         (p/module-nominal-type-names!
           (get surface "datums")
@@ -430,17 +467,21 @@
     {}
     surfaces))
 
-(defn- resolve-imports! [(prog Any) (surfaces Any)] Any
+;; Imported callables are unproved unless the checked provider separately
+;; publishes its authoritative ordinary and returned-callable synchronization
+;; facts below.
+;; own declare-externs are first, so they win any name collision.
+(defn- resolve-imports!
+  [prog Any
+   surfaces Any] Any
   (let [own-externs (get prog "externs")
         imported (reduce
-                   (fn [acc Any surface Any] Any
+                   (fn
+                     [acc Any
+                      surface Any] Any
                      (into acc
                        (mapv
                          (fn [extern Any] Any
-                           ;; Imported callables are unproved unless the
-                           ;; checked provider separately publishes its
-                           ;; authoritative ordinary and returned-callable
-                           ;; synchronization facts below.
                          (assoc extern
                            "synchronous" false
                            "returnsSynchronousCallable" false))
@@ -450,25 +491,26 @@
                            (get surface "refer")
                            (get surface "imported-aliases")))))
                    [] surfaces)
-        record-contracts
-          (reduce
-            (fn [acc Any surface Any] Any
+        record-contracts (reduce
+            (fn
+              [acc Any
+               surface Any] Any
               (into acc
                 (p/qualify-imported-record-contracts
                   (get surface "record-contracts")
                   (get surface "prefix")
                   (get surface "refer"))))
             [] surfaces)
-        callable-synchronization
-          (reduce
-            (fn [acc Any surface Any] Any
+        callable-synchronization (reduce
+            (fn
+              [acc Any
+               surface Any] Any
               (into acc
                 (p/qualify-imported-callable-synchronization
                   (get surface "callable-synchronization")
                   (get surface "prefix")
                   (get surface "refer"))))
             [] surfaces)]
-    ;; own declare-externs are first, so they win any name collision.
     (assoc prog
       "externs" (dedup-externs (into own-externs imported))
       IMPORTED-RECORD-CONTRACTS-KEY record-contracts
@@ -479,22 +521,25 @@
 ;; #lang line is consumed by the reader (target dropped from read-program), and
 ;; the CLI --target is authoritative; a source-level (define-target ...) wins if
 ;; present (duplicate would be a parse error).
-(defn- has-define-target? [(datums Any)] Bool
+(defn- has-define-target? [datums Any] Bool
   (> (count (filterv (fn [d Any] Bool
                        (and (vector? d) (>= (count d) 2) (= (nth d 0) "define-target")))
                      datums)) 0))
 
-(defn- parse-file-target! [(path String) (target String)] Any
+;; Racket raises on a parse diagnostic and exits nonzero. The self-host
+;; parser collects + eprints, so the driver must fail explicitly: any parse
+;; diagnostic => nonzero exit, no 'ok', no emit. (err! already printed each.)
+(defn- parse-file-target!
+  [path String
+   target String] Any
   (let [source-snapshot Any (selfhost.rt/read-source-snapshot path)
         source-text String (get source-snapshot "text")
         source-id String (selfhost.rt/source-id path)
-        reader-output Any
-          (rd/read-program-with-syntax! source-text source-id)
+        reader-output Any (rd/read-program-with-syntax! source-text source-id)
         datums0 Any (get reader-output "datums")
         syntaxes0 Any (get reader-output "syntaxes")
         datums Any (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
-        syntaxes Any
-          (if (has-define-target? datums0)
+        syntaxes Any (if (has-define-target? datums0)
             syntaxes0
             (into
               [(syntax/datum->beagle-syntax!
@@ -517,9 +562,6 @@
                       imported-nominal-type-names)
                     surfaces)
         perrs Any (p/parse-errors)]
-    ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
-    ;; parser collects + eprints, so the driver must fail explicitly: any parse
-    ;; diagnostic => nonzero exit, no 'ok', no emit. (err! already printed each.)
     (if (> (count perrs) 0)
       (do (selfhost.rt/exit 1)
           prog)
@@ -529,9 +571,11 @@
        "source-sha256" (get source-snapshot "sourceSha256")
        "source-id" source-id})))
 
-(defn- imported-record-field-order [(prog Any)] Any
+(defn- imported-record-field-order [prog Any] Any
   (reduce
-    (fn [out Any contract Any] Any
+    (fn
+      [out Any
+       contract Any] Any
       (assoc out (get contract "name")
         (mapv
           (fn [field String] String
@@ -540,9 +584,11 @@
     {}
     (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))
 
-(defn- imported-record-namespaces [(prog Any)] Any
+(defn- imported-record-namespaces [prog Any] Any
   (reduce
-    (fn [out Any contract Any] Any
+    (fn
+      [out Any
+       contract Any] Any
       (let [namespace (get contract "namespace")]
         (if (string? namespace)
           (assoc out (get contract "name") namespace)
@@ -550,7 +596,7 @@
     {}
     (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))
 
-(defn- check-or-die! [(prog Any)] Any
+(defn- check-or-die! [prog Any] Any
   (let [errors Any (c/check-program! prog)]
     (if (> (count errors) 0)
       (do
@@ -564,7 +610,9 @@
 
 ;; Emit dispatch by target. Default clj keeps current behavior; each backend
 ;; adds one branch here (parallel target ports union into this table).
-(defn- emit-for-target! [(target String) (prog Any)] String
+(defn- emit-for-target!
+  [target String
+   prog Any] String
   (cond
     (= target "js") (ejs/emit-program! prog)
     (= target "nix") (en/emit-program! prog)
@@ -576,12 +624,12 @@
    "imports" "importedRecordFieldOrder" "importedRecordNamespaces"
    "externs" "forms"])
 
-(defn- exact-checked-program-keys? [(projection Any)] Bool
+(defn- exact-checked-program-keys? [projection Any] Bool
   (and (= (count (keys projection)) (count CHECKED-PROGRAM-KEYS))
        (every? (fn [key String] Bool (contains? projection key))
          CHECKED-PROGRAM-KEYS)))
 
-(defn- complete-binding? [(binding Any)] Bool
+(defn- complete-binding? [binding Any] Bool
   (and (map? binding)
        (contains? binding "name")
        (contains? binding "constraint")
@@ -591,12 +639,14 @@
           (and (not (nil? (get binding "constraint")))
                (not (false? (get binding "constraint")))))))
 
-(defn- exact-object-keys? [(value Any) (expected Any)] Bool
+(defn- exact-object-keys?
+  [value Any
+   expected Any] Bool
   (and (map? value)
        (= (count (keys value)) (count expected))
        (every? (fn [key String] Bool (contains? value key)) expected)))
 
-(defn- valid-record-update-contract? [(contract Any)] Bool
+(defn- valid-record-update-contract? [contract Any] Bool
   (and (exact-object-keys?
          contract ["recordName" "fieldOrder" "validator"])
        (string? (get contract "recordName"))
@@ -605,11 +655,11 @@
        (or (nil? (get contract "validator"))
            (string? (get contract "validator")))))
 
-(defn- valid-record-field-access-contract? [(contract Any)] Bool
+(defn- valid-record-field-access-contract? [contract Any] Bool
   (and (exact-object-keys? contract ["recordName"])
        (string? (get contract "recordName"))))
 
-(defn- params-complete? [(params Any)] Bool
+(defn- params-complete? [params Any] Bool
   (and (vector? params)
        (every? (fn [param Any] Bool
                  (if (= (get param "type") "param")
@@ -617,7 +667,7 @@
                    true))
          params)))
 
-(defn- callable-shape-complete? [(callable Any)] Bool
+(defn- callable-shape-complete? [callable Any] Bool
   (and (contains? callable "rest")
        (params-complete? (get callable "params"))
        (let [rest-param (get callable "rest")]
@@ -626,17 +676,17 @@
              (and (= (get rest-param "type") "param")
                   (complete-binding? rest-param))))))
 
-(defn- bindings-complete? [(bindings Any)] Bool
+(defn- bindings-complete? [bindings Any] Bool
   (and (vector? bindings) (every? complete-binding? bindings)))
 
 (declare constraint-schema-complete?)
 
-(defn- map-children-complete? [(value Any)] Bool
+(defn- map-children-complete? [value Any] Bool
   (every? (fn [key Any] Bool
             (constraint-schema-complete? (get value key)))
     (keys value)))
 
-(defn- constraint-schema-complete? [(value Any)] Bool
+(defn- constraint-schema-complete? [value Any] Bool
   (cond
     (vector? value)
     (every? constraint-schema-complete? value)
@@ -644,8 +694,7 @@
     (map? value)
     (let [node (get value "node")
           type (get value "type")
-          local-ok
-            (cond
+          local-ok (cond
               (= type "param") (complete-binding? value)
               (= type "binding") (complete-binding? value)
 
@@ -715,7 +764,7 @@
 
     :else true))
 
-(defn- checked-projection [(snapshot Any)] Any
+(defn- checked-projection [snapshot Any] Any
   (let [prog (get snapshot "program")
         externs (mapv (fn [extern Any] Any
                         {"name" (get extern "name")
@@ -737,12 +786,14 @@
               "forms" (get prog "forms")}]
     (assoc base "projectionSha256" (selfhost.rt/projection-sha256 base))))
 
-(defn- invalid-projection! [(message String)] Any
+(defn- invalid-projection! [message String] Any
   (selfhost.rt/eprint (str "beagle [emit-from-ast]: " message "\n"))
   (selfhost.rt/exit 1)
   nil)
 
-(defn- validate-checked-projection! [(target String) (projection Any)] Any
+(defn- validate-checked-projection!
+  [target String
+   projection Any] Any
   (cond
     (not (map? projection))
     (invalid-projection! "input must be a checked-program JSON object")
@@ -794,13 +845,17 @@
 
     :else projection))
 
-(defn- cmd-ast! [(path String) (target String)] Nil
+(defn- cmd-ast!
+  [path String
+   target String] Nil
   (let [snapshot (parse-file-target! path target)
         prog (check-or-die! (get snapshot "program"))]
     (println (selfhost.rt/canonical-json
                (checked-projection (assoc snapshot "program" prog))))))
 
-(defn- cmd-check! [(path String) (target String)] Nil
+(defn- cmd-check!
+  [path String
+   target String] Nil
   (let [prog (get (parse-file-target! path target) "program")]
     (check-or-die! prog)
     ;; The hosted check command exposes warn-level purity from its checked
@@ -810,33 +865,41 @@
       (c/check-purity! prog)))
   (selfhost.rt/eprint "ok\n"))
 
-(defn- cmd-emit! [(path String) (target String)] Nil
+(defn- cmd-emit!
+  [path String
+   target String] Nil
   (print (emit-for-target! target
            (check-or-die! (get (parse-file-target! path target) "program")))))
 
-(defn- cmd-emit-from-ast! [(target String)] Nil
+(defn- cmd-emit-from-ast! [target String] Nil
   (print (emit-for-target! target
            (validate-checked-projection! target
              (selfhost.rt/parse-json (selfhost.rt/read-stdin))))))
 
 ;; Extract `--target VALUE` (default clj); returns the first non-flag positional
 ;; after the command as the path.
-(defn- flag-value [(args Any) (flag String) (default String)] String
+(defn- flag-value
+  [args Any
+   flag String
+   default String] String
   (loop [i 0]
     (if (>= i (count args)) default
       (if (and (= (nth args i) flag) (< (+ i 1) (count args)))
         (nth args (+ i 1))
         (recur (+ i 1))))))
 
-(defn- flag-values [(args Any) (flag String)] Any
-  (loop [i Int 0 acc Any []]
+(defn- flag-values
+  [args Any
+   flag String] Any
+  (loop [i Int 0
+         acc Any []]
     (if (>= i (count args))
       acc
       (if (and (= (nth args i) flag) (< (+ i 1) (count args)))
         (recur (+ i 2) (conj acc (nth args (+ i 1))))
         (recur (+ i 1) acc)))))
 
-(defn- first-positional [(args Any)] String
+(defn- first-positional [args Any] String
   (loop [i 1]
     (if (>= i (count args)) ""
       (let [a (nth args i)]
