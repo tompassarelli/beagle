@@ -1,0 +1,4 @@
+#lang beagle/js
+
+(require '["@scope/package/subpath" :as pkg :refer [make] :rename {make build}])
+(require-global '[Idiomorph :as idio])

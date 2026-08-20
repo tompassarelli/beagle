@@ -16,10 +16,11 @@
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 9)
-;; V9 is the complete Beagle import boundary: finalized bindings, macros,
-;; type/record/error contracts, and dynamic-var status all participate in the
-;; interface digest.  Unchanged interfaces can therefore prune reverse users.
+(define INTERFACE-SCHEMA-VERSION 10)
+;; V10 is the complete Beagle import boundary: finalized bindings, macros,
+;; type/record/error contracts, dynamic-var status, and canonical import
+;; identities all participate in the interface digest.  Unchanged interfaces
+;; can therefore prune reverse users.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
@@ -1091,6 +1092,19 @@
               name)))))]
     [else details]))
 
+(define (require-entry->canonical-datum entry)
+  `(require
+    (identity
+     ,(module-identity-kind (require-entry-identity entry))
+     ,(module-identity-value (require-entry-identity entry)))
+    (alias ,(require-entry-alias entry))
+    (refer ,@(or (require-entry-refer entry) '()))
+    (rename
+     ,@(for/list ([source (in-list
+                            (sort (hash-keys (require-entry-rename entry))
+                                  symbol<?))])
+         (list source (hash-ref (require-entry-rename entry) source))))))
+
 (define (interface-canonical-datum
          namespace target gen-class? bindings macro-fingerprints
          type-declarations type-exports record-contracts errors requires
@@ -1106,9 +1120,7 @@
      ,@(for/list ([entry (in-list
                           (sort requires symbol<?
                                 #:key require-entry-ns))])
-         (list (require-entry-ns entry)
-               (require-entry-alias entry)
-               (require-entry-refer entry))))
+         (require-entry->canonical-datum entry)))
     (bindings
      ,@(for/list ([name (in-list (sort (hash-keys bindings) symbol<?))])
          (define binding (hash-ref bindings name))

@@ -60,6 +60,7 @@
          racket/set
          racket/list
          "parse.rkt"
+         "module-interface.rkt"
          "types.rkt"
          "emit-dispatch.rkt")
 
@@ -429,7 +430,13 @@ CLJ
     [(for/or ([r (in-list base-rs)])
        (eq? (require-entry-ns r) 'clojure.string))
      base-rs]
-    [else (append base-rs (list (require-entry 'clojure.string 'str #f)))]))
+    [else
+     (append
+      base-rs
+      (list
+       (require-entry 'clojure.string 'str #f
+                      (module-identity 'beagle-namespace 'clojure.string)
+                      (hasheq))))]))
 
 ;; Find the index of the last `.` in s, or #f if none.
 (define (string-last-dot s)

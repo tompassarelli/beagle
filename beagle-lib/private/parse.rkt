@@ -1987,26 +1987,44 @@
           (cons (module-import interface prefix refer-syms)
                 imp-module-interfaces)))
 
-  (define (candidate-for-require rn)
-    (validate-module-path! rn)
-    (define candidate
-      (and module-resolver (module-resolver rn source-path)))
-    (when (and candidate (not (module-source? candidate)))
-      (error 'beagle
-             "module resolver returned ~v for ~a; expected module-source or #f"
-             candidate rn))
-    (when (and candidate
-               (not (eq? (module-source-namespace candidate) rn)))
-      (error 'beagle
-             "module resolver returned namespace ~a for required module ~a"
-             (module-source-namespace candidate)
-             rn))
-    candidate)
+  (define (canonical-require-namespace spec)
+    ;; Older target consumers still read REQUIRE-ENTRY-NS.  It is deliberately
+    ;; a lossy projection; the exact identity stays on the entry for the
+    ;; module-interface and the native ESM emitter successor.
+    (define value (module-identity-value (canonical-libspec-identity spec)))
+    (if (symbol? value) value (string->symbol value)))
 
-  (define (pre-register-require-types! rn alias refer-syms)
+  (define (source-backed-require? spec)
+    (eq? (module-identity-kind (canonical-libspec-identity spec))
+         'beagle-namespace))
+
+  (define (candidate-for-require rn source-backed?)
+    (if (not source-backed?)
+        #f
+        (let ()
+          (validate-module-path! rn)
+          (define candidate
+            (and module-resolver (module-resolver rn source-path)))
+          (when (and candidate (not (module-source? candidate)))
+            (error 'beagle
+                   "module resolver returned ~v for ~a; expected module-source or #f"
+                   candidate rn))
+          (when (and candidate
+                     (not (eq? (module-source-namespace candidate) rn)))
+            (error 'beagle
+                   "module resolver returned namespace ~a for required module ~a"
+                   (module-source-namespace candidate)
+                   rn))
+          candidate)))
+
+  (define (pre-register-require-types! spec)
+    (define rn (canonical-require-namespace spec))
+    (define alias (canonical-libspec-alias spec))
+    (define refer-syms (canonical-libspec-refer spec))
+    (define source-backed? (source-backed-require? spec))
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
-    (define candidate (candidate-for-require rn))
+    (define candidate (candidate-for-require rn source-backed?))
     (define interface (and candidate (module-source-interface candidate)))
     (cond
       [interface
@@ -2019,10 +2037,15 @@
        (hash-set! prefixes rn rn)]
       [else (void)]))
 
-  (define (register-require! rn alias refer-syms)
+  (define (register-require! spec)
+    (define rn (canonical-require-namespace spec))
+    (define alias (canonical-libspec-alias spec))
+    (define refer-syms (canonical-libspec-refer spec))
+    (define rename (canonical-libspec-rename spec))
+    (define source-backed? (source-backed-require? spec))
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
-    (define candidate (candidate-for-require rn))
+    (define candidate (candidate-for-require rn source-backed?))
     (define interface (and candidate (module-source-interface candidate)))
     (define (declared-extern? name)
       (set-member? declared-extern-names name))
@@ -2053,7 +2076,8 @@
          (hash-set! externs name (type-prim 'Any))
          (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
          (hash-set! imp-symbol-ns name prefix))]
-      [(or (and (eq? target 'js)
+      [(or (not source-backed?)
+           (and (eq? target 'js)
                 (let ([module-name (symbol->string rn)])
                   (or (not (string-contains? module-name "."))
                       (string-contains? module-name "/"))))
@@ -2077,49 +2101,83 @@
                   "required namespace ~a could not be resolved (required by ~a); it is absent from this invocation and no declared module root provides it")
               rn
               (or source-path "<unknown source>"))])
-    (set! requires (cons (require-entry rn alias refer-syms) requires)))
+    (set!
+     requires
+     (cons
+      (require-entry rn alias (and (pair? refer-syms) refer-syms)
+                     (canonical-libspec-identity spec) rename)
+      requires)))
 
   (define current-require-registration
     (make-parameter register-require!))
 
-  ;; One require libspec: lib, [lib], [lib :as a], [lib :refer [syms]],
-  ;; [lib :as a :refer [syms]] — possibly quoted ('[lib :as a]). Anything
-  ;; else is a pointed rejection, never a silent drop.
-  (define (register-require-libspec! spec context)
-    (define d0 (->datum spec))
-    (define unq (if (and (pair? d0) (eq? (car d0) 'quote) (pair? (cdr d0))) (cadr d0) d0))
-    (cond
-      [(symbol? unq)
-       ((current-require-registration) unq #f #f)]
-      [(and (pair? unq) (eq? (car unq) BRACKET-TAG))
-       (define items (cdr unq))
-       (unless (and (pair? items) (symbol? (car items)))
+  (define (unquote-libspec-datum datum)
+    (if (and (pair? datum) (eq? (car datum) 'quote) (pair? (cdr datum)))
+        (cadr datum)
+        datum))
+
+  (define (rename-map-datum datum context)
+    (define unquoted (unquote-libspec-datum datum))
+    (unless (and (pair? unquoted) (eq? (car unquoted) MAP-TAG))
+      (raise-parse-error 'bad-meta-value
+                         "~a: :rename expects a map, got: ~v" context datum))
+    (define entries (cdr unquoted))
+    (unless (even? (length entries))
+      (raise-parse-error 'bad-meta-value
+                         "~a: :rename expects complete key/value pairs, got: ~v"
+                         context datum))
+    (let loop ([rest entries] [out (hasheq)])
+      (cond
+        [(null? rest) out]
+        [(hash-has-key? out (car rest))
          (raise-parse-error 'bad-meta-value
-                            "~a: libspec must start with a namespace symbol, got: ~v" context unq))
-       (define rn (car items))
-       (let loop ([rest (cdr items)] [alias #f] [refer-syms #f])
-         (cond
-           [(null? rest)
-            ((current-require-registration) rn alias refer-syms)]
-           [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
-            (loop (cddr rest) (cadr rest) refer-syms)]
-           [(and (eq? (car rest) ':refer) (pair? (cdr rest)))
-            (define rd (->datum (cadr rest)))
-            (cond
-              [(eq? rd ':all)
-               (raise-parse-error 'bad-meta-value
-                                  "~a: (:refer :all) is not supported — name the symbols explicitly: [~a :refer [sym ...]]" context rn)]
-              [(and (pair? rd) (eq? (car rd) BRACKET-TAG))
-               (loop (cddr rest) alias (map ->datum (cdr rd)))]
-              [else
-               (raise-parse-error 'bad-meta-value
-                                  "~a: :refer expects a vector of symbols: [~a :refer [sym ...]], got: ~v" context rn rd)])]
-           [else
-            (raise-parse-error 'bad-meta-value
-                               "~a: unsupported libspec option ~v — supported: [lib], [lib :as alias], [lib :refer [syms]], [lib :as alias :refer [syms]]" context (car rest))]))]
-      [else
-       (raise-parse-error 'bad-meta-value
-                          "~a: bad libspec ~v — expected a namespace symbol or [lib :as alias] / [lib :refer [syms]]" context unq)]))
+                            "~a: :rename repeats source ~a" context (car rest))]
+        [else (loop (cddr rest) (hash-set out (car rest) (cadr rest)))])))
+
+  (define (canonical-libspec-items unquoted context)
+    (unless (and (pair? unquoted) (eq? (car unquoted) BRACKET-TAG))
+      (raise-parse-error
+       'bad-meta-value
+       "~a: libspec must use canonical vector syntax [source :as alias :refer [names] :rename {source local}], got: ~v"
+       context unquoted))
+    (define raw-items (cdr unquoted))
+    (unless (pair? raw-items)
+      (raise-parse-error 'bad-meta-value "~a: libspec cannot be empty" context))
+    (let loop ([rest (cdr raw-items)] [items (list (car raw-items))])
+      (cond
+        [(null? rest) items]
+        [(null? (cdr rest))
+         (raise-parse-error 'bad-meta-value
+                            "~a: libspec option ~a requires a value"
+                            context (car rest))]
+        [else
+         (define option (car rest))
+         (define raw-value (cadr rest))
+         (define value-datum (unquote-libspec-datum (->datum raw-value)))
+         (define value
+           (case option
+             [(:refer)
+              (if (and (pair? value-datum)
+                       (eq? (car value-datum) BRACKET-TAG))
+                  (cdr value-datum)
+                  value-datum)]
+             [(:rename) (rename-map-datum value-datum context)]
+             [else value-datum]))
+         (loop (cddr rest) (append items (list option value)))])))
+
+  ;; The one canonical parser boundary.  Namespace clauses and top-level
+  ;; require forms both call it; no bare or compatibility libspec survives.
+  (define (register-require-libspec! spec context #:kind [kind 'require])
+    (define d0 (->datum spec))
+    (define unquoted (unquote-libspec-datum d0))
+    (define items (canonical-libspec-items unquoted context))
+    (define normalized
+      (with-handlers ([exn:fail?
+                       (lambda (error)
+                         (raise-parse-error 'bad-meta-value "~a: ~a"
+                                            context (exn-message error)))])
+        (normalize-canonical-libspec items #:kind kind)))
+    ((current-require-registration) normalized))
 
   ;; One import spec: java.time.LocalDate, (java.time LocalDate Duration),
   ;; [java.time LocalDate] — possibly quoted.
@@ -2149,26 +2207,29 @@
       (match d
         [(list* 'ns (? symbol?) ns-rest)
          (for ([clause (in-list ns-rest)]
-               #:when
-               (and (pair? clause) (eq? (car clause) ':require)))
+               #:when (and (pair? clause)
+                            (memq (car clause)
+                                  '(:require :require-global))))
+           (define kind
+             (if (eq? (car clause) ':require-global)
+                 'require-global
+                 'require))
            (for ([spec (in-list (cdr clause))])
-             (register-require-libspec! spec "ns :require")))]
+             (register-require-libspec!
+              spec
+              (if (eq? kind 'require-global)
+                  "ns :require-global"
+                  "ns :require")
+              #:kind kind)))]
         [(list* 'require specs)
-         #:when (and (pair? specs) (symbol? (car specs)))
-         (register-require-libspec!
-          (cons BRACKET-TAG specs)
-          "require")]
-        [(list* 'require specs)
-         #:when
-         (and
-          (pair? specs)
-          (for/and ([spec (in-list specs)])
-            (let ([datum (->datum spec)])
-              (and
-               (pair? datum)
-               (memq (car datum) (list 'quote BRACKET-TAG))))))
+         #:when (pair? specs)
          (for ([spec (in-list specs)])
            (register-require-libspec! spec "require"))]
+        [(list* 'require-global specs)
+         #:when (pair? specs)
+         (for ([spec (in-list specs)])
+           (register-require-libspec! spec "require-global"
+                                      #:kind 'require-global))]
         [_ (void)])))
 
   ;; Pre-scan: register parametric defunion names so parse-type can handle them
@@ -2227,6 +2288,10 @@
            [(and (pair? clause) (eq? (car clause) ':require))
             (for ([spec (in-list (cdr clause))])
               (register-require-libspec! spec "ns :require"))]
+           [(and (pair? clause) (eq? (car clause) ':require-global))
+            (for ([spec (in-list (cdr clause))])
+              (register-require-libspec! spec "ns :require-global"
+                                         #:kind 'require-global))]
            [(and (pair? clause) (eq? (car clause) ':import))
             (for ([spec (in-list (cdr clause))])
               (register-import-spec! spec "ns :import"))]
@@ -2243,7 +2308,7 @@
                                "(ns ~a (:refer-clojure ...)) — :refer-clojure is not supported; clojure.core is always available unqualified." n)]
            [else
             (raise-parse-error 'bad-meta-value
-                               "(ns ~a ...): unsupported ns clause ~v — supported: docstring, (:require libspec ...), (:import spec ...)" n clause)]))]
+                               "(ns ~a ...): unsupported ns clause ~v — supported: docstring, (:require libspec ...), (:require-global libspec ...), (:import spec ...)" n clause)]))]
 
       [(list 'defmacro (? symbol? name) macro-params template)
        (validate-identifier! name "macro")
@@ -2308,21 +2373,17 @@
        (set! declared-module-contract contract)
        (set! declared-module-contract-source (stx->src-loc s))]
 
-      ;; (require lib), (require lib :as a), (require lib :refer [syms]),
-      ;; (require lib :as a :refer [syms]) — bare form, options trailing.
-      ;; (require '[lib :as a] '[lib2 :refer [x]] 'lib3) — quoted libspecs,
-      ;; one or more. Both families route through register-require-libspec!.
+      ;; Canonical vector libspecs only.  Namespace clauses and top-level
+      ;; require/require-global share the same normalized registration path.
       [(list* 'require specs)
-       #:when (and (pair? specs) (symbol? (car specs)))
-       (register-require-libspec! (cons BRACKET-TAG specs) "require")]
-      [(list* 'require specs)
-       #:when (and (pair? specs)
-                   (for/and ([s (in-list specs)])
-                     (let ([sd (->datum s)])
-                       (and (pair? sd)
-                            (memq (car sd) (list 'quote BRACKET-TAG))))))
+       #:when (pair? specs)
        (for ([spec (in-list specs)])
          (register-require-libspec! spec "require"))]
+      [(list* 'require-global specs)
+       #:when (pair? specs)
+       (for ([spec (in-list specs)])
+         (register-require-libspec! spec "require-global"
+                                    #:kind 'require-global))]
 
       ;; (import java.time.LocalDate), (import (java.time LocalDate Duration)),
       ;; quoted variants accepted.
@@ -2339,7 +2400,10 @@
                           "malformed ns form — expected (ns name.space \"doc\"? (:require ...) (:import ...)), got: ~v" d)]
       [(cons 'require _)
        (raise-parse-error 'bad-meta-value
-                          "malformed require — expected (require lib :as alias / :refer [syms]) or (require '[lib :as alias] ...), got: ~v" d)]
+                          "malformed require — expected canonical vector libspecs such as (require '[lib :as alias]), got: ~v" d)]
+      [(cons 'require-global _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed require-global — expected canonical vector libspecs such as (require-global '[Idiomorph :as idio]), got: ~v" d)]
       [(cons 'import _)
        (raise-parse-error 'bad-meta-value
                           "malformed import — expected (import java.pkg.Class) or (import (java.pkg Class1 Class2)), got: ~v" d)]

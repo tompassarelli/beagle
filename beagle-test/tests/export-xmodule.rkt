@@ -11,6 +11,7 @@
          beagle/private/parse
          beagle/private/check
          beagle/private/emit
+         beagle/private/ast-json
          beagle/private/query)
 
 (define-runtime-path fixtures-dir "fixtures/export-xmodule")
@@ -112,6 +113,41 @@
              (lambda ()
                (normalize-refer-global
                 (list ':only '(Date) ':rename (hasheq 'Date 'Date))))))
+
+(test-case "top-level canonical libspecs retain module identities and renames"
+  (define prog (fixture-program "top-level-libspec.bjs"))
+  (type-check! prog)
+  (define requires (program-requires prog))
+  (check-equal? (length requires) 2)
+  (define native
+    (for/first ([entry (in-list requires)]
+                #:when (eq? (module-identity-kind (require-entry-identity entry))
+                            'native-esm))
+      entry))
+  (define global
+    (for/first ([entry (in-list requires)]
+                #:when (eq? (module-identity-kind (require-entry-identity entry))
+                            'global))
+      entry))
+  (check-equal?
+   (module-identity-value (require-entry-identity native))
+   "@scope/package/subpath")
+  (check-equal? (require-entry-rename native) (hasheq 'make 'build))
+  (check-equal?
+   (module-identity-value (require-entry-identity global))
+   'Idiomorph)
+  (define serialized-requires (hash-ref (program->json prog) 'requires))
+  (define serialized-native
+    (for/first ([entry (in-list serialized-requires)]
+                #:when (equal? (hash-ref (hash-ref entry 'identity) 'kind)
+                               "native-esm"))
+      entry))
+  (check-equal? (hash-ref (hash-ref serialized-native 'identity) 'value)
+                "@scope/package/subpath")
+  (check-equal? (hash-ref serialized-native 'rename) (hasheq "make" "build"))
+  (define interface
+    (program->module-interface prog #:source-id "top-level-libspec.bjs"))
+  (check-equal? (module-interface-requires interface) requires))
 
 (test-case "a correct call to a js/export'd function still checks"
   (check-not-exn (lambda () (check-file "ok.bjs"))))

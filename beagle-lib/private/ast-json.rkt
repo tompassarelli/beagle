@@ -13,6 +13,7 @@
          json
          openssl/sha1
          "ast.rkt"
+         "module-interface.rkt"
          "types.rkt"
          "macros.rkt"
          (only-in "parse.rkt" program-source-bytes)
@@ -30,6 +31,23 @@
 (define current-json-semantic-contracts (make-parameter #f))
 
 (define CHECKED-PROGRAM-SCHEMA-VERSION 4)
+
+(define (require-entry->json r)
+  (define identity (require-entry-identity r))
+  (hasheq
+   'ns (symbol->string (require-entry-ns r))
+   'identity
+   (hasheq 'kind (symbol->string (module-identity-kind identity))
+           'value (let ([value (module-identity-value identity)])
+                    (if (symbol? value) (symbol->string value) value)))
+   'alias (and (require-entry-alias r)
+               (symbol->string (require-entry-alias r)))
+   'refer (and (require-entry-refer r)
+               (map symbol->string (require-entry-refer r)))
+   'rename
+   (for/hasheq ([source (in-list (hash-keys (require-entry-rename r)))])
+     (values (symbol->string source)
+             (symbol->string (hash-ref (require-entry-rename r) source))))))
 
 (define (float->json-value value)
   (cond
@@ -1215,13 +1233,7 @@
             'namespace (symbol->string (program-namespace prog))
             'gen-class (program-gen-class? prog)
             'imports (map symbol->string (program-imports prog))
-            'requires (map (lambda (r)
-                             (hasheq 'ns (symbol->string (require-entry-ns r))
-                                     'alias (and (require-entry-alias r)
-                                                 (symbol->string (require-entry-alias r)))
-                                     'refer (and (require-entry-refer r)
-                                                 (map symbol->string (require-entry-refer r)))))
-                           (program-requires prog))
+            'requires (map require-entry->json (program-requires prog))
             'externs
             (for/list ([name (in-list
                               (sort (hash-keys (program-externs prog))
@@ -1283,14 +1295,7 @@
        'importedRecordFieldOrder (imported-record-field-order->json prog)
        'importedRecordNamespaces (imported-record-namespaces->json prog)
        'requires
-       (map (lambda (r)
-              (hasheq 'ns (symbol->string (require-entry-ns r))
-                      'alias (and (require-entry-alias r)
-                                  (symbol->string (require-entry-alias r)))
-                      'refer (and (require-entry-refer r)
-                                  (map symbol->string
-                                       (require-entry-refer r)))))
-            (program-requires prog))
+       (map require-entry->json (program-requires prog))
        'externs
        (for/list ([name (in-list
                          (sort (hash-keys (program-externs prog)) symbol<?))])
