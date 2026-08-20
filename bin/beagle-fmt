@@ -97,5 +97,50 @@ if [[ ${#files[@]} -eq 0 ]]; then
 fi
 
 mapfile -d '' -t sorted_files < <(printf '%s\0' "${files[@]}" | sort -z -u)
+
+# Formatting is routinely asked the same question more than once in an edit
+# cycle (hook, editor, then review). A content-addressed check result is exact:
+# the key includes every input byte plus the compiled Racket closure stamp.
+# Write mode always executes because its purpose is mutation, not diagnosis.
+if [[ "$mode" == "--check" ]]; then
+    cache_dir="$BEAGLE_DIR/.beagle/cache/fmt"
+    mkdir -p "$cache_dir"
+    closure_stamp="$(stat -c '%y:%s' "$BEAGLE_DIR/.beagle/zo-fresh" 2>/dev/null || true)"
+    cache_key="$({
+        printf '%s\0%s\0' "$closure_stamp" "$mode"
+        sha256sum "$BEAGLE_DIR/bin/beagle-fmt"
+        for file in "${sorted_files[@]}"; do
+            printf '%s\0' "$file"
+            sha256sum "$file"
+        done
+    } | sha256sum | cut -d' ' -f1)"
+    cache_out="$cache_dir/$cache_key.out"
+    cache_err="$cache_dir/$cache_key.err"
+    cache_status="$cache_dir/$cache_key.status"
+    if [[ -f "$cache_out" && -f "$cache_err" && -f "$cache_status" ]]; then
+        cat "$cache_out"
+        cat "$cache_err" >&2
+        exit "$(cat "$cache_status")"
+    fi
+
+    out_tmp="$(mktemp "$cache_dir/.out.XXXXXX")"
+    err_tmp="$(mktemp "$cache_dir/.err.XXXXXX")"
+    set +e
+    "$RACKET" "$BEAGLE_DIR/beagle-lib/private/signature-format.rkt" \
+        "$mode" "${sorted_files[@]}" >"$out_tmp" 2>"$err_tmp"
+    status=$?
+    set -e
+    if [[ $status == 0 || $status == 3 ]]; then
+        status_tmp="$(mktemp "$cache_dir/.status.XXXXXX")"
+        printf '%s\n' "$status" >"$status_tmp"
+        mv -f "$out_tmp" "$cache_out"
+        mv -f "$err_tmp" "$cache_err"
+        mv -f "$status_tmp" "$cache_status"
+    fi
+    cat "$out_tmp" 2>/dev/null || cat "$cache_out"
+    cat "$err_tmp" 2>/dev/null >&2 || cat "$cache_err" >&2
+    exit "$status"
+fi
+
 exec "$RACKET" "$BEAGLE_DIR/beagle-lib/private/signature-format.rkt" \
     "$mode" "${sorted_files[@]}"

@@ -15,27 +15,11 @@
 
 (struct file-format (path formatted edits) #:transparent)
 
-(define (source-extension path)
-  (define extension (path-get-extension path))
-  (if extension (bytes->string/utf-8 extension) ".bgl"))
-
 (define (signature-layout-edits-for-source path source)
-  (define parent (or (path-only path) (current-directory)))
-  (define tmp
-    (make-temporary-file
-     (string-append ".beagle-fmt-pass-~a" (source-extension path)) #f parent))
-  (with-handlers ([exn:fail?
-                   (lambda (exn)
-                     (when (file-exists? tmp) (delete-file tmp))
-                     (raise exn))])
-    (call-with-output-file tmp
-      (lambda (out) (display source out))
-      #:exists 'truncate/replace)
-    (define edits
-      (for/list ([edit (in-list (signature-layout-edits tmp))])
-        (struct-copy layout-edit edit [path (path->string path)])))
-    (delete-file tmp)
-    edits))
+  (for/list ([edit (in-list
+                    (signature-layout-edits/bytes
+                     path (string->bytes/utf-8 source)))])
+    (struct-copy layout-edit edit [path (path->string path)])))
 
 (define (converged-signature-layout path source)
   (let loop ([candidate source]

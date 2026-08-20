@@ -308,7 +308,7 @@ case "$cmd" in
         exec "$BIN/beagle-repl" "$@"
         ;;
     init)            exec "$BIN/beagle-init" "$@" ;;
-    syntax)          exec "$BIN/beagle-syntax" "$@" ;;
+    syntax)          exec "$BIN/beagle-syntax-dispatch" "$@" ;;
     validate)        exec "$BIN/beagle-validate" "$@" ;;
     repair)          exec "$BIN/beagle-repair" "$@" ;;
     doctor)          exec "$BIN/beagle-doctor" "$@" ;;

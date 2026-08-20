@@ -1025,18 +1025,27 @@
       (for ([child (in-list subs)] #:when (pair? (->datum child)))
         (inspect-layout-form! source tokens child)))))
 
+(define (signature-layout-edits/bytes source-path source-bytes)
+  (define path
+    (simplify-path
+     (path->complete-path
+      (if (path? source-path) source-path (string->path source-path)))))
+  (unless (bytes? source-bytes)
+    (raise-argument-error 'signature-layout-edits/bytes "bytes?" source-bytes))
+  (define source (bytes->string/utf-8 source-bytes))
+  (define tokens (tokenize source))
+  (define stxs (read-beagle-syntax/bytes path source-bytes))
+  (parameterize ([current-layout-edits '()])
+    (for ([stx (in-list stxs)] #:when (syntax-position stx))
+      (inspect-layout-form! source tokens stx))
+    (sort (current-layout-edits) < #:key layout-edit-offset)))
+
 (define (signature-layout-edits source-path)
   (define path
     (simplify-path
      (path->complete-path
       (if (path? source-path) source-path (string->path source-path)))))
-  (define source (file->string path))
-  (define tokens (tokenize source))
-  (define stxs (read-beagle-syntax path))
-  (parameterize ([current-layout-edits '()])
-    (for ([stx (in-list stxs)] #:when (syntax-position stx))
-      (inspect-layout-form! source tokens stx))
-    (sort (current-layout-edits) < #:key layout-edit-offset)))
+  (signature-layout-edits/bytes path (file->bytes path)))
 
 (define (apply-signature-layout-edits source edits)
   (define unsafe (filter (lambda (edit) (not (layout-edit-safe? edit))) edits))
@@ -5928,6 +5937,7 @@
  strip-target-export
  (struct-out layout-edit)
  signature-layout-edits
+ signature-layout-edits/bytes
  apply-signature-layout-edits
  parse-params
  parse-record-fields

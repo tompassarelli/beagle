@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "$BEAGLE_DIR/bin/_beagle-racket"
+
+# Advanced modes produce contextual repair data or mutate the source. The
+# ordinary one-file structural check is pure and safe to replay by content.
+if [[ $# != 1 || ! -f "$1" ]]; then
+    exec "$BEAGLE_DIR/bin/beagle-syntax" "$@"
+fi
+
+file="$(realpath "$1")"
+cache_dir="$BEAGLE_DIR/.beagle/cache/syntax"
+mkdir -p "$cache_dir"
+closure_stamp="$(stat -c '%y:%s' "$BEAGLE_DIR/.beagle/zo-fresh" 2>/dev/null || true)"
+cache_key="$({
+    printf '%s\0%s\0' "$closure_stamp" "$file"
+    sha256sum "$BEAGLE_DIR/bin/beagle-syntax" "$file"
+} | sha256sum | cut -d' ' -f1)"
+cache_out="$cache_dir/$cache_key.out"
+cache_err="$cache_dir/$cache_key.err"
+cache_status="$cache_dir/$cache_key.status"
+
+if [[ -f "$cache_out" && -f "$cache_err" && -f "$cache_status" ]]; then
+    cat "$cache_out"
+    cat "$cache_err" >&2
+    exit "$(cat "$cache_status")"
+fi
+
+out_tmp="$(mktemp "$cache_dir/.out.XXXXXX")"
+err_tmp="$(mktemp "$cache_dir/.err.XXXXXX")"
+set +e
+"$BEAGLE_DIR/bin/beagle-syntax" "$file" >"$out_tmp" 2>"$err_tmp"
+status=$?
+set -e
+if [[ $status == 0 || $status == 1 ]]; then
+    status_tmp="$(mktemp "$cache_dir/.status.XXXXXX")"
+    printf '%s\n' "$status" >"$status_tmp"
+    mv -f "$out_tmp" "$cache_out"
+    mv -f "$err_tmp" "$cache_err"
+    mv -f "$status_tmp" "$cache_status"
+fi
+cat "$out_tmp" 2>/dev/null || cat "$cache_out"
+cat "$err_tmp" 2>/dev/null >&2 || cat "$cache_err" >&2
+exit "$status"
