@@ -125,7 +125,7 @@
   (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
 
 (defn- ordered-keys [table Any] Any
-  (vec (sort (vec (keys table)))))
+  (vec (sort-by reference->string (vec (keys table)))))
 
 ;; --- type constructors (inlined from types.bjs) ------------------------------
 
@@ -4761,13 +4761,13 @@
                              (assoc m1 alias true)
                              m1)))
                        {"str" true} (get prog "requires"))
-            refs (reduce (fn
+            refs Any (reduce (fn
                            [a Any
                             f Any] Any
                            (collect-references f a))
                    [] (get prog "forms"))
-            seen (atom {})
-            bad (atom [])]
+            seen Any (atom {})
+            bad Any (atom [])]
         (doseq [ref refs]
           (when (qualified-reference? ref)
             (let [prefix (get ref "qualifier")
@@ -4974,7 +4974,7 @@
                                  (assoc out origin true))
                                ids (ordered-keys (get state "owners"))))
                      {} states)
-        owners (reduce
+        owners Any (reduce
                  (fn
                    [out Any
                     origin Any] Any
@@ -4985,13 +4985,13 @@
                        "live"
                        "dead")))
                  {} (ordered-keys origin-ids))
-        max-id (reduce (fn
+        max-id Int (reduce (fn
                          [current Int
                           state Any] Int
                          (let [candidate (get state "next-id")]
                            (if (> candidate current) candidate current)))
                        (get base "next-id") states)
-        all-markers (reduce (fn
+        all-markers Any (reduce (fn
                               [markers Any
                                state Any] Any
                               (reduce marker-add markers (get state "markers")))
@@ -5223,9 +5223,9 @@
                               arg Any] Any
                              (purity-analyze-and-escape arg next call))
                            state args)
-              fresh (purity-fresh-id after-args)
-              origin (get fresh "id")
-              origins {origin true}]
+              fresh Any (purity-fresh-id after-args)
+              origin Any (get fresh "id")
+              origins Any {origin true}]
           (purity-result
             (purity-set-origin-status (get fresh "state") origins "live")
             origins))
@@ -6064,8 +6064,8 @@
                                   name String] Any
                                  (assoc out name (fresh-inference-var!)))
             {} (get scheme "vars"))
-          raw-bounds (get scheme "bounds")
-          bounds (if (map? raw-bounds)
+          raw-bounds Any (get scheme "bounds")
+          bounds Any (if (map? raw-bounds)
             (mapv
               (fn [name String] Any
                 [(get replacements name)

@@ -1265,7 +1265,7 @@
     ;; Macro definitions need their exact template before the registry exists.
     ;; Index only those top-level forms here; ordinary call indexing waits until
     ;; registration is complete and then visits registered macro heads only.
-    (doseq [i Int (range (count datums))]
+    (doseq [i (range (count datums))]
       (let [datum (nth datums i)
             value (nth syntaxes i)]
         (when (and (vector? datum)
@@ -6805,12 +6805,12 @@
     (let [prog (parse-program!
             [["defmacro" "around" [BRACKET-TAG "body"]
               ["quasiquote"
-               ["let" [BRACKET-TAG "tmp" 1]
+               ["let" [BRACKET-TAG "tmp" "Int" 1]
                 ["do" "tmp" ["unquote" "body"]]]]]
-             ["defn" "capture" [BRACKET-TAG ["tmp" "Int"]] "Int"
+             ["defn" "capture" [BRACKET-TAG "tmp" "Int"] "Int"
               ["around"
                ["do" "tmp"
-                ["let" [BRACKET-TAG "tmp" 2] "tmp"]]]]])
+                ["let" [BRACKET-TAG "tmp" "Int" 2] "tmp"]]]]])
           form (nth (get prog "forms") 0)
           param (nth (get form "params") 0)
           outer (nth (get form "body") 0)
