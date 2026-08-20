@@ -135,12 +135,13 @@ run_phase() {
 # The claim is discharged by evidence, not by reading: the build was traced at
 # clone/clone3/vfork return values (not just execve, which misses a fork that
 # never execs) and the tree reconstructed. module-source-closure, source-facts,
-# ast-verify-N, native-receipts, staged-manifest, and locked-staged-verifier
-# spawned ZERO descendants, and module-source-root-cli.rkt, source-facts.clj,
-# verify-checked-ast.rkt, and build-finalize.clj hold no spawn call site (the
-# two apparent hits in build-finalize.clj are string literals naming
-# wasm.materializer.sh, not calls). ast-verify-N is one phase PER SOURCE FILE,
-# so it is the one that scales.
+# native-receipts, staged-manifest, and locked-staged-verifier spawned ZERO
+# descendants, and module-source-root-cli.rkt, source-facts.clj, and
+# build-finalize.clj hold no spawn call site (the two apparent hits in
+# build-finalize.clj are string literals naming wasm.materializer.sh, not
+# calls). Checked-AST verification is deliberately excluded: its per-source
+# cohort needs directly owned supervisors so a failed parallel worker can stop
+# and reap its siblings before staging is removed.
 #
 # ast-bundle, core-compiler, core-lowering, core-checkpoint-wire, and
 # wasm-materializer genuinely fork and MUST keep real tree containment.
@@ -159,6 +160,171 @@ run_phase_leaf() {
         echo "beagle build: phase $name ERROR ($rc)" >&2
     fi
     return "$rc"
+}
+
+# Direct supervisor PIDs, never shell-function subshells. The EXIT/signal path
+# must be able to stop the exact owners that guarantee their verifier subtree is
+# gone before cleanup removes the metadata paths those children write.
+ast_verify_live_pids=()
+stop_ast_verify_workers() {
+    local pid
+    for pid in "${ast_verify_live_pids[@]:-}"; do
+        [[ -n "$pid" ]] || continue
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    for pid in "${ast_verify_live_pids[@]:-}"; do
+        [[ -n "$pid" ]] || continue
+        wait "$pid" 2>/dev/null || true
+    done
+    ast_verify_live_pids=()
+}
+
+run_ast_verifier_pool() {
+    local source_count="${#normalized_sources[@]}"
+    local worker_count="$emit_workers"
+    local deadline="${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}"
+    local next_index=0 failure_seen=0 failure_cutoff=-1
+    local finished_pid="" finished_index="" status=0 expected_receipt=""
+    local receipt_value="" source="" ast="" metadata="" log="" receipt=""
+    local source_digest_after="" pid="" live_index="" selected_index=-1
+    local selected_status=0 index=0
+    local -a live=() next_live=()
+    local -A index_by_pid=() status_by_index=() canceled_by_index=()
+    local -A log_by_index=() receipt_by_index=() started_by_index=()
+
+    ((worker_count <= source_count)) || worker_count="$source_count"
+
+    while ((next_index < source_count || ${#live[@]} > 0)); do
+        while ((failure_seen == 0 && next_index < source_count &&
+                ${#live[@]} < worker_count)); do
+            source="${normalized_sources[$next_index]}"
+            ast="$work/source_${next_index}.ast.json"
+            metadata="$work/source_${next_index}.metadata"
+            log="$work/source_${next_index}.verify.log"
+            receipt="$work/source_${next_index}.verify.receipt"
+            source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
+            [[ "${source_digest_befores[$next_index]}" == "$source_digest_after" ]] ||
+                die "source changed while its checked projection was captured: $source"
+            printf 'beagle build: phase ast-verify-%s START (workers=%s, deadline=%ss kill-grace=%ss)\n' \
+                "$next_index" "$worker_count" "$deadline" "$core_kill_grace" >"$log"
+            BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
+                "$NATIVE_SUPERVISOR" "$deadline" "$core_kill_grace" -- \
+                "$RACKET" "$AST_VERIFIER" "$ast" "$source" \
+                >"$metadata" 2>>"$log" &
+            pid=$!
+            live+=("$pid")
+            ast_verify_live_pids+=("$pid")
+            index_by_pid["$pid"]="$next_index"
+            log_by_index["$next_index"]="$log"
+            receipt_by_index["$next_index"]="$receipt"
+            started_by_index["$next_index"]=1
+            next_index=$((next_index + 1))
+        done
+
+        ((${#live[@]} > 0)) || break
+        finished_pid=""
+        if wait -n -p finished_pid "${live[@]}"; then
+            status=0
+        else
+            status=$?
+        fi
+        if [[ -z "$finished_pid" ||
+              -z "${index_by_pid[$finished_pid]+known}" ]]; then
+            echo "beagle build: checked-AST supervisor wait contract failed" >&2
+            stop_ast_verify_workers
+            return 2
+        fi
+        finished_index="${index_by_pid[$finished_pid]}"
+        unset 'index_by_pid[$finished_pid]'
+        next_live=()
+        for pid in "${live[@]}"; do
+            [[ "$pid" == "$finished_pid" ]] || next_live+=("$pid")
+        done
+        live=("${next_live[@]}")
+        ast_verify_live_pids=("${live[@]}")
+
+        receipt_value=""
+        [[ -f "${receipt_by_index[$finished_index]}" ]] &&
+            receipt_value="$(<"${receipt_by_index[$finished_index]}")"
+        if [[ "$status" -eq 124 ]]; then
+            expected_receipt='subtree-reaped-v0 timeout status=124'
+        else
+            expected_receipt="subtree-reaped-v0 exit status=$status"
+        fi
+        if [[ "$receipt_value" != "$expected_receipt" ]]; then
+            printf 'beagle build: ast-verify-%s supervisor receipt mismatch: status=%s receipt=%s\n' \
+                "$finished_index" "$status" "${receipt_value:-missing}" \
+                >>"${log_by_index[$finished_index]}"
+            status=2
+            unset 'canceled_by_index[$finished_index]'
+        fi
+        status_by_index["$finished_index"]="$status"
+        if [[ -n "${canceled_by_index[$finished_index]+canceled}" ]]; then
+            printf 'beagle build: phase ast-verify-%s CANCELLED (%s)\n' \
+                "$finished_index" "$status" >>"${log_by_index[$finished_index]}"
+        elif [[ "$status" -eq 0 ]]; then
+            printf 'beagle build: phase ast-verify-%s END\n' \
+                "$finished_index" >>"${log_by_index[$finished_index]}"
+        elif [[ "$status" -eq 124 ]]; then
+            printf 'beagle build: phase ast-verify-%s TIMEOUT (%s)\n' \
+                "$finished_index" "$status" >>"${log_by_index[$finished_index]}"
+        else
+            printf 'beagle build: phase ast-verify-%s ERROR (%s)\n' \
+                "$finished_index" "$status" >>"${log_by_index[$finished_index]}"
+        fi
+
+        if [[ -z "${canceled_by_index[$finished_index]+canceled}" &&
+              "$status" -ne 0 ]]; then
+            failure_seen=1
+            if [[ "$status" -ne 124 &&
+                  ("$failure_cutoff" -lt 0 ||
+                   "$finished_index" -lt "$failure_cutoff") ]]; then
+                failure_cutoff="$finished_index"
+                for pid in "${live[@]}"; do
+                    live_index="${index_by_pid[$pid]}"
+                    if ((live_index > failure_cutoff)) &&
+                       [[ -z "${canceled_by_index[$live_index]+canceled}" ]]; then
+                        canceled_by_index["$live_index"]=1
+                        kill -TERM "$pid" 2>/dev/null || true
+                    fi
+                done
+            fi
+        fi
+    done
+
+    ast_verify_live_pids=()
+    for ((index = 0; index < next_index; index++)); do
+        [[ -n "${started_by_index[$index]+started}" ]] || continue
+        cat "${log_by_index[$index]}" >&2
+    done
+
+    # A completed verifier defect outranks a deadline breach, and source order
+    # breaks ties. Workers canceled only because a lower-index defect decided
+    # the cohort are not independent failures.
+    for ((index = 0; index < next_index; index++)); do
+        [[ -z "${canceled_by_index[$index]+canceled}" ]] || continue
+        status="${status_by_index[$index]:-2}"
+        if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+            selected_index="$index"
+            selected_status="$status"
+            break
+        fi
+    done
+    if ((selected_index < 0)); then
+        for ((index = 0; index < next_index; index++)); do
+            [[ -z "${canceled_by_index[$index]+canceled}" ]] || continue
+            status="${status_by_index[$index]:-2}"
+            if [[ "$status" -eq 124 ]]; then
+                selected_index="$index"
+                selected_status=124
+                break
+            fi
+        done
+    fi
+    if ((selected_index >= 0)); then
+        echo "beagle build: checked AST verification failed for ${normalized_sources[$selected_index]} (ast-verify-$selected_index status=$selected_status)" >&2
+        return "$selected_status"
+    fi
 }
 
 # The Core result cache lock guards two SEPARATE critical sections, not one:
@@ -416,6 +582,7 @@ core_checkpoint_staging=""
 core_checkpoint_alias_staging=""
 cleanup() {
     local rc=$?
+    stop_ast_verify_workers
     if [[ "$commit_started" == "1" && "$build_committed" != "1" ]]; then
         rm -f -- "$out/build.manifest.sha256"
         for artifact in "${managed_artifacts[@]}"; do
@@ -1043,16 +1210,11 @@ for index, (source, source_id) in enumerate(zip(sources, source_ids)):
     interface_destination.write_text(module["interfaceSha256"] + "\n")
 PY
 
+run_ast_verifier_pool
 source_index=0
 for source in "${normalized_sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
-    source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
-    [[ "${source_digest_befores[$source_index]}" == "$source_digest_after" ]] ||
-        die "source changed while its checked projection was captured: $source"
     ast_metadata="$work/source_${source_index}.metadata"
-    run_phase_leaf "ast-verify-$source_index" \
-        "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
-        "$RACKET" "$AST_VERIFIER" "$ast" "$source" >"$ast_metadata"
     mapfile -d '' -t checked_fields <"$ast_metadata"
     [[ ${#checked_fields[@]} -eq 4 ]] ||
         die "checked AST verifier returned malformed metadata for $source"
