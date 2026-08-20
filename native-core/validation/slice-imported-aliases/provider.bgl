@@ -1,8 +1,10 @@
 #lang beagle
 (ns provider)
 
-(defrecord Item [value Int])
+(defrecord Item [value Any])
 (defalias Term (Dyn String Int Item))
+
+(defn item? [value Any] Bool (instance? Item value))
 
 ;; Declaration order cannot override the immutable dependency edge.
 (def exported-label String provider-label)

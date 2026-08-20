@@ -800,6 +800,10 @@
   (core/->TypeDef (type-id "Float") "F64"
     (core/->AtomType (core/->F64Kind true))))
 
+(defn f32-type [] core/TypeDef
+  (core/->TypeDef (type-id "F32") "F32"
+    (core/->AtomType (core/->F64Kind true))))
+
 (defn text-type [] core/TypeDef
   (core/->TypeDef (type-id "String") "Text"
     (core/->AtomType (core/->TextKind true))))
@@ -1505,6 +1509,9 @@
 
     (= "Float" spelling)
     (->TypeResolutionV0 (type-id "Float") [(f64-type)] [] true)
+
+    (= "F32" spelling)
+    (->TypeResolutionV0 (type-id "F32") [(f32-type)] [] true)
 
     (= "String" spelling)
     (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
@@ -23017,7 +23024,9 @@
                     (->LayoutMeasureV0 bytes bytes true
                       (if (> width 0) name "i64")))
                   (instance? native.core.F64Kind kind)
-                  (->LayoutMeasureV0 8 8 true "f64")
+                  (if (= "F32" (core/typedef-name definition))
+                    (->LayoutMeasureV0 4 4 true "F32")
+                    (->LayoutMeasureV0 8 8 true "f64"))
                   (instance? native.core.TextKind kind)
                   (->LayoutMeasureV0 8 8 true "text handle")
                   (instance? native.core.BytesKind kind)
@@ -23207,7 +23216,10 @@
               (if (fixed-integer-unsigned? name)
                 (core/->UnsignedIntReprV0 bits)
                 (core/->SignedIntReprV0 bits))))
-          (instance? native.core.F64Kind kind) (core/->ScalarShapeV0 (core/->FloatReprV0 64))
+          (instance? native.core.F64Kind kind)
+          (core/->ScalarShapeV0
+            (core/->FloatReprV0
+              (if (= "F32" (core/typedef-name definition)) 32 64)))
           ;; Text and Keyword are handles: the bytes live outside the value, so
           ;; the value itself is an exact 64-bit scalar.
           (instance? native.core.TextKind kind)

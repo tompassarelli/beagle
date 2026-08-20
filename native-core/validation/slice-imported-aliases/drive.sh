@@ -12,6 +12,7 @@ trap 'rm -rf "${scratch:?}"' EXIT
   --entry consumer/echo-term \
   --entry consumer/echo-term-maybe \
   --entry consumer/imported-label \
+  --entry consumer/recursive-non-float? \
   "$here/provider.bgl" \
   "$here/consumer.bgl"
 
@@ -21,5 +22,6 @@ rg -q '^stage typed-to-native COMPLETE$' "$scratch/artifacts/report.txt"
 rg -q '^lowered .* echo-term ' "$scratch/artifacts/report.txt"
 rg -q '^lowered .* echo-term-maybe ' "$scratch/artifacts/report.txt"
 rg -q '^lowered .* imported-label ' "$scratch/artifacts/report.txt"
+rg -q '^lowered .* recursive-non-float\? ' "$scratch/artifacts/report.txt"
 
 echo "drive.sh: imported types and lexical globals retained provider ownership through Native projection"

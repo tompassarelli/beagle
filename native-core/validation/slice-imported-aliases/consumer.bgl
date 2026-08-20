@@ -5,3 +5,9 @@
 (defn echo-term [value t/Term] t/Term value)
 (defn echo-term-maybe [value t/Term?] t/Term? value)
 (defn imported-label [] String t/exported-label)
+
+;; Imported recursive Any must retain the complete numeric refinement family.
+(defn recursive-non-float? [value Any] Bool
+  (if (t/item? value)
+    (recursive-non-float? (t/item-value value))
+    (not (and (number? value) (not (integer? value))))))
