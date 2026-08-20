@@ -5,6 +5,7 @@
 ;; the shapes the parser accepts.
 
 (require rackunit
+         racket/set
          (only-in beagle/private/ast
                   beagle-syntax-span
                   empty-scope-set
@@ -85,6 +86,39 @@
 (test-case "unquote-splicing rejects a non-list"
   (check-exn #rx"expected a list"
              (lambda () (ev-let '((v . 7)) '(quasiquote (+ (unquote-splicing v)))))))
+
+(test-case "quasiquote rejects a phase-only macro closure at unquote"
+  (check-exn
+   #rx"BEAGLE macro-phase/output: unquote cannot emit a phase-only macro closure"
+   (lambda ()
+     (ev `(let (,BRACKET-TAG f Any (fn (,BRACKET-TAG) Any 1))
+            (quasiquote (do (unquote f))))))))
+
+(test-case "quasiquote rejects phase-only values nested in runtime containers"
+  (define closure (ev `(fn (,BRACKET-TAG) Any 1)))
+  (for ([value (in-list (list (list closure)
+                              (vector closure)
+                              (hasheq 'f closure)
+                              (set closure)))])
+    (check-exn
+     #rx"BEAGLE macro-phase/output: unquote cannot emit a phase-only macro closure"
+     (lambda ()
+       (macro-eval
+        '(quasiquote (do (unquote value)))
+        (hash-set (make-macro-env) 'value value))))))
+
+(test-case "quasiquote rejects a phase-only host procedure at both output boundaries"
+  (define host-procedure (lambda () 1))
+  (define env
+    (hash-set* (make-macro-env)
+               'value host-procedure
+               'values (list host-procedure)))
+  (check-exn
+   #rx"BEAGLE macro-phase/output: unquote cannot emit a phase-only host procedure"
+   (lambda () (macro-eval '(quasiquote (do (unquote value))) env)))
+  (check-exn
+   #rx"BEAGLE macro-phase/output: unquote-splicing cannot emit a phase-only host procedure"
+   (lambda () (macro-eval '(quasiquote (do (unquote-splicing values))) env))))
 
 (test-case "unquote outside a template is an error, not a silent call"
   (check-exn #rx"outside a quasiquote"

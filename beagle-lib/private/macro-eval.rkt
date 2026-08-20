@@ -11,6 +11,7 @@
 
 (require racket/list
          racket/match
+         racket/set
          racket/string
          (only-in "ast.rkt"
                   beagle-syntax?
@@ -107,6 +108,53 @@
 
 ;; Quasiquote builds a datum: everything is literal except `~expr` (evaluated in
 ;; place) and `~@expr` (evaluated, then spliced into the surrounding list).
+(define (phase-only-output-kind value [seen (make-hasheq)])
+  (cond
+    [(macro-closure? value) "macro closure"]
+    [(procedure? value) "host procedure"]
+    ;; Syntax values have their own immutable tree and source provenance.  They
+    ;; are valid macro output and must pass through unchanged.
+    [(beagle-syntax? value) #f]
+    [(pair? value)
+     (cond
+       [(hash-ref seen value #f) #f]
+       [else
+        (hash-set! seen value #t)
+        (or (phase-only-output-kind (car value) seen)
+            (phase-only-output-kind (cdr value) seen))])]
+    [(vector? value)
+     (cond
+       [(hash-ref seen value #f) #f]
+       [else
+        (hash-set! seen value #t)
+        (for/or ([item (in-vector value)])
+          (phase-only-output-kind item seen))])]
+    [(hash? value)
+     (cond
+       [(hash-ref seen value #f) #f]
+       [else
+        (hash-set! seen value #t)
+        (for/or ([(key item) (in-hash value)])
+          (or (phase-only-output-kind key seen)
+              (phase-only-output-kind item seen)))])]
+    [(set? value)
+     (cond
+       [(hash-ref seen value #f) #f]
+       [else
+        (hash-set! seen value #t)
+        (for/or ([item (in-set value)])
+          (phase-only-output-kind item seen))])]
+    [else #f]))
+
+(define (ensure-runtime-output value position)
+  (define kind (phase-only-output-kind value))
+  (when kind
+    (error '|BEAGLE macro-phase/output|
+           "~a cannot emit a phase-only ~a into generated runtime syntax"
+           position
+           kind))
+  value)
+
 (define (eval-quasiquote template env depth)
   (cond
     [(not (pair? template)) template]
@@ -115,7 +163,9 @@
            (eval-quasiquote (cadr template) env (+ depth 1)))]
     [(eq? (car template) 'unquote)
      (if (= depth 1)
-         (macro-eval (cadr template) env)
+         (ensure-runtime-output
+          (macro-eval (cadr template) env)
+          "unquote")
          (list 'unquote
                (eval-quasiquote (cadr template) env (- depth 1))))]
     [(eq? (car template) 'unquote-splicing)
@@ -132,12 +182,18 @@
          [(and (pair? (car items))
                (eq? (caar items) 'unquote-splicing)
                (= depth 1))
-          (define spliced (macro-seq (macro-eval (cadr (car items)) env)
-                                     "unquote-splicing (`~~@`)"))
+          (define spliced
+            (macro-seq
+             (ensure-runtime-output
+              (macro-eval (cadr (car items)) env)
+              "unquote-splicing")
+             "unquote-splicing (`~~@`)"))
           (append spliced (loop (cdr items)))]
          ;; `(a . ~b)` — the reader leaves an unquote in tail position.
          [(and (eq? (car items) 'unquote) (= depth 1))
-          (macro-eval (cadr items) env)]
+          (ensure-runtime-output
+           (macro-eval (cadr items) env)
+           "unquote")]
          [else
           (cons (eval-quasiquote (car items) env depth)
                 (loop (cdr items)))]))]))
