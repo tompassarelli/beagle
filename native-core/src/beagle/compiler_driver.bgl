@@ -1,0 +1,30 @@
+#lang beagle
+(ns beagle.compiler-driver
+  (:require [beagle.datum-reader :as reader]))
+
+(def max-source-bytes Int 67108864)
+
+(defrecord AdmittedSource
+  [(path String)
+   (text String)
+   (events (Vec reader/ReaderEvent))])
+
+(defunion SourceAdmission
+  (SourceAccepted [(source AdmittedSource)])
+  (SourceRejected
+    [(code Int) (path String) (offset Int) (detail String)]))
+
+(defn admit-source-text [(path String) (text String)] SourceAdmission
+  (let [(read reader/DatumRead) (reader/read-events text)
+        (error String?) (reader/datumread-error read)]
+    (if (nil? error)
+      (->SourceAccepted
+        (->AdmittedSource path text (reader/datumread-events read)))
+      (->SourceRejected 65 path (reader/datumread-error-offset read) error))))
+
+(defn read-source-path [(path String)] SourceAdmission
+  (match (host.fs/read-text-bounded path max-source-bytes)
+    [(host.fs/ReadTextBoundedOk text) (admit-source-text path text)]
+    [(host.fs/ReadTextBoundedError errno)
+     (->SourceRejected 66 path -1 (str "read failed with errno " errno))]))
+
