@@ -1,0 +1,22 @@
+[{:case-id "js-materializer"
+  :steps [{:argv ["timeout" "--foreground" "30s"
+                   "bin/beagle" "check" "--agent"
+                   "native-core/src/beagle/frontend_facts.bgl"
+                   "native-core/src/beagle/checker.bgl"
+                   "native-core/src/beagle/datum_reader.bgl"
+                   "native-core/src/beagle/js_materializer.bgl"
+                   "native-core/validation/js-materializer/fixture.bgl"]
+           :stdin ""
+           :max-bytes 1048576
+           :expected-status 0
+           :stdout {:mode :contains :value ""}
+           :stderr {:mode :contains :value ""}
+           :file-text []}
+          {:argv ["echo" "native JavaScript materializer: source/type gate PASS"]
+           :stdin ""
+           :max-bytes 4096
+           :expected-status 0
+           :stdout {:mode :exact
+                    :value "native JavaScript materializer: source/type gate PASS\n"}
+           :stderr {:mode :exact :value ""}
+           :file-text []}]}]
