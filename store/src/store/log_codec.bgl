@@ -252,9 +252,9 @@
     (if (< (- end start) 12)
       (->RecordDecodeResult nil "Store transaction log record header is truncated")
       (let [transaction-fields WireFields_store-log-transaction_payload (read-store-log-transaction-payload! decoder)
-            sequence (wirefields_store-log-transaction_payload-sequence
+            sequence Int (wirefields_store-log-transaction_payload-sequence
              transaction-fields)
-            operation-count (wirefields_store-log-transaction_payload-operation-count
+            operation-count Int (wirefields_store-log-transaction_payload-operation-count
              transaction-fields)]
         (cond
           [(deref (wire/decoder-error decoder))
@@ -279,13 +279,13 @@
                     (->RecordDecodeResult
                      (term-store/transaction-record sequence operations) nil)]))
                (let [operation-fields WireFields_store-log-operation_payload (read-store-log-operation-payload! decoder)
-                     actual (wirefields_store-log-operation_payload-ordinal
+                     actual Int (wirefields_store-log-operation_payload-ordinal
                       operation-fields)
-                     action (wirefields_store-log-operation_payload-action
+                     action Int (wirefields_store-log-operation_payload-action
                       operation-fields)
-                     triple (wirefields_store-log-operation_payload-proposition
+                     triple t/Triple (wirefields_store-log-operation_payload-proposition
                       operation-fields)
-                     error (deref (wire/decoder-error decoder))]
+                     error String? (deref (wire/decoder-error decoder))]
                  (cond
                    [error (->RecordDecodeResult nil error)]
                    [(not= actual ordinal)
