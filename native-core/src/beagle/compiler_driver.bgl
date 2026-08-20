@@ -14,6 +14,24 @@
   (SourceRejected
     [(code Int) (path String) (offset Int) (detail String)]))
 
+(defrecord CompileBundleRequest
+  [(store-log String)
+   (space-id String)
+   (stage String)
+   (result-key String)
+   (compiler-context String)
+   (profile String)
+   (unit-id String)
+   (source-paths (Vec String))
+   (changed-path String)
+   (changed-content-id String)
+   (changed-bytes (Vec Int))])
+
+(defunion CompileBundleResult
+  (Warm [(content-id String)])
+  (Materialized [(content-id String) (artifact-id String)])
+  (Error [(code Int) (detail String)]))
+
 (defn admit-source-text [(path String) (text String)] SourceAdmission
   (let [(read reader/DatumRead) (reader/read-events text)
         (error String?) (reader/datumread-error read)]
@@ -27,4 +45,3 @@
     [(host.fs/ReadTextBoundedOk text) (admit-source-text path text)]
     [(host.fs/ReadTextBoundedError errno)
      (->SourceRejected 66 path -1 (str "read failed with errno " errno))]))
-
