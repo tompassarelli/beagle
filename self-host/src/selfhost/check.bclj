@@ -1172,7 +1172,7 @@
             referred (get require-spec "refer")]
         (if (nil? contracts)
           env
-          (let [qualified (reduce
+          (let [qualified Any (reduce
                   (fn
                     [out Any
                      member Any] Any
@@ -1487,7 +1487,7 @@
             builtin-proofs
             (ordered-keys local-definitions))]
     (loop [proofs assumed]
-      (let [next (reduce
+      (let [next Any (reduce
                 (fn
                   [out Any
                    name Any] Any
@@ -1661,7 +1661,7 @@
             external-proofs
             (ordered-keys local-definitions))]
     (loop [proofs assumed]
-      (let [next (reduce
+      (let [next Any (reduce
                 (fn
                   [out Any
                    name Any] Any
@@ -2108,10 +2108,10 @@
   [env Any
    params (Vec Any)
    rest-param Any] Any
-  (let [all-params (if (nil? rest-param)
+  (let [all-params Any (if (nil? rest-param)
                      (vec params)
                      (conj (vec params) rest-param))
-        effective-types (if (nil? rest-param)
+        effective-types Any (if (nil? rest-param)
                           (mapv param-type-or-any params)
                           (conj (mapv param-type-or-any params)
                             (rest-param-body-type rest-param)))]
@@ -2120,7 +2120,7 @@
     ;; predicate before installing any target so a sibling cannot shadow a
     ;; top-level predicate or become an implicit input.
     (doseq [i (range (count all-params))]
-      (let [p (nth all-params i)]
+      (let [p Any (nth all-params i)]
         (when (= (get p "type") "param")
           (check-binding-constraint!
             p
@@ -2134,9 +2134,9 @@
       (fn
         [out Any
          i Int] Any
-        (let [p (nth all-params i)
-              target (param-binding-target p)
-              effective (nth effective-types i)]
+        (let [p Any (nth all-params i)
+              target Any (param-binding-target p)
+              effective Any (nth effective-types i)]
           (if (string? target)
             (binder-env-assoc out p target effective)
             (bind-destructure-type! out target effective "parameter" p))))
@@ -2408,12 +2408,12 @@
 (defn unstable-binding-keys [value Any] Any
   (cond
     (map? value)
-      (let [nested (reduce (fn
+      (let [nested Any (reduce (fn
                              [found Any
                               child Any] Any
                              (merge found (unstable-binding-keys child)))
                     {} (vals value))
-            target (if (= (get value "node") "set!")
+            target Any (if (= (get value "node") "set!")
                      (get value "target") nil)]
         (if (and (not (nil? target)) (= (get target "node") "ref"))
           (assoc nested (local-reference-key target) true)
@@ -2561,19 +2561,19 @@
             (reduce (fn
                       [arm-env Any
                        i Int] Any
-                      (let [b (nth bindings i)
-                            kw (if (not (nil? field-order))
+                      (let [b Any (nth bindings i)
+                            kw Any (if (not (nil? field-order))
                                  (if (< i (count field-order)) (nth field-order i) nil)
                                  nil)
-                            raw-type (if (and (not (nil? kw)) (not (nil? (get field-map kw))))
+                            raw-type Any (if (and (not (nil? kw)) (not (nil? (get field-map kw))))
                                        (get field-map kw)
                                        ANY)
-                            bname (if (string? b) b (get b "name"))]
+                            bname Any (if (string? b) b (get b "name"))]
                         (binder-env-assoc arm-env pat bname raw-type)))
                     arm-env indices)
             (if (= (count bindings) 1)
-              (let [b0 (nth bindings 0)
-                    bname (if (string? b0) b0 (get b0 "name"))]
+              (let [b0 Any (nth bindings 0)
+                    bname Any (if (string? b0) b0 (get b0 "name"))]
                 (binder-env-assoc arm-env pat bname (make-prim rec-name)))
               arm-env)))
 
@@ -2595,20 +2595,20 @@
                         (get-in (deref STATE) ["union-members" union-name])
                         nil)]
     (when (not (nil? union-members))
-      (let [matched-types (reduce (fn
+      (let [matched-types Any (reduce (fn
                                     [acc Any
                                      c Any] Any
                                     (let [pat (get c "pattern")]
                                       (if (= (get pat "type") "record")
-                                        (let [written (get pat "name")
-                                              canonical (canonical-union-member-name
+                                        (let [written Any (get pat "name")
+                                              canonical Any (canonical-union-member-name
                                                   written target-type)]
                                           (conj acc
                                             (if (nil? canonical)
                                               written canonical)))
                                         acc)))
                                   [] clauses)
-            missing (filterv (fn [m Any] Bool
+            missing Any (filterv (fn [m Any] Bool
                                (nil? (some (fn [x Any] Bool (= x m)) matched-types)))
                              union-members)]
         (when (> (count missing) 0)
@@ -2798,16 +2798,16 @@
         fn-display String (reference->string fn-name)
         fn-leaf Any (reference-leaf fn-name)
         check-slot (Fn [Int] Any) (fn [i Int] Any
-                     (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
-                           expected-atom? (check-atom-ctor! (nth args i) expected env)
-                           actual (if expected-atom?
+                     (let [expected Any (if (< i n-fixed) (nth fixed i) rest-t)
+                           expected-atom? Bool (check-atom-ctor! (nth args i) expected env)
+                           actual Any (if expected-atom?
                                     expected
                                     (infer-expr! (nth args i) env))
-                           enum-violation (enum-member-violation expected (nth args i))]
+                           enum-violation Any (enum-member-violation expected (nth args i))]
                        (when (not expected-atom?)
                          (unify-inference-types! actual expected))
-                       (let [actual (prune-inference-type actual)
-                             expected (prune-inference-type expected)]
+                       (let [actual Any (prune-inference-type actual)
+                             expected Any (prune-inference-type expected)]
                          (when (some? enum-violation)
                            (emit-enum-member-violation! enum-violation))
                          (when (not (and
@@ -2839,7 +2839,7 @@
 (defn infer-cond-clauses!
   [clauses (Vec Any)
    env Any] Any
-  (let [final (reduce
+  (let [final Any (reduce
                 (fn
                   [state Any
                    c Any] Any
@@ -3474,7 +3474,7 @@
           (last-expr-type! (get e "body") env))
 
     (= (get e "node") "letfn")
-      (let [body-env (reduce (fn
+      (let [body-env Any (reduce (fn
                                [be Any
                                 f Any] Any
                                (let [rp (opt-field (get f "rest"))
@@ -3683,7 +3683,7 @@
                 (merge-types-list clause-types)))))
 
     (= (get e "node") "for")
-      (let [body-env (reduce
+      (let [body-env Any (reduce
                        (fn
                          [be Any
                           c Any] Any
@@ -3717,13 +3717,13 @@
                                (extend-with-let-bindings! be (get c "bindings"))
                              :else be)))
                        env (get e "clauses"))
-            body-type (last-expr-type! (get e "body") body-env)]
+            body-type Any (last-expr-type! (get e "body") body-env)]
         (if (any-type? body-type)
           (make-app "Vec" [ANY])
           (make-app "Vec" [body-type])))
 
     (= (get e "node") "doseq")
-      (let [body-env (reduce
+      (let [body-env Any (reduce
                        (fn
                          [be Any
                           c Any] Any
@@ -4311,9 +4311,9 @@
       (fn
         [out Any
          i Int] Any
-        (let [parameter (nth all-params i)
-              target (param-binding-target parameter)
-              effective (nth effective-types i)]
+        (let [parameter Any (nth all-params i)
+              target Any (param-binding-target parameter)
+              effective Any (nth effective-types i)]
           (if (string? target)
             (binder-env-assoc out parameter target effective)
             (bind-destructure-type! out target effective "parameter" parameter))))
@@ -4360,7 +4360,7 @@
 (defn infer-value-definition-types!
   [prog Any
    initial-env Any] Any
-  (let [pending (reduce
+      (let [pending Any (reduce
             (fn
               [out Any
                raw-form Any] Any
@@ -4375,7 +4375,7 @@
            remaining Any pending]
       (if (= (count remaining) 0)
         {"env" env "types" types "ok" true}
-        (let [step (reduce
+        (let [step Any (reduce
                   (fn
                     [state Any
                      form Any] Any
@@ -4750,7 +4750,7 @@
    env Any] Nil
   (let [target (get prog "target")]
     (when (= target "clj")
-      (let [required (reduce
+      (let [required Any (reduce
                        (fn
                          [m Any
                           r Any] Any
@@ -4964,7 +4964,7 @@
 (defn purity-join-states
   [base Any
    states Any] Any
-  (let [origin-ids (reduce
+  (let [origin-ids Any (reduce
                      (fn
                        [ids Any
                         state Any] Any
@@ -5090,7 +5090,7 @@
 (defn purity-analyze-branches
   [branches Any
    state Any] Any
-  (let [summary (reduce
+  (let [summary Any (reduce
                   (fn
                     [acc Any
                      branch Any] Any
@@ -5217,7 +5217,7 @@
                                  (contains? (get state "globals") name))))]
     (cond
       (and (not qualified?) (= name "transient") (not primitive-shadowed))
-        (let [after-args (reduce
+        (let [after-args Any (reduce
                            (fn
                              [next Any
                               arg Any] Any
@@ -5541,7 +5541,7 @@
             ;; Dynamic rebinding evaluates each value, but it does not create a
             ;; lexical binding. Calls in the body therefore retain their normal
             ;; module/local resolution and effect propagation.
-            (let [after-bindings (reduce
+            (let [after-bindings Any (reduce
                                    (fn
                                      [next Any
                                       binding Any] Any
@@ -5807,7 +5807,7 @@
     [] (get prog "forms")))
 
 (defn purity-global-bindings [prog Any] Any
-  (let [externs (reduce (fn
+  (let [externs Any (reduce (fn
                           [names Any
                            entry Any] Any
                           (assoc names (get entry "name") true))
@@ -5846,7 +5846,7 @@
   [defs Any
    globals Any] Any
   (loop [known {}]
-    (let [next (reduce (fn
+    (let [next Any (reduce (fn
                          [acc Any
                           definition Any] Any
                          (if (> (count (definition-effect-markers
@@ -6046,7 +6046,7 @@
                 (substitute-contract-vars member replacements))
           (get t "members")))
     (poly-type? t)
-      (let [nested (reduce (fn
+      (let [nested Any (reduce (fn
                              [out Any
                               name String] Any
                              (dissoc out name))
@@ -6059,7 +6059,7 @@
 
 (defn- freshen-contract-implementation! [scheme Any] Any
   (if (poly-type? scheme)
-    (let [replacements (reduce (fn
+    (let [replacements Any (reduce (fn
                                  [out Any
                                   name String] Any
                                  (assoc out name (fresh-inference-var!)))
@@ -6078,7 +6078,7 @@
 
 (defn- rigid-declared-contract [scheme Any] Any
   (if (poly-type? scheme)
-    (let [replacements (reduce
+    (let [replacements Any (reduce
             (fn
               [out Any
                name String] Any
