@@ -86,7 +86,7 @@ fi
 timeout --foreground 180s env "${native_env[@]}" "$repo/bin/beagle-native-exe" \
   --out "$scratch/s2-dynamic-projection-fixture" \
   --artifacts "$scratch/artifacts" \
-  --entry native.s2-dynamic-projection/main \
+  --entry native.s2-dynamic-projection/main! \
   -- "$here/fixture.bgl"
 
 timeout --foreground 10s "$scratch/s2-dynamic-projection-fixture"
@@ -105,7 +105,8 @@ for function in \
   direct-text short-text cond-projection unguarded-map nullable-map \
   unguarded-vector unguarded-text unguarded-str unguarded-map-tail \
   unguarded-vector-tail unguarded-set-tail unguarded-text-tail \
-  unguarded-regex main; do
+  unguarded-regex carrier-vector carrier-count reduce-dynamic-texts \
+  step-counter! main!; do
   rg -q "^lowered fn_[0-9]+ ${function} " "$report" \
     || die "lowered function is missing: $function"
 done

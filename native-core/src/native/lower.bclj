@@ -163,7 +163,8 @@
    (parent-nodes (Map String core/NativeId))
    (definition-roots (Map String core/NativeId))
    (module-roots (Map String core/NativeId))
-   (record-keys (Vec String))])
+   (record-keys (Vec String))
+   (inferred-types (Vec core/NativeId))])
 
 (defn graph-text-index [(graph stages/TermGraphV0)] (Map String String)
   (let [nodes (Vec stages/TermNodeV0) (stages/termgraphv0-nodes graph)]
@@ -393,10 +394,11 @@
                form-ids (Map String (Vec core/NativeId)) {}
                callee-names (Map String Bool) {}
                child-nodes (Map String (Vec core/NativeId)) {}
-               parent-nodes (Map String core/NativeId) {}]
+               parent-nodes (Map String core/NativeId) {}
+               inferred-types (Vec core/NativeId) []]
           (if (>= position (count facts))
             (->SourceIndexV0 (count facts) first-objects first-texts form-ids
-              callee-names child-nodes parent-nodes {} {} [])
+              callee-names child-nodes parent-nodes {} {} [] inferred-types)
             (let [fact SourceFactV0 (nth facts position)
                   subject core/NativeId (sourcefactv0-subject fact)
                   object core/NativeId (sourcefactv0-object fact)
@@ -431,7 +433,10 @@
                 (assoc child-nodes subject-key (conj children object))
                 (if (nil? (get parent-nodes object-key))
                   (assoc parent-nodes object-key subject)
-                  parent-nodes)))))
+                  parent-nodes)
+                (if (= "inferred-type" predicate)
+                  (conj inferred-types object)
+                  inferred-types)))))
         named SourceIndexV0 (seed-module-table partial modules)
         indexed SourceIndexV0 (add-module-indexes named)
         records (Vec core/NativeId)
@@ -1476,6 +1481,13 @@
   [(index SourceIndexV0) (source-type core/NativeId)] (U String Nil)
   (index-first-text index source-type "name"))
 
+(defn source-any-type?
+  [(index SourceIndexV0) (source-type (U core/NativeId Nil))]
+  Bool
+  (and (some? source-type)
+    (= "type-prim" (fact-text index source-type "form-kind"))
+    (= "Any" (fact-text index source-type "name"))))
+
 (defn primitive-resolution
   [(index SourceIndexV0)
    (source-type core/NativeId)
@@ -1696,6 +1708,13 @@
   (core/->TypeDef (closed-buffer-type-id element-type) "Buffer"
     (core/->BufferTypeV0 element-type)))
 
+(defn atom-cell-type-id [(content-type core/NativeId)] core/NativeId
+  (lower-id "atom-cell-type" [(id-value content-type)]))
+
+(defn atom-cell-type [(content-type core/NativeId)] core/TypeDef
+  (core/->TypeDef (atom-cell-type-id content-type) "AtomCell"
+    (core/->AtomCellTypeV0 content-type)))
+
 (defn homogeneous-type-ids? [(ids (Vec core/NativeId))] Bool
   (if (= 0 (count ids))
     false
@@ -1780,12 +1799,10 @@
         false)
 
       (and (= "Atom" constructor) (= 1 (count ids)))
-      (let [id core/NativeId
-            (lower-id "atom-cell-type" [(id-value (nth ids 0))])]
+      (let [id core/NativeId (atom-cell-type-id (nth ids 0))]
         (->TypeResolutionV0 id
           (append-type-def definitions
-            (core/->TypeDef id "AtomCell"
-              (core/->AtomCellTypeV0 (nth ids 0))))
+            (atom-cell-type (nth ids 0)))
           diagnostics
           true))
 
@@ -2287,6 +2304,252 @@
     (and (parameterresolutionv0-valid left)
       (parameterresolutionv0-valid right))))
 
+(defn source-binding-value
+  [(index SourceIndexV0) (binding-id String)] (U core/NativeId Nil)
+  (if (= "" binding-id)
+    nil
+    (let [bindings (Vec core/NativeId) (index-form-ids index "binding")]
+      (loop [position Int 0]
+        (if (>= position (count bindings))
+          nil
+          (let [binding core/NativeId (nth bindings position)]
+            (if (= binding-id (fact-text index binding "binding-id"))
+              (index-first-object index binding "value")
+              (recur (+ position 1)))))))))
+
+(defn source-global-value
+  [(index SourceIndexV0) (reference core/NativeId)] (U core/NativeId Nil)
+  (let [resolved ResolvedSourceNameV0
+        (resolve-source-name index (source-module-name index reference)
+          (source-reference-spelling index reference))
+        definitions (Vec core/NativeId) (index-form-ids index "def")]
+    (if (not (resolvedsourcenamev0-visible resolved))
+      nil
+      (loop [position Int 0]
+        (if (>= position (count definitions))
+          nil
+          (let [definition core/NativeId (nth definitions position)]
+            (if (and
+                  (= (resolvedsourcenamev0-module-name resolved)
+                    (source-module-name index definition))
+                  (= (resolvedsourcenamev0-local-name resolved)
+                    (fact-text index definition "name")))
+              (index-first-object index definition "value")
+              (recur (+ position 1)))))))))
+
+(defn source-call-function
+  [(index SourceIndexV0) (call core/NativeId)] (U core/NativeId Nil)
+  (let [callee (U core/NativeId Nil) (index-first-object index call "callee")
+        binding-id String
+        (if (nil? callee) "" (fact-text index callee "binding-id"))
+        resolved ResolvedSourceNameV0
+        (resolve-source-name index (source-module-name index call)
+          (source-callee-name index call))
+        functions (Vec core/NativeId) (index-form-ids index "defn")]
+    (loop [position Int 0]
+      (if (>= position (count functions))
+        nil
+        (let [function core/NativeId (nth functions position)
+              function-binding String (fact-text index function "binding-id")]
+          (if (or
+                (and (not (= "" binding-id)) (= binding-id function-binding))
+                (and (resolvedsourcenamev0-visible resolved)
+                  (= (resolvedsourcenamev0-module-name resolved)
+                    (source-module-name index function))
+                  (= (resolvedsourcenamev0-local-name resolved)
+                    (fact-text index function "name"))))
+            function
+            (recur (+ position 1))))))))
+
+(defn carrier-resolution? [(resolution TypeResolutionV0)] Bool
+  (let [target core/NativeId (typeresolutionv0-type-id resolution)
+        definitions (Vec core/TypeDef)
+        (typeresolutionv0-definitions resolution)]
+    (loop [position Int 0]
+      (if (>= position (count definitions))
+        false
+        (let [definition core/TypeDef (nth definitions position)
+              shape core/TypeShape (core/typedef-shape definition)]
+          (if (and (same-id? target (core/typedef-id definition))
+                (or (instance? native.core.VectorType shape)
+                  (instance? native.core.MapTypeV0 shape)
+                  (instance? native.core.SetTypeV0 shape)
+                  (instance? native.core.AtomCellTypeV0 shape)))
+            true
+            (recur (+ position 1))))))))
+
+;; Following a callee crosses into the call graph, where mutual recursion is
+;; ordinary. Bound that depth separately from syntax-tree fuel.
+(defn callee-carrier-depth [] Int 4)
+
+(declare source-expression-carrier-resolution)
+
+(defn source-sequence-result
+  [(index SourceIndexV0) (expression core/NativeId)] (U core/NativeId Nil)
+  (let [kind String (fact-text index expression "form-kind")]
+    (cond
+      (= "do" kind)
+      (let [body (U core/NativeId Nil)
+            (index-first-object index expression "body")
+            items (Vec core/NativeId)
+            (if (nil? body) [] (index-sequence-items index body))]
+        (if (= 0 (count items)) nil (nth items (- (count items) 1))))
+
+      (= "let" kind) (index-first-object index expression "body")
+      :else nil)))
+
+(defn source-expression-carrier-resolution
+  [(index SourceIndexV0) (expression core/NativeId) (fuel Int)]
+  (U TypeResolutionV0 Nil)
+  (if (<= fuel 0)
+    nil
+    (let [kind String (fact-text index expression "form-kind")
+          inferred-source (U core/NativeId Nil)
+          (index-first-object index expression "inferred-type")
+          inferred (U TypeResolutionV0 Nil)
+          (if (nil? inferred-source)
+            nil
+            (let [resolution TypeResolutionV0
+                  (resolve-source-type index inferred-source)]
+              (if (and (typeresolutionv0-valid resolution)
+                    (carrier-resolution? resolution))
+                resolution
+                nil)))]
+      (cond
+        (some? inferred) inferred
+
+        (= "vec" kind)
+        (->TypeResolutionV0 (slice-value-vector-type-id)
+          [(slice-value-vector-type)] [] true)
+
+        (= "map" kind)
+        (->TypeResolutionV0 (slice-value-map-type-id)
+          [(slice-value-map-type)] [] true)
+
+        (= "set" kind)
+        (->TypeResolutionV0 (slice-value-set-type-id)
+          [(slice-value-set-type)] [] true)
+
+        (= "ref" kind)
+        (let [binding-value (U core/NativeId Nil)
+              (source-binding-value index
+                (fact-text index expression "binding-id"))
+              value (U core/NativeId Nil)
+              (if (some? binding-value)
+                binding-value
+                (source-global-value index expression))]
+          (if (nil? value)
+            nil
+            (source-expression-carrier-resolution index value (- fuel 1))))
+
+        (or (= "call" kind) (= "static-call" kind))
+        (if (= "atom" (source-callee-name index expression))
+          (let [arguments-node (U core/NativeId Nil)
+                (index-first-object index expression "args")
+                arguments (Vec core/NativeId)
+                (if (nil? arguments-node)
+                  []
+                  (index-sequence-items index arguments-node))]
+            (if (not (= 1 (count arguments)))
+              nil
+              (let [content-source core/NativeId (nth arguments 0)
+                    content-inferred (U core/NativeId Nil)
+                    (index-first-object index content-source "inferred-type")
+                    content TypeResolutionV0
+                    (if (nil? content-inferred)
+                      (cond
+                        (= "vec" (fact-text index content-source "form-kind"))
+                        (->TypeResolutionV0 (slice-value-vector-type-id)
+                          [(slice-value-vector-type)] [] true)
+                        (= "map" (fact-text index content-source "form-kind"))
+                        (->TypeResolutionV0 (slice-value-map-type-id)
+                          [(slice-value-map-type)] [] true)
+                        (= "set" (fact-text index content-source "form-kind"))
+                        (->TypeResolutionV0 (slice-value-set-type-id)
+                          [(slice-value-set-type)] [] true)
+                        :else
+                        (->TypeResolutionV0 (type-id "LowerFailure") [] [] false))
+                      (resolve-source-type index content-inferred))]
+                (if (not (typeresolutionv0-valid content))
+                  nil
+                  (let [content-type core/NativeId
+                        (typeresolutionv0-type-id content)]
+                    (->TypeResolutionV0 (atom-cell-type-id content-type)
+                      (append-type-def
+                        (typeresolutionv0-definitions content)
+                        (atom-cell-type content-type))
+                      [] true))))))
+          (let [function (U core/NativeId Nil)
+                (source-call-function index expression)
+                body (U core/NativeId Nil)
+                (if (nil? function)
+                  nil
+                  (index-first-object index function "body"))]
+            (if (nil? body)
+              nil
+              (source-expression-carrier-resolution index body
+                (if (> fuel (callee-carrier-depth))
+                  (callee-carrier-depth)
+                  (- fuel 1))))))
+
+        :else
+        (let [result (U core/NativeId Nil)
+              (source-sequence-result index expression)]
+          (if (nil? result)
+            nil
+            (source-expression-carrier-resolution index result
+              (- fuel 1))))))))
+
+(defn call-targets-function?
+  [(index SourceIndexV0)
+   (call core/NativeId)
+   (source-function core/NativeId)]
+  Bool
+  (let [target (U core/NativeId Nil) (source-call-function index call)]
+    (and (some? target) (same-id? target source-function))))
+
+(defn parameter-carrier-resolution
+  [(index SourceIndexV0)
+   (source-function core/NativeId)
+   (position Int)]
+  (U TypeResolutionV0 Nil)
+  ;; Module-level calls are indexed as static calls; both forms are evidence.
+  (let [calls (Vec core/NativeId)
+        (vec (concat (index-form-ids index "call")
+               (index-form-ids index "static-call")))]
+    (loop [scan Int 0
+           chosen (U TypeResolutionV0 Nil) nil
+           conflict Bool false]
+      (if (or (>= scan (count calls)) conflict)
+        (if conflict nil chosen)
+        (let [call core/NativeId (nth calls scan)
+              arguments-node (U core/NativeId Nil)
+              (index-first-object index call "args")
+              arguments (Vec core/NativeId)
+              (if (nil? arguments-node)
+                []
+                (index-sequence-items index arguments-node))]
+          (if (or (not (call-targets-function? index call source-function))
+                (>= position (count arguments)))
+            (recur (+ scan 1) chosen false)
+            (let [candidate (U TypeResolutionV0 Nil)
+                  (source-expression-carrier-resolution index
+                    (nth arguments position) (+ 1 (index-facts index)))]
+              (cond
+                (nil? candidate) (recur (+ scan 1) chosen false)
+                (nil? chosen) (recur (+ scan 1) candidate false)
+                (same-id? (typeresolutionv0-type-id chosen)
+                  (typeresolutionv0-type-id candidate))
+                (recur (+ scan 1)
+                  (->TypeResolutionV0
+                    (typeresolutionv0-type-id chosen)
+                    (append-type-defs
+                      (typeresolutionv0-definitions chosen)
+                      (typeresolutionv0-definitions candidate))
+                    [] true)
+                  false)
+                :else (recur (+ scan 1) chosen true)))))))))
+
 (defn resolve-rest-parameter
   [(index SourceIndexV0)
    (source-function core/NativeId)
@@ -2353,8 +2616,15 @@
                     "LOWER-PARAMETER-MISSING-ANNOTATION"
                     (str "function parameter has no closed type: " name)))
                 false)
-              (let [resolution TypeResolutionV0
-                    (resolve-source-type index source-type)]
+              (let [specialized (U TypeResolutionV0 Nil)
+                    (if (source-any-type? index source-type)
+                      (parameter-carrier-resolution index source-function
+                        position)
+                      nil)
+                    resolution TypeResolutionV0
+                    (if (nil? specialized)
+                      (resolve-source-type index source-type)
+                      specialized)]
                 (recur (+ position 1)
                   (conj parameters
                     (core/->Parameter
@@ -2989,6 +3259,28 @@
                 (typeresolutionv0-definitions
                   (resolve-source-type index annotation))))))))))
 
+;; The checked projection publishes the effective type of every expression,
+;; including inference-only locals and nested closure bodies. Materialize those
+;; families before lowering so bodies can use the checker's exact context.
+(defn inferred-type-definitions [(index SourceIndexV0)] (Vec core/TypeDef)
+  (let [inferred-types (Vec core/NativeId)
+        (sourceindexv0-inferred-types index)]
+    (loop [position Int 0
+           definitions (Vec core/TypeDef) []
+           seen (Map String Bool) {}]
+      (if (>= position (count inferred-types))
+        definitions
+        (let [resolution TypeResolutionV0
+              (resolve-source-type index (nth inferred-types position))
+              key String (id-value (typeresolutionv0-type-id resolution))]
+          (if (or (not (typeresolutionv0-valid resolution))
+                (= true (get seen key)))
+            (recur (+ position 1) definitions seen)
+            (recur (+ position 1)
+              (append-type-defs definitions
+                (typeresolutionv0-definitions resolution))
+              (assoc seen key true))))))))
+
 ;; A vector literal made of scalar literals names its element type by itself.
 ;; Mint the closed vector TypeDef up front so such a literal lowers in a
 ;; module that never spells (Vec T) in any annotation.
@@ -3001,6 +3293,70 @@
     (= "string" kind) (type-id "String")
     (= "keyword" kind) (type-id "Keyword")
     :else nil))
+
+(defn indexed-expression-type
+  [(index SourceIndexV0) (expression core/NativeId)] (U core/NativeId Nil)
+  (let [inferred (U core/NativeId Nil)
+        (index-first-object index expression "inferred-type")]
+    (if (some? inferred)
+      (let [resolution TypeResolutionV0 (resolve-source-type index inferred)]
+        (if (typeresolutionv0-valid resolution)
+          (typeresolutionv0-type-id resolution)
+          nil))
+      (let [kind String (fact-text index expression "form-kind")]
+        (cond
+          (= "literal" kind)
+          (let [literal-kind String
+                (fact-text index expression "literal-kind")]
+            (if (= "nil" literal-kind)
+              (type-id "Nil")
+              (scalar-literal-kind-type literal-kind)))
+
+          (and (= "ref" kind)
+            (or (= "true" (fact-text index expression "name"))
+                (= "false" (fact-text index expression "name"))))
+          (type-id "Bool")
+
+          :else nil)))))
+
+;; Atom is intentionally inferred as Any at the call boundary. Its initializer
+;; is the closed source of the cell content family.
+(defn atom-call-type-definitions [(index SourceIndexV0)] (Vec core/TypeDef)
+  (let [calls (Vec core/NativeId)
+        (vec (concat (index-form-ids index "call")
+               (index-form-ids index "static-call")))]
+    (loop [position Int 0 definitions (Vec core/TypeDef) []]
+      (if (>= position (count calls))
+        definitions
+        (let [call core/NativeId (nth calls position)
+              args-node (U core/NativeId Nil)
+              (index-first-object index call "args")
+              args (Vec core/NativeId)
+              (if (nil? args-node) [] (index-sequence-items index args-node))
+              content-type (U core/NativeId Nil)
+              (if (and (= "atom" (source-callee-name index call))
+                    (= 1 (count args)))
+                (indexed-expression-type index (nth args 0))
+                nil)]
+          (recur (+ position 1)
+            (if (nil? content-type)
+              definitions
+              (append-type-def definitions
+                (atom-cell-type content-type)))))))))
+
+;; `some` returns the callback value or nil, so every callable return admitted
+;; to the shared body environment needs its corresponding closed carrier.
+(defn some-result-type-definitions
+  [(resolutions (Vec FunctionResolutionV0))] (Vec core/TypeDef)
+  (loop [position Int 0 definitions (Vec core/TypeDef) []]
+    (if (>= position (count resolutions))
+      definitions
+      (let [function TypedFunctionV0
+            (functionresolutionv0-function (nth resolutions position))]
+        (recur (+ position 1)
+          (append-type-def definitions
+            (nullable-map-value-type
+              (typedfunctionv0-return-type function))))))))
 
 (defn literal-vector-element-type
   [(index SourceIndexV0) (literal core/NativeId)] (U core/NativeId Nil)
@@ -4732,11 +5088,26 @@
                 (nil? source-type))
             (recur (+ position 1) captures)
             (let [resolution TypeResolutionV0
-                  (resolve-source-type index source-type)]
+                  (resolve-source-type index source-type)
+                  ;; The lexical binder is authoritative for a capture. If its
+                  ;; source boundary is Any, retain the concrete cell or
+                  ;; collection carrier established by that binder's value.
+                  carrier (U TypeResolutionV0 Nil)
+                  (if (or (not (source-any-type? index source-type))
+                        (nil? binder))
+                    nil
+                    (let [value (U core/NativeId Nil)
+                          (index-first-object index binder "value")]
+                      (if (nil? value)
+                        nil
+                        (source-expression-carrier-resolution index value
+                          (+ 1 (index-facts index))))))
+                  effective TypeResolutionV0
+                  (if (nil? carrier) resolution carrier)]
               (recur (+ position 1)
                 (conj captures
                   (->ClosureCaptureV0 name
-                    (typeresolutionv0-type-id resolution)
+                    (typeresolutionv0-type-id effective)
                     (lower-id "capture-parameter"
                       [(id-value owner) name])))))))))))
 
@@ -6923,6 +7294,16 @@
       (= "type-prim" (fact-text index annotation "form-kind"))
       (= "Any" (fact-text index annotation "name")))))
 
+;; Any is an external sum boundary, not an instruction to erase a concrete
+;; aggregate while it remains in SSA. Collection operations and Atom mutation
+;; need the carrier that the initializer produced.
+(defn internal-dynamic-carrier?
+  [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+  (or (vector-type? types target)
+    (map-type? types target)
+    (set-type? types target)
+    (some? (atom-cell-content-of types target))))
+
 (defn source-transient-vector-type?
   [(index SourceIndexV0) (annotation core/NativeId)] Bool
   (= "TransientVec" (source-type-spelling index annotation)))
@@ -7642,9 +8023,16 @@
   [(env BodyEnvV0) (state BodyStateV0) (expression core/NativeId)]
   (U core/NativeId Nil)
   (let [index SourceIndexV0 (bodyenvv0-index env)
+        source-inferred (U core/NativeId Nil)
+        (index-first-object index expression "inferred-type")
         inferred (U core/NativeId Nil)
-        (annotation-native-type index
-          (index-first-object index expression "inferred-type"))]
+        (if (nil? source-inferred)
+          nil
+          (let [resolution TypeResolutionV0
+                (resolve-source-type index source-inferred)]
+            (if (typeresolutionv0-valid resolution)
+              (typeresolutionv0-type-id resolution)
+              nil)))]
     (if (some? inferred) inferred (source-ref-type env state expression))))
 
 (defn contextual-argument-type
@@ -8209,15 +8597,35 @@
    (expression core/NativeId)
    (expected (U core/NativeId Nil))]
   (U core/NativeId Nil)
-  (if (or (nil? expected) (not (same-id? expected (slice-value-type-id))))
-    expected
-    (let [kind String (fact-text index expression "form-kind")]
-      (cond
-        (= "vec" kind) (vector-type-of types (slice-value-type-id))
-        (= "map" kind)
-        (map-type-of types (slice-value-type-id) (slice-value-type-id))
-        (= "set" kind) (set-type-of types (slice-value-type-id))
-        :else expected))))
+  (let [kind String (fact-text index expression "form-kind")
+        inferred-source (U core/NativeId Nil)
+        (index-first-object index expression "inferred-type")
+        inferred (U core/NativeId Nil)
+        (if (nil? inferred-source)
+          nil
+          (let [resolution TypeResolutionV0
+                (resolve-source-type index inferred-source)]
+            (if (typeresolutionv0-valid resolution)
+              (typeresolutionv0-type-id resolution)
+              nil)))
+        inferred-carrier (U core/NativeId Nil)
+        (cond
+          (and (= "vec" kind) (some? inferred)
+            (vector-type? types inferred)) inferred
+          (and (= "map" kind) (some? inferred)
+            (map-type? types inferred)) inferred
+          (and (= "set" kind) (some? inferred)
+            (set-type? types inferred)) inferred
+          :else nil)]
+    (cond
+      (and (some? expected)
+        (not (same-id? expected (slice-value-type-id)))) expected
+      (and (nil? expected) (some? inferred-carrier)) inferred-carrier
+      (= "vec" kind) (vector-type-of types (slice-value-type-id))
+      (= "map" kind)
+      (map-type-of types (slice-value-type-id) (slice-value-type-id))
+      (= "set" kind) (set-type-of types (slice-value-type-id))
+      :else expected)))
 
 (defn lower-contextual-value
   [(env BodyEnvV0)
@@ -10385,6 +10793,9 @@
   (and (type-widens-to? types narrower wider (widen-budget))
     (not (type-widens-to? types wider narrower (widen-budget)))))
 
+;; Mutually widening candidates denote one value set. Non-strict domination
+;; collapses that equivalence class to its first-declared canonical carrier;
+;; genuinely incomparable candidates still remain ambiguous.
 (defn join-candidate-dominated?
   [(types (Vec core/TypeDef))
    (candidate core/NativeId)
@@ -10393,7 +10804,8 @@
   (loop [position Int 0]
     (if (>= position (count minima))
       false
-      (if (strict-widen-subtype? types (nth minima position) candidate)
+      (if (type-widens-to? types (nth minima position) candidate
+            (widen-budget))
         true
         (recur (+ position 1))))))
 
@@ -12384,6 +12796,25 @@
 (defn state-enter-inline-callback [(state BodyStateV0)] BodyStateV0
   (with state [:loop-states []]))
 
+;; A dynamic collection operand reaches lowering as SliceValue. Reuse the
+;; builtin carrier selector to find its single vector alternative, then narrow
+;; at the boundary so a foreign runtime alternative traps.
+(defn lower-dynamic-vector-carrier
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (source ExprResultV0)]
+  ExprResultV0
+  (let [source-type core/NativeId (exprresultv0-type-id source)]
+    (if (vector-type? types source-type)
+      source
+      (let [carrier (U core/NativeId Nil)
+            (builtin-boundary-target types source-type
+              (slice-value-vector-type-id))]
+        (if (nil? carrier)
+          source
+          (lower-boundary-coerce types owner (exprresultv0-state source)
+            (exprresultv0-value-id source) source-type carrier))))))
+
 ;; Callback annotations own empty-literal shapes and every value crossing them.
 (defn lower-contextual-boundary
   [(env BodyEnvV0)
@@ -12412,8 +12843,13 @@
    (expected (U core/NativeId Nil))]
   ExprResultV0
   (let [types (Vec core/TypeDef) (bodyenvv0-types env)
-        source ExprResultV0
+        raw ExprResultV0
         (lower-expr-expected env owner state expression expected)
+        source ExprResultV0
+        (if (or (exprresultv0-terminated raw)
+                (state-blocked? (exprresultv0-state raw)))
+          raw
+          (lower-dynamic-vector-carrier types owner raw))
         settled BodyStateV0 (exprresultv0-state source)
         source-type core/NativeId (exprresultv0-type-id source)]
     (cond
@@ -14291,7 +14727,7 @@
 
 (defn static-atom-builtin-updater? [(callee String)] Bool
   (or (= "assoc" callee) (= "update" callee) (= "conj" callee)
-    (= "into" callee)))
+    (= "into" callee) (= "inc" callee) (= "dec" callee)))
 
 (defn lower-static-atom-assoc-swap
   [(env BodyEnvV0)
@@ -14474,6 +14910,31 @@
           (fn [current ExprResultV0] ExprResultV0
             (lower-static-update-value env owner current
               (nth args 2) (nth args 3)))))
+
+      (or (= "inc" updater) (= "dec" updater))
+      (cond
+        (not (= 2 (count args)))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-STEP-ARITY: swap! inc and dec take no extra arguments")
+
+        (not (same-id? content (int-type-id)))
+        (fail-result state
+          "TODO-NATIVE-ATOM-SWAP-STEP-TYPE: static Atom inc and dec require an Int cell")
+
+        :else
+        (lower-atom-cas-retry owner state cell-id content
+          (fn [current ExprResultV0] ExprResultV0
+            (let [current-state BodyStateV0 (exprresultv0-state current)
+                  step-id core/NativeId
+                  (state-id current-state owner "atom-step-one")
+                  seeded BodyStateV0
+                  (state-emit (state-bump current-state)
+                    (core/->AtomInstruction
+                      (core/->SsaValueV0 step-id (int-type-id))
+                      (core/->I64Atom 1)))]
+              (lower-checked-arith seeded owner
+                (if (= "inc" updater) "+" "-")
+                (exprresultv0-value-id current) step-id)))))
 
       (= "conj" updater)
       (cond
@@ -15694,14 +16155,21 @@
                         (state-fail current
                           (str "TODO-NATIVE-BINDING-VALUE: " name " has no value form"))
                         (lower-id "body" ["let"]) (type-id "LowerFailure") false)
-                      (let [expected (U core/NativeId Nil)
-                            (annotation-native-type index annotation)
+                      (let [dynamic-annotation Bool
+                            (source-any-type? index annotation)
+                            expected (U core/NativeId Nil)
+                            (if dynamic-annotation
+                              nil
+                              (annotation-native-type index annotation))
                             raw ExprResultV0
                             (lower-expr-expected env owner current value-node expected)
                             value ExprResultV0
                             (if (or (nil? annotation)
                                   (exprresultv0-terminated raw)
-                                  (state-blocked? (exprresultv0-state raw)))
+                                  (state-blocked? (exprresultv0-state raw))
+                                  (and dynamic-annotation
+                                    (internal-dynamic-carrier? types
+                                      (exprresultv0-type-id raw))))
                               raw
                               (lower-boundary-coerce types owner
                                 (exprresultv0-state raw)
@@ -16107,9 +16575,14 @@
                                             (nth owner-specs candidate)))
                                       candidate
                                       (recur (+ candidate 1)))))
+                                dynamic-annotation Bool
+                                (source-any-type? index annotation)
                                 expected (U core/NativeId Nil)
-                                (if legacy-transient-owner active-transient
-                                  (annotation-native-type index annotation))
+                                (if legacy-transient-owner
+                                  active-transient
+                                  (if dynamic-annotation
+                                    nil
+                                    (annotation-native-type index annotation)))
                                 scoped-current BodyStateV0
                                 (if (and local-transient-loop
                                       (>= local-owner-position 0)
@@ -16130,10 +16603,20 @@
                                     (exprresultv0-terminated raw-scoped))
                                   raw-scoped)
                                 value ExprResultV0
-                                (if (or (nil? expected)
-                                      (exprresultv0-terminated raw)
-                                      (state-blocked? (exprresultv0-state raw)))
-                                  raw
+                                (cond
+                                  (or (exprresultv0-terminated raw)
+                                    (state-blocked? (exprresultv0-state raw))) raw
+                                  (and dynamic-annotation
+                                    (internal-dynamic-carrier? types
+                                      (exprresultv0-type-id raw))) raw
+                                  dynamic-annotation
+                                  (lower-boundary-coerce types owner
+                                    (exprresultv0-state raw)
+                                    (exprresultv0-value-id raw)
+                                    (exprresultv0-type-id raw)
+                                    (slice-value-type-id))
+                                  (nil? expected) raw
+                                  :else
                                   (lower-boundary-coerce types owner
                                     (exprresultv0-state raw)
                                     (exprresultv0-value-id raw)
@@ -16461,8 +16944,15 @@
                   "TODO-NATIVE-DOSEQ-COLLECTION: the binding has no collection expression")
 
                 :else
-                (let [collection ExprResultV0
+                (let [raw-collection ExprResultV0
                       (lower-expr env owner state collection-node)
+                      collection ExprResultV0
+                      (if (or (exprresultv0-terminated raw-collection)
+                              (state-blocked?
+                                (exprresultv0-state raw-collection)))
+                        raw-collection
+                        (lower-dynamic-vector-carrier types owner
+                          raw-collection))
                       collection-state BodyStateV0 (exprresultv0-state collection)]
                   (cond
                     (exprresultv0-terminated collection) collection
@@ -17307,9 +17797,17 @@
                                        (exprresultv0-type-id collection)))
                                 (fail-result collection-state
                                   "TODO-NATIVE-REDUCE-COLLECTION: reduce needs a native Vec or closed insertion-order Set")
-                                (not (same-id? element-type
-                                       (vector-element-of types
-                                         (exprresultv0-type-id collection))))
+                                (and (not (same-id? element-type
+                                            (vector-element-of types
+                                              (exprresultv0-type-id collection))))
+                                  (not (type-widens-to? types
+                                    (vector-element-of types
+                                      (exprresultv0-type-id collection))
+                                    element-type (widen-budget)))
+                                  (not (type-widens-to? types element-type
+                                    (vector-element-of types
+                                      (exprresultv0-type-id collection))
+                                    (widen-budget))))
                                 (fail-result collection-state
                                   "TODO-NATIVE-REDUCE-ELEMENT: vector element must match the callback element parameter")
                                 :else
@@ -17375,14 +17873,28 @@
                                         body-id [])
                                       item-id core/NativeId
                                       (state-id branched owner "reduce-item")
+                                      carrier-element core/NativeId
+                                      (vector-element-of types
+                                        (exprresultv0-type-id collection))
+                                      loaded BodyStateV0
+                                      (state-emit (state-bump branched)
+                                        (core/->VecGetInstruction
+                                          (core/->SsaValueV0 item-id
+                                            carrier-element)
+                                          (exprresultv0-value-id collection)
+                                          header-index))
+                                      element ExprResultV0
+                                      (if (same-id? carrier-element element-type)
+                                        (->ExprResultV0 loaded item-id
+                                          element-type false)
+                                        (lower-boundary-coerce types owner
+                                          loaded item-id carrier-element
+                                          element-type))
+                                      element-id core/NativeId
+                                      (exprresultv0-value-id element)
                                       isolated BodyStateV0
                                       (state-enter-inline-callback
-                                        (state-emit (state-bump branched)
-                                          (core/->VecGetInstruction
-                                            (core/->SsaValueV0 item-id
-                                              element-type)
-                                            (exprresultv0-value-id collection)
-                                            header-index)))
+                                        (exprresultv0-state element))
                                       callback-state BodyStateV0
                                       (if (some? callback-signature)
                                         isolated
@@ -17392,12 +17904,12 @@
                                             (nth callback-source-parameters 0) 0
                                             header-accumulator accumulator-type)
                                           (nth callback-source-parameters 1) 1
-                                          item-id element-type))
+                                          element-id element-type))
                                       callback-result ExprResultV0
                                       (if (some? callback-signature)
                                         (lower-static-callback-call isolated owner
                                           callback-signature
-                                          [header-accumulator item-id]
+                                          [header-accumulator element-id]
                                           "reduce-callback-call")
                                         (lower-contextual-boundary env owner
                                           callback-state callback-body-node accumulator-type
@@ -20092,22 +20604,29 @@
             (str "LOWER-MISSING-GLOBAL-EFFECTIVE-TYPE: "
               (globalbindingv0-name global)
               " has no checker-published effective type"))
-          (let [expected (U core/NativeId Nil)
-                (annotation-native-type (bodyenvv0-index env) effective-type)
+          (let [index SourceIndexV0 (bodyenvv0-index env)
+                dynamic-effective-type Bool
+                (source-any-type? index effective-type)
+                expected (U core/NativeId Nil)
+                (if dynamic-effective-type
+                  nil
+                  (annotation-native-type index effective-type))
                 raw ExprResultV0
                 (lower-expr-expected env owner current
                   (globalbindingv0-value global) expected)
                 value ExprResultV0
                 (if (or (exprresultv0-terminated raw)
-                        (state-blocked? (exprresultv0-state raw)))
+                        (state-blocked? (exprresultv0-state raw))
+                        (and dynamic-effective-type
+                          (internal-dynamic-carrier? (bodyenvv0-types env)
+                            (exprresultv0-type-id raw))))
                   raw
                   (lower-boundary-coerce (bodyenvv0-types env) owner
                     (exprresultv0-state raw)
                     (exprresultv0-value-id raw)
                     (exprresultv0-type-id raw)
                     (typeresolutionv0-type-id
-                      (resolve-source-type
-                        (bodyenvv0-index env) effective-type))))]
+                      (resolve-source-type index effective-type))))]
             (cond
               (state-blocked? (exprresultv0-state value))
               (exprresultv0-state value)
@@ -20456,25 +20975,35 @@
               (if (effectivefunctionsignaturev0-present effective-signature)
                 nil
                 (index-first-object index source-function "ret")))
+            source-body (U core/NativeId Nil)
+            (index-first-object index source-function "body")
+            specialized-return (U TypeResolutionV0 Nil)
+            (if (and (source-any-type? index source-return)
+                  (some? source-body))
+              (source-expression-carrier-resolution index source-body
+                (+ 1 (index-facts index)))
+              nil)
             source-abi-symbol (U String Nil)
             (index-first-text index source-function "abi-symbol")
             abi-symbol String
             (if (nil? source-abi-symbol) source-name source-abi-symbol)
             return-resolution TypeResolutionV0
-            (if (and
-                  (effectivefunctionsignaturev0-present effective-signature)
-                  (not (effectivefunctionsignaturev0-valid effective-signature)))
-              (->TypeResolutionV0
-                (type-id "LowerFailure") [(lower-failure-type)] [] false)
-              (if (nil? source-return)
-              (->TypeResolutionV0
-                (type-id "Nil")
-                [(nil-type)]
-                [(core/->DiagnosticV0
-                   "TODO-NATIVE-SIGNATURE-FACTS"
-                   (str "checked source projection omitted the return annotation for " source-name))]
-                true)
-                (resolve-source-type index source-return)))
+            (if (some? specialized-return)
+              specialized-return
+              (if (and
+                    (effectivefunctionsignaturev0-present effective-signature)
+                    (not (effectivefunctionsignaturev0-valid effective-signature)))
+                (->TypeResolutionV0
+                  (type-id "LowerFailure") [(lower-failure-type)] [] false)
+                (if (nil? source-return)
+                  (->TypeResolutionV0
+                    (type-id "Nil")
+                    [(nil-type)]
+                    [(core/->DiagnosticV0
+                       "TODO-NATIVE-SIGNATURE-FACTS"
+                       (str "checked source projection omitted the return annotation for " source-name))]
+                    true)
+                  (resolve-source-type index source-return))))
             native-op (U String Nil) (function-native-op index source-function)
             readiness NativeReadinessV0
             (if (and (some? native-op) (recognized-native-op? native-op))
@@ -22146,9 +22675,18 @@
           (append-type-defs
             (append-type-defs record-types (global-type-definitions index globals))
             (binding-type-definitions index))
-          (literal-vector-type-definitions index))
-        base-source-types (Vec core/TypeDef)
+          (append-type-defs
+            (literal-vector-type-definitions index)
+            (append-type-defs
+              (inferred-type-definitions index)
+              (atom-call-type-definitions index))))
+        function-source-types (Vec core/TypeDef)
         (collect-function-types declared-types signature-resolutions)
+        base-source-types (Vec core/TypeDef)
+        (if (index-has-callee? index "some")
+          (append-type-defs function-source-types
+            (some-result-type-definitions signature-resolutions))
+          function-source-types)
         ;; Text search lowers through an optional index even when the authored
         ;; result is Bool, so its hidden result type must precede body lowering.
         text-index-source-types (Vec core/TypeDef)
@@ -22166,6 +22704,16 @@
           (append-type-def text-index-source-types
             (nullable-map-value-type (float-type-id)))
           text-index-source-types)
+        ;; Host environment lookup is lowering-owned and checked as Any, so its
+        ;; optional String family must exist before body lowering.
+        environment-source-types (Vec core/TypeDef)
+        (if (or
+              (index-has-callee? index "System/getenv")
+              (index-has-callee? index "java.lang.System/getenv")
+              (index-has-callee? index "selfhost.rt/getenv"))
+          (append-type-def parse-source-types
+            (nullable-map-value-type (text-type-id)))
+          parse-source-types)
         source-types (Vec core/TypeDef)
         (if (or
               (index-has-callee? index "host.fs/path-kind")
@@ -22186,8 +22734,9 @@
               (index-has-callee? index "host.fs/unlock")
               (index-has-callee? index "host.clock/format-iso8601")
               (index-has-callee? index "host.system/hostname"))
-          (append-type-defs parse-source-types (filesystem-outcome-types))
-          parse-source-types)
+          (append-type-defs environment-source-types
+            (filesystem-outcome-types))
+          environment-source-types)
         process-source-types (Vec core/TypeDef)
         (if (or
               (index-has-callee? index "host.process/run-capture")
@@ -22663,8 +23212,8 @@
 (def native-lowering-workers Int 22)
 
 ;; Hosted concurrency is deliberately isolated behind an Any boundary. Each
-;; future owns one contiguous input batch, and forcing in batch order restores
-;; the exact serial mapv order for frozen output and surfaced failures.
+;; future owns one contiguous input batch. Dereferencing batches in their
+;; original order restores serial mapv order for frozen output and failures.
 (defn ordered-native-mapv [(operation Any) (values Any)] Any
   (let [items Any (vec values)
         item-count Int (count items)]
@@ -22680,7 +23229,7 @@
               batches)]
         (vec
           (mapcat identity
-            (mapv (fn [result Any] Any (force result)) pending)))))))
+            (mapv (fn [result Any] Any (deref result)) pending)))))))
 
 (defn resolve-layouts
   [(types (Vec core/TypeDef)) (abi core/AbiProfileV0)] (Vec LayoutResolutionV0)
@@ -26851,7 +27400,7 @@
        (source-index-key empty-context-vector-annotation "name") "Vec"
        (source-index-key int-annotation "form-kind") "type-prim"
        (source-index-key int-annotation "name") "Int"}
-      {} {} {} {} {} {} [])))
+      {} {} {} {} {} {} [] [])))
 
 (def empty-context-types (Vec core/TypeDef)
   [(i64-type) (text-type) (keyword-type) (lower-failure-type)

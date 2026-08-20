@@ -140,7 +140,27 @@
 (defn unguarded-regex [(value Any)] Int
   (if (re-matches #"A.*" value) 5 0))
 
-(defn main [] Int
+(defn carrier-vector [] Any
+  [1 2 3])
+
+(defn carrier-count [(items Any)] Int
+  (count items))
+
+(defn reduce-dynamic-texts [(items (Vec Any))] String
+  (reduce
+    (fn [(result String) (item String)] String
+      (str result item))
+    ""
+    items))
+
+(defn step-counter! [] Int
+  (let [cell (atom 4)]
+    (do
+      (swap! cell inc)
+      (swap! cell dec)
+      (deref cell))))
+
+(defn main! [] Int
   (if (and (= (direct-map {:number 7}) 7)
            (= (short-map {:number 7}) 1)
            (= (direct-vector [4 5 6]) 3)
@@ -162,6 +182,9 @@
            (= (unguarded-vector-tail [1 2 3]) 7)
            (= (unguarded-set-tail #{1 2 3} 2) 2)
            (= (unguarded-text-tail "A-B-" "-") 6)
-           (= (unguarded-regex "A-B-") 5))
+           (= (unguarded-regex "A-B-") 5)
+           (= (carrier-count (carrier-vector)) 3)
+           (= (reduce-dynamic-texts ["A" "B"]) "AB")
+           (= (step-counter!) 4))
     0
     1))
