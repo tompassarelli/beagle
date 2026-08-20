@@ -205,7 +205,7 @@
 (defn obligation-report
   [(label String)
    (verdicts (Vec obligations/ObligationVerdictV0))] String
-  (let [(names (Vec String)) (slice/obligation-names)]
+  (let [names (Vec String) (slice/obligation-names)]
     (loop [position Int 0 report String ""]
       (if (>= position (count verdicts))
         report
@@ -218,7 +218,7 @@
 
 (defn failing-obligation-verdicts
   [(verdicts (Vec obligations/ObligationVerdictV0))] String
-  (let [(names (Vec String)) (slice/obligation-names)]
+  (let [names (Vec String) (slice/obligation-names)]
     (loop [position Int 0 report String ""]
       (if (>= position (count verdicts))
         report
