@@ -111,7 +111,7 @@
             (queryadmissionrequest-schema-content-id request)))
         (recur (+ position 1)
           (conj facts
-            (->CompileQueryFact (+ 4 position) :query/target digest position
+            (->CompileQueryFact (+ 4 position) :query/target digest 0
               (nth targets position))))))))
 
 (defn admit-and-identify-query [request QueryAdmissionRequest] QueryAdmission
@@ -141,3 +141,25 @@
             (queryadmissionrequest-rules-content-id request)
             (queryadmissionrequest-schema-content-id request)
             (canonical-query-facts digest request ordered)))))))
+
+(defn admit-canonical-query [closure AdmittedQueryClosure] QueryAdmission
+  (let [request QueryAdmissionRequest
+        (->QueryAdmissionRequest
+          (admittedqueryclosure-source-closure-digest closure)
+          (admittedqueryclosure-compiler-context closure)
+          (admittedqueryclosure-profile closure)
+          (admittedqueryclosure-targets closure)
+          (admittedqueryclosure-rules-content-id closure)
+          (admittedqueryclosure-schema-content-id closure))]
+    (match (admit-and-identify-query request)
+      [(QueryRejected code detail) (->QueryRejected code detail)]
+      [(QueryAdmitted admitted)
+       (if (and (= (admittedqueryclosure-query-digest closure)
+                   (admittedqueryclosure-query-digest admitted))
+                (= (admittedqueryclosure-targets closure)
+                   (admittedqueryclosure-targets admitted))
+                (= (admittedqueryclosure-facts closure)
+                   (admittedqueryclosure-facts admitted)))
+         (->QueryAdmitted admitted)
+         (->QueryRejected :query/canonical-mismatch
+           "canonical query closure does not match its admitted dimensions"))])))
