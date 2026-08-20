@@ -11086,6 +11086,11 @@ int32_t native_host_filesystem_append_bytes_v0(
     written += (size_t)amount;
   }
   free(octets);
+  if (fdatasync(descriptor) != 0) {
+    status = native_host_filesystem_errno();
+    (void)close(descriptor);
+    return status;
+  }
   if (close(descriptor) != 0) {
     return native_host_filesystem_errno();
   }

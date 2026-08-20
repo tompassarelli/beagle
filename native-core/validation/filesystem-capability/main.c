@@ -54,6 +54,7 @@ int main(int argc, char **argv) {
   char nested_file_path[4096];
   char nested_directory_path[4096];
   char append_path[4096];
+  char append_bytes_path[4096];
   char missing_append_path[4096];
   char obstructed_path[4096];
   uint64_t a_text;
@@ -64,8 +65,12 @@ int main(int argc, char **argv) {
   native_vec *entries = NULL;
   int64_t kind = INT64_C(0);
   int descriptor;
+  int32_t append_status;
   struct stat metadata;
   const uint8_t invalid[] = {UINT8_C(0xc3), UINT8_C(0x28)};
+  int64_t append_octets[] = {INT64_C(0), INT64_C(255), INT64_C(10)};
+  native_vec append_bytes = {append_octets, INT64_C(3), INT64_C(3), NULL};
+  uint8_t appended_octets[3];
 
   if (argc != 2) {
     fail("expected scratch directory");
@@ -82,6 +87,8 @@ int main(int argc, char **argv) {
   path_join(nested_directory_path, sizeof nested_directory_path, argv[1],
             "nested/a/b");
   path_join(append_path, sizeof append_path, argv[1], "append.log");
+  path_join(append_bytes_path, sizeof append_bytes_path, argv[1],
+            "append-bytes.log");
   path_join(missing_append_path, sizeof missing_append_path, argv[1],
             "missing/append.log");
   path_join(obstructed_path, sizeof obstructed_path, a_path,
@@ -202,6 +209,24 @@ int main(int argc, char **argv) {
       (memcmp(native_text_bytes(contents), "base\nalpha\nbravo\n",
               (size_t)17U) != 0)) {
     fail("append exact bytes");
+  }
+
+  require_status(native_host_filesystem_append_bytes_v0(
+                     &capability, text(&arena, append_bytes_path),
+                     &append_bytes),
+                 0, "append binary bytes");
+  descriptor = open(append_bytes_path, O_RDONLY | O_CLOEXEC);
+  if ((descriptor < 0) ||
+      (read(descriptor, appended_octets, sizeof appended_octets) !=
+       (ssize_t)sizeof appended_octets) ||
+      (close(descriptor) != 0) ||
+      (memcmp(appended_octets, "\000\377\n", sizeof appended_octets) != 0)) {
+    fail("append binary contents");
+  }
+  append_status = native_host_filesystem_append_bytes_v0(
+      &capability, text(&arena, "/dev/null"), &append_bytes);
+  if (append_status == 0) {
+    fail("append binary sync failure was hidden");
   }
 
   native_arena_destroy(&arena);
