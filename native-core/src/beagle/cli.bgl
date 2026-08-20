@@ -1,11 +1,17 @@
 #lang beagle
 (ns beagle.cli
-  (:require [beagle.compiler-driver :as driver]))
+  (:require [beagle.bootstrap-contract :as bootstrap]
+            [beagle.compiler-driver :as driver]
+            [beagle.module-source-resolver :as resolver]))
+
+(defunion CliModuleRootsResult
+  (CliModuleRootsReady [roots (Vec resolver/ModuleSourceRootV1)])
+  (CliModuleRootsRejected [code Int detail String]))
 
 (defn write-usage [] Nil
   (do
     (host.stderr/write-line "usage: beagle syntax SOURCE")
-    (host.stderr/write-line "       beagle compile SOURCE --out OUT")))
+    (host.stderr/write-line bootstrap/compile-command-usage)))
 
 (defn syntax-command [args (Vec String)] Int
   (if (= 1 (count args))
@@ -20,27 +26,94 @@
          code)])
     (do (write-usage) 64)))
 
+(defn root-prefix-present?
+  [roots (Vec resolver/ModuleSourceRootV1)
+   logical-prefix String] Bool
+  (some?
+    (some
+      (fn [root resolver/ModuleSourceRootV1] String?
+        (if (= logical-prefix
+                (resolver/modulesourcerootv1-logical-prefix root))
+          logical-prefix
+          nil))
+      roots)))
+
+(defn parse-module-roots
+  [args (Vec String)
+   start Int] CliModuleRootsResult
+  (loop [offset Int start
+         roots (Vec resolver/ModuleSourceRootV1) []]
+    (if (>= offset (count args))
+      (if (empty? roots)
+        (->CliModuleRootsRejected 64
+          "compile requires at least one --module-root")
+        (->CliModuleRootsReady roots))
+      (if (or (> (+ offset 2) (- (count args) 1))
+              (not= "--module-root" (nth args offset)))
+        (->CliModuleRootsRejected 64
+          "module roots must be --module-root LOGICAL_PREFIX DIRECTORY triples")
+        (let [logical-prefix String (nth args (+ offset 1))
+              directory String (nth args (+ offset 2))]
+          (if (root-prefix-present? roots logical-prefix)
+            (->CliModuleRootsRejected 64
+              (str "duplicate module-root logical prefix: " logical-prefix))
+            (match (resolver/module-source-root logical-prefix directory)
+              [(resolver/ModuleSourceRootRejectedV1 code detail)
+               (->CliModuleRootsRejected code detail)]
+              [(resolver/ModuleSourceRootReadyV1 root)
+               (recur (+ offset 3) (conj roots root))])))))))
+
+(defn compile-resolved-command
+  [source String
+   source-id String
+   output String
+   roots (Vec resolver/ModuleSourceRootV1)
+   store driver/CompileStore] Int
+  (match (resolver/read-entry-source roots source-id source)
+    [(resolver/ResolvedSourceReadRejectedV1 code detail)
+     (do
+       (host.stderr/write-line (str "beagle: compile failed: " detail))
+       code)]
+    [(resolver/ResolvedSourceReadV1 entry)
+     (let [config driver/CompileSourceConfig
+           (driver/->CompileSourceConfig
+             source-id
+             output
+             (str output "/beagle-store.log")
+             "compiler"
+             "cc"
+             "")]
+       (match (driver/compile-source
+                config
+                entry
+                (fn [request driver/ImportResolutionRequestV1]
+                  driver/ImportResolutionResponseV1
+                  (resolver/resolve-import roots request))
+                store)
+         [(driver/CompileBundleWarm content-id artifact-id executable-path) 0]
+         [(driver/CompileBundleMaterialized content-id artifact-id executable-path) 0]
+         [(driver/CompileBundleError code detail)
+          (do
+            (host.stderr/write-line (str "beagle: compile failed: " detail))
+            code)]))]))
+
 (defn compile-command
   [args (Vec String)
    store driver/CompileStore] Int
-  (if (and (= 3 (count args)) (= "--out" (nth args 1)))
+  (if (and (>= (count args) 8)
+           (= "--source-id" (nth args 1))
+           (= "--out" (nth args 3))
+           (= 0 (mod (- (count args) 5) 3)))
     (let [source String (nth args 0)
-          output String (nth args 2)
-          config driver/CompileSourceConfig
-          (driver/->CompileSourceConfig
-            source
-            output
-            (str output "/beagle-store.log")
-            "compiler"
-            "cc"
-            "")]
-      (match (driver/compile-source config store)
-        [(driver/CompileBundleWarm content-id artifact-id executable-path) 0]
-        [(driver/CompileBundleMaterialized content-id artifact-id executable-path) 0]
-        [(driver/CompileBundleError code detail)
+          source-id String (nth args 2)
+          output String (nth args 4)]
+      (match (parse-module-roots args 5)
+        [(CliModuleRootsRejected code detail)
          (do
            (host.stderr/write-line (str "beagle: compile failed: " detail))
-           code)]))
+           code)]
+        [(CliModuleRootsReady roots)
+         (compile-resolved-command source source-id output roots store)]))
     (do (write-usage) 64)))
 
 (defn main-with-store

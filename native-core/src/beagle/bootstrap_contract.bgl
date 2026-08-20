@@ -81,7 +81,7 @@
   (content-id compiler-context-descriptor))
 
 (def compile-command-usage String
-  "usage: beagle compile SOURCE --out OUT")
+  "usage: beagle compile SOURCE --source-id SOURCE_ID --out OUT --module-root LOGICAL_PREFIX DIRECTORY [--module-root LOGICAL_PREFIX DIRECTORY ...]")
 (def rebuild-next-command-usage String
   "usage: beagle rebuild-next --bundle MANIFEST --out OUT --parent-lineage FILE")
 (def bootstrap-contract-command-usage String

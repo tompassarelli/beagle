@@ -1,0 +1,385 @@
+#lang beagle
+(ns beagle.module-source-resolver
+  (:require [beagle.compiler-driver :as driver]
+            [beagle.frontend-facts :as facts]
+            [beagle.parser :as parser]
+            [beagle.parser-reader :as parser-reader]
+            [beagle.syntax-semantics :as semantics]
+            [clojure.string :as str]))
+
+(defrecord ModuleSourceRootV1
+  [logical-prefix String
+   physical-directory String])
+
+(defunion ModuleSourceRootResultV1
+  (ModuleSourceRootReadyV1 [root ModuleSourceRootV1])
+  (ModuleSourceRootRejectedV1 [code Int detail String]))
+
+(defunion ResolvedSourceReadResultV1
+  (ResolvedSourceReadV1 [source driver/ResolvedSourceFactsV1])
+  (ResolvedSourceReadRejectedV1 [code Int detail String]))
+
+(defunion ModuleCandidateReadV1
+  (ModuleCandidateAbsentV1
+    [dependency driver/ImportResolutionDependencyV1])
+  (ModuleCandidatePresentV1
+    [dependency driver/ImportResolutionDependencyV1
+     source driver/ResolvedSourceFactsV1])
+  (ModuleCandidateFailedV1
+    [dependency driver/ImportResolutionDependencyV1
+     code Int
+     detail String]))
+
+(defrecord CandidateScanStateV1
+  [dependencies (Vec driver/ImportResolutionDependencyV1)
+   sources (Vec driver/ResolvedSourceFactsV1)
+   failure-code Int?
+   failure-detail String?])
+
+(defn logical-character? [character String] Bool
+  (or (and (>= (compare character "a") 0)
+           (<= (compare character "z") 0))
+      (and (>= (compare character "A") 0)
+           (<= (compare character "Z") 0))
+      (and (>= (compare character "0") 0)
+           (<= (compare character "9") 0))
+      (= character "-")
+      (= character "_")
+      (= character ".")
+      (= character "/")))
+
+(defn canonical-logical-path? [value String] Bool
+  (and (> (count value) 0)
+       (not (str/starts-with? value "/"))
+       (not (str/ends-with? value "/"))
+       (not (str/includes? value "//"))
+       (not (str/includes? value "\\"))
+       (not (= value "."))
+       (not (= value ".."))
+       (not (str/starts-with? value "./"))
+       (not (str/starts-with? value "../"))
+       (not (str/includes? value "/./"))
+       (not (str/includes? value "/../"))
+       (not (str/ends-with? value "/."))
+       (not (str/ends-with? value "/.."))
+       (loop [offset Int 0]
+         (if (>= offset (count value))
+           true
+           (if (logical-character? (subs value offset (+ offset 1)))
+             (recur (+ offset 1))
+             false)))))
+
+(defn module-source-root
+  [logical-prefix String
+   physical-directory String] ModuleSourceRootResultV1
+  (if (not (canonical-logical-path? logical-prefix))
+    (->ModuleSourceRootRejectedV1 64
+      "module-root logical prefix is not a canonical relative path")
+    (match (host.fs/path-kind physical-directory)
+      [(host.fs/PathKindError errno)
+       (->ModuleSourceRootRejectedV1 errno
+         (str "module-root path is unavailable: " physical-directory))]
+      [(host.fs/PathKindOk kind)
+       (if (not= kind 2)
+         (->ModuleSourceRootRejectedV1 64
+           (str "module-root path is not a directory: " physical-directory))
+         (match (host.fs/real-path physical-directory)
+           [(host.fs/RealPathError errno)
+            (->ModuleSourceRootRejectedV1 errno
+              (str "module-root cannot be resolved: " physical-directory))]
+           [(host.fs/RealPathOk resolved)
+            (->ModuleSourceRootReadyV1
+              (->ModuleSourceRootV1 logical-prefix resolved))]))])))
+
+(defn fact-errors-detail [errors (Vec facts/FactError)] String
+  (if (empty? errors)
+    "source fact projection rejected without an error"
+    (facts/facterror-message (first errors))))
+
+(defn read-resolved-source
+  [source-id String
+   physical-path String] ResolvedSourceReadResultV1
+  (if (not (canonical-logical-path? source-id))
+    (->ResolvedSourceReadRejectedV1 64
+      "logical source ID is not a canonical relative path")
+    (match (host.fs/read-text-bounded physical-path driver/max-source-bytes)
+      [(host.fs/ReadTextBoundedError errno)
+       (->ResolvedSourceReadRejectedV1 errno
+         (str "source read failed: " physical-path))]
+      [(host.fs/ReadTextBoundedOk text)
+       (let [source-digest String
+             (str "sha256:" (sha256-bytes (utf8-encode text)))]
+         (match (parser-reader/facts-from-source
+                  source-id text source-digest "native-core")
+           [(facts/FactsRejected errors)
+            (->ResolvedSourceReadRejectedV1 65 (fact-errors-detail errors))]
+           [(facts/FactsRead raw)
+            (match (semantics/normalize raw)
+              [(facts/FactsRejected errors)
+               (->ResolvedSourceReadRejectedV1 65 (fact-errors-detail errors))]
+              [(facts/FactsRead normalized)
+               (->ResolvedSourceReadV1
+                 (driver/->ResolvedSourceFactsV1
+                   raw normalized (parser/package-authority)))])]))])))
+
+(defn entry-root-matches?
+  [root ModuleSourceRootV1
+   source-id String
+   resolved-path String] Bool
+  (let [physical-prefix String
+        (str (modulesourcerootv1-physical-directory root) "/")
+        logical-prefix String
+        (str (modulesourcerootv1-logical-prefix root) "/")]
+    (and (str/starts-with? resolved-path physical-prefix)
+         (= source-id
+            (str logical-prefix
+                 (subs resolved-path (count physical-prefix)))))))
+
+(defn entry-root-match-count
+  [roots (Vec ModuleSourceRootV1)
+   source-id String
+   resolved-path String] Int
+  (reduce
+    (fn [matches Int root ModuleSourceRootV1] Int
+      (if (entry-root-matches? root source-id resolved-path)
+        (+ matches 1)
+        matches))
+    0
+    roots))
+
+(defn read-entry-source
+  [roots (Vec ModuleSourceRootV1)
+   source-id String
+   physical-path String] ResolvedSourceReadResultV1
+  (if (empty? roots)
+    (->ResolvedSourceReadRejectedV1 64
+      "compile requires at least one exact module root")
+    (match (host.fs/real-path physical-path)
+      [(host.fs/RealPathError errno)
+       (->ResolvedSourceReadRejectedV1 errno
+         (str "entry source cannot be resolved: " physical-path))]
+      [(host.fs/RealPathOk resolved)
+       (let [matches Int (entry-root-match-count roots source-id resolved)]
+         (if (not= matches 1)
+           (->ResolvedSourceReadRejectedV1 64
+             "entry source must map to exactly one declared logical module root")
+           (read-resolved-source source-id resolved)))])))
+
+(defn length-framed [value String] String
+  (str (count (utf8-encode value)) ":" value))
+
+(defn absence-content-id [source-id String] String
+  (str "sha256:"
+       (sha256-bytes
+         (utf8-encode
+           (str "beagle-module-absence/v1" (length-framed source-id))))))
+
+(defn resolution-error-content-id
+  [source-id String code Int detail String] String
+  (str "sha256:"
+       (sha256-bytes
+         (utf8-encode
+           (str "beagle-module-resolution-error/v1"
+                (length-framed source-id)
+                (length-framed (str code))
+                (length-framed detail))))))
+
+(defn namespace-character? [character String] Bool
+  (or (and (>= (compare character "a") 0)
+           (<= (compare character "z") 0))
+      (and (>= (compare character "A") 0)
+           (<= (compare character "Z") 0))
+      (and (>= (compare character "0") 0)
+           (<= (compare character "9") 0))
+      (= character "-")
+      (= character "_")
+      (= character ".")))
+
+(defn canonical-namespace? [namespace String] Bool
+  (and (> (count namespace) 0)
+       (not (str/starts-with? namespace "."))
+       (not (str/ends-with? namespace "."))
+       (not (str/includes? namespace ".."))
+       (loop [offset Int 0]
+         (if (>= offset (count namespace))
+           true
+           (if (namespace-character? (subs namespace offset (+ offset 1)))
+             (recur (+ offset 1))
+             false)))))
+
+(defn namespace-relative-source-id [namespace String] String
+  (str (str/replace (str/replace namespace "-" "_") "." "/") ".bgl"))
+
+(defn root-source-id
+  [root ModuleSourceRootV1 relative String] String
+  (str (modulesourcerootv1-logical-prefix root) "/" relative))
+
+(defn root-physical-path
+  [root ModuleSourceRootV1 relative String] String
+  (str (modulesourcerootv1-physical-directory root) "/" relative))
+
+(defn inside-root?
+  [root ModuleSourceRootV1 resolved-path String] Bool
+  (str/starts-with? resolved-path
+    (str (modulesourcerootv1-physical-directory root) "/")))
+
+(defn failed-dependency
+  [source-id String code Int detail String]
+  driver/ImportResolutionDependencyV1
+  (driver/->ImportResolutionDependencyV1
+    source-id false (resolution-error-content-id source-id code detail)))
+
+(defn validate-resolved-candidate
+  [source-id String
+   resolved String
+   required-namespace String] ModuleCandidateReadV1
+  (match (read-resolved-source source-id resolved)
+    [(ResolvedSourceReadRejectedV1 code detail)
+     (->ModuleCandidateFailedV1
+       (failed-dependency source-id code detail)
+       code detail)]
+    [(ResolvedSourceReadV1 source)
+     (let [normalized facts/SyntaxFactBundle
+           (driver/resolvedsourcefactsv1-normalized source)
+           declared String? (facts/syntaxfactbundle-namespace normalized)]
+       (if (not= declared required-namespace)
+         (->ModuleCandidateFailedV1
+           (failed-dependency source-id 65
+             "candidate declares a different namespace")
+           65
+           (str "required namespace " required-namespace
+                " resolved to " source-id
+                " declaring " (or declared "no namespace")))
+         (->ModuleCandidatePresentV1
+           (driver/->ImportResolutionDependencyV1
+             source-id true
+             (facts/syntaxfactbundle-source-digest normalized))
+           source)))]))
+
+(defn read-existing-candidate
+  [root ModuleSourceRootV1
+   source-id String
+   physical String
+   required-namespace String] ModuleCandidateReadV1
+  (match (host.fs/real-path physical)
+    [(host.fs/RealPathError errno)
+     (->ModuleCandidateFailedV1
+       (failed-dependency source-id errno "candidate real-path failed")
+       errno
+       (str "module candidate cannot be resolved: " physical))]
+    [(host.fs/RealPathOk resolved)
+     (if (not (inside-root? root resolved))
+       (->ModuleCandidateFailedV1
+         (failed-dependency source-id 64 "candidate escapes module root")
+         64
+         (str "module candidate escapes its exact root: " source-id))
+       (validate-resolved-candidate source-id resolved required-namespace))]))
+
+(defn read-root-candidate
+  [root ModuleSourceRootV1
+   required-namespace String] ModuleCandidateReadV1
+  (let [relative String (namespace-relative-source-id required-namespace)
+        source-id String (root-source-id root relative)
+        physical String (root-physical-path root relative)]
+    (match (host.fs/path-kind physical)
+      [(host.fs/PathKindError errno)
+       (if (= errno 2)
+         (->ModuleCandidateAbsentV1
+           (driver/->ImportResolutionDependencyV1
+             source-id false (absence-content-id source-id)))
+         (->ModuleCandidateFailedV1
+           (failed-dependency source-id errno "candidate path-kind failed")
+           errno
+           (str "candidate path-kind failed: " physical)))]
+      [(host.fs/PathKindOk kind)
+       (if (and (not= kind 1) (not= kind 3))
+         (->ModuleCandidateFailedV1
+           (failed-dependency source-id 64 "candidate is not a file")
+           64
+           (str "module candidate is not a file: " physical))
+         (read-existing-candidate
+           root source-id physical required-namespace))])))
+
+(defn scan-root-candidate
+  [state CandidateScanStateV1
+   candidate ModuleCandidateReadV1] CandidateScanStateV1
+  (match candidate
+    [(ModuleCandidateAbsentV1 dependency)
+     (->CandidateScanStateV1
+       (conj (candidatescanstatev1-dependencies state) dependency)
+       (candidatescanstatev1-sources state)
+       (candidatescanstatev1-failure-code state)
+       (candidatescanstatev1-failure-detail state))]
+    [(ModuleCandidatePresentV1 dependency source)
+     (->CandidateScanStateV1
+       (conj (candidatescanstatev1-dependencies state) dependency)
+       (conj (candidatescanstatev1-sources state) source)
+       (candidatescanstatev1-failure-code state)
+       (candidatescanstatev1-failure-detail state))]
+    [(ModuleCandidateFailedV1 dependency code detail)
+     (->CandidateScanStateV1
+       (conj (candidatescanstatev1-dependencies state) dependency)
+       (candidatescanstatev1-sources state)
+       (or (candidatescanstatev1-failure-code state) code)
+       (or (candidatescanstatev1-failure-detail state) detail))]))
+
+(defn request-receipt
+  [request driver/ImportResolutionRequestV1
+   dependencies (Vec driver/ImportResolutionDependencyV1)
+   selected String?] driver/ImportResolutionReceiptV1
+  (driver/->ImportResolutionReceiptV1
+    (driver/importresolutionrequestv1-importer-path request)
+    (driver/importresolutionrequestv1-import-order request)
+    (driver/importresolutionrequestv1-required-namespace request)
+    dependencies
+    selected))
+
+(defn resolve-import
+  [roots (Vec ModuleSourceRootV1)
+   request driver/ImportResolutionRequestV1]
+  driver/ImportResolutionResponseV1
+  (let [required String
+        (driver/importresolutionrequestv1-required-namespace request)]
+    (if (or (empty? roots) (not (canonical-namespace? required)))
+      (driver/->ImportResolutionFailedV1
+        (request-receipt request [] nil)
+        64
+        "import resolution requires roots and a canonical namespace")
+      (let [state CandidateScanStateV1
+            (reduce
+              (fn [scan CandidateScanStateV1
+                   root ModuleSourceRootV1] CandidateScanStateV1
+                (scan-root-candidate scan (read-root-candidate root required)))
+              (->CandidateScanStateV1 [] [] nil nil)
+              roots)
+            dependencies (Vec driver/ImportResolutionDependencyV1)
+            (candidatescanstatev1-dependencies state)
+            sources (Vec driver/ResolvedSourceFactsV1)
+            (candidatescanstatev1-sources state)
+            failure-code Int? (candidatescanstatev1-failure-code state)]
+        (cond
+          (some? failure-code)
+          (driver/->ImportResolutionFailedV1
+            (request-receipt request dependencies nil)
+            failure-code
+            (or (candidatescanstatev1-failure-detail state)
+                "module candidate resolution failed"))
+
+          (= 0 (count sources))
+          (driver/->ImportResolutionMissingV1
+            (request-receipt request dependencies nil))
+
+          (> (count sources) 1)
+          (driver/->ImportResolutionFailedV1
+            (request-receipt request dependencies nil)
+            65
+            (str "namespace collides across exact module roots: " required))
+
+          :else
+          (let [source driver/ResolvedSourceFactsV1 (first sources)
+                normalized facts/SyntaxFactBundle
+                (driver/resolvedsourcefactsv1-normalized source)
+                selected String (facts/syntaxfactbundle-path normalized)]
+            (driver/->ImportResolutionFoundV1
+              (request-receipt request dependencies selected)
+              source)))))))

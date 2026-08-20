@@ -1005,18 +1005,23 @@
 
 (defn compile-source
   [config CompileSourceConfig
+   entry ResolvedSourceFactsV1
+   resolver ImportResolverV1
    store CompileStore] CompileBundleResult
-  (let [path String (compilesourceconfig-source-path config)]
-    (match (read-source-facts path "native-core")
-      [(SourceFactsRejected code detail) (->CompileBundleError code detail)]
-      [(SourceFactsRead raw normalized)
-       (match (close-source-facts path
-                [(parser/->ExplicitFactSourceV1
-                   normalized (parser/package-authority))])
-         [(SourceFactsClosureRejected code detail)
-          (->CompileBundleError code detail)]
-         [(SourceFactsClosed syntax)
-          (compile-closed-source config syntax [raw] store)])])))
+  (let [entry-path String
+        (facts/syntaxfactbundle-path (resolvedsourcefactsv1-normalized entry))]
+    (if (not= entry-path (compilesourceconfig-source-path config))
+      (->CompileBundleError 64
+        "compile config source ID does not match the resolved entry source")
+      (match (collect-source-facts entry resolver)
+        [(SourceFactsCollectionRejectedV1 code detail receipts)
+         (->CompileBundleError code detail)]
+        [(SourceFactsCollectedV1 collected)
+         (compile-closed-source
+           config
+           (collectedsourcefactsv1-closure collected)
+           (collectedsourcefactsv1-raw-modules collected)
+           store)]))))
 
 (defn materialize-and-link
   [query CompileQuery
