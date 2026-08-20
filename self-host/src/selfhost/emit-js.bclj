@@ -1621,13 +1621,12 @@
    body Any] Any
   (let [mutated (collect-set!-syms! body)
         constrained-sequence? (bindings-have-constraints? bindings)]
-    (loop [remaining (vec bindings)
-           i 0
-           strings []
-           bound (deref bound-vars)
-           types deref
-           type-env renames
-           deref rename-env]
+    (loop [remaining Any (vec bindings)
+           i Int 0
+           strings (Vec String) []
+           bound Any (deref bound-vars)
+           types Any (deref type-env)
+           renames Any (deref rename-env)]
       (if (= 0 (count remaining))
         {"strs" strings "bound" bound "types" types "renames" renames}
         (let [binding (nth remaining 0)

@@ -4370,10 +4370,9 @@
                   out)))
             []
             (get prog "forms"))]
-    (loop [env initial-env
-           types definition-type-table
-           prog initial-env
-           remaining pending]
+    (loop [env Any initial-env
+           types Any (definition-type-table prog initial-env)
+           remaining Any pending]
       (if (= (count remaining) 0)
         {"env" env "types" types "ok" true}
         (let [step (reduce
