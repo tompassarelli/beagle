@@ -90,6 +90,11 @@
     (list (p 'String) (p 'Int))
     #f
     (p 'host.fs/ReadTextBoundedResult))
+   (q 'host.stdin 'read-text-bounded)
+   (type-fn
+    (list (p 'Int))
+    #f
+    (p 'host.stdin/ReadTextBoundedResult))
    (q 'host.fs 'list-directory-bounded)
    (type-fn
     (list (p 'String) (p 'Int))
@@ -269,6 +274,14 @@
      (list 'host.fs/ReadTextBoundedOk
            (list (cons ':text (p 'String))))
      (list 'host.fs/ReadTextBoundedError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.stdin/ReadTextBoundedResult
+    (list
+     (list 'host.stdin/ReadTextBoundedOk
+           (list (cons ':text (p 'String))))
+     (list 'host.stdin/ReadTextBoundedOverflow '())
+     (list 'host.stdin/ReadTextBoundedError
            (list (cons ':errno (p 'Int))))))
    (list
     'host.fs/ListDirectoryBoundedResult

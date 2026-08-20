@@ -1,0 +1,30 @@
+#lang beagle
+(ns native.stdin-bounded-probe)
+
+(defn success-case? [] Bool
+  (match (host.stdin/read-text-bounded 16)
+    [(host.stdin/ReadTextBoundedOk text) (= text "alpha\n")]
+    [(host.stdin/ReadTextBoundedOverflow) false]
+    [(host.stdin/ReadTextBoundedError errno) false]))
+
+(defn overflow-case? [] Bool
+  (match (host.stdin/read-text-bounded 3)
+    [(host.stdin/ReadTextBoundedOk text) false]
+    [(host.stdin/ReadTextBoundedOverflow) true]
+    [(host.stdin/ReadTextBoundedError errno) false]))
+
+(defn negative-bound-case? [] Bool
+  (match (host.stdin/read-text-bounded -1)
+    [(host.stdin/ReadTextBoundedOk text) false]
+    [(host.stdin/ReadTextBoundedOverflow) false]
+    [(host.stdin/ReadTextBoundedError errno) true]))
+
+(defn probe [(args (Vec String))] Int
+  (if (= (count args) 1)
+    (let [(mode String) (nth args 0)]
+      (cond
+        (= mode "success") (if (success-case?) 0 1)
+        (= mode "overflow") (if (overflow-case?) 0 1)
+        (= mode "negative") (if (negative-bound-case?) 0 1)
+        :else 64))
+    64))

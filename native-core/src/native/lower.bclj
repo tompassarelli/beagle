@@ -1074,6 +1074,12 @@
 (defn filesystem-text-outcome-type-id [] core/NativeId
   (type-id "HostFilesystemTextOutcome"))
 
+(defn stdin-text-result-type-id [] core/NativeId
+  (type-id "HostStdinTextResult"))
+
+(defn stdin-text-outcome-type-id [] core/NativeId
+  (type-id "HostStdinTextOutcome"))
+
 (defn filesystem-paths-result-type-id [] core/NativeId
   (type-id "HostFilesystemPathsResult"))
 
@@ -1116,6 +1122,20 @@
   (core/->TypeDef (filesystem-text-outcome-type-id) "HostFilesystemTextOutcome"
     (core/->OutcomeType (type-id "String") (filesystem-text-result-type-id))))
 
+(defn stdin-text-result-type [] core/TypeDef
+  (core/->TypeDef (stdin-text-result-type-id) "HostStdinTextResult"
+    (core/->UnionType
+      [(core/->TypeVariant
+         (variant-id "HostStdinTextResult" "ok") "ok" (type-id "String"))
+       (core/->TypeVariant
+         (variant-id "HostStdinTextResult" "overflow") "overflow" nil)
+       (core/->TypeVariant
+         (variant-id "HostStdinTextResult" "error") "error" (type-id "Int"))])))
+
+(defn stdin-text-outcome-type [] core/TypeDef
+  (core/->TypeDef (stdin-text-outcome-type-id) "HostStdinTextOutcome"
+    (core/->OutcomeType (type-id "String") (stdin-text-result-type-id))))
+
 (defn filesystem-paths-result-type [] core/TypeDef
   (core/->TypeDef (filesystem-paths-result-type-id) "HostFilesystemPathsResult"
     (core/->UnionType
@@ -1141,6 +1161,7 @@
    (filesystem-paths-type)
    (filesystem-int-result-type) (filesystem-int-outcome-type)
    (filesystem-text-result-type) (filesystem-text-outcome-type)
+   (stdin-text-result-type) (stdin-text-outcome-type)
    (filesystem-paths-result-type) (filesystem-paths-outcome-type)
    (filesystem-nil-result-type) (filesystem-nil-outcome-type)])
 
@@ -1297,6 +1318,12 @@
       (= name "host.fs/ReadTextBoundedOk")) "ok"
     (and (same-id? target-type (filesystem-text-outcome-type-id))
       (= name "host.fs/ReadTextBoundedError")) "error"
+    (and (same-id? target-type (stdin-text-outcome-type-id))
+      (= name "host.stdin/ReadTextBoundedOk")) "ok"
+    (and (same-id? target-type (stdin-text-outcome-type-id))
+      (= name "host.stdin/ReadTextBoundedOverflow")) "overflow"
+    (and (same-id? target-type (stdin-text-outcome-type-id))
+      (= name "host.stdin/ReadTextBoundedError")) "error"
     (and (same-id? target-type (filesystem-paths-outcome-type-id))
       (= name "host.fs/ListDirectoryBoundedOk")) "ok"
     (and (same-id? target-type (filesystem-paths-outcome-type-id))
@@ -1470,6 +1497,10 @@
 
     (= "host.fs/ReadTextBoundedResult" spelling)
     (->TypeResolutionV0 (filesystem-text-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.stdin/ReadTextBoundedResult" spelling)
+    (->TypeResolutionV0 (stdin-text-outcome-type-id)
       (filesystem-outcome-types) [] true)
 
     (= "host.fs/ListDirectoryBoundedResult" spelling)
@@ -2485,6 +2516,7 @@
 
 (defn host-filesystem-callee? [(name String)] Bool
   (or (= name "host.fs/read-text-bounded")
+      (= name "host.stdin/read-text-bounded")
       (= name "host.fs/list-directory-bounded")
       (= name "host.fs/path-kind")
       (= name "host.fs/real-path")
@@ -2503,6 +2535,7 @@
 (defn host-filesystem-operation [(name String)] String
   (cond
     (= name "host.fs/read-text-bounded") "read-text-bounded"
+    (= name "host.stdin/read-text-bounded") "stdin-read-text-bounded"
     (= name "host.fs/list-directory-bounded") "list-directory-bounded"
     (= name "host.fs/path-kind") "path-kind"
     (= name "host.fs/real-path") "real-path"
@@ -2521,6 +2554,7 @@
 
 (defn host-filesystem-abi-id? [(candidate core/NativeId)] Bool
   (or (same-id? candidate (host-filesystem-abi-id "read-text-bounded"))
+      (same-id? candidate (host-filesystem-abi-id "stdin-read-text-bounded"))
       (same-id? candidate (host-filesystem-abi-id "list-directory-bounded"))
       (same-id? candidate (host-filesystem-abi-id "path-kind"))
       (same-id? candidate (host-filesystem-abi-id "real-path"))
@@ -9976,6 +10010,10 @@
 (defn host-filesystem-operands-valid?
   [(callee String) (value-types (Vec core/NativeId))] Bool
   (cond
+    (= callee "host.stdin/read-text-bounded")
+    (and (= 1 (count value-types))
+      (same-id? (nth value-types 0) (int-type-id)))
+
     (or (= callee "host.fs/read-text-bounded")
         (= callee "host.fs/list-directory-bounded"))
     (and (= 2 (count value-types))
@@ -10015,6 +10053,8 @@
     (filesystem-text-outcome-type-id)
     (= callee "host.fs/real-path")
     (filesystem-text-outcome-type-id)
+    (= callee "host.stdin/read-text-bounded")
+    (stdin-text-outcome-type-id)
     (= callee "host.fs/create-temporary-sibling")
     (filesystem-text-outcome-type-id)
     (= callee "host.fs/list-directory-bounded")
@@ -10044,6 +10084,7 @@
           (if (or (= callee "selfhost.rt/abs-path")
                 (= callee "host.fs/read-text-bounded")
                 (= callee "host.fs/real-path")
+                (= callee "host.stdin/read-text-bounded")
                 (= callee "host.fs/list-directory-bounded")
                 (= callee "host.fs/create-temporary-sibling"))
             (arena-value-id owner)
@@ -20842,6 +20883,7 @@
               (index-has-callee? index "host.fs/path-kind")
               (index-has-callee? index "host.fs/real-path")
               (index-has-callee? index "host.fs/read-text-bounded")
+              (index-has-callee? index "host.stdin/read-text-bounded")
               (index-has-callee? index "host.fs/list-directory-bounded")
               (index-has-callee? index "host.fs/write-text-atomic")
               (index-has-callee? index "host.fs/make-parent-directories")
@@ -22001,6 +22043,15 @@
     "v0"
     layouts-digest))
 
+(defn host-stdin-abi [(layouts-digest String)] core/AbiDeclV0
+  (host-filesystem-abi
+    "stdin-read-text-bounded"
+    "native_host_stdin_read_text_bounded_v0"
+    [(borrowed-abi-value "max-bytes" (int-type-id))]
+    (stdin-text-outcome-type-id)
+    true
+    layouts-digest))
+
 (defn host-whole-input-abi [(operation String) (layouts-digest String)]
   core/AbiDeclV0
   (core/->AbiDeclV0
@@ -22452,6 +22503,11 @@
               (host-filesystem-abi-id "abs-path"))
           (conj with-filesystem-file-exists (nth filesystem-abis 9))
           with-filesystem-file-exists)
+        with-stdin (Vec core/AbiDeclV0)
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "stdin-read-text-bounded"))
+          (conj with-filesystem-abs-path (host-stdin-abi digest))
+          with-filesystem-abs-path)
         process-abis (Vec core/AbiDeclV0) (host-process-abis digest)
         called-process-abis (Vec core/AbiDeclV0)
         (filterv
@@ -22459,7 +22515,7 @@
             (any-function-calls-abi? functions (core/abideclv0-id abi)))
           process-abis)
         with-process (Vec core/AbiDeclV0)
-        (vec (concat with-filesystem-abs-path called-process-abis))
+        (vec (concat with-stdin called-process-abis))
         with-time-sleep (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions (host-time-sleep-abi-id))
           (conj with-process (host-time-sleep-abi digest))
@@ -23911,6 +23967,8 @@
                      (host-filesystem-abi-id "file-exists")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "abs-path")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "stdin-read-text-bounded")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "make-parent-directories")) 1 0)
                (if (any-function-calls-abi? typed-functions

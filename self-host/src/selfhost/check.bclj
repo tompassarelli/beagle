@@ -1162,9 +1162,12 @@
         "host.fs/create-temporary-sibling"
         (make-fn [(make-prim "String")] nil
           (make-prim "host.fs/CreateTemporarySiblingResult")))
-      "host.fs/rename-file"
-      (make-fn [(make-prim "String") (make-prim "String")] nil
-        (make-prim "host.fs/RenameFileResult")))
+      "host.stdin/read-text-bounded"
+      (make-fn [INT-TYPE] nil
+        (make-prim "host.stdin/ReadTextBoundedResult")))
+    "host.fs/rename-file"
+    (make-fn [(make-prim "String") (make-prim "String")] nil
+      (make-prim "host.fs/RenameFileResult")))
     "host.fs/remove-file"
     (make-fn [(make-prim "String")] nil
       (make-prim "host.fs/RemoveFileResult"))))
@@ -1202,6 +1205,12 @@
     [{"name" "host.fs/CreateTemporarySiblingOk"
       "fields" [[":path" (make-prim "String")]]}
      {"name" "host.fs/CreateTemporarySiblingError"
+      "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.stdin/ReadTextBoundedResult"
+    [{"name" "host.stdin/ReadTextBoundedOk"
+      "fields" [[":text" (make-prim "String")]]}
+     {"name" "host.stdin/ReadTextBoundedOverflow" "fields" []}
+     {"name" "host.stdin/ReadTextBoundedError"
       "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/RenameFileResult"
     [{"name" "host.fs/RenameFileOk" "fields" []}

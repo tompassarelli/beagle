@@ -10146,9 +10146,9 @@ uint64_t native_host_filesystem_read_text_bounded_or_die_v0(
   return result;
 }
 
-uint64_t native_host_stdin_read_text_bounded_or_die_v0(
+int32_t native_host_stdin_read_text_bounded_v0(
     native_arena *arena, const native_capability *capability,
-    int64_t max_bytes) {
+    int64_t max_bytes, uint64_t *out) {
   uint8_t *buffer = NULL;
   uint8_t *destination = NULL;
   size_t length = (size_t)0U;
@@ -10156,11 +10156,11 @@ uint64_t native_host_stdin_read_text_bounded_or_die_v0(
   size_t bound;
   uint64_t result;
   if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
-      (max_bytes < INT64_C(0)) ||
+      (out == NULL) || (max_bytes < INT64_C(0)) ||
       ((uint64_t)max_bytes > (uint64_t)SIZE_MAX)) {
-    native_host_input_failure("stdin", "HOST-INPUT-INVALID-BOUND", 0,
-                             max_bytes);
+    return EINVAL;
   }
+  *out = UINT64_C(0);
   bound = (size_t)max_bytes;
   for (;;) {
     ssize_t amount;
@@ -10174,12 +10174,13 @@ uint64_t native_host_stdin_read_text_bounded_or_die_v0(
           continue;
         }
         if (amount > 0) {
-          native_host_input_failure("stdin", "HOST-INPUT-BOUND-EXCEEDED",
-                                   (uint64_t)length + UINT64_C(1), max_bytes);
+          free(buffer);
+          return NATIVE_HOST_STDIN_OVERFLOW;
         }
         if (amount < 0) {
-          native_host_input_failure("stdin", "HOST-INPUT-READ-FAILED",
-                                   (uint64_t)length, max_bytes);
+          int32_t status = native_host_filesystem_errno();
+          free(buffer);
+          return status;
         }
         break;
       }
@@ -10188,8 +10189,8 @@ uint64_t native_host_stdin_read_text_bounded_or_die_v0(
       }
       replacement = (uint8_t *)realloc(buffer, grown);
       if (replacement == NULL) {
-        native_host_input_failure("stdin", "HOST-INPUT-ALLOC-FAILED",
-                                 (uint64_t)length, max_bytes);
+        free(buffer);
+        return ENOMEM;
       }
       buffer = replacement;
       capacity = grown;
@@ -10199,22 +10200,56 @@ uint64_t native_host_stdin_read_text_bounded_or_die_v0(
       continue;
     }
     if (amount < 0) {
-      native_host_input_failure("stdin", "HOST-INPUT-READ-FAILED",
-                               (uint64_t)length, max_bytes);
+      int32_t status = native_host_filesystem_errno();
+      free(buffer);
+      return status;
     }
     if (amount == 0) {
       break;
     }
     length += (size_t)amount;
   }
+  if (!native_utf8_valid(buffer, (uint64_t)length)) {
+    free(buffer);
+    return EILSEQ;
+  }
   result = native_text_alloc(arena, (uint64_t)length, &destination);
   if ((length != (size_t)0U) && (destination != NULL)) {
     memcpy(destination, buffer, length);
   }
   free(buffer);
-  if (!native_utf8_valid(destination, (uint64_t)length)) {
-    native_host_input_failure("stdin", "HOST-INPUT-INVALID-UTF8",
-                             (uint64_t)length, max_bytes);
+  *out = result;
+  return 0;
+}
+
+uint64_t native_host_stdin_read_text_bounded_or_die_v0(
+    native_arena *arena, const native_capability *capability,
+    int64_t max_bytes) {
+  uint64_t result = UINT64_C(0);
+  int32_t status = native_host_stdin_read_text_bounded_v0(
+      arena, capability, max_bytes, &result);
+  if (status == NATIVE_HOST_STDIN_OVERFLOW) {
+    native_host_input_failure(
+        "stdin", "HOST-INPUT-BOUND-EXCEEDED",
+        (max_bytes < INT64_MAX) ? (uint64_t)(max_bytes + INT64_C(1)) :
+                                  UINT64_MAX,
+        max_bytes);
+  }
+  if (status == EINVAL) {
+    native_host_input_failure("stdin", "HOST-INPUT-INVALID-BOUND", 0,
+                              max_bytes);
+  }
+  if (status == EILSEQ) {
+    native_host_input_failure("stdin", "HOST-INPUT-INVALID-UTF8", 0,
+                              max_bytes);
+  }
+  if (status == ENOMEM) {
+    native_host_input_failure("stdin", "HOST-INPUT-ALLOC-FAILED", 0,
+                              max_bytes);
+  }
+  if (status != 0) {
+    native_host_input_failure("stdin", "HOST-INPUT-READ-FAILED", 0,
+                              max_bytes);
   }
   return result;
 }

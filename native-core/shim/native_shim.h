@@ -17,6 +17,7 @@
 
 #define NATIVE_HOST_SOCKET_OK INT32_C(0)
 #define NATIVE_HOST_SOCKET_PEER_CLOSED INT32_C(-1)
+#define NATIVE_HOST_STDIN_OVERFLOW INT32_C(-2)
 #define NATIVE_HOST_SOCKET_INHERITED_FD INT64_C(3)
 #define NATIVE_HOST_SOCKET_MAX_IO INT64_C(1048576)
 #define NATIVE_HOST_PROCESS_MAX_LINE_BYTES INT64_C(16777216)
@@ -689,6 +690,9 @@ int32_t native_host_filesystem_real_path_v0(
     uint64_t *out);
 int32_t native_host_filesystem_read_text_bounded_v0(
     native_arena *arena, const native_capability *capability, uint64_t path,
+    int64_t max_bytes, uint64_t *out);
+int32_t native_host_stdin_read_text_bounded_v0(
+    native_arena *arena, const native_capability *capability,
     int64_t max_bytes, uint64_t *out);
 /* Compiler whole-input adapters fail loudly with a structured diagnostic on
    any host error or bound overflow; they never return a truncated Text. */

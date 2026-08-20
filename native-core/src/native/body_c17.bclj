@@ -279,6 +279,7 @@
 
 (defn host-filesystem-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_filesystem_read_text_bounded_v0")
+      (= symbol "native_host_stdin_read_text_bounded_v0")
       (= symbol "native_host_filesystem_list_directory_bounded_v0")
       (= symbol "native_host_filesystem_path_kind_v0")
       (= symbol "native_host_filesystem_real_path_v0")
@@ -1810,6 +1811,8 @@
             (outcome-variant types owner "ok")
             peer-variant (U core/TypeVariant Nil)
             (outcome-variant types owner "peer-closed")
+            overflow-variant (U core/TypeVariant Nil)
+            (outcome-variant types owner "overflow")
             error-variant (U core/TypeVariant Nil)
             (outcome-variant types owner "error")
             ok-payload (U core/NativeId Nil)
@@ -1819,6 +1822,8 @@
             ok-tag Int (outcome-variant-tag types layouts owner "ok")
             peer-tag Int
             (outcome-variant-tag types layouts owner "peer-closed")
+            overflow-tag Int
+            (outcome-variant-tag types layouts owner "overflow")
             error-tag Int (outcome-variant-tag types layouts owner "error")
             result-value (U core/AbiValueV0 Nil)
             (core/abideclv0-result abi)
@@ -1827,7 +1832,8 @@
         (if (or (nil? ok-variant) (nil? error-variant)
               (nil? error-payload) (nil? result-value)
               (< ok-tag 0) (< error-tag 0)
-              (and (some? peer-variant) (< peer-tag 0)))
+              (and (some? peer-variant) (< peer-tag 0))
+              (and (some? overflow-variant) (< overflow-tag 0)))
           ""
           (let [hidden (Vec String)
                 (if (nil? arena-id)
@@ -1866,6 +1872,11 @@
                 (str "    } else if (" status
                   " == NATIVE_HOST_SOCKET_PEER_CLOSED) {\n"
                   "      " target ".tag = INT64_C(" peer-tag ");\n"))
+              (if (nil? overflow-variant)
+                ""
+                (str "    } else if (" status
+                  " == NATIVE_HOST_STDIN_OVERFLOW) {\n"
+                  "      " target ".tag = INT64_C(" overflow-tag ");\n"))
               "    } else {\n"
               "      " target ".tag = INT64_C(" error-tag ");\n"
               "      " target ".payload.variant_" error-tag
