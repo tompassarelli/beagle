@@ -368,6 +368,12 @@ C
       '(defn start [] Nil nil)' ';; changed during materialization' \
       >"$FAKE_MUTATE_SOURCE"
   fi
+  if [[ "$want_qbe" == 1 && -n "${FAKE_MUTATE_HOST_ROOT:-}" ]]; then
+    for input in server_host.c server_host.h server_generated.c; do
+      printf '%s\n' 'changed during materialization' \
+        >"$FAKE_MUTATE_HOST_ROOT/native/$input"
+    done
+  fi
   # A refused generation is reported on stderr but publishes no artifacts.
   if [[ "$want_qbe" == 1 && -n "${FAKE_QBE_REFUSAL:-}" ]]; then
     cat "$out/report.txt" >&2
@@ -1307,9 +1313,10 @@ grep -Fqx "$(sha256sum "$scratch/tool/beagle-lib/module_01.txt" |
 # program and one host artifact. The builder copy derives each checkout root
 # from itself, so this exercises the production re-anchoring boundary rather
 # than substituting paths in a fixture manifest.
+snapshot_checkout="$scratch/checkout-host-snapshot"
 portable_a="$scratch/checkout-a"
 portable_b="$scratch/different/depth/checkout-b"
-for portable in "$portable_a" "$portable_b"; do
+for portable in "$snapshot_checkout" "$portable_a" "$portable_b"; do
   mkdir -p "$portable/bin" "$portable/native" "$portable/src"
   cp "$builder" "$portable/bin/beagle-store-native-build"
   cp "$repo/beagle-pin.txt" "$portable/beagle-pin.txt"
@@ -1319,6 +1326,41 @@ for portable in "$portable_a" "$portable_b"; do
   printf '%s\n' '#lang beagle' '(ns demo.portable)' \
     '(defn start [] Nil nil)' >"$portable/src/portable.bgl"
 done
+
+snapshot_host_source_digest="$(sha256sum \
+  "$snapshot_checkout/native/server_host.c" | sed 's/ .*//')"
+snapshot_host_header_digest="$(sha256sum \
+  "$snapshot_checkout/native/server_host.h" | sed 's/ .*//')"
+snapshot_adapter_digest="$(sha256sum \
+  "$snapshot_checkout/native/server_generated.c" | sed 's/ .*//')"
+snapshot_host_artifact="$(env \
+  BEAGLE_STORE_BEAGLE="$scratch/tool/bin/beagle" \
+  BEAGLE_STORE_NATIVE_CACHE="$scratch/cache-host-snapshot" \
+  BEAGLE_STORE_NATIVE_CC="${CC:-cc}" \
+  BEAGLE_STORE_QBE_FRONTIER_LEDGER="$ledger" \
+  FAKE_NATIVE_CALLS="$calls" \
+  FAKE_MUTATE_HOST_ROOT="$snapshot_checkout" \
+  "$snapshot_checkout/bin/beagle-store-native-build" --host server \
+  "$snapshot_checkout/src/portable.bgl")" ||
+  fail "host input snapshot did not survive checkout mutation during materialization"
+[[ -f "$snapshot_host_artifact/READY" &&
+  -x "$snapshot_host_artifact/bin/beagle-store-server-native" ]] ||
+  fail "host input snapshot did not publish a ready server artifact"
+for input in server_host.c server_host.h server_generated.c; do
+  grep -Fqx 'changed during materialization' \
+    "$snapshot_checkout/native/$input" ||
+    fail "host input snapshot regression did not mutate $input"
+done
+grep -Fqx "host-source repo:native/server_host.c $snapshot_host_source_digest" \
+  "$snapshot_host_artifact/input.manifest" ||
+  fail "host source manifest did not preserve its launch bytes"
+grep -Fqx "host-header repo:native/server_host.h $snapshot_host_header_digest" \
+  "$snapshot_host_artifact/input.manifest" ||
+  fail "host header manifest did not preserve its launch bytes"
+grep -Fqx "adapter repo:native/server_generated.c $snapshot_adapter_digest" \
+  "$snapshot_host_artifact/input.manifest" ||
+  fail "host adapter manifest did not preserve its launch bytes"
+
 portable_env=(
   env
   BEAGLE_STORE_BEAGLE="$scratch/tool/bin/beagle"

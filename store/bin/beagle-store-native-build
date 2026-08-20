@@ -179,15 +179,6 @@ cache_input_name() {
   fi
 }
 
-compiler_input_name() {
-  local path="$1" relative
-  if relative="$(checkout_relative_path "$path")"; then
-    printf '%s\n' "$relative"
-  else
-    printf '%s\n' "$path"
-  fi
-}
-
 host_source=""
 host_header=""
 adapter_header=""
@@ -233,11 +224,6 @@ if [[ "$host" != "program" ]]; then
   adapter_name="$(cache_input_name "$adapter")"
   [[ -z "$wasm_host_source" ]] ||
     wasm_host_source_name="$(cache_input_name "$wasm_host_source")"
-  host_source_arg="$(compiler_input_name "$host_source")"
-  host_include_arg="$(compiler_input_name "$(dirname "$host_header")")"
-  adapter_arg="$(compiler_input_name "$adapter")"
-  [[ -z "$wasm_host_source" ]] ||
-    wasm_host_source_arg="$(compiler_input_name "$wasm_host_source")"
 fi
 
 if [[ "$host" == "wasm-embed" ]]; then
@@ -412,11 +398,14 @@ program_input_manifest=""
 stage=""
 program_stage=""
 source_snapshot_root=""
+host_snapshot_root=""
 cleanup() {
   [[ -z "$stage" || ! -d "$stage" ]] || rm -rf "${stage:?}"
   [[ -z "$program_stage" || ! -d "$program_stage" ]] || rm -rf "${program_stage:?}"
   [[ -z "$source_snapshot_root" || ! -d "$source_snapshot_root" ]] ||
     rm -rf "${source_snapshot_root:?}"
+  [[ -z "$host_snapshot_root" || ! -d "$host_snapshot_root" ]] ||
+    rm -rf "${host_snapshot_root:?}"
   [[ -z "$input_manifest" || ! -f "$input_manifest" ]] || rm -f "${input_manifest:?}"
   [[ -z "$program_input_manifest" || ! -f "$program_input_manifest" ]] ||
     rm -f "${program_input_manifest:?}"
@@ -424,6 +413,49 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Host packaging follows the native-program materializer and can therefore be
+# minutes after launch. Capture every selected Store C/header input before that
+# compiler starts; manifests, links, copies, and provenance below read only
+# these immutable bytes.
+snapshot_host_input() {
+  local source="$1" destination="$2"
+  local source_digest_before snapshot_digest source_digest_after
+  mkdir -p "$(dirname "$destination")"
+  source_digest_before="$(sha256sum "$source" | sed 's/ .*//')"
+  cp -- "$source" "$destination"
+  snapshot_digest="$(sha256sum "$destination" | sed 's/ .*//')"
+  source_digest_after="$(sha256sum "$source" | sed 's/ .*//')"
+  [[ "$source_digest_before" == "$snapshot_digest" &&
+    "$snapshot_digest" == "$source_digest_after" ]] ||
+    die "host input changed while its launch snapshot was captured: $source"
+  chmod a-w "$destination"
+}
+
+if [[ "$host" != "program" ]]; then
+  host_snapshot_root="$(mktemp -d "$cache_root/.tmp/host-inputs.XXXXXX")"
+  snapshot_host_input "$host_source" "$host_snapshot_root/src/host.c"
+  host_source="$host_snapshot_root/src/host.c"
+  snapshot_host_input "$host_header" \
+    "$host_snapshot_root/include/$(basename "$host_header")"
+  host_header="$host_snapshot_root/include/$(basename "$host_header")"
+  if [[ -n "$adapter_header" ]]; then
+    snapshot_host_input "$adapter_header" \
+      "$host_snapshot_root/include/$(basename "$adapter_header")"
+    adapter_header="$host_snapshot_root/include/$(basename "$adapter_header")"
+  fi
+  snapshot_host_input "$adapter" "$host_snapshot_root/src/adapter.c"
+  adapter="$host_snapshot_root/src/adapter.c"
+  if [[ -n "$wasm_host_source" ]]; then
+    snapshot_host_input "$wasm_host_source" \
+      "$host_snapshot_root/src/wasm-host.c"
+    wasm_host_source="$host_snapshot_root/src/wasm-host.c"
+  fi
+  host_source_arg="$host_source"
+  host_include_arg="$host_snapshot_root/include"
+  adapter_arg="$adapter"
+  [[ -z "$wasm_host_source" ]] || wasm_host_source_arg="$wasm_host_source"
+fi
 
 # A native program build can invoke Beagle more than once: a QBE refusal is
 # followed by a C17-only recovery pass. Capture the declared dependency-first
