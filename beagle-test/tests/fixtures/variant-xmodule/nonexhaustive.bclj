@@ -2,7 +2,7 @@
 
 ;; Exhaustiveness must reach an IMPORTED union: the use site names it
 ;; `p/Shape`, the provider declares it `Shape`.
-(require prov :as p)
+(require [prov :as p])
 
 (defn area [s p/Shape] Int
   (match s

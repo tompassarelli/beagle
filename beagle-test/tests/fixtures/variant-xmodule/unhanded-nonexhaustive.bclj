@@ -5,7 +5,7 @@
 ;; unresolved the union's member list never crossed the boundary, so this
 ;; source produced a return-type complaint instead of an exhaustiveness one.
 (ns xmod.unhanded-nonexhaustive)
-(require xmod.shape-kinds :as p)
+(require [xmod.shape-kinds :as p])
 
 (defn area [s p/Shape] Int
   (match s

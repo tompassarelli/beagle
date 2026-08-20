@@ -1,7 +1,7 @@
 #lang beagle/clj
 
 ;; (g) The same-module twins, across a module boundary.
-(require prov :as p)
+(require [prov :as p])
 
 (defn area [s p/Shape] Int
   (match s

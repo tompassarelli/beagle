@@ -1,6 +1,6 @@
 #lang beagle/clj
 
-(require prov :as p)
+(require [prov :as p])
 
 (defn publication [root p/Root] p/PublicationRef
   (match root

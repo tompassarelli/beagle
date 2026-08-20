@@ -3,7 +3,7 @@
 ;; A union over BARE sibling-record names must import each member at its full
 ;; field arity — the importer used to re-register bare members as nullary and
 ;; erase the record's fields.
-(require prov :as p)
+(require [prov :as p])
 
 (defn build [] p/Node
   (p/->Elem "div" 2))

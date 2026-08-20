@@ -5,7 +5,7 @@
 ;; require went unresolved the binder took the constructor type instead, and
 ;; this same source failed with "got Circle" — blaming the variant, not the field.
 (ns xmod.unhanded-field-type)
-(require xmod.shape-kinds :as p)
+(require [xmod.shape-kinds :as p])
 
 (defn wrong [s p/Shape] Int
   (match s

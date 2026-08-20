@@ -2,7 +2,7 @@
 
 ;; (g) Cross-module must never be MORE permissive: the imported binder is still
 ;; the FIELD, so `c` is Int and the accessor call must fail.
-(require prov :as p)
+(require [prov :as p])
 
 (defn area [s p/Shape] Int
   (match s

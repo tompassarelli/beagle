@@ -2,7 +2,7 @@
 
 ;; `:as` import: qualified constructor and accessor are TYPED, and a variant
 ;; pattern binds the FIELD positionally — same as a same-module defunion.
-(require prov :as p)
+(require [prov :as p])
 
 (defn area [s p/Shape] Int
   (match s
