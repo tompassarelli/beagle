@@ -14,18 +14,16 @@
             [native.qbe :as qbe]))
 
 
-(defn typing-rejection-report [(result lower/TypingResultV0)] String
+(defn typing-rejection-report [result lower/TypingResultV0] String
   (if (not (instance? native.lower.TypingRejectedV0 result))
     ""
-    (let [(diagnostics (Vec core/DiagnosticV0))
-          (core/passreceiptv0-diagnostics
+    (let [diagnostics (Vec core/DiagnosticV0) (core/passreceiptv0-diagnostics
             (lower/typingrejectedv0-receipt result))]
       (loop [position Int 0
-             report String
-             "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"]
+             report String "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"]
         (if (>= position (count diagnostics))
           report
-          (let [(diagnostic core/DiagnosticV0) (nth diagnostics position)]
+          (let [diagnostic core/DiagnosticV0 (nth diagnostics position)]
             (recur (+ position 1)
               (str report "typing-diagnostic "
                 (core/diagnosticv0-code diagnostic) " "
@@ -34,11 +32,11 @@
 (defn union-tag-type-id [] core/NativeId
   (core/typedef-id (lower/union-tag-type)))
 
-(defn type-references [(definition core/TypeDef)] (Vec core/NativeId)
-  (let [(shape core/TypeShape) (core/typedef-shape definition)]
+(defn type-references [definition core/TypeDef] (Vec core/NativeId)
+  (let [shape core/TypeShape (core/typedef-shape definition)]
     (cond
       (instance? native.core.RecordType shape)
-      (mapv (fn [(field core/TypeField)] core/NativeId
+      (mapv (fn [field core/TypeField] core/NativeId
               (core/typefield-type-id field))
         (core/recordtype-fields shape))
 
@@ -48,8 +46,7 @@
              collected (Vec core/NativeId) [(union-tag-type-id)]]
         (if (>= position (count variants))
           collected
-          (let [(payload (U core/NativeId Nil))
-                (core/typevariant-payload-type (nth variants position))]
+          (let [payload (U core/NativeId Nil) (core/typevariant-payload-type (nth variants position))]
             (recur (+ position 1) variants
               (if (nil? payload) collected (conj collected payload))))))
 
@@ -72,8 +69,7 @@
       [(core/referencetype-target-type shape)]
 
       (instance? native.core.FunctionType shape)
-      (let [(rest-type (U core/NativeId Nil))
-            (core/functiontype-rest-type shape)]
+      (let [rest-type (U core/NativeId Nil) (core/functiontype-rest-type shape)]
         (vec (concat
                (core/functiontype-parameter-types shape)
                (if (nil? rest-type) [] [rest-type])
@@ -86,84 +82,80 @@
 
       :else [])))
 
-(defn instruction-type [(instruction core/Instruction)] core/NativeId
+(defn instruction-type [instruction core/Instruction] core/NativeId
   (core/ssavaluev0-type-id (get instruction :result)))
 
-(defn function-type-seeds [(function core/FunctionDef)] (Vec core/NativeId)
-  (let [(return-type (U core/NativeId Nil)) (core/functiondef-return-type function)
-        (seeds (Vec core/NativeId))
-        (core/append-ids
-          (mapv (fn [(parameter core/Parameter)] core/NativeId
+(defn function-type-seeds [function core/FunctionDef] (Vec core/NativeId)
+  (let [return-type (U core/NativeId Nil) (core/functiondef-return-type function)
+        seeds (Vec core/NativeId) (core/append-ids
+          (mapv (fn [parameter core/Parameter] core/NativeId
                   (core/parameter-type-id parameter))
             (core/functiondef-parameters function))
           (if (nil? return-type) [] [return-type]))
-        (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [position Int 0 collected (Vec core/NativeId) seeds]
+        blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position Int 0
+           collected (Vec core/NativeId) seeds]
       (if (>= position (count blocks))
         collected
-        (let [(block core/BasicBlock) (nth blocks position)
-              (with-parameters (Vec core/NativeId))
-              (core/append-ids collected
-                (mapv (fn [(parameter core/Parameter)] core/NativeId
+        (let [block core/BasicBlock (nth blocks position)
+              with-parameters (Vec core/NativeId) (core/append-ids collected
+                (mapv (fn [parameter core/Parameter] core/NativeId
                         (core/parameter-type-id parameter))
                   (core/basicblock-parameters block)))]
           (recur (+ position 1)
             (core/append-ids with-parameters
-              (mapv (fn [(instruction core/Instruction)] core/NativeId
+              (mapv (fn [instruction core/Instruction] core/NativeId
                       (instruction-type instruction))
                 (core/basicblock-instructions block)))))))))
 
 (defn conj-id
-  [(ids (Vec core/NativeId))
-   (candidate core/NativeId)] (Vec core/NativeId)
+  [ids (Vec core/NativeId)
+   candidate core/NativeId] (Vec core/NativeId)
   (if (core/id-in? ids candidate) ids (conj ids candidate)))
 
-(defn abi-type-seeds [(program core/NativeCoreProgram)] (Vec core/NativeId)
+(defn abi-type-seeds [program core/NativeCoreProgram] (Vec core/NativeId)
   (loop [position Int 0
          abis (Vec core/AbiDeclV0) (core/nativecoreprogram-abis program)
          collected (Vec core/NativeId) []]
     (if (>= position (count abis))
       collected
-      (let [(abi core/AbiDeclV0) (nth abis position)
-            (result (U core/AbiValueV0 Nil)) (core/abideclv0-result abi)]
+      (let [abi core/AbiDeclV0 (nth abis position)
+            result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
         (recur (+ position 1) abis
           (core/append-ids
             (core/append-ids collected [(core/abideclv0-failure-type abi)])
-            (mapv (fn [(value core/AbiValueV0)] core/NativeId
+            (mapv (fn [value core/AbiValueV0] core/NativeId
                     (core/abivaluev0-type-id value))
               (if (nil? result)
                 (core/abideclv0-parameters abi)
                 (conj (core/abideclv0-parameters abi) result)))))))))
 
-(defn reachable-type-ids
-  [(program core/NativeCoreProgram)] (Vec core/NativeId)
-  (let [(types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
-        (seeds (Vec core/NativeId))
-        (loop [position Int 0
-               functions (Vec core/FunctionDef) (core/nativecoreprogram-functions program)
-               collected (Vec core/NativeId) (abi-type-seeds program)]
-          (if (>= position (count functions))
+(defn reachable-type-ids [program core/NativeCoreProgram] (Vec core/NativeId)
+  (let [types (Vec core/TypeDef) (core/nativecoreprogram-types program)
+        seeds (Vec core/NativeId) (loop [position Int 0
+                                         functions (Vec core/FunctionDef) (core/nativecoreprogram-functions program)
+                                         collected (Vec core/NativeId) (abi-type-seeds program)]
+                                    (if (>= position (count functions))
             collected
             (recur (+ position 1) functions
               (loop [inner Int 0
-                     candidates (Vec core/NativeId)
-                     (function-type-seeds (nth functions position))
+                     candidates (Vec core/NativeId) (function-type-seeds (nth functions position))
                      kept (Vec core/NativeId) collected]
                 (if (>= inner (count candidates))
                   kept
                   (recur (+ inner 1) candidates
                     (conj-id kept (nth candidates inner))))))))]
-    (loop [round Int 0 current (Vec core/NativeId) seeds]
-      (let [(grown (Vec core/NativeId))
-            (loop [position Int 0 collected (Vec core/NativeId) current]
-              (if (>= position (count current))
+    (loop [round Int 0
+           current (Vec core/NativeId) seeds]
+      (let [grown (Vec core/NativeId) (loop [position Int 0
+                                             collected (Vec core/NativeId) current]
+                                        (if (>= position (count current))
                 collected
-                (let [(definition (U core/TypeDef Nil))
-                      (slice/find-type types (nth current position))
-                      (references (Vec core/NativeId))
-                      (if (nil? definition) [] (type-references definition))]
+                (let [definition (U core/TypeDef Nil) (slice/find-type types (nth current position))
+                      references (Vec core/NativeId) (if (nil? definition) [] (type-references definition))]
                   (recur (+ position 1)
-                    (loop [inner Int 0 kept (Vec core/NativeId) collected]
+                    (loop [inner Int 0
+                           kept (Vec core/NativeId) collected]
                       (if (>= inner (count references))
                         kept
                         (recur (+ inner 1) (conj-id kept (nth references inner)))))))))]
@@ -171,20 +163,19 @@
           grown
           (recur (+ round 1) grown))))))
 
-(defn projected-program
-  [(program core/NativeCoreProgram)] core/NativeCoreProgram
-  (let [(kept (Vec core/NativeId)) (reachable-type-ids program)]
+(defn projected-program [program core/NativeCoreProgram] core/NativeCoreProgram
+  (let [kept (Vec core/NativeId) (reachable-type-ids program)]
     (core/->NativeCoreProgram
       (core/nativecoreprogram-id program)
       (core/nativecoreprogram-parent program)
       (core/nativecoreprogram-compiler-pass program)
-      (filterv (fn [(definition core/TypeDef)] Bool
+      (filterv (fn [definition core/TypeDef] Bool
                  (core/id-in? kept (core/typedef-id definition)))
         (core/nativecoreprogram-types program))
       (core/nativecoreprogram-effects program)
       (core/nativecoreprogram-regions program)
       (core/nativecoreprogram-capabilities program)
-      (filterv (fn [(layout core/LayoutDef)] Bool
+      (filterv (fn [layout core/LayoutDef] Bool
                  (core/id-in? kept (core/layoutdef-type-id layout)))
         (core/nativecoreprogram-layouts program))
       (core/nativecoreprogram-functions program)
@@ -194,19 +185,20 @@
       (core/nativecoreprogram-abis program)
       (core/nativecoreprogram-observations program))))
 
-(defn id-text [(candidate Any)] String (str (get candidate :value "")))
+(defn id-text [candidate Any] String (str (get candidate :value "")))
 
-(defn verdict-subject [(verdict Any)] String
+(defn verdict-subject [verdict Any] String
   (str (id-text (get verdict :type-id nil))
     (id-text (get verdict :function-id nil))
     (id-text (get verdict :abi-id nil))
     (id-text (get verdict :region-id nil))))
 
 (defn obligation-report
-  [(label String)
-   (verdicts (Vec obligations/ObligationVerdictV0))] String
+  [label String
+   verdicts (Vec obligations/ObligationVerdictV0)] String
   (let [names (Vec String) (slice/obligation-names)]
-    (loop [position Int 0 report String ""]
+    (loop [position Int 0
+           report String ""]
       (if (>= position (count verdicts))
         report
         (recur (+ position 1)
@@ -216,10 +208,10 @@
               "FAIL")
             " " (nth names position) "\n"))))))
 
-(defn failing-obligation-verdicts
-  [(verdicts (Vec obligations/ObligationVerdictV0))] String
+(defn failing-obligation-verdicts [verdicts (Vec obligations/ObligationVerdictV0)] String
   (let [names (Vec String) (slice/obligation-names)]
-    (loop [position Int 0 report String ""]
+    (loop [position Int 0
+           report String ""]
       (if (>= position (count verdicts))
         report
         (recur (+ position 1)
@@ -229,14 +221,15 @@
               (verdict-subject (nth verdicts position)) "\n")))))))
 
 (defn failing-obligations
-  [(program core/NativeCoreProgram)
-   (abi core/AbiProfileV0)] String
+  [program core/NativeCoreProgram
+   abi core/AbiProfileV0] String
   (failing-obligation-verdicts
     (obligations/validate-native-core-program program abi)))
 
-(defn function-report [(functions (Vec core/FunctionDef))] String
-  (let [(ordered (Vec core/FunctionDef)) (c17/ordered-functions functions)]
-    (loop [position Int 0 report String ""]
+(defn function-report [functions (Vec core/FunctionDef)] String
+  (let [ordered (Vec core/FunctionDef) (c17/ordered-functions functions)]
+    (loop [position Int 0
+           report String ""]
       (if (>= position (count ordered))
         report
         (recur (+ position 1)
@@ -246,16 +239,16 @@
             " blocks\n"))))))
 
 (defn functions-named
-  [(functions (Vec core/FunctionDef))
-   (name String)] (Vec core/FunctionDef)
-  (filterv (fn [(function core/FunctionDef)] Bool
+  [functions (Vec core/FunctionDef)
+   name String] (Vec core/FunctionDef)
+  (filterv (fn [function core/FunctionDef] Bool
              (= name (core/functiondef-name function)))
     functions))
 
 (defn single-function-program
-  [(program core/NativeCoreProgram)
-   (function core/FunctionDef)] core/NativeCoreProgram
-  (let [(function-id core/NativeId) (core/functiondef-id function)]
+  [program core/NativeCoreProgram
+   function core/FunctionDef] core/NativeCoreProgram
+  (let [function-id core/NativeId (core/functiondef-id function)]
     (core/->NativeCoreProgram
       (core/nativecoreprogram-id program)
       (core/nativecoreprogram-parent program)
@@ -269,44 +262,39 @@
       (core/nativecoreprogram-allowed-effects program)
       (core/nativecoreprogram-allowed-regions program)
       (core/nativecoreprogram-allowed-capabilities program)
-      (filterv (fn [(abi core/AbiDeclV0)] Bool
+      (filterv (fn [abi core/AbiDeclV0] Bool
                  (core/native-id= function-id (core/abideclv0-function-id abi)))
         (core/nativecoreprogram-abis program))
       (core/nativecoreprogram-observations program))))
 
-(defn obligations-pass?
-  [(verdicts (Vec obligations/ObligationVerdictV0))] Bool
+(defn obligations-pass? [verdicts (Vec obligations/ObligationVerdictV0)] Bool
   (every? obligations/obligation-passed?
     verdicts))
 
-(defn qbe-leaf? [(function core/FunctionDef)] Bool
-  (every? (fn [(block core/BasicBlock)] Bool
-            (every? (fn [(instruction core/Instruction)] Bool
+(defn qbe-leaf? [function core/FunctionDef] Bool
+  (every? (fn [block core/BasicBlock] Bool
+            (every? (fn [instruction core/Instruction] Bool
                       (not (instance? native.core.CallInstruction instruction)))
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
 
 (defn emit-qbe-function!
-  [(program core/NativeCoreProgram)
-   (function-name String)
-   (artifacts-dir String)
-   (module-index Int)
-   (abi core/AbiProfileV0)] String
-  (let [(matches (Vec core/FunctionDef))
-        (functions-named (core/nativecoreprogram-functions program) function-name)]
+  [program core/NativeCoreProgram
+   function-name String
+   artifacts-dir String
+   module-index Int
+   abi core/AbiProfileV0] String
+  (let [matches (Vec core/FunctionDef) (functions-named (core/nativecoreprogram-functions program) function-name)]
     (if (not= (count matches) 1)
       (str "qbe-selected-function REFUSED " function-name
         " matches=" (count matches) "\n")
-      (let [(selected core/FunctionDef) (nth matches 0)]
+      (let [selected core/FunctionDef (nth matches 0)]
         (if (not (qbe-leaf? selected))
           (str "qbe-selected-function REFUSED " function-name
             " has calls outside the one-function projection\n")
-          (let [(projected core/NativeCoreProgram)
-                (projected-program (single-function-program program selected))
-                (verdicts (Vec obligations/ObligationVerdictV0))
-                (obligations/validate-native-core-program projected abi)
-                (head String)
-                (str "qbe-selected-function " function-name "\n"
+          (let [projected core/NativeCoreProgram (projected-program (single-function-program program selected))
+                verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program projected abi)
+                head String (str "qbe-selected-function " function-name "\n"
                   "qbe-program-functions "
                   (count (core/nativecoreprogram-functions projected)) "\n"
                   "qbe-program-abis " (count (core/nativecoreprogram-abis projected)) "\n"
@@ -316,14 +304,12 @@
                   (failing-obligation-verdicts verdicts))]
             (if (not (obligations-pass? verdicts))
               (str head "qbe-materialize REFUSED structural obligations failed\n")
-              (let [(result qbe/QbeMaterialization)
-                    (qbe/materialize-program projected module-index
+              (let [result qbe/QbeMaterialization (qbe/materialize-program projected module-index
                       (core/abiprofilev0-id abi))]
                 (if (not (qbe/materialization-ok? result))
                   (str head "qbe-materialize REFUSED "
                     (qbe/materialization-detail result) "\n")
-                  (let [(artifact qbe/QbeArtifact)
-                        (qbe/materialization-artifact result)]
+                  (let [artifact qbe/QbeArtifact (qbe/materialization-artifact result)]
                     (do
                       (spit (str artifacts-dir "/"
                               (qbe/qbeartifact-module-name artifact))
@@ -332,48 +318,37 @@
                         (qbe/qbeartifact-module-name artifact) "\n"))))))))))))
 
 (defn emit-slice-for-abi!
-  [(facts-path String)
-   (module-name String)
-   (relative-path String)
-   (artifacts-dir String)
-   (compiler-commit String)
-   (abi core/AbiProfileV0)] String
-  (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
-        (configuration (Vec String))
-        ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        (source stages/SourceStageV1)
-        (slice/source-program rows module-name relative-path)
-        (freeze-result lower/SourceFreezeResultV0)
-        (lower/freeze-source-stage source compiler-commit configuration)]
+  [facts-path String
+   module-name String
+   relative-path String
+   artifacts-dir String
+   compiler-commit String
+   abi core/AbiProfileV0] String
+  (let [rows (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
+        configuration (Vec String) ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
+        source stages/SourceStageV1 (slice/source-program rows module-name relative-path)
+        freeze-result lower/SourceFreezeResultV0 (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [(frozen-source stages/FrozenSourceStageV1)
-            (lower/sourcefreezeacceptedv0-frozen freeze-result)
-            (typing-result lower/TypingResultV0)
-            (lower/lower-typed-stage frozen-source compiler-commit configuration)]
+      (let [frozen-source stages/FrozenSourceStageV1 (lower/sourcefreezeacceptedv0-frozen freeze-result)
+            typing-result lower/TypingResultV0 (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           (typing-rejection-report typing-result)
-          (let [(frozen-typed stages/FrozenTypedStageV0)
-                (lower/typingacceptedv0-frozen typing-result)
-                (typed-slice lower/TypedSliceV0)
-                (lower/typingacceptedv0-slice typing-result)
-                (native-result lower/NativeLoweringResultV0)
-                (lower/lower-native-stage frozen-typed typed-slice compiler-commit
+          ;; QBE materializes epoch-0 only, so it is handed the identity
+          ;; program rather than the derived one it would refuse.
+          (let [frozen-typed stages/FrozenTypedStageV0 (lower/typingacceptedv0-frozen typing-result)
+                typed-slice lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
+                native-result lower/NativeLoweringResultV0 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
                   configuration abi)
-                (epoch-result lower/EpochLoweringResultV0)
-                (lower/epoch-derived-stage (slice/native-frozen native-result)
+                epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage (slice/native-frozen native-result)
                   compiler-commit configuration abi)
-                (frozen-native stages/FrozenNativeStageV0)
-                (lower/epoch-result-frozen epoch-result)
-                (program core/NativeCoreProgram)
-                (stages/nativestagev0-program
+                frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
+                program core/NativeCoreProgram (stages/nativestagev0-program
                   (stages/frozennativestagev0-stage frozen-native))
-                (projected core/NativeCoreProgram) (projected-program program)
-                (result body/BodyMaterializationV0) (body/materialize-program projected 0)
-                (verdicts (Vec obligations/ObligationVerdictV0))
-                (obligations/validate-native-core-program projected abi)
-                (head String)
-                (str "stage source-freeze ACCEPTED\n"
+                projected core/NativeCoreProgram (projected-program program)
+                result body/BodyMaterializationV0 (body/materialize-program projected 0)
+                verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program projected abi)
+                head String (str "stage source-freeze ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
                   "stage typed-to-native "
                   (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
@@ -400,8 +375,7 @@
             (if (not (body/materialization-ok? result))
               (str head "materialize REFUSED "
                 (body/materialization-detail result) "\n")
-              (let [(artifact body/BodyArtifactV0)
-                    (body/materialization-artifact result)]
+              (let [artifact body/BodyArtifactV0 (body/materialization-artifact result)]
                 (do
                  (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
                    (body/bodyartifactv0-header-text artifact))
@@ -412,78 +386,59 @@
                     (body/bodyartifactv0-source-name artifact) "\n"))))))))))
 
 (defn emit-slice!
-  [(facts-path String)
-   (module-name String)
-   (relative-path String)
-   (artifacts-dir String)
-   (compiler-commit String)
-   (abi-id String)] String
-  (let [(profile (U core/AbiProfileV0 Nil)) (core/abi-profile-for abi-id)]
+  [facts-path String
+   module-name String
+   relative-path String
+   artifacts-dir String
+   compiler-commit String
+   abi-id String] String
+  (let [profile (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
     (if (nil? profile)
       (str "stage abi REJECTED unknown abi profile " abi-id "\n")
       (emit-slice-for-abi! facts-path module-name relative-path artifacts-dir
         compiler-commit profile))))
 
 (defn emit-dual-slice-for-abi!
-  [(facts-path String)
-   (module-name String)
-   (relative-path String)
-   (artifacts-dir String)
-   (compiler-commit String)
-   (qbe-function-name String)
-   (qbe-module-index Int)
-   (abi core/AbiProfileV0)] String
-  (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
-        (configuration (Vec String))
-        ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        (source stages/SourceStageV1)
-        (slice/source-program rows module-name relative-path)
-        (freeze-result lower/SourceFreezeResultV0)
-        (lower/freeze-source-stage source compiler-commit configuration)]
+  [facts-path String
+   module-name String
+   relative-path String
+   artifacts-dir String
+   compiler-commit String
+   qbe-function-name String
+   qbe-module-index Int
+   abi core/AbiProfileV0] String
+  (let [rows (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
+        configuration (Vec String) ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
+        source stages/SourceStageV1 (slice/source-program rows module-name relative-path)
+        freeze-result lower/SourceFreezeResultV0 (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [(frozen-source stages/FrozenSourceStageV1)
-            (lower/sourcefreezeacceptedv0-frozen freeze-result)
-            (typing-result lower/TypingResultV0)
-            (lower/lower-typed-stage frozen-source compiler-commit configuration)]
+      (let [frozen-source stages/FrozenSourceStageV1 (lower/sourcefreezeacceptedv0-frozen freeze-result)
+            typing-result lower/TypingResultV0 (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           (typing-rejection-report typing-result)
-          (let [(frozen-typed stages/FrozenTypedStageV0)
-                (lower/typingacceptedv0-frozen typing-result)
-                (typed-slice lower/TypedSliceV0)
-                (lower/typingacceptedv0-slice typing-result)
-                (native-result lower/NativeLoweringResultV0)
-                (lower/lower-native-stage frozen-typed typed-slice compiler-commit
+          (let [frozen-typed stages/FrozenTypedStageV0 (lower/typingacceptedv0-frozen typing-result)
+                typed-slice lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
+                native-result lower/NativeLoweringResultV0 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
                   configuration abi)
-                (epoch-result lower/EpochLoweringResultV0)
-                (lower/epoch-derived-stage (slice/native-frozen native-result)
+                epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage (slice/native-frozen native-result)
                   compiler-commit configuration abi)
-                (frozen-native stages/FrozenNativeStageV0)
-                (lower/epoch-result-frozen epoch-result)
-                (program core/NativeCoreProgram)
-                (stages/nativestagev0-program
+                frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
+                program core/NativeCoreProgram (stages/nativestagev0-program
                   (stages/frozennativestagev0-stage frozen-native))
-                ;; QBE materializes epoch-0 only, so it is handed the identity
-                ;; program rather than the derived one it would refuse.
-                (qbe-program core/NativeCoreProgram)
-                (lower/epoch-identity-program (slice/native-frozen native-result)
+                qbe-program core/NativeCoreProgram (lower/epoch-identity-program (slice/native-frozen native-result)
                   compiler-commit configuration abi)
-                (projected core/NativeCoreProgram) (projected-program program)
-                (result body/BodyMaterializationV0)
-                (body/materialize-program projected 0)
-                (verdicts (Vec obligations/ObligationVerdictV0))
-                (obligations/validate-native-core-program projected abi)
-                (complete Bool)
-                (instance? native.lower.NativeLoweringCompleteV0 native-result)
-                (qbe-report String)
-                (if complete
+                projected core/NativeCoreProgram (projected-program program)
+                result body/BodyMaterializationV0 (body/materialize-program projected 0)
+                verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program projected abi)
+                complete Bool (instance? native.lower.NativeLoweringCompleteV0 native-result)
+                qbe-report String (if complete
                   (str "qbe-stage typed-to-native COMPLETE\n"
                     (emit-qbe-function! qbe-program qbe-function-name
                       artifacts-dir qbe-module-index abi))
                   (str "qbe-stage typed-to-native PENDING\n"
                     "qbe-materialize REFUSED native lowering incomplete\n"))
-                (head String)
-                (str "stage source-freeze ACCEPTED\n"
+                head String (str "stage source-freeze ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
                   "stage typed-to-native " (if complete "COMPLETE" "PENDING") "\n"
                   "stage native-to-epoch "
@@ -507,8 +462,7 @@
             (if (not (body/materialization-ok? result))
               (str head "materialize REFUSED "
                 (body/materialization-detail result) "\n" qbe-report)
-              (let [(artifact body/BodyArtifactV0)
-                    (body/materialization-artifact result)]
+              (let [artifact body/BodyArtifactV0 (body/materialization-artifact result)]
                 (do
                   (spit (str artifacts-dir "/"
                           (body/bodyartifactv0-header-name artifact))
@@ -522,15 +476,15 @@
                     qbe-report))))))))))
 
 (defn emit-dual-slice!
-  [(facts-path String)
-   (module-name String)
-   (relative-path String)
-   (artifacts-dir String)
-   (compiler-commit String)
-   (qbe-function-name String)
-   (qbe-module-index Int)
-   (abi-id String)] String
-  (let [(profile (U core/AbiProfileV0 Nil)) (core/abi-profile-for abi-id)]
+  [facts-path String
+   module-name String
+   relative-path String
+   artifacts-dir String
+   compiler-commit String
+   qbe-function-name String
+   qbe-module-index Int
+   abi-id String] String
+  (let [profile (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
     (if (nil? profile)
       (str "stage abi REJECTED unknown abi profile " abi-id "\n")
       (emit-dual-slice-for-abi! facts-path module-name relative-path artifacts-dir
