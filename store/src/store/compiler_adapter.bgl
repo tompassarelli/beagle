@@ -1,0 +1,121 @@
+#lang beagle
+
+;; The compiler CLI uses this adapter when it is running without the C Store
+;; host.  It deliberately keeps the driver boundary in terms of admitted
+;; closures and artifact envelopes; `native-server` remains the authority for
+;; fact persistence and log encoding.
+(ns store.compiler-adapter
+  (:require [beagle.artifact-linker :as linker]
+            [beagle.cli :as cli]
+            [beagle.compiler-driver :as driver]
+            [beagle.fact-profile :as profile]
+            [store.native-server :as server]))
+
+(def max-store-log-bytes Int 67108864)
+
+(defn failed-store [detail String] server/StoreResult
+  (server/->StoreResult server/status-fatal nil detail 0 [] ""))
+
+(defn open-store [path String space-id String] server/StoreResult
+  (match (host.fs/read-text-bounded path max-store-log-bytes)
+    [(host.fs/ReadTextBoundedOk text)
+     (server/server-store-boot! path space-id (utf8-encode text) [])]
+    [(host.fs/ReadTextBoundedError errno)
+     (failed-store (str "could not read Store log: " path))]))
+
+(defn append-log! [path String bytes (Vec Int)] String?
+  (if (empty? bytes)
+    nil
+    (match (host.fs/append-text path (utf8-decode bytes))
+      [(host.fs/AppendTextOk) nil]
+      [(host.fs/AppendTextError errno)
+       (str "could not append Store log: " path)])))
+
+(defn persist-boot! [path String store-result server/StoreResult] String?
+  (append-log! path (server/storeresult-boot-append store-result)))
+
+(defn query-store
+  [store-result server/StoreResult
+   query profile/AdmittedQueryClosure] driver/CompileStoreResponse
+  (let [result server/CompileQueryResult
+        (server/server-compile-query!
+          store-result
+          (profile/admittedqueryclosure-source-closure-digest query)
+          (profile/admittedqueryclosure-compiler-context query)
+          (profile/admittedqueryclosure-profile query)
+          (profile/admittedqueryclosure-targets query)
+          (profile/admittedqueryclosure-rules-content-id query)
+          (profile/admittedqueryclosure-schema-content-id query)
+          (profile/admittedqueryclosure-query-digest query))]
+    (if (not= server/status-ok (server/compilequeryresult-status result))
+       (driver/->CompileStoreFailure 74
+         (or (server/compilequeryresult-error result) "Store query failed"))
+       (if (not (server/compilequeryresult-found result))
+         (driver/->CompileStoreCold)
+         (let [stored server/CompileStoredValue?
+               (server/compilequeryresult-value result)]
+           (if (nil? stored)
+             (driver/->CompileStoreFailure 74 "Store query omitted its value")
+             (let [admitted profile/AdmittedResultClosure
+                   (server/compilestoredvalue-result stored)
+                   payload String (server/compilestoredvalue-payload stored)]
+               (if (= "rejected" (profile/admittedresultclosure-status admitted))
+                 (driver/->CompileStoreWarmRejected admitted payload)
+                 (match (linker/decode-artifact-envelope
+                          (or (profile/admittedresultclosure-artifact-content-id admitted) "")
+                          payload)
+                   [(linker/ArtifactEnvelopeDecodedV1 artifact)
+                    (driver/->CompileStoreWarm admitted artifact)]
+                   [(linker/ArtifactEnvelopeDecodeErrorV1 detail)
+                    (driver/->CompileStoreWarmRejected admitted detail)])))))))))
+
+(defn append-store
+  [path String store-result server/StoreResult
+   result profile/AdmittedResultClosure artifact linker/TargetArtifactV1]
+  driver/CompileStoreResponse
+  (match (linker/encode-artifact-envelope artifact)
+    [(linker/ArtifactEnvelopeErrorV1 detail)
+     (driver/->CompileStoreFailure 65 detail)]
+    [(linker/ArtifactEnvelopeReadyV1 artifact-content-id payload)
+     (let [query profile/AdmittedQueryClosure
+           (profile/admittedresultclosure-query result)
+           appended server/CompileAppendResult
+           (server/server-compile-append!
+             store-result
+             (profile/admittedqueryclosure-source-closure-digest query)
+             (profile/admittedqueryclosure-compiler-context query)
+             (profile/admittedqueryclosure-profile query)
+             (profile/admittedqueryclosure-targets query)
+             (profile/admittedqueryclosure-rules-content-id query)
+             (profile/admittedqueryclosure-schema-content-id query)
+             (profile/admittedqueryclosure-query-digest query)
+             (profile/admittedresultclosure-target result)
+             (profile/admittedresultclosure-materializer-content-id result)
+             (profile/admittedresultclosure-status result)
+             artifact-content-id payload)]
+       (if (not= server/status-ok (server/compileappendresult-status appended))
+         (driver/->CompileStoreFailure 74
+           (or (server/compileappendresult-error appended) "Store append failed"))
+         (let [write-error String?
+               (append-log! path (server/compileappendresult-append-bytes appended))]
+           (if write-error
+             (driver/->CompileStoreFailure 74 write-error)
+             (driver/->CompileStorePersisted)))))]))
+
+(defn compile-store [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  (match request
+    [(driver/CompileStoreLookup path space-id query)
+     (let [store-result server/StoreResult (open-store path space-id)
+           boot-error String? (persist-boot! path store-result)]
+       (if boot-error
+         (driver/->CompileStoreFailure 74 boot-error)
+         (query-store store-result query)))]
+    [(driver/CompileStoreAppend path space-id result artifact)
+     (let [store-result server/StoreResult (open-store path space-id)
+           boot-error String? (persist-boot! path store-result)]
+       (if boot-error
+         (driver/->CompileStoreFailure 74 boot-error)
+         (append-store path store-result result artifact)))]))
+
+(defn -main [args (Vec String)] Int
+  (cli/main-with-store args compile-store))
