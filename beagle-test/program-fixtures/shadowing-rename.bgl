@@ -1,0 +1,19 @@
+#lang beagle
+
+;; `helper` is the top-level binding selected by stable identity.
+(defn helper [value Int] Int
+  (+ value 1))
+
+;; This local `helper` shadows the top-level binding and must remain unchanged.
+(defn shadowed [helper Int] Int
+  (+ helper 10))
+
+(defn dependent [value Int] Int
+  (helper value))
+
+;; helper in this string and comment is source text, not a semantic reference.
+(defn literal [] String
+  "helper")
+
+(defn independent [value Int] Int
+  (* value 2))
