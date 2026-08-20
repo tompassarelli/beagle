@@ -61,8 +61,15 @@ case "${1:-}" in
             physical="$1"
             logical="$2"
             shift 2
-            printf '%s{"source":"%s","interfaceSha256":"sha256:%064d","program":{"fixture":%s}}' \
-                "$separator" "$logical" 0 "$module_index"
+            interface="sha256:$(printf '%064d' 0)"
+            if [[ "$module_index" == 1 && "${FAKE_BAD_INTERFACE_1:-0}" == 1 ]]; then
+                interface=malformed
+            fi
+            printf '%s{"source":"%s","interfaceSha256":"%s","program":{"fixture":%s}}' \
+                "$separator" "$logical" "$interface" "$module_index"
+            if [[ "$module_index" == 2 && "${FAKE_MUTATE_SOURCE_2:-0}" == 1 ]]; then
+                printf 'changed-after-snapshot\n' >>"$physical"
+            fi
             separator=,
             module_index=$((module_index + 1))
             [[ -f "$physical" ]] || exit 66
@@ -110,8 +117,12 @@ case "${1:-}" in
         fi
         [[ "$fail" == 0 ]] || exit "$fail"
         [[ -f "$ast" ]] || exit 67
-        printf 'fixture/s%s.bgl\0fixture.s%s\0sha256:%064d\0sha256:%064d\0' \
-            "$index" "$index" 0 0
+        if [[ "$index" == 1 && "${FAKE_MALFORMED_1:-0}" == 1 ]]; then
+            printf 'fixture/s%s.bgl\0' "$index"
+        else
+            printf 'fixture/s%s.bgl\0fixture.s%s\0sha256:%064d\0sha256:%064d\0' \
+                "$index" "$index" 0 0
+        fi
         ;;
     *)
         echo "unexpected fake Racket invocation: $*" >&2
@@ -155,9 +166,10 @@ FAKE_BB
 chmod +x "$fake_bin/racket" "$fake_bin/bb"
 
 run_case() {
-    local name="$1" order="$2" expected_status="$3"
-    shift 3
-    local state="$scratch/$name" status=0 pid
+    local name="$1" order="$2" expected_status="$3" pool_workers="$4"
+    local barrier_workers="$5" expected_launched="$6"
+    shift 6
+    local state="$scratch/$name" status=0
     mkdir -p "$state/tmp" "$state/out" "$state/cache"
     set +e
     env \
@@ -174,13 +186,13 @@ run_case() {
         BEAGLE_CORE_LOCK_TIMEOUT_SECONDS=5 \
         BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS=5 \
         FAKE_STATE="$state" \
-        FAKE_EXPECTED=3 \
+        FAKE_EXPECTED="$barrier_workers" \
         FAKE_CAPTURE="$state/projector-order" \
         FAKE_ORDER="$order" \
         "$@" \
         timeout --foreground 25s "$repo/bin/beagle-build-core" \
             --materializer c17 \
-            --emit-workers 3 \
+            --emit-workers "$pool_workers" \
             --out "$state/out" \
             --module-root "fixture=$sources_root" \
             "$sources_root/s0.bgl" "$sources_root/s1.bgl" "$sources_root/s2.bgl" \
@@ -192,7 +204,7 @@ run_case() {
         echo "ast-verify-parallel: $name expected status $expected_status, got $status" >&2
         return 1
     }
-    for index in 0 1 2; do
+    for ((index = 0; index < expected_launched; index++)); do
         [[ -f "$state/overlap-$index" ]] || {
             echo "ast-verify-parallel: $name verifier $index never reached the cohort barrier" >&2
             return 1
@@ -204,8 +216,8 @@ run_case() {
     done
 }
 
-run_case completion-a forward 73
-run_case completion-b reverse 73
+run_case completion-a forward 73 3 3 3
+run_case completion-b reverse 73 3 3 3
 cmp "$scratch/completion-a/projector-order" \
     "$scratch/completion-b/projector-order"
 cat >"$scratch/expected-order" <<'EXPECTED'
@@ -217,8 +229,10 @@ input fixture/s2.bgl
 interface fixture/s2.bgl=sha256:0000000000000000000000000000000000000000000000000000000000000000
 EXPECTED
 cmp "$scratch/expected-order" "$scratch/completion-a/projector-order"
+run_case refill reverse 73 2 2 3
+cmp "$scratch/expected-order" "$scratch/refill/projector-order"
 
-run_case failure forward 17 \
+run_case failure forward 17 3 3 3 \
     FAKE_FAIL_0=17 FAKE_FAIL_1=19 FAKE_HANG_2=1
 grep -Fq 'phase ast-verify-0 ERROR (17)' "$scratch/failure/stderr"
 grep -Fq 'phase ast-verify-1 ERROR (19)' "$scratch/failure/stderr"
@@ -226,4 +240,23 @@ grep -Fq 'phase ast-verify-2 CANCELLED (143)' "$scratch/failure/stderr"
 grep -Fq 'ast-verify-0 status=17' "$scratch/failure/stderr"
 [[ -f "$scratch/failure/term-2" ]]
 
-echo 'ast-verify-parallel: PASS overlap=3 ordered=stable failure=source-0 siblings=reaped'
+run_case timeout-metadata forward 2 3 3 3 \
+    BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS=1 \
+    BEAGLE_CORE_KILL_GRACE_SECONDS=1 \
+    FAKE_HANG_0=1 FAKE_MALFORMED_1=1
+grep -Fq 'phase ast-verify-0 TIMEOUT (124)' "$scratch/timeout-metadata/stderr"
+grep -Fq 'phase ast-verify-1 ERROR (2)' "$scratch/timeout-metadata/stderr"
+grep -Fq 'ast-verify-1 status=2' "$scratch/timeout-metadata/stderr"
+
+run_case malformed-interface reverse 2 3 3 3 FAKE_BAD_INTERFACE_1=1
+grep -Fq 'malformed interface digest' "$scratch/malformed-interface/stderr"
+grep -Fq 'ast-verify-1 status=2' "$scratch/malformed-interface/stderr"
+
+run_case snapshot-vs-defect forward 17 3 2 2 \
+    FAKE_FAIL_0=17 FAKE_MUTATE_SOURCE_2=1
+grep -Fq 'source changed while its checked projection was captured' \
+    "$scratch/snapshot-vs-defect/stderr"
+grep -Fq 'ast-verify-0 status=17' "$scratch/snapshot-vs-defect/stderr"
+[[ ! -e "$scratch/snapshot-vs-defect/start-2" ]]
+
+echo 'ast-verify-parallel: PASS overlap=3 order=stable arbitration=complete siblings=reaped'

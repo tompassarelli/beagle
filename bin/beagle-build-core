@@ -166,6 +166,8 @@ run_phase_leaf() {
 # must be able to stop the exact owners that guarantee their verifier subtree is
 # gone before cleanup removes the metadata paths those children write.
 ast_verify_live_pids=()
+ast_verified_logical_paths=()
+ast_verified_interface_sha256s=()
 stop_ast_verify_workers() {
     local pid
     for pid in "${ast_verify_live_pids[@]:-}"; do
@@ -181,18 +183,21 @@ stop_ast_verify_workers() {
 
 run_ast_verifier_pool() {
     local source_count="${#normalized_sources[@]}"
-    local worker_count=4
+    local worker_count="$emit_workers"
     local deadline="${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}"
     local next_index=0 failure_seen=0 failure_cutoff=-1
     local finished_pid="" finished_index="" status=0 expected_receipt=""
     local receipt_value="" source="" ast="" metadata="" log="" receipt=""
     local source_digest_after="" pid="" live_index="" selected_index=-1
-    local selected_status=0 index=0
-    local -a live=() next_live=()
+    local selected_status=0 index=0 interface_sha256_path=""
+    local interface_sha256=""
+    local -a live=() next_live=() checked_fields=()
     local -A index_by_pid=() status_by_index=() canceled_by_index=()
     local -A log_by_index=() receipt_by_index=() started_by_index=()
 
     ((worker_count <= source_count)) || worker_count="$source_count"
+    ast_verified_logical_paths=()
+    ast_verified_interface_sha256s=()
 
     while ((next_index < source_count || ${#live[@]} > 0)); do
         while ((failure_seen == 0 && next_index < source_count &&
@@ -202,11 +207,26 @@ run_ast_verifier_pool() {
             metadata="$work/source_${next_index}.metadata"
             log="$work/source_${next_index}.verify.log"
             receipt="$work/source_${next_index}.verify.receipt"
-            source_digest_after="$(sha256sum "$source" | awk '{print $1}')"
-            [[ "${source_digest_befores[$next_index]}" == "$source_digest_after" ]] ||
-                die "source changed while its checked projection was captured: $source"
             printf 'beagle build: phase ast-verify-%s START (workers=%s, deadline=%ss kill-grace=%ss)\n' \
                 "$next_index" "$worker_count" "$deadline" "$core_kill_grace" >"$log"
+            log_by_index["$next_index"]="$log"
+            receipt_by_index["$next_index"]="$receipt"
+            started_by_index["$next_index"]=1
+            source_digest_after=""
+            if ! source_digest_after="$(sha256sum "$source" 2>/dev/null | awk '{print $1}')"; then
+                source_digest_after=unavailable
+            fi
+            if [[ "${source_digest_befores[$next_index]}" != "$source_digest_after" ]]; then
+                printf 'beagle build: source changed while its checked projection was captured: %s\n' \
+                    "$source" >>"$log"
+                printf 'beagle build: phase ast-verify-%s ERROR (2)\n' \
+                    "$next_index" >>"$log"
+                status_by_index["$next_index"]=2
+                failure_seen=1
+                failure_cutoff="$next_index"
+                next_index=$((next_index + 1))
+                break
+            fi
             BEAGLE_BOUNDED_COMPLETION_RECEIPT="$receipt" \
                 "$NATIVE_SUPERVISOR" "$deadline" "$core_kill_grace" -- \
                 "$RACKET" "$AST_VERIFIER" "$ast" "$source" \
@@ -215,9 +235,6 @@ run_ast_verifier_pool() {
             live+=("$pid")
             ast_verify_live_pids+=("$pid")
             index_by_pid["$pid"]="$next_index"
-            log_by_index["$next_index"]="$log"
-            receipt_by_index["$next_index"]="$receipt"
-            started_by_index["$next_index"]=1
             next_index=$((next_index + 1))
         done
 
@@ -257,6 +274,38 @@ run_ast_verifier_pool() {
                 >>"${log_by_index[$finished_index]}"
             status=2
             unset 'canceled_by_index[$finished_index]'
+        fi
+        if [[ "$status" -eq 0 &&
+              -z "${canceled_by_index[$finished_index]+canceled}" ]]; then
+            metadata="$work/source_${finished_index}.metadata"
+            source="${normalized_sources[$finished_index]}"
+            checked_fields=()
+            if ! mapfile -d '' -t checked_fields <"$metadata"; then
+                printf 'beagle build: checked AST verifier metadata is unreadable for %s\n' \
+                    "$source" >>"${log_by_index[$finished_index]}"
+                status=2
+            elif [[ ${#checked_fields[@]} -ne 4 ]]; then
+                printf 'beagle build: checked AST verifier returned malformed metadata for %s\n' \
+                    "$source" >>"${log_by_index[$finished_index]}"
+                status=2
+            fi
+            if [[ "$status" -eq 0 ]]; then
+                interface_sha256_path="$work/source_${finished_index}.interface.sha256"
+                if [[ -f "$interface_sha256_path" ]] &&
+                   interface_sha256="$(tr -d '\r\n' <"$interface_sha256_path")"; then
+                    :
+                else
+                    interface_sha256=""
+                fi
+                if [[ ! "$interface_sha256" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                    printf 'beagle build: checked AST bundle returned a malformed interface digest for %s\n' \
+                        "$source" >>"${log_by_index[$finished_index]}"
+                    status=2
+                else
+                    ast_verified_logical_paths["$finished_index"]="${checked_fields[0]}"
+                    ast_verified_interface_sha256s["$finished_index"]="$interface_sha256"
+                fi
+            fi
         fi
         status_by_index["$finished_index"]="$status"
         if [[ -n "${canceled_by_index[$finished_index]+canceled}" ]]; then
@@ -325,6 +374,7 @@ run_ast_verifier_pool() {
         echo "beagle build: checked AST verification failed for ${normalized_sources[$selected_index]} (ast-verify-$selected_index status=$selected_status)" >&2
         return "$selected_status"
     fi
+    return 0
 }
 
 # The Core result cache lock guards two SEPARATE critical sections, not one:
@@ -1214,15 +1264,8 @@ run_ast_verifier_pool
 source_index=0
 for source in "${normalized_sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
-    ast_metadata="$work/source_${source_index}.metadata"
-    mapfile -d '' -t checked_fields <"$ast_metadata"
-    [[ ${#checked_fields[@]} -eq 4 ]] ||
-        die "checked AST verifier returned malformed metadata for $source"
-    logical_path="${checked_fields[0]}"
-    interface_sha256_path="$work/source_${source_index}.interface.sha256"
-    interface_sha256="$(tr -d '\r\n' <"$interface_sha256_path")"
-    [[ "$interface_sha256" =~ ^sha256:[0-9a-f]{64}$ ]] ||
-        die "checked AST bundle returned a malformed interface digest for $source"
+    logical_path="${ast_verified_logical_paths[$source_index]}"
+    interface_sha256="${ast_verified_interface_sha256s[$source_index]}"
     projector_args+=(--input "$ast=$logical_path"
         --interface-sha256 "$logical_path=$interface_sha256")
     if $wasm_selected; then
