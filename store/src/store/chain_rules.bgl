@@ -3,19 +3,18 @@
 (ns store.chain-rules)
 
 (defn sealed-member-fault
-  [(index Int)
-   (expected-space String)
-   (actual-space String)
-   (recorded-start Int)
-   (actual-start Int)
-   (recorded-end Int)
-   (actual-end Int)
-   (recorded-bytes Int)
-   (actual-bytes Int)
-   (continuation Bool)
-   (torn Bool)
-   (expected-next Int)]
-  String?
+  [index Int
+   expected-space String
+   actual-space String
+   recorded-start Int
+   actual-start Int
+   recorded-end Int
+   actual-end Int
+   recorded-bytes Int
+   actual-bytes Int
+   continuation Bool
+   torn Bool
+   expected-next Int] String?
   (cond
     [(not= expected-space actual-space)
      "Store transaction log segment belongs to a different SpaceId"]
@@ -35,13 +34,12 @@
     [:else nil]))
 
 (defn tail-member-fault
-  [(sealed-count Int)
-   (expected-space String)
-   (actual-space String)
-   (actual-start Int)
-   (continuation Bool)
-   (expected-next Int)]
-  String?
+  [sealed-count Int
+   expected-space String
+   actual-space String
+   actual-start Int
+   continuation Bool
+   expected-next Int] String?
   (cond
     [(not= expected-space actual-space)
      "Store transaction log tail belongs to a different SpaceId"]
@@ -53,5 +51,7 @@
      "Store transaction log branch tail does not continue the sealed chain"]
     [:else nil]))
 
-(defn next-expected [(actual-end Int) (expected-next Int)] Int
+(defn next-expected
+  [actual-end Int
+   expected-next Int] Int
   (if (pos? actual-end) (inc actual-end) expected-next))

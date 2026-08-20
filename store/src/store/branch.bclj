@@ -22,111 +22,143 @@
 ;; transaction; the ref is the only cheap record of where a sealed chain ends
 ;; once the branch tail beside it is empty.
 (defrecord SegmentRecord
-  [(sha256 String) (start-sequence Int) (end-sequence Int) (byte-count Int)])
+  [sha256 String
+   start-sequence Int
+   end-sequence Int
+   byte-count Int])
 
-(defrecord RefDocument [(space-id String) (segments (Vec SegmentRecord))])
+(defrecord RefDocument
+  [space-id String
+   segments (Vec SegmentRecord)])
 
 ;; A branch name is mutable routing and is deliberately absent. Equal history
 ;; on two refs has one identity; their first different tail prefix separates it.
 (defrecord BranchRevision
-  [(space-id String) (history-sha256 String) (sequence Int) (identity String)])
+  [space-id String
+   history-sha256 String
+   sequence Int
+   identity String])
 
 ;; What a folded chain member turned out to be on disk, as the caller read it.
 (defrecord ChainMember
-  [(start-sequence Int)
-   (end-sequence Int)
-   (byte-count Int)
-   (continuation Bool)
-   (space-id String)
-   (torn Bool)])
+  [start-sequence Int
+   end-sequence Int
+   byte-count Int
+   continuation Bool
+   space-id String
+   torn Bool])
 
 (defrecord ForkPlan
-  [(document RefDocument) (sealed SegmentRecord) (fork-sequence Int)])
+  [document RefDocument
+   sealed SegmentRecord
+   fork-sequence Int])
 
 ;; A fork prepares every file it installs before it writes this marker, so the
 ;; marker's presence means the remaining renames may be replayed as they stand.
-(defrecord ForkMarker [(parent String) (child String) (segment String)])
+(defrecord ForkMarker
+  [parent String
+   child String
+   segment String])
 
 ;; A reseal prepares its segment, tail, ref, and watch transition before this
 ;; marker becomes durable. Its presence authorizes replaying the remaining
 ;; renames and binds recovery to the exact candidate ref.
-(defrecord ResealMarker [(branch String) (segment String) (ref-identity String)])
+(defrecord ResealMarker
+  [branch String
+   segment String
+   ref-identity String])
 
-(defn- fail [(message String) (code Keyword)] Any
+(defn- fail
+  [message String
+   code Keyword] Any
   (throw (ex-info message {:type code :store-log/code code})))
 
-(defn valid-segment-name? [(value String)] Bool
+(defn valid-segment-name? [value String] Bool
   (some? (re-matches #"[0-9a-f]{64}" value)))
 
-(defn valid-branch-name? [(value String)] Bool
+(defn valid-branch-name? [value String] Bool
   (and (pos? (count value))
        (<= (count value) max-branch-name-length)
        (some? (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" value))
        (not (str/includes? value ".."))))
 
-(defn require-branch-name! [(value String)] String
+(defn require-branch-name! [value String] String
   (if (valid-branch-name? value)
     value
     (fail (str "branch name is not a usable ref file name: " value)
           :invalid-branch-name)))
 
-(defn segments-directory [(store-path String)] String
+(defn segments-directory [store-path String] String
   (str store-path ".segments"))
 
-(defn refs-directory [(store-path String)] String
+(defn refs-directory [store-path String] String
   (str store-path ".refs"))
 
-(defn branches-directory [(store-path String)] String
+(defn branches-directory [store-path String] String
   (str store-path ".branches"))
 
-(defn segment-path [(store-path String) (sha256 String)] String
+(defn segment-path
+  [store-path String
+   sha256 String] String
   (if (valid-segment-name? sha256)
     (str (segments-directory store-path) "/" sha256)
     (fail (str "segment name is not a SHA-256 hex digest: " sha256)
           :invalid-segment-name)))
 
-(defn ref-path! [(store-path String) (branch String)] String
+(defn ref-path!
+  [store-path String
+   branch String] String
   (str (refs-directory store-path) "/" (require-branch-name! branch)))
 
-(defn branch-tail-path! [(store-path String) (branch String)] String
+(defn branch-tail-path!
+  [store-path String
+   branch String] String
   (if (= (require-branch-name! branch) default-branch)
     store-path
     (str (branches-directory store-path) "/" branch)))
 
-(defn snapshot-path [(tail-path String)] String
+(defn snapshot-path [tail-path String] String
   (str tail-path ".snapshot"))
 
-(defn- crc32-of [(text String)] Int
-  (let [(digest Any) (CRC32.)]
+(defn- crc32-of [text String] Int
+  (let [digest Any (CRC32.)]
     (.update digest (.getBytes text StandardCharsets/UTF_8))
     (long (.getValue digest))))
 
-(defn- revision-write-u8! [(out Any) (value Int)] Nil
+(defn- revision-write-u8!
+  [out Any
+   value Int] Nil
   (do (.write out (int (bit-and value 255))) nil))
 
-(defn- revision-write-u32-le! [(out Any) (value Int)] Nil
+(defn- revision-write-u32-le!
+  [out Any
+   value Int] Nil
   (do
     (doseq [position (range 4)]
       (revision-write-u8!
        out (unsigned-bit-shift-right value (* position 8))))
     nil))
 
-(defn- revision-write-i64-le! [(out Any) (value Int)] Nil
+(defn- revision-write-i64-le!
+  [out Any
+   value Int] Nil
   (do
     (doseq [position (range 8)]
       (revision-write-u8!
        out (unsigned-bit-shift-right value (* position 8))))
     nil))
 
-(defn- revision-write-text! [(out Any) (value String)] Nil
-  (let [(bytes Any) (.getBytes value StandardCharsets/UTF_8)]
+(defn- revision-write-text!
+  [out Any
+   value String] Nil
+  (let [bytes Any (.getBytes value StandardCharsets/UTF_8)]
     (revision-write-u32-le! out (alength bytes))
     (.write out bytes)
     nil))
 
-(defn- sha256-hex [(bytes Any)] String
+(defn- sha256-hex [bytes Any] String
   (apply str
-         (mapv (fn [(value Any)] String
+         (mapv (fn [value Any] String
                  (format "%02x" (bit-and (int value) 255)))
                (vec (.digest (MessageDigest/getInstance "SHA-256") bytes)))))
 
@@ -136,8 +168,10 @@
 ;; lossless reseal preserves revision identity. Text values carry u32
 ;; little-endian byte lengths and the sequence is i64.
 (defn- branch-revision-preimage!
-  [(space-id String) (history-sha256 String) (sequence Int)] Any
-  (let [(out ByteArrayOutputStream) (ByteArrayOutputStream.)]
+  [space-id String
+   history-sha256 String
+   sequence Int] Any
+  (let [out ByteArrayOutputStream (ByteArrayOutputStream.)]
     (revision-write-text! out branch-revision-format)
     (revision-write-text! out space-id)
     (revision-write-text! out history-sha256)
@@ -145,7 +179,9 @@
     (.toByteArray out)))
 
 (defn branch-revision!
-  [(space-id String) (history-sha256 String) (sequence Int)] BranchRevision
+  [space-id String
+   history-sha256 String
+   sequence Int] BranchRevision
   (cond
     [(zero? (count space-id))
      (fail "branch revision SpaceId must be nonempty"
@@ -157,25 +193,23 @@
      (fail "branch revision sequence must not be negative"
            :invalid-branch-revision)]
     [:else
-     (let [(identity String)
-           (str "sha256:"
+     (let [identity String (str "sha256:"
                 (sha256-hex
                  (branch-revision-preimage!
                   space-id history-sha256 sequence)))]
        (->BranchRevision space-id history-sha256 sequence identity))]))
 
-(defn- segment-line [(segment SegmentRecord)] String
+(defn- segment-line [segment SegmentRecord] String
   (str "segment " (segmentrecord-sha256 segment) " "
        (segmentrecord-start-sequence segment) " "
        (segmentrecord-end-sequence segment) " "
        (segmentrecord-byte-count segment) "\n"))
 
-(defn print-ref [(document RefDocument)] String
-  (let [(body String)
-        (str ref-format "\n"
+(defn print-ref [document RefDocument] String
+  (let [body String (str ref-format "\n"
              "space " (refdocument-space-id document) "\n"
              (apply str
-                    (mapv (fn [(segment SegmentRecord)] String
+                    (mapv (fn [segment SegmentRecord] String
                             (segment-line segment))
                           (refdocument-segments document))))]
     (str body "crc " (format "%08x" (crc32-of body)) "\n")))
@@ -183,22 +217,26 @@
 ;; The ref identity binds the exact canonical ref bytes, including their CRC.
 ;; It names mutable-routing state for compare-and-set; it is not a durable
 ;; branch revision and therefore may change when physical segments are resealed.
-(defn ref-identity [(document RefDocument)] String
+(defn ref-identity [document RefDocument] String
   (str "sha256:"
        (sha256-hex (.getBytes (print-ref document) StandardCharsets/UTF_8))))
 
-(defn- parse-count [(value String) (label String)] Int
+(defn- parse-count
+  [value String
+   label String] Int
   (if (some? (re-matches #"(?:0|[1-9][0-9]{0,17})" value))
     (Long/parseLong value)
     (fail (str "branch ref " label " is not a decimal count: " value)
           :invalid-branch-ref)))
 
-(defn- parse-segment-line [(line String) (known Any)] SegmentRecord
-  (let [(fields (Vec String)) (vec (str/split line #" "))]
+(defn- parse-segment-line
+  [line String
+   known Any] SegmentRecord
+  (let [fields (Vec String) (vec (str/split line #" "))]
     (if (not= 5 (count fields))
       (fail (str "branch ref segment line is malformed: " line)
             :invalid-branch-ref)
-      (let [(sha256 String) (nth fields 1)]
+      (let [sha256 String (nth fields 1)]
         (cond
           [(not (valid-segment-name? sha256))
            (fail (str "branch ref segment name is not a SHA-256 hex digest: "
@@ -208,9 +246,8 @@
            (fail (str "branch ref lists the same segment twice: " sha256)
                  :invalid-branch-ref)]
           [:else
-           (let [(start Int)
-                 (parse-count (nth fields 2) "segment start sequence")
-                 (end Int) (parse-count (nth fields 3) "segment end sequence")]
+           (let [start Int (parse-count (nth fields 2) "segment start sequence")
+                 end Int (parse-count (nth fields 3) "segment end sequence")]
              (if (< end start)
                (fail (str "branch ref segment ends before it begins: " sha256)
                      :invalid-branch-ref)
@@ -218,8 +255,8 @@
                                 (parse-count (nth fields 4)
                                              "segment byte count"))))])))))
 
-(defn parse-ref [(text String)] RefDocument
-  (let [(lines (Vec String)) (vec (str/split-lines text))]
+(defn parse-ref [text String] RefDocument
+  (let [lines (Vec String) (vec (str/split-lines text))]
     (cond
       [(< (count lines) 3)
        (fail "branch ref is missing its format, space, or CRC line"
@@ -232,59 +269,54 @@
       [(not (str/starts-with? (nth lines (dec (count lines))) "crc "))
        (fail "branch ref does not end with its CRC line" :invalid-branch-ref)]
       [:else
-       (let [(space-id String) (subs (nth lines 1) 6)
-             (body String)
-             (apply str
-                    (mapv (fn [(line String)] String (str line "\n"))
+       (let [space-id String (subs (nth lines 1) 6)
+             body String (apply str
+                    (mapv (fn [line String] String (str line "\n"))
                           (subvec lines 0 (dec (count lines)))))
-             (stored String) (subs (nth lines (dec (count lines))) 4)]
+             stored String (subs (nth lines (dec (count lines))) 4)]
          (cond
            [(zero? (count space-id))
             (fail "branch ref SpaceId must be nonempty" :invalid-branch-ref)]
            [(not= stored (format "%08x" (crc32-of body)))
             (fail "branch ref CRC does not match" :invalid-branch-ref)]
            [:else
-            (let [(segments (Vec SegmentRecord))
-                  (loop [index Int 2
-                         known Any #{}
-                         acc (Vec SegmentRecord) []]
-                    (if (>= index (dec (count lines)))
+            (let [segments (Vec SegmentRecord) (loop [index Int 2
+                                                      known Any #{}
+                                                      acc (Vec SegmentRecord) []]
+                                                 (if (>= index (dec (count lines)))
                       acc
-                      (let [(line String) (nth lines index)]
+                      (let [line String (nth lines index)]
                         (if (not (str/starts-with? line "segment "))
                           (fail (str "branch ref contains an unknown line: "
                                      line)
                                 :invalid-branch-ref)
-                          (let [(segment SegmentRecord)
-                                (parse-segment-line line known)]
+                          (let [segment SegmentRecord (parse-segment-line line known)]
                             (recur (inc index)
                                    (conj known (segmentrecord-sha256 segment))
                                    (conj acc segment)))))))]
               (->RefDocument space-id segments))]))])))
 
-(defn empty-ref [(space-id String)] RefDocument
+(defn empty-ref [space-id String] RefDocument
   (->RefDocument space-id []))
 
 ;; The last transaction the sealed chain names, or 0 when it names none.
-(defn chain-end-sequence [(document RefDocument)] Int
-  (let [(segments (Vec SegmentRecord)) (refdocument-segments document)]
+(defn chain-end-sequence [document RefDocument] Int
+  (let [segments (Vec SegmentRecord) (refdocument-segments document)]
     (loop [index Int (dec (count segments))]
       (if (neg? index)
         0
-        (let [(end Int)
-              (segmentrecord-end-sequence (nth segments index))]
+        (let [end Int (segmentrecord-end-sequence (nth segments index))]
           (if (pos? end) end (recur (dec index))))))))
 
-(defn print-fork-marker [(marker ForkMarker)] String
-  (let [(body String)
-        (str fork-marker-format "\n"
+(defn print-fork-marker [marker ForkMarker] String
+  (let [body String (str fork-marker-format "\n"
              "parent " (forkmarker-parent marker) "\n"
              "child " (forkmarker-child marker) "\n"
              "segment " (forkmarker-segment marker) "\n")]
     (str body "crc " (format "%08x" (crc32-of body)) "\n")))
 
-(defn parse-fork-marker [(text String)] ForkMarker
-  (let [(lines (Vec String)) (vec (str/split-lines text))]
+(defn parse-fork-marker [text String] ForkMarker
+  (let [lines (Vec String) (vec (str/split-lines text))]
     (cond
       [(not= 5 (count lines))
        (fail "fork marker does not carry its three fields and CRC"
@@ -298,13 +330,12 @@
        (fail "fork marker does not name its parent, child, and segment"
              :invalid-fork-marker)]
       [:else
-       (let [(body String)
-             (apply str
-                    (mapv (fn [(line String)] String (str line "\n"))
+       (let [body String (apply str
+                    (mapv (fn [line String] String (str line "\n"))
                           (subvec lines 0 4)))
-             (parent String) (subs (nth lines 1) 7)
-             (child String) (subs (nth lines 2) 6)
-             (segment String) (subs (nth lines 3) 8)]
+             parent String (subs (nth lines 1) 7)
+             child String (subs (nth lines 2) 6)
+             segment String (subs (nth lines 3) 8)]
          (cond
            [(not= (nth lines 4) (str "crc " (format "%08x" (crc32-of body))))
             (fail "fork marker CRC does not match" :invalid-fork-marker)]
@@ -318,16 +349,15 @@
                   :invalid-fork-marker)]
            [:else (->ForkMarker parent child segment)]))])))
 
-(defn print-reseal-marker [(marker ResealMarker)] String
-  (let [(body String)
-        (str reseal-marker-format "\n"
+(defn print-reseal-marker [marker ResealMarker] String
+  (let [body String (str reseal-marker-format "\n"
              "branch " (resealmarker-branch marker) "\n"
              "segment " (resealmarker-segment marker) "\n"
              "ref " (resealmarker-ref-identity marker) "\n")]
     (str body "crc " (format "%08x" (crc32-of body)) "\n")))
 
-(defn parse-reseal-marker [(text String)] ResealMarker
-  (let [(lines (Vec String)) (vec (str/split-lines text))]
+(defn parse-reseal-marker [text String] ResealMarker
+  (let [lines (Vec String) (vec (str/split-lines text))]
     (cond
       [(not= 5 (count lines))
        (fail "reseal marker does not carry its three fields and CRC"
@@ -341,13 +371,12 @@
        (fail "reseal marker does not name its branch, segment, and ref"
              :invalid-reseal-marker)]
       [:else
-       (let [(body String)
-             (apply str
-                    (mapv (fn [(line String)] String (str line "\n"))
+       (let [body String (apply str
+                    (mapv (fn [line String] String (str line "\n"))
                           (subvec lines 0 4)))
-             (branch String) (subs (nth lines 1) 7)
-             (segment String) (subs (nth lines 2) 8)
-             (identity String) (subs (nth lines 3) 4)]
+             branch String (subs (nth lines 1) 7)
+             segment String (subs (nth lines 2) 8)
+             identity String (subs (nth lines 3) 4)]
          (cond
            [(not= (nth lines 4)
                   (str "crc " (format "%08x" (crc32-of body))))
@@ -367,13 +396,15 @@
 ;; Fork appends one sealed segment to the parent chain; parent and child then
 ;; name the identical chain and diverge only in their tails.
 (defn fork-plan
-  [(parent RefDocument) (sealed SegmentRecord) (fork-sequence Int)] ForkPlan
-  (let [(segments (Vec SegmentRecord)) (refdocument-segments parent)]
+  [parent RefDocument
+   sealed SegmentRecord
+   fork-sequence Int] ForkPlan
+  (let [segments (Vec SegmentRecord) (refdocument-segments parent)]
     (cond
       [(not (valid-segment-name? (segmentrecord-sha256 sealed)))
        (fail "sealed segment name is not a SHA-256 hex digest"
              :invalid-segment-name)]
-      [(some (fn [(segment SegmentRecord)] Bool
+      [(some (fn [segment SegmentRecord] Bool
                (= (segmentrecord-sha256 segment)
                   (segmentrecord-sha256 sealed)))
              segments)

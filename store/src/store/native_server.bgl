@@ -16,102 +16,121 @@
 (def status-fatal Int 2)
 (def empty-bytes (Vec Int) [])
 
-(defrecord Status [(code Int) (error String?)])
+(defrecord Status
+  [code Int
+   error String?])
 
 ;; log-byte-count tracks the canonical transaction log length this store has written,
 ;; which is the watermark a checkpoint image records.
 (defrecord Store
-  [(canonical-log-path String) (session schema/Session) (log-byte-count Int)])
+  [canonical-log-path String
+   session schema/Session
+   log-byte-count Int])
 
-(defrecord Request [(packet t/StoreRpcPacketV2)])
-(defrecord Response [(packet t/StoreRpcPacketV2)])
+(defrecord Request [packet t/StoreRpcPacketV2])
+(defrecord Response [packet t/StoreRpcPacketV2])
 
 ;; Optional payloads and errors stay opaque; status and byte fields have fixed
 ;; positions because the C adapter consumes those fields directly.
 (defrecord StoreResult
-  [(status Int)
-   (store Store?)
-   (error String?)
-   (valid-log-bytes Int)
-   (boot-append (Vec Int))
-   (snapshot-report String)])
+  [status Int
+   store Store?
+   error String?
+   valid-log-bytes Int
+   boot-append (Vec Int)
+   snapshot-report String])
 
-(defrecord RequestResult [(status Int) (request Request?) (error String?)])
+(defrecord RequestResult
+  [status Int
+   request Request?
+   error String?])
 
 (defrecord ResponseResult
-  [(status Int)
-   (response Response?)
-   (error String?)
-   (append-bytes (Vec Int))
-   (next-store StoreResult)
-   (state-changed Bool)
-   (snapshot-bytes (Vec Int))])
+  [status Int
+   response Response?
+   error String?
+   append-bytes (Vec Int)
+   next-store StoreResult
+   state-changed Bool
+   snapshot-bytes (Vec Int)])
 
-(defrecord BytesResult [(status Int) (bytes (Vec Int))])
+(defrecord BytesResult
+  [status Int
+   bytes (Vec Int)])
 
 ;; Direct compiler calls carry fact-profile products through the same Store
 ;; transaction boundary as RPC.  There is no second key encoding: every
 ;; admitted canonical fact is one ordinary Store triple.
 (defrecord CompileDirectResult
-  [(status Int)
-   (error String?)
-   (next-store StoreResult)
-   (append-bytes (Vec Int))
-   (state-changed Bool)
-   (query fact-profile/AdmittedQueryClosure?)
-   (result fact-profile/AdmittedResultClosure?)])
+  [status Int
+   error String?
+   next-store StoreResult
+   append-bytes (Vec Int)
+   state-changed Bool
+   query fact-profile/AdmittedQueryClosure?
+   result fact-profile/AdmittedResultClosure?])
 
 (defrecord CompileStoredValue
-  [(result fact-profile/AdmittedResultClosure) (payload String)])
+  [result fact-profile/AdmittedResultClosure
+   payload String])
 
 (defrecord CompileQueryResult
-  [(status Int) (found Bool) (value CompileStoredValue?) (error String?)])
+  [status Int
+   found Bool
+   value CompileStoredValue?
+   error String?])
 
 (defrecord CompileAppendResult
-  [(status Int)
-   (outcome Int)
-   (value CompileStoredValue?)
-   (error String?)
-   (append-bytes (Vec Int))
-   (next-store StoreResult)
-   (state-changed Bool)
-   (snapshot-bytes (Vec Int))])
+  [status Int
+   outcome Int
+   value CompileStoredValue?
+   error String?
+   append-bytes (Vec Int)
+   next-store StoreResult
+   state-changed Bool
+   snapshot-bytes (Vec Int)])
 
-(defn error-or [(error String?) (fallback String)] String
+(defn error-or
+  [error String?
+   fallback String] String
   (if error error fallback))
 
 (defn ok-status [] Status (->Status status-ok nil))
 
-(defn fatal-status [(message String)] Status
+(defn fatal-status [message String] Status
   (->Status status-fatal message))
 
-(defn failed-store [(message String)] StoreResult
+(defn failed-store [message String] StoreResult
   (->StoreResult status-fatal nil message 0 empty-bytes ""))
 
-(defn failed-request [(message String)] RequestResult
+(defn failed-request [message String] RequestResult
   (->RequestResult status-fatal nil message))
 
 (defn failed-response
-  [(message String) (store-result StoreResult)] ResponseResult
+  [message String
+   store-result StoreResult] ResponseResult
   (->ResponseResult
    status-fatal nil message empty-bytes store-result false empty-bytes))
 
-(defn next-store-result [(prior StoreResult) (store Store)] StoreResult
+(defn next-store-result
+  [prior StoreResult
+   store Store] StoreResult
   (->StoreResult
    status-ok store nil
    (storeresult-valid-log-bytes prior) empty-bytes ""))
 
-(defn compiler-fact-triple [(fact fact-profile/CompileQueryFact)] t/Triple
+(defn compiler-fact-triple [fact fact-profile/CompileQueryFact] t/Triple
   (t/triple (fact-profile/compilequeryfact-subject fact)
             (fact-profile/compilequeryfact-relation fact)
             (fact-profile/compilequeryfact-value fact)))
 
 (defn compiler-fact-operations
-  [(root (Atom t/TermStore)) (facts (Vec fact-profile/CompileQueryFact))]
-  (Vec t/CommitOperation)
+  [root (Atom t/TermStore)
+   facts (Vec fact-profile/CompileQueryFact)] (Vec t/CommitOperation)
   (reduce
-   (fn [(operations (Vec t/CommitOperation))
-        (fact fact-profile/CompileQueryFact)] (Vec t/CommitOperation)
+   (fn
+     [operations (Vec t/CommitOperation)
+      fact fact-profile/CompileQueryFact] (Vec t/CommitOperation)
      (let [proposition (compiler-fact-triple fact)]
        (if (contains? (term-store/live-propositions root) proposition)
          operations
@@ -119,15 +138,16 @@
    [] facts))
 
 (defn compiler-commit!
-  [(prior StoreResult) (facts (Vec fact-profile/CompileQueryFact))
-   (query fact-profile/AdmittedQueryClosure?)
-   (result fact-profile/AdmittedResultClosure?)] CompileDirectResult
+  [prior StoreResult
+   facts (Vec fact-profile/CompileQueryFact)
+   query fact-profile/AdmittedQueryClosure?
+   result fact-profile/AdmittedResultClosure?] CompileDirectResult
   (let [current Store? (storeresult-store prior)]
     (if (or (not= status-ok (storeresult-status prior)) (nil? current))
       (->CompileDirectResult status-fatal
                              (error-or (storeresult-error prior) "store boot failed")
                              prior empty-bytes false query result)
-      (let [(store-value Store) current
+      (let [store-value Store current
             session (schema/fork-session (store-session store-value))
             root (schema/store-of session)
             before (term-store/current-sequence root)
@@ -154,13 +174,13 @@
                                                  "compiler fact log encoding failed")
                                        prior empty-bytes false query result)))))))))
 
-(defn payload-content-id [(payload String)] String
+(defn payload-content-id [payload String] String
   (str "sha256:" (sha256-bytes (utf8-encode payload))))
 
 (defn compiler-stored-facts
-  [(query fact-profile/AdmittedQueryClosure)
-   (result fact-profile/AdmittedResultClosure)
-   (payload String)] (Vec fact-profile/CompileQueryFact)
+  [query fact-profile/AdmittedQueryClosure
+   result fact-profile/AdmittedResultClosure
+   payload String] (Vec fact-profile/CompileQueryFact)
   (conj
    (vec
     (concat (fact-profile/admittedqueryclosure-facts query)
@@ -170,9 +190,13 @@
                                    0 payload)))
 
 (defn stored-result-text
-  [(root (Atom t/TermStore)) (result-digest String) (relation Keyword)] String?
+  [root (Atom t/TermStore)
+   result-digest String
+   relation Keyword] String?
   (reduce
-   (fn [found String? proposition t/Triple] String?
+   (fn
+     [found String?
+      proposition t/Triple] String?
      (if found
        found
        (let [value Any (t/triple-t3 proposition)]
@@ -183,9 +207,9 @@
    nil (term-store/live-propositions root)))
 
 (defn stored-value-for-result
-  [(root (Atom t/TermStore))
-   (query fact-profile/AdmittedQueryClosure)
-   (result-digest String)] CompileStoredValue?
+  [root (Atom t/TermStore)
+   query fact-profile/AdmittedQueryClosure
+   result-digest String] CompileStoredValue?
   (let [target String? (stored-result-text root result-digest :result/target)
         materializer String? (stored-result-text root result-digest :result/materializer)
         status String? (stored-result-text root result-digest :result/status)
@@ -205,11 +229,13 @@
       nil)))
 
 (defn stored-value-for-query
-  [(root (Atom t/TermStore))
-   (query fact-profile/AdmittedQueryClosure)] CompileStoredValue?
+  [root (Atom t/TermStore)
+   query fact-profile/AdmittedQueryClosure] CompileStoredValue?
   (let [query-digest String (fact-profile/admittedqueryclosure-query-digest query)]
     (reduce
-     (fn [found CompileStoredValue? proposition t/Triple] CompileStoredValue?
+     (fn
+       [found CompileStoredValue?
+        proposition t/Triple] CompileStoredValue?
        (if found
          found
          (if (and (= :result/query (t/triple-t2 proposition))
@@ -221,13 +247,11 @@
 ;; The whole log is already borrowed here; slicing it into chunks would copy
 ;; every byte again.
 (defn- fold-store!
-  [(canonical-log-path String)
-   (space-id String)
-   (log-bytes ByteSource)
-   (report String)]
-  StoreResult
-  (let [completed
-        (log/consume-transaction-log-header!
+  [canonical-log-path String
+   space-id String
+   log-bytes ByteSource
+   report String] StoreResult
+  (let [completed (log/consume-transaction-log-header!
          (log/start-transaction-log-stream space-id) log-bytes)
         root (log/bootstream-store completed)
         error (log/bootstream-error completed)]
@@ -250,23 +274,22 @@
 ;; An image that installs but whose tail does not continue is never an error:
 ;; the boot degrades to the full fold that the transaction log alone supports.
 (defn- snapshot-store!
-  [(canonical-log-path String)
-   (space-id String)
-   (log-bytes ByteSource)
-   (plan snapshot/BootPlan)]
-  StoreResult
-  (let [(image snapshot/Image?) (snapshot/bootplan-image plan)]
+  [canonical-log-path String
+   space-id String
+   log-bytes ByteSource
+   plan snapshot/BootPlan] StoreResult
+  (let [image snapshot/Image? (snapshot/bootplan-image plan)]
     (if (nil? image)
       (fold-store! canonical-log-path space-id log-bytes
                    "store: snapshot boot degraded to full fold; reason :no-image")
-      (let [(present snapshot/Image) image
-            (sidecar snapshot/Sidecar?) (snapshot/image-sidecar present)]
+      (let [present snapshot/Image image
+            sidecar snapshot/Sidecar? (snapshot/image-sidecar present)]
         (if (nil? sidecar)
           (fold-store!
            canonical-log-path space-id log-bytes
            "store: snapshot boot degraded to full fold; reason :no-sidecar")
           (let [watermark (snapshot/sidecar-watermark
-                           (let [(known snapshot/Sidecar) sidecar] known))
+                           (let [known snapshot/Sidecar sidecar] known))
                 root (term-store/new-term-store
                       (snapshot/image-space-id present))
                 loaded (snapshot/install-image! present root)]
@@ -275,8 +298,7 @@
                canonical-log-path space-id log-bytes
                (str "store: snapshot boot degraded to full fold; reason "
                     (str (term-store/termstoreloadresult-code loaded))))
-              (let [tail
-                    (log/consume-transaction-log-records!
+              (let [tail (log/consume-transaction-log-records!
                      (log/->BootStream space-id (term-store/open-fold! root)
                                        watermark [] nil)
                      log-bytes watermark)
@@ -298,11 +320,10 @@
                      (snapshot/bootplan-report plan))))))))))))
 
 (defn boot-store!
-  [(canonical-log-path String)
-   (space-id String)
-   (log-bytes ByteSource)
-   (snapshot-bytes ByteSource)]
-  StoreResult
+  [canonical-log-path String
+   space-id String
+   log-bytes ByteSource
+   snapshot-bytes ByteSource] StoreResult
   (let [plan (snapshot/plan-snapshot-boot! true snapshot-bytes log-bytes
                                            space-id)]
     (if (= :replay (snapshot/bootplan-route plan))
@@ -311,7 +332,8 @@
                    (snapshot/bootplan-report plan)))))
 
 (defn wrap-rpc-response
-  [(request-packet t/StoreRpcPacketV2) (rpc-response t/RpcResponse)] Response
+  [request-packet t/StoreRpcPacketV2
+   rpc-response t/RpcResponse] Response
   (->Response
    (t/->StoreRpcPacketV2 :response 0
                    (t/storerpcpacketv2-request-id request-packet)
@@ -320,12 +342,11 @@
 ;; A checkpoint writes an image beside the log; the log itself is untouched, so
 ;; the operation appends nothing and changes no store state.
 (defn checkpoint-response!
-  [(store-result StoreResult)
-   (store Store)
-   (packet t/StoreRpcPacketV2)
-   (request t/RpcRequest)
-   (now-ms Int)]
-  ResponseResult
+  [store-result StoreResult
+   store Store
+   packet t/StoreRpcPacketV2
+   request t/RpcRequest
+   now-ms Int] ResponseResult
   (let [session (store-session store)
         root (schema/store-of session)
         served-version (term-store/current-sequence root)
@@ -360,8 +381,7 @@
                                   "rpc/checkpoint does not support paging"))
         nil empty-bytes next-store false empty-bytes)]
       [:else
-       (let [encoded
-             (snapshot/encode-snapshot! root served-version watermark now-ms)]
+       (let [encoded (snapshot/encode-snapshot! root served-version watermark now-ms)]
          (if (= status-ok (snapshot/bytesresult-status encoded))
            (->ResponseResult
             status-ok
@@ -387,15 +407,14 @@
             nil empty-bytes next-store false empty-bytes)))])))
 
 (defn dispatch-request!
-  [(store-result StoreResult)
-   (store Store)
-   (request-value Request)
-   (now-ms Int)]
-  ResponseResult
+  [store-result StoreResult
+   store Store
+   request-value Request
+   now-ms Int] ResponseResult
   (let [packet (request-packet request-value)
         request (t/storerpcpacketv2-request packet)]
     (if request
-      (let [(present t/RpcRequest) request]
+      (let [present t/RpcRequest request]
         (if (= :rpc/checkpoint (t/rpcrequest-op present))
           (checkpoint-response! store-result store packet present now-ms)
           (let [session (store-session store)
@@ -409,8 +428,7 @@
                 encoded (log/encode-store-append! root before-sequence)]
             (if (= status-ok (log/bytesresult-status encoded))
               (let [append-bytes (log/bytesresult-bytes encoded)
-                    next-store
-                    (next-store-result
+                    next-store (next-store-result
                      store-result
                      (->Store (store-canonical-log-path store) working-session
                               (+ (store-log-byte-count store)
@@ -430,7 +448,7 @@
       (failed-response
        "decoded request packet omitted RpcRequest" store-result))))
 
-(defn read-request! [(request-bytes ByteSource)] RequestResult
+(defn read-request! [request-bytes ByteSource] RequestResult
   (let [decoded (native-wire/decode-request-bytes! request-bytes)
         packet (native-wire/decoderesult-packet decoded)
         error (native-wire/decoderesult-error decoded)]
@@ -439,9 +457,8 @@
       (failed-request
        (error-or error "native Store RPC request decode failed")))))
 
-(defn write-response! [(response-value Response)] BytesResult
-  (let [encoded
-        (native-wire/encode-response-bytes! (response-packet response-value))
+(defn write-response! [response-value Response] BytesResult
+  (let [encoded (native-wire/encode-response-bytes! (response-packet response-value))
         bytes (native-wire/encoderesult-bytes encoded)
         error (native-wire/encoderesult-error encoded)]
     (if (and (nil? error) bytes)
@@ -453,18 +470,16 @@
 (defn server-generated-abi [] Int server-abi)
 
 (defn server-store-boot!
-  [(canonical-log-path String)
-   (space-id String)
-   (log-bytes ByteSource)
-   (snapshot-bytes ByteSource)]
-  StoreResult
+  [canonical-log-path String
+   space-id String
+   log-bytes ByteSource
+   snapshot-bytes ByteSource] StoreResult
   (boot-store! canonical-log-path space-id log-bytes snapshot-bytes))
 
 (defn server-store-dispatch!
-  [(store-result StoreResult)
-   (request-result RequestResult)
-   (now-ms Int)]
-  ResponseResult
+  [store-result StoreResult
+   request-result RequestResult
+   now-ms Int] ResponseResult
   (let [store (storeresult-store store-result)
         request-value (requestresult-request request-result)]
     (if (and (= status-ok (storeresult-status store-result))
@@ -479,39 +494,38 @@
                    "request decode failed"))
        store-result))))
 
-(defn server-store-shutdown [(store-result StoreResult)] Status
+(defn server-store-shutdown [store-result StoreResult] Status
   (let [store (storeresult-store store-result)]
     (if (and (= status-ok (storeresult-status store-result)) store)
       (ok-status)
       (fatal-status
        (error-or (storeresult-error store-result) "store boot failed")))))
 
-(defn server-codec-read-request! [(request-bytes ByteSource)] RequestResult
+(defn server-codec-read-request! [request-bytes ByteSource] RequestResult
   (read-request! request-bytes))
 
-(defn server-codec-write-response!
-  [(response-result ResponseResult)] BytesResult
+(defn server-codec-write-response! [response-result ResponseResult] BytesResult
   (let [response-value (responseresult-response response-result)]
     (if (and (= status-ok (responseresult-status response-result))
              response-value)
       (write-response! response-value)
       (->BytesResult status-fatal empty-bytes))))
 
-(defn server-codec-release-request [(request-result RequestResult)] Nil nil)
+(defn server-codec-release-request [request-result RequestResult] Nil nil)
 
-(defn server-codec-release-response [(response-result ResponseResult)] Nil nil)
+(defn server-codec-release-response [response-result ResponseResult] Nil nil)
 
 ;; These direct entries are intentionally positional: the C boundary passes
 ;; raw fact-profile dimensions, never a serialized closure.
 (defn server-compile-query!
-  [(store-result StoreResult)
-   (source-closure-digest String)
-   (compiler-context String)
-   (profile String)
-   (ordered-targets (Vec String))
-   (rules-content-id String)
-   (schema-content-id String)
-   (expected-query-digest String)] CompileQueryResult
+  [store-result StoreResult
+   source-closure-digest String
+   compiler-context String
+   profile String
+   ordered-targets (Vec String)
+   rules-content-id String
+   schema-content-id String
+   expected-query-digest String] CompileQueryResult
   (match (fact-profile/admit-and-identify-query
           (fact-profile/->QueryAdmissionRequest
            source-closure-digest compiler-context profile ordered-targets
@@ -529,27 +543,26 @@
                                  (error-or (storeresult-error store-result)
                                            "store boot failed"))
            (let [store-value Store current
-                 value CompileStoredValue?
-                 (stored-value-for-query (schema/store-of (store-session store-value))
+                 value CompileStoredValue? (stored-value-for-query (schema/store-of (store-session store-value))
                                          query)]
              (if value
                (->CompileQueryResult status-ok true value nil)
                (->CompileQueryResult status-ok false nil nil))))))]))
 
 (defn server-compile-append!
-  [(store-result StoreResult)
-   (source-closure-digest String)
-   (compiler-context String)
-   (profile String)
-   (ordered-targets (Vec String))
-   (rules-content-id String)
-   (schema-content-id String)
-   (expected-query-digest String)
-   (target String)
-   (materializer-content-id String)
-   (status String)
-   (claimed-content-id String)
-   (payload String)] CompileAppendResult
+  [store-result StoreResult
+   source-closure-digest String
+   compiler-context String
+   profile String
+   ordered-targets (Vec String)
+   rules-content-id String
+   schema-content-id String
+   expected-query-digest String
+   target String
+   materializer-content-id String
+   status String
+   claimed-content-id String
+   payload String] CompileAppendResult
   (match (fact-profile/admit-and-identify-query
           (fact-profile/->QueryAdmissionRequest
            source-closure-digest compiler-context profile ordered-targets

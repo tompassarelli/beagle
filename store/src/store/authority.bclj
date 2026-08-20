@@ -21,7 +21,7 @@
 
 (def u64-max String "18446744073709551615")
 
-(defn canonical-u64-decimal? [(value Any)] Bool
+(defn canonical-u64-decimal? [value Any] Bool
   (if (string? value)
     (let [n (count value)]
       (and (pos? n)
@@ -29,10 +29,13 @@
         (or (< n 20) (and (= n 20) (<= (.compareTo value u64-max) 0)))))
     false))
 
-(defn- authority-fail! [(code String) (path String) (message String)] Any
+(defn- authority-fail!
+  [code String
+   path String
+   message String] Any
   (throw (ex-info message {:authority/code code :authority/path path})))
 
-(defn unicode-scalar-string? [(value Any)] Bool
+(defn unicode-scalar-string? [value Any] Bool
   (if (string? value)
     (loop [i Int 0]
       (if (>= i (count value))
@@ -47,18 +50,18 @@
             [:else (recur (inc i))]))))
     false))
 
-(defn json-subset-value? [(value Any)] Bool
+(defn json-subset-value? [value Any] Bool
   (cond
     [(boolean? value) true]
     [(string? value) (unicode-scalar-string? value)]
     [(vector? value)
-     (every? (fn [(item Any)] Bool (json-subset-value? item)) value)]
+     (every? (fn [item Any] Bool (json-subset-value? item)) value)]
     [(map? value)
-     (every? (fn [(key Any)] Bool (and (string? key) (unicode-scalar-string? key) (json-subset-value? (get value key))))
+     (every? (fn [key Any] Bool (and (string? key) (unicode-scalar-string? key) (json-subset-value? (get value key))))
        (vec (sort (set (keys value)))))]
     [:else false]))
 
-(defn decode-json-no-number-no-null! [(raw Any)] Any
+(defn decode-json-no-number-no-null! [raw Any] Any
   (if (string? raw)
     (let [parsed (try (authority-json/decode-strict raw) (catch (_ Throwable) (authority-fail! "invalid-json" "$" "raw JSON is malformed or contains a duplicate object name")))]
       (if (json-subset-value? parsed)
@@ -68,7 +71,7 @@
           "raw JSON must contain only booleans, strings, arrays, and string-keyed objects")))
     (authority-fail! "invalid-json" "$" "raw JSON input must be a string")))
 
-(defn clean-authority-string? [(value Any)] Bool
+(defn clean-authority-string? [value Any] Bool
   (if (string? value)
     (and (unicode-scalar-string? value)
       (java.text.Normalizer/isNormalized value java.text.Normalizer$Form/NFC)
@@ -79,14 +82,14 @@
             (if (or (< n 32) (and (<= 127 n) (<= n 159))) false (recur (inc i)))))))
     false))
 
-(defn- jcs-escape-string [(value String)] String
+(defn- jcs-escape-string [value String] String
   (str "\""
     (apply str
-      (mapv (fn [(i Int)] String (let [n (int (.charAt value i))] (cond [(= n 34) "\\\""] [(= n 92) "\\\\"] [(= n 8) "\\b"] [(= n 9) "\\t"] [(= n 10) "\\n"] [(= n 12) "\\f"] [(= n 13) "\\r"] [(< n 32) (format "\\u%04x" n)] [:else (subs value i (inc i))])))
+      (mapv (fn [i Int] String (let [n (int (.charAt value i))] (cond [(= n 34) "\\\""] [(= n 92) "\\\\"] [(= n 8) "\\b"] [(= n 9) "\\t"] [(= n 10) "\\n"] [(= n 12) "\\f"] [(= n 13) "\\r"] [(< n 32) (format "\\u%04x" n)] [:else (subs value i (inc i))])))
         (vec (range (count value)))))
     "\""))
 
-(defn jcs-json-no-number-no-null-canonical! [(value Any)] String
+(defn jcs-json-no-number-no-null-canonical! [value Any] String
   (if (json-subset-value? value)
     (cond
       [(boolean? value) (if value "true" "false")]
@@ -94,14 +97,14 @@
       [(vector? value)
        (str "["
          (str/join ","
-           (mapv (fn [(item Any)] String (jcs-json-no-number-no-null-canonical! item))
+           (mapv (fn [item Any] String (jcs-json-no-number-no-null-canonical! item))
              value))
          "]")]
       [(map? value)
        (let [ordered (vec (sort (set (keys value))))]
          (str "{"
            (str/join ","
-             (mapv (fn [(key Any)] String (str (jcs-escape-string (str key)) ":" (jcs-json-no-number-no-null-canonical! (get value key))))
+             (mapv (fn [key Any] String (str (jcs-escape-string (str key)) ":" (jcs-json-no-number-no-null-canonical! (get value key))))
                ordered))
            "}"))]
       [:else
@@ -112,36 +115,37 @@
       "$"
       "value lies outside the JCS no-number/no-null subset")))
 
-(defn sha256-text [(value String)] String
-  (let [bytes (.getBytes value java.nio.charset.StandardCharsets/UTF_8) digest (.digest (java.security.MessageDigest/getInstance "SHA-256") bytes)]
+(defn sha256-text [value String] String
+  (let [bytes (.getBytes value java.nio.charset.StandardCharsets/UTF_8)
+        digest (.digest (java.security.MessageDigest/getInstance "SHA-256") bytes)]
     (str "sha256:"
       (apply str
-        (mapv (fn [(b Any)] String (format "%02x" (bit-and (int b) 255)))
+        (mapv (fn [b Any] String (format "%02x" (bit-and (int b) 255)))
           (vec digest))))))
 
-(defn digest-json-no-number-no-null! [(value Any)] String
+(defn digest-json-no-number-no-null! [value Any] String
   (sha256-text (jcs-json-no-number-no-null-canonical! value)))
 
 (defn- ensure-authority!
-  [(condition Any) (code String) (path String) (message String)] Nil
+  [condition Any
+   code String
+   path String
+   message String] Nil
   (if condition nil (authority-fail! code path message)))
 
 (defn- closed-object!
-  [(value Any)
-   (required (Vec String))
-   (optional (Vec String))
-   (path String)]
-  (Map String Any)
+  [value Any
+   required (Vec String)
+   optional (Vec String)
+   path String] (Map String Any)
   (if (map? value)
-    (let [(m (Map String Any)) value (keys0 (Vec String)) (vec (sort (set (keys m)))) (allowed (Vec String)) (vec (concat required optional)) (missing (Vec String)) (filterv (fn
-                                                                                                                                                                                [(key String)]
-                                                                                                                                                                                Bool
-                                                                                                                                                                                (not (contains? m key))) required) (unknown (Vec Any)) (filterv (fn
-                                                                                                                                                                                                                                                  [(key Any)]
-                                                                                                                                                                                                                                                  Bool
-                                                                                                                                                                                                                                                  (or (not (string? key)) (not (some (fn
-                                                                                                                                                                                                                                                                                       [(allowed-key String)]
-                                                                                                                                                                                                                                                                                       Bool
+    (let [m (Map String Any) value
+          keys0 (Vec String) (vec (sort (set (keys m))))
+          allowed (Vec String) (vec (concat required optional))
+          missing (Vec String) (filterv (fn [key String] Bool
+                                                                                                                                                                                (not (contains? m key))) required)
+          unknown (Vec Any) (filterv (fn [key Any] Bool
+                                                                                                                                                                                                                                                  (or (not (string? key)) (not (some (fn [allowed-key String] Bool
                                                                                                                                                                                                                                                                                        (= allowed-key key)) allowed)))) keys0)]
       (do
         (ensure-authority! (empty? missing)
@@ -155,14 +159,18 @@
         m))
     (authority-fail! "expected-object" path "expected a JSON object")))
 
-(defn- clean-text! [(value Any) (path String)] String
+(defn- clean-text!
+  [value Any
+   path String] String
   (if (clean-authority-string? value)
     value
     (authority-fail! "invalid-text"
       path
       "expected NFC Unicode scalar text without control characters")))
 
-(defn- digest-text! [(value Any) (path String)] String
+(defn- digest-text!
+  [value Any
+   path String] String
   (let [text (clean-text! value path)]
     (if (.matches text "sha256:[0-9a-f]{64}")
       text
@@ -170,7 +178,9 @@
         path
         "expected lowercase sha256:<64 hex>"))))
 
-(defn- decimal-text! [(value Any) (path String)] String
+(defn- decimal-text!
+  [value Any
+   path String] String
   (do
     (ensure-authority! (canonical-u64-decimal? value)
       "invalid-decimal"
@@ -178,7 +188,9 @@
       "expected a canonical unsigned 64-bit decimal string")
     (str value)))
 
-(defn- vector-value! [(value Any) (path String)] (Vec Any)
+(defn- vector-value!
+  [value Any
+   path String] (Vec Any)
   (do
     (ensure-authority! (vector? value)
       "expected-array"
@@ -186,7 +198,9 @@
       "expected a JSON array")
     (vec value)))
 
-(defn- bool-value! [(value Any) (path String)] Bool
+(defn- bool-value!
+  [value Any
+   path String] Bool
   (do
     (ensure-authority! (boolean? value)
       "expected-boolean"
@@ -194,10 +208,12 @@
       "expected a JSON boolean")
     (if value true false)))
 
-(defn- string-object! [(value Any) (path String)] (Map String Any)
+(defn- string-object!
+  [value Any
+   path String] (Map String Any)
   (if (map? value)
-    (let [(m (Map String Any)) value (bad (Vec Any)) (filterv (fn
-                                                                [(key Any)] Bool (not (clean-authority-string? key))) (vec (sort (set (keys m)))))]
+    (let [m (Map String Any) value
+          bad (Vec Any) (filterv (fn [key Any] Bool (not (clean-authority-string? key))) (vec (sort (set (keys m)))))]
       (do
         (ensure-authority! (empty? bad)
           "invalid-object-key"
@@ -206,9 +222,11 @@
         m))
     (authority-fail! "expected-object" path "expected a JSON object")))
 
-(defn- clean-string-vector! [(value Any) (path String)] (Vec String)
-  (let [items (vector-value! value path) normalized (mapv (fn
-                                                            [(item Any)] String (clean-text! item path)) items)]
+(defn- clean-string-vector!
+  [value Any
+   path String] (Vec String)
+  (let [items (vector-value! value path)
+        normalized (mapv (fn [item Any] String (clean-text! item path)) items)]
     (do
       (ensure-authority! (= (count normalized) (count (set normalized)))
         "duplicate-array-item"
@@ -219,8 +237,11 @@
 (def expected-tool-order (Vec String)
   ["add-def" "set-body" "rename-def" "insert-after" "replace-in-body"])
 
-(defn- validate-property-schema! [(value Any) (path String)] (Map String Any)
-  (let [m (closed-object! value ["type" "description"] [] path) type0 (clean-text! (get m "type") (str path ".type"))]
+(defn- validate-property-schema!
+  [value Any
+   path String] (Map String Any)
+  (let [m (closed-object! value ["type" "description"] [] path)
+        type0 (clean-text! (get m "type") (str path ".type"))]
     (do
       (ensure-authority! (= type0 "string")
         "invalid-property-type"
@@ -229,8 +250,12 @@
       (clean-text! (get m "description") (str path ".description"))
       m)))
 
-(defn- validate-input-schema! [(value Any) (path String)] (Map String Any)
-  (let [m (closed-object! value ["type" "properties" "required"] [] path) properties (string-object! (get m "properties") (str path ".properties")) required (clean-string-vector! (get m "required") (str path ".required"))]
+(defn- validate-input-schema!
+  [value Any
+   path String] (Map String Any)
+  (let [m (closed-object! value ["type" "properties" "required"] [] path)
+        properties (string-object! (get m "properties") (str path ".properties"))
+        required (clean-string-vector! (get m "required") (str path ".required"))]
     (do
       (ensure-authority! (= "object" (clean-text! (get m "type") (str path ".type")))
         "invalid-schema-type"
@@ -249,7 +274,9 @@
           "required entries must name properties"))
       m)))
 
-(defn validate-tool-descriptor! [(value Any) (path String)] (Map String Any)
+(defn validate-tool-descriptor!
+  [value Any
+   path String] (Map String Any)
   (let [m (closed-object! value ["name" "description" "inputSchema"] [] path)]
     (do
       (clean-text! (get m "name") (str path ".name"))
@@ -257,13 +284,12 @@
       (validate-input-schema! (get m "inputSchema") (str path ".inputSchema"))
       m)))
 
-(defn validate-tool-catalog! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["catalogVersion" "tools"] [] "tools") tools (vector-value! (get m "tools") "tools.tools") normalized (mapv (fn
-                                                                                                                                              [(tool Any)]
-                                                                                                                                              (Map String Any)
-                                                                                                                                              (validate-tool-descriptor! tool "tools.tools[]")) tools) names (mapv (fn
-                                                                                                                                                                                                                     [(tool (Map String Any))]
-                                                                                                                                                                                                                     String
+(defn validate-tool-catalog! [value Any] (Map String Any)
+  (let [m (closed-object! value ["catalogVersion" "tools"] [] "tools")
+        tools (vector-value! (get m "tools") "tools.tools")
+        normalized (mapv (fn [tool Any] (Map String Any)
+                                                                                                                                              (validate-tool-descriptor! tool "tools.tools[]")) tools)
+        names (mapv (fn [tool (Map String Any)] String
                                                                                                                                                                                                                      (str (get tool "name"))) normalized)]
     (do
       (ensure-authority! (= "store.graph-edit-tools/v1" (clean-text! (get m "catalogVersion") "tools.catalogVersion"))
@@ -276,8 +302,9 @@
         "catalog must contain the exact five graph-edit tools in served order")
       m)))
 
-(defn tool-catalog-digest! [(value Any)] String
-  (let [catalog (validate-tool-catalog! value) digest (digest-json-no-number-no-null! catalog)]
+(defn tool-catalog-digest! [value Any] String
+  (let [catalog (validate-tool-catalog! value)
+        digest (digest-json-no-number-no-null! catalog)]
     (do
       (ensure-authority! (= digest "sha256:226f40e6da724f8a8b38e58f490bf4f0ae09b2bc9991ba93c2b9fb04697eedad")
         "catalog-fixture"
@@ -288,7 +315,9 @@
 (def beagle-source-extensions (Vec String)
   [".bclj" ".bcljs" ".bjs" ".bnix" ".bgl" ".bsql" ".bpy"])
 
-(defn- portable-relative-path? [(value Any) (allow-empty Bool)] Bool
+(defn- portable-relative-path?
+  [value Any
+   allow-empty Bool] Bool
   (if (string? value)
     (if (empty? value)
       allow-empty
@@ -298,11 +327,11 @@
         (not (str/includes? value "\\"))
         (not (str/includes? value "//"))
         (not (str/includes? value ":"))
-        (every? (fn [(segment Any)] Bool (and (not (= segment ".")) (not (= segment "..")) (pos? (count (str segment)))))
+        (every? (fn [segment Any] Bool (and (not (= segment ".")) (not (= segment "..")) (pos? (count (str segment)))))
           (vec (.split value "/")))))
     false))
 
-(defn- source-extension [(path String)] String?
+(defn- source-extension [path String] String?
   (loop [extensions (Vec String) beagle-source-extensions]
     (if (empty? extensions)
       nil
@@ -310,7 +339,7 @@
         (first extensions)
         (recur (rest extensions))))))
 
-(defn- module-id-for-source-path! [(path String)] String
+(defn- module-id-for-source-path! [path String] String
   (let [extension (source-extension path)]
     (if (some? extension)
       (str/replace (subs path 0 (- (count path) (count extension))) "/" ".")
@@ -318,16 +347,23 @@
         "manifest.entries[].sourcePath"
         "sourcePath must use a canonical Beagle extension"))))
 
-(defn unsigned-utf8-compare [(a String) (b String)] Int
-  (let [aa (vec (.getBytes a java.nio.charset.StandardCharsets/UTF_8)) bb (vec (.getBytes b java.nio.charset.StandardCharsets/UTF_8)) stop (min (count aa) (count bb))]
+(defn unsigned-utf8-compare
+  [a String
+   b String] Int
+  (let [aa (vec (.getBytes a java.nio.charset.StandardCharsets/UTF_8))
+        bb (vec (.getBytes b java.nio.charset.StandardCharsets/UTF_8))
+        stop (min (count aa) (count bb))]
     (loop [i Int 0]
       (if (= i stop)
         (compare (count aa) (count bb))
-        (let [av (bit-and (int (nth aa i)) 255) bv (bit-and (int (nth bb i)) 255)]
+        (let [av (bit-and (int (nth aa i)) 255)
+              bv (bit-and (int (nth bb i)) 255)]
           (if (= av bv) (recur (inc i)) (compare av bv)))))))
 
-(defn validate-module-entry! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["moduleId" "sourcePath"] [] "manifest.entries[]") module-id (clean-text! (get m "moduleId") "manifest.entries[].moduleId") source-path (clean-text! (get m "sourcePath") "manifest.entries[].sourcePath")]
+(defn validate-module-entry! [value Any] (Map String Any)
+  (let [m (closed-object! value ["moduleId" "sourcePath"] [] "manifest.entries[]")
+        module-id (clean-text! (get m "moduleId") "manifest.entries[].moduleId")
+        source-path (clean-text! (get m "sourcePath") "manifest.entries[].sourcePath")]
     (do
       (ensure-authority! (portable-relative-path? source-path false)
         "invalid-source-path"
@@ -343,12 +379,14 @@
         "moduleId must be derived exactly from sourcePath")
       {"moduleId" module-id "sourcePath" source-path})))
 
-(defn ascii-case-alias [(value String)] String
+(defn ascii-case-alias [value String] String
   (apply str
-    (mapv (fn [(i Int)] String (let [n (int (.charAt value i))] (if (and (<= 65 n) (<= n 90)) (str (char (+ n 32))) (subs value i (inc i)))))
+    (mapv (fn [i Int] String (let [n (int (.charAt value i))] (if (and (<= 65 n) (<= n 90)) (str (char (+ n 32))) (subs value i (inc i)))))
       (vec (range (count value))))))
 
-(defn- module-entry-compare [(a (Map String Any)) (b (Map String Any))] Int
+(defn- module-entry-compare
+  [a (Map String Any)
+   b (Map String Any)] Int
   (let [by-module (unsigned-utf8-compare (str (get a "moduleId")) (str (get b "moduleId")))]
     (if (zero? by-module)
       (unsigned-utf8-compare (str (get a "sourcePath"))
@@ -356,27 +394,28 @@
       by-module)))
 
 (defn normalize-module-manifest!
-  [(source-root-relative-to-checkout Any)
-   (graph-version Any)
-   (entries-value Any)
-   (ast-module-ids-value Any)]
-  (Map String Any)
-  (let [source-root (clean-text! source-root-relative-to-checkout "manifest.sourceRootRelativeToCheckout") version (decimal-text! graph-version "manifest.graphVersion") entries (mapv (fn
-                                                                                                                                                                                         [(entry Any)]
-                                                                                                                                                                                         (Map String Any)
-                                                                                                                                                                                         (validate-module-entry! entry)) (vector-value! entries-value "manifest.entries")) module-ids (mapv (fn
-                                                                                                                                                                                                                                                                                              [(entry (Map String Any))]
-                                                                                                                                                                                                                                                                                              String
-                                                                                                                                                                                                                                                                                              (str (get entry "moduleId"))) entries) source-paths (mapv (fn
-                                                                                                                                                                                                                                                                                                                                                          [(entry (Map String Any))]
-                                                                                                                                                                                                                                                                                                                                                          String
-                                                                                                                                                                                                                                                                                                                                                          (str (get entry "sourcePath"))) entries) module-aliases (mapv ascii-case-alias module-ids) path-aliases (mapv ascii-case-alias source-paths) ast-module-ids (clean-string-vector! ast-module-ids-value "manifest.astModuleIds") known (set module-ids) orphans (filterv (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    [(module-id String)]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    Bool
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    (not (contains? known module-id))) ast-module-ids) ordered (vec (sort-by (fn
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               [(entry (Map String Any))]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               (Map String Any)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               entry) module-entry-compare entries)) mapping-core {"manifestVersion" "store.module-manifest/v1" "sourceRootRelativeToCheckout" source-root "entries" ordered} snapshot-core (assoc mapping-core "graphVersion" version)]
+  [source-root-relative-to-checkout Any
+   graph-version Any
+   entries-value Any
+   ast-module-ids-value Any] (Map String Any)
+  (let [source-root (clean-text! source-root-relative-to-checkout "manifest.sourceRootRelativeToCheckout")
+        version (decimal-text! graph-version "manifest.graphVersion")
+        entries (mapv (fn [entry Any] (Map String Any)
+                                                                                                                                                                                         (validate-module-entry! entry)) (vector-value! entries-value "manifest.entries"))
+        module-ids (mapv (fn [entry (Map String Any)] String
+                                                                                                                                                                                                                                                                                              (str (get entry "moduleId"))) entries)
+        source-paths (mapv (fn [entry (Map String Any)] String
+                                                                                                                                                                                                                                                                                                                                                          (str (get entry "sourcePath"))) entries)
+        module-aliases (mapv ascii-case-alias module-ids)
+        path-aliases (mapv ascii-case-alias source-paths)
+        ast-module-ids (clean-string-vector! ast-module-ids-value "manifest.astModuleIds")
+        known (set module-ids)
+        orphans (filterv (fn [module-id String] Bool
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    (not (contains? known module-id))) ast-module-ids)
+        ordered (vec (sort-by (fn [entry (Map String Any)] (Map String Any)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               entry) module-entry-compare entries))
+        mapping-core {"manifestVersion" "store.module-manifest/v1" "sourceRootRelativeToCheckout" source-root "entries" ordered}
+        snapshot-core (assoc mapping-core "graphVersion" version)]
     (do
       (ensure-authority! (portable-relative-path? source-root true)
         "invalid-source-root"
@@ -408,11 +447,12 @@
        "entries"
        ordered})))
 
-(defn validate-normalized-module-manifest! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["manifestVersion" "sourceRootRelativeToCheckout" "graphVersion" "mappingDigest" "snapshotDigest" "entries"] [] "manifest") entries (vector-value! (get m "entries") "manifest.entries") module-ids (mapv (fn
-                                                                                                                                                                                                                                            [(entry Any)]
-                                                                                                                                                                                                                                            String
-                                                                                                                                                                                                                                            (str (get (validate-module-entry! entry) "moduleId"))) entries) expected (normalize-module-manifest! (get m "sourceRootRelativeToCheckout") (get m "graphVersion") entries module-ids)]
+(defn validate-normalized-module-manifest! [value Any] (Map String Any)
+  (let [m (closed-object! value ["manifestVersion" "sourceRootRelativeToCheckout" "graphVersion" "mappingDigest" "snapshotDigest" "entries"] [] "manifest")
+        entries (vector-value! (get m "entries") "manifest.entries")
+        module-ids (mapv (fn [entry Any] String
+                                                                                                                                                                                                                                            (str (get (validate-module-entry! entry) "moduleId"))) entries)
+        expected (normalize-module-manifest! (get m "sourceRootRelativeToCheckout") (get m "graphVersion") entries module-ids)]
     (do
       (ensure-authority! (= "store.module-manifest/v1" (clean-text! (get m "manifestVersion") "manifest.manifestVersion"))
         "manifest-version"
@@ -426,8 +466,16 @@
         "manifest order or digest does not match its normalized content")
       m)))
 
-(defn validate-authority-binding! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["bindingVersion" "candidateProtocol" "coordinator" "runtime" "corpus" "tools"] [] "binding") coordinator (closed-object! (get m "coordinator") ["instanceId" "endpoint" "lease"] [] "binding.coordinator") endpoint (closed-object! (get coordinator "endpoint") ["transport" "host" "port" "serverSpkiSha256"] [] "binding.coordinator.endpoint") lease (closed-object! (get coordinator "lease") ["id" "epoch" "clientSpkiSha256"] [] "binding.coordinator.lease") runtime (closed-object! (get m "runtime") ["closureDigest"] [] "binding.runtime") corpus (closed-object! (get m "corpus") ["checkoutRoot" "sourceRoot" "codeLog" "identity" "moduleManifest"] [] "binding.corpus") identity (closed-object! (get corpus "identity") ["checkoutFileKey" "sourceFileKey" "logFileKey"] [] "binding.corpus.identity") manifest (closed-object! (get corpus "moduleManifest") ["mappingDigest"] [] "binding.corpus.moduleManifest") tools (closed-object! (get m "tools") ["catalogDigest"] [] "binding.tools")]
+(defn validate-authority-binding! [value Any] (Map String Any)
+  (let [m (closed-object! value ["bindingVersion" "candidateProtocol" "coordinator" "runtime" "corpus" "tools"] [] "binding")
+        coordinator (closed-object! (get m "coordinator") ["instanceId" "endpoint" "lease"] [] "binding.coordinator")
+        endpoint (closed-object! (get coordinator "endpoint") ["transport" "host" "port" "serverSpkiSha256"] [] "binding.coordinator.endpoint")
+        lease (closed-object! (get coordinator "lease") ["id" "epoch" "clientSpkiSha256"] [] "binding.coordinator.lease")
+        runtime (closed-object! (get m "runtime") ["closureDigest"] [] "binding.runtime")
+        corpus (closed-object! (get m "corpus") ["checkoutRoot" "sourceRoot" "codeLog" "identity" "moduleManifest"] [] "binding.corpus")
+        identity (closed-object! (get corpus "identity") ["checkoutFileKey" "sourceFileKey" "logFileKey"] [] "binding.corpus.identity")
+        manifest (closed-object! (get corpus "moduleManifest") ["mappingDigest"] [] "binding.corpus.moduleManifest")
+        tools (closed-object! (get m "tools") ["catalogDigest"] [] "binding.tools")]
     (do
       (ensure-authority! (= "store.graph-edit-authority-binding/v1" (clean-text! (get m "bindingVersion") "binding.bindingVersion"))
         "binding-version"
@@ -465,12 +513,19 @@
       (digest-text! (get tools "catalogDigest") "binding.tools.catalogDigest")
       m)))
 
-(defn authority-binding-digest! [(value Any)] String
+(defn authority-binding-digest! [value Any] String
   (digest-json-no-number-no-null! (validate-authority-binding! value)))
 
-(defn authority-binding-from-descriptor
-  [(descriptor (Map String Any))] (Map String Any)
-  (let [(coordinator (Map String Any)) (get descriptor "coordinator") (endpoint (Map String Any)) (get coordinator "endpoint") (lease (Map String Any)) (get coordinator "lease") (runtime (Map String Any)) (get descriptor "runtime") (corpus (Map String Any)) (get descriptor "corpus") (identity (Map String Any)) (get corpus "identity") (snapshot (Map String Any)) (get corpus "snapshot") (manifest (Map String Any)) (get snapshot "moduleManifest") (tools (Map String Any)) (get descriptor "tools")]
+(defn authority-binding-from-descriptor [descriptor (Map String Any)] (Map String Any)
+  (let [coordinator (Map String Any) (get descriptor "coordinator")
+        endpoint (Map String Any) (get coordinator "endpoint")
+        lease (Map String Any) (get coordinator "lease")
+        runtime (Map String Any) (get descriptor "runtime")
+        corpus (Map String Any) (get descriptor "corpus")
+        identity (Map String Any) (get corpus "identity")
+        snapshot (Map String Any) (get corpus "snapshot")
+        manifest (Map String Any) (get snapshot "moduleManifest")
+        tools (Map String Any) (get descriptor "tools")]
     {"bindingVersion"
      "store.graph-edit-authority-binding/v1"
      "candidateProtocol"
@@ -515,12 +570,14 @@
      "tools"
      {"catalogDigest" (get tools "catalogDigest")}}))
 
-(defn authority-descriptor-digest! [(value Any)] String
+(defn authority-descriptor-digest! [value Any] String
   (let [m (string-object! value "descriptor")]
     (digest-json-no-number-no-null! (dissoc m "descriptorDigest"))))
 
-(defn- validate-descriptor-coordinator! [(value Any)] (Map String Any)
-  (let [coordinator (closed-object! value ["instanceId" "endpoint" "lease"] [] "descriptor.coordinator") endpoint (closed-object! (get coordinator "endpoint") ["transport" "host" "port" "serverSpkiSha256"] [] "descriptor.coordinator.endpoint") lease (closed-object! (get coordinator "lease") ["id" "epoch" "clientSpkiSha256" "expiresAtUnixMs" "state"] [] "descriptor.coordinator.lease")]
+(defn- validate-descriptor-coordinator! [value Any] (Map String Any)
+  (let [coordinator (closed-object! value ["instanceId" "endpoint" "lease"] [] "descriptor.coordinator")
+        endpoint (closed-object! (get coordinator "endpoint") ["transport" "host" "port" "serverSpkiSha256"] [] "descriptor.coordinator.endpoint")
+        lease (closed-object! (get coordinator "lease") ["id" "epoch" "clientSpkiSha256" "expiresAtUnixMs" "state"] [] "descriptor.coordinator.lease")]
     (do
       (clean-text! (get coordinator "instanceId")
         "descriptor.coordinator.instanceId")
@@ -543,8 +600,9 @@
         "descriptors require an active lease")
       coordinator)))
 
-(defn- validate-descriptor-runtime! [(value Any)] (Map String Any)
-  (let [runtime (closed-object! value ["sealVersion" "system" "roots" "closureDigest"] [] "descriptor.runtime") roots (clean-string-vector! (get runtime "roots") "descriptor.runtime.roots")]
+(defn- validate-descriptor-runtime! [value Any] (Map String Any)
+  (let [runtime (closed-object! value ["sealVersion" "system" "roots" "closureDigest"] [] "descriptor.runtime")
+        roots (clean-string-vector! (get runtime "roots") "descriptor.runtime.roots")]
     (do
       (clean-text! (get runtime "sealVersion") "descriptor.runtime.sealVersion")
       (clean-text! (get runtime "system") "descriptor.runtime.system")
@@ -556,8 +614,12 @@
         "descriptor.runtime.closureDigest")
       runtime)))
 
-(defn- validate-descriptor-corpus! [(value Any)] (Map String Any)
-  (let [corpus (closed-object! value ["checkoutRoot" "sourceRoot" "sourceRootRelativeToCheckout" "codeLog" "identity" "snapshot"] [] "descriptor.corpus") identity (closed-object! (get corpus "identity") ["checkoutFileKey" "sourceFileKey" "logFileKey"] [] "descriptor.corpus.identity") snapshot (closed-object! (get corpus "snapshot") ["graphVersion" "logPrefixBytes" "logPrefixSha256" "moduleManifest"] [] "descriptor.corpus.snapshot") manifest (closed-object! (get snapshot "moduleManifest") ["manifestVersion" "mappingDigest" "snapshotDigest" "entries"] [] "descriptor.corpus.snapshot.moduleManifest") full-manifest {"manifestVersion" (get manifest "manifestVersion") "sourceRootRelativeToCheckout" (get corpus "sourceRootRelativeToCheckout") "graphVersion" (get snapshot "graphVersion") "mappingDigest" (get manifest "mappingDigest") "snapshotDigest" (get manifest "snapshotDigest") "entries" (get manifest "entries")}]
+(defn- validate-descriptor-corpus! [value Any] (Map String Any)
+  (let [corpus (closed-object! value ["checkoutRoot" "sourceRoot" "sourceRootRelativeToCheckout" "codeLog" "identity" "snapshot"] [] "descriptor.corpus")
+        identity (closed-object! (get corpus "identity") ["checkoutFileKey" "sourceFileKey" "logFileKey"] [] "descriptor.corpus.identity")
+        snapshot (closed-object! (get corpus "snapshot") ["graphVersion" "logPrefixBytes" "logPrefixSha256" "moduleManifest"] [] "descriptor.corpus.snapshot")
+        manifest (closed-object! (get snapshot "moduleManifest") ["manifestVersion" "mappingDigest" "snapshotDigest" "entries"] [] "descriptor.corpus.snapshot.moduleManifest")
+        full-manifest {"manifestVersion" (get manifest "manifestVersion") "sourceRootRelativeToCheckout" (get corpus "sourceRootRelativeToCheckout") "graphVersion" (get snapshot "graphVersion") "mappingDigest" (get manifest "mappingDigest") "snapshotDigest" (get manifest "snapshotDigest") "entries" (get manifest "entries")}]
     (do
       (clean-text! (get corpus "checkoutRoot") "descriptor.corpus.checkoutRoot")
       (clean-text! (get corpus "sourceRoot") "descriptor.corpus.sourceRoot")
@@ -575,8 +637,9 @@
       (validate-normalized-module-manifest! full-manifest)
       corpus)))
 
-(defn- validate-descriptor-tools! [(value Any)] (Map String Any)
-  (let [tools (closed-object! value ["catalogVersion" "catalogDigest" "tools"] [] "descriptor.tools") catalog {"catalogVersion" (get tools "catalogVersion") "tools" (get tools "tools")}]
+(defn- validate-descriptor-tools! [value Any] (Map String Any)
+  (let [tools (closed-object! value ["catalogVersion" "catalogDigest" "tools"] [] "descriptor.tools")
+        catalog {"catalogVersion" (get tools "catalogVersion") "tools" (get tools "tools")}]
     (do
       (ensure-authority! (= (digest-text! (get tools "catalogDigest") "descriptor.tools.catalogDigest") (tool-catalog-digest! catalog))
         "catalog-digest"
@@ -584,8 +647,10 @@
         "catalogDigest does not match the exact served catalog")
       tools)))
 
-(defn- validate-descriptor-lifecycle! [(value Any)] (Map String Any)
-  (let [lifecycle (closed-object! value ["durability" "projection"] [] "descriptor.lifecycle") durability (closed-object! (get lifecycle "durability") ["state"] [] "descriptor.lifecycle.durability") projection (closed-object! (get lifecycle "projection") ["state" "generation"] [] "descriptor.lifecycle.projection")]
+(defn- validate-descriptor-lifecycle! [value Any] (Map String Any)
+  (let [lifecycle (closed-object! value ["durability" "projection"] [] "descriptor.lifecycle")
+        durability (closed-object! (get lifecycle "durability") ["state"] [] "descriptor.lifecycle.durability")
+        projection (closed-object! (get lifecycle "projection") ["state" "generation"] [] "descriptor.lifecycle.projection")]
     (do
       (clean-text! (get durability "state")
         "descriptor.lifecycle.durability.state")
@@ -595,8 +660,9 @@
         "descriptor.lifecycle.projection.generation")
       lifecycle)))
 
-(defn validate-authority-descriptor! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["descriptorVersion" "descriptorDigest" "candidateProtocol" "coordinator" "runtime" "corpus" "tools" "lifecycle" "bindingDigest"] [] "descriptor") binding (authority-binding-from-descriptor m)]
+(defn validate-authority-descriptor! [value Any] (Map String Any)
+  (let [m (closed-object! value ["descriptorVersion" "descriptorDigest" "candidateProtocol" "coordinator" "runtime" "corpus" "tools" "lifecycle" "bindingDigest"] [] "descriptor")
+        binding (authority-binding-from-descriptor m)]
     (do
       (ensure-authority! (= "store.graph-edit-authority/v1" (clean-text! (get m "descriptorVersion") "descriptor.descriptorVersion"))
         "descriptor-version"
@@ -622,11 +688,13 @@
         "descriptorDigest does not match descriptor content")
       m)))
 
-(defn seal-authority-descriptor! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["descriptorVersion" "candidateProtocol" "coordinator" "runtime" "corpus" "tools" "lifecycle"] [] "descriptor") with-binding (assoc m "bindingDigest" (authority-binding-digest! (authority-binding-from-descriptor m))) sealed (assoc with-binding "descriptorDigest" (authority-descriptor-digest! with-binding))]
+(defn seal-authority-descriptor! [value Any] (Map String Any)
+  (let [m (closed-object! value ["descriptorVersion" "candidateProtocol" "coordinator" "runtime" "corpus" "tools" "lifecycle"] [] "descriptor")
+        with-binding (assoc m "bindingDigest" (authority-binding-digest! (authority-binding-from-descriptor m)))
+        sealed (assoc with-binding "descriptorDigest" (authority-descriptor-digest! with-binding))]
     (validate-authority-descriptor! sealed)))
 
-(defn phase-receipt-digest! [(value Any)] String
+(defn phase-receipt-digest! [value Any] String
   (let [m (string-object! value "receipt")]
     (digest-json-no-number-no-null! (dissoc m "receiptDigest"))))
 
@@ -762,8 +830,12 @@
     "detailCodes"
     ["stale-version"]}})
 
-(defn- validate-accepted-prepare! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["status" "candidateId" "baseGraphVersion" "manifestSnapshotDigest" "opsDigest" "ednDigest" "ops" "asserts" "retracts" "newNodes"] [] "receipt.prepare") ops (bigint (decimal-text! (get m "ops") "receipt.prepare.ops")) asserts (bigint (decimal-text! (get m "asserts") "receipt.prepare.asserts")) retracts (bigint (decimal-text! (get m "retracts") "receipt.prepare.retracts")) new-nodes (bigint (decimal-text! (get m "newNodes") "receipt.prepare.newNodes"))]
+(defn- validate-accepted-prepare! [value Any] (Map String Any)
+  (let [m (closed-object! value ["status" "candidateId" "baseGraphVersion" "manifestSnapshotDigest" "opsDigest" "ednDigest" "ops" "asserts" "retracts" "newNodes"] [] "receipt.prepare")
+        ops (bigint (decimal-text! (get m "ops") "receipt.prepare.ops"))
+        asserts (bigint (decimal-text! (get m "asserts") "receipt.prepare.asserts"))
+        retracts (bigint (decimal-text! (get m "retracts") "receipt.prepare.retracts"))
+        new-nodes (bigint (decimal-text! (get m "newNodes") "receipt.prepare.newNodes"))]
     (do
       (ensure-authority! (= "accepted" (clean-text! (get m "status") "receipt.prepare.status"))
         "prepare-status"
@@ -786,8 +858,9 @@
         "newNodes cannot exceed asserts")
       m)))
 
-(defn- validate-prepare-phase! [(value Any)] (Map String Any)
-  (let [raw (string-object! value "receipt.prepare") status (clean-text! (get raw "status") "receipt.prepare.status")]
+(defn- validate-prepare-phase! [value Any] (Map String Any)
+  (let [raw (string-object! value "receipt.prepare")
+        status (clean-text! (get raw "status") "receipt.prepare.status")]
     (cond
       [(= status "not_run")
        (closed-object! raw ["status"] [] "receipt.prepare")]
@@ -799,8 +872,12 @@
          "receipt.prepare.status"
          "prepare status must be not_run, accepted, or rejected")])))
 
-(defn- validate-versioned-commit! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["status" "graphVersionBefore" "graphVersionAfter" "installed" "coordinatorReceiptDigest"] [] "receipt.commit") status (clean-text! (get m "status") "receipt.commit.status") before (bigint (decimal-text! (get m "graphVersionBefore") "receipt.commit.graphVersionBefore")) after (bigint (decimal-text! (get m "graphVersionAfter") "receipt.commit.graphVersionAfter")) installed (bigint (decimal-text! (get m "installed") "receipt.commit.installed"))]
+(defn- validate-versioned-commit! [value Any] (Map String Any)
+  (let [m (closed-object! value ["status" "graphVersionBefore" "graphVersionAfter" "installed" "coordinatorReceiptDigest"] [] "receipt.commit")
+        status (clean-text! (get m "status") "receipt.commit.status")
+        before (bigint (decimal-text! (get m "graphVersionBefore") "receipt.commit.graphVersionBefore"))
+        after (bigint (decimal-text! (get m "graphVersionAfter") "receipt.commit.graphVersionAfter"))
+        installed (bigint (decimal-text! (get m "installed") "receipt.commit.installed"))]
     (do
       (ensure-authority! (contains? (set ["committed" "failed_restored"]) status)
         "commit-status"
@@ -820,8 +897,9 @@
             "failed_restored must install zero operations")))
       m)))
 
-(defn- validate-commit-phase! [(value Any)] (Map String Any)
-  (let [raw (string-object! value "receipt.commit") status (clean-text! (get raw "status") "receipt.commit.status")]
+(defn- validate-commit-phase! [value Any] (Map String Any)
+  (let [raw (string-object! value "receipt.commit")
+        status (clean-text! (get raw "status") "receipt.commit.status")]
     (cond
       [(= status "not_run") (closed-object! raw ["status"] [] "receipt.commit")]
       [(or (= status "committed") (= status "failed_restored"))
@@ -847,8 +925,9 @@
          "receipt.commit.status"
          "commit status must be not_run, committed, rejected_stale, failed_restored, or indeterminate")])))
 
-(defn- validate-projection-phase! [(value Any)] (Map String Any)
-  (let [raw (string-object! value "receipt.projection") status (clean-text! (get raw "status") "receipt.projection.status")]
+(defn- validate-projection-phase! [value Any] (Map String Any)
+  (let [raw (string-object! value "receipt.projection")
+        status (clean-text! (get raw "status") "receipt.projection.status")]
     (cond
       [(= status "not_run")
        (closed-object! raw ["status"] [] "receipt.projection")]
@@ -879,8 +958,9 @@
          "receipt.projection.status"
          "projection status must be not_run, published, stale, or indeterminate")])))
 
-(defn- validate-receipt-envelope! [(m (Map String Any))] (Map String Any)
-  (let [authority (closed-object! (get m "authority") ["bindingDigest" "descriptorDigest" "instanceId" "leaseId" "leaseEpoch"] [] "receipt.authority") request (closed-object! (get m "request") ["tool" "argumentsDigest"] [] "receipt.request")]
+(defn- validate-receipt-envelope! [m (Map String Any)] (Map String Any)
+  (let [authority (closed-object! (get m "authority") ["bindingDigest" "descriptorDigest" "instanceId" "leaseId" "leaseEpoch"] [] "receipt.authority")
+        request (closed-object! (get m "request") ["tool" "argumentsDigest"] [] "receipt.request")]
     (do
       (ensure-authority! (= "store.graph-edit-phase-receipt/v1" (clean-text! (get m "receiptVersion") "receipt.receiptVersion"))
         "receipt-version"
@@ -912,18 +992,19 @@
       m)))
 
 (defn- validate-receipt-transition!
-  [(m (Map String Any))
-   (prepare (Map String Any))
-   (commit (Map String Any))
-   (projection (Map String Any))]
-  Nil
-  (let [outcome (clean-text! (get m "outcome") "receipt.outcome") spec-value (get receipt-transition-table outcome)]
+  [m (Map String Any)
+   prepare (Map String Any)
+   commit (Map String Any)
+   projection (Map String Any)] Nil
+  (let [outcome (clean-text! (get m "outcome") "receipt.outcome")
+        spec-value (get receipt-transition-table outcome)]
     (do
       (ensure-authority! (some? spec-value)
         "receipt-outcome"
         "receipt.outcome"
         "outcome is outside the closed receipt vocabulary")
-      (let [(spec (Map String Any)) spec-value (detail-codes (Vec Any)) (vector-value! (get spec "detailCodes") "receipt.transition.detailCodes")]
+      (let [spec (Map String Any) spec-value
+            detail-codes (Vec Any) (vector-value! (get spec "detailCodes") "receipt.transition.detailCodes")]
         (do
           (ensure-authority! (= (get prepare "status") (get spec "prepare"))
             "receipt-transition"
@@ -957,17 +1038,21 @@
           nil)))))
 
 (defn- validate-receipt-version-relations!
-  [(prepare (Map String Any))
-   (commit (Map String Any))
-   (projection (Map String Any))]
-  Nil
-  (let [prepare-status (str (get prepare "status")) commit-status (str (get commit "status")) projection-status (str (get projection "status"))]
+  [prepare (Map String Any)
+   commit (Map String Any)
+   projection (Map String Any)] Nil
+  (let [prepare-status (str (get prepare "status"))
+        commit-status (str (get commit "status"))
+        projection-status (str (get projection "status"))]
     (do
       (when (= prepare-status "accepted")
-        (let [base (bigint (str (get prepare "baseGraphVersion"))) ops (bigint (str (get prepare "ops")))]
+        (let [base (bigint (str (get prepare "baseGraphVersion")))
+              ops (bigint (str (get prepare "ops")))]
           (cond
             [(= commit-status "committed")
-             (let [before (bigint (str (get commit "graphVersionBefore"))) after (bigint (str (get commit "graphVersionAfter"))) installed (bigint (str (get commit "installed")))]
+             (let [before (bigint (str (get commit "graphVersionBefore")))
+                   after (bigint (str (get commit "graphVersionAfter")))
+                   installed (bigint (str (get commit "installed")))]
                (do
                  (ensure-authority! (= base before)
                    "receipt-version"
@@ -1007,8 +1092,11 @@
         "projection must cite the committed coordinator receipt"))
     nil))
 
-(defn validate-phase-receipt! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["receiptVersion" "receiptDigest" "operationId" "authority" "request" "module" "prepare" "commit" "projection" "outcome" "canonicalMutation" "retry" "automaticRetryable"] ["detailCode"] "receipt") prepare (validate-prepare-phase! (get m "prepare")) commit (validate-commit-phase! (get m "commit")) projection (validate-projection-phase! (get m "projection"))]
+(defn validate-phase-receipt! [value Any] (Map String Any)
+  (let [m (closed-object! value ["receiptVersion" "receiptDigest" "operationId" "authority" "request" "module" "prepare" "commit" "projection" "outcome" "canonicalMutation" "retry" "automaticRetryable"] ["detailCode"] "receipt")
+        prepare (validate-prepare-phase! (get m "prepare"))
+        commit (validate-commit-phase! (get m "commit"))
+        projection (validate-projection-phase! (get m "projection"))]
     (do
       (validate-receipt-envelope! m)
       (validate-receipt-transition! m prepare commit projection)
@@ -1019,8 +1107,9 @@
         "receiptDigest does not match receipt content")
       m)))
 
-(defn seal-phase-receipt! [(value Any)] (Map String Any)
-  (let [m (closed-object! value ["receiptVersion" "operationId" "authority" "request" "module" "prepare" "commit" "projection" "outcome" "canonicalMutation" "retry" "automaticRetryable"] ["detailCode"] "receipt") sealed (assoc m "receiptDigest" (phase-receipt-digest! m))]
+(defn seal-phase-receipt! [value Any] (Map String Any)
+  (let [m (closed-object! value ["receiptVersion" "operationId" "authority" "request" "module" "prepare" "commit" "projection" "outcome" "canonicalMutation" "retry" "automaticRetryable"] ["detailCode"] "receipt")
+        sealed (assoc m "receiptDigest" (phase-receipt-digest! m))]
     (validate-phase-receipt! sealed)))
 
 (def exact-tool-catalog-digest String

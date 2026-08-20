@@ -43,55 +43,72 @@
 
 
 (defn ultimate
-  [(ctx (U ri/Graph Nil)) (view Any) (BOUND Any) (REFERS Any) (B Any)] Any
-  (loop [b Any B n Int 0]
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   B Any] Any
+  (loop [b Any B
+         n Int 0]
     (let [tgt (rr/refers-target ctx view BOUND REFERS b)]
       (if (and (some? tgt) (< n 64)) (recur tgt (inc n)) b))))
 
 (defn binding-name
-  [(ctx (U ri/Graph Nil)) (view Any) (BOUND Any) (REFERS Any) (B Any)] Any
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   B Any] Any
   (rr/sym-val ctx view (ultimate ctx view BOUND REFERS B)))
 
 (defn render-sym
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (BOUND Any)
-   (REFERS Any)
-   (FIXED Any)
-   (e Any)]
-  Any
-  (let [leaf (rr/sym-val ctx view e) qual (rr/sym-qualifier ctx view e) authored (if (some? qual) (str (str qual) "/" (str leaf)) leaf) D (rr/refers-target ctx view BOUND REFERS e)]
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   FIXED Any
+   e Any] Any
+  (let [leaf (rr/sym-val ctx view e)
+        qual (rr/sym-qualifier ctx view e)
+        authored (if (some? qual) (str (str qual) "/" (str leaf)) leaf)
+        D (rr/refers-target ctx view BOUND REFERS e)]
     (if (nil? D)
       authored
-      (let [fixed? (and (some? ctx) (some? FIXED) (some? e) (not (empty? (ri/by-subject-predicate ctx e FIXED)))) cpfx (rr/pred-val ctx view e "ctor_prefix") afield (rr/pred-val ctx view e "accessor_field") nm0 (binding-name ctx view BOUND REFERS D) nm (cond (some? cpfx) (str (str cpfx) (str nm0)) (some? afield) (str (str/lower-case (str nm0)) "-" (str afield)) :else nm0)]
+      (let [fixed? (and (some? ctx) (some? FIXED) (some? e) (not (empty? (ri/by-subject-predicate ctx e FIXED))))
+            cpfx (rr/pred-val ctx view e "ctor_prefix")
+            afield (rr/pred-val ctx view e "accessor_field")
+            nm0 (binding-name ctx view BOUND REFERS D)
+            nm (cond (some? cpfx) (str (str cpfx) (str nm0)) (some? afield) (str (str/lower-case (str nm0)) "-" (str afield)) :else nm0)]
         (cond (nil? nm0) authored fixed? authored (some? qual) (str (str qual) "/" (str nm)) :else nm)))))
 
-(defn ord-edges [(ctx (U ri/Graph Nil)) (n Any)] (Vec Any)
+(defn ord-edges
+  [ctx (U ri/Graph Nil)
+   n Any] (Vec Any)
   (if (or (nil? ctx) (nil? n))
     []
-    (let [rows (reduce (fn [(acc (Vec Any)) (cid Any)] (Vec Any) (let [(p Any) (ri/predicate-at ctx cid) (r Any) (ri/target-at ctx cid)] (if (and (string? p) (rc/ord-pos? p) (some? r)) (conj acc [(rc/ord-parse p) p cid r]) acc))) [] (ri/by-subject ctx n))]
-      (vec (sort-by (fn [(row Any)] Any (nth row 0)) rc/ord-cmp rows)))))
+    (let [rows (reduce (fn
+                         [acc (Vec Any)
+                          cid Any] (Vec Any)
+                         (let [p Any (ri/predicate-at ctx cid)
+                               r Any (ri/target-at ctx cid)]
+                           (if (and (string? p) (rc/ord-pos? p) (some? r)) (conj acc [(rc/ord-parse p) p cid r]) acc))) [] (ri/by-subject ctx n))]
+      (vec (sort-by (fn [row Any] Any (nth row 0)) rc/ord-cmp rows)))))
 
 (defn node->str
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (BOUND Any)
-   (REFERS Any)
-   (FIXED Any)
-   (n Any)]
-  String
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   FIXED Any
+   n Any] String
   (let [k (rr/kind-of ctx view n)]
     (cond
       (= "list" k)
-      (let [kids (rr/ordered-children ctx n) h (nth kids 0 nil) hs (if (and (some? h) (= "symbol" (rr/kind-of ctx view h))) (render-sym ctx view BOUND REFERS FIXED h) nil) kidstr (fn
-                                                                                                                                                                                     [(ks
-                                                                                                                                                                                       (Vec
-                                                                                                                                                                                        Any))]
-                                                                                                                                                                                     String
-                                                                                                                                                                                     (str/join " " (mapv (fn
-                                                                                                                                                                                                           [(c
-                                                                                                                                                                                                             Any)]
-                                                                                                                                                                                                           String
+      (let [kids (rr/ordered-children ctx n)
+            h (nth kids 0 nil)
+            hs (if (and (some? h) (= "symbol" (rr/kind-of ctx view h))) (render-sym ctx view BOUND REFERS FIXED h) nil)
+            kidstr (fn [ks (Vec Any)] String
+                                                                                                                                                                                     (str/join " " (mapv (fn [c Any] String
                                                                                                                                                                                                            (node->str ctx view BOUND REFERS FIXED c)) ks)))]
         (cond
           (= hs "#%brackets")
@@ -116,37 +133,41 @@
       (str (rr/pred-val ctx view n "v")))))
 
 (defn node->canon
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (BOUND Any)
-   (REFERS Any)
-   (FIXED Any)
-   (n Any)]
-  Any
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   FIXED Any
+   n Any] Any
   (if (= "list" (rr/kind-of ctx view n))
     (into [:list]
-      (mapv (fn [(c Any)] Any (node->canon ctx view BOUND REFERS FIXED c))
+      (mapv (fn [c Any] Any (node->canon ctx view BOUND REFERS FIXED c))
         (rr/ordered-children ctx n)))
     (if (= "symbol" (rr/kind-of ctx view n))
       [:leaf "symbol" (render-sym ctx view BOUND REFERS FIXED n)]
       [:leaf (rr/kind-of ctx view n) (rr/pred-val ctx view n "v")])))
 
 (defn- anchor-go
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (BOUND Any)
-   (REFERS Any)
-   (FIXED Any)
-   (n Any)
-   (target Any)
-   (chain (Vec Any))]
-  (Vec Any)
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   FIXED Any
+   n Any
+   target Any
+   chain (Vec Any)] (Vec Any)
   (if (= "list" (rr/kind-of ctx view n))
-    (let [chain2 (if (nil? n) chain (conj chain n)) st (reduce (fn
-                                                                 [(st (Vec Any))
-                                                                  (row Any)]
-                                                                 (Vec Any)
-                                                                 (let [pos (nth row 1) cid (nth row 2) ch (nth row 3) sub (anchor-go ctx view BOUND REFERS FIXED ch target chain2) cc (nth sub 0) ms (into (nth st 1) (nth sub 1))] [(conj (nth st 0) cc) (if (= cc target) (conj ms {:parent n :pos pos :cid cid :child ch :chain chain2}) ms)])) [[] []] (ord-edges ctx n))]
+    (let [chain2 (if (nil? n) chain (conj chain n))
+          st (reduce (fn
+                       [st (Vec Any)
+                        row Any] (Vec Any)
+                       (let [pos (nth row 1)
+                             cid (nth row 2)
+                             ch (nth row 3)
+                             sub (anchor-go ctx view BOUND REFERS FIXED ch target chain2)
+                             cc (nth sub 0)
+                             ms (into (nth st 1) (nth sub 1))]
+                         [(conj (nth st 0) cc) (if (= cc target) (conj ms {:parent n :pos pos :cid cid :child ch :chain chain2}) ms)])) [[] []] (ord-edges ctx n))]
       [(into [:list] (nth st 0)) (nth st 1)])
     [(if (= "symbol" (rr/kind-of ctx view n))
        [:leaf "symbol" (render-sym ctx view BOUND REFERS FIXED n)]
@@ -154,29 +175,30 @@
      []]))
 
 (defn anchor-match-sites
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (BOUND Any)
-   (REFERS Any)
-   (FIXED Any)
-   (root Any)
-   (target Any)]
-  (Vec Any)
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   FIXED Any
+   root Any
+   target Any] (Vec Any)
   (vec (nth (anchor-go ctx view BOUND REFERS FIXED root target []) 1)))
 
 (defn anchor-matches
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (BOUND Any)
-   (REFERS Any)
-   (FIXED Any)
-   (root Any)
-   (target Any)]
-  (Vec Any)
-  (mapv (fn [(s Any)] Any [(get s :parent) (get s :pos) (get s :cid) (get s :child)])
+  [ctx (U ri/Graph Nil)
+   view Any
+   BOUND Any
+   REFERS Any
+   FIXED Any
+   root Any
+   target Any] (Vec Any)
+  (mapv (fn [s Any] Any [(get s :parent) (get s :pos) (get s :cid) (get s :child)])
     (anchor-match-sites ctx view BOUND REFERS FIXED root target)))
 
-(defn crumb-label [(ctx (U ri/Graph Nil)) (view Any) (n Any)] Any
+(defn crumb-label
+  [ctx (U ri/Graph Nil)
+   view Any
+   n Any] Any
   (let [h (rr/head-sym ctx view n)]
     (if (some? h)
       h

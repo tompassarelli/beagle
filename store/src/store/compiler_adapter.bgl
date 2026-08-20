@@ -16,16 +16,19 @@
 (defn failed-store [detail String] server/StoreResult
   (server/->StoreResult server/status-fatal nil detail 0 [] ""))
 
-(defn open-store! [path String space-id String] server/StoreResult
+(defn open-store!
+  [path String
+   space-id String] server/StoreResult
   (match (host.fs/append-text path "")
     [(host.fs/AppendTextError errno)
      (failed-store (str "could not create Store log: " path))]
     [(host.fs/AppendTextOk)
-     (let [source ByteSource
-           (host.fs/read-byte-source-bounded-or-die path max-store-log-bytes)]
+     (let [source ByteSource (host.fs/read-byte-source-bounded-or-die path max-store-log-bytes)]
        (server/server-store-boot! path space-id source (subvec source 0 0)))]))
 
-(defn append-log! [path String bytes (Vec Int)] String?
+(defn append-log!
+  [path String
+   bytes (Vec Int)] String?
   (if (empty? bytes)
     nil
     (match (host.fs/append-bytes path bytes)
@@ -33,14 +36,15 @@
       [(host.fs/AppendBytesError errno)
        (str "could not append Store log: " path)])))
 
-(defn persist-boot! [path String store-result server/StoreResult] String?
+(defn persist-boot!
+  [path String
+   store-result server/StoreResult] String?
   (append-log! path (server/storeresult-boot-append store-result)))
 
 (defn query-store!
   [store-result server/StoreResult
    query profile/AdmittedQueryClosure] driver/CompileStoreResponse
-  (let [result server/CompileQueryResult
-        (server/server-compile-query!
+  (let [result server/CompileQueryResult (server/server-compile-query!
           store-result
           (profile/admittedqueryclosure-source-closure-digest query)
           (profile/admittedqueryclosure-compiler-context query)
@@ -58,8 +62,7 @@
                (server/compilequeryresult-value result)]
            (if (nil? stored)
              (driver/->CompileStoreFailure 74 "Store query omitted its value")
-             (let [admitted profile/AdmittedResultClosure
-                   (server/compilestoredvalue-result stored)
+             (let [admitted profile/AdmittedResultClosure (server/compilestoredvalue-result stored)
                    payload String (server/compilestoredvalue-payload stored)]
                (if (= "rejected" (profile/admittedresultclosure-status admitted))
                  (driver/->CompileStoreWarmRejected admitted payload)
@@ -72,17 +75,16 @@
                     (driver/->CompileStoreWarmRejected admitted detail)])))))))))
 
 (defn append-store!
-  [path String store-result server/StoreResult
-   result profile/AdmittedResultClosure artifact linker/TargetArtifactV1]
-  driver/CompileStoreResponse
+  [path String
+   store-result server/StoreResult
+   result profile/AdmittedResultClosure
+   artifact linker/TargetArtifactV1] driver/CompileStoreResponse
   (match (linker/encode-artifact-envelope artifact)
     [(linker/ArtifactEnvelopeErrorV1 detail)
      (driver/->CompileStoreFailure 65 detail)]
     [(linker/ArtifactEnvelopeReadyV1 artifact-content-id payload)
-     (let [query profile/AdmittedQueryClosure
-           (profile/admittedresultclosure-query result)
-           appended server/CompileAppendResult
-           (server/server-compile-append!
+     (let [query profile/AdmittedQueryClosure (profile/admittedresultclosure-query result)
+           appended server/CompileAppendResult (server/server-compile-append!
              store-result
              (profile/admittedqueryclosure-source-closure-digest query)
              (profile/admittedqueryclosure-compiler-context query)
@@ -98,8 +100,7 @@
        (if (not= server/status-ok (server/compileappendresult-status appended))
          (driver/->CompileStoreFailure 74
            (or (server/compileappendresult-error appended) "Store append failed"))
-         (let [write-error String?
-               (append-log! path (server/compileappendresult-append-bytes appended))]
+         (let [write-error String? (append-log! path (server/compileappendresult-append-bytes appended))]
            (if write-error
              (driver/->CompileStoreFailure 74 write-error)
              (driver/->CompileStorePersisted)))))]))

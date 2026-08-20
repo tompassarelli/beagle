@@ -25,11 +25,11 @@
 (declare-extern writer-authority/release! (Fn [Any] Any))
 
 (clojure.core/require 'store.rt)
-(let [(raw-emitted-file Any) (File. (str *file*))
-      (emitted-file Any) (.getCanonicalFile raw-emitted-file)
-      (emitted-namespace-directory Any) (.getParentFile emitted-file)
-      (out-directory Any) (.getParentFile emitted-namespace-directory)
-      (store-directory Any) (.getParentFile out-directory)]
+(let [raw-emitted-file Any (File. (str *file*))
+      emitted-file Any (.getCanonicalFile raw-emitted-file)
+      emitted-namespace-directory Any (.getParentFile emitted-file)
+      out-directory Any (.getParentFile emitted-namespace-directory)
+      store-directory Any (.getParentFile out-directory)]
   (clojure.core/load-file
    (str (.getPath store-directory) "/database.clj")))
 
@@ -38,58 +38,67 @@
 (def fact-kind String "DevCompileUnitResultV1")
 
 (defrecord CompileFact
-  [(stage String) (result-key String) (id String) (encoding String)])
+  [stage String
+   result-key String
+   id String
+   encoding String])
 
-(defrecord AppendCounts [(appended Int) (retained Int)])
+(defrecord AppendCounts
+  [appended Int
+   retained Int])
 
-(defn- fail [(message String) (code Keyword)] Any
+(defn- fail
+  [message String
+   code Keyword] Any
   (throw (ex-info message {:type code :store/code code})))
 
-(defn- nonempty-string? [(value Any)] Bool
+(defn- nonempty-string? [value Any] Bool
   (and (string? value) (pos? (count value))))
 
-(defn- exact-sha256? [(value Any)] Bool
+(defn- exact-sha256? [value Any] Bool
   (and (string? value)
        (some? (re-matches #"sha256:[0-9a-f]{64}" value))))
 
-(defn- allowed-stage? [(value Any)] Bool
+(defn- allowed-stage? [value Any] Bool
   (or (= "typed" value) (= "native" value)))
 
-(defn- sha256-id [(text String)] String
+(defn- sha256-id [text String] String
   (str
    "sha256:"
    (apply
     str
     (mapv
-     (fn [(value Any)] String
+     (fn [value Any] String
        (format "%02x" (bit-and (int value) 255)))
      (vec
       (.digest (MessageDigest/getInstance "SHA-256")
                (.getBytes text StandardCharsets/UTF_8)))))))
 
-(defn- payload-byte-count [(payload String)] Int
+(defn- payload-byte-count [payload String] Int
   (count (vec (.getBytes payload StandardCharsets/UTF_8))))
 
-(defn- absolute-store-path [(value Any)] String
+(defn- absolute-store-path [value Any] String
   (if (and (string? value) (some? (re-matches #"/.*" value)))
     value
     (fail "development fact Store path must be absolute"
           :dev-compile-facts/relative-route)))
 
-(defn compile-fact [(id String) (encoding String)] CompileFact
-  (let [(envelope Any) (store.rt/parse-edn encoding)]
+(defn compile-fact
+  [id String
+   encoding String] CompileFact
+  (let [envelope Any (store.rt/parse-edn encoding)]
     (if-not (and (vector? envelope) (= 9 (count envelope)))
       (fail "compile fact envelope must have nine vector fields"
             :dev-compile-facts/invalid-envelope)
-      (let [(kind Any) (nth envelope 0)
-            (stage Any) (nth envelope 1)
-            (result-key Any) (nth envelope 2)
-            (compiler-context Any) (nth envelope 3)
-            (profile Any) (nth envelope 4)
-            (unit-id Any) (nth envelope 5)
-            (byte-count Any) (nth envelope 6)
-            (digest Any) (nth envelope 7)
-            (payload Any) (nth envelope 8)]
+      (let [kind Any (nth envelope 0)
+            stage Any (nth envelope 1)
+            result-key Any (nth envelope 2)
+            compiler-context Any (nth envelope 3)
+            profile Any (nth envelope 4)
+            unit-id Any (nth envelope 5)
+            byte-count Any (nth envelope 6)
+            digest Any (nth envelope 7)
+            payload Any (nth envelope 8)]
         (cond
           [(not= fact-kind kind)
            (fail "compile fact envelope has an unknown kind"
@@ -120,10 +129,12 @@
                  :dev-compile-facts/payload-mismatch)]
           [:else (->CompileFact stage result-key id encoding)])))))
 
-(defn- fact-subject [(stage String) (result-key String)] Any
+(defn- fact-subject
+  [stage String
+   result-key String] Any
   (store.types/triple subject-tag stage result-key))
 
-(defn- fact-proposition [(entry CompileFact)] Any
+(defn- fact-proposition [entry CompileFact] Any
   (store.types/triple
    (fact-subject (compilefact-stage entry)
                  (compilefact-result-key entry))
@@ -133,12 +144,12 @@
 ;; Stored envelopes remain raw here. The caller must observe malformed or
 ;; duplicate facts as divergence instead of having the Store hide them as a
 ;; plausible miss.
-(defn- proposition-entry [(proposition Any)] CompileFact?
+(defn- proposition-entry [proposition Any] CompileFact?
   (if-not (store.types/triple? proposition)
     nil
-    (let [(subject Any) (store.types/triple-t1 proposition)
-          (kind Any) (store.types/triple-t2 proposition)
-          (encoding Any) (store.types/triple-t3 proposition)]
+    (let [subject Any (store.types/triple-t1 proposition)
+          kind Any (store.types/triple-t2 proposition)
+          encoding Any (store.types/triple-t3 proposition)]
       (if (and (store.types/triple? subject)
                (= subject-tag (store.types/triple-t1 subject))
                (allowed-stage? (store.types/triple-t2 subject))
@@ -152,34 +163,37 @@
          encoding)
         nil))))
 
-(defn- all-facts [(database Any)] (Vec CompileFact)
+(defn- all-facts [database Any] (Vec CompileFact)
   (reduce
-   (fn [(entries (Vec CompileFact)) (proposition Any)] (Vec CompileFact)
-     (let [(entry CompileFact?) (proposition-entry proposition)]
+   (fn
+     [entries (Vec CompileFact)
+      proposition Any] (Vec CompileFact)
+     (let [entry CompileFact? (proposition-entry proposition)]
        (if (some? entry) (conj entries entry) entries)))
    []
    (database/live-propositions database)))
 
 (defn- facts-for-key
-  [(entries (Vec CompileFact))
-   (stage String)
-   (result-key String)]
-  (Vec CompileFact)
+  [entries (Vec CompileFact)
+   stage String
+   result-key String] (Vec CompileFact)
   (filterv
-   (fn [(entry CompileFact)] Bool
+   (fn [entry CompileFact] Bool
      (and (= stage (compilefact-stage entry))
           (= result-key (compilefact-result-key entry))))
    entries))
 
-(defn- same-entry? [(left CompileFact) (right CompileFact)] Bool
+(defn- same-entry?
+  [left CompileFact
+   right CompileFact] Bool
   (and (= (compilefact-stage left) (compilefact-stage right))
        (= (compilefact-result-key left) (compilefact-result-key right))
        (= (compilefact-id left) (compilefact-id right))
        (= (compilefact-encoding left) (compilefact-encoding right))))
 
-(defn- create-or-open! [(path String)] Any
-  (let [(file Any) (File. path)
-        (parent Any) (.getParentFile file)]
+(defn- create-or-open! [path String] Any
+  (let [file Any (File. path)
+        parent Any (.getParentFile file)]
     (if (and (some? parent) (not (.isDirectory parent)))
       (.mkdirs parent)
       nil)
@@ -188,15 +202,17 @@
       (database/create-triple-log! path space-id))
     (database/open-database! path space-id)))
 
-(defn- revision-identity [(path String)] String
-  (let [(revision Any) (database/branch-revision! path)
-        (identity Any) (get revision :identity)]
+(defn- revision-identity [path String] String
+  (let [revision Any (database/branch-revision! path)
+        identity Any (get revision :identity)]
     (if (string? identity)
       identity
       (fail "Store returned no branch revision identity"
             :dev-compile-facts/revision-unresolved))))
 
-(defn- append-propositions! [(database Any) (propositions (Vec Any))] Nil
+(defn- append-propositions!
+  [database Any
+   propositions (Vec Any)] Nil
   (if (empty? propositions)
     nil
     (do
@@ -213,26 +229,27 @@
           :attestation "store/canonical-validator-v1"}}
         :operations
         (mapv
-         (fn [(proposition Any)] Any
+         (fn [proposition Any] Any
            {:action :assert :proposition proposition})
          propositions)})
       nil)))
 
-(defn- append-entries! [(database Any) (entries (Vec CompileFact))] AppendCounts
-  (let [(known (Vec CompileFact)) (all-facts database)
-        (pending (Vec CompileFact))
-        (reduce
+(defn- append-entries!
+  [database Any
+   entries (Vec CompileFact)] AppendCounts
+  (let [known (Vec CompileFact) (all-facts database)
+        pending (Vec CompileFact) (reduce
          (fn
-           [(accepted (Vec CompileFact)) (entry CompileFact)] (Vec CompileFact)
-           (let [(candidates (Vec CompileFact))
-                 (facts-for-key
+           [accepted (Vec CompileFact)
+            entry CompileFact] (Vec CompileFact)
+           (let [candidates (Vec CompileFact) (facts-for-key
                   (vec (concat known accepted))
                   (compilefact-stage entry)
                   (compilefact-result-key entry))]
              (cond
                [(empty? candidates) (conj accepted entry)]
                [(every?
-                 (fn [(candidate CompileFact)] Bool
+                 (fn [candidate CompileFact] Bool
                    (same-entry? candidate entry))
                  candidates)
                 accepted]
@@ -246,11 +263,13 @@
     (append-propositions! database (mapv fact-proposition pending))
     (->AppendCounts (count pending) (- (count entries) (count pending)))))
 
-(defn append! [(path String) (entries (Vec CompileFact))] (Vec Any)
-  (let [(authority Any) (writer-authority/acquire! path)]
+(defn append!
+  [path String
+   entries (Vec CompileFact)] (Vec Any)
+  (let [authority Any (writer-authority/acquire! path)]
     (try
-      (let [(database Any) (create-or-open! path)
-            (counts AppendCounts) (append-entries! database entries)]
+      (let [database Any (create-or-open! path)
+            counts AppendCounts (append-entries! database entries)]
         ["store.dev-compile-facts/append-response-v1"
          "ok"
          (revision-identity path)
@@ -258,7 +277,7 @@
          (appendcounts-retained counts)])
       (finally (writer-authority/release! authority)))))
 
-(defn- request-row [(value Any)] (Vec String)
+(defn- request-row [value Any] (Vec String)
   (if (and (vector? value)
            (= 5 (count value))
            (allowed-stage? (nth value 0))
@@ -272,18 +291,20 @@
           :dev-compile-facts/invalid-query)))
 
 (defn- query-rows
-  [(facts (Vec CompileFact)) (requests (Vec (Vec String)))] (Vec Any)
+  [facts (Vec CompileFact)
+   requests (Vec (Vec String))] (Vec Any)
   (reduce
-   (fn [(rows (Vec Any)) (request (Vec String))] (Vec Any)
-     (let [(stage String) (nth request 0)
-           (result-key String) (nth request 1)
-           (matches (Vec CompileFact))
-           (facts-for-key facts stage result-key)]
+   (fn
+     [rows (Vec Any)
+      request (Vec String)] (Vec Any)
+     (let [stage String (nth request 0)
+           result-key String (nth request 1)
+           matches (Vec CompileFact) (facts-for-key facts stage result-key)]
        (vec
         (concat
          rows
          (mapv
-          (fn [(entry CompileFact)] (Vec String)
+          (fn [entry CompileFact] (Vec String)
             [stage result-key
              (compilefact-id entry)
              (compilefact-encoding entry)])
@@ -291,23 +312,24 @@
    []
    requests))
 
-(defn query! [(path String) (requests (Vec (Vec String)))] (Vec Any)
-  (let [(file Any) (File. path)]
+(defn query!
+  [path String
+   requests (Vec (Vec String))] (Vec Any)
+  (let [file Any (File. path)]
     (if-not (.isFile file)
       ["store.dev-compile-facts/query-response-v1"
        "COLD" "" requests []]
-      (let [(database Any) (database/open-database! path space-id)
-            (facts (Vec CompileFact)) (all-facts database)]
+      (let [database Any (database/open-database! path space-id)
+            facts (Vec CompileFact) (all-facts database)]
         ["store.dev-compile-facts/query-response-v1"
          "ONLINE"
          (revision-identity path)
          requests
          (query-rows facts requests)]))))
 
-(defn- request-vector [(expected-tag String)] (Vec Any)
-  (let [(line Any) (read-line)
-        (value Any)
-        (if (string? line) (store.rt/parse-edn line) nil)]
+(defn- request-vector [expected-tag String] (Vec Any)
+  (let [line Any (read-line)
+        value Any (if (string? line) (store.rt/parse-edn line) nil)]
     (if (and (vector? value)
              (= 3 (count value))
              (= expected-tag (nth value 0)))
@@ -315,13 +337,13 @@
       (fail (str "request must be " expected-tag " with three fields")
             :dev-compile-facts/invalid-request))))
 
-(defn- query-requests-from [(value Any)] (Vec (Vec String))
+(defn- query-requests-from [value Any] (Vec (Vec String))
   (if (vector? value)
     (mapv request-row value)
     (fail "query requests must be a vector"
           :dev-compile-facts/invalid-query)))
 
-(defn- entry-from-value [(value Any)] CompileFact
+(defn- entry-from-value [value Any] CompileFact
   (if (and (vector? value)
            (= 2 (count value))
            (string? (nth value 0))
@@ -330,31 +352,29 @@
     (fail "append entry must be [id canonical-envelope-edn]"
           :dev-compile-facts/invalid-entry)))
 
-(defn- entries-from-value [(value Any)] (Vec CompileFact)
+(defn- entries-from-value [value Any] (Vec CompileFact)
   (if (vector? value)
     (mapv entry-from-value value)
     (fail "append entries must be a vector"
           :dev-compile-facts/invalid-entry)))
 
-(defn dispatch! [(command String)] (Vec Any)
+(defn dispatch! [command String] (Vec Any)
   (cond
     [(= command "query")
-     (let [(request (Vec Any))
-           (request-vector "store.dev-compile-facts/query-v1")]
+     (let [request (Vec Any) (request-vector "store.dev-compile-facts/query-v1")]
        (query! (absolute-store-path (nth request 1))
                (query-requests-from (nth request 2))))]
     [(= command "append")
-     (let [(request (Vec Any))
-           (request-vector "store.dev-compile-facts/append-v1")]
+     (let [request (Vec Any) (request-vector "store.dev-compile-facts/append-v1")]
        (append! (absolute-store-path (nth request 1))
                 (entries-from-value (nth request 2))))]
     [:else
      (fail (str "unknown development compile fact command: " command)
            :dev-compile-facts/unknown-command)]))
 
-(defn- error-code [(error Any)] String
-  (let [(data Any) (ex-data error)
-        (code Any) (or (get data :store/code) (get data :type))]
+(defn- error-code [error Any] String
+  (let [data Any (ex-data error)
+        code Any (or (get data :store/code) (get data :type))]
     (if (keyword? code) (subs (str code) 1) "unclassified")))
 
 (defn -main [& args] Nil

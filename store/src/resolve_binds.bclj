@@ -23,26 +23,44 @@
   (:require [resolve-ident :as ri] [resolve-read :as rr]))
 
 
-(defn- sv [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
+(defn- sv
+  [ctx (U ri/Graph Nil)
+   view Any
+   e Any] Any
   (rr/sym-val ctx view e))
 
-(defn brackets? [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Bool
+(defn brackets?
+  [ctx (U ri/Graph Nil)
+   view Any
+   e Any] Bool
   (= "#%brackets" (rr/head-sym ctx view e)))
 
-(defn map-node? [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Bool
+(defn map-node?
+  [ctx (U ri/Graph Nil)
+   view Any
+   e Any] Bool
   (= "#%map" (rr/head-sym ctx view e)))
 
-(defn- tail [(ctx (U ri/Graph Nil)) (e Any)] (Vec Any)
+(defn- tail
+  [ctx (U ri/Graph Nil)
+   e Any] (Vec Any)
   (vec (rest (rr/ordered-children ctx e))))
 
-(defn- binding-form? [(ctx (U ri/Graph Nil)) (view Any) (node Any)] Bool
+(defn- binding-form?
+  [ctx (U ri/Graph Nil)
+   view Any
+   node Any] Bool
   (let [n (rr/unwrap-meta ctx view node)]
     (or (some? (sv ctx view n))
       (brackets? ctx view n)
       (map-node? ctx view n))))
 
-(defn typed-binding-parts [(ctx (U ri/Graph Nil)) (view Any) (node Any)] Any
-  (let [n (rr/unwrap-meta ctx view node) children (rr/ordered-children ctx n)]
+(defn typed-binding-parts
+  [ctx (U ri/Graph Nil)
+   view Any
+   node Any] Any
+  (let [n (rr/unwrap-meta ctx view node)
+        children (rr/ordered-children ctx n)]
     (when (and (= "list" (rr/kind-of ctx view n))
             (contains? #{2 3} (count children))
             (binding-form? ctx view (nth children 0 nil)))
@@ -51,31 +69,37 @@
        :constraint (nth children 2 nil)})))
 
 (defn signature-parts
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (forms (Vec Any))
-   (macro? Bool)
-   (raises-allowed? Bool)]
-  Any
+  [ctx (U ri/Graph Nil)
+   view Any
+   forms (Vec Any)
+   macro? Bool
+   raises-allowed? Bool] Any
   (let [params (nth forms 0 nil)]
     (when (and (some? params) (brackets? ctx view params))
-      (let [after-params (vec (rest forms)) return-type (if macro? nil (nth after-params 0 nil)) after-return (if macro? after-params (vec (rest after-params))) raises? (and raises-allowed? (not macro?) (= ":raises" (str (sv ctx view (nth after-return 0 nil))))) raises-type (if raises? (nth after-return 1 nil) nil) body (if raises? (vec (drop 2 after-return)) after-return)]
+      (let [after-params (vec (rest forms))
+            return-type (if macro? nil (nth after-params 0 nil))
+            after-return (if macro? after-params (vec (rest after-params)))
+            raises? (and raises-allowed? (not macro?) (= ":raises" (str (sv ctx view (nth after-return 0 nil)))))
+            raises-type (if raises? (nth after-return 1 nil) nil)
+            body (if raises? (vec (drop 2 after-return)) after-return)]
         {:params params
          :return-type return-type
          :raises-type raises-type
          :body body}))))
 
 (defn signature-tail
-  [(ctx (U ri/Graph Nil)) (view Any) (forms (Vec Any)) (macro? Bool)] Any
+  [ctx (U ri/Graph Nil)
+   view Any
+   forms (Vec Any)
+   macro? Bool] Any
   (signature-parts ctx view forms macro? (not macro?)))
 
 (defn- complete-signature
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (forms (Vec Any))
-   (macro? Bool)
-   (raises-allowed? Bool)]
-  Any
+  [ctx (U ri/Graph Nil)
+   view Any
+   forms (Vec Any)
+   macro? Bool
+   raises-allowed? Bool] Any
   (let [signature (signature-parts
                     ctx view forms macro? raises-allowed?)
         raises-marker? (and raises-allowed?
@@ -91,10 +115,12 @@
     (when complete? (assoc signature :forms forms))))
 
 (defn- structural-arity-signatures
-  [(ctx (U ri/Graph Nil)) (view Any) (clauses (Vec Any))] (Vec Any)
+  [ctx (U ri/Graph Nil)
+   view Any
+   clauses (Vec Any)] (Vec Any)
   (if (empty? clauses)
     []
-    (let [signatures (mapv (fn [(clause Any)] Any
+    (let [signatures (mapv (fn [clause Any] Any
                              (when (= "list" (rr/kind-of ctx view clause))
                                (complete-signature
                                  ctx view
@@ -107,11 +133,10 @@
         []))))
 
 (defn executable-signatures
-  [(ctx (U ri/Graph Nil))
-   (view Any)
-   (head String)
-   (forms (Vec Any))]
-  (Vec Any)
+  [ctx (U ri/Graph Nil)
+   view Any
+   head String
+   forms (Vec Any)] (Vec Any)
   (cond
     (contains? #{"defn" "defn-"} head)
     (let [tail (if (= "string" (rr/kind-of ctx view (nth forms 0 nil)))
@@ -133,34 +158,50 @@
     []))
 
 (defn param-type-nodes
-  [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
+  [ctx (U ri/Graph Nil)
+   view Any
+   bracket Any] (Vec Any)
   (vec
-    (keep (fn [(node Any)] Any
+    (keep (fn [node Any] Any
             (let [parts (typed-binding-parts ctx view node)]
               (when (some? parts) (get parts :type))))
       (tail ctx bracket))))
 
 (defn param-constraint-nodes
-  [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
+  [ctx (U ri/Graph Nil)
+   view Any
+   bracket Any] (Vec Any)
   (vec
-    (keep (fn [(node Any)] Any
+    (keep (fn [node Any] Any
             (let [parts (typed-binding-parts ctx view node)]
               (when (some? parts) (get parts :constraint))))
       (tail ctx bracket))))
 
-(defn let-type-nodes [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [nodes (Vec Any) (tail ctx bracket) types (Vec Any) []]
+(defn let-type-nodes
+  [ctx (U ri/Graph Nil)
+   view Any
+   bracket Any] (Vec Any)
+  (loop [nodes (Vec Any) (tail ctx bracket)
+         types (Vec Any) []]
     (if (empty? nodes)
       types
-      (let [parts (typed-binding-parts ctx view (nth nodes 0 nil)) type-node (if (nil? parts) nil (get parts :type))]
+      (let [parts (typed-binding-parts ctx view (nth nodes 0 nil))
+            type-node (if (nil? parts) nil (get parts :type))]
         (recur (vec (drop 2 nodes))
           (if (nil? type-node) types (conj types type-node)))))))
 
-(defn for-type-nodes [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [nodes (Vec Any) (tail ctx bracket) types (Vec Any) []]
+(defn for-type-nodes
+  [ctx (U ri/Graph Nil)
+   view Any
+   bracket Any] (Vec Any)
+  (loop [nodes (Vec Any) (tail ctx bracket)
+         types (Vec Any) []]
     (if (empty? nodes)
       types
-      (let [binding (nth nodes 0 nil) marker (str (sv ctx view binding)) value (nth nodes 1 nil) rest-nodes (vec (drop 2 nodes))]
+      (let [binding (nth nodes 0 nil)
+            marker (str (sv ctx view binding))
+            value (nth nodes 1 nil)
+            rest-nodes (vec (drop 2 nodes))]
         (cond
           (= ":let" marker)
           (recur rest-nodes
@@ -171,32 +212,44 @@
           (contains? #{":when" ":while"} marker)
           (recur rest-nodes types)
           :else
-          (let [parts (typed-binding-parts ctx view binding) type-node (if (nil? parts) nil (get parts :type))]
+          (let [parts (typed-binding-parts ctx view binding)
+                type-node (if (nil? parts) nil (get parts :type))]
             (recur rest-nodes
               (if (nil? type-node) types (conj types type-node)))))))))
 
-(defn collect-bind-syms [(ctx (U ri/Graph Nil)) (view Any) (node Any)] (Vec Any)
+(defn collect-bind-syms
+  [ctx (U ri/Graph Nil)
+   view Any
+   node Any] (Vec Any)
   (if (nil? node)
     []
-    (let [n (rr/unwrap-meta ctx view node) v (sv ctx view n)]
+    (let [n (rr/unwrap-meta ctx view node)
+          v (sv ctx view n)]
       (cond
         (some? v)
         (if (contains? #{"_" "&"} (str v)) [] [n])
         (brackets? ctx view n)
-        (reduce (fn [(acc (Vec Any)) (k Any)] (Vec Any) (into acc (collect-bind-syms ctx view k)))
+        (reduce (fn
+                  [acc (Vec Any)
+                   k Any] (Vec Any)
+                  (into acc (collect-bind-syms ctx view k)))
           []
           (tail ctx n))
         (map-node? ctx view n)
-        (loop [ks (Vec Any) (tail ctx n) acc (Vec Any) []]
+        (loop [ks (Vec Any) (tail ctx n)
+               acc (Vec Any) []]
           (if (empty? ks)
             acc
-            (let [k (first ks) kv (sv ctx view k) v2 (nth ks 1 nil) ks2 (vec (drop 2 ks))]
+            (let [k (first ks)
+                  kv (sv ctx view k)
+                  v2 (nth ks 1 nil)
+                  ks2 (vec (drop 2 ks))]
               (cond
                 (contains? #{":keys" ":strs" ":syms"} (str kv))
                 (recur ks2
                   (into acc
                     (if (and (some? v2) (brackets? ctx view v2))
-                      (vec (keep (fn [(c Any)] Any (let [leaf (rr/unwrap-meta ctx view c)] (when (some? (sv ctx view leaf)) leaf))) (tail ctx v2)))
+                      (vec (keep (fn [c Any] Any (let [leaf (rr/unwrap-meta ctx view c)] (when (some? (sv ctx view leaf)) leaf))) (tail ctx v2)))
                       [])))
                 (= ":as" (str kv))
                 (recur ks2 (into acc (collect-bind-syms ctx view v2)))
@@ -214,22 +267,33 @@
         :else
         []))))
 
-(defn collect-or-vals [(ctx (U ri/Graph Nil)) (view Any) (node Any)] (Vec Any)
+(defn collect-or-vals
+  [ctx (U ri/Graph Nil)
+   view Any
+   node Any] (Vec Any)
   (if (nil? node)
     []
-    (let [parts (typed-binding-parts ctx view node) binding (if (nil? parts) node (get parts :binding))]
+    (let [parts (typed-binding-parts ctx view node)
+          binding (if (nil? parts) node (get parts :binding))]
       (cond
       (map-node? ctx view binding)
-      (loop [ks (Vec Any) (tail ctx binding) acc (Vec Any) []]
+      (loop [ks (Vec Any) (tail ctx binding)
+             acc (Vec Any) []]
         (if (empty? ks)
           acc
-          (let [k (first ks) kv (sv ctx view k) v2 (nth ks 1 nil) ks2 (vec (drop 2 ks))]
+          (let [k (first ks)
+                kv (sv ctx view k)
+                v2 (nth ks 1 nil)
+                ks2 (vec (drop 2 ks))]
             (cond
               (= ":or" (str kv))
               (recur ks2
                 (into acc
                   (if (and (some? v2) (map-node? ctx view v2))
-                    (vec (keep-indexed (fn [(i Int) (cc Any)] Any (if (odd? i) cc nil)) (tail ctx v2)))
+                    (vec (keep-indexed (fn
+                                         [i Int
+                                          cc Any] Any
+                                         (if (odd? i) cc nil)) (tail ctx v2)))
                     [])))
               (contains? #{":as" ":keys" ":strs" ":syms"} (str kv))
               (recur ks2 acc)
@@ -238,25 +302,42 @@
               :else
               (recur ks2 (into acc (collect-or-vals ctx view k)))))))
       (brackets? ctx view binding)
-      (reduce (fn [(acc (Vec Any)) (k Any)] (Vec Any) (into acc (collect-or-vals ctx view k)))
+      (reduce (fn
+                [acc (Vec Any)
+                 k Any] (Vec Any)
+                (into acc (collect-or-vals ctx view k)))
         []
         (tail ctx binding))
       :else
       []))))
 
-(defn param-binds [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [ks (Vec Any) (tail ctx bracket) binds (Vec Any) []]
+(defn param-binds
+  [ctx (U ri/Graph Nil)
+   view Any
+   bracket Any] (Vec Any)
+  (loop [ks (Vec Any) (tail ctx bracket)
+         binds (Vec Any) []]
     (if (empty? ks)
       binds
-      (let [node (first ks) parts (typed-binding-parts ctx view node) binding (if (nil? parts) node (get parts :binding))]
+      (let [node (first ks)
+            parts (typed-binding-parts ctx view node)
+            binding (if (nil? parts) node (get parts :binding))]
         (recur (vec (rest ks))
           (into binds (collect-bind-syms ctx view binding)))))))
 
-(defn let-bind-pairs [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [ks (Vec Any) (tail ctx bracket) acc (Vec Any) []]
+(defn let-bind-pairs
+  [ctx (U ri/Graph Nil)
+   view Any
+   bracket Any] (Vec Any)
+  (loop [ks (Vec Any) (tail ctx bracket)
+         acc (Vec Any) []]
     (if (empty? ks)
       acc
-      (let [raw-pat (first ks) parts (typed-binding-parts ctx view raw-pat) pat (if (nil? parts) raw-pat (get parts :binding)) val (nth ks 1 nil) constraint (if (nil? parts) nil (get parts :constraint))]
+      (let [raw-pat (first ks)
+            parts (typed-binding-parts ctx view raw-pat)
+            pat (if (nil? parts) raw-pat (get parts :binding))
+            val (nth ks 1 nil)
+            constraint (if (nil? parts) nil (get parts :constraint))]
         (recur (vec (drop 2 ks))
           (conj acc
             [(collect-bind-syms ctx view pat)
@@ -264,11 +345,18 @@
              (collect-or-vals ctx view pat)
              constraint]))))))
 
-(defn for-bind-pairs [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [ks (Vec Any) (tail ctx bracket) acc (Vec Any) []]
+(defn for-bind-pairs
+  [ctx (U ri/Graph Nil)
+   view Any
+   bracket Any] (Vec Any)
+  (loop [ks (Vec Any) (tail ctx bracket)
+         acc (Vec Any) []]
     (if (empty? ks)
       acc
-      (let [k (first ks) kv (sv ctx view k) v (nth ks 1 nil) ks2 (vec (drop 2 ks))]
+      (let [k (first ks)
+            kv (sv ctx view k)
+            v (nth ks 1 nil)
+            ks2 (vec (drop 2 ks))]
         (cond
           (contains? #{":when" ":while"} (str kv))
           (recur ks2 (conj acc [:expr v]))
@@ -276,11 +364,13 @@
           (recur ks2
             (into acc
               (if (and (some? v) (brackets? ctx view v))
-                (mapv (fn [(p Any)] Any [:bind (nth p 0 nil) (nth p 1 nil) (nth p 2 nil) (nth p 3 nil)])
+                (mapv (fn [p Any] Any [:bind (nth p 0 nil) (nth p 1 nil) (nth p 2 nil) (nth p 3 nil)])
                   (let-bind-pairs ctx view v))
                 [])))
           :else
-          (let [parts (typed-binding-parts ctx view k) binding (if (nil? parts) k (get parts :binding)) constraint (if (nil? parts) nil (get parts :constraint))]
+          (let [parts (typed-binding-parts ctx view k)
+                binding (if (nil? parts) k (get parts :binding))
+                constraint (if (nil? parts) nil (get parts :constraint))]
             (recur ks2
               (conj acc
                 [:bind
@@ -290,20 +380,32 @@
                  constraint]))))))))
 
 (defn context-of
-  [(ctx (U ri/Graph Nil)) (view Any) (bsyms (Vec Any))] (Map Any Any)
-  (reduce (fn [(acc (Map Any Any)) (b Any)] (Map Any Any) (assoc acc (sv ctx view b) b))
+  [ctx (U ri/Graph Nil)
+   view Any
+   bsyms (Vec Any)] (Map Any Any)
+  (reduce (fn
+            [acc (Map Any Any)
+             b Any] (Map Any Any)
+            (assoc acc (sv ctx view b) b))
     {}
     bsyms))
 
-(defn match-pat-binds [(ctx (U ri/Graph Nil)) (view Any) (pat Any)] (Vec Any)
+(defn match-pat-binds
+  [ctx (U ri/Graph Nil)
+   view Any
+   pat Any] (Vec Any)
   (if (nil? pat)
     []
-    (let [n (rr/unwrap-meta ctx view pat) v (sv ctx view n)]
+    (let [n (rr/unwrap-meta ctx view pat)
+          v (sv ctx view n)]
       (cond
         (some? v)
         (if (= "_" (str v)) [] [n])
         (or (= "list" (rr/kind-of ctx view n)) (brackets? ctx view n))
-        (reduce (fn [(acc (Vec Any)) (k Any)] (Vec Any) (into acc (match-pat-binds ctx view k)))
+        (reduce (fn
+                  [acc (Vec Any)
+                   k Any] (Vec Any)
+                  (into acc (match-pat-binds ctx view k)))
           []
           (tail ctx n))
         :else

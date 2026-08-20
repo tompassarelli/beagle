@@ -40,30 +40,34 @@
 (require store.txn :as txn)
 
 (defrecord OrderedResultSnapshot
-  [(space String) (version Int) (lower-exclusive Int)])
+  [space String
+   version Int
+   lower-exclusive Int])
 
 (defrecord OrderedResultKey
-  [(snapshot OrderedResultSnapshot) (operation Keyword) (digest String)])
+  [snapshot OrderedResultSnapshot
+   operation Keyword
+   digest String])
 
 (defrecord OrderedResultEntry
-  [(key OrderedResultKey)
-   (query-rows (Vec (Vec Any)))
-   (triple-rows (Vec t/Triple))
-   (bytes Int)])
+  [key OrderedResultKey
+   query-rows (Vec (Vec Any))
+   triple-rows (Vec t/Triple)
+   bytes Int])
 
 (defrecord OrderedResultCache
-  [(entries (Vec OrderedResultEntry))
-   (snapshots (Vec OrderedResultSnapshot))
-   (bytes Int)
-   (hits Int)
-   (misses Int)
-   (evictions Int)])
+  [entries (Vec OrderedResultEntry)
+   snapshots (Vec OrderedResultSnapshot)
+   bytes Int
+   hits Int
+   misses Int
+   evictions Int])
 
 (defrecord Session
-  [(store (Atom t/TermStore))
-   (view (Atom rot/Rotation))
-   (ordered-results (Atom OrderedResultCache))
-   (derived-generation (Atom Int))])
+  [store (Atom t/TermStore)
+   view (Atom rot/Rotation)
+   ordered-results (Atom OrderedResultCache)
+   derived-generation (Atom Int)])
 
 (def name-predicate String "name")
 
@@ -93,61 +97,77 @@
   (->OrderedResultCache no-ordered-result-entries
                         no-ordered-result-snapshots 0 0 0 0))
 
-(defn session! [(ctx (Atom t/TermStore))] Session
+(defn session! [ctx (Atom t/TermStore)] Session
   (->Session ctx (atom (rot/project! ctx))
              (atom (empty-ordered-result-cache)) (atom 0)))
 
-(defn fork-session [(s Session)] Session
+(defn fork-session [s Session] Session
   (->Session (atom (deref (session-store s)))
              (atom (deref (session-view s)))
              (atom (deref (session-ordered-results s)))
              (atom (deref (session-derived-generation s)))))
 
-(defn store-of [(s Session)] (Atom t/TermStore) (session-store s))
+(defn store-of [s Session] (Atom t/TermStore) (session-store s))
 
-(defn ordered-results-of [(s Session)] (Atom OrderedResultCache)
+(defn ordered-results-of [s Session] (Atom OrderedResultCache)
   (session-ordered-results s))
 
-(defn derived-generation-of [(s Session)] Int
+(defn derived-generation-of [s Session] Int
   (deref (session-derived-generation s)))
 
-(defn mark-derived-change! [(s Session)] Nil
+(defn mark-derived-change! [s Session] Nil
   (do
     (reset! (session-derived-generation s)
             (inc (deref (session-derived-generation s))))
     nil))
 
-(defn view [(s Session)] rot/Rotation (deref (session-view s)))
+(defn view [s Session] rot/Rotation (deref (session-view s)))
 
-(defn refresh! [(s Session)] Session
+(defn refresh! [s Session] Session
   (do (reset! (session-view s) (rot/refresh! (view s) (store-of s))) s))
 
-(defn- commit! [(s Session) (builder (Atom txn/Builder))] Session
+(defn- commit!
+  [s Session
+   builder (Atom txn/Builder)] Session
   (do (txn/commit! (store-of s) builder) (refresh! s)))
 
-(defn predicate-ids [(s Session) (spelling String)] (Vec Any)
+(defn predicate-ids
+  [s Session
+   spelling String] (Vec Any)
   (vec (distinct (concat (rot/subjects (rot/by-t23 (view s) predicate-name-predicate spelling)) (rot/subjects (rot/by-t23 (view s) predicate-alias-predicate spelling))))))
 
 ;; Predicate identity is resolved only through stored canonical-name and alias
 ;; propositions. An unregistered spelling has no identity yet.
-(defn resolve-predicate [(s Session) (spelling String)] Any
-  (let [(ids (Vec Any)) (predicate-ids s spelling)]
+(defn resolve-predicate
+  [s Session
+   spelling String] Any
+  (let [ids (Vec Any) (predicate-ids s spelling)]
     (cond
       [(> (count ids) 1)
        (throw (ex-info (str "predicate spelling collision: " spelling) {:predicate spelling :ids ids}))]
       [(= (count ids) 1) (first ids)]
       [:else nil])))
 
-(defn predicate-name [(s Session) (pid Any)] String
-  (let [(events (Vec t/OperationOccurrence)) (rot/by-t12 (view s) pid predicate-name-predicate) (raw Any) (if (empty? events) pid (t/triple-t3 (rot/proposition-of (last events))))]
+(defn predicate-name
+  [s Session
+   pid Any] String
+  (let [events (Vec t/OperationOccurrence) (rot/by-t12 (view s) pid predicate-name-predicate)
+        raw Any (if (empty? events) pid (t/triple-t3 (rot/proposition-of (last events))))]
     (if (string? raw) raw (str raw))))
 
-(defn register-predicate! [(s Session) (spelling String)] Any
-  (let [(candidate Any) (resolve-predicate s spelling) (canonical String) (if (some? candidate) (predicate-name s candidate) spelling) (default-alias String) (str ":" canonical) (alias-ids (Vec Any)) (predicate-ids s default-alias)]
+(defn register-predicate!
+  [s Session
+   spelling String] Any
+  (let [candidate Any (resolve-predicate s spelling)
+        canonical String (if (some? candidate) (predicate-name s candidate) spelling)
+        default-alias String (str ":" canonical)
+        alias-ids (Vec Any) (predicate-ids s default-alias)]
     (do
       (when (and (not (empty? alias-ids)) (or (nil? candidate) (not (and (= 1 (count alias-ids)) (= candidate (first alias-ids))))))
         (throw (ex-info (str "predicate alias collision: " default-alias) {:predicate canonical :alias default-alias :ids alias-ids})))
-      (let [(pid Any) (if (some? candidate) candidate spelling) (named (Vec t/OperationOccurrence)) (rot/by-t12 (view s) pid predicate-name-predicate) (builder (Atom txn/Builder)) (txn/open (store-of s))]
+      (let [pid Any (if (some? candidate) candidate spelling)
+            named (Vec t/OperationOccurrence) (rot/by-t12 (view s) pid predicate-name-predicate)
+            builder (Atom txn/Builder) (txn/open (store-of s))]
         (do
           (when (empty? named)
             (txn/assert! builder
@@ -158,38 +178,64 @@
           (when (pos? (txn/operation-count builder)) (commit! s builder))
           pid)))))
 
-(defn cardinality [(s Session) (pname String)] String
-  (let [(pid Any) (resolve-predicate s pname) (card Any) (resolve-predicate s cardinality-predicate) (events (Vec t/OperationOccurrence)) (if (and (some? pid) (some? card)) (rot/by-t12 (view s) pid card) [])]
+(defn cardinality
+  [s Session
+   pname String] String
+  (let [pid Any (resolve-predicate s pname)
+        card Any (resolve-predicate s cardinality-predicate)
+        events (Vec t/OperationOccurrence) (if (and (some? pid) (some? card)) (rot/by-t12 (view s) pid card) [])]
     (if (empty? events)
       multi
-      (let [(value Any) (t/triple-t3 (rot/proposition-of (first events)))]
+      (let [value Any (t/triple-t3 (rot/proposition-of (first events)))]
         (if (string? value) value multi)))))
 
-(defn assert! [(s Session) (subject Any) (pname String) (value Any)] t/Triple
-  (let [(pid Any) (register-predicate! s pname) (builder (Atom txn/Builder)) (txn/open (store-of s)) (occurrence t/Triple) (if (= single (cardinality s pname)) (txn/update-single! builder (view s) subject pid value) (txn/assert! builder (t/triple subject pid value)))]
+(defn assert!
+  [s Session
+   subject Any
+   pname String
+   value Any] t/Triple
+  (let [pid Any (register-predicate! s pname)
+        builder (Atom txn/Builder) (txn/open (store-of s))
+        occurrence t/Triple (if (= single (cardinality s pname)) (txn/update-single! builder (view s) subject pid value) (txn/assert! builder (t/triple subject pid value)))]
     (do (commit! s builder) occurrence)))
 
 ;; A Term store has one slot-2 vocabulary, so a ref IS a value; link! survives
 ;; only as the caller-side statement of intent.
-(defn link! [(s Session) (subject Any) (pname String) (target Any)] t/Triple
+(defn link!
+  [s Session
+   subject Any
+   pname String
+   target Any] t/Triple
   (assert! s subject pname target))
 
-(defn lookup-all [(s Session) (subject Any) (pname String)] (Vec Any)
+(defn lookup-all
+  [s Session
+   subject Any
+   pname String] (Vec Any)
   (let [pid (resolve-predicate s pname)]
     (if (nil? pid) no-terms (rot/values (rot/by-t12 (view s) subject pid)))))
 
 ;; (first all) selects the default-main of a possibly-multi (l,p) group: a view
 ;; selection (first-wins), not a uniqueness proof. cf resolve/select-main-1
-(defn lookup [(s Session) (subject Any) (pname String)] Any
-  (let [(all (Vec Any)) (lookup-all s subject pname)]
+(defn lookup
+  [s Session
+   subject Any
+   pname String] Any
+  (let [all (Vec Any) (lookup-all s subject pname)]
     (if (empty? all) nil (first all))))
 
-(defn find-by [(s Session) (pname String) (value Any)] (Vec Any)
+(defn find-by
+  [s Session
+   pname String
+   value Any] (Vec Any)
   (let [pid (resolve-predicate s pname)]
     (if (nil? pid) no-terms (rot/subjects (rot/by-t23 (view s) pid value)))))
 
 (defn def-predicate!
-  [(s Session) (pname String) (card String) (kind String)] Any
+  [s Session
+   pname String
+   card String
+   kind String] Any
   (let [pid (register-predicate! s pname)]
     (do
       (assert! s pid cardinality-predicate card)
@@ -198,52 +244,77 @@
 
 ;; A minted coordinate is durable only once its transaction commits, so minting
 ;; and the first proposition about the node share one transaction.
-(defn mint-node! [(s Session) (pname String) (value Any)] Any
-  (let [(pid Any) (register-predicate! s pname) (builder (Atom txn/Builder)) (txn/open (store-of s)) (node t/Triple) (txn/mint! builder)]
+(defn mint-node!
+  [s Session
+   pname String
+   value Any] Any
+  (let [pid Any (register-predicate! s pname)
+        builder (Atom txn/Builder) (txn/open (store-of s))
+        node t/Triple (txn/mint! builder)]
     (do
       (txn/assert! builder (t/triple node pid value))
       (commit! s builder)
       node)))
 
-(defn name! [(s Session) (subject Any) (nm String)] t/Triple
+(defn name!
+  [s Session
+   subject Any
+   nm String] t/Triple
   (assert! s subject name-predicate nm))
 
-(defn name-of [(s Session) (subject Any)] Any
+(defn name-of
+  [s Session
+   subject Any] Any
   (lookup s subject name-predicate))
 
-(defn resolve-name [(s Session) (nm String)] Any
-  (let [(ls (Vec Any)) (find-by s name-predicate nm)]
+(defn resolve-name
+  [s Session
+   nm String] Any
+  (let [ls (Vec Any) (find-by s name-predicate nm)]
     (if (empty? ls) nil (first ls))))
 
-(defn alias-predicate! [(s Session) (spelling String) (alias String)] Any
-  (let [(resolved Any) (resolve-predicate s spelling) (ids-before (Vec Any)) (predicate-ids s alias)]
+(defn alias-predicate!
+  [s Session
+   spelling String
+   alias String] Any
+  (let [resolved Any (resolve-predicate s spelling)
+        ids-before (Vec Any) (predicate-ids s alias)]
     (do
       (when (and (not (empty? ids-before)) (or (nil? resolved) (not (and (= 1 (count ids-before)) (= resolved (first ids-before))))))
         (throw (ex-info (str "predicate spelling collision: " alias) {:predicate spelling :alias alias :ids ids-before})))
-      (let [(pid Any) (register-predicate! s spelling) (ids (Vec Any)) (predicate-ids s alias)]
+      (let [pid Any (register-predicate! s spelling)
+            ids (Vec Any) (predicate-ids s alias)]
         (do
           (when (empty? ids)
-            (let [(builder (Atom txn/Builder)) (txn/open (store-of s))]
+            (let [builder (Atom txn/Builder) (txn/open (store-of s))]
               (do
                 (txn/assert! builder
                   (t/triple pid predicate-alias-predicate alias))
                 (commit! s builder))))
           pid)))))
 
-(defn rename-predicate! [(s Session) (spelling String) (new-name String)] Any
-  (let [(resolved Any) (resolve-predicate s spelling) (name-ids (Vec Any)) (predicate-ids s new-name) (default-alias String) (str ":" new-name) (alias-ids (Vec Any)) (predicate-ids s default-alias)]
+(defn rename-predicate!
+  [s Session
+   spelling String
+   new-name String] Any
+  (let [resolved Any (resolve-predicate s spelling)
+        name-ids (Vec Any) (predicate-ids s new-name)
+        default-alias String (str ":" new-name)
+        alias-ids (Vec Any) (predicate-ids s default-alias)]
     (do
       (when (and (not (empty? name-ids)) (or (nil? resolved) (not (and (= 1 (count name-ids)) (= resolved (first name-ids))))))
         (throw (ex-info (str "predicate spelling collision: " new-name) {:predicate spelling :new-name new-name :ids name-ids})))
       (when (and (not (empty? alias-ids)) (or (nil? resolved) (not (and (= 1 (count alias-ids)) (= resolved (first alias-ids))))))
         (throw (ex-info (str "predicate alias collision: " default-alias) {:predicate spelling :new-name new-name :alias default-alias :ids alias-ids})))
-      (let [pid (register-predicate! s spelling) old-name (predicate-name s pid)]
+      (let [pid (register-predicate! s spelling)
+            old-name (predicate-name s pid)]
         (do
           (when (not (= old-name new-name))
             (do
-              (let [(old-ids (Vec Any)) (predicate-ids s old-name) (aliases (Vec t/OperationOccurrence)) (rot/by-t23 (view s) predicate-alias-predicate old-name)]
+              (let [old-ids (Vec Any) (predicate-ids s old-name)
+                    aliases (Vec t/OperationOccurrence) (rot/by-t23 (view s) predicate-alias-predicate old-name)]
                 (when (and (= 1 (count old-ids)) (and (= pid (first old-ids)) (empty? aliases)))
-                  (let [(builder (Atom txn/Builder)) (txn/open (store-of s))]
+                  (let [builder (Atom txn/Builder) (txn/open (store-of s))]
                     (do
                       (txn/assert! builder
                         (t/triple pid predicate-alias-predicate old-name))
@@ -252,7 +323,7 @@
               (alias-predicate! s new-name default-alias)))
           pid)))))
 
-(defn setup! [(s Session)] Session
+(defn setup! [s Session] Session
   (do
     (def-predicate! s cardinality-predicate single literal-kind)
     (def-predicate! s value-kind-predicate single literal-kind)
