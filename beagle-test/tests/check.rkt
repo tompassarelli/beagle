@@ -1426,6 +1426,19 @@ BEAGLE
   '(defn result-tag [(result Result)] String
      (js/get result ._tag)))
 
+(check-js-ok "union discriminator equality narrows direct and local projections"
+  `(defunion Result (Ok ,(br '(value String))) (Err ,(br '(message String))))
+  '(defn direct-result-value [(result Result)] String
+     (if (= (js/get result ._tag) "Ok")
+       (js/get result .value)
+       (js/get result .message)))
+  '(defn local-result-value [(result Result)] String
+     (let [(tag String) (js/get result ._tag)]
+       (cond
+         (= tag "Ok") (js/get result .value)
+         (= tag "Err") (js/get result .message)
+         :else "unreachable"))))
+
 (check-js-err/rx "js/get rejects unknown member on a nominal record union"
   #rx"js/get: \\.depth is not a member of EitherBound"
   '(defrecord LeftBound [(width Float)])

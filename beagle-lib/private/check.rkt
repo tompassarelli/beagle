@@ -5019,6 +5019,42 @@
                      (cons (list (cons key (member-view-type member-name cur)))
                            (list (cons key (subtract-member cur member-name))))))))))
 
+(define (union-tag-narrowings cond-expr env)
+  (define (tag-projection-receiver value)
+    (define projected
+      (cond
+        [(jst-get? value) value]
+        [(local-reference? value)
+         (reference-hash-ref
+          (hash-ref env CALLABLE-VALUES-ENV-KEY (hasheq)) value #f)]
+        [else #f]))
+    (and (jst-get? projected)
+         (jst-selector? (jst-get-key projected))
+         (string=? (jst-selector-name (jst-get-key projected)) "_tag")
+         (jst-get-receiver projected)))
+  (and (call-form? cond-expr)
+       (memq (call-form-fn cond-expr) '(= not=))
+       (= (length (call-form-args cond-expr)) 2)
+       (let* ([a1 (car (call-form-args cond-expr))]
+              [a2 (cadr (call-form-args cond-expr))]
+              [tag (cond [(string? a1) a1]
+                         [(string? a2) a2]
+                         [else #f])]
+              [receiver (cond [(string? a1) (tag-projection-receiver a2)]
+                              [(string? a2) (tag-projection-receiver a1)]
+                              [else #f])]
+              [key (and receiver (stable-scrutinee-var receiver env))]
+              [cur (and key (hash-ref env key #f))]
+              [member-name
+               (and tag cur
+                    (canonical-union-member-name (string->symbol tag) cur))])
+         (and member-name
+              (let ([positive (list (cons key (member-view-type member-name cur)))]
+                    [negative (list (cons key (subtract-member cur member-name)))])
+                (if (eq? (call-form-fn cond-expr) '=)
+                    (cons positive negative)
+                    (cons negative positive)))))))
+
 (define (test-narrowings cond-expr env)
   (cond
     [(< (current-check-profile) 2) (values '() '())]
@@ -5051,6 +5087,8 @@
         (if (= 1 (length args))
             (test-narrowings (car args) env)
             (values '() (fold-branch args #f)))]
+       [(union-tag-narrowings cond-expr env)
+        => (lambda (p) (values (car p) (cdr p)))]
        [(instance-narrowings cond-expr env)
         => (lambda (p) (values (car p) (cdr p)))]
        ;; Bare-local truthiness.
