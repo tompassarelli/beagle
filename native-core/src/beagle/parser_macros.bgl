@@ -1,7 +1,7 @@
 #lang beagle
 (ns beagle.parser-macros)
 
-(require beagle.frontend-facts :as facts)
+(require [beagle.frontend-facts :as facts])
 
 (def WHEN-MACRO-ID String "macro/when")
 

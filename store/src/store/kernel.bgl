@@ -2,8 +2,8 @@
 ;; Structural Triple operations. Domain roles and view policy live above this
 ;; neutral position-addressed boundary.
 (ns store.kernel)
-(require store.types :as t)
-(require clojure.string :as str)
+(require [store.types :as t])
+(require [clojure.string :as str])
 
 ;; This is the one bootstrap door. Everything reachable through its t3
 ;; profile header remains ordinary relational vocabulary.

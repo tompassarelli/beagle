@@ -19,9 +19,9 @@
 (ns store.rotation)
 
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require store.store :as store)
+(require [store.store :as store])
 
 ;; A key is never materialized. It is NAMED by the event that first carried it
 ;; plus the key shape, and hashed through one of these stack entries, so

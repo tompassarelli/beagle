@@ -1,8 +1,8 @@
 #lang beagle
 ;; Portable recursive Term storage and occurrence-ordered transaction history.
 (ns store.store)
-(require store.types :as t)
-(require store.slots :as slots)
+(require [store.types :as t])
+(require [store.slots :as slots])
 
 (def empty-ids (Vec Int) [])
 (def empty-atoms (Vec t/AtomRow) [])

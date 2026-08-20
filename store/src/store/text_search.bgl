@@ -2,9 +2,9 @@
 ;; Additive analyzers over the exact word index. The released text-match
 ;; relation delegates to its original source and keeps its semantics unchanged.
 (ns store.text-search)
-(require clojure.string :as str)
-(require store.text-index :as text-index)
-(require store.types :as t)
+(require [clojure.string :as str])
+(require [store.text-index :as text-index])
+(require [store.types :as t])
 
 (defalias PostingMap (Map String (Vec Int)))
 

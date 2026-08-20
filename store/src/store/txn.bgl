@@ -9,11 +9,11 @@
 (ns store.txn)
 
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require store.store :as store)
+(require [store.store :as store])
 
-(require store.rotation :as rot)
+(require [store.rotation :as rot])
 
 ;; Deliberately unnamespaced: minting is a domain coordinate, not kernel vocabulary.
 (def mint-ordinal Keyword :mint-ordinal)

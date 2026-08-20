@@ -3,8 +3,8 @@
 (ns store.text-index)
 
 
-(require clojure.string :as str)
-(require store.types :as t)
+(require [clojure.string :as str])
+(require [store.types :as t])
 
 (def text-index-max-bytes Int (* 64 1024 1024))
 

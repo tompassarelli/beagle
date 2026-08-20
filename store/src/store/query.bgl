@@ -2,9 +2,9 @@
 ;; Record-only query core over recursive Terms. EDN, JSON, and RPC are syntax
 ;; adapters; evaluation, validation, results, pages, and errors are typed IR.
 (ns store.query)
-(require store.datalog :as d)
-(require store.types :as t)
-(require clojure.string :as str)
+(require [store.datalog :as d])
+(require [store.types :as t])
+(require [clojure.string :as str])
 
 (defrecord AggregateSpec
   [operator Keyword

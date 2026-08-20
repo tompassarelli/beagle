@@ -3,7 +3,7 @@
 ;; vectors. Semantic values are recursive Terms; transaction history is kept
 ;; in private physical rows and exposed through non-Term system records.
 (ns store.types)
-(require store.slots :as slots)
+(require [store.slots :as slots])
 
 ;; Atom is the closed grounding vocabulary for the recursive term model.  An
 ;; Instant is canonical epoch seconds plus nanoseconds; civil-time context is

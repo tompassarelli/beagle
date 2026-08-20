@@ -2,11 +2,11 @@
 ;; Typed Datalog over homogeneous rows of recursive Beagle Store Terms. Relation names
 ;; are query-local; the kernel assigns no role to t1, t2, or t3.
 (ns store.datalog)
-(require store.rotation :as rot)
-(require store.store :as store)
-(require store.types :as t)
-(require store.text-index :as text-index)
-(require store.text-search :as text-search)
+(require [store.rotation :as rot])
+(require [store.store :as store])
+(require [store.types :as t])
+(require [store.text-index :as text-index])
+(require [store.text-search :as text-search])
 
 ;; Query syntax adapters compile to this IR. QueryTerm.value stays Any because
 ;; Beagle cannot consume a recursive Dyn through generic equality; constant and
