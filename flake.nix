@@ -108,13 +108,15 @@
             cp -r bin "$out/bin"
             cp -r native-core "$out/native-core"
             cp -r store "$out/store"
+            mkdir -p "$out/self-host"
+            cp -r self-host/seed "$out/self-host/seed"
             # bin/test/ is the test-harness DIRECTORY, not an executable — if it
             # lands on PATH it shadows POSIX `test` system-wide (root shell-outs
             # exec a directory -> EACCES; broke nixos-rebuild 2026-07-09).
             rm -rf "$out/bin/test"
             if [ -d share ]; then cp -r share "$out/share"; fi
             chmod -R u+w "$out/beagle-lib" "$out/bin" "$out/native-core" \
-              "$out/store"
+              "$out/store" "$out/self-host/seed"
 
             # Collection link: racket resolves a collection by directory NAME on
             # the search path. The collection is named "beagle" but the dir is
