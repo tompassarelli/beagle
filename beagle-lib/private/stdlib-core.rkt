@@ -95,6 +95,11 @@
     (list (p 'String) (p 'Int))
     #f
     (p 'host.fs/ReadTextBoundedResult))
+   (q 'host.fs 'read-byte-source-bounded-or-die)
+   (type-fn
+    (list (p 'String) (p 'Int))
+    #f
+    (p 'ByteSource))
    (q 'host.stdin 'read-text-bounded)
    (type-fn
     (list (p 'Int))

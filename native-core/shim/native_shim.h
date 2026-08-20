@@ -699,6 +699,12 @@ int32_t native_host_stdin_read_text_bounded_v0(
 uint64_t native_host_filesystem_read_text_bounded_or_die_v0(
     native_arena *arena, const native_capability *capability, uint64_t path,
     int64_t max_bytes);
+/* Reads arbitrary file octets into arena-owned storage. The returned header
+   borrows that storage and remains valid for the arena lifetime. */
+native_byte_source *
+native_host_filesystem_read_byte_source_bounded_or_die_v0(
+    native_arena *arena, const native_capability *capability, uint64_t path,
+    int64_t max_bytes);
 uint64_t native_host_stdin_read_text_bounded_or_die_v0(
     native_arena *arena, const native_capability *capability,
     int64_t max_bytes);

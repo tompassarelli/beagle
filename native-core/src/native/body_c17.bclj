@@ -323,6 +323,7 @@
 
 (defn host-whole-input-symbol? [(symbol String)] Bool
   (or (= symbol "native_host_filesystem_read_text_bounded_or_die_v0")
+      (= symbol "native_host_filesystem_read_byte_source_bounded_or_die_v0")
       (= symbol "native_host_stdin_read_text_bounded_or_die_v0")))
 
 (defn host-clock-outcome-symbol? [(symbol String)] Bool

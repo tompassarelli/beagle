@@ -2552,9 +2552,12 @@
   (lower-id "extern" [(str "host-whole-input-" operation "-v0")]))
 
 (defn host-whole-input-symbol [(operation String)] String
-  (if (= operation "read-file-bounded")
+  (cond
+    (= operation "read-file-bounded")
     "native_host_filesystem_read_text_bounded_or_die_v0"
-    "native_host_stdin_read_text_bounded_or_die_v0"))
+    (= operation "read-byte-source-bounded")
+    "native_host_filesystem_read_byte_source_bounded_or_die_v0"
+    :else "native_host_stdin_read_text_bounded_or_die_v0"))
 
 (defn host-filesystem-callee? [(name String)] Bool
   (or (= name "host.fs/read-text-bounded")
@@ -2618,6 +2621,8 @@
       (same-id? candidate (host-filesystem-abi-id "abs-path"))
       (same-id? candidate (host-store-abi-id))
       (same-id? candidate (host-whole-input-abi-id "read-file-bounded"))
+      (same-id? candidate
+        (host-whole-input-abi-id "read-byte-source-bounded"))
       (same-id? candidate (host-whole-input-abi-id "read-stdin-bounded"))))
 
 (defn host-process-effect-id [] core/NativeId
@@ -10212,6 +10217,28 @@
               (core/->TokenFlowV0 [] [])))
           result-id (text-type-id) false)))))
 
+(defn lower-byte-source-input-call
+  [(owner core/NativeId)
+   (state BodyStateV0)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (if (not (and (= 2 (count value-types))
+                (text-operand? (nth value-types 0))
+                (same-id? (nth value-types 1) (int-type-id))))
+    (fail-result state
+      "TODO-NATIVE-BYTE-SOURCE-INPUT-OPERANDS: host.fs/read-byte-source-bounded-or-die takes one Text path and one Int bound")
+    (let [result-id core/NativeId (state-id state owner "byte-source-input")]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 result-id (byte-source-type-id))
+            (host-whole-input-abi-id "read-byte-source-bounded")
+            values
+            (arena-value-id owner)
+            (core/->TokenFlowV0 [] [])))
+        result-id (byte-source-type-id) false))))
+
 (defn lower-host-text-output-call
   [(owner core/NativeId)
    (state BodyStateV0)
@@ -17553,6 +17580,9 @@
                 (lower-whole-input-call env owner current callee values
                   value-types)
 
+                (= callee "host.fs/read-byte-source-bounded-or-die")
+                (lower-byte-source-input-call owner current values value-types)
+
                 (= callee "host.store/compile")
                 (lower-host-store-call owner current values value-types)
 
@@ -22165,11 +22195,15 @@
     (host-whole-input-symbol operation)
     (core/->AbiImportV0 true)
     (core/->RestrictedCAbiV0 true)
-    (if (= operation "read-file-bounded")
+    (if (or (= operation "read-file-bounded")
+            (= operation "read-byte-source-bounded"))
       [(borrowed-abi-value "path" (text-type-id))
        (borrowed-abi-value "max-bytes" (int-type-id))]
       [(borrowed-abi-value "max-bytes" (int-type-id))])
-    (core/->AbiValueV0 "result" (text-type-id)
+    (core/->AbiValueV0 "result"
+      (if (= operation "read-byte-source-bounded")
+        (byte-source-type-id)
+        (text-type-id))
       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
     (type-id "LowerFailure")
     [(allocate-effect-id) (host-filesystem-effect-id)]
@@ -22291,6 +22325,7 @@
      true
      layouts-digest)]
     (host-whole-input-abi "read-file-bounded" layouts-digest)
+    (host-whole-input-abi "read-byte-source-bounded" layouts-digest)
     (host-whole-input-abi "read-stdin-bounded" layouts-digest)))
  
 
