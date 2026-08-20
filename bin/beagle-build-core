@@ -2158,24 +2158,20 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
   (let [all-definitions (vec (definition-nodes index))
         module-batches (module-definition-batches index all-definitions)
         definition-ids (set (map id-value all-definitions))
+        ordered-definitions (vec (mapcat second module-batches))
         _worker-evidence
         (binding [*out* *err*]
           (println (str "beagle build: source-projection workers="
-                        (min projection-parallelism (count module-batches))
-                        " modules=" (count module-batches))))
+                        (min projection-parallelism (count ordered-definitions))
+                        " definitions=" (count ordered-definitions))))
         entries
-        (flatten-module-entries
         (ordered-parallel-mapv
-         (fn [[module-name module-definitions]]
-           [module-name
-            (mapv
-             (fn [definition]
-               [(id-value definition)
-                (vec (dependency-nodes
-                      definitions index definition definition-ids))])
-             module-definitions)])
-         module-batches))]
-    {:ordered (vec (mapcat second module-batches)) :by-id (into {} entries)}))
+         (fn [definition]
+           [(id-value definition)
+            (vec (dependency-nodes
+                  definitions index definition definition-ids))])
+         ordered-definitions)]
+    {:ordered ordered-definitions :by-id (into {} entries)}))
 
 (defn source-node-name-index [rows]
   (reduce
