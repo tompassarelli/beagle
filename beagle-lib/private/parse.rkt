@@ -6015,6 +6015,28 @@
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (for-let (parse-let-bindings (or let-stx (cadr rest)))) acc))]
+      [(and (>= (length rest) 3)
+            (binding-form-datum? (car rest))
+            (type-expression-datum? (cadr rest)))
+       (define binder-stx (and stxs (car stxs)))
+       (define name (parse-binding-form (car rest) "for/doseq binding"))
+       (define val-stx (and stxs (>= (length stxs) 3) (caddr stxs)))
+       (loop (cdddr rest)
+             (and stxs (>= (length stxs) 3) (cdddr stxs))
+             (cons (register-syntax-binder!
+                    (store-src!
+                     (for-binding name
+                                  (parse-expr (or val-stx (caddr rest)))
+                                  (parse-type (cadr rest))
+                                  #f)
+                     (and binder-stx (stx->src-loc binder-stx)))
+                    binder-stx)
+                   acc))]
+      [(and (= (length rest) 2)
+            (binding-form-datum? (car rest))
+            (type-expression-datum? (cadr rest)))
+       (raise-missing-binding-initializer
+        "for/doseq binding" (car rest) (and stxs (car stxs)))]
       [(and (>= (length rest) 2)
             (bracketed? (car rest)))
        (define destr (parse-seq-destructure (car rest)))

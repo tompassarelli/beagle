@@ -649,6 +649,13 @@
 (check-ok "doseq with :when passes"
   '(doseq [x (range 10) :when (even? x)] (println x)))
 
+(check-ok "doseq accepts a flat typed binding before modifiers"
+  '(doseq [x Int (range 10) :when (even? x)] (println x)))
+
+(check-err/rx "doseq rejects a flat typed binding without a collection"
+  #rx"has no following initializer"
+  '(doseq [x Int] (println x)))
+
 (check-ok "range over Int bounds has List Int element type"
   '(defn indexes [] (List Int) (range 3)))
 
