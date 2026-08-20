@@ -98,8 +98,9 @@ bundle_case() {
   ' "$response" >>"$raw_identities"
 }
 
-build_case() {
+build_case_from_sources() {
   local case_id="$1"
+  local source_directory="$2"
   local output="$scratch/build/$case_id"
   local log="$scratch/build/$case_id.log"
   local source_args=()
@@ -109,7 +110,7 @@ build_case() {
     entry_args+=(--entry "$entry")
   done
   for source in "${sources[@]}"; do
-    source_args+=("$scratch_relative/sources/$source")
+    source_args+=("$source_directory/$source")
   done
   (
     cd "$repo"
@@ -141,6 +142,10 @@ build_case() {
     >>"$context"
 }
 
+build_case() {
+  build_case_from_sources "$1" "$scratch_relative/sources"
+}
+
 run_case() {
   local case_id="$1"
   echo "branch-compile-corpus: $case_id START"
@@ -153,6 +158,51 @@ run_case() {
 for case_id in baseline baseline-repeat comment-layout private-implementation public-interface; do
   run_case "$case_id"
 done
+
+directory_invariance() {
+  local first_case="directory-invariance-alpha"
+  local second_case="directory-invariance-beta"
+  local first_sources="$scratch/$first_case"
+  local second_sources="$scratch/$second_case"
+  local source
+  local first_rows="$scratch/$first_case.semantic-unit-content.tsv"
+  local second_rows="$scratch/$second_case.semantic-unit-content.tsv"
+
+  mkdir -p "$first_sources" "$second_sources"
+  for source in "${sources[@]}"; do
+    cp "$here/corpus/$source" "$first_sources/$source"
+    cp "$here/corpus/$source" "$second_sources/$source"
+    cmp -s "$first_sources/$source" "$second_sources/$source" || {
+      echo "branch-compile-corpus: directory-invariance source copies differ" >&2
+      exit 1
+    }
+  done
+
+  # Deliberately compile distinct repository-relative directories without a
+  # module-root mapping. The fixed corpus/<file>.bgl ids above remain the
+  # oracle's control, while this stage proves content digests ignore source
+  # directory identity.
+  echo "branch-compile-corpus: directory-invariance START"
+  build_case_from_sources "$first_case" "$scratch_relative/$first_case"
+  build_case_from_sources "$second_case" "$scratch_relative/$second_case"
+  awk -F '\t' -v case_id="$first_case" '
+    $1 == case_id && $2 == "semantic-unit-content" {print $2 "\t" $3 "\t" $4}
+  ' "$raw_identities" | sort >"$first_rows"
+  awk -F '\t' -v case_id="$second_case" '
+    $1 == case_id && $2 == "semantic-unit-content" {print $2 "\t" $3 "\t" $4}
+  ' "$raw_identities" | sort >"$second_rows"
+  if ! diff -u "$first_rows" "$second_rows"; then
+    echo "branch-compile-corpus: semantic-unit content depends on source directory" >&2
+    exit 1
+  fi
+  awk -F '\t' -v first_case="$first_case" -v second_case="$second_case" '
+    $1 != first_case && $1 != second_case
+  ' "$raw_identities" >"$scratch/identities.without-directory-invariance.tsv"
+  mv "$scratch/identities.without-directory-invariance.tsv" "$raw_identities"
+  echo "branch-compile-corpus: directory-invariance END"
+}
+
+directory_invariance
 
 sort -t $'\t' -k1,1 -k2,2 -k3,3 "$raw_identities" >"$scratch/identities.with-repeat.tsv"
 awk -F '\t' '$1 == "baseline"' "$scratch/identities.with-repeat.tsv" \

@@ -60,6 +60,40 @@
 
     :else value))
 
+;; Binder identities carry the module's source id and the binder's position in
+;; the module. Neither is content of the unit, so the content digest records
+;; only which binder each reference resolves to, renumbered in canonical
+;; traversal order.
+(defn canonical-binding-ids [value]
+  (let [seen (volatile! {})
+        token (fn [id]
+                (or (get @seen id)
+                    (let [t (str "binder:" (count @seen))]
+                      (vswap! seen assoc id t)
+                      t)))]
+    (letfn [(walk [node]
+              (cond
+                (map? node)
+                (into {}
+                  (for [key (sort (keys node))
+                        :let [child (get node key)]]
+                    [key
+                     (cond
+                       (and (contains? #{"bindingId" "refersTo"} key)
+                            (string? child))
+                       (token child)
+
+                       (and (= "bindingIds" key) (map? child))
+                       (into {}
+                         (for [inner (sort (keys child))]
+                           [inner (token (get child inner))]))
+
+                       :else (walk child))]))
+
+                (sequential? node) (mapv walk node)
+                :else node))]
+      (walk value))))
+
 (defn semantic-unit-selector [form]
   (let [kind (get form "node")
         selector
@@ -94,7 +128,7 @@
     {"kind" "beagle.semantic-unit-content"
      "schemaVersion" 0
      "descriptor" (semantic-unit-descriptor ast form)
-     "definition" (without-provenance form)
+     "definition" (canonical-binding-ids (without-provenance form))
      "nativeOp" (get @native-ops (get form "name"))}))
 
 ;; native.checked-program owns kind, schemaVersion, and projection

@@ -16,21 +16,53 @@ interface_sha256="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 bb -e '
   (require (quote [cheshire.core :as json])
            (quote [clojure.string :as str]))
-  (load-file (nth *command-line-args* 6))
+  (load-file (nth *command-line-args* 10))
   (let [source-id "semantic/unit_fixture.bgl"
+        int-type {"kind" "prim" "name" "Int"}
+        parameter
+        (fn [binding-id]
+          {"type" "param"
+           "name" "value"
+           "ann" int-type
+           "bindingId" binding-id})
         function
-        (fn [name value]
+        (fn [name value binding-id]
           {"node" "defn"
            "name" name
            "private" false
-           "params" []
+           "params" [(parameter binding-id)]
            "rest" nil
-           "ret" {"kind" "prim" "name" "Int"}
+           "ret" int-type
            "effectiveType" {"kind" "fn"
-                            "params" []
+                            "params" [int-type]
                             "rest" nil
-                            "ret" {"kind" "prim" "name" "Int"}}
-           "body" [{"node" "literal" "kind" "number" "value" value}]})
+                            "ret" int-type}
+           "body" [{"node" "call"
+                    "fn" {"node" "ref" "name" "+"}
+                    "args" [{"node" "ref"
+                             "name" "value"
+                             "refersTo" binding-id}
+                            {"node" "literal" "kind" "number" "value" value}]}]})
+        shadow
+        (fn [reference-id]
+          {"node" "defn"
+           "name" "shadow"
+           "private" false
+           "params" [(parameter "parameter:semantic/unit_fixture.bgl:0:value")]
+           "rest" nil
+           "ret" int-type
+           "effectiveType" {"kind" "fn"
+                            "params" [int-type]
+                            "rest" nil
+                            "ret" int-type}
+           "body" [{"node" "let"
+                    "bindings" [{"name" "value"
+                                 "ann" int-type
+                                 "bindingId" "let:semantic/unit_fixture.bgl:1:value"
+                                 "value" {"node" "literal" "kind" "number" "value" 5}}]
+                    "body" [{"node" "ref"
+                             "name" "value"
+                             "refersTo" reference-id}]}]})
         base
         {"kind" "beagle.checked-program"
          "schemaVersion" 4
@@ -45,33 +77,56 @@ bb -e '
          "importedRecordNamespaces" {}
          "requires" []
          "externs" []
-         "forms" [(function "stable" 7)]}
+         "forms" [(function "stable" 7
+                    "parameter:semantic/unit_fixture.bgl:0:value")]}
         inserted
         (assoc base
           "sourceSha256" (second *command-line-args*)
-          "forms" [(function "earlier" 3) (function "stable" 7)])
+          "forms" [(function "earlier" 3
+                     "parameter:semantic/unit_fixture.bgl:0:value")
+                   (function "stable" 7
+                     "parameter:semantic/unit_fixture.bgl:1:value")])
         mutated
         (assoc base
           "sourceSha256" (nth *command-line-args* 2)
-          "forms" [(function "stable" 8)])]
-    (spit (nth *command-line-args* 3)
-      (json/generate-string
-        (native.checked-program/with-projection-digest base)))
-    (spit (nth *command-line-args* 4)
-      (json/generate-string
-        (native.checked-program/with-projection-digest inserted)))
+          "forms" [(function "stable" 8
+                    "parameter:semantic/unit_fixture.bgl:0:value")])
+        shadow-let
+        (assoc base
+          "sourceSha256" (nth *command-line-args* 3)
+          "forms" [(shadow "let:semantic/unit_fixture.bgl:1:value")])
+        shadow-parameter
+        (assoc base
+          "sourceSha256" (nth *command-line-args* 4)
+          "forms" [(shadow "parameter:semantic/unit_fixture.bgl:0:value")])]
     (spit (nth *command-line-args* 5)
       (json/generate-string
-        (native.checked-program/with-projection-digest mutated))))' \
+        (native.checked-program/with-projection-digest base)))
+    (spit (nth *command-line-args* 6)
+      (json/generate-string
+        (native.checked-program/with-projection-digest inserted)))
+    (spit (nth *command-line-args* 7)
+      (json/generate-string
+        (native.checked-program/with-projection-digest mutated)))
+    (spit (nth *command-line-args* 8)
+      (json/generate-string
+        (native.checked-program/with-projection-digest shadow-let)))
+    (spit (nth *command-line-args* 9)
+      (json/generate-string
+        (native.checked-program/with-projection-digest shadow-parameter))))' \
   "sha256:1111111111111111111111111111111111111111111111111111111111111111" \
   "sha256:2222222222222222222222222222222222222222222222222222222222222222" \
   "sha256:3333333333333333333333333333333333333333333333333333333333333333" \
+  "sha256:4444444444444444444444444444444444444444444444444444444444444444" \
+  "sha256:5555555555555555555555555555555555555555555555555555555555555555" \
   "$scratch/base.ast.json" \
   "$scratch/inserted.ast.json" \
   "$scratch/mutated.ast.json" \
+  "$scratch/shadow-let.ast.json" \
+  "$scratch/shadow-parameter.ast.json" \
   "$repo/native-core/bin/checked-program.clj"
 
-for version in base inserted mutated; do
+for version in base inserted mutated shadow-let shadow-parameter; do
   bb "$repo/native-core/bin/source-facts.clj" \
     --input "$scratch/$version.ast.json=semantic/unit_fixture.bgl" \
     --interface-sha256 "semantic/unit_fixture.bgl=$interface_sha256" \
@@ -142,6 +197,16 @@ bb -cp "$scratch/out" -e '
         (slice/row-first-text inserted-rows inserted-id "semantic-unit-sha256")
         mutated-semantic
         (slice/row-first-text mutated-rows mutated-id "semantic-unit-sha256")
+        shadow-let-rows (slice/parse-facts (slurp (nth *command-line-args* 3)))
+        shadow-parameter-rows
+        (slice/parse-facts (slurp (nth *command-line-args* 4)))
+        shadow-let-id (definition-subject shadow-let-rows "shadow")
+        shadow-parameter-id (definition-subject shadow-parameter-rows "shadow")
+        shadow-let-semantic
+        (slice/row-first-text shadow-let-rows shadow-let-id "semantic-unit-sha256")
+        shadow-parameter-semantic
+        (slice/row-first-text shadow-parameter-rows shadow-parameter-id
+          "semantic-unit-sha256")
         checked-projection
         (slice/row-first-text base-rows
           (first (slice/form-node-names base-rows "module-root"))
@@ -176,9 +241,11 @@ bb -cp "$scratch/out" -e '
           (conj (str "semantic unit ID churned: "
                   base-id " -> " inserted-id " / " mutated-id))
           (not= base-semantic inserted-semantic)
-          (conj "unchanged definition semantic digest churned after earlier insertion")
+          (conj "parameter-bearing definition semantic digest churned after earlier insertion")
           (= base-semantic mutated-semantic)
           (conj "private literal mutation did not change semantic-unit-sha256")
+          (= shadow-let-semantic shadow-parameter-semantic)
+          (conj "shadowed parameter and let reference merged into one semantic digest")
           (not= expected-interface interface-digest)
           (conj (str "SourceModuleV1 did not retain interface digest: "
                   interface-digest " != " expected-interface))
@@ -211,6 +278,7 @@ bb -cp "$scratch/out" -e '
     (when (seq failures)
       (doseq [failure failures] (binding [*out* *err*] (println failure)))
       (throw (ex-info "semantic unit identity contract failed" {:failures failures})))
-    (println "semantic unit identity: stable IDs, semantic/interface separation, and lossless atom encoding PASS"))' \
+    (println "semantic unit identity: parameter-position stability, shadowing distinction, semantic/interface separation, and lossless atom encoding PASS"))' \
   "$scratch/base.facts" "$scratch/inserted.facts" "$scratch/mutated.facts" \
+  "$scratch/shadow-let.facts" "$scratch/shadow-parameter.facts" \
   "$interface_sha256"
