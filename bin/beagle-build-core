@@ -50,60 +50,10 @@ if [[ "$native_route_selected" == 1 && ! -x "$PLATFORM_SUPERVISOR" ]]; then
     exit 2
 fi
 
-# The Rust supervisor is the same CLI and the same containment contract as the
-# Racket and Python ones, at coreutils-`timeout` startup cost: ~0.004s against
-# 0.59s (Racket, which re-execs itself into a PID namespace and so boots two
-# Racket VMs per phase) and 0.13s (Python). A two-file build fans ~12 of them
-# out, so that startup alone was several seconds of a build whose compilation is
-# ~2s and whose result is already cached.
-#
-# It is built INTO THE CACHE, never into the checkout: a launch-critical or
-# read-only checkout must not need a writable build directory to be fast. The
-# cache key is the supervisor's own sources, so a source change rebuilds it
-# exactly once and every other invocation is one `-x` test.
-#
-# Absence is a fallback, not a failure: no cargo, no sources, or a failed build
-# and the incumbent supervisors below still enforce the identical contract.
-RUST_SUPERVISOR_SOURCE="$BEAGLE_DIR/tools/run-bounded"
-resolve_rust_supervisor() {
-    local key binary cache lock log
-    if [[ -n "${BEAGLE_RUST_SUPERVISOR:-}" ]]; then
-        [[ -x "$BEAGLE_RUST_SUPERVISOR" ]] || return 1
-        printf '%s\n' "$BEAGLE_RUST_SUPERVISOR"
-        return 0
-    fi
-    [[ -f "$RUST_SUPERVISOR_SOURCE/src/main.rs" ]] || return 1
-    key="$(cat "$RUST_SUPERVISOR_SOURCE/src/main.rs" \
-              "$RUST_SUPERVISOR_SOURCE/Cargo.toml" |
-        sha256sum | awk '{print $1}')"
-    cache="${XDG_CACHE_HOME:-$HOME/.cache}/beagle/tools"
-    binary="$cache/run-bounded-$key"
-    if [[ -x "$binary" ]]; then
-        printf '%s\n' "$binary"
-        return 0
-    fi
-    command -v cargo >/dev/null 2>&1 || return 1
-    mkdir -p "$cache" || return 1
-    lock="$cache/.run-bounded.lock"
-    log="$cache/.run-bounded.build.log"
-    echo "beagle build: building the Rust bounded supervisor (once per source change)" >&2
-    (
-        exec {build_lock_fd}>"$lock"
-        flock "$build_lock_fd" || exit 1
-        [[ -x "$binary" ]] && exit 0
-        cargo build --release --locked --offline \
-            --manifest-path "$RUST_SUPERVISOR_SOURCE/Cargo.toml" \
-            --target-dir "$cache/.target" >"$log" 2>&1 || exit 1
-        mv -f "$cache/.target/release/run-bounded" "$binary.$$" &&
-            mv -f "$binary.$$" "$binary"
-    ) || {
-        echo "beagle build: Rust supervisor build failed; see $log" >&2
-        return 1
-    }
-    [[ -x "$binary" ]] || return 1
-    printf '%s\n' "$binary"
-}
-RUST_SUPERVISOR="$(resolve_rust_supervisor || true)"
+# The Rust supervisor is cached outside launch-critical checkouts; absence is
+# a fallback to the incumbent supervisors below.
+source "$BIN/_beagle-rust-supervisor"
+RUST_SUPERVISOR="$(beagle_resolve_rust_supervisor 'beagle build' || true)"
 if [[ -n "$RUST_SUPERVISOR" ]]; then
     export BEAGLE_RUST_SUPERVISOR="$RUST_SUPERVISOR"
 fi

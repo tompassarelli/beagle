@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Resolve the cached native implementation of the bounded-supervisor contract.
+
+beagle_resolve_rust_supervisor() {
+    local label="$1" source key binary cache lock log
+    if [[ -n "${BEAGLE_RUST_SUPERVISOR:-}" ]]; then
+        [[ -x "$BEAGLE_RUST_SUPERVISOR" ]] || return 1
+        printf '%s\n' "$BEAGLE_RUST_SUPERVISOR"
+        return 0
+    fi
+    source="$BEAGLE_DIR/tools/run-bounded"
+    [[ -f "$source/src/main.rs" ]] || return 1
+    key="$(cat "$source/src/main.rs" "$source/Cargo.toml" |
+        sha256sum | awk '{print $1}')"
+    cache="${XDG_CACHE_HOME:-$HOME/.cache}/beagle/tools"
+    binary="$cache/run-bounded-$key"
+    if [[ -x "$binary" ]]; then
+        printf '%s\n' "$binary"
+        return 0
+    fi
+    command -v cargo >/dev/null 2>&1 || return 1
+    mkdir -p "$cache" || return 1
+    lock="$cache/.run-bounded.lock"
+    log="$cache/.run-bounded.build.log"
+    echo "$label: building the Rust bounded supervisor (once per source change)" >&2
+    (
+        exec {build_lock_fd}>"$lock"
+        flock "$build_lock_fd" || exit 1
+        [[ -x "$binary" ]] && exit 0
+        cargo build --release --locked --offline \
+            --manifest-path "$source/Cargo.toml" \
+            --target-dir "$cache/.target" >"$log" 2>&1 || exit 1
+        mv -f "$cache/.target/release/run-bounded" "$binary.$$" &&
+            mv -f "$binary.$$" "$binary"
+    ) || {
+        echo "$label: Rust supervisor build failed; see $log" >&2
+        return 1
+    }
+    [[ -x "$binary" ]] || return 1
+    printf '%s\n' "$binary"
+}

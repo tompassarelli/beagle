@@ -5,6 +5,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 supervisor="$root/native-core/bin/run-bounded"
+BEAGLE_DIR="$root"
+source "$root/bin/_beagle-rust-supervisor"
 module_helper="$root/bin/_beagle-core-compiler-module-cache.clj"
 kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
 overall_timeout="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-600}"
@@ -132,6 +134,9 @@ fi
 # before deciding whether the multi-minute construction is needed at all.
 if [[ "$print_key" != 1 &&
       "${BEAGLE_CORE_COMPILER_PROJECTION_SUPERVISED:-0}" != 1 ]]; then
+    rust_supervisor="$(beagle_resolve_rust_supervisor \
+        'beagle core compiler projection' || true)"
+    [[ -z "$rust_supervisor" ]] || supervisor="$rust_supervisor"
     supervised_args=()
     if [[ "$cache_requested" == 1 ]]; then
         supervised_args+=(--cache-root "$cache_root")
