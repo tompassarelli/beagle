@@ -1917,7 +1917,7 @@
   [env Any
    pattern Any
    owner Any] Any
-  (let [out (reduce (fn
+  (let [out Any (reduce (fn
                       [acc Any
                        name String] Any
                       (binder-env-assoc acc owner name ANY))
@@ -1969,7 +1969,7 @@
         (and (app-type? aggregate)
           (or (= (get aggregate "name") "Vec") (= (get aggregate "name") "List"))
           (= (count (get aggregate "args")) 1))
-        (let [elem-type (nullable-type (nth (get aggregate "args") 0))
+        (let [elem-type Any (nullable-type (nth (get aggregate "args") 0))
               with-fixed Any (reduce
                            (fn
                              [out Any
@@ -2545,14 +2545,14 @@
   (let [pat (get clause "pattern")]
     (cond
       (= (get pat "type") "record")
-        (let [written-name (get pat "name")
-              canonical-name
+        (let [written-name Any (get pat "name")
+              canonical-name Any
                 (canonical-union-member-name written-name target-type)
-              rec-name (if (nil? canonical-name) written-name canonical-name)
-              bindings (get pat "bindings")
-              field-map (get-in (deref STATE) ["record-fields" rec-name])
-              field-order (get-in (deref STATE) ["record-field-order" rec-name])
-              arm-env (if (nil? scrutinee)
+              rec-name Any (if (nil? canonical-name) written-name canonical-name)
+              bindings Any (get pat "bindings")
+              field-map Any (get-in (deref STATE) ["record-fields" rec-name])
+              field-order Any (get-in (deref STATE) ["record-field-order" rec-name])
+              arm-env Any (if (nil? scrutinee)
                         env
                         (assoc env scrutinee
                           (member-view-type rec-name target-type)))
@@ -2701,7 +2701,7 @@
   [body (Vec Any)
    env Any
    expected-result Any] Any
-  (let [n (count body)
+  (let [n Int (count body)
         indices (Vec Int) (vec (range n))]
     (if (= n 0)
       ANY
@@ -2787,17 +2787,17 @@
    fn-t Any
    args (Vec Any)
    env Any] (Vec Any)
-  (let [fixed (get fn-t "params")
-        rest-t (get fn-t "rest")
-        n-fixed (count fixed)
-        n-args (count args)
+  (let [fixed (Vec Any) (get fn-t "params")
+        rest-t Any (get fn-t "rest")
+        n-fixed Int (count fixed)
+        n-args Int (count args)
         argument-indices (Vec Int)
           (vec (range (if (nil? rest-t)
                        (if (< n-fixed n-args) n-fixed n-args)
                        n-args)))
-        fn-display (reference->string fn-name)
-        fn-leaf (reference-leaf fn-name)
-        check-slot (fn [i Int] Any
+        fn-display String (reference->string fn-name)
+        fn-leaf Any (reference-leaf fn-name)
+        check-slot (Fn [Int] Any) (fn [i Int] Any
                      (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
                            expected-atom? (check-atom-ctor! (nth args i) expected env)
                            actual (if expected-atom?
@@ -3101,8 +3101,8 @@
 
     (and (app-type? expected) (= (get expected "name") "HVec")
          (not (nil? value)) (= (get value "node") "vec"))
-    (let [items (get value "items")
-          elems (get expected "args")
+    (let [items (Vec Any) (get value "items")
+          elems (Vec Any) (get expected "args")
           indices (Vec Int) (vec (range (count items)))]
       (and (= (count items) (count elems))
            (every? true?
@@ -4298,11 +4298,11 @@
    params Any
    rest-param Any
    signature Any] Any
-  (let [all-params (if (nil? rest-param)
+  (let [all-params (Vec Any) (if (nil? rest-param)
                      (vec params)
                      (conj (vec params) rest-param))
-        fixed-types (get signature "params")
-        effective-types (if (nil? rest-param)
+        fixed-types (Vec Any) (get signature "params")
+        effective-types (Vec Any) (if (nil? rest-param)
                           fixed-types
                           (conj (vec fixed-types)
                             (make-app "Vec" [(get signature "rest")])))
@@ -5364,17 +5364,17 @@
                                     (if (or (= 0 (count remaining-targets))
                                  (= 0 (count remaining-results)))
                            {"state" next "seen" seen}
-                           (let [target (first remaining-targets)
-                                 result (first remaining-results)
-                                 arg (get result "arg")
-                                 origins (get result "origins")
-                                 binding (if (string? target)
+                           (let [target Any (first remaining-targets)
+                                 result Any (first remaining-results)
+                                 arg Any (get result "arg")
+                                 origins Any (get result "origins")
+                                 binding Any (if (string? target)
                                            (get (get state "scope") target)
                                            nil)
                                  prior Any (if (nil? binding)
                                                {}
                                                (get binding "origins"))
-                                 prior-still-live
+                                 prior-still-live Any
                                    (reduce
                                      (fn
                                        [live Any
@@ -5384,33 +5384,33 @@
                                          live
                                          (assoc live origin true)))
                                      {} (ordered-keys prior))
-                                 disjoint
+                                 disjoint Bool
                                    (every?
                                      (fn [origin Any] Bool
                                        (not (contains? seen origin)))
                                      (ordered-keys origins))
-                                 exact-target
+                                 exact-target Bool
                                    (and (= (get arg "node") "ref")
                                         (= (get arg "name") target))
-                                 safe-transfer
+                                 safe-transfer Bool
                                    (and (not (nil? binding))
                                         (> (count prior) 0)
                                         (or exact-target
                                             (purity-binding-acquires-owner?
                                               target arg state))
                                         disjoint)
-                                 without-abandoned
+                                 without-abandoned Any
                                    (if (or (= 0 (count prior-still-live))
                                            (= prior origins))
                                      next
                                      (purity-escape-origins
                                        next prior-still-live value))
-                                 checked
+                                 checked Any
                                    (if (or (= 0 (count origins)) safe-transfer)
                                      without-abandoned
                                      (purity-escape-origins
                                        without-abandoned origins value))
-                                 dead (purity-set-origin-status
+                                 dead Any (purity-set-origin-status
                                         checked origins "dead")]
                              (recur (rest remaining-targets)
                                     (rest remaining-results)
@@ -5419,13 +5419,13 @@
                   (purity-result (get transferred "state") {}))))
           (= node "fn")
             (let [lambda-depth Int (get state "lambda-depth")
-                  nested (assoc state "lambda-depth" (+ lambda-depth 1))
-                  bound (purity-bind-params nested
+                  nested Any (assoc state "lambda-depth" (+ lambda-depth 1))
+                  bound Any (purity-bind-params nested
                           (get value "params") (opt-field (get value "rest")))
-                  result (purity-analyze-sequence (get value "body") bound)
-                  escaped (purity-escape-origins
+                  result Any (purity-analyze-sequence (get value "body") bound)
+                  escaped Any (purity-escape-origins
                             (get result "state") (get result "origins") value)
-                  restored (assoc
+                  restored Any (assoc
                              (assoc
                               (assoc state "owners" (get escaped "owners"))
                               "markers" (get escaped "markers"))
@@ -5517,14 +5517,14 @@
                                  fn-def Any] Any
                                 (let [lambda-depth Int
                                         (get next "lambda-depth")
-                                      nested (assoc next "lambda-depth"
+                                      nested Any (assoc next "lambda-depth"
                                                (+ lambda-depth 1))
-                                      bound (purity-bind-params nested
+                                      bound Any (purity-bind-params nested
                                               (get fn-def "params")
                                               (opt-field (get fn-def "rest")))
-                                      result (purity-analyze-sequence
+                                      result Any (purity-analyze-sequence
                                                (get fn-def "body") bound)
-                                      escaped (purity-escape-origins
+                                      escaped Any (purity-escape-origins
                                                 (get result "state")
                                                 (get result "origins") fn-def)]
                                   (assoc
