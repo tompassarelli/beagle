@@ -2727,6 +2727,24 @@
 
 ;; === register-union ==========================================================
 
+(defn register-nullary-union-members!
+  [(members (Vec Any)) (type-params Any) (env Any)] Any
+  ;; Core bare members are payloadless variants. Hosted targets reserve bare
+  ;; members for pre-declared records and receive no synthetic constructor.
+  (if (not (= (get (deref STATE) "target") "core"))
+    env
+    (reduce
+      (fn [(out Any) (member String)] Any
+        (let [ctor (str "->" member)]
+          (if (some? (get out ctor))
+            out
+            (let [ctor-fn (make-fn [] nil (make-prim member))]
+              (assoc out ctor
+                (if (or (nil? type-params) (= (count type-params) 0))
+                  ctor-fn
+                  (make-poly type-params ctor-fn nil)))))))
+      env members)))
+
 (defn register-union!
   [(name String)
    (members (Vec Any))
@@ -2737,19 +2755,20 @@
   (do
     (swap! STATE assoc-in ["union-members" name] members)
     (if (or (nil? type-params) (= (count type-params) 0))
-      (let [env1 (assoc env name (make-union (mapv (fn [(m Any)] Any (make-prim m)) members)))]
-        (if (not (nil? member-fields))
-          (reduce (fn [(e Any) (m Any)] Any
-                    (let [fields (get member-fields m)]
-                      (if (not (nil? fields)) (register-record! m fields e) e)))
-                  env1 members)
-          env1))
+      (let [env1 (assoc env name (make-union (mapv (fn [(m Any)] Any (make-prim m)) members)))
+            env2 (if (not (nil? member-fields))
+                   (reduce (fn [(e Any) (m Any)] Any
+                             (let [fields (get member-fields m)]
+                               (if (not (nil? fields)) (register-record! m fields e) e)))
+                     env1 members)
+                   env1)]
+        (register-nullary-union-members! members type-params env2))
       (let [env1 (assoc env name (make-prim name))]
         (swap! STATE assoc-in ["parametric-unions" name]
                {"params" type-params "members" members "member-fields" member-fields})
         (doseq [member members]
           (swap! STATE assoc-in ["parametric-member-union" member] name))
-        (if (not (nil? member-fields))
+        (let [env2 (if (not (nil? member-fields))
           (reduce (fn [(e Any) (m Any)] Any
                     (let [fields (get member-fields m)]
                       (if (not (nil? fields))
@@ -2777,7 +2796,8 @@
                           e2)
                         e)))
                   env1 members)
-          env1)))))
+          env1)]
+          (register-nullary-union-members! members type-params env2))))))
 
 ;; === infer-expr! (the core engine) ============================================
 
@@ -6379,6 +6399,28 @@
                  (make-defn-node "f" [(make-param target (make-prim "Config"))]
                    (make-prim "String") [(make-ref "missing")])])]
       (> (get (type-check! prog) "count") 0)))
+  (expect! "union: Core bare tag member owns a nullary constructor"
+    (let [union-form {"node" "defunion"
+                      "name" "Action"
+                      "members" ["Start" "Stop"]
+                      "type-params" []
+                      "member-fields" nil}
+          prog (assoc
+                 (make-prog [union-form (make-call "->Start" [])])
+                 "target" "core")]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "union: hosted bare record member keeps constructor arity"
+    (let [record (make-record-node "Start"
+                   [{"name" "code" "ann" (make-prim "Int")}])
+          union-form {"node" "defunion"
+                      "name" "Action"
+                      "members" ["Start"]
+                      "type-params" []
+                      "member-fields" nil}
+          prog (make-prog
+                 [record union-form
+                  (make-call "->Start" [(make-lit "number" 1)])])]
+      (= (get (type-check! prog) "count") 0)))
   (expect! "destructure: nominal union projects a field shared by every member"
     (let [union-form {"node" "defunion"
                       "name" "Named"

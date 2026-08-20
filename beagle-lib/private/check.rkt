@@ -2359,10 +2359,7 @@
          [(null? type-params)
           (hash-set! env name
                      (type-union (map (lambda (m) (type-prim m)) members)))
-          ;; `(defunion Result Ok Err)` names pre-declared records (no inline
-          ;; fields) — those already registered as defrecords.
-          (when member-fields
-            (register-union-member-fields! members member-fields '() env))]
+          (register-union-member-fields! members member-fields '() env)]
          [else
           (hash-set! env name (type-prim name))
           (register-parametric-union! name type-params members member-fields env)])]
@@ -2471,9 +2468,7 @@
 ;; single-binding instance fallback instead.
 (define (register-union-member-fields! members member-fields type-params env)
   (for ([m (in-list members)]
-        ;; No entry = a bare member naming an already-declared record; registering
-        ;; it here would erase that record's arity. `(Name [])` has an entry.
-        #:when (hash-ref member-fields m #f))
+        #:when (and member-fields (hash-ref member-fields m #f)))
     (define fields (hash-ref member-fields m '()))
     (define m-type (type-prim m))
     (define m-str (symbol->string m))
@@ -2503,7 +2498,19 @@
     (hash-set! RECORD-FIELDS m field-map)
     (hash-set! RECORD-FIELD-ORDER m
                (map (lambda (f) (string->symbol (string-append ":" (symbol->string (param-name f)))))
-                    fields))))
+                    fields)))
+  ;; Core bare members are payloadless variants. Hosted targets reserve bare
+  ;; members for pre-declared records and receive no synthetic constructor.
+  (when (eq? (current-check-target) 'core)
+    (for ([m (in-list members)])
+      (define ctor (string->symbol (string-append "->" (symbol->string m))))
+      (unless (reference-hash-ref env ctor #f)
+        (define ctor-fn (type-fn '() #f (type-prim m)))
+        (reference-hash-set!
+         env ctor
+         (if (null? type-params)
+             ctor-fn
+             (type-poly type-params ctor-fn #f)))))))
 
 (define (mut-copy h)
   (hash-copy h))
