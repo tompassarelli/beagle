@@ -797,7 +797,7 @@ static int serve_client(int client_fd, server_context *server) {
     return -1;
   }
 
-  /* No peer-liveness check belongs here. A FRAMRPC client may half-close
+  /* No peer-liveness check belongs here. A Store RPC client may half-close
      (shutdown(SHUT_WR)) once its request is on the wire and then wait for the
      response -- tests/store_native_generated_adapter_smoke.sh does exactly
      that -- and at the socket layer a half-close is indistinguishable from a
@@ -1060,7 +1060,7 @@ static int accept_loop(int listener_fd, store_server_store *store,
      about to accept -- the host can ANSWER. It deliberately does not mean
      "listening": under socket activation systemd owns the listening socket
      long before this process exists, so listening carries no information. */
-  notify_service_manager("READY=1\nSTATUS=serving FRAMRPC\n");
+  notify_service_manager("READY=1\nSTATUS=serving Store RPC\n");
   while (stop_requested == 0 && !server_has_fatal_failure(&server)) {
     client_job *job;
     pthread_t worker;

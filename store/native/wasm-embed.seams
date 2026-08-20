@@ -15,7 +15,7 @@
 #   fd_write fd_close fd_seek   wasi-libc stdio, linked from the shim's
 #                       diagnostics and never reached.
 #   proc_exit           abort/_Exit, never reached.
-# tests/store_wasm_embed_smoke.sh measures all of this: over the full frame
+# tests/store_wasm_embed_smoke.sh measures all of this: over the full packet
 # matrix the five never-reached imports record zero calls.
 store-wasm-embed-seams/v1
 export _initialize func

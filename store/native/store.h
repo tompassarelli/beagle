@@ -104,20 +104,22 @@ typedef struct store_open_options_v1 {
 BEAGLE_STORE_API uint32_t store_abi_version(void);
 
 /*
- * With HOST == NULL, LOG_PATH is opened as the canonical local FRAMLOG and
- * Beagle Store supplies libc allocation, realtime clock, and POSIX durability. With a
- * host, every callback is required; LOG_PATH is then only a stable diagnostic
- * label. A successful open transfers storage-close responsibility to Beagle Store.
- * Allocation context must remain valid until every returned buffer is freed.
- * A wasi build cannot flock, so there the embedder owns FRAMLOG exclusivity.
+ * With HOST == NULL, LOG_PATH is opened as the canonical local Store
+ * transaction log; Beagle Store supplies libc allocation, realtime clock, and
+ * POSIX durability. With a host, every callback is required; LOG_PATH is then
+ * only a stable diagnostic label. A successful open transfers storage-close
+ * responsibility to Beagle Store. Allocation context must remain valid until
+ * every returned buffer is freed.
+ * A wasi build cannot flock, so there the embedder owns Store transaction log
+ * exclusivity.
  */
 BEAGLE_STORE_API store_status store_open(const store_open_options_v1 *options,
                                store_database **database_out,
                                store_error *error);
 
 /*
- * Each call consumes exactly one canonical FRAMRPC v2 request frame and
- * returns exactly one canonical FRAMRPC v2 response frame. The three entry
+ * Each call consumes exactly one canonical Store RPC v2 request packet and
+ * returns exactly one canonical Store RPC v2 response packet. The three entry
  * points name host intent; the typed Beagle Store dispatcher remains the sole
  * authority for operation validity and returns protocol errors in RESPONSE.
  */
@@ -145,11 +147,11 @@ BEAGLE_STORE_API store_status store_close(store_database *database, store_error 
  * This build has no POSIX storage: HOST == NULL selects nine named imports of
  * wasm module "store_host_v1", one per store_host_v1 callback, each named for
  * its field and typed by the wasm32 lowering of the prototype above. The
- * import host passes storage context 0 for the FRAMLOG and 1 for the snapshot
- * image, so both objects ride those same nine imports. LOG_PATH
- * is then a diagnostic label, host contexts are 0, and the embedder owns
- * FRAMLOG exclusivity. An import reports failure by returning nonzero; a
- * trapping import unwinds the guest uncleaned, so a trap is instance-fatal.
+ * import host passes storage context 0 for the Store transaction log and 1 for
+ * the snapshot image, so both objects ride those same nine imports. LOG_PATH
+ * is then a diagnostic label, host contexts are 0, and the embedder owns Store
+ * transaction log exclusivity. An import reports failure by returning nonzero;
+ * a trapping import unwinds the guest uncleaned, so a trap is instance-fatal.
  * A response buffer is released only by store_buffer_release, its release field
  * being a guest table index. store_wasm_alloc/store_wasm_free stage embedder
  * requests, options, and error structs; they never free a response. The module

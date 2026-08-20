@@ -33,10 +33,10 @@
 #define BEAGLE_STORE_SERVER_BUDGET_COMPACT_DIVISOR ((uint64_t)4u)
 #define BEAGLE_STORE_SERVER_BUDGET_GENERATION_BYTES ((uint64_t)(1u * 1024u * 1024u))
 #define BEAGLE_STORE_SERVER_CAPABILITY_TOKEN UINT64_C(1)
-#define BEAGLE_STORE_SERVER_FRAME_HEADER_BYTES ((size_t)26u)
-#define BEAGLE_STORE_SERVER_FRAME_BODY_LENGTH_OFFSET ((size_t)14u)
-#define BEAGLE_STORE_SERVER_FRAME_MAX_BODY_BYTES UINT32_C(1048576)
-#define BEAGLE_STORE_SERVER_FRAME_MAX_BYTES ((size_t)1048602u)
+#define STORE_RPC_PACKET_HEADER_BYTES ((size_t)26u)
+#define STORE_RPC_PACKET_BODY_LENGTH_OFFSET ((size_t)14u)
+#define STORE_RPC_PACKET_MAX_BODY_BYTES UINT32_C(1048576)
+#define STORE_RPC_PACKET_MAX_BYTES ((size_t)1048602u)
 #define BEAGLE_STORE_SERVER_IO_CHUNK_BYTES ((size_t)8192u)
 
 _Static_assert(BEAGLE_STORE_SERVER_ADAPTER_ABI ==
@@ -154,7 +154,7 @@ struct store_server_request {
   store_server_codec_read_request_return result;
 };
 
-/* The response frame is copied out of the generated module's arenas while
+/* The response packet is copied out of the generated module's arenas while
    dispatch still holds them live, so a response in flight references no store
    generation and no request arena: a slow or held client socket can never pin
    store memory. */
@@ -438,20 +438,22 @@ static int posix_storage_open(const char *path, posix_storage **storage_out,
 
   if (storage == NULL) {
     copy_error(error, error_capacity,
-               "cannot allocate the POSIX FRAMLOG owner");
+               "cannot allocate the POSIX Store transaction log owner");
     return BEAGLE_STORE_SERVER_OUT_OF_MEMORY;
   }
   storage->fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
 
   if (storage->fd < 0) {
     free(storage);
-    copy_error(error, error_capacity, "cannot open the canonical FRAMLOG");
+    copy_error(error, error_capacity,
+               "cannot open the canonical Store transaction log");
     return BEAGLE_STORE_SERVER_HOST_ERROR;
   }
   if (fstat(storage->fd, &status) != 0 || !S_ISREG(status.st_mode) ||
       status.st_size < 0) {
-    copy_error(error, error_capacity,
-               "canonical FRAMLOG is not a readable regular file");
+    copy_error(
+        error, error_capacity,
+        "canonical Store transaction log is not a readable regular file");
     (void)close(storage->fd);
     free(storage);
     return BEAGLE_STORE_SERVER_HOST_ERROR;
@@ -460,8 +462,9 @@ static int posix_storage_open(const char *path, posix_storage **storage_out,
   // grant — the same obligation store.h already places on a host storage table.
 #ifndef __wasi__
   if (flock(storage->fd, LOCK_EX | LOCK_NB) != 0) {
-    copy_error(error, error_capacity,
-               "canonical FRAMLOG writer authority is unavailable");
+    copy_error(
+        error, error_capacity,
+        "canonical Store transaction log writer authority is unavailable");
     (void)close(storage->fd);
     free(storage);
     return BEAGLE_STORE_SERVER_HOST_ERROR;
@@ -479,7 +482,7 @@ static int posix_storage_size(void *context, uint64_t *size_out, char *error,
   if (fstat(storage->fd, &status) != 0 || !S_ISREG(status.st_mode) ||
       status.st_size < 0) {
     copy_error(error, error_capacity,
-               "cannot inspect the canonical FRAMLOG");
+               "cannot inspect the canonical Store transaction log");
     return BEAGLE_STORE_SERVER_HOST_ERROR;
   }
   *size_out = (uint64_t)status.st_size;
@@ -495,7 +498,7 @@ static int posix_storage_read(void *context, uint64_t offset,
   if (offset > (uint64_t)INT64_MAX ||
       length > (size_t)(INT64_MAX - (int64_t)offset)) {
     copy_error(error, error_capacity,
-               "canonical FRAMLOG read exceeds the POSIX range");
+               "canonical Store transaction log read exceeds the POSIX range");
     return BEAGLE_STORE_SERVER_HOST_ERROR;
   }
   while (position < length) {
@@ -509,8 +512,9 @@ static int posix_storage_read(void *context, uint64_t offset,
       continue;
     } else {
       copy_error(error, error_capacity,
-                 count == 0 ? "canonical FRAMLOG ended while reading"
-                            : "cannot read the canonical FRAMLOG");
+                 count == 0
+                     ? "canonical Store transaction log ended while reading"
+                     : "cannot read the canonical Store transaction log");
       return BEAGLE_STORE_SERVER_HOST_ERROR;
     }
   }
@@ -524,7 +528,7 @@ static int posix_storage_truncate(void *context, uint64_t length, char *error,
 
   if ((uint64_t)offset != length || ftruncate(storage->fd, offset) != 0) {
     copy_error(error, error_capacity,
-               "cannot repair the canonical FRAMLOG tail");
+               "cannot repair the canonical Store transaction log tail");
     return BEAGLE_STORE_SERVER_HOST_ERROR;
   }
   return BEAGLE_STORE_SERVER_OK;
@@ -539,7 +543,8 @@ static int posix_storage_append(void *context, const uint8_t *bytes,
   // Parenthesized: wasi-libc defines lseek as a statement-expression macro,
   // which -pedantic rejects; the parentheses suppress that expansion.
   if ((lseek)(storage->fd, (off_t)0, SEEK_END) < (off_t)0) {
-    copy_error(error, error_capacity, "cannot seek the canonical FRAMLOG");
+    copy_error(error, error_capacity,
+               "cannot seek the canonical Store transaction log");
     return BEAGLE_STORE_SERVER_HOST_ERROR;
   }
   while (position < length) {
@@ -551,7 +556,7 @@ static int posix_storage_append(void *context, const uint8_t *bytes,
       continue;
     } else {
       copy_error(error, error_capacity,
-                 "cannot append the canonical FRAMLOG");
+                 "cannot append the canonical Store transaction log");
       return BEAGLE_STORE_SERVER_HOST_ERROR;
     }
   }
@@ -563,7 +568,8 @@ static int posix_storage_sync(void *context, char *error,
   posix_storage *storage = context;
 
   if (fsync(storage->fd) != 0) {
-    copy_error(error, error_capacity, "cannot sync the canonical FRAMLOG");
+    copy_error(error, error_capacity,
+               "cannot sync the canonical Store transaction log");
     return BEAGLE_STORE_SERVER_HOST_ERROR;
   }
   return BEAGLE_STORE_SERVER_OK;
@@ -575,7 +581,8 @@ static int posix_storage_close(void *context, char *error,
   int status = BEAGLE_STORE_SERVER_OK;
 
   if (close(storage->fd) != 0) {
-    copy_error(error, error_capacity, "cannot close the canonical FRAMLOG");
+    copy_error(error, error_capacity,
+               "cannot close the canonical Store transaction log");
     status = BEAGLE_STORE_SERVER_HOST_ERROR;
   }
   free(storage);
@@ -618,7 +625,7 @@ static int write_bytes(int fd, const uint8_t *bytes, size_t length,
       return BEAGLE_STORE_SERVER_PEER_CLOSED;
     } else {
       copy_error(error, error_capacity,
-                 "cannot write the generated response frame");
+                 "cannot write the generated response packet");
       return BEAGLE_STORE_SERVER_CLIENT_ERROR;
     }
   }
@@ -631,9 +638,9 @@ static int append_log_vector(store_server_store *store,
   uint8_t chunk[BEAGLE_STORE_SERVER_IO_CHUNK_BYTES];
   size_t length;
   size_t offset = 0u;
-  int status = vector_length(vector, 0u, SIZE_MAX, &length, error,
-                             error_capacity,
-                             "generated FRAMLOG append is not byte-valued");
+  int status = vector_length(
+      vector, 0u, SIZE_MAX, &length, error, error_capacity,
+      "generated Store transaction log append is not byte-valued");
 
   if (status != BEAGLE_STORE_SERVER_OK || length == 0u) {
     return status;
@@ -651,7 +658,7 @@ static int append_log_vector(store_server_store *store,
 
       if (*value < INT64_C(0) || *value > INT64_C(255)) {
         copy_error(error, error_capacity,
-                   "generated FRAMLOG append is not byte-valued");
+                   "generated Store transaction log append is not byte-valued");
         return BEAGLE_STORE_SERVER_FATAL;
       }
       chunk[index] = (uint8_t)*value;
@@ -678,8 +685,9 @@ static int repair_log_tail(store_server_store *store,
                            char *error, size_t error_capacity) {
   if (valid_length < INT64_C(0) ||
       (uint64_t)valid_length > (uint64_t)original_length) {
-    copy_error(error, error_capacity,
-               "generated FRAMLOG recovery returned an invalid prefix");
+    copy_error(
+        error, error_capacity,
+        "generated Store transaction log recovery returned an invalid prefix");
     return BEAGLE_STORE_SERVER_FATAL;
   }
   if ((size_t)valid_length == original_length) {
@@ -689,56 +697,56 @@ static int repair_log_tail(store_server_store *store,
       store->host.context, (uint64_t)valid_length, error, error_capacity);
 }
 
-static uint32_t frame_body_length(const uint8_t *header) {
-  return (uint32_t)header[BEAGLE_STORE_SERVER_FRAME_BODY_LENGTH_OFFSET] |
-         ((uint32_t)header[BEAGLE_STORE_SERVER_FRAME_BODY_LENGTH_OFFSET + 1u]
+static uint32_t packet_body_length(const uint8_t *header) {
+  return (uint32_t)header[STORE_RPC_PACKET_BODY_LENGTH_OFFSET] |
+         ((uint32_t)header[STORE_RPC_PACKET_BODY_LENGTH_OFFSET + 1u]
           << 8u) |
-         ((uint32_t)header[BEAGLE_STORE_SERVER_FRAME_BODY_LENGTH_OFFSET + 2u]
+         ((uint32_t)header[STORE_RPC_PACKET_BODY_LENGTH_OFFSET + 2u]
           << 16u) |
-         ((uint32_t)header[BEAGLE_STORE_SERVER_FRAME_BODY_LENGTH_OFFSET + 3u]
+         ((uint32_t)header[STORE_RPC_PACKET_BODY_LENGTH_OFFSET + 3u]
           << 24u);
 }
 
-static int read_frame(int fd, uint8_t **frame_out, size_t *length_out,
+static int read_packet(int fd, uint8_t **packet_out, size_t *length_out,
                       char *error, size_t error_capacity) {
-  uint8_t header[BEAGLE_STORE_SERVER_FRAME_HEADER_BYTES];
-  uint8_t *frame;
+  uint8_t header[STORE_RPC_PACKET_HEADER_BYTES];
+  uint8_t *packet;
   uint32_t body_length;
-  size_t frame_length;
+  size_t packet_length;
   int status = read_exact(
       fd, header, sizeof(header), true, BEAGLE_STORE_SERVER_CLIENT_ERROR,
-      "generated request frame ended inside its header",
-      "cannot read the generated request frame header", error,
+      "generated request packet ended inside its header",
+      "cannot read the generated request packet header", error,
       error_capacity);
 
   if (status != BEAGLE_STORE_SERVER_OK) {
     return status;
   }
-  body_length = frame_body_length(header);
-  if (body_length > BEAGLE_STORE_SERVER_FRAME_MAX_BODY_BYTES) {
+  body_length = packet_body_length(header);
+  if (body_length > STORE_RPC_PACKET_MAX_BODY_BYTES) {
     copy_error(error, error_capacity,
-               "generated request frame exceeds the body limit");
+               "generated request packet exceeds the body limit");
     return BEAGLE_STORE_SERVER_CLIENT_ERROR;
   }
-  frame_length = sizeof(header) + (size_t)body_length;
-  frame = malloc(frame_length);
-  if (frame == NULL) {
+  packet_length = sizeof(header) + (size_t)body_length;
+  packet = malloc(packet_length);
+  if (packet == NULL) {
     copy_error(error, error_capacity,
-               "cannot allocate the generated request frame");
+               "cannot allocate the generated request packet");
     return BEAGLE_STORE_SERVER_FATAL;
   }
-  memcpy(frame, header, sizeof(header));
-  status = read_exact(fd, frame + sizeof(header), (size_t)body_length, false,
+  memcpy(packet, header, sizeof(header));
+  status = read_exact(fd, packet + sizeof(header), (size_t)body_length, false,
                       BEAGLE_STORE_SERVER_CLIENT_ERROR,
-                      "generated request frame ended inside its body",
-                      "cannot read the generated request frame body", error,
+                      "generated request packet ended inside its body",
+                      "cannot read the generated request packet body", error,
                       error_capacity);
   if (status != BEAGLE_STORE_SERVER_OK) {
-    free(frame);
+    free(packet);
     return status;
   }
-  *frame_out = frame;
-  *length_out = frame_length;
+  *packet_out = packet;
+  *length_out = packet_length;
   return BEAGLE_STORE_SERVER_OK;
 }
 
@@ -895,8 +903,9 @@ static int boot_generation_from_log(
   *generation_out = NULL;
   status = read_whole_object(
       &store->host, store->host.context, &log_bytes, &log_length,
-      "canonical FRAMLOG exceeds the native address range",
-      "cannot allocate the canonical FRAMLOG input", error, error_capacity);
+      "canonical Store transaction log exceeds the native address range",
+      "cannot allocate the canonical Store transaction log input", error,
+      error_capacity);
   if (status != BEAGLE_STORE_SERVER_OK) {
     return status;
   }
@@ -979,15 +988,17 @@ static int compact_store(store_server_store *store, char *error,
   if (status != BEAGLE_STORE_SERVER_OK) {
     return status;
   }
-  status = vector_length(replacement->result.field_4, 0u, SIZE_MAX,
-                         &append_length, error, error_capacity,
-                         "generated compacted FRAMLOG append is invalid");
+  status = vector_length(
+      replacement->result.field_4, 0u, SIZE_MAX, &append_length, error,
+      error_capacity,
+      "generated compacted Store transaction log append is invalid");
   if (status != BEAGLE_STORE_SERVER_OK || append_length != 0u ||
       replacement->result.field_3 < INT64_C(0) ||
       (uint64_t)replacement->result.field_3 != (uint64_t)log_length) {
     generation_release(replacement);
-    copy_error(error, error_capacity,
-               "generated compaction did not consume the canonical FRAMLOG");
+    copy_error(
+        error, error_capacity,
+        "generated compaction did not consume the canonical Store transaction log");
     return BEAGLE_STORE_SERVER_FATAL;
   }
   previous = store->current;
@@ -1018,8 +1029,9 @@ int store_server_store_compact_idle(store_server_store *store,
     return BEAGLE_STORE_SERVER_FATAL;
   }
   if (store->poisoned) {
-    copy_error(error, error_capacity,
-               "canonical FRAMLOG is poisoned after a durability failure");
+    copy_error(
+        error, error_capacity,
+        "canonical Store transaction log is poisoned after a durability failure");
     return BEAGLE_STORE_SERVER_FATAL;
   }
   if (store->current->chain_generations <=
@@ -1217,7 +1229,7 @@ int store_server_store_boot(const char *canonical_log_path,
 /* The generated encoder reads the dispatch result in place, so this must run
    while the arenas that result points into are still live: inside dispatch,
    before the request owner or base generation can be released. */
-static int encode_response_frame(
+static int encode_response_packet(
     const store_server_store_dispatch_return *result, uint8_t **bytes_out,
     size_t *length_out, char *error, size_t error_capacity) {
   generated_owner *owner;
@@ -1241,16 +1253,16 @@ static int encode_response_frame(
                             "generated response encode failed");
   if (status == BEAGLE_STORE_SERVER_OK) {
     status = vector_length(
-        generated_result.field_1, BEAGLE_STORE_SERVER_FRAME_HEADER_BYTES,
-        BEAGLE_STORE_SERVER_FRAME_MAX_BYTES, &length, error, error_capacity,
-        "generated response frame has an invalid byte representation");
+        generated_result.field_1, STORE_RPC_PACKET_HEADER_BYTES,
+        STORE_RPC_PACKET_MAX_BYTES, &length, error, error_capacity,
+        "generated response packet has an invalid byte representation");
   }
   bytes = NULL;
   if (status == BEAGLE_STORE_SERVER_OK) {
     bytes = malloc(length);
     if (bytes == NULL) {
       copy_error(error, error_capacity,
-                 "cannot allocate the encoded response frame");
+                 "cannot allocate the encoded response packet");
       status = BEAGLE_STORE_SERVER_OUT_OF_MEMORY;
     }
   }
@@ -1260,7 +1272,7 @@ static int encode_response_frame(
 
     if (*value < INT64_C(0) || *value > INT64_C(255)) {
       copy_error(error, error_capacity,
-                 "generated response frame has an invalid byte representation");
+                 "generated response packet has an invalid byte representation");
       status = BEAGLE_STORE_SERVER_FATAL;
     } else {
       bytes[index] = (uint8_t)*value;
@@ -1299,8 +1311,9 @@ int store_server_store_dispatch(store_server_store *store,
   }
   *response_out = NULL;
   if (store->poisoned) {
-    copy_error(error, error_capacity,
-               "canonical FRAMLOG is poisoned after a durability failure");
+    copy_error(
+        error, error_capacity,
+        "canonical Store transaction log is poisoned after a durability failure");
     return BEAGLE_STORE_SERVER_FATAL;
   }
   if (store_needs_compaction(store)) {
@@ -1368,14 +1381,15 @@ int store_server_store_dispatch(store_server_store *store,
     generation_release(previous);
   }
   /* The image is a separate storage object; a failed image write never
-     poisons the FRAMLOG, which stays the authoritative history. */
+     poisons the Store transaction log, which stays the authoritative
+     history. */
   if (status == BEAGLE_STORE_SERVER_OK) {
     status = write_snapshot_vector(store, result.field_6, error,
                                    error_capacity);
   }
   if (status == BEAGLE_STORE_SERVER_OK) {
-    status = encode_response_frame(&result, &bytes, &length, error,
-                                   error_capacity);
+    status = encode_response_packet(&result, &bytes, &length, error,
+                                    error_capacity);
   }
   (void)BEAGLE_STORE_SERVER_CALL_CODEC_RELEASE_RESPONSE(
       &request->owner->arena, &request->owner->capability, result);
@@ -1411,8 +1425,9 @@ int store_server_store_shutdown(store_server_store *store, char *error,
                             error_capacity,
                             "generated store shutdown failed");
   if (store->poisoned) {
-    copy_error(error, error_capacity,
-               "canonical FRAMLOG is poisoned after a durability failure");
+    copy_error(
+        error, error_capacity,
+        "canonical Store transaction log is poisoned after a durability failure");
     status = BEAGLE_STORE_SERVER_FATAL;
   }
   close_status = store->host.storage_sync(store->host.context, error,
@@ -1455,22 +1470,22 @@ int store_server_codec_decode_request(const uint8_t *bytes, size_t length,
     return BEAGLE_STORE_SERVER_FATAL;
   }
   *request_out = NULL;
-  if (length < BEAGLE_STORE_SERVER_FRAME_HEADER_BYTES) {
+  if (length < STORE_RPC_PACKET_HEADER_BYTES) {
     copy_error(error, error_capacity,
-               "generated request frame ended inside its header");
+               "generated request packet ended inside its header");
     return BEAGLE_STORE_SERVER_CLIENT_ERROR;
   }
-  body_length = frame_body_length(bytes);
-  if (body_length > BEAGLE_STORE_SERVER_FRAME_MAX_BODY_BYTES) {
+  body_length = packet_body_length(bytes);
+  if (body_length > STORE_RPC_PACKET_MAX_BODY_BYTES) {
     copy_error(error, error_capacity,
-               "generated request frame exceeds the body limit");
+               "generated request packet exceeds the body limit");
     return BEAGLE_STORE_SERVER_CLIENT_ERROR;
   }
-  if (length != BEAGLE_STORE_SERVER_FRAME_HEADER_BYTES + (size_t)body_length) {
+  if (length != STORE_RPC_PACKET_HEADER_BYTES + (size_t)body_length) {
     copy_error(error, error_capacity,
-               length < BEAGLE_STORE_SERVER_FRAME_HEADER_BYTES + (size_t)body_length
-                   ? "generated request frame ended inside its body"
-                   : "generated request frame has trailing bytes");
+               length < STORE_RPC_PACKET_HEADER_BYTES + (size_t)body_length
+                   ? "generated request packet ended inside its body"
+                   : "generated request packet has trailing bytes");
     return BEAGLE_STORE_SERVER_CLIENT_ERROR;
   }
   /* No store is in scope at decode time, so a scratch owner keeps the default
@@ -1524,12 +1539,12 @@ int store_server_codec_encode_response(const store_server_response *response,
   }
   *bytes_out = NULL;
   *length_out = 0u;
-  /* Dispatch already encoded the frame; its length is at least the frame
+  /* Dispatch already encoded the packet; its length is at least the packet
      header, so this allocation is never zero-sized. */
   bytes = malloc(response->length);
   if (bytes == NULL) {
     copy_error(error, error_capacity,
-               "cannot allocate the encoded response frame");
+               "cannot allocate the encoded response packet");
     return BEAGLE_STORE_SERVER_OUT_OF_MEMORY;
   }
   memcpy(bytes, response->bytes, response->length);
@@ -1543,8 +1558,8 @@ void store_server_codec_release_bytes(uint8_t *bytes) { free(bytes); }
 int store_server_codec_read_request(int client_fd,
                                    store_server_request **request_out,
                                    char *error, size_t error_capacity) {
-  uint8_t *frame;
-  size_t frame_length;
+  uint8_t *packet;
+  size_t packet_length;
   int status;
 
   clear_error(error, error_capacity);
@@ -1554,14 +1569,14 @@ int store_server_codec_read_request(int client_fd,
     return BEAGLE_STORE_SERVER_FATAL;
   }
   *request_out = NULL;
-  status = read_frame(client_fd, &frame, &frame_length, error,
-                      error_capacity);
+  status = read_packet(client_fd, &packet, &packet_length, error,
+                       error_capacity);
   if (status != BEAGLE_STORE_SERVER_OK) {
     return status;
   }
   status = store_server_codec_decode_request(
-      frame, frame_length, request_out, error, error_capacity);
-  free(frame);
+      packet, packet_length, request_out, error, error_capacity);
+  free(packet);
   return status;
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the FRAMRPC server as a GraalVM native image. Domain semantics
+# Build the Store RPC server as a GraalVM native image. Domain semantics
 # remain the Beagle-emitted Clojure under ../out; the entry is a platform
 # adapter around server/-main.
 # Run under GraalVM CE:

@@ -40,7 +40,7 @@ BEAGLE_STORE_HOST_IMPORT(storage_close)
 int store_host_import_storage_close(void *context);
 
 /* One instance binds one host database, so a context is only an object
-   discriminator: 0 is the FRAMLOG and 1 is the snapshot image. */
+   discriminator: 0 is the Store transaction log and 1 is the snapshot image. */
 static const store_host_v1 import_host = {
     .abi_version = BEAGLE_STORE_ABI_VERSION,
     .struct_size = (uint32_t)sizeof(store_host_v1),
