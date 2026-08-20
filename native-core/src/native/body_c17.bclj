@@ -357,6 +357,54 @@
       (= symbol "native_host_clock_wall_nanoseconds_v0")
       (= symbol "native_host_time_sleep_milliseconds_v0")))
 
+(defn store-compile-request-type-id [] core/NativeId
+  (core/canonical-id "native-lower-v0/type"
+    ["beagle.compiler-driver/CompileStoreRequest"]))
+
+(defn store-compile-response-type-id [] core/NativeId
+  (core/canonical-id "native-lower-v0/type"
+    ["beagle.compiler-driver/CompileStoreResponse"]))
+
+(defn store-compile-abi
+  [abis (Vec core/AbiDeclV0)] (U core/AbiDeclV0 Nil)
+  (loop [position Int 0]
+    (if (>= position (count abis))
+      nil
+      (let [abi core/AbiDeclV0 (nth abis position)
+            parameters (Vec core/AbiValueV0) (core/abideclv0-parameters abi)
+            result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
+            parameter (U core/AbiValueV0 Nil)
+            (if (= 1 (count parameters)) (nth parameters 0) nil)]
+        (if (and
+              (= "native_host_store_compile_v0" (core/abideclv0-symbol abi))
+              (instance? native.core.AbiImportV0
+                (core/abideclv0-direction abi))
+              (instance? native.core.RestrictedCAbiV0
+                (core/abideclv0-convention abi))
+              (some? parameter)
+              (= "request" (core/abivaluev0-name parameter))
+              (core/native-id= (store-compile-request-type-id)
+                (core/abivaluev0-type-id parameter))
+              (instance? native.core.BorrowedV0
+                (core/abivaluev0-ownership parameter))
+              (nil? (core/abivaluev0-lifetime-region parameter))
+              (some? result)
+              (= "response" (core/abivaluev0-name result))
+              (core/native-id= (store-compile-response-type-id)
+                (core/abivaluev0-type-id result))
+              (instance? native.core.ArenaOwnedV0
+                (core/abivaluev0-ownership result))
+              (some? (core/abivaluev0-lifetime-region result))
+              (core/native-id=
+                (core/arenaownedv0-region
+                  (core/abivaluev0-ownership result))
+                (core/abivaluev0-lifetime-region result))
+              (= 2 (count (core/abideclv0-required-effects abi)))
+              (= 2 (count (core/abideclv0-required-capabilities abi)))
+              (= "v0" (core/abideclv0-version abi)))
+          abi
+          (recur (+ position 1)))))))
+
 (defn program-supported? [program core/NativeCoreProgram] Bool
   (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
         types (Vec core/TypeDef) (core/nativecoreprogram-types program)]
@@ -892,8 +940,10 @@
   [types (Vec core/TypeDef)
    layouts (Vec core/LayoutDef)
    functions (Vec core/FunctionDef)
+   abis (Vec core/AbiDeclV0)
    module-index Int] String
-  (if (not (value-descriptors-used? functions))
+  (if (and (not (value-descriptors-used? functions))
+        (nil? (store-compile-abi abis)))
     ""
     (str
       (loop [position Int 0
@@ -3598,6 +3648,154 @@
               "\n")
             result))))))
 
+;; The Store host is implemented in a separate C translation unit.  Its
+;; request and response types are program-local Native Core types, so expose
+;; stable aliases only after this module's concrete types have been emitted.
+;; This keeps the import fully prototyped without making the C host depend on
+;; dependency-order type indexes.
+(defn emit-store-compile-import
+  [types (Vec core/TypeDef)
+   abis (Vec core/AbiDeclV0)
+   module-index Int] String
+  (let [abi (U core/AbiDeclV0 Nil) (store-compile-abi abis)]
+    (if (nil? abi)
+      ""
+      (let [parameters (Vec core/AbiValueV0) (core/abideclv0-parameters abi)
+            result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
+        (if (or (not (= 1 (count parameters))) (nil? result))
+          ""
+          (str
+            "typedef "
+            (c17/c-type types module-index
+              (core/abivaluev0-type-id (nth parameters 0)))
+            " native_host_store_compile_request_v0;\n"
+            "typedef "
+            (c17/c-type types module-index (core/abivaluev0-type-id result))
+            " native_host_store_compile_response_v0;\n"
+            "native_host_store_compile_response_v0 native_host_store_compile_v0(\n"
+            "    native_arena *arena, const native_capability *capability,\n"
+            "    native_host_store_compile_request_v0 request);\n"))))))
+
+(defn emit-store-compile-schema-declarations
+  [abis (Vec core/AbiDeclV0)] String
+  (if (nil? (store-compile-abi abis))
+    ""
+    (str
+      "typedef struct native_host_store_named_type_v0 {\n"
+      "  const char *name;\n"
+      "  const native_value_descriptor *value;\n"
+      "} native_host_store_named_type_v0;\n"
+      "typedef struct native_host_store_named_field_v0 {\n"
+      "  const char *owner;\n"
+      "  const char *name;\n"
+      "  size_t index;\n"
+      "} native_host_store_named_field_v0;\n"
+      "typedef struct native_host_store_named_variant_v0 {\n"
+      "  const char *owner;\n"
+      "  const char *name;\n"
+      "  int64_t tag;\n"
+      "} native_host_store_named_variant_v0;\n"
+      "extern const native_host_store_named_type_v0 "
+      "native_host_store_compile_types_v0[];\n"
+      "extern const size_t native_host_store_compile_type_count_v0;\n"
+      "extern const native_host_store_named_field_v0 "
+      "native_host_store_compile_fields_v0[];\n"
+      "extern const size_t native_host_store_compile_field_count_v0;\n"
+      "extern const native_host_store_named_variant_v0 "
+      "native_host_store_compile_variants_v0[];\n"
+      "extern const size_t native_host_store_compile_variant_count_v0;\n")))
+
+(defn emit-store-compile-named-types
+  [types (Vec core/TypeDef)
+   module-index Int] String
+  (str
+    "const native_host_store_named_type_v0 native_host_store_compile_types_v0[] = {\n"
+    (loop [position Int 0 result String ""]
+      (if (>= position (count types))
+        result
+        (let [definition core/TypeDef (nth types position)]
+          (recur (+ position 1)
+            (str result "  { \"" (escape-c-text (core/typedef-name definition))
+              "\", &" (descriptor-symbol types module-index
+                (core/typedef-id definition)) " },\n")))))
+    "};\n"
+    "const size_t native_host_store_compile_type_count_v0 = "
+    "sizeof(native_host_store_compile_types_v0) / "
+    "sizeof(native_host_store_compile_types_v0[0]);\n"))
+
+(defn emit-store-compile-named-fields
+  [types (Vec core/TypeDef)] String
+  (str
+    "const native_host_store_named_field_v0 native_host_store_compile_fields_v0[] = {\n"
+    (loop [type-position Int 0 result String ""]
+      (if (>= type-position (count types))
+        result
+        (let [definition core/TypeDef (nth types type-position)
+              shape core/TypeShape (core/typedef-shape definition)]
+          (recur (+ type-position 1)
+            (if (not (instance? native.core.RecordType shape))
+              result
+              (loop [field-position Int 0
+                     fields (Vec core/TypeField) (core/recordtype-fields shape)
+                     field-result String result]
+                (if (>= field-position (count fields))
+                  field-result
+                  (let [field core/TypeField (nth fields field-position)]
+                    (recur (+ field-position 1) fields
+                      (str field-result "  { \""
+                        (escape-c-text (core/typedef-name definition)) "\", \""
+                        (escape-c-text (core/typefield-name field)) "\", (size_t)"
+                        field-position " },\n"))))))))))
+    "};\n"
+    "const size_t native_host_store_compile_field_count_v0 = "
+    "sizeof(native_host_store_compile_fields_v0) / "
+    "sizeof(native_host_store_compile_fields_v0[0]);\n"))
+
+(defn emit-store-compile-named-variants
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)] String
+  (str
+    "const native_host_store_named_variant_v0 native_host_store_compile_variants_v0[] = {\n"
+    (loop [type-position Int 0 result String ""]
+      (if (>= type-position (count types))
+        result
+        (let [definition core/TypeDef (nth types type-position)
+              shape core/TypeShape (core/typedef-shape definition)]
+          (recur (+ type-position 1)
+            (if (not (instance? native.core.UnionType shape))
+              result
+              (loop [variant-position Int 0
+                     variants (Vec core/TypeVariant) (core/uniontype-variants shape)
+                     variant-result String result]
+                (if (>= variant-position (count variants))
+                  variant-result
+                  (let [variant core/TypeVariant (nth variants variant-position)]
+                    (recur (+ variant-position 1) variants
+                      (str variant-result "  { \""
+                        (escape-c-text (core/typedef-name definition)) "\", \""
+                        (escape-c-text (core/typevariant-name variant))
+                        "\", INT64_C("
+                        (variant-tag layouts (core/typedef-id definition)
+                          (core/typevariant-id variant))
+                        ") },\n"))))))))))
+    "};\n"
+    "const size_t native_host_store_compile_variant_count_v0 = "
+    "sizeof(native_host_store_compile_variants_v0) / "
+    "sizeof(native_host_store_compile_variants_v0[0]);\n"))
+
+(defn emit-store-compile-schema
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   abis (Vec core/AbiDeclV0)
+   module-index Int] String
+  (if (nil? (store-compile-abi abis))
+    ""
+    (str
+      (emit-store-compile-named-types types module-index)
+      (emit-store-compile-named-fields types)
+      (emit-store-compile-named-variants types layouts)
+      "\n")))
+
 (defn emit-internal-function-prototypes
   [types (Vec core/TypeDef)
    functions (Vec core/FunctionDef)
@@ -3626,6 +3824,8 @@
       "#ifndef " guard "\n#define " guard "\n\n"
       "#include \"native_shim.h\"\n\n"
       (c17/emit-types types layouts module-index)
+      (emit-store-compile-import types abis module-index)
+      (emit-store-compile-schema-declarations abis)
       (emit-public-function-prototypes types functions abis module-index)
       "\n#endif\n")))
 
@@ -3687,7 +3887,8 @@
       "")
     (emit-internal-function-prototypes types functions abis module-index)
     (emit-text-pool module-index pool)
-    (emit-value-descriptors types layouts functions module-index)
+    (emit-value-descriptors types layouts functions abis module-index)
+    (emit-store-compile-schema types layouts abis module-index)
     (emit-parallel-adapters types functions module-index)))
 
 (defn emit-source
