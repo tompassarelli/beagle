@@ -1,6 +1,8 @@
 #lang beagle
 (ns compiler-import-closure.fixture
-  (:require [beagle.frontend-facts :as facts]
+  (:require [beagle.compiler-driver :as driver]
+            [beagle.frontend-facts :as facts]
+            [beagle.parser :as parser]
             [beagle.parser-reader :as parser-reader]
             [beagle.syntax-semantics :as semantics]))
 
@@ -9,6 +11,202 @@
 
 (def unsupported-source String
   "#lang beagle\n(ns app.main (:require [dep.one :refer [value]]))\n(defn main [args (Vec String)] Int 0)\n")
+
+(def entry-source String
+  "#lang beagle\n(ns app.main (:require [app.mid :as mid]))\n(defn main [args (Vec String)] Int 0)\n")
+
+(def mid-source String
+  "#lang beagle\n(ns app.mid (:require [app.leaf :as leaf]))\n(defn value [arg Int] Int 1)\n")
+
+(def leaf-source String
+  "#lang beagle\n(ns app.leaf)\n(defn value [arg Int] Int 2)\n")
+
+(defn resolved-source
+  [path String source String digest String] driver/ResolvedSourceFactsV1?
+  (match (parser-reader/facts-from-source path source digest "native-core")
+    [(facts/FactsRejected errors) nil]
+    [(facts/FactsRead raw)
+     (match (semantics/normalize raw)
+       [(facts/FactsRejected errors) nil]
+       [(facts/FactsRead normalized)
+        (driver/->ResolvedSourceFactsV1
+          raw normalized (parser/package-authority))])]))
+
+(defn receipt
+  [request driver/ImportResolutionRequestV1
+   dependencies (Vec driver/ImportResolutionDependencyV1)
+   selected String?] driver/ImportResolutionReceiptV1
+  (driver/->ImportResolutionReceiptV1
+    (driver/importresolutionrequestv1-importer-path request)
+    (driver/importresolutionrequestv1-import-order request)
+    (driver/importresolutionrequestv1-required-namespace request)
+    dependencies
+    selected))
+
+(defn mid-dependencies [reversed Bool]
+  (Vec driver/ImportResolutionDependencyV1)
+  (let [absent-a driver/ImportResolutionDependencyV1
+        (driver/->ImportResolutionDependencyV1
+          "a/absent.bgl" false "sha256:absent:a")
+        present driver/ImportResolutionDependencyV1
+        (driver/->ImportResolutionDependencyV1
+          "app/mid.bgl" true "sha256:mid")
+        absent-z driver/ImportResolutionDependencyV1
+        (driver/->ImportResolutionDependencyV1
+          "z/absent.bgl" false "sha256:absent:z")]
+    (if reversed
+      [absent-a present absent-z]
+      [absent-z present absent-a])))
+
+(defn leaf-dependencies [reversed Bool]
+  (Vec driver/ImportResolutionDependencyV1)
+  (let [absent driver/ImportResolutionDependencyV1
+        (driver/->ImportResolutionDependencyV1
+          "app/leaf.bclj" false "sha256:absent:leaf-bclj")
+        present driver/ImportResolutionDependencyV1
+        (driver/->ImportResolutionDependencyV1
+          "app/leaf.bgl" true "sha256:leaf")]
+    (if reversed [present absent] [absent present])))
+
+(defn resolve-fixture
+  [request driver/ImportResolutionRequestV1
+   reversed Bool] driver/ImportResolutionResponseV1
+  (let [required String
+        (driver/importresolutionrequestv1-required-namespace request)]
+    (cond
+      (= "app.mid" required)
+      (let [source driver/ResolvedSourceFactsV1?
+            (resolved-source "app/mid.bgl" mid-source "sha256:mid")
+            resolved-receipt driver/ImportResolutionReceiptV1
+            (receipt request (mid-dependencies reversed) "app/mid.bgl")]
+        (if (nil? source)
+          (driver/->ImportResolutionFailedV1 resolved-receipt 70
+            "fixture mid source did not normalize")
+          (driver/->ImportResolutionFoundV1 resolved-receipt source)))
+
+      (= "app.leaf" required)
+      (let [source driver/ResolvedSourceFactsV1?
+            (resolved-source "app/leaf.bgl" leaf-source "sha256:leaf")
+            resolved-receipt driver/ImportResolutionReceiptV1
+            (receipt request (leaf-dependencies reversed) "app/leaf.bgl")]
+        (if (nil? source)
+          (driver/->ImportResolutionFailedV1 resolved-receipt 70
+            "fixture leaf source did not normalize")
+          (driver/->ImportResolutionFoundV1 resolved-receipt source)))
+
+      :else
+      (driver/->ImportResolutionMissingV1
+        (receipt request
+          [(driver/->ImportResolutionDependencyV1
+             "absent/unknown.bgl" false "sha256:absent:unknown")]
+          nil)))))
+
+(defn forward-resolver
+  [request driver/ImportResolutionRequestV1]
+  driver/ImportResolutionResponseV1
+  (resolve-fixture request false))
+
+(defn reversed-resolver
+  [request driver/ImportResolutionRequestV1]
+  driver/ImportResolutionResponseV1
+  (resolve-fixture request true))
+
+(defn missing-resolver
+  [request driver/ImportResolutionRequestV1]
+  driver/ImportResolutionResponseV1
+  (driver/->ImportResolutionMissingV1
+    (receipt request
+      [(driver/->ImportResolutionDependencyV1
+         "z/mid.bgl" false "sha256:absent:z-mid")
+       (driver/->ImportResolutionDependencyV1
+         "a/mid.bgl" false "sha256:absent:a-mid")]
+      nil)))
+
+(defn canonical-receipt? [receipt driver/ImportResolutionReceiptV1] Bool
+  (let [dependencies (Vec driver/ImportResolutionDependencyV1)
+        (driver/importresolutionreceiptv1-dependencies receipt)]
+    (and (= 3 (count dependencies))
+         (= "a/absent.bgl"
+            (driver/importresolutiondependencyv1-candidate-path
+              (nth dependencies 0)))
+         (= "sha256:absent:a"
+            (driver/importresolutiondependencyv1-content-id
+              (nth dependencies 0)))
+         (not (driver/importresolutiondependencyv1-present
+                (nth dependencies 0)))
+         (= "app/mid.bgl"
+            (driver/importresolutiondependencyv1-candidate-path
+              (nth dependencies 1)))
+         (driver/importresolutiondependencyv1-present
+           (nth dependencies 1))
+         (= "z/absent.bgl"
+            (driver/importresolutiondependencyv1-candidate-path
+              (nth dependencies 2))))))
+
+(defn collected-closure-valid?
+  [collected driver/CollectedSourceFactsV1] Bool
+  (let [closure facts/SyntaxFactClosure
+        (driver/collectedsourcefactsv1-closure collected)
+        modules (Vec facts/SyntaxFactBundle)
+        (facts/syntaxfactclosure-modules closure)
+        receipts (Vec driver/ImportResolutionReceiptV1)
+        (driver/collectedsourcefactsv1-receipts collected)]
+    (and (= 3 (count modules))
+         (= "app/leaf.bgl"
+            (facts/syntaxfactbundle-path (nth modules 0)))
+         (= "app/mid.bgl"
+            (facts/syntaxfactbundle-path (nth modules 1)))
+         (= "app/main.bgl"
+            (facts/syntaxfactbundle-path (nth modules 2)))
+         (= ["app/leaf.bgl" "app/mid.bgl" "app/main.bgl"]
+            (driver/closure-source-paths closure))
+         (= 2 (count receipts))
+         (canonical-receipt? (first receipts)))))
+
+(defn transitive-closure-deterministic? [ignored Int] Bool
+  (let [entry driver/ResolvedSourceFactsV1?
+        (resolved-source "app/main.bgl" entry-source "sha256:entry")]
+    (if (nil? entry)
+      false
+      (match (driver/collect-source-facts entry forward-resolver)
+        [(driver/SourceFactsCollectionRejectedV1 code detail receipts) false]
+        [(driver/SourceFactsCollectedV1 forward)
+         (match (driver/collect-source-facts entry reversed-resolver)
+           [(driver/SourceFactsCollectionRejectedV1 code detail receipts) false]
+           [(driver/SourceFactsCollectedV1 reversed)
+            (and (collected-closure-valid? forward)
+                 (collected-closure-valid? reversed)
+                 (= (facts/syntaxfactclosure-closure-digest
+                      (driver/collectedsourcefactsv1-closure forward))
+                    (facts/syntaxfactclosure-closure-digest
+                      (driver/collectedsourcefactsv1-closure reversed)))
+                 (= (driver/collectedsourcefactsv1-receipts forward)
+                    (driver/collectedsourcefactsv1-receipts reversed)))])]))))
+
+(defn missing-provider-rejected? [ignored Int] Bool
+  (let [entry driver/ResolvedSourceFactsV1?
+        (resolved-source "app/main.bgl" entry-source "sha256:entry")]
+    (if (nil? entry)
+      false
+      (match (driver/collect-source-facts entry missing-resolver)
+        [(driver/SourceFactsCollectedV1 collected) false]
+        [(driver/SourceFactsCollectionRejectedV1 code detail receipts)
+         (let [dependencies (Vec driver/ImportResolutionDependencyV1)
+               (driver/importresolutionreceiptv1-dependencies (first receipts))]
+           (and (= 66 code)
+                (= 1 (count receipts))
+                (= 2 (count dependencies))
+                (= "a/mid.bgl"
+                   (driver/importresolutiondependencyv1-candidate-path
+                     (nth dependencies 0)))
+                (= "sha256:absent:a-mid"
+                   (driver/importresolutiondependencyv1-content-id
+                     (nth dependencies 0)))
+                (not (driver/importresolutiondependencyv1-present
+                       (nth dependencies 0)))
+                (= "z/mid.bgl"
+                   (driver/importresolutiondependencyv1-candidate-path
+                     (nth dependencies 1)))))]))))
 
 (defn imports-normalized? [ignored Int] Bool
   (match (parser-reader/facts-from-source
@@ -49,6 +247,8 @@
 
 (defn main [args (Vec String)] Int
   (if (and (imports-normalized? 0)
-           (unsupported-rejected? 0))
+           (unsupported-rejected? 0)
+           (transitive-closure-deterministic? 0)
+           (missing-provider-rejected? 0))
     0
     1))

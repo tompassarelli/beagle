@@ -62,6 +62,64 @@
   (SourceFactsClosed [closure facts/SyntaxFactClosure])
   (SourceFactsClosureRejected [code Int detail String]))
 
+(defrecord ImportResolutionDependencyV1
+  [candidate-path String
+   present Bool
+   content-id String])
+
+(defrecord ImportResolutionRequestV1
+  [importer-path String
+   import-order Int
+   required-namespace String])
+
+(defrecord ImportResolutionReceiptV1
+  [importer-path String
+   import-order Int
+   required-namespace String
+   dependencies (Vec ImportResolutionDependencyV1)
+   selected-path String?])
+
+(defrecord ResolvedSourceFactsV1
+  [raw facts/SyntaxFactBundle
+   normalized facts/SyntaxFactBundle
+   authority parser/ModuleAuthorityV1])
+
+(defunion ImportResolutionResponseV1
+  (ImportResolutionFoundV1
+    [receipt ImportResolutionReceiptV1
+     source ResolvedSourceFactsV1])
+  (ImportResolutionMissingV1 [receipt ImportResolutionReceiptV1])
+  (ImportResolutionFailedV1
+    [receipt ImportResolutionReceiptV1
+     code Int
+     detail String]))
+
+(defalias ImportResolverV1
+  (Fn [ImportResolutionRequestV1] ImportResolutionResponseV1))
+
+(defrecord CollectedSourceFactsV1
+  [closure facts/SyntaxFactClosure
+   raw-modules (Vec facts/SyntaxFactBundle)
+   receipts (Vec ImportResolutionReceiptV1)])
+
+(defunion CollectSourceFactsResultV1
+  (SourceFactsCollectedV1 [collected CollectedSourceFactsV1])
+  (SourceFactsCollectionRejectedV1
+    [code Int
+     detail String
+     receipts (Vec ImportResolutionReceiptV1)]))
+
+(defrecord SourceCollectionStateV1
+  [sources (Vec ResolvedSourceFactsV1)
+   receipts (Vec ImportResolutionReceiptV1)])
+
+(defunion ResolveImportStepV1
+  (ImportStepResolvedV1 [state SourceCollectionStateV1])
+  (ImportStepRejectedV1
+    [code Int
+     detail String
+     receipts (Vec ImportResolutionReceiptV1)]))
+
 (defrecord CheckedModuleFacts
   [raw facts/SyntaxFactBundle
    syntax facts/SyntaxFactBundle
@@ -190,6 +248,247 @@
      (->SourceFactsClosed closure)]
     [(parser/ExplicitBundleRejectedV1 errors)
      (->SourceFactsClosureRejected 65 (fact-errors-detail errors))]))
+
+(defn insert-resolution-dependency
+  [dependencies (Vec ImportResolutionDependencyV1)
+   dependency ImportResolutionDependencyV1]
+  (Vec ImportResolutionDependencyV1)
+  (loop [remaining (Vec ImportResolutionDependencyV1) dependencies
+         prefix (Vec ImportResolutionDependencyV1) []]
+    (if (empty? remaining)
+      (conj prefix dependency)
+      (let [current ImportResolutionDependencyV1 (first remaining)]
+        (if (neg? (compare
+                    (importresolutiondependencyv1-candidate-path dependency)
+                    (importresolutiondependencyv1-candidate-path current)))
+          (into (conj prefix dependency) remaining)
+          (recur (rest remaining) (conj prefix current)))))))
+
+(defn canonical-resolution-dependencies
+  [dependencies (Vec ImportResolutionDependencyV1)]
+  (Vec ImportResolutionDependencyV1)
+  (reduce insert-resolution-dependency [] dependencies))
+
+(defn duplicate-resolution-path?
+  [dependencies (Vec ImportResolutionDependencyV1)] Bool
+  (loop [remaining (Vec ImportResolutionDependencyV1) dependencies
+         previous String? nil]
+    (if (empty? remaining)
+      false
+      (let [path String
+            (importresolutiondependencyv1-candidate-path (first remaining))]
+        (if (= previous path)
+          true
+          (recur (rest remaining) path))))))
+
+(defn canonical-resolution-receipt
+  [receipt ImportResolutionReceiptV1] ImportResolutionReceiptV1
+  (->ImportResolutionReceiptV1
+    (importresolutionreceiptv1-importer-path receipt)
+    (importresolutionreceiptv1-import-order receipt)
+    (importresolutionreceiptv1-required-namespace receipt)
+    (canonical-resolution-dependencies
+      (importresolutionreceiptv1-dependencies receipt))
+    (importresolutionreceiptv1-selected-path receipt)))
+
+(defn receipt-matches-request?
+  [receipt ImportResolutionReceiptV1
+   request ImportResolutionRequestV1] Bool
+  (and (= (importresolutionreceiptv1-importer-path receipt)
+          (importresolutionrequestv1-importer-path request))
+       (= (importresolutionreceiptv1-import-order receipt)
+          (importresolutionrequestv1-import-order request))
+       (= (importresolutionreceiptv1-required-namespace receipt)
+          (importresolutionrequestv1-required-namespace request))
+       (not (duplicate-resolution-path?
+              (importresolutionreceiptv1-dependencies receipt)))
+       (not (empty? (importresolutionreceiptv1-dependencies receipt)))
+       (every?
+         (fn [dependency ImportResolutionDependencyV1] Bool
+           (and (> (count
+                     (importresolutiondependencyv1-candidate-path dependency)) 0)
+                (> (count
+                     (importresolutiondependencyv1-content-id dependency)) 0)))
+         (importresolutionreceiptv1-dependencies receipt))))
+
+(defn present-resolution-dependencies
+  [receipt ImportResolutionReceiptV1]
+  (Vec ImportResolutionDependencyV1)
+  (reduce
+    (fn [present (Vec ImportResolutionDependencyV1)
+         dependency ImportResolutionDependencyV1]
+      (Vec ImportResolutionDependencyV1)
+      (if (importresolutiondependencyv1-present dependency)
+        (conj present dependency)
+        present))
+    []
+    (importresolutionreceiptv1-dependencies receipt)))
+
+(defn found-receipt-valid?
+  [receipt ImportResolutionReceiptV1
+   request ImportResolutionRequestV1
+   source ResolvedSourceFactsV1] Bool
+  (let [normalized facts/SyntaxFactBundle
+        (resolvedsourcefactsv1-normalized source)
+        raw facts/SyntaxFactBundle (resolvedsourcefactsv1-raw source)
+        selected String? (importresolutionreceiptv1-selected-path receipt)
+        present (Vec ImportResolutionDependencyV1)
+        (present-resolution-dependencies receipt)
+        namespace String? (facts/syntaxfactbundle-namespace normalized)]
+    (and (receipt-matches-request? receipt request)
+         (some? selected)
+         (= 1 (count present))
+         (= selected
+            (importresolutiondependencyv1-candidate-path (first present)))
+         (= selected (facts/syntaxfactbundle-path normalized))
+         (= selected (facts/syntaxfactbundle-path raw))
+         (= (facts/syntaxfactbundle-source-digest normalized)
+            (facts/syntaxfactbundle-source-digest raw))
+         (= (facts/syntaxfactbundle-source-digest normalized)
+            (importresolutiondependencyv1-content-id (first present)))
+         (= namespace
+            (importresolutionrequestv1-required-namespace request)))))
+
+(defn missing-receipt-valid?
+  [receipt ImportResolutionReceiptV1
+   request ImportResolutionRequestV1] Bool
+  (and (receipt-matches-request? receipt request)
+       (nil? (importresolutionreceiptv1-selected-path receipt))
+       (empty? (present-resolution-dependencies receipt))))
+
+(defn resolved-source-for-namespace
+  [sources (Vec ResolvedSourceFactsV1)
+   namespace String] ResolvedSourceFactsV1?
+  (some
+    (fn [source ResolvedSourceFactsV1] ResolvedSourceFactsV1?
+      (if (= namespace
+              (facts/syntaxfactbundle-namespace
+                (resolvedsourcefactsv1-normalized source)))
+        source
+        nil))
+    sources))
+
+(defn same-resolved-source?
+  [left ResolvedSourceFactsV1
+   right ResolvedSourceFactsV1] Bool
+  (let [left-bundle facts/SyntaxFactBundle
+        (resolvedsourcefactsv1-normalized left)
+        right-bundle facts/SyntaxFactBundle
+        (resolvedsourcefactsv1-normalized right)]
+    (and (= (facts/syntaxfactbundle-path left-bundle)
+            (facts/syntaxfactbundle-path right-bundle))
+         (= (facts/syntaxfactbundle-source-digest left-bundle)
+            (facts/syntaxfactbundle-source-digest right-bundle)))))
+
+(defn resolve-import-step
+  [state SourceCollectionStateV1
+   importer-path String
+   edge facts/ImportEdgeFact
+   resolver ImportResolverV1] ResolveImportStepV1
+  (let [request ImportResolutionRequestV1
+        (->ImportResolutionRequestV1
+          importer-path
+          (facts/importedgefact-order edge)
+          (facts/importedgefact-required edge))]
+    (match (resolver request)
+      [(ImportResolutionFailedV1 receipt code detail)
+       (let [canonical ImportResolutionReceiptV1
+             (canonical-resolution-receipt receipt)]
+         (if (receipt-matches-request? canonical request)
+           (->ImportStepRejectedV1 code detail
+             (conj (sourcecollectionstatev1-receipts state) canonical))
+           (->ImportStepRejectedV1 65
+             "import resolver failure receipt does not match its request"
+             (conj (sourcecollectionstatev1-receipts state) canonical))))]
+      [(ImportResolutionMissingV1 receipt)
+       (let [canonical ImportResolutionReceiptV1
+             (canonical-resolution-receipt receipt)]
+         (if (missing-receipt-valid? canonical request)
+           (->ImportStepRejectedV1 66
+             (str "unresolved namespace: "
+                  (facts/importedgefact-required edge))
+             (conj (sourcecollectionstatev1-receipts state) canonical))
+           (->ImportStepRejectedV1 65
+             "missing import receipt is not a closed negative resolution"
+             (conj (sourcecollectionstatev1-receipts state) canonical))))]
+      [(ImportResolutionFoundV1 receipt source)
+       (let [canonical ImportResolutionReceiptV1
+             (canonical-resolution-receipt receipt)]
+         (if (not (found-receipt-valid? canonical request source))
+           (->ImportStepRejectedV1 65
+             "resolved import source does not match its causal receipt"
+             (conj (sourcecollectionstatev1-receipts state) canonical))
+           (let [required String (facts/importedgefact-required edge)
+                 existing ResolvedSourceFactsV1?
+                 (resolved-source-for-namespace
+                   (sourcecollectionstatev1-sources state) required)]
+             (if (and (some? existing)
+                      (not (same-resolved-source? existing source)))
+               (->ImportStepRejectedV1 65
+                 (str "namespace resolved to conflicting sources: " required)
+                 (conj (sourcecollectionstatev1-receipts state) canonical))
+               (->ImportStepResolvedV1
+                 (->SourceCollectionStateV1
+                   (if (nil? existing)
+                     (conj (sourcecollectionstatev1-sources state) source)
+                     (sourcecollectionstatev1-sources state))
+                   (conj (sourcecollectionstatev1-receipts state)
+                         canonical)))))))])))
+
+(defn resolve-module-imports
+  [state SourceCollectionStateV1
+   source ResolvedSourceFactsV1
+   resolver ImportResolverV1] ResolveImportStepV1
+  (let [bundle facts/SyntaxFactBundle
+        (resolvedsourcefactsv1-normalized source)
+        importer-path String (facts/syntaxfactbundle-path bundle)]
+    (loop [remaining (Vec facts/ImportEdgeFact)
+           (facts/syntaxfactbundle-imports bundle)
+           current SourceCollectionStateV1 state]
+      (if (empty? remaining)
+        (->ImportStepResolvedV1 current)
+        (match (resolve-import-step current importer-path (first remaining) resolver)
+          [(ImportStepRejectedV1 code detail receipts)
+           (->ImportStepRejectedV1 code detail receipts)]
+          [(ImportStepResolvedV1 next-state)
+           (recur (rest remaining) next-state)])))))
+
+(defn collect-source-facts
+  [entry ResolvedSourceFactsV1
+   resolver ImportResolverV1] CollectSourceFactsResultV1
+  (loop [cursor Int 0
+         state SourceCollectionStateV1
+         (->SourceCollectionStateV1 [entry] [])]
+    (if (>= cursor (count (sourcecollectionstatev1-sources state)))
+      (let [sources (Vec ResolvedSourceFactsV1)
+            (sourcecollectionstatev1-sources state)
+            entry-path String
+            (facts/syntaxfactbundle-path
+              (resolvedsourcefactsv1-normalized entry))
+            explicit (Vec parser/ExplicitFactSourceV1)
+            (mapv
+              (fn [source ResolvedSourceFactsV1] parser/ExplicitFactSourceV1
+                (parser/->ExplicitFactSourceV1
+                  (resolvedsourcefactsv1-normalized source)
+                  (resolvedsourcefactsv1-authority source)))
+              sources)]
+        (match (close-source-facts entry-path explicit)
+          [(SourceFactsClosureRejected code detail)
+           (->SourceFactsCollectionRejectedV1 code detail
+             (sourcecollectionstatev1-receipts state))]
+          [(SourceFactsClosed closure)
+           (->SourceFactsCollectedV1
+             (->CollectedSourceFactsV1
+               closure
+               (mapv resolvedsourcefactsv1-raw sources)
+               (sourcecollectionstatev1-receipts state)))]))
+      (let [source ResolvedSourceFactsV1
+            (nth (sourcecollectionstatev1-sources state) cursor)]
+        (match (resolve-module-imports state source resolver)
+          [(ImportStepRejectedV1 code detail receipts)
+           (->SourceFactsCollectionRejectedV1 code detail receipts)]
+          [(ImportStepResolvedV1 next-state)
+           (recur (+ cursor 1) next-state)])))))
 
 (defn raw-modules-at-path
   [raw-modules (Vec facts/SyntaxFactBundle)
@@ -647,6 +946,11 @@
     [(CompileBundleMaterialized content-id artifact-id executable-path)
      (write-output-metadata output-directory artifact-id result)]))
 
+(defn closure-source-paths
+  [syntax facts/SyntaxFactClosure] (Vec String)
+  (mapv facts/syntaxfactbundle-path
+    (facts/syntaxfactclosure-modules syntax)))
+
 (defn compile-checked-source
   [config CompileSourceConfig
    syntax facts/SyntaxFactClosure
@@ -657,8 +961,7 @@
     [(ProgramAdmissionPlanningRejected code detail)
      (->CompileBundleError code detail)]
     [(ProgramAdmissionPlanned program-plan)
-     (let [path String (compilesourceconfig-source-path config)
-           request CompileBundleRequest
+     (let [request CompileBundleRequest
            (->CompileBundleRequest
              (compilesourceconfig-store-log config)
              (compilesourceconfig-space-id config)
@@ -667,7 +970,7 @@
              [bootstrap/default-target-id]
              bootstrap/default-rule-set-content-id
              bootstrap/compiler-schema-content-id
-             [path]
+             (closure-source-paths syntax)
              syntax)]
        (match (compile-query request)
          [(CompileQueryAdmissionRejected code detail)

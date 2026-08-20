@@ -252,19 +252,30 @@
   (let [head String? (edge-target rows subject 0)]
     (if (nil? head) nil (node-value rows head))))
 
-(defn namespace-name
-  [rows (Vec facts/CompilerFact)] String?
+(defn root-node [rows (Vec facts/CompilerFact)] String?
   (loop [remaining (Vec facts/CompilerFact) rows]
     (if (empty? remaining)
       nil
-      (let [fact facts/CompilerFact (first remaining)
-            subject String (facts/compilerfact-subject fact)]
+      (let [fact facts/CompilerFact (first remaining)]
         (if (and (= :syntax/node (facts/compilerfact-relation fact))
-                 (= "list" (fact-text fact))
-                 (= "ns" (form-head rows subject)))
-          (let [name-node String? (edge-target rows subject 1)]
-            (if (nil? name-node) nil (node-value rows name-node)))
+                 (= "root" (fact-text fact)))
+          (facts/compilerfact-subject fact)
           (recur (rest remaining)))))))
+
+(defn namespace-name
+  [rows (Vec facts/CompilerFact)] String?
+  (let [root String? (root-node rows)]
+    (if (nil? root)
+      nil
+      (loop [slot Int 0]
+        (let [subject String? (edge-target rows root slot)]
+          (if (nil? subject)
+            nil
+            (if (and (= "list" (node-kind rows subject))
+                     (= "ns" (form-head rows subject)))
+              (let [name-node String? (edge-target rows subject 1)]
+                (if (nil? name-node) nil (node-value rows name-node)))
+              (recur (+ slot 1)))))))))
 
 (defn import-error
   [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)
@@ -342,35 +353,38 @@
 
 (defn collect-imports
   [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)] ImportCollectionResult
-  (let [importer String? (namespace-name rows)]
-    (if (nil? importer)
+  (let [importer String? (namespace-name rows)
+        root String? (root-node rows)]
+    (if (or (nil? importer) (nil? root))
       (import-error bundle rows "" :semantics/namespace
         "source must declare a namespace before imports can be normalized")
-      (loop [remaining (Vec facts/CompilerFact) rows
+      (loop [slot Int 0
+             namespace-count Int 0
              collected (Vec facts/ImportEdgeFact) []]
-        (if (empty? remaining)
-          (->ImportsCollected collected)
-          (let [fact facts/CompilerFact (first remaining)
-                subject String (facts/compilerfact-subject fact)]
-            (if (and (= :syntax/node (facts/compilerfact-relation fact))
-                     (= "list" (fact-text fact)))
+        (let [subject String? (edge-target rows root slot)]
+          (if (nil? subject)
+            (if (= 1 namespace-count)
+              (->ImportsCollected collected)
+              (import-error bundle rows root :semantics/namespace
+                "source must contain exactly one root namespace declaration"))
+            (if (= "list" (node-kind rows subject))
               (cond
                 (= "ns" (form-head rows subject))
                 (match (append-namespace-requires
                          bundle rows importer subject collected)
                   [(ImportsRejected error) (->ImportsRejected error)]
                   [(ImportsCollected next-imports)
-                   (recur (rest remaining) next-imports)])
+                   (recur (+ slot 1) (+ namespace-count 1) next-imports)])
 
                 (= "require" (form-head rows subject))
                 (match (append-require-clause
                          bundle rows importer subject 1 collected)
                   [(ImportsRejected error) (->ImportsRejected error)]
                   [(ImportsCollected next-imports)
-                   (recur (rest remaining) next-imports)])
+                   (recur (+ slot 1) namespace-count next-imports)])
 
-                :else (recur (rest remaining) collected))
-              (recur (rest remaining) collected))))))))
+                :else (recur (+ slot 1) namespace-count collected))
+              (recur (+ slot 1) namespace-count collected))))))))
 
 (defn normalize-facts
   [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)] facts/FactReadResult
