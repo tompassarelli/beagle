@@ -3,6 +3,7 @@
 #define BEAGLE_STORE_SERVER_HOST_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #define BEAGLE_STORE_SERVER_GENERATED_ABI 4u
@@ -21,6 +22,54 @@ enum store_server_status {
   BEAGLE_STORE_SERVER_HOST_ERROR = 4,
   BEAGLE_STORE_SERVER_OUT_OF_MEMORY = 5
 };
+
+typedef struct store_server_compile_slice {
+  const uint8_t *data;
+  size_t length;
+} store_server_compile_slice;
+
+typedef void (*store_server_compile_release_fn)(void *context,
+                                                void *allocation);
+
+typedef struct store_server_compile_buffer {
+  uint8_t *data;
+  size_t length;
+  void *release_context;
+  store_server_compile_release_fn release;
+} store_server_compile_buffer;
+
+typedef struct store_server_compile_key {
+  store_server_compile_slice source;
+  store_server_compile_slice compiler;
+  store_server_compile_slice profile;
+  const store_server_compile_slice *targets;
+  size_t target_count;
+  store_server_compile_slice rules;
+  store_server_compile_slice schema;
+  store_server_compile_slice expected_query_digest;
+} store_server_compile_key;
+
+/* PAYLOAD owns one contiguous allocation backing itself and every slice. */
+typedef struct store_server_compile_value {
+  store_server_compile_slice target;
+  store_server_compile_slice materializer;
+  store_server_compile_slice status;
+  store_server_compile_slice claimed_id;
+  store_server_compile_buffer payload;
+} store_server_compile_value;
+
+typedef enum store_server_compile_outcome {
+  BEAGLE_STORE_SERVER_COMPILE_COLD = 0,
+  BEAGLE_STORE_SERVER_COMPILE_FOUND = 1,
+  BEAGLE_STORE_SERVER_COMPILE_APPENDED = 2,
+  BEAGLE_STORE_SERVER_COMPILE_RETAINED = 3
+} store_server_compile_outcome;
+
+typedef struct store_server_compile_query_result {
+  int status;
+  bool found;
+  store_server_compile_outcome outcome;
+} store_server_compile_query_result;
 
 typedef int (*store_server_clock_fn)(void *context, int64_t *milliseconds_out,
                                     char *error, size_t error_capacity);
@@ -61,7 +110,7 @@ typedef struct store_server_host_v1 {
   store_server_storage_close_fn storage_close;
 } store_server_host_v1;
 
-/* The adapter verifies and invokes the eight generated-module hooks. */
+/* The adapter verifies and invokes the ten generated-module hooks. */
 uint32_t store_server_generated_abi(void);
 
 /* SPACE_ID is NULL when the deployed flat-log service did not configure one.
@@ -82,6 +131,20 @@ int store_server_store_dispatch(store_server_store *store,
                                const store_server_request *request,
                                store_server_response **response_out,
                                char *error, size_t error_capacity);
+
+int store_server_compile_query(
+    store_server_store *store, const store_server_compile_key *key,
+    store_server_compile_value *value,
+    store_server_compile_query_result *result, char *error,
+    size_t error_capacity);
+
+int store_server_compile_append(
+    store_server_store *store, const store_server_compile_key *key,
+    const store_server_compile_value *value,
+    store_server_compile_query_result *result, char *error,
+    size_t error_capacity);
+
+void store_server_compile_value_release(store_server_compile_value *value);
 
 int store_server_store_shutdown(store_server_store *store,
                                char *error, size_t error_capacity);

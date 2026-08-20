@@ -544,6 +544,9 @@ wasm_exports=(
   store_transact
   store_query
   store_snapshot
+  store_compile_query
+  store_compile_append
+  store_compile_value_release
   store_buffer_release
   store_close
   store_wasm_alloc
@@ -928,6 +931,8 @@ write_server_symbols() {
     server-codec-write-response!
     server-codec-release-request
     server-codec-release-response
+    server-compile-query!
+    server-compile-append!
   )
   local -a suffixes=(
     generated_abi
@@ -1329,7 +1334,7 @@ if [[ "$host" == "server" ]]; then
   {
     printf 'native-host-c17 PASS compiler=%s output=%s\n' \
       "$cc" "$stage/bin/beagle-store-server-native"
-    printf 'native-host-abi PASS host=server exports=8\n'
+    printf 'native-host-abi PASS host=server exports=10\n'
     write_qbe_frontier_receipt
   } >"$stage/native-host.report.txt"
 elif [[ "$host" == "wasm-embed" ]]; then
@@ -1414,8 +1419,10 @@ else
     nm -D --defined-only "$stage/lib/libbeagle_store.so" \
       | awk '{print $3}' | sed -n '/^store_/p' | sort \
       >"$stage/embed.exports"
-    printf '%s\n' store_abi_version store_buffer_release store_close store_open \
-      store_query store_snapshot store_transact | sort >"$stage/embed.expected"
+    printf '%s\n' store_abi_version store_buffer_release store_close \
+      store_compile_append store_compile_query store_compile_value_release \
+      store_open store_query store_snapshot store_transact \
+      | sort >"$stage/embed.expected"
     cmp -s "$stage/embed.expected" "$stage/embed.exports" ||
       die "embed shared library exports do not match the public ABI"
     rm -f "$stage/embed.expected"
@@ -1425,7 +1432,7 @@ else
       "$cc" "$stage/lib/libbeagle_store.so"
     printf 'native-host-static PASS archiver=%s output=%s\n' \
       "$ar" "$stage/lib/libbeagle_store.a"
-    printf 'native-host-abi PASS host=embed exports=7 version=1\n'
+    printf 'native-host-abi PASS host=embed exports=10 version=1\n'
     write_qbe_frontier_receipt
   } >"$stage/native-host.report.txt"
 fi
@@ -1453,4 +1460,3 @@ printf 'beagle-store-native-build/v1 %s\n' "$closure_hash" >"$stage/READY"
 mv "$stage" "$artifact_dir"
 stage=""
 printf '%s\n' "$artifact_dir"
-

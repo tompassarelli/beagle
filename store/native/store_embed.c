@@ -299,6 +299,254 @@ static store_status call(store_database *database, store_slice request,
   return BEAGLE_STORE_OK;
 }
 
+static bool valid_slice(store_slice slice) {
+  return slice.data != NULL || slice.length == 0u;
+}
+
+static bool valid_compile_key(const store_compile_key *key) {
+  size_t index;
+
+  if (key == NULL || !valid_slice(key->source) ||
+      !valid_slice(key->compiler) || !valid_slice(key->profile) ||
+      !valid_slice(key->rules) || !valid_slice(key->schema) ||
+      !valid_slice(key->expected_query_digest) ||
+      (key->targets == NULL && key->target_count != 0u)) {
+    return false;
+  }
+  for (index = 0u; index < key->target_count; index += 1u) {
+    if (!valid_slice(key->targets[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool valid_compile_value(const store_compile_value *value) {
+  return value != NULL && valid_slice(value->target) &&
+         valid_slice(value->materializer) && valid_slice(value->status) &&
+         valid_slice(value->claimed_id) &&
+         (value->payload.data != NULL || value->payload.length == 0u);
+}
+
+static store_server_compile_slice server_compile_slice(store_slice slice) {
+  return (store_server_compile_slice){slice.data, slice.length};
+}
+
+static int add_compile_value_length(size_t *total, size_t length) {
+  if (*total > SIZE_MAX - length) {
+    return 0;
+  }
+  *total += length;
+  return 1;
+}
+
+/* The generated adapter owns query values with libc allocation. Copy the
+   whole value into the embedder's allocation regime before dropping it. */
+static store_status copy_compile_value(
+    store_database *database, store_compile_value *destination,
+    const store_server_compile_value *source, store_error *error) {
+  const uint8_t *sources[5] = {
+      source->payload.data,
+      source->target.data,
+      source->materializer.data,
+      source->status.data,
+      source->claimed_id.data,
+  };
+  size_t lengths[5] = {
+      source->payload.length,
+      source->target.length,
+      source->materializer.length,
+      source->status.length,
+      source->claimed_id.length,
+  };
+  uint8_t *allocation;
+  size_t total = 0u;
+  size_t offset = 0u;
+  size_t index;
+
+  for (index = 0u; index < 5u; index += 1u) {
+    if ((sources[index] == NULL && lengths[index] != 0u) ||
+        !add_compile_value_length(&total, lengths[index])) {
+      set_error(error, BEAGLE_STORE_ENGINE_ERROR,
+                "generated compiler value has an invalid representation");
+      return BEAGLE_STORE_ENGINE_ERROR;
+    }
+  }
+  allocation = database->host.allocate(database->host.allocation_context,
+                                        total == 0u ? 1u : total);
+  if (allocation == NULL) {
+    set_error(error, BEAGLE_STORE_OUT_OF_MEMORY,
+              "embedded host could not allocate a compiler value");
+    return BEAGLE_STORE_OUT_OF_MEMORY;
+  }
+  for (index = 0u; index < 5u; index += 1u) {
+    if (lengths[index] != 0u) {
+      memcpy(allocation + offset, sources[index], lengths[index]);
+    }
+    if (index == 0u) {
+      destination->payload.data = allocation + offset;
+      destination->payload.length = lengths[index];
+    } else {
+      store_slice *slice = index == 1u   ? &destination->target
+                           : index == 2u ? &destination->materializer
+                           : index == 3u ? &destination->status
+                                         : &destination->claimed_id;
+
+      slice->data = allocation + offset;
+      slice->length = lengths[index];
+    }
+    offset += lengths[index];
+  }
+  destination->payload.release_context = database->host.allocation_context;
+  destination->payload.release = database->host.deallocate;
+  return BEAGLE_STORE_OK;
+}
+
+static store_status compile_call(store_database *database,
+                                 const store_compile_key *key,
+                                 const store_compile_value *append_value,
+                                 store_compile_value *query_value,
+                                 store_compile_query_result *result,
+                                 store_error *error) {
+  store_server_compile_slice *targets = NULL;
+  store_server_compile_key server_key;
+  store_server_compile_value server_input;
+  store_server_compile_value server_value = {0};
+  store_server_compile_query_result server_result;
+  char detail[BEAGLE_STORE_SERVER_ERROR_CAPACITY];
+  store_status public_result = BEAGLE_STORE_OK;
+  size_t target_bytes;
+  size_t index;
+  int lock_status;
+  int status;
+
+  clear_error(error);
+  if (query_value != NULL) {
+    *query_value = (store_compile_value){0};
+  }
+  if (result != NULL) {
+    *result = (store_compile_query_result){
+        .status = BEAGLE_STORE_INVALID_ARGUMENT,
+        .found = false,
+        .outcome = append_value == NULL ? BEAGLE_STORE_COMPILE_COLD
+                                        : BEAGLE_STORE_COMPILE_RETAINED,
+    };
+  }
+  if (database == NULL || result == NULL || !valid_compile_key(key) ||
+      (append_value != NULL && !valid_compile_value(append_value)) ||
+      (append_value == NULL && query_value == NULL) ||
+      key->target_count > SIZE_MAX / sizeof(*targets)) {
+    set_error(error, BEAGLE_STORE_INVALID_ARGUMENT,
+              "compiler call requires a database, complete key, value owner, and valid text slices");
+    return BEAGLE_STORE_INVALID_ARGUMENT;
+  }
+  target_bytes = key->target_count * sizeof(*targets);
+  if (target_bytes != 0u) {
+    targets = database->host.allocate(database->host.allocation_context,
+                                      target_bytes);
+    if (targets == NULL) {
+      set_error(error, BEAGLE_STORE_OUT_OF_MEMORY,
+                "embedded host could not allocate compiler targets");
+      result->status = BEAGLE_STORE_OUT_OF_MEMORY;
+      return BEAGLE_STORE_OUT_OF_MEMORY;
+    }
+  }
+  for (index = 0u; index < key->target_count; index += 1u) {
+    targets[index] = server_compile_slice(key->targets[index]);
+  }
+  server_key = (store_server_compile_key){
+      .source = server_compile_slice(key->source),
+      .compiler = server_compile_slice(key->compiler),
+      .profile = server_compile_slice(key->profile),
+      .targets = targets,
+      .target_count = key->target_count,
+      .rules = server_compile_slice(key->rules),
+      .schema = server_compile_slice(key->schema),
+      .expected_query_digest =
+          server_compile_slice(key->expected_query_digest),
+  };
+  if (append_value != NULL) {
+    server_input = (store_server_compile_value){
+        .target = server_compile_slice(append_value->target),
+        .materializer = server_compile_slice(append_value->materializer),
+        .status = server_compile_slice(append_value->status),
+        .claimed_id = server_compile_slice(append_value->claimed_id),
+        .payload =
+            (store_server_compile_buffer){
+                .data = append_value->payload.data,
+                .length = append_value->payload.length,
+                .release_context = NULL,
+                .release = NULL,
+            },
+    };
+  }
+  lock_status = pthread_mutex_lock(&database->mutex);
+  if (lock_status != 0) {
+    if (targets != NULL) {
+      database->host.deallocate(database->host.allocation_context, targets);
+    }
+    set_error(error, BEAGLE_STORE_ENGINE_ERROR,
+              "cannot enter the embedded Beagle Store database");
+    result->status = BEAGLE_STORE_ENGINE_ERROR;
+    return BEAGLE_STORE_ENGINE_ERROR;
+  }
+  if (append_value == NULL) {
+    status = store_server_compile_query(
+        database->store, &server_key, &server_value, &server_result, detail,
+        sizeof(detail));
+  } else {
+    status = store_server_compile_append(
+        database->store, &server_key, &server_input, &server_result, detail,
+        sizeof(detail));
+  }
+  if (status == BEAGLE_STORE_SERVER_OK && append_value == NULL &&
+      server_result.found) {
+    public_result =
+        copy_compile_value(database, query_value, &server_value, error);
+    if (public_result != BEAGLE_STORE_OK) {
+      status = public_result == BEAGLE_STORE_OUT_OF_MEMORY
+                   ? BEAGLE_STORE_SERVER_OUT_OF_MEMORY
+                   : BEAGLE_STORE_SERVER_FATAL;
+    }
+  }
+  store_server_compile_value_release(&server_value);
+  (void)pthread_mutex_unlock(&database->mutex);
+  if (targets != NULL) {
+    database->host.deallocate(database->host.allocation_context, targets);
+  }
+  if (status != BEAGLE_STORE_SERVER_OK) {
+    if (query_value != NULL) {
+      store_compile_value_release(query_value);
+    }
+    if (public_result == BEAGLE_STORE_OK) {
+      public_result = fail_from_server(status, detail, error);
+    }
+    result->status = public_result;
+    return public_result;
+  }
+  if ((append_value == NULL &&
+       (server_result.outcome < BEAGLE_STORE_SERVER_COMPILE_COLD ||
+        server_result.outcome > BEAGLE_STORE_SERVER_COMPILE_FOUND)) ||
+      (append_value != NULL &&
+       (server_result.outcome < BEAGLE_STORE_SERVER_COMPILE_APPENDED ||
+        server_result.outcome > BEAGLE_STORE_SERVER_COMPILE_RETAINED)) ||
+      server_result.status != BEAGLE_STORE_SERVER_OK ||
+      server_result.found !=
+          (server_result.outcome != BEAGLE_STORE_SERVER_COMPILE_COLD)) {
+    if (query_value != NULL) {
+      store_compile_value_release(query_value);
+    }
+    set_error(error, BEAGLE_STORE_ENGINE_ERROR,
+              "generated compiler operation returned an invalid result");
+    result->status = BEAGLE_STORE_ENGINE_ERROR;
+    return BEAGLE_STORE_ENGINE_ERROR;
+  }
+  result->status = BEAGLE_STORE_OK;
+  result->found = server_result.found;
+  result->outcome = (store_compile_outcome)server_result.outcome;
+  return BEAGLE_STORE_OK;
+}
+
 uint32_t store_abi_version(void) { return BEAGLE_STORE_ABI_VERSION; }
 
 store_status store_open(const store_open_options_v1 *options,
@@ -430,6 +678,65 @@ store_status store_snapshot(store_database *database, store_slice request,
   return call(database, request, response, error);
 }
 
+store_status store_compile_query(store_database *database,
+                                 const store_compile_key *key,
+                                 store_compile_value *value,
+                                 store_compile_query_result *result,
+                                 store_error *error) {
+  if (value == NULL) {
+    clear_error(error);
+    if (result != NULL) {
+      *result = (store_compile_query_result){
+          .status = BEAGLE_STORE_INVALID_ARGUMENT,
+          .found = false,
+          .outcome = BEAGLE_STORE_COMPILE_COLD,
+      };
+    }
+    set_error(error, BEAGLE_STORE_INVALID_ARGUMENT,
+              "compiler query requires a value result owner");
+    return BEAGLE_STORE_INVALID_ARGUMENT;
+  }
+  return compile_call(database, key, NULL, value, result, error);
+}
+
+store_status store_compile_append(store_database *database,
+                                  const store_compile_key *key,
+                                  const store_compile_value *value,
+                                  store_compile_query_result *result,
+                                  store_error *error) {
+  if (value == NULL) {
+    clear_error(error);
+    if (result != NULL) {
+      *result = (store_compile_query_result){
+          .status = BEAGLE_STORE_INVALID_ARGUMENT,
+          .found = false,
+          .outcome = BEAGLE_STORE_COMPILE_RETAINED,
+      };
+    }
+    set_error(error, BEAGLE_STORE_INVALID_ARGUMENT,
+              "compiler append requires a value");
+    return BEAGLE_STORE_INVALID_ARGUMENT;
+  }
+  return compile_call(database, key, value, NULL, result, error);
+}
+
+void store_compile_value_release(store_compile_value *value) {
+  void *context;
+  store_deallocate_fn release;
+  uint8_t *allocation;
+
+  if (value == NULL) {
+    return;
+  }
+  context = value->payload.release_context;
+  release = value->payload.release;
+  allocation = value->payload.data;
+  *value = (store_compile_value){0};
+  if (release != NULL && allocation != NULL) {
+    release(context, allocation);
+  }
+}
+
 void store_buffer_release(store_buffer *buffer) {
   void *context;
   store_deallocate_fn release;
@@ -450,6 +757,7 @@ void store_buffer_release(store_buffer *buffer) {
 store_status store_close(store_database *database, store_error *error) {
   store_host_v1 host;
   char detail[BEAGLE_STORE_SERVER_ERROR_CAPACITY];
+  int lock_status;
   int status;
 
   clear_error(error);
@@ -459,16 +767,19 @@ store_status store_close(store_database *database, store_error *error) {
     return BEAGLE_STORE_INVALID_ARGUMENT;
   }
   host = database->host;
-  if (pthread_mutex_lock(&database->mutex) != 0) {
+  lock_status = pthread_mutex_lock(&database->mutex);
+  status = store_server_store_shutdown(database->store, detail, sizeof(detail));
+  database->store = NULL;
+  if (lock_status == 0) {
+    (void)pthread_mutex_unlock(&database->mutex);
+  }
+  (void)pthread_mutex_destroy(&database->mutex);
+  host.deallocate(host.allocation_context, database);
+  if (lock_status != 0) {
     set_error(error, BEAGLE_STORE_ENGINE_ERROR,
               "cannot close the embedded Beagle Store database mutex");
     return BEAGLE_STORE_ENGINE_ERROR;
   }
-  status = store_server_store_shutdown(database->store, detail, sizeof(detail));
-  database->store = NULL;
-  (void)pthread_mutex_unlock(&database->mutex);
-  (void)pthread_mutex_destroy(&database->mutex);
-  host.deallocate(host.allocation_context, database);
   if (status != BEAGLE_STORE_SERVER_OK) {
     return fail_from_server(status, detail, error);
   }

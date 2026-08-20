@@ -51,76 +51,29 @@ typedef struct store_buffer {
   store_deallocate_fn release;
 } store_buffer;
 
-typedef struct store_compile_target {
-  store_slice value;
-} store_compile_target;
-
-/* A fact is exposed as its five canonical fields.  This deliberately is not
- * a serialized closure: relation, subject, and value remain separately
- * inspectable by the caller and slot is always zero for the compiler profile.
- */
-typedef struct store_compile_fact {
-  uint64_t order;
-  store_slice relation;
-  store_slice subject;
-  uint64_t slot;
-  store_slice value;
-} store_compile_fact;
-
-/* A direct compile request carries the fact-profile's raw dimensions. Targets
- * remain an ordered sequence: callers must never pack membership into text.
- * When has_expected_query_digest is true, Store treats it as a CAS assertion
- * against fact-profile's recomputed query identity. */
-typedef struct store_compile_request {
-  store_slice source_closure_digest;
-  store_slice compiler_context;
+/* Direct compiler keys carry the fact profile's raw dimensions. Targets stay
+ * ordered and the expected query digest is required canonical text. */
+typedef struct store_compile_key {
+  store_slice source;
+  store_slice compiler;
   store_slice profile;
-  const store_compile_target *targets;
+  const store_slice *targets;
   size_t target_count;
-  store_slice rules_content_id;
-  store_slice schema_content_id;
-  bool has_expected_query_digest;
-  uint8_t expected_query_digest[32];
-} store_compile_request;
+  store_slice rules;
+  store_slice schema;
+  store_slice expected_query_digest;
+} store_compile_key;
 
-/* Result dimensions are admitted against REQUEST's canonical query closure.
- * Exactly one of artifact_content_id and diagnostic_content_id is present,
- * according to status ("ok" or "rejected"). */
-typedef struct store_compile_result_request {
+/* A queried value owns one contiguous allocation through PAYLOAD. Every
+ * returned slice points into that allocation and remains valid until
+ * store_compile_value_release. Append borrows every field for the call. */
+typedef struct store_compile_value {
   store_slice target;
-  store_slice materializer_content_id;
+  store_slice materializer;
   store_slice status;
-  bool has_artifact_content_id;
-  store_slice artifact_content_id;
-  bool has_diagnostic_content_id;
-  store_slice diagnostic_content_id;
-} store_compile_result_request;
-
-/* Store owns FACTS and every slice it names until store_compile_result_release.
- * The two digests are fact-profile SHA-256 values without their textual
- * "sha256:" prefix. */
-typedef struct store_compile_result {
-  uint8_t query_digest[32];
-  uint8_t result_digest[32];
-  store_slice target;
-  store_slice materializer_content_id;
-  store_slice status;
-  bool has_artifact_content_id;
-  store_slice artifact_content_id;
-  bool has_diagnostic_content_id;
-  store_slice diagnostic_content_id;
-  store_compile_fact *facts;
-  size_t fact_count;
-  void *release_context;
-  store_deallocate_fn release;
-} store_compile_result;
-
-typedef struct store_compile_result_set {
-  store_compile_result *results;
-  size_t result_count;
-  void *release_context;
-  store_deallocate_fn release;
-} store_compile_result_set;
+  store_slice claimed_id;
+  store_buffer payload;
+} store_compile_value;
 
 typedef enum store_compile_outcome {
   BEAGLE_STORE_COMPILE_COLD = 0,
@@ -128,6 +81,12 @@ typedef enum store_compile_outcome {
   BEAGLE_STORE_COMPILE_APPENDED = 2,
   BEAGLE_STORE_COMPILE_RETAINED = 3
 } store_compile_outcome;
+
+typedef struct store_compile_query_result {
+  store_status status;
+  bool found;
+  store_compile_outcome outcome;
+} store_compile_query_result;
 
 typedef struct store_error {
   int32_t code;
@@ -215,23 +174,18 @@ BEAGLE_STORE_API store_status store_snapshot(store_database *database,
 /* rpc/checkpoint writes the image to the snapshot storage object and answers
    with its sequence, watermark, stamp, fingerprint, and byte count. */
 
-/* Direct compile operations do not construct Store RPC packets. Both admit
- * REQUEST using beagle.fact-profile; APPEND then admits RESULT against that
- * exact query. QUERY returns caller-owned, structured canonical closures. */
+/* Direct compiler operations do not construct Store RPC packets. QUERY sets
+ * outcome to COLD or FOUND. APPEND sets it to APPENDED or RETAINED. */
 BEAGLE_STORE_API store_status store_compile_query(
-    store_database *database, const store_compile_request *request,
-    store_compile_result_set *results, store_compile_outcome *outcome,
+    store_database *database, const store_compile_key *key,
+    store_compile_value *value, store_compile_query_result *result,
     store_error *error);
 BEAGLE_STORE_API store_status store_compile_append(
-    store_database *database, const store_compile_request *request,
-    const store_compile_result_request *result,
-    store_compile_result *admitted, store_compile_outcome *outcome,
+    store_database *database, const store_compile_key *key,
+    const store_compile_value *value, store_compile_query_result *result,
     store_error *error);
 
-BEAGLE_STORE_API void store_compile_result_release(
-    store_compile_result *result);
-BEAGLE_STORE_API void store_compile_result_set_release(
-    store_compile_result_set *results);
+BEAGLE_STORE_API void store_compile_value_release(store_compile_value *value);
 
 /* BUFFER remains owned until this function; it may outlive DATABASE. */
 BEAGLE_STORE_API void store_buffer_release(store_buffer *buffer);
@@ -268,4 +222,3 @@ const store_host_v1 *store_wasm_host_v1(void);
 #endif
 
 #endif
-
