@@ -3239,21 +3239,42 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                    (unit/unitcontractv0-unit-id contract))))
      (singleton/preparedcandidatev0-contracts prepared))))
 
-(defn dev-typed-requests
-  [source-units prepared compiler-context profile]
+(defn dev-typing-environment-hash [prepared source-unit]
+  (stages/content-digest
+   (stages/canonical-set
+    "beagle-dev-unit-typing-environment-v1"
+    (mapv unit/unitcontractv0-digest
+          (dev-read-contracts prepared source-unit)))))
+
+(defn dev-unit-receipts
+  [source-units prepared profile-identity compiler-context
+   materialization-receipt-id]
   (mapv
    (fn [source-unit]
+     (unit/make-unit-derivation-receipt
+      profile-identity
+      source-unit
+      (dev-read-contracts prepared source-unit)
+      (singleton/preparedcandidatev0-semantic-contracts prepared)
+      (dev-typing-environment-hash prepared source-unit)
+      compiler-context
+      materialization-receipt-id
+      []))
+   source-units))
+
+(defn dev-typed-requests
+  [source-units receipts compiler-context profile]
+  (mapv
+   (fn [source-unit receipt]
      ["typed"
-      (unit/unit-result-key
-       compiler-context source-unit
-       (singleton/preparedcandidatev0-contracts prepared))
+      (unit/unit-result-key receipt)
       compiler-context
       profile
       (dev-unit-id-text (stages/sourceunitv0-id source-unit))])
-   source-units))
+   source-units receipts))
 
 (defn compile-dev-typed-units
-  [source-units prepared rows compiler-context profile]
+  [source-units receipts prepared rows compiler-context profile]
   (loop [position 0
          compiled []
          pending []
@@ -3265,10 +3286,8 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
        :counters counters}
       (let [source-unit (nth source-units position)
             unit-id (stages/sourceunitv0-id source-unit)
-            result-key
-            (unit/unit-result-key
-             compiler-context source-unit
-             (singleton/preparedcandidatev0-contracts prepared))
+            receipt (nth receipts position)
+            result-key (unit/unit-result-key receipt)
             selection
             (select-typed-dev-fact
              rows result-key compiler-context profile unit-id)
@@ -3289,7 +3308,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                    (stages/sourceunitv0-semantic-digest source-unit)
                    (stages/sourceunitv0-read-set source-unit)
                    (dev-read-contracts prepared source-unit)
-                   compiler-context
+                   receipt
                    result-key))]
             (if-not
              (instance? native.unit_compile.TypedUnitCompiledV0 result)
@@ -3326,26 +3345,23 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
     (mapv unit/typedunitv0-digest typed-units))))
 
 (defn dev-native-result-key
-  [source-unit prepared typed-units compiler-context]
+  [receipt typed-units]
   (stages/content-digest
    (stages/canonical-record
     "beagle-dev-native-result-v1"
-    [(unit/unit-result-key
-      compiler-context source-unit
-      (singleton/preparedcandidatev0-contracts prepared))
+    [(unit/unit-result-key receipt)
      (dev-typed-set-digest typed-units)])))
 
 (defn dev-native-requests
-  [source-units prepared typed-units compiler-context profile]
+  [source-units receipts typed-units compiler-context profile]
   (mapv
-   (fn [source-unit]
+   (fn [source-unit receipt]
      ["native"
-      (dev-native-result-key
-       source-unit prepared typed-units compiler-context)
+      (dev-native-result-key receipt typed-units)
       compiler-context
       profile
       (dev-unit-id-text (stages/sourceunitv0-id source-unit))])
-   source-units))
+   source-units receipts))
 
 (defn dev-typed-unit-for [typed-units unit-id]
   (some
@@ -3357,7 +3373,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
    typed-units))
 
 (defn compile-dev-native-units
-  [source-units prepared typed-units rows compiler-context profile abi]
+  [source-units receipts prepared typed-units rows compiler-context profile abi]
   (loop [position 0
          compiled []
          pending []
@@ -3369,9 +3385,9 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
        :counters counters}
       (let [source-unit (nth source-units position)
             unit-id (stages/sourceunitv0-id source-unit)
+            receipt (nth receipts position)
             fact-key
-            (dev-native-result-key
-             source-unit prepared typed-units compiler-context)
+            (dev-native-result-key receipt typed-units)
             selection
             (select-native-dev-fact
              rows fact-key compiler-context profile unit-id)
@@ -3382,10 +3398,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                  (conj compiled (:unit selection))
                  pending
                  next-counters)
-          (let [base-key
-                (unit/unit-result-key
-                 compiler-context source-unit
-                 (singleton/preparedcandidatev0-contracts prepared))
+          (let [base-key (unit/unit-result-key receipt)
                 target (dev-typed-unit-for typed-units unit-id)
                 result
                 (do
@@ -3393,7 +3406,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                    status "native" fact-key unit-id)
                   (singleton/compile-native-unit
                    prepared unit-id target typed-units
-                   compiler-context base-key abi))]
+                   receipt base-key abi))]
             (if-not
              (instance? native.unit_compile.NativeUnitCompiledV0 result)
               {:ok? false
@@ -3485,9 +3498,18 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
            "unit-contract-v0"
            "typed-unit-wire-v1"
            "native-unit-wire-v1"]))
+        profile-identity (unit/core-profile-identity-v1)
+        semantic-contracts
+        (unit/five-form-semantic-contracts profile-identity)
+        materialization-receipt-id
+        (stages/content-digest
+         (stages/canonical-record
+          "beagle-dev-unit-materialization-v1"
+          [dev-fact-profile
+           (str "abi=" (System/getenv "BEAGLE_CORE_ABI"))]))
         preparation
         (singleton/prepare-unit-compilation
-         frozen-source compiler-context configuration)]
+         frozen-source compiler-context semantic-contracts configuration)]
     (if-not
      (instance?
       native.unit_compile.UnitPreparationAcceptedV0 preparation)
@@ -3496,15 +3518,19 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
        :counters (empty-dev-counters)}
       (let [prepared
             (singleton/unitpreparationacceptedv0-prepared preparation)
+            receipts
+            (dev-unit-receipts
+             source-units prepared profile-identity compiler-context
+             materialization-receipt-id)
             store (System/getenv "BEAGLE_CORE_DEV_FACT_STORE")
             typed-query
             (query-dev-facts
              store
              (dev-typed-requests
-              source-units prepared compiler-context dev-fact-profile))
+              source-units receipts compiler-context dev-fact-profile))
             typed-pass
             (compile-dev-typed-units
-             source-units prepared (:rows typed-query)
+             source-units receipts prepared (:rows typed-query)
              compiler-context dev-fact-profile)]
         (if-not (:ok? typed-pass)
           {:ok? false
@@ -3515,11 +3541,11 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                 (query-dev-facts
                  store
                  (dev-native-requests
-                  source-units prepared typed-units
+                  source-units receipts typed-units
                   compiler-context dev-fact-profile))
                 native-pass
                 (compile-dev-native-units
-                 source-units prepared typed-units (:rows native-query)
+                 source-units receipts prepared typed-units (:rows native-query)
                  compiler-context dev-fact-profile abi)
                 counters
                 (merge-dev-counters
