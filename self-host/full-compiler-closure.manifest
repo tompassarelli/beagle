@@ -6,7 +6,7 @@ input self-host self-host/src/selfhost/check.bclj sha256:cc6f5d66963a64043b1ed74
 input self-host self-host/src/selfhost/emit-clj.bclj sha256:238d4a9ed7009540cd01a8dd14d6f80384b97f60506c172c16f2c4bd94242258
 input self-host self-host/src/selfhost/emit-js.bclj sha256:45a2b6b0c2e653fa029d58ec712ae843b265da76444a0830069bf09aaad896bb
 input self-host self-host/src/selfhost/emit-nix.bclj sha256:3194756f258f8d5a5677fd9f938ab56372c0333ae7f95abcbb7481c3cc6d4859
-input self-host self-host/src/selfhost/facts-roundtrip.bclj sha256:434c66a889b16525a74944901068458cdbc54732d8e34ab3a3e3ffad8853b958
+input self-host self-host/src/selfhost/facts-roundtrip.bclj sha256:319a6ea91ed784d5253735566eda198e21bd1d63b65d59a27fe12350ff0ed087
 input self-host self-host/src/selfhost/macros.bclj sha256:94b7b11912f58eab26b6369fe61f88362f248e36cd7f026796b1ec282691f59c
 input self-host self-host/src/selfhost/main.bclj sha256:042638991705cee04de5bcb5ce4b59a42dc9a536dfc78b890fd7e841488bdf40
 input self-host self-host/src/selfhost/parse.bclj sha256:6dcb1bbe03022d674a4aee717d76ba48dfc9d8d410b21396630c1d7a65529f5f

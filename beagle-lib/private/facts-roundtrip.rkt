@@ -541,16 +541,6 @@
 (define (grammar-vector-context? ctx)
   (memq ctx '(params fields bindings)))
 
-;; `(Base where pred)` — a refinement is infix, so `where` sits in the middle.
-(define (refinement-datum? d)
-  (and (list? d) (= (length d) 3) (eq? (cadr d) 'where)))
-
-;; A `let`/`loop` binding carries its type inside the canonical ascription, so
-;; the refinement that forces a break is reached through `(: value Type)`.
-(define (ascribed-refinement? d)
-  (and (list? d) (= (length d) 3) (eq? (car d) ':)
-       (refinement-datum? (caddr d))))
-
 ;; Only a vector that actually declares types is laid out by the grammar; a
 ;; wholly inferred parameter vector keeps the generic width formatter.
 (define (typed-declaration-vector? d)
@@ -561,16 +551,12 @@
 
 ;; The breaking law is stated in BINDINGS and is absolute: more than one
 ;; binding in a vector always breaks, one binding per line, with no width
-;; threshold. A refinement forces the break even for a single binding.
+;; threshold. A single binding stays inline even when its type is refined.
 (define (grammar-vector-break? d ctx)
   (and (grammar-vector? d ctx)
        (or (eq? ctx 'bindings) (typed-declaration-vector? d))
        (let ([logical (logical-vector-elems d)])
-         (or (> (length logical) 1)
-             (for/or ([entry (in-list logical)])
-               (if (eq? ctx 'bindings)
-                   (ascribed-refinement? (last entry))
-                   (refinement-datum? (last entry))))))))
+         (> (length logical) 1))))
 
 (define (grammar-vector? d ctx)
   (and (grammar-vector-context? ctx) (bracket-datum? d)))
@@ -687,22 +673,20 @@
 ;; A function signature has three canonical width states. Keep the owner and
 ;; signature together when they fit. If only the owner makes the line wide,
 ;; move `[params] Return` as one unit. Expand the parameter vector only when
-;; that unit cannot fit at its continuation indentation; the positional return
-;; then owns the following line. This is purely width-driven--parameter count
-;; never changes the shape.
-(define (signature-unit->pretty elems col [return-own-line? #f] [ctx 'params])
+;; the grammar requires it, and keep the positional return attached to the
+;; closing bracket.
+(define (signature-unit->pretty elems col [ctx 'params])
   (define oneline (string-join (map datum->src/raw elems) " "))
   (cond
     [(and (pair? elems)
           (bracket-datum? (car elems))
           (grammar-vector-break? (car elems) ctx))
-     (define pad (make-string col #\space))
      (define tail (cdr elems))
      (string-append
       (grammar-vector->pretty (car elems) col ctx)
       (if (null? tail)
           ""
-          (string-append (if return-own-line? (string-append "\n" pad) " ")
+          (string-append " "
                          (string-join (map datum->src/raw tail) " "))))]
     [else oneline]))
 
@@ -765,11 +749,26 @@
   (cond
     [(eq? ctx 'data) #f]
     [(grammar-vector-break? d ctx) #t]
+    [(cross-parameter-where-layout? d ctx) #t]
     [else
      (define-values (open close elems) (pp-seq-parts d))
      (and open
           (for/or ([e (in-list elems)] [i (in-naturals)])
             (canonical-layout-needed? e (grammar-child-context d ctx i e))))]))
+
+(define (where-clause-datum? d)
+  (define elems (list-elems d))
+  (and elems (pair? elems) (eq? (car elems) 'where)))
+
+(define (cross-parameter-where-layout? d ctx)
+  (define elems (list-elems d))
+  (and elems
+       (or (eq? ctx 'arity-clause)
+           (and (pair? elems)
+                (symbol? (car elems))
+                (memq (car elems) '(defn defn- fn))))
+       (for/or ([e (in-list elems)])
+         (where-clause-datum? e))))
 
 ;; How many post-head elements stay on the opening line (the "signature") before
 ;; the body breaks onto BODY-INDENT-indented lines. Keeps defn/let/if heads intact
@@ -892,7 +891,6 @@
               owner "\n" body-pad
               (signature-unit->pretty
                unit-elems (+ col BODY-INDENT)
-               (memq head '(defn defn-))
                signature-vector-ctx)))
            (for/fold ([out (string-append open (datum->src/raw head))])
                      ([e (in-list kept)] [i (in-naturals 1)])
@@ -934,7 +932,7 @@
      (define signature
        (if unit-fits?
            inline-unit
-           (signature-unit->pretty signature-elems inner-col #t)))
+           (signature-unit->pretty signature-elems inner-col 'params)))
      (string-append
       open signature
       (apply string-append

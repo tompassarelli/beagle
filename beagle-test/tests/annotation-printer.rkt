@@ -57,17 +57,20 @@
    (string-append
     "(defn add\n"
     "  [x Int\n"
-    "   y Int]\n"
-    "  Int\n"
+    "   y Int] Int\n"
     "  (+ x y))")))
 
-(test-case "a refinement forces a one-pair vector to break"
+(test-case "a refinement does not force a one-pair vector to break"
   (check-equal?
    (pretty "(defn positive [(x Int positive?)] Int x)")
+   "(defn positive [x (Int where positive?)] Int x)"))
+
+(test-case "a short cross-parameter where clause takes its own line"
+  (check-equal?
+   (pretty "(defn positive [(x Int)] Int (where (> x 0)) x)")
    (string-append
-    "(defn positive\n"
-    "  [x (Int where positive?)]\n"
-    "  Int\n"
+    "(defn positive [x Int] Int\n"
+    "  (where (> x 0))\n"
     "  x)")))
 
 (test-case "canonical ruling example"
@@ -81,8 +84,7 @@
      "(defn resize\n"
      "  [shape Shape\n"
      "   width (Int where (> _ 0))\n"
-     "   height (Int where (> _ 0))]\n"
-     "  Shape\n"
+     "   height (Int where (> _ 0))] Shape\n"
      "  (where (fits shape width height))\n"
      "  ...)"))
   (check-equal? (pretty source) expected)
@@ -95,8 +97,7 @@
    (string-append
     "(defn place\n"
     "  [{:keys [w h]} Size\n"
-    "   label String]\n"
-    "  Point\n"
+    "   label String] Point\n"
     "  label)")))
 
 (test-case "variadic marker stays attached to exactly one pair"
@@ -105,8 +106,7 @@
    (string-append
     "(defn collect\n"
     "  [first Int\n"
-    "   & more (Vec Int)]\n"
-    "  Int\n"
+    "   & more (Vec Int)] Int\n"
     "  first)")))
 
 (test-case "fn and defrecord use the same vector break law"
@@ -155,15 +155,12 @@
   (check-equal? (pretty "(loop [i 0] i)") "(loop [i 0] i)")
   (check-equal? (pretty "(let [(a Int) 1] a)") "(let [a (: 1 Int)] a)"))
 
-(test-case "a refinement forces a one-binding let to break"
+(test-case "a refinement does not force a one-binding let to break"
   (check-equal?
    (pretty "(let [(width Int (> _ 0)) source] width)")
-   (string-append
-    "(let\n"
-    "  [width (: source (Int where (> _ 0)))]\n"
-    "  width)")))
+   "(let [width (: source (Int where (> _ 0)))] width)"))
 
-(test-case "multi-arity defn prints each expanded return on its own line"
+(test-case "multi-arity defn attaches each return to its closing bracket"
   (check-equal?
    (pretty
     "(defn f ([(x Int)] Int x) ([(x Int) (y Int)] Int (+ x y)))")
@@ -171,8 +168,7 @@
     "(defn f\n"
     "  ([x Int] Int x)\n"
     "  ([x Int\n"
-    "    y Int]\n"
-    "   Int\n"
+    "    y Int] Int\n"
     "   (+ x y)))")))
 
 (test-case "nested typed owner sites contain no grouped declarations"
@@ -198,8 +194,7 @@
    (string-append
     "(defn add\n"
     "  [x Int\n"
-    "   y Int]\n"
-    "  Int\n"
+    "   y Int] Int\n"
     "  (+ x y))\n\n")))
 
 (test-case "ordinary vectors and colon-bearing symbols stay data"
