@@ -28,9 +28,9 @@
 (defn append-log! [path String bytes (Vec Int)] String?
   (if (empty? bytes)
     nil
-    (match (host.fs/append-text path (utf8-decode bytes))
-      [(host.fs/AppendTextOk) nil]
-      [(host.fs/AppendTextError errno)
+    (match (host.fs/append-bytes path bytes)
+      [(host.fs/AppendBytesOk) nil]
+      [(host.fs/AppendBytesError errno)
        (str "could not append Store log: " path)])))
 
 (defn persist-boot! [path String store-result server/StoreResult] String?
