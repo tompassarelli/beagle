@@ -14,7 +14,7 @@
 #           "blast":{callee:[transitive-callers]}}   on stdout (JSON)
 #          a one-line summary on stderr.
 #
-# Rents Beagle Store's Layer-2 engine (resolve.clj). Set BEAGLE_STORE_OUT to override.
+# Rents the in-repository Store Layer-2 engine (resolve.clj). Set BEAGLE_STORE_OUT to override its build output.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -25,8 +25,8 @@ fi
 DIR="$(cd "$1" && pwd)"
 BIN="$(cd "$(dirname "$0")" && pwd)"
 RT="$BIN/../beagle-lib/private/facts-roundtrip.rkt"
-BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
-BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+BEAGLE_STORE_ROOT="$BIN/../store"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_ROOT/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
 # Beagle Store engine (resolve.clj). beagle's tooling RENTS it.
 source "$BIN/_beagle-racket"

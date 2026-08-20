@@ -48,11 +48,11 @@ Beagle Store revision, UTC time, kernel, CPU, memory, load, Python and SQLite ve
 corpus sizes, and run count. The corpus has no random input, so
 `corpus-triples` plus the contract version identifies its logical contents.
 
-Run the current comparison from a clean Beagle Store checkout:
+Run the current comparison from the Beagle checkout root:
 
 ```sh
 BENCH_RUNS=2 BENCH_SIZES=3000,30000 \
-  ~/code/store/main/bench/in-class/run.sh
+  store/bench/in-class/run.sh
 ```
 
 The runner writes raw JSONL and environment metadata below `/tmp` unless the

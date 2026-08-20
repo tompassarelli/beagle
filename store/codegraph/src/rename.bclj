@@ -12,7 +12,6 @@
 ;; would corrupt both files; the graph edit is correct by construction because
 ;; scope is structural, not lexical.
 ;;
-;;   bb -cp ~/code/store/out -m rename <old> <new> <target-substr> <edn>...
 ;; ============================================================================
 (ns rename)
 

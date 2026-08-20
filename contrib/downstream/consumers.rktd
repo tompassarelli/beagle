@@ -79,8 +79,7 @@
 
  (consumer
   (name "store")
-  (repo-env "BEAGLE_STORE_REPO")
-  (repo-default "~/code/beagle/main/store")
+  (repo-default "beagle:store")
   (target "clj")
   (enumerators
    ((enumerator

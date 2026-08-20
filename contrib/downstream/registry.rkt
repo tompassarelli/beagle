@@ -24,6 +24,7 @@
          list->jsexpr)
 
 (define-runtime-path default-registry-path "consumers.rktd")
+(define-runtime-path candidate-beagle-root "../..")
 
 ;; --- drift signal ------------------------------------------------------------
 ;; A drift error is fail-closed: an enumerator's SHAPE no longer matches what
@@ -58,7 +59,10 @@
   (define override (and env-var (getenv env-var)))
   (simplify-path
    (path->complete-path
-    (expand-user (or override (spec-ref c 'repo-default))))))
+    (let ([default (spec-ref c 'repo-default)])
+      (if (string=? default "beagle:store")
+          (build-path candidate-beagle-root "store")
+          (expand-user (or override default)))))))
 
 ;; --- external shells (deterministic, boring) ---------------------------------
 (define (sha256-of-string s)

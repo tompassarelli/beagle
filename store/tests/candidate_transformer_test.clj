@@ -1,5 +1,4 @@
 ;; Pure candidate construction: no server, socket, log, or filesystem mutation.
-;;   cd ~/code/store/main && bb -cp ~/code/store/main/out ~/code/store/main/tests/candidate_transformer_test.clj
 (require '[clojure.set :as set]
          '[store.candidate-transformer :as candidate])
 

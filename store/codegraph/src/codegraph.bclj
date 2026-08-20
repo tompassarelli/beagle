@@ -10,7 +10,6 @@
 ;;   A. caller precision on name collisions   (graph resolves scope; bare-symbol can't)
 ;;   B. transitive leverage / blast radius     (one fixpoint; a one-hop tool can't)
 ;;
-;; Run:  bb -cp ~/code/store/out:~/code/store/codegraph/src:~/code/store -m codegraph build/gjoa.facts
 ;; ============================================================================
 (ns codegraph)
 

@@ -12,7 +12,7 @@
 #   SELFHOST_OUT=/tmp/stage runs the ladder against an isolated authored-source
 #   compilation without changing the checked-in seed.
 #   default corpus: every tracked fixture under self-host/fixtures/, plus the
-#   $BEAGLE_STORE_REPO/src/store modules listed below that exist in that checkout
+#   in-repository Store modules listed below that exist in this checkout
 #   BEAGLE_ORACLE_ROOT=/path selects the oracle binaries to compare against.
 #
 # Module resolution is closed on BOTH sides: rungs 6 and 7 pass the exact
@@ -129,7 +129,7 @@ beagle_select_stage0 "$OUT" self-host/native/beagle-selfhost || exit $?
 SH_MAIN_CMD=("$NATIVE_BIN")
 beagle_stage0_banner "$OUT"
 
-BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_ROOT="$WT/store"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
   MODULES=(self-host/fixtures/*.bclj self-host/fixtures/*.bjs)
@@ -140,8 +140,8 @@ if [ ${#MODULES[@]} -eq 0 ]; then
   # compilers under closed module resolution, so it cannot serve as an
   # emit-parity rung.
   for store_module in branch; do
-    [ -f "$BEAGLE_STORE_REPO/src/store/$store_module.bclj" ] && \
-      MODULES+=("$BEAGLE_STORE_REPO/src/store/$store_module.bclj")
+    [ -f "$BEAGLE_STORE_ROOT/src/store/$store_module.bclj" ] && \
+      MODULES+=("$BEAGLE_STORE_ROOT/src/store/$store_module.bclj")
   done
 fi
 

@@ -7,7 +7,6 @@
 ;; relates an exact retraction occurrence to an exact assertion occurrence; if
 ;; not, "withdrawn" was a euphemism for overwrite.
 ;;
-;;   bb -cp ~/code/store/out -m supersession-check      ; reads /tmp/trap.edn
 ;; ============================================================================
 (ns supersession-check)
 

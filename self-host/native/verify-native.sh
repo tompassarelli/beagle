@@ -6,7 +6,7 @@
 #   (b) the Racket compiler's emit (the oracle).
 #
 # Usage: self-host/native/verify-native.sh [MODULE.bclj ...]
-#   default corpus: $BEAGLE_STORE_REPO/src/store/*.bclj + self-host/fixtures/lowering-temps.bclj
+#   default corpus: in-repository Store modules + self-host/fixtures/lowering-temps.bclj
 # Requires: self-host/native/beagle-selfhost (run build.sh first), bb, the
 # checkout's pinned racket (resolved via bin/_beagle-racket).
 # BEAGLE_NATIVE_BIN overrides the binary under test (e.g. a nix-built result).
@@ -24,10 +24,10 @@ mkdir -p "$LAB"
 
 [ -x "$NATIVE" ] || { echo "verify-native: $NATIVE missing — run self-host/native/build.sh" >&2; exit 1; }
 
-BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
+BEAGLE_STORE_ROOT="$ROOT/store"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
-    MODULES=("$BEAGLE_STORE_REPO"/src/store/*.bclj self-host/fixtures/lowering-temps.bclj)
+    MODULES=("$BEAGLE_STORE_ROOT"/src/store/*.bclj self-host/fixtures/lowering-temps.bclj)
 fi
 
 # Pinned racket for the oracle mint (worktree-safe collection routing, as in beagle-remint).

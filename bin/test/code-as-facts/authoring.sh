@@ -20,8 +20,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 source "$ROOT/bin/_beagle-racket"
-BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
-BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+BEAGLE_STORE_ROOT="$ROOT/store"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_ROOT/out}"
 source "$ROOT/bin/_beagle-store-resolver"
 fail=0
 

@@ -18,9 +18,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 source "$ROOT/bin/_beagle-racket"
-BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
-BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
-SRC="${CODE_AS_FACTS_CORPUS:-$BEAGLE_STORE_REPO/src}"
+BEAGLE_STORE_ROOT="$ROOT/store"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_ROOT/out}"
+SRC="${CODE_AS_FACTS_CORPUS:-$BEAGLE_STORE_ROOT/src}"
 fail=0
 
 echo "================ move 3 — code as canonical facts ================"

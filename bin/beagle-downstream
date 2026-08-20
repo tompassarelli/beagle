@@ -17,7 +17,7 @@
 # script and NEVER writes into a consumer repo, so the gate is byte-clean by
 # construction (proven in-band by a before/after `git status --porcelain` hash).
 # Consumer repo paths default to ~/code/<name>, overridable per consumer
-# (GJOA_REPO, WAKE_REPO, NORTH_REPO, BEAGLE_STORE_REPO, NIXOS_CONFIG_REPO).
+# (GJOA_REPO, WAKE_REPO, NORTH_REPO, NIXOS_CONFIG_REPO).
 #
 # Exit codes: 0 = ok; 1 = a consumer failed / not byte-clean; 2 = usage / dirty
 # refusal; 3 = enumerator drift.

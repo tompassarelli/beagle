@@ -15,5 +15,5 @@ bin/test/cascade-graph/run.sh
 ```
 
 The check requires the Beagle Store engine (`BEAGLE_STORE_OUT`, default
-`~/code/store/main/out`). It proves module-local call-graph scope; the type
+`store/out`). It proves module-local call-graph scope; the type
 checker remains the Racket leaf that checks one node.

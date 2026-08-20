@@ -22,7 +22,6 @@
 ;;        per-module comment can't reach: "who is downstream of the HAMT?")
 ;;
 ;; Run:
-;;   bb -cp ~/code/store/out:~/code/store -m rep-jurisdiction <rep.facts> [<callgraph.facts>]
 ;;
 ;; <rep.facts>       : a per-def rep-fact stream (see the shape above)
 ;; <callgraph.facts> : OPTIONAL — output of `beagle-facts <src>...`; when given,

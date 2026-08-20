@@ -89,7 +89,7 @@ walks ancestor directories or guesses filenames:
 # explicit repeated module roots: ns store.store -> ROOT/store/store.bclj
 #   (`-` maps to `_`, `.` to `/`; extension = the importer's extension)
 bb -cp self-host/seed -m selfhost.main emit \
-    --module-root store=$BEAGLE_STORE_REPO/src $BEAGLE_STORE_REPO/src/store/fold.bclj
+    --module-root store=store/src store/src/store/fold.bclj
 
 # explicit closed bundle: members resolve by declared (ns ...), so
 #   dash-named files need no rename

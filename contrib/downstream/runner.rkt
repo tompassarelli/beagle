@@ -36,6 +36,8 @@
          run->jsexpr
          (struct-out run-result))
 
+(define-runtime-path CANDIDATE-BEAGLE-ROOT "../..")
+
 ;; --- small deterministic shells ----------------------------------------------
 (define (sha256-of-string s)
   (define-values (proc out in err)
@@ -72,16 +74,11 @@
 
 ;; --- source mapping (cross-repo resolve deps, read-only, byte-clean) ----------
 (define (store-repo-path consumers)
-  ;; resolve store's repo the same way the registry does (env override + default)
+  ;; The Store consumer is checkout-local; retain this direct path for callers
+  ;; that invoke the runner with a filtered consumer list.
   (define store (findf (lambda (c) (string=? (consumer-name c) "store")) consumers))
   (if store (consumer-repo-path store)
-      (let ([env (getenv "BEAGLE_STORE_REPO")])
-        (simplify-path (path->complete-path (or env (expand-home "~/code/store/main")))))))
-
-(define (expand-home p)
-  (if (string-prefix? p "~/")
-      (path->string (build-path (find-system-path 'home-dir) (substring p 2)))
-      p))
+      (simplify-path (build-path CANDIDATE-BEAGLE-ROOT "store"))))
 
 ;; --- compile subprocess ------------------------------------------------------
 ;; One racket process per consumer compiles the whole roster (emit, not just

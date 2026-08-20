@@ -6,7 +6,6 @@
 ;; engine (not just an in-memory map): source -> facts -> Beagle Store -> facts.
 ;;
 ;;   racket .../facts-roundtrip.rkt --emit-edn FILE > A.edn
-;;   bb -cp ~/code/store/out -m roundtrip-store A.edn > B.edn
 ;;   racket .../facts-roundtrip.rkt --verify B.edn FILE
 ;; ============================================================================
 (ns roundtrip-store)

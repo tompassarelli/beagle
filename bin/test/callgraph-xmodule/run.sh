@@ -14,8 +14,8 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
-BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
-BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
+BEAGLE_STORE_ROOT="$ROOT/store"
+BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_ROOT/out}"
 export BEAGLE_STORE_OUT
 source "$ROOT/bin/_beagle-store-resolver"
 CG="$ROOT/bin/beagle-callgraph"

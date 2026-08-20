@@ -40,7 +40,7 @@ differ there.
 ## Run
 
 ```
-CODE_AS_FACTS_CORPUS=~/code/store/main/src BEAGLE_STORE_OUT=~/code/store/main/out bin/test/code-as-facts/run.sh
+bin/test/code-as-facts/run.sh
 ```
 
 Needs racket (`facts-roundtrip`, `beagle-build-all`) + bb + store's `out/` classpath.
@@ -71,7 +71,7 @@ boundary:
   enter the store as `v`-facts).
 
 ```
-BEAGLE_STORE_OUT=~/code/store/main/out bin/test/code-as-facts/authoring-verbs.sh
+bin/test/code-as-facts/authoring-verbs.sh
 ```
 
 `rename.sh` is the complete resolver capability suite and runs against current
