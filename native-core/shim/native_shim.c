@@ -10962,6 +10962,77 @@ int32_t native_host_filesystem_append_text_v0(
   return 0;
 }
 
+int32_t native_host_filesystem_append_bytes_v0(
+    const native_capability *capability, uint64_t path_text,
+    const native_vec *bytes) {
+  char *path = NULL;
+  uint8_t *octets = NULL;
+  size_t length;
+  size_t written = (size_t)0U;
+  int descriptor;
+  int32_t status;
+  int64_t index;
+  if (!native_host_filesystem_capability_valid(capability) ||
+      (bytes == NULL) || (bytes->length < INT64_C(0)) ||
+      (bytes->capacity < bytes->length) ||
+      ((bytes->length > INT64_C(0)) && (bytes->elements == NULL)) ||
+      ((uint64_t)bytes->length > (uint64_t)SIZE_MAX)) {
+    return EINVAL;
+  }
+  length = (size_t)bytes->length;
+  if (length != (size_t)0U) {
+    octets = (uint8_t *)malloc(length);
+    if (octets == NULL) {
+      return ENOMEM;
+    }
+  }
+  for (index = INT64_C(0); index < bytes->length; index++) {
+    int64_t value =
+        *(const int64_t *)((const uint8_t *)bytes->elements +
+                          (size_t)index * sizeof(int64_t));
+    if ((value < INT64_C(0)) || (value > INT64_C(255))) {
+      free(octets);
+      return EINVAL;
+    }
+    octets[(size_t)index] = (uint8_t)value;
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    free(octets);
+    return status;
+  }
+  descriptor = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
+                    (mode_t)0644);
+  free(path);
+  if (descriptor < 0) {
+    free(octets);
+    return native_host_filesystem_errno();
+  }
+  while (written < length) {
+    ssize_t amount = write(descriptor, octets + written, length - written);
+    if (amount < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      status = native_host_filesystem_errno();
+      free(octets);
+      (void)close(descriptor);
+      return status;
+    }
+    if (amount == 0) {
+      free(octets);
+      (void)close(descriptor);
+      return EIO;
+    }
+    written += (size_t)amount;
+  }
+  free(octets);
+  if (close(descriptor) != 0) {
+    return native_host_filesystem_errno();
+  }
+  return 0;
+}
+
 #ifdef __wasi__
 /* wasi-libc declares flock but never defines it, so any arm that calls it
    fails a reactor link with an undefined symbol. Fail closed by name instead
