@@ -2,11 +2,11 @@
 (ns native.c11-validation-corpus)
 
 
-(require native.core :as core)
-(require native.c11 :as c11)
-(require native.lower :as lower)
-(require native.obligations :as obligations)
-(require native.stages :as stages)
+(require [native.core :as core])
+(require [native.c11 :as c11])
+(require [native.lower :as lower])
+(require [native.obligations :as obligations])
+(require [native.stages :as stages])
 
 (defn fixture-id [name String] core/NativeId
   (core/canonical-id "native-c11-fixture-v0" [name]))

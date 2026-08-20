@@ -18,11 +18,11 @@
 ;;   5  the same pair at epoch-0
 
 
-(require native.body-c17 :as body)
-(require native.core :as core)
-(require native.lower :as lower)
-(require native.obligations :as obligations)
-(require native.stages :as stages)
+(require [native.body-c17 :as body])
+(require [native.core :as core])
+(require [native.lower :as lower])
+(require [native.obligations :as obligations])
+(require [native.stages :as stages])
 
 (defn epoch-id [label String] core/NativeId
   (core/canonical-id "native-epoch-fixture-v0" [label]))

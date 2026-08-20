@@ -12,14 +12,14 @@
 ;;      the root, so every promote collapses and no epoch is minted
 
 
-(require native.body-c17 :as body)
-(require native.body-slice :as body-slice)
-(require native.core :as core)
-(require native.fold-c17 :as c17)
-(require native.lower :as lower)
-(require native.obligations :as obligations)
-(require native.slice :as slice)
-(require native.stages :as stages)
+(require [native.body-c17 :as body])
+(require [native.body-slice :as body-slice])
+(require [native.core :as core])
+(require [native.fold-c17 :as c17])
+(require [native.lower :as lower])
+(require [native.obligations :as obligations])
+(require [native.slice :as slice])
+(require [native.stages :as stages])
 
 (defn native-of
   [facts-path String

@@ -5,10 +5,10 @@
 (ns native.body-c17)
 
 
-(require native.core :as core)
-(require native.fold-c17 :as c17)
-(require native.simd :as simd)
-(require native.stages :as stages)
+(require [native.core :as core])
+(require [native.fold-c17 :as c17])
+(require [native.simd :as simd])
+(require [native.stages :as stages])
 
 (defrecord BodyArtifactV0
   [header-name String

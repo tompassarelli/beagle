@@ -4,11 +4,11 @@
 (ns native.fold-slice-corpus)
 
 
-(require native.core :as core)
-(require native.stages :as stages)
-(require native.lower :as lower)
-(require native.obligations :as obligations)
-(require native.fold-c17 :as c17)
+(require [native.core :as core])
+(require [native.stages :as stages])
+(require [native.lower :as lower])
+(require [native.obligations :as obligations])
+(require [native.fold-c17 :as c17])
 
 (def module-name String "store.fold")
 (def module-path String "src/store/fold.bclj")
