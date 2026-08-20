@@ -1,6 +1,6 @@
 (ns store.rt
   "Host-interop runtime for Beagle Store's Beagle modules — the irreducible Clojure
-  layer (file IO, string ops, and FRAMRPC transport) the .bclj
+  layer (file IO, string ops, and Store RPC transport) the .bclj
   `declare-extern`s bind to. Beagle owns the typed logic; this owns the host
   calls."
   (:refer-clojure :exclude [slurp])   ; store.rt/slurp wraps clojure.core/slurp; keep the JVM server's stderr clean
@@ -118,7 +118,7 @@
 
 (defn slugify [title] (rtc/slugify title))
 
-;; --- FRAMRPC transport -------------------------------------------------------
+;; --- Store RPC transport ----------------------------------------------------
 
 ;; client-side mutual TLS: present BEAGLE_STORE_SERVER_TLS_KEYSTORE, verify the server against
 ;; BEAGLE_STORE_SERVER_TLS_TRUSTSTORE. Works on babashka (client SSL classes are present; only the
@@ -183,7 +183,7 @@
 (defn- server-tls-handshake! [socket]
   (let [timeout (server-timeout-ms "BEAGLE_STORE_SERVER_HANDSHAKE_TIMEOUT_MS" 2000)]
     ;; SO_TIMEOUT bounds an individual SSL read and the watchdog bounds the
-    ;; whole exchange. FRAMRPC installs its request deadline after the handshake.
+    ;; whole exchange. Store RPC installs its deadline after the handshake.
     (.setSoTimeout socket timeout)
     (run-with-server-watchdog!
      socket
@@ -230,7 +230,7 @@
     (Integer/parseInt port)
     7977))
 
-;; --- FRAMRPC v2 client -------------------------------------------------------
+;; --- Store RPC v2 client ----------------------------------------------------
 ;; Data clients share this one bounded binary implementation. Human-facing
 ;; commands may parse EDN before this boundary, but only recursive Terms and
 ;; closed RpcRequest records reach the socket.
@@ -240,7 +240,7 @@
 (defn rpc-space-id []
   (let [space (System/getenv "BEAGLE_STORE_SPACE_ID")]
     (when (str/blank? space)
-      (throw (ex-info "BEAGLE_STORE_SPACE_ID is required for FRAMRPC data requests"
+      (throw (ex-info "BEAGLE_STORE_SPACE_ID is required for Store RPC data requests"
                       {:type :rpc-space-id-required})))
     space))
 
@@ -264,8 +264,8 @@
 (defn- rpc-stream-body-length! [header]
   (dotimes [index 8]
     (when-not (= (bit-and 255 (int (aget header index)))
-                 (bit-and 255 (int (aget rpc/rpc-v2-magic index))))
-      (throw (ex-info "FRAMRPC response magic does not match"
+                 (bit-and 255 (int (aget rpc/store-rpc-v2-magic index))))
+      (throw (ex-info "Store RPC response magic does not match"
                       {:type :rpc-invalid-magic}))))
   (let [buffer (doto (java.nio.ByteBuffer/wrap header)
                  (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
@@ -277,38 +277,38 @@
           body-length (Integer/toUnsignedLong (.getInt buffer))]
       (when-not (and (= major rpc/rpc-v2-major)
                      (= minor rpc/rpc-v2-minor))
-        (throw (ex-info "FRAMRPC response version is unsupported"
+        (throw (ex-info "Store RPC response version is unsupported"
                         {:type :rpc-unsupported-version
                          :major major :minor minor})))
       (when-not (contains? #{2 4} kind)
-        (throw (ex-info "FRAMRPC client expected a response or event frame"
+        (throw (ex-info "Store RPC client expected a response or event packet"
                         {:type :rpc-invalid-kind :kind kind})))
       (when-not (zero? flags)
-        (throw (ex-info "FRAMRPC v2 response flags must be zero"
+        (throw (ex-info "Store RPC v2 response flags must be zero"
                         {:type :rpc-invalid-flags :flags flags})))
       (when (> body-length rpc/rpc-v2-max-body-bytes)
-        (throw (ex-info "FRAMRPC response body exceeds the 1 MiB limit"
-                        {:type :rpc-frame-too-large
+        (throw (ex-info "Store RPC response body exceeds the 1 MiB limit"
+                        {:type :rpc-packet-too-large
                          :body-length body-length})))
       (int body-length))))
 
-(defn read-rpc-frame! [input]
+(defn store-rpc-read-packet! [input]
   (let [header (byte-array rpc/rpc-v2-header-bytes)]
     (when-not (read-rpc-exact! input header 0 rpc/rpc-v2-header-bytes)
-      (throw (ex-info "FRAMRPC response ended inside its header"
+      (throw (ex-info "Store RPC response ended inside its header"
                       {:type :rpc-truncated})))
     (let [body-length (rpc-stream-body-length! header)
           body (byte-array body-length)
-          frame (byte-array (+ rpc/rpc-v2-header-bytes body-length))]
+          packet (byte-array (+ rpc/rpc-v2-header-bytes body-length))]
       (when-not (read-rpc-exact! input body 0 body-length)
-        (throw (ex-info "FRAMRPC response ended inside its body"
+        (throw (ex-info "Store RPC response ended inside its body"
                         {:type :rpc-truncated})))
-      (System/arraycopy header 0 frame 0 rpc/rpc-v2-header-bytes)
-      (System/arraycopy body 0 frame rpc/rpc-v2-header-bytes body-length)
-      (rpc/decode-rpc-frame-v2! frame))))
+      (System/arraycopy header 0 packet 0 rpc/rpc-v2-header-bytes)
+      (System/arraycopy body 0 packet rpc/rpc-v2-header-bytes body-length)
+      (rpc/store-rpc-decode-packet-v2! packet))))
 
 (defn native-request-to!
-  "Send one closed FRAMRPC request to host/port and return its RpcResponse.
+  "Send one closed Store RPC request to host/port and return its RpcResponse.
    The response id, space, and operation must match the request exactly."
   [host port request]
   (let [request-id (next-rpc-request-id)]
@@ -318,22 +318,23 @@
             output (.getOutputStream socket)]
         (.setSoTimeout socket timeout)
         (.write output
-                (rpc/encode-rpc-frame-v2!
-                 (rpc/rpc-request-frame request-id request)))
+                (rpc/store-rpc-encode-packet-v2!
+                 (rpc/store-rpc-request-packet request-id request)))
         (.flush output)
-        (let [frame (read-rpc-frame! (.getInputStream socket))
-              response (terms/rpcframev2-response frame)]
-          (when-not (= :response (terms/rpcframev2-kind frame))
-            (throw (ex-info "FRAMRPC request received a non-response frame"
+        (let [packet (store-rpc-read-packet! (.getInputStream socket))
+              response (terms/storerpcpacketv2-response packet)]
+          (when-not (= :response (terms/storerpcpacketv2-kind packet))
+            (throw (ex-info "Store RPC request received a non-response packet"
                             {:type :rpc-invalid-kind})))
-          (when-not (= request-id (terms/rpcframev2-request-id frame))
-            (throw (ex-info "FRAMRPC response request-id does not match"
+          (when-not (= request-id
+                       (terms/storerpcpacketv2-request-id packet))
+            (throw (ex-info "Store RPC response request-id does not match"
                             {:type :rpc-request-id-mismatch})))
           (when-not (and (= (terms/rpcrequest-space request)
                             (terms/rpcresponse-space response))
                          (= (terms/rpcrequest-op request)
                             (terms/rpcresponse-op response)))
-            (throw (ex-info "FRAMRPC response identity does not match its request"
+            (throw (ex-info "Store RPC response identity does not match its request"
                             {:type :rpc-response-mismatch})))
           response)))))
 

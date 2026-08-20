@@ -903,22 +903,23 @@
         root)
       (if (= version head)
         root
-        (let [(frames-result store/TransactionFramesResult)
-              (store/transaction-frames-between-result
+        (let [(records-result store/TransactionRecordsResult)
+              (store/transaction-records-between-result
                (deref root) -1 version)
-              (frames-code Keyword?) (store/transactionframesresult-code frames-result)]
-          (if (not (store/transactionframesresult-ok frames-result))
+              (records-code Keyword?)
+              (store/transactionrecordsresult-code records-result)]
+          (if (not (store/transactionrecordsresult-ok records-result))
             (do
               (record-read-error!
                context
-               (if (some? frames-code)
-                 frames-code :rpc/native-query-failed)
+               (if (some? records-code)
+                 records-code :rpc/native-query-failed)
                "native read operation failed")
               root)
             (let [(copy (Atom t/TermStore)) (store/new-term-store (store/space-id root))
-                  (frames (Vec t/TransactionFrame))
-                  (store/transactionframesresult-frames frames-result)]
-              (loop [remaining frames]
+                  (records (Vec t/TransactionRecord))
+                  (store/transactionrecordsresult-records records-result)]
+              (loop [remaining records]
                 (if (empty? remaining)
                   copy
                   (let [(replay-result store/TransactionReplayResult)

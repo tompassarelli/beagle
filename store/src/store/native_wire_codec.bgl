@@ -7,30 +7,30 @@
 
 (def rpc-v2-header-bytes Int 26)
 (def rpc-v2-max-body-bytes Int 1048576)
-(def rpc-v2-max-frame-bytes Int 1048602)
+(def store-rpc-v2-max-packet-bytes Int 1048602)
 (def rpc-v2-max-string-bytes Int 1048576)
 (def rpc-v2-max-space-bytes Int 4096)
 (def rpc-v2-max-term-nodes Int 65536)
-(def rpc-v2-magic (Vec Int) [70 82 65 77 82 80 67 0])
+(def store-rpc-v2-magic (Vec Int) [83 84 79 82 69 82 80 67])
 (def recursive-term-depth-error String
   "recursive Term exceeds the TermCodecV1 depth bound")
 (def term-node-count-error String
   "TermCodecV1 node count exceeds the configured bound")
 
-(defwire rpc-v2-frame-header
-  (framed :u32le :none)
+(defwire store-rpc-v2-packet-header
+  (packet-encoded :u32le :none)
   (tagged :u8
     [1 request
-     [(flags :u8 "frame flags")
+     [(flags :u8 "packet flags")
       (body-length :u32le "body length")
       (request-id :i64le "request id")]]
     [2 response
-     [(flags :u8 "frame flags")
+     [(flags :u8 "packet flags")
       (body-length :u32le "body length")
       (request-id :i64le "request id")]]))
 
 (defwire rpc-v2-request-body
-  (framed :none :none)
+  (packet-encoded :none :none)
   (tagged :none
     [0 request
      [(space (codec String :bounded-space-term append-space-term!
@@ -44,7 +44,7 @@
       (payload (codec Any :term append-schema-term! read-schema-term! -1))]]))
 
 (defwire rpc-v2-response-body
-  (framed :none :none)
+  (packet-encoded :none :none)
   (tagged :none
     [0 response
      [(space (codec String :bounded-space-term append-space-term!
@@ -59,7 +59,7 @@
       (payload (optional (codec Any :term append-schema-term!
                                 read-schema-term! -1)))]]))
 
-(defrecord DecodeResult [(frame t/RpcFrameV2?) (error String?)])
+(defrecord DecodeResult [(packet t/StoreRpcPacketV2?) (error String?)])
 
 (defrecord EncodeResult [(bytes (U Nil (Vec Int))) (error String?)])
 
@@ -67,7 +67,7 @@
   (cond
     [(= error recursive-term-depth-error) :term-depth-exceeded]
     [(= error term-node-count-error) :term-codec-node-limit]
-    [:else :rpc-frame-too-large]))
+    [:else :rpc-packet-too-large]))
 
 (defrecord TermDigestResult
   [(ok Bool) (digest String) (code Keyword) (message String)])
@@ -100,10 +100,12 @@
 ;; typed `(codec Type kind append-fn read-fn fixed-bytes [bound])` pair. The
 ;; latter is how domain records compose schemas without exposing target code or
 ;; splitting one field's encoder and decoder across declarations.
-(defmacro defwire [name framing tagging]
-  (syntax-match (list framing tagging)
+(defmacro defwire [name packet-encoding tagging]
+  (syntax-match (list packet-encoding tagging)
     [(list
-      (list (literal framed) (capture length-kind) (capture checksum-kind))
+      (list (literal packet-encoded)
+            (capture length-kind)
+            (capture checksum-kind))
       (list (literal tagged) (capture tag-kind) (tail-splice cases)))
      (let [base-type
            (fn [spec] Any
@@ -415,7 +417,7 @@
   (if (and (>= amount 0) (>= (decoder-remaining decoder) amount))
     true
     (do
-      (decoder-error! decoder (str "FRAMRPC ended inside " context))
+      (decoder-error! decoder (str "Store RPC ended inside " context))
       false)))
 
 (defn read-u8! [(decoder Decoder) (context String)] Int
@@ -425,7 +427,8 @@
       (if (byte-value? value)
         (do (swap! (decoder-position decoder) increment-int) value)
         (do
-          (decoder-error! decoder "FRAMRPC byte vector contains a value outside u8")
+          (decoder-error! decoder
+                          "Store RPC byte vector contains a value outside u8")
           0)))
     0))
 
@@ -467,7 +470,8 @@
   ;; Both arms end in nil so the native join has one declared alternative.
   (if (byte-value? value)
     (do (swap! (encoder-bytes encoder) conj value) nil)
-    (do (encoder-error! encoder "FRAMRPC encoder produced a value outside u8")
+    (do (encoder-error! encoder
+                        "Store RPC encoder produced a value outside u8")
         nil)))
 
 (defn append-u16-le! [(encoder Encoder) (value Int)] Nil
@@ -488,7 +492,7 @@
                       (bit-and 255 (unsigned-bit-shift-right value (* offset 8))))
           (recur (+ offset 1)))
         nil))
-    (encoder-error! encoder "FRAMRPC u32 value is out of range")))
+    (encoder-error! encoder "Store RPC u32 value is out of range")))
 
 (defn append-i64-le! [(encoder Encoder) (value Int)] Nil
   (loop [offset 0]
@@ -763,7 +767,7 @@
       (termdigestresult-digest result)
       (let [message (termdigestresult-message result)]
         (throw (ex-info message {:type (termdigestresult-code result)
-                                 :fram/code (termdigestresult-code result)
+                                 :store-rpc/code (termdigestresult-code result)
                                  :message message}))))))
 
 (defn read-keyword-term! [(decoder Decoder) (label String)] Keyword
@@ -780,7 +784,7 @@
       (if (= tag 1)
         (read-sized-text! decoder rpc-v2-max-space-bytes "SpaceId")
         (do
-          (decoder-error! decoder "FRAMRPC SpaceId must be a String Term")
+          (decoder-error! decoder "Store RPC SpaceId must be a String Term")
           "")))
     ""))
 
@@ -860,10 +864,10 @@
 
 (defn magic-valid! [(decoder Decoder)] Bool
   (loop [index 0 valid true]
-    (if (< index (count rpc-v2-magic))
+    (if (< index (count store-rpc-v2-magic))
       (recur (+ index 1)
              (and valid
-                  (= (nth rpc-v2-magic index)
+                  (= (nth store-rpc-v2-magic index)
                      (read-u8! decoder "magic"))))
       valid)))
 
@@ -872,48 +876,51 @@
                            (atom 0) (empty-error-cell))
         byte-count (count bytes)]
     (cond
-      [(> byte-count rpc-v2-max-frame-bytes)
-       (->DecodeResult nil "FRAMRPC frame exceeds the configured byte limit")]
+      [(> byte-count store-rpc-v2-max-packet-bytes)
+       (->DecodeResult nil
+                       "Store RPC packet exceeds the configured byte limit")]
       [(< byte-count rpc-v2-header-bytes)
-       (->DecodeResult nil "FRAMRPC frame ended inside its header")]
+       (->DecodeResult nil "Store RPC packet ended inside its header")]
       [(not (magic-valid! decoder))
-       (->DecodeResult nil "FRAMRPC magic does not match")]
+       (->DecodeResult nil "Store RPC magic does not match")]
       [:else
        (let [major (read-u16-le! decoder "major version")
              minor (read-u16-le! decoder "minor version")
-             kind (read-u8! decoder "frame kind")
-             (header WireFields_rpc-v2-frame-header_request)
-             (read-rpc-v2-frame-header-request! decoder)
-             flags (wirefields_rpc-v2-frame-header_request-flags header)
+             kind (read-u8! decoder "packet kind")
+             (header WireFields_store-rpc-v2-packet-header_request)
+             (read-store-rpc-v2-packet-header-request! decoder)
+             flags (wirefields_store-rpc-v2-packet-header_request-flags header)
              body-length
-             (wirefields_rpc-v2-frame-header_request-body-length header)
+             (wirefields_store-rpc-v2-packet-header_request-body-length header)
              request-id
-             (wirefields_rpc-v2-frame-header_request-request-id header)]
+             (wirefields_store-rpc-v2-packet-header_request-request-id header)]
          (cond
            [(or (not= major 2) (not= minor 0))
-            (->DecodeResult nil "FRAMRPC major/minor version is unsupported")]
+            (->DecodeResult nil "Store RPC major/minor version is unsupported")]
            [(not= kind 1)
-            (->DecodeResult nil "native request decoder accepts only request frames")]
+            (->DecodeResult nil
+                            "native request decoder accepts only request packets")]
            [(not= flags 0)
-            (->DecodeResult nil "FRAMRPC v2 flags must be zero")]
+            (->DecodeResult nil "Store RPC v2 flags must be zero")]
            [(> body-length rpc-v2-max-body-bytes)
             (->DecodeResult nil
-                            "FRAMRPC declared body exceeds the configured byte limit")]
+                            "Store RPC declared body exceeds the configured byte limit")]
            [(< (decoder-remaining decoder) body-length)
-            (->DecodeResult nil "FRAMRPC body is shorter than declared")]
+            (->DecodeResult nil "Store RPC body is shorter than declared")]
            [(> (decoder-remaining decoder) body-length)
             (->DecodeResult nil
-                            "FRAMRPC frame has bytes beyond its declared body")]
+                            "Store RPC packet has bytes beyond its declared body")]
            [:else
             (let [request (read-request-body! decoder)
-                  frame (t/->RpcFrameV2 :request 0 request-id request nil)
+                  packet
+                  (t/->StoreRpcPacketV2 :request 0 request-id request nil)
                   error (deref (decoder-error decoder))]
               (cond
                 [error (->DecodeResult nil error)]
                 [(not= 0 (decoder-remaining decoder))
                  (->DecodeResult nil
-                                 "FRAMRPC body decoder left trailing bytes")]
-                [:else (->DecodeResult frame nil)]))]))])))
+                                 "Store RPC body decoder left trailing bytes")]
+                [:else (->DecodeResult packet nil)]))]))])))
 
 (defn append-page-response! [(encoder Encoder) (page t/RpcPageResponse)] Nil
   (append-u32-le! encoder (t/rpcpageresponse-ordinal page))
@@ -939,31 +946,32 @@
    (t/rpcresponse-error response)
    (t/rpc-response-payload-value response)))
 
-(defn finish-response-frame!
-  [(frame t/RpcFrameV2) (body-bytes (Vec Int))] EncodeResult
+(defn finish-response-packet!
+  [(packet t/StoreRpcPacketV2) (body-bytes (Vec Int))] EncodeResult
   (let [out (->Encoder (empty-byte-cell) (atom 0) (empty-error-cell))]
-    (swap! (encoder-bytes out) into rpc-v2-magic)
+    (swap! (encoder-bytes out) into store-rpc-v2-magic)
     (append-u16-le! out 2)
     (append-u16-le! out 0)
-    (append-rpc-v2-frame-header-response!
-     out 0 (count body-bytes) (t/rpcframev2-request-id frame))
+    (append-store-rpc-v2-packet-header-response!
+     out 0 (count body-bytes) (t/storerpcpacketv2-request-id packet))
     (swap! (encoder-bytes out) into body-bytes)
     (let [error (deref (encoder-error out))]
       (if error
         (->EncodeResult nil error)
         (->EncodeResult (deref (encoder-bytes out)) nil)))))
 
-(defn encode-response-bytes! [(frame t/RpcFrameV2)] EncodeResult
-  (let [response (t/rpcframev2-response frame)]
+(defn encode-response-bytes! [(packet t/StoreRpcPacketV2)] EncodeResult
+  (let [response (t/storerpcpacketv2-response packet)]
     (cond
-      [(not= :response (t/rpcframev2-kind frame))
-       (->EncodeResult nil "native response encoder accepts only response frames")]
-      [(not= 0 (t/rpcframev2-flags frame))
-       (->EncodeResult nil "FRAMRPC v2 flags must be zero")]
+      [(not= :response (t/storerpcpacketv2-kind packet))
+       (->EncodeResult nil
+                       "native response encoder accepts only response packets")]
+      [(not= 0 (t/storerpcpacketv2-flags packet))
+       (->EncodeResult nil "Store RPC v2 flags must be zero")]
       [(nil? response)
-       (->EncodeResult nil "response frame must carry one RpcResponse")]
-      [(not (nil? (t/rpcframev2-request frame)))
-       (->EncodeResult nil "response frame must not carry RpcRequest")]
+       (->EncodeResult nil "response packet must carry one RpcResponse")]
+      [(not (nil? (t/storerpcpacketv2-request packet)))
+       (->EncodeResult nil "response packet must not carry RpcRequest")]
       [:else
        (let [body (->Encoder (empty-byte-cell) (atom 0) (empty-error-cell))]
          (append-response-body! body response)
@@ -973,5 +981,5 @@
              [body-error (->EncodeResult nil body-error)]
              [(> (count body-bytes) rpc-v2-max-body-bytes)
               (->EncodeResult nil
-                              "FRAMRPC body exceeds the configured byte limit")]
-             [:else (finish-response-frame! frame body-bytes)])))])))
+                              "Store RPC body exceeds the configured byte limit")]
+             [:else (finish-response-packet! packet body-bytes)])))])))

@@ -94,7 +94,7 @@
 (defn response-encode-error! [(candidate t/RpcResponse)] String?
   (let [encoded
         (native-wire/encode-response-bytes!
-         (t/->RpcFrameV2 :response 0 0 nil candidate))]
+         (t/->StoreRpcPacketV2 :response 0 0 nil candidate))]
     (native-wire/encoderesult-error encoded)))
 
 (defn response-preflight-error
@@ -105,7 +105,7 @@
   (error-response
    request served-version
    (native-wire/response-encode-error-code encode-error) false
-   "lease response exceeds FRAMRPC v2 encode limits"))
+   "lease response exceeds Store RPC v2 encode limits"))
 
 (defn expected-version-matches?
   [(served-version Int) (expected-version Int?)] Bool
@@ -416,4 +416,4 @@
       [:else
        (error-response
         request served-version :rpc/native-operation-unavailable false
-        "FRAMRPC operation is not a lease operation")])))
+        "Store RPC operation is not a lease operation")])))

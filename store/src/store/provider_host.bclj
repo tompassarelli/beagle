@@ -168,7 +168,7 @@
   [(operation Keyword) (proposition t/Triple) (policy Keyword)] ProviderAction
   (if (and (or (= operation :rpc/assert) (= operation :rpc/retract)) (or (= policy :rpc/subject-any) (= policy :rpc/subject-existing)))
     (->ProviderAction operation proposition policy)
-    (throw (ex-info "provider action is outside the FRAMRPC mutation seam" {:type :provider/invalid-action}))))
+    (throw (ex-info "provider action is outside the Store RPC mutation seam" {:type :provider/invalid-action}))))
 
 (defn provider-stage
   [(capability-value t/Triple) (stage Keyword) (result Keyword)] ProviderStage
@@ -278,8 +278,8 @@
            (let [(response t/RpcResponse) (executor request)]
              (if (and (t/rpc-response? response) (response-matches-request? request response))
                (->ProviderInvocation descriptor-value request response)
-               (throw (ex-info "provider executor returned a mismatched FRAMRPC response" {:type :provider/response-mismatch}))))
-           (throw (ex-info "accepted provider plan did not lower to FRAMRPC" {:type :provider/request-missing}))))])))
+               (throw (ex-info "provider executor returned a mismatched Store RPC response" {:type :provider/response-mismatch}))))
+           (throw (ex-info "accepted provider plan did not lower to Store RPC" {:type :provider/request-missing}))))])))
 
 (defn invoke-plan-to!
   [(descriptors (Vec ProviderDescriptor))

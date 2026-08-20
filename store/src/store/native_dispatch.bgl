@@ -277,10 +277,10 @@
   (if (= version (store/current-sequence root))
     root
     (let [(copy (Atom t/TermStore)) (store/new-term-store (store/space-id root))
-          (frames (Vec t/TransactionFrame))
-          (store/transaction-frames-between (deref root) 0 version)]
+          (records (Vec t/TransactionRecord))
+          (store/transaction-records-between (deref root) 0 version)]
       (do
-        (doseq [frame frames] (store/replay-transaction! copy frame))
+        (doseq [record records] (store/replay-transaction! copy record))
         copy))))
 
 (defn scan-rotation! [(session schema/Session) (version Int)] rot/Rotation
@@ -594,7 +594,7 @@
 (defn mutation-response-encode-error! [(candidate t/RpcResponse)] String?
   (let [encoded
         (native-wire/encode-response-bytes!
-         (t/->RpcFrameV2 :response 0 0 nil candidate))]
+         (t/->StoreRpcPacketV2 :response 0 0 nil candidate))]
     (native-wire/encoderesult-error encoded)))
 
 (defn commit-mutation!
@@ -631,7 +631,7 @@
           (error-response
            request served-version
            (native-wire/response-encode-error-code encode-error) false
-           "mutation response exceeds FRAMRPC v2 encode limits")
+           "mutation response exceeds Store RPC v2 encode limits")
           (if changed
             (do
               (store/commit-boundary!
@@ -639,7 +639,7 @@
                operations
                (store/commit-metadata "store.rpc/v2"
                                       "store/CommitOperationV1"
-                                      "framrpc-v2"))
+                                      "store-rpc-v2"))
               (schema/refresh! session)
               candidate)
             candidate))))))
@@ -796,4 +796,4 @@
              [:else
               (error-response
                request served-version :rpc/native-operation-unavailable false
-               "FRAMRPC operation has no typed native server route")])))])))
+               "Store RPC operation has no typed native server route")])))])))

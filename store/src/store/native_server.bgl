@@ -17,13 +17,13 @@
 
 (defrecord Status [(code Int) (error String?)])
 
-;; log-byte-count tracks the canonical FRAMLOG length this store has written,
+;; log-byte-count tracks the canonical transaction log length this store has written,
 ;; which is the watermark a checkpoint image records.
 (defrecord Store
   [(canonical-log-path String) (session schema/Session) (log-byte-count Int)])
 
-(defrecord Request [(frame t/RpcFrameV2)])
-(defrecord Response [(frame t/RpcFrameV2)])
+(defrecord Request [(packet t/StoreRpcPacketV2)])
+(defrecord Response [(packet t/StoreRpcPacketV2)])
 
 ;; Optional payloads and errors stay opaque; status and byte fields have fixed
 ;; positions because the C adapter consumes those fields directly.
@@ -81,8 +81,8 @@
    (report String)]
   StoreResult
   (let [completed
-        (log/consume-framlog-header!
-         (log/start-framlog-stream space-id) log-bytes)
+        (log/consume-transaction-log-header!
+         (log/start-transaction-log-stream space-id) log-bytes)
         root (log/bootstream-store completed)
         error (log/bootstream-error completed)]
     (if (and (nil? error) root)
@@ -99,10 +99,10 @@
          report))
       (failed-store
        (error-or error
-                 "native FRAMLOG boot failed")))))
+                 "native transaction log boot failed")))))
 
 ;; An image that installs but whose tail does not continue is never an error:
-;; the boot degrades to the full fold that the FRAMLOG alone always supports.
+;; the boot degrades to the full fold that the transaction log alone supports.
 (defn- snapshot-store!
   [(canonical-log-path String)
    (space-id String)
@@ -130,7 +130,7 @@
                (str "store: snapshot boot degraded to full fold; reason "
                     (str (term-store/termstoreloadresult-code loaded))))
               (let [tail
-                    (log/consume-framlog-frames!
+                    (log/consume-transaction-log-records!
                      (log/->BootStream space-id (term-store/open-fold! root)
                                        watermark [] nil)
                      log-bytes watermark)
@@ -165,10 +165,10 @@
                    (snapshot/bootplan-report plan)))))
 
 (defn wrap-rpc-response
-  [(request-frame t/RpcFrameV2) (rpc-response t/RpcResponse)] Response
+  [(request-packet t/StoreRpcPacketV2) (rpc-response t/RpcResponse)] Response
   (->Response
-   (t/->RpcFrameV2 :response 0
-                   (t/rpcframev2-request-id request-frame)
+   (t/->StoreRpcPacketV2 :response 0
+                   (t/storerpcpacketv2-request-id request-packet)
                    nil rpc-response)))
 
 ;; A checkpoint writes an image beside the log; the log itself is untouched, so
@@ -176,7 +176,7 @@
 (defn checkpoint-response!
   [(store-result StoreResult)
    (store Store)
-   (frame t/RpcFrameV2)
+   (packet t/StoreRpcPacketV2)
    (request t/RpcRequest)
    (now-ms Int)]
   ResponseResult
@@ -190,7 +190,7 @@
        (->ResponseResult
         status-ok
         (wrap-rpc-response
-         frame
+         packet
          (dispatch/error-response request served-version :rpc/space-mismatch
                                   false
                                   "request SpaceId does not match the served store"))
@@ -199,7 +199,7 @@
        (->ResponseResult
         status-ok
         (wrap-rpc-response
-         frame
+         packet
          (dispatch/error-response request served-version :rpc-invalid-payload
                                   false
                                   "operation payload must be :rpc/unit"))
@@ -208,7 +208,7 @@
        (->ResponseResult
         status-ok
         (wrap-rpc-response
-         frame
+         packet
          (dispatch/error-response request served-version :rpc/unexpected-page
                                   false
                                   "rpc/checkpoint does not support paging"))
@@ -220,7 +220,7 @@
            (->ResponseResult
             status-ok
             (wrap-rpc-response
-             frame
+             packet
              (dispatch/response
               request served-version
               (dispatch/rpc-record
@@ -233,7 +233,7 @@
            (->ResponseResult
             status-ok
             (wrap-rpc-response
-             frame
+             packet
              (dispatch/error-response
               request served-version :rpc/checkpoint-unavailable false
               (error-or (snapshot/bytesresult-error encoded)
@@ -246,12 +246,12 @@
    (request-value Request)
    (now-ms Int)]
   ResponseResult
-  (let [frame (request-frame request-value)
-        request (t/rpcframev2-request frame)]
+  (let [packet (request-packet request-value)
+        request (t/storerpcpacketv2-request packet)]
     (if request
       (let [(present t/RpcRequest) request]
         (if (= :rpc/checkpoint (t/rpcrequest-op present))
-          (checkpoint-response! store-result store frame present now-ms)
+          (checkpoint-response! store-result store packet present now-ms)
           (let [session (store-session store)
                 working-session (schema/fork-session session)
                 root (schema/store-of working-session)
@@ -270,7 +270,7 @@
                               (+ (store-log-byte-count store)
                                  (count append-bytes))))]
                 (->ResponseResult status-ok
-                                  (wrap-rpc-response frame rpc-response)
+                                  (wrap-rpc-response packet rpc-response)
                                   nil
                                   append-bytes
                                   next-store
@@ -279,23 +279,23 @@
                                   empty-bytes))
               (failed-response
                (error-or (log/bytesresult-error encoded)
-                         "native FRAMLOG append encoding failed")
+                         "native transaction log append encoding failed")
                store-result)))))
       (failed-response
-       "decoded request frame omitted RpcRequest" store-result))))
+       "decoded request packet omitted RpcRequest" store-result))))
 
 (defn read-request! [(request-bytes ByteSource)] RequestResult
   (let [decoded (native-wire/decode-request-bytes! request-bytes)
-        frame (native-wire/decoderesult-frame decoded)
+        packet (native-wire/decoderesult-packet decoded)
         error (native-wire/decoderesult-error decoded)]
-    (if (and (nil? error) frame)
-      (->RequestResult status-ok (->Request frame) nil)
+    (if (and (nil? error) packet)
+      (->RequestResult status-ok (->Request packet) nil)
       (failed-request
-       (error-or error "native FRAMRPC request decode failed")))))
+       (error-or error "native Store RPC request decode failed")))))
 
 (defn write-response! [(response-value Response)] BytesResult
   (let [encoded
-        (native-wire/encode-response-bytes! (response-frame response-value))
+        (native-wire/encode-response-bytes! (response-packet response-value))
         bytes (native-wire/encoderesult-bytes encoded)
         error (native-wire/encoderesult-error encoded)]
     (if (and (nil? error) bytes)
