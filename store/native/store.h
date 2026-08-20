@@ -3,6 +3,7 @@
 #define BEAGLE_STORE_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #if defined(_WIN32) && defined(BEAGLE_STORE_SHARED)
@@ -50,12 +51,24 @@ typedef struct store_buffer {
   store_deallocate_fn release;
 } store_buffer;
 
-/* A direct compile request is the immutable compiler query identity and its
- * canonical ordered query-fact closure. The digest is the raw SHA-256 bytes;
- * Store revalidates the closure before it is read or persisted. */
+typedef struct store_compile_target {
+  store_slice value;
+} store_compile_target;
+
+/* A direct compile request carries the fact-profile's raw dimensions. Targets
+ * remain an ordered sequence: callers must never pack membership into text.
+ * When has_expected_query_digest is true, Store treats it as a CAS assertion
+ * against fact-profile's recomputed query identity. */
 typedef struct store_compile_request {
-  uint8_t query_digest[32];
-  store_slice query_facts;
+  store_slice source_closure_digest;
+  store_slice compiler_context;
+  store_slice profile;
+  const store_compile_target *targets;
+  size_t target_count;
+  store_slice rules_content_id;
+  store_slice schema_content_id;
+  bool has_expected_query_digest;
+  uint8_t expected_query_digest[32];
 } store_compile_request;
 
 typedef enum store_compile_outcome {
