@@ -213,6 +213,33 @@
                      `(def result Any ,form))))
             (type-check! prog)))))
 
+     (test-case "js/set! enforces known member writes"
+       (check-not-exn
+        (lambda ()
+          (type-check!
+           (jst-parse
+            (jst-preamble
+             '(defrecord Profile [name String])
+             '(defn rename [profile Profile] Any
+                (js/set! profile .name "Bea")))))))
+       (for ([forms
+              (in-list
+               (list
+                (jst-preamble
+                 '(defrecord Profile [name String])
+                 '(defn wrong-value [profile Profile] Any
+                    (js/set! profile .name 42)))
+                (jst-preamble
+                 '(defrecord Profile [name String])
+                 '(defn missing-member [profile Profile] Any
+                    (js/set! profile .age 42)))
+                (jst-preamble
+                 '(defn readonly-native [values (Vec Int)] Any
+                    (js/set! values .length 0)))) )])
+         (check-exn
+          exn:fail?
+          (lambda () (type-check! (jst-parse forms)))))))
+
    ) ;; end type-check suite
 
    ;; ===== Emission =====

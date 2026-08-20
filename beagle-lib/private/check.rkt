@@ -6071,10 +6071,7 @@
     [(jst-selector? e) ANY]
     [(jst-get? e)      (infer-jst-get e env)]
     [(jst-call? e)     (infer-jst-call e env)]
-    [(jst-set? e)
-     (traverse-jst-member
-      (jst-set-receiver e) (jst-set-key e) (list (jst-set-value e)) env)
-     ANY]
+    [(jst-set? e)      (infer-jst-set e env)]
     [(jst-new? e)
      (infer-jst-new e env)]
     [(jst-delete? e)
@@ -6954,6 +6951,55 @@
          "js/call" receiver-type selector e)]
        [else
         (for-each (lambda (arg) (infer-expr arg env)) args)
+        ANY])]))
+
+(define (raise-readonly-jst-member receiver-type selector node)
+  (raise-diag
+   'type-mismatch
+   (format "js/set!: .~a on ~a is not writable"
+           selector (type->string receiver-type))
+   (hasheq 'form "js/set!"
+           'member selector
+           'receiver-type (type->string receiver-type))
+   #:src (src-for node)))
+
+(define (check-jst-member-write! expected value env node)
+  (define actual (infer-expr-with-expected value env expected))
+  (unless (or (check-hvec-literal value expected env (src-for value))
+              (check-atom-ctor value expected env (src-for value))
+              (type-compatible? actual expected))
+    (raise-diag
+     'type-mismatch
+     (format "js/set!: member value expected ~a, got ~a"
+             (type->string expected) (type->string actual))
+     (type-mismatch-details expected actual)
+     #:src (src-for node))))
+
+(define (infer-jst-set e env)
+  (define receiver (jst-set-receiver e))
+  (define key (jst-set-key e))
+  (define value (jst-set-value e))
+  (define receiver-type (infer-expr receiver env))
+  (cond
+    [(not (jst-selector? key))
+     (infer-expr key env)
+     (infer-expr value env)
+     ANY]
+    [else
+     (define selector (jst-selector-name key))
+     (define record-contract
+       (jst-record-member-contract receiver-type selector))
+     (cond
+       [record-contract
+        (check-jst-member-write! record-contract value env e)
+        ANY]
+       [(jst-static-member-contract receiver-type selector)
+        (raise-readonly-jst-member receiver-type selector e)]
+       [(jst-closed-record-receiver? receiver-type)
+        (raise-unknown-jst-record-member
+         "js/set!" receiver-type selector e)]
+       [else
+        (infer-expr value env)
         ANY])]))
 
 (define (infer-jst-new e env [expected-result #f])
