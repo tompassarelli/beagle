@@ -1265,7 +1265,7 @@
     ;; Macro definitions need their exact template before the registry exists.
     ;; Index only those top-level forms here; ordinary call indexing waits until
     ;; registration is complete and then visits registered macro heads only.
-    (doseq [i (range (count datums))]
+    (doseq [i Int (range (count datums))]
       (let [datum (nth datums i)
             value (nth syntaxes i)]
         (when (and (vector? datum)
