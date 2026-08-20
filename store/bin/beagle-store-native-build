@@ -511,6 +511,8 @@ native_server_entries=(
   store.native-server/server-codec-write-response!
   store.native-server/server-codec-release-request
   store.native-server/server-codec-release-response
+  store.native-server/server-compile-query!
+  store.native-server/server-compile-append!
 )
 # The QBE frontier ledger is keyed by the entry set, because that is what
 # selects the native program QBE judges; the default set gets a stable short name.
@@ -936,6 +938,8 @@ write_server_symbols() {
     codec_write_response
     codec_release_request
     codec_release_response
+    compile_query
+    compile_append
   )
   local -a macro_suffixes=(
     GENERATED_ABI
@@ -946,8 +950,13 @@ write_server_symbols() {
     CODEC_WRITE_RESPONSE
     CODEC_RELEASE_REQUEST
     CODEC_RELEASE_RESPONSE
+    COMPILE_QUERY
+    COMPILE_APPEND
   )
-  local -a source_arities=(0 4 3 1 1 1 1 1)
+  # The direct compiler seam accepts raw fact-profile dimensions rather than
+  # an RPC packet or packed closure. Query receives seven dimensions; append
+  # receives those plus five result dimensions.
+  local -a source_arities=(0 4 3 1 1 1 1 1 7 12)
 
   [[ -f "$module_header" ]] || die "C17 materializer omitted module_0.h"
   for index in "${!logical_names[@]}"; do
