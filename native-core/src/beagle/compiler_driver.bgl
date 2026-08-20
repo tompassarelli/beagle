@@ -1,6 +1,8 @@
 #lang beagle
 (ns beagle.compiler-driver
   (:require [beagle.artifact-linker :as linker]
+            [beagle.bootstrap-contract :as bootstrap]
+            [beagle.bootstrap-query :as bootstrap-query]
             [beagle.checker :as checker]
             [beagle.datum-reader :as reader]
             [beagle.fact-materializer :as materializer]
@@ -8,6 +10,7 @@
             [beagle.frontend-facts :as facts]
             [beagle.parser :as parser]
             [beagle.parser-reader :as parser-reader]
+            [beagle.rule-scheduler :as scheduler]
             [beagle.syntax-semantics :as semantics]))
 
 (def max-source-bytes Int 67108864)
@@ -29,8 +32,7 @@
    syntax facts/SyntaxFactClosure])
 
 (defrecord CompileQuery
-  [query-id String
-   facts (Vec profile/CompileQueryFact)
+  [admitted profile/AdmittedQueryClosure
    request CompileBundleRequest])
 
 (defunion CompileQueryAdmissionResult
@@ -81,10 +83,11 @@
        (->CompileQueryAdmissionRejected code detail)]
       [(profile/QueryAdmitted admitted)
        (->CompileQueryReady
-         (->CompileQuery
-           (profile/admittedqueryclosure-query-digest admitted)
-           (profile/admittedqueryclosure-facts admitted)
-           request))])))
+         (->CompileQuery admitted request))])))
+
+(defn compile-query-id [query CompileQuery] String
+  (profile/admittedqueryclosure-query-digest
+    (compilequery-admitted query)))
 
 (defn fact-errors-detail [errors (Vec facts/FactError)] String
   (if (empty? errors)
@@ -144,7 +147,7 @@
   (match (linker/write-and-link config artifact)
     [(linker/ArtifactLinkedV1 executable-path)
      (->CompileBundleMaterialized
-       (compilequery-query-id query)
+       (compile-query-id query)
        (linker/targetartifactv1-digest artifact)
        executable-path)]
     [(linker/ArtifactLinkErrorV1 code detail)
@@ -170,7 +173,7 @@
         "native compile requires exactly one materialization target")
       (match (materializer/materialize
                (materializer/->FactMaterializationRequest
-                 (compilequery-query-id query)
+                 (compile-query-id query)
                  (first targets)
                  (checkedfactclosure-syntax checked)
                  (checked-module-results checked)
