@@ -342,43 +342,46 @@ fi
 result_cache_key=""
 result_cache_entry=""
 if [[ "$result_cache_enabled" == 1 ]]; then
-    result_key_input="$work/native-exe-result.key"
-    compiler_context="$(
-        {
-            printf 'head\0'
-            git -C "$BEAGLE_DIR" rev-parse HEAD
-            printf 'tracked-diff\0'
-            git -C "$BEAGLE_DIR" --no-pager diff --binary --no-ext-diff HEAD --
-        } | sha256sum | awk '{print $1}'
-    )"
-    {
-        printf 'beagle-native-exe-result-v2\0'
-        printf 'compiler-context\0%s\0' "$compiler_context"
-        printf 'entry\0%s\0static\0%s\0' "$entry" "$static_link"
-        printf 'platform\0%s\0' "$(uname -srm)"
-        for tool in "$cc_path" "$(command -v python3)" "$(command -v bb)" "$RACKET"; do
-            tool="$(realpath "$tool")"
-            printf 'tool-digest\0'
-            sha256sum "$tool" | awk '{print $1}'
-        done
-        if [[ -n "${BEAGLE_NATIVE_COMPILER_BIN:-}" ]]; then
-            native_compiler="$(realpath "$BEAGLE_NATIVE_COMPILER_BIN")"
-            printf 'native-compiler-digest\0'
-            sha256sum "$native_compiler" | awk '{print $1}'
-        fi
-        printf 'module-roots\0'
-        for ((root_index = 1; root_index < ${#module_root_args[@]}; root_index += 2)); do
-            printf '%s\0' "${module_root_args[$root_index]%%=*}"
-        done
-        printf 'sources\0'
-        for source_index in "${!closure_sources[@]}"; do
-            printf '%s\0' "${closure_source_ids[$source_index]}"
-            sha256sum "${closure_sources[$source_index]}" | awk '{print $1}'
-        done
-        printf 'ordered-checked-ast-and-interfaces\0'
-        cat "$bundle_ast"
-    } >"$result_key_input"
-    result_cache_key="$(sha256sum "$result_key_input" | awk '{print $1}')"
+    result_key_args=(
+        --bundle "$bundle_ast"
+        --entry "$entry"
+        --static "$static_link"
+        --platform "$(uname -srm)"
+        --semantic "$BEAGLE_DIR/native-core/src/native/core.bclj"
+        --semantic "$BEAGLE_DIR/native-core/src/native/stages.bclj"
+        --semantic "$BEAGLE_DIR/native-core/src/native/simd.bclj"
+        --semantic "$BEAGLE_DIR/native-core/src/native/obligations.bclj"
+        --semantic "$BEAGLE_DIR/native-core/src/native/slice.bclj"
+        --semantic "$BEAGLE_DIR/native-core/src/native/unit_reuse.bclj"
+        --semantic "$BEAGLE_DIR/native-core/src/native/unit_compile.bclj"
+        --lowering "$BEAGLE_DIR/native-core/src/native/lower.bclj"
+        --materializer "$BEAGLE_DIR/native-core/src/native/c11.bclj"
+        --materializer "$BEAGLE_DIR/native-core/src/native/fold_c17.bclj"
+        --materializer "$BEAGLE_DIR/native-core/src/native/body_c17.bclj"
+        --materializer "$BEAGLE_DIR/native-core/src/native/body_slice.bclj"
+        --materializer "$BEAGLE_DIR/native-core/shim/native_shim.c"
+        --materializer "$BEAGLE_DIR/native-core/shim/native_shim.h"
+        --materializer "$BEAGLE_DIR/native-core/shim/native_parallel.c"
+        --materializer "$BEAGLE_DIR/native-core/shim/native_parallel.h"
+        --materializer "$BEAGLE_DIR/native-core/shim/native_unicode15_data.h"
+        --materializer "$BEAGLE_DIR/native-core/shim/UNICODE-LICENSE.txt"
+        --materializer "$BEAGLE_DIR/share/targets.sh"
+        --tool "$CORE_BUILD"
+        --tool "$BIN/beagle-core-compiler-projection"
+        --tool "$BIN/beagle-native-exe"
+        --tool "$BEAGLE_DIR/native-core/bin/source-facts.clj"
+        --tool "$BEAGLE_DIR/native-core/bin/semantic_read_store.clj"
+        --tool "$BEAGLE_DIR/native-core/bin/emit-workers"
+        --tool "$BEAGLE_DIR/native-core/validation/build-finalize.clj"
+        --tool "$cc_path"
+        --tool "$(command -v python3)"
+        --tool "$(command -v bb)"
+        --tool "$RACKET"
+    )
+    if [[ -n "${BEAGLE_NATIVE_COMPILER_BIN:-}" ]]; then
+        result_key_args+=(--native-compiler "$(realpath "$BEAGLE_NATIVE_COMPILER_BIN")")
+    fi
+    result_cache_key="$("$BIN/_beagle-native-exe-result-key" "${result_key_args[@]}")"
     result_cache_entry="$result_cache_root/$result_cache_key"
     if result_cache_entry_valid "$result_cache_entry" "$result_cache_key"; then
         publish_cached_result "$result_cache_entry"
