@@ -331,16 +331,19 @@
          source-facts-content-id "|"
          native-program-content-id)))
 
-(defn byte-source-bytes [source ByteSource] (Vec Int)
-  (loop [offset Int 0 bytes (Vec Int) []]
-    (if (>= offset (count source))
-      bytes
-      (recur (+ offset 1) (conj bytes (nth source offset))))))
+(defn byte-source-bytes! [source ByteSource] (Vec Int)
+  (let [seed (Vec Int) []]
+    (persistent!
+      (loop [offset Int 0
+             bytes (TransientVec Int) (transient seed)]
+        (if (>= offset (count source))
+          bytes
+          (recur (+ offset 1) (conj! bytes (nth source offset))))))))
 
-(defn executable-content-id [path String] String
+(defn executable-content-id! [path String] String
   (str "sha256:"
     (sha256-bytes
-      (byte-source-bytes
+      (byte-source-bytes!
         (host.fs/read-byte-source-bounded-or-die
           path max-native-executable-bytes)))))
 

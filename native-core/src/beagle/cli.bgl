@@ -28,7 +28,7 @@
       (do (host.stderr/write-line bootstrap/bootstrap-contract-command-usage) 0)
       (do (host.stderr/write-line bootstrap/bootstrap-contract-command-usage) 64))))
 
-(defn rebuild-next-command [args (Vec String)] Int
+(defn rebuild-next-command! [args (Vec String)] Int
   (if (and (= 1 (count args))
            (or (= "--help" (first args)) (= "-h" (first args))))
     (do (host.stderr/write-line bootstrap/rebuild-next-command-usage) 0)
@@ -42,7 +42,7 @@
            (host.stderr/write-line (str "beagle: rebuild-next failed: " detail))
            code)]
         [(rebuild/NativeRebuildBundleDecodedV1 bundle)
-         (match (rebuild/rebuild-next bundle (nth args 3) (nth args 5))
+         (match (rebuild/rebuild-next! bundle (nth args 3) (nth args 5))
            [(rebuild/NativeRebuildRejectedV1 code detail)
             (do
               (host.stderr/write-line
@@ -111,7 +111,7 @@
               [(resolver/ModuleSourceRootReadyV1 root)
                (recur (+ offset 3) (conj roots root))])))))))
 
-(defn compile-resolved-command
+(defn compile-resolved-command!
   [source String
    source-id String
    output String
@@ -131,7 +131,7 @@
              "compiler"
              "cc"
              "")]
-       (match (driver/compile-source
+       (match (driver/compile-source!
                 config
                 entry
                 (fn [request driver/ImportResolutionRequestV1]
@@ -145,7 +145,7 @@
             (host.stderr/write-line (str "beagle: compile failed: " detail))
             code)]))]))
 
-(defn compile-command
+(defn compile-command!
   [args (Vec String)
    store driver/CompileStore] Int
   (if (and (>= (count args) 8)
@@ -161,10 +161,10 @@
            (host.stderr/write-line (str "beagle: compile failed: " detail))
            code)]
         [(CliModuleRootsReady roots)
-         (compile-resolved-command source source-id output roots store)]))
+         (compile-resolved-command! source source-id output roots store)]))
     (do (write-usage) 64)))
 
-(defn main-with-store
+(defn main-with-store!
   [args (Vec String)
    store driver/CompileStore] Int
   (if (empty? args)
@@ -173,8 +173,8 @@
           command-args (Vec String) (subvec args 1)]
       (cond
         (= command "syntax") (syntax-command command-args)
-        (= command "compile") (compile-command command-args store)
-        (= command "rebuild-next") (rebuild-next-command command-args)
+        (= command "compile") (compile-command! command-args store)
+        (= command "rebuild-next") (rebuild-next-command! command-args)
         (= command "bootstrap-contract")
         (bootstrap-contract-command command-args)
         (or (= command "--help") (= command "-h"))
@@ -185,13 +185,13 @@
           (write-usage)
           64)))))
 
-(defn native-main [args (Vec String)] Int
+(defn native-main! [args (Vec String)] Int
   (if (empty? args)
     (do (write-native-usage) 64)
     (let [command String (first args)
           command-args (Vec String) (subvec args 1)]
       (cond
-        (= command "rebuild-next") (rebuild-next-command command-args)
+        (= command "rebuild-next") (rebuild-next-command! command-args)
         (= command "bootstrap-contract")
         (bootstrap-contract-command command-args)
         (or (= command "--help") (= command "-h"))
@@ -202,8 +202,8 @@
           (write-native-usage)
           64)))))
 
-(defn main [args (Vec String)] Int
-  (native-main args))
+(defn main! [args (Vec String)] Int
+  (native-main! args))
 
 (defn -main [args (Vec String)] Int
-  (main-with-store args host.store/compile))
+  (main-with-store! args host.store/compile))

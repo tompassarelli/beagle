@@ -233,7 +233,7 @@
             executable-content-id
             (bootstrap/lineage-content-id lineage))])])))
 
-(defn rebuild-next
+(defn rebuild-next!
   [bundle NativeRebuildBundleV1
    output-directory String
    parent-lineage-path String] NativeRebuildResultV1
@@ -247,7 +247,7 @@
          (->NativeRebuildRejectedV1 65 detail)]
         [(bootstrap/NativeCompilerLineageDecodedV1 parent)
          (let [actual-parent-executable-content-id String
-               (bootstrap/executable-content-id parent-executable)]
+               (bootstrap/executable-content-id! parent-executable)]
            (if (not= actual-parent-executable-content-id
                      (bootstrap/nativecompilerlineagev1-executable-content-id
                        parent))
@@ -268,5 +268,5 @@
                  [(linker/ArtifactLinkedV1 executable-path)
                   (write-rebuild-metadata
                     layout bundle
-                    (bootstrap/executable-content-id executable-path)
+                    (bootstrap/executable-content-id! executable-path)
                     parent)]))))]))))

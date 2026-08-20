@@ -1012,7 +1012,7 @@
           nil))
       (facts/syntaxfactclosure-modules closure))))
 
-(defn write-success-output-metadata
+(defn write-success-output-metadata!
   [output-directory String
    semantic-content-id String
    materialization-content-id String
@@ -1025,7 +1025,7 @@
         lineage-path String
         (bootstrap/nativeartifactlayoutv1-lineage-path layout)
         executable-content-id String
-        (bootstrap/executable-content-id executable-path)
+        (bootstrap/executable-content-id! executable-path)
         manifest String
         (bootstrap/native-seed-artifact-payload
           (bootstrap/native-seed-artifact
@@ -1051,29 +1051,29 @@
              (->CompileBundleError errno "could not write compiler lineage")]
             [(host.fs/WriteTextAtomicOk) result])])])))
 
-(defn write-output-metadata
+(defn write-output-metadata!
   [output-directory String
    result CompileBundleResult] CompileBundleResult
   (match result
     [(CompileBundleError code detail) (->CompileBundleError code detail)]
     [(CompileBundleWarm content-id artifact-id executable-path)
-     (write-success-output-metadata
+     (write-success-output-metadata!
        output-directory content-id artifact-id executable-path result)]
     [(CompileBundleMaterialized content-id artifact-id executable-path)
-     (write-success-output-metadata
+     (write-success-output-metadata!
        output-directory content-id artifact-id executable-path result)]))
 
-(defn complete-compile-output
+(defn complete-compile-output!
   [output-directory String
    result CompileBundleResult] CompileBundleResult
-  (write-output-metadata output-directory result))
+  (write-output-metadata! output-directory result))
 
 (defn closure-source-paths
   [syntax facts/SyntaxFactClosure] (Vec String)
   (mapv facts/syntaxfactbundle-path
     (facts/syntaxfactclosure-modules syntax)))
 
-(defn compile-checked-source
+(defn compile-checked-source!
   [config CompileSourceConfig
    syntax facts/SyntaxFactClosure
    checked CheckedFactClosure
@@ -1107,12 +1107,12 @@
                   (bootstrap/nativeartifactlayoutv1-executable-path layout)
                   (compilesourceconfig-c-compiler config)
                   (compilesourceconfig-qbe-compiler config))]
-            (complete-compile-output
+            (complete-compile-output!
               (compilesourceconfig-output-directory config)
               (compile-stored-query query checked namespace "main"
                 link-config program-plan store)))]))]))
 
-(defn compile-closed-source
+(defn compile-closed-source!
   [config CompileSourceConfig
    syntax facts/SyntaxFactClosure
    raw-modules (Vec facts/SyntaxFactBundle)
@@ -1123,9 +1123,9 @@
      (let [namespace String? (entry-namespace syntax)]
        (if (nil? namespace)
          (->CompileBundleError 65 "entry source does not declare a namespace")
-         (compile-checked-source config syntax checked namespace store)))]))
+         (compile-checked-source! config syntax checked namespace store)))]))
 
-(defn compile-source
+(defn compile-source!
   [config CompileSourceConfig
    entry ResolvedSourceFactsV1
    resolver ImportResolverV1
@@ -1139,7 +1139,7 @@
         [(SourceFactsCollectionRejectedV1 code detail receipts)
          (->CompileBundleError code detail)]
         [(SourceFactsCollectedV1 collected)
-         (compile-closed-source
+         (compile-closed-source!
            config
            (collectedsourcefactsv1-closure collected)
            (collectedsourcefactsv1-raw-modules collected)

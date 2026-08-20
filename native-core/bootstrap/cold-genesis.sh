@@ -49,7 +49,7 @@ BEAGLE_DEV_FACT_REUSE=0 \
   "$repo/bin/beagle-native-exe" \
     --out "$stage/bin/beagle" \
     --artifacts "$artifacts" \
-    --entry beagle.cli/main \
+    --entry beagle.cli/main! \
     --module-root "native-core/src=$repo/native-core/src" \
     --module-root "store/src=$repo/store/src" \
     -- "$repo/native-core/src/beagle/cli.bgl" \
