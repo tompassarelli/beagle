@@ -1,0 +1,19 @@
+#lang beagle
+
+(ns native.host-store-lowering-fixture
+  (:require [beagle.compiler-driver :as driver]))
+
+(defn main! [] Int
+  (let [request driver/CompileStoreRequest
+        (driver/->CompileStoreAdmitProgram
+          (driver/->ProgramAdmissionPlan
+            "fixture.store"
+            "host-store-lowering"
+            "compiler-context"
+            "closure-digest"
+            :debug
+            "root"
+            []))
+        response driver/CompileStoreResponse
+        (host.store/compile request)]
+    0))

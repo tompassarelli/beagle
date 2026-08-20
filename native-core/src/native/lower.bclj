@@ -25898,6 +25898,8 @@
                      (host-stderr-write-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-stderr-write-line-abi-id)) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-store-abi-id)) 1 0)
                (if (or
                      (any-function-calls-abi? typed-functions
                        (host-filesystem-abi-id "read-text-bounded"))
