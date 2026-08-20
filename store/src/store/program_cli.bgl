@@ -10,7 +10,6 @@
             [beagle.program-projection :as projection]
             [beagle.program-read :as read]
             [beagle.program-transaction :as transaction]
-            [store.compiler-adapter :as adapter]
             [store.datalog :as d]
             [store.kernel :as kernel]
             [store.native-dispatch :as dispatch]
@@ -21,6 +20,20 @@
             [store.schema :as schema]
             [store.store :as term-store]
             [store.types :as t]))
+
+(def max-store-log-bytes Int 67108864)
+
+(defn- failed-store [detail String] server/StoreResult
+  (server/->StoreResult server/status-fatal nil detail 0 [] ""))
+
+(defn- append-log!
+  [path String bytes (Vec Int)] String?
+  (if (empty? bytes)
+    nil
+    (match (host.fs/append-bytes path bytes)
+      [(host.fs/AppendBytesOk) nil]
+      [(host.fs/AppendBytesError errno)
+       (str "could not append Store log: " path)])))
 
 (def usage String
   (str
@@ -809,7 +822,7 @@
                         (->ExecutionFailed 74 detail)]
                        [(transaction/CommitReceiptAccepted receipt)
                         (let [append-error String?
-                              (adapter/append-log!
+                              (append-log!
                                 log-path
                                 (server/responseresult-append-bytes dispatched))]
                           (if (some? append-error)
@@ -961,12 +974,12 @@
   [path String space-id String] server/StoreResult
   (let [source ByteSource
         (host.fs/read-byte-source-bounded-or-die
-          path adapter/max-store-log-bytes)
+          path max-store-log-bytes)
         opened server/StoreResult
         (server/server-store-boot! path space-id source (subvec source 0 0))]
     (if (= (count source) (server/storeresult-valid-log-bytes opened))
       opened
-      (adapter/failed-store
+      (failed-store
         "Store log contains an incomplete or unrecognized byte tail"))))
 
 (defn- execute-locked!
@@ -1020,7 +1033,7 @@
     (let [path String (programinvocation-log-path invocation)
           preflight ByteSource
           (host.fs/read-byte-source-bounded-or-die
-            path adapter/max-store-log-bytes)]
+            path max-store-log-bytes)]
       (run-locked! invocation))
     (catch Exception problem
       (report-result

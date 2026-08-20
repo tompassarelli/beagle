@@ -46,6 +46,21 @@ base_root='"program-cli-root-v1"'
 next_root='"program-cli-root-v2"'
 binding="[\"fixture/shadowing-rename.bgl\" :declares_at $binding_node_index]"
 
+locked_before_hash="$(sha256sum "$store_log" | awk '{print $1}')"
+exec 9<>"$store_log"
+flock -x 9
+set +e
+"$program_executable" "$space" "$store_log" inspect "$base_root" 1 \
+  >"$scratch/locked.stdout" 2>"$scratch/locked.stderr"
+locked_status=$?
+set -e
+flock -u 9
+exec 9>&-
+locked_after_hash="$(sha256sum "$store_log" | awk '{print $1}')"
+[[ "$locked_status" == 75 ]]
+[[ "$locked_before_hash" == "$locked_after_hash" ]]
+grep -Fq 'Store log is absent or locked' "$scratch/locked.stderr"
+
 cp "$store_log" "$scratch/torn.storelog"
 printf '\001' >>"$scratch/torn.storelog"
 torn_before_hash="$(sha256sum "$scratch/torn.storelog" | awk '{print $1}')"
