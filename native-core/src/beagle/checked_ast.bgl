@@ -1,0 +1,127 @@
+#lang beagle
+(ns beagle.checked-ast)
+
+(defunion CheckedField
+  (CheckedTextField [name String value String])
+  (CheckedBoolField [name String value Bool])
+  (CheckedIntField [name String value Int])
+  (CheckedNodeField [name String target Int])
+  (CheckedNodesField [name String targets (Vec Int)])
+  (CheckedTextsField [name String values (Vec String)]))
+
+(defrecord CheckedNode
+  [kind String
+   fields (Vec CheckedField)])
+
+(defrecord CheckedModule
+  [path String
+   namespace String
+   target String
+   source-digest String
+   projection-digest String
+   interface-digest String?
+   imports (Vec String)
+   form-roots (Vec Int)
+   nodes (Vec CheckedNode)])
+
+(defrecord CheckedBundle
+  [modules (Vec CheckedModule)])
+
+(defn node-at [module CheckedModule target Int] CheckedNode
+  (nth (checkedmodule-nodes module) target))
+
+(defn text-field [node CheckedNode name String] String?
+  (reduce
+    (fn [found String? field CheckedField] String?
+      (if (some? found)
+        found
+        (match field
+          [(CheckedTextField field-name value)
+           (if (= field-name name) value nil)]
+          [(CheckedBoolField field-name value) nil]
+          [(CheckedIntField field-name value) nil]
+          [(CheckedNodeField field-name target) nil]
+          [(CheckedNodesField field-name targets) nil]
+          [(CheckedTextsField field-name values) nil])))
+    nil
+    (checkednode-fields node)))
+
+(defn bool-field [node CheckedNode name String] Bool?
+  (reduce
+    (fn [found Bool? field CheckedField] Bool?
+      (if (some? found)
+        found
+        (match field
+          [(CheckedBoolField field-name value)
+           (if (= field-name name) value nil)]
+          [(CheckedTextField field-name value) nil]
+          [(CheckedIntField field-name value) nil]
+          [(CheckedNodeField field-name target) nil]
+          [(CheckedNodesField field-name targets) nil]
+          [(CheckedTextsField field-name values) nil])))
+    nil
+    (checkednode-fields node)))
+
+(defn int-field [node CheckedNode name String] Int?
+  (reduce
+    (fn [found Int? field CheckedField] Int?
+      (if (some? found)
+        found
+        (match field
+          [(CheckedIntField field-name value)
+           (if (= field-name name) value nil)]
+          [(CheckedTextField field-name value) nil]
+          [(CheckedBoolField field-name value) nil]
+          [(CheckedNodeField field-name target) nil]
+          [(CheckedNodesField field-name targets) nil]
+          [(CheckedTextsField field-name values) nil])))
+    nil
+    (checkednode-fields node)))
+
+(defn node-field [node CheckedNode name String] Int?
+  (reduce
+    (fn [found Int? field CheckedField] Int?
+      (if (some? found)
+        found
+        (match field
+          [(CheckedNodeField field-name target)
+           (if (= field-name name) target nil)]
+          [(CheckedTextField field-name value) nil]
+          [(CheckedBoolField field-name value) nil]
+          [(CheckedIntField field-name value) nil]
+          [(CheckedNodesField field-name targets) nil]
+          [(CheckedTextsField field-name values) nil])))
+    nil
+    (checkednode-fields node)))
+
+(defn nodes-field [node CheckedNode name String] (Vec Int)
+  (reduce
+    (fn [found (Vec Int) field CheckedField] (Vec Int)
+      (if (> (count found) 0)
+        found
+        (match field
+          [(CheckedNodesField field-name targets)
+           (if (= field-name name) targets [])]
+          [(CheckedTextField field-name value) []]
+          [(CheckedBoolField field-name value) []]
+          [(CheckedIntField field-name value) []]
+          [(CheckedNodeField field-name target) []]
+          [(CheckedTextsField field-name values) []])))
+    []
+    (checkednode-fields node)))
+
+(defn texts-field [node CheckedNode name String] (Vec String)
+  (reduce
+    (fn [found (Vec String) field CheckedField] (Vec String)
+      (if (> (count found) 0)
+        found
+        (match field
+          [(CheckedTextsField field-name values)
+           (if (= field-name name) values [])]
+          [(CheckedTextField field-name value) []]
+          [(CheckedBoolField field-name value) []]
+          [(CheckedIntField field-name value) []]
+          [(CheckedNodeField field-name target) []]
+          [(CheckedNodesField field-name targets) []])))
+    []
+    (checkednode-fields node)))
