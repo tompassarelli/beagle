@@ -100,6 +100,8 @@
     "(defn compose [(outer (Fn [String] Bool)) (inner (Fn [Int] String))] (Fn [Int] Bool) (fn [(value Int)] Bool (outer (inner value))))")
 (ok "let and loop bindings"
     "(defn f [(x Int)] Int (let [(y Int) x z y] (loop [(n Int) z] n)))")
+(ok "flat let and loop binding triples"
+    "(defn f [(x Int)] Int (let [y Int x] (loop [n Int y] n)))")
 (ok "conditional binding"     "(defn f [(x Int)] Int (if-let [(y Int) x] y 0))")
 (ok "for and nested :let"
     "(defn f [(xs (Vec Int))] (Vec Int) (for [(x Int) xs :let [(y Int) x]] y))")

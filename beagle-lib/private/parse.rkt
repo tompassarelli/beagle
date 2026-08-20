@@ -3316,7 +3316,8 @@
   (lambda (d subs)
     (match d
       [(list 'let bindings-form body ...)
-       (let-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+       (let-form (parse-local-bindings
+                  (or (stx-ref subs 1) bindings-form) "let binding")
                  (parse-body (or (stx-tail subs 2) body)))]
       [_ (parse-list-form* d subs)])))
 
@@ -3334,7 +3335,8 @@
   (lambda (d subs)
     (match d
       [(list 'loop bindings-form body ...)
-       (loop-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+       (loop-form (parse-local-bindings
+                   (or (stx-ref subs 1) bindings-form) "loop binding")
                   (parse-body (or (stx-tail subs 2) body)))]
       [_ (parse-list-form* d subs)])))
 
@@ -5319,6 +5321,15 @@
    (hash-set (source-error-details source-stx binder)
              'binder (binding-datum->src binder))))
 
+(define (raise-missing-binding-initializer context binder [source-stx #f])
+  (raise-parse-error
+   'bad-form
+   "~a ~a has no following initializer"
+   context (binding-datum->src binder)
+   #:details
+   (hash-set (source-error-details source-stx binder)
+             'binder (binding-datum->src binder))))
+
 ;; Repair hints feed the automated repair loop, so every declaration-site
 ;; rejection spells the grammar it wants back. Record fields are pairs
 ;; (rule 4c) and a field-local validator is a refinement type (rule 3).
@@ -5577,6 +5588,51 @@
        (error 'beagle
               "map destructure: unsupported entry ~v — supported: {:keys [names] :or {name default} :as name}"
               (car rest))])))
+
+(define (parse-flat-triple-bindings b context)
+  (define d (->datum b))
+  (define psubs (stx-subs b))
+  (define items (bracket-items b (string-append context "s")))
+  (define item-stxs (bracket-stxs psubs d))
+  (let loop ([rest items] [stxs item-stxs] [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      [(null? (cdr rest))
+       (raise-missing-binding-type context (car rest) (and stxs (car stxs)))]
+      [(null? (cddr rest))
+       (raise-missing-binding-initializer context (car rest)
+                                          (and stxs (car stxs)))]
+      [else
+       (define binder (car rest))
+       (define binder-stx (and stxs (car stxs)))
+       (define type-datum (cadr rest))
+       (define value-stx (and stxs (caddr stxs)))
+       (define name (parse-binding-form binder context))
+       (define binding
+         (store-src!
+          (let-binding name (parse-type type-datum) #f
+                       (parse-expr (or value-stx (caddr rest))))
+          (and binder-stx (stx->src-loc binder-stx))))
+       (loop (cdddr rest)
+             (and stxs (cdddr stxs))
+             (cons (register-syntax-binder! binding binder-stx) acc))])))
+
+;; Ruling 22 deliberately stages the migration: local-binding vectors dual-read
+;; until the corpus has authored every type, then the final migration commit
+;; removes the legacy pair/grouped path. A type-shaped second slot selects the
+;; new `binding Type initializer` grammar; all other vectors retain the current
+;; pair reader during that bounded bridge.
+(define (parse-local-bindings b context)
+  (define items (bracket-items b (string-append context "s")))
+  (cond
+    [(null? items) (parse-let-bindings b)]
+    [(null? (cdr items))
+     (define item-stxs (bracket-stxs (stx-subs b) (->datum b)))
+     (raise-missing-binding-type context (car items)
+                                 (and item-stxs (car item-stxs)))]
+    [(type-expression-datum? (cadr items))
+     (parse-flat-triple-bindings b context)]
+    [else (parse-let-bindings b)]))
 
 (define (parse-let-bindings b)
   (define d (->datum b))

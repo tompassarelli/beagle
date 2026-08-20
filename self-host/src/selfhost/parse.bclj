@@ -2541,10 +2541,10 @@
               "` more than once; every nested destructuring name and :as alias must be unique")))
     parsed))
 
-;; --- parse-let-bindings! ------------------------------------------------------
-;; Each binding target and value remain an ordinary pair. A typed target is one
-;; structural `(binding-form Type [constraint])` datum, so it never perturbs
-;; pair arity.
+;; --- local binding parsers ----------------------------------------------------
+;; Ruling 22 stages local-binding migration. The current pair/grouped reader
+;; remains available while the new flat triple reader is enabled; the final
+;; migration commit removes the old path after every type is authored.
 (defn parse-let-bindings! [(b Any)] Any
   (let [items (unwrap-items b)
         n (count items)
@@ -2586,6 +2586,40 @@
         :else
         (do (err! (str "bad let bindings at: " (str (nth items i)))) acc)))]
     parsed))
+
+(defn- parse-flat-triple-bindings! [(b Any) (context String)] Any
+  (let [items (unwrap-items b)
+        n (count items)]
+    (loop [(i Int) 0 (acc Any) []]
+      (cond
+        (>= i n)
+        acc
+        (>= (+ i 2) n)
+        (do
+          (err! (str context " `" (binding-datum->src (nth items i))
+                     "` requires a type and initializer"))
+          acc)
+        :else
+        (let [binder (nth items i)
+              name (parse-binding-form! binder context)]
+          (recur (+ i 3)
+            (conj acc
+              (make-let-binding! name
+                (parse-type* (nth items (+ i 1)))
+                nil
+                (parse-expr* (nth items (+ i 2)))))))))))
+
+(defn- parse-local-bindings! [(b Any) (context String)] Any
+  (let [items (unwrap-items b)]
+    (cond
+      (= (count items) 0)
+      (parse-let-bindings! b)
+      (= (count items) 1)
+      (do (missing-binding-type! context (nth items 0)) [])
+      (type-expression-datum? (nth items 1))
+      (parse-flat-triple-bindings! b context)
+      :else
+      (parse-let-bindings! b))))
 
 ;; --- parse-record-fields! -----------------------------------------------------
 ;; Fields use the same dual reader as executable parameters and always carry a
@@ -4187,7 +4221,7 @@
       (= head "fn")
       (err! "fn needs a return type and body — write `(fn [params] ReturnType body...)`")
       (and (= head "let") (>= (count rest-items) 1))
-      (make-let (parse-let-bindings! (nth rest-items 0))
+      (make-let (parse-local-bindings! (nth rest-items 0) "let binding")
         (mapv parse-expr* (subvec rest-items 1)))
       (and (= head "binding") (>= (count rest-items) 1))
       {"node"
@@ -4202,7 +4236,7 @@
       (make-letfn (parse-letfn-fns! (nth rest-items 0))
         (mapv parse-expr* (subvec rest-items 1)))
       (and (= head "loop") (>= (count rest-items) 1))
-      (make-loop (parse-let-bindings! (nth rest-items 0))
+      (make-loop (parse-local-bindings! (nth rest-items 0) "loop binding")
         (mapv parse-expr* (subvec rest-items 1)))
       (= head "recur")
       (make-recur (mapv parse-expr* rest-items))
@@ -5616,6 +5650,11 @@
         (= (count (get node "bindings")) 2)
         (= (get (nth (get node "bindings") 0) "name") "x")
         (= (get (nth (get node "bindings") 1) "name") "y"))))
+  (expect! "let with flat typed triples"
+    (let [node (parse-expr* ["let" [BRACKET-TAG "x" "Int" 1 "y" "Int" 2] ["+" "x" "y"]])]
+      (and (= (count (get node "bindings")) 2)
+        (= (get (get (nth (get node "bindings") 0) "ann") "name") "Int")
+        (= (get (get (nth (get node "bindings") 1) "ann") "name") "Int"))))
   (expect! "binding form (dynamic-var rebinding, let-binding shape)"
     (let [node (parse-expr* ["binding" [BRACKET-TAG "*out*" "*err*"] ["println" ["#%string" "x"]]])]
       (and (= (get node "node") "binding")
@@ -5674,6 +5713,9 @@
       (and (= (get node "node") "loop")
         (= (count (get node "bindings")) 1)
         (= (get (nth (get node "bindings") 0) "name") "i"))))
+  (expect! "loop with a flat typed triple"
+    (let [node (parse-expr* ["loop" [BRACKET-TAG "i" "Int" 0] ["recur" ["+" "i" 1]]])]
+      (= (get (get (nth (get node "bindings") 0) "ann") "name") "Int")))
   (expect! "recur"
     (let [node (parse-expr* ["recur" 1 2])]
       (and (= (get node "node") "recur") (= (count (get node "args")) 2))))
@@ -6091,6 +6133,13 @@
       (and (= (count bindings) 2)
         (= (get (nth bindings 0) "name") "x")
         (= (get (nth bindings 1) "name") "y"))))
+  (expect! "parse-local-bindings! flat triples"
+    (let [bindings (parse-local-bindings!
+                     [BRACKET-TAG "x" "Int" 1 "y" "Int" 2]
+                     "let binding")]
+      (and (= (count bindings) 2)
+        (= (get (get (nth bindings 0) "ann") "name") "Int")
+        (= (get (get (nth bindings 1) "ann") "name") "Int"))))
   (expect! "unsafe-js rejected"
     (do
       (reset-errors!)
