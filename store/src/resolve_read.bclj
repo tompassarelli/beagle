@@ -27,7 +27,7 @@
 ;; predicate need not be interned before it can be asked about, so the
 ;; "value-id missing -> nil" early exits are gone: an unregistered predicate
 ;; simply has no live occurrences. select-causal-1 and select-main-1 now agree,
-;; because a frame store's transaction sequence IS the causal order the old tx
+;; because a record store's transaction sequence IS the causal order the old tx
 ;; :observed/:seq metadata stood in for.
 ;;
 ;; Consumed by resolve.clj (aliases these behind wrappers) — so the emitted

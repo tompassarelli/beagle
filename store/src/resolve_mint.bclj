@@ -173,8 +173,8 @@
             :else
             (mint-leaf-on! m builder src "other" (pr-str d))))))))
 
-;; ONE frame per minted subtree: every coordinate in it is durable on that
-;; frame's own assertions, and a half-minted subtree can never be observed.
+;; ONE source context per minted subtree: every coordinate in it is durable on that
+;; source context's own assertions, and a half-minted subtree can never be observed.
 (defn mint-datum! [(m Mint) (src String) (d Any)] Any
   (let [ctx (:ctx m) builder (ri/open ctx) root (mint-datum-on! m builder src d)]
     (do (ri/commit! ctx builder) root)))
@@ -199,18 +199,18 @@
 ;; e.g. (def src 1)(defn f [dst] (+ dst src)), rename src->dst yields (+ dst dst).
 ;; A reference that resolves to B (unqualified, name-tracking — not a
 ;; :rename-fixed or x/qualified ref, which don't render as a bare `new`) is
-;; captured iff `new` is in its scope. capture-refs reuses walk's EXACT frame
+;; captured iff `new` is in its scope. capture-refs reuses walk's EXACT context
 ;; construction (param-binds, let-bind-pairs, for-bind-pairs,
-;; match-pat-binds, frame-of), so the check is scope-precise — the two
+;; match-pat-binds, context-of), so the check is scope-precise — the two
 ;; walkers must agree or a rename is either wrongly rejected or wrongly allowed.
 ;;
-;; Scope is a (Vec Any) of frames here, innermost first, as in Cut G's walk!
+;; Scope is a (Vec Any) of contexts here, innermost first, as in Cut G's walk!
 ;; (the original threaded a cons-list; resolve.clj's wrapper vecs it). `new` is
 ;; spelled `newnm` — Beagle reserves nothing, but `new` reads as host interop.
 ;; The Int-typing sentinel is gone with the widening: a node id is a Term.
 (defn- nn [(e Any)] Any e)
 
-(defn- push [(frame Any) (scope (Vec Any))] (Vec Any) (into [frame] scope))
+(defn- push [(context Any) (scope (Vec Any))] (Vec Any) (into [context] scope))
 
 ;; a reference that will render the binding's CURRENT name: not :rename-fixed
 ;; (keeps its own spelling) and not x/qualified (renders alias/, so a bare local
@@ -228,7 +228,7 @@
         (if (and (some? target)
               (= B (rv/ultimate ctx view BOUND REFERS target))
               (renders-as-tracked-name? m node)
-              (some? (some (fn [(frame Any)] Any (get frame newnm)) scope)))
+              (some? (some (fn [(context Any)] Any (get context newnm)) scope)))
           [node]
           []))
       (= "list" k)
@@ -245,7 +245,7 @@
             cap-signature (fn
                             [(signature Any) (arity-scope (Vec Any))] (Vec Any)
                             (let [params (get signature :params)
-                                  frame (rb/frame-of ctx view
+                                  context (rb/context-of ctx view
                                           (if (nil? params)
                                             []
                                             (rb/param-binds ctx view params)))
@@ -267,7 +267,7 @@
                                 (into
                                   (capture-all constraints arity-scope)
                                   (capture-all or-vals arity-scope))
-                                (capture-all body (push frame arity-scope)))))
+                                (capture-all body (push context arity-scope)))))
             cap-arity (fn
                         [(forms (Vec Any))
                          (macro? Bool)
@@ -401,7 +401,7 @@
                                                      (capture-refs m value-node active-scope B newnm))
                                                    after-constraint)]
                                              [(push
-                                                (rb/frame-of ctx view binds)
+                                                (rb/context-of ctx view binds)
                                                 active-scope)
                                               after-value]))
                                    [scope []]
@@ -454,7 +454,7 @@
                                                                        newnm))
                                                                    after-constraint)]
                                                  [(push
-                                                    (rb/frame-of ctx view binds)
+                                                    (rb/context-of ctx view binds)
                                                     active-scope)
                                                   after-value]))))
                                    [scope []]
@@ -471,12 +471,12 @@
                                                (rr/ordered-children ctx clause)))
                             pattern (nth clause-children 0 nil)
                             body (vec (rest clause-children))
-                            frame (rb/frame-of ctx view
+                            context (rb/context-of ctx view
                                     (rb/match-pat-binds ctx view pattern))]
                         (into
                           (into acc
                             (capture-refs m pattern scope B newnm))
-                          (capture-all body (push frame scope))))
+                          (capture-all body (push context scope))))
                       acc))
             (capture-refs m (nth kids 1 nil) scope B newnm)
             (vec (drop 2 kids)))
@@ -489,13 +489,13 @@
                                 (= "list" (rr/kind-of ctx view form)))
                               (vec (rest (rr/ordered-children ctx bracket)))))
                           [])
-                frame (rb/frame-of ctx view
+                context (rb/context-of ctx view
                         (vec
                           (keep
                             (fn [(form Any)] Any
                               (nth (rr/ordered-children ctx form) 0 nil))
                             fnlists)))
-                body-scope (push frame scope)
+                body-scope (push context scope)
                 function-captures (reduce (fn
                                             [(acc (Vec Any))
                                              (form Any)]
@@ -545,7 +545,7 @@
           (= "as->" head)
           (let [init (nth kids 1 nil)
                 name-node (nth kids 2 nil)
-                frame (rb/frame-of ctx view
+                context (rb/context-of ctx view
                         (if (some? (rr/sym-val ctx view name-node))
                           [(nn name-node)]
                           []))
@@ -555,7 +555,7 @@
             (into initial
               (capture-all
                 (vec (drop 3 kids))
-                (push frame scope))))
+                (push context scope))))
           :else
           (capture-all kids scope)))
       :else
@@ -681,19 +681,19 @@
       (mapv (fn [(s String)] Any (str "projected -> " (f s) "   <- " s))
         srcs))))
 
-;; re-resolve! — after a mint the module frame is stale (a new def, or a new body's
-;; references), so recompute every module's three frames and re-walk. The `binding`
+;; re-resolve! — after a mint the module context is stale (a new def, or a new body's
+;; references), so recompute every module's three contexts and re-walk. The `binding`
 ;; of *xresolve*/*tresolve*/*aresolve* IS the dynamic scope and cannot move, so this
 ;; ports the portable half: the three per-src tables the re-walk reads. Idempotent —
 ;; bind! only adds an edge where one resolves.
-(defn re-resolve-frames
+(defn re-resolve-contexts
   [(srcs (Vec String)) (mdefs Any) (mtypes Any) (maccs Any)] (Map Keyword Any)
   (let [fd mdefs ft mtypes fa maccs]
-    {:modframe
+    {:module-context
      (reduce (fn [(acc (Map Any Any)) (s String)] (Map Any Any) (assoc acc s (fd s)))
        {}
        srcs)
-     :typeframe
+     :type-context
      (reduce (fn [(acc (Map Any Any)) (s String)] (Map Any Any) (assoc acc s (ft s)))
        {}
        srcs)

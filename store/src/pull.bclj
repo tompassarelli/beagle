@@ -1,7 +1,7 @@
 #lang beagle/clj
 
 ;; Local nested-shape compatibility projection over an immutable TermStore.
-;; This module does not add a pull operation to the live FRAMRPC surface.
+;; This module does not add a pull operation to the live Store RPC surface.
 (ns pull)
 
 
@@ -304,7 +304,7 @@
                    (visited (Set Any))]
                   Any
                   (if (> (inc depth) max-depth)
-                    {:fram/id (nm-of target) :fram/truncated true}
+                    {:store/id (nm-of target) :store/truncated true}
                     (node target (nm-of target) subpattern
                       (inc depth) visited)))
                 (elem
@@ -418,9 +418,9 @@
                   Any
                   (cond
                     (contains? visited subject)
-                    {:fram/id name :fram/cycle true}
+                    {:store/id name :store/cycle true}
                     (>= (deref state) max-nodes)
-                    {:fram/id name :fram/truncated true}
+                    {:store/id name :store/truncated true}
                     :else
                     (do
                       (swap! state (fn [(count Int)] Int (inc count)))
@@ -428,13 +428,13 @@
                         (fn [(acc Any) (element Any)] Any
                           (elem acc subject depth
                             (conj visited subject) element))
-                        {:fram/id name}
+                        {:store/id name}
                         requested))))]
           (let [one
                 (fn [(name Any)] Any
                   (let [subject (s/resolve-name schema name)]
                     (if (nil? subject)
-                      {:fram/id name}
+                      {:store/id name}
                       (node subject name pattern 0 #{}))))]
             (if (vector? root)
               (mapv (fn [(name Any)] Any (one name)) root)

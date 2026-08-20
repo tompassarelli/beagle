@@ -1,5 +1,5 @@
 #lang beagle/clj
-;; FRI is a disposable acceleration cache over a canonical TermStore/FRAMLOG.
+;; FRI is a disposable acceleration cache over the canonical Beagle Store log.
 ;; Its private handles never cross the semantic API boundary.
 (ns fri-port
   (:require [store.store :as store]
@@ -12,7 +12,7 @@
            [java.util Arrays HexFormat]))
 
 
-(def MAGIC String "FRAMFRI2")
+(def MAGIC String "BEAGLEFRI2")
 (def FMT Int 2)
 (def FLAGS Int 0)
 (def PAYLOAD-FLAGS Int 0)
@@ -549,7 +549,7 @@
       (fail "fri: cache belongs to a different SpaceId" :cache-space-mismatch)
       (if (not (and (= stored-fingerprint (cachesource-fingerprint source))
                     (= stored-position (cachesource-valid-bytes source))))
-        (fail "fri: cache does not match the canonical FRAMLOG prefix"
+        (fail "fri: cache does not match the canonical Beagle Store log prefix"
               :cache-source-mismatch)
         (if (not (Arrays/equals stored-sha (sha256-bytes payload)))
           (fail "fri: cache payload checksum mismatch" :invalid-fri-cache)

@@ -15,8 +15,8 @@
 ;; A Graph carries the store root with the rotation built from it (store.schema's
 ;; Session rule) plus the writer attribution the Term store does not record. A
 ;; fact is named by its assertion occurrence coordinate. `mint!` emits no
-;; operation, so a whole subtree or corpus file shares one frame and every
-;; coordinate in it is durable on that frame's own assertions.
+;; operation, so a whole subtree or corpus file shares one source context and every
+;; coordinate in it is durable on that source context's own assertions.
 (ns resolve-ident)
 
 

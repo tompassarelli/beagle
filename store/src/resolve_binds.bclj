@@ -289,7 +289,7 @@
                  (collect-or-vals ctx view binding)
                  constraint]))))))))
 
-(defn frame-of
+(defn context-of
   [(ctx (U ri/Graph Nil)) (view Any) (bsyms (Vec Any))] (Map Any Any)
   (reduce (fn [(acc (Map Any Any)) (b Any)] (Map Any Any) (assoc acc (sv ctx view b) b))
     {}
@@ -393,13 +393,13 @@
 
 ;;     [bind-syms value-node or-default-vals constraint-node]
 
-;;     so walk/capture can build the frame incrementally.
+;;     so walk/capture can build the context incrementally.
 
 ;;   for-bind-pairs
 
 ;;     for/doseq, ordered: [:bind syms vnode orvals constraint] | [:expr node].
 
-;;   frame-of
+;;   context-of
 
 ;;     spelling -> binding node, for one scope level.
 

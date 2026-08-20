@@ -1,7 +1,7 @@
 #lang beagle/clj
 
 ;; ============================================================================
-;; resolve-modules — one module's frame, and its import/export surface.
+;; resolve-modules — one module's context, and its import/export surface.
 ;; ============================================================================
 ;; Stage M1 Cut D of the engine core port (north thread
 ;; 019f9f0e-de2a-7759-bb10-db8b14be6fad). Everything the resolver needs to know
@@ -265,7 +265,7 @@
 
 ;;   module-defs
 
-;;     ---------------------------------------------------------------- frame ----
+;;     -------------------------------------------------------------- context ----
 
 ;;     {top-level-name -> binding-node} for every value binding the module makes, so
 
@@ -275,7 +275,7 @@
 
 ;;   protocol-method-parts / union-member-parts
 
-;;     Exact declaration readers shared by frames, retained identities, type walking,
+;;     Exact declaration readers shared by contexts, retained identities, type walking,
 
 ;;     accessors, and capture analysis. Shifted or trailing children invalidate the
 

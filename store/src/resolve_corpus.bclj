@@ -1,12 +1,12 @@
 #lang beagle/clj
 
 ;; ============================================================================
-;; resolve-corpus — THE CORPUS/STORE FRAME: install one resolver run's state.
+;; resolve-corpus — THE CORPUS/STORE CONTEXT: install one resolver run's state.
 ;; ============================================================================
 ;; Stage M1 Cut L of the engine core port (north thread
 ;; 019f9f0e-de2a-7759-bb10-db8b14be6fad). This layer owns the portable
 ;; corpus/store orchestration: cross-module resolver construction, warm-store
-;; grouping, frame/export installation, whole/scoped resolver runs, and the
+;; grouping, context/export installation, whole/scoped resolver runs, and the
 ;; durable bound_to -> derived refers_to identity lift.
 ;;
 ;; STATE IS EXPLICIT. resolve.clj's ^:dynamic vars stay in that namespace
@@ -61,12 +61,12 @@
 
 (defn walk-corpus
   [(srcs (Vec Any))
-   (modframe Any)
-   (typeframe Any)
+   (module-context Any)
+   (type-context Any)
    (accessors Any)
    (ents Any)]
   rw/Corpus
-  (rw/->Corpus srcs modframe typeframe accessors ents))
+  (rw/->Corpus srcs module-context type-context accessors ents))
 
 (defn name->module [(nm Any)] Any
   (if (string? nm)
@@ -176,7 +176,7 @@
       (install groups tables)
       (when (= "1" (System/getenv "BEAGLE_STORE_PROF"))
         (let [profile (:profile state) (t-done Int) (System/nanoTime)]
-          (profile (format "  corpus-from-store!: groups=%.1fms frames+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- t-done t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state))))))
+          (profile (format "  corpus-from-store!: groups=%.1fms contexts+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- t-done t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state))))))
       tables)))
 
 (def RESOLVE-SPACE String "resolve")
@@ -228,12 +228,12 @@
 
 (defn file-entity-map [(file-ents (Atom Any))] Any (deref file-ents))
 
-(defn def-binding [(modframe Any) (typeframe Any) (src Any) (nm Any)] Any
-  (or (get (get modframe src) nm) (get (get typeframe src) nm)))
+(defn def-binding [(module-context Any) (type-context Any) (src Any) (nm Any)] Any
+  (or (get (get module-context src) nm) (get (get type-context src) nm)))
 
 (defn corpus-table-values [(tables Any)] Any
-  [(:modframe tables)
-   (:typeframe tables)
+  [(:module-context tables)
+   (:type-context tables)
    (:accessors tables)
    (:exports tables)
    (:type-exports tables)

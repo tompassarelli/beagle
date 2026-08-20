@@ -116,8 +116,8 @@
    (extract Any)
    (out-path Any)
    (def-binding Any)
-   (typeframe Any)
-   (modframe Any)
+   (type-context Any)
+   (module-context Any)
    (forms-of Any)
    (module-name Any)
    (parse-require Any)
@@ -158,7 +158,7 @@
         (warn (str "REJECTED — `" new "` already names a binding in " src " (rename-doesn't-collide; no facts mutated)."))
         (reject 3)))
     (doseq [(src String) target-srcs]
-      (when (and (some? (get (get (:typeframe v) src) old)) (not (upper-first? new)))
+      (when (and (some? (get (get (:type-context v) src) old)) (not (upper-first? new)))
         (warn (str "REJECTED — `" new "` is not a valid (Capitalized) type name " "(beagle type-name shape; no facts mutated)."))
         (reject 3)))
     (doseq [(src String) target-srcs]
@@ -170,7 +170,7 @@
                                                                              (vec (mapcat (fn
                                                                                             [(f Any)]
                                                                                             (Vec Any)
-                                                                                            (vec (crefs f (list (get (:modframe v) s)) B new))) (vec (fo s))))) srcs))]
+                                                                                            (vec (crefs f (list (get (:module-context v) s)) B new))) (vec (fo s))))) srcs))]
             (when (> (count caps) 0)
               (warn (str "REJECTED — renaming `" old "` -> `" new "` would be CAPTURED by a local `" new "` in scope at " (count caps) " reference(s) (no-capture; no facts mutated)."))
               (reject 4))))))
@@ -898,8 +898,8 @@
       (fn [(src String)] Any (extract-file src (out-path src)))
       out-path
       (get env :def-binding)
-      (get env :typeframe)
-      (get env :modframe)
+      (get env :type-context)
+      (get env :module-context)
       (get env :forms-of)
       (get env :module-name)
       (get env :parse-require)

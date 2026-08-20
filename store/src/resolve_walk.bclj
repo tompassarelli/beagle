@@ -6,9 +6,9 @@
 ;; ============================================================================
 ;; Stage M1 Cut G of the engine core port (north thread
 ;; 019f9f0e-de2a-7759-bb10-db8b14be6fad). This is the turtle-#5 heart of the
-;; resolver: descend the ordered AST, carry a scope stack of frames, and for each
+;; resolver: descend the ordered AST, carry a scope stack of contexts, and for each
 ;; symbol leaf write the `refers_to` edge that names WHICH binding it means —
-;; nearest-frame first, then the durable `bound_to` identity edge, then the
+;; nearest-context first, then the durable `bound_to` identity edge, then the
 ;; cross-module import surface, then module-local types / auto-constructors /
 ;; synthesized field accessors, else "native" (correctly no edge).
 ;;
@@ -52,7 +52,7 @@
 ;;                that materialize/cold-boot performs — so re-derive them from
 ;;                the reference's own spelling. Identity always wins over
 ;;                spelling for the TARGET; spelling only picks the markers.
-;;   walk-type!   a TYPE position: module-local type frame first, then the
+;;   walk-type!   a TYPE position: module-local type context first, then the
 ;;                cross-module import surface; a compound `(Vec Any)` or a
 ;;                bracket vector recurses elementwise.
 ;;   walk-binding-types!  resolve only the type child of structural
@@ -92,10 +92,10 @@
 ;;                `red-zone` is one symbol, not `red`).
 ;;   run-resolution-over! / run-resolution!  the driver: per src, install that
 ;;                module's three resolvers, walk its forms in a scope of exactly
-;;                its module frame, then its comments. The cross-module tables
+;;                its module context, then its comments. The cross-module tables
 ;;                are always WHOLE-corpus; only the walked SUBSET narrows (the
 ;;                S3.3 scoped re-resolve: full tables, partial walk).
-;;   corpus-tables  the per-run frame/export tables resolve-edn! computes from
+;;   corpus-tables  the per-run context/export tables resolve-edn! computes from
 ;;                the freshly loaded srcs — the portable half of resolve-edn!
 ;;                (its `binding`/`set!` scaffolding must stay in resolve.clj,
 ;;                because the dynamic vars themselves cannot move namespace).
@@ -131,7 +131,7 @@
    (ares Any)])
 
 (defrecord Corpus
-  [(srcs (Vec Any)) (modframe Any) (typeframe Any) (accessors Any) (ents Any)])
+  [(srcs (Vec Any)) (module-context Any) (type-context Any) (accessors Any) (ents Any)])
 
 ;; The Int-typing sentinel is gone with the widening: a node id is a Term, and
 ;; an absent one now fails in t/triple instead of silently writing node -1.
@@ -166,7 +166,7 @@
       nil
       (let [hit (get (nth scope i) nm)] (if (nil? hit) (recur (inc i)) hit)))))
 
-(defn- push [(frame Any) (scope (Vec Any))] (Vec Any) (into [frame] scope))
+(defn- push [(context Any) (scope (Vec Any))] (Vec Any) (into [context] scope))
 
 (defn bind! [(w Walk) (L Any) (target Any)] Any
   (do
@@ -246,7 +246,7 @@
                                                                                                                                                                                (binding
                                                                                                                                                                                 Any)]
                                                                                                                                                                               (Vec Any)
-                                                                                                                                                                              (into acc (rb/collect-or-vals (:ctx w) (:view w) binding))) [] (vec (rest (kids w params)))) frame (rb/frame-of (:ctx w) (:view w) binds) return-type (get signature :return-type) raises-type (get signature :raises-type)]
+                                                                                                                                                                              (into acc (rb/collect-or-vals (:ctx w) (:view w) binding))) [] (vec (rest (kids w params)))) context (rb/context-of (:ctx w) (:view w) binds) return-type (get signature :return-type) raises-type (get signature :raises-type)]
       (do
         (when (not macro?)
           (walk-binding-types! w (rb/param-type-nodes (:ctx w) (:view w) params)))
@@ -254,7 +254,7 @@
         (when (some? raises-type) (walk-type! w raises-type))
         (walk-all! w constraints scope wf)
         (walk-all! w or-vals scope wf)
-        (walk-all! w (get signature :body) (push frame scope) wf)))))
+        (walk-all! w (get signature :body) (push context scope) wf)))))
 
 (defn walk-fn-arity!
   [(w Walk) (forms (Vec Any)) (scope (Vec Any)) (wf Any) (macro? Bool)] Any
@@ -270,7 +270,7 @@
   (cond
     (some? (sv w node))
     (when (not quoted?)
-      (let [nm (sv w node) qualifier (sq w node) outer (if (empty? scope) [] (vec (butlast scope))) modframe (if (empty? scope) nil (last scope)) inner (if (nil? qualifier) (scope-lookup outer nm) nil) mod-hit (if (nil? qualifier) (get modframe nm) nil)]
+      (let [nm (sv w node) qualifier (sq w node) outer (if (empty? scope) [] (vec (butlast scope))) module-context (if (empty? scope) nil (last scope)) inner (if (nil? qualifier) (scope-lookup outer nm) nil) mod-hit (if (nil? qualifier) (get module-context nm) nil)]
         (cond
           (some? inner)
           nil
@@ -527,7 +527,7 @@
                                                                                                                                                                                                                                                      (p
                                                                                                                                                                                                                                                       Any)]
                                                                                                                                                                                                                                                     (Vec Any)
-                                                                                                                                                                                                                                                    (let [bsyms (nth p 0) vnode (nth p 1) orvals (nth p 2) constraint (nth p 3 nil)] (do (walk-all! w orvals sc walk!) (when (some? constraint) (walk! w constraint sc)) (when (some? vnode) (walk! w vnode sc)) (push (rb/frame-of (:ctx w) (:view w) bsyms) sc)))) scope pairs)]
+                                                                                                                                                                                                                                                    (let [bsyms (nth p 0) vnode (nth p 1) orvals (nth p 2) constraint (nth p 3 nil)] (do (walk-all! w orvals sc walk!) (when (some? constraint) (walk! w constraint sc)) (when (some? vnode) (walk! w vnode sc)) (push (rb/context-of (:ctx w) (:view w) bsyms) sc)))) scope pairs)]
             (walk-all! w (vec (drop 2 ks)) final walk!))
           (contains? rc/FOR-FORMS hs)
           (let [bracket (nth ks 1 nil) ok (and (some? bracket) (brk? w bracket)) _ (when ok (walk-binding-types! w (rb/for-type-nodes (:ctx w) (:view w) bracket))) entries (if ok (rb/for-bind-pairs (:ctx w) (:view w) bracket) []) final (reduce (fn
@@ -537,7 +537,7 @@
                                                                                                                                                                                                                                                        (e
                                                                                                                                                                                                                                                         Any)]
                                                                                                                                                                                                                                                       (Vec Any)
-                                                                                                                                                                                                                                                      (if (= :expr (nth e 0)) (do (walk! w (nth e 1) sc) sc) (let [bsyms (nth e 1) vnode (nth e 2) orvals (nth e 3) constraint (nth e 4 nil)] (do (walk-all! w orvals sc walk!) (when (some? constraint) (walk! w constraint sc)) (when (some? vnode) (walk! w vnode sc)) (push (rb/frame-of (:ctx w) (:view w) bsyms) sc))))) scope entries)]
+                                                                                                                                                                                                                                                      (if (= :expr (nth e 0)) (do (walk! w (nth e 1) sc) sc) (let [bsyms (nth e 1) vnode (nth e 2) orvals (nth e 3) constraint (nth e 4 nil)] (do (walk-all! w orvals sc walk!) (when (some? constraint) (walk! w constraint sc)) (when (some? vnode) (walk! w vnode sc)) (push (rb/context-of (:ctx w) (:view w) bsyms) sc))))) scope entries)]
             (walk-all! w (vec (drop 2 ks)) final walk!))
           (contains? rc/MATCH-FORMS hs)
           (do
@@ -548,7 +548,7 @@
                   (walk-pat-heads! w pat scope walk!)
                   (walk-all! w
                     body
-                    (push (rb/frame-of (:ctx w) (:view w) (rb/match-pat-binds (:ctx w) (:view w) pat))
+                    (push (rb/context-of (:ctx w) (:view w) (rb/match-pat-binds (:ctx w) (:view w) pat))
                       scope)
                     walk!)))))
           (= "letfn" hs)
@@ -556,11 +556,11 @@
                                                                                                          [(f
                                                                                                            Any)]
                                                                                                          Bool
-                                                                                                         (= "list" (kd w f))) (vec (rest (kids w bracket))))) []) frame (rb/frame-of (:ctx w) (:view w) (vec (keep (fn
+                                                                                                         (= "list" (kd w f))) (vec (rest (kids w bracket))))) []) context (rb/context-of (:ctx w) (:view w) (vec (keep (fn
                                                                                                                                                                                                                      [(f
                                                                                                                                                                                                                        Any)]
                                                                                                                                                                                                                      Any
-                                                                                                                                                                                                                     (nth (kids w f) 0 nil)) fnlists))) bodyscope (push frame scope)]
+                                                                                                                                                                                                                     (nth (kids w f) 0 nil)) fnlists))) bodyscope (push context scope)]
             (do
               (doseq [fl fnlists]
                 (walk-fn-arity! w (vec (rest (kids w fl))) bodyscope walk! false))
@@ -568,10 +568,10 @@
           (contains? rc/EXTEND-FORMS hs)
           (walk-extension! w ks scope walk!)
           (= "as->" hs)
-          (let [init (nth ks 1 nil) name (nth ks 2 nil) frame (rb/frame-of (:ctx w) (:view w) (if (some? (sv w name)) [name] []))]
+          (let [init (nth ks 1 nil) name (nth ks 2 nil) context (rb/context-of (:ctx w) (:view w) (if (some? (sv w name)) [name] []))]
             (do
               (when (some? init) (walk! w init scope))
-              (walk-all! w (vec (drop 3 ks)) (push frame scope) walk!)))
+              (walk-all! w (vec (drop 3 ks)) (push context scope) walk!)))
           :else
           (walk-all! w ks scope walk!)))
       :else
@@ -583,8 +583,8 @@
     (swap! (:ncomment w) (fn [(n Int)] Int (inc n)))))
 
 (defn- def-binding [(cp Corpus) (src Any) (nm Any)] Any
-  (let [v (get (get (:modframe cp) src) nm)]
-    (if (some? v) v (get (get (:typeframe cp) src) nm))))
+  (let [v (get (get (:module-context cp) src) nm)]
+    (if (some? v) v (get (get (:type-context cp) src) nm))))
 
 (defn resolve-comment! [(w Walk) (cp Corpus) (e Any) (src Any)] Any
   (doseq [seg (vec (filter (fn [(s Any)] Bool (= "symbol" (kd w s))) (rr/ordered-segs (:ctx w) e)))]
@@ -610,7 +610,7 @@
     (:ntype w)
     (:ncomment w)
     (xres-for src)
-    (fn [(nm Any)] Any (get (get (:typeframe cp) src) nm))
+    (fn [(nm Any)] Any (get (get (:type-context cp) src) nm))
     (fn [(nm Any)] Any (get (get (:accessors cp) src) nm))))
 
 (defn run-resolution-over!
@@ -626,7 +626,7 @@
       (do
         (swap! walked conj src)
         (swap! n-forms + (count forms))
-        (walk-all! w2 forms [(get (:modframe cp) src)] walk!)
+        (walk-all! w2 forms [(get (:module-context cp) src)] walk!)
         (walk-comments! w2 cp src)))))
 
 (defn run-resolution!
@@ -660,9 +660,9 @@
                                                                                                                                                                                                          Any)]
                                                                                                                                                                                                        (Map Any Any)
                                                                                                                                                                                                        (let [ents (vec (get ents-of s []))] (assoc m (rm/module-name ctx view ents) (f ents)))) {} named))]
-    {:modframe
+    {:module-context
      (per (fn [(ents (Vec Any))] Any (rm/module-defs ctx view ents)))
-     :typeframe
+     :type-context
      (per (fn [(ents (Vec Any))] Any (rm/module-types ctx view ents)))
      :accessors
      (per (fn [(ents (Vec Any))] Any (rm/module-accessors ctx view ents)))
@@ -682,7 +682,7 @@
 
 (defn scoped-corpus-tables
   [(ctx ri/Graph) (view Any) (groups Any) (scope Any)] (Map Keyword Any)
-  (let [srcs (vec (keys groups)) frame-srcs (if (some? scope) (vec (filter scope srcs)) srcs) per-frame (fn
+  (let [srcs (vec (keys groups)) context-srcs (if (some? scope) (vec (filter scope srcs)) srcs) per-context (fn
                                                                                                           [(f
                                                                                                             Any)]
                                                                                                           Any
@@ -692,7 +692,7 @@
                                                                                                                      (src
                                                                                                                       Any)]
                                                                                                                     Any
-                                                                                                                    (assoc table src (f (vec (get groups src []))))) {} frame-srcs)) named (vec (filter (fn
+                                                                                                                    (assoc table src (f (vec (get groups src []))))) {} context-srcs)) named (vec (filter (fn
                                                                                                                                                                                                           [(src
                                                                                                                                                                                                             Any)]
                                                                                                                                                                                                           Bool
@@ -709,12 +709,12 @@
                                                                                                                                                                                                                                                                                                                          (let [ents (vec (get groups src []))] (assoc table (rm/module-name ctx view ents) (f ents)))) {} named)))]
     {:srcs
      srcs
-     :modframe
-     (per-frame (fn [(ents (Vec Any))] Any (rm/module-defs ctx view ents)))
-     :typeframe
-     (per-frame (fn [(ents (Vec Any))] Any (rm/module-types ctx view ents)))
+     :module-context
+     (per-context (fn [(ents (Vec Any))] Any (rm/module-defs ctx view ents)))
+     :type-context
+     (per-context (fn [(ents (Vec Any))] Any (rm/module-types ctx view ents)))
      :accessors
-     (per-frame (fn [(ents (Vec Any))] Any (rm/module-accessors ctx view ents)))
+     (per-context (fn [(ents (Vec Any))] Any (rm/module-accessors ctx view ents)))
      :exports
      (by-module (fn [(ents (Vec Any))] Any (let [exports (rm/module-exports ctx view ents)] (if (empty? exports) (rm/module-defs ctx view ents) exports))))
      :type-exports

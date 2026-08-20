@@ -78,14 +78,14 @@
   [(ctx (U ri/Graph Nil))
    (view Any)
    (srcs (Vec String))
-   (file-modframe Any)
+   (file-module-context Any)
    (ents-of Any)]
   (Map Any Any)
-  (reduce (fn [(acc (Map Any Any)) (src String)] (Map Any Any) (let [frame (get file-modframe src {}) label (src-label ctx view src (get ents-of src []))] (reduce (fn
+  (reduce (fn [(acc (Map Any Any)) (src String)] (Map Any Any) (let [module-context (get file-module-context src {}) label (src-label ctx view src (get ents-of src []))] (reduce (fn
                                                                                                                                                                      [(a (Map Any Any))
                                                                                                                                                                       (nm Any)]
                                                                                                                                                                      (Map Any Any)
-                                                                                                                                                                     (let [leaf (get frame nm)] (assoc a leaf {:key (str src "#" (str leaf)) :file src :module label :name nm}))) acc (set (keys frame)))))
+                                                                                                                                                                     (let [leaf (get module-context nm)] (assoc a leaf {:key (str src "#" (str leaf)) :file src :module label :name nm}))) acc (set (keys module-context)))))
     {}
     srcs))
 
@@ -116,10 +116,10 @@
    (BOUND Any)
    (REFERS Any)
    (srcs (Vec String))
-   (file-modframe Any)
+   (file-module-context Any)
    (ents-of Any)]
   (Map Keyword Any)
-  (let [defn-meta (defn-meta-of ctx view srcs file-modframe ents-of) defn-set (set (keys defn-meta)) callers (callers-of ctx view BOUND REFERS srcs ents-of defn-meta) edges (reduce (fn
+  (let [defn-meta (defn-meta-of ctx view srcs file-module-context ents-of) defn-set (set (keys defn-meta)) callers (callers-of ctx view BOUND REFERS srcs ents-of defn-meta) edges (reduce (fn
                                                                                                                                                                                        [(acc (Vec Any))
                                                                                                                                                                                         (pair Any)]
                                                                                                                                                                                        (Vec Any)
@@ -219,7 +219,7 @@
 
 ;;     {leaf -> {:key :file :module :name}} over every top-level binding in the bound
 
-;;     corpus, in srcs order then frame order — `into {}` semantics, so a later entry
+;;     corpus, in srcs order then context order — `into {}` semantics, so a later entry
 
 ;;     for the same leaf wins, exactly as before.
 
