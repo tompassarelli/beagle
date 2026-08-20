@@ -92,11 +92,18 @@ reuse=0
 [[ "$bundle" == 1 &&
    "${BEAGLE_CHECKED_AST_REUSE:-1}" != 0 &&
    "${BEAGLE_FACT_REUSE_FORBIDDEN:-0}" != 1 ]] && reuse=1
-ast_store="${BEAGLE_CHECKED_AST_STORE:-$BEAGLE_ROOT/.beagle/checked-ast.storelog}"
 ast_profile="beagle-ast-v2"
 ast_unit="$(if [[ "$bundle" == 1 ]]; then echo bundle; else echo single; fi)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/beagle-ast.XXXXXX")"
 trap 'rm -rf "${tmp_dir:?}"' EXIT
+
+run_checked_ast_store() {
+    (
+        flock --exclusive 9
+        bb -cp "$BEAGLE_ROOT/store/out" \
+            "$BEAGLE_ROOT/bin/_beagle-checked-ast-store.clj" "$@"
+    ) 9>"$ast_store.publish.lock"
+}
 
 closure_fields="$tmp_dir/closure-fields"
 if [[ "$reuse" == 1 ]]; then
@@ -139,8 +146,9 @@ if [[ "$reuse" == 1 ]]; then
     done
     cat "$source_hashes" >>"$key_input"
     result_key="sha256:$(sha256sum "$key_input" | awk '{print $1}')"
+    ast_store="${BEAGLE_CHECKED_AST_STORE:-$BEAGLE_ROOT/.beagle/checked-ast/${result_key#sha256:}.storelog}"
     mkdir -p "$(dirname "$ast_store")"
-    if bb -cp "$BEAGLE_ROOT/store/out" "$BEAGLE_ROOT/bin/_beagle-checked-ast-store.clj" query "$ast_store" "$result_key" "$compiler_context" "$ast_profile" "$ast_unit" >"$tmp_dir/hit" 2>/dev/null; then
+    if run_checked_ast_store query "$ast_store" "$result_key" "$compiler_context" "$ast_profile" "$ast_unit" >"$tmp_dir/hit" 2>/dev/null; then
         cat "$tmp_dir/hit"
         exit 0
     fi
@@ -252,7 +260,7 @@ if [[ "$reuse" == 1 ]]; then
         printf '%s\0%s\0' "$logical" "$(sha256sum -- "$physical" | awk '{print $1}')" >>"$source_hashes_after"
     done <"$closure_fields"
     if cmp -s "$source_hashes" "$source_hashes_after"; then
-        bb -cp "$BEAGLE_ROOT/store/out" "$BEAGLE_ROOT/bin/_beagle-checked-ast-store.clj" append "$ast_store" "$result_key" "$compiler_context" "$ast_profile" "$ast_unit" "$projection"
+        run_checked_ast_store append "$ast_store" "$result_key" "$compiler_context" "$ast_profile" "$ast_unit" "$projection"
     fi
 fi
 cat "$projection"
