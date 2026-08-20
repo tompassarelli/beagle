@@ -1060,6 +1060,21 @@
    "every?"   (make-fn [ANY ANY] nil (make-prim "Bool"))
    "range"    (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
+;; Nix-only operator contracts. Shared arithmetic, ordering, equality, and
+;; boolean operators live in STDLIB. The Nix emitter accepts one-or-more
+;; collection operands and lowers them as a left fold, so ++ and // publish the
+;; same arity here.
+(def NIX-STDLIB Any
+  {"==" (make-fn [ANY ANY] nil BOOL-TYPE)
+   "!=" (make-fn [ANY ANY] nil BOOL-TYPE)
+   "++" (make-poly ["A"]
+          (let [items (make-app "Vec" [(make-var "A")])]
+            (make-fn [items] items items))
+          nil)
+   "//" (let [attrs (make-app "Map" [ANY ANY])]
+          (make-fn [attrs] attrs attrs))
+   "->" (make-fn [BOOL-TYPE BOOL-TYPE] nil BOOL-TYPE)})
+
 ;; Hosted namespace contracts mirror the Racket checker's canonical catalog.
 ;; They are projected through each program's declared require alias below;
 ;; keeping the catalog namespace-keyed makes new hosted libraries an explicit
@@ -1133,6 +1148,13 @@
    "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
    "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
                      nil FLOAT-TYPE)})
+
+(defn target-stdlib [(target String)] Any
+  (cond
+    (= target "core") (merge STDLIB CORE-STDLIB)
+    (= target "js") (merge STDLIB JS-ATOM-STDLIB)
+    (= target "nix") (merge STDLIB NIX-STDLIB)
+    :else STDLIB))
 
 ;; Clojure 1.12 Class/method instance-position calls carry the receiver as the
 ;; first surface element, while declare-extern describes only the Java method
@@ -1332,7 +1354,7 @@
             (fn [(out Any) (name Any)] Any
               (assoc out name true))
             external-proofs
-            (ordered-keys STDLIB))
+            (ordered-keys (target-stdlib (get prog "target"))))
         assumed
           (reduce
             (fn [(out Any) (name Any)] Any
@@ -3747,12 +3769,7 @@
 (defn build-initial-env! [(prog Any)] Any
   (let [externs (get prog "externs")
         forms (get prog "forms")
-        base-stdlib (cond
-                        (= (get prog "target") "core")
-                          (merge STDLIB CORE-STDLIB)
-                        (= (get prog "target") "js")
-                          (merge STDLIB JS-ATOM-STDLIB)
-                        :else STDLIB)
+        base-stdlib (target-stdlib (get prog "target"))
         target-stdlib (merge base-stdlib
                         (hosted-require-contracts (get prog "requires" [])))
         env-with-externs (if (not (nil? externs))
@@ -7121,6 +7138,26 @@
            (= (get (nth (get identity-type "params") 0) "name") "Int"))))
 
   ;; --- E021 free dotted-name (nix target) ---
+  (expect! "nix-only operator contracts check without extern declarations"
+    (let [one (make-lit "number" 1)
+          two (make-lit "number" 2)
+          left (make-vec-node [one])
+          right (make-vec-node [two])
+          attrs-a (make-map-node [(make-map-pair (make-lit "keyword" "a") one)])
+          attrs-b (make-map-node [(make-map-pair (make-lit "keyword" "b") two)])
+          prog (assoc (make-prog
+                        [(make-call "++" [left right])
+                         (make-call "!=" [one two])
+                         (make-call "==" [one one])
+                         (make-call "//" [attrs-a attrs-b])
+                         (make-call "->" [(make-lit "bool" true)
+                                           (make-lit "bool" false)])])
+                 "target" "nix")]
+      (= (count (check-program! prog)) 0)))
+  (expect! "nix-only operator contracts stay target-scoped"
+    (and (some? (get (target-stdlib "nix") "++"))
+         (nil? (get (target-stdlib "clj") "++"))))
+
   (expect! "E021: free dotted root rejected"
     (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" []
                 "forms" [{"node" "nix-fn-set" "rest" true "at-name" false

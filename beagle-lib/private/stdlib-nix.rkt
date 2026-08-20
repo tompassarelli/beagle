@@ -22,6 +22,7 @@
 (define BOOL (type-prim 'Bool))
 (define INT  (type-prim 'Int))
 (define NIXT (type-prim 'NixType))
+(define (VEC-OF t) (type-app 'Vec (list (if (type? t) t (type-prim t)))))
 (define (LIST-OF t) (type-app 'List (list (if (type? t) t (type-prim t)))))
 (define (MAP-OF k v) (type-app 'Map (list (if (type? k) k (type-prim k))
                                           (if (type? v) v (type-prim v)))))
@@ -35,6 +36,22 @@
 
 (define STDLIB-NIX
   (hash
+   ;; ============================================================================
+   ;; Nix-only operators. Shared arithmetic, ordering, equality, and boolean
+   ;; operators come from STDLIB-PORTABLE; these spellings exist only on Nix.
+   ;; The emitter deliberately accepts one-or-more collection operands and
+   ;; lowers them as a left fold, so ++ and // publish that same arity contract.
+   ;; ============================================================================
+
+   '== (fn-of (list ANY ANY) BOOL)
+   '!= (fn-of (list ANY ANY) BOOL)
+   '++ (poly-fn '(A) (list (VEC-OF (tv 'A))) (VEC-OF (tv 'A))
+               #:rest (VEC-OF (tv 'A)))
+   '// (poly-fn '(K V) (list (MAP-OF (tv 'K) (tv 'V)))
+               (MAP-OF (tv 'K) (tv 'V))
+               #:rest (MAP-OF (tv 'K) (tv 'V)))
+   '-> (fn-of (list BOOL BOOL) BOOL)
+
    ;; ============================================================================
    ;; builtins.* — lists / seqs (parametric)
    ;; ============================================================================

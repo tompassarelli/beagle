@@ -9,6 +9,7 @@
          (only-in beagle/private/check type-check! current-check-profile)
          beagle/private/emit-dispatch
          beagle/private/emit-nix
+         beagle/private/stdlib-types
          beagle/private/types
          (only-in beagle/lang/reader-impl beagle-readtable))
 
@@ -388,6 +389,24 @@
     "protocol implementations are not supported by the nix backend")))
 
 ;; --- nix builtins ----------------------------------------------------------
+
+(test-case "standard Nix infix operators all have semantic contracts"
+  (define contracts (stdlib-for-target 'nix))
+  (for ([operator (in-list '(+ - * / < > <= >= = == not= != and or ++ // ->))])
+    (check-true (hash-has-key? contracts operator)
+                (format "missing Nix operator contract: ~a" operator)))
+  (for ([operator (in-list '(!= ++ // ->))])
+    (check-false (hash-has-key? (stdlib-for-target 'clj) operator)
+                 (format "Nix-only operator leaked to Clojure: ~a" operator))))
+
+(test-case "Nix-only list concatenation and inequality check without externs"
+  (define out
+    (nix-check-and-emit
+     (string-append
+      "(define-target nix) "
+      "[(++ [1] [2] [3]) (!= 1 2)]")))
+  (check-true (string-contains? out "[ 1 ] ++ [ 2 ] ++ [ 3 ]"))
+  (check-true (string-contains? out "1 != 2")))
 
 (test-case "builtins/ calls emit as builtins.*"
   (define out (nix-emit "(define-target nix) (builtins/length [1 2 3])"))
