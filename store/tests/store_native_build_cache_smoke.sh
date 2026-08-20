@@ -111,6 +111,31 @@ typedef struct native_m0_type_9 {
   int64_t field_0;
   uint64_t field_1;
 } native_m0_type_9;
+typedef struct native_m0_type_10_option {
+  int64_t tag;
+  union {
+    void *variant_0;
+  } payload;
+} native_m0_type_10_option;
+typedef struct native_m0_type_10 {
+  int64_t field_0;
+  bool field_1;
+  uint8_t padding_1[7];
+  native_m0_type_10_option field_2;
+  native_m0_type_10_option field_3;
+} native_m0_type_10;
+typedef struct native_m0_type_11 {
+  int64_t field_0;
+  int64_t field_1;
+  native_m0_type_10_option field_2;
+  native_m0_type_10_option field_3;
+  native_vec *field_4;
+  native_m0_type_1 field_5;
+  uint8_t padding_5[24];
+  bool field_6;
+  uint8_t padding_6[sizeof(void *) == 8u ? 7 : 3];
+  native_vec *field_7;
+} native_m0_type_11;
 
 native_m0_type_1 native_m0_fn_2(native_arena *arena, const native_capability *capability, native_m0_type_2 native_v_0, native_m0_type_2 native_v_1, native_m0_type_4 native_v_2, native_m0_type_4 native_v_3);
 native_m0_type_9 native_m0_fn_3(native_m0_type_1 native_v_0);
@@ -120,6 +145,8 @@ native_m0_type_5 native_m0_fn_11(native_arena *arena, const native_capability *c
 native_m0_type_8 native_m0_fn_13(native_m0_type_7 native_v_0);
 native_m0_type_8 native_m0_fn_17(const native_capability *capability, native_m0_type_5 native_v_0);
 native_m0_type_7 native_m0_fn_19(native_arena *arena, native_m0_type_4 native_v_0);
+native_m0_type_10 native_m0_fn_23(native_arena *arena, const native_capability *capability, native_m0_type_1 native_v_0, uint64_t native_v_1, uint64_t native_v_2, uint64_t native_v_3, native_m0_type_4 native_v_4, uint64_t native_v_5, uint64_t native_v_6, uint64_t native_v_7);
+native_m0_type_11 native_m0_fn_29(native_arena *arena, const native_capability *capability, native_m0_type_1 native_v_0, uint64_t native_v_1, uint64_t native_v_2, uint64_t native_v_3, native_m0_type_4 native_v_4, uint64_t native_v_5, uint64_t native_v_6, uint64_t native_v_7, uint64_t native_v_8, uint64_t native_v_9, uint64_t native_v_10, uint64_t native_v_11, uint64_t native_v_12);
 
 #endif
 C
@@ -183,6 +210,62 @@ native_m0_type_7 native_m0_fn_19(native_arena *arena,
                                    native_m0_type_4 native_v_0) {
   (void)arena;
   return (native_m0_type_7){.field_0 = native_v_0 == (native_vec *)0 ? 2 : 0};
+}
+
+native_m0_type_10 native_m0_fn_23(native_arena *arena,
+                                    const native_capability *capability,
+                                    native_m0_type_1 native_v_0,
+                                    uint64_t native_v_1,
+                                    uint64_t native_v_2,
+                                    uint64_t native_v_3,
+                                    native_m0_type_4 native_v_4,
+                                    uint64_t native_v_5,
+                                    uint64_t native_v_6,
+                                    uint64_t native_v_7) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  (void)native_v_2;
+  (void)native_v_3;
+  (void)native_v_4;
+  (void)native_v_5;
+  (void)native_v_6;
+  (void)native_v_7;
+  return (native_m0_type_10){.field_0 = 0};
+}
+
+native_m0_type_11 native_m0_fn_29(native_arena *arena,
+                                    const native_capability *capability,
+                                    native_m0_type_1 native_v_0,
+                                    uint64_t native_v_1,
+                                    uint64_t native_v_2,
+                                    uint64_t native_v_3,
+                                    native_m0_type_4 native_v_4,
+                                    uint64_t native_v_5,
+                                    uint64_t native_v_6,
+                                    uint64_t native_v_7,
+                                    uint64_t native_v_8,
+                                    uint64_t native_v_9,
+                                    uint64_t native_v_10,
+                                    uint64_t native_v_11,
+                                    uint64_t native_v_12) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  (void)native_v_2;
+  (void)native_v_3;
+  (void)native_v_4;
+  (void)native_v_5;
+  (void)native_v_6;
+  (void)native_v_7;
+  (void)native_v_8;
+  (void)native_v_9;
+  (void)native_v_10;
+  (void)native_v_11;
+  (void)native_v_12;
+  return (native_m0_type_11){.field_0 = 0};
 }
 
 C
@@ -260,6 +343,9 @@ C
       printf '%s\n' 'lowered fn_17 server-codec-release-response 1 blocks'
     [[ "$duplicate_symbol" == 0 ]] ||
       printf '%s\n' 'lowered fn_23 server-store-boot! 1 blocks'
+    printf '%s\n' \
+      'lowered fn_23 server-compile-query! 1 blocks' \
+      'lowered fn_29 server-compile-append! 1 blocks'
     printf '%s\n' \
       'obligation-projection PASS valid-ssa' \
       'obligation-projection PASS exhaustive-matches' \
@@ -535,6 +621,15 @@ uint32_t store_server_generated_abi(void) {
           &arena, &capability, dispatched);
   store_server_generated_abi_return abi =
       BEAGLE_STORE_SERVER_CALL_GENERATED_ABI(&arena, &capability);
+  store_server_compile_query_return compile_query =
+      BEAGLE_STORE_SERVER_CALL_COMPILE_QUERY(
+          &arena, &capability, boot, UINT64_C(0), UINT64_C(0),
+          UINT64_C(0), &bytes, UINT64_C(0), UINT64_C(0), UINT64_C(0));
+  store_server_compile_append_return compile_append =
+      BEAGLE_STORE_SERVER_CALL_COMPILE_APPEND(
+          &arena, &capability, boot, UINT64_C(0), UINT64_C(0),
+          UINT64_C(0), &bytes, UINT64_C(0), UINT64_C(0), UINT64_C(0),
+          UINT64_C(0), UINT64_C(0), UINT64_C(0), UINT64_C(0), UINT64_C(0));
   int64_t direct_status = stopped.field_0 + written.field_0;
   int64_t valid_log_bytes = boot.field_3;
   native_vec *boot_append = boot.field_4;
@@ -548,6 +643,8 @@ uint32_t store_server_generated_abi(void) {
   (void)response_bytes;
   (void)request_released;
   (void)response_released;
+  (void)compile_query;
+  (void)compile_append;
   return (uint32_t)abi;
 }
 
@@ -588,6 +685,52 @@ int store_server_store_dispatch(store_server_store *store,
   *response_out = NULL;
   clear_error(error, capacity);
   return BEAGLE_STORE_SERVER_FATAL;
+}
+
+int store_server_compile_query(
+    store_server_store *store, const store_server_compile_key *key,
+    store_server_compile_value *value,
+    store_server_compile_query_result *result, char *error,
+    size_t capacity) {
+  (void)store;
+  (void)key;
+  if (value != NULL) {
+    *value = (store_server_compile_value){0};
+  }
+  if (result != NULL) {
+    *result = (store_server_compile_query_result){
+        .status = BEAGLE_STORE_SERVER_FATAL,
+        .found = false,
+        .outcome = BEAGLE_STORE_SERVER_COMPILE_COLD,
+    };
+  }
+  clear_error(error, capacity);
+  return BEAGLE_STORE_SERVER_FATAL;
+}
+
+int store_server_compile_append(
+    store_server_store *store, const store_server_compile_key *key,
+    const store_server_compile_value *value,
+    store_server_compile_query_result *result, char *error,
+    size_t capacity) {
+  (void)store;
+  (void)key;
+  (void)value;
+  if (result != NULL) {
+    *result = (store_server_compile_query_result){
+        .status = BEAGLE_STORE_SERVER_FATAL,
+        .found = false,
+        .outcome = BEAGLE_STORE_SERVER_COMPILE_RETAINED,
+    };
+  }
+  clear_error(error, capacity);
+  return BEAGLE_STORE_SERVER_FATAL;
+}
+
+void store_server_compile_value_release(store_server_compile_value *value) {
+  if (value != NULL) {
+    *value = (store_server_compile_value){0};
+  }
 }
 
 int store_server_store_shutdown(store_server_store *store,
@@ -675,17 +818,17 @@ assert_ffc_notices "$host_artifact"
 host_program="$scratch/cache/.programs/$(sed -n 's/^program=//p' \
   "$host_artifact/input.manifest")"
 assert_ffc_notices "$host_program"
-grep -Fqx 'native-host-abi PASS host=server exports=8' \
+grep -Fqx 'native-host-abi PASS host=server exports=10' \
   "$host_artifact/native-host.report.txt" ||
-  fail "server host artifact omitted its eight-export receipt"
+  fail "server host artifact omitted its ten-export receipt"
 symbols_header="$host_artifact/server_symbols.h"
 [[ -f "$symbols_header" ]] || fail "server host omitted its generated symbol header"
-[[ "$(grep -c '^#define BEAGLE_STORE_SERVER_SYMBOL_' "$symbols_header")" == "8" ]] ||
-  fail "server symbol header did not contain exactly eight symbol mappings"
-[[ "$(grep -c '^#define BEAGLE_STORE_SERVER_CALL_' "$symbols_header")" == "8" ]] ||
-  fail "server symbol header did not contain exactly eight normalized calls"
-[[ "$(grep -Ec '^typedef [A-Za-z_][A-Za-z0-9_]* store_server_[a-z_]+_(return|arg_[0-9]+);$' "$symbols_header")" == "20" ]] ||
-  fail "server symbol header did not contain all twenty stable type aliases"
+[[ "$(grep -c '^#define BEAGLE_STORE_SERVER_SYMBOL_' "$symbols_header")" == "10" ]] ||
+  fail "server symbol header did not contain exactly ten symbol mappings"
+[[ "$(grep -c '^#define BEAGLE_STORE_SERVER_CALL_' "$symbols_header")" == "10" ]] ||
+  fail "server symbol header did not contain exactly ten normalized calls"
+[[ "$(grep -Ec '^typedef [A-Za-z_][A-Za-z0-9_]* store_server_[a-z_]+_(return|arg_[0-9]+);$' "$symbols_header")" == "43" ]] ||
+  fail "server symbol header did not contain all forty-three stable type aliases"
 required_symbol_lines=(
   '#define BEAGLE_STORE_SERVER_SYMBOL_GENERATED_ABI native_m0_fn_7'
   '#define BEAGLE_STORE_SERVER_SYMBOL_STORE_BOOT native_m0_fn_2'
@@ -695,6 +838,8 @@ required_symbol_lines=(
   '#define BEAGLE_STORE_SERVER_SYMBOL_CODEC_WRITE_RESPONSE native_m0_fn_5'
   '#define BEAGLE_STORE_SERVER_SYMBOL_CODEC_RELEASE_REQUEST native_m0_fn_13'
   '#define BEAGLE_STORE_SERVER_SYMBOL_CODEC_RELEASE_RESPONSE native_m0_fn_17'
+  '#define BEAGLE_STORE_SERVER_SYMBOL_COMPILE_QUERY native_m0_fn_23'
+  '#define BEAGLE_STORE_SERVER_SYMBOL_COMPILE_APPEND native_m0_fn_29'
   'typedef native_m0_type_1 store_server_store_boot_return;'
   'typedef native_m0_type_2 store_server_store_boot_arg_0;'
   'typedef native_m0_type_2 store_server_store_boot_arg_1;'
@@ -711,6 +856,29 @@ required_symbol_lines=(
   'typedef native_m0_type_7 store_server_codec_release_request_arg_0;'
   'typedef native_m0_type_8 store_server_codec_release_response_return;'
   'typedef native_m0_type_5 store_server_codec_release_response_arg_0;'
+  'typedef native_m0_type_10 store_server_compile_query_return;'
+  'typedef native_m0_type_1 store_server_compile_query_arg_0;'
+  'typedef uint64_t store_server_compile_query_arg_1;'
+  'typedef uint64_t store_server_compile_query_arg_2;'
+  'typedef uint64_t store_server_compile_query_arg_3;'
+  'typedef native_m0_type_4 store_server_compile_query_arg_4;'
+  'typedef uint64_t store_server_compile_query_arg_5;'
+  'typedef uint64_t store_server_compile_query_arg_6;'
+  'typedef uint64_t store_server_compile_query_arg_7;'
+  'typedef native_m0_type_11 store_server_compile_append_return;'
+  'typedef native_m0_type_1 store_server_compile_append_arg_0;'
+  'typedef uint64_t store_server_compile_append_arg_1;'
+  'typedef uint64_t store_server_compile_append_arg_2;'
+  'typedef uint64_t store_server_compile_append_arg_3;'
+  'typedef native_m0_type_4 store_server_compile_append_arg_4;'
+  'typedef uint64_t store_server_compile_append_arg_5;'
+  'typedef uint64_t store_server_compile_append_arg_6;'
+  'typedef uint64_t store_server_compile_append_arg_7;'
+  'typedef uint64_t store_server_compile_append_arg_8;'
+  'typedef uint64_t store_server_compile_append_arg_9;'
+  'typedef uint64_t store_server_compile_append_arg_10;'
+  'typedef uint64_t store_server_compile_append_arg_11;'
+  'typedef uint64_t store_server_compile_append_arg_12;'
   '#define BEAGLE_STORE_SERVER_CALL_GENERATED_ABI(arena, capability) BEAGLE_STORE_SERVER_SYMBOL_GENERATED_ABI()'
   '#define BEAGLE_STORE_SERVER_CALL_STORE_BOOT(arena, capability, arg_0, arg_1, arg_2, arg_3) BEAGLE_STORE_SERVER_SYMBOL_STORE_BOOT((arena), (capability), (arg_0), (arg_1), (arg_2), (arg_3))'
   '#define BEAGLE_STORE_SERVER_CALL_STORE_DISPATCH(arena, capability, arg_0, arg_1, arg_2) BEAGLE_STORE_SERVER_SYMBOL_STORE_DISPATCH((arena), (capability), (arg_0), (arg_1), (arg_2))'
@@ -718,6 +886,8 @@ required_symbol_lines=(
   '#define BEAGLE_STORE_SERVER_CALL_CODEC_READ_REQUEST(arena, capability, arg_0) BEAGLE_STORE_SERVER_SYMBOL_CODEC_READ_REQUEST((arena), (arg_0))'
   '#define BEAGLE_STORE_SERVER_CALL_CODEC_WRITE_RESPONSE(arena, capability, arg_0) BEAGLE_STORE_SERVER_SYMBOL_CODEC_WRITE_RESPONSE((arena), (capability), (arg_0))'
   '#define BEAGLE_STORE_SERVER_CALL_CODEC_RELEASE_RESPONSE(arena, capability, arg_0) BEAGLE_STORE_SERVER_SYMBOL_CODEC_RELEASE_RESPONSE((capability), (arg_0))'
+  '#define BEAGLE_STORE_SERVER_CALL_COMPILE_QUERY(arena, capability, arg_0, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, arg_7) BEAGLE_STORE_SERVER_SYMBOL_COMPILE_QUERY((arena), (capability), (arg_0), (arg_1), (arg_2), (arg_3), (arg_4), (arg_5), (arg_6), (arg_7))'
+  '#define BEAGLE_STORE_SERVER_CALL_COMPILE_APPEND(arena, capability, arg_0, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, arg_7, arg_8, arg_9, arg_10, arg_11, arg_12) BEAGLE_STORE_SERVER_SYMBOL_COMPILE_APPEND((arena), (capability), (arg_0), (arg_1), (arg_2), (arg_3), (arg_4), (arg_5), (arg_6), (arg_7), (arg_8), (arg_9), (arg_10), (arg_11), (arg_12))'
 )
 for required_line in "${required_symbol_lines[@]}"; do
   grep -Fqx -- "$required_line" "$symbols_header" ||
@@ -771,7 +941,7 @@ embed_artifact="$("${build_env[@]}" "$builder" --host embed \
   -f "$embed_artifact/lib/libbeagle_store.so" ]] ||
   fail "embed host artifact omitted its public libraries"
 assert_ffc_notices "$embed_artifact"
-grep -Fqx 'native-host-abi PASS host=embed exports=7 version=1' \
+grep -Fqx 'native-host-abi PASS host=embed exports=10 version=1' \
   "$embed_artifact/native-host.report.txt" ||
   fail "embed host artifact omitted its public ABI receipt"
 cat >"$scratch/embed-consumer.c" <<'C'
@@ -958,7 +1128,7 @@ mv "$adapter.incomplete" "$adapter"
 if "${build_env[@]}" "$builder" --host server --adapter "$adapter" \
     "$scratch/sources/good.bgl" \
     >"$scratch/missing-export.out" 2>"$scratch/missing-export.err"; then
-  fail "server host linked without all eight generated ABI exports"
+  fail "server host linked without all ten generated ABI exports"
 fi
 grep -Fq 'store_server_codec_release_response' "$scratch/missing-export.err" ||
   fail "server host link did not name the missing ABI export"
