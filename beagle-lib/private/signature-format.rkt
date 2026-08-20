@@ -57,9 +57,14 @@
            (or (layout-edit-line edit) 1)
            (add1 (or (layout-edit-col edit) 0))
            (layout-edit-role edit)
-           (if (layout-edit-safe? edit)
-               ""
-               " (automatic rewrite refused: line comment reach could change)")))
+           (case (layout-edit-refusal edit)
+             [(refinement-not-implemented)
+              (string-append
+               " (refinement-not-implemented: automatic rewrite refused; "
+               "legacy binding constraints remain accepted until refinement semantics land)")]
+             [(comment-reach)
+              " (automatic rewrite refused: line comment reach could change)"]
+             [else ""])))
 
 (define (atomic-write-string path content)
   (define parent (or (path-only path) (current-directory)))

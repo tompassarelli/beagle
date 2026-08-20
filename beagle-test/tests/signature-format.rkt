@@ -42,22 +42,36 @@
    (string-append
     "(defn add\n"
     "  [x Int\n"
-    "   y Int]\n"
-    "  Int\n"
+    "   y Int] Int\n"
     "  (+ x y))\n"))
   (check-equal? (length edits) 1))
 
-(test-case "legacy constraints become refinement types"
-  (define-values (actual edits)
-    (formatted "(defn positive [(x Int positive?)] Int x)\n"))
-  (check-equal?
-   actual
-   (string-append
-    "(defn positive\n"
-    "  [x (Int where positive?)]\n"
-    "  Int\n"
-    "  x)\n"))
-  (check-equal? (length edits) 1))
+(test-case "single refinement stays inline"
+  (define source
+    "(defn positive [x (Int where (> _ 0))] Int x)\n")
+  (define-values (actual edits) (formatted source))
+  (check-equal? actual source)
+  (check-equal? edits '()))
+
+(test-case "legacy constraints refuse command-wide writes"
+  (define blocked "(defn positive [(x Int positive?)] Int x)\n")
+  (define rewritable "(defn add [(x Int) (y Int)] Int (+ x y))\n")
+  (with-source
+   blocked
+   (lambda (blocked-path)
+     (with-source
+      rewritable
+      (lambda (rewritable-path)
+        (define edits (signature-layout-edits blocked-path))
+        (check-equal? (length edits) 1)
+        (check-equal? (layout-edit-refusal (car edits))
+                      'refinement-not-implemented)
+        (check-equal?
+         (format-signature-files 'check (list blocked-path rewritable-path)) 3)
+        (check-equal?
+         (format-signature-files 'write (list blocked-path rewritable-path)) 2)
+        (check-equal? (file->string blocked-path) blocked)
+        (check-equal? (file->string rewritable-path) rewritable))))))
 
 (test-case "signature where clause remains after its return line"
   (define-values (actual edits)
@@ -68,8 +82,7 @@
    (string-append
     "(defn bounded\n"
     "  [lo Int\n"
-    "   hi Int]\n"
-    "  Bool\n"
+    "   hi Int] Bool\n"
     "  (where (<= lo hi))\n"
     "  true)\n"))
   (check-equal? (length edits) 1))
@@ -83,8 +96,7 @@
    (string-append
     "(defn collect\n"
     "  [first Int\n"
-    "   & more (Vec Int)]\n"
-    "  Int\n"
+    "   & more (Vec Int)] Int\n"
     "  first)\n"))
   (check-equal? (length edits) 1))
 
@@ -110,6 +122,30 @@
     "  [x Float\n"
     "   y Float])\n"))
   (check-equal? (length edits) 1))
+
+(test-case "one local binding triple stays inline"
+  (define source "(let [x Int 1] x)\n")
+  (define-values (actual edits) (formatted source))
+  (check-equal? actual source)
+  (check-equal? edits '()))
+
+(test-case "let and loop break one complete triple per line"
+  (for ([source+expected
+         (in-list
+          (list
+           (cons "(let [x Int 1 y Int 2] (+ x y))\n"
+                 (string-append
+                  "(let [x Int 1\n"
+                  "      y Int 2]\n"
+                  "  (+ x y))\n"))
+           (cons "(loop [x Int 1 y Int 2] (+ x y))\n"
+                 (string-append
+                  "(loop [x Int 1\n"
+                  "       y Int 2]\n"
+                  "  (+ x y))\n"))))])
+    (define-values (actual edits) (formatted (car source+expected)))
+    (check-equal? actual (cdr source+expected))
+    (check-equal? (length edits) 1)))
 
 (test-case "width never changes a single-pair signature"
   (define name (make-string 120 #\f))
@@ -154,6 +190,5 @@
       (string-append
        "(defn add\n"
        "  [x Int\n"
-       "   y Int]\n"
-       "  Int\n"
+       "   y Int] Int\n"
        "  (+ x y))\n")))))

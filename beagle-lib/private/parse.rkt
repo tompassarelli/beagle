@@ -450,7 +450,7 @@
 ;; Physical layout is formatter policy, not language validity. The reader
 ;; syntax positions and tokenizer still live here so the formatter can reuse
 ;; the compiler's exact grammar-site discovery without reparsing source text.
-(struct layout-edit (path line col role offset before replacement safe?)
+(struct layout-edit (path line col role offset before replacement safe? refusal)
   #:transparent)
 
 (define current-layout-edits (make-parameter '()))
@@ -591,6 +591,32 @@
                                 'flat)
                                acc)))]))))))
 
+(define (logical-local-entry-stxs vector-stx)
+  (define subs (stx-subs vector-stx))
+  (define items (and subs (cdr subs)))
+  (and items
+       (let ([legacy? (and (pair? items)
+                           (structured-binding? (->datum (car items))))])
+         (let loop ([rest items] [acc '()])
+           (cond
+             [(null? rest) (reverse acc)]
+             [legacy?
+              (and (>= (length rest) 2)
+                   (loop (cddr rest)
+                         (cons (spanning-entry
+                                (take rest 2)
+                                (map ->datum (take rest 2))
+                                'legacy-triple)
+                               acc)))]
+             [else
+              (and (>= (length rest) 3)
+                   (loop (cdddr rest)
+                         (cons (spanning-entry
+                                (take rest 3)
+                                (map ->datum (take rest 3))
+                                'flat-triple)
+                               acc)))])))))
+
 ;; Each binding is one source datum, so layout never has to infer logical
 ;; boundaries from alternating marker tokens.
 (define (fragment->inline tokens start end)
@@ -704,24 +730,14 @@
       (format "~a (~a where ~a)" (car rendered) (cadr rendered) (caddr rendered))
       (string-join rendered " ")))
 
-(define (entry-refinement? entry)
+(define (legacy-constrained-entry? entry)
   (define style (syntax-property entry 'beagle-binding-entry-style))
   (define datum (->datum entry))
-  (cond
-    [(eq? style 'legacy-rest)
-     (define declaration (cadr datum))
-     (or (= (length declaration) 3)
-         (and (list? (cadr declaration))
-              (= (length (cadr declaration)) 3)
-              (eq? (cadr (cadr declaration)) 'where)))]
-    [(eq? style 'legacy)
-     (or (= (length datum) 3)
-         (and (list? (cadr datum)) (= (length (cadr datum)) 3)
-              (eq? (cadr (cadr datum)) 'where)))]
-    [else
-     (define type-datum (last datum))
-     (and (list? type-datum) (= (length type-datum) 3)
-          (eq? (cadr type-datum) 'where))]))
+  (case style
+    [(legacy) (= (length datum) 3)]
+    [(legacy-rest) (= (length (cadr datum)) 3)]
+    [(legacy-triple) (= (length (car datum)) 3)]
+    [else #f]))
 
 (define (canonical-entry-text tokens entry start end col [suffix-width 0])
   (define inline (fragment->inline tokens start end))
@@ -732,6 +748,15 @@
      (define source-stxs
        (syntax-property entry 'beagle-binding-entry-source-stxs))
      (string-append "& " (legacy-declaration-text tokens (cadr source-stxs)))]
+    [(legacy-triple)
+     (define source-stxs
+       (syntax-property entry 'beagle-binding-entry-source-stxs))
+     (string-append
+      (legacy-declaration-text tokens (car source-stxs))
+      " "
+      (fragment->inline tokens
+                        (syntax-start-offset (cadr source-stxs))
+                        (syntax-end-offset (cadr source-stxs) tokens)))]
     [else inline]))
 
 (define (canonical-vector-text tokens open close entries continuation-col
@@ -842,9 +867,10 @@
       SIGNATURE-LINE-WIDTH))
 
 (define (check-layout-vector! source tokens form-stx anchor vector-stx placement role
-                              [return-slot? #t] [return-own-line? #f])
+                              [return-slot? #t]
+                              [entry-reader logical-entry-stxs])
   (define start (syntax-start-offset vector-stx))
-  (define entries (and start (logical-entry-stxs vector-stx)))
+  (define entries (and start (entry-reader vector-stx)))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
   (define close (and open (matching-token tokens open)))
   (when (and entries open close anchor (syntax-start-offset anchor))
@@ -862,10 +888,9 @@
            (fragment->inline tokens anchor-end (token-offset open))))
     (define continuation-col
       (signature-continuation-col form-stx open placement tokens))
-    (define expanded?
-      (or (> (length entries) 1)
-          (for/or ([entry (in-list entries)])
-            (entry-refinement? entry))))
+    (define body-col
+      (+ (or (physical-syntax-column form-stx tokens) 0) 2))
+    (define expanded? (> (length entries) 1))
     (define layout (if expanded? 'expanded 'inline))
     (define vector-col
       (if (eq? layout 'inline) (token-col open) continuation-col))
@@ -892,44 +917,55 @@
     (define body?
       (and after-signature (not (closer? after-signature))))
     (define region-end
-      (if (and (eq? layout 'expanded) return-slot? body?)
+      (if (and (eq? layout 'expanded) body?)
           (token-offset after-signature)
           signature-end))
+    (define return-fragment
+      (and return-slot? (pair? tail-fragments) (car tail-fragments)))
+    (define qualification-fragments
+      (if return-fragment (cdr tail-fragments) '()))
     (define replacement
       (string-append
        prefix-text
        vector-text
        (cond
-         [(not return-slot?) ""]
-         [(and (eq? layout 'expanded) return-own-line?)
-          (string-append "\n" (make-string continuation-col #\space)
-                         (string-join
-                          tail-fragments
-                          (string-append "\n"
-                                         (make-string continuation-col #\space)))
-                         (if body?
-                             (string-append "\n"
-                                            (make-string continuation-col #\space))
-                             ""))]
+         [(not return-slot?)
+          (if (and (eq? layout 'expanded) body?)
+              (string-append "\n" (make-string body-col #\space))
+              "")]
          [else
           (string-append
-           (if (null? tail-fragments)
-               ""
-               (string-append " " (string-join tail-fragments " ")))
-           (if (and (eq? layout 'expanded) body?)
-               (string-append "\n" (make-string continuation-col #\space))
+           (if return-fragment (string-append " " return-fragment) "")
+           (apply string-append
+                  (for/list ([fragment (in-list qualification-fragments)])
+                    (string-append "\n"
+                                   (make-string continuation-col #\space)
+                                   fragment)))
+           (if (and body?
+                    (or (eq? layout 'expanded)
+                        (pair? qualification-fragments)))
+               (string-append "\n" (make-string body-col #\space))
                ""))])))
     (define before (substring source region-start region-end))
     (unless (string=? before replacement)
       (define path
         (let ([src (syntax-source vector-stx)])
           (if (path? src) (path->string src) src)))
+      (define legacy-constraint?
+        (for/or ([entry (in-list entries)])
+          (legacy-constrained-entry? entry)))
+      (define comment-reach?
+        (line-comment-in-range? tokens region-start region-end))
       (current-layout-edits
        (cons (layout-edit path
                           (physical-syntax-line vector-stx tokens)
                           (physical-syntax-column vector-stx tokens)
                           role region-start before replacement
-                          (not (line-comment-in-range? tokens region-start region-end)))
+                          (not (or legacy-constraint? comment-reach?))
+                          (cond
+                            [legacy-constraint? 'refinement-not-implemented]
+                            [comment-reach? 'comment-reach]
+                            [else #f]))
              (current-layout-edits))))))
 
 (define (vector-stx? stx)
@@ -943,6 +979,13 @@
   (when (and (vector-stx? vector-stx) anchor)
     (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role
                           #f)))
+
+(define (inspect-local-binding-layout! source tokens form-stx role)
+  (define subs (stx-subs form-stx))
+  (define vector-stx (and subs (stx-ref subs 1)))
+  (when (vector-stx? vector-stx)
+    (check-layout-vector! source tokens form-stx vector-stx vector-stx 'bare role
+                          #f logical-local-entry-stxs)))
 
 (define (inspect-method-form! source tokens method-stx [role "method parameter"])
   (define subs (stx-subs method-stx))
@@ -984,14 +1027,14 @@
     (cond
       [(and (pair? tail) (vector-stx? (car tail)))
        (check-layout-vector! source tokens form-stx anchor (car tail) 'owner
-                             "parameter" #t #t)]
+                             "parameter" #t)]
       [else
        (for ([clause (in-list tail)])
          (define clause-subs (stx-subs clause))
          (when (and clause-subs (pair? clause-subs)
                     (vector-stx? (car clause-subs)))
            (check-layout-vector! source tokens clause clause (car clause-subs) 'clause
-                                 "multi-arity parameter" #t #t)))])))
+                                 "multi-arity parameter" #t)))])))
 
 (define (inspect-layout-form! source tokens form-stx)
   (define subs (stx-subs form-stx))
@@ -1000,6 +1043,8 @@
     (case head
       [(defn defn-) (inspect-defn-layout! source tokens form-stx)]
       [(fn) (inspect-fn-layout! source tokens form-stx)]
+      [(let) (inspect-local-binding-layout! source tokens form-stx "let binding")]
+      [(loop) (inspect-local-binding-layout! source tokens form-stx "loop binding")]
       [(defrecord) (inspect-named-form-vector! source tokens form-stx 2 1 "typed field")]
       [(letfn)
        (define fns (stx-ref subs 1))
