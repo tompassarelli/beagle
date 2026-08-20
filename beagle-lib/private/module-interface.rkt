@@ -60,6 +60,164 @@
 ;; qualified use sites; REFER is #f or the explicitly referred symbol list.
 (struct module-import (interface prefix refer) #:transparent)
 
+;; The parser owns surface syntax, but it must pass one normalized import
+;; contract to every module consumer.  In particular, the string `"react"`
+;; and the namespace `react` are different identities: the former is an exact
+;; native ESM specifier while the latter is a Beagle module-provider key.
+(struct module-identity (kind value) #:transparent)
+(struct canonical-libspec (identity alias refer rename) #:transparent)
+(struct canonical-global-refer (refer rename) #:transparent)
+
+(define (libspec-error format-string . arguments)
+  (apply error 'normalize-require-libspec format-string arguments))
+
+(define (plain-symbol? value)
+  (and (symbol? value) (not (keyword? value))))
+
+(define (distinct-symbols? values)
+  (= (length values) (length (remove-duplicates values eq?))))
+
+(define (validated-symbol-list value description)
+  (unless (and (list? value)
+               (andmap plain-symbol? value)
+               (distinct-symbols? value))
+    (libspec-error "~a must be a duplicate-free list of symbols, got: ~v"
+                   description value))
+  value)
+
+(define (validated-rename value refer description)
+  (unless (hash? value)
+    (libspec-error "~a must be a symbol-to-symbol map, got: ~v"
+                   description value))
+  (define entries (hash->list value))
+  (unless (andmap (lambda (entry)
+                    (and (plain-symbol? (car entry))
+                         (plain-symbol? (cdr entry))))
+                  entries)
+    (libspec-error "~a must be a symbol-to-symbol map, got: ~v"
+                   description value))
+  (define sources (map car entries))
+  (define targets (map cdr entries))
+  (unless (and (distinct-symbols? targets)
+               (andmap (lambda (source) (memq source refer)) sources))
+    (libspec-error
+     "~a may rename each explicitly referred symbol once, got: ~v"
+     description value))
+  (when (for/or ([entry (in-list entries)])
+          (eq? (car entry) (cdr entry)))
+    (libspec-error "~a cannot rename a symbol to itself, got: ~v"
+                   description value))
+  (for/hasheq ([entry (in-list entries)])
+    (values (car entry) (cdr entry))))
+
+(define (libspec-identity source kind)
+  (case kind
+    [(require)
+     (cond
+       [(string? source) (module-identity 'native-esm source)]
+       [(plain-symbol? source) (module-identity 'beagle-namespace source)]
+       [else
+        (libspec-error
+         "require libspec must start with a namespace symbol or native ESM string, got: ~v"
+         source)])]
+    [(require-global)
+     (unless (plain-symbol? source)
+       (libspec-error
+        "require-global libspec must start with a global symbol, got: ~v"
+        source))
+     (module-identity 'global source)]
+    [else
+     (libspec-error "unknown libspec kind ~a" kind)]))
+
+;; ITEMS are already-delimited source data: `(source :as alias :refer (name ...)
+;; :rename #hasheq((name . local)))`.  This deliberately has no quoted, bare,
+;; or alternate-option compatibility grammar.  The parser strips reader tags
+;; and calls this one boundary for `require` and `require-global` alike.
+(define (normalize-require-libspec items #:kind [kind 'require])
+  (unless (and (list? items) (pair? items))
+    (libspec-error "libspec must be a non-empty canonical item list, got: ~v"
+                   items))
+  (define identity (libspec-identity (car items) kind))
+  (define seen (make-hasheq))
+  (define alias #f)
+  (define refer '())
+  (define rename (hasheq))
+  (let loop ([rest (cdr items)])
+    (cond
+      [(null? rest)
+       (canonical-libspec identity alias refer rename)]
+      [(or (not (plain-symbol? (car rest)))
+           (not (memq (car rest) '(:as :refer :rename))))
+       (libspec-error
+        "unsupported libspec option ~v; supported: :as, :refer, :rename"
+        (car rest))]
+      [(hash-ref seen (car rest) #f)
+       (libspec-error "libspec option ~a appears more than once" (car rest))]
+      [(null? (cdr rest))
+       (libspec-error "libspec option ~a requires a value" (car rest))]
+      [else
+       (hash-set! seen (car rest) #t)
+       (case (car rest)
+         [(:as)
+          (unless (plain-symbol? (cadr rest))
+            (libspec-error ":as expects a symbol, got: ~v" (cadr rest)))
+          (set! alias (cadr rest))]
+         [(:refer)
+          (set! refer (validated-symbol-list (cadr rest) ":refer"))]
+         [(:rename)
+          ;; Validate after the complete option sequence, so option order has
+          ;; no meaning while `:rename` still requires an explicit `:refer`.
+          (set! rename (cadr rest))])
+       (loop (cddr rest))])))
+
+;; `:rename` validation depends on `:refer`, so finish the normalized value in
+;; a second pass.  Keeping it separate makes a future parser call independent
+;; of source option order.
+(define (normalize-canonical-libspec items #:kind [kind 'require])
+  (define provisional (normalize-require-libspec items #:kind kind))
+  (canonical-libspec
+   (canonical-libspec-identity provisional)
+   (canonical-libspec-alias provisional)
+   (canonical-libspec-refer provisional)
+   (validated-rename (canonical-libspec-rename provisional)
+                     (canonical-libspec-refer provisional)
+                     ":rename")))
+
+;; `refer-global` is a separate namespace clause, not a module import.  It is
+;; nevertheless normalized here because its renamed globals must retain a
+;; global identity and must never be confused with a native ESM dependency.
+(define (normalize-refer-global options)
+  (unless (list? options)
+    (libspec-error "refer-global options must be a canonical item list, got: ~v"
+                   options))
+  (define seen (make-hasheq))
+  (define refer #f)
+  (define rename (hasheq))
+  (let loop ([rest options])
+    (cond
+      [(null? rest)
+       (unless refer
+         (libspec-error "refer-global requires :only [global ...]"))
+       (canonical-global-refer
+        refer
+        (validated-rename rename refer "refer-global :rename"))]
+      [(or (not (plain-symbol? (car rest)))
+           (not (memq (car rest) '(:only :rename))))
+       (libspec-error
+        "unsupported refer-global option ~v; supported: :only, :rename"
+        (car rest))]
+      [(hash-ref seen (car rest) #f)
+       (libspec-error "refer-global option ~a appears more than once" (car rest))]
+      [(null? (cdr rest))
+       (libspec-error "refer-global option ~a requires a value" (car rest))]
+      [else
+       (hash-set! seen (car rest) #t)
+       (case (car rest)
+         [(:only)
+          (set! refer (validated-symbol-list (cadr rest) "refer-global :only"))]
+         [(:rename) (set! rename (cadr rest))])
+       (loop (cddr rest))])))
+
 (define (param-interface-type p)
   (cond
     [(param? p) (or (param-type p) ANY)]
@@ -1515,6 +1673,8 @@
  program-protocol-contract-ref
  program-protocol-method-contract-ref
  module-interfaces-overlay-digest
+ normalize-canonical-libspec
+ normalize-refer-global
  (struct-out interface-binding)
  (struct-out interface-macro)
  (struct-out interface-constraint)
@@ -1526,4 +1686,7 @@
  (struct-out interface-protocol-contract)
  (struct-out module-interface)
  (struct-out module-source)
- (struct-out module-import))
+ (struct-out module-import)
+ (struct-out module-identity)
+ (struct-out canonical-libspec)
+ (struct-out canonical-global-refer))

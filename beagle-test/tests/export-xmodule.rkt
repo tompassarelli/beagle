@@ -53,6 +53,66 @@
 (define (check-file name)
   (type-check! (fixture-program name)))
 
+(test-case "canonical string libspec preserves native ESM identity"
+  (define spec
+    (normalize-canonical-libspec
+     (list "@scope/package/subpath" ':as 'pkg ':refer '(make) ':rename
+           (hasheq 'make 'build))))
+  (check-equal?
+   (canonical-libspec-identity spec)
+   (module-identity 'native-esm "@scope/package/subpath"))
+  (check-equal? (canonical-libspec-alias spec) 'pkg)
+  (check-equal? (canonical-libspec-refer spec) '(make))
+  (check-equal? (canonical-libspec-rename spec) (hasheq 'make 'build)))
+
+(test-case "namespace and native ESM identities never collapse"
+  (define namespace-spec
+    (normalize-canonical-libspec (list 'react ':as 'react)))
+  (define esm-spec
+    (normalize-canonical-libspec (list "react" ':as 'react)))
+  (check-equal?
+   (module-identity-kind (canonical-libspec-identity namespace-spec))
+   'beagle-namespace)
+  (check-equal?
+   (module-identity-kind (canonical-libspec-identity esm-spec))
+   'native-esm)
+  (check-not-equal? (canonical-libspec-identity namespace-spec)
+                    (canonical-libspec-identity esm-spec)))
+
+(test-case "require-global preserves a global rather than ESM identity"
+  (define spec
+    (normalize-canonical-libspec (list 'Idiomorph ':as 'idio)
+                                 #:kind 'require-global))
+  (check-equal?
+   (canonical-libspec-identity spec)
+   (module-identity 'global 'Idiomorph)))
+
+(test-case "refer-global has an explicit closed rename contract"
+  (define globals
+    (normalize-refer-global
+     (list ':only '(Date String) ':rename (hasheq 'Date 'my-date))))
+  (check-equal? (canonical-global-refer-refer globals) '(Date String))
+  (check-equal? (canonical-global-refer-rename globals)
+                (hasheq 'Date 'my-date)))
+
+(test-case "libspec validation rejects duplicate, implicit, and ambiguous renames"
+  (check-exn #rx"appears more than once"
+             (lambda ()
+               (normalize-canonical-libspec
+                (list "react" ':as 'react ':as 'again))))
+  (check-exn #rx"explicitly referred"
+             (lambda ()
+               (normalize-canonical-libspec
+                (list "react" ':rename (hasheq 'make 'build)))))
+  (check-exn #rx"duplicate-free list"
+             (lambda ()
+               (normalize-canonical-libspec
+                (list "react" ':refer '(make make)))))
+  (check-exn #rx"cannot rename a symbol to itself"
+             (lambda ()
+               (normalize-refer-global
+                (list ':only '(Date) ':rename (hasheq 'Date 'Date))))))
+
 (test-case "a correct call to a js/export'd function still checks"
   (check-not-exn (lambda () (check-file "ok.bjs"))))
 
