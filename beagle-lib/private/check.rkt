@@ -264,6 +264,7 @@
 (define current-error-definitions (make-parameter (hasheq)))
 (define current-raising-functions (make-parameter (hasheq)))
 (define current-check-error-contract (make-parameter #f))
+(define current-caught-error-types (make-parameter '()))
 
 ;; Non-#f only while the whole-program definition solver is constraining one
 ;; monomorphic SCC.  Normal checking sees only finalized signatures.
@@ -1992,6 +1993,70 @@
        (equal? (error-contract-error-type left)
                (error-contract-error-type right))))
 
+(define (catch-clause-declared-type clause)
+  (define declared (catch-clause-exception-type clause))
+  (cond
+    [(type? declared) declared]
+    [(eq? declared ':default) ANY]
+    [else (parse-type declared)]))
+
+(define (catch-all-error-type? caught contract)
+  (define caught-name (error-type-name caught))
+  (or (any-type? caught)
+      (eq? caught-name ':default)
+      (equal? caught (error-contract-error-type contract))
+      (and (eq? (error-contract-mode contract) 'exception)
+           (case (current-check-target)
+             [(js) (memq caught-name '(Error ExceptionInfo))]
+             [(clj) (memq caught-name
+                          '(Throwable Exception ExceptionInfo
+                            clojure.lang.ExceptionInfo))]
+             [else #f]))))
+
+(define (error-contract-after-catches contract)
+  (define caught-types (current-caught-error-types))
+  (cond
+    [(ormap (lambda (caught) (catch-all-error-type? caught contract))
+            caught-types)
+     #f]
+    [else
+     (define uncovered
+       (filter
+        (lambda (variant)
+          (define member-type (type-prim (car variant)))
+          (not
+           (ormap (lambda (caught)
+                    (type-compatible? member-type caught))
+                  caught-types)))
+        (error-contract-payload-layout contract)))
+     (and (pair? uncovered)
+          (error-contract (error-contract-error-type contract)
+                          uncovered
+                          (error-contract-mode contract)))]))
+
+(define (check-try-error-expr! e env)
+  (define inherited-catches (current-caught-error-types))
+  (define local-catches
+    (map catch-clause-declared-type (try-form-catches e)))
+  (parameterize ([current-caught-error-types
+                  (append local-catches inherited-catches)])
+    (for ([expr (in-list (try-form-body e))])
+      (check-error-expr! expr env)))
+  ;; A handler or finally expression is outside this try's protected body.
+  ;; Only an enclosing try may discharge an effect raised from either one.
+  (parameterize ([current-caught-error-types inherited-catches])
+    (for ([clause (in-list (try-form-catches e))])
+      (define catch-env (mut-copy env))
+      (binder-env-set! catch-env
+                       clause
+                       (catch-clause-name clause)
+                       (catch-clause-declared-type clause))
+      (for ([expr (in-list (catch-clause-body clause))])
+        (check-error-expr! expr catch-env)))
+    (when (try-form-finally-body e)
+      (for ([expr (in-list (try-form-finally-body e))])
+        (check-error-expr! expr env)))))
+
 (define (check-error-expr! e env)
   (define table (current-semantic-contracts))
   (define current-contract (current-check-error-contract))
@@ -2047,16 +2112,18 @@
      (define inner (check-expr-expr e))
      (define contract (raising-call-contract inner))
      (when contract
-       (unless (same-error-contract? current-contract contract)
+       (define uncovered (error-contract-after-catches contract))
+       (when (and uncovered
+                  (not (same-error-contract? current-contract uncovered)))
          (error-contract-error
           e
           (format "check propagates ~a, but the enclosing function does not declare matching :raises"
-                  (type->string (error-contract-error-type contract)))
+                  (type->string (error-contract-error-type uncovered)))
           (hasheq
-           'raised (type->string (error-contract-error-type contract))
+           'raised (type->string (error-contract-error-type uncovered))
            'repair (format ":raises ~a"
                            (type->string
-                            (error-contract-error-type contract))))))
+                            (error-contract-error-type uncovered))))))
        (hash-set! table e contract)
        (hash-set! table inner contract))
      (if contract
@@ -2076,17 +2143,25 @@
            (check-error-expr! arg env))
          (check-error-expr! inner env))
      (check-error-expr! (rescue-form-fallback e) env)]
+    [(try-form? e)
+     (check-try-error-expr! e env)]
     [(raising-call-contract e)
      => (lambda (contract)
-          (error-contract-error
-           e
-           (format "call to ~a raises ~a and must be wrapped in check or rescue"
-                   (reference->string (call-form-fn e))
-                   (type->string (error-contract-error-type contract)))
-           (hasheq
-            'function (reference->string (call-form-fn e))
-            'raised (type->string (error-contract-error-type contract))
-            'repair "(check (call ...)) or (rescue (call ...) ...)")))]
+          (define uncovered (error-contract-after-catches contract))
+          (if uncovered
+              (error-contract-error
+               e
+               (format "call to ~a raises ~a and must be wrapped in check or rescue"
+                       (reference->string (call-form-fn e))
+                       (type->string (error-contract-error-type uncovered)))
+               (hasheq
+                'function (reference->string (call-form-fn e))
+                'raised (type->string (error-contract-error-type uncovered))
+                'repair "(check (call ...)), (rescue (call ...) ...), or a covering try/catch"))
+              (begin
+                (hash-set! table e contract)
+                (for ([arg (in-list (call-form-args e))])
+                  (check-error-expr! arg env)))))]
     [(call-form? e)
      (for ([arg (in-list (call-form-args e))])
        (check-error-expr! arg env))]
@@ -6323,7 +6398,8 @@
      (define catch-types
        (for/list ([c (in-list (try-form-catches e))])
          (define catch-env (mut-copy env))
-         (binder-env-set! catch-env c (catch-clause-name c) ANY)
+         (binder-env-set! catch-env c (catch-clause-name c)
+                          (catch-clause-declared-type c))
          (last-expr-type (catch-clause-body c) catch-env)))
      (when (try-form-finally-body e)
        (for ([expr (in-list (try-form-finally-body e))]) (infer-expr expr env)))
