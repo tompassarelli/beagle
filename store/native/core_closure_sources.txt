@@ -19,6 +19,5 @@ src/store/log_codec.bgl
 src/store/snapshot_codec.bgl
 src/store/native_lease_ops.bgl
 src/store/native_query_ops.bgl
-src/store/native_compile.bgl
 src/store/native_dispatch.bgl
 src/store/native_server.bgl

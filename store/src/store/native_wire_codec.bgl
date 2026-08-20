@@ -136,11 +136,6 @@
                [(if (list? spec) (= (first spec) 'codec) false) (nth spec 1)]
                [:else
                 (error "defwire " name ": unsupported wire type " spec)]))
-           field-type Any
-           (fn [spec Any] Any
-             (if (if (list? spec) (= (first spec) 'optional) false)
-               (list 'U 'Nil (base-type (nth spec 1)))
-               (base-type spec)))
            base-kind Any
            (fn [spec Any] Any
              (cond
@@ -266,7 +261,13 @@
                            (if (list? field)
                              (if (if (= (count field) 2)
                                    true (= (count field) 3))
-                               (do (field-type (nth field 1)) field)
+                               (do
+                                (if (if (list? (nth field 1))
+                                        (= (first (nth field 1)) 'optional)
+                                        false)
+                                  (list 'U 'Nil (base-type (nth (nth field 1) 1)))
+                                  (base-type (nth field 1)))
+                                field)
                                (syntax-error-at fields field-index
                                  "Invalid defwire field declaration: " field))
                              (syntax-error-at fields field-index
@@ -335,7 +336,13 @@
                            (cons (ann encoder 'store.native-wire-codec/Encoder)
                                  (map
                                   (fn [field Any local Any] Any
-                                    (ann local (field-type (nth field 1))))
+                                    (ann local
+                                         (if (if (list? (nth field 1))
+                                                 (= (first (nth field 1)) 'optional)
+                                                 false)
+                                           (list 'U 'Nil
+                                                 (base-type (nth (nth field 1) 1)))
+                                           (base-type (nth field 1)))))
                                   fields locals)))
                     bindings Any
                     (mapcat
@@ -343,7 +350,13 @@
                        (let [context Any (if (= (count field) 3)
                                        (nth field 2)
                                        (str name " " case-name " " (nth field 0)))]
-                         (list (ann local (field-type (nth field 1)))
+                         (list (ann local
+                                    (if (if (list? (nth field 1))
+                                            (= (first (nth field 1)) 'optional)
+                                            false)
+                                      (list 'U 'Nil
+                                            (base-type (nth (nth field 1) 1)))
+                                      (base-type (nth field 1))))
                                (read-field (nth field 1) decoder context))))
                      fields locals)]
                 (list
@@ -352,7 +365,12 @@
                               (map
                                (fn [field Any] Any
                                  (ann (nth field 0)
-                                      (field-type (nth field 1))))
+                                      (if (if (list? (nth field 1))
+                                              (= (first (nth field 1)) 'optional)
+                                              false)
+                                        (list 'U 'Nil
+                                              (base-type (nth (nth field 1) 1)))
+                                        (base-type (nth field 1)))))
                                fields)))
                  (list 'def tag-name 'Int tag)
                  (list 'def fixed-name 'Int fixed-bytes)
