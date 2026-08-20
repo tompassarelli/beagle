@@ -5,7 +5,7 @@
             [store.rt :as rt]
             [store.types :as t]))
 
-;; Public data commands speak only FRAMRPC. EDN exists here solely as the
+;; Public data commands speak only Store RPC. EDN exists here solely as the
 ;; human command-line syntax and is lowered to Terms before any socket opens.
 
 (defn- server-port []

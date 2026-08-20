@@ -3,7 +3,7 @@
 ;; beagle-store-ingest-code — THE FLIP, stage 1: Beagle source tree -> canonical CODE log.
 ;; ============================================================================
 ;; Demotes Beagle text from source-of-truth to a generated view: ingest each
-;; module's AST into a per-repo native FRAMLOG, re-keying file-local integer
+;; module's AST into a per-repo native Store transaction log, re-keying file-local integer
 ;; node labels only where the predicate declares a structural reference.
 ;;
 ;; The log carries ONLY the AST (kind/v or qualified-symbol qualifier/name,
@@ -199,7 +199,7 @@
   (when (empty? srcs)
     (die "usage: bin/beagle-store-ingest-code <src> [<src>...] --space-id <id> [--out <log>] [--module <name>] [--root <dir>]"))
   (when append
-    (die "--append was removed: rebuild the complete sibling FRAMLOG instead"))
+    (die "--append was removed: rebuild the complete sibling Store transaction log instead"))
   (when (str/blank? space-id)
     (die "--space-id is required and must be nonempty"))
   (when-not beagle-bin
@@ -217,7 +217,7 @@
           _ (.mkdirs (.getParentFile target))
           sibling (io/file (.getParentFile target)
                            (str "." (.getName target) ".ingest-"
-                                (java.util.UUID/randomUUID) ".framlog"))
+                                (java.util.UUID/randomUUID) ".storelog"))
           proposition-count (atom 0)]
       (try
         (database/create-triple-log! (.getPath sibling) space-id)

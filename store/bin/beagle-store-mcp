@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Beagle Store MCP server — the AI-facing edge of one instance. Speaks MCP (JSON-RPC 2.0
 # over stdio) and advertises exactly five public data tools: tell, retract, show,
-# ask, and validate. Public calls use FRAMRPC; graph authoring is a separate
+# ask, and validate. Public calls use Store RPC; graph authoring is a separate
 # sealed-control surface and is refused here.
 # Point a model's MCP client at this command.
 #

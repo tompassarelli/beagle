@@ -21,10 +21,10 @@
             "writer_authority.clj")))
 
 (def ^:private ^"[B" triple-log-magic
-  (.getBytes "FRAMLOG\u0000" java.nio.charset.StandardCharsets/UTF_8))
+  (.getBytes "__Store transaction log_MAGIC__" java.nio.charset.StandardCharsets/UTF_8))
 (def ^:private triple-log-version 1)
 (def ^:private triple-log-flags 0)
-;; Header flag bit 0: every frame payload in this generation is
+;; Header flag bit 0: every record payload in this generation is
 ;; Deflate-compressed; the CRC still covers the stored (compressed) bytes.
 (def ^:private deflate-flag 1)
 ;; Header flag bit 1: this generation continues a sealed segment chain and is
@@ -61,7 +61,7 @@
       (throw (ex-info
               "store: canonical commit validation rejected the write"
               {:type :canonical-commit-rejected
-               :fram/code :canonical-commit-rejected
+               :store/code :canonical-commit-rejected
                :metadata metadata})))
     (assoc metadata
            :validation-attestation
@@ -70,7 +70,7 @@
             :attestation canonical-validator})))
 
 (defn- fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- require-u32! [n label]
   (when-not (and (integer? n) (<= 0 n 4294967295))
@@ -134,29 +134,29 @@
   (when-not (t/triple? value)
     (fail! :invalid-triple "recursive encoder requires a Triple" {:value value}))
   (when-not (zero? depth)
-    (fail! :invalid-term-depth "FRAMLOG Term encoding must begin at depth zero"
+    (fail! :invalid-term-depth "Store transaction log Term encoding must begin at depth zero"
            {:depth depth}))
   (try
     (rpc/write-term-codec-v1!
      out value Integer/MAX_VALUE Integer/MAX_VALUE max-term-depth)
     (catch clojure.lang.ExceptionInfo e
-      (let [code (:fram/code (ex-data e))]
+      (let [code (:store/code (ex-data e))]
         (case code
           :term-depth-exceeded (throw e)
           :term-codec-invalid-utf8
-          (fail! :invalid-utf8 "FRAMLOG Term contains invalid UTF-8" {:cause code})
+          (fail! :invalid-utf8 "Store transaction log Term contains invalid UTF-8" {:cause code})
           :term-codec-invalid-keyword
-          (fail! :invalid-keyword "FRAMLOG Keyword atom is empty" {:cause code})
+          (fail! :invalid-keyword "Store transaction log Keyword atom is empty" {:cause code})
           :term-codec-integer-range
-          (fail! :invalid-integer "FRAMLOG Term integer is out of range" {:cause code})
+          (fail! :invalid-integer "Store transaction log Term integer is out of range" {:cause code})
           :term-codec-unsupported-term
-          (fail! :unsupported-term "FRAMLOG encountered a value outside Term"
+          (fail! :unsupported-term "Store transaction log encountered a value outside Term"
                  {:value value :class (some-> value class str)})
           (throw e))))))
 
 (defn- ensure-remaining! [^java.nio.ByteBuffer buffer n context]
   (when (< (.remaining buffer) n)
-    (fail! :corrupt-triple-log "FRAMLOG payload ended inside a value"
+    (fail! :corrupt-triple-log "Store transaction log payload ended inside a value"
            {:context context :needed n :remaining (.remaining buffer)})))
 
 (defn- read-u32 [^java.nio.ByteBuffer buffer context]
@@ -165,17 +165,17 @@
 
 (defn- read-term [^java.nio.ByteBuffer buffer depth]
   (when-not (zero? depth)
-    (fail! :corrupt-triple-log "FRAMLOG Term decoding must begin at depth zero"
+    (fail! :corrupt-triple-log "Store transaction log Term decoding must begin at depth zero"
            {:depth depth}))
   (try
     (t/termcodecdecoded-value
      (rpc/decode-term-codec-v1!
       buffer Integer/MAX_VALUE Integer/MAX_VALUE max-term-depth))
     (catch clojure.lang.ExceptionInfo e
-      (if (= :term-depth-exceeded (:fram/code (ex-data e)))
+      (if (= :term-depth-exceeded (:store/code (ex-data e)))
         (throw e)
-        (fail! :corrupt-triple-log "FRAMLOG contains a malformed Term"
-               {:cause (:fram/code (ex-data e))})))))
+        (fail! :corrupt-triple-log "Store transaction log contains a malformed Term"
+               {:cause (:store/code (ex-data e))})))))
 
 (defn- wire-action [action]
   (case action :assert 1 :retract 2
@@ -186,7 +186,7 @@
   (case action
     1 :assert
     2 :retract
-    (fail! :corrupt-triple-log "FRAMLOG contains an unknown operation action"
+    (fail! :corrupt-triple-log "Store transaction log contains an unknown operation action"
            {:action action})))
 
 (defn- operation-map [ordinal operation]
@@ -213,10 +213,10 @@
               (recur)))))
       (.toByteArray out))
     (catch java.io.IOException error
-      (fail! :corrupt-triple-log "FRAMLOG deflate frame is invalid"
+      (fail! :corrupt-triple-log "Store transaction log deflate record is invalid"
              {:path path :offset offset :cause (.getMessage error)}))))
 
-(defn- write-transaction-frame! [^java.io.OutputStream out tx deflate?]
+(defn- write-transaction-record! [^java.io.OutputStream out tx deflate?]
   (let [payload (java.io.ByteArrayOutputStream.)
         operations (:operations tx)]
     (write-i64-le! payload (:tx-seq tx))
@@ -237,42 +237,42 @@
       (.write out ^bytes bytes)
       (write-u32-le! out (.getValue crc)))))
 
-(defn- decode-transaction-payload [^bytes payload frame-offset]
+(defn- decode-transaction-payload [^bytes payload record-offset]
   (let [buffer (doto (java.nio.ByteBuffer/wrap payload)
                  (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
     (ensure-remaining! buffer 12 "transaction header")
     (let [sequence (.getLong buffer)
           operation-count (read-u32 buffer "operation count")]
       (when (neg? sequence)
-        (fail! :corrupt-triple-log "FRAMLOG transaction sequence is negative"
-               {:offset frame-offset :sequence sequence}))
+        (fail! :corrupt-triple-log "Store transaction log transaction sequence is negative"
+               {:offset record-offset :sequence sequence}))
       (when (or (zero? operation-count) (> operation-count Integer/MAX_VALUE))
-        (fail! :corrupt-triple-log "FRAMLOG transaction operation count is invalid"
-               {:offset frame-offset :operation-count operation-count}))
+        (fail! :corrupt-triple-log "Store transaction log transaction operation count is invalid"
+               {:offset record-offset :operation-count operation-count}))
       (let [operations
             (mapv
              (fn [expected]
                (let [ordinal (read-u32 buffer "operation ordinal")]
                  (when-not (= expected ordinal)
                    (fail! :noncontiguous-ordinal
-                          "FRAMLOG operation ordinals are not contiguous"
-                          {:offset frame-offset :sequence sequence
+                          "Store transaction log operation ordinals are not contiguous"
+                          {:offset record-offset :sequence sequence
                            :expected expected :actual ordinal}))
                  (ensure-remaining! buffer 1 "operation action")
                  (let [action (bit-and 255 (int (.get buffer)))
                        proposition (read-term buffer 0)]
                    (when-not (t/triple? proposition)
                      (fail! :corrupt-triple-log
-                            "FRAMLOG operation proposition is not a Triple"
-                            {:offset frame-offset :sequence sequence
+                            "Store transaction log operation proposition is not a Triple"
+                            {:offset record-offset :sequence sequence
                              :ordinal ordinal}))
                    {:ordinal ordinal :action action
                     :store-action (store-action action)
                     :triple proposition})))
              (range (int operation-count)))]
         (when-not (zero? (.remaining buffer))
-          (fail! :corrupt-triple-log "FRAMLOG transaction has trailing payload bytes"
-                 {:offset frame-offset :sequence sequence
+          (fail! :corrupt-triple-log "Store transaction log transaction has trailing payload bytes"
+                 {:offset record-offset :sequence sequence
                   :remaining (.remaining buffer)}))
         {:tx-seq sequence :operations operations}))))
 
@@ -286,14 +286,14 @@
   ([^bytes bytes path allow-continuation?]
   (when-not (bytes-prefix? bytes triple-log-magic)
     (fail! :corrupt-triple-log
-           "FRAMLOG magic does not match"
+           "Store transaction log magic does not match"
            {:path path}))
   (let [^java.nio.ByteBuffer buffer
         (doto (java.nio.ByteBuffer/wrap bytes)
           (.order java.nio.ByteOrder/LITTLE_ENDIAN))]
     (.position buffer (alength triple-log-magic))
     (try
-      (ensure-remaining! buffer 8 "FRAMLOG header")
+      (ensure-remaining! buffer 8 "Store transaction log header")
       (let [version (bit-and 65535 (int (.getShort buffer)))
             flags (bit-and 65535 (int (.getShort buffer)))
             space-length (read-u32 buffer "SpaceId length")]
@@ -305,10 +305,10 @@
                                     #{triple-log-flags deflate-flag})
                                   flags))
           (fail! :unsupported-log-version
-                 "FRAMLOG version or flags are unsupported"
+                 "Store transaction log version or flags are unsupported"
                  {:path path :version version :flags flags}))
         (when (or (zero? space-length) (> space-length Integer/MAX_VALUE))
-          (fail! :corrupt-triple-log "FRAMLOG SpaceId length is invalid"
+          (fail! :corrupt-triple-log "Store transaction log SpaceId length is invalid"
                  {:path path :length space-length}))
         (ensure-remaining! buffer (int space-length) "SpaceId")
         (let [space-bytes (byte-array (int space-length))
@@ -317,75 +317,75 @@
               deflate? (pos? (bit-and deflate-flag flags))
               continuation? (pos? (bit-and continuation-flag flags))
               header-bytes (.position buffer)]
-          (loop [frames [] valid-bytes header-bytes prefix-ends {}]
+          (loop [records [] valid-bytes header-bytes prefix-ends {}]
             (let [offset (.position buffer)
                   remaining (.remaining buffer)]
               (cond
                 (zero? remaining)
-                {:space-id space-id :deflate? deflate? :frames frames
+                {:space-id space-id :deflate? deflate? :records records
                  :continuation? continuation?
                  :valid-bytes valid-bytes
                  :header-bytes header-bytes :prefix-ends prefix-ends
                  :torn-tail nil}
 
                 (< remaining 4)
-                {:space-id space-id :deflate? deflate? :frames frames
+                {:space-id space-id :deflate? deflate? :records records
                  :continuation? continuation?
                  :valid-bytes valid-bytes
                  :header-bytes header-bytes :prefix-ends prefix-ends
                  :torn-tail {:offset offset :bytes remaining
-                             :reason :torn-frame-length}}
+                             :reason :torn-record-length}}
 
                 :else
-                (let [payload-length (read-u32 buffer "frame payload length")]
+                (let [payload-length (read-u32 buffer "record payload length")]
                   (when (> payload-length Integer/MAX_VALUE)
-                    (fail! :corrupt-triple-log "FRAMLOG frame exceeds JVM bounds"
+                    (fail! :corrupt-triple-log "Store transaction log record exceeds JVM bounds"
                            {:path path :offset offset :length payload-length}))
                   (if (< (.remaining buffer) (+ payload-length 4))
-                    {:space-id space-id :frames frames
+                    {:space-id space-id :records records
                      :continuation? continuation?
                      :valid-bytes valid-bytes
                      :header-bytes header-bytes :prefix-ends prefix-ends
                      :torn-tail {:offset offset :bytes (- (alength bytes) offset)
-                                 :reason :torn-transaction-frame}}
+                                 :reason :torn-transaction-record}}
                     (let [payload (byte-array (int payload-length))
                           _ (.get buffer payload)
-                          stored-crc (read-u32 buffer "frame CRC")
+                          stored-crc (read-u32 buffer "record CRC")
                           actual-crc (.getValue
                                       (doto (java.util.zip.CRC32.)
                                         (.update payload)))]
                       (when-not (= stored-crc actual-crc)
-                        (fail! :corrupt-triple-log "FRAMLOG frame CRC does not match"
+                        (fail! :corrupt-triple-log "Store transaction log record CRC does not match"
                                {:path path :offset offset
                                 :stored stored-crc :actual actual-crc}))
-                      (let [frame (decode-transaction-payload
+                      (let [record (decode-transaction-payload
                                    (if deflate?
                                      (inflate-bytes payload path offset)
                                      payload)
                                    offset)
                             end (.position buffer)]
-                        (recur (conj frames frame) end
-                               (assoc prefix-ends (:tx-seq frame) end)))))))))))
+                        (recur (conj records record) end
+                               (assoc prefix-ends (:tx-seq record) end)))))))))))
       (catch Throwable error
         (if (instance? clojure.lang.ExceptionInfo error)
           (throw error)
-          (fail! :corrupt-triple-log "FRAMLOG header is truncated"
+          (fail! :corrupt-triple-log "Store transaction log header is truncated"
                  {:path path :cause (.getMessage error)})))))))
 
 (defn read-triple-log!
-  "Read and validate a FRAMLOG generation without accepting any legacy shape."
+  "Read and validate a Store transaction log generation without accepting any legacy shape."
   ([path] (read-triple-log! path false))
   ([path allow-continuation?]
    (let [file (.getCanonicalFile (java.io.File. (str path)))]
      (when-not (.isFile file)
-       (fail! :triple-log-missing "FRAMLOG source is missing"
+       (fail! :triple-log-missing "Store transaction log source is missing"
               {:path (.getPath file)}))
      (parse-triple-log-bytes
       (java.nio.file.Files/readAllBytes (.toPath file)) (.getPath file)
       allow-continuation?))))
 
 (defn require-triple-log-header!
-  "Return the immutable SpaceId of a validated FRAMLOG generation."
+  "Return the immutable SpaceId of a validated Store transaction log generation."
   [path]
   (:space-id (read-triple-log! path)))
 
@@ -394,10 +394,10 @@
   [path upper-inclusive]
   (let [file (.getCanonicalFile (java.io.File. (str path)))
         parsed (read-triple-log! (.getPath file))
-        sequence (reduce (fn [known frame]
-                           (let [candidate (:tx-seq frame)]
+        sequence (reduce (fn [known record]
+                           (let [candidate (:tx-seq record)]
                              (if (<= candidate upper-inclusive) candidate known)))
-                         nil (:frames parsed))
+                         nil (:records parsed))
         valid-bytes (if (some? sequence)
                       (get (:prefix-ends parsed) sequence)
                       (:header-bytes parsed))
@@ -423,8 +423,8 @@
      (.write out ^bytes space-bytes))))
 
 (defn create-triple-log!
-  "Atomically create a header-only FRAMLOG generation for SPACE-ID.
-   {:deflate? true} creates a generation whose frames are Deflate-compressed."
+  "Atomically create a header-only Store transaction log generation for SPACE-ID.
+   {:deflate? true} creates a generation whose records are Deflate-compressed."
   ([path space-id] (create-triple-log! path space-id {}))
   ([path space-id {:keys [deflate? continuation?]
                    :or {deflate? false continuation? false}}]
@@ -432,13 +432,13 @@
         parent (.getParentFile target)]
     (when-not (and (.isAbsolute target) parent (.isDirectory parent))
       (fail! :triple-log-target-invalid
-             "FRAMLOG target must be an absolute path in an existing directory"
+             "Store transaction log target must be an absolute path in an existing directory"
              {:path (.getPath target)}))
     (when (.exists target)
-      (fail! :triple-log-exists "FRAMLOG target already exists"
+      (fail! :triple-log-exists "Store transaction log target already exists"
              {:path (.getPath target)}))
     (let [tmp (java.nio.file.Files/createTempFile
-               (.toPath parent) ".framlog-header-" ".tmp"
+               (.toPath parent) ".storelog-header-" ".tmp"
                (make-array java.nio.file.attribute.FileAttribute 0))]
       (try
         (with-open [file-out (java.io.FileOutputStream. (.toFile tmp))
@@ -456,35 +456,35 @@
         (.getPath target)
         (finally (java.nio.file.Files/deleteIfExists tmp)))))))
 
-(defn- append-frame-durable! [path frame deflate?]
+(defn- append-record-durable! [path record deflate?]
   (with-open [file-out (java.io.FileOutputStream. (str path) true)
               out (java.io.BufferedOutputStream. file-out)]
-    (write-transaction-frame! out frame deflate?)
+    (write-transaction-record! out record deflate?)
     (.flush out)
     (.force (.getChannel file-out) true)))
 
-(defn- append-frame-cohort-durable! [path frames deflate?]
+(defn- append-record-cohort-durable! [path records deflate?]
   (with-open [file-out (java.io.FileOutputStream. (str path) true)
               out (java.io.BufferedOutputStream. file-out)]
-    (doseq [frame frames]
-      (write-transaction-frame! out frame deflate?))
+    (doseq [record records]
+      (write-transaction-record! out record deflate?))
     (.flush out)
     (.force (.getChannel file-out) true)))
 
-(def ^:dynamic *deferred-frames* nil)
+(def ^:dynamic *deferred-records* nil)
 
-(defn- frame->store-frame [frame]
-  (term-store/transaction-frame
-   (:tx-seq frame)
+(defn- record->store-record [record]
+  (term-store/transaction-record
+   (:tx-seq record)
    (mapv (fn [{:keys [store-action triple]}]
            (case store-action
              :assert (term-store/assert-operation triple)
              :retract (term-store/retract-operation triple)))
-         (:operations frame))))
+         (:operations record))))
 
-(defn- replay-frames! [context frames]
-  (doseq [frame frames]
-    (term-store/replay-transaction! context (frame->store-frame frame)))
+(defn- replay-records! [context records]
+  (doseq [record records]
+    (term-store/replay-transaction! context (record->store-record record)))
   context)
 
 (defn- truncate-log! [path length]
@@ -527,9 +527,9 @@
            {:path (str store) :marker (reseal-marker-path store)})))
 
 (defn open-database!
-  "Open a FRAMLOG-backed TermStore. A passive reader reports a torn trailing
-   frame and refuses later writes. An authority-holding caller may pass
-   {:repair-torn? true}; only the last incomplete frame is truncated."
+  "Open a Store transaction log-backed TermStore. A passive reader reports a torn trailing
+   record and refuses later writes. An authority-holding caller may pass
+   {:repair-torn? true}; only the last incomplete record is truncated."
   ([path] (open-database! path nil {}))
   ([path expected-space] (open-database! path expected-space {}))
   ([path expected-space {:keys [repair-torn?] :or {repair-torn? false}}]
@@ -538,10 +538,10 @@
          parsed (read-triple-log! canonical)
          space-id (:space-id parsed)]
      (when (and expected-space (not= expected-space space-id))
-       (fail! :space-mismatch "FRAMLOG belongs to a different SpaceId"
+       (fail! :space-mismatch "Store transaction log belongs to a different SpaceId"
               {:expected expected-space :actual space-id :path canonical}))
      (let [context (term-store/new-term-store space-id)]
-       (replay-frames! context (:frames parsed))
+       (replay-records! context (:records parsed))
        (when (and (:torn-tail parsed) repair-torn?)
          (truncate-log! canonical (:valid-bytes parsed)))
        {:term-store context
@@ -596,7 +596,7 @@
 (defn- branch-control-path [store]
   (str store ".branch-control"))
 
-(def ^:private branch-watch-format "framwatch/v1")
+(def ^:private branch-watch-format "store-watch/v1")
 
 (defn- branch-watch-path [store branch-name]
   (str store ".watches/" (branch/require-branch-name! branch-name)))
@@ -822,8 +822,8 @@
 
 (defn- chain-member [parsed byte-count]
   (branch/->ChainMember
-   (long (or (:tx-seq (first (:frames parsed))) 0))
-   (long (or (:tx-seq (last (:frames parsed))) 0))
+   (long (or (:tx-seq (first (:records parsed))) 0))
+   (long (or (:tx-seq (last (:records parsed))) 0))
    (long byte-count)
    (boolean (:continuation? parsed))
    (:space-id parsed)
@@ -833,7 +833,7 @@
   "Validate hosted branch metadata through the canonical Native Core rules."
   [document members tail]
   (if (not= (count (branch/refdocument-segments document)) (count members))
-    "FRAMLOG branch ref does not name the segments that were read"
+    "Store transaction log branch ref does not name the segments that were read"
     (loop [index 0 expected-next 1]
       (if (>= index (count members))
         (chain-rules/tail-member-fault
@@ -869,7 +869,7 @@
 (defn- read-chain-source! [path allow-continuation?]
   (let [file (.getCanonicalFile (java.io.File. (str path)))]
     (when-not (.isFile file)
-      (fail! :triple-log-missing "FRAMLOG source is missing"
+      (fail! :triple-log-missing "Store transaction log source is missing"
              {:path (.getPath file)}))
     (let [bytes (java.nio.file.Files/readAllBytes (.toPath file))
           parsed (parse-triple-log-bytes
@@ -888,13 +888,13 @@
         actual (sha256-hex (:bytes source))]
     (when-not (= expected actual)
       (fail! :segment-digest-mismatch
-             "sealed FRAMLOG segment does not match its content address"
+             "sealed Store transaction log segment does not match its content address"
              {:path (:path source) :expected expected :actual actual}))))
 
 (defn- require-uncompressed-branch-source! [source]
   (when (:deflate? (:parsed source))
     (fail! :unsupported-branch-chain-encoding
-           "branch routing does not support Deflate-compressed FRAMLOG members"
+           "branch routing does not support Deflate-compressed Store transaction log members"
            {:path (:path source)}))
   source)
 
@@ -988,7 +988,7 @@
        (and (nil? document) (= selected branch/default-branch))
        (let [tail (read-chain-source! store false)
              parsed (:parsed tail)
-             sequence (long (or (:tx-seq (last (:frames parsed))) 0))]
+             sequence (long (or (:tx-seq (last (:records parsed))) 0))]
          (require-uncompressed-branch-source! tail)
          (branch/branch-revision!
           (:space-id parsed) (history-sha256 [tail]) sequence))
@@ -1023,7 +1023,7 @@
          (doseq [[segment source] sealed]
            (require-segment-identity! segment source))
          (let [sequence
-               (long (or (:tx-seq (last (:frames parsed)))
+               (long (or (:tx-seq (last (:records parsed)))
                          (branch/chain-end-sequence document)))]
            (branch/branch-revision!
             (branch/refdocument-space-id document)
@@ -1033,7 +1033,7 @@
 (defn open-branch!
   "Open one branch of a store: fold its sealed segment chain in ref order, then
    its tail. A store with no ref for the default branch boots exactly as an
-   unforked FRAMLOG does."
+   unforked Store transaction log does."
   ([store-path branch] (open-branch! store-path branch nil {}))
   ([store-path branch expected-space]
    (open-branch! store-path branch expected-space {}))
@@ -1062,12 +1062,12 @@
              {:keys [sealed tail]} (require-ref-chain! store branch document)
              tail-parsed (:parsed tail)]
          (when (and expected-space (not= expected-space space-id))
-           (fail! :space-mismatch "FRAMLOG belongs to a different SpaceId"
+           (fail! :space-mismatch "Store transaction log belongs to a different SpaceId"
                   {:expected expected-space :actual space-id :branch branch}))
          (let [context (term-store/new-term-store space-id)]
            (doseq [[_ source] sealed]
-             (replay-frames! context (:frames (:parsed source))))
-           (replay-frames! context (:frames tail-parsed))
+             (replay-records! context (:records (:parsed source))))
+           (replay-records! context (:records tail-parsed))
            (when (and (:torn-tail tail-parsed) repair-torn?)
              (truncate-log! tail-path (:valid-bytes tail-parsed)))
            {:term-store context
@@ -1288,7 +1288,7 @@
 
 (defn retain-branch-root!
   "Durably retain every sealed segment named by DOCUMENT as a pin, checkpoint,
-   or active session root. The root stores canonical framref/v1 facts rather
+   or active session root. The root stores canonical store-ref/v1 facts rather
    than a pointer to mutable branch routing."
   [store-path kind root-name document]
   (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
@@ -1414,7 +1414,7 @@
         out (java.io.ByteArrayOutputStream.)]
     (when (some #(not= deflate? (:deflate? (:parsed %))) sources)
       (fail! :incompatible-chain-encoding
-             "reseal requires one frame encoding across the branch chain" {}))
+             "reseal requires one record encoding across the branch chain" {}))
     (.write out ^bytes (:bytes first-source) 0
             (int (:header-bytes first-parsed)))
     (doseq [source sources]
@@ -1447,15 +1447,15 @@
               tail-parsed (:parsed tail)]
           (when (:torn-tail tail-parsed)
             (fail! :torn-tail-repair-required
-                   "reseal requires a branch tail with no torn trailing frame"
+                   "reseal requires a branch tail with no torn trailing record"
                    {:branch selected :path (:path tail)}))
           (let [^bytes content (combined-history-bytes sources)
                 parsed (parse-triple-log-bytes content "resealed segment")
-                frames (:frames parsed)
+                records (:records parsed)
                 record (branch/->SegmentRecord
                         (sha256-hex content)
-                        (long (or (:tx-seq (first frames)) 0))
-                        (long (or (:tx-seq (last frames)) 0))
+                        (long (or (:tx-seq (first records)) 0))
+                        (long (or (:tx-seq (last records)) 0))
                         (long (alength content)))
                 candidate (branch/->RefDocument
                            (branch/refdocument-space-id document) [record])
@@ -1487,7 +1487,7 @@
             (assoc (complete-reseal! store marker)
                    :previous-segments
                    (count (branch/refdocument-segments document))
-                   :sequence (long (or (:tx-seq (last frames)) 0))
+                   :sequence (long (or (:tx-seq (last records)) 0))
                    :recovered? false))))))
       (finally
         (writer-authority/release! held-control)))))
@@ -1556,39 +1556,39 @@
                     {:branch parent :path (branch/ref-path! store parent)}))
            (let [parsed (read-triple-log! parent-tail true)
                  space-id (:space-id parsed)
-                 frames (:frames parsed)
+                 records (:records parsed)
                  base (or document (branch/empty-ref space-id))
                  chained? (pos? (count (branch/refdocument-segments base)))]
              (when (:deflate? parsed)
                (fail! :unsupported-branch-chain-encoding
-                      "branch routing does not support Deflate-compressed FRAMLOG members"
+                      "branch routing does not support Deflate-compressed Store transaction log members"
                       {:path parent-tail :branch parent}))
              (when (:torn-tail parsed)
                (fail! :torn-tail-repair-required
-                      "fork requires a parent tail with no torn trailing frame"
+                      "fork requires a parent tail with no torn trailing record"
                       {:branch parent :path parent-tail}))
              (when (not= space-id (branch/refdocument-space-id base))
-               (fail! :space-mismatch "FRAMLOG belongs to a different SpaceId"
+               (fail! :space-mismatch "Store transaction log belongs to a different SpaceId"
                       {:expected (branch/refdocument-space-id base)
                        :actual space-id :branch parent}))
              (when (not= chained? (boolean (:continuation? parsed)))
                (fail! :invalid-branch-chain
                       (if chained?
-                        "FRAMLOG branch tail must carry the continuation flag"
-                        "FRAMLOG base chain segment must not carry the continuation flag")
+                        "Store transaction log branch tail must carry the continuation flag"
+                        "Store transaction log base chain segment must not carry the continuation flag")
                       {:branch parent :path parent-tail}))
              (let [^bytes content (java.nio.file.Files/readAllBytes
                                    (.toPath (java.io.File. (str parent-tail))))
                    record (branch/->SegmentRecord
                            (sha256-hex content)
-                           (long (or (:tx-seq (first frames)) 0))
-                           (long (or (:tx-seq (last frames)) 0))
+                           (long (or (:tx-seq (first records)) 0))
+                           (long (or (:tx-seq (last records)) 0))
                            (long (alength content)))
-                   ;; The tail's own last frame, else the chain's recorded end:
+                   ;; The tail's own last record, else the chain's recorded end:
                    ;; a fork reads no sealed segment to learn where it forked.
                    plan (branch/fork-plan
                          base record
-                         (long (or (:tx-seq (last frames))
+                         (long (or (:tx-seq (last records))
                                    (branch/chain-end-sequence base))))
                    chain (branch/forkplan-document plan)
                    text (branch/print-ref chain)
@@ -1763,7 +1763,7 @@
   base)
 
 (def ^:private occurrence-metadata-order
-  [:kernel/recorded-at :kernel/asserted-by :kernel/source-frame
+  [:kernel/recorded-at :kernel/asserted-by :kernel/source-record
    :kernel/supersedes])
 
 (defn- canonical-term! [value]
@@ -1817,7 +1817,7 @@
                                                      canonical-term!)
                          :kernel/asserted-by (some-> (:asserted-by operation)
                                                     canonical-term!)
-                         :kernel/source-frame (some-> (:source-frame operation)
+                         :kernel/source-record (some-> (:source-record operation)
                                                      canonical-term!)
                          :kernel/supersedes (:supersedes operation)}]
              (validate-occurrence-reference! db (:supersedes operation) :supersedes)
@@ -1850,19 +1850,19 @@
     (vec (concat per-source tx-metadata))))
 
 (defn- append-and-replay! [db sequence operations metadata]
-  (let [frame (term-store/transaction-frame sequence operations)
+  (let [record (term-store/transaction-record sequence operations)
         serializable {:tx-seq sequence
                       :commit-metadata metadata
                       :operations (mapv operation-map (range) operations)}]
-    (if *deferred-frames*
-      (swap! *deferred-frames* conj serializable)
+    (if *deferred-records*
+      (swap! *deferred-records* conj serializable)
       (when-let [path (:log db)]
-        (append-frame-durable! path serializable (:deflate? db))))
-    (term-store/replay-transaction! (database-store db) frame)))
+        (append-record-durable! path serializable (:deflate? db))))
+    (term-store/replay-transaction! (database-store db) record)))
 
 (defn- throwable-code [error]
   (let [data (ex-data error)]
-    (or (:fram/code data) (:type data) (:code data)
+    (or (:store/code data) (:type data) (:code data)
         (keyword (.getSimpleName (class error))))))
 
 (defn- fence-and-reconcile! [db before-store ^Throwable error]
@@ -1881,7 +1881,7 @@
                   (fail! :space-mismatch
                          "durable history changed SpaceId during reconciliation"
                          {:expected (database-space db) :actual space-id}))
-                (replay-frames! context (:frames parsed))
+                (replay-records! context (:records parsed))
                 {:context context :torn-tail (:torn-tail parsed)
                  :valid-bytes (:valid-bytes parsed) :source :durable-prefix})
               (let [context (term-store/new-term-store (database-space db))]
@@ -1914,12 +1914,12 @@
   (if (= :corrupt (:status recovery))
     (throw
      (ex-info "durable history is corrupt after a commit failure"
-              {:type :database-corrupt :fram/code :database-corrupt
+              {:type :database-corrupt :store/code :database-corrupt
                :recovery recovery}
               error))
     (throw
      (ex-info "commit outcome is durability-ambiguous; restart is required"
-              {:type :durability-ambiguous :fram/code :durability-ambiguous
+              {:type :durability-ambiguous :store/code :durability-ambiguous
                :recovery recovery}
               error))))
 
@@ -1936,11 +1936,11 @@
         {:reject :conflict :expected base :current current}
         (do
           (when-not (and (vector? operations) (seq operations))
-            (fail! :invalid-transaction-frame
+            (fail! :invalid-transaction-record
                    "transaction requires a nonempty operation vector" {}))
           (when (:torn-tail db)
             (fail! :torn-tail-repair-required
-                   "FRAMLOG has a torn trailing frame; writer authority must repair it"
+                   "Store transaction log has a torn trailing record; writer authority must repair it"
                    {:path (:log db) :torn-tail (:torn-tail db)}))
           (let [context (database-store db)
                 sequence (term-store/next-sequence context)
@@ -1980,7 +1980,7 @@
 
 (defn commit-cohort!
   "Run mutation functions in FIFO order against a private store root, append
-   every resulting FRAMLOG frame under one durability barrier, and publish the
+   every resulting Store transaction log record under one durability barrier, and publish the
    root atomically. Individual pre-append failures are returned without
    aborting later functions; a barrier failure fences the whole database."
   [db mutation-functions]
@@ -1991,9 +1991,9 @@
           scratch (assoc db
                          :term-store (term-store/fork-store context)
                          :mutation-state (atom @(:mutation-state db)))
-          frames (atom [])
+          records (atom [])
           results
-          (binding [*deferred-frames* frames]
+          (binding [*deferred-records* records]
             (mapv (fn [mutation]
                     (try
                       (let [value (mutation scratch)]
@@ -2005,15 +2005,15 @@
                          :version (term-store/current-sequence
                                    (database-store scratch))})))
                   mutation-functions))]
-      (if (empty? @frames)
-        {:results results :frame-count 0 :root before-store
+      (if (empty? @records)
+        {:results results :record-count 0 :root before-store
          :version (term-store/current-sequence context)}
         (try
           (when-let [path (:log db)]
-            (append-frame-cohort-durable! path @frames (:deflate? db)))
+            (append-record-cohort-durable! path @records (:deflate? db)))
           (let [root @(database-store scratch)]
             (reset! context root)
-            {:results results :frame-count (count @frames) :root root
+            {:results results :record-count (count @records) :root root
              :version (term-store/current-sequence context)})
           (catch Throwable error
             (propagate-ambiguous-commit!
@@ -2026,14 +2026,14 @@
    (commit! db (assoc options :operations
                       [{:action :assert :proposition proposition
                         :supersedes (:supersedes options)
-                        :source-frame (:source-frame options)}]))))
+                        :source-record (:source-record options)}]))))
 
 (defn retract!
   ([db proposition] (retract! db proposition {}))
   ([db proposition options]
    (commit! db (assoc options :operations
                       [{:action :retract :proposition proposition
-                        :source-frame (:source-frame options)}]))))
+                        :source-record (:source-record options)}]))))
 
 (defn withdraw-occurrence!
   "Withdraw one exact currently-effective occurrence. TermStore's physical

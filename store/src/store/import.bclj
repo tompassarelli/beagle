@@ -1,6 +1,6 @@
 #lang beagle/clj
 (ns store.import
-  "Import thread Markdown into occurrence-history transaction frames. A file
+  "Import thread Markdown into occurrence-history transaction records. A file
   is a block of `@subject predicate object` lines, then `---`, then a prose
   body. Every line is a projected Triple; host IO lives behind store.rt
   externs.")
@@ -221,17 +221,17 @@
       (warn (str path " — skipped (could not parse): " (.getMessage error)))
       [])))
 
-(defn- number-frames [(triples (Vec t/Triple))] (Vec t/TransactionFrame)
-  (loop [(position Int) 0 (frames (Vec t/TransactionFrame)) []]
+(defn- number-records [(triples (Vec t/Triple))] (Vec t/TransactionRecord)
+  (loop [(position Int) 0 (records (Vec t/TransactionRecord)) []]
     (if (>= position (count triples))
-      frames
+      records
       (recur (+ position 1)
-             (conj frames
-                   (fold/transaction-frame
+             (conj records
+                   (fold/transaction-record
                     (+ position 1)
                     [(store/assert-operation (nth triples position))]))))))
 
-(defn load-corpus [(threads-dir String)] (Vec t/TransactionFrame)
+(defn load-corpus [(threads-dir String)] (Vec t/TransactionRecord)
   (let [(files (Vec String)) (store.rt/list-md threads-dir)
         (triples (Vec t/Triple))
         (reduce
@@ -239,4 +239,4 @@
            (vec (concat acc (safe-file->triples path))))
          []
          files)]
-    (number-frames (normalize-predicate-triples triples))))
+    (number-records (normalize-predicate-triples triples))))

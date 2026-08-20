@@ -190,7 +190,7 @@
         dl-reaches (set (d/facts db "reaches"))
         t1 (System/currentTimeMillis)
         truth (reduce + (mapv (fn [(k (Vec Any))] Int (count (transitive fadj k))) defn-keys))]
-    (println (str "\nFram Datalog transitive closure: " (count dl-reaches) " reaches-pairs in " (- t1 t0) " ms" "  (in-process closure: " truth " pairs — " (if (= (count dl-reaches) truth) "MATCH" "DIVERGE") ")"))))
+    (println (str "\nBeagle Store Datalog transitive closure: " (count dl-reaches) " reaches-pairs in " (- t1 t0) " ms" "  (in-process closure: " truth " pairs — " (if (= (count dl-reaches) truth) "MATCH" "DIVERGE") ")"))))
 
 ;; MACRO delta = mean of per-target precision deltas (each collision target weighted
 ;; equally; a 2-way split floors incumbent P at 0.5).

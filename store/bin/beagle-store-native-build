@@ -535,7 +535,7 @@ qbe_ledger="$(realpath -m "${BEAGLE_STORE_QBE_FRONTIER_LEDGER:-$repo/native/qbe-
 wasm_seams_ledger="$(realpath -m "${BEAGLE_STORE_WASM_SEAMS_LEDGER:-$repo/native/wasm-embed.seams}")"
 wasm_seams_name="$(cache_input_name "$wasm_seams_ledger")"
 # The public ABI plus the two staging allocators an external embedder needs to
-# place a request frame, its options, and its error struct in guest memory.
+# place a request packet, its options, and its error struct in guest memory.
 wasm_exports=(
   store_abi_version
   store_open
@@ -1329,7 +1329,7 @@ elif [[ "$host" == "wasm-embed" ]]; then
   wasm_objects=()
   for index in "${!wasm_sources[@]}"; do
     object="$stage/objects/$index.o"
-    # -O2 keeps the reactor's frames inside its default linear stack; there is
+    # -O2 keeps the reactor's stack entries inside its default linear stack; there is
     # no -pthread, wasip1 being single-threaded.
     if ! (
       cd "$repo"

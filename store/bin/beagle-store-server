@@ -2,7 +2,7 @@
 # Beagle Store server — the sole-writer multi-agent service. Production
 # launches require a completed Beagle native artifact. The JVM remains available
 # only through the explicitly selected oracle or checkout-development routes.
-#   beagle-store-server [serve] [port] [framlog] [space-id]   (mode defaults to serve)
+#   beagle-store-server [serve] [port] [store-log] [space-id]   (mode defaults to serve)
 #   BEAGLE_STORE_SERVER_RUNTIME=native       production runtime (default)
 #   BEAGLE_STORE_NATIVE_ARTIFACT_DIR=<path>  READY native-build artifact directory;
 #                                    a checkout builds its own when unset
@@ -39,13 +39,13 @@ elif [[ "${BEAGLE_STORE_PACKAGED:-0}" == "1" ]]; then
     echo "beagle-store-server: pass a log path, or set BEAGLE_STORE_LOG, BEAGLE_STORE_STATE_DIR, XDG_STATE_HOME, or HOME" >&2
     exit 2
   fi
-  log_path="$state_dir/history.framlog"
+  log_path="$state_dir/history.storelog"
 else
-  log_path="$HERE/history.framlog"
+  log_path="$HERE/history.storelog"
 fi
 space_id="${3:-${BEAGLE_STORE_SPACE_ID:-}}"
 if [[ ! -e "$log_path" && -z "$space_id" ]]; then
-  echo "beagle-store-server: BEAGLE_STORE_SPACE_ID (or the fourth argument) is required to create a FRAMLOG" >&2
+  echo "beagle-store-server: BEAGLE_STORE_SPACE_ID (or the fourth argument) is required to create a Store transaction log" >&2
   exit 2
 fi
 

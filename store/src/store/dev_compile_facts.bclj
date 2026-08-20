@@ -43,7 +43,7 @@
 (defrecord AppendCounts [(appended Int) (retained Int)])
 
 (defn- fail [(message String) (code Keyword)] Any
-  (throw (ex-info message {:type code :fram/code code})))
+  (throw (ex-info message {:type code :store/code code})))
 
 (defn- nonempty-string? [(value Any)] Bool
   (and (string? value) (pos? (count value))))
@@ -354,7 +354,7 @@
 
 (defn- error-code [(error Any)] String
   (let [(data Any) (ex-data error)
-        (code Any) (or (get data :fram/code) (get data :type))]
+        (code Any) (or (get data :store/code) (get data :type))]
     (if (keyword? code) (subs (str code) 1) "unclassified")))
 
 (defn -main [& args] Nil

@@ -25,7 +25,7 @@
 (declare-extern writer-authority/acquire! (Fn [String] Any))
 (declare-extern writer-authority/release! (Fn [Any] Any))
 
-;; The hosted database owns FRAMLOG creation, append/fsync, replay, and recovery.
+;; The hosted database owns Store transaction log creation, append/fsync, replay, and recovery.
 ;; Loading it here keeps the command runnable with only store/out on classpath.
 (clojure.core/require 'store.rt)
 (let [(raw-emitted-file Any) (File. (str *file*))
@@ -59,7 +59,7 @@
 (defrecord AppendCounts [(appended Int) (retained Int)])
 
 (defn- fail [(message String) (code Keyword)] Any
-  (throw (ex-info message {:type code :fram/code code})))
+  (throw (ex-info message {:type code :store/code code})))
 
 (defn- nonempty-string? [(value Any)] Bool
   (and (string? value) (pos? (count value))))
@@ -568,7 +568,7 @@
 
 (defn- error-code [(error Any)] String
   (let [(data Any) (ex-data error)
-        (code Any) (or (get data :fram/code) (get data :type))]
+        (code Any) (or (get data :store/code) (get data :type))]
     (if (keyword? code) (subs (str code) 1) "unclassified")))
 
 (defn -main [& args] Nil

@@ -37,7 +37,7 @@
 (def unresolved-publication-code-v1 :conflict/unresolved-publication)
 
 (defn- conflict-fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- nonblank-string? [value]
   (and (string? value) (not (str/blank? value))))
@@ -106,7 +106,7 @@
           (writer-authority/validate-fact-envelope! bytes fact-id)
           (catch clojure.lang.ExceptionInfo error
             (if (= :fact-envelope/id-mismatch
-                   (or (:fram/code (ex-data error)) (:type (ex-data error))))
+                   (or (:store/code (ex-data error)) (:type (ex-data error))))
               (conflict-fail! fact-id-mismatch-code-v1
                               "supplied fact ID does not match canonical bytes"
                               {:fact-id fact-id :actual (:actual (ex-data error))})

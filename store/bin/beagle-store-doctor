@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deep public-data selfcheck over one isolated FRAMRPC server and its restart.
+# Deep public-data selfcheck over one isolated Store RPC server and its restart.
 # Sealed snapshot/reload/cutover/TLS-listener checks live with their control
 # channel and are intentionally not simulated through the public socket.
 set -uo pipefail
@@ -36,7 +36,7 @@ free_port() {
 PORT="$(free_port 8200)" || exit 1
 DEAD="$(free_port $((PORT + 1)))" || exit 1
 SPACE="beagle-store-doctor"
-LOG="$SCRATCH/history.framlog"
+LOG="$SCRATCH/history.storelog"
 case "${BEAGLE_STORE_SERVER_RUNTIME:-native}" in
   native) EXPECTED_ENGINE=:rpc/native ;;
   graal) EXPECTED_ENGINE=:rpc/graal ;;

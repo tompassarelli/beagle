@@ -41,7 +41,7 @@
 (def ^:private signature-byte-count-v1 64)
 
 (defn- materialization-fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- exact-keys? [value expected-keys]
   (and (map? value) (= expected-keys (set (keys value)))))

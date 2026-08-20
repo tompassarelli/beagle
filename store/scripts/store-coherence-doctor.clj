@@ -30,7 +30,7 @@
     (catch Exception e (fail! (or (ex-message e) (str e))))))
 
 (defn fact-op [m]
-  (fold/->FactOp (or (:tx m) 0) (:op m) (:l m) (:p m) (:r m) (or (:frame m) "coherence")))
+  (fold/->FactOp (or (:tx m) 0) (:op m) (:l m) (:p m) (:r m) (or (:record m) "coherence")))
 
 (defn fact-key [cmap m]
   (if (kernel/single-eff? cmap (:p m))

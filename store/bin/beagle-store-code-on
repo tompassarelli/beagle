@@ -6,7 +6,7 @@
 # and .mcp.json stay at <dir> — repos whose tree also holds build artifacts /
 # vendored copies (gjoa: gitignored engine/ mirrors src/) must not ingest those.
 # Does the whole incantation in one shot:
-#   1. ingest <dir> -> .store/code.log (native FRAMLOG)
+#   1. ingest <dir> -> .store/code.log (native Store transaction log)
 #   2. boot the native server on that log
 #   3. wire the public Beagle Store data MCP to that SpaceId
 # Graph-control authoring is a separate sealed service and is not enabled here.
@@ -73,7 +73,7 @@ if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
   exit 1
 fi
 
-echo "  [1/3] ingesting code -> native FRAMLOG …"
+echo "  [1/3] ingesting code -> native Store transaction log …"
 mapfile -t SRCS < <(find "$SRC" -regextype posix-extended -regex '.*\.b(clj|js|nix|gl)$' -not -path '*/.store/*' -not -path '*/docs/private/*' -not -path '*/test/*' -not -path '*/tests/*' | sort)
 [ "${#SRCS[@]}" -eq 0 ] && { echo "        no live Beagle source under $SRC"; exit 1; }
 ( cd "$HERE" && BEAGLE_HOME="$BEAGLE_HOME" bin/beagle-store-ingest-code "${SRCS[@]}" \
@@ -150,7 +150,7 @@ fi
 cat <<EOF
 
 === NATIVE CODE CORPUS ON ===
-FRAMLOG + server: $NATIVE_STATUS
+Store transaction log + server: $NATIVE_STATUS
 The public Beagle Store data MCP is wired to SpaceId $SPACE_ID.
 Graph-control authoring is not enabled here; that is the separate N2.6b seam.
 Reason over the code graph (blast-radius / who-calls), any time:

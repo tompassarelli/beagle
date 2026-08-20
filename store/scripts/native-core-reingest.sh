@@ -18,7 +18,7 @@ done
 
 SCRATCH_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/store-native-reingest-XXXXXX")"
 SPACE_ID="native-core-reingest-scratch-$$"
-CODE_LOG="$SCRATCH_ROOT/code.framlog"
+CODE_LOG="$SCRATCH_ROOT/code.storelog"
 SCRATCH_SRC="$SCRATCH_ROOT/src"
 MANIFEST="$SCRATCH_ROOT/modules.tsv"
 SERVER_PID=""

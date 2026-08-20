@@ -14,7 +14,7 @@
 (def unexplained-claim-class-v1 "unexplained-claim")
 
 (defn- fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- claim-id-set! [field values]
   (when-not (and (coll? values)

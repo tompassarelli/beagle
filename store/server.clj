@@ -41,8 +41,8 @@
 (def server-generation (atom 0))
 (def commit-sequencer (atom nil))
 (def commit-sequencer-stats
-  (atom {:cohorts 0 :frames 0 :barriers 0 :publications 0}))
-(def ^:private commit-cohort-max-frames 32)
+  (atom {:cohorts 0 :records 0 :barriers 0 :publications 0}))
+(def ^:private commit-cohort-max-records 32)
 (def ^:private commit-cohort-max-bytes (* 1024 1024))
 (def ^:private commit-cohort-max-wait-ns 1000000)
 (def ^:private query-page-snapshot-limit 4)
@@ -53,7 +53,7 @@
 (def query-archive-manifest (atom []))
 (def ^:private query-archive-databases (atom {}))
 (def ^:private query-archive-magic
-  (.getBytes "FRAMQAR1" java.nio.charset.StandardCharsets/UTF_8))
+  (.getBytes "STOREQAR1" java.nio.charset.StandardCharsets/UTF_8))
 (def ^:private text-index-version-limit 4)
 (def ^:private text-index-byte-limit (* 64 1024 1024))
 
@@ -114,7 +114,7 @@
   (bounded-positive-env-int "BEAGLE_STORE_CONNECTION_WORKERS" 32 512))
 (def connection-pending-limit
   (bounded-positive-env-int "BEAGLE_STORE_CONNECTION_QUEUE" 128 65536))
-(def connection-first-frame-timeout-ms
+(def connection-first-packet-timeout-ms
   (bounded-positive-env-int "BEAGLE_STORE_CONNECTION_READ_TIMEOUT_MS" 5000 600000))
 (def connection-drain-grace-ms
   (bounded-positive-env-int "BEAGLE_STORE_SHUTDOWN_CONNECTION_GRACE_MS" 3000 600000))
@@ -183,9 +183,9 @@
 
 (defn- response-outcome
   "Errors reach the client as a response field, not a thrown exception, so the
-   only place an error code is observable is the encoded response frame."
-  [frame]
-  (if-let [error (some-> frame t/rpcframev2-response t/rpcresponse-error)]
+   only place an error code is observable is the encoded response packet."
+  [packet]
+  (if-let [error (some-> packet t/rpcpacketv2-response t/rpcresponse-error)]
     [:error (t/rpcerror-code error)]
     [:ok nil]))
 
@@ -202,7 +202,7 @@
           :rpc/lease-renew :rpc/lease-release]))
 
 (defn- server-fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code :code code))))
+  (throw (ex-info message (assoc data :type code :store/code code :code code))))
 
 (defn- canonical-path [path]
   (.getPath (.getCanonicalFile (io/file (str path)))))
@@ -277,7 +277,7 @@
   nil)
 
 (defn boot!
-  "Install one FRAMLOG generation. Active boot acquires lifetime writer
+  "Install one Store transaction log generation. Active boot acquires lifetime writer
    authority before creation or torn-tail repair; standby boot stays read-only."
   ([path expected-space]
    (boot! path expected-space (writer-authority/server-role-from-env)))
@@ -293,7 +293,7 @@
        (when-not (.exists file)
          (when-not expected-space
            (server-fail! :space-id-required
-                         "new FRAMLOG generation requires an explicit SpaceId"
+                         "new Store transaction log generation requires an explicit SpaceId"
                          {:path canonical}))
          (database/create-triple-log! canonical expected-space))
        (let [opened (database/open-database!
@@ -498,8 +498,8 @@
 
 (defn- require-encodable-rpc-response!
   [request served-version payload]
-  (rpc/encode-rpc-frame-v2!
-   (rpc/rpc-response-frame
+  (rpc/encode-rpc-packet-v2!
+   (rpc/rpc-response-packet
     0
     (rpc/rpc-response!
      (t/rpcrequest-space request)
@@ -534,7 +534,7 @@
               :commit-metadata
               {:producer "store.rpc/v2"
                :shape-schema-id "store/CommitOperationV1"
-               :profile "framrpc-v2"
+               :profile "store-rpc-v2"
                :validation-attestation
                {:validator "store/canonical-validator-v1"
                 :result :pending
@@ -858,7 +858,7 @@
           (database/triple-log-prefix-source! (:log db) upper-inclusive)
           directory (query-archive-directory db)
           _ (.mkdirs ^java.io.File directory)
-          target (io/file directory (str "epoch-through-" upper-inclusive ".framlog"))
+          target (io/file directory (str "epoch-through-" upper-inclusive ".storelog"))
           temporary (io/file directory (str ".epoch-through-" upper-inclusive ".tmp"))
           bytes (java.nio.file.Files/readAllBytes
                  (.toPath (io/file (:log db))))
@@ -925,7 +925,7 @@
             (catch Throwable error
               (if (contains? #{:query/archive-unavailable
                                :query/snapshot-expired}
-                             (:fram/code (ex-data error)))
+                             (:store/code (ex-data error)))
                 (throw error)
                 (server-fail! :query/archive-unavailable
                               "query archive is temporarily unavailable"
@@ -947,9 +947,9 @@
                       (term-store/new-term-store
                        (database/database-space history-db)))
             lower-exclusive (dec (deref (t/termstore-next-sequence @context)))]
-        (doseq [frame (term-store/transaction-frames-between
+        (doseq [record (term-store/transaction-records-between
                        head-root lower-exclusive version)]
-          (term-store/replay-transaction! context frame))
+          (term-store/replay-transaction! context record))
         (write-query-checkpoint! history-db version @context)))))
 
 (defn- snapshot-image [version root]
@@ -1859,7 +1859,7 @@
        (mapv #(rpc/rpc-violation! :rpc/profile-violation %)
              profile-violations)))
     (catch Throwable error
-      (let [code (or (:fram/code (ex-data error))
+      (let [code (or (:store/code (ex-data error))
                      (:type (ex-data error)) :rpc/validation-failed)]
         (rpc/rpc-validation!
          false [(rpc/rpc-violation!
@@ -1877,14 +1877,14 @@
 
 (defn- request-body-bytes [request]
   (- (alength ^bytes
-              (rpc/encode-rpc-frame-v2!
-               (rpc/rpc-request-frame 0 request)))
+              (rpc/encode-rpc-packet-v2!
+               (rpc/rpc-request-packet 0 request)))
      rpc/rpc-v2-header-bytes))
 
 (defn- take-commit-cohort! [^LinkedBlockingQueue queue first-ticket]
   (let [deadline (+ (:enqueued-ns first-ticket) commit-cohort-max-wait-ns)]
     (loop [tickets [first-ticket] bytes (:bytes first-ticket)]
-      (if (>= (count tickets) commit-cohort-max-frames)
+      (if (>= (count tickets) commit-cohort-max-records)
         [tickets nil]
         (let [ready (.poll queue)
               remaining (- deadline (System/nanoTime))
@@ -1900,20 +1900,20 @@
 
 (defn- commit-sequencer-stopped-error []
   (ex-info "commit sequencer is not running"
-           {:type :rpc/not-booted :fram/code :rpc/not-booted}))
+           {:type :rpc/not-booted :store/code :rpc/not-booted}))
 
 (defn- deliver-commit-cohort! [tickets]
   (try
     (let [db @database
           committed (database/commit-cohort! db (mapv :mutation tickets))
-          frame-count (:frame-count committed)
+          record-count (:record-count committed)
           _ (swap! commit-sequencer-stats
                    (fn [stats]
                      (cond-> (-> stats
                                  (update :cohorts inc)
-                                 (update :frames + frame-count))
-                       (pos? frame-count) (update :barriers inc))))
-          snapshot (if (pos? (:frame-count committed))
+                                 (update :records + record-count))
+                       (pos? record-count) (update :barriers inc))))
+          snapshot (if (pos? (:record-count committed))
                      (let [published (publish-snapshot! db)]
                        (swap! commit-sequencer-stats update :publications inc)
                        published)
@@ -1957,7 +1957,7 @@
         thread (Thread. #(commit-sequencer-loop! queue) "store-commit-sequencer")]
     (.setDaemon thread true)
     (reset! commit-sequencer-stats
-            {:cohorts 0 :frames 0 :barriers 0 :publications 0})
+            {:cohorts 0 :records 0 :barriers 0 :publications 0})
     (reset! commit-sequencer {:queue queue :thread thread})
     (.start thread)
     nil))
@@ -2006,7 +2006,7 @@
       :rpc/lease-check {:payload (handle-lease-check! payload cancellation snapshot)}
       :rpc/validate {:payload (handle-validate! payload cancellation snapshot)}
       (server-fail! :rpc/unsupported-operation
-                    "operation is not part of FRAMRPC v2" {}))))
+                    "operation is not part of Store RPC v2" {}))))
 
 (def ^:private retryable-error-codes
   #{:rpc/conflict :rpc/cancelled :query-cancelled :query-time-limit
@@ -2028,7 +2028,7 @@
                       "request SpaceId does not match the served space" {}))
       (when (= :unsupported (native-op-disposition operation))
         (server-fail! :rpc/unsupported-operation
-                      "operation is not part of FRAMRPC v2" {}))
+                      "operation is not part of Store RPC v2" {}))
       (when (and (not (contains? paged-rpc-operations operation))
                  (t/rpcrequest-page request))
         (server-fail! :rpc/unexpected-page
@@ -2055,7 +2055,7 @@
                             page nil payload))
       (catch Throwable error
         (let [data (ex-data error)
-              code (or (:fram/code data) (:code data) (:type data)
+              code (or (:store/code data) (:code data) (:type data)
                        :rpc/internal-error)
               code (if (keyword? code) code :rpc/internal-error)]
           (rpc/rpc-response!
@@ -2077,7 +2077,7 @@
   (dotimes [index 8]
     (when-not (= (bit-and 255 (int (aget header index)))
                  (bit-and 255 (int (aget rpc/rpc-v2-magic index))))
-      (server-fail! :rpc-invalid-magic "FRAMRPC magic does not match" {})))
+      (server-fail! :rpc-invalid-magic "Store RPC magic does not match" {})))
   (let [buffer (doto (ByteBuffer/wrap header) (.order ByteOrder/LITTLE_ENDIAN))]
     (.position buffer 8)
     (let [major (Short/toUnsignedInt (.getShort buffer))
@@ -2088,41 +2088,41 @@
       (when-not (and (= major rpc/rpc-v2-major)
                      (= minor rpc/rpc-v2-minor))
         (server-fail! :rpc-unsupported-version
-                      "FRAMRPC major/minor version is unsupported" {}))
+                      "Store RPC major/minor version is unsupported" {}))
       (when-not (<= 1 kind 4)
-        (server-fail! :rpc-invalid-kind "FRAMRPC frame kind is unknown" {}))
+        (server-fail! :rpc-invalid-kind "Store RPC packet kind is unknown" {}))
       (when-not (zero? flags)
-        (server-fail! :rpc-invalid-flags "FRAMRPC v2 flags must be zero" {}))
+        (server-fail! :rpc-invalid-flags "Store RPC v2 flags must be zero" {}))
       (when (> body-length rpc/rpc-v2-max-body-bytes)
-        (server-fail! :rpc-frame-too-large
-                      "FRAMRPC declared body exceeds the byte limit" {}))
+        (server-fail! :rpc-packet-too-large
+                      "Store RPC declared body exceeds the byte limit" {}))
       (int body-length))))
 
-(defn read-rpc-frame! [^InputStream input]
+(defn read-rpc-packet! [^InputStream input]
   (let [first-byte (.read input)]
     (when-not (neg? first-byte)
       (when-not (= first-byte (bit-and 255 (int (aget rpc/rpc-v2-magic 0))))
-        (server-fail! :rpc-invalid-magic "FRAMRPC magic does not match" {}))
+        (server-fail! :rpc-invalid-magic "Store RPC magic does not match" {}))
       (let [header (byte-array rpc/rpc-v2-header-bytes)]
         (aset-byte header 0 (unchecked-byte first-byte))
         (when-not (read-exact! input header 1 (dec rpc/rpc-v2-header-bytes))
-          (server-fail! :rpc-truncated "FRAMRPC frame ended inside its header" {}))
+          (server-fail! :rpc-truncated "Store RPC packet ended inside its header" {}))
         (let [body-length (validate-stream-header! header)
               body (byte-array body-length)]
           (when-not (read-exact! input body 0 body-length)
-            (server-fail! :rpc-truncated "FRAMRPC body is shorter than declared" {}))
-          (let [frame (byte-array (+ rpc/rpc-v2-header-bytes body-length))]
-            (System/arraycopy header 0 frame 0 rpc/rpc-v2-header-bytes)
-            (System/arraycopy body 0 frame rpc/rpc-v2-header-bytes body-length)
-            (rpc/decode-rpc-frame-v2! frame)))))))
+            (server-fail! :rpc-truncated "Store RPC body is shorter than declared" {}))
+          (let [packet (byte-array (+ rpc/rpc-v2-header-bytes body-length))]
+            (System/arraycopy header 0 packet 0 rpc/rpc-v2-header-bytes)
+            (System/arraycopy body 0 packet rpc/rpc-v2-header-bytes body-length)
+            (rpc/decode-rpc-packet-v2! packet)))))))
 
-(defn- write-rpc-frame! [^OutputStream output frame]
+(defn- write-rpc-packet! [^OutputStream output packet]
   (let [bytes
         (try
-          (rpc/encode-rpc-frame-v2! frame)
+          (rpc/encode-rpc-packet-v2! packet)
           (catch Throwable error
-            (let [response (t/rpcframev2-response frame)
-                  code (or (:fram/code (ex-data error)) :rpc/internal-error)
+            (let [response (t/rpcpacketv2-response packet)
+                  code (or (:store/code (ex-data error)) :rpc/internal-error)
                   fallback
                   (rpc/rpc-response!
                    (t/rpcresponse-space response) (t/rpcresponse-op response)
@@ -2132,9 +2132,9 @@
                     (or (.getMessage error)
                         "native RPC response is not encodable") nil)
                    nil)]
-              (rpc/encode-rpc-frame-v2!
-               (rpc/rpc-response-frame
-                (t/rpcframev2-request-id frame) fallback)))))]
+              (rpc/encode-rpc-packet-v2!
+               (rpc/rpc-response-packet
+                (t/rpcpacketv2-request-id packet) fallback)))))]
     (.write output bytes)
     (.flush output)
     (alength ^bytes bytes)))
@@ -2222,11 +2222,11 @@
     (instance? SocketException error) :rpc/connection-error
     :else
     (let [data (ex-data error)]
-      (or (:fram/code data) (:code data) (:type data) :rpc/internal-error))))
+      (or (:store/code data) (:code data) (:type data) :rpc/internal-error))))
 
 (defn- serve-accepted-connection! [^Socket socket]
   (try
-    (.setSoTimeout socket connection-first-frame-timeout-ms)
+    (.setSoTimeout socket connection-first-packet-timeout-ms)
     (serve-connection! socket)
     (catch Throwable error
       (when (= :rpc/internal-error (admission-error-code error))
@@ -2286,19 +2286,19 @@
                     "request id is already active" {}))
     (swap! active-requests assoc request-id cancellation)))
 
-(defn handle-rpc-frame! [frame cancellation]
-  (case (t/rpcframev2-kind frame)
+(defn handle-rpc-packet! [packet cancellation]
+  (case (t/rpcpacketv2-kind packet)
     :request
-    (rpc/rpc-response-frame
-     (t/rpcframev2-request-id frame)
-     (handle-rpc-request! (t/rpcframev2-request frame) cancellation))
+    (rpc/rpc-response-packet
+     (t/rpcpacketv2-request-id packet)
+     (handle-rpc-request! (t/rpcpacketv2-request packet) cancellation))
     :cancel
     (do
-      (when-let [target (get @active-requests (t/rpcframev2-request-id frame))]
+      (when-let [target (get @active-requests (t/rpcpacketv2-request-id packet))]
         (cancel-state! target :client-cancelled))
       nil)
     (server-fail! :rpc-invalid-kind
-                  "listener accepts request and cancel frames only" {})))
+                  "listener accepts request and cancel packets only" {})))
 
 (defn serve-connection! [^Socket socket]
   (with-open [socket socket]
@@ -2306,18 +2306,18 @@
           output (.getOutputStream socket)
           opened (System/nanoTime)]
       (try
-        (let [frame (read-rpc-frame! input)
+        (let [packet (read-rpc-packet! input)
               started (System/nanoTime)]
           (when (.isConnected socket)
             (.setSoTimeout socket 0))
-          (when frame
-            (if (= :cancel (t/rpcframev2-kind frame))
-              (let [result (handle-rpc-frame! frame (cancellation-state))]
+          (when packet
+            (if (= :cancel (t/rpcpacketv2-kind packet))
+              (let [result (handle-rpc-packet! packet (cancellation-state))]
                 (record-request! :rpc/cancel (- (System/nanoTime) started)
                                  :ok nil nil)
                 result)
-              (let [request-id (t/rpcframev2-request-id frame)
-                    operation (t/rpcrequest-op (t/rpcframev2-request frame))
+              (let [request-id (t/rpcpacketv2-request-id packet)
+                    operation (t/rpcrequest-op (t/rpcpacketv2-request packet))
                     cancellation (cancellation-state)]
                 (register-request! request-id cancellation)
                 (future
@@ -2327,22 +2327,22 @@
                     (catch Throwable _
                       (cancel-state! cancellation :client-disconnected))))
                 (try
-                  (let [response (handle-rpc-frame! frame cancellation)
-                        response-bytes (write-rpc-frame! output response)
+                  (let [response (handle-rpc-packet! packet cancellation)
+                        response-bytes (write-rpc-packet! output response)
                         [outcome code] (response-outcome response)]
                     (record-request! operation (- (System/nanoTime) started)
                                      outcome code response-bytes))
                   (finally
                     (swap! active-requests dissoc request-id)))))))
         (catch Throwable error
-          ;; Frame-level failures never reach handle-rpc-request!, so without
+          ;; Beagle Packet-level failures never reach handle-rpc-request!, so without
           ;; this arm a malformed or duplicated request is served invisibly.
           (let [code (admission-error-code error)]
             (record-request! nil (- (System/nanoTime) opened) :error code nil))
           (throw error))))))
 
 (defn serve!
-  "Serve FRAMRPC v2 requests. The default bind is loopback; an authenticated
+  "Serve Store RPC v2 requests. The default bind is loopback; an authenticated
    private gateway may set BEAGLE_STORE_BIND explicitly. The active process holds
    writer authority for the full listener lifetime; a standby refreshes reads."
   [port path expected-space role]
@@ -2366,7 +2366,7 @@
           " log=" (or request-log-path "stderr")
           " connection-workers=" connection-worker-limit
           " connection-queue=" connection-pending-limit
-          " connection-read-timeout-ms=" connection-first-frame-timeout-ms
+          " connection-read-timeout-ms=" connection-first-packet-timeout-ms
           " max-heap-mb=" (quot (.maxMemory (Runtime/getRuntime)) 1048576)))
     (try
       (while (not @stopping?)
@@ -2384,7 +2384,7 @@
       (let [[first-arg second-arg third-arg] command-arguments]
         (serve! (Integer/parseInt (or first-arg "7977"))
                 (or second-arg
-                    (str (System/getProperty "user.dir") "/data/history.framlog"))
+                    (str (System/getProperty "user.dir") "/data/history.storelog"))
                 (or third-arg (System/getenv "BEAGLE_STORE_SPACE_ID"))
                 (writer-authority/server-role-from-env)))
 

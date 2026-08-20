@@ -26,7 +26,7 @@
   [:marked :re-derivable :archive-only :unsafe])
 
 (defn- fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- nonblank? [value]
   (and (string? value) (not (str/blank? value))))
@@ -290,7 +290,7 @@
         partition (mark-and-partition-v1 {:facts facts :roots roots :now now})]
     {:format inventory-format-v1
      :version fact-gc-version-v1
-     :framlog-bytes bytes
+     :store-log-bytes bytes
      :filesystem-allocated-bytes bytes
      :operation-occurrences (count facts)
      :live-fact-entries (count (:marked-fact-ids partition))
@@ -407,8 +407,8 @@
   "Fail closed before append when any configured fact/byte/free-space bound is crossed."
   [{:keys [inventory budget append-bytes append-facts free-bytes]}]
   (let [budget (admission-budget-v1 budget)
-        inventory (merge {:framlog-bytes 0 :live-fact-entries 0} inventory)
-        next-bytes (+ (:framlog-bytes inventory) (long (or append-bytes 0)))
+        inventory (merge {:store-log-bytes 0 :live-fact-entries 0} inventory)
+        next-bytes (+ (:store-log-bytes inventory) (long (or append-bytes 0)))
         next-facts (+ (:live-fact-entries inventory) (long (or append-facts 0)))
         free (long (or free-bytes (:free-bytes inventory) 0))
         breaches (vec (concat
@@ -419,5 +419,5 @@
      :status (if (empty? breaches) :accepted :refused)
      :code (if (empty? breaches) :fact-gc/admitted :fact-gc/budget-breach)
      :breaches breaches
-     :projected {:framlog-bytes next-bytes :live-fact-entries next-facts
+     :projected {:store-log-bytes next-bytes :live-fact-entries next-facts
                  :free-bytes free}}))

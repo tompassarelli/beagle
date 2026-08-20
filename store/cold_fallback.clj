@@ -33,14 +33,14 @@
    :deadline                  ["COLD" "QUEUE-DEADLINE" "UNAVAILABLE"]
    :full-queue                ["COLD" "QUEUE-DEADLINE" "DEFERRED"]
    :stale-revision            ["COLD" "STALE-REVISION" "DEFERRED"]
-   :corrupt-frame             ["DEGRADED" "CORRUPT" "UNAVAILABLE"]
+   :corrupt-record             ["DEGRADED" "CORRUPT" "UNAVAILABLE"]
    :torn-tail                 ["DEGRADED" "TORN-TAIL" "UNAVAILABLE"]
    :partial-transaction       ["DEGRADED" "PARTIAL-COMMIT" "UNAVAILABLE"]
    :ambiguous-commit-response ["DEGRADED" "DURABILITY-UNKNOWN" "DEFERRED"]
    :budget                     ["COLD" "BUDGET" "DEFERRED"]})
 
 (defn- fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- nonblank-string? [value]
   (and (string? value) (not (str/blank? value))))
@@ -137,7 +137,7 @@
           (str/includes? spelling "durability-unknown"))
       :ambiguous-commit-response
       (str/includes? spelling "stale") :stale-revision
-      (str/includes? spelling "corrupt") :corrupt-frame
+      (str/includes? spelling "corrupt") :corrupt-record
       (str/includes? spelling "budget") :budget
       (or (str/includes? spelling "queue")
           (str/includes? spelling "full")) :full-queue
@@ -150,7 +150,7 @@
 (defn- throwable->failure [error]
   (or (some-> error ex-data :cold-fallback/failure)
       (some-> error ex-data :failure)
-      (code->failure (or (some-> error ex-data :fram/code)
+      (code->failure (or (some-> error ex-data :store/code)
                          (some-> error ex-data :type)))
       (when (instance? java.io.IOException error) :unreachable)
       :unreachable))
@@ -246,4 +246,4 @@
                       (if (and (map? probe-result)
                                (= :failure (:status probe-result)))
                         (:failure probe-result)
-                        :corrupt-frame))))))
+                        :corrupt-record))))))

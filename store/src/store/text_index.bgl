@@ -42,7 +42,7 @@
 (defn text-error-data [(error TextError)] (Map Keyword Any)
   (if (texterror-limit-data error)
     {:type (texterror-type error)
-     :fram/code (texterror-code error)
+     :store/code (texterror-code error)
      :bytes (texterror-bytes error)
      :maximum (texterror-maximum error)}
     {:type (texterror-type error)

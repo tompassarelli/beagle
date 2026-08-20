@@ -39,7 +39,7 @@
 (def ^:private fact-value-max-depth 256)
 
 (defn- fact-fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- byte-value? [value]
   (and (integer? value) (<= 0 value 255)))
@@ -539,7 +539,7 @@
   :maintenance-batch/stale-revision)
 
 (defn- maintenance-fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- maintenance-attempt-id? [value]
   (and (string? value) (not (str/blank? value))))
@@ -723,7 +723,7 @@
   (quot (System/nanoTime) 1000000))
 
 (defn- admission-fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- require-admission-request!
   [{:keys [log space-id batch-id compiler-epoch-id timeout-ms retry-ms

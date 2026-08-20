@@ -1,4 +1,4 @@
-;; Native FRAMRPC probes for bin/beagle-store-doctor.
+;; Native Store RPC probes for bin/beagle-store-doctor.
 (require '[store.rpc :as wire]
          '[store.kernel :as kernel]
          '[store.rt :as rt]

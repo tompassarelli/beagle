@@ -4,7 +4,7 @@ description: >-
   Use when BUILDING a program, app, or tool on the Beagle Store engine, including
   designing its ontology, vocabulary, shapes, or schema conventions — choose an
   explicit modeling profile, enforce Fact Normal Form for fact-oriented data,
-  and query recursive Terms/Triples through FRAMRPC structured plans. Covers
+  and query recursive Terms/Triples through Store RPC structured plans. Covers
   profile scope, normalization, append-only occurrence history, immutable
   snapshots, paging, and Datalog derivation. NOT for one-off store reads or
   graph-authoring edits.
@@ -56,7 +56,7 @@ proposition.
 
 Read the current documentation named above, then inspect the typed definitions
 under `store:src/store/` and the official client under `store:clients/bun/`.
-The public data boundary is FRAMRPC v2, not an incidental internal Clojure
+The public data boundary is Store RPC v2, not an incidental internal Clojure
 function. The checkout CLI requires `BEAGLE_STORE_SPACE_ID` and routes data commands
 through `store:bin/beagle store`; Bun applications use `store:clients/bun/store-rpc.mjs`.
 The native-first server is the default launcher; `jvm-dev` and `jvm-oracle` are
@@ -142,10 +142,10 @@ The FNF gate passes only when all seven answers are yes:
   `validate` are convenient CLI projections. For applications, use the Bun
   client’s `assert`, `retract`, or atomic `batch` methods. Every mutation is
   append-only; replacing a value is a retraction plus an assertion in one
-  transaction. Never edit FRAMLOG or generated files in `store:out/` directly;
+  transaction. Never edit Store transaction log or generated files in `store:out/` directly;
   `store:out/resolve.clj` is the explicit hand-maintained exception.
 - **History is intrinsic.** An assertion creates an occurrence coordinate.
-  FRAMLOG stores `assert` and `retract` operations; a successful content
+  Store transaction log stores `assert` and `retract` operations; a successful content
   retraction withdraws the newest live equal assertion occurrence. That exact
   occurrence remains addressable in history, and equal proposition content
   remains live if another assertion occurrence is still in force. A no-match
@@ -221,7 +221,7 @@ The FNF gate passes only when all seven answers are yes:
 - If a domain Keyword or String uses namespace spelling to imply membership,
   stop and assert that membership separately. Keyword versus String carries
   Atom kind, not membership.
-- If you bypass FRAMRPC to reach an internal store helper, stop and confirm that
+- If you bypass Store RPC to reach an internal store helper, stop and confirm that
   the task is engine implementation work rather than application modeling.
 
 The family: Beagle text edits → `beagle-authoring`; graph-upstream files and

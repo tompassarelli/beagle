@@ -15,7 +15,7 @@
 (def semantic-currentness-kinds-v1 #{"EPOCH" "RE-ATTESTATION"})
 
 (defn- fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- value-of [m key]
   (or (get m key) (get m (name key))))

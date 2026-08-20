@@ -6,7 +6,7 @@
 #   BEAGLE_STORE_SERVER_PORT / BEAGLE_STORE_LOG / BEAGLE_STORE_SPACE_ID select the listener and identity.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export BEAGLE_STORE_SERVER_PORT="${BEAGLE_STORE_SERVER_PORT:-7977}"
-LOG="${BEAGLE_STORE_LOG:-$PWD/history.framlog}"
+LOG="${BEAGLE_STORE_LOG:-$PWD/history.storelog}"
 if [[ -z "${BEAGLE_STORE_SPACE_ID:-}" ]]; then
   echo "ERROR: BEAGLE_STORE_SPACE_ID is required" >&2
   exit 2

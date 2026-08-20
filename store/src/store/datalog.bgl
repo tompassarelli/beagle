@@ -220,10 +220,10 @@
        {:type :store-query-abort :code code}]
       [(and (= error-type :query-text-index-limit) (some? bytes))
        {:type :query-text-index-limit
-        :fram/code code
+        :store/code code
         :bytes bytes
         :maximum (queryevaluationerror-maximum error-value)}]
-      [:else {:type error-type :fram/code code}])))
+      [:else {:type error-type :store/code code}])))
 
 (defn raise-query-evaluation-error [(error-value QueryEvaluationError)] Any
   (throw (ex-info (queryevaluationerror-message error-value)

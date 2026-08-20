@@ -24,7 +24,7 @@
 (def budget-accepted-code-v1 :budget/accepted)
 
 (defn- budget-fail! [code message data]
-  (throw (ex-info message (assoc data :type code :fram/code code))))
+  (throw (ex-info message (assoc data :type code :store/code code))))
 
 (defn- nonnegative-integer! [label value]
   (when-not (and (integer? value) (not (neg? value)))

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # beagle-store-code-status <dir> — flip-level detection for the graceful ladder (L0-L3).
 # Prints ONE machine-readable line on stdout and always exits 0. It uses the
-# FRAMLOG header and a bounded native :rpc/status request; it never parses rows.
+# Store transaction log header and a bounded native :rpc/status request; it never parses rows.
 #
 # The ladder (documented in ~/code/STACK.md, announced by the session-start hook):
 #   level=3  native corpus + sealed graph-control authoring (N2.6b)
