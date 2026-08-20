@@ -94,12 +94,6 @@
   ;; the map/record property spelling stays internally consistent.
   (mangle-prop (substring s 1)))
 
-(define (kw->object-key kw)
-  (define prop (kw->prop kw))
-  ;; Preserve existing bare-key bytes for ordinary keywords. A namespace slash
-  ;; is not legal in a JS identifier, so only that ABI-bearing case is quoted.
-  (if (string-contains? prop "/") (~v prop) prop))
-
 (define (keyword-symbol? sym)
   (and (symbol? sym)
        (let ([s (symbol->string sym)])
@@ -116,22 +110,23 @@
      (if (< (length rest) 2)
          (reverse acc)
          (loop (cddr rest)
-               (cons (format "[~a]: ~a" (emit-expr (car rest)) (emit-expr (cadr rest)))
+               (cons (format "[~a]: ~a"
+                             (emit-property-key (car rest))
+                             (emit-expr (cadr rest)))
                      acc))))
    ", "))
+
+(define (emit-property-key key)
+  (runtime-call "property_key" (list key)))
 
 (define (emit-core-call fn-sym args)
   (define n (length args))
   (case fn-sym
-    [(str) (format "(\"\".concat(~a))"
-                   (string-join (map emit-expr args) ", "))]
-    [(println) (format "console.log(~a)"
-                       (string-join (map emit-expr args) ", "))]
-    [(print) (format "process.stdout.write(~a)"
-                     (if (= n 1) (emit-expr (car args))
-                         (format "\"\".concat(~a)" (string-join (map emit-expr args) ", "))))]
-    [(pr prn) (format "console.log(~a)"
-                      (string-join (map emit-expr args) ", "))]
+    [(str) (runtime-call "str" args)]
+    [(println) (format "console.log(~a)" (runtime-call "print_str" args))]
+    [(print) (format "process.stdout.write(~a)" (runtime-call "print_str" args))]
+    [(pr) (format "process.stdout.write(~a)" (runtime-call "pr_str" args))]
+    [(prn) (format "console.log(~a)" (runtime-call "pr_str" args))]
     [(nil?) (if (= n 1) (format "(~a == null)" (emit-expr (car args))) #f)]
     [(some?) (if (= n 1) (format "(~a != null)" (emit-expr (car args))) #f)]
     [(true?) (if (= n 1) (format "(~a === true)" (emit-expr (car args))) #f)]
@@ -237,8 +232,9 @@
     [(keys) (if (= n 1)
                 (case (classify-rep (car args))
                   [(hmap) (hamt-call "hamtMapKeys" (emit-expr (car args)))]
-                  [(poly) (begin (mark-needs-v!) (use-runtime!) (format "$$bc$keys(~a)" (emit-expr (car args))))]
-                  [else (format "Object.keys(~a)" (emit-expr (car args)))])
+                  [else (begin
+                          (mark-needs-v-if-hamtish! (car args))
+                          (runtime-call "keys" args))])
                 #f)]
     [(vals) (if (= n 1)
                 (case (classify-rep (car args))
@@ -276,7 +272,7 @@
     [(boolean) (if (= n 1) (emit-truthy-expr (car args)) #f)]
     [(string?) (if (= n 1) (format "(typeof ~a === 'string')" (emit-expr (car args))) #f)]
     [(number?) (if (= n 1) (format "(typeof ~a === 'number')" (emit-expr (car args))) #f)]
-    [(keyword?) (if (= n 1) (format "(typeof ~a === 'string')" (emit-expr (car args))) #f)]
+    [(keyword?) (if (= n 1) (runtime-call "keyword_p" args) #f)]
     [(fn?) (if (= n 1) (format "(typeof ~a === 'function')" (emit-expr (car args))) #f)]
     [(and) (emit-logical-expr 'and args)]
     [(or) (emit-logical-expr 'or args)]
@@ -285,8 +281,9 @@
                                    (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(ex-message) (if (= n 1) (format "~a.message" (emit-expr (car args))) #f)]
     [(ex-data) (if (= n 1) (format "~a.data" (emit-expr (car args))) #f)]
-    [(name) (if (= n 1) (format "String(~a)" (emit-expr (car args))) #f)]
-    [(keyword) (if (= n 1) (emit-expr (car args)) #f)]
+    [(name) (if (= n 1) (runtime-call "name" args) #f)]
+    [(keyword) (if (= n 1) (runtime-call "keyword" args) #f)]
+    [(symbol) (if (= n 1) (runtime-call "symbol" args) #f)]
     [(integer?) (if (= n 1) (format "Number.isInteger(~a)" (emit-expr (car args))) #f)]
     [(subs) (cond
               [(= n 2) (format "~a.substring(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
@@ -338,14 +335,15 @@
                [(and (= n 3) (eq? crep 'poly))
                 (begin (mark-needs-v!) (use-runtime!) (format "$$bc$get(~a, ~a, ~a)"
                                               (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args))))]
-               [(= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args)))]
-               [(= n 3) (format "(() => { const _x = ~a, _k = ~a; return _x[_k] != null ? _x[_k] : ~a; })()"
-                                (emit-expr (car args)) (emit-expr (cadr args))
-                                (emit-expr (caddr args)))]
+               [(or (= n 2) (= n 3)) (runtime-call "get" args)]
                [else #f]))]
     [(update) (if (= n 3)
-                  (format "(() => { const _m = ~a, _k = ~a; return { ..._m, [_k]: ~a(_m[_k]) }; })()"
-                          (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))
+                  (begin
+                    (use-runtime!)
+                    (format "(() => { const _m = ~a, _k = $$bc$property_key(~a); return { ..._m, [_k]: ~a(_m[_k]) }; })()"
+                            (emit-expr (car args))
+                            (emit-expr (cadr args))
+                            (emit-expr (caddr args))))
                   #f)]
     [(merge) (if (>= n 1)
               (format "Object.assign({}, ~a)" (string-join (map emit-expr args) ", "))
@@ -355,7 +353,8 @@
                 [(eq? (classify-rep (car args)) 'hmap)
                  (hamt-call "hamtMapDissoc" (emit-expr (car args)) (emit-expr (cadr args)))]
                 [else (format "(() => { const _r = {...~a}; delete _r[~a]; return _r; })()"
-                              (emit-expr (car args)) (emit-expr (cadr args)))])]
+                              (emit-expr (car args))
+                              (emit-property-key (cadr args)))])]
     [(subvec) (cond
                 [(= n 2) (format "~a.slice(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
                 [(= n 3) (format "~a.slice(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
@@ -438,11 +437,7 @@
                    [(= n 1) (format "~a.slice(0, -1)" (emit-expr (car args)))]
                    [(= n 2) (format "~a.slice(0, -~a)" (emit-expr (cadr args)) (emit-expr (car args)))]
                    [else #f])]
-    [(pr-str) (if (>= n 1)
-                (format
-                 "((..._xs) => { const _pr = (_x) => _x == null ? 'nil' : Array.isArray(_x) ? '[' + _x.map(_pr).join(' ') + ']' : typeof _x === 'string' ? JSON.stringify(_x) : String(_x); return _xs.map(_pr).join(' '); })(~a)"
-                 (string-join (map emit-expr args) ", "))
-                #f)]
+    [(pr-str) (if (>= n 1) (runtime-call "pr_str" args) #f)]
     [(to-array) (if (= n 1) (format "Array.from(~a)" (emit-expr (car args))) #f)]
     [(aget) (if (= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(aset) (if (= n 3) (format "(~a[~a] = ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args))) #f)]
@@ -482,7 +477,8 @@
     [(list?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
     [(boolean?) (if (= n 1) (format "(typeof ~a === 'boolean')" (emit-expr (car args))) #f)]
     [(any?) (if (= n 1) "true" #f)]
-    [(symbol?) (if (= n 1) (format "(typeof ~a === 'symbol')" (emit-expr (car args))) #f)]
+    [(symbol?) (if (= n 1) (runtime-call "symbol_p" args) #f)]
+    [(undefined?) (if (= n 1) (runtime-call "undefined_p" args) #f)]
     ;; --- math / numeric --------------------------------------------------------
     [(quot) (if (= n 2) (format "Math.trunc(~a / ~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(rem) (if (= n 2) (format "(~a % ~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
@@ -493,8 +489,7 @@
     ;; --- predicates ------------------------------------------------------------
     [(not-any?) (if (= n 2) (format "(!~a.some(~a))" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(not-every?) (if (= n 2) (format "(!~a.every(~a))" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
-    [(distinct?) (if (>= n 2) (format "(new Set([~a]).size === ~a)"
-                                      (string-join (map emit-expr args) ", ") (number->string n)) #f)]
+    [(distinct?) (if (>= n 2) (runtime-call "distinct_p" args) #f)]
     ;; --- string / regex --------------------------------------------------------
     [(re-pattern) (if (= n 1) (format "new RegExp(~a)" (emit-expr (car args))) #f)]
     [(re-matches)
@@ -507,7 +502,10 @@
                                   (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(re-groups) (if (= n 1) (format "~a" (emit-expr (car args))) #f)]
     [(format)     (if (>= n 1) (runtime-call "format" args) #f)]
-    ;; --- type coercion (int/double/char omitted — shadow user names too easily)
+    ;; --- type coercion ----------------------------------------------------------
+    [(int)        (if (= n 1) (format "(~a | 0)" (emit-expr (car args))) #f)]
+    [(double)     (if (= n 1) (format "Number(~a)" (emit-expr (car args))) #f)]
+    [(char)       (if (= n 1) (runtime-call "char" args) #f)]
     ;; --- higher-order ----------------------------------------------------------
     [(memoize)    (if (= n 1) (runtime-call "memoize" args) #f)]
     [(fnil)       (if (>= n 2) (runtime-call "fnil" args) #f)]
@@ -585,7 +583,7 @@
                           (format "(() => { const _a = ~a; if (_a.value === ~a) { _a.value = ~a; return true; } return false; })()"
                                   (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))
                           #f)]
-    [(gensym) (format "Symbol(~a)" (if (= n 0) "" (emit-expr (car args))))]
+    [(gensym) (runtime-call "gensym" args)]
     [(hash) (if (= n 1) (runtime-call "hash" args) #f)]
     [(random-uuid) (if (= n 0) "crypto.randomUUID()" #f)]
     [(parse-long) (if (= n 1) (format "parseInt(~a, 10)" (emit-expr (car args))) #f)]
@@ -827,8 +825,8 @@
 
 ;; --- type-based scalar equality optimization (P3) ---------------------------
 ;; A type is ===-safe iff its core.js value-equality (equiv) coincides with JS
-;; ===.  ===-SAFE: Int + integer widths, String, Bool, Keyword (emits as a bare
-;; string).  EXCLUDED by design:
+;; ===.  ===-SAFE: Int + integer widths, String, Bool, and interned Keyword.
+;; EXCLUDED by design:
 ;;   - Nil: equiv(null,undefined)=true but null===undefined=false; Beagle nil has
 ;;     two runtime reps (null AND undefined), so === would mis-compare.
 ;;   - Float/F32: NaN===NaN is false (equiv(NaN,NaN) too — they only coincide);
@@ -2082,7 +2080,7 @@
     [(symbol? e)
      (cond
        [(eq? e 'nil) "null"]
-       [(keyword-symbol? e) (~v (kw->prop e))]
+       [(keyword-symbol? e) (runtime-call "keyword" (list (kw->prop e)))]
        [(js-bound? e) (resolved-name e)]
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
        [else (mangle-name e)])]
@@ -2117,8 +2115,7 @@
                         (define v (cdr p))
                         (define key-str
                           (cond
-                            [(keyword-symbol? k) (kw->object-key k)]
-                            [else (format "[~a]" (emit-expr k))]))
+                            [else (format "[~a]" (emit-property-key k))]))
                         (format "~a: ~a" key-str (emit-expr v)))
                       (map-form-pairs e))
                  ", "))])]
@@ -2717,7 +2714,7 @@
      ;; hamtMap object would read `undefined`.
      (define target (kw-access-target e))
      (define prop (kw->prop (kw-access-kw e)))
-     (define keystr (~v prop))
+     (define keystr (emit-expr (kw-access-kw e)))
      (define default (kw-access-default e))
      (case (classify-rep target)
        [(hmap)
@@ -2845,7 +2842,10 @@
          "(() => { const _s = ~a, _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"g\" : \"gu\"), _out = []; let _last = 0; for (const _m of _s.matchAll(new RegExp(_r.source, _f))) { _out.push(_s.slice(_last, _m.index)); _last = _m.index + _m[0].length; if (_m[0].length === 0 && _last < _s.length) _last += Array.from(_s.slice(_last))[0].length; } _out.push(_s.slice(_last)); while (_out.length > 0 && _out[_out.length - 1] === \"\") _out.pop(); return _out; })()"
          (emit-expr (car args))
          (emit-expr (cadr args)))]
-       [(and (symbol? fn-sym) (emit-core-call fn-sym args)) => values]
+       [(and (symbol? fn-sym)
+             (not (js-bound? fn-sym))
+             (emit-core-call fn-sym args))
+        => values]
        [(qualified-ref? fn-sym)
         (format "~a(~a)"
                 (emit-qualified-reference
@@ -3525,8 +3525,8 @@
     [(real? d) (emit-js-number d)]
     [(symbol? d)
      (if (keyword-symbol? d)
-         (~v (kw->prop d))
-         (~v (symbol->string d)))]
+         (runtime-call "keyword" (list (kw->prop d)))
+         (runtime-call "symbol" (list (symbol->string d))))]
     [(null? d) "[]"]
     [(pair? d) (format "[~a]" (string-join (map emit-quoted d) ", "))]
     [else (~v d)]))

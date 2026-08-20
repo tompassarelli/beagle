@@ -119,6 +119,58 @@
      "main();"
      "Hello, world!")
 
+   (check-js-behavior "keyword, symbol, nil, and declared scalar identity"
+     (list
+      `(def literal-keyword Keyword :alpha/item)
+      `(def literal-symbol Symbol (quote alpha/item))
+      `(defn make-keyword ,(br 'text 'String) Keyword (keyword text))
+      `(defn make-symbol ,(br 'text 'String) Symbol (symbol text))
+      `(defn keyword-value? ,(br 'value 'Any) Bool (keyword? value))
+      `(defn symbol-value? ,(br 'value 'Any) Bool (symbol? value))
+      `(defn scalar-equal? ,(br 'left 'Any 'right 'Any) Bool (= left right))
+      `(defn value-hash ,(br 'value 'Any) Int (hash value))
+      `(defn value-name ,(br 'value 'Any) String (name value))
+      `(defn render ,(br 'value 'Any) String (str value))
+      `(defn print-value ,(br 'value 'Any) String (pr-str value))
+      `(defn scalar-map ,(br) Any ,(mt ':x 1 "x" 2))
+      `(defn map-get ,(br 'm 'Any 'key 'Any) Any (get m key))
+      `(defn scalar-keys ,(br 'm 'Any) Any (keys m))
+      `(defn as-int ,(br 'value 'Any) Int (int value))
+      `(defn as-double ,(br 'value 'Any) Float (double value))
+      `(defn as-char ,(br 'value 'Any) Any (char value)))
+     (string-append
+      "const k1 = make_keyword('alpha/item'), k2 = make_keyword('alpha/item');\n"
+      "const s1 = make_symbol('alpha/item'), s2 = make_symbol('alpha/item');\n"
+      "if (!keyword_value_p(literal_keyword) || keyword_value_p('alpha/item')) throw new Error('keyword predicate');\n"
+      "if (!symbol_value_p(literal_symbol) || symbol_value_p(Symbol('foreign'))) throw new Error('symbol predicate');\n"
+      "if (!scalar_equal_p(k1, k2) || scalar_equal_p(k1, 'alpha/item')) throw new Error('keyword equality');\n"
+      "if (!scalar_equal_p(s1, s2) || scalar_equal_p(s1, k1)) throw new Error('symbol equality');\n"
+      "if (value_hash(k1) !== value_hash(k2) || value_hash(s1) !== value_hash(s2)) throw new Error('value hash');\n"
+      "if (value_hash(k1) === value_hash('alpha/item') || value_hash(s1) === value_hash('alpha/item')) throw new Error('tagged hash');\n"
+      "if (value_name(k1) !== 'item' || value_name(s1) !== 'item') throw new Error('name');\n"
+      "if (render(null) !== '' || render(undefined) !== '' || render(k1) !== ':alpha/item' || render(s1) !== 'alpha/item') throw new Error('str');\n"
+      "if (print_value(k1) !== ':alpha/item' || print_value(s1) !== 'alpha/item' || print_value('alpha/item') !== '\"alpha/item\"') throw new Error('pr-str');\n"
+      "const m = scalar_map();\n"
+      "if (map_get(m, k1.text === 'alpha/item' ? make_keyword('x') : null) !== 1 || map_get(m, 'x') !== 2) throw new Error('property codec');\n"
+      "const ks = scalar_keys(m);\n"
+      "if (ks.length !== 2 || !ks.some(keyword_value_p) || !ks.some(x => typeof x === 'string')) throw new Error('property decode');\n"
+      "if (as_int(3.9) !== 3 || as_int(-3.9) !== -3 || as_int(undefined) !== 0) throw new Error('int');\n"
+      "if (as_double('3.5') !== 3.5 || !Number.isNaN(as_double(undefined))) throw new Error('double');\n"
+      "if (as_char(65) !== 'A' || as_char('Z') !== 'Z') throw new Error('char');\n"
+      "let charFailed = false; try { as_char('too long'); } catch (_) { charFailed = true; }\n"
+      "if (!charFailed) throw new Error('char rejection');"))
+
+   (check-js-output "keyword and symbol print as scalar values"
+     (list
+      `(defn print-scalars ,(br) Nil
+         (do (print :alpha/item)
+             (print (symbol "alpha/item"))
+             (pr :alpha/item)
+             (pr (symbol "alpha/item"))
+             nil)))
+     "print_scalars();"
+     ":alpha/itemalpha/item:alpha/itemalpha/item")
+
    (check-js-output "boolean logic"
      (list '(defn both [(a Bool) (b Bool)] Bool (and a b))
            '(defn main [] Nil
@@ -139,19 +191,19 @@
       '(defn observe-or! [(value Any)] Any
          (do (js/call or-events .push value) value))
       '(defn ordered! [(limit Int)] Any
-         (loop [(at Int) 0 (prior Int) -1]
+         (loop [at Int 0 prior Int -1]
            (or (and (= at limit) prior)
                (and (note! at)
                     (< at limit)
                     (recur (+ at 1) at)))))
       '(defn and-gate! [(gate Any)] Any
-         (loop [(at Int) 0]
+         (loop [at Int 0]
            (and gate
                 (observe-and! at)
                 (< at 1)
                 (recur (+ at 1)))))
       '(defn or-gate! [(gate Any)] Any
-         (loop [(at Int) 0]
+         (loop [at Int 0]
            (or gate
                (observe-or! (= at 1))
                (recur (+ at 1))))))
@@ -213,8 +265,8 @@ console.assert(threw, 'frozen record should reject mutation');
            '(defrecord Rect [(w Int) (h Int)])
            `(defn area [(shape Any)] Int
               (match shape
-                ,(br '(Circle r) '(* r r))
-                ,(br '(Rect w h) '(* w h)))))
+                ,(br '(Circle r) '(* (int r) (int r)))
+                ,(br '(Rect w h) '(* (int w) (int h))))))
      "console.log(area(Circle(5))); console.log(area(Rect(3, 4)));"
      "25\n12")
 
@@ -368,22 +420,22 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- let / IIFE ----------------------------------------------------------
 
    (check-js-output "let binds correctly"
-     (list '(defn f [] Int (let [x 10 y 20] (+ x y))))
+     (list '(defn f [] Int (let [x Int 10 y Int 20] (+ x y))))
      "console.log(f());"
      "30")
 
    (check-js-output "nested let scoping"
      (list '(defn f [] Int
-              (let [x 1]
-                (let [x 2]
+              (let [x Int 1]
+                (let [x Int 2]
                   x))))
      "console.log(f());"
      "2")
 
    (check-js-output "let does not leak into outer scope"
      (list '(defn f [] Int
-              (let [x 1]
-                (+ (let [y 10] y) x))))
+              (let [x Int 1]
+                (+ (let [y Int 10] y) x))))
      "console.log(f());"
      "11")
 
@@ -393,16 +445,16 @@ console.log(JSON.stringify(snapshot()));"
    ;; See emit-js.rkt's `current-rename-env` / `emit-let-bindings`.
    (check-js-output "let with repeated binding name (return position)"
      (list '(defn f [] Int
-              (let [x 1
-                    x (+ x 1)]
+              (let [x Int 1
+                    x Int (+ x 1)]
                 x)))
      "console.log(f());"
      "2")
 
    (check-js-output "let with repeated binding name (non-return position)"
      (list '(defn f [] Int
-              (let [x 1
-                    x (+ x 1)]
+              (let [x Int 1
+                    x Int (+ x 1)]
                 x))
            '(defn main [] Nil
               (do (println (f))
@@ -412,17 +464,17 @@ console.log(JSON.stringify(snapshot()));"
 
    (check-js-output "let with three-times-repeated binding name"
      (list '(defn f [] Int
-              (let [x 1
-                    x (+ x 1)
-                    x (* x 10)]
+              (let [x Int 1
+                    x Int (+ x 1)
+                    x Int (* x 10)]
                 x)))
      "console.log(f());"
      "20")
 
    (check-js-behavior "let with repeated binding name emits distinct JS identifiers"
      (list '(defn f [] Int
-              (let [x 1
-                    x (+ x 1)]
+              (let [x Int 1
+                    x Int (+ x 1)]
                 x)))
      "if (f() !== 2) throw new Error('expected 2');")
 
@@ -582,12 +634,12 @@ console.log(JSON.stringify(snapshot()));"
    (check-js-output "sibling constrained lets use distinct compiler slots"
      (list
       '(defn positive? [(candidate Int)] Bool (> candidate 0))
-      '(defn sibling-lets [] Int
+      `(defn sibling-lets [(first-input Int) (second-input Int)] Int
          (do
-           (let [(first-value Int positive?) 1] first-value)
-           (let [(second-value Int positive?) 2] second-value)
+           (let ,(br '(first-value Int positive?) 'first-input) first-value)
+           (let ,(br '(second-value Int positive?) 'second-input) second-value)
            3)))
-     "console.log(sibling_lets());"
+     "console.log(sibling_lets(1, 2));"
      "3")
 
    (check-js-output "typed JS methods enforce constraints before hidden installs"
@@ -651,8 +703,8 @@ console.log(JSON.stringify(snapshot()));"
    (test-case "let with repeated binding name never emits duplicate const/let in one block"
      (define js (js-emit (list '(ns test.app) '(define-target js)
                                 '(defn f [] Int
-                                   (let [x 1
-                                         x (+ x 1)]
+                                   (let [x Int 1
+                                         x Int (+ x 1)]
                                      x)))))
      (define decls (regexp-match* #rx"(const|let) x[a-zA-Z0-9_]* =" js))
      (check-equal? (length (remove-duplicates decls)) (length decls)
@@ -860,7 +912,7 @@ console.log(JSON.stringify(snapshot()));"
    ;; Static emitter coverage alone misses "Assignment to constant variable".
    (check-js-output "set!-mutated let local executes"
      (list '(defn overwrite-local! [(n Int)] Int
-              (let [acc 0]
+              (let [acc Int 0]
                 (set! acc n)
                 acc)))
      "console.log(overwrite_local_bang(42));"
@@ -1105,20 +1157,20 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "[0,1,2]")
 
    (check-js-output "select-keys picks keys"
-     (list `(defn f [(m Any)] Any (select-keys m ,(br ":a" ":c"))))
-     "console.log(JSON.stringify(f({':a':1, ':b':2, ':c':3})));"
-     "{\":a\":1,\":c\":3}")
+     (list `(defn f [(m Any)] Any (select-keys m ,(br ':a ':c))))
+     "console.log(JSON.stringify(f({a:1, b:2, c:3})));"
+     "{\"a\":1,\"c\":3}")
 
    (check-js-output "assoc-in nested set"
-     (list `(defn f [(m Any)] Any (assoc-in m ,(br ":a" ":b") 42)))
-     "console.log(JSON.stringify(f({':a': {':b': 0}})));"
-     "{\":a\":{\":b\":42}}")
+     (list `(defn f [(m Any)] Any (assoc-in m ,(br ':a ':b) 42)))
+     "console.log(JSON.stringify(f({a: {b: 0}})));"
+     "{\"a\":{\"b\":42}}")
 
    (check-js-output "update-in nested update"
      (list '(defn add1 [(x Int)] Int (+ x 1))
-           `(defn f [(m Any)] Any (update-in m ,(br ":a") add1)))
-     "console.log(JSON.stringify(f({':a': 5})));"
-     "{\":a\":6}")
+           `(defn f [(m Any)] Any (update-in m ,(br ':a) add1)))
+     "console.log(JSON.stringify(f({a: 5})));"
+     "{\"a\":6}")
 
    ;; --- higher-order value wrappers -------------------------------------------
 
@@ -1175,17 +1227,17 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
 
    (check-js-output "loop with let containing recur"
      (list '(defn find-char [(s String) (target Int)] Int
-              (loop [i 0]
-                (let [c (js/call s .charCodeAt i)]
+              (loop [i Int 0]
+                (let [c Int (js/call s .charCodeAt i)]
                   (if (= c target) i (recur (+ i 1)))))))
      "console.log(find_char('hello', 108));"
      "2")
 
    (check-js-output "loop with nested let containing recur"
      (list '(defn sum-until [(xs (Vec Int)) (limit Int)] Int
-              (loop [i 0 total 0]
+              (loop [i Int 0 total Int 0]
                 (if (>= i (count xs)) total
-                  (let [(v Int) (nth xs i)]
+                  (let [v Int (nth xs i)]
                     (if (>= (+ total v) limit) total
                       (recur (+ i 1) (+ total v))))))))
      "console.log(sum_until([1,2,3,4,5], 7));"
@@ -1193,9 +1245,9 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
 
    (check-js-output "loop with cond containing recur"
      (list '(defn classify-first [(xs (Vec Int))] String
-              (loop [i 0]
+              (loop [i Int 0]
                 (if (>= i (count xs)) "none"
-                  (let [v (nth xs i)]
+                  (let [v Int (nth xs i)]
                     (cond
                       (> v 100) "big"
                       (> v 10) "medium"

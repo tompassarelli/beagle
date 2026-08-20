@@ -1,3 +1,107 @@
+const keywordValues = new Map();
+
+class BeagleKeyword {
+  constructor(text) {
+    this.text = text;
+    Object.freeze(this);
+  }
+
+  toString() { return `:${this.text}`; }
+}
+
+class BeagleSymbol {
+  constructor(text) {
+    this.text = text;
+    Object.freeze(this);
+  }
+
+  toString() { return this.text; }
+}
+
+export function keyword(x) {
+  if (x instanceof BeagleKeyword) return x;
+  const text = String(x);
+  let value = keywordValues.get(text);
+  if (value === undefined) {
+    value = new BeagleKeyword(text);
+    keywordValues.set(text, value);
+  }
+  return value;
+}
+
+export function symbol(x) {
+  return x instanceof BeagleSymbol ? x : new BeagleSymbol(String(x));
+}
+
+export function keyword_p(x) { return x instanceof BeagleKeyword; }
+export function symbol_p(x) { return x instanceof BeagleSymbol; }
+export function undefined_p(x) { return x === undefined; }
+
+export function name(x) {
+  if (!(x instanceof BeagleKeyword) && !(x instanceof BeagleSymbol)) return String(x);
+  const text = x.text;
+  const slash = text.lastIndexOf("/");
+  return slash < 0 ? text : text.slice(slash + 1);
+}
+
+export function str(...xs) {
+  return xs.map(x => x == null ? "" : String(x)).join("");
+}
+
+export function print_str(...xs) {
+  return xs.map(x => x == null ? "" : String(x)).join(" ");
+}
+
+function prValue(x) {
+  if (x == null) return "nil";
+  if (x instanceof BeagleKeyword || x instanceof BeagleSymbol) return String(x);
+  if (Array.isArray(x)) return `[${x.map(prValue).join(" ")}]`;
+  if (typeof x === "string") return JSON.stringify(x);
+  return String(x);
+}
+
+export function pr_str(...xs) { return xs.map(prValue).join(" "); }
+
+export function char(x) {
+  if (typeof x === "number") return String.fromCharCode(x);
+  if (typeof x === "string" && Array.from(x).length === 1) return x;
+  throw new TypeError(`Cannot coerce ${String(x)} to char`);
+}
+
+let gensymCounter = 0;
+export function gensym(prefix = "G__") {
+  return symbol(`${prefix}${gensymCounter++}`);
+}
+
+// JavaScript objects stringify property keys, while Beagle map keys retain
+// scalar type. Ordinary keyword properties keep their established field bytes;
+// every other scalar is tagged, and the reserved prefix is escaped for keywords.
+const PROPERTY_PREFIX = "\uFDD0";
+export function property_key(x) {
+  if (x instanceof BeagleKeyword) {
+    return x.text.startsWith(PROPERTY_PREFIX) ? `${PROPERTY_PREFIX}k${x.text}` : x.text;
+  }
+  if (x instanceof BeagleSymbol) return `${PROPERTY_PREFIX}y${x.text}`;
+  if (typeof x === "string") return `${PROPERTY_PREFIX}s${x}`;
+  if (typeof x === "number") return `${PROPERTY_PREFIX}n${String(x)}`;
+  if (typeof x === "boolean") return `${PROPERTY_PREFIX}b${x ? "1" : "0"}`;
+  if (x == null) return `${PROPERTY_PREFIX}z`;
+  return x;
+}
+
+export function property_value(x) {
+  if (typeof x !== "string" || !x.startsWith(PROPERTY_PREFIX)) return keyword(x);
+  const tag = x[PROPERTY_PREFIX.length];
+  const text = x.slice(PROPERTY_PREFIX.length + 1);
+  if (tag === "k") return keyword(text);
+  if (tag === "y") return symbol(text);
+  if (tag === "s") return text;
+  if (tag === "n") return Number(text);
+  if (tag === "b") return text === "1";
+  if (tag === "z") return null;
+  return keyword(x);
+}
+
 export function range(...args) {
   let start = 0, end, step = 1;
   if (args.length === 1) { end = args[0]; }
@@ -32,18 +136,23 @@ export function map_indexed(f, coll) {
 export function assoc_in(m, path, v) {
   if (path.length === 0) return v;
   const [k, ...rest] = path;
-  return { ...m, [k]: rest.length === 0 ? v : assoc_in(m[k] || {}, rest, v) };
+  const p = property_key(k);
+  return { ...m, [p]: rest.length === 0 ? v : assoc_in(m[p] || {}, rest, v) };
 }
 
 export function update_in(m, path, f) {
   if (path.length === 0) return f(m);
   const [k, ...rest] = path;
-  return { ...m, [k]: rest.length === 0 ? f(m[k]) : update_in(m[k] || {}, rest, f) };
+  const p = property_key(k);
+  return { ...m, [p]: rest.length === 0 ? f(m[p]) : update_in(m[p] || {}, rest, f) };
 }
 
 export function select_keys(m, ks) {
   const r = {};
-  for (const k of ks) if (k in m) r[k] = m[k];
+  for (const k of ks) {
+    const p = property_key(k);
+    if (p in m) r[p] = m[p];
+  }
   return r;
 }
 
@@ -127,17 +236,20 @@ export function every_pred(...preds) {
 
 export function rename_keys(m, kmap) {
   const r = { ...m };
-  for (const [old_k, new_k] of Object.entries(kmap)) {
-    if (old_k in r) {
-      r[new_k] = r[old_k];
-      delete r[old_k];
+  for (const [oldProperty, newKey] of Object.entries(kmap)) {
+    const oldKey = property_value(oldProperty);
+    const source = property_key(oldKey);
+    const target = property_key(newKey);
+    if (source in r) {
+      r[target] = r[source];
+      delete r[source];
     }
   }
   return r;
 }
 
 export function map_keys(f, m) {
-  return Object.fromEntries(Object.entries(m).map(([k, v]) => [f(k), v]));
+  return Object.fromEntries(Object.entries(m).map(([k, v]) => [property_key(f(property_value(k))), v]));
 }
 
 export function map_vals(f, m) {
@@ -152,7 +264,7 @@ export function disj(s, ...ks) {
 
 export function reduce_kv(f, init, m) {
   let acc = init;
-  for (const [k, v] of Object.entries(m)) acc = f(acc, k, v);
+  for (const [k, v] of Object.entries(m)) acc = f(acc, property_value(k), v);
   return acc;
 }
 
@@ -206,7 +318,7 @@ export function split_with(pred, coll) {
 
 export function zipmap(keys, vals) {
   const r = {};
-  for (let i = 0; i < keys.length && i < vals.length; i++) r[keys[i]] = vals[i];
+  for (let i = 0; i < keys.length && i < vals.length; i++) r[property_key(keys[i])] = vals[i];
   return r;
 }
 
@@ -241,8 +353,9 @@ function hamtWalk(node, out) {
 function hamtMapNativeView(m) {
   const o = {};
   for (const [k, v] of hamtWalk(m.root, [])) {
-    if (k !== null && typeof k === "object") return null;
-    o[k] = v;
+    if (k !== null && typeof k === "object" &&
+        !(k instanceof BeagleKeyword) && !(k instanceof BeagleSymbol)) return null;
+    o[property_key(k)] = v;
   }
   return o;
 }
@@ -293,11 +406,11 @@ function hamtHash(x) {
     for (const [e] of hamtWalk(x.root, [])) acc = (acc + hashV(e)) | 0;
     return mix(6, acc);
   }
-  // hamtMap: mirror the native object-map branch (seed 7). Scalar keys hash via
-  // their native string form so HAMT and native of equal content hash equal.
+  // hamtMap: mirror the native object-map branch (seed 7). The property codec
+  // decodes native keys before hashing, so both representations hash key values.
   let acc = 0;
   for (const [k, v] of hamtWalk(x.root, [])) {
-    const hk = (k !== null && typeof k === "object") ? hashV(k) : hashV(String(k));
+    const hk = hashV(k);
     acc = (acc + mix(hk, hashV(v))) | 0;
   }
   return mix(7, acc);
@@ -316,7 +429,11 @@ function isPlainObject(x) {
 // is whether the recursion (rec) handles nested HAMTs.
 function equivNative(a, b, rec) {
   const ta = typeof a, tb = typeof b;
-  // scalars: numbers, strings (keywords emit as bare strings), booleans.
+  const aKeyword = a instanceof BeagleKeyword, bKeyword = b instanceof BeagleKeyword;
+  if (aKeyword || bKeyword) return aKeyword && bKeyword && a.text === b.text;
+  const aSymbol = a instanceof BeagleSymbol, bSymbol = b instanceof BeagleSymbol;
+  if (aSymbol || bSymbol) return aSymbol && bSymbol && a.text === b.text;
+  // Primitive scalars: numbers, strings, booleans, and foreign JS Symbols.
   if (ta !== "object" || tb !== "object") return a === b;
 
   const aArr = Array.isArray(a), bArr = Array.isArray(b);
@@ -385,7 +502,7 @@ export function contains(coll, x) {
     return false;
   }
   if (Array.isArray(coll)) return Number.isInteger(x) && x >= 0 && x < coll.length;
-  if (typeof coll === "object") return Object.prototype.hasOwnProperty.call(coll, x);
+  if (typeof coll === "object") return Object.prototype.hasOwnProperty.call(coll, property_key(x));
   return false;
 }
 
@@ -406,7 +523,7 @@ export function containsV(coll, x) {
     return false;
   }
   if (Array.isArray(coll)) return Number.isInteger(x) && x >= 0 && x < coll.length;
-  if (typeof coll === "object") return Object.prototype.hasOwnProperty.call(coll, x);
+  if (typeof coll === "object") return Object.prototype.hasOwnProperty.call(coll, property_key(x));
   return false;
 }
 
@@ -434,6 +551,7 @@ function distinctImpl(coll, hashFn, equivFn) {
 }
 export function distinct_equiv(coll) { return distinctImpl(coll, hash, equiv); }
 export function distinct_equivV(coll) { return distinctImpl(coll, hashV, equivV); }
+export function distinct_p(...xs) { return distinctImpl(xs, hash, equiv).length === xs.length; }
 
 export function count(x) {
   // Clojure `count` over Beagle EMITTED JS representations, rep-dispatched at
@@ -475,7 +593,8 @@ export function get(coll, k, notFound = null) {
     return notFound;
   }
   if (typeof coll === "object") { // native map / record
-    return Object.prototype.hasOwnProperty.call(coll, k) ? coll[k] : notFound;
+    const p = property_key(k);
+    return Object.prototype.hasOwnProperty.call(coll, p) ? coll[p] : notFound;
   }
   return notFound;
 }
@@ -484,7 +603,9 @@ export function keys(coll) {
   // map keys, rep-polymorphic: HAMT -> traversed keys; native object map -> own keys.
   if (coll == null) return [];
   if (isHamt(coll) && coll._bg === "hamtMap") return hamtWalk(coll.root, []).map(p => p[0]);
-  if (typeof coll === "object" && !Array.isArray(coll) && !(coll instanceof Set)) return Object.keys(coll);
+  if (typeof coll === "object" && !Array.isArray(coll) && !(coll instanceof Set)) {
+    return Object.keys(coll).map(property_value);
+  }
   return [];
 }
 
@@ -506,11 +627,11 @@ function mix(h, c) {
 // share it and differ only in whether the recursion handles nested HAMTs.
 function hashNative(x, rec) {
   const t = typeof x;
+  if (x instanceof BeagleKeyword) return mix(9, hashText(x.text));
+  if (x instanceof BeagleSymbol) return mix(10, hashText(x.text));
   if (t === "number") return mix(1, x | 0) ^ ((x * 2654435761) | 0);
   if (t === "string") {
-    let h = 2;
-    for (let i = 0; i < x.length; i++) h = mix(h, x.charCodeAt(i));
-    return h | 0;
+    return hashText(x);
   }
   if (t === "boolean") return x ? 3 : 4;
   if (Array.isArray(x)) { // order-SENSITIVE combine.
@@ -525,10 +646,16 @@ function hashNative(x, rec) {
   }
   if (t === "object") { // maps AND records: order-INSENSITIVE over (key,value).
     let acc = 0;
-    for (const k of Object.keys(x)) acc = (acc + mix(rec(k), rec(x[k]))) | 0;
+    for (const k of Object.keys(x)) acc = (acc + mix(rec(property_value(k)), rec(x[k]))) | 0;
     return mix(7, acc);
   }
   return mix(8, rec(String(x))); // fallback: stable string coercion.
+}
+
+function hashText(x) {
+  let h = 2;
+  for (let i = 0; i < x.length; i++) h = mix(h, x.charCodeAt(i));
+  return h | 0;
 }
 
 // LITE hash — native, NO HAMT branch (pairs with lite equiv). Returns 32-bit int.
@@ -548,7 +675,7 @@ export function get_in(m, path) {
   let v = m;
   for (const k of path) {
     if (v == null) return null;
-    v = v[k];
+    v = v[property_key(k)];
   }
   return v ?? null;
 }
