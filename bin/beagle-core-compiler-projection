@@ -8,6 +8,7 @@ supervisor="$root/native-core/bin/run-bounded"
 module_helper="$root/bin/_beagle-core-compiler-module-cache.clj"
 kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
 overall_timeout="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-600}"
+module_jobs="${BEAGLE_CORE_MODULE_JOBS:-}"
 # The projection key names emitted bytes, not this script's scheduling and
 # cache machinery. The canonical projection is source-location-free: diagnostic
 # locations remain checker evidence and are not executable artifact identity.
@@ -91,6 +92,10 @@ done
 }
 [[ "$kill_grace" =~ ^[1-9][0-9]*$ ]] || {
     echo "beagle core compiler projection: invalid kill grace" >&2
+    exit 2
+}
+[[ -z "$module_jobs" || "$module_jobs" =~ ^[1-9][0-9]*$ ]] || {
+    echo "beagle core compiler projection: invalid module job count" >&2
     exit 2
 }
 [[ "$cache_root" == /* ]] || {
@@ -247,6 +252,21 @@ module_build_order=(
     core stages obligations simd lower c11 slice unit_reuse unit_compile
     fold_c17 body_c17 qbe body_slice
 )
+declare -A module_dependencies=(
+    [core]=""
+    [stages]="core"
+    [obligations]="core"
+    [simd]="core stages"
+    [lower]="core stages obligations"
+    [c11]="core stages simd"
+    [slice]="core stages obligations simd lower c11"
+    [unit_reuse]="core stages obligations lower"
+    [unit_compile]="core stages obligations lower unit_reuse"
+    [fold_c17]="core"
+    [body_c17]="core stages simd fold_c17"
+    [qbe]="core stages simd"
+    [body_slice]="core stages obligations simd lower c11 slice fold_c17 body_c17 qbe"
+)
 declare -A module_sources=()
 for source in "${sources[@]}"; do
     module_sources["$(basename "$source" .bclj)"]="$source"
@@ -276,8 +296,11 @@ write_module_input_manifest() {
         printf 'module %s\n' "$module"
         printf 'source %s %s\n' "${module_sources[$module]}" \
             "$(sha256sum "$root/${module_sources[$module]}" | awk '{print $1}')"
-        for dependency in "${module_build_order[@]}"; do
-            [[ -n "${module_entries[$dependency]:-}" ]] || continue
+        for dependency in ${module_dependencies[$module]}; do
+            [[ -n "${module_entries[$dependency]:-}" ]] || {
+                echo "beagle core compiler projection: provider is unavailable: $module needs $dependency" >&2
+                return 1
+            }
             entry="${module_entries[$dependency]}"
             printf 'provider-interface %s %s\n' "$dependency" \
                 "$(sha256sum "$entry/interface.json" | awk '{print $1}')"
@@ -305,101 +328,189 @@ module_entry_valid() {
     (cd "$entry" && sha256sum --check --strict artifacts.sha256 >/dev/null 2>&1)
 }
 
-build_projection() {
-    local compiled="$1" build_log="$2" object_root="$3"
-    local module source dependency entry key stage fresh corrupt core_records
-    local recipe_digest manifest_digest started ended elapsed recipe_manifest
-    local recipe_recheck projection_manifest projection_recheck
+module_ready() {
+    local module="$1" dependency
+    for dependency in ${module_dependencies[$module]}; do
+        [[ "${module_status[$dependency]:-}" == done ]] || return 1
+    done
+}
+
+build_module() {
+    local module="$1" recipe_digest="$2" object_root="$3" fresh="$4"
+    local entry="$5" key="$6" module_log="$7"
+    local source dependency stage corrupt manifest_digest started ended elapsed
     local module_lock_fd
     local -a source_args surface_args
+    source="${module_sources[$module]}"
+    exec {module_lock_fd}>"$object_root/.locks/$key.lock"
+    flock -x "$module_lock_fd"
+    stage="$(mktemp "$object_root/.staging/locked.$module.XXXXXX")"
+    write_module_input_manifest "$stage" "$module" "$recipe_digest"
+    cmp -s "$fresh" "$stage" || {
+        echo "beagle core compiler projection: module input changed before cache admission: $module" >&2
+        return 1
+    }
+    rm -f "$stage"
+    stage=""
+    if module_entry_valid "$entry" "$key"; then
+        rm -f "$fresh"
+        printf 'HIT 0\n'
+        return 0
+    fi
+    if [[ -e "$entry" ]]; then
+        corrupt="$object_root/.staging/corrupt.$key.$$"
+        mv "$entry" "$corrupt"
+        rm -rf "${corrupt:?}"
+    fi
+    stage="$(mktemp -d "$object_root/.staging/module.$module.XXXXXX")"
+    mv "$fresh" "$stage/input.manifest"
+    source_args=()
+    for dependency in "${sources[@]}"; do
+        [[ "$dependency" == "$source" ]] ||
+            source_args+=(--source "$root/$dependency")
+    done
+    surface_args=()
+    for dependency in ${module_dependencies[$module]}; do
+        surface_args+=(--surface \
+            "$root/${module_sources[$dependency]}=${module_entries[$dependency]}/surface.json")
+    done
+    started="$(date +%s%N)"
+    if ! bb -cp "$root/self-host/seed" "$module_helper" compile \
+            "${source_args[@]}" "${surface_args[@]}" \
+            --artifact "$stage/artifact.clj" \
+            --surface-out "$stage/surface.json" \
+            --interface-out "$stage/interface.json" \
+            "$root/$source" >"$module_log" 2>&1; then
+        echo "beagle core compiler projection: module compile failed: $module" >&2
+        return 1
+    fi
+    ended="$(date +%s%N)"
+    elapsed=$(( (ended - started + 999999999) / 1000000000 ))
+    fresh="$(mktemp "$object_root/.staging/recheck.$module.XXXXXX")"
+    write_module_input_manifest "$fresh" "$module" "$recipe_digest"
+    cmp -s "$fresh" "$stage/input.manifest" || {
+        echo "beagle core compiler projection: source closure changed while compiling $module" >&2
+        return 1
+    }
+    rm -f "$fresh"
+    (cd "$stage" && sha256sum artifact.clj interface.json surface.json \
+        >artifacts.sha256)
+    manifest_digest="$(sha256sum "$stage/artifacts.sha256" | awk '{print $1}')"
+    printf 'beagle-core-compiler-module/v1 %s %s\n' \
+        "$key" "$manifest_digest" >"$stage/READY"
+    module_entry_valid "$stage" "$key" || {
+        echo "beagle core compiler projection: staged module proof is invalid: $module" >&2
+        return 1
+    }
+    mv "$stage" "$entry"
+    printf 'MISS %s\n' "$elapsed"
+}
+
+build_projection() {
+    local compiled="$1" build_log="$2" object_root="$3"
+    local module dependency entry key fresh core_records generated
+    local recipe_digest recipe_manifest
+    local recipe_recheck projection_manifest projection_recheck
+    local running_count done_count finished_pid finished_module job_rc
+    local max_jobs module_log module_error module_report report_kind report_elapsed
+    local -a running_pids failed_modules
     declare -gA module_entries=()
+    declare -gA module_status=()
+    declare -A pid_modules=() module_pids=() module_keys=()
+    declare -A module_logs=() module_errors=() module_reports=()
     mkdir -p "$compiled/native" "$object_root/.locks" "$object_root/.staging"
     projection_manifest="$(mktemp "$object_root/.staging/projection.XXXXXX")"
     write_input_manifest "$projection_manifest"
     recipe_manifest="$(mktemp "$object_root/.staging/recipe.XXXXXX")"
     write_module_recipe_manifest "$recipe_manifest"
     recipe_digest="$(sha256sum "$recipe_manifest" | awk '{print $1}')"
-    echo "beagle core compiler projection: construction START (per-module, overall build deadline=${overall_timeout}s)" >&2
+    max_jobs="${module_jobs:-$(nproc)}"
+    ((max_jobs <= ${#module_build_order[@]})) || max_jobs="${#module_build_order[@]}"
+    echo "beagle core compiler projection: construction START (per-module, jobs=$max_jobs, overall build deadline=${overall_timeout}s)" >&2
     : >"$build_log"
     for module in "${module_build_order[@]}"; do
-        source="${module_sources[$module]}"
-        fresh="$(mktemp "$object_root/.staging/input.$module.XXXXXX")"
-        write_module_input_manifest "$fresh" "$module" "$recipe_digest"
-        key="$(sha256sum "$fresh" | awk '{print $1}')"
-        entry="$object_root/$key"
-        exec {module_lock_fd}>"$object_root/.locks/$key.lock"
-        flock -x "$module_lock_fd"
-        stage="$(mktemp "$object_root/.staging/locked.$module.XXXXXX")"
-        write_module_input_manifest "$stage" "$module" "$recipe_digest"
-        cmp -s "$fresh" "$stage" || {
-            echo "beagle core compiler projection: module input changed before cache admission: $module" >&2
-            return 1
-        }
-        rm -f "$stage"
-        stage=""
-        if ! module_entry_valid "$entry" "$key"; then
-            if [[ -e "$entry" ]]; then
-                corrupt="$object_root/.staging/corrupt.$key.$$"
-                mv "$entry" "$corrupt"
-                rm -rf "${corrupt:?}"
-            fi
-            stage="$(mktemp -d "$object_root/.staging/module.$module.XXXXXX")"
-            mv "$fresh" "$stage/input.manifest"
-            fresh=""
-            source_args=()
-            for dependency in "${sources[@]}"; do
-                [[ "$dependency" == "$source" ]] ||
-                    source_args+=(--source "$root/$dependency")
+        module_status[$module]=pending
+    done
+    running_count=0
+    done_count=0
+    failed_modules=()
+    while ((done_count < ${#module_build_order[@]})); do
+        if ((${#failed_modules[@]} == 0)); then
+            for module in "${module_build_order[@]}"; do
+                ((running_count < max_jobs)) || break
+                [[ "${module_status[$module]}" == pending ]] || continue
+                module_ready "$module" || continue
+                fresh="$(mktemp "$object_root/.staging/input.$module.XXXXXX")"
+                write_module_input_manifest "$fresh" "$module" "$recipe_digest"
+                key="$(sha256sum "$fresh" | awk '{print $1}')"
+                entry="$object_root/$key"
+                module_entries[$module]="$entry"
+                module_keys[$module]="$key"
+                module_log="$(mktemp "$object_root/.staging/log.$module.XXXXXX")"
+                module_error="$(mktemp "$object_root/.staging/error.$module.XXXXXX")"
+                module_report="$(mktemp "$object_root/.staging/report.$module.XXXXXX")"
+                module_logs[$module]="$module_log"
+                module_errors[$module]="$module_error"
+                module_reports[$module]="$module_report"
+                build_module "$module" "$recipe_digest" "$object_root" \
+                    "$fresh" "$entry" "$key" "$module_log" \
+                    >"$module_report" 2>"$module_error" &
+                module_pids[$module]=$!
+                pid_modules[$!]="$module"
+                module_status[$module]=running
+                running_count=$((running_count + 1))
+                echo "beagle core compiler projection: module START $module" >&2
             done
-            surface_args=()
-            for dependency in "${module_build_order[@]}"; do
-                [[ -n "${module_entries[$dependency]:-}" ]] || continue
-                surface_args+=(--surface \
-                    "$root/${module_sources[$dependency]}=${module_entries[$dependency]}/surface.json")
-            done
-            started="$(date +%s%N)"
-            if ! bb -cp "$root/self-host/seed" "$module_helper" compile \
-                    "${source_args[@]}" "${surface_args[@]}" \
-                    --artifact "$stage/artifact.clj" \
-                    --surface-out "$stage/surface.json" \
-                    --interface-out "$stage/interface.json" \
-                    "$root/$source" >>"$build_log" 2>&1; then
-                sed -n '1,200p' "$build_log" >&2
-                return 1
-            fi
-            ended="$(date +%s%N)"
-            elapsed=$(( (ended - started + 999999999) / 1000000000 ))
-            fresh="$(mktemp "$object_root/.staging/recheck.$module.XXXXXX")"
-            write_module_input_manifest "$fresh" "$module" "$recipe_digest"
-            cmp -s "$fresh" "$stage/input.manifest" || {
-                echo "beagle core compiler projection: source closure changed while compiling $module" >&2
-                return 1
-            }
-            rm -f "$fresh"
-            fresh=""
-            (cd "$stage" && sha256sum artifact.clj interface.json surface.json \
-                >artifacts.sha256)
-            manifest_digest="$(sha256sum "$stage/artifacts.sha256" | awk '{print $1}')"
-            printf 'beagle-core-compiler-module/v1 %s %s\n' \
-                "$key" "$manifest_digest" >"$stage/READY"
-            module_entry_valid "$stage" "$key" || {
-                echo "beagle core compiler projection: staged module proof is invalid: $module" >&2
-                return 1
-            }
-            mv "$stage" "$entry"
-            echo "beagle core compiler projection: module MISS $module $key seconds=$elapsed" >&2
-        else
-            rm -f "$fresh"
-            fresh=""
-            echo "beagle core compiler projection: module HIT $module $key" >&2
         fi
-        module_entries[$module]="$entry"
+        if ((running_count == 0)); then
+            if ((${#failed_modules[@]} > 0)); then
+                break
+            fi
+            echo "beagle core compiler projection: module dependency graph made no progress" >&2
+            return 1
+        fi
+        running_pids=("${!pid_modules[@]}")
+        finished_pid=""
+        if wait -n -p finished_pid "${running_pids[@]}"; then
+            job_rc=0
+        else
+            job_rc=$?
+        fi
+        finished_module="${pid_modules[$finished_pid]}"
+        unset 'pid_modules[$finished_pid]'
+        unset 'module_pids[$finished_module]'
+        running_count=$((running_count - 1))
+        if ((job_rc == 0)); then
+            read -r report_kind report_elapsed <"${module_reports[$finished_module]}"
+            module_status[$finished_module]=done
+            done_count=$((done_count + 1))
+            if [[ "$report_kind" == HIT ]]; then
+                echo "beagle core compiler projection: module HIT $finished_module ${module_keys[$finished_module]}" >&2
+            else
+                echo "beagle core compiler projection: module MISS $finished_module ${module_keys[$finished_module]} seconds=$report_elapsed" >&2
+            fi
+        else
+            module_status[$finished_module]=failed
+            failed_modules+=("$finished_module")
+            echo "beagle core compiler projection: module FAIL $finished_module exit=$job_rc" >&2
+            sed -n '1,200p' "${module_errors[$finished_module]}" >&2
+            sed -n '1,200p' "${module_logs[$finished_module]}" >&2
+        fi
+    done
+    if ((${#failed_modules[@]} > 0)); then
+        echo "beagle core compiler projection: failed modules: ${failed_modules[*]}" >&2
+        return 1
+    fi
+    for module in "${module_build_order[@]}"; do
+        cat "${module_logs[$module]}" >>"$build_log"
+        rm -f "${module_logs[$module]}" "${module_errors[$module]}" \
+            "${module_reports[$module]}"
+        entry="${module_entries[$module]}"
         cp -- "$entry/artifact.clj" "$compiled/native/$module.clj"
         cmp -s "$entry/artifact.clj" "$compiled/native/$module.clj" || {
             echo "beagle core compiler projection: assembled module differs from authenticated object: $module" >&2
             return 1
         }
-        exec {module_lock_fd}>&-
     done
     recipe_recheck="$(mktemp "$object_root/.staging/recipe-recheck.XXXXXX")"
     write_module_recipe_manifest "$recipe_recheck"
