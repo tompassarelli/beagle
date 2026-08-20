@@ -953,10 +953,11 @@ write_server_symbols() {
     COMPILE_QUERY
     COMPILE_APPEND
   )
-  # The direct compiler seam accepts raw fact-profile dimensions rather than
-  # an RPC packet or packed closure. Query receives seven dimensions; append
-  # receives those plus five result dimensions.
-  local -a source_arities=(0 4 3 1 1 1 1 1 7 12)
+  # The direct compiler seam receives the live StoreResult first, then raw
+  # fact-profile dimensions rather than an RPC packet or packed closure.
+  # Query receives StoreResult plus seven dimensions; append adds five result
+  # dimensions. Its returned next StoreResult drives the normal durable swap.
+  local -a source_arities=(0 4 3 1 1 1 1 1 8 13)
 
   [[ -f "$module_header" ]] || die "C17 materializer omitted module_0.h"
   for index in "${!logical_names[@]}"; do
