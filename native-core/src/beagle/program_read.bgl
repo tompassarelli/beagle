@@ -1,0 +1,250 @@
+#lang beagle
+;; Program reads are typed views over Store's canonical relations. Query-local
+;; rule names organize a plan; they are never persisted vocabulary.
+(ns beagle.program-read
+  (:require [store.datalog :as d]
+            [store.query :as query]
+            [store.types :as t]))
+
+(def member-of Keyword :member_of)
+(def contains Keyword :contains)
+(def refers-to Keyword :refers_to)
+(def depends-on Keyword :depends_on)
+(def admitted-by Keyword :admitted_by)
+(def named Keyword :named)
+
+(def relationships Keyword :relationships)
+(def profiles Keyword :profiles)
+(def program-roots Keyword :program_roots)
+(def bindings Keyword :bindings)
+(def references Keyword :references)
+
+(def rooted-relation String "rooted")
+(def inspect-relation String "inspect")
+(def definition-relation String "definition")
+(def references-relation String "references")
+(def dependency-relation String "dependency")
+(def impact-relation String "impact")
+(def occurrences-relation String "occurrences")
+(def withdrawals-relation String "withdrawals")
+
+(defrecord ProgramHistoryQueryPlans
+  [occurrences query/QueryPlan
+   withdrawals query/QueryPlan])
+
+(defn- variable [name String] d/QueryTerm
+  (d/variable name))
+
+;; QueryTerm.value is the Store query boundary's deliberate Any bridge for the
+;; recursive Term union; d/constant performs the canonical runtime check.
+(defn- constant [value Any] d/QueryTerm
+  (d/constant value))
+
+(defn- triple-literal
+  [t1 d/QueryTerm
+   t2 d/QueryTerm
+   t3 d/QueryTerm] d/Literal
+  (d/relation-literal d/triple-relation [t1 t2 t3]))
+
+(defn- declared-relationship [relationship Keyword] d/Literal
+  (triple-literal
+   (constant relationship)
+   (constant member-of)
+   (constant relationships)))
+
+(defn- rooted-rules [root-resource Any] (Vec d/Rule)
+  [(d/rule
+    rooted-relation
+    [(constant root-resource)]
+    [(triple-literal
+      (constant root-resource)
+      (constant member-of)
+      (constant program-roots))
+     (declared-relationship member-of)
+     (triple-literal
+      (constant root-resource)
+      (constant admitted-by)
+      (variable "profile"))
+     (declared-relationship admitted-by)
+     (triple-literal
+      (variable "profile")
+      (constant member-of)
+      (constant profiles))])
+   (d/rule
+    rooted-relation
+    [(variable "child")]
+    [(d/relation-literal
+      rooted-relation
+      [(variable "parent")])
+     (triple-literal
+      (variable "parent")
+      (constant contains)
+      (variable "child"))
+     (declared-relationship contains)])])
+
+(defn- with-rooted-rules
+  [root-resource Any
+   final-rule d/Rule] (Vec d/Rule)
+  (conj (rooted-rules root-resource) final-rule))
+
+(defn- ordered-plan
+  [relation String
+   rules (Vec d/Rule)
+   columns Int] query/QueryPlan
+  (let [order (Vec query/OrderClause)
+        (loop [column Int 0
+               clauses (Vec query/OrderClause) []]
+          (if (>= column columns)
+            clauses
+            (recur (+ column 1) (conj clauses (query/order-clause column :asc)))))]
+    (query/ordered-query-plan
+     (query/relation-find relation)
+     [rules]
+     order
+     nil)))
+
+(defn inspect-query
+  [root-resource Any] query/QueryPlan
+  (ordered-plan
+   inspect-relation
+   (with-rooted-rules
+    root-resource
+    (d/rule
+     inspect-relation
+     [(variable "t1") (variable "t2") (variable "t3")]
+     [(d/relation-literal rooted-relation [(variable "t1")])
+      (triple-literal
+       (variable "t1")
+       (variable "t2")
+       (variable "t3"))
+      (triple-literal
+       (variable "t2")
+       (constant member-of)
+       (constant relationships))]))
+   3))
+
+(defn definition-query
+  [root-resource Any
+   exact-name String] query/QueryPlan
+  (ordered-plan
+   definition-relation
+   (with-rooted-rules
+    root-resource
+    (d/rule
+     definition-relation
+     [(variable "binding")]
+     [(d/relation-literal rooted-relation [(variable "binding")])
+      (triple-literal
+       (variable "binding")
+       (constant member-of)
+       (constant bindings))
+      (triple-literal
+       (variable "binding")
+       (constant named)
+       (constant exact-name))
+      (declared-relationship named)]))
+   1))
+
+(defn references-query
+  [root-resource Any
+   target Any] query/QueryPlan
+  (ordered-plan
+   references-relation
+   (with-rooted-rules
+    root-resource
+    (d/rule
+     references-relation
+     [(variable "reference")]
+     [(d/relation-literal rooted-relation [(variable "reference")])
+      (triple-literal
+       (variable "reference")
+       (constant member-of)
+       (constant references))
+      (triple-literal
+       (variable "reference")
+       (constant refers-to)
+       (constant target))
+      (declared-relationship refers-to)]))
+   1))
+
+(defn impact-query
+  [root-resource Any
+   changed Any] query/QueryPlan
+  (let [rules (Vec d/Rule)
+        (rooted-rules root-resource)
+        direct d/Rule
+        (d/rule
+         dependency-relation
+         [(variable "dependent") (variable "prerequisite")]
+         [(d/relation-literal rooted-relation [(variable "dependent")])
+          (d/relation-literal rooted-relation [(variable "prerequisite")])
+          (triple-literal
+           (variable "dependent")
+           (constant depends-on)
+           (variable "prerequisite"))
+          (declared-relationship depends-on)])
+        transitive d/Rule
+        (d/rule
+         dependency-relation
+         [(variable "dependent") (variable "prerequisite")]
+         [(d/relation-literal
+           dependency-relation
+           [(variable "dependent") (variable "middle")])
+          (d/relation-literal
+           dependency-relation
+           [(variable "middle") (variable "prerequisite")])])
+        result d/Rule
+        (d/rule
+         impact-relation
+         [(variable "dependent")]
+         [(d/relation-literal
+           dependency-relation
+           [(variable "dependent") (constant changed)])])]
+    (ordered-plan
+     impact-relation
+     (conj (conj (conj rules direct) transitive) result)
+     1)))
+
+(defn history-queries
+  [root-resource Any
+   proposition t/Triple] ProgramHistoryQueryPlans
+  (let [subject Any (t/triple-t1 proposition)
+        occurrence-rule d/Rule
+        (d/rule
+         occurrences-relation
+         [(variable "coordinate")
+          (variable "action")
+          (constant proposition)]
+         [(d/relation-literal rooted-relation [(constant subject)])
+          (d/relation-literal
+           d/occurrence-relation
+           [(variable "coordinate")
+            (variable "action")
+            (constant proposition)])])
+        withdrawal-rule d/Rule
+        (d/rule
+         withdrawals-relation
+         [(variable "retraction") (variable "assertion")]
+         [(d/relation-literal rooted-relation [(constant subject)])
+          (d/relation-literal
+           d/occurrence-relation
+           [(variable "assertion")
+            (constant t/assert-action)
+            (constant proposition)])
+          (d/relation-literal
+           d/occurrence-relation
+           [(variable "retraction")
+            (constant t/retract-action)
+            (constant proposition)])
+          (d/relation-literal
+           d/withdrawal-relation
+           [(variable "retraction") (variable "assertion")])])]
+    (->ProgramHistoryQueryPlans
+     (ordered-plan
+      occurrences-relation
+      (with-rooted-rules root-resource occurrence-rule)
+      3)
+     (ordered-plan
+      withdrawals-relation
+      (with-rooted-rules root-resource withdrawal-rule)
+      2))))

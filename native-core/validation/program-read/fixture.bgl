@@ -1,0 +1,157 @@
+#lang beagle
+(ns program-read.fixture
+  (:require [beagle.program-read :as read]
+            [store.datalog :as d]
+            [store.query :as query]
+            [store.types :as t]))
+
+(def root-a Keyword :root-a)
+(def root-b Keyword :root-b)
+(def profile Keyword :profile-v1)
+(def module-a Keyword :module-a)
+(def module-b Keyword :module-b)
+(def module-dependent Keyword :module-dependent)
+(def module-outsider Keyword :module-outsider)
+(def binding-a Keyword :binding-a)
+(def binding-b Keyword :binding-b)
+
+(def span-a t/Triple (t/triple 10 :through_byte 20))
+(def span-b t/Triple (t/triple 30 :through_byte 40))
+(def reference-a t/Triple (t/triple module-a :has_span span-a))
+(def reference-b t/Triple (t/triple module-b :has_span span-b))
+
+(defn relationship [term Keyword] t/Triple
+  (t/triple term :member_of :relationships))
+
+(def propositions (Vec t/Triple)
+  [(relationship :member_of)
+   (relationship :contains)
+   (relationship :represented_by)
+   (relationship :refers_to)
+   (relationship :depends_on)
+   (relationship :derived_from)
+   (relationship :admitted_by)
+   (relationship :includes)
+   (relationship :has_span)
+   (relationship :through_byte)
+   (relationship :named)
+
+   (t/triple profile :member_of :profiles)
+   (t/triple root-a :member_of :program_roots)
+   (t/triple root-a :admitted_by profile)
+   (t/triple root-b :member_of :program_roots)
+   (t/triple root-b :admitted_by profile)
+
+   (t/triple root-a :contains module-a)
+   (t/triple root-a :contains module-dependent)
+   (t/triple module-a :member_of :modules)
+   (t/triple module-a :contains binding-a)
+   (t/triple module-a :contains reference-a)
+   (t/triple binding-a :member_of :bindings)
+   (t/triple binding-a :named "helper")
+   (t/triple reference-a :member_of :references)
+   (t/triple reference-a :refers_to binding-a)
+   (t/triple module-dependent :member_of :modules)
+   (t/triple module-dependent :depends_on module-a)
+
+   (t/triple root-b :contains module-b)
+   (t/triple root-b :contains module-outsider)
+   (t/triple module-b :member_of :modules)
+   (t/triple module-b :contains binding-b)
+   (t/triple module-b :contains reference-b)
+   (t/triple binding-b :member_of :bindings)
+   (t/triple binding-b :named "helper")
+   (t/triple reference-b :member_of :references)
+   (t/triple reference-b :refers_to binding-b)
+   (t/triple module-outsider :member_of :modules)
+   (t/triple module-outsider :depends_on module-a)])
+
+(def named-proposition t/Triple (t/triple binding-a :named "helper"))
+(def assertion-coordinate t/Triple
+  (t/occurrence-coordinate
+   (t/transaction-coordinate "program-read-fixture" 1)
+   0))
+(def retraction-coordinate t/Triple
+  (t/occurrence-coordinate
+   (t/transaction-coordinate "program-read-fixture" 2)
+   0))
+(def assertion t/OperationOccurrence
+  (t/->OperationOccurrence
+   assertion-coordinate t/assert-action named-proposition))
+(def retraction t/OperationOccurrence
+  (t/->OperationOccurrence
+   retraction-coordinate t/retract-action named-proposition))
+(def occurrences (Vec t/OperationOccurrence) [assertion retraction])
+(def withdrawals (Vec t/Withdrawal) [(t/->Withdrawal retraction assertion)])
+
+(defn rows [plan query/QueryPlan] (Vec d/Tuple)
+  (query/result-rows (query/run! propositions plan)))
+
+(defn history-rows [plan query/QueryPlan] (Vec d/Tuple)
+  (let [execution query/QueryExecutionResult
+        (query/run-plan-with-history-result!
+         propositions occurrences withdrawals plan nil)
+        result query/QueryResult?
+        (query/execution-query-result execution)]
+    (if (some? result)
+      (let [present query/QueryResult result]
+        (query/result-rows present))
+      [])))
+
+(defn contains-row?
+  [rows-value (Vec d/Tuple)
+   expected d/Tuple] Bool
+  (contains? (set rows-value) expected))
+
+(defn plans-valid? [] Bool
+  (let [history read/ProgramHistoryQueryPlans
+        (read/history-queries root-a named-proposition)]
+    (every?
+     (fn [plan query/QueryPlan] Bool
+       (query/compile-ok? (query/compile-query! plan)))
+     [(read/inspect-query root-a)
+      (read/definition-query root-a "helper")
+      (read/references-query root-a binding-a)
+      (read/impact-query root-a module-a)
+      (read/programhistoryqueryplans-occurrences history)
+      (read/programhistoryqueryplans-withdrawals history)])))
+
+(defn root-scoped-live-reads? [] Bool
+  (let [inspect-rows (Vec d/Tuple) (rows (read/inspect-query root-a))]
+    (and
+     (= [[binding-a]] (rows (read/definition-query root-a "helper")))
+     (= [[reference-a]] (rows (read/references-query root-a binding-a)))
+     (= [[module-dependent]] (rows (read/impact-query root-a module-a)))
+     (contains-row? inspect-rows [binding-a :named "helper"])
+     (contains-row? inspect-rows [reference-a :refers_to binding-a])
+     (not (contains-row? inspect-rows [binding-b :named "helper"]))
+     (not (contains-row?
+           inspect-rows
+           [module-outsider :depends_on module-a])))))
+
+(defn occurrence-native-history? [] Bool
+  (let [history read/ProgramHistoryQueryPlans
+        (read/history-queries root-a named-proposition)
+        outsider read/ProgramHistoryQueryPlans
+        (read/history-queries root-b named-proposition)]
+    (and
+     (= [[assertion-coordinate :assert named-proposition]
+         [retraction-coordinate :retract named-proposition]]
+        (history-rows
+         (read/programhistoryqueryplans-occurrences history)))
+     (= [[retraction-coordinate assertion-coordinate]]
+        (history-rows
+         (read/programhistoryqueryplans-withdrawals history)))
+     (empty?
+      (history-rows
+       (read/programhistoryqueryplans-occurrences outsider)))
+     (empty?
+      (history-rows
+       (read/programhistoryqueryplans-withdrawals outsider))))))
+
+(defn main [args (Vec String)] Int
+  (if (and (plans-valid?)
+           (root-scoped-live-reads?)
+           (occurrence-native-history?))
+    0
+    1))
