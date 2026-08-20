@@ -1036,14 +1036,17 @@
 (defn plan-rename
   [base-root program/ProgramRoot
    next-root-resource t/Term
-   selected-binding t/Term
+   selected-binding Any
    new-name String] RenamePlan
-  (match (read/rename-selection base-root selected-binding)
-    [(read/ProgramRenameSelectionRejected code detail)
-     (reject :rename/selection-rejected detail)]
-    [(read/ProgramRenameSelected selection)
-     (plan-canonical-rename
-       base-root next-root-resource selection new-name)]))
+  (if (not (t/term? selected-binding))
+    (reject :rename/invalid-term
+      "selected binding identity must be a Store Term")
+    (match (read/rename-selection base-root selected-binding)
+      [(read/ProgramRenameSelectionRejected code detail)
+       (reject :rename/selection-rejected detail)]
+      [(read/ProgramRenameSelected selection)
+       (plan-canonical-rename
+         base-root next-root-resource selection new-name)])))
 
 (defn preview [transaction ProgramTransaction] RenamePreview
   (->RenamePreview
