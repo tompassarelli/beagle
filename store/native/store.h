@@ -50,6 +50,21 @@ typedef struct store_buffer {
   store_deallocate_fn release;
 } store_buffer;
 
+/* A direct compile request is the immutable compiler query identity and its
+ * canonical ordered query-fact closure. The digest is the raw SHA-256 bytes;
+ * Store revalidates the closure before it is read or persisted. */
+typedef struct store_compile_request {
+  uint8_t query_digest[32];
+  store_slice query_facts;
+} store_compile_request;
+
+typedef enum store_compile_outcome {
+  BEAGLE_STORE_COMPILE_COLD = 0,
+  BEAGLE_STORE_COMPILE_FOUND = 1,
+  BEAGLE_STORE_COMPILE_APPENDED = 2,
+  BEAGLE_STORE_COMPILE_RETAINED = 3
+} store_compile_outcome;
+
 typedef struct store_error {
   int32_t code;
   char message[BEAGLE_STORE_ERROR_MESSAGE_CAPACITY];
@@ -135,6 +150,18 @@ BEAGLE_STORE_API store_status store_snapshot(store_database *database,
                                    store_error *error);
 /* rpc/checkpoint writes the image to the snapshot storage object and answers
    with its sequence, watermark, stamp, fingerprint, and byte count. */
+
+/* Direct compile operations do not construct Store RPC packets. Query writes
+ * an owned canonical result-fact closure to RESULT_FACTS; append accepts one.
+ * Both revalidate REQUEST's digest and query-fact closure. */
+BEAGLE_STORE_API store_status store_compile_query(
+    store_database *database, const store_compile_request *request,
+    store_buffer *result_facts, store_compile_outcome *outcome,
+    store_error *error);
+BEAGLE_STORE_API store_status store_compile_append(
+    store_database *database, const store_compile_request *request,
+    store_slice result_facts, store_compile_outcome *outcome,
+    store_error *error);
 
 /* BUFFER remains owned until this function; it may outlive DATABASE. */
 BEAGLE_STORE_API void store_buffer_release(store_buffer *buffer);
