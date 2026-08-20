@@ -1142,7 +1142,8 @@ for source in "${normalized_sources[@]}"; do
     source_index=$((source_index + 1))
 done
 run_phase_leaf source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
-    bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs
+    bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs \
+    --store "$cache_root/source-facts.storelog"
 fi
 else
     facts="$work/artifacts/source.facts"

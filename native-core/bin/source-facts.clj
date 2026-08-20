@@ -4,7 +4,12 @@
 ;; root. Nested syntax uses pre-order ordinals, while top-level semantic units
 ;; use stable names derived from their checked module/kind/name selector.
 (require '[cheshire.core :as json]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
+         '[clojure.java.shell :as shell]
          '[clojure.string])
+(import '[java.nio.charset StandardCharsets]
+        '[java.security MessageDigest])
 
 (load-file
   (.getCanonicalPath
@@ -12,11 +17,68 @@
       "checked-program.clj")))
 (require '[native.checked-program :as checked-program])
 
-(def counter (atom 0))
+(def ^:dynamic counter (atom 0))
 (defn nid [] (str (swap! counter inc)))
-(def rows (atom (transient [])))
-(def constraint-emissions (atom 0))
+(def ^:dynamic rows (atom (transient [])))
+(def ^:dynamic constraint-emissions (atom 0))
 (def native-ops (atom {}))
+
+(def source-fact-shard-kind "DevCompileUnitResultV1")
+(def source-fact-shard-stage "typed")
+(def source-fact-shard-profile "source-facts-shard-v1")
+
+(defn sha256-text [text]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (.update digest (.getBytes ^String text StandardCharsets/UTF_8))
+    (str "sha256:"
+      (apply str
+        (map #(format "%02x" (bit-and (int %) 255))
+          (.digest digest))))))
+
+(defn utf8-byte-count [text]
+  (alength (.getBytes ^String text StandardCharsets/UTF_8)))
+
+(defn projector-context []
+  (let [projector-file (.getCanonicalFile (io/file *file*))
+        checked-file (io/file (.getParentFile projector-file)
+                       "checked-program.clj")]
+    (checked-program/projection-digest
+      {"kind" "beagle.source-facts-projector-context"
+       "schemaVersion" 0
+       "projectorSha256" (sha256-text (slurp projector-file))
+       "checkedProgramSha256" (sha256-text (slurp checked-file))})))
+
+(defn invoke-source-fact-store [command store request]
+  (let [projector-file (.getCanonicalFile (io/file *file*))
+        repository (.getParentFile
+                     (.getParentFile (.getParentFile projector-file)))
+        classpath (.getPath (io/file repository "store" "out"))
+        result
+        (shell/sh "timeout" "--foreground" "-k" "1s" "10s"
+          "env" "-u" "BEAGLE_STORE_TELEMETRY_LOG"
+          "bb" "-cp" classpath "-m" "store.dev-compile-facts" command
+          :in (str (pr-str request) "\n"))]
+    (when (zero? (:exit result))
+      (try
+        (edn/read-string (:out result))
+        (catch Exception _ nil)))))
+
+(defn query-source-fact-store [store requests]
+  (let [response
+        (invoke-source-fact-store "query" store
+          ["store.dev-compile-facts/query-v1" store requests])]
+    (if (and (vector? response)
+             (= 5 (count response))
+             (= "store.dev-compile-facts/query-response-v1" (nth response 0))
+             (contains? #{"ONLINE" "COLD"} (nth response 1))
+             (vector? (nth response 4)))
+      (nth response 4)
+      [])))
+
+(defn append-source-fact-store! [store entries]
+  (when (seq entries)
+    (invoke-source-fact-store "append" store
+      ["store.dev-compile-facts/append-v1" store entries])))
 (defn escape-text [value]
   (let [last-position (dec (count value))
         unsafe? (or (empty? value)
@@ -831,11 +893,114 @@
       (throw (ex-info (str option " contains duplicate keys") {:keys keys})))
     (into {} parsed)))
 
+(defn source-fact-shard-key
+  [raw-ast relative-path interface-sha256 include-defs? selected-names context]
+  (checked-program/projection-digest
+    {"kind" "beagle.source-fact-shard-key"
+     "schemaVersion" 0
+     "rawAstSha256" (sha256-text raw-ast)
+     "relativePath" relative-path
+     "interfaceSha256" interface-sha256
+     "includeDefs" (boolean include-defs?)
+     "selectedNames" (sort selected-names)
+     "nativeOps" (into (sorted-map) @native-ops)
+     "projectorContext" context}))
+
+(defn source-fact-shard-entry [key context source-id payload]
+  (let [encoding
+        (pr-str [source-fact-shard-kind source-fact-shard-stage key context
+                 source-fact-shard-profile source-id
+                 (utf8-byte-count payload) (sha256-text payload) payload])]
+    [(sha256-text encoding) encoding]))
+
+(defn parse-source-fact-shard
+  [row key context source-id]
+  (try
+    (when (and (vector? row) (= 4 (count row))
+               (= source-fact-shard-stage (nth row 0))
+               (= key (nth row 1)))
+      (let [id (nth row 2)
+            encoding (nth row 3)
+            envelope (edn/read-string encoding)]
+        (when (and (vector? envelope) (= 9 (count envelope))
+                   (= source-fact-shard-kind (nth envelope 0))
+                   (= source-fact-shard-stage (nth envelope 1))
+                   (= key (nth envelope 2))
+                   (= context (nth envelope 3))
+                   (= source-fact-shard-profile (nth envelope 4))
+                   (= source-id (nth envelope 5))
+                   (= id (sha256-text encoding))
+                   (= encoding (pr-str envelope)))
+          (let [byte-count (nth envelope 6)
+                digest (nth envelope 7)
+                payload (nth envelope 8)]
+            (when (and (string? payload)
+                       (= byte-count (utf8-byte-count payload))
+                       (= digest (sha256-text payload)))
+              (let [shard (edn/read-string payload)]
+                (when (and (map? shard)
+                           (= payload (pr-str shard))
+                           (integer? (get shard "nodeCount"))
+                           (<= 0 (get shard "nodeCount"))
+                           (string? (get shard "moduleRoot"))
+                           (vector? (get shard "rows")))
+                  shard)))))))
+    (catch Exception _ nil)))
+
+(defn select-source-fact-shard [store-rows key context source-id]
+  (let [candidates
+        (filterv #(and (= source-fact-shard-stage (nth % 0 nil))
+                       (= key (nth % 1 nil)))
+          store-rows)]
+    (when (= 1 (count candidates))
+      (parse-source-fact-shard (first candidates) key context source-id))))
+
+(defn emit-source-fact-shard
+  [raw-ast relative-path interface-sha256 include-defs? selected-names]
+  (binding [counter (atom 0)
+            rows (atom (transient []))
+            constraint-emissions (atom 0)]
+    (let [ast (json/parse-string raw-ast)]
+      (require-native-compatible-ast! ast relative-path)
+      (let [root (emit-module ast relative-path interface-sha256
+                   include-defs? selected-names)
+            emitted-rows (persistent! @rows)
+            selected-counts
+            (into (sorted-map)
+              (frequencies
+                (for [form (get ast "forms")
+                      :let [name (get form "name")]
+                      :when (and (contains? selected-names name)
+                                 (selected-form? include-defs? #{} form))]
+                  name)))]
+        (sorted-map
+          "moduleRoot" root
+          "namespace" (get ast "namespace")
+          "nodeCount" @counter
+          "rows" emitted-rows
+          "selectedCounts" selected-counts
+          "sourceId" (get ast "sourceId"))))))
+
+(def numeric-node-pattern #"[0-9]+")
+
+(defn offset-node [value offset]
+  (if (and (string? value) (re-matches numeric-node-pattern value))
+    (str (+ offset (Long/parseLong value)))
+    value))
+
+(defn offset-shard-rows [shard offset]
+  (mapv
+    (fn [[subject predicate kind object]]
+      [(offset-node subject offset) predicate kind
+       (if (= "n" kind) (offset-node object offset) object)])
+    (get shard "rows")))
+
 (let [arguments *command-line-args*
       input-specs (option-values arguments "--input")
       interface-sha256-by-source
       (key-value-specs arguments "--interface-sha256")
       out (option-value arguments "--output")
+      store (option-value arguments "--store")
       include-defs? (some #{"--include-defs"} arguments)
       selected-names (set (option-values arguments "--form"))
       annotations (option-values arguments "--native-op")]
@@ -850,27 +1015,46 @@
       (throw
         (ex-info "--interface-sha256 carries a malformed SHA-256 digest"
           {:source-id source-id :digest digest}))))
-  (let [parsed
+  (when (and store (not (clojure.string/starts-with? store "/")))
+    (throw (ex-info "--store must be an absolute path" {:store store})))
+  (let [context (projector-context)
+        inputs
         (mapv
           (fn [input-spec]
             (let [[in relative-path] (parse-input-spec input-spec)
-                  ast (json/parse-string (slurp in))]
-              (require-native-compatible-ast! ast relative-path)
+                  raw-ast (slurp in)
+                  interface-sha256
+                  (get interface-sha256-by-source relative-path)]
               {:path in
                :relative-path relative-path
-               :interface-sha256
-               (get interface-sha256-by-source relative-path)
-               :ast ast}))
+               :interface-sha256 interface-sha256
+               :raw-ast raw-ast
+               :key (source-fact-shard-key raw-ast relative-path
+                      interface-sha256 include-defs? selected-names context)}))
           input-specs)
-        source-ids (mapv #(get (:ast %) "sourceId") parsed)
-        namespaces (mapv #(get (:ast %) "namespace") parsed)
-        relative-paths (mapv :relative-path parsed)]
-    (when (not= (count source-ids) (count (distinct source-ids)))
-      (throw (ex-info "checked projections contain duplicate sourceId values"
-                      {:sourceIds source-ids})))
-    (when (not= (count namespaces) (count (distinct namespaces)))
-      (throw (ex-info "checked projections contain duplicate namespaces"
-                      {:namespaces namespaces})))
+        relative-paths (mapv :relative-path inputs)
+        requests
+        (mapv (fn [{:keys [key relative-path]}]
+                [source-fact-shard-stage key context source-fact-shard-profile
+                 relative-path])
+          inputs)
+        store-rows (if store (query-source-fact-store store requests) [])
+        projected
+        (mapv
+          (fn [{:keys [key relative-path raw-ast interface-sha256] :as input}]
+            (if-let [hit (select-source-fact-shard
+                           store-rows key context relative-path)]
+              (future {:shard hit :hit? true :input input})
+              (future
+                {:shard (emit-source-fact-shard raw-ast relative-path
+                          interface-sha256 include-defs? selected-names)
+                 :hit? false
+                 :input input})))
+          inputs)
+        results (mapv deref projected)
+        shards (mapv :shard results)
+        source-ids (mapv #(get % "sourceId") shards)
+        namespaces (mapv #(get % "namespace") shards)]
     (when (seq interface-sha256-by-source)
       (let [missing
             (filterv #(nil? (get interface-sha256-by-source %)) relative-paths)
@@ -881,14 +1065,14 @@
           (throw
             (ex-info "--interface-sha256 keys must exactly cover source inputs"
               {:missing missing :unknown unknown})))))
+    (when (not= (count source-ids) (count (distinct source-ids)))
+      (throw (ex-info "checked projections contain duplicate sourceId values"
+                      {:sourceIds source-ids})))
+    (when (not= (count namespaces) (count (distinct namespaces)))
+      (throw (ex-info "checked projections contain duplicate namespaces"
+                      {:namespaces namespaces})))
     (let [selected-counts
-          (frequencies
-            (for [{:keys [ast]} parsed
-                  form (get ast "forms")
-                  :let [name (get form "name")]
-                  :when (and (contains? selected-names name)
-                             (selected-form? include-defs? #{} form))]
-              name))
+          (apply merge-with + (map #(get % "selectedCounts") shards))
           missing-names
           (filterv #(zero? (get selected-counts % 0)) (sort selected-names))
           ambiguous-names
@@ -905,13 +1089,39 @@
             (str "native source-fact projection form selection is ambiguous: "
                  (clojure.string/join ", " ambiguous-names))
             {:ambiguous-form-names ambiguous-names})))
-      (let [modules
-            (mapv
-              (fn [{:keys [ast relative-path interface-sha256]}]
-                (emit-module ast relative-path interface-sha256
-                  include-defs? selected-names))
-              parsed)]
-        (row! "0" "form-kind" "t" "program-root")
-        (row! "0" "modules" "n" (emit-node-seq modules)))))
-  (spit out (apply str (for [[s p k o] (persistent! @rows)]
-                         (str s "\t" p "\t" k "\t" o "\n")))))
+      (when store
+        (append-source-fact-store! store
+          (mapv
+            (fn [{:keys [shard hit? input]}]
+              (when-not hit?
+                (source-fact-shard-entry (:key input) context
+                  (:relative-path input) (pr-str shard))))
+            (filterv #(not (:hit? %)) results))))
+      (let [{:keys [rows modules offset]}
+            (reduce
+              (fn [{:keys [rows modules offset]} shard]
+                {:rows (into rows (offset-shard-rows shard offset))
+                 :modules (conj modules
+                            (offset-node (get shard "moduleRoot") offset))
+                 :offset (+ offset (get shard "nodeCount"))})
+              {:rows [] :modules [] :offset 0}
+              shards)
+            sequence-node (str (inc offset))
+            final-rows
+            (into rows
+              (concat
+                [["0" "form-kind" "t" "program-root"]
+                 [sequence-node "form-kind" "t" "seq"]]
+                (map-indexed
+                  (fn [position module]
+                    [sequence-node (str "f" position) "n" module])
+                  modules)
+                [["0" "modules" "n" sequence-node]]))]
+        (binding [*out* *err*]
+          (println (str "source-facts: Store shards hits="
+                     (count (filter :hit? results))
+                     " misses=" (count (remove :hit? results)))))
+        (spit out
+          (apply str
+            (for [[s p k o] final-rows]
+              (str s "\t" p "\t" k "\t" o "\n"))))))))
