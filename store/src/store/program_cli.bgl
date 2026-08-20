@@ -1,0 +1,120 @@
+#lang beagle
+;; Process arguments stay textual until the Store Term decoder admits them.
+;; Parsing a spelling must never manufacture program vocabulary or membership.
+(ns store.program-cli)
+
+(def usage String
+  (str
+   "usage: beagle program SPACE_ID LOG_PATH inspect ROOT VERSION\n"
+   "       beagle program SPACE_ID LOG_PATH definition ROOT VERSION NAME\n"
+   "       beagle program SPACE_ID LOG_PATH references ROOT VERSION TERM\n"
+   "       beagle program SPACE_ID LOG_PATH impact ROOT VERSION TERM\n"
+   "       beagle program SPACE_ID LOG_PATH history ROOT VERSION TRIPLE\n"
+   "       beagle program SPACE_ID LOG_PATH rename ROOT VERSION BINDING NEW --preview|--commit"))
+
+(defunion ProgramCommand
+  (Inspect
+    [root-text String
+     store-version Int])
+  (Definition
+    [root-text String
+     store-version Int
+     exact-name String])
+  (References
+    [root-text String
+     store-version Int
+     target-text String])
+  (Impact
+    [root-text String
+     store-version Int
+     changed-text String])
+  (History
+    [root-text String
+     store-version Int
+     proposition-text String])
+  (Rename
+    [root-text String
+     store-version Int
+     binding-text String
+     new-name String
+     commit Bool]))
+
+(defrecord ProgramInvocation
+  [space-id String
+   log-path String
+   command ProgramCommand])
+
+(defn- present? [value String] Bool
+  (not (= value "")))
+
+(defn- all-present? [values (Vec String)] Bool
+  (every? present? values))
+
+(defn- parse-version [value String] Int?
+  (let [parsed Int? (parse-long value)]
+    (if (and (some? parsed) (>= (or parsed 0) 0)) parsed nil)))
+
+(defn- parse-command [args (Vec String)] ProgramCommand?
+  (let [verb String (nth args 2)
+        parsed-version Int? (parse-version (nth args 4))
+        store-version Int (or parsed-version 0)]
+    (cond
+      [(and (= verb "inspect")
+            (= (count args) 5)
+            (present? (nth args 3))
+            (some? parsed-version))
+       (->Inspect (nth args 3) store-version)]
+
+      [(and (= verb "definition")
+            (= (count args) 6)
+            (all-present? [(nth args 3) (nth args 5)])
+            (some? parsed-version))
+       (->Definition (nth args 3) store-version (nth args 5))]
+
+      [(and (= verb "references")
+            (= (count args) 6)
+            (all-present? [(nth args 3) (nth args 5)])
+            (some? parsed-version))
+       (->References (nth args 3) store-version (nth args 5))]
+
+      [(and (= verb "impact")
+            (= (count args) 6)
+            (all-present? [(nth args 3) (nth args 5)])
+            (some? parsed-version))
+       (->Impact (nth args 3) store-version (nth args 5))]
+
+      [(and (= verb "history")
+            (= (count args) 6)
+            (all-present? [(nth args 3) (nth args 5)])
+            (some? parsed-version))
+       (->History (nth args 3) store-version (nth args 5))]
+
+      [(and (= verb "rename")
+            (= (count args) 8)
+            (all-present? [(nth args 3) (nth args 5) (nth args 6)])
+            (some? parsed-version)
+            (or (= (nth args 7) "--preview")
+                (= (nth args 7) "--commit")))
+       (->Rename (nth args 3) store-version (nth args 5) (nth args 6)
+                 (= (nth args 7) "--commit"))]
+
+      [:else nil])))
+
+(defn parse-args [args (Vec String)] ProgramInvocation?
+  (if (and (>= (count args) 5)
+           (present? (nth args 0))
+           (present? (nth args 1)))
+    (let [command ProgramCommand? (parse-command args)]
+      (if (some? command)
+        (->ProgramInvocation (nth args 0) (nth args 1) command)
+        nil))
+    nil))
+
+;; Dispatch is added only after ProgramRoot, reads, and ProgramTransaction land.
+;; Until then this entry is exercised only by its private native seam check.
+(defn main [args (Vec String)] Int
+  (if (some? (parse-args args))
+    0
+    (do
+      (host.stderr/write-line usage)
+      64)))
