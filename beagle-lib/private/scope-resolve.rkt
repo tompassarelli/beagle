@@ -251,6 +251,10 @@
 
 (define (walk-sequential-bindings vector-value table path ctx)
   (define items (sequence-children vector-value))
+  (define flat?
+    (and (pair? items)
+         (pair? (cdr items))
+         (type-expression-datum? (syntax-datum (cadr items)))))
   (let loop ([rest items]
              [index 0]
              [out '()]
@@ -260,33 +264,38 @@
       [(null? rest)
        (values
         (rebuild-sequence vector-value out) current region-scopes)]
-      [(null? (cdr rest))
+      [(or (null? (cdr rest))
+           (and flat? (null? (cddr rest))))
        (values
         (rebuild-sequence
          vector-value
-         (append
-          out
-          (list
-           (walk
-            (syntax-add-scopes (car rest) region-scopes)
-            current (append path (list index)) ctx))))
+         (append out
+                 (for/list ([item (in-list rest)]
+                            [offset (in-naturals index)])
+                   (walk
+                    (syntax-add-scopes item region-scopes)
+                    current (append path (list offset)) ctx))))
         current
         region-scopes)]
       [else
        (define declaration
          (syntax-add-scopes (car rest) region-scopes))
+       (define rhs-offset (if flat? 2 1))
        (define rhs
          (walk
-          (syntax-add-scopes (cadr rest) region-scopes)
-          current (append path (list (add1 index))) ctx))
+          (syntax-add-scopes (list-ref rest rhs-offset) region-scopes)
+          current (append path (list (+ index rhs-offset))) ctx))
        (define scope (fresh-scope-id 'lexical))
        (define-values (bound table* _ids)
          (bind-declaration
           declaration current scope 'lexical (append path (list index))))
        (loop
-        (cddr rest)
-        (+ index 2)
-        (append out (list bound rhs))
+        (if flat? (cdddr rest) (cddr rest))
+        (+ index (if flat? 3 2))
+        (append out
+                (if flat?
+                    (list bound (cadr rest) rhs)
+                    (list bound rhs)))
         table*
         (append region-scopes (list scope)))])))
 

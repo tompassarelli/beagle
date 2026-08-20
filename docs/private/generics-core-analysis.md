@@ -83,10 +83,3 @@ checker, and the generated cheatsheet pass (413 tests total). The focused
 definition-inference case proves a game-shaped `filterv` → `mapv` → `reduce`
 chain infers `(Fn [(Vec Enemy)] Int)` end to end and exercises both `reduce`
 arities.
-
-The mandatory native source-freeze and full typed-stage gates could not start:
-`native-core/validation/store-checkout.sh` requires
-`~/code/store/pins/24309a05927a59d7d495292a3b15a7e9b2adaf2c`, but the Store
-repository and pin are absent. Restore the exact Store pin, then rerun both gates. Because
-main is moving for the release repair, landing also requires a rebase and a
-fresh rerun of every gate against the rebased commit.
