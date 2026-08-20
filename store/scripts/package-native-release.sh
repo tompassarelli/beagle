@@ -16,10 +16,10 @@ Usage:
   package-native-release.sh --artifact DIR --output DIR --version vMAJOR.MINOR.PATCH \
     [--target x86_64-linux-musl|aarch64-linux-musl] [--source-root DIR]
 
-DIR must be the immutable READY directory emitted by beagle-store-native-build for a
-static server host. The source root must be a clean checkout whose requested
-version tag points at HEAD. The command writes a normalized .tar.gz archive and
-its receipt, then prints their absolute paths on separate lines.
+DIR must be the immutable READY directory emitted by beagle-store-native-build
+for a static server host. The source root must be a clean Beagle checkout whose
+requested version tag points at HEAD. The command writes a normalized .tar.gz
+archive and its receipt, then prints their absolute paths on separate lines.
 USAGE
 }
 
@@ -81,8 +81,8 @@ done
 tar --version 2>/dev/null | grep -Fq 'GNU tar' ||
   die "GNU tar is required for normalized release archives"
 
-script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-source_root="${source_root:-$script_root}"
+script_store_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source_root="${source_root:-$(cd "$script_store_root/.." && pwd -P)}"
 source_root="$(realpath "$source_root")"
 [[ -d "$source_root/.git" || -f "$source_root/.git" ]] ||
   die "source root is not a Git worktree: $source_root"
@@ -93,6 +93,9 @@ git -C "$source_root" diff --quiet --ignore-submodules -- ||
   die "source worktree has tracked changes: $source_root"
 git -C "$source_root" diff --cached --quiet --ignore-submodules -- ||
   die "source worktree has staged changes: $source_root"
+store_root="$source_root/store"
+[[ -d "$store_root" && ! -L "$store_root" ]] ||
+  die "Beagle Store root is unavailable or is a symlink: $store_root"
 
 source_commit="$(git -C "$source_root" rev-parse 'HEAD^{commit}')"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] ||
@@ -110,12 +113,12 @@ source_epoch="$(git -C "$source_root" show -s --format=%ct "$source_commit")"
 
 source_files=(LICENSE LICENSE-MIT LICENSE-APACHE beagle-pin.txt bin/beagle-store-native-build)
 for source_file in "${source_files[@]}"; do
-  [[ -f "$source_root/$source_file" && ! -L "$source_root/$source_file" ]] ||
+  [[ -f "$store_root/$source_file" && ! -L "$store_root/$source_file" ]] ||
     die "source worktree omitted regular $source_file"
-  git -C "$source_root" ls-files --error-unmatch "$source_file" >/dev/null 2>&1 ||
+  git -C "$source_root" ls-files --error-unmatch "store/$source_file" >/dev/null 2>&1 ||
     die "source file is not tracked: $source_file"
 done
-mapfile -t beagle_pin_lines <"$source_root/beagle-pin.txt"
+mapfile -t beagle_pin_lines <"$store_root/beagle-pin.txt"
 [[ "${#beagle_pin_lines[@]}" == 1 &&
   "${beagle_pin_lines[0]}" =~ ^[0-9a-f]{40}$ ]] ||
   die "beagle-pin.txt must contain exactly one lowercase 40-hex revision"
@@ -150,7 +153,7 @@ server="$artifact/bin/beagle-store-server-native"
   die "artifact input manifest is not beagle-store-native-build-input/v3"
 [[ "$(grep -Fxc 'host=server' "$input_manifest" || true)" == 1 ]] ||
   die "artifact input manifest is not uniquely bound to host=server"
-builder_sha256="$(sha256sum "$source_root/bin/beagle-store-native-build" | awk '{print $1}')"
+builder_sha256="$(sha256sum "$store_root/bin/beagle-store-native-build" | awk '{print $1}')"
 [[ "$(sed -n '2p' "$input_manifest")" == "$builder_sha256" ]] ||
   die "artifact input manifest is not bound to the release builder"
 artifact_beagle_revision="$(<"$artifact_beagle_revision_file")"
@@ -192,7 +195,7 @@ release_root="$scratch/$release_name"
 mkdir -p "$release_root/bin"
 install -m 0755 "$server" "$release_root/bin/beagle-store-server-native"
 for license in LICENSE LICENSE-MIT LICENSE-APACHE; do
-  install -m 0644 "$source_root/$license" "$release_root/$license"
+  install -m 0644 "$store_root/$license" "$release_root/$license"
 done
 
 tar --format=ustar --sort=name --mtime="@$source_epoch" \

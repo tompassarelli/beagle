@@ -19,17 +19,18 @@ for command in cmp git gzip readelf sha256sum tar; do
   command -v "$command" >/dev/null 2>&1 || fail "missing command: $command"
 done
 source_seed="$scratch/source-seed"
-mkdir -p "$source_seed/bin"
+mkdir -p "$source_seed/store/bin"
 git -C "$source_seed" init -q
 printf '%s\n' 'release source' >"$source_seed/source.txt"
 cat >"$source_seed/server.c" <<'C'
 int main(void) { return 0; }
 C
-cp "$repo/LICENSE" "$repo/LICENSE-MIT" "$repo/LICENSE-APACHE" "$source_seed/"
-cp "$repo/beagle-pin.txt" "$source_seed/"
-cp "$repo/bin/beagle-store-native-build" "$source_seed/bin/"
-git -C "$source_seed" add source.txt server.c LICENSE LICENSE-MIT LICENSE-APACHE \
-  beagle-pin.txt bin/beagle-store-native-build
+cp "$repo/LICENSE" "$repo/LICENSE-MIT" "$repo/LICENSE-APACHE" "$source_seed/store/"
+cp "$repo/beagle-pin.txt" "$source_seed/store/"
+cp "$repo/bin/beagle-store-native-build" "$source_seed/store/bin/"
+git -C "$source_seed" add source.txt server.c \
+  store/LICENSE store/LICENSE-MIT store/LICENSE-APACHE \
+  store/beagle-pin.txt store/bin/beagle-store-native-build
 GIT_AUTHOR_NAME='Beagle Store' GIT_AUTHOR_EMAIL=store@example.invalid \
 GIT_AUTHOR_DATE='2026-01-02T03:04:05Z' \
 GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
@@ -41,7 +42,7 @@ GIT_COMMITTER_DATE='2026-01-02T04:05:06Z' \
 git -C "$source_seed" tag v1.2.4
 source_commit="$(git -C "$source_seed" rev-parse HEAD)"
 tag_object="$(git -C "$source_seed" rev-parse refs/tags/v1.2.3)"
-beagle_revision="$(<"$source_seed/beagle-pin.txt")"
+beagle_revision="$(<"$source_seed/store/beagle-pin.txt")"
 
 git clone -q --no-local "$source_seed" "$scratch/work-a"
 git clone -q --no-local "$source_seed" "$scratch/different/depth/work-b"
@@ -52,7 +53,7 @@ command -v "$cc" >/dev/null 2>&1 || fail "missing C compiler: $cc"
 input_template="$scratch/input.manifest"
 printf '%s\n' \
   'beagle-store-native-build-input/v3' \
-  "$(sha256sum "$source_seed/bin/beagle-store-native-build" | awk '{print $1}')" \
+  "$(sha256sum "$source_seed/store/bin/beagle-store-native-build" | awk '{print $1}')" \
   'host=server' \
   'program=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' \
   >"$input_template"

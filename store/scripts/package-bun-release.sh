@@ -16,10 +16,11 @@ Usage:
   package-bun-release.sh --output DIR --version vMAJOR.MINOR.PATCH \
     [--source-root DIR]
 
-The source root must be a clean checkout whose requested release tag points at
-HEAD. The command uses Bun 1.3.13 to write the canonical package tarball and a
-path-independent receipt, then prints their absolute paths on separate lines.
-The package's own semver is recorded independently from the repository tag.
+The source root must be a clean Beagle checkout whose requested release tag
+points at HEAD. The command uses Bun 1.3.13 to write the canonical package
+tarball and a path-independent receipt, then prints their absolute paths on
+separate lines. The package's own semver is recorded independently from the
+repository tag.
 USAGE
 }
 
@@ -65,8 +66,8 @@ done
 [[ "$(bun --version)" == "1.3.13" ]] ||
   die "Bun 1.3.13 is required to produce canonical package bytes"
 
-script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-source_root="${source_root:-$script_root}"
+script_store_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source_root="${source_root:-$(cd "$script_store_root/.." && pwd -P)}"
 source_root="$(realpath "$source_root")"
 [[ -d "$source_root/.git" || -f "$source_root/.git" ]] ||
   die "source root is not a Git worktree: $source_root"
@@ -77,6 +78,9 @@ git -C "$source_root" diff --quiet --ignore-submodules -- ||
   die "source worktree has tracked changes: $source_root"
 git -C "$source_root" diff --cached --quiet --ignore-submodules -- ||
   die "source worktree has staged changes: $source_root"
+store_root="$source_root/store"
+[[ -d "$store_root" && ! -L "$store_root" ]] ||
+  die "Beagle Store root is unavailable or is a symlink: $store_root"
 
 source_commit="$(git -C "$source_root" rev-parse 'HEAD^{commit}')"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] ||
@@ -92,13 +96,13 @@ source_epoch="$(git -C "$source_root" show -s --format=%ct "$source_commit")"
 [[ "$source_epoch" =~ ^[0-9]+$ ]] ||
   die "source commit has no integer timestamp: $source_commit"
 
-package_root="$source_root/clients/bun"
+package_root="$store_root/clients/bun"
 package_json="$package_root/package.json"
 [[ -d "$package_root" && ! -L "$package_root" ]] ||
   die "Bun package root is unavailable or is a symlink: $package_root"
 [[ -f "$package_json" && ! -L "$package_json" ]] ||
   die "Bun package manifest is unavailable or is a symlink: $package_json"
-git -C "$source_root" ls-files --error-unmatch clients/bun/package.json \
+git -C "$source_root" ls-files --error-unmatch store/clients/bun/package.json \
   >/dev/null 2>&1 || die "Bun package manifest is not tracked"
 
 # The following single-quoted string is Bun source, not shell.
@@ -124,6 +128,11 @@ package_version="$(bun -e '
     "./core": { types: "./store-rpc-core.d.ts", import: "./store-rpc-core.mjs" },
     "./schema": { types: "./schema.d.ts", import: "./schema.mjs" },
   };
+  const expectedRepository = {
+    type: "git",
+    url: "git+https://github.com/tompassarelli/beagle.git",
+    directory: "store/clients/bun",
+  };
   const fail = message => {
     console.error(`package-bun-release: ${message}`);
     process.exit(2);
@@ -142,6 +151,9 @@ package_version="$(bun -e '
   if (manifest.sideEffects !== false) fail("package must remain side-effect free");
   if (manifest.engines?.bun !== ">=1.3.13") fail("unexpected Bun engine floor");
   if (manifest.license !== "MIT OR Apache-2.0") fail("unexpected package license");
+  if (JSON.stringify(manifest.repository) !== JSON.stringify(expectedRepository)) {
+    fail("unexpected package repository metadata");
+  }
   for (const key of ["dependencies", "optionalDependencies", "peerDependencies"]) {
     if (manifest[key] && Object.keys(manifest[key]).length !== 0) {
       fail(`runtime dependency surface is not closed: ${key}`);
@@ -168,9 +180,9 @@ package_files=(
 for package_file in "${package_files[@]}"; do
   source_file="$package_root/$package_file"
   [[ -f "$source_file" && ! -L "$source_file" ]] ||
-    die "package file is unavailable or is a symlink: clients/bun/$package_file"
-  git -C "$source_root" ls-files --error-unmatch "clients/bun/$package_file" \
-    >/dev/null 2>&1 || die "package file is not tracked: clients/bun/$package_file"
+    die "package file is unavailable or is a symlink: store/clients/bun/$package_file"
+  git -C "$source_root" ls-files --error-unmatch "store/clients/bun/$package_file" \
+    >/dev/null 2>&1 || die "package file is not tracked: store/clients/bun/$package_file"
 done
 
 mkdir -p "$output"
@@ -196,7 +208,7 @@ trap 'exit 143' TERM
 [[ -f "$temporary_archive" && ! -L "$temporary_archive" ]] ||
   die "Bun did not produce the package archive"
 
-expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs\npackage/schema.d.ts\npackage/schema.mjs'
+expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs'
 archive_entries="$(tar -tzf "$temporary_archive")"
 [[ "$archive_entries" == "$expected_entries" ]] ||
   die "package archive member set or order is not canonical"

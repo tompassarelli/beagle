@@ -21,7 +21,7 @@ done
 [[ "$(bun --version)" == "1.3.13" ]] || fail "Bun 1.3.13 is required"
 
 source_seed="$scratch/source-seed"
-mkdir -p "$source_seed/clients/bun"
+mkdir -p "$source_seed/store/clients/bun"
 package_files=(
   package.json
   LICENSE
@@ -37,28 +37,28 @@ package_files=(
   README.md
 )
 for package_file in "${package_files[@]}"; do
-  cp "$repo/clients/bun/$package_file" "$source_seed/clients/bun/$package_file"
+  cp "$repo/clients/bun/$package_file" "$source_seed/store/clients/bun/$package_file"
 done
 git -C "$source_seed" init -q
 git -C "$source_seed" add \
-  clients/bun/package.json \
-  clients/bun/LICENSE \
-  clients/bun/LICENSE-MIT \
-  clients/bun/LICENSE-APACHE \
-  clients/bun/store-rpc.mjs \
-  clients/bun/store-rpc-core.mjs \
-  clients/bun/store-rpc-core.d.ts \
-  clients/bun/store-rpc.d.ts \
-  clients/bun/backup.mjs \
-  clients/bun/schema.mjs \
-  clients/bun/schema.d.ts \
-  clients/bun/README.md
-GIT_AUTHOR_NAME=Beagle Store GIT_AUTHOR_EMAIL=store@example.invalid \
+  store/clients/bun/package.json \
+  store/clients/bun/LICENSE \
+  store/clients/bun/LICENSE-MIT \
+  store/clients/bun/LICENSE-APACHE \
+  store/clients/bun/store-rpc.mjs \
+  store/clients/bun/store-rpc-core.mjs \
+  store/clients/bun/store-rpc-core.d.ts \
+  store/clients/bun/store-rpc.d.ts \
+  store/clients/bun/backup.mjs \
+  store/clients/bun/schema.mjs \
+  store/clients/bun/schema.d.ts \
+  store/clients/bun/README.md
+GIT_AUTHOR_NAME='Beagle Store' GIT_AUTHOR_EMAIL=store@example.invalid \
 GIT_AUTHOR_DATE='2026-01-02T03:04:05Z' \
-GIT_COMMITTER_NAME=Beagle Store GIT_COMMITTER_EMAIL=store@example.invalid \
+GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
 GIT_COMMITTER_DATE='2026-01-02T03:04:05Z' \
   git -C "$source_seed" commit -q -m release
-GIT_COMMITTER_NAME=Beagle Store GIT_COMMITTER_EMAIL=store@example.invalid \
+GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
 GIT_COMMITTER_DATE='2026-01-02T04:05:06Z' \
   git -C "$source_seed" tag -a v1.2.3 -m release
 git -C "$source_seed" tag v1.2.4
@@ -69,7 +69,7 @@ git clone -q --no-local "$source_seed" "$scratch/work-a"
 git clone -q --no-local "$source_seed" "$scratch/different/depth/work-b"
 for package_file in "${package_files[@]}"; do
   touch -t 203801020304.05 \
-    "$scratch/different/depth/work-b/clients/bun/$package_file"
+    "$scratch/different/depth/work-b/store/clients/bun/$package_file"
 done
 
 mapfile -t files_a < <(
@@ -109,7 +109,7 @@ expected_receipt_keys=$'store-bun-release-receipt/v2\nsource-commit\nsource-date
   "$expected_receipt_keys" ]] ||
   fail "receipt schema is not closed and ordered"
 
-expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs\npackage/schema.d.ts\npackage/schema.mjs'
+expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs'
 [[ "$(tar -tzf "${files_a[0]}")" == "$expected_entries" ]] ||
   fail "archive member set or order is not canonical"
 
@@ -117,7 +117,7 @@ extract="$scratch/extract"
 mkdir -p "$extract"
 tar -xzf "${files_a[0]}" -C "$extract"
 for package_file in "${package_files[@]}"; do
-  cmp -s "$source_seed/clients/bun/$package_file" \
+  cmp -s "$source_seed/store/clients/bun/$package_file" \
     "$extract/package/$package_file" ||
     fail "archive changed or omitted $package_file"
 done
@@ -275,7 +275,7 @@ PROBE
 # A tracked mutation and a tag/HEAD mismatch both fail before package bytes are
 # produced.
 git clone -q --no-local "$source_seed" "$scratch/dirty-source"
-printf '\nchanged\n' >>"$scratch/dirty-source/clients/bun/README.md"
+printf '\nchanged\n' >>"$scratch/dirty-source/store/clients/bun/README.md"
 if "$packager" --source-root "$scratch/dirty-source" \
     --output "$scratch/out-dirty" --version v1.2.3 \
     >"$scratch/dirty.stdout" 2>"$scratch/dirty.stderr"; then

@@ -16,10 +16,11 @@ Usage:
   package-cloudflare-do-release.sh --output DIR --version vMAJOR.MINOR.PATCH \
     [--source-root DIR]
 
-The source root must be a clean checkout whose requested release tag points at
-HEAD. The command uses Bun 1.3.13 to write the canonical adapter tarball and a
-path-independent receipt, then prints their absolute paths on separate lines.
-The package's 0.3.0 semver is independent from the repository release tag.
+The source root must be a clean Beagle checkout whose requested release tag
+points at HEAD. The command uses Bun 1.3.13 to write the canonical adapter
+tarball and a path-independent receipt, then prints their absolute paths on
+separate lines. The package's 0.3.0 semver is independent from the repository
+release tag.
 USAGE
 }
 
@@ -65,8 +66,8 @@ done
 [[ "$(bun --version)" == "1.3.13" ]] ||
   die "Bun 1.3.13 is required to produce canonical package bytes"
 
-script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-source_root="${source_root:-$script_root}"
+script_store_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source_root="${source_root:-$(cd "$script_store_root/.." && pwd -P)}"
 [[ ! -L "$source_root" ]] || die "source root must not be a symlink: $source_root"
 source_root="$(realpath "$source_root")"
 [[ -d "$source_root/.git" || -f "$source_root/.git" ]] ||
@@ -76,6 +77,9 @@ git_root="$(git -C "$source_root" rev-parse --show-toplevel 2>/dev/null || true)
   die "source root must name the top of one Git worktree: $source_root"
 [[ -z "$(git -C "$source_root" status --porcelain=v1 --untracked-files=all)" ]] ||
   die "source worktree is not clean: $source_root"
+store_root="$source_root/store"
+[[ -d "$store_root" && ! -L "$store_root" ]] ||
+  die "Beagle Store root is unavailable or is a symlink: $store_root"
 
 source_commit="$(git -C "$source_root" rev-parse 'HEAD^{commit}')"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] ||
@@ -92,7 +96,7 @@ source_epoch="$(git -C "$source_root" show -s --format=%ct "$source_commit")"
 [[ "$source_epoch" =~ ^[0-9]+$ ]] ||
   die "source commit has no integer timestamp: $source_commit"
 
-package_root="$source_root/clients/cloudflare-do"
+package_root="$store_root/clients/cloudflare-do"
 package_json="$package_root/package.json"
 [[ -d "$package_root" && ! -L "$package_root" ]] ||
   die "Cloudflare package root is unavailable or is a symlink: $package_root"
@@ -101,7 +105,7 @@ package_json="$package_root/package.json"
 [[ "$(realpath "$package_json")" == "$package_json" ]] ||
   die "Cloudflare package manifest traverses a symlink: $package_json"
 git -C "$source_root" ls-files --error-unmatch \
-  clients/cloudflare-do/package.json >/dev/null 2>&1 ||
+  store/clients/cloudflare-do/package.json >/dev/null 2>&1 ||
   die "Cloudflare package manifest is not tracked"
 
 # The following single-quoted string is Bun source, not shell.
@@ -126,7 +130,7 @@ package_version="$(bun -e '
   const expectedRepository = {
     type: "git",
     url: "git+https://github.com/tompassarelli/beagle.git",
-    directory: "clients/cloudflare-do",
+    directory: "store/clients/cloudflare-do",
   };
   const fail = message => {
     console.error(`package-cloudflare-do-release: ${message}`);
@@ -178,23 +182,23 @@ package_files=(
   src/seams.d.ts
 )
 for root_file in "${root_files[@]}"; do
-  source_file="$source_root/$root_file"
+  source_file="$store_root/$root_file"
   [[ -f "$source_file" && ! -L "$source_file" ]] ||
     die "release file is unavailable or is a symlink: $root_file"
   [[ "$(realpath "$source_file")" == "$source_file" ]] ||
     die "release file traverses a symlink: $root_file"
-  git -C "$source_root" ls-files --error-unmatch "$root_file" >/dev/null 2>&1 ||
+  git -C "$source_root" ls-files --error-unmatch "store/$root_file" >/dev/null 2>&1 ||
     die "release file is not tracked: $root_file"
 done
 for package_file in "${package_files[@]}"; do
   source_file="$package_root/$package_file"
   [[ -f "$source_file" && ! -L "$source_file" ]] ||
-    die "package file is unavailable or is a symlink: clients/cloudflare-do/$package_file"
+    die "package file is unavailable or is a symlink: store/clients/cloudflare-do/$package_file"
   [[ "$(realpath "$source_file")" == "$source_file" ]] ||
-    die "package file traverses a symlink: clients/cloudflare-do/$package_file"
+    die "package file traverses a symlink: store/clients/cloudflare-do/$package_file"
   git -C "$source_root" ls-files --error-unmatch \
-    "clients/cloudflare-do/$package_file" >/dev/null 2>&1 ||
-    die "package file is not tracked: clients/cloudflare-do/$package_file"
+    "store/clients/cloudflare-do/$package_file" >/dev/null 2>&1 ||
+    die "package file is not tracked: store/clients/cloudflare-do/$package_file"
 done
 
 if [[ -e "$output" ]]; then
@@ -221,7 +225,7 @@ staging="$scratch/staging"
 mkdir -p "$staging/src"
 install -m 0644 "$package_json" "$staging/package.json"
 for root_file in "${root_files[@]}"; do
-  install -m 0644 "$source_root/$root_file" "$staging/$root_file"
+  install -m 0644 "$store_root/$root_file" "$staging/$root_file"
 done
 for package_file in "${package_files[@]}"; do
   install -m 0644 "$package_root/$package_file" "$staging/$package_file"
@@ -253,7 +257,7 @@ shipped_root="$verify_root/package"
 cmp -s "$package_json" "$shipped_root/package.json" ||
   die "package archive changed package.json"
 for root_file in "${root_files[@]}"; do
-  cmp -s "$source_root/$root_file" "$shipped_root/$root_file" ||
+  cmp -s "$store_root/$root_file" "$shipped_root/$root_file" ||
     die "package archive changed or omitted $root_file"
 done
 for package_file in "${package_files[@]}"; do

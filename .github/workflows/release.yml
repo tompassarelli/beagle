@@ -290,8 +290,8 @@ jobs:
             [[ "$(git -C "$repo_root" rev-parse "refs/tags/$RELEASE_TAG")" == \
               "$RELEASE_TAG_OBJECT" ]]
           done
-          echo "first=$source_a/store" >> "$GITHUB_OUTPUT"
-          echo "second=$source_b/store" >> "$GITHUB_OUTPUT"
+          echo "first=$source_a" >> "$GITHUB_OUTPUT"
+          echo "second=$source_b" >> "$GITHUB_OUTPUT"
 
       - name: Build twice and seal the reproducible Bun client package
         id: bun_client
@@ -303,7 +303,7 @@ jobs:
           set -euo pipefail
           mapfile -t package_files < <(
             store/scripts/package-bun-release.sh \
-              --source-root "$GITHUB_WORKSPACE/store" \
+              --source-root "$GITHUB_WORKSPACE" \
               --output "$RUNNER_TEMP/store-bun-release" \
               --version "$RELEASE_TAG"
           )
@@ -317,7 +317,7 @@ jobs:
           git -C "$second_source" checkout --quiet --detach "$RELEASE_COMMIT"
           mapfile -t second_package_files < <(
             "$second_source/store/scripts/package-bun-release.sh" \
-              --source-root "$second_source/store" \
+              --source-root "$second_source" \
               --output "$RUNNER_TEMP/store-bun-release-b" \
               --version "$RELEASE_TAG"
           )
@@ -355,13 +355,13 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t package_files < <(
-            "$SOURCE_A/scripts/package-cloudflare-do-release.sh" \
+            "$SOURCE_A/store/scripts/package-cloudflare-do-release.sh" \
               --source-root "$SOURCE_A" \
               --output "$RUNNER_TEMP/store-cloudflare-do-release" \
               --version "$RELEASE_TAG"
           )
           mapfile -t second_package_files < <(
-            "$SOURCE_B/scripts/package-cloudflare-do-release.sh" \
+            "$SOURCE_B/store/scripts/package-cloudflare-do-release.sh" \
               --source-root "$SOURCE_B" \
               --output "$RUNNER_TEMP/store-cloudflare-do-release-b" \
               --version "$RELEASE_TAG"
@@ -421,21 +421,21 @@ jobs:
           }
 
           cache="$RUNNER_TEMP/store-cloudflare-wasm-cache"
-          artifact_a="$(build_wasm "$SOURCE_A" "$cache")"
-          artifact_b="$(build_wasm "$SOURCE_B" "$cache")"
+          artifact_a="$(build_wasm "$SOURCE_A/store" "$cache")"
+          artifact_b="$(build_wasm "$SOURCE_B/store" "$cache")"
           [[ "$artifact_b" == "$artifact_a" ]] || {
             echo "Cloudflare Wasm cache identity differs across source workdirs" >&2
             exit 1
           }
 
           mapfile -t release_files < <(
-            "$SOURCE_A/scripts/package-cloudflare-wasm-release.sh" \
+            "$SOURCE_A/store/scripts/package-cloudflare-wasm-release.sh" \
               --source-root "$SOURCE_A" --artifact "$artifact_a" \
               --output "$RUNNER_TEMP/store-cloudflare-wasm-release" \
               --version "$RELEASE_TAG"
           )
           mapfile -t second_release_files < <(
-            "$SOURCE_B/scripts/package-cloudflare-wasm-release.sh" \
+            "$SOURCE_B/store/scripts/package-cloudflare-wasm-release.sh" \
               --source-root "$SOURCE_B" --artifact "$artifact_b" \
               --output "$RUNNER_TEMP/store-cloudflare-wasm-release-b" \
               --version "$RELEASE_TAG"
@@ -504,7 +504,7 @@ jobs:
           artifact="$(build_native "$GITHUB_WORKSPACE/store" "$cache")"
           mapfile -t release_files < <(
             store/scripts/package-native-release.sh \
-              --source-root "$GITHUB_WORKSPACE/store" \
+              --source-root "$GITHUB_WORKSPACE" \
               --artifact "$artifact" \
               --output "$RUNNER_TEMP/store-native-release" \
               --version "$RELEASE_TAG" \
@@ -525,7 +525,7 @@ jobs:
           }
           mapfile -t second_release_files < <(
             "$second_source/store/scripts/package-native-release.sh" \
-              --source-root "$second_source/store" \
+              --source-root "$second_source" \
               --artifact "$second_artifact" \
               --output "$RUNNER_TEMP/store-native-release-b" \
               --version "$RELEASE_TAG" \

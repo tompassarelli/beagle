@@ -19,20 +19,24 @@ done
 [[ "$(bun --version)" == "1.3.13" ]] || fail "Bun 1.3.13 is required"
 
 source_seed="$scratch/source-seed"
-mkdir -p "$source_seed/bin" "$source_seed/native" "$source_seed/src"
-cp "$repo/LICENSE" "$repo/LICENSE-MIT" "$repo/LICENSE-APACHE" "$source_seed/"
-cp "$repo/beagle-pin.txt" "$source_seed/"
-cp "$repo/native/wasm-embed.seams" "$source_seed/native/wasm-embed.seams"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$source_seed/bin/beagle-store-native-build"
-chmod +x "$source_seed/bin/beagle-store-native-build"
+store_seed="$source_seed/store"
+mkdir -p "$store_seed/bin" "$store_seed/native" "$store_seed/src" \
+  "$source_seed/native-core/src"
+cp "$repo/LICENSE" "$repo/LICENSE-MIT" "$repo/LICENSE-APACHE" "$store_seed/"
+cp "$repo/beagle-pin.txt" "$store_seed/"
+cp "$repo/native/wasm-embed.seams" "$store_seed/native/wasm-embed.seams"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$store_seed/bin/beagle-store-native-build"
+chmod +x "$store_seed/bin/beagle-store-native-build"
 for member in store_embed.c store.h server_host.h server_generated.c store_wasm_host.c; do
-  printf 'synthetic %s\n' "$member" >"$source_seed/native/$member"
+  printf 'synthetic %s\n' "$member" >"$store_seed/native/$member"
 done
-printf '%s\n' src/core-a.bgl src/core-b.bgl >"$source_seed/native/core_closure_sources.txt"
-printf '%s\n' '#lang beagle' '(ns synthetic.a)' >"$source_seed/src/core-a.bgl"
-printf '%s\n' '#lang beagle' '(ns synthetic.b)' >"$source_seed/src/core-b.bgl"
+printf '%s\n' ../native-core/src/core-a.bgl src/core-b.bgl \
+  >"$store_seed/native/core_closure_sources.txt"
+printf '%s\n' '#lang beagle' '(ns synthetic.a)' \
+  >"$source_seed/native-core/src/core-a.bgl"
+printf '%s\n' '#lang beagle' '(ns synthetic.b)' >"$store_seed/src/core-b.bgl"
 git -C "$source_seed" init -q
-git -C "$source_seed" add LICENSE LICENSE-MIT LICENSE-APACHE beagle-pin.txt bin native src
+git -C "$source_seed" add store native-core
 GIT_AUTHOR_NAME='Beagle Store' GIT_AUTHOR_EMAIL=store@example.invalid \
 GIT_AUTHOR_DATE='2026-01-02T03:04:05Z' \
 GIT_COMMITTER_NAME='Beagle Store' GIT_COMMITTER_EMAIL=store@example.invalid \
@@ -44,28 +48,28 @@ GIT_COMMITTER_DATE='2026-01-02T04:05:06Z' \
 git -C "$source_seed" tag v1.2.4
 source_commit="$(git -C "$source_seed" rev-parse HEAD)"
 tag_object="$(git -C "$source_seed" rev-parse refs/tags/v1.2.3)"
-beagle_revision="$(<"$source_seed/beagle-pin.txt")"
+beagle_revision="$(<"$store_seed/beagle-pin.txt")"
 
 git clone -q --no-local "$source_seed" "$scratch/work-a"
 git clone -q --no-local "$source_seed" "$scratch/different/depth/work-b"
 touch -t 203801020304.05 \
-  "$scratch/different/depth/work-b/LICENSE" \
-  "$scratch/different/depth/work-b/LICENSE-MIT" \
-  "$scratch/different/depth/work-b/LICENSE-APACHE" \
-  "$scratch/different/depth/work-b/native/wasm-embed.seams"
+  "$scratch/different/depth/work-b/store/LICENSE" \
+  "$scratch/different/depth/work-b/store/LICENSE-MIT" \
+  "$scratch/different/depth/work-b/store/LICENSE-APACHE" \
+  "$scratch/different/depth/work-b/store/native/wasm-embed.seams"
 
 make_artifact() {
   local root="$1" input_manifest="$1/input.manifest"
   mkdir -p "$root"
   printf '%s\n' \
     'beagle-store-native-build-input/v3' \
-    "$(sha256sum "$source_seed/bin/beagle-store-native-build" | awk '{print $1}')" \
+    "$(sha256sum "$store_seed/bin/beagle-store-native-build" | awk '{print $1}')" \
     'host=wasm-embed' \
     'program=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' \
     'native-program=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789' \
     'synthetic-toolchain-identity' \
     'link=dynamic' \
-    "host-source repo:native/store_embed.c $(sha256sum "$source_seed/native/store_embed.c" | awk '{print $1}')" \
+    "host-source repo:native/store_embed.c $(sha256sum "$store_seed/native/store_embed.c" | awk '{print $1}')" \
     >"$input_manifest"
   local artifact_identity artifact
   artifact_identity="$(sha256sum "$input_manifest" | awk '{print $1}')"
@@ -77,7 +81,7 @@ make_artifact() {
   # A complete empty Wasm module; the native builder is responsible for the
   # full import/export validation before it writes READY.
   printf '\x00asm\x01\x00\x00\x00' >"$artifact/lib/libstore.wasm"
-  grep -v '^[[:space:]]*#' "$source_seed/native/wasm-embed.seams" |
+  grep -v '^[[:space:]]*#' "$store_seed/native/wasm-embed.seams" |
     grep -v '^[[:space:]]*$' >"$artifact/wasm-embed.seams"
   printf '%s\n' 'Unicode License V3 synthetic fixture' >"$artifact/UNICODE-LICENSE.txt"
   printf '%s\n' 'WASI toolchain licenses synthetic fixture' \
@@ -88,7 +92,7 @@ make_artifact() {
   {
     printf '%s\n' \
       'beagle-store-native-build-provenance/v2' \
-      "builder-sha256 $(sha256sum "$source_seed/bin/beagle-store-native-build" | awk '{print $1}')" \
+      "builder-sha256 $(sha256sum "$store_seed/bin/beagle-store-native-build" | awk '{print $1}')" \
       'beagle-compiler-inputs-sha256 1111111111111111111111111111111111111111111111111111111111111111' \
       "beagle-revision $beagle_revision" \
       'abi wasm32' \
@@ -97,16 +101,16 @@ make_artifact() {
     index=0
     while IFS= read -r source_member; do
       printf 'source-sha256 %06d %s\n' "$index" \
-        "$(sha256sum "$source_seed/$source_member" | awk '{print $1}')"
+        "$(sha256sum "$store_seed/$source_member" | awk '{print $1}')"
       index=$((index + 1))
-    done <"$source_seed/native/core_closure_sources.txt"
+    done <"$store_seed/native/core_closure_sources.txt"
     printf '%s\n' \
-      "host-source-sha256 $(sha256sum "$source_seed/native/store_embed.c" | awk '{print $1}')" \
-      "host-header-sha256 $(sha256sum "$source_seed/native/store.h" | awk '{print $1}')" \
-      "adapter-header-sha256 $(sha256sum "$source_seed/native/server_host.h" | awk '{print $1}')" \
-      "adapter-sha256 $(sha256sum "$source_seed/native/server_generated.c" | awk '{print $1}')" \
-      "wasm-host-source-sha256 $(sha256sum "$source_seed/native/store_wasm_host.c" | awk '{print $1}')" \
-      "wasm-seams-sha256 $(sha256sum "$source_seed/native/wasm-embed.seams" | awk '{print $1}')" \
+      "host-source-sha256 $(sha256sum "$store_seed/native/store_embed.c" | awk '{print $1}')" \
+      "host-header-sha256 $(sha256sum "$store_seed/native/store.h" | awk '{print $1}')" \
+      "adapter-header-sha256 $(sha256sum "$store_seed/native/server_host.h" | awk '{print $1}')" \
+      "adapter-sha256 $(sha256sum "$store_seed/native/server_generated.c" | awk '{print $1}')" \
+      "wasm-host-source-sha256 $(sha256sum "$store_seed/native/store_wasm_host.c" | awk '{print $1}')" \
+      "wasm-seams-sha256 $(sha256sum "$store_seed/native/wasm-embed.seams" | awk '{print $1}')" \
       'wasi-cc-sha256 2222222222222222222222222222222222222222222222222222222222222222' \
       'wasi-cc-version-sha256 3333333333333333333333333333333333333333333333333333333333333333' \
       'wasm-tools-sha256 4444444444444444444444444444444444444444444444444444444444444444' \
@@ -215,7 +219,7 @@ expect_failure member-link 'artifact file is unavailable or symlinked: lib/libst
   --output "$scratch/out-member-link" --version v1.2.3
 
 git clone -q --no-local "$source_seed" "$scratch/dirty"
-printf '%s\n' dirty >>"$scratch/dirty/LICENSE"
+printf '%s\n' dirty >>"$scratch/dirty/store/LICENSE"
 expect_failure dirty 'source worktree is not clean' \
   "$packager" --source-root "$scratch/dirty" --artifact "$artifact_a" \
   --output "$scratch/out-dirty" --version v1.2.3
