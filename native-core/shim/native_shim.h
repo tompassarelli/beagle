@@ -706,6 +706,11 @@ uint64_t native_host_stdin_read_text_bounded_or_die_v0(
 int32_t native_host_filesystem_list_directory_bounded_v0(
     native_arena *arena, const native_capability *capability, uint64_t path,
     int64_t max_entries, native_vec **out);
+/* Waits until one watched path changes. On success, out receives that input
+   path's Text handle; host failures return errno and leave out zero. */
+int32_t native_host_filesystem_wait_for_change_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *paths, uint64_t *out);
 int32_t native_host_filesystem_write_text_atomic_v0(
     const native_capability *capability, uint64_t path, uint64_t text);
 int32_t native_host_filesystem_make_parent_directories_v0(
