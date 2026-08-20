@@ -5516,11 +5516,19 @@
 
 ;; --- target compatibility warnings ----------------------------------------
 
+(define JS-SUPPORTED-SCALAR-OPS
+  (set 'symbol 'int 'double 'char))
+
 (define (warn-target-exclude sym node)
-  (define excludes (target-excludes-for (current-check-target)))
+  (define target (current-check-target))
+  (define raw-excludes (target-excludes-for target))
+  (define excludes
+    (if (eq? target 'js)
+        (set-subtract raw-excludes JS-SUPPORTED-SCALAR-OPS)
+        raw-excludes))
   (when (and excludes (set-member? excludes sym))
     (define src (src-for node))
-    (define tgt (current-check-target))
+    (define tgt target)
     (define display-name
       (if (qualified-ref? sym)
           (format "~a/~a" (qualified-ref-qualifier sym)

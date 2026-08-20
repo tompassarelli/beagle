@@ -1,0 +1,8 @@
+#lang beagle/js
+
+(ns js-s0-supported-scalars)
+
+(def scalar-symbol Symbol (symbol "alpha"))
+(def scalar-int Int (int 7.5))
+(def scalar-double Float (double 7))
+(def scalar-char Any (char 65))
