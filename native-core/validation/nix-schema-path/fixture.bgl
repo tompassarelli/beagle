@@ -25,10 +25,9 @@
     "     :services.openssh.enable false}})\n"))
 
 (defn occurrence=?
-  [(occurrence paths/OptionPathOccurrence)
-   (path String)
-   (offset Int)]
-  Bool
+  [occurrence paths/OptionPathOccurrence
+   path String
+   offset Int] Bool
   (and (= "fixture.bnix"
           (paths/optionpathoccurrence-source-id occurrence))
        (= path (paths/optionpathoccurrence-path occurrence))
@@ -62,16 +61,14 @@
       ["home-manager.users"])
     [(OptionPathError source-id offset message) false]
     [(OptionPaths occurrences)
-     (let [(uses (Vec paths/RemovedPathUse))
-           (paths/removed-path-uses
+     (let [uses (Vec paths/RemovedPathUse) (paths/removed-path-uses
              ["services.openssh.enable"
               "services.missing.enable"
               "services.printing.enable"]
              occurrences)
-           (openssh paths/RemovedPathUse) (nth uses 0)
-           (printing paths/RemovedPathUse) (nth uses 1)
-           (openssh-occurrences (Vec paths/OptionPathOccurrence))
-           (paths/removedpathuse-occurrences openssh)]
+           openssh paths/RemovedPathUse (nth uses 0)
+           printing paths/RemovedPathUse (nth uses 1)
+           openssh-occurrences (Vec paths/OptionPathOccurrence) (paths/removedpathuse-occurrences openssh)]
        (and (= 2 (count uses))
             (= "services.openssh.enable"
                (paths/removedpathuse-path openssh))
@@ -88,8 +85,7 @@
                (count (paths/removedpathuse-occurrences printing)))))]))
 
 (defn ranking-case [] Bool
-  (let [(ranked (Vec paths/PathSuggestion))
-        (paths/rank-path-suggestions "ab" ["ac" "zz" "aa" "abc"] 3)]
+  (let [ranked (Vec paths/PathSuggestion) (paths/rank-path-suggestions "ab" ["ac" "zz" "aa" "abc"] 3)]
     (and (= 3 (paths/levenshtein-distance "kitten" "sitting"))
          (= 0 (paths/levenshtein-distance "same" "same"))
          (= 4 (paths/levenshtein-distance "" "path"))

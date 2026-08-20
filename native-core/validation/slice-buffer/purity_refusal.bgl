@@ -3,8 +3,8 @@
 
 ;; Mutation is visible at both call boundaries: the primitive and its helper
 ;; carry `!`, so this unmarked wrapper is rejected by ordinary purity tracking.
-(defn overwrite-buffer! [(buffer (Buffer Float))] Float
+(defn overwrite-buffer! [buffer (Buffer Float)] Float
   (aset-double! buffer 0 1.0))
 
-(defn overwrite [(buffer (Buffer Float))] Float
+(defn overwrite [buffer (Buffer Float)] Float
   (overwrite-buffer! buffer))

@@ -1,10 +1,10 @@
 #lang beagle
 (ns native.nullable-text-index-fixture)
 
-(defn includes-dot? [(value String)] Bool
+(defn includes-dot? [value String] Bool
   (str/includes? value "."))
 
-(defn index-present? [(value String)] Bool
+(defn index-present? [value String] Bool
   (some? (str/index-of value ".")))
 
 (defn main [] Int

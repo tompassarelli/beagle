@@ -3,10 +3,12 @@
 
 (def append-count Int 32768)
 
-(defrecord PairedBuild [(left (Vec Int)) (right (Vec Bool))])
+(defrecord PairedBuild
+  [left (Vec Int)
+   right (Vec Bool)])
 
 (defn build-ordered! [] (Vec Int)
-  (let [(seed (Vec Int)) []]
+  (let [seed (Vec Int) []]
     (persistent!
       (loop [index Int 0
              builder (TransientVec Int) (transient seed)]
@@ -15,12 +17,12 @@
           builder)))))
 
 (defn copy-nonempty! [] (Vec Int)
-  (let [(seed (Vec Int)) [41]]
+  (let [seed (Vec Int) [41]]
     (persistent! (transient seed))))
 
 (defn build-paired! [] PairedBuild
-  (let [(empty-left (Vec Int)) []
-        (empty-right (Vec Bool)) []]
+  (let [empty-left (Vec Int) []
+        empty-right (Vec Bool) []]
     (loop [index Int 0
            left (TransientVec Int) (transient empty-left)
            right (TransientVec Bool) (transient empty-right)]

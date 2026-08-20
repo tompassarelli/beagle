@@ -3,7 +3,7 @@
 (require clojure.string :as str)
 
 (defn last-index-found? [] Bool
-  (let [(found (U Int Nil)) (str/last-index-of "ababa" "ba")]
+  (let [found (U Int Nil) (str/last-index-of "ababa" "ba")]
     (and (some? found) (= found 3))))
 
 (defn last-index-missing? [] Bool

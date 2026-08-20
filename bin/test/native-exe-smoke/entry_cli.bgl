@@ -1,7 +1,7 @@
 #lang beagle
 (ns native.cli-entry)
 
-(defn cli-main [(args (Vec String))] Int
+(defn cli-main [args (Vec String)] Int
   (if (and (= (count args) 2)
            (= (nth args 0) "left")
            (= (nth args 1) "right"))

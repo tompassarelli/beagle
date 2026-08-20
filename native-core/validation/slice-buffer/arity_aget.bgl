@@ -1,5 +1,5 @@
 #lang beagle
 (ns native.buffer-arity-aget)
 
-(defn bad-aget [(buffer (Buffer Float))] Float
+(defn bad-aget [buffer (Buffer Float)] Float
   (aget buffer))

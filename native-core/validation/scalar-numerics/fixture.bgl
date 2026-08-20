@@ -1,84 +1,128 @@
 #lang beagle
 (ns native.scalar-numerics)
 
-(defn i64-add [(left Int) (right Int)] Int
+(defn i64-add
+  [left Int
+   right Int] Int
   (+ left right))
 
-(defn i64-subtract [(left Int) (right Int)] Int
+(defn i64-subtract
+  [left Int
+   right Int] Int
   (- left right))
 
-(defn i64-multiply [(left Int) (right Int)] Int
+(defn i64-multiply
+  [left Int
+   right Int] Int
   (* left right))
 
-(defn i64-negate [(value Int)] Int
+(defn i64-negate [value Int] Int
   (- value))
 
-(defn i64-add-three-left [(first Int) (second Int) (third Int)] Int
+(defn i64-add-three-left
+  [first Int
+   second Int
+   third Int] Int
   (+ first second third))
 
-(defn i64-add-three-right [(first Int) (second Int) (third Int)] Int
+(defn i64-add-three-right
+  [first Int
+   second Int
+   third Int] Int
   (+ first (+ second third)))
 
-(defn i64-quotient [(left Int) (right Int)] Int
+(defn i64-quotient
+  [left Int
+   right Int] Int
   (quot left right))
 
-(defn i64-remainder [(left Int) (right Int)] Int
+(defn i64-remainder
+  [left Int
+   right Int] Int
   (rem left right))
 
-(defn i64-modulus [(left Int) (right Int)] Int
+(defn i64-modulus
+  [left Int
+   right Int] Int
   (mod left right))
 
-(defn f64-to-bits [(value Float)] Int
+(defn f64-to-bits [value Float] Int
   (float-to-bits value))
 
-(defn f64-from-bits [(value Int)] Float
+(defn f64-from-bits [value Int] Float
   (float-from-bits value))
 
-(defn i64-truncate-bits [(value Int)] Int
+(defn i64-truncate-bits [value Int] Int
   (long (float-from-bits value)))
 
-(defn f64-add-bits [(left Int) (right Int)] Int
+(defn f64-add-bits
+  [left Int
+   right Int] Int
   (float-to-bits
     (+ (float-from-bits left) (float-from-bits right))))
 
-(defn f64-subtract-bits [(left Int) (right Int)] Int
+(defn f64-subtract-bits
+  [left Int
+   right Int] Int
   (float-to-bits
     (- (float-from-bits left) (float-from-bits right))))
 
-(defn f64-multiply-bits [(left Int) (right Int)] Int
+(defn f64-multiply-bits
+  [left Int
+   right Int] Int
   (float-to-bits
     (* (float-from-bits left) (float-from-bits right))))
 
-(defn f64-divide-bits [(left Int) (right Int)] Int
+(defn f64-divide-bits
+  [left Int
+   right Int] Int
   (float-to-bits
     (/ (float-from-bits left) (float-from-bits right))))
 
-(defn f64-equal-bits? [(left Int) (right Int)] Bool
+(defn f64-equal-bits?
+  [left Int
+   right Int] Bool
   (= (float-from-bits left) (float-from-bits right)))
 
-(defn f64-less-bits? [(left Int) (right Int)] Bool
+(defn f64-less-bits?
+  [left Int
+   right Int] Bool
   (< (float-from-bits left) (float-from-bits right)))
 
-(defn f64-less-equal-bits? [(left Int) (right Int)] Bool
+(defn f64-less-equal-bits?
+  [left Int
+   right Int] Bool
   (<= (float-from-bits left) (float-from-bits right)))
 
-(defn f64-add-left-bits [(first Int) (second Int) (third Int)] Int
+(defn f64-add-left-bits
+  [first Int
+   second Int
+   third Int] Int
   (float-to-bits
     (+ (+ (float-from-bits first) (float-from-bits second))
       (float-from-bits third))))
 
-(defn f64-add-right-bits [(first Int) (second Int) (third Int)] Int
+(defn f64-add-right-bits
+  [first Int
+   second Int
+   third Int] Int
   (float-to-bits
     (+ (float-from-bits first)
       (+ (float-from-bits second) (float-from-bits third)))))
 
-(defn f64-multiply-then-add-bits [(left Int) (right Int) (addend Int)] Int
+(defn f64-multiply-then-add-bits
+  [left Int
+   right Int
+   addend Int] Int
   (float-to-bits
     (+ (* (float-from-bits left) (float-from-bits right))
       (float-from-bits addend))))
 
-(defn f64-kernel [(x-bits Int) (y-bits Int) (scale-bits Int)] Float
-  (let [(x Float) (float-from-bits x-bits)
-        (y Float) (float-from-bits y-bits)
-        (scale Float) (float-from-bits scale-bits)]
+(defn f64-kernel
+  [x-bits Int
+   y-bits Int
+   scale-bits Int] Float
+  (let [x Float (float-from-bits x-bits)
+        y Float (float-from-bits y-bits)
+        scale Float (float-from-bits scale-bits)]
     (/ (+ (* x x) (* y y)) scale)))

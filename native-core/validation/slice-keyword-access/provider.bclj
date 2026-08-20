@@ -1,7 +1,7 @@
 #lang beagle/clj
 (ns native.keyword-provider)
 
-(defrecord Pair [(value String)])
+(defrecord Pair [value String])
 
-(defn pair? [(value Any)] Bool
+(defn pair? [value Any] Bool
   (instance? Pair value))

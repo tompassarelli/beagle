@@ -2,16 +2,18 @@
 
 (ns native.vector-named-callback-provider)
 
-(defrecord Item [(value Int)])
+(defrecord Item [value Int])
 
-(defn item-to-int [(item Item)] Int
+(defn item-to-int [item Item] Int
   (item-value item))
 
-(defn item-positive? [(item Item)] Bool
+(defn item-positive? [item Item] Bool
   (> (item-value item) 0))
 
-(defn item-present [(item Item)] (U Int Nil)
+(defn item-present [item Item] (U Int Nil)
   (if (> (item-value item) 8) (item-value item) nil))
 
-(defn item-add [(acc Int) (item Item)] Int
+(defn item-add
+  [acc Int
+   item Item] Int
   (+ acc (item-value item)))

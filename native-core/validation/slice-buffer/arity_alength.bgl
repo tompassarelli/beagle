@@ -1,5 +1,5 @@
 #lang beagle
 (ns native.buffer-arity-alength)
 
-(defn bad-alength [(buffer (Buffer Float))] Int
+(defn bad-alength [buffer (Buffer Float)] Int
   (alength buffer 1))

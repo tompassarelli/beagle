@@ -1,4 +1,6 @@
 #lang beagle/clj
 (ns fc.recursive)
-(defrecord Tree [(value Int) (children (Vec Tree))])
-(defn root-val [(t Tree)] Int (tree-value t))
+(defrecord Tree
+  [value Int
+   children (Vec Tree)])
+(defn root-val [t Tree] Int (tree-value t))

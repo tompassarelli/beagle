@@ -1,7 +1,9 @@
 #lang beagle
 (ns native.real-path-probe)
 
-(defn resolves? [link String target String] Bool
+(defn resolves?
+  [link String
+   target String] Bool
   (match (host.fs/real-path link)
     [(host.fs/RealPathOk path) (= path target)]
     [(host.fs/RealPathError errno) false]))

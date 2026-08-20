@@ -5,6 +5,6 @@
 (def af Any #(+ % 1))
 (def rt Any 1/2)
 (def big Any 12345678901234567890)
-(defn ^:private p [(a Any)] Any a)
+(defn ^:private p [a Any] Any a)
 (def nested Any [[[[1]]]])
 (def kw Any :foo/bar)

@@ -8,7 +8,8 @@
 
 (defn relation-count
   [rows (Vec facts/CompilerFact) relation Keyword] Int
-  (loop [remaining (Vec facts/CompilerFact) rows total Int 0]
+  (loop [remaining (Vec facts/CompilerFact) rows
+         total Int 0]
     (if (empty? remaining)
       total
       (let [row facts/CompilerFact (first remaining)]
@@ -42,8 +43,7 @@
            "smoke.bgl" smoke-source "fixture-digest" "core")
     [(FactsRead bundle)
      (let [rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts bundle)
-           root String
-           (facts/canonical-node-subject
+           root String (facts/canonical-node-subject
              "fixture-digest" 0 (count (utf8-encode smoke-source)) :syntax/root 0)]
        (and (facts/canonical-fact-order? rows)
             (> (relation-count rows :syntax/node) 0)

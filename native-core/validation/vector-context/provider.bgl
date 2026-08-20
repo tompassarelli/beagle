@@ -5,4 +5,6 @@
 
 (defunion Event
   (EventStarted [offset Int])
-  (EventText [offset Int text String]))
+  (EventText
+    [offset Int
+     text String]))

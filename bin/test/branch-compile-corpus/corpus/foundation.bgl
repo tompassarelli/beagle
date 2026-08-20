@@ -1,11 +1,11 @@
 #lang beagle
 (ns corpus.foundation)
 
-(defn- private-offset [(value Int)] Int
+(defn- private-offset [value Int] Int
   (+ value 1))
 
-(defn adjust [(value Int)] Int
+(defn adjust [value Int] Int
   (private-offset value))
 
-(defn double-value [(value Int)] Int
+(defn double-value [value Int] Int
   (* value 2))

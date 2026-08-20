@@ -2,10 +2,10 @@
 (ns native.short-circuit)
 
 (defn nested-short-circuit
-  [(outer Bool)
-   (left Bool)
-   (middle Bool)
-   (right Bool)] Bool
+  [outer Bool
+   left Bool
+   middle Bool
+   right Bool] Bool
   (if (and outer
         (and (or left middle)
           (and middle right)))

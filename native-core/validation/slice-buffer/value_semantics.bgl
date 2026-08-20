@@ -2,5 +2,5 @@
 (ns native.buffer-value-semantics)
 
 ;; Mutable buffer identity is deliberately outside generic value semantics.
-(defn same-buffer? [(buffer (Buffer Float))] Bool
+(defn same-buffer? [buffer (Buffer Float)] Bool
   (= buffer buffer))

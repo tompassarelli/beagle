@@ -2,5 +2,5 @@
 (ns native.buffer-wrong-element)
 
 ;; The general source constructor parses, but Native Buffer v0 admits only F64.
-(defn identity-buffer [(buffer (Buffer Int))] (Buffer Int)
+(defn identity-buffer [buffer (Buffer Int)] (Buffer Int)
   buffer)

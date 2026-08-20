@@ -3,7 +3,7 @@
 
 ;; Explicit structure-of-buffers composition is ordinary semantic structure:
 ;; the record stores a Buffer handle without changing record or Vec layout.
-(defrecord Holder [(buffer (Buffer Float))])
+(defrecord Holder [buffer (Buffer Float)])
 
 (defn make-holder-buffer! [] (Buffer Float)
   (let [buffer (double-array 2)
@@ -11,13 +11,13 @@
     (aset-double! buffer 1 6.0)
     (holder-buffer holder)))
 
-(defn holder-first [(holder Holder)] Float
+(defn holder-first [holder Holder] Float
   (aget (holder-buffer holder) 0))
 
 ;; The intermediate call has no direct Buffer instruction. Its arena must
 ;; still remain the holder's durable arena because the callee reads that
 ;; Buffer through the record parameter.
-(defn indirect-holder-first [(holder Holder)] Float
+(defn indirect-holder-first [holder Holder] Float
   (holder-first holder))
 
 (defn derived-holder-call! [] Int

@@ -1,8 +1,9 @@
 #lang beagle/clj
 (ns fc.multiarity)
 (defn greet
-  ([(name String)] String
+  ([name String] String
     (str "Hi " name))
-  ([(name String) (title String)] String
+  ([name String
+    title String] String
     (str "Hi " title " " name)))
-(defn use-it [(n String)] String (greet n))
+(defn use-it [n String] String (greet n))

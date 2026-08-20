@@ -5,8 +5,8 @@
 ;; in its own module so the fixture module stays annotation-free for Int.
 
 (defunion Result
-  (Loaded [(values (Vec Int))])
-  (Rejected [(message String)]))
+  (Loaded [values (Vec Int)])
+  (Rejected [message String]))
 
 (defn build [] (Vec Int)
   [4 5 6])

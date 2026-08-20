@@ -3,22 +3,21 @@
 
 
 (defrecord PackedValue
-  [(coordinate I32)
-   (revision U32)
-   (phi I16)
-   (material U8)])
+  [coordinate I32
+   revision U32
+   phi I16
+   material U8])
 
-(defn keep-i32 [(value I32)] I32 value)
+(defn keep-i32 [value I32] I32 value)
 
-(defn keep-u32 [(value U32)] U32 value)
+(defn keep-u32 [value U32] U32 value)
 
-(defn keep-i16 [(value I16)] I16 value)
+(defn keep-i16 [value I16] I16 value)
 
-(defn keep-u8 [(value U8)] U8 value)
+(defn keep-u8 [value U8] U8 value)
 
 (defn layout-entry [] Int
-  (let [(packed PackedValue)
-        (->PackedValue (keep-i32 -42000) (keep-u32 4000000000)
+  (let [packed PackedValue (->PackedValue (keep-i32 -42000) (keep-u32 4000000000)
           (keep-i16 -1234) (keep-u8 255))]
     (if (and (= packed packed)
              (= (:coordinate packed) -42000)

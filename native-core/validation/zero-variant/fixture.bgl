@@ -2,12 +2,12 @@
 (ns native.zero-variant-fixture
   (:require [native.zero-variant-action :as action]))
 
-(defn status [(value action/Action)] Int
+(defn status [value action/Action] Int
   (match value
     [(Start) 17]
     [(Stop) 23]))
 
-(defn -main [(args (Vec String))] Int
+(defn -main [args (Vec String)] Int
   (if (and (= 1 (count args)) (= "stop" (first args)))
     (status (action/stop))
     (status (action/start))))

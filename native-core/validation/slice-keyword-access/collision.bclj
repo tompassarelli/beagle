@@ -1,4 +1,4 @@
 #lang beagle/clj
 (ns native.keyword-access)
 
-(defrecord Pair [(value String)])
+(defrecord Pair [value String])

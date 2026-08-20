@@ -2,7 +2,7 @@
 (ns native.record-with-unknown-field)
 
 
-(defrecord Fighter [(health Int)])
+(defrecord Fighter [health Int])
 
 (defn entry [] Fighter
   (with (->Fighter 40) [:mana 12]))

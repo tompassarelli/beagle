@@ -5,4 +5,4 @@
 ;; surface while hosted sources are checked as a closed module graph.
 (ns resolve)
 
-(defn blast-closure [(forward Any)] Any nil)
+(defn blast-closure [forward Any] Any nil)

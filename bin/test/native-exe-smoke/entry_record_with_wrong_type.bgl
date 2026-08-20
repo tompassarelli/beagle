@@ -2,7 +2,7 @@
 (ns native.record-with-wrong-type)
 
 
-(defrecord Fighter [(health Int)])
+(defrecord Fighter [health Int])
 
 (defn entry [] Fighter
   (with (->Fighter 40) [:health "hurt"]))

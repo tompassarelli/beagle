@@ -4,9 +4,9 @@
 
 (def seed Int 2)
 
-(defrecord Box [(value Int)])
+(defrecord Box [value Int])
 
-(defn box-value [(box Box)] Int
+(defn box-value [box Box] Int
   (:value box))
 
 (defn helper [] Int
@@ -30,19 +30,19 @@
   (call-helper))
 
 (defunion ProjectionUnion
-  (ProjectionValue [(value Int)]))
+  (ProjectionValue [value Int]))
 
 (defunion :throwable ProjectionError
-  (ProjectionFailure [(value ProjectionUnion)]))
+  (ProjectionFailure [value ProjectionUnion]))
 
-(defn typed-helper [(problem ProjectionError)] Int
+(defn typed-helper [problem ProjectionError] Int
   4)
 
 (defn typed-entry [] Int
   (typed-helper (->ProjectionFailure (->ProjectionValue 4))))
 
 (defn unreachable [] Int
-  ((fn [(value Int)] Int value) 0))
+  ((fn [value Int] Int value) 0))
 
 (defn bad-entry [] Int
   (unreachable))

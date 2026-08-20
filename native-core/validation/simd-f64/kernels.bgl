@@ -1,7 +1,9 @@
 #lang beagle
 (ns native.simd-f64-kernels)
 
-(defn copy! [(source (Buffer Float)) (destination (Buffer Float))] Float
+(defn copy!
+  [source (Buffer Float)
+   destination (Buffer Float)] Float
   (let [length (alength source)]
     (if (not= length (alength destination))
       0.0
@@ -13,10 +15,9 @@
           (if (zero? length) 0.0 (aget destination 0)))))))
 
 (defn add!
-  [(left (Buffer Float))
-   (right (Buffer Float))
-   (destination (Buffer Float))]
-  Float
+  [left (Buffer Float)
+   right (Buffer Float)
+   destination (Buffer Float)] Float
   (let [length (alength left)]
     (if (or (not= length (alength right))
           (not= length (alength destination)))
@@ -30,10 +31,9 @@
           (if (zero? length) 0.0 (aget destination 0)))))))
 
 (defn subtract!
-  [(left (Buffer Float))
-   (right (Buffer Float))
-   (destination (Buffer Float))]
-  Float
+  [left (Buffer Float)
+   right (Buffer Float)
+   destination (Buffer Float)] Float
   (let [length (alength left)]
     (if (or (not= length (alength right))
           (not= length (alength destination)))
@@ -47,10 +47,9 @@
           (if (zero? length) 0.0 (aget destination 0)))))))
 
 (defn multiply!
-  [(left (Buffer Float))
-   (right (Buffer Float))
-   (destination (Buffer Float))]
-  Float
+  [left (Buffer Float)
+   right (Buffer Float)
+   destination (Buffer Float)] Float
   (let [length (alength left)]
     (if (or (not= length (alength right))
           (not= length (alength destination)))
@@ -64,11 +63,10 @@
           (if (zero? length) 0.0 (aget destination 0)))))))
 
 (defn multiply-add!
-  [(left (Buffer Float))
-   (right (Buffer Float))
-   (addend (Buffer Float))
-   (destination (Buffer Float))]
-  Float
+  [left (Buffer Float)
+   right (Buffer Float)
+   addend (Buffer Float)
+   destination (Buffer Float)] Float
   (let [length (alength left)]
     (if (or (not= length (alength right))
           (not= length (alength addend))
@@ -85,7 +83,9 @@
 
 ;; Reverse reads carry a dependence when destination aliases source. V0 keeps
 ;; this loop scalar instead of speculating about overlap.
-(defn reverse-copy! [(source (Buffer Float)) (destination (Buffer Float))] Float
+(defn reverse-copy!
+  [source (Buffer Float)
+   destination (Buffer Float)] Float
   (let [length (alength source)]
     (if (not= length (alength destination))
       0.0

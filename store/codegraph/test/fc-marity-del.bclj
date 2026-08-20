@@ -2,7 +2,8 @@
 (ns fc.marity-del)
 (def base Int 10)
 (defn scale
-  ([(x Int)] Int
+  ([x Int] Int
     (* x base))
-  ([(x Int) (y Int)] Int
+  ([x Int
+    y Int] Int
     (+ (* x base) y)))

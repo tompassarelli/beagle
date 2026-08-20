@@ -3,7 +3,7 @@
 
 ;; Buffer v0 is the mutable dense carrier; every persistent aggregate remains
 ;; an ordinary Vec/record and is never transposed into this representation.
-(defn fill! [(buffer (Buffer Float))] Float
+(defn fill! [buffer (Buffer Float)] Float
   (if (zero? (alength buffer))
     0.0
     (loop [index Int 0]
@@ -13,7 +13,9 @@
           (recur (+ index 1)))
         (aget buffer 0)))))
 
-(defn stencil! [(source (Buffer Float)) (destination (Buffer Float))] Float
+(defn stencil!
+  [source (Buffer Float)
+   destination (Buffer Float)] Float
   (let [length (alength source)]
     (if (or (zero? length) (not= length (alength destination)))
       0.0
@@ -30,16 +32,20 @@
               (recur (+ index 1)))
             (aget destination 0)))))))
 
-(defn read-at [(buffer (Buffer Float)) (index Int)] Float
+(defn read-at
+  [buffer (Buffer Float)
+   index Int] Float
   (aget buffer index))
 
-(defn write-at! [(buffer (Buffer Float)) (index Int)] Float
+(defn write-at!
+  [buffer (Buffer Float)
+   index Int] Float
   (aset-double! buffer index 4.0))
 
 ;; Both Buffer constructions occur before the time-step loop. Each allocates
 ;; one dense arena span and one durable checked handle outside resettable arena
 ;; storage. The loop only swaps handles and performs checked scalar writes.
-(defn run-stencil! [(steps Int)] Float
+(defn run-stencil! [steps Int] Float
   (if (neg? steps)
     0.0
     (let [left (double-array 8)

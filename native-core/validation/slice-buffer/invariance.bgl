@@ -1,8 +1,8 @@
 #lang beagle
 (ns native.buffer-invariance)
 
-(defn accept-any-buffer [(buffer (Buffer Any))] Nil
+(defn accept-any-buffer [buffer (Buffer Any)] Nil
   nil)
 
-(defn reject-buffer-widening [(buffer (Buffer Float))] Nil
+(defn reject-buffer-widening [buffer (Buffer Float)] Nil
   (accept-any-buffer buffer))

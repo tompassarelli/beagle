@@ -2,12 +2,14 @@
 (ns native.buffer-vector-value-semantics)
 
 (defn buffers-equal?
-  [(left (Vec (Buffer Float))) (right (Vec (Buffer Float)))] Bool
+  [left (Vec (Buffer Float))
+   right (Vec (Buffer Float))] Bool
   (= left right))
 
-(defn buffers-hash [(value (Vec (Buffer Float)))] Int
+(defn buffers-hash [value (Vec (Buffer Float))] Int
   (hash value))
 
 (defn buffers-compare
-  [(left (Vec (Buffer Float))) (right (Vec (Buffer Float)))] Int
+  [left (Vec (Buffer Float))
+   right (Vec (Buffer Float))] Int
   (compare left right))

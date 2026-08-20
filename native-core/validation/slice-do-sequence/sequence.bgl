@@ -1,32 +1,32 @@
 #lang beagle
 (ns native.do-sequence-validation)
 
-(defn body-last [(x Int)] Int
+(defn body-last [x Int] Int
   (+ x 1)
   (+ x 2))
 
-(defn do-last [(x Int)] Int
+(defn do-last [x Int] Int
   (do
     (+ x 3)
     (+ x 4)))
 
-(defn do-first-traps [(x Int)] Int
+(defn do-first-traps [x Int] Int
   (do
     (+ x 1)
     7))
 
-(defn do-ref-last [(x Int)] Int
+(defn do-ref-last [x Int] Int
   (do
     x
     11))
 
-(defn do-branch-last [(flag Bool)] Int
+(defn do-branch-last [flag Bool] Int
   (do
     (if flag 1 2)
     12))
 
-(defn do-empty [(x Int)] Int
+(defn do-empty [x Int] Int
   (do x))
 
-(defn do-doseq [(x Int)] Int
+(defn do-doseq [x Int] Int
   (do x))

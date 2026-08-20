@@ -1,5 +1,5 @@
 #lang beagle
 (ns native.buffer-negative-length)
 
-(defn allocate-length [(length Int)] (Buffer Float)
+(defn allocate-length [length Int] (Buffer Float)
   (double-array length))
