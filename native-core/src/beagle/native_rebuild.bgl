@@ -6,6 +6,8 @@
 (def max-rebuild-bundle-bytes Int 268435456)
 (def artifact-envelope-marker String "artifact-envelope")
 (def lineage-filename String "/beagle-native-lineage.edn")
+(def source-facts-content-id-filename String "source.facts.content-id")
+(def native-program-content-id-filename String "module.native-program.content-id")
 
 (defrecord NativeRebuildBundleV1
   [semantic-content-id String
@@ -64,14 +66,20 @@
 (defn artifact-semantic-content-id
   [artifact linker/TargetArtifactV1] String?
   (let [source-facts linker/ArtifactFileV1?
-        (artifact-file artifact "source.facts")
+        (artifact-file artifact source-facts-content-id-filename)
         native-program linker/ArtifactFileV1?
-        (artifact-file artifact "module.native-program")]
+        (artifact-file artifact native-program-content-id-filename)]
     (if (or (nil? source-facts) (nil? native-program))
       nil
-      (bootstrap/rebuild-semantic-content-id
-        (linker/artifactfilev1-content-id source-facts)
-        (linker/artifactfilev1-content-id native-program)))))
+      (let [source-facts-content-id String
+            (linker/artifactfilev1-payload source-facts)
+            native-program-content-id String
+            (linker/artifactfilev1-payload native-program)]
+        (if (and (bootstrap/exact-content-id? source-facts-content-id)
+                 (bootstrap/exact-content-id? native-program-content-id))
+          (bootstrap/rebuild-semantic-content-id
+            source-facts-content-id native-program-content-id)
+          nil)))))
 
 (defn decode-rebuild-envelope
   [payload String
@@ -94,7 +102,7 @@
 
            (nil? derived-semantic-content-id)
            (->NativeRebuildBundleRejectedV1 65
-             "rebuild bundle omits normalized facts or native program")
+             "rebuild bundle omits semantic input content IDs")
 
            (not= semantic-content-id derived-semantic-content-id)
            (->NativeRebuildBundleRejectedV1 65

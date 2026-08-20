@@ -9,12 +9,16 @@
   (CliModuleRootsReady [roots (Vec resolver/ModuleSourceRootV1)])
   (CliModuleRootsRejected [code Int detail String]))
 
+(defn write-native-usage [] Nil
+  (do
+    (host.stderr/write-line bootstrap/rebuild-next-command-usage)
+    (host.stderr/write-line bootstrap/bootstrap-contract-command-usage)))
+
 (defn write-usage [] Nil
   (do
     (host.stderr/write-line "usage: beagle syntax SOURCE")
     (host.stderr/write-line bootstrap/compile-command-usage)
-    (host.stderr/write-line bootstrap/rebuild-next-command-usage)
-    (host.stderr/write-line bootstrap/bootstrap-contract-command-usage)))
+    (write-native-usage)))
 
 (defn bootstrap-contract-command [args (Vec String)] Int
   (if (empty? args)
@@ -183,20 +187,19 @@
 
 (defn native-main [args (Vec String)] Int
   (if (empty? args)
-    (do (write-usage) 64)
+    (do (write-native-usage) 64)
     (let [command String (first args)
           command-args (Vec String) (subvec args 1)]
       (cond
-        (= command "syntax") (syntax-command command-args)
         (= command "rebuild-next") (rebuild-next-command command-args)
         (= command "bootstrap-contract")
         (bootstrap-contract-command command-args)
         (or (= command "--help") (= command "-h"))
-        (do (write-usage) 0)
+        (do (write-native-usage) 0)
         :else
         (do
           (host.stderr/write-line (str "beagle: unknown native command: " command))
-          (write-usage)
+          (write-native-usage)
           64)))))
 
 (defn main [args (Vec String)] Int
