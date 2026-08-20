@@ -151,7 +151,7 @@
         modules (Vec stages/SourceModuleV1) (stages/sourcestagev1-modules source)]
     (if (not (unit/source-units-supported? units))
       (->UnitPreparationRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
-        "preparation accepts exactly the nine defn branch corpus units")
+        "preparation requires a nonempty closure of unique defn units")
       (let [prelude lower/TypingPreludeV0 (lower/prepare-typing-prelude frozen-source configuration)
             env lower/BodyEnvV0 (lower/typingpreludev0-env prelude)
             index lower/SourceIndexV0 (lower/bodyenvv0-index env)
@@ -269,7 +269,7 @@
           ;; The prelude's types are a BASE, never the closed set: a body
           ;; contributes types of its own, such as the checked-arithmetic
           ;; outcome family.  The merge is the same fold the whole path
-          ;; runs over all nine resolutions, applied to this one, and it
+          ;; runs over all resolutions, applied to this one, and it
           ;; must precede selection because reachability only follows
           ;; references through types present in the vector it is given.
           ;; A target at the settlement fixpoint carries only the pure
@@ -318,7 +318,7 @@
 
 ;; Native ABI identity has one non-local input: function-abi embeds the digest
 ;; of the FULL candidate layout set, so this may run only once a complete,
-;; collision-free nine-unit typed set exists.  Resolving layouts for types is
+;; collision-free closure typed set exists.  Resolving layouts for types is
 ;; allowed here; lowering another function body is not.
 (defn compile-native-unit
   [prepared PreparedCandidateV0
@@ -358,7 +358,7 @@
       (not (unit/exact-id-set? (unit/source-unit-ids units)
              (unit/typed-unit-ids candidate-typed-units)))
       (->NativeUnitCompileRejectedV0 "UNIT-NATIVE-SET"
-        "the candidate typed set is not the exact nine-unit source set"
+        "the candidate typed set is not the exact source closure"
         target-unit-id)
 
       (not (at-settlement-fixpoint? function))

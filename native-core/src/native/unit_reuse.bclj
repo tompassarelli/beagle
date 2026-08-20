@@ -2227,7 +2227,7 @@
                (core/regiondef-id region)))
     regions))
 
-(declare typed-unit-record-valid? native-unit-record-valid?)
+(declare source-units-supported? typed-unit-record-valid? native-unit-record-valid?)
 
 (defn extract-unit-payloads
   [source stages/SourceStageV1
@@ -2239,9 +2239,9 @@
         typed-functions (Vec lower/TypedFunctionV0) (lower/typedslicev0-functions typed-slice)
         native-program core/NativeCoreProgram (stages/nativestagev0-program
           (stages/frozennativestagev0-stage native-frozen))]
-    (if (not= 9 (count units))
-      (->UnitExtractionRejectedV0 "UNIT-CORPUS-SIZE"
-        (str "expected exactly nine source units, found " (count units)))
+    (if (not (source-units-supported? units))
+      (->UnitExtractionRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
+        "unit extraction requires a nonempty closure of unique defn units")
       (loop [position Int 0
              contracts (Vec UnitContractV0) []
              typed-units (Vec TypedUnitV0) []
@@ -3315,9 +3315,9 @@
   [typed-functions (Vec lower/TypedFunctionV0)
    native-functions (Vec core/FunctionDef)
    abis (Vec core/AbiDeclV0)] Bool
-  (and (= 9 (count typed-functions))
-    (= 9 (count native-functions))
-    (= 9 (count abis))
+  (and (> (count typed-functions) 0)
+    (= (count typed-functions) (count native-functions))
+    (= (count typed-functions) (count abis))
     (every?
       (fn [function lower/TypedFunctionV0] Bool
         (and (= 1 (count (lower/typedfunctionv0-effects function)))
@@ -3340,11 +3340,15 @@
       abis)))
 
 (defn source-units-supported? [units (Vec stages/SourceUnitV0)] Bool
-  (and (= 9 (count units))
-    (core/unique-ids? (source-unit-ids units))
+  (let [unit-ids (Vec core/NativeId) (source-unit-ids units)]
+    (and (> (count units) 0)
+    (core/unique-ids? unit-ids)
     (every? (fn [unit stages/SourceUnitV0] Bool
               (= "defn" (stages/sourceunitv0-kind unit)))
-      units)))
+      units)
+    (every? (fn [unit stages/SourceUnitV0] Bool
+              (core/ids-in? (stages/sourceunitv0-read-set unit) unit-ids))
+      units))))
 
 (defn make-frozen-typed
   [source-digest String
@@ -3464,7 +3468,7 @@
     (cond
       (not (source-units-supported? source-units))
       (->UnitAssemblyRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
-        "assembly accepts exactly the nine defn branch corpus units")
+        "assembly requires a nonempty closure of unique defn units")
 
       (not (unit-sets-exact? source-units contracts typed-units native-units))
       (->UnitAssemblyRejectedV0 "UNIT-SET-MISMATCH"
@@ -3498,7 +3502,7 @@
 
           (not (bounded-functions? typed-functions native-functions abis))
           (->UnitAssemblyRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
-            "the branch corpus requires nine pure definitions and exports")
+            "the closure requires one pure definition and export per source unit")
 
           (not (abi-layout-digests-match? abis layouts))
           (->UnitAssemblyRejectedV0 "UNIT-ABI-LAYOUT-DIGEST"
