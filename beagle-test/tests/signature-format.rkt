@@ -185,6 +185,23 @@
        "      z 2]\n"
        "  (f z z))\n")))))
 
+(test-case "qualified flat local type is not a legacy refinement"
+  (define source
+    (string-append
+     "(let [a terrain/TerrainBatch (filterv first? xs) "
+     "b (Vec Any) (filterv second? xs)] a)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [a terrain/TerrainBatch (filterv first? xs)\n"
+       "      b (Vec Any) (filterv second? xs)]\n"
+       "  a)\n")))))
+
 (test-case "width never changes a single-pair signature"
   (define name (make-string 120 #\f))
   (define source (format "(defn ~a [x Int] Int x)\n" name))

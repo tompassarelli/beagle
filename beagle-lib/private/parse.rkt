@@ -597,7 +597,12 @@
   (and items
        (let ([flat? (and (pair? items)
                          (pair? (cdr items))
-                         (type-expression-datum? (->datum (cadr items))))])
+                         (let ([type-datum (->datum (cadr items))])
+                           (or (type-expression-datum? type-datum)
+                               (and (symbol? type-datum)
+                                    (regexp-match?
+                                     #rx"/[A-Z][A-Za-z0-9_-]*$"
+                                     (symbol->string type-datum))))))])
          (let loop ([rest items] [acc '()])
            (cond
              [(null? rest) (reverse acc)]
