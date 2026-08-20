@@ -22,9 +22,6 @@
  (site (path "README.md")
        (note "headline target sentence, idiom clause, target table, pipeline diagram, emitter inventory"))
 
- (site (path "CLAUDE.md")
-       (note "target count in the architecture section; idiomatic-per-target clause in the generative spec"))
-
  (site (path "docs/architecture.md")
        (note "target spans externalized from the README restructure; registered so they cannot drift unowned"))
 
