@@ -39,6 +39,9 @@
             (callable-clause-shape 3 #t 'three-or-more))))))
 
 (test-case "rest bindings preserve ordered empty-or-more sequence semantics"
+  (check-eq? callable-rest-seq-constructor 'List)
+  (check-true (callable-rest-seq-type? 'List '(Int)))
+  (check-false (callable-rest-seq-type? 'Vec '(Int)))
   (check-equal? (callable-rest-seq '(head next tail) 1) '(next tail))
   (check-equal? (callable-rest-seq '(head next) 2) '()))
 
@@ -47,10 +50,10 @@
     (file->string (build-path fixtures-dir name)))
   (define accepted (fixture "anonymous-multi-rest.bjs"))
   (check-true (string-contains? accepted "(fn\n"))
-  (check-true (string-contains? accepted "& more (Vec Int)"))
+  (check-true (string-contains? accepted "& more (List Int)"))
   (check-false (string-contains? accepted "$arity"))
   (check-false (string-contains? accepted "applyTo"))
   (check-true
-   (string-contains? (fixture "arity-overlap.bjs") "& more (Vec Int)"))
+   (string-contains? (fixture "arity-overlap.bjs") "& more (List Int)"))
   (check-true
    (string-contains? (fixture "rest-seq-expectations.bjs") "(seq more)")))

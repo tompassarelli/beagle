@@ -6,5 +6,5 @@
 (def ambiguous Any
   (fn
     ([value Int] Int value)
-    ([first Int & more (Vec Int)] Int
+    ([first Int & more (List Int)] Int
      (+ first (count more)))))

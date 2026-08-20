@@ -4,5 +4,5 @@
 (def choose Any
   (fn
     ([value Int] Int value)
-    ([first Int second Int & more (Vec Int)] Int
+    ([first Int second Int & more (List Int)] Int
      (+ first second (count more)))))

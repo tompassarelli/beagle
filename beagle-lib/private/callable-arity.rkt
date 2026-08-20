@@ -10,6 +10,13 @@
 (struct callable-clause-shape (fixed-arity rest? payload) #:transparent)
 (struct callable-shape (clauses) #:transparent)
 
+(define callable-rest-seq-constructor 'List)
+
+(define (callable-rest-seq-type? constructor arguments)
+  (and (eq? constructor callable-rest-seq-constructor)
+       (list? arguments)
+       (= (length arguments) 1)))
+
 (define (valid-clause-shape? clause)
   (and (callable-clause-shape? clause)
        (exact-nonnegative-integer? (callable-clause-shape-fixed-arity clause))
@@ -70,6 +77,8 @@
 (provide
  (struct-out callable-clause-shape)
  (struct-out callable-shape)
+ callable-rest-seq-constructor
+ callable-rest-seq-type?
  callable-clause-accepts-arity?
  callable-clauses-overlap?
  make-callable-shape

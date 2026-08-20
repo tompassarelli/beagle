@@ -17,6 +17,7 @@
          "nixos-schema.rkt"
          "macros.rkt"
          "diagnostic-kind.rkt"
+         "callable-arity.rkt"
          "type-facts-v1.rkt")
 
 (define (named-reference? ref)
@@ -2633,32 +2634,47 @@
     [else ANY]))
 
 (define (rest-binding-aggregate-type callable-element-type)
-  (type-app 'Vec (list callable-element-type)))
+  (type-app (if (eq? (current-check-target) 'js)
+                callable-rest-seq-constructor
+                'Vec)
+            (list callable-element-type)))
+
+(define (rest-binding-aggregate-type? type)
+  (and (type-app? type)
+       (= (length (type-app-args type)) 1)
+       (if (eq? (current-check-target) 'js)
+           (callable-rest-seq-type?
+            (type-app-ctor type)
+            (type-app-args type))
+           (eq? (type-app-ctor type) 'Vec))))
+
+(define (rest-binding-aggregate-description)
+  (if (eq? (current-check-target) 'js)
+      "(List Element)"
+      "(Vec Element)"))
 
 (define (rest-param-call-element-type rest-param [inference? #f])
   (define authored (and (param? rest-param) (param-type rest-param)))
   (cond
-    [(and authored (type-app? authored)
-          (eq? (type-app-ctor authored) 'Vec)
-     (= (length (type-app-args authored)) 1))
+    [(and authored (rest-binding-aggregate-type? authored))
      (car (type-app-args authored))]
     [authored
      (raise-diag
       'rest-annotation
-      (format "rest parameter annotation must describe its aggregate body binding as (Vec Element), got ~a"
+      (format "rest parameter annotation must describe its aggregate body binding as ~a, got ~a"
+              (rest-binding-aggregate-description)
               (type->string authored))
       (hasheq 'actual (type->string authored)
-              'expected "(Vec Element)"
-              'repair "write & (name (Vec Element))")
+              'expected (rest-binding-aggregate-description)
+              'repair (format "write & (name ~a)"
+                              (rest-binding-aggregate-description)))
       #:src (src-for rest-param))]
     [inference? (fresh-type-meta)]
     [else ANY]))
 
 (define (rest-param-body-type rest-param callable-element-type)
   (define authored (and (param? rest-param) (param-type rest-param)))
-  (if (and authored (type-app? authored)
-           (eq? (type-app-ctor authored) 'Vec)
-           (= (length (type-app-args authored)) 1))
+  (if (and authored (rest-binding-aggregate-type? authored))
       authored
       (rest-binding-aggregate-type callable-element-type)))
 

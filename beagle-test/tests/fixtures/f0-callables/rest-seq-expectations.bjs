@@ -2,7 +2,7 @@
 (ns f0.callables.rest-seq-expectations)
 
 (def rest-summary Any
-  (fn [head Int & more (Vec Int)] Int
+  (fn [head Int & more (List Int)] Int
     (if (seq more)
         (+ head (count more))
         head)))
