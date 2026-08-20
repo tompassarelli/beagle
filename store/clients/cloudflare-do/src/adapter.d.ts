@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-export const FRAMRPC_MAX_FRAME_BYTES: 1048602;
+export const STORERPC_MAX_PACKET_BYTES: 1048602;
 export const OPTIONS_SIZE: 32;
 export const ERROR_SIZE: 516;
 export const BUFFER_SIZE: 16;
@@ -34,7 +34,7 @@ export interface StoreRpcRequestInspection {
   readonly space: string;
   readonly operation: StoreRpcOperation;
   readonly requestId: bigint;
-  readonly frameBytes: number;
+  readonly packetBytes: number;
   readonly bodyBytes: number;
 }
 
@@ -43,16 +43,16 @@ export interface StoreExchangeOptions {
   space: string;
 }
 
-/** The subset of a FRAMRPC transport request consumed by this adapter. */
+/** The subset of a STORERPC transport request consumed by this adapter. */
 export interface StoreTransportRequestLike {
-  readonly frame: Uint8Array;
+  readonly packet: Uint8Array;
   readonly entry: StoreTransportEntry;
   readonly space: string;
 }
 
 export interface StoreExchangeStub {
   exchange(
-    frame: Uint8Array,
+    packet: Uint8Array,
     options: StoreExchangeOptions,
   ): MaybePromise<Uint8Array>;
 }
@@ -67,7 +67,7 @@ export class StoreRequestError extends Error {
 }
 
 export function inspectStoreRpcRequest(
-  frame: Uint8Array,
+  packet: Uint8Array,
 ): Readonly<StoreRpcRequestInspection>;
 
 export function storeRpcEntry(operation: StoreRpcOperation): StoreRpcDispatchEntry;
@@ -193,12 +193,12 @@ export interface DurableStoreStoreStats {
   image: ChunkedRangeStats;
 }
 
-export interface FramlogIdentity {
+export interface StoreLogIdentity {
   readonly byteLength: number;
   readonly sha256: string;
 }
 
-export interface FramlogRestoreMarker extends FramlogIdentity {
+export interface StoreLogRestoreMarker extends StoreLogIdentity {
   readonly format: 'store-cloudflare-restore/v1';
   readonly spaceId: string;
   readonly servedVersion: string;
@@ -220,7 +220,7 @@ export class DurableStoreStore implements StoreStoreLike {
   commit(parts: StoreStoreCommitPart[]): Promise<void>;
   replace(
     parts: Array<StoreStoreCommitPart | StoreStorePlannedPart>,
-    marker: FramlogRestoreMarker,
+    marker: StoreLogRestoreMarker,
   ): Promise<void>;
   useStorage(storage: DurableObjectStorageLike): void;
   stats(): DurableStoreStoreStats;
@@ -252,7 +252,7 @@ export type StoreBackupErrorCode =
   | 'crypto-unavailable'
   | 'engine'
   | 'invalid-backup'
-  | 'invalid-framlog'
+  | 'invalid-storelog'
   | 'restore-fenced'
   | 'space-mismatch'
   | 'storage'
@@ -262,7 +262,7 @@ export type StoreBackupErrorCode =
 export class StoreBackupError extends Error {
   constructor(code: string, message: string, options?: ErrorOptions);
   readonly code: string;
-  readonly expectedCurrent?: Readonly<FramlogIdentity> | null;
+  readonly expectedCurrent?: Readonly<StoreLogIdentity> | null;
 }
 
 export class StoreStorageError extends Error {
@@ -300,7 +300,7 @@ export interface StoreCheckpointResult extends StoreCallResult {
   imageBytes: number;
 }
 
-export interface PortableFramlog {
+export interface PortableStoreLog {
   readonly bytes: Uint8Array;
   readonly servedVersion: string;
 }
@@ -352,34 +352,34 @@ export class StoreInstance {
   readCString(pointer: number, limit: number): string;
   putCString(text: string): number;
   open(spaceId: string, logLabel?: string): Promise<StoreCallStatus>;
-  call(entry: StoreInstanceEntry, frame: Uint8Array): Promise<StoreCallResult>;
-  query(frame: Uint8Array): Promise<StoreCallResult>;
-  transact(frame: Uint8Array): Promise<StoreCallResult>;
-  snapshot(frame: Uint8Array): Promise<StoreCallResult>;
-  checkpoint(frame: Uint8Array): Promise<StoreCheckpointResult>;
+  call(entry: StoreInstanceEntry, packet: Uint8Array): Promise<StoreCallResult>;
+  query(packet: Uint8Array): Promise<StoreCallResult>;
+  transact(packet: Uint8Array): Promise<StoreCallResult>;
+  snapshot(packet: Uint8Array): Promise<StoreCallResult>;
+  checkpoint(packet: Uint8Array): Promise<StoreCheckpointResult>;
   close(): Promise<StoreCallStatus>;
-  portableFramlog(): Promise<Readonly<PortableFramlog>>;
+  portableStoreLog(): Promise<Readonly<PortableStoreLog>>;
   fence(error: Error): Promise<Error>;
   logBytes(): Uint8Array;
   imageBytes(): Uint8Array;
   stats(): StoreInstanceStats;
 }
 
-export interface FramlogBackup extends FramlogIdentity {
+export interface StoreLogBackup extends StoreLogIdentity {
   readonly format: 'store-cloudflare-backup/v1';
   readonly spaceId: string;
   readonly servedVersion: string;
   readonly bytes: Uint8Array;
 }
 
-export type FramlogRestoreOptions =
+export type StoreLogRestoreOptions =
   | { readonly replace?: false }
   | {
       readonly replace: true;
-      readonly expectedCurrent: Readonly<FramlogIdentity>;
+      readonly expectedCurrent: Readonly<StoreLogIdentity>;
     };
 
-export interface FramlogRestoreResult extends FramlogIdentity {
+export interface StoreLogRestoreResult extends StoreLogIdentity {
   readonly format: 'store-cloudflare-backup/v1';
   readonly spaceId: string;
   readonly servedVersion: string;
@@ -411,19 +411,19 @@ export class StoreDurableObjectBase<Env = unknown> {
   openResult?: StoreCallStatus;
 
   store(): Promise<StoreInstance>;
-  query(frame: Uint8Array): Promise<StoreCallResult>;
-  transact(frame: Uint8Array): Promise<StoreCallResult>;
-  snapshot(frame: Uint8Array): Promise<StoreCallResult>;
-  checkpoint(frame: Uint8Array): Promise<StoreCheckpointResult>;
+  query(packet: Uint8Array): Promise<StoreCallResult>;
+  transact(packet: Uint8Array): Promise<StoreCallResult>;
+  snapshot(packet: Uint8Array): Promise<StoreCallResult>;
+  checkpoint(packet: Uint8Array): Promise<StoreCheckpointResult>;
   exchange(
-    frame: Uint8Array,
+    packet: Uint8Array,
     options: StoreExchangeOptions,
   ): Promise<Uint8Array>;
-  exportFramlog(): Promise<Readonly<FramlogBackup>>;
-  restoreFramlog(
-    backup: FramlogBackup,
-    options?: FramlogRestoreOptions,
-  ): Promise<Readonly<FramlogRestoreResult>>;
+  exportStoreLog(): Promise<Readonly<StoreLogBackup>>;
+  restoreStoreLog(
+    backup: StoreLogBackup,
+    options?: StoreLogRestoreOptions,
+  ): Promise<Readonly<StoreLogRestoreResult>>;
   recycle(): Promise<StoreCallStatus | null>;
 }
 
@@ -434,11 +434,11 @@ export interface DurableObjectNamespaceLike<Stub> {
 export interface StoreDataPlaneEntrypoint extends StoreExchangeStub {}
 
 export interface StoreAdminStub {
-  exportFramlog(): MaybePromise<Readonly<FramlogBackup>>;
-  restoreFramlog(
-    backup: FramlogBackup,
-    options?: FramlogRestoreOptions,
-  ): MaybePromise<Readonly<FramlogRestoreResult>>;
+  exportStoreLog(): MaybePromise<Readonly<StoreLogBackup>>;
+  restoreStoreLog(
+    backup: StoreLogBackup,
+    options?: StoreLogRestoreOptions,
+  ): MaybePromise<Readonly<StoreLogRestoreResult>>;
 }
 
 export interface StoreAdminEntrypoint extends StoreAdminStub {}

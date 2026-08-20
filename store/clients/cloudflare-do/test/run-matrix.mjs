@@ -33,8 +33,8 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     { type: "ESModule", path: `${root}/src/adapter.mjs` },
     { type: "ESModule", path: `${root}/src/seams.mjs` },
     { type: "CompiledWasm", path: `${root}/lib/libstore.wasm` },
-    { type: "Data", path: `${root}/test/bundle/frames.bin` },
-    { type: "Text", path: `${root}/test/bundle/frames.json` },
+    { type: "Data", path: `${root}/test/bundle/packets.bin` },
+    { type: "Text", path: `${root}/test/bundle/packets.json` },
   ],
   scriptPath: `${root}/test/worker/worker.mjs`,
   // No cf metadata fetch: this row must run with no network and leave no
@@ -79,12 +79,12 @@ async function call(path, id, extra = "") {
   return body;
 }
 
-async function exportFramlog(id) {
+async function exportStoreLog(id) {
   const response = await mf.dispatchFetch(
     `http://localhost/admin/export?id=${id}`,
   );
   if (!response.ok) {
-    throw new Error(`/export-framlog[${id}]: ${await response.text()}`);
+    throw new Error(`/export-storelog[${id}]: ${await response.text()}`);
   }
   const bytes = new Uint8Array(await response.arrayBuffer());
   return {
@@ -97,7 +97,7 @@ async function exportFramlog(id) {
   };
 }
 
-async function restoreFramlog(id, backup) {
+async function restoreStoreLog(id, backup) {
   const response = await mf.dispatchFetch(
     `http://localhost/admin/restore?id=${id}`,
     {
@@ -115,12 +115,12 @@ async function restoreFramlog(id, backup) {
   );
   const receipt = await response.json();
   if (!response.ok || receipt.fatal) {
-    throw new Error(`/restore-framlog[${id}]: ${receipt.fatal}`);
+    throw new Error(`/restore-storelog[${id}]: ${receipt.fatal}`);
   }
   return receipt;
 }
 
-// A frame's status is the oracle's business, so a nonzero one is only checked
+// A packet's status is the oracle's business, so a nonzero one is only checked
 // here when no oracle transcript is supplied to compare against.
 async function transcript(id, passes, oracle) {
   const lines = [];
@@ -128,11 +128,11 @@ async function transcript(id, passes, oracle) {
     const body = await call("/pass", id, `&label=${label}&manifest=${manifest}`);
     lines.push(...body.out);
     if (oracle) {
-      notes.push(`  note ${id} pass ${label}: ${body.failures} nonzero frames`);
+      notes.push(`  note ${id} pass ${label}: ${body.failures} nonzero packets`);
     } else {
       check(
         body.failures === 0,
-        `${id} pass ${label}: ${body.failures} frame failures`,
+        `${id} pass ${label}: ${body.failures} packet failures`,
       );
     }
   }
@@ -174,7 +174,7 @@ function compare(name, produced, oracle) {
 try {
   await (await mf.dispatchFetch("http://localhost/ready?id=warm")).json();
 
-  // 1. The frame matrix, three passes, against the native oracle.
+  // 1. The packet matrix, three passes, against the native oracle.
   const matrix = await transcript(
     "matrix",
     [
@@ -185,8 +185,8 @@ try {
     oraclePath,
   );
   writeFileSync(`${outDir}/workerd.transcript`, matrix.text);
-  writeFileSync(`${outDir}/workerd.framlog`, matrix.log);
-  writeFileSync(`${outDir}/workerd.framimage`, matrix.image);
+  writeFileSync(`${outDir}/workerd.storelog`, matrix.log);
+  writeFileSync(`${outDir}/workerd.storeimage`, matrix.image);
   compare("matrix transcript", matrix.text, oraclePath);
   check(
     matrix.image.length > 0,
@@ -195,7 +195,7 @@ try {
 
   // 2. A portable export crosses object identity without changing bytes or
   // semantics. The snapshot image is derived and intentionally rebuilt later.
-  const backup = await exportFramlog("matrix");
+  const backup = await exportStoreLog("matrix");
   check(
     backup.byteLength === matrix.log.length &&
       sameBytes(backup.bytes, matrix.log) &&
@@ -206,9 +206,9 @@ try {
   );
   check(
     !sameBytes(backup.bytes, new Uint8Array(0)),
-    "the source admin namespace contains the matrix FRAMLOG",
+    "the source admin namespace contains the matrix STORELOG",
   );
-  const restoreReceipt = await restoreFramlog("matrix-restored", backup);
+  const restoreReceipt = await restoreStoreLog("matrix-restored", backup);
   const restoredLog = new Uint8Array(
     await (
       await mf.dispatchFetch(
@@ -231,15 +231,15 @@ try {
   );
   check(
     sameBytes(restoredLog, matrix.log),
-    "fresh-object restore reproduced the source FRAMLOG byte for byte",
+    "fresh-object restore reproduced the source STORELOG byte for byte",
   );
   check(
     restoredImage.length === 0,
     "fresh-object restore did not copy the derived snapshot image",
   );
   check(
-    sameBytes(await exportFramlog("matrix-restored").then((one) => one.bytes), backup.bytes),
-    "distinct source and restored admin namespaces export identical FRAMLOG bytes",
+    sameBytes(await exportStoreLog("matrix-restored").then((one) => one.bytes), backup.bytes),
+    "distinct source and restored admin namespaces export identical STORELOG bytes",
   );
   const sourceSemantics = await call(
     "/pass",
@@ -255,7 +255,7 @@ try {
     sourceSemantics.failures === 0 &&
       restoredSemantics.failures === 0 &&
       JSON.stringify(sourceSemantics.out) === JSON.stringify(restoredSemantics.out),
-    "source and restored objects answer the same workerd frame matrix",
+    "source and restored objects answer the same workerd packet matrix",
   );
 
   // 3. The unpaged-bound matrix, same three-pass shape.
@@ -269,7 +269,7 @@ try {
     depthOraclePath,
   );
   writeFileSync(`${outDir}/workerd-depth.transcript`, depth.text);
-  writeFileSync(`${outDir}/workerd-depth.framlog`, depth.log);
+  writeFileSync(`${outDir}/workerd-depth.storelog`, depth.log);
   compare("depth transcript", depth.text, depthOraclePath);
 
   // 4. Multi-chunk coverage: a log past one 64 KiB chunk, read back whole.
@@ -279,7 +279,7 @@ try {
     grown.reached && grown.failures === 0,
     `grew the log to ${grown.guestLogBytes} bytes in ${grown.rounds} rounds`,
   );
-  const inventory = await call("/keys", "multichunk", "&prefix=framlog/");
+  const inventory = await call("/keys", "multichunk", "&prefix=storelog/");
   const chunkKeys = inventory.keys.filter((key) => !key.endsWith("meta"));
   const expectedChunks = Math.ceil(inventory.meta.length / 65536);
   check(
@@ -302,7 +302,7 @@ try {
     `the multi-chunk log reopened at ${reread.log.length} bytes ` +
       `(was ${inventory.meta.length})`,
   );
-  const rechecked = await call("/keys", "multichunk", "&prefix=framlog/");
+  const rechecked = await call("/keys", "multichunk", "&prefix=storelog/");
   check(
     rechecked.keys.filter((key) => !key.endsWith("meta")).length ===
       Math.ceil(rechecked.meta.length / 65536),
@@ -321,7 +321,7 @@ try {
   );
   check(
     raced.statuses.every((status) => status === 0),
-    `every racer answered a status frame: ${raced.statuses.join(",")}`,
+    `every racer answered a status packet: ${raced.statuses.join(",")}`,
   );
 
   const deleted = await call("/delete-batches", "race", "&chunks=130");
@@ -336,18 +336,18 @@ try {
   // 6. The official client semantics over a non-TCP Worker/DO transport.
   const entries = [];
   const space = "store-wasm-embed";
-  const transport = async ({ frame, entry, space: requestSpace }) => {
+  const transport = async ({ packet, entry, space: requestSpace }) => {
     entries.push(entry);
     const response = await mf.dispatchFetch(
       "http://localhost/rpc",
       {
         method: "POST",
         headers: {
-          "content-type": "application/vnd.framrpc",
+          "content-type": "application/vnd.storerpc",
           "x-store-entry": entry,
           "x-store-space": requestSpace,
         },
-        body: frame,
+        body: packet,
       },
     );
     if (!response.ok) throw new Error(await response.text());

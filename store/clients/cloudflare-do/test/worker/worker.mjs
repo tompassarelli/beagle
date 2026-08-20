@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-// The Durable Object under test: one FRAMLOG plus its snapshot image per
+// The Durable Object under test: one STORELOG plus its snapshot image per
 // object, in real DurableObjectStorage, driven by the published adapter.
 import storeModule from "../../lib/libstore.wasm";
-import framesBin from "../bundle/frames.bin";
-import framesJson from "../bundle/frames.json";
+import packetsBin from "../bundle/packets.bin";
+import packetsJson from "../bundle/packets.json";
 import { DurableObject } from "cloudflare:workers";
 import {
   ChunkedRange,
@@ -13,11 +13,11 @@ import {
   hex,
 } from "../../src/adapter.mjs";
 
-const catalogue = JSON.parse(framesJson);
-const blob = new Uint8Array(framesBin);
+const catalogue = JSON.parse(packetsJson);
+const blob = new Uint8Array(packetsBin);
 const SPACE = "store-wasm-embed";
 
-function frame(name) {
+function packet(name) {
   const entry = catalogue.table[name];
   return blob.subarray(entry.offset, entry.offset + entry.length);
 }
@@ -56,28 +56,28 @@ class StoreHarness {
     return this.base.recycle();
   }
 
-  query(frame) {
-    return this.base.query(frame);
+  query(packet) {
+    return this.base.query(packet);
   }
 
-  transact(frame) {
-    return this.base.transact(frame);
+  transact(packet) {
+    return this.base.transact(packet);
   }
 
-  checkpoint(frame) {
-    return this.base.checkpoint(frame);
+  checkpoint(packet) {
+    return this.base.checkpoint(packet);
   }
 
-  exchange(frame, options) {
-    return this.base.exchange(frame, options);
+  exchange(packet, options) {
+    return this.base.exchange(packet, options);
   }
 
-  exportFramlog() {
-    return this.base.exportFramlog();
+  exportStoreLog() {
+    return this.base.exportStoreLog();
   }
 
-  restoreFramlog(backup, options) {
-    return this.base.restoreFramlog(backup, options);
+  restoreStoreLog(backup, options) {
+    return this.base.restoreStoreLog(backup, options);
   }
 
   get openResult() {
@@ -121,9 +121,9 @@ class StoreHarness {
     out.push(`${label} ${opened.status} "${opened.message}"`);
 
     for (const { entry, name, declared } of manifest(which)) {
-      const bytes = frame(name);
+      const bytes = packet(name);
       if (bytes.length !== declared) {
-        out.push(`frame ${name} READ-MISMATCH`);
+        out.push(`packet ${name} READ-MISMATCH`);
         failures += 1;
         continue;
       }
@@ -144,13 +144,13 @@ class StoreHarness {
           result = { status: 0, response, released: true };
         }
       } catch (error) {
-        fatal = `frame ${name}: ${error.message}`;
+        fatal = `packet ${name}: ${error.message}`;
         break;
       }
-      out.push(`frame ${name} ${result.status} ${hex(result.response)}`);
+      out.push(`packet ${name} ${result.status} ${hex(result.response)}`);
       if (result.status !== 0) failures += 1;
       if (!result.released) {
-        out.push(`frame ${name} RELEASE-DID-NOT-CLEAR`);
+        out.push(`packet ${name} RELEASE-DID-NOT-CLEAR`);
         failures += 1;
       }
     }
@@ -167,26 +167,26 @@ class StoreHarness {
   /** The durable bytes of one range, read back through a fresh reader. */
   async dump(url) {
     const which = url.searchParams.get("range") ?? "log";
-    const prefix = which === "image" ? "framimage/" : "framlog/";
+    const prefix = which === "image" ? "storeimage/" : "storelog/";
     const bytes = await new ChunkedRange(this.state.storage, { prefix }).load();
     return new Response(bytes, {
       headers: { "content-type": "application/octet-stream" },
     });
   }
 
-  /** Transact a cycle of frames until the durable log passes `bytes`. */
+  /** Transact a cycle of packets until the durable log passes `bytes`. */
   async grow(url) {
     const target = Number(url.searchParams.get("bytes") ?? 96 * 1024);
     const limit = Number(url.searchParams.get("limit") ?? 400);
     const names = (
-      url.searchParams.get("frames") ??
+      url.searchParams.get("packets") ??
       "30-batch-bulk-a.bin,30-batch-bulk-b.bin,30-batch-bulk-c.bin"
     ).split(",");
     const instance = await this.store();
     let rounds = 0;
     let failures = 0;
     while (instance.log.length < target && rounds < limit) {
-      const result = await this.transact(frame(names[rounds % names.length]));
+      const result = await this.transact(packet(names[rounds % names.length]));
       if (result.status !== 0) failures += 1;
       rounds += 1;
     }
@@ -201,7 +201,7 @@ class StoreHarness {
 
   /** The live key inventory, which is how multi-chunk coverage is observed. */
   async keys(url) {
-    const prefix = url.searchParams.get("prefix") ?? "framlog/";
+    const prefix = url.searchParams.get("prefix") ?? "storelog/";
     const listed = await this.state.storage.list({ prefix });
     const meta = await this.state.storage.get(`${prefix}meta`);
     return json({
@@ -252,7 +252,7 @@ class StoreHarness {
     const settled = await Promise.all(demands);
     const distinct = new Set(settled).size;
     const answered = await Promise.all(
-      settled.map(() => this.query(frame("02-status.bin"))),
+      settled.map(() => this.query(packet("02-status.bin"))),
     );
     return json({
       width,
@@ -266,7 +266,7 @@ class StoreHarness {
 }
 
 // Distinct namespaces isolate harness scenarios while every object is still
-// addressed by the one exact SpaceId carried in its frames.
+// addressed by the one exact SpaceId carried in its packets.
 class StoreHarnessObject extends DurableObject {
   #store;
 
@@ -279,16 +279,16 @@ class StoreHarnessObject extends DurableObject {
     return this.#store.fetch(request);
   }
 
-  exchange(frame, options) {
-    return this.#store.exchange(frame, options);
+  exchange(packet, options) {
+    return this.#store.exchange(packet, options);
   }
 
-  exportFramlog() {
-    return this.#store.exportFramlog();
+  exportStoreLog() {
+    return this.#store.exportStoreLog();
   }
 
-  restoreFramlog(backup, options) {
-    return this.#store.restoreFramlog(backup, options);
+  restoreStoreLog(backup, options) {
+    return this.#store.restoreStoreLog(backup, options);
   }
 }
 
@@ -313,8 +313,8 @@ export class StoreClient extends DurableObject {
     });
   }
 
-  exchange(frame, options) {
-    return this.#store.exchange(frame, options);
+  exchange(packet, options) {
+    return this.#store.exchange(packet, options);
   }
 }
 
@@ -340,13 +340,13 @@ export default {
     if (url.pathname === "/rpc") {
       const space = request.headers.get("x-store-space");
       const dataPlane = storeDataPlaneEntrypoint(env.BEAGLE_STORE_CLIENT, SPACE);
-      const frame = new Uint8Array(await request.arrayBuffer());
-      const response = await dataPlane.exchange(frame, {
+      const packet = new Uint8Array(await request.arrayBuffer());
+      const response = await dataPlane.exchange(packet, {
         entry: request.headers.get("x-store-entry"),
         space,
       });
       return new Response(response, {
-        headers: { "content-type": "application/vnd.framrpc" },
+        headers: { "content-type": "application/vnd.storerpc" },
       });
     }
     if (url.pathname === "/admin/export") {
@@ -354,7 +354,7 @@ export default {
         ? env.BEAGLE_STORE_RESTORED
         : env.BEAGLE_STORE_MATRIX;
       const admin = storeAdminEntrypoint(source, SPACE);
-      const backup = await admin.exportFramlog();
+      const backup = await admin.exportStoreLog();
       return new Response(backup.bytes, {
         headers: {
           "content-type": "application/octet-stream",
@@ -377,7 +377,7 @@ export default {
         sha256: request.headers.get("x-store-sha256"),
         bytes,
       };
-      return json(await admin.restoreFramlog(backup));
+      return json(await admin.restoreStoreLog(backup));
     }
     const scenario = url.searchParams.get("id") ?? "matrix";
     return namespace(env, scenario).getByName(SPACE).fetch(request);

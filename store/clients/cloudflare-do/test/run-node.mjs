@@ -2,7 +2,7 @@
 // The durability half of the harness, in plain Node over the memory storage:
 // what a lost isolate, a rejected commit, and a shrinking object leave behind.
 //
-//   node test/run-node.mjs WASM FRAMES-DIR
+//   node test/run-node.mjs WASM PACKETS-DIR
 import { readFileSync } from "node:fs";
 import {
   ChunkedRange,
@@ -16,10 +16,10 @@ import {
   storeDataPlaneEntrypoint,
 } from "../src/adapter.mjs";
 
-const [wasmPath, framesDir] = process.argv.slice(2);
+const [wasmPath, packetsDir] = process.argv.slice(2);
 const SPACE = "store-wasm-embed";
 const module = new WebAssembly.Module(readFileSync(wasmPath));
-const frame = (name) => new Uint8Array(readFileSync(`${framesDir}/${name}`));
+const packet = (name) => new Uint8Array(readFileSync(`${packetsDir}/${name}`));
 const objectState = (storage, spaceId = SPACE) => ({
   storage,
   id: { name: spaceId },
@@ -51,7 +51,7 @@ async function open(store) {
 }
 
 const durableLog = (storage) =>
-  new ChunkedRange(storage, { prefix: "framlog/" }).load();
+  new ChunkedRange(storage, { prefix: "storelog/" }).load();
 
 function samePrefix(shorter, longer) {
   return shorter.every((byte, index) => byte === longer[index]);
@@ -62,7 +62,7 @@ function sameBytes(left, right) {
 }
 
 const durableImage = (storage) =>
-  new ChunkedRange(storage, { prefix: "framimage/" }).load();
+  new ChunkedRange(storage, { prefix: "storeimage/" }).load();
 
 async function sha256(bytes) {
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -87,7 +87,7 @@ class FailPostPublishStorage extends MemoryStorage {
   }
 
   async transaction(body) {
-    if (this.failNextMarkerClear && this.map.has("framrestore/pending")) {
+    if (this.failNextMarkerClear && this.map.has("storerestore/pending")) {
       this.failNextMarkerClear = false;
       throw new Error("restore marker delete said no");
     }
@@ -99,8 +99,8 @@ class FailPostPublishStorage extends MemoryStorage {
 {
   const storage = new MemoryStorage();
   let store = await open(new DurableStoreStore(storage));
-  await store.transact(frame("03-assert-unicode.bin"));
-  await store.transact(frame("04-batch-mixed.bin"));
+  await store.transact(packet("03-assert-unicode.bin"));
+  await store.transact(packet("04-batch-mixed.bin"));
   const landed = await durableLog(storage);
 
   // The isolate is "dead": the guest still sees storage_sync return 0 and
@@ -108,7 +108,7 @@ class FailPostPublishStorage extends MemoryStorage {
   const doomed = new DurableStoreStore(storage);
   doomed.commit = () => Promise.resolve();
   store = await open(doomed);
-  const lost = await store.transact(frame("12-retract.bin"));
+  const lost = await store.transact(packet("12-retract.bin"));
   const believed = store.log.length;
   const after = await durableLog(storage);
 
@@ -120,8 +120,8 @@ class FailPostPublishStorage extends MemoryStorage {
   );
 
   const reborn = await open(new DurableStoreStore(storage));
-  const status = await reborn.query(frame("02-status.bin"));
-  const scan = await reborn.query(frame("13-scan-after.bin"));
+  const status = await reborn.query(packet("02-status.bin"));
+  const scan = await reborn.query(packet("13-scan-after.bin"));
   const closed = await reborn.close();
   check(
     status.status === 0 && scan.status === 0 && closed.status === 0,
@@ -137,7 +137,7 @@ class FailPostPublishStorage extends MemoryStorage {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await object.transact(frame("03-assert-unicode.bin"));
+  await object.transact(packet("03-assert-unicode.bin"));
   const landed = await durableLog(storage);
   const first = await object.store();
 
@@ -150,7 +150,7 @@ class FailPostPublishStorage extends MemoryStorage {
 
   let raised = null;
   try {
-    await object.transact(frame("04-batch-mixed.bin"));
+    await object.transact(packet("04-batch-mixed.bin"));
   } catch (error) {
     raised = error;
   }
@@ -165,7 +165,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let reused = null;
   try {
-    await first.query(frame("02-status.bin"));
+    await first.query(packet("02-status.bin"));
   } catch (error) {
     reused = error;
   }
@@ -180,7 +180,7 @@ class FailPostPublishStorage extends MemoryStorage {
   refuse = false;
   const second = await object.store();
   check(second !== first, "the object reopened from the durable bytes");
-  const answered = await object.query(frame("02-status.bin"));
+  const answered = await object.query(packet("02-status.bin"));
   check(answered.status === 0, "the reopened object answers again");
   const replayed = await durableLog(storage);
   check(
@@ -207,7 +207,7 @@ class FailPostPublishStorage extends MemoryStorage {
     `8 racing callers booted ${new Set(settled).size} instance(s)`,
   );
   const answers = await Promise.all(
-    Array.from({ length: 8 }, () => object.query(frame("02-status.bin"))),
+    Array.from({ length: 8 }, () => object.query(packet("02-status.bin"))),
   );
   check(
     answers.every((one) => one.status === 0),
@@ -225,7 +225,7 @@ class FailPostPublishStorage extends MemoryStorage {
     "30-batch-bulk-a.bin",
     "30-batch-bulk-b.bin",
     "30-batch-bulk-c.bin",
-  ].map(frame);
+  ].map(packet);
   let rounds = 0;
   while (store.log.length < 96 * 1024 && rounds < 400) {
     const result = await store.transact(bulk[rounds % bulk.length]);
@@ -238,7 +238,7 @@ class FailPostPublishStorage extends MemoryStorage {
     `the durable log spans chunks at ${big.length} bytes (${rounds} rounds)`,
   );
   const chunkKeys = [...storage.map.keys()].filter(
-    (key) => key.startsWith("framlog/") && !key.endsWith("meta"),
+    (key) => key.startsWith("storelog/") && !key.endsWith("meta"),
   );
   check(
     chunkKeys.length === Math.ceil(big.length / 65536),
@@ -254,14 +254,14 @@ class FailPostPublishStorage extends MemoryStorage {
   const doomed = new DurableStoreStore(storage);
   doomed.commit = () => Promise.resolve();
   const dying = await open(doomed);
-  await dying.transact(frame("30-batch-bulk-a.bin"));
+  await dying.transact(packet("30-batch-bulk-a.bin"));
   const afterTear = await durableLog(storage);
   check(
     afterTear.length === big.length && samePrefix(afterTear, big),
     `the torn tail left the ${big.length}-byte log byte-identical`,
   );
   const survivor = await open(new DurableStoreStore(storage));
-  const answered = await survivor.query(frame("40-query-bulk-at-limit.bin"));
+  const answered = await survivor.query(packet("40-query-bulk-at-limit.bin"));
   check(
     answered.status === 0,
     "the multi-chunk log reopened after the lost tail",
@@ -269,7 +269,7 @@ class FailPostPublishStorage extends MemoryStorage {
   await survivor.close();
 }
 
-// -- 5. the checked exact-frame data plane ----------------------------------
+// -- 5. the checked exact-packet data plane ----------------------------------
 {
   const storage = new MemoryStorage();
   const object = new StoreDurableObjectBase(
@@ -278,13 +278,13 @@ class FailPostPublishStorage extends MemoryStorage {
       instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
     },
   );
-  const statusFrame = frame("02-status.bin");
-  const inspected = inspectStoreRpcRequest(statusFrame);
+  const statusPacket = packet("02-status.bin");
+  const inspected = inspectStoreRpcRequest(statusPacket);
   check(
     inspected.space === SPACE && inspected.operation === "rpc/status",
     "the request boundary inspects the canonical SpaceId and operation",
   );
-  const response = await object.exchange(statusFrame, {
+  const response = await object.exchange(statusPacket, {
     entry: "query",
     space: SPACE,
   });
@@ -295,7 +295,7 @@ class FailPostPublishStorage extends MemoryStorage {
 
   let wrongEntry;
   try {
-    await object.exchange(frame("03-assert-unicode.bin"), {
+    await object.exchange(packet("03-assert-unicode.bin"), {
       entry: "query",
       space: SPACE,
     });
@@ -310,17 +310,17 @@ class FailPostPublishStorage extends MemoryStorage {
 
   let wrongSpace;
   try {
-    await object.exchange(statusFrame, { entry: "query", space: "other" });
+    await object.exchange(statusPacket, { entry: "query", space: "other" });
   } catch (error) {
     wrongSpace = error;
   }
   check(
     wrongSpace instanceof StoreRequestError
       && wrongSpace.code === "request/space-mismatch",
-    "the caller and frame SpaceIds must both belong to the object",
+    "the caller and packet SpaceIds must both belong to the object",
   );
 
-  const inconsistent = statusFrame.slice();
+  const inconsistent = statusPacket.slice();
   new DataView(
     inconsistent.buffer,
     inconsistent.byteOffset,
@@ -340,7 +340,7 @@ class FailPostPublishStorage extends MemoryStorage {
 
   let checkpoint;
   try {
-    await object.exchange(frame("27-checkpoint.bin"), {
+    await object.exchange(packet("27-checkpoint.bin"), {
       entry: "transact",
       space: SPACE,
     });
@@ -380,7 +380,7 @@ class FailPostPublishStorage extends MemoryStorage {
     publicMethods.length === 1 && publicMethods[0] === "exchange",
     `the service-binding data-plane capability exposes only ${publicMethods.join(",")}`,
   );
-  const dataResponse = await dataPlane.exchange(statusFrame, {
+  const dataResponse = await dataPlane.exchange(statusPacket, {
     entry: "query",
     space: SPACE,
   });
@@ -401,10 +401,10 @@ class FailPostPublishStorage extends MemoryStorage {
     },
   }, SPACE);
   check(
-    Object.keys(admin).join(",") === "exportFramlog,restoreFramlog",
-    "the separate admin capability exposes only FRAMLOG export and restore",
+    Object.keys(admin).join(",") === "exportStoreLog,restoreStoreLog",
+    "the separate admin capability exposes only STORELOG export and restore",
   );
-  const adminBackup = await admin.exportFramlog();
+  const adminBackup = await admin.exportStoreLog();
   check(
     adminName === SPACE && adminBackup.spaceId === SPACE,
     "the admin facade resolves the same raw object by exact SpaceId name",
@@ -421,13 +421,13 @@ class FailPostPublishStorage extends MemoryStorage {
     { which: "log", bytes: wide, length: wide.length, lowWater: 0 },
   ]);
   const before = [...storage.map.keys()].filter((key) =>
-    key.startsWith("framlog/0"),
+    key.startsWith("storelog/0"),
   ).length;
   await store.commit([
     { which: "log", bytes: wide, length: 40 * 1024, lowWater: 0 },
   ]);
   const after = [...storage.map.keys()].filter((key) =>
-    key.startsWith("framlog/0"),
+    key.startsWith("storelog/0"),
   ).length;
   const reread = await durableLog(storage);
   check(before === 4 && after === 1, `chunk keys went ${before} -> ${after}`);
@@ -487,36 +487,36 @@ class FailPostPublishStorage extends MemoryStorage {
   );
 
   const foreignStorage = new MemoryStorage(
-    new Map([["framimage/not-a-chunk", new Uint8Array([1])]]),
+    new Map([["storeimage/not-a-chunk", new Uint8Array([1])]]),
   );
   let foreignKey = null;
   try {
     await new ChunkedRange(foreignStorage, {
-      prefix: "framimage/",
+      prefix: "storeimage/",
     }).clearPlan();
   } catch (error) {
     foreignKey = error;
   }
   check(
     /unrecognised storage key/.test(foreignKey?.message) &&
-      foreignStorage.map.has("framimage/not-a-chunk"),
+      foreignStorage.map.has("storeimage/not-a-chunk"),
     "a range clear refuses an unrecognised key without deleting it",
   );
 }
 
-// -- 6. portable FRAMLOG export -> empty restore -> semantic equivalence -----
+// -- 6. portable STORELOG export -> empty restore -> semantic equivalence -----
 {
   const sourceStorage = new MemoryStorage();
   const source = new StoreDurableObjectBase(objectState(sourceStorage), {}, module, {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await source.transact(frame("03-assert-unicode.bin"));
-  await source.transact(frame("04-batch-mixed.bin"));
-  const checkpointed = await source.checkpoint(frame("27-checkpoint.bin"));
+  await source.transact(packet("03-assert-unicode.bin"));
+  await source.transact(packet("04-batch-mixed.bin"));
+  const checkpointed = await source.checkpoint(packet("27-checkpoint.bin"));
   check(checkpointed.status === 0, "the backup source wrote a checkpoint image");
 
-  const backup = await source.exportFramlog();
+  const backup = await source.exportStoreLog();
   const sourceLog = await durableLog(sourceStorage);
   const sourceImage = await durableImage(sourceStorage);
   check(
@@ -527,7 +527,7 @@ class FailPostPublishStorage extends MemoryStorage {
       /^[0-9a-f]{64}$/.test(backup.sha256),
     `export described ${backup.byteLength} bytes as ${backup.sha256}`,
   );
-  check(sameBytes(backup.bytes, sourceLog), "export bytes equal the durable FRAMLOG");
+  check(sameBytes(backup.bytes, sourceLog), "export bytes equal the durable STORELOG");
   check(sourceImage.length > 0, `source image has ${sourceImage.length} bytes`);
 
   const restoredStorage = new MemoryStorage();
@@ -540,7 +540,7 @@ class FailPostPublishStorage extends MemoryStorage {
       instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
     },
   );
-  const receipt = await restored.restoreFramlog(backup);
+  const receipt = await restored.restoreStoreLog(backup);
   const restoredLog = await durableLog(restoredStorage);
   const restoredImage = await durableImage(restoredStorage);
   check(
@@ -551,12 +551,12 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   check(
     sameBytes(restoredLog, sourceLog),
-    "empty-target restore landed the FRAMLOG byte for byte",
+    "empty-target restore landed the STORELOG byte for byte",
   );
   check(restoredImage.length === 0, "restore omitted the derived snapshot image");
 
-  const sourceAnswer = await source.query(frame("20-query-all-final.bin"));
-  const restoredAnswer = await restored.query(frame("20-query-all-final.bin"));
+  const sourceAnswer = await source.query(packet("20-query-all-final.bin"));
+  const restoredAnswer = await restored.query(packet("20-query-all-final.bin"));
   check(
     sourceAnswer.status === restoredAnswer.status &&
       sameBytes(sourceAnswer.response, restoredAnswer.response),
@@ -567,7 +567,7 @@ class FailPostPublishStorage extends MemoryStorage {
   const healthy = await restored.store();
   let nonempty = null;
   try {
-    await restored.restoreFramlog(backup);
+    await restored.restoreStoreLog(backup);
   } catch (error) {
     nonempty = error;
   }
@@ -581,7 +581,7 @@ class FailPostPublishStorage extends MemoryStorage {
     "the nonempty-target refusal leaves durable bytes unchanged",
   );
   check(
-    (await healthy.query(frame("02-status.bin"))).status === 0,
+    (await healthy.query(packet("02-status.bin"))).status === 0,
     "the expected nonempty-target refusal does not fence the live guest",
   );
 
@@ -593,7 +593,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let wrongSpace = null;
   try {
-    await mismatched.restoreFramlog(backup);
+    await mismatched.restoreStoreLog(backup);
   } catch (error) {
     wrongSpace = error;
   }
@@ -613,7 +613,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let damaged = null;
   try {
-    await damagedTarget.restoreFramlog({ ...backup, bytes: damagedBytes });
+    await damagedTarget.restoreStoreLog({ ...backup, bytes: damagedBytes });
   } catch (error) {
     damaged = error;
   }
@@ -636,13 +636,13 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let torn = null;
   try {
-    await tornTarget.restoreFramlog(tornBackup);
+    await tornTarget.restoreStoreLog(tornBackup);
   } catch (error) {
     torn = error;
   }
   check(
-    torn?.code === "invalid-framlog",
-    "restore replays and rejects a correctly hashed torn FRAMLOG suffix",
+    torn?.code === "invalid-storelog",
+    "restore replays and rejects a correctly hashed torn STORELOG suffix",
   );
   check(tornStorage.map.size === 0, "replay refusal does not touch storage");
 
@@ -655,7 +655,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let wrongVersion = null;
   try {
-    await wrongVersionTarget.restoreFramlog({
+    await wrongVersionTarget.restoreStoreLog({
       ...backup,
       servedVersion: (BigInt(backup.servedVersion) + 1n).toString(),
     });
@@ -664,7 +664,7 @@ class FailPostPublishStorage extends MemoryStorage {
   }
   check(
     wrongVersion?.code === "verification",
-    "full replay binds servedVersion to the supplied FRAMLOG",
+    "full replay binds servedVersion to the supplied STORELOG",
   );
   check(
     wrongVersionStorage.map.size === 0,
@@ -679,17 +679,17 @@ class FailPostPublishStorage extends MemoryStorage {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await source.transact(frame("03-assert-unicode.bin"));
-  const backup = await source.exportFramlog();
+  await source.transact(packet("03-assert-unicode.bin"));
+  const backup = await source.exportStoreLog();
 
   const targetStorage = new MemoryStorage();
   const target = new StoreDurableObjectBase(objectState(targetStorage), {}, module, {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await target.transact(frame("04-batch-mixed.bin"));
-  await target.checkpoint(frame("27-checkpoint.bin"));
-  const current = await target.exportFramlog();
+  await target.transact(packet("04-batch-mixed.bin"));
+  await target.checkpoint(packet("27-checkpoint.bin"));
+  const current = await target.exportStoreLog();
   const expectedCurrent = {
     byteLength: current.byteLength,
     sha256: current.sha256,
@@ -706,7 +706,7 @@ class FailPostPublishStorage extends MemoryStorage {
   };
   let rejected = null;
   try {
-    await target.restoreFramlog(backup, { replace: true, expectedCurrent });
+    await target.restoreStoreLog(backup, { replace: true, expectedCurrent });
   } catch (error) {
     rejected = error;
   }
@@ -718,7 +718,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let fenced = null;
   try {
-    await retained.query(frame("02-status.bin"));
+    await retained.query(packet("02-status.bin"));
   } catch (error) {
     fenced = error;
   }
@@ -728,26 +728,26 @@ class FailPostPublishStorage extends MemoryStorage {
   );
 
   check(
-    (await target.query(frame("02-status.bin"))).status === 0,
+    (await target.query(packet("02-status.bin"))).status === 0,
     "a rejected publication reopens the old durable state",
   );
 
   reject = false;
-  const receipt = await target.restoreFramlog(backup, {
+  const receipt = await target.restoreStoreLog(backup, {
     replace: true,
     expectedCurrent,
   });
   check(receipt.replaced === true, "explicit replacement reports occupied storage");
   check(
     sameBytes(await durableLog(targetStorage), backup.bytes),
-    "explicit replacement landed the exported FRAMLOG exactly",
+    "explicit replacement landed the exported STORELOG exactly",
   );
   check(
     (await durableImage(targetStorage)).length === 0,
     "explicit replacement atomically cleared the old derived image",
   );
-  const sourceAnswer = await source.query(frame("20-query-all-final.bin"));
-  const targetAnswer = await target.query(frame("20-query-all-final.bin"));
+  const sourceAnswer = await source.query(packet("20-query-all-final.bin"));
+  const targetAnswer = await target.query(packet("20-query-all-final.bin"));
   check(
     sourceAnswer.status === targetAnswer.status &&
       sameBytes(sourceAnswer.response, targetAnswer.response),
@@ -764,11 +764,11 @@ class FailPostPublishStorage extends MemoryStorage {
       instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
     },
   );
-  await missingImageTarget.transact(frame("04-batch-mixed.bin"));
-  await missingImageTarget.checkpoint(frame("27-checkpoint.bin"));
-  const missingCurrent = await missingImageTarget.exportFramlog();
+  await missingImageTarget.transact(packet("04-batch-mixed.bin"));
+  await missingImageTarget.checkpoint(packet("27-checkpoint.bin"));
+  const missingCurrent = await missingImageTarget.exportStoreLog();
   const missingChunk = [...missingStorage.map.keys()].find((key) =>
-    /^framimage\/[0-9]{8}$/.test(key)
+    /^storeimage\/[0-9]{8}$/.test(key)
   );
   missingStorage.map.delete(missingChunk);
   let tornImage = null;
@@ -781,7 +781,7 @@ class FailPostPublishStorage extends MemoryStorage {
     missingChunk !== undefined && /chunk .* missing/.test(tornImage?.message),
     "the replacement target begins with a missing derived-image chunk",
   );
-  await missingImageTarget.restoreFramlog(backup, {
+  await missingImageTarget.restoreStoreLog(backup, {
     replace: true,
     expectedCurrent: {
       byteLength: missingCurrent.byteLength,
@@ -791,9 +791,9 @@ class FailPostPublishStorage extends MemoryStorage {
   check(
     sameBytes(await durableLog(missingStorage), backup.bytes) &&
       ![...missingStorage.map.keys()].some((key) =>
-        key.startsWith("framimage/")
+        key.startsWith("storeimage/")
       ) &&
-      !missingStorage.map.has("framrestore/pending"),
+      !missingStorage.map.has("storerestore/pending"),
     "replacement recovers a missing image chunk and removes its whole range",
   );
 
@@ -807,10 +807,10 @@ class FailPostPublishStorage extends MemoryStorage {
       instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
     },
   );
-  await corruptImageTarget.transact(frame("04-batch-mixed.bin"));
-  await corruptImageTarget.checkpoint(frame("27-checkpoint.bin"));
-  const corruptCurrent = await corruptImageTarget.exportFramlog();
-  corruptStorage.map.set("framimage/meta", {
+  await corruptImageTarget.transact(packet("04-batch-mixed.bin"));
+  await corruptImageTarget.checkpoint(packet("27-checkpoint.bin"));
+  const corruptCurrent = await corruptImageTarget.exportStoreLog();
+  corruptStorage.map.set("storeimage/meta", {
     length: 1n,
     chunkBytes: 64 * 1024,
   });
@@ -824,7 +824,7 @@ class FailPostPublishStorage extends MemoryStorage {
     corruptImage instanceof TypeError,
     "the replacement target begins with corrupt derived-image metadata",
   );
-  await corruptImageTarget.restoreFramlog(backup, {
+  await corruptImageTarget.restoreStoreLog(backup, {
     replace: true,
     expectedCurrent: {
       byteLength: corruptCurrent.byteLength,
@@ -834,9 +834,9 @@ class FailPostPublishStorage extends MemoryStorage {
   check(
     sameBytes(await durableLog(corruptStorage), backup.bytes) &&
       ![...corruptStorage.map.keys()].some((key) =>
-        key.startsWith("framimage/")
+        key.startsWith("storeimage/")
       ) &&
-      !corruptStorage.map.has("framrestore/pending"),
+      !corruptStorage.map.has("storerestore/pending"),
     "replacement ignores corrupt image metadata and removes its whole range",
   );
 }
@@ -848,22 +848,22 @@ class FailPostPublishStorage extends MemoryStorage {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await source.transact(frame("04-batch-mixed.bin"));
-  const backup = await source.exportFramlog();
+  await source.transact(packet("04-batch-mixed.bin"));
+  const backup = await source.exportStoreLog();
 
   const targetStorage = new MemoryStorage();
   const target = new StoreDurableObjectBase(objectState(targetStorage), {}, module, {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await target.transact(frame("03-assert-unicode.bin"));
-  const observed = await target.exportFramlog();
-  await target.transact(frame("04-batch-mixed.bin"));
+  await target.transact(packet("03-assert-unicode.bin"));
+  const observed = await target.exportStoreLog();
+  await target.transact(packet("04-batch-mixed.bin"));
   const intervened = await durableLog(targetStorage);
 
   let conflict = null;
   try {
-    await target.restoreFramlog(backup, {
+    await target.restoreStoreLog(backup, {
       replace: true,
       expectedCurrent: {
         byteLength: observed.byteLength,
@@ -879,7 +879,7 @@ class FailPostPublishStorage extends MemoryStorage {
     "the CAS conflict preserves the intervening durable write byte for byte",
   );
   check(
-    (await target.query(frame("02-status.bin"))).status === 0,
+    (await target.query(packet("02-status.bin"))).status === 0,
     "a pre-publication CAS conflict clears the administrative fence",
   );
 }
@@ -891,23 +891,23 @@ class FailPostPublishStorage extends MemoryStorage {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await source.transact(frame("04-batch-mixed.bin"));
-  const incoming = await source.exportFramlog();
+  await source.transact(packet("04-batch-mixed.bin"));
+  const incoming = await source.exportStoreLog();
 
   const targetStorage = new FailPostPublishStorage();
   const target = new StoreDurableObjectBase(objectState(targetStorage), {}, module, {
     spaceId: SPACE,
     instance: { nowMs: () => 1700000000000, arena: { initialPages: 8 } },
   });
-  await target.transact(frame("03-assert-unicode.bin"));
-  await target.checkpoint(frame("27-checkpoint.bin"));
-  const previous = await target.exportFramlog();
-  const previousAnswer = await target.query(frame("20-query-all-final.bin"));
+  await target.transact(packet("03-assert-unicode.bin"));
+  await target.checkpoint(packet("27-checkpoint.bin"));
+  const previous = await target.exportStoreLog();
+  const previousAnswer = await target.query(packet("20-query-all-final.bin"));
 
   targetStorage.failNextMarkerClear = true;
   let failed = null;
   try {
-    await target.restoreFramlog(incoming, {
+    await target.restoreStoreLog(incoming, {
       replace: true,
       expectedCurrent: {
         byteLength: previous.byteLength,
@@ -930,7 +930,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let dataFence = null;
   try {
-    await target.query(frame("02-status.bin"));
+    await target.query(packet("02-status.bin"));
   } catch (error) {
     dataFence = error;
   }
@@ -950,7 +950,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let freshFence = null;
   try {
-    await freshTarget.query(frame("02-status.bin"));
+    await freshTarget.query(packet("02-status.bin"));
   } catch (error) {
     freshFence = error;
   }
@@ -961,7 +961,7 @@ class FailPostPublishStorage extends MemoryStorage {
 
   let recoveryConflict = null;
   try {
-    await target.restoreFramlog(previous, {
+    await target.restoreStoreLog(previous, {
       replace: true,
       expectedCurrent: {
         byteLength: previous.byteLength,
@@ -977,7 +977,7 @@ class FailPostPublishStorage extends MemoryStorage {
   );
   let stillFenced = null;
   try {
-    await target.query(frame("02-status.bin"));
+    await target.query(packet("02-status.bin"));
   } catch (error) {
     stillFenced = error;
   }
@@ -986,14 +986,14 @@ class FailPostPublishStorage extends MemoryStorage {
     "a failed recovery attempt preserves the durable fence",
   );
 
-  const recovered = await target.restoreFramlog(previous, {
+  const recovered = await target.restoreStoreLog(previous, {
     replace: true,
     expectedCurrent: {
       byteLength: incoming.byteLength,
       sha256: incoming.sha256,
     },
   });
-  const recoveredAnswer = await target.query(frame("20-query-all-final.bin"));
+  const recoveredAnswer = await target.query(packet("20-query-all-final.bin"));
   check(
     recovered.sha256 === previous.sha256 &&
       sameBytes(await durableLog(targetStorage), previous.bytes),

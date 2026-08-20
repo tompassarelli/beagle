@@ -9,7 +9,7 @@ database with no server, no socket, and no shim in front of it.
 This is a library an application embeds, not a deployment. Nothing here is
 deployed on its own; `wrangler.example.toml` shows the shape your Worker needs.
 
-For a Worker that talks to a Beagle Store *server* over FRAMRPC, use
+For a Worker that talks to a Beagle Store *server* over STORERPC, use
 `clients/bun` behind a shim instead — that is a different regime with
 different guarantees.
 
@@ -53,24 +53,24 @@ export class StoreLog extends DurableObject {
     );
   }
 
-  exchange(frame, options) {
-    return this.#store.exchange(frame, options);
+  exchange(packet, options) {
+    return this.#store.exchange(packet, options);
   }
 
-  exportFramlog() {
-    return this.#store.exportFramlog();
+  exportStoreLog() {
+    return this.#store.exportStoreLog();
   }
 
-  restoreFramlog(backup, options) {
-    return this.#store.restoreFramlog(backup, options);
+  restoreStoreLog(backup, options) {
+    return this.#store.restoreStoreLog(backup, options);
   }
 }
 
 // The backend Worker's public service entrypoint delegates only exchange.
 export class DataPlane extends WorkerEntrypoint {
-  exchange(frame, options) {
+  exchange(packet, options) {
     return storeDataPlaneEntrypoint(this.env.BEAGLE_STORE, SPACE)
-      .exchange(frame, options);
+      .exchange(packet, options);
   }
 }
 
@@ -83,18 +83,18 @@ export function client(DATA_PLANE) {
 }
 ```
 
-The raw storage-owning object takes a canonical FRAMRPC v2 request frame and
-answers with one response frame only after any write is durable:
+The raw storage-owning object takes a canonical STORERPC v2 request packet and
+answers with one response packet only after any write is durable:
 
 | method | validates | dispatches |
 | --- | --- | --- |
-| `exchange(frame, { entry, space })` | frame bound and envelope, exact SpaceId, closed operation, operation/entry agreement | `store_query`, `store_transact`, or `store_snapshot` |
+| `exchange(packet, { entry, space })` | packet bound and envelope, exact SpaceId, closed operation, operation/entry agreement | `store_query`, `store_transact`, or `store_snapshot` |
 
 Only the backend Worker holds the raw namespace. Its data WorkerEntrypoint
 resolves the object with `env.BEAGLE_STORE.getByName(SPACE)` and delegates only
 `exchange`; the wiki Worker receives only that service binding. A separately
 protected admin entrypoint may delegate export/restore to the same object, so
-both capabilities still address one store. Frame encoding and result decoding
+both capabilities still address one store. Packet encoding and result decoding
 come from `@tompassarelli/beagle-store-rpc/core`; the same official application client
 therefore works over TCP or a Durable Object.
 
@@ -102,19 +102,19 @@ The Worker compatibility date must be `2026-03-15` or newer. The raw object
 requires `state.id.name === spaceId`; unnamed and string-reconstructed object
 IDs fail closed. This deployment regime therefore limits SpaceIds to 1,024
 UTF-8 bytes, Cloudflare's maximum for exposing the stable object name, even
-though FRAMRPC itself allows 4,096.
+though STORERPC itself allows 4,096.
 
 `exchange` refuses `rpc/checkpoint`. Checkpoint, export, and restore are
 operator capabilities and must be hosted behind a separately authorized
 WorkerEntrypoint; they never appear on the wiki's data-plane service binding.
 
-## Portable FRAMLOG backup and restore
+## Portable STORELOG backup and restore
 
-The raw storage owner also implements `exportFramlog()` and
-`restoreFramlog(backup, options)`. Expose them only through a separately
+The raw storage owner also implements `exportStoreLog()` and
+`restoreStoreLog(backup, options)`. Expose them only through a separately
 authorized admin WorkerEntrypoint using `storeAdminEntrypoint(namespace,
 spaceId)`; the data-plane facade remains exchange-only. A portable export is
-the exact authoritative FRAMLOG plus its SpaceId, served version, byte length,
+the exact authoritative STORELOG plus its SpaceId, served version, byte length,
 and lowercase SHA-256. The derived snapshot image is deliberately excluded.
 
 Restore verifies the closed backup envelope, checksum, embedded SpaceId, and
@@ -125,13 +125,13 @@ log, image, and pending-restore marker are all empty. Replacing an existing
 object requires the exact observed log identity:
 
 ```js
-await admin.restoreFramlog(backup, {
+await admin.restoreStoreLog(backup, {
   replace: true,
   expectedCurrent: { byteLength, sha256 },
 });
 ```
 
-The replacement transaction publishes the candidate FRAMLOG, clears the
+The replacement transaction publishes the candidate STORELOG, clears the
 derived image, and writes a durable pending marker atomically. Data exchange
 and export fail closed while that marker exists, including after isolate loss.
 The adapter then reopens the durable bytes without permitting repair, verifies
@@ -151,8 +151,8 @@ One Durable Object owns two chunked key ranges in its own storage:
 
 | range | holds |
 | --- | --- |
-| `framlog/` | the FRAMLOG, which is the authority |
-| `framimage/` | the snapshot image a checkpoint writes |
+| `storelog/` | the STORELOG, which is the authority |
+| `storeimage/` | the snapshot image a checkpoint writes |
 
 Both are sliced into 64 KiB chunks under a `meta` key that carries the
 authoritative length, because DO caps one value at 128 KiB. A commit rewrites
@@ -209,14 +209,14 @@ visible too. A tenth host hook cannot reach this adapter silently.
 ```console
 $ bun install                        # pinned Miniflare/workerd toolchain
 $ scripts/build-wasm.sh
-$ bun test/pack-frames.mjs
+$ bun test/pack-packets.mjs
 $ bun run test:bun                   # durability, fencing, multi-chunk
-$ bun run test:workerd               # the frame matrix inside workerd
+$ bun run test:workerd               # the packet matrix inside workerd
 ```
 
 `tests/store_do_client_smoke.sh` is the same harness as one CI row: it builds
 the wasm and the native lp64 oracle, runs both halves, and compares the
-transcript and the FRAMLOG bytes the Durable Object wrote against the oracle's.
+transcript and the STORELOG bytes the Durable Object wrote against the oracle's.
 It SKIPs cleanly when Bun, Miniflare, or the wasi compiler is absent.
 
 ## Cloudflare capacity gate

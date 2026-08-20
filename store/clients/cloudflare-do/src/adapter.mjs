@@ -10,41 +10,41 @@ import { assertSeams } from "./seams.mjs";
 
 const PAGE_BYTES = 65536;
 const BEAGLE_STORE_ABI_VERSION = 1;
-const FRAMLOG_BACKUP_FORMAT = "store-cloudflare-backup/v1";
-const FRAMLOG_RESTORE_FORMAT = "store-cloudflare-restore/v1";
-const FRAMLOG_RESTORE_KEY = "framrestore/pending";
-const FRAMLOG_FIXED_HEADER_BYTES = 16;
-const FRAMLOG_MAX_SPACE_BYTES = 4096;
-const FRAMLOG_MAGIC = Uint8Array.of(
-  0x46, 0x52, 0x41, 0x4d, 0x4c, 0x4f, 0x47, 0x00,
+const STORELOG_BACKUP_FORMAT = "store-cloudflare-backup/v1";
+const STORELOG_RESTORE_FORMAT = "store-cloudflare-restore/v1";
+const STORELOG_RESTORE_KEY = "storerestore/pending";
+const STORELOG_FIXED_HEADER_BYTES = 16;
+const STORELOG_MAX_SPACE_BYTES = 4096;
+const STORELOG_MAGIC = Uint8Array.of(
+  0x53, 0x54, 0x4f, 0x52, 0x45, 0x4c, 0x4f, 0x47,
 );
 const SHA256 = /^[0-9a-f]{64}$/;
-const FRAMRPC_MAGIC = Uint8Array.of(
-  0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00,
+const STORERPC_MAGIC = Uint8Array.of(
+  0x53, 0x54, 0x4f, 0x52, 0x45, 0x52, 0x50, 0x43,
 );
-const FRAMRPC_HEADER_BYTES = 26;
-const FRAMRPC_MAX_BODY_BYTES = 1024 * 1024;
-export const FRAMRPC_MAX_FRAME_BYTES =
-  FRAMRPC_HEADER_BYTES + FRAMRPC_MAX_BODY_BYTES;
-const FRAMRPC_MAX_SPACE_BYTES = 4096;
+const STORERPC_HEADER_BYTES = 26;
+const STORERPC_MAX_BODY_BYTES = 1024 * 1024;
+export const STORERPC_MAX_PACKET_BYTES =
+  STORERPC_HEADER_BYTES + STORERPC_MAX_BODY_BYTES;
+const STORERPC_MAX_SPACE_BYTES = 4096;
 const BEAGLE_STORE_DO_MAX_NAMED_SPACE_BYTES = 1024;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 const textEncoder = new TextEncoder();
 
-const FRAMRPC_OPERATIONS = new Set([
+const STORERPC_OPERATIONS = new Set([
   "rpc/version", "rpc/status", "rpc/validate",
   "rpc/assert", "rpc/retract", "rpc/batch",
   "rpc/scan", "rpc/query", "rpc/occurrences",
   "rpc/lease-acquire", "rpc/lease-renew", "rpc/lease-release",
   "rpc/lease-check", "rpc/checkpoint",
 ]);
-const FRAMRPC_MUTATIONS = new Set([
+const STORERPC_MUTATIONS = new Set([
   "rpc/assert", "rpc/retract", "rpc/batch",
   "rpc/lease-acquire", "rpc/lease-renew", "rpc/lease-release",
 ]);
 
 export class StoreRequestError extends Error {
-  constructor(message, code = "request/invalid-frame", options) {
+  constructor(message, code = "request/invalid-packet", options) {
     super(`Beagle Store request: ${message}`, options);
     this.name = "StoreRequestError";
     this.code = code;
@@ -72,7 +72,7 @@ class RequestReader {
 
   ensure(length, label) {
     if (this.offset + length > this.bytes.length) {
-      requestFail(`frame ended inside ${label}`, "request/truncated");
+      requestFail(`packet ended inside ${label}`, "request/truncated");
     }
   }
 
@@ -113,37 +113,37 @@ class RequestReader {
     if (this.u8(`${label} tag`) !== 1) {
       requestFail(`${label} is not a String Term`, "request/invalid-record");
     }
-    return this.text(FRAMRPC_MAX_SPACE_BYTES, label);
+    return this.text(STORERPC_MAX_SPACE_BYTES, label);
   }
 
   keywordTerm(label) {
     if (this.u8(`${label} tag`) !== 6) {
       requestFail(`${label} is not a Keyword Term`, "request/invalid-record");
     }
-    const value = this.text(FRAMRPC_MAX_BODY_BYTES, label);
+    const value = this.text(STORERPC_MAX_BODY_BYTES, label);
     if (!value) requestFail(`${label} is empty`, "request/invalid-record");
     return value;
   }
 }
 
 /**
- * Parse only the fixed FRAMRPC v2 envelope fields an embedder must authorize.
+ * Parse only the fixed STORERPC v2 envelope fields an embedder must authorize.
  * The engine remains the authority for the complete recursive payload codec.
  */
-export function inspectStoreRpcRequest(frame) {
-  if (!(frame instanceof Uint8Array)) {
-    requestFail("frame must be a Uint8Array", "request/invalid-type");
+export function inspectStoreRpcRequest(packet) {
+  if (!(packet instanceof Uint8Array)) {
+    requestFail("packet must be a Uint8Array", "request/invalid-type");
   }
-  if (frame.length < FRAMRPC_HEADER_BYTES) {
-    requestFail("frame ended inside its header", "request/truncated");
+  if (packet.length < STORERPC_HEADER_BYTES) {
+    requestFail("packet ended inside its header", "request/truncated");
   }
-  if (frame.length > FRAMRPC_MAX_FRAME_BYTES) {
-    requestFail("frame exceeds 1 MiB body limit", "request/frame-too-large");
+  if (packet.length > STORERPC_MAX_PACKET_BYTES) {
+    requestFail("packet exceeds 1 MiB body limit", "request/packet-too-large");
   }
-  if (!sameBytes(frame.subarray(0, FRAMRPC_MAGIC.length), FRAMRPC_MAGIC)) {
+  if (!sameBytes(packet.subarray(0, STORERPC_MAGIC.length), STORERPC_MAGIC)) {
     requestFail("magic does not match", "request/invalid-magic");
   }
-  const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
   const major = view.getUint16(8, true);
   const minor = view.getUint16(10, true);
   const kind = view.getUint8(12);
@@ -153,35 +153,35 @@ export function inspectStoreRpcRequest(frame) {
   if (major !== 2 || minor !== 0) {
     requestFail("protocol version is unsupported", "request/unsupported-version");
   }
-  if (kind !== 1) requestFail("frame is not a request", "request/invalid-kind");
+  if (kind !== 1) requestFail("packet is not a request", "request/invalid-kind");
   if (flags !== 0) requestFail("flags must be zero", "request/invalid-flags");
-  if (bodyBytes > FRAMRPC_MAX_BODY_BYTES) {
-    requestFail("body exceeds 1 MiB", "request/frame-too-large");
+  if (bodyBytes > STORERPC_MAX_BODY_BYTES) {
+    requestFail("body exceeds 1 MiB", "request/packet-too-large");
   }
-  if (frame.length !== FRAMRPC_HEADER_BYTES + bodyBytes) {
+  if (packet.length !== STORERPC_HEADER_BYTES + bodyBytes) {
     requestFail("body length is inconsistent", "request/truncated");
   }
-  const body = new RequestReader(frame.subarray(FRAMRPC_HEADER_BYTES));
+  const body = new RequestReader(packet.subarray(STORERPC_HEADER_BYTES));
   const space = body.stringTerm("SpaceId");
   const operation = body.keywordTerm("operation");
-  if (!space || textEncoder.encode(space).length > FRAMRPC_MAX_SPACE_BYTES) {
+  if (!space || textEncoder.encode(space).length > STORERPC_MAX_SPACE_BYTES) {
     requestFail("SpaceId is empty or too large", "request/invalid-space");
   }
-  if (!FRAMRPC_OPERATIONS.has(operation)) {
-    requestFail("operation is outside FRAMRPC v2", "request/unsupported-operation");
+  if (!STORERPC_OPERATIONS.has(operation)) {
+    requestFail("operation is outside STORERPC v2", "request/unsupported-operation");
   }
   return Object.freeze({
     space,
     operation,
     requestId,
-    frameBytes: frame.length,
+    packetBytes: packet.length,
     bodyBytes,
   });
 }
 
 export function storeRpcEntry(operation) {
   if (operation === "rpc/checkpoint") return "operator";
-  if (FRAMRPC_MUTATIONS.has(operation)) return "transact";
+  if (STORERPC_MUTATIONS.has(operation)) return "transact";
   if (operation === "rpc/occurrences") return "snapshot";
   return "query";
 }
@@ -195,7 +195,7 @@ export function storeDurableObjectTransport(stub) {
   if (!stub || (typeof stub !== "object" && typeof stub !== "function")) {
     throw new TypeError("Beagle Store Durable Object service binding is required");
   }
-  return ({ frame, entry, space }) => stub.exchange(frame, { entry, space });
+  return ({ packet, entry, space }) => stub.exchange(packet, { entry, space });
 }
 
 // wasm32 layouts of the public ABI structs (native/store.h under -m32).
@@ -233,47 +233,47 @@ function exactObject(value, keys, label) {
   return value;
 }
 
-function parseFramlogHeader(bytes) {
+function parseStoreLogHeader(bytes) {
   if (!(bytes instanceof Uint8Array)) {
     backupFailure("invalid-backup", "backup.bytes must be a Uint8Array");
   }
-  if (bytes.length < FRAMLOG_FIXED_HEADER_BYTES) {
-    backupFailure("invalid-framlog", "FRAMLOG header is truncated");
+  if (bytes.length < STORELOG_FIXED_HEADER_BYTES) {
+    backupFailure("invalid-storelog", "STORELOG header is truncated");
   }
-  if (FRAMLOG_MAGIC.some((byte, index) => bytes[index] !== byte)) {
-    backupFailure("invalid-framlog", "FRAMLOG magic does not match");
+  if (STORELOG_MAGIC.some((byte, index) => bytes[index] !== byte)) {
+    backupFailure("invalid-storelog", "STORELOG magic does not match");
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint16(8, true);
   const flags = view.getUint16(10, true);
   if (version !== 1 || flags !== 0) {
     backupFailure(
-      "invalid-framlog",
-      `FRAMLOG version or flags are unsupported (${version}, ${flags})`,
+      "invalid-storelog",
+      `STORELOG version or flags are unsupported (${version}, ${flags})`,
     );
   }
   const spaceBytes = view.getUint32(12, true);
-  if (spaceBytes === 0 || spaceBytes > FRAMLOG_MAX_SPACE_BYTES) {
-    backupFailure("invalid-framlog", "FRAMLOG SpaceId length is invalid");
+  if (spaceBytes === 0 || spaceBytes > STORELOG_MAX_SPACE_BYTES) {
+    backupFailure("invalid-storelog", "STORELOG SpaceId length is invalid");
   }
-  if (bytes.length < FRAMLOG_FIXED_HEADER_BYTES + spaceBytes) {
-    backupFailure("invalid-framlog", "FRAMLOG header is truncated inside SpaceId");
+  if (bytes.length < STORELOG_FIXED_HEADER_BYTES + spaceBytes) {
+    backupFailure("invalid-storelog", "STORELOG header is truncated inside SpaceId");
   }
   let spaceId;
   try {
     spaceId = new TextDecoder("utf-8", { fatal: true }).decode(
       bytes.subarray(
-        FRAMLOG_FIXED_HEADER_BYTES,
-        FRAMLOG_FIXED_HEADER_BYTES + spaceBytes,
+        STORELOG_FIXED_HEADER_BYTES,
+        STORELOG_FIXED_HEADER_BYTES + spaceBytes,
       ),
     );
   } catch (error) {
-    backupFailure("invalid-framlog", "FRAMLOG SpaceId is not valid UTF-8", {
+    backupFailure("invalid-storelog", "STORELOG SpaceId is not valid UTF-8", {
       cause: error,
     });
   }
   if (!spaceId) {
-    backupFailure("invalid-framlog", "FRAMLOG SpaceId is empty");
+    backupFailure("invalid-storelog", "STORELOG SpaceId is empty");
   }
   return spaceId;
 }
@@ -305,7 +305,7 @@ function textBytes(value, label) {
   return bytes;
 }
 
-function statusFrame(spaceId) {
+function statusPacket(spaceId) {
   const space = textBytes(spaceId, "SpaceId");
   const operation = textBytes("rpc/status", "status operation");
   const unit = textBytes("rpc/unit", "status payload");
@@ -314,22 +314,22 @@ function statusFrame(spaceId) {
     1 + 4 + operation.length +
     3 +
     1 + 4 + unit.length;
-  const frame = new Uint8Array(FRAMRPC_HEADER_BYTES + bodyLength);
-  frame.set(FRAMRPC_MAGIC, 0);
-  const view = new DataView(frame.buffer);
+  const packet = new Uint8Array(STORERPC_HEADER_BYTES + bodyLength);
+  packet.set(STORERPC_MAGIC, 0);
+  const view = new DataView(packet.buffer);
   view.setUint16(8, 2, true);
   view.setUint16(10, 0, true);
   view.setUint8(12, 1); // request
   view.setUint8(13, 0);
   view.setUint32(14, bodyLength, true);
   view.setBigInt64(18, 0n, true);
-  let offset = FRAMRPC_HEADER_BYTES;
+  let offset = STORERPC_HEADER_BYTES;
   const term = (tag, bytes) => {
     view.setUint8(offset, tag);
     offset += 1;
     view.setUint32(offset, bytes.length, true);
     offset += 4;
-    frame.set(bytes, offset);
+    packet.set(bytes, offset);
     offset += bytes.length;
   };
   term(1, space);
@@ -338,17 +338,17 @@ function statusFrame(spaceId) {
   view.setUint8(offset++, 0); // page
   view.setUint8(offset++, 0); // timeout
   term(6, unit);
-  return frame;
+  return packet;
 }
 
-function decodeStatusServedVersion(frame, expectedSpaceId) {
-  if (!(frame instanceof Uint8Array) || frame.length < FRAMRPC_HEADER_BYTES) {
+function decodeStatusServedVersion(packet, expectedSpaceId) {
+  if (!(packet instanceof Uint8Array) || packet.length < STORERPC_HEADER_BYTES) {
     backupFailure("engine", "status response ended inside its header");
   }
-  if (FRAMRPC_MAGIC.some((byte, index) => frame[index] !== byte)) {
+  if (STORERPC_MAGIC.some((byte, index) => packet[index] !== byte)) {
     backupFailure("engine", "status response magic does not match");
   }
-  const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
   if (
     view.getUint16(8, true) !== 2 ||
     view.getUint16(10, true) !== 0 ||
@@ -359,24 +359,24 @@ function decodeStatusServedVersion(frame, expectedSpaceId) {
     backupFailure("engine", "status response header is not canonical");
   }
   const bodyLength = view.getUint32(14, true);
-  if (frame.length !== FRAMRPC_HEADER_BYTES + bodyLength) {
+  if (packet.length !== STORERPC_HEADER_BYTES + bodyLength) {
     backupFailure("engine", "status response body length is inconsistent");
   }
-  let offset = FRAMRPC_HEADER_BYTES;
+  let offset = STORERPC_HEADER_BYTES;
   const textTerm = (tag, label) => {
-    if (offset + 5 > frame.length || view.getUint8(offset) !== tag) {
+    if (offset + 5 > packet.length || view.getUint8(offset) !== tag) {
       backupFailure("engine", `status response ${label} has the wrong Term tag`);
     }
     offset += 1;
     const length = view.getUint32(offset, true);
     offset += 4;
-    if (offset + length > frame.length) {
+    if (offset + length > packet.length) {
       backupFailure("engine", `status response ended inside ${label}`);
     }
     let value;
     try {
       value = new TextDecoder("utf-8", { fatal: true }).decode(
-        frame.subarray(offset, offset + length),
+        packet.subarray(offset, offset + length),
       );
     } catch (error) {
       backupFailure("engine", `status response ${label} is not valid UTF-8`, {
@@ -391,7 +391,7 @@ function decodeStatusServedVersion(frame, expectedSpaceId) {
   if (spaceId !== expectedSpaceId || operation !== "rpc/status") {
     backupFailure("engine", "status response identity does not match its request");
   }
-  if (offset + 11 > frame.length) {
+  if (offset + 11 > packet.length) {
     backupFailure("engine", "status response ended before its controls");
   }
   const servedVersion = view.getBigInt64(offset, true);
@@ -404,7 +404,7 @@ function decodeStatusServedVersion(frame, expectedSpaceId) {
     pagePresent !== 0 ||
     errorPresent !== 0 ||
     payloadPresent !== 1 ||
-    offset >= frame.length
+    offset >= packet.length
   ) {
     backupFailure("engine", "status response reports an error or invalid controls");
   }
@@ -436,10 +436,10 @@ async function verifiedBackup(backup, configuredSpaceId) {
   const servedVersion = backup.servedVersion;
   const expectedSha256 = backup.sha256;
   const suppliedBytes = backup.bytes;
-  if (format !== FRAMLOG_BACKUP_FORMAT) {
+  if (format !== STORELOG_BACKUP_FORMAT) {
     backupFailure(
       "invalid-backup",
-      `backup.format must be ${FRAMLOG_BACKUP_FORMAT}`,
+      `backup.format must be ${STORELOG_BACKUP_FORMAT}`,
     );
   }
   if (typeof spaceId !== "string" || spaceId.length === 0) {
@@ -484,11 +484,11 @@ async function verifiedBackup(backup, configuredSpaceId) {
   // captureBackup owned this copy before the restore entered its asynchronous
   // operation queue, so hashing and landing observe the same byte string.
   const bytes = suppliedBytes;
-  const headerSpaceId = parseFramlogHeader(bytes);
+  const headerSpaceId = parseStoreLogHeader(bytes);
   if (headerSpaceId !== spaceId) {
     backupFailure(
       "space-mismatch",
-      `FRAMLOG belongs to SpaceId ${JSON.stringify(headerSpaceId)}, not ` +
+      `STORELOG belongs to SpaceId ${JSON.stringify(headerSpaceId)}, not ` +
         JSON.stringify(spaceId),
     );
   }
@@ -496,7 +496,7 @@ async function verifiedBackup(backup, configuredSpaceId) {
   if (digest !== expectedSha256) {
     backupFailure(
       "verification",
-      `backup FRAMLOG SHA-256 is ${digest}, not ${expectedSha256}`,
+      `backup STORELOG SHA-256 is ${digest}, not ${expectedSha256}`,
     );
   }
   return Object.freeze({ bytes, digest, servedVersion });
@@ -539,10 +539,10 @@ function restoreFence(marker, cause) {
     ? " Recover with another verified restore using { replace: true, " +
       `expectedCurrent: ${JSON.stringify(expectedCurrent)} }.`
     : " Recover with an explicit verified replacement after inspecting the " +
-      "current FRAMLOG identity.";
+      "current STORELOG identity.";
   const error = new StoreBackupError(
     "restore-fenced",
-    "a FRAMLOG restore is durably pending; data access remains fenced." + recovery,
+    "a STORELOG restore is durably pending; data access remains fenced." + recovery,
     cause ? { cause } : undefined,
   );
   error.expectedCurrent = expectedCurrent;
@@ -564,7 +564,7 @@ function restoreFence(marker, cause) {
 export class ChunkedRange {
   constructor(storage, options = {}) {
     this.storage = storage;
-    this.prefix = options.prefix ?? "framlog/";
+    this.prefix = options.prefix ?? "storelog/";
     this.chunkBytes = options.chunkBytes ?? 64 * 1024;
     this.batchKeys = Math.min(options.batchKeys ?? 100, 128);
     this.metaKey = `${this.prefix}meta`;
@@ -713,7 +713,7 @@ export class ChunkedRange {
 }
 
 /**
- * The FRAMLOG and the snapshot image as two key ranges in one DO storage.
+ * The STORELOG and the snapshot image as two key ranges in one DO storage.
  *
  * Commits are serialised and atomic across both ranges: store replays the log
  * from byte zero and boots through the image when one is present, so the pair
@@ -729,11 +729,11 @@ export class DurableStoreStore {
     this.ranges = {
       log: new ChunkedRange(storage, {
         ...shared,
-        prefix: options.logPrefix ?? "framlog/",
+        prefix: options.logPrefix ?? "storelog/",
       }),
       image: new ChunkedRange(storage, {
         ...shared,
-        prefix: options.imagePrefix ?? "framimage/",
+        prefix: options.imagePrefix ?? "storeimage/",
       }),
     };
     this.commits = 0;
@@ -778,7 +778,7 @@ export class DurableStoreStore {
     const run = async () => {
       await this.storage.transaction(async (txn) => {
         for (const { range, plan } of staged) await range.applyTo(txn, plan);
-        await txn.put(FRAMLOG_RESTORE_KEY, marker);
+        await txn.put(STORELOG_RESTORE_KEY, marker);
       });
       for (const { range, plan } of staged) range.settle(plan);
       this.commits += 1;
@@ -1020,7 +1020,7 @@ class GuestArena {
     this.next = header + need;
     const view = this.#view();
     view.setUint32(header, cls, true);
-    view.setUint32(header + 4, 0x4652414d, true); // 'FRAM'
+    view.setUint32(header + 4, 0x53544f52, true); // 'STORE'
     this.liveBytes += cls;
     this.peakLiveBytes = Math.max(this.peakLiveBytes, this.liveBytes);
     return header + GuestArena.HEADER;
@@ -1067,7 +1067,7 @@ export class StoreStorageError extends Error {
   }
 }
 
-/** A wasm-embed entry point failed before it could produce a FRAMRPC reply. */
+/** A wasm-embed entry point failed before it could produce a STORERPC reply. */
 export class StoreExchangeError extends Error {
   constructor(status, message) {
     super(`Beagle Store exchange failed with status ${status}: ${message}`);
@@ -1316,30 +1316,30 @@ export class StoreInstance {
   }
 
   /** entry: "q" | "t" | "s" */
-  call(entry, frame) {
-    return this.#serialise(() => this.#callNow(entry, frame));
+  call(entry, packet) {
+    return this.#serialise(() => this.#callNow(entry, packet));
   }
 
-  query(frame) {
-    return this.call("q", frame);
+  query(packet) {
+    return this.call("q", packet);
   }
 
-  transact(frame) {
-    return this.call("t", frame);
+  transact(packet) {
+    return this.call("t", packet);
   }
 
-  snapshot(frame) {
-    return this.call("s", frame);
+  snapshot(packet) {
+    return this.call("s", packet);
   }
 
   /**
-   * Take a checkpoint: FRAME is a canonical `:rpc/checkpoint` request, which
+   * Take a checkpoint: PACKET is a canonical `:rpc/checkpoint` request, which
    * store answers by rewriting the snapshot image. Resolves once both the image
    * and the log are durable.
    */
-  checkpoint(frame) {
+  checkpoint(packet) {
     return this.#serialise(async () => {
-      const result = await this.#callNow("t", frame);
+      const result = await this.#callNow("t", packet);
       return { ...result, imageBytes: this.image.length };
     });
   }
@@ -1360,10 +1360,10 @@ export class StoreInstance {
     });
   }
 
-  /** Bind one stable FRAMLOG copy to the logical version it contains. */
-  portableFramlog() {
+  /** Bind one stable STORELOG copy to the logical version it contains. */
+  portableStoreLog() {
     return this.#serialise(async () => {
-      const response = await this.#callNow("q", statusFrame(this.spaceId));
+      const response = await this.#callNow("q", statusPacket(this.spaceId));
       if (response.status !== 0) {
         backupFailure(
           "engine",
@@ -1395,7 +1395,7 @@ export class StoreInstance {
     return result;
   }
 
-  async #callNow(entry, frame) {
+  async #callNow(entry, packet) {
     const entryPoint =
       entry === "t"
         ? this.exports.store_transact
@@ -1403,12 +1403,12 @@ export class StoreInstance {
           ? this.exports.store_snapshot
           : this.exports.store_query;
 
-    const requestPointer = this.alloc(frame.length);
-    this.write(requestPointer, frame);
+    const requestPointer = this.alloc(packet.length);
+    this.write(requestPointer, packet);
     const slice = this.alloc(8);
     const view = this.#view();
     view.setUint32(slice + 0, requestPointer, true);
-    view.setUint32(slice + 4, frame.length, true);
+    view.setUint32(slice + 4, packet.length, true);
     const buffer = this.alloc(BUFFER_SIZE);
     const error = this.alloc(ERROR_SIZE);
 
@@ -1443,7 +1443,7 @@ export class StoreInstance {
   /**
    * One guest call at a time. The guest is single-threaded and its pointers
    * live across the awaits inside a call, so two overlapping requests on one
-   * instance would interleave allocations into each other's frames.
+   * instance would interleave allocations into each other's packets.
    */
   #serialise(body) {
     const run = async () => {
@@ -1527,7 +1527,7 @@ export class StoreInstance {
 }
 
 /**
- * A Durable Object that owns one FRAMLOG and its snapshot image.
+ * A Durable Object that owns one STORELOG and its snapshot image.
  *
  * The instance is created lazily per isolate and kept for the object's
  * lifetime: instantiation is the expensive step and the state it holds is
@@ -1586,7 +1586,7 @@ export class StoreDurableObjectBase {
   }
 
   async #bootData() {
-    const pending = await this.state.storage.get(FRAMLOG_RESTORE_KEY);
+    const pending = await this.state.storage.get(STORELOG_RESTORE_KEY);
     if (pending !== undefined) {
       const fenced = restoreFence(pending);
       this.administrativeFence = fenced;
@@ -1621,7 +1621,7 @@ export class StoreDurableObjectBase {
         if (parts.length !== 0) {
           backupFailure(
             "verification",
-            "post-publication replay tried to repair durable FRAM bytes",
+            "post-publication replay tried to repair durable STORE bytes",
           );
         }
       },
@@ -1641,31 +1641,31 @@ export class StoreDurableObjectBase {
     return instance;
   }
 
-  query(frame) {
-    return this.#use((instance) => instance.query(frame));
+  query(packet) {
+    return this.#use((instance) => instance.query(packet));
   }
 
-  transact(frame) {
-    return this.#use((instance) => instance.transact(frame));
+  transact(packet) {
+    return this.#use((instance) => instance.transact(packet));
   }
 
-  snapshot(frame) {
-    return this.#use((instance) => instance.snapshot(frame));
+  snapshot(packet) {
+    return this.#use((instance) => instance.snapshot(packet));
   }
 
-  checkpoint(frame) {
-    return this.#use((instance) => instance.checkpoint(frame));
+  checkpoint(packet) {
+    return this.#use((instance) => instance.checkpoint(packet));
   }
 
   /**
-   * Runtime-neutral data plane for the official FRAMRPC client.
+   * Runtime-neutral data plane for the official STORERPC client.
    *
    * This is safe to expose as a Durable Object RPC method: it validates the
-   * exact frame bound, protocol envelope, SpaceId, and operation/entry pairing
+   * exact packet bound, protocol envelope, SpaceId, and operation/entry pairing
    * before entering the guest. It resolves only after the adapter has durably
    * committed every write performed by the call.
    */
-  async exchange(frame, options = {}) {
+  async exchange(packet, options = {}) {
     if (!options || typeof options !== "object" || Array.isArray(options)) {
       requestFail("exchange options must be an object", "request/invalid-options");
     }
@@ -1682,7 +1682,7 @@ export class StoreDurableObjectBase {
     if (typeof options.space !== "string" || !options.space) {
       requestFail("space must be a nonempty string", "request/invalid-space");
     }
-    const inspected = inspectStoreRpcRequest(frame);
+    const inspected = inspectStoreRpcRequest(packet);
     if (inspected.operation === "rpc/checkpoint") {
       requestFail(
         "checkpoint is an operator capability, not a data-plane operation",
@@ -1700,17 +1700,17 @@ export class StoreDurableObjectBase {
     }
 
     const result = options.entry === "transact"
-      ? await this.transact(frame)
+      ? await this.transact(packet)
       : options.entry === "snapshot"
-        ? await this.snapshot(frame)
-        : await this.query(frame);
+        ? await this.snapshot(packet)
+        : await this.query(packet);
     if (result.status !== 0) {
       throw new StoreExchangeError(result.status, result.message);
     }
     if (!(result.response instanceof Uint8Array)) {
       throw new StoreExchangeError(result.status, "guest response is not bytes");
     }
-    if (result.response.length > FRAMRPC_MAX_FRAME_BYTES) {
+    if (result.response.length > STORERPC_MAX_PACKET_BYTES) {
       throw new StoreExchangeError(result.status, "guest response exceeds 1 MiB");
     }
     if (!result.released) {
@@ -1719,23 +1719,23 @@ export class StoreDurableObjectBase {
     return result.response;
   }
 
-  /** Export the exact authoritative FRAMLOG after all earlier writes landed. */
-  exportFramlog() {
+  /** Export the exact authoritative STORELOG after all earlier writes landed. */
+  exportStoreLog() {
     return this.#serialiseOperation(async () => {
       const instance = await this.store();
-      const point = await instance.portableFramlog();
+      const point = await instance.portableStoreLog();
       const { bytes } = point;
-      const spaceId = parseFramlogHeader(bytes);
+      const spaceId = parseStoreLogHeader(bytes);
       if (spaceId !== this.spaceId) {
         backupFailure(
           "space-mismatch",
-          `FRAMLOG belongs to SpaceId ${JSON.stringify(spaceId)}, not ` +
+          `STORELOG belongs to SpaceId ${JSON.stringify(spaceId)}, not ` +
             JSON.stringify(this.spaceId),
         );
       }
       const sha256 = await sha256Hex(bytes);
       return Object.freeze({
-        format: FRAMLOG_BACKUP_FORMAT,
+        format: STORELOG_BACKUP_FORMAT,
         spaceId,
         servedVersion: point.servedVersion,
         byteLength: bytes.length,
@@ -1746,16 +1746,16 @@ export class StoreDurableObjectBase {
   }
 
   /**
-   * Atomically install one verified canonical FRAMLOG and discard the derived
+   * Atomically install one verified canonical STORELOG and discard the derived
    * image. The default accepts only storage with neither log nor image bytes;
    * replacing an existing database must be explicit.
    */
-  restoreFramlog(backup, options = {}) {
+  restoreStoreLog(backup, options = {}) {
     const captured = captureBackup(backup);
     const restore = this.#restoreOptions(options);
     return this.#serialiseOperation(async () => {
       const verified = await verifiedBackup(captured, this.spaceId);
-      await this.#preflightFramlog(verified.bytes, verified.servedVersion);
+      await this.#preflightStoreLog(verified.bytes, verified.servedVersion);
 
       // A normal restore must be observationally harmless when the target is
       // already occupied. This first read avoids fencing a healthy live guest
@@ -1823,7 +1823,7 @@ export class StoreDurableObjectBase {
             plan: target.imageClearPlan,
           },
         ], {
-          format: FRAMLOG_RESTORE_FORMAT,
+          format: STORELOG_RESTORE_FORMAT,
           spaceId: this.spaceId,
           servedVersion: verified.servedVersion,
           byteLength: verified.bytes.length,
@@ -1845,7 +1845,7 @@ export class StoreDurableObjectBase {
       // object fenced until the exact bytes replay from DurableObjectStorage
       // and report the version declared by the backup.
       const marker = Object.freeze({
-        format: FRAMLOG_RESTORE_FORMAT,
+        format: STORELOG_RESTORE_FORMAT,
         spaceId: this.spaceId,
         servedVersion: verified.servedVersion,
         byteLength: verified.bytes.length,
@@ -1858,21 +1858,21 @@ export class StoreDurableObjectBase {
       let reopened = null;
       try {
         reopened = await this.#bootForRestore();
-        const point = await reopened.portableFramlog();
+        const point = await reopened.portableStoreLog();
         if (!sameBytes(point.bytes, verified.bytes)) {
           backupFailure(
             "verification",
-            "the published FRAMLOG did not reopen byte for byte",
+            "the published STORELOG did not reopen byte for byte",
           );
         }
         if (point.servedVersion !== verified.servedVersion) {
           backupFailure(
             "verification",
-            "the published FRAMLOG reopened at an unexpected served version",
+            "the published STORELOG reopened at an unexpected served version",
           );
         }
         await this.state.storage.transaction(async (txn) => {
-          const pending = await txn.get(FRAMLOG_RESTORE_KEY);
+          const pending = await txn.get(STORELOG_RESTORE_KEY);
           if (pending === undefined) return;
           if (!this.#sameRestoreMarker(pending, marker)) {
             backupFailure(
@@ -1880,7 +1880,7 @@ export class StoreDurableObjectBase {
               "the pending restore marker changed before it could be cleared",
             );
           }
-          await txn.delete(FRAMLOG_RESTORE_KEY);
+          await txn.delete(STORELOG_RESTORE_KEY);
         });
       } catch (error) {
         const fenced = restoreFence(marker, error);
@@ -1894,7 +1894,7 @@ export class StoreDurableObjectBase {
       this.administrativeFence = null;
 
       return Object.freeze({
-        format: FRAMLOG_BACKUP_FORMAT,
+        format: STORELOG_BACKUP_FORMAT,
         spaceId: this.spaceId,
         servedVersion: verified.servedVersion,
         byteLength: verified.bytes.length,
@@ -1930,7 +1930,7 @@ export class StoreDurableObjectBase {
     };
   }
 
-  async #preflightFramlog(bytes, expectedServedVersion) {
+  async #preflightStoreLog(bytes, expectedServedVersion) {
     const preflightStore = {
       async load(which) {
         return which === "log" ? bytes : new Uint8Array(0);
@@ -1946,15 +1946,15 @@ export class StoreDurableObjectBase {
       const opened = await instance.open(this.spaceId, "restore-preflight");
       if (opened.status !== 0) {
         backupFailure(
-          "invalid-framlog",
-          `FRAMLOG replay failed: ${opened.status} ${opened.message}`,
+          "invalid-storelog",
+          `STORELOG replay failed: ${opened.status} ${opened.message}`,
         );
       }
-      const point = await instance.portableFramlog();
+      const point = await instance.portableStoreLog();
       if (!sameBytes(point.bytes, bytes)) {
         backupFailure(
-          "invalid-framlog",
-          "FRAMLOG replay repaired or truncated the supplied byte string",
+          "invalid-storelog",
+          "STORELOG replay repaired or truncated the supplied byte string",
         );
       }
       if (point.servedVersion !== expectedServedVersion) {
@@ -1988,7 +1988,7 @@ export class StoreDurableObjectBase {
     try {
       const log = await store.load("log");
       const imageClearPlan = await store.clearPlan("image");
-      const pending = await this.state.storage.get(FRAMLOG_RESTORE_KEY);
+      const pending = await this.state.storage.get(STORELOG_RESTORE_KEY);
       return {
         store,
         log,
@@ -2019,7 +2019,7 @@ export class StoreDurableObjectBase {
   async #fenceLiveForRestore() {
     const fenced = new StoreBackupError(
       "administrative-fence",
-      "this Beagle Store instance was fenced for a FRAMLOG restore",
+      "this Beagle Store instance was fenced for a STORELOG restore",
     );
     const existingFence = this.administrativeFence;
     this.administrativeFence = existingFence ?? fenced;
@@ -2096,8 +2096,8 @@ export function storeDataPlaneEntrypoint(namespace, spaceId) {
   }
   const object = () => namespace.getByName(spaceId);
   return Object.freeze({
-    exchange(frame, options) {
-      return object().exchange(frame, options);
+    exchange(packet, options) {
+      return object().exchange(packet, options);
     },
   });
 }
@@ -2120,11 +2120,11 @@ export function storeAdminEntrypoint(namespace, spaceId) {
   }
   const object = () => namespace.getByName(spaceId);
   return Object.freeze({
-    exportFramlog() {
-      return object().exportFramlog();
+    exportStoreLog() {
+      return object().exportStoreLog();
     },
-    restoreFramlog(backup, options) {
-      return object().restoreFramlog(backup, options);
+    restoreStoreLog(backup, options) {
+      return object().restoreStoreLog(backup, options);
     },
   });
 }

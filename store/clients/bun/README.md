@@ -1,8 +1,8 @@
 # `@tompassarelli/beagle-store-rpc`
 
-The official client for Beagle Store's binary FRAMRPC v2 data plane. It is an ES
+The official client for Beagle Store's binary STORERPC v2 data plane. It is an ES
 module with no runtime dependencies. The root entry point binds Bun TCP; the
-portable `./core` entry point accepts an exact-frame transport. Both expose
+portable `./core` entry point accepts an exact-packet transport. Both expose
 the same thirteen frozen data operations.
 
 Use this client for application and builder traffic that needs exact recursive
@@ -33,7 +33,7 @@ $ bun add /path/to/store/clients/bun
 Bun 1.3.13 or newer is required.
 
 The runtime-neutral `@tompassarelli/beagle-store-rpc/core` entry point exposes the same
-client over an injected exact-frame transport and has no TCP or Node builtin
+client over an injected exact-packet transport and has no TCP or Node builtin
 dependency. It is the supported route for Workers and embedded hosts:
 
 ```js
@@ -49,7 +49,7 @@ const store = storeClient({
 });
 ```
 
-The transport accepts and returns canonical FRAMRPC bytes. It does not change
+The transport accepts and returns canonical STORERPC bytes. It does not change
 the operation set or engine ABI. A timeout after dispatch is ambiguous for a
 mutation; recover by reading the application's idempotency receipt and never
 blindly retry it.
@@ -175,7 +175,7 @@ automatically. Integers decode as canonical decimal strings inside Terms and as
 
 ## Operations
 
-The client exposes exactly the frozen FRAMRPC v2 method set:
+The client exposes exactly the frozen STORERPC v2 method set:
 
 - `version`, `status`, `validate`
 - `assert`, `retract`, `batch`
@@ -183,10 +183,10 @@ The client exposes exactly the frozen FRAMRPC v2 method set:
 - `leaseAcquire`, `leaseRenew`, `leaseRelease`, `leaseCheck`
 
 Server errors throw `StoreRpcError` with `code`, `retryable`, `detail`,
-`servedVersion`, and operation identity. Transport and malformed-frame errors
+`servedVersion`, and operation identity. Transport and malformed-packet errors
 use `StoreTransportError` and `StoreProtocolError`.
 
-`FRAMRPC_MAX_BATCH_ACTIONS` is the canonical 247-action mutation-response depth
+`STORERPC_MAX_BATCH_ACTIONS` is the canonical 247-action mutation-response depth
 ceiling. The client rejects a larger batch before transport. Mutation receipts
 decode each accepted action as
 `{ inputIndex, stateChanged, occurrence }`. `occurrence` is the one exact
@@ -194,7 +194,7 @@ occurrence-coordinate Term assigned to that action. This includes an unmatched
 retraction: it reports `stateChanged: false` while still advancing the version
 and receiving a coordinate. Receipts do not repeat submitted proposition Terms,
 so large action Terms do not enlarge the response. Beagle Store still
-exact-preflights the response frame before commit because SpaceId size and the
+exact-preflights the response packet before commit because SpaceId size and the
 receipt-envelope width determine its encoded bytes.
 
 `occurrences()` returns `{ coordinate, action, proposition }` objects. The
@@ -207,11 +207,11 @@ assertion)` when the exact cancelled assertion matters.
 `preflightBatch(actions, options)` is a synchronous, no-send helper over the
 exact request encoder. It returns a frozen
 `{ actionCount, requestBytes, bodyBytes, termCount, maxTermDepth }` object and
-enforces the same frame, Term-node, Term-depth, and action ceilings as the
+enforces the same packet, Term-node, Term-depth, and action ceilings as the
 eventual call. Pass that object back as `batch(..., { preflight })`; the client
 re-encodes the request and throws `StoreProtocolError` with
 `client/preflight-mismatch` before opening a connection if any metric changed.
-This helper is client-side and does not add a fourteenth FRAMRPC operation.
+This helper is client-side and does not add a fourteenth STORERPC operation.
 
 ### Native operator checkpoint
 
@@ -219,7 +219,7 @@ This helper is client-side and does not add a fourteenth FRAMRPC operation.
 capability used by `bin/beagle-store-backup`. It sends only `rpc/checkpoint`, cannot be
 used as a generic operation escape hatch, and is deliberately absent from the
 ordinary `storeClient` object. The native server writes its derived snapshot
-image and returns the exact durable FRAMLOG watermark, served version,
+image and returns the exact durable STORELOG watermark, served version,
 timestamp, snapshot CRC32, and snapshot byte count. Application and builder
 traffic should use `storeClient`; the JVM routes may reject this native-only
 operator operation.
@@ -227,7 +227,7 @@ operator operation.
 ## Schema-aware application writes
 
 The optional `@tompassarelli/beagle-store-rpc/schema` entry point builds reusable
-application constraints over an injected official client. It adds no FRAMRPC
+application constraints over an injected official client. It adds no STORERPC
 operation and assigns no domain role to the neutral kernel.
 
 ```js
@@ -397,7 +397,7 @@ retryable `StoreRpcError` whose code is `rpc/conflict`; the default is four
 retries after the initial attempt and the configurable hard ceiling is 32.
 Duplicate identity owners are never selected arbitrarily.
 
-Schema batches are capped at 247 actions, the FRAMRPC v2 mutation-response depth
+Schema batches are capped at 247 actions, the STORERPC v2 mutation-response depth
 ceiling exported by the base client. Before sending, the schema client calls
 `preflightBatch` with the exact actions and expected version and attaches the
 result to `batch`, so a changed request is rejected locally. Beagle Store also
@@ -440,7 +440,7 @@ version. `updateUniqueMany` instead returns
 the subject arrays align with the input create and update arrays, and
 `preflight` is null only when an update-only plan needs no batch.
 
-FRAMRPC v2 serves one request per TCP connection. The client follows that
+STORERPC v2 serves one request per TCP connection. The client follows that
 contract directly without HTTP, JSON, MCP, or a Clojure shim. The server socket
 is plaintext and unauthenticated; keep it on loopback or a private network, or
 put an authenticated TLS boundary in front of it.

@@ -43,8 +43,8 @@ function fixture(overrides = {}) {
       pass: true,
       corpus: { ...REQUIRED_CORPUS_PROFILE },
       deploymentBundle: structuredClone(bundle),
-      loadFrames: 29,
-      verifyFrames: 4,
+      loadPackets: 29,
+      verifyPackets: 4,
       responseBytes: 3,
       runtimeConfiguration: {
         ...CAPACITY_RUNTIME_CONFIGURATION,
@@ -125,8 +125,8 @@ describe("Cloudflare capacity receipt", () => {
     const generatedNames = new Set([
       "spaceId",
       "batches",
-      "loadFrames",
-      "verifyFrames",
+      "loadPackets",
+      "verifyPackets",
     ]);
     const requiredSourceProfile = Object.fromEntries(
       Object.entries(REQUIRED_CORPUS_PROFILE).filter(
@@ -208,8 +208,8 @@ describe("Cloudflare capacity receipt", () => {
     input.functional.corpus.articles = 32;
     input.functional.corpus.expectedFacts = 864;
     input.functional.corpus.batches = 4;
-    input.functional.corpus.loadFrames = 4;
-    input.functional.loadFrames = 4;
+    input.functional.corpus.loadPackets = 4;
+    input.functional.loadPackets = 4;
     const receipt = makeReceipt(input);
     expect(receipt.pass).toBe(false);
     expect(receipt.checks.fixedCorpusProfileObserved).toBe(false);
