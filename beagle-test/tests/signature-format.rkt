@@ -202,6 +202,29 @@
        "      b (Vec Any) (filterv second? xs)]\n"
        "  a)\n")))))
 
+(test-case "compound qualified flat local types are not legacy refinements"
+  (for ([type-text
+         (in-list
+          '("(U terrain/DigRequest Nil)"
+            "(JsMap String logout/LogoutState)"
+            "(Atom sim/World)"
+            "(Vec character/Character)"))])
+    (define source
+      (format
+       "(let [a ~a (filterv first? xs) b (Vec Any) (filterv second? xs)] a)\n"
+       type-text))
+    (with-source
+     source
+     (lambda (path)
+       (check-equal? (format-signature-files 'write (list path)) 0)
+       (check-equal? (format-signature-files 'check (list path)) 0)
+       (check-equal?
+        (file->string path)
+        (string-append
+         (format "(let [a ~a (filterv first? xs)\n" type-text)
+         "      b (Vec Any) (filterv second? xs)]\n"
+         "  a)\n"))))))
+
 (test-case "width never changes a single-pair signature"
   (define name (make-string 120 #\f))
   (define source (format "(defn ~a [x Int] Int x)\n" name))

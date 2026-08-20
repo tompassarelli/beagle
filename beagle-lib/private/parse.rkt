@@ -592,17 +592,29 @@
                                acc)))]))))))
 
 (define (logical-local-entry-stxs vector-stx)
+  ;; Formatting runs before module interfaces have registered qualified nominal
+  ;; types. Probe their structure by replacing only capitalized qualified type
+  ;; atoms with `Any`, while leaving the compound constructor and arity checks
+  ;; to the real type parser.
+  (define (layout-type-expression-datum? datum)
+    (define (qualified-type-atom? value)
+      (and (symbol? value)
+           (regexp-match? #rx"/[A-Z][A-Za-z0-9_-]*$"
+                          (symbol->string value))))
+    (define (probe value)
+      (cond
+        [(qualified-type-atom? value) 'Any]
+        [(list? value) (map probe value)]
+        [else value]))
+    (or (type-expression-datum? datum)
+        (type-expression-datum? (probe datum))))
   (define subs (stx-subs vector-stx))
   (define items (and subs (cdr subs)))
   (and items
        (let ([flat? (and (pair? items)
                          (pair? (cdr items))
-                         (let ([type-datum (->datum (cadr items))])
-                           (or (type-expression-datum? type-datum)
-                               (and (symbol? type-datum)
-                                    (regexp-match?
-                                     #rx"/[A-Z][A-Za-z0-9_-]*$"
-                                     (symbol->string type-datum))))))])
+                         (layout-type-expression-datum?
+                          (->datum (cadr items))))])
          (let loop ([rest items] [acc '()])
            (cond
              [(null? rest) (reverse acc)]
