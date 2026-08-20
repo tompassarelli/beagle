@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Scope-correct rename — repair as a graph operation, the COMPLETE engine.
 #
-# One engine (chartroom's resolve.clj, Turtle #5: a lexical resolver that adds
+# One engine (Beagle Store's resolve.clj, Turtle #5: a lexical resolver that adds
 # refers_to edges, then renames a def by editing ONE node — references follow
 # refers_to). It is correct across all three scope hazards, which a text sed cannot
 # be, and O(1) (edits the def, not each reference):
@@ -9,8 +9,7 @@
 #   2. SHADOWING          — rename a def; a local of the same name (param/let) untouched
 #   3. CROSS-MODULE        — rename a def; every `<alias>/name` reader across files renamed
 #   + the collision invariant: a rename onto an existing binding is refused.
-# Current candidates check coherently. Needs racket + bb + store out/ +
-# chartroom resolve.clj.
+# Current candidates check coherently. Needs racket + bb + store out/ resolve.clj.
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
 
@@ -21,9 +20,8 @@ OVERLAY_CHECK="$ROOT/beagle-lib/private/facts-check-overlay.rkt"
 SUPERVISOR="$ROOT/native-core/bin/run-bounded.rkt"
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
-CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
 source "$ROOT/bin/_beagle-racket"
-source "$ROOT/bin/_store-resolver"
+source "$ROOT/bin/_beagle-store-resolver"
 BEAGLE_STORE_SRC="${CODE_AS_FACTS_CORPUS:-$BEAGLE_STORE_REPO/src}"
 fail=0
 

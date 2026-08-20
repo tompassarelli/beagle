@@ -22,7 +22,7 @@
 #      was a FACT OP not a text splice (the EDN delta shows freshly-minted node ids
 #      carrying kind/v/order-slot facts + a re-pointed wrapper/body slot).
 #
-# Needs racket + bb + store out/ + chartroom (resolve.clj). Fail-closed: an edit the
+# Needs racket + bb + store out/ (resolve.clj). Fail-closed: an edit the
 # engine refuses, or that does not recompile, is REJECTED with no tree written.
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
@@ -32,9 +32,8 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
-CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
 source "$ROOT/bin/_beagle-racket"
-source "$ROOT/bin/_store-resolver"
+source "$ROOT/bin/_beagle-store-resolver"
 fail=0
 
 # author <outdir> <corpus> <op> <args...> -> prints COMMITTED | REJECTED

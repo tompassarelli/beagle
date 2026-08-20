@@ -10,7 +10,7 @@
 #     recompiles.
 #   - UNSAFE (a reference would be orphaned, in THIS module or a CONSUMER via alias):
 #     refuse, mutate nothing (fail closed).
-# Needs racket + bb + store out/ + chartroom resolve.clj.
+# Needs racket + bb + store out/ resolve.clj.
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
 
@@ -19,9 +19,8 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
-CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
 source "$ROOT/bin/_beagle-racket"
-source "$ROOT/bin/_store-resolver"
+source "$ROOT/bin/_beagle-store-resolver"
 CORP="$HERE/delete-corpus"
 fail=0
 

@@ -11,7 +11,7 @@
 #     {op rename, old O, new N, scope S}  -> the one engine (resolve.clj): scope-correct
 #                                            across collision + shadowing + cross-module
 #
-# Needs racket + bb + store out/ + chartroom (resolve.clj). Self-gates with a worked
+# Needs racket + bb + store out/ (resolve.clj). Self-gates with a worked
 # NL→edit example (valid commits + recompiles; invalid fails closed).
 set -uo pipefail
 export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global /tmp collision)
@@ -22,8 +22,7 @@ RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 source "$ROOT/bin/_beagle-racket"
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
-CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
-source "$ROOT/bin/_store-resolver"
+source "$ROOT/bin/_beagle-store-resolver"
 fail=0
 
 # apply <outdir> <corpus> <op> <args...> -> prints COMMITTED | REJECTED

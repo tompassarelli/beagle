@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reasoning call-graph — CROSS-MODULE completeness.
 #
-# beagle-callgraph derives the call graph from chartroom's CONVERGED resolver
+# beagle-callgraph derives the call graph from Beagle Store's lexical resolver
 # (resolve.clj refers_to), so a qualified cross-module call (a/f, fully-qualified m/f)
 # is resolved by binding identity — not dropped, the way a bare-callname index does.
 # A dropped cross-module edge silently EMPTIES the blast radius ("changing this is
@@ -9,16 +9,15 @@
 #
 # Corpus: xm.lib defines target; xm.mid calls it via (:as l) -> l/target; xm.top calls
 # xm.mid/relay fully-qualified. A transitive cross-module chain. blast(target) must
-# include relay AND (transitively) use-it. Needs racket + bb + store out/ + chartroom.
+# include relay AND (transitively) use-it. Needs racket + bb + store out/.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
-CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
-export BEAGLE_STORE_OUT CHARTROOM
-source "$ROOT/bin/_store-resolver"
+export BEAGLE_STORE_OUT
+source "$ROOT/bin/_beagle-store-resolver"
 CG="$ROOT/bin/beagle-callgraph"
 fail=0
 

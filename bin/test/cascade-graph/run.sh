@@ -13,13 +13,12 @@ VERIFY="$HERE/verify.bclj"
 fail=0
 
 RESOLVER_PROBE="$(mktemp -d)"
-mkdir -p "$RESOLVER_PROBE/out" "$RESOLVER_PROBE/chartroom"
+mkdir -p "$RESOLVER_PROBE/out"
 touch "$RESOLVER_PROBE/out/resolve.clj"
 resolver_status=0
 (
   BEAGLE_STORE_OUT="$RESOLVER_PROBE/out"
-  CHARTROOM="$RESOLVER_PROBE/chartroom"
-  source "$BIN/_store-resolver"
+  source "$BIN/_beagle-store-resolver"
   resolved="$(find_store_resolver)" || exit 1
   [[ "$resolved" == "$BEAGLE_STORE_OUT/resolve.clj" ]]
 ) || resolver_status=$?

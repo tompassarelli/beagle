@@ -2,7 +2,7 @@
 # beagle-callgraph: emit the SCOPE-CORRECT call graph of a beagle source tree as
 # JSON, with the transitive blast radius computed by Beagle Store Datalog.
 #
-# Derived from chartroom's CONVERGED lexical resolver (resolve.clj `refers_to`) — the
+# Derived from Beagle Store's lexical resolver (resolve.clj `refers_to`) — the
 # SAME resolution that powers scope-correct rename/delete. A call is resolved by binding
 # IDENTITY, so it is correct across module collisions AND cross-module qualified calls
 # (a/f, fully-qualified m/f) and multi-arity defns — which the older bare-callname index
@@ -14,7 +14,7 @@
 #           "blast":{callee:[transitive-callers]}}   on stdout (JSON)
 #          a one-line summary on stderr.
 #
-# Rents Beagle Store's Layer-2 engine (resolve.clj). Set BEAGLE_STORE_OUT / CHARTROOM to override.
+# Rents Beagle Store's Layer-2 engine (resolve.clj). Set BEAGLE_STORE_OUT to override.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -28,10 +28,9 @@ RT="$BIN/../beagle-lib/private/facts-roundtrip.rkt"
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
-# Beagle Store engine (resolve.clj). beagle's tooling RENTS it. CHARTROOM remains the legacy override.
-CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
+# Beagle Store engine (resolve.clj). beagle's tooling RENTS it.
 source "$BIN/_beagle-racket"
-source "$BIN/_store-resolver"
+source "$BIN/_beagle-store-resolver"
 RES="$(find_store_resolver)" || exit 3
 
 if [[ ! -d "$BEAGLE_STORE_OUT" ]]; then
@@ -42,7 +41,7 @@ fi
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # Project each beagle source to its fact-AST (the projection that carries requires/scope,
-# so cross-module calls resolve), then resolve + emit the call graph in chartroom.
+# so cross-module calls resolve), then resolve + emit the call graph.
 EDNS=(); i=0
 while IFS= read -r f; do
     "$RACKET" "$RT" --emit-edn "$f" > "$WORK/$i.edn" 2>/dev/null

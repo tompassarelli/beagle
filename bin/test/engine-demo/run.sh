@@ -21,10 +21,9 @@ RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 source "$ROOT/bin/_beagle-racket"
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"
 BEAGLE_STORE_OUT="${BEAGLE_STORE_OUT:-$BEAGLE_STORE_REPO/out}"
-CHARTROOM="${CHARTROOM:-$BEAGLE_STORE_REPO/chartroom}"
-source "$ROOT/bin/_store-resolver"
+source "$ROOT/bin/_beagle-store-resolver"
 SRC="${CODE_AS_FACTS_CORPUS:-$BEAGLE_STORE_REPO/src}"
-export BEAGLE_STORE_OUT CHARTROOM
+export BEAGLE_STORE_OUT
 fail=0
 
 TARGET=term-codec-v1-max-depth

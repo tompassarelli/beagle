@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Source after setting BEAGLE_STORE_OUT and CHARTROOM, then call find_store_resolver.
+# Source after setting BEAGLE_STORE_OUT, then call find_store_resolver.
 
 find_store_resolver() {
     local store_root candidate
     store_root="$(dirname "$BEAGLE_STORE_OUT")"
 
     for candidate in \
-        "$CHARTROOM/src/resolve.clj" \
-        "$CHARTROOM/resolve.clj" \
         "$BEAGLE_STORE_OUT/resolve.clj" \
         "$store_root/resolve.clj"
     do
@@ -18,8 +16,6 @@ find_store_resolver() {
     done
 
     echo "Beagle Store resolver not found; checked:" >&2
-    echo "  $CHARTROOM/src/resolve.clj" >&2
-    echo "  $CHARTROOM/resolve.clj" >&2
     echo "  $BEAGLE_STORE_OUT/resolve.clj" >&2
     echo "  $store_root/resolve.clj" >&2
     return 1
