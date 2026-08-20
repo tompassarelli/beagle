@@ -49,9 +49,9 @@ artifact_receipt="$artifact/READY"
 
 port="$(python3 -c 'import socket
 s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
-source_log="$scratch/source/history.framlog"
+source_log="$scratch/source/history.storelog"
 backup="$scratch/backup"
-restore_log="$scratch/restore/history.framlog"
+restore_log="$scratch/restore/history.storelog"
 mkdir -p "$(dirname "$source_log")" "$(dirname "$restore_log")"
 
 start_server() { # log-path output-stem
@@ -95,7 +95,7 @@ create_receipt="$(
 )"
 [[ -f "$backup/manifest.json" && -f "$backup/manifest.sha256" ]] ||
   fail "backup did not publish its manifest"
-[[ ! -e "$backup/history.framlog.snapshot" ]] ||
+[[ ! -e "$backup/history.storelog.snapshot" ]] ||
   fail "backup copied derived snapshot state"
 verify_receipt="$("$backup_command" verify --backup "$backup" --space-id "$space")"
 grep -Fq 'beagle-store-backup/create-receipt/v1' <<<"$create_receipt" ||
@@ -116,20 +116,20 @@ tail_version="$(bun "$driver" "$port" "$space" tail "$served_version")"
 [[ "$tail_version" == "2" ]] || fail "source tail ended at unexpected version $tail_version"
 stop_server
 
-cp "$backup/history.framlog" "$restore_log"
+cp "$backup/history.storelog" "$restore_log"
 [[ ! -e "$restore_log.snapshot" ]] || fail "restore storage was not fresh"
 restore_hash_before="$(bun -e 'const bytes = await Bun.file(Bun.argv[1]).arrayBuffer();
 console.log(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));' "$restore_log")"
 if timeout 10 "$server" "$port" "$restore_log" wrong-space \
     >"$scratch/wrong-space.out" 2>"$scratch/wrong-space.err"; then
-  fail "restored FRAMLOG booted under the wrong SpaceId"
+  fail "restored STORELOG booted under the wrong SpaceId"
 fi
 grep -Fq 'generated store boot failed' "$scratch/wrong-space.err" ||
   fail "wrong-SpaceId restore did not fail closed during store boot"
 restore_hash_after="$(bun -e 'const bytes = await Bun.file(Bun.argv[1]).arrayBuffer();
 console.log(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));' "$restore_log")"
 [[ "$restore_hash_after" == "$restore_hash_before" ]] ||
-  fail "wrong-SpaceId boot mutated the restored FRAMLOG"
+  fail "wrong-SpaceId boot mutated the restored STORELOG"
 
 start_server "$restore_log" restore-1 || fail "restored server did not become replay-ready"
 bun "$driver" "$port" "$space" restored "$served_version" >/dev/null

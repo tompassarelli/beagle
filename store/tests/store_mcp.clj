@@ -175,12 +175,12 @@
              (json/generate-string
               {:changed
                (let [[results]
-                     (store.rt/rpc-record-fields!
+                     (store.rt/rpc-packet-fields!
                       (store.rt/native-payload response)
                       :rpc/mutation-result 1)
                      [result] (store.rt/rpc-list-values! results)
                      [_ changed _]
-                     (store.rt/rpc-record-fields! result :rpc/action-result 3)]
+                     (store.rt/rpc-packet-fields! result :rpc/action-result 3)]
                  changed)
                :servedVersion
                (str (terms/rpcresponse-served-version response))})}))))
@@ -196,7 +196,7 @@
             (mcp-subject! (:subject arguments)) nil nil))]
       (or (native-error-result response)
           (let [[values]
-                (store.rt/rpc-record-fields!
+                (store.rt/rpc-packet-fields!
                  (store.rt/native-payload response) :rpc/triples 1)]
             {:text
              (json/generate-string
@@ -216,14 +216,14 @@
            (store.rt/native-query-payload! (:query arguments)))]
       (or (native-error-result response)
           (let [[rows]
-                (store.rt/rpc-record-fields!
+                (store.rt/rpc-packet-fields!
                  (store.rt/native-payload response) :query/rows 1)]
             {:text
              (json/generate-string
               (mapv
                (fn [row]
                  (let [[values]
-                       (store.rt/rpc-record-fields! row :query/row 1)]
+                       (store.rt/rpc-packet-fields! row :query/row 1)]
                    (mapv term-json (store.rt/rpc-list-values! values))))
                (store.rt/rpc-list-values! rows)))})))
     (catch Throwable error
@@ -236,7 +236,7 @@
            (store.rt/server-port) :rpc/validate rpc-wire/rpc-unit)]
       (or (native-error-result response)
           (let [[valid violations]
-                (store.rt/rpc-record-fields!
+                (store.rt/rpc-packet-fields!
                  (store.rt/native-payload response) :rpc/validation 2)]
             {:text
              (json/generate-string

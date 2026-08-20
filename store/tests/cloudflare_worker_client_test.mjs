@@ -47,7 +47,7 @@ check('client requires an explicit SpaceId and closed input keys', () => {
   assert.throws(() => client.tripleQuery({ unexpected: 'value' }), /unknown/);
 });
 
-check('version request is the exact JSON FRAMRPC envelope', async () => {
+check('version request is the exact JSON STORERPC envelope', async () => {
   let observed;
   const store = client.storeClient({
     url: 'https://shim.test/', token: 'secret', space: 'space-a',
@@ -77,7 +77,7 @@ check('assert lowers directly to a typed recursive write record', async () => {
     client.keywordTerm('title'), 'Door Schedule', { expectedVersion: 11 });
   assert.equal(request.op, 'rpc/assert');
   assert.equal(request.expectedVersion, '11');
-  const [proposition, policy, fence] = client.recordFields(request.payload, 'rpc/write', 3);
+  const [proposition, policy, fence] = client.packetFields(request.payload, 'rpc/write', 3);
   assert.equal(proposition[0], 'triple');
   assert.deepEqual(policy, ['keyword', 'rpc/subject-any']);
   assert.deepEqual(fence, ['keyword', 'rpc/none']);
@@ -94,16 +94,16 @@ check('typed query plans and pagination contain no untyped JSON data', async () 
   assert.equal(request.op, 'rpc/query');
   assert.deepEqual(request.page, { limit: '100' });
   assert.equal(request.timeoutMs, '5000');
-  const [plan, snapshot] = client.recordFields(request.payload, 'query/request', 2);
-  client.recordFields(plan, 'query/plan', 2);
-  assert.deepEqual(client.recordFields(snapshot, 'query/as-of', 1)[0], ['integer', '9']);
+  const [plan, snapshot] = client.packetFields(request.payload, 'query/request', 2);
+  client.packetFields(plan, 'query/plan', 2);
+  assert.deepEqual(client.packetFields(snapshot, 'query/as-of', 1)[0], ['integer', '9']);
 
   await store.query(client.tripleQuery({ t2: client.keywordTerm('title') }),
     { since: { lowerExclusive: 9, upper: 12 } });
-  const [_sincePlan, sinceSnapshot] = client.recordFields(request.payload, 'query/request', 2);
-  const [lower, upper] = client.recordFields(sinceSnapshot, 'query/since', 2);
+  const [_sincePlan, sinceSnapshot] = client.packetFields(request.payload, 'query/request', 2);
+  const [lower, upper] = client.packetFields(sinceSnapshot, 'query/since', 2);
   assert.deepEqual(lower, ['integer', '9']);
-  assert.deepEqual(client.recordFields(upper, 'query/as-of', 1)[0], ['integer', '12']);
+  assert.deepEqual(client.packetFields(upper, 'query/as-of', 1)[0], ['integer', '12']);
 });
 
 check('the closed client exposes every public operation', async () => {

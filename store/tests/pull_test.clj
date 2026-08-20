@@ -34,7 +34,7 @@
 
   ;; --- (1) flat scalar attrs ------------------------------------------------
   (let [r (pull/run! st "@x" ["title" "status"] {})]
-    (chk "flat: :fram/id present" (= "@x" (:fram/id r)))
+    (chk "flat: :store/id present" (= "@x" (:store/id r)))
     (chk "flat: single scalar title" (= "Ship v1" (get r "title")))
     (chk "flat: single scalar status" (= "open" (get r "status"))))
 
@@ -48,14 +48,14 @@
   (let [r (pull/run! st "@x" [{"depends_on" ["title"]}] {})
         deps (get r "depends_on")]
     (chk "nested: depends_on is a vector" (vector? deps))
-    (chk "nested: target :fram/id" (= "@dep1" (:fram/id (first deps))))
+    (chk "nested: target :store/id" (= "@dep1" (:store/id (first deps))))
     (chk "nested: target attr pulled" (= "Design" (get (first deps) "title"))))
 
   ;; --- (4) reverse ref ------------------------------------------------------
   (let [r (pull/run! st "@x" ["_part_of"] {})
         rev (get r "_part_of")]
     (chk "reverse: vector of subjects" (vector? rev))
-    (chk "reverse: found the pointing subjects" (= #{"@a" "@b"} (set (map :fram/id rev)))))
+    (chk "reverse: found the pointing subjects" (= #{"@a" "@b"} (set (map :store/id rev)))))
 
   ;; --- (5) :* wildcard ------------------------------------------------------
   (let [r (pull/run! st "@x" [:*] {})]
@@ -114,23 +114,23 @@
         c2 (first (get r "rel"))
         c3 (first (get c2 "rel"))
         c4 (first (get c3 "rel"))]
-    (chk "max-depth: chain expands to the cap" (and (= "@c2" (:fram/id c2)) (= "@c3" (:fram/id c3))))
-    (chk "max-depth: node beyond the cap is truncated" (and (= "@c4" (:fram/id c4)) (:fram/truncated c4))))
+    (chk "max-depth: chain expands to the cap" (and (= "@c2" (:store/id c2)) (= "@c3" (:store/id c3))))
+    (chk "max-depth: node beyond the cap is truncated" (and (= "@c4" (:store/id c4)) (:store/truncated c4))))
 
-  ;; --- (10) caps: max-nodes -> :fram/truncated ------------------------------
+  ;; --- (10) caps: max-nodes -> :store/truncated ------------------------------
   (let [r (pull/run! st "@x" [{"depends_on" ["title"]}] {:max-nodes 1})
         dep (first (get r "depends_on"))]
     (chk "max-nodes: budget exhausted truncates deeper subjects"
-         (and (= "@dep1" (:fram/id dep)) (:fram/truncated dep) (not (contains? dep "title")))))
+         (and (= "@dep1" (:store/id dep)) (:store/truncated dep) (not (contains? dep "title")))))
 
-  ;; --- (11) cycle: :fram/cycle stub + termination ---------------------------
+  ;; --- (11) cycle: :store/cycle stub + termination ---------------------------
   (commit! db "u" "@k1" "rel" :link "@k2" nil)
   (commit! db "u" "@k2" "rel" :link "@k1" nil)
   (let [r (pull/run! st "@k1" [{"rel" :...}] {})            ; terminating IS the evidence
         k2 (first (get r "rel"))
         back (first (get k2 "rel"))]
-    (chk "cycle: revisit on current path becomes a :fram/cycle stub"
-         (and (= "@k1" (:fram/id back)) (:fram/cycle back))))
+    (chk "cycle: revisit on current path becomes a :store/cycle stub"
+         (and (= "@k1" (:store/id back)) (:store/cycle back))))
 
   ;; --- (12) validation: total, never throws ---------------------------------
   (chk "validate: ok pattern -> []"
@@ -148,8 +148,8 @@
        (let [r (pull/run! st "@x" [42] {})] (and (map? r) (contains? r :error))))
 
   ;; --- (13) unknown root: sensible empty node (documented choice) ------------
-  (chk "unknown root -> bare {:fram/id} node, not an error"
-       (= {:fram/id "@nope"} (pull/run! st "@nope" ["title"] {})))
+  (chk "unknown root -> bare {:store/id} node, not an error"
+       (= {:store/id "@nope"} (pull/run! st "@nope" ["title"] {})))
 
   ;; --- (14) vector root -----------------------------------------------------
   (let [r (pull/run! st ["@x" "@dep1"] ["title"] {})]
@@ -207,7 +207,7 @@
             resp  (exec {:op :pull :root "@w1" :pattern ["title"]} roots)]
         (chk "wire: {:op :pull} dispatches through execute-query"
              (= "Wired" (get resp "title")))
-        (chk "wire: response carries :fram/id" (= "@w1" (:fram/id resp))))
+        (chk "wire: response carries :store/id" (= "@w1" (:store/id resp))))
       (let [roots (capture)
             resp  (exec {:op :pull :root "@w1" :pattern [{"title" 0}]} roots)]
         (chk "wire: validation errors return the standard :error envelope"

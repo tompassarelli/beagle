@@ -14,7 +14,7 @@
 (defn error-code [f]
   (try (f) nil
        (catch clojure.lang.ExceptionInfo error
-         (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+         (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (defn hex->bytes [text]
   (mapv #(Integer/parseInt (apply str %) 16) (partition 2 text)))
@@ -144,7 +144,7 @@
    (java.nio.file.Files/createTempDirectory
     "fact-id-v1-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (.getPath (io/file scratch "facts.framlog")))
+(def log-path (.getPath (io/file scratch "facts.storelog")))
 (def cold-vector (first vectors))
 (def cold-id (get cold-vector "id"))
 (def cold-hex (get cold-vector "hex"))

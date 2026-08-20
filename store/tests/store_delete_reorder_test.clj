@@ -54,9 +54,9 @@
 
 ;; seed a module: three referenced typed defs (base <- greet, punct <- greet) plus
 ;; one UNREFERENCED typed def (`dead`) — the safe delete target. Seeding `dead` (vs
-;; upsert-then-delete) keeps it in the initial module frame, so the delete victim is
-;; resolvable without a mid-binding frame refresh (the warm/daemon path rebuilds the
-;; frame per verb; the resolve-edn! test path computes it once at setup).
+;; upsert-then-delete) keeps it in the initial module record, so the delete victim is
+;; resolvable without a mid-binding record refresh (the warm/daemon path rebuilds the
+;; record per verb; the resolve-edn! test path computes it once at setup).
 (def seed (str work "/demo.bclj"))
 (spit seed (str "#lang beagle/clj\n"
                 "(def base String \"hello\")\n"
@@ -101,7 +101,7 @@
               (chk "D1a: the to-delete def `dead` exists pre-delete" (some? (resolve/def-binding src "dead")))
               (resolve/verb-delete! "dead" "demo")
               ;; the EFFECT is fact-native: `dead`'s wrapper form-edge is no longer LIVE
-              ;; (def-binding reads the stale frame table, so we query live wrapper edges).
+              ;; (def-binding reads the stale record table, so we query live wrapper edges).
               (chk "D1b: `dead`'s wrapper form-edge is no longer live post-delete"
                    (not (some (fn [[_ _ r]] (= r dead-form)) (resolve/wrap-forms wrap))))
               ;; reorder `base` AFTER `punct` (base,punct,greet -> punct,base,greet). Same node id.

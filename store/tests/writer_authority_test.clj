@@ -1,4 +1,4 @@
-;; Writer authority and FRAMRPC v2 JVM server integration.
+;; Writer authority and STORERPC v2 JVM server integration.
 (require '[babashka.process :as process]
          '[clojure.java.io :as io]
          '[clojure.string :as str]
@@ -49,7 +49,7 @@
    {:cancelled (atom false) :query-control (atom nil)}))
 
 (defn scan-values [response]
-  (let [[values] (wire/rpc-record-fields!
+  (let [[values] (wire/rpc-packet-fields!
                   (t/rpc-response-payload-value response) :rpc/triples 1)]
     (wire/rpc-list-values! values)))
 
@@ -59,7 +59,7 @@
     "store-term-authority-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
 
-(let [log (str (io/file scratch "lock-only.framlog"))]
+(let [log (str (io/file scratch "lock-only.storelog"))]
   (spit log "")
   (check! "nil role preserves active default"
           (= :active (writer-authority/server-role-from nil)))
@@ -83,8 +83,8 @@
     (writer-authority/release! successor)))
 
 ;; Host-level native dispatcher: physical authority gates a typed occurrence
-;; write before the durable transaction frame is appended.
-(let [log (str (io/file scratch "direct.framlog"))
+;; write before the durable transaction record is appended.
+(let [log (str (io/file scratch "direct.storelog"))
       space "direct-space"]
   (server/boot! log space :active)
   (try
@@ -96,9 +96,9 @@
                     (wire/rpc-write! proposition wire/rpc-subject-any nil))
           [[_ changed coordinate]]
           (let [[results]
-                (wire/rpc-record-fields!
+                (wire/rpc-packet-fields!
                  (t/rpc-response-payload-value response) :rpc/mutation-result 1)]
-            (mapv #(wire/rpc-record-fields! % :rpc/action-result 3)
+            (mapv #(wire/rpc-packet-fields! % :rpc/action-result 3)
                   (wire/rpc-list-values! results)))]
       (check! "active write returns logical version and occurrence coordinate"
               (and changed (= 1 (t/rpcresponse-served-version response))
@@ -106,13 +106,13 @@
                    (= space (t/triple-t1 (t/triple-t1 coordinate)))
                    (= 1 (t/triple-t3 (t/triple-t1 coordinate)))
                    (= 0 (t/triple-t3 coordinate)))))
-    (let [append-var (ns-resolve 'database 'append-frame-cohort-durable!)
+    (let [append-var (ns-resolve 'database 'append-record-cohort-durable!)
           original @append-var
           failure
           (with-redefs-fn
             {append-var
-             (fn [path frames deflate?]
-               (original path frames deflate?)
+             (fn [path records deflate?]
+               (original path records deflate?)
                (throw (ex-info "injected after force"
                                {:type :injected-post-force})))}
             #(direct-request!
@@ -134,13 +134,13 @@
                    space :rpc/assert
                    (wire/rpc-write! (t/triple "A" :email "retry@example.com")
                                     wire/rpc-subject-any nil)))))
-      (check! "ambiguity writes one tx2 frame, never duplicate tx2"
-              (= [1 2] (mapv :tx-seq (:frames (database/read-triple-log! log))))))
+      (check! "ambiguity writes one tx2 record, never duplicate tx2"
+              (= [1 2] (mapv :tx-seq (:records (database/read-triple-log! log))))))
     (finally (server/shutdown!))))
 
 ;; One active JVM writer, one JVM standby, and a refused duplicate active over
-;; the same canonical FRAMLOG. All client traffic is FRAMRPC v2 binary.
-(let [log (str (io/file scratch "shared.framlog"))
+;; the same canonical STORELOG. All client traffic is STORERPC v2 binary.
+(let [log (str (io/file scratch "shared.storelog"))
       space "shared-space"
       active-port (free-port)
       duplicate-port (free-port)

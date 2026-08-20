@@ -3,13 +3,13 @@
 (def names
   '[*capture-only?* *corpus-cache* *corpus-scope* *reject!*
     *resolve-walk?* *view* ACC CTOR FIXED KIND QUAL REFERS Vp ctx
-    file->ents file-accessors file-modframe file-typeframe
+    file->ents file-accessors file-modrecord file-typerecord
     global-accessor-exports global-exports global-type-exports srcs tx])
 
 (def expected
   [:capture-only :corpus-cache :corpus-scope :reject :resolve-walk :view
    :acc :ctor :fixed :kind :qual :refers :vp :ctx :file-ents
-   :file-accessors :file-modframe :file-typeframe :global-accessor-exports
+   :file-accessors :file-modrecord :file-typerecord :global-accessor-exports
    :global-exports :global-type-exports :srcs :tx])
 
 (def failures (atom 0))
@@ -49,8 +49,8 @@
                   resolve/ctx :ctx
                   resolve/file->ents :file-ents
                   resolve/file-accessors :file-accessors
-                  resolve/file-modframe :file-modframe
-                  resolve/file-typeframe :file-typeframe
+                  resolve/file-modrecord :file-modrecord
+                  resolve/file-typerecord :file-typerecord
                   resolve/global-accessor-exports :global-accessor-exports
                   resolve/global-exports :global-exports
                   resolve/global-type-exports :global-type-exports

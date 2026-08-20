@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import {
-  FRAMRPC_MAX_FRAME_BYTES,
+  STORERPC_MAX_PACKET_BYTES,
   StoreProtocolError,
   StoreRpcError,
   StoreTransportError,
@@ -68,8 +68,8 @@ function rpcList(values) {
   );
 }
 
-function rpcRecord(tag, fields) {
-  return tripleTerm(keywordTerm(tag), rpcList(fields), keywordTerm('rpc/record'));
+function rpcPacket(tag, fields) {
+  return tripleTerm(keywordTerm(tag), rpcList(fields), keywordTerm('rpc/packet'));
 }
 
 function successResponse(request, payload, { major = 2, minor = 0 } = {}) {
@@ -164,8 +164,8 @@ test('runtime-neutral transport preserves the closed client surface', async () =
   for (const request of observed) {
     assert.equal(Object.isFrozen(request), true);
     assert.equal(request.space, 'worker-space');
-    assert(request.frame instanceof Uint8Array);
-    assert(request.frame.length <= FRAMRPC_MAX_FRAME_BYTES);
+    assert(request.packet instanceof Uint8Array);
+    assert(request.packet.length <= STORERPC_MAX_PACKET_BYTES);
     assert(request.signal instanceof AbortSignal);
   }
 });
@@ -182,7 +182,7 @@ test('transport responses retain exact protocol identity checks', async () => {
   );
 });
 
-test('FRAMRPC v1 response frames are rejected at the v2 client boundary', async () => {
+test('STORERPC v1 response packets are rejected at the v2 client boundary', async () => {
   const store = storeClient({
     space: 'worker-space',
     transport: request => successResponse(request, keywordTerm('rpc/unit'), { major: 1 }),
@@ -194,14 +194,14 @@ test('FRAMRPC v1 response frames are rejected at the v2 client boundary', async 
   );
 });
 
-test('occurrence and mutation records decode to strict typed objects', async () => {
+test('occurrence and mutation packets decode to strict typed objects', async () => {
   const coordinate = tripleTerm(
     tripleTerm('worker-space', keywordTerm('kernel/tx-sequence'), integerTerm(1)),
     keywordTerm('kernel/op-ordinal'),
     integerTerm(0),
   );
   const proposition = tripleTerm('subject', keywordTerm('predicate'), 'object');
-  const occurrenceRecord = rpcRecord('rpc/occurrence', [
+  const occurrencePacket = rpcPacket('rpc/occurrence', [
     coordinate,
     keywordTerm('assert'),
     proposition,
@@ -210,7 +210,7 @@ test('occurrence and mutation records decode to strict typed objects', async () 
     space: 'worker-space',
     transport: request => successResponse(
       request,
-      rpcRecord('rpc/occurrences', [rpcList([occurrenceRecord])]),
+      rpcPacket('rpc/occurrences', [rpcList([occurrencePacket])]),
     ),
   });
   assert.deepEqual((await occurrences.occurrences()).result, [{
@@ -223,8 +223,8 @@ test('occurrence and mutation records decode to strict typed objects', async () 
     space: 'worker-space',
     transport: request => successResponse(
       request,
-      rpcRecord('rpc/mutation-result', [rpcList([
-        rpcRecord('rpc/action-result', [integerTerm(0), booleanTerm(false), coordinate]),
+      rpcPacket('rpc/mutation-result', [rpcList([
+        rpcPacket('rpc/action-result', [integerTerm(0), booleanTerm(false), coordinate]),
       ])]),
     ),
   });
@@ -261,7 +261,7 @@ test('occurrence decoding rejects malformed coordinates, actions, and propositio
       space: 'worker-space',
       transport: request => successResponse(
         request,
-        rpcRecord('rpc/occurrences', [rpcList([rpcRecord('rpc/occurrence', fields)])]),
+        rpcPacket('rpc/occurrences', [rpcList([rpcPacket('rpc/occurrence', fields)])]),
       ),
     });
     await assert.rejects(

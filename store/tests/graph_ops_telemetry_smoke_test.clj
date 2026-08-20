@@ -47,7 +47,7 @@
   (try
     (.mkdirs src)
     (io/copy (io/file root "codegraph/test/fc-truecap.bclj") module)
-    (spit facts "{:tx 1 :op \"assert\" :l \"@a\" :p \"title\" :r \"A\" :frame \"test\"}\n")
+    (spit facts "{:tx 1 :op \"assert\" :l \"@a\" :p \"title\" :r \"A\" :record \"test\"}\n")
     (let [off (run-call (assoc base-env "BEAGLE_STORE_GRAPH_OPS_LOG" "off") request)
           absent-off? (not (.exists telemetry))
           on (run-call (assoc base-env "BEAGLE_STORE_GRAPH_OPS_LOG" (.getCanonicalPath telemetry)) request)

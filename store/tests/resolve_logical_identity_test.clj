@@ -108,8 +108,8 @@
 (rmi/mint-datum! mint source-id datum)
 
 (def module-ents (get @ents source-id))
-(def modframe (rm/module-defs ctx nil module-ents))
-(def typeframe (rm/module-types ctx nil module-ents))
+(def modrecord (rm/module-defs ctx nil module-ents))
+(def typerecord (rm/module-types ctx nil module-ents))
 
 (defn- named-definition [name]
   (some (fn [form]
@@ -121,7 +121,7 @@
 
 (println "=== Canonical logical identities from emitted resolver modules ===")
 
-(let [names (set (keys modframe))]
+(let [names (set (keys modrecord))]
   (check "metadata-bearing protocol members use their declared names"
          (every? names ["outer-method" "head-method"])
          (pr-str names))
@@ -226,7 +226,7 @@
            (= [target-ref body-ref] captures)
            (pr-str captures))))
 
-(let [names (set (keys typeframe))]
+(let [names (set (keys typerecord))]
   (check "the union and all metadata-bearing variants are addressable"
          (every? names ["Event" "OuterVariant" "HeadVariant" "BareVariant"])
          (pr-str names))
@@ -237,40 +237,40 @@
 (check "module keys point at leaves with the same canonical spelling"
        (every? (fn [[name leaf]]
                  (= name (rr/sym-val ctx nil leaf)))
-               modframe)
-       (pr-str modframe))
+               modrecord)
+       (pr-str modrecord))
 
 (check "type keys point at leaves with the same canonical spelling"
        (every? (fn [[name leaf]]
                  (= name (rr/sym-val ctx nil leaf)))
-               typeframe)
-       (pr-str typeframe))
+               typerecord)
+       (pr-str typerecord))
 
 (check "defmulti resolves through the corpus definition lookup"
-       (= (get modframe "dispatch")
-          (rco/def-binding {source-id modframe}
-                           {source-id typeframe}
+       (= (get modrecord "dispatch")
+          (rco/def-binding {source-id modrecord}
+                           {source-id typerecord}
                            source-id
                            "dispatch"))
-       (pr-str (get modframe "dispatch")))
+       (pr-str (get modrecord "dispatch")))
 
 ;; Query construction keeps caller identities as canonical leaves. Reachability
-;; is intentionally not needed here; callers-of is the fact-frame boundary whose
+;; is intentionally not needed here; callers-of is the fact-record boundary whose
 ;; former positional naming admitted #%meta and omitted defmulti.
 (def defn-meta-of (ns-resolve 'resolve-query 'defn-meta-of))
 (def callers-of (ns-resolve 'resolve-query 'callers-of))
 (def defn-meta
-  (defn-meta-of ctx nil [source-id] {source-id modframe} @ents))
+  (defn-meta-of ctx nil [source-id] {source-id modrecord} @ents))
 (def caller-leaves
   (set (map first
             (callers-of ctx nil BOUND REFERS [source-id] @ents defn-meta))))
 
 (check "metadata-named defn is represented as a query caller"
-       (contains? caller-leaves (get modframe "meta-caller"))
+       (contains? caller-leaves (get modrecord "meta-caller"))
        (pr-str caller-leaves))
 
 (check "plain defn is represented as a query caller"
-       (contains? caller-leaves (get modframe "plain-caller"))
+       (contains? caller-leaves (get modrecord "plain-caller"))
        (pr-str caller-leaves))
 
 ;; The verb must delegate module selection to the canonical, segment-aware
@@ -350,8 +350,8 @@
 
 (def initial-binding
   (fn [src name]
-    (rco/def-binding {source-id modframe}
-                     {source-id typeframe}
+    (rco/def-binding {source-id modrecord}
+                     {source-id typerecord}
                      src name)))
 
 (def live-upsert-verb
@@ -400,7 +400,7 @@
 (def unresolved-verb
   (upsert-verb
    unresolved-wrapper
-   (fn [_ name] (when (= name "plain-caller") (get modframe name)))
+   (fn [_ name] (when (= name "plain-caller") (get modrecord name)))
    (fn [_ _] (swap! unresolved-mints inc))))
 (def unresolved-facts-before (count (ri/live-propositions ctx)))
 (def unresolved-result

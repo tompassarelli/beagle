@@ -11,7 +11,7 @@
 (defn error-code [f]
   (try (f) nil
        (catch clojure.lang.ExceptionInfo error
-         (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+         (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (defn permutations [items]
   (if (empty? items)

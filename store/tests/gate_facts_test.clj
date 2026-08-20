@@ -1,5 +1,5 @@
 ;; Durable shadow gate fact adapter. Every command runs in a fresh babashka
-;; process so a passing read proves FRAMLOG reopen, not retained heap state.
+;; process so a passing read proves STORELOG reopen, not retained heap state.
 (require '[clojure.edn :as edn]
          '[clojure.java.io :as io])
 
@@ -32,7 +32,7 @@
    (java.nio.file.Files/createTempDirectory
     "store-gate-facts-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (.getPath (io/file scratch "facts.framlog")))
+(def log-path (.getPath (io/file scratch "facts.storelog")))
 
 (defn cleanup! []
   (doseq [file (reverse (file-seq scratch))]

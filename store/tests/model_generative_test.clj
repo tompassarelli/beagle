@@ -1,5 +1,5 @@
 ;; Model-based generative gate: seeded op sequences compared against the pure
-;; oracle after EVERY op and again after a cold FRAMLOG restart.
+;; oracle after EVERY op and again after a cold STORELOG restart.
 ;;   env -u BEAGLE_STORE_TELEMETRY_LOG bb -cp out tests/model_generative_test.clj
 ;; BEAGLE_STORE_MODEL_SEEDS / BEAGLE_STORE_MODEL_OPS override the run; BEAGLE_STORE_MODEL_NEGATIVE=1
 ;; arms the oracle's negative control, which must make this gate FAIL.
@@ -75,7 +75,7 @@
 (defn gen-proposition [rand-int]
   (t/triple (gen-term rand-int 2) (gen-term rand-int 1) (gen-term rand-int 2)))
 
-;; FRAMLOG's TermCodecV1 depth bound is 256; a deep proposition stays just
+;; STORELOG's TermCodecV1 depth bound is 256; a deep proposition stays just
 ;; inside it so the harness probes the limit without asserting its error path.
 (defn deep-proposition [rand-int depth]
   (loop [term (pick rand-int atom-vocabulary) level 0]
@@ -84,13 +84,13 @@
       (recur (t/triple term :link level) (inc level)))))
 
 (def actors ["Tom" "reviewer" :lane])
-(def frames ["model-gen" "batch-frame" ""])
+(def records ["model-gen" "batch-record" ""])
 (def instants [(t/instant 1785560000 1) (t/instant 1785560001 999999999)])
 
 (defn gen-options [rand-int]
   (cond-> {}
     (< (rand-int 100) 45) (assoc :actor (pick rand-int actors))
-    (< (rand-int 100) 35) (assoc :source-frame (pick rand-int frames))
+    (< (rand-int 100) 35) (assoc :source-record (pick rand-int records))
     (< (rand-int 100) 30) (assoc :recorded-at (pick rand-int instants))))
 
 ;; ----------------------------------------------------------- op generation
@@ -153,7 +153,7 @@
                                     :proposition (or (gen-pool-proposition rand-int pool)
                                                      (gen-proposition rand-int))}
                              (< (rand-int 100) 40)
-                             (assoc :source-frame (pick rand-int frames))
+                             (assoc :source-record (pick rand-int records))
                              (< (rand-int 100) 25)
                              (assoc :recorded-at (pick rand-int instants))
                              (< (rand-int 100) 25)
@@ -218,7 +218,7 @@
         pool (vec (repeatedly 14 #(gen-proposition rand-int)))
         deep (deep-proposition rand-int (+ 24 (rand-int 16)))
         prelude (subvec [{:kind :assert :proposition deep
-                          :options {:source-frame "deep-prelude"}}
+                          :options {:source-record "deep-prelude"}}
                          {:kind :assert :proposition deep :options {}}
                          {:kind :retract :proposition deep :options {}}]
                         0 (min 3 op-count))]
@@ -325,8 +325,8 @@
         upper (quot current 2)
         lower (max -1 (- upper 3))
         context (store/new-term-store space-id)
-        _ (doseq [frame (store/transaction-frames-between root -1 upper)]
-            (store/replay-transaction! context frame))
+        _ (doseq [record (store/transaction-records-between root -1 upper)]
+            (store/replay-transaction! context record))
         postings (store/operation-postings root)
         positions (store/operation-candidate-positions
                    root lower upper nil nil postings)
@@ -347,7 +347,7 @@
   (try
     {:value (f)}
     (catch clojure.lang.ExceptionInfo error
-      {:threw (or (:fram/code (ex-data error)) (:type (ex-data error)))})
+      {:threw (or (:store/code (ex-data error)) (:type (ex-data error)))})
     (catch Throwable error
       {:threw (keyword (.getSimpleName (class error)))})))
 
@@ -362,7 +362,7 @@
 (def run-counter (atom 0))
 
 (defn- fresh-log! []
-  (let [file (java.io.File. scratch (str "run-" (swap! run-counter inc) ".framlog"))]
+  (let [file (java.io.File. scratch (str "run-" (swap! run-counter inc) ".storelog"))]
     (database/create-triple-log! (.getPath file) space-id)
     file))
 
@@ -447,11 +447,11 @@
         deep (deep-proposition rand-int 240)
         deeper (deep-proposition rand-int 248)
         opened [{:kind :assert :proposition deep
-                 :options {:actor "deep" :source-frame "deep-arm"}}
+                 :options {:actor "deep" :source-record "deep-arm"}}
                 {:kind :assert :proposition deep :options {}}
                 {:kind :batch
                  :operations [{:action :assert :proposition deeper
-                               :source-frame "deep-batch"}
+                               :source-record "deep-batch"}
                               {:action :retract :proposition deeper}
                               {:action :assert :proposition deep}]
                  :options {:actor "deep" :recorded-at (first instants)}}]

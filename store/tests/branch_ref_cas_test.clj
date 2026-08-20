@@ -40,9 +40,9 @@
        (into-array java.nio.file.CopyOption
                    [java.nio.file.StandardCopyOption/REPLACE_EXISTING])))))
 
-(def target (store-path "target.framlog"))
-(def source-a (store-path "candidate-a.framlog"))
-(def source-b (store-path "candidate-b.framlog"))
+(def target (store-path "target.storelog"))
+(def source-a (store-path "candidate-a.storelog"))
+(def source-b (store-path "candidate-b.storelog"))
 (def original (seed-and-seal! target "original" "target-child"))
 (def candidate-a (seed-and-seal! source-a "alpha" "alpha-child"))
 (def candidate-b (seed-and-seal! source-b "bravo" "bravo-child"))

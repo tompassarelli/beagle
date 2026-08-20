@@ -56,7 +56,7 @@
 (def store-root (.getCanonicalPath (io/file ".")))
 (def source-root (io/file scratch "src"))
 (def source-path (str (io/file source-root "gate_fixture.bclj")))
-(def log-path (str (io/file scratch "code.framlog")))
+(def log-path (str (io/file scratch "code.storelog")))
 (def space "native-code-gate-test")
 (def port (free-port))
 (def beagle-home

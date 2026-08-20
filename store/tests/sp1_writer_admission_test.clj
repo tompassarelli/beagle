@@ -16,7 +16,7 @@
 (defn error-code [f]
   (try (f) nil
        (catch clojure.lang.ExceptionInfo error
-         (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+         (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (defn eventually [f timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
@@ -57,7 +57,7 @@
       (error-code
        (fn []
          (writer-authority/run-admitted-batch!
-          {:log "/definitely/not/opened/sp1.framlog"
+          {:log "/definitely/not/opened/sp1.storelog"
            :space-id "stable-space"
            :batch-id "deadline-batch"
            :compiler-epoch-id "compiler-a"
@@ -83,7 +83,7 @@
    (java.nio.file.Files/createTempDirectory
     "sp1-writer-admission-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (.getPath (io/file scratch "facts.framlog")))
+(def log-path (.getPath (io/file scratch "facts.storelog")))
 (def space-id "facts-authority-space-v1")
 (def fixture "tests/fixtures/sp1/controlled_writer.clj")
 (def worker-count 6)

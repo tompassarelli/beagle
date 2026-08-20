@@ -19,5 +19,5 @@ root-level implementation files by relative path.
 
 ## What stays at the root (do NOT move)
 
-- `database.clj` — SpaceId + FRAMLOG database.
-- `server.clj` — FRAMRPC server implementation.
+- `database.clj` — SpaceId + STORELOG database.
+- `server.clj` — STORERPC server implementation.

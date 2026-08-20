@@ -1,6 +1,6 @@
-;; One exact FRAMLOG byte corpus is opened through production hosted branch
+;; One exact STORELOG byte corpus is opened through production hosted branch
 ;; routing and embedded into a Native Core executable that calls
-;; store.log-codec/boot-framlog-chain!.
+;; store.log-codec/boot-store-log-chain!.
 ;; Run from the repository root:
 ;;   tests/run_hosted_test.sh 240s bb -cp out tests/branch_chain_parity_test.clj
 (require '[clojure.java.io :as io]
@@ -21,7 +21,7 @@
     (f)
     nil
     (catch clojure.lang.ExceptionInfo error
-      (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+      (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (def scratch
   (.toFile
@@ -47,7 +47,7 @@
                   java.nio.file.StandardOpenOption/TRUNCATE_EXISTING]))))
 
 (defn source-bytes! [name source-space options proposition]
-  (let [path (.getPath (io/file scratch (str name ".framlog")))]
+  (let [path (.getPath (io/file scratch (str name ".storelog")))]
     (database/create-triple-log! path source-space options)
     (when proposition
       (database/assert! (database/open-database! path source-space)
@@ -116,7 +116,7 @@
     :tail plain-tail :expected "reject"}])
 
 (defn hosted-verdict [index fixture]
-  (let [path (.getPath (io/file scratch (str "hosted-" index ".framlog")))
+  (let [path (.getPath (io/file scratch (str "hosted-" index ".storelog")))
         segments (:segments fixture)]
     (write-bytes! path (:bytes (:tail fixture)))
     (when (seq segments)
@@ -135,7 +135,7 @@
       {:verdict "accept" :code nil}
       (catch clojure.lang.ExceptionInfo error
         {:verdict "reject"
-         :code (or (:fram/code (ex-data error)) (:type (ex-data error)))}))))
+         :code (or (:store/code (ex-data error)) (:type (ex-data error)))}))))
 
 (def executable (.getPath (io/file scratch "chain-parity")))
 (def artifacts (.getPath (io/file scratch "artifacts")))
@@ -292,11 +292,11 @@
         (zero? (:exit precision-check)))
 (check! "the Native Core production probe compiles and links without a JVM"
         (zero? (:exit build)))
-(check! "flat hosted FRAMLOG still accepts valid Deflate frames"
+(check! "flat hosted STORELOG still accepts valid Deflate records"
         (= #{(t/triple (apply str (repeat 256 "compressible")) :value 1)}
            (set (database/live-propositions
                  (database/open-database! (:path deflated-base) space)))))
-(let [path (.getPath (io/file scratch "deflated-torn-repair.framlog"))
+(let [path (.getPath (io/file scratch "deflated-torn-repair.storelog"))
       source ^bytes (:bytes deflated-base)
       torn (java.util.Arrays/copyOf source (inc (alength source)))]
   (write-bytes! path torn)
@@ -333,7 +333,7 @@
 (check! "hosted branch routing rejects every Deflate position explicitly"
         (every? #(= :unsupported-branch-chain-encoding (:hosted-code %))
                 (filter :deflated? results)))
-(check! "Native Core boot-framlog-chain! matches hosted production routing"
+(check! "Native Core boot-store-log-chain! matches hosted production routing"
         (every? #(= (:hosted %) (:native %)) results))
 
 (when-not (zero? (:exit build))

@@ -53,7 +53,7 @@ fi
 work="$(mktemp -d)"
 home="$work/home"
 mkdir -p "$home" "$work/cwd"
-log="$work/history.framlog"
+log="$work/history.storelog"
 space="package-native-rpc"
 server_output="$work/server.out"
 pid=
@@ -157,7 +157,7 @@ stop_server() {
 start_server
 initial_version="$(wait_ready)"
 [[ "$initial_version" == "0" ]] || {
-  echo "store package smoke: fresh FRAMLOG did not start at version 0: $initial_version" >&2; exit 1; }
+  echo "store package smoke: fresh STORELOG did not start at version 0: $initial_version" >&2; exit 1; }
 
 if [[ "$require_proc" == "1" ]]; then
   cmdline="$("$tr_bin" '\0' '\n' <"/proc/$pid/cmdline")"
@@ -202,13 +202,13 @@ lease_probe='
              (rt/native-request-to! "127.0.0.1" port
                (wire/rpc-request! space op nil nil nil payload)))
       acquired (call :rpc/lease-acquire (wire/rpc-lease-acquire! :package "holder" 5000))
-      [fence _] (wire/rpc-record-fields! (t/rpc-response-payload-value acquired) :lease/grant 2)
+      [fence _] (wire/rpc-packet-fields! (t/rpc-response-payload-value acquired) :lease/grant 2)
       renewed (call :rpc/lease-renew (wire/rpc-lease-renew! fence 10000))
-      [next-fence _] (wire/rpc-record-fields! (t/rpc-response-payload-value renewed) :lease/grant 2)
+      [next-fence _] (wire/rpc-packet-fields! (t/rpc-response-payload-value renewed) :lease/grant 2)
       old-check (call :rpc/lease-check fence)
-      [old-valid _] (wire/rpc-record-fields! (t/rpc-response-payload-value old-check) :lease/check 2)
+      [old-valid _] (wire/rpc-packet-fields! (t/rpc-response-payload-value old-check) :lease/check 2)
       released (call :rpc/lease-release next-fence)
-      [released?] (wire/rpc-record-fields! (t/rpc-response-payload-value released) :lease/released 1)]
+      [released?] (wire/rpc-packet-fields! (t/rpc-response-payload-value released) :lease/released 1)]
   (if (and (nil? (t/rpcresponse-error acquired))
            (not= fence next-fence) (false? old-valid) released?)
     (println "lease-ok")
@@ -245,7 +245,7 @@ restart_show="$(run_private_cli show package)"
   echo "store package smoke: restart lost MCP write" >&2; exit 1; }
 stop_server
 
-# Packaged default state is writable history.framlog and still needs an explicit
+# Packaged default state is writable history.storelog and still needs an explicit
 # database identity.
 state_dir="$work/state"
 port="$(free_port)"
@@ -259,8 +259,8 @@ server_output="$work/state-server.out"
 ) >"$server_output" 2>&1 &
 pid=$!
 wait_ready >/dev/null
-[[ -f "$state_dir/history.framlog" ]] || {
-  echo "store package smoke: default state did not create history.framlog" >&2; exit 1; }
+[[ -f "$state_dir/history.storelog" ]] || {
+  echo "store package smoke: default state did not create history.storelog" >&2; exit 1; }
 stop_server
 
 echo "store package smoke: native version $restart_version"

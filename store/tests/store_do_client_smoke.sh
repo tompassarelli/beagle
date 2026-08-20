@@ -2,12 +2,12 @@
 # The Cloudflare Durable Object client end to end: the published adapter drives
 # the same wasm-embed engine inside workerd that tests/store_wasm_embed_smoke.sh
 # drives from python, over real DurableObjectStorage, and must answer the
-# native lp64 oracle byte for byte on the same frames.
+# native lp64 oracle byte for byte on the same packets.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 client="$repo/clients/cloudflare-do"
-frames="$repo/tests/wasm_embed/frames"
+packets="$repo/tests/wasm_embed/packets"
 space="store-wasm-embed"
 
 skip() {
@@ -40,23 +40,23 @@ BEAGLE_STORE_DO_WASM_ARTIFACT="$wasm_artifact" bash "$client/scripts/build-wasm.
   fail "publishing lib/libstore.wasm failed"
 bun "$client/scripts/check-seams.mjs" ||
   fail "the adapter's seam list is not native/wasm-embed.seams"
-bun "$client/test/pack-frames.mjs" "$frames" "$client/test/bundle" >/dev/null ||
-  fail "packing the frame bundle failed"
+bun "$client/test/pack-packets.mjs" "$packets" "$client/test/bundle" >/dev/null ||
+  fail "packing the packet bundle failed"
 
-# The oracle: the same frames through the native lp64 embed library.
+# The oracle: the same packets through the native lp64 embed library.
 embed_artifact="$("$repo/bin/beagle-store-native-build" --host embed "${sources[@]}")" ||
   fail "native embed oracle build failed"
 "${CC:-cc}" -std=c17 -pedantic -Wall -Wextra -Werror -pthread \
-  -I"$embed_artifact/include" "$repo/tests/wasm_embed/frames_driver.c" \
-  "$embed_artifact/lib/libbeagle_store.a" -o "$scratch/frames_driver" ||
+  -I"$embed_artifact/include" "$repo/tests/wasm_embed/packets_driver.c" \
+  "$embed_artifact/lib/libbeagle_store.a" -o "$scratch/packets_driver" ||
   fail "native oracle driver did not compile"
-"$scratch/frames_driver" "$frames" "$frames/manifest.txt" \
-  "$frames/manifest-reopen.txt" "$frames/manifest-image.txt" \
-  "$scratch/native.framlog" "$space" >"$scratch/native.transcript" ||
+"$scratch/packets_driver" "$packets" "$packets/manifest.txt" \
+  "$packets/manifest-reopen.txt" "$packets/manifest-image.txt" \
+  "$scratch/native.storelog" "$space" >"$scratch/native.transcript" ||
   fail "native oracle reported a failure: $(tail -3 "$scratch/native.transcript")"
-"$scratch/frames_driver" "$frames" "$frames/manifest-depth.txt" \
-  "$frames/manifest-depth-reopen.txt" "$frames/manifest-depth-image.txt" \
-  "$scratch/native-depth.framlog" "$space" \
+"$scratch/packets_driver" "$packets" "$packets/manifest-depth.txt" \
+  "$packets/manifest-depth-reopen.txt" "$packets/manifest-depth-image.txt" \
+  "$scratch/native-depth.storelog" "$space" \
   >"$scratch/native-depth.transcript" ||
   fail "native oracle failed the depth matrix: $(tail -3 "$scratch/native-depth.transcript")"
 
@@ -66,7 +66,7 @@ budget="${BEAGLE_STORE_DO_SMOKE_TIMEOUT:-1200}"
 
 bun_status=0
 timeout "$budget" bun "$client/test/run-node.mjs" \
-  "$client/lib/libstore.wasm" "$frames" >"$scratch/bun.out" 2>&1 ||
+  "$client/lib/libstore.wasm" "$packets" >"$scratch/bun.out" 2>&1 ||
   bun_status=$?
 cat "$scratch/bun.out"
 [[ $bun_status -eq 0 ]] ||
@@ -80,15 +80,15 @@ cat "$scratch/workerd.out"
 [[ $workerd_status -eq 0 ]] ||
   fail "the workerd harness failed (exit $workerd_status)"
 
-cmp -s "$scratch/native.framlog" "$scratch/workerd.framlog" ||
-  fail "the FRAMLOG written through DurableObjectStorage differs from the native one"
-cmp -s "$scratch/native-depth.framlog" "$scratch/workerd-depth.framlog" ||
-  fail "the depth-matrix FRAMLOG differs from the native one"
-[[ -s "$scratch/workerd.framimage" ]] ||
+cmp -s "$scratch/native.storelog" "$scratch/workerd.storelog" ||
+  fail "the STORELOG written through DurableObjectStorage differs from the native one"
+cmp -s "$scratch/native-depth.storelog" "$scratch/workerd-depth.storelog" ||
+  fail "the depth-matrix STORELOG differs from the native one"
+[[ -s "$scratch/workerd.storeimage" ]] ||
   fail "the checkpoint wrote no bytes to the durable image range"
 
-printf 'store do client smoke: PASS frames=%s framlog=%s image=%s artifact=%s\n' \
-  "$(grep -c '^frame ' "$scratch/workerd.transcript")" \
-  "$(sha256sum "$scratch/workerd.framlog" | sed 's/ .*//')" \
-  "$(wc -c <"$scratch/workerd.framimage")" \
+printf 'store do client smoke: PASS packets=%s store-log=%s image=%s artifact=%s\n' \
+  "$(grep -c '^packet ' "$scratch/workerd.transcript")" \
+  "$(sha256sum "$scratch/workerd.storelog" | sed 's/ .*//')" \
+  "$(wc -c <"$scratch/workerd.storeimage")" \
   "$(basename "$wasm_artifact")"

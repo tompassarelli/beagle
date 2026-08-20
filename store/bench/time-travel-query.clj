@@ -1,4 +1,4 @@
-;; Paired cache-cold FRAMRPC query latency at head 3001 versus as-of 3000.
+;; Paired cache-cold STORERPC query latency at head 3001 versus as-of 3000.
 ;;   BEAGLE_STORE_SERVER_QUIET=1 env -u BEAGLE_STORE_TELEMETRY_LOG bb -cp out bench/time-travel-query.clj
 (require '[clojure.java.io :as io]
          '[database]
@@ -14,7 +14,7 @@
    (java.nio.file.Files/createTempDirectory
     "store-time-travel-bench-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (.getPath (io/file scratch "history.framlog")))
+(def log-path (.getPath (io/file scratch "history.storelog")))
 (def request-id (atom 0))
 
 (defn free-port []
@@ -53,7 +53,7 @@
 (database/create-triple-log! log-path space)
 (let [marker (t/triple "marker" :bench/value "stable")
       filler (t/triple "unrelated" :bench/value "toggle")
-      frames
+      records
       (mapv (fn [sequence]
               {:tx-seq sequence
                :operations
@@ -61,7 +61,7 @@
                  :action (if (or (= sequence 1) (even? sequence)) 1 2)
                  :triple (if (= sequence 1) marker filler)}]})
             (range 1 3002))]
-  ((var-get #'database/append-frame-cohort-durable!) log-path frames false)
+  ((var-get #'database/append-record-cohort-durable!) log-path records false)
   (let [port (free-port)
         server (future (server/serve! port log-path space :active))
         plan (query-plan marker)

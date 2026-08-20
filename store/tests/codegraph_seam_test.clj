@@ -35,7 +35,7 @@
 (when (empty? src-files)
   (println "codegraph_seam_test: skipped — codegraph/ not present (pre-fold).") (System/exit 0))
 
-(def store-ns-re #"\bfram\.[a-z][a-z0-9-]*")
+(def store-ns-re #"\bstore\.[a-z][a-z0-9-]*")
 (def violations
   (mapcat (fn [path]
             (->> (str/split-lines (slurp path))

@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import {
-  FRAMRPC_MAX_BATCH_ACTIONS,
+  STORERPC_MAX_BATCH_ACTIONS,
   StoreRpcError,
   StoreTransportError,
   storeClient,
@@ -73,7 +73,7 @@ function mutationResultsFixture(actions, sequence) {
   }));
 }
 
-function mockFram({
+function mockStore({
   versions = [0n],
   queryResults = [],
   scanResults = [],
@@ -253,13 +253,13 @@ function assertNoIo(calls) {
   assert.equal(calls.batch.length, 0);
 }
 
-check('schema aliases the canonical FRAMRPC batch depth ceiling', async () => {
-  assert.equal(SCHEMA_MAX_BATCH_ACTIONS, FRAMRPC_MAX_BATCH_ACTIONS);
-  assert.equal(FRAMRPC_MAX_BATCH_ACTIONS, 247);
+check('schema aliases the canonical STORERPC batch depth ceiling', async () => {
+  assert.equal(SCHEMA_MAX_BATCH_ACTIONS, STORERPC_MAX_BATCH_ACTIONS);
+  assert.equal(STORERPC_MAX_BATCH_ACTIONS, 247);
   const disconnected = storeClient({ space: 'batch-limit-test', port: 1 });
   assert.throws(
     () => disconnected.batch(Array.from(
-      { length: FRAMRPC_MAX_BATCH_ACTIONS + 1 },
+      { length: STORERPC_MAX_BATCH_ACTIONS + 1 },
       () => ({ op: 'assert', t1: 'subject', t2: 'predicate', t3: 'value' }),
     )),
     error => error.code === 'client/action-limit',
@@ -301,12 +301,12 @@ check('batch preflight reports exact deterministic request metrics and is rechec
       t2: TITLE,
       t3: 'x'.repeat(1024 * 1024),
     }]),
-    error => error.code === 'client/frame-too-large',
+    error => error.code === 'client/packet-too-large',
   );
 });
 
 check('createUnique pins its identity read and guards creation with the same expected version', async () => {
-  const store = mockFram({ versions: [7n], queryResults: [[]] });
+  const store = mockStore({ versions: [7n], queryResults: [[]] });
   const schema = schemaClient(store.client);
 
   await schema.createUnique({
@@ -335,7 +335,7 @@ check('createUnique pins its identity read and guards creation with the same exp
 });
 
 check('replaceSingle retracts every value from one pinned snapshot and asserts exactly once', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [11n],
     scanResults: [[
       ['triple', PAGE_A, TITLE, OLD_TITLE_A],
@@ -363,7 +363,7 @@ check('replaceSingle preserves duplicate live occurrences across pinned pages', 
     Object.freeze(['integer', '0']),
     Object.freeze(['integer', '11']),
   ]);
-  const store = mockFram({
+  const store = mockStore({
     versions: [12n],
     scanResults: [
       {
@@ -399,7 +399,7 @@ check('replaceSingle preserves duplicate live occurrences across pinned pages', 
 });
 
 check('an initial scan/version skew retries without sending a stale batch', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [70n, 71n],
     scanResults: [
       {
@@ -430,7 +430,7 @@ check('an initial scan/version skew retries without sending a stale batch', asyn
 });
 
 check('an OCC race re-reads a fresh pinned snapshot before retrying', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [20n, 21n],
     queryResults: [[], []],
     batchOutcomes: [conflict(21n), undefined],
@@ -451,7 +451,7 @@ check('an OCC race re-reads a fresh pinned snapshot before retrying', async () =
 });
 
 check('createUnique rejects an identity already owned by another subject without mutation', async () => {
-  const store = mockFram({ versions: [30n], queryResults: [[[PAGE_B]]] });
+  const store = mockStore({ versions: [30n], queryResults: [[[PAGE_B]]] });
   const schema = schemaClient(store.client);
 
   await assert.rejects(
@@ -468,7 +468,7 @@ check('createUnique rejects an identity already owned by another subject without
 });
 
 check('upsertUnique reuses the sole identity match as the write subject', async () => {
-  const store = mockFram({ versions: [40n], queryResults: [[[PAGE_B]]] });
+  const store = mockStore({ versions: [40n], queryResults: [[[PAGE_B]]] });
   const schema = schemaClient(store.client);
 
   await schema.upsertUnique({
@@ -486,7 +486,7 @@ check('upsertUnique reuses the sole identity match as the write subject', async 
 });
 
 check('upsertUnique rejects an identity resolved to multiple subjects', async () => {
-  const store = mockFram({ versions: [41n], queryResults: [[[PAGE_B], [PAGE_C]]] });
+  const store = mockStore({ versions: [41n], queryResults: [[[PAGE_B], [PAGE_C]]] });
   const schema = schemaClient(store.client);
 
   await assert.rejects(
@@ -508,7 +508,7 @@ check('updateUnique rejects a missing or duplicate source before scanning or wri
 
   for (const [index, testCase] of cases.entries()) {
     const version = 80n + BigInt(index);
-    const store = mockFram({ versions: [version], queryResults: [testCase.owners] });
+    const store = mockStore({ versions: [version], queryResults: [testCase.owners] });
     const schema = schemaClient(store.client);
 
     await assert.rejects(
@@ -522,7 +522,7 @@ check('updateUnique rejects a missing or duplicate source before scanning or wri
 });
 
 check('multi allowedCurrent accepts reordered sets and duplicate occurrences', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [81n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[
@@ -558,7 +558,7 @@ check('multi allowedCurrent rejects stale missing and extra values without writi
   ];
   for (const [index, current] of cases.entries()) {
     const version = 82n + BigInt(index);
-    const store = mockFram({
+    const store = mockStore({
       versions: [version],
       queryResults: [[[PAGE_A]]],
       scanResults: [current],
@@ -579,7 +579,7 @@ check('multi allowedCurrent rejects stale missing and extra values without writi
 });
 
 check('multi allowedCurrent empty set accepts only an empty current cell', async () => {
-  const accepted = mockFram({
+  const accepted = mockStore({
     versions: [84n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[]],
@@ -592,7 +592,7 @@ check('multi allowedCurrent empty set accepts only an empty current cell', async
   }));
   assert.equal(accepted.calls.batch.length, 1);
 
-  const rejected = mockFram({
+  const rejected = mockStore({
     versions: [85n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[tripleFixture(PAGE_A, TAG, OLD_TITLE_A)]],
@@ -611,7 +611,7 @@ check('multi allowedCurrent empty set accepts only an empty current cell', async
 });
 
 check('updateUnique rejects a field predicate equal to its identity predicate before I/O', async () => {
-  const store = mockFram();
+  const store = mockStore();
   const schema = schemaClient(store.client);
   await assert.rejects(
     schema.updateUnique(updateInput({ predicate: SLUG })),
@@ -630,7 +630,7 @@ check('updateUnique requires each exact identity to resolve solely to its requir
 
   for (const [index, testCase] of cases.entries()) {
     const version = 82n + BigInt(index);
-    const store = mockFram({
+    const store = mockStore({
       versions: [version],
       queryResults: [[[PAGE_A]], testCase.owners],
     });
@@ -647,7 +647,7 @@ check('updateUnique requires each exact identity to resolve solely to its requir
 });
 
 check('single update accepts duplicate allowed current occurrences and replaces every occurrence at one version', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [85n],
     queryResults: [[[PAGE_A]], [[PAGE_B]]],
     scanResults: [[
@@ -687,7 +687,7 @@ check('allowedCurrent rejects absent, different, and multiple distinct current v
 
   for (const [index, current] of cases.entries()) {
     const version = 86n + BigInt(index);
-    const store = mockFram({
+    const store = mockStore({
       versions: [version],
       queryResults: [[[PAGE_A]]],
       scanResults: [current],
@@ -705,7 +705,7 @@ check('allowedCurrent rejects absent, different, and multiple distinct current v
 });
 
 check('multi update supports empty replacement and deduplicates exact desired Terms', async () => {
-  const removing = mockFram({
+  const removing = mockStore({
     versions: [90n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[
@@ -723,7 +723,7 @@ check('multi update supports empty replacement and deduplicates exact desired Te
     { op: 'retract', terms: [PAGE_A, TITLE, OLD_TITLE_B] },
   ]);
 
-  const replacing = mockFram({
+  const replacing = mockStore({
     versions: [91n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[tripleFixture(PAGE_A, TITLE, OLD_TITLE_A)]],
@@ -741,7 +741,7 @@ check('multi update supports empty replacement and deduplicates exact desired Te
 });
 
 check('an update OCC conflict reruns source, required identities, and current guards', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [100n, 101n],
     queryResults: [
       [[PAGE_A]], [[PAGE_B]],
@@ -775,7 +775,7 @@ check('an update OCC conflict reruns source, required identities, and current gu
 });
 
 check('an update scan skew reruns every guard and never submits the stale attempt', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [110n, 111n],
     queryResults: [
       [[PAGE_A]], [[PAGE_B]],
@@ -809,7 +809,7 @@ check('an update scan skew reruns every guard and never submits the stale attemp
 });
 
 check('updateUniqueMany replaces multiple fields and subjects in one pinned batch', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [140n],
     queryResults: [[[REVISION_A]], [[PAGE_A]], [[PAGE_B]]],
     scanResults: [
@@ -838,7 +838,7 @@ check('updateUniqueMany replaces multiple fields and subjects in one pinned batc
 });
 
 check('an exact single replacement is a no-op but duplicate occurrences still collapse', async () => {
-  const exact = mockFram({
+  const exact = mockStore({
     versions: [141n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[tripleFixture(PAGE_A, TITLE, NEW_TITLE)]],
@@ -855,7 +855,7 @@ check('an exact single replacement is a no-op but duplicate occurrences still co
   });
   assert.equal(exact.calls.batch.length, 0);
 
-  const duplicates = mockFram({
+  const duplicates = mockStore({
     versions: [142n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[
@@ -874,7 +874,7 @@ check('an exact single replacement is a no-op but duplicate occurrences still co
 });
 
 check('empty allowedCurrent is an absence CAS and one failed cell prevents the whole command', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [143n],
     queryResults: [[[REVISION_A]], [[PAGE_A]]],
     scanResults: [
@@ -895,7 +895,7 @@ check('empty allowedCurrent is an absence CAS and one failed cell prevents the w
 });
 
 check('updateUniqueMany rejects duplicate resolved cells and cross-alias identity writes', async () => {
-  const duplicate = mockFram({
+  const duplicate = mockStore({
     versions: [144n],
     queryResults: [[[PAGE_A]], [[PAGE_A]]],
   });
@@ -918,7 +918,7 @@ check('updateUniqueMany rejects duplicate resolved cells and cross-alias identit
   assert.equal(duplicate.calls.scan.length, 0);
   assert.equal(duplicate.calls.batch.length, 0);
 
-  const identityWrite = mockFram({
+  const identityWrite = mockStore({
     versions: [145n],
     queryResults: [[[PAGE_A]], [[PAGE_A]]],
   });
@@ -947,7 +947,7 @@ check('updateUniqueMany rejects duplicate resolved cells and cross-alias identit
 });
 
 check('a later multi-update scan skew replans every source and field', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [150n, 151n],
     queryResults: [
       [[REVISION_A]], [[PAGE_A]],
@@ -972,7 +972,7 @@ check('a later multi-update scan skew replans every source and field', async () 
 });
 
 check('a multi-update conflict rereads and rebuilds the whole command', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [152n, 153n],
     queryResults: [
       [[REVISION_A]], [[PAGE_A]],
@@ -1019,7 +1019,7 @@ check('updateUniqueMany enforces the aggregate 247-action boundary without split
     ],
   };
 
-  const exact = mockFram({
+  const exact = mockStore({
     versions: [154n],
     queryResults: [[[PAGE_A]], [[REVISION_A]]],
     scanResults: [current(PAGE_A, TITLE, 123), current(REVISION_A, REVISION_STATUS, 124)],
@@ -1028,7 +1028,7 @@ check('updateUniqueMany enforces the aggregate 247-action boundary without split
   assert.equal(exact.calls.batch.length, 1);
   assert.equal(exact.calls.batch[0].actions.length, SCHEMA_MAX_BATCH_ACTIONS);
 
-  const overflow = mockFram({
+  const overflow = mockStore({
     versions: [155n],
     queryResults: [[[PAGE_A]], [[REVISION_A]]],
     scanResults: [current(PAGE_A, TITLE, 124), current(REVISION_A, REVISION_STATUS, 124)],
@@ -1056,7 +1056,7 @@ check('updateUniqueMany validates structure before I/O and skips an empty action
       }],
     },
   ]) {
-    const invalid = mockFram();
+    const invalid = mockStore();
     await assert.rejects(
       schemaClient(invalid.client).updateUniqueMany(input),
       error => error instanceof SchemaConstraintError,
@@ -1064,7 +1064,7 @@ check('updateUniqueMany validates structure before I/O and skips an empty action
     assertNoIo(invalid.calls);
   }
 
-  const empty = mockFram({
+  const empty = mockStore({
     versions: [156n],
     queryResults: [[[PAGE_A]], [[REVISION_A]]],
     scanResults: [[], []],
@@ -1091,7 +1091,7 @@ check('updateUniqueMany validates structure before I/O and skips an empty action
 });
 
 check('createUnique checks required identities at the same version as creation', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [120n],
     queryResults: [[], [[PAGE_B]]],
   });
@@ -1117,7 +1117,7 @@ check('createUnique rejects more than 247 batch actions before mutation', async 
     value: Object.freeze(['integer', String(index)]),
     cardinality: 'multi',
   }));
-  const store = mockFram({ versions: [50n], queryResults: [[]] });
+  const store = mockStore({ versions: [50n], queryResults: [[]] });
   const schema = schemaClient(store.client);
 
   await assert.rejects(
@@ -1138,7 +1138,7 @@ check('upsertUnique rejects an oversized desired field list before I/O', async (
     value: Object.freeze(['integer', String(index)]),
     cardinality: 'multi',
   }));
-  const store = mockFram();
+  const store = mockStore();
 
   await assert.rejects(
     schemaClient(store.client).upsertUnique({
@@ -1158,7 +1158,7 @@ check('updateUnique rejects an oversized desired value list before I/O', async (
     { length: SCHEMA_MAX_BATCH_ACTIONS + 1 },
     (_, index) => Object.freeze(['integer', String(index)]),
   );
-  const store = mockFram();
+  const store = mockStore();
 
   await assert.rejects(
     schemaClient(store.client).updateUnique(updateInput({
@@ -1177,7 +1177,7 @@ check('updateUnique rejects an oversized allowedCurrent guard before I/O', async
     { length: SCHEMA_MAX_BATCH_ACTIONS + 1 },
     (_, index) => Object.freeze(['integer', String(index)]),
   );
-  const store = mockFram();
+  const store = mockStore();
 
   await assert.rejects(
     schemaClient(store.client).updateUnique(updateInput({ allowedCurrent })),
@@ -1193,7 +1193,7 @@ check('schema mutations reject an oversized requireUnique list before I/O', asyn
     { length: SCHEMA_MAX_REQUIRE_UNIQUE + 1 },
     () => requiredAuthor(),
   );
-  const store = mockFram();
+  const store = mockStore();
 
   await assert.rejects(
     schemaClient(store.client).createUnique({
@@ -1361,7 +1361,7 @@ check('upsertUnique keeps single-field scan concurrency bounded', async () => {
 check('schema reads reject repeated cursors and pages beyond their ceiling', async () => {
   const cursorA = Object.freeze(['keyword', 'schema/cursor-a']);
   const cursorB = Object.freeze(['keyword', 'schema/cursor-b']);
-  const repeated = mockFram({
+  const repeated = mockStore({
     versions: [160n],
     queryResults: [
       { result: [], page: { done: false, nextCursor: cursorA } },
@@ -1380,7 +1380,7 @@ check('schema reads reject repeated cursors and pages beyond their ceiling', asy
   assert.equal(repeated.calls.query.length, SCHEMA_MAX_READ_PAGES);
   assert.equal(repeated.calls.batch.length, 0);
 
-  const overPages = mockFram({
+  const overPages = mockStore({
     versions: [161n],
     queryResults: [[[PAGE_A]]],
     scanResults: [
@@ -1404,7 +1404,7 @@ check('schema reads reject repeated cursors and pages beyond their ceiling', asy
 check('two scan pages can expose the 248th occurrence action-limit sentinel', async () => {
   const cursor = Object.freeze(['keyword', 'schema/cursor-overflow']);
   const occurrence = tripleFixture(PAGE_A, TAG, WIKI_TAG);
-  const store = mockFram({
+  const store = mockStore({
     versions: [162n],
     queryResults: [[[PAGE_A]]],
     scanResults: [
@@ -1436,7 +1436,7 @@ check('transactUnique creates a mutually-referencing set with planned uniqueness
   const alpha = Object.freeze(['string', 'alpha']);
   const beta = Object.freeze(['string', 'beta']);
   const gamma = Object.freeze(['string', 'gamma']);
-  const store = mockFram({
+  const store = mockStore({
     versions: [170n],
     queryResults: [[], [], []],
   });
@@ -1486,7 +1486,7 @@ check('transactUnique creates a mutually-referencing set with planned uniqueness
 
 check('transactUnique mixes create and update while zero desired single values clear the cell', async () => {
   const child = Object.freeze(['string', 'child']);
-  const store = mockFram({
+  const store = mockStore({
     versions: [171n],
     queryResults: [[], [[PAGE_A]]],
     scanResults: [[tripleFixture(PAGE_A, TITLE, OLD_TITLE_A)]],
@@ -1520,7 +1520,7 @@ check('transactUnique mixes create and update while zero desired single values c
 });
 
 check('transactUnique composes an exact multi-set guard with required Ref identities', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [172n],
     queryResults: [[[PAGE_A]], [[PAGE_B]], [[PAGE_C]]],
     scanResults: [[
@@ -1555,7 +1555,7 @@ check('transactUnique composes an exact multi-set guard with required Ref identi
 });
 
 check('transactUnique multi-set or target identity failure has zero partial effects', async () => {
-  const staleSet = mockFram({
+  const staleSet = mockStore({
     versions: [173n],
     queryResults: [[[PAGE_A]], [[PAGE_B]]],
     scanResults: [[tripleFixture(PAGE_A, TAG, PAGE_B)]],
@@ -1578,7 +1578,7 @@ check('transactUnique multi-set or target identity failure has zero partial effe
   );
   assert.equal(staleSet.calls.batch.length, 0);
 
-  const missingTarget = mockFram({
+  const missingTarget = mockStore({
     versions: [174n],
     queryResults: [[[PAGE_A]], []],
   });
@@ -1603,7 +1603,7 @@ check('transactUnique multi-set or target identity failure has zero partial effe
 });
 
 check('an already-empty single clear is an update-only transaction no-op', async () => {
-  const store = mockFram({
+  const store = mockStore({
     versions: [172n],
     queryResults: [[[PAGE_A]]],
     scanResults: [[]],
@@ -1632,7 +1632,7 @@ check('an already-empty single clear is an update-only transaction no-op', async
 });
 
 check('transactUnique rejects duplicate planned identities and subjects before I/O', async () => {
-  const duplicateIdentity = mockFram();
+  const duplicateIdentity = mockStore();
   await assert.rejects(
     schemaClient(duplicateIdentity.client).transactUnique({
       creates: [
@@ -1644,7 +1644,7 @@ check('transactUnique rejects duplicate planned identities and subjects before I
   );
   assertNoIo(duplicateIdentity.calls);
 
-  const duplicateSubject = mockFram();
+  const duplicateSubject = mockStore();
   await assert.rejects(
     schemaClient(duplicateSubject.client).transactUnique({
       creates: [
@@ -1656,7 +1656,7 @@ check('transactUnique rejects duplicate planned identities and subjects before I
   );
   assertNoIo(duplicateSubject.calls);
 
-  const fieldCollision = mockFram();
+  const fieldCollision = mockStore();
   await assert.rejects(
     schemaClient(fieldCollision.client).transactUnique({
       creates: [
@@ -1672,7 +1672,7 @@ check('transactUnique rejects duplicate planned identities and subjects before I
   );
   assertNoIo(fieldCollision.calls);
 
-  const updateCollision = mockFram();
+  const updateCollision = mockStore();
   await assert.rejects(
     schemaClient(updateCollision.client).transactUnique({
       creates: [{
@@ -1689,7 +1689,7 @@ check('transactUnique rejects duplicate planned identities and subjects before I
   );
   assertNoIo(updateCollision.calls);
 
-  const resolvedCellCollision = mockFram({
+  const resolvedCellCollision = mockStore({
     versions: [173n],
     queryResults: [[], [[PAGE_A]]],
   });
@@ -1717,7 +1717,7 @@ check('transactUnique rejects duplicate planned identities and subjects before I
   assert.equal(resolvedCellCollision.calls.preflightBatch.length, 0);
   assert.equal(resolvedCellCollision.calls.batch.length, 0);
 
-  const mismatchedGuard = mockFram();
+  const mismatchedGuard = mockStore();
   await assert.rejects(
     schemaClient(mismatchedGuard.client).transactUnique({
       creates: [{
@@ -1735,7 +1735,7 @@ check('transactUnique rejects duplicate planned identities and subjects before I
 check('a planned idempotency reservation is re-resolved after conflict before any second write', async () => {
   const requestId = Object.freeze(['string', 'request-1']);
   const requestIdentity = Object.freeze(['keyword', 'request/id']);
-  const store = mockFram({
+  const store = mockStore({
     versions: [180n, 181n],
     queryResults: [[], [], [[PAGE_C]], []],
     batchOutcomes: [conflict(180n)],
@@ -1766,7 +1766,7 @@ check('a planned idempotency reservation is re-resolved after conflict before an
 
 check('transport ambiguity is never retried and conflict exhaustion remains typed', async () => {
   const ambiguity = new StoreTransportError('connection ended after write');
-  const ambiguous = mockFram({
+  const ambiguous = mockStore({
     versions: [190n],
     queryResults: [[]],
     batchOutcomes: [ambiguity],
@@ -1782,7 +1782,7 @@ check('transport ambiguity is never retried and conflict exhaustion remains type
   assert.equal(ambiguous.calls.version.length, 1);
   assert.equal(ambiguous.calls.batch.length, 1);
 
-  const exhausted = mockFram({
+  const exhausted = mockStore({
     versions: [191n, 192n],
     queryResults: [[], []],
     batchOutcomes: [conflict(191n), conflict(192n)],
@@ -1806,7 +1806,7 @@ check('non-conflict write errors propagate unchanged and are not retried', async
     retryable: true,
     message: 'server unavailable',
   });
-  const store = mockFram({
+  const store = mockStore({
     versions: [60n],
     queryResults: [[]],
     batchOutcomes: [failure],

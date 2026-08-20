@@ -17,7 +17,7 @@
             (>= attempt 200) nil
             :else (do (Thread/sleep 25) (recur (inc attempt)))))))
 
-(defn fields [value tag count-value] (wire/rpc-record-fields! value tag count-value))
+(defn fields [value tag count-value] (wire/rpc-packet-fields! value tag count-value))
 (defn values-list [value] (wire/rpc-list-values! value))
 (defn payload [response] (t/rpc-response-payload-value response))
 (defn error-code [response] (some-> response t/rpcresponse-error t/rpcerror-code))
@@ -57,7 +57,7 @@
   (.toFile (java.nio.file.Files/createTempDirectory
             "store-query-cursor-bench-"
             (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (str (io/file scratch "history.framlog")))
+(def log-path (str (io/file scratch "history.storelog")))
 (def space "query-cursor-bench")
 (def port (free-port))
 (def server (future (server/serve! port log-path space :active)))

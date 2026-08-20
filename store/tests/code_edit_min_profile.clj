@@ -21,7 +21,7 @@
             r/CTOR (c/value! st "ctor_prefix") r/ACC (c/value! st "accessor_field")
             r/n-resolved (atom 0) r/n-unresolved (atom 0) r/n-xmod (atom 0) r/n-type (atom 0) r/n-comment (atom 0)
             r/n-forms-walked (atom 0) r/walked-modules (atom #{})
-            r/srcs [] r/file-modframe {} r/file-typeframe {} r/file-accessors {}
+            r/srcs [] r/file-modrecord {} r/file-typerecord {} r/file-accessors {}
             r/global-exports {} r/global-type-exports {} r/global-accessor-exports {}]
     ;; grouping only (file->ents + srcs)
     (let [t0 (System/nanoTime)
@@ -35,8 +35,8 @@
       (println (format "grouping (by-p NAME):       %.1f ms   srcs=%d" (ms t0) (count r/srcs))))
     ;; full per-src table build (all 11 modules)
     (let [t1 (System/nanoTime)]
-      (set! r/file-modframe  (into {} (map (fn [s] [s (r/module-defs s)]) r/srcs)))
-      (set! r/file-typeframe (into {} (map (fn [s] [s (r/module-types s)]) r/srcs)))
+      (set! r/file-modrecord  (into {} (map (fn [s] [s (r/module-defs s)]) r/srcs)))
+      (set! r/file-typerecord (into {} (map (fn [s] [s (r/module-types s)]) r/srcs)))
       (set! r/file-accessors (into {} (map (fn [s] [s (r/module-accessors s)]) r/srcs)))
       (println (format "per-src tables (ALL 11):    %.1f ms" (ms t1))))
     ;; single-module table build (schema only)

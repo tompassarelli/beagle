@@ -70,7 +70,7 @@ assert_code_on_line "beagle-store-code-on binds BEAGLE_STORE_SPACE_ID into MCP c
   '"BEAGLE_STORE_SPACE_ID": "$SPACE_ID"'
 assert_code_on_line "beagle-store-code-on binds the native server port" \
   '"BEAGLE_STORE_SERVER_PORT": "$PORT"'
-assert_code_on_line "beagle-store-code-on binds the native FRAMLOG path" \
+assert_code_on_line "beagle-store-code-on binds the native STORELOG path" \
   '"BEAGLE_STORE_LOG": "$CODE_LOG"'
 assert_code_on_line "beagle-store-code-on excludes inherited telemetry from graph servers" \
   'exec env -u BEAGLE_STORE_TELEMETRY_LOG \'
@@ -126,7 +126,7 @@ assert "mcp.json preserves stable SpaceId" \
   '[ "$(jq -r ".mcpServers.store.env.BEAGLE_STORE_SPACE_ID" "$DIR/.mcp.json")" = "wire-test-space" ]'
 assert "mcp.json preserves native server port" \
   '[ "$(jq -r ".mcpServers.store.env.BEAGLE_STORE_SERVER_PORT" "$DIR/.mcp.json")" = "31337" ]'
-assert "mcp.json preserves native FRAMLOG" \
+assert "mcp.json preserves native STORELOG" \
   '[ "$(jq -r ".mcpServers.store.env.BEAGLE_STORE_LOG" "$DIR/.mcp.json")" = "/canonical/store/.store/code.log" ]'
 assert "mcp.json keeps unrelated mcpServers.other-tool" \
   '[ "$(jq -r ".mcpServers[\"other-tool\"].command" "$DIR/.mcp.json")" = "/bin/other" ]'
@@ -138,7 +138,7 @@ assert "config.toml preserves stable SpaceId" \
   'grep -q "^BEAGLE_STORE_SPACE_ID = \"wire-test-space\"$" "$DIR/.codex/config.toml"'
 assert "config.toml preserves native server port" \
   'grep -q "^BEAGLE_STORE_SERVER_PORT = \"31337\"$" "$DIR/.codex/config.toml"'
-assert "config.toml preserves native FRAMLOG" \
+assert "config.toml preserves native STORELOG" \
   'grep -q "^BEAGLE_STORE_LOG = \"/canonical/store/.store/code.log\"$" "$DIR/.codex/config.toml"'
 assert "config.toml keeps unrelated [projects.unrelated]" \
   'grep -q "^\[projects.unrelated\]$" "$DIR/.codex/config.toml"'

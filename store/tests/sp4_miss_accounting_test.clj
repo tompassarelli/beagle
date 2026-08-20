@@ -87,7 +87,7 @@
 (let [fallback-count (atom 0)
       typed-error (ex-info "forced typed Store failure"
                            {:type :store/wrapped
-                            :fram/code :store/durability-ambiguous})
+                            :store/code :store/durability-ambiguous})
       observed-error
       (try
         (miss-accounting/account-misses-before-fallback-v1!
@@ -101,7 +101,7 @@
   (check! "typed Store errors retain the exact code and prevent fallback"
           (and (identical? typed-error observed-error)
                (= :store/durability-ambiguous
-                  (:fram/code (ex-data observed-error)))
+                  (:store/code (ex-data observed-error)))
                (zero? @fallback-count))))
 
 (let [failures (remove second @checks)]

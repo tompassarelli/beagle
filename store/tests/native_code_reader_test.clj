@@ -53,7 +53,7 @@
 (def source-root (io/file scratch "src"))
 (def known-path (str (io/file source-root "known.bclj")))
 (def collision-path (str (io/file source-root "knownx.bclj")))
-(def log-path (str (io/file scratch "code.framlog")))
+(def log-path (str (io/file scratch "code.storelog")))
 (def space "native-code-reader-test")
 (def beagle
   (or (System/getenv "BEAGLE_STORE_BEAGLE")
@@ -104,7 +104,7 @@
           snapshot-triples (:triples module-snapshot)
           projected (code-reader/project-module-edn module-snapshot)
           rendered (code-reader/render-module! beagle module-snapshot)]
-      (check! "page drain spans multiple FRAMRPC responses"
+      (check! "page drain spans multiple STORERPC responses"
               (> (:pages module-snapshot) 1))
       (check! "snapshot cites the drained graph version"
               (= 2 (:version citation)))

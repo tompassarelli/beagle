@@ -23,9 +23,9 @@ Triples. A missing result field or nonzero `errors` stops the run.
   while another reader repeats the join;
 - mixed read/write: 40 cycles of one durable write followed by three joins.
 
-The Beagle Store adapter seeds a scratch FRAMLOG through the current server engine,
+The Beagle Store adapter seeds a scratch STORELOG through the current server engine,
 then times replay plus the first successful `rpc/status` request over a loopback
-FRAMRPC v2 socket. JVM startup and TCP bind stay outside
+STORERPC v2 socket. JVM startup and TCP bind stay outside
 `boot-to-serving-ms`; steady reads and writes cross the socket. SQLite uses
 Python's `sqlite3` binding with WAL, `synchronous=FULL`, one writer connection,
 and independent reader connections. Its seed transaction is complete and

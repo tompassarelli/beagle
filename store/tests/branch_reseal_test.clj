@@ -18,7 +18,7 @@
     (f)
     nil
     (catch clojure.lang.ExceptionInfo error
-      (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+      (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (defn read-all ^bytes [path]
   (java.nio.file.Files/readAllBytes (.toPath (java.io.File. (str path)))))
@@ -43,7 +43,7 @@
    (java.nio.file.Files/createTempDirectory
     "store-branch-reseal-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log (.getPath (java.io.File. scratch "long-lived.framlog")))
+(def log (.getPath (java.io.File. scratch "long-lived.storelog")))
 (def space "branch-reseal-space")
 
 (database/create-triple-log! log space)
@@ -143,7 +143,7 @@
 (def recovered
   (mapv (fn [phase]
           (let [fixture (interrupted-reseal!
-                         (str "recover-" (name phase) ".framlog") phase)
+                         (str "recover-" (name phase) ".storelog") phase)
                 blocked
                 (error-code
                  #(database/open-branch!
@@ -184,7 +184,7 @@
          recovered))
 
 (def corrupt-marker
-  (interrupted-reseal! "corrupt-marker.framlog" :prepared))
+  (interrupted-reseal! "corrupt-marker.storelog" :prepared))
 (write-all!
  (str (:path corrupt-marker) ".reseal")
  (.getBytes
@@ -201,7 +201,7 @@
                                       ^bytes (read-all (:ref corrupt-marker)))))
 
 (def corrupt-segment
-  (interrupted-reseal! "corrupt-segment.framlog" :prepared))
+  (interrupted-reseal! "corrupt-segment.storelog" :prepared))
 (let [segment-path
       (branch/segment-path
        (:path corrupt-segment) (:segment (:receipt corrupt-segment)))

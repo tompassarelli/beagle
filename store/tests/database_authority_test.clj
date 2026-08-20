@@ -117,7 +117,7 @@
       ctx2 (authority-context co2 i2)
       live-e1-after-replay? (fence-ok? co2 "R" "client-a" e1)
       dg-before (log-digest co2)
-      ;; replay G1's next frame verbatim against G2 (in-order seq, live epoch)
+      ;; replay G1's next record verbatim against G2 (in-order seq, live epoch)
       g1-replay (authority-session-request ctx2 h1 {:instance i1 :epoch e1 :seq 2}
                                            (commit-action co2 "client-a" "replayed"))
       dg-after (log-digest co2)
@@ -133,9 +133,9 @@
   (check "two-boot: fresh boot mints a distinct non-restorable nonce" (not= i1 i2))
   (check "two-boot: after replay G1's epoch is STILL the live lease (fence alone would pass)"
          live-e1-after-replay?)
-  (check "two-boot: replayed G1 frame rejects on GENERATION, not epoch"
+  (check "two-boot: replayed G1 record rejects on GENERATION, not epoch"
          (= :wrong-generation (:reject g1-replay)))
-  (check "two-boot: replayed G1 frame appended nothing (log head digest unchanged)"
+  (check "two-boot: replayed G1 record appended nothing (log head digest unchanged)"
          (= dg-before dg-after))
   (check "two-boot: G2 acquires a strictly newer epoch" (> e2 e1))
   (check "two-boot: fresh G2 lease at sequence 1 commits" (:ok g2-commit))
@@ -183,10 +183,10 @@
               (not= (get desc-e1 "bindingDigest") (get desc-e2 "bindingDigest"))
               (not= (get desc-e1 "descriptorDigest") (get desc-e2 "descriptorDigest"))))
   (check "replay: a pre-renewal epoch is fence-rejected" (= :fence-lost (:reject stale-epoch)))
-  (check "replay: the fence-rejected stale-epoch frame appended nothing" (= dg-before dg-after)))
+  (check "replay: the fence-rejected stale-epoch record appended nothing" (= dg-before dg-after)))
 
 ;; ===========================================================================
-;; WRONG-PEER — a frame whose holder does not hold the live lease is fenced.
+;; WRONG-PEER — a record whose holder does not hold the live lease is fenced.
 ;; ===========================================================================
 (let [db (new-database (scratch-log))
       _  (register-pred! db "note" "single" "literal")
@@ -199,8 +199,8 @@
       wrong-peer (authority-session-request ctx forged {:instance i :epoch e1 :seq 1}
                                             (commit-action db "client-b" "intruder"))
       dg-after (log-digest db)]
-  (check "wrong-peer: a non-holder's fenced frame rejects" (= :fence-lost (:reject wrong-peer)))
-  (check "wrong-peer: rejected frame appended nothing" (= dg-before dg-after)))
+  (check "wrong-peer: a non-holder's fenced record rejects" (= :fence-lost (:reject wrong-peer)))
+  (check "wrong-peer: rejected record appended nothing" (= dg-before dg-after)))
 
 ;; ===========================================================================
 ;; SECOND-LEASE — exactly one authority session; a concurrent opener is rejected.
@@ -218,7 +218,7 @@
   (check "second-lease: the rejected open appended nothing" (= dg-before dg-after)))
 
 ;; ===========================================================================
-;; EXPIRY — a lapsed lease fences its own in-flight frame; a fresh lease recovers.
+;; EXPIRY — a lapsed lease fences its own in-flight record; a fresh lease recovers.
 ;; ===========================================================================
 (let [db (new-database (scratch-log))
       _  (register-pred! db "note" "single" "literal")
@@ -237,8 +237,8 @@
       e2 (:epoch h2)
       fresh-commit (authority-session-request ctx h2 {:instance i :epoch e2 :seq 1}
                                               (commit-action db "client-a" "fresh"))]
-  (check "expiry: a lapsed lease fences its in-flight frame" (= :fence-lost (:reject expired)))
-  (check "expiry: the fenced expired frame appended nothing" (= dg-before dg-after))
+  (check "expiry: a lapsed lease fences its in-flight record" (= :fence-lost (:reject expired)))
+  (check "expiry: the fenced expired record appended nothing" (= dg-before dg-after))
   (check "expiry: a fresh lease takes a strictly newer epoch and commits"
          (and (:ok reopen) (> e2 e1) (:ok fresh-commit))))
 
@@ -265,12 +265,12 @@
   (check "tombstone: release erases the exact held lease" (:ok released))
   (check "tombstone: an old handle is fence-rejected after release"
          (= :fence-lost (:reject after-tombstone)))
-  (check "tombstone: the rejected old-handle frame appended nothing" (= dg-before dg-after))
+  (check "tombstone: the rejected old-handle record appended nothing" (= dg-before dg-after))
   (check "tombstone: a fresh lease is permitted at a strictly newer epoch"
          (and (:ok reopen) (> e2 e1) (:ok fresh-commit))))
 
 ;; ===========================================================================
-;; SEQUENCE — out-of-order / duplicate frames reject before append.
+;; SEQUENCE — out-of-order / duplicate records reject before append.
 ;; ===========================================================================
 (let [db (new-database (scratch-log))
       _  (register-pred! db "note" "single" "literal")
@@ -289,8 +289,8 @@
                                      (commit-action db "client-a" "dup"))
       two (authority-session-request ctx h {:instance i :epoch e :seq 2}
                                      (commit-action db "client-a" "two"))]
-  (check "sequence: a gap (out-of-order) frame rejects" (= :out-of-order (:reject gap)))
-  (check "sequence: the rejected gap frame appended nothing" (= dg-before-gap dg-after-gap))
+  (check "sequence: a gap (out-of-order) record rejects" (= :out-of-order (:reject gap)))
+  (check "sequence: the rejected gap record appended nothing" (= dg-before-gap dg-after-gap))
   (check "sequence: exact next sequence commits" (:ok one))
   (check "sequence: a duplicate of a consumed slot rejects (exactly-once)"
          (= :out-of-order (:reject dup)))
@@ -312,7 +312,7 @@
       ctx (authority-context db (fresh-instance-id))
       i (:instance ctx)
       make-action (fn [req] (commit-action db "client-a" (get-in req [:body :value])))]
-  ;; drive run-authority-connection with an in-memory reader whose later frames are
+  ;; drive run-authority-connection with an in-memory reader whose later records are
   ;; filled in from the epoch the open handshake returns (the wire discovers it too).
   (let [state (atom {:queue [{:op :authority-open :res "R" :holder "client-a"
                               :client-spki spki-a :ttl-ms 600000}]
@@ -338,12 +338,12 @@
              (= 2 (count (filter #(and (:ok %) (:seq %)) rs))))
       (check "loop: the two mutations commit at sequences 1 and 2"
              (= [1 2] (mapv :seq (filter #(and (:ok %) (:seq %)) rs))))))
-  ;; a connection whose first frame is NOT authority-open is refused (legacy stays one-shot).
+  ;; a connection whose first record is NOT authority-open is refused (legacy stays one-shot).
   (let [rs (atom [])
         q (atom [{:op :assert :te "@x" :p "p" :r "v"}])
         read-req (fn [] (let [n (first @q)] (swap! q rest) n))]
     (run-authority-connection ctx read-req #(swap! rs conj %) (fn [_] (fn [] {:ok 0})))
-    (check "loop: a non-authority-open first frame is refused"
+    (check "loop: a non-authority-open first record is refused"
            (= :not-authority-open (:reject (first @rs))))))
 
 (println (str "\ndatabase-authority: " @pass " / " (+ @pass @fail) " PASS"))

@@ -207,12 +207,12 @@ import * as schema from './schema.mjs';
 globalThis.__storeWorkerProbe = [Object.keys(core), Object.keys(schema)];
 PROBE
 bun build "$extract/package/worker-probe.mjs" --target=browser \
-  --outfile="$scratch/framrpc-worker-probe.js" >/dev/null
-[[ -s "$scratch/framrpc-worker-probe.js" ]] ||
+  --outfile="$scratch/store-rpc-worker-probe.js" >/dev/null
+[[ -s "$scratch/store-rpc-worker-probe.js" ]] ||
   fail "schema and core did not produce a browser-target bundle"
-! grep -Fq 'node:net' "$scratch/framrpc-worker-probe.js" ||
+! grep -Fq 'node:net' "$scratch/store-rpc-worker-probe.js" ||
   fail "schema and core browser bundle retained node:net"
-! grep -Fq 'store-rpc.mjs' "$scratch/framrpc-worker-probe.js" ||
+! grep -Fq 'store-rpc.mjs' "$scratch/store-rpc-worker-probe.js" ||
   fail "schema and core browser bundle retained the TCP entry"
 
 # Install the local tarball with an empty cache, offline mode, and an unusable
@@ -220,7 +220,7 @@ bun build "$extract/package/worker-probe.mjs" --target=browser \
 # alone, not the checkout or a fetched package.
 consumer="$scratch/consumer"
 mkdir -p "$consumer/empty-cache"
-printf '%s\n' '{"name":"framrpc-release-consumer","private":true,"type":"module"}' \
+printf '%s\n' '{"name":"store-rpc-release-consumer","private":true,"type":"module"}' \
   >"$consumer/package.json"
 (
   cd "$consumer"

@@ -12,7 +12,7 @@
 (defn error-code [f]
   (try (f) nil
        (catch clojure.lang.ExceptionInfo error
-         (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+         (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (def attempt-a "maintenance-attempt-a")
 (def attempt-b "maintenance-attempt-b")
@@ -145,7 +145,7 @@
            (swap! append-count inc)
            (throw (ex-info "forced ambiguous append"
                            {:type :durability-ambiguous
-                            :fram/code :durability-ambiguous})))
+                            :store/code :durability-ambiguous})))
          preparation-b))]
   (check! "ambiguous append is preserved and never retried"
           (and (= :durability-ambiguous code) (= 1 @append-count))))

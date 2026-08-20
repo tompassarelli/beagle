@@ -1,4 +1,4 @@
-;; Spike unicode/arena frames: NOT repo code. Read-path frames whose payloads
+;; Spike unicode/arena packets: NOT repo code. Read-path packets whose payloads
 ;; carry multi-byte UTF-8 and one large string, so the wasm codec and arena run
 ;; without needing the (currently trapping) write path.
 (require '[store.rpc :as w]
@@ -14,7 +14,7 @@
 (defn emit! [name entry op payload & {:keys [page]}]
   (let [id (swap! next-id inc)
         request (w/rpc-request! space op nil page nil payload)
-        bytes (w/encode-rpc-frame-v2! (w/rpc-request-frame id request))]
+        bytes (w/encode-rpc-packet-v2! (w/rpc-request-packet id request))]
     (io/copy bytes (io/file out-dir (str name ".bin")))
     (swap! manifest conj (str entry " " name ".bin " (alength bytes) " " op))
     (println (format "%-26s %-2s %8d bytes id=%d op=%s" name entry

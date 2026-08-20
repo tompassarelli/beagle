@@ -1,4 +1,4 @@
-;; W25 memory/build and warm end-to-end FRAMRPC query bars.
+;; W25 memory/build and warm end-to-end STORERPC query bars.
 (require '[clojure.java.io :as io]
          '[clojure.string :as str]
          '[store.rpc :as wire]
@@ -81,7 +81,7 @@
   (some-> response t/rpcresponse-error t/rpcerror-code))
 
 (defn row-count [response]
-  (let [[rows] (wire/rpc-record-fields!
+  (let [[rows] (wire/rpc-packet-fields!
                 (t/rpc-response-payload-value response) :query/rows 1)]
     (count (wire/rpc-list-values! rows))))
 
@@ -90,7 +90,7 @@
    (java.nio.file.Files/createTempDirectory
     "store-text-perf-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (str (io/file scratch "text-perf.framlog")))
+(def log-path (str (io/file scratch "text-perf.storelog")))
 (def space "text-perf")
 (def corpus-10k
   (vec (for [i (range 10000)]

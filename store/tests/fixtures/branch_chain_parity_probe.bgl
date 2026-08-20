@@ -20,7 +20,7 @@
                              segment-byte-count)]
           empty-chain-pieces)
         result
-        (log/boot-framlog-chain!
+        (log/boot-store-log-chain!
          configured-space segments
          (log/->ChainPiece tail-bytes 0 0 (count tail-bytes)))]
     (if (= log/status-ok (log/bootresult-status result)) 0 1)))

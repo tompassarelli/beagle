@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The checkpoint operation and the snapshot boot route end to end: an image is
-# written beside the FRAMLOG, a restart installs it and replays only the tail,
+# written beside the STORELOG, a restart installs it and replays only the tail,
 # and a damaged image degrades to a full fold instead of failing the boot.
 # Builds the whole native server, so the CI manifest dispositions it
 # exclude-runner: it gates in the flake devShell, not on a hosted runner.
@@ -46,7 +46,7 @@ fi
 server="$artifact/bin/beagle-store-server-native"
 [[ -x "$server" ]] || fail "artifact has no beagle-store-server-native"
 
-log="$scratch/framlog"
+log="$scratch/store-log"
 image="$log.snapshot"
 
 port="$(python3 -c 'import socket

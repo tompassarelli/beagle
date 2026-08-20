@@ -18,7 +18,7 @@
    (java.nio.file.Files/createTempDirectory
     "store-revision-generation-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log (.getPath (java.io.File. scratch "state.framlog")))
+(def log (.getPath (java.io.File. scratch "state.storelog")))
 (def space "revision-generation-space")
 (def source-revision "1111111111111111111111111111111111111111")
 (def program-revision "2222222222222222222222222222222222222222")

@@ -104,7 +104,7 @@
   (check! "an incomplete budget fails closed before any append"
           (and result
                (= budget-accounting/budget-invalid-code-v1
-                  (:fram/code (ex-data result)))
+                  (:store/code (ex-data result)))
                (= before @state))))
 
 (let [failures (remove second @checks)]

@@ -102,7 +102,7 @@
                 nil
                 (catch clojure.lang.ExceptionInfo error error))]
   (chk "oversize combined search build fails with typed query-text-index-limit"
-       (= :query-text-index-limit (:fram/code (ex-data problem)))))
+       (= :query-text-index-limit (:store/code (ex-data problem)))))
 
 (let [mixed (conj propositions
                   (t/triple "@ignored" "private-note"

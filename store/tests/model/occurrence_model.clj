@@ -16,13 +16,13 @@
 ;; Metadata assertions ride the same transaction, after every source operation,
 ;; in this fixed predicate order.
 (def metadata-order
-  [:kernel/recorded-at :kernel/asserted-by :kernel/source-frame
+  [:kernel/recorded-at :kernel/asserted-by :kernel/source-record
    :kernel/supersedes])
 
 (def ^:private metadata-source-key
   {:kernel/recorded-at :recorded-at
    :kernel/asserted-by :asserted-by
-   :kernel/source-frame :source-frame
+   :kernel/source-record :source-record
    :kernel/supersedes :supersedes})
 
 ;; ---------------------------------------------------------------- coordinates
@@ -262,12 +262,12 @@
   (commit model (assoc options :operations
                        [{:action :assert :proposition proposition
                          :supersedes (:supersedes options)
-                         :source-frame (:source-frame options)}])))
+                         :source-record (:source-record options)}])))
 
 (defn retract-proposition [model proposition options]
   (commit model (assoc options :operations
                        [{:action :retract :proposition proposition
-                         :source-frame (:source-frame options)}])))
+                         :source-record (:source-record options)}])))
 
 (defn withdraw-occurrence [model target options]
   (let [event (occurrence model target)

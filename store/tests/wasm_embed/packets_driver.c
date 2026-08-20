@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-// Native lp64 oracle for the wasm host-import smoke: the same FRAMRPC frames
+// Native lp64 oracle for the wasm host-import smoke: the same STORERPC packets
 // through the same public ABI, with the same fixed clock and host-held log
 // bytes the wasm embedder supplies, so the transcripts are byte-comparable.
 #include <stdio.h>
@@ -9,7 +9,7 @@
 #include "store.h"
 
 #define ORACLE_LOG_CAPACITY ((size_t)(16u * 1024u * 1024u))
-#define ORACLE_FRAME_CAPACITY ((size_t)(2u * 1024u * 1024u))
+#define ORACLE_PACKET_CAPACITY ((size_t)(2u * 1024u * 1024u))
 #define ORACLE_FIXED_EPOCH_MS INT64_C(1700000000000)
 
 typedef struct oracle_storage {
@@ -19,7 +19,7 @@ typedef struct oracle_storage {
 
 static oracle_storage storage;
 static oracle_storage image;
-static uint8_t request_bytes[ORACLE_FRAME_CAPACITY];
+static uint8_t request_bytes[ORACLE_PACKET_CAPACITY];
 
 static void *host_allocate(void *context, size_t size) {
   (void)context;
@@ -104,7 +104,7 @@ static void fill_host(store_host_v1 *host) {
   host->storage_close = host_storage_close;
 }
 
-static size_t read_frame(const char *directory, const char *name) {
+static size_t read_packet(const char *directory, const char *name) {
   char path[512];
   FILE *file;
   size_t length;
@@ -112,7 +112,7 @@ static size_t read_frame(const char *directory, const char *name) {
   snprintf(path, sizeof path, "%s/%s", directory, name);
   file = fopen(path, "rb");
   if (file == NULL) {
-    fprintf(stderr, "cannot open frame %s\n", path);
+    fprintf(stderr, "cannot open packet %s\n", path);
     exit(9);
   }
   length = fread(request_bytes, 1u, sizeof request_bytes, file);
@@ -164,9 +164,9 @@ static int run_pass(const char *label, const char *directory,
         3) {
       continue;
     }
-    length = read_frame(directory, name);
+    length = read_packet(directory, name);
     if (length != (size_t)declared) {
-      printf("frame %s READ-MISMATCH\n", name);
+      printf("packet %s READ-MISMATCH\n", name);
       failures++;
       continue;
     }
@@ -181,7 +181,7 @@ static int run_pass(const char *label, const char *directory,
     } else {
       status = store_query(database, request, &response, &error);
     }
-    printf("frame %s %d ", name, (int)status);
+    printf("packet %s %d ", name, (int)status);
     for (index = 0u; index < response.length; index++) {
       printf("%02x", response.data[index]);
     }
@@ -192,7 +192,7 @@ static int run_pass(const char *label, const char *directory,
     store_buffer_release(&response);
     if (response.data != NULL || response.length != 0u ||
         response.release != NULL) {
-      printf("frame %s RELEASE-DID-NOT-CLEAR\n", name);
+      printf("packet %s RELEASE-DID-NOT-CLEAR\n", name);
       failures++;
     }
   }
@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
 
   if (argc < 7) {
     fprintf(stderr,
-            "usage: frames_driver FRAMES MANIFEST REOPEN-MANIFEST "
+            "usage: packets_driver PACKETS MANIFEST REOPEN-MANIFEST "
             "IMAGE-MANIFEST LOG-OUT SPACE\n");
     return 2;
   }

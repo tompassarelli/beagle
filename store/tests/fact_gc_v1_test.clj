@@ -12,7 +12,7 @@
 (defn error-code [f]
   (try (f) nil
        (catch clojure.lang.ExceptionInfo error
-         (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+         (or (:store/code (ex-data error)) (:type (ex-data error))))))
 (def fixture (edn/read-string (slurp "tests/fixtures/fact-gc/cases.edn")))
 (def now 1735689600000)
 
@@ -111,7 +111,7 @@
   (let [summary (retention/inventory-v1 {:log-path path})]
     (check! "inventory reports bytes, entries, roots, and free space"
             (and (= retention/inventory-format-v1 (:format summary))
-                 (pos? (:framlog-bytes summary))
+                 (pos? (:store-log-bytes summary))
                  (= 5 (:operation-occurrences summary))
                  (= 3 (:live-fact-entries summary))
                  (= 5 (:root-count summary))
@@ -131,12 +131,12 @@
 (let [budget (retention/admission-budget-v1
               {:max-log-bytes 100 :max-fact-entries 10 :min-free-bytes 20})
       accepted (retention/admit-append-v1!
-                {:inventory {:framlog-bytes 10 :live-fact-entries 1 :free-bytes 100}
+                {:inventory {:store-log-bytes 10 :live-fact-entries 1 :free-bytes 100}
                  :budget (select-keys budget [:max-log-bytes :max-fact-entries
                                                :min-free-bytes])
                  :append-bytes 10 :append-facts 1})
       refused (retention/admit-append-v1!
-               {:inventory {:framlog-bytes 90 :live-fact-entries 10 :free-bytes 19}
+               {:inventory {:store-log-bytes 90 :live-fact-entries 10 :free-bytes 19}
                 :budget (select-keys budget [:max-log-bytes :max-fact-entries
                                               :min-free-bytes])
                 :append-bytes 11 :append-facts 1})]

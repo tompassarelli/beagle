@@ -1,4 +1,4 @@
-;; Beagle Store adapter: speaks FRAMRPC v2 to server.clj over a real loopback
+;; Beagle Store adapter: speaks STORERPC v2 to server.clj over a real loopback
 ;; socket. boot-to-serving-ms excludes JVM startup and the ServerSocket bind,
 ;; per METHODOLOGY.md. Bulk reads use paged :rpc/query, never scan/occurrences
 ;; (both fail past ~250 rows, a term-depth bound).
@@ -18,7 +18,7 @@
 
 (def scratch (.toFile (java.nio.file.Files/createTempDirectory
                        "store-in-class-" (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (.getPath (io/file scratch "coordination.framlog")))
+(def log-path (.getPath (io/file scratch "coordination.storelog")))
 (def space-id "bench-in-class")
 (def expected-rows (quot corpus-triples 3))
 
@@ -36,7 +36,7 @@
         value (f)]
     [(/ (- (System/nanoTime) t0) 1e6) value]))
 
-;; Untimed: one durable tx per live triple, on a throwaway server, so the timed boot replays a populated FRAMLOG.
+;; Untimed: one durable tx per live triple, on a throwaway server, so the timed boot replays a populated STORELOG.
 (def seed-cancellation {:cancelled (atom false) :query-control (atom nil)})
 (defn seed-assert! [proposition]
   (let [request (wire/rpc-request! space-id :rpc/assert nil nil nil
@@ -78,10 +78,10 @@
   (some-> response t/rpcresponse-error t/rpcerror-code))
 
 (defn query-rows [response]
-  (let [[values] (wire/rpc-record-fields! (t/rpc-response-payload-value response)
+  (let [[values] (wire/rpc-packet-fields! (t/rpc-response-payload-value response)
                                           :query/rows 1)]
     (mapv (fn [row]
-            (let [[row-values] (wire/rpc-record-fields! row :query/row 1)]
+            (let [[row-values] (wire/rpc-packet-fields! row :query/row 1)]
               (wire/rpc-list-values! row-values)))
           (wire/rpc-list-values! values))))
 

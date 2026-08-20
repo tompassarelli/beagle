@@ -114,7 +114,7 @@
     (p/shell {} "rm" "-rf" tmp)))
 
 (let [failed (remove second @checks)]
-  (println (str "\nfram promotion: " (- (count @checks) (count failed))
+  (println (str "\nstore promotion: " (- (count @checks) (count failed))
                 "/" (count @checks) " passed"))
   (when (seq failed)
     (System/exit 1)))

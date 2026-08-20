@@ -14,7 +14,7 @@
 
 (let [shim (file-source "deploy/cloudflare/shim.clj")
       worker (file-source "deploy/cloudflare/worker-client.js")]
-  (check! "Cloudflare shim uses the shared FRAMRPC client"
+  (check! "Cloudflare shim uses the shared STORERPC client"
           (and (str/includes? shim "rt/native-request-to!")
                (str/includes? shim "rpc/rpc-request!")
                (str/includes? shim "strict-duplicate-detection true"))
@@ -32,7 +32,7 @@
           nil))
 
 (let [server (file-source "server.clj")]
-  (check! "server serves only the closed thirteen-op FRAMRPC set"
+  (check! "server serves only the closed thirteen-op STORERPC set"
           (= 13 (count (re-seq #":rpc/[a-z-]+" (between server
                                                        "(def native-rpc-operations"
                                                        "(def paged-rpc-operations"))))
@@ -52,7 +52,7 @@
   (check! "MCP tools/list catalog is exactly the five public data verbs"
           (= ["tell" "retract" "show" "ask" "validate"] tool-names)
           tool-names)
-  (check! "MCP public data dispatch is FRAMRPC-only"
+  (check! "MCP public data dispatch is STORERPC-only"
           (and public
                (str/includes? public "store.rt/native-call!"))
           nil))
@@ -69,7 +69,7 @@
                (str/includes? fast "(t/rpcpageresponse-done page)")
                (str/includes? fast "(t/rpc-page-response-cursor-value page)"))
           nil)
-  (check! "readiness and deep probes speak native version frames"
+  (check! "readiness and deep probes speak native version records"
           (and (str/includes? up "native-call!")
                (str/includes? selfcheck "native-request-to!"))
           nil)
@@ -89,7 +89,7 @@
       code-on (file-source "bin/beagle-store-code-on")
       ingest (file-source "bin/beagle-store-ingest-code")
       status (file-source "bin/beagle-store-code-status")]
-  (check! "FRAMLOG serving and code ingest retain distinct boundaries"
+  (check! "STORELOG serving and code ingest retain distinct boundaries"
           (and (str/includes? launcher "BEAGLE_STORE_SERVER_RUNTIME:-native")
                (str/includes? launcher "artifact_dir/READY")
                (str/includes? launcher "BEAGLE_STORE_GRAAL_ARTIFACT")

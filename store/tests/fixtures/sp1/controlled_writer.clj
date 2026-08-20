@@ -42,7 +42,7 @@
             (fn [_ proposition]
               (let [db (database/open-database! log space)
                     committed (database/assert! db proposition
-                                                {:source-frame batch})]
+                                                {:source-record batch})]
                 {:batch-id batch :transaction (:ok committed)}))})]
       (println (pr-str (dissoc receipt :value))))
 

@@ -1,4 +1,4 @@
-;; Authoritative database gate: occurrence identity, OCC, durable FRAMLOG,
+;; Authoritative database gate: occurrence identity, OCC, durable STORELOG,
 ;; recursive terms, views, supersession, withdrawal, and lease fencing.
 (require '[store.store :as store]
          '[store.types :as t])
@@ -15,14 +15,14 @@
     (f)
     nil
     (catch clojure.lang.ExceptionInfo error
-      (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+      (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (def scratch
   (.toFile
    (java.nio.file.Files/createTempDirectory
     "store-term-database-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-file (java.io.File. scratch "history.framlog"))
+(def log-file (java.io.File. scratch "history.storelog"))
 (database/create-triple-log! (.getPath log-file) "database-space")
 (def db (database/open-database! (.getPath log-file) "database-space"))
 
@@ -35,7 +35,7 @@
 
 (def first-assertion
   (database/assert! db email {:actor "Tom" :recorded-at recorded
-                           :source-frame "database-test"}))
+                           :source-record "database-test"}))
 (def first-event (first (:occurrences first-assertion)))
 (def first-coordinate (t/operationoccurrence-coordinate first-event))
 (def first-tx (:ok first-assertion))
@@ -47,10 +47,10 @@
 (check! "transaction time is an ordinary typed metadata Triple"
         (some #{(t/triple first-tx :kernel/recorded-at recorded)}
               (database/live-propositions db)))
-(check! "actor and source frame are ordinary metadata propositions"
+(check! "actor and source record are ordinary metadata propositions"
         (and (some #{(t/triple first-tx :kernel/asserted-by "Tom")}
                    (database/live-propositions db))
-             (some #{(t/triple first-coordinate :kernel/source-frame "database-test")}
+             (some #{(t/triple first-coordinate :kernel/source-record "database-test")}
                    (database/live-propositions db))))
 
 (def duplicate (database/assert! db email {}))
@@ -155,7 +155,7 @@
 
 (def numeric-result
   (database/assert! db (t/triple "measurement" :value (float 1.5)) {}))
-(check! "commit canonicalizes Float atoms before memory and FRAMLOG diverge"
+(check! "commit canonicalizes Float atoms before memory and STORELOG diverge"
         (instance? Double
                    (t/triple-t3
                     (t/operationoccurrence-proposition
@@ -163,7 +163,7 @@
 
 (def before-restart (store/dump-term-store (database/database-store db)))
 (def restarted (database/open-database! (.getPath log-file) "database-space"))
-(check! "cold FRAMLOG replay reconstructs the exact TermStore v2 dump"
+(check! "cold STORELOG replay reconstructs the exact TermStore v2 dump"
         (= before-restart
            (store/dump-term-store (database/database-store restarted))))
 (check! "cold replay preserves system history and effective projections"
@@ -172,14 +172,14 @@
              (= (database/live-occurrences db)
                 (database/live-occurrences restarted))))
 
-;; A torn trailing frame is dropped as a whole. Passive readers report it and
+;; A torn trailing record is dropped as a whole. Passive readers report it and
 ;; cannot append; an authority-holding boot truncates exactly to valid-bytes.
 (with-open [out (java.io.FileOutputStream. log-file true)]
   (.write out (byte-array [(byte 40) (byte 0) (byte 0) (byte 0)
                            (byte 1) (byte 2) (byte 3)]))
   (.force (.getChannel out) true))
 (def passive (database/open-database! (.getPath log-file) "database-space"))
-(check! "passive boot drops and reports a torn trailing transaction frame"
+(check! "passive boot drops and reports a torn trailing transaction record"
         (and (:torn-tail passive)
              (= before-restart
                 (store/dump-term-store (database/database-store passive)))))
@@ -189,27 +189,27 @@
 (def repaired
   (database/open-database! (.getPath log-file) "database-space"
                            {:repair-torn? true}))
-(check! "authority repair reports and truncates only the torn frame"
+(check! "authority repair reports and truncates only the torn record"
         (and (:recovered-tail repaired)
              (nil? (:torn-tail (database/read-triple-log! (.getPath log-file))))))
 (database/assert! repaired nested {})
 (def after-repair (database/open-database! (.getPath log-file) "database-space"))
-(check! "a repaired generation accepts and cold-replays the next whole frame"
+(check! "a repaired generation accepts and cold-replays the next whole record"
         (some #{nested} (database/live-propositions after-repair)))
 
-;; A thrown append cannot reveal whether the frame reached stable storage. The
+;; A thrown append cannot reveal whether the record reached stable storage. The
 ;; database rebuilds its readable state from disk but stays mutation-fenced.
-(def append-frame-var
-  (ns-resolve 'database 'append-frame-durable!))
-(def append-frame-original @append-frame-var)
+(def append-record-var
+  (ns-resolve 'database 'append-record-durable!))
+(def append-record-original @append-record-var)
 
-(def pre-append-file (java.io.File. scratch "pre-append-failure.framlog"))
+(def pre-append-file (java.io.File. scratch "pre-append-failure.storelog"))
 (database/create-triple-log! (.getPath pre-append-file) "pre-append-space")
 (def pre-append-db
   (database/open-database! (.getPath pre-append-file) "pre-append-space"))
 (def pre-append-error
   (with-redefs-fn
-    {append-frame-var
+    {append-record-var
      (fn [_ _ _]
        (throw (ex-info "injected before append" {:type :injected-pre-append})))}
     #(error-code
@@ -221,7 +221,7 @@
                 (:status (database/database-recovery-state pre-append-db)))
              (= (t/transaction-coordinate "pre-append-space" 0)
                 (database/current-transaction pre-append-db))
-             (empty? (:frames
+             (empty? (:records
                       (database/read-triple-log! (.getPath pre-append-file))))))
 (check! "pre-append database rejects retry until restart"
         (= :recovery-required
@@ -229,35 +229,35 @@
             #(database/assert! pre-append-db (t/triple "pre" :state "retry") {}))))
 
 (def append-cohort-var
-  (ns-resolve 'database 'append-frame-cohort-durable!))
+  (ns-resolve 'database 'append-record-cohort-durable!))
 (def append-cohort-original @append-cohort-var)
-(def cohort-file (java.io.File. scratch "cohort.framlog"))
+(def cohort-file (java.io.File. scratch "cohort.storelog"))
 (database/create-triple-log! (.getPath cohort-file) "cohort-space")
 (def cohort-db (database/open-database! (.getPath cohort-file) "cohort-space"))
 (def cohort-barriers (atom 0))
 (def cohort-result
   (with-redefs-fn
     {append-cohort-var
-     (fn [path frames deflate?]
+     (fn [path records deflate?]
        (swap! cohort-barriers inc)
-       (append-cohort-original path frames deflate?))}
+       (append-cohort-original path records deflate?))}
     #(database/commit-cohort!
       cohort-db
       [(fn [db] (database/assert! db (t/triple "group" :item 1) {}))
        (fn [db] (database/assert! db (t/triple "group" :item 2) {}))])))
-(check! "a cohort keeps two logical transaction frames under one barrier"
+(check! "a cohort keeps two logical transaction records under one barrier"
         (and (= 1 @cohort-barriers)
-             (= 2 (:frame-count cohort-result))
+             (= 2 (:record-count cohort-result))
              (= [1 2]
                 (mapv :tx-seq
-                      (:frames (database/read-triple-log! (.getPath cohort-file)))))))
+                      (:records (database/read-triple-log! (.getPath cohort-file)))))))
 (check! "a successful cohort publishes its final private root atomically"
         (and (= (t/transaction-coordinate "cohort-space" 2)
                 (database/current-transaction cohort-db))
              (= #{(t/triple "group" :item 1) (t/triple "group" :item 2)}
                 (set (database/live-propositions cohort-db)))))
 
-(def failed-cohort-file (java.io.File. scratch "failed-cohort.framlog"))
+(def failed-cohort-file (java.io.File. scratch "failed-cohort.storelog"))
 (database/create-triple-log! (.getPath failed-cohort-file) "failed-cohort-space")
 (def failed-cohort-db
   (database/open-database! (.getPath failed-cohort-file) "failed-cohort-space"))
@@ -279,18 +279,18 @@
                 (:status (database/database-recovery-state failed-cohort-db)))
              (= (t/transaction-coordinate "failed-cohort-space" 0)
                 (database/current-transaction failed-cohort-db))
-             (empty? (:frames
+             (empty? (:records
                       (database/read-triple-log! (.getPath failed-cohort-file))))))
 
-(def post-force-file (java.io.File. scratch "post-force-failure.framlog"))
+(def post-force-file (java.io.File. scratch "post-force-failure.storelog"))
 (database/create-triple-log! (.getPath post-force-file) "post-force-space")
 (def post-force-db
   (database/open-database! (.getPath post-force-file) "post-force-space"))
 (def post-force-error
   (with-redefs-fn
-    {append-frame-var
-     (fn [path frame deflate?]
-       (append-frame-original path frame deflate?)
+    {append-record-var
+     (fn [path record deflate?]
+       (append-record-original path record deflate?)
        (throw (ex-info "injected after force" {:type :injected-post-force})))}
     #(error-code
       (fn []
@@ -303,7 +303,7 @@
              (= (t/transaction-coordinate "post-force-space" 1)
                 (database/current-transaction post-force-db))
              (= [1] (mapv :tx-seq
-                           (:frames
+                           (:records
                             (database/read-triple-log!
                              (.getPath post-force-file)))))))
 (check! "post-force database rejects a stale-sequence retry"
@@ -319,31 +319,31 @@
                 (:ok post-force-next))
              (= [1 2]
                 (mapv :tx-seq
-                      (:frames
+                      (:records
                        (database/read-triple-log! (.getPath post-force-file)))))
              (= (t/transaction-coordinate "post-force-space" 2)
                 (database/current-transaction
                  (database/open-database! (.getPath post-force-file)
                                           "post-force-space")))))
 
-(def corrupt-file (java.io.File. scratch "reconcile-corrupt.framlog"))
+(def corrupt-file (java.io.File. scratch "reconcile-corrupt.storelog"))
 (database/create-triple-log! (.getPath corrupt-file) "corrupt-space")
 (def corrupt-db (database/open-database! (.getPath corrupt-file) "corrupt-space"))
 (def corrupt-error
   (with-redefs-fn
-    {append-frame-var
-     (fn [path frame deflate?]
-       (append-frame-original path frame deflate?)
+    {append-record-var
+     (fn [path record deflate?]
+       (append-record-original path record deflate?)
        (with-open [file (java.io.RandomAccessFile. (str path) "rw")]
          (.seek file (dec (.length file)))
          (let [last-byte (.read file)]
            (.seek file (dec (.length file)))
            (.write file (bit-xor last-byte 1))
            (.force (.getChannel file) true)))
-       (throw (ex-info "injected corrupt durable frame"
+       (throw (ex-info "injected corrupt durable record"
                        {:type :injected-corruption})))}
     #(error-code
-      (fn [] (database/assert! corrupt-db (t/triple "bad" :frame true) {})))))
+      (fn [] (database/assert! corrupt-db (t/triple "bad" :record true) {})))))
 (check! "failed durable replay permanently fences the database as corrupt"
         (and (= :database-corrupt corrupt-error)
              (= :corrupt (:status (database/database-recovery-state corrupt-db)))

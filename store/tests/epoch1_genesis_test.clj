@@ -9,7 +9,7 @@
 (defn error-code [f]
   (try (f) nil
        (catch clojure.lang.ExceptionInfo error
-         (:fram/code (ex-data error)))))
+         (:store/code (ex-data error)))))
 
 (def facts
   [{:id "syntax/program" :structural {:shape "module-definition"}}

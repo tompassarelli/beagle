@@ -1,4 +1,4 @@
-;; Transaction-frame fold over exact assertion occurrences.
+;; Transaction-record fold over exact assertion occurrences.
 ;;   env -u BEAGLE_STORE_TELEMETRY_LOG bb -cp out tests/fold_occurrence_test.clj
 (require '[store.fold :as fold]
          '[store.store :as store]
@@ -13,14 +13,14 @@
 (def proposition (t/triple "Alice" :email "alice@example.com"))
 (def nested (t/triple proposition :reported-by (t/triple "CRM" :batch 71)))
 
-(def frames
-  [(fold/transaction-frame
+(def records
+  [(fold/transaction-record
     10 [(store/assert-operation proposition)
         (store/assert-operation proposition)
         (store/assert-operation nested)])
-   (fold/transaction-frame 12 [(store/retract-operation proposition)])])
+   (fold/transaction-record 12 [(store/retract-operation proposition)])])
 
-(def result (fold/fold! "msa-space" frames))
+(def result (fold/fold! "msa-space" records))
 (def refolded (fold/refold! "msa-space" (:dump result)))
 (def occurrences (:occurrences result))
 (def withdrawals (:withdrawals result))
@@ -35,7 +35,7 @@
    ["fold version is exact logical transaction sequence" (= 12 (:version result))]
    ["transaction sequence gaps do not fabricate transactions"
     (= 2 (count (t/termstoredump-transactions (:dump result))))]
-   ["max-sequence reads logical coordinates" (= 12 (fold/max-sequence frames))]
+   ["max-sequence reads logical coordinates" (= 12 (fold/max-sequence records))]
    ["equal proposition occurrences remain separately addressable"
     (let [events (filterv t/assertion-occurrence?
                           (filterv
@@ -66,12 +66,12 @@
          (= (:live-occurrences result) (:live-occurrences refolded))
          (= (:live-propositions result) (:live-propositions refolded))
          (= (:version result) (:version refolded)))]
-   ["out-of-order frames are rejected by occurrence order"
+   ["out-of-order records are rejected by occurrence order"
     (= :nonmonotonic-transaction-sequence
        (error-type #(fold/fold!
                      "msa-space"
-                     [(fold/transaction-frame 12 [(store/assert-operation proposition)])
-                      (fold/transaction-frame 10 [(store/assert-operation nested)])])))]
+                     [(fold/transaction-record 12 [(store/assert-operation proposition)])
+                      (fold/transaction-record 10 [(store/assert-operation nested)])])))]
    ["dump refold cannot silently change spaces"
     (= :space-mismatch
        (error-type #(fold/refold! "other-space" (:dump result))))]])

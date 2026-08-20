@@ -1,7 +1,7 @@
 ;; Folding a sealed chain plus its tail must produce exactly the store the same
-;; frames produce in one file, and must refuse every chain it cannot vouch for
+;; records produce in one file, and must refuse every chain it cannot vouch for
 ;; rather than fold a shorter history that still looks well formed.
-;; Run from the repository root: bb -cp out tests/framlog_chain_boot_test.clj
+;; Run from the repository root: bb -cp out tests/store-log_chain_boot_test.clj
 (require '[store.branch :as branch]
          '[store.store :as store]
          '[store.types :as t])
@@ -18,12 +18,12 @@
     (f)
     nil
     (catch clojure.lang.ExceptionInfo error
-      (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+      (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (def scratch
   (.toFile
    (java.nio.file.Files/createTempDirectory
-    "store-framlog-chain-boot-"
+    "store-store-log-chain-boot-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
 
 (defn- store-path [name] (.getPath (java.io.File. scratch name)))
@@ -41,7 +41,7 @@
 
 (defn- image [db] (store/dump-term-store (database/database-store db)))
 
-(def space "framlog-chain-boot-space")
+(def space "store-log-chain-boot-space")
 
 ;; The commit script both arms replay, in order.
 (def script
@@ -60,14 +60,14 @@
    (fn [db] (database/assert! db (t/triple "Task" :owner "Tom") {}))])
 
 ;; Arm 1 — one file, no fork.
-(def flat-log (store-path "flat.framlog"))
+(def flat-log (store-path "flat.storelog"))
 (database/create-triple-log! flat-log space)
 (def flat (database/open-database! flat-log space))
 (doseq [step script] (step flat))
 (def flat-image (image flat))
 
 ;; Arm 2 — the same script, forked after the third commit.
-(def chained-log (store-path "chained.framlog"))
+(def chained-log (store-path "chained.storelog"))
 (database/create-triple-log! chained-log space)
 (def head (database/open-database! chained-log space))
 (doseq [step (take 3 script)] (step head))
@@ -82,18 +82,18 @@
    chained-log
    (branch/segmentrecord-sha256 (first (branch/refdocument-segments lane-ref)))))
 
-(println "FRAMLOG chain boot:")
+(println "STORELOG chain boot:")
 (println (str "  flat log " (alength (read-all flat-log)) " bytes; chain "
               (count (branch/refdocument-segments lane-ref))
               " segment + tail " (alength (read-all lane-tail)) " bytes"))
 
-(check! "a chain fold equals the single-file fold of the same frames"
+(check! "a chain fold equals the single-file fold of the same records"
         (= flat-image (image (database/open-branch! chained-log "lane" space))))
 (check! "the chain and the flat log agree on their transaction sequences"
-        (= (mapv :tx-seq (:frames (database/read-triple-log! flat-log)))
-           (into (mapv :tx-seq (:frames (database/read-triple-log!
+        (= (mapv :tx-seq (:records (database/read-triple-log! flat-log)))
+           (into (mapv :tx-seq (:records (database/read-triple-log!
                                          sealed-path true)))
-                 (mapv :tx-seq (:frames (database/read-triple-log!
+                 (mapv :tx-seq (:records (database/read-triple-log!
                                          lane-tail true))))))
 (check! "a continuation tail opened without its ref is refused"
         (= :unsupported-log-version
@@ -124,13 +124,13 @@
     (first (branch/refdocument-segments
             (database/read-branch-ref log "lane"))))))
 
-(def missing-log (forked-store! "missing.framlog"))
+(def missing-log (forked-store! "missing.storelog"))
 (java.nio.file.Files/delete (.toPath (java.io.File. (sealed-of missing-log))))
 (check! "a missing segment fails the boot closed"
         (= :triple-log-missing
            (error-code #(database/open-branch! missing-log "lane" space))))
 
-(def short-log (forked-store! "short.framlog"))
+(def short-log (forked-store! "short.storelog"))
 (let [content (read-all (sealed-of short-log))]
   (write-bytes! (sealed-of short-log)
                 (java.util.Arrays/copyOfRange content 0 (dec (alength content)))))
@@ -138,7 +138,7 @@
         (= :invalid-branch-chain
            (error-code #(database/open-branch! short-log "lane" space))))
 
-(def flipped-log (forked-store! "flipped.framlog"))
+(def flipped-log (forked-store! "flipped.storelog"))
 (let [content (read-all (sealed-of flipped-log))
       copy (java.util.Arrays/copyOf content (alength content))
       offset (dec (alength content))]
@@ -149,8 +149,8 @@
         (= :corrupt-triple-log
            (error-code #(database/open-branch! flipped-log "lane" space))))
 
-(def alien-log (forked-store! "alien.framlog"))
-(let [other (store-path "other.framlog")]
+(def alien-log (forked-store! "alien.storelog"))
+(let [other (store-path "other.storelog")]
   (database/create-triple-log! other "another-space")
   (let [db (database/open-database! other "another-space")]
     (doseq [step (take 3 script)] (step db)))
@@ -161,7 +161,7 @@
 
 ;; A ref that skips a segment leaves a sequence hole at the boundary the fold
 ;; would otherwise cross without noticing.
-(def hole-log (forked-store! "hole.framlog"))
+(def hole-log (forked-store! "hole.storelog"))
 (database/fork-store! hole-log "lane" "lane-2")
 (let [db (database/open-branch! hole-log "lane-2" space)]
   (database/assert! db (t/triple "after" :second-fork 1) {}))
@@ -184,7 +184,7 @@
         (= :invalid-branch-chain
            (error-code #(database/open-branch! hole-log "lane-3" space))))
 
-(def gap-log (forked-store! "gap.framlog"))
+(def gap-log (forked-store! "gap.storelog"))
 (database/fork-store! gap-log "lane" "lane-2")
 (let [db (database/open-branch! gap-log "lane-2" space)]
   (database/assert! db (t/triple "after" :second-fork 1) {}))
@@ -205,7 +205,7 @@
 
 ;; Every byte cut of the tail must fold to an exact committed image or fail
 ;; loudly; a third image across the segment boundary is a durability defect.
-(def sweep-log (store-path "sweep.framlog"))
+(def sweep-log (store-path "sweep.storelog"))
 (database/create-triple-log! sweep-log space)
 (let [db (database/open-database! sweep-log space)]
   (doseq [step (take 3 script)] (step db)))
@@ -238,7 +238,7 @@
              (let [db (database/open-branch! sweep-log "lane" space)]
                (if (= expected (image db)) :exact :divergent))
              (catch clojure.lang.ExceptionInfo error
-               (or (:fram/code (ex-data error)) :unknown))
+               (or (:store/code (ex-data error)) :unknown))
              (catch Throwable error :non-store-throwable))]
        (update acc outcome (fnil conj []) cut)))
    {} (range (long (:header-bytes (database/read-triple-log! sweep-tail true)))
@@ -246,10 +246,10 @@
 (write-bytes! sweep-tail sweep-bytes)
 
 (println (str "  tail sweep: " (alength sweep-bytes) " bytes, "
-              (count sweep-boundaries) " frame boundaries, outcomes "
+              (count sweep-boundaries) " record boundaries, outcomes "
               (pr-str (into {} (map (fn [[k v]] [k (count v)]) sweep)))))
 
-(check! "the sweep fixture appended frames after the segment boundary"
+(check! "the sweep fixture appended records after the segment boundary"
         (and (> (count sweep-boundaries) 1) (= 4 (count sweep-images))))
 (check! "every cut of a continuation tail folds to an exact committed image"
         (= (set (keys sweep)) #{:exact}))
@@ -265,9 +265,9 @@
 (let [failures (remove second @checks)]
   (if (empty? failures)
     (do
-      (println "\nFRAMLOG chain boot:" (count @checks) "/" (count @checks) "PASS")
+      (println "\nSTORELOG chain boot:" (count @checks) "/" (count @checks) "PASS")
       (shutdown-agents))
     (do
-      (println "\nFRAMLOG chain boot:" (count failures) "FAILED")
+      (println "\nSTORELOG chain boot:" (count failures) "FAILED")
       (shutdown-agents)
       (System/exit 1))))

@@ -64,7 +64,7 @@
 
 (def checks
   [["FRI2 magic/version are the only runtime format"
-    (and (= "FRAMFRI2" fri/MAGIC)
+    (and (= "STOREFRI2" fri/MAGIC)
          (= 2 fri/FMT)
          (= [2 0 0 0]
             (mapv #(bit-and (int %) 255) (subvec (vec bytes-one) 8 12))))]
@@ -72,9 +72,9 @@
     (= :invalid-fri-cache (error-type #(decode-term-v1! malformed-length)))]
    ["TermCodecV1 rejects an unknown tag"
     (= :invalid-fri-cache (error-type #(decode-term-v1! malformed-tag)))]
-   ["TermCodecV1 rejects recursion beyond the FRAMLOG depth bound"
+   ["TermCodecV1 rejects recursion beyond the STORELOG depth bound"
     (= :invalid-fri-cache (error-type #(decode-term-v1! excessive-depth)))]
-   ["TermCodecV1 rejects trailing bytes inside a framed row"
+   ["TermCodecV1 rejects trailing bytes inside a recordd row"
     (= :invalid-fri-cache (error-type #(decode-term-v1! trailing-term-byte)))]
    ["cache is deterministic for one dump and source prefix"
     (java.util.Arrays/equals bytes-one bytes-two)]

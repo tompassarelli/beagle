@@ -23,7 +23,7 @@
             (>= attempt 200) nil
             :else (do (Thread/sleep 25) (recur (inc attempt)))))))
 
-(defn fields [value tag count-value] (wire/rpc-record-fields! value tag count-value))
+(defn fields [value tag count-value] (wire/rpc-packet-fields! value tag count-value))
 (defn values-list [value] (wire/rpc-list-values! value))
 (defn payload [response] (t/rpc-response-payload-value response))
 (defn error-code [response] (some-> response t/rpcresponse-error t/rpcerror-code))
@@ -65,7 +65,7 @@
   (.toFile (java.nio.file.Files/createTempDirectory
             "store-query-cursor-binary-search-"
             (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (str (io/file scratch "history.framlog")))
+(def log-path (str (io/file scratch "history.storelog")))
 (def space "query-cursor-binary-search")
 (def port (free-port))
 (def server (future (server/serve! port log-path space :active)))
@@ -73,7 +73,7 @@
 (try
   (check! "listener starts" (some? (eventually #(request! port space :rpc/version wire/rpc-unit))))
 
-  ;; bulk-load rows in bounded batches (1MiB request body ceiling per frame)
+  ;; bulk-load rows in bounded batches (1MiB request body ceiling per record)
   (doseq [chunk (partition-all 200 (range row-count))]
     (let [actions (mapv (fn [i] (wire/rpc-action!
                                   :rpc/assert (t/triple (str "row-" i) :cursor-row i)

@@ -1,4 +1,4 @@
-;; Real server + authenticated JSON shim + FRAMRPC restart proof.
+;; Real server + authenticated JSON shim + STORERPC restart proof.
 (require '[babashka.fs :as fs]
          '[babashka.process :as proc]
          '[cheshire.core :as json]
@@ -22,7 +22,7 @@
 
 (def watchdog
   (future (Thread/sleep 90000)
-          (binding [*out* *err*] (println "cloudflare FRAMRPC: hard timeout"))
+          (binding [*out* *err*] (println "cloudflare STORERPC: hard timeout"))
           (System/exit 124)))
 
 (defn stop-process! [process]
@@ -59,7 +59,7 @@
       (recur (nth cursor 3) (conj result (nth cursor 2)))
       :else (throw (ex-info "malformed JSON RPC list" {:value value})))))
 
-(defn record-json-fields [value tag field-count]
+(defn packet-json-fields [value tag field-count]
   (when-not (and (= "triple" (first value))
                  (= ["keyword" tag] (second value))
                  (= ["keyword" "rpc/record"] (nth value 3)))
@@ -113,7 +113,7 @@
 (let [server-port (free-port)
       shim-port (free-port)
       scratch (fs/create-temp-dir {:prefix "store-cloudflare-rpc-"})
-      log-path (str (io/file (str scratch) "history.framlog"))
+      log-path (str (io/file (str scratch) "history.storelog"))
       space "cloudflare-rpc-test"
       token "cloudflare-rpc-secret"
       inherited (apply dissoc (into {} (System/getenv))
@@ -137,7 +137,7 @@
       (check! "Worker client typed JSON contract" (zero? (:exit node))))
 
     (start-server!)
-    (check! "server starts on FRAMRPC"
+    (check! "server starts on STORERPC"
             (eventually #(= 0 (direct-version server-port space))))
     (reset! shim
             (proc/process
@@ -156,7 +156,7 @@
 
     (let [version (http-post shim-port "/q" token "application/json"
                              (request-json space :rpc/version wire/rpc-unit))]
-      (check! "success response is one closed JSON FRAMRPC envelope"
+      (check! "success response is one closed JSON STORERPC envelope"
               (and (= 200 (:status version))
                    (= "application/json" (:content-type version))
                    (= #{"space" "op" "servedVersion" "payload"}
@@ -183,7 +183,7 @@
                      (request-json space :rpc/scan
                                    (wire/rpc-triple-pattern! subject nil nil)))
           [encoded-triples]
-          (record-json-fields (get (:json scanned) "payload") "rpc/triples" 1)
+          (packet-json-fields (get (:json scanned) "payload") "rpc/triples" 1)
           triples (list-json-values encoded-triples)]
       (check! "batch accepts every Atom kind plus recursive Triple nesting"
               (and (= 200 (:status asserted))
@@ -214,13 +214,13 @@
       (stop-process! @server)
       (reset! server nil)
       (start-server!)
-      (check! "server restart replays the recursive FRAMLOG"
+      (check! "server restart replays the recursive STORELOG"
               (eventually #(= 1 (direct-version server-port space))))
       (let [after-restart
             (http-post shim-port "/q" token "application/json"
                        (request-json space :rpc/scan
                                      (wire/rpc-triple-pattern! subject nil nil)))
-            [encoded] (record-json-fields (get (:json after-restart) "payload")
+            [encoded] (packet-json-fields (get (:json after-restart) "payload")
                                           "rpc/triples" 1)]
         (check! "shim reads the same seven live Triples after restart"
                 (= 7 (count (list-json-values encoded))))))
@@ -260,7 +260,7 @@
       (check! "unknown envelope keys are rejected"
               (and (= 400 (:status extra))
                    (= "shim/unknown-key" (get-in extra [:json "error" "code"]))))
-      (check! "noncanonical tagged scalar is rejected before FRAMRPC"
+      (check! "noncanonical tagged scalar is rejected before STORERPC"
               (and (= 400 (:status noncanonical))
                    (= "shim/noncanonical-integer"
                       (get-in noncanonical [:json "error" "code"]))))
@@ -295,5 +295,5 @@
 (let [failures (remove second @checks)]
   (doseq [[label ok] @checks] (println (if ok "  [PASS]" "  [FAIL]") label))
   (if (seq failures)
-    (do (println "\ncloudflare FRAMRPC:" (count failures) "FAILED") (System/exit 1))
-    (println "\ncloudflare FRAMRPC:" (count @checks) "/" (count @checks) "PASS")))
+    (do (println "\ncloudflare STORERPC:" (count failures) "FAILED") (System/exit 1))
+    (println "\ncloudflare STORERPC:" (count @checks) "/" (count @checks) "PASS")))

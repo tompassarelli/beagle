@@ -4,8 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import {
-  FRAMRPC_MAX_BATCH_ACTIONS,
-  FRAMRPC_VERSION,
+  STORERPC_MAX_BATCH_ACTIONS,
+  STORERPC_VERSION,
   StoreRpcError,
   float64Term,
   float64Value,
@@ -161,9 +161,9 @@ async function exerciseClient(store) {
   });
 
   await check('Term constructors preserve i64, float, recursive Triple, and Instant identity', async () => {
-    assert.deepEqual(FRAMRPC_VERSION, { major: 2, minor: 0 });
-    assert.equal(FRAMRPC_MAX_BATCH_ACTIONS, 247);
-    assert.equal(SCHEMA_MAX_BATCH_ACTIONS, FRAMRPC_MAX_BATCH_ACTIONS);
+    assert.deepEqual(STORERPC_VERSION, { major: 2, minor: 0 });
+    assert.equal(STORERPC_MAX_BATCH_ACTIONS, 247);
+    assert.equal(SCHEMA_MAX_BATCH_ACTIONS, STORERPC_MAX_BATCH_ACTIONS);
     assert.deepEqual(integerTerm(I64_MIN), ['integer', '-9223372036854775808']);
     assert(Object.is(float64Value(float64Term(-0)), -0));
     assert.deepEqual(
@@ -188,7 +188,7 @@ async function exerciseClient(store) {
   });
 
   let firstVersion;
-  await check('version and status use direct binary FRAMRPC', async () => {
+  await check('version and status use direct binary STORERPC', async () => {
     const version = await store.version();
     const status = await store.status();
     assert.equal(version.servedVersion, 0n);
@@ -680,21 +680,21 @@ async function exerciseClient(store) {
     );
   });
 
-  console.log(`\nBun FRAMRPC client: ${checks.length}/${checks.length} PASS`);
+  console.log(`\nBun STORERPC client: ${checks.length}/${checks.length} PASS`);
 }
 
-test('Bun FRAMRPC client matches the live server', async () => {
+test('Bun STORERPC client matches the live server', async () => {
   const tmp = await mkdtemp(resolve(tmpdir(), 'store-bun-client-'));
   let server;
   try {
     const port = await freePort();
     const space = `bun-client-${process.pid}`;
-    server = await startServer(port, resolve(tmp, 'history.framlog'), space);
+    server = await startServer(port, resolve(tmp, 'history.storelog'), space);
     const store = storeClient({ host: '127.0.0.1', port, space, requestTimeoutMs: 30000 });
     await exerciseClient(store);
   } catch (error) {
     throw new Error(
-      `Bun FRAMRPC client failed\n${server?.output() ?? ''}`,
+      `Bun STORERPC client failed\n${server?.output() ?? ''}`,
       { cause: error },
     );
   } finally {

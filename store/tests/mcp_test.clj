@@ -1,4 +1,4 @@
-;; Real stdio JSON-RPC MCP -> shared FRAMRPC client -> real JVM server.
+;; Real stdio JSON-RPC MCP -> shared STORERPC client -> real JVM server.
 (require '[babashka.fs :as fs]
          '[babashka.process :as proc]
          '[cheshire.core :as json]
@@ -46,7 +46,7 @@
 
 (def root (.getCanonicalPath (io/file (System/getProperty "user.dir"))))
 (def scratch (fs/create-temp-dir {:prefix "store-native-mcp-"}))
-(def log-path (str (io/file (str scratch) "history.framlog")))
+(def log-path (str (io/file (str scratch) "history.storelog")))
 (def space "native-mcp-test")
 (def port (free-port))
 (def inherited
@@ -61,7 +61,7 @@
                 "bin/beagle-store-server" "serve" (str port) log-path space))
 
 (try
-  (check! "real JVM server starts on FRAMRPC"
+  (check! "real JVM server starts on STORERPC"
           (eventually #(= 0 (direct-version port space))))
 
   (let [query
@@ -114,7 +114,7 @@
               (= ["tell" "retract" "show" "ask" "validate"] names))
       (check! "every tool carries a closed object input schema"
               (every? #(= "object" (get-in % [:inputSchema :type])) tools)))
-    (check! "tell commits through FRAMRPC"
+    (check! "tell commits through STORERPC"
             (and (not (get-in by-id [3 :result :isError]))
                  (str/includes? (call-text (get by-id 3)) "servedVersion")))
     (check! "second tell advances the server logical version"
@@ -127,7 +127,7 @@
     (let [rows (json/parse-string (call-text (get by-id 6)))]
       (check! "ask lowers structured JSON to the typed query plan"
               (contains? (set (map vec rows)) ["@a" "@b"])))
-    (check! "retract commits through FRAMRPC"
+    (check! "retract commits through STORERPC"
             (and (not (get-in by-id [7 :result :isError]))
                  (= 3 (direct-version port space))))
     (let [rows (json/parse-string (call-text (get by-id 8)))]
@@ -185,5 +185,5 @@
     (println (if ok "  [PASS]" "  [FAIL]") label)
     (when (and (not ok) detail) (println "    actual:" (pr-str detail))))
   (if (seq failures)
-    (do (println "\nStore MCP FRAMRPC:" (count failures) "FAILED") (System/exit 1))
-    (println "\nStore MCP FRAMRPC:" (count @checks) "/" (count @checks) "PASS")))
+    (do (println "\nStore MCP STORERPC:" (count failures) "FAILED") (System/exit 1))
+    (println "\nStore MCP STORERPC:" (count @checks) "/" (count @checks) "PASS")))

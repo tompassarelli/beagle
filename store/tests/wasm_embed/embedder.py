@@ -2,12 +2,12 @@
 """External wasm embedder for store's named-import host regime.
 
 Instantiates lib/libstore.wasm with wasmtime and supplies all nine store_host_v1
-imports as host functions. The FRAMLOG lives in this process as a bytearray:
+imports as host functions. The STORELOG lives in this process as a bytearray:
 the guest gets no preopened directory, no realtime clock, and no allocator of
 its own for responses. WASI is answered only where the Beagle shim genuinely
 reaches it (monotonic clock, empty environment); every other WASI import is a
 counting ENOSYS stub, so any reliance on one is measured, not assumed. Prints
-the same transcript as tests/wasm_embed/frames_driver.c.
+the same transcript as tests/wasm_embed/packets_driver.c.
 """
 import struct
 import sys
@@ -50,7 +50,7 @@ WASI_PREVIEW1 = [
 
 
 class HostLog:
-    """The FRAMLOG and the snapshot image, both held on the host side.
+    """The STORELOG and the snapshot image, both held on the host side.
 
     One storage context per object: the import host passes 0 for the log and 1
     for the image, so the same seven storage imports serve both.
@@ -306,7 +306,7 @@ def read_manifest(path):
     return rows
 
 
-def run_pass(guest, label, frames_dir, manifest_path, space_id, out):
+def run_pass(guest, label, packets_dir, manifest_path, space_id, out):
     entry_calls = {"t": "store_transact", "s": "store_snapshot"}
     options = guest.open_options(space_id, "in-memory")
     database_out = guest.alloc(4)
@@ -319,10 +319,10 @@ def run_pass(guest, label, frames_dir, manifest_path, space_id, out):
 
     failures = 0
     for entry, name, declared in read_manifest(manifest_path):
-        with open("%s/%s" % (frames_dir, name), "rb") as handle:
+        with open("%s/%s" % (packets_dir, name), "rb") as handle:
             request = handle.read()
         if len(request) != declared:
-            out.write("frame %s READ-MISMATCH\n" % name)
+            out.write("packet %s READ-MISMATCH\n" % name)
             failures += 1
             continue
         request_ptr = guest.alloc(len(request))
@@ -342,7 +342,7 @@ def run_pass(guest, label, frames_dir, manifest_path, space_id, out):
             "<IIII", guest.read(buffer_ptr, BUFFER_SIZE)
         )
         response = guest.read(data, length) if length else b""
-        out.write("frame %s %d %s\n" % (name, status, response.hex()))
+        out.write("packet %s %d %s\n" % (name, status, response.hex()))
         if status != 0:
             failures += 1
         guest.call("store_buffer_release", buffer_ptr)
@@ -352,7 +352,7 @@ def run_pass(guest, label, frames_dir, manifest_path, space_id, out):
             0,
             0,
         ):
-            out.write("frame %s RELEASE-DID-NOT-CLEAR\n" % name)
+            out.write("packet %s RELEASE-DID-NOT-CLEAR\n" % name)
             failures += 1
         guest.free(request_ptr)
 
@@ -365,13 +365,13 @@ def run_pass(guest, label, frames_dir, manifest_path, space_id, out):
 def main():
     if len(sys.argv) < 9:
         sys.stderr.write(
-            "usage: embedder.py MODULE FRAMES MANIFEST REOPEN-MANIFEST "
+            "usage: embedder.py MODULE PACKETS MANIFEST REOPEN-MANIFEST "
             "IMAGE-MANIFEST LOG-OUT TALLY-OUT SPACE\n"
         )
         return 2
     (
         module_path,
-        frames_dir,
+        packets_dir,
         manifest_path,
         reopen_manifest_path,
         image_manifest_path,
@@ -389,7 +389,7 @@ def main():
     failures = run_pass(
         Guest(engine, module, log, refused, served),
         "open",
-        frames_dir,
+        packets_dir,
         manifest_path,
         space_id,
         sys.stdout,
@@ -399,7 +399,7 @@ def main():
     failures += run_pass(
         Guest(engine, module, log, refused, served),
         "reopen",
-        frames_dir,
+        packets_dir,
         reopen_manifest_path,
         space_id,
         sys.stdout,
@@ -410,7 +410,7 @@ def main():
     failures += run_pass(
         Guest(engine, module, log, refused, served),
         "image",
-        frames_dir,
+        packets_dir,
         image_manifest_path,
         space_id,
         sys.stdout,

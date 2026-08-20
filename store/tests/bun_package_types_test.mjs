@@ -26,7 +26,7 @@ function run(command, args, cwd) {
 }
 
 test('packed Bun consumer accepts the public declaration surface', async () => {
-  const scratch = await mkdtemp(resolve(tmpdir(), 'framrpc-bun-types-'));
+  const scratch = await mkdtemp(resolve(tmpdir(), 'store-rpc-bun-types-'));
   try {
     run(Bun.argv[0], [
       'pm',
@@ -41,7 +41,7 @@ test('packed Bun consumer accepts the public declaration surface', async () => {
     const archive = resolve(scratch, archives[0]);
 
     await Bun.write(resolve(scratch, 'package.json'), JSON.stringify({
-      name: 'framrpc-types-consumer',
+      name: 'store-rpc-types-consumer',
       private: true,
       type: 'module',
     }));
@@ -60,8 +60,8 @@ test('packed Bun consumer accepts the public declaration surface', async () => {
     }));
     await Bun.write(resolve(scratch, 'consumer.mts'), `
 import {
-  FRAMRPC_MAX_BATCH_ACTIONS,
-  FRAMRPC_VERSION,
+  STORERPC_MAX_BATCH_ACTIONS,
+  STORERPC_VERSION,
   storeNativeCheckpoint,
   keywordTerm,
 } from '@tompassarelli/beagle-store-rpc';
@@ -91,7 +91,7 @@ import type {
 declare const store: StoreClient;
 declare const receipt: MutationActionResult;
 declare const occurrence: Occurrence;
-const transport: StoreTransport = async request => request.frame;
+const transport: StoreTransport = async request => request.packet;
 const embedded: StoreClient = storeTransportClient({
   space: 'worker-space',
   transport,
@@ -139,10 +139,10 @@ const preflight: BatchPreflight = store.preflightBatch([{
   t3: state,
 }], { expectedVersion: 1n });
 const code: SchemaConstraintCode = 'schema/current-value-rejected';
-const protocolMajor: 2 = FRAMRPC_VERSION.major;
-const protocolMinor: 0 = FRAMRPC_VERSION.minor;
-const protocolActions: 247 = FRAMRPC_MAX_BATCH_ACTIONS;
-const schemaActions: typeof FRAMRPC_MAX_BATCH_ACTIONS = SCHEMA_MAX_BATCH_ACTIONS;
+const protocolMajor: 2 = STORERPC_VERSION.major;
+const protocolMinor: 0 = STORERPC_VERSION.minor;
+const protocolActions: 247 = STORERPC_MAX_BATCH_ACTIONS;
+const schemaActions: typeof STORERPC_MAX_BATCH_ACTIONS = SCHEMA_MAX_BATCH_ACTIONS;
 const pages: 2 = SCHEMA_MAX_READ_PAGES;
 const checkpoint = storeNativeCheckpoint({ space: 'operator-space' });
 const coordinate: OccurrenceCoordinateTerm = receipt.occurrence;

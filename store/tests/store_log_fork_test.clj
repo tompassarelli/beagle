@@ -1,7 +1,7 @@
 ;; Fork seals the parent tail into the shared chain and hands both branches a
 ;; fresh tail: no triple is copied, both branches see the pre-fork history, and
 ;; neither branch's later writes are visible to the other.
-;; Run from the repository root: bb -cp out tests/framlog_fork_test.clj
+;; Run from the repository root: bb -cp out tests/store-log_fork_test.clj
 (require '[store.branch :as branch]
          '[store.store :as store]
          '[store.types :as t])
@@ -18,12 +18,12 @@
     (f)
     nil
     (catch clojure.lang.ExceptionInfo error
-      (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+      (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (def scratch
   (.toFile
    (java.nio.file.Files/createTempDirectory
-    "store-framlog-fork-"
+    "store-store-log-fork-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
 
 (defn- store-path [name] (.getPath (java.io.File. scratch name)))
@@ -49,10 +49,10 @@
 (defn- live? [db proposition]
   (boolean (some #{proposition} (database/live-propositions db))))
 
-(def space "framlog-fork-space")
+(def space "store-log-fork-space")
 
 ;; ---------------------------------------------------------------- fork at S
-(def log (store-path "framlog"))
+(def log (store-path "store-log"))
 (database/create-triple-log! log space)
 (def origin (database/open-database! log space))
 (database/assert! origin (t/triple "Alice" :email "alice@example.com") {})
@@ -65,7 +65,7 @@
 (def pre-fork-image (image origin))
 (def pre-fork-bytes (read-all log))
 (def pre-fork-sequence
-  (:tx-seq (last (:frames (database/read-triple-log! log)))))
+  (:tx-seq (last (:records (database/read-triple-log! log)))))
 
 ;; A derived image beside the parent tail is stale the moment the tail is
 ;; sealed; the fork must remove it rather than let a later boot install it.
@@ -79,7 +79,7 @@
 (def receipt (database/fork-store! log "lane"))
 (def sealed-path (branch/segment-path log (:segment receipt)))
 
-(println "FRAMLOG fork:")
+(println "STORELOG fork:")
 (println (str "  forked at sequence " (:fork-sequence receipt)
               " into " (count (:chain receipt)) " sealed segment(s)"))
 
@@ -115,7 +115,7 @@
         (every? (fn [path]
                   (let [parsed (database/read-triple-log! path true)]
                     (and (:continuation? parsed)
-                         (empty? (:frames parsed))
+                         (empty? (:records parsed))
                          (= space (:space-id parsed)))))
                 [parent-tail child-tail]))
 (check! "a continuation tail opened without its ref is refused"
@@ -144,8 +144,8 @@
 
 (check! "each branch's first append lands at the fork sequence plus one"
         (= [(inc pre-fork-sequence) (inc pre-fork-sequence)]
-           [(:tx-seq (first (:frames (database/read-triple-log! parent-tail true))))
-            (:tx-seq (first (:frames (database/read-triple-log! child-tail true))))]))
+           [(:tx-seq (first (:records (database/read-triple-log! parent-tail true))))
+            (:tx-seq (first (:records (database/read-triple-log! child-tail true))))]))
 (check! "sibling post-fork occurrences can have the same coordinate"
         (= parent-coordinate child-coordinate))
 (check! "coordinate-colliding sibling appends have distinct branch revisions"
@@ -203,7 +203,7 @@
                    chain))))
 
 ;; ---------------------------------------------------------- fork of nothing
-(def empty-log (store-path "empty.framlog"))
+(def empty-log (store-path "empty.storelog"))
 (database/create-triple-log! empty-log space)
 (def empty-receipt (database/fork-store! empty-log "lane"))
 (check! "forking an empty store reports sequence zero"
@@ -215,7 +215,7 @@
 (def empty-child (database/open-branch! empty-log "lane" space))
 (database/assert! empty-child (t/triple "first" :after "fork") {})
 (check! "a branch of an empty store begins at sequence one"
-        (= 1 (:tx-seq (first (:frames
+        (= 1 (:tx-seq (first (:records
                               (database/read-triple-log!
                                (branch/branch-tail-path! empty-log "lane")
                                true))))))
@@ -236,7 +236,7 @@
         (= 2 (count (.listFiles
                      (java.io.File. (branch/segments-directory log))))))
 
-(def torn-log (store-path "torn.framlog"))
+(def torn-log (store-path "torn.storelog"))
 (database/create-triple-log! torn-log space)
 (def torn-db (database/open-database! torn-log space))
 (database/assert! torn-db (t/triple "torn" :n 1) {})
@@ -248,7 +248,7 @@
                [java.nio.file.StandardOpenOption/CREATE
                 java.nio.file.StandardOpenOption/WRITE
                 java.nio.file.StandardOpenOption/TRUNCATE_EXISTING])))
-(check! "fork refuses a parent tail with a torn trailing frame"
+(check! "fork refuses a parent tail with a torn trailing record"
         (= :torn-tail-repair-required
            (error-code #(database/fork-store! torn-log "lane"))))
 (check! "a refused fork never seals the torn tail"
@@ -257,7 +257,7 @@
 ;; ------------------------------------------------------ fork of a sealed tail
 ;; A branch whose tail was just sealed holds no transaction of its own, so the
 ;; sequence a second fork reports can only come from the ref it already has.
-(def resumed-log (store-path "resumed.framlog"))
+(def resumed-log (store-path "resumed.storelog"))
 (database/create-triple-log! resumed-log space)
 (let [db (database/open-database! resumed-log space)]
   (database/assert! db (t/triple "seed" :n 1) {})
@@ -282,7 +282,7 @@
              (nil? (database/read-branch-ref resumed-log "lane-3"))))
 
 ;; ---------------------------------------------------------- writer authority
-(def locked-log (store-path "locked.framlog"))
+(def locked-log (store-path "locked.storelog"))
 (database/create-triple-log! locked-log space)
 (let [db (database/open-database! locked-log space)]
   (database/assert! db (t/triple "locked" :n 1) {}))
@@ -297,10 +297,10 @@
 (check! "fork proceeds once writer authority is released"
         (= 1 (count (:chain (database/fork-store! locked-log "lane")))))
 
-;; A replacement sealed segment can be a wholly valid FRAMLOG with the same
+;; A replacement sealed segment can be a wholly valid STORELOG with the same
 ;; SpaceId, byte count, and sequence span. Its content address must still fail.
-(def tampered-log (store-path "tampered.framlog"))
-(def replacement-log (store-path "replacement.framlog"))
+(def tampered-log (store-path "tampered.storelog"))
+(def replacement-log (store-path "replacement.storelog"))
 (database/create-triple-log! tampered-log space)
 (database/create-triple-log! replacement-log space)
 (database/assert! (database/open-database! tampered-log space)
@@ -321,7 +321,7 @@
           (and (= (branch/segmentrecord-byte-count record)
                   (alength replacement-bytes))
                (= space (:space-id parsed))
-               (= [1] (mapv :tx-seq (:frames parsed)))
+               (= [1] (mapv :tx-seq (:records parsed)))
                (not= (:segment tampered-receipt)
                      (sha256-hex replacement-bytes)))))
 (write-all! tampered-segment replacement-bytes)
@@ -368,8 +368,8 @@
          (into-array java.nio.file.CopyOption [])))
       log)))
 
-(def sealed-crash (interrupted-store! "crash-sealed.framlog" false))
-(def unsealed-crash (interrupted-store! "crash-unsealed.framlog" true))
+(def sealed-crash (interrupted-store! "crash-sealed.storelog" false))
+(def unsealed-crash (interrupted-store! "crash-unsealed.storelog" true))
 
 (check! "an interrupted fork is named on open rather than read as a lost log"
         (= [:fork-incomplete :fork-incomplete]
@@ -397,9 +397,9 @@
 (let [failures (remove second @checks)]
   (if (empty? failures)
     (do
-      (println "\nFRAMLOG fork:" (count @checks) "/" (count @checks) "PASS")
+      (println "\nSTORELOG fork:" (count @checks) "/" (count @checks) "PASS")
       (shutdown-agents))
     (do
-      (println "\nFRAMLOG fork:" (count failures) "FAILED")
+      (println "\nSTORELOG fork:" (count failures) "FAILED")
       (shutdown-agents)
       (System/exit 1))))

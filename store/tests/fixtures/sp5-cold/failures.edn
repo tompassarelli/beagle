@@ -23,8 +23,8 @@
   :mode "COLD"
   :failure-class "STALE-REVISION"
   :maintenance-status "DEFERRED"}
- {:case :corrupt-frame
-  :failure :corrupt-frame
+ {:case :corrupt-record
+  :failure :corrupt-record
   :mode "DEGRADED"
   :failure-class "CORRUPT"
   :maintenance-status "UNAVAILABLE"}

@@ -43,8 +43,7 @@ sources=("$generated/module_0.c" "$generated/native_shim.c" "$driver")
 "$cc_bin" "${strict[@]}" "$store_revision_define" -I"$generated" "${sources[@]}" \
   -o "$work/revision-generation"
 
-sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all
-          -fno-omit-frame-pointer -g)
+sanitize=(-fsanitize=address,undefined -fno-sanitize-recover=all -g)
 "$cc_bin" "${strict[@]}" "${sanitize[@]}" "$store_revision_define" -I"$generated" \
   "${sources[@]}" -o "$work/revision-generation-sanitized"
 

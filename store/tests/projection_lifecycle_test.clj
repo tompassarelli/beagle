@@ -49,7 +49,7 @@
 (def source-dir (io/file checkout "src"))
 (def target (io/file source-dir "known.bclj"))
 (def outside (io/file scratch "outside.bclj"))
-(def log-path (str (io/file scratch "code.framlog")))
+(def log-path (str (io/file scratch "code.storelog")))
 (def checkout-root (.getCanonicalPath checkout))
 (def store-root (.getCanonicalPath (io/file ".")))
 (def space "projection-lifecycle-test")

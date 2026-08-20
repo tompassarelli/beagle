@@ -21,7 +21,7 @@
   (host/descriptor codegraph-id codegraph (host/provider-contract codegraph 1)
                    [worlds] :provider/ready))
 
-(println "provider host — boot selection and typed FRAMRPC seam")
+(println "provider host — boot selection and typed STORERPC seam")
 
 (let [boot (host/boot-providers [worlds-provider codegraph-provider]
                                 [worlds codegraph])]
@@ -111,7 +111,7 @@
                       response)]
         (host/invoke-plan-to! [worlds-provider] [worlds] worlds
                               "127.0.0.1" 17771 "space" plan))]
-  (check! "private invocation boots the registry and executes its exact FRAMRPC request"
+  (check! "private invocation boots the registry and executes its exact STORERPC request"
           (and (= worlds-provider
                   (host/providerinvocation-descriptor invocation))
                (= response (host/providerinvocation-response invocation))
@@ -147,7 +147,7 @@
       plan (host/rejected-plan :provider/test-rejection result 2
                                [(host/provider-stage worlds :provider/test
                                                      :provider/rejected)])]
-  (check! "a rejected plan has no batch and cannot reach FRAMRPC"
+  (check! "a rejected plan has no batch and cannot reach STORERPC"
           (and (nil? (host/plan-batch "space" plan))
                (nil? (host/plan-request "space" plan))
                (empty? (host/providerplan-actions plan)))))

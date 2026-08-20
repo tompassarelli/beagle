@@ -88,7 +88,7 @@
 
 (def canonical-capture-form
   (list 'defn 'canonical-capture
-        "capture frames stay arity-local"
+        "capture records stay arity-local"
         (list [(list 'first-value 'Int)] 'Any 'first-value)
         (list [(list 'second-value 'Int)] 'Any 'target)))
 
@@ -242,8 +242,8 @@
 
 (def module-ents (get @ents source-id))
 (def forms (rm/forms-of ctx nil module-ents))
-(def modframe (rm/module-defs ctx nil module-ents))
-(def typeframe (rm/module-types ctx nil module-ents))
+(def modrecord (rm/module-defs ctx nil module-ents))
+(def typerecord (rm/module-types ctx nil module-ents))
 (def accessors (rm/module-accessors ctx nil module-ents))
 
 (defn- form-name [form]
@@ -343,13 +343,13 @@
 (let [shifted (named-definition "ShiftedUnion")
       trailing (named-definition "TrailingUnion")]
   (check! "malformed union member shapes gain no logical identity"
-          (and (not (contains? typeframe "ShiftedVariant"))
-               (not (contains? typeframe "TrailingVariant"))
+          (and (not (contains? typerecord "ShiftedVariant"))
+               (not (contains? typerecord "TrailingVariant"))
                (not (contains? (rm/form-binding-leaves ctx nil shifted)
                                [:variant "ShiftedVariant"]))
                (not (contains? (rm/form-binding-leaves ctx nil trailing)
                                [:variant "TrailingVariant"])))
-          (pr-str {:types (keys typeframe)
+          (pr-str {:types (keys typerecord)
                    :shifted (rm/form-binding-leaves ctx nil shifted)
                    :trailing (rm/form-binding-leaves ctx nil trailing)})))
 
@@ -439,10 +439,10 @@
           (pr-str arities)))
 
 (check! "record and union fields expose their compiler-defined accessors"
-        (and (= (get typeframe "Character")
+        (and (= (get typerecord "Character")
                 (first (get accessors "character-id")))
              (= "id" (second (get accessors "character-id")))
-             (= (get typeframe "Variant")
+             (= (get typerecord "Variant")
                 (first (get accessors "variant-value")))
              (= "value" (second (get accessors "variant-value"))))
         (pr-str accessors))
@@ -454,28 +454,28 @@
                          candidate)))
                    (rr/ordered-children ctx protocol-definition))]
   (check! "protocol members and union variants retain logical identities"
-          (and (= (get modframe "encode")
+          (and (= (get modrecord "encode")
                   (rm/logical-name-leaf ctx nil method))
-               (every? #(contains? typeframe %)
+               (every? #(contains? typerecord %)
                        ["Point" "Character" "Event" "Variant" "Encodable"]))
-          (pr-str {:defs (keys modframe) :types (keys typeframe)})))
+          (pr-str {:defs (keys modrecord) :types (keys typerecord)})))
 
 (let [definition (named-definition "MalformedProtocol")
       leaves (rm/form-binding-leaves ctx nil definition)]
   (check! "malformed protocol declarations gain no logical identity"
-          (and (not (contains? modframe "stray-method"))
-               (not (contains? modframe "shifted-method"))
-               (not (contains? modframe "trailing-method"))
+          (and (not (contains? modrecord "stray-method"))
+               (not (contains? modrecord "shifted-method"))
+               (not (contains? modrecord "trailing-method"))
                (not (contains? leaves [:member "stray-method"]))
                (not (contains? leaves [:member "shifted-method"]))
                (not (contains? leaves [:member "trailing-method"])))
-          (pr-str {:defs (keys modframe) :leaves leaves})))
+          (pr-str {:defs (keys modrecord) :leaves leaves})))
 
 (def tables (rw/corpus-tables ctx nil [source-id] @ents))
 (def corpus
   (rco/walk-corpus [source-id]
-                   (:modframe tables)
-                   (:typeframe tables)
+                   (:modrecord tables)
+                   (:typerecord tables)
                    (:accessors tables)
                    @ents))
 (def base-walk
@@ -660,7 +660,7 @@
 (def trailing-protocol-return (nth trailing-protocol-children 2))
 
 (check! "constraints resolve as value references across every declaration role"
-        (and (every? #(= (get modframe "validator?") (reference-target %))
+        (and (every? #(= (get modrecord "validator?") (reference-target %))
                      [named-constraint
                       character-constraint
                       variant-constraint
@@ -668,9 +668,9 @@
                       extension-constraint
                       (first canonical-constraints)
                       (second canonical-constraints)])
-             (= (get modframe "constraint-factory")
+             (= (get modrecord "constraint-factory")
                 (reference-target (first expression-children)))
-             (= (get modframe "target")
+             (= (get modrecord "target")
                 (reference-target (second expression-children))))
         (pr-str
          (mapv (fn [node]
@@ -685,7 +685,7 @@
                 (first expression-children)
                 (second expression-children)])))
 
-(check! "each canonical clause resolves its body in its own parameter frame"
+(check! "each canonical clause resolves its body in its own parameter record"
         (and (= canonical-first-binding (reference-target canonical-first-body))
              (= canonical-second-binding (reference-target canonical-second-body)))
         (pr-str {:first [(rr/sym-val ctx nil canonical-first-body)
@@ -693,7 +693,7 @@
                  :second [(rr/sym-val ctx nil canonical-second-body)
                           (reference-target canonical-second-body)]}))
 
-(check! "a bracket-valued body resolves in its single parameter frame"
+(check! "a bracket-valued body resolves in its single parameter record"
         (= vector-body-binding (reference-target vector-body-reference))
         (pr-str {:binding vector-body-binding
                  :reference (reference-target vector-body-reference)}))
@@ -701,11 +701,11 @@
 (check! "metadata, docstring, and raises preserve their exact executable slots"
         (and (= direct-raised-binding
                 (reference-target direct-raised-body))
-             (= (get modframe "validator?")
+             (= (get modrecord "validator?")
                 (reference-target direct-raised-constraint))
-             (= (get typeframe "Point")
+             (= (get typerecord "Point")
                 (reference-target direct-raised-return))
-             (= (get typeframe "Event")
+             (= (get typerecord "Event")
                 (reference-target direct-raised-error)))
         (pr-str {:body (reference-target direct-raised-body)
                  :constraint (reference-target direct-raised-constraint)
@@ -714,9 +714,9 @@
 
 (check! "an anonymous fn reads its parameter vector only from the direct slot"
         (and (= direct-fn-binding (reference-target direct-fn-body))
-             (= (get modframe "validator?")
+             (= (get modrecord "validator?")
                 (reference-target (:constraint direct-fn-parts)))
-             (= (get typeframe "Point")
+             (= (get typerecord "Point")
                 (reference-target (:type direct-fn-parts))))
         (pr-str {:body (reference-target direct-fn-body)
                  :constraint (reference-target (:constraint direct-fn-parts))
@@ -763,7 +763,7 @@
                 trailing-protocol-return])))
 
 (check! ":raises is a marker only in the direct defn raises slot"
-        (every? #(= (get modframe "target") (reference-target %))
+        (every? #(= (get modrecord "target") (reference-target %))
                 [raises-literal-multi-target
                  raises-literal-fn-target
                  extension-target-reference])
@@ -780,7 +780,7 @@
   (first (rb/param-binds ctx nil bare-adjacent-second-params)))
 (def bare-adjacent-second-body (nth bare-adjacent-children 7))
 
-(check! "bare adjacent multi-arity syntax creates no secondary parameter frame"
+(check! "bare adjacent multi-arity syntax creates no secondary parameter record"
         (nil? (reference-target bare-adjacent-second-body))
         (pr-str {:binding bare-adjacent-second-binding
                  :reference (reference-target bare-adjacent-second-body)}))
@@ -796,15 +796,15 @@
 (def self-scope-def (named-definition "self-scope"))
 (def let-scope-def (named-definition "let-scope"))
 (def for-scope-def (named-definition "for-scope"))
-(def target-binding (get modframe "target"))
+(def target-binding (get modrecord "target"))
 (def self-captures
-  (rmi/capture-refs mint self-scope-def [modframe] target-binding "shadow"))
+  (rmi/capture-refs mint self-scope-def [modrecord] target-binding "shadow"))
 (def let-captures
-  (rmi/capture-refs mint let-scope-def [modframe] target-binding "shadow"))
+  (rmi/capture-refs mint let-scope-def [modrecord] target-binding "shadow"))
 (def for-captures
-  (rmi/capture-refs mint for-scope-def [modframe] target-binding "shadow"))
-(def validator-binding (get modframe "validator?"))
-(def artificial-shadow-scope [{"shadow" target-binding} modframe])
+  (rmi/capture-refs mint for-scope-def [modrecord] target-binding "shadow"))
+(def validator-binding (get modrecord "validator?"))
+(def artificial-shadow-scope [{"shadow" target-binding} modrecord])
 (def record-captures
   (rmi/capture-refs mint (named-definition "Character")
                     artificial-shadow-scope validator-binding "shadow"))
@@ -816,13 +816,13 @@
                     artificial-shadow-scope validator-binding "shadow"))
 (def letfn-captures
   (rmi/capture-refs mint (named-definition "letfn-constraint")
-                    [modframe] validator-binding "inner"))
+                    [modrecord] validator-binding "inner"))
 (def extension-captures
   (rmi/capture-refs mint (definition-by-head "extend-type")
                     artificial-shadow-scope validator-binding "shadow"))
 (def canonical-multi-captures
   (rmi/capture-refs mint (named-definition "canonical-capture")
-                    [modframe] target-binding "second-value"))
+                    [modrecord] target-binding "second-value"))
 (def shifted-record-captures
   (rmi/capture-refs mint (named-definition "ShiftedRecord")
                     artificial-shadow-scope validator-binding "shadow"))
@@ -890,7 +890,7 @@
                  :letfn letfn-captures
                  :extension extension-captures}))
 
-(check! "capture analysis gives each canonical clause its own parameter frame"
+(check! "capture analysis gives each canonical clause its own parameter record"
         (and (= 1 (count canonical-multi-captures))
              (= "target" (rr/sym-val ctx nil (first canonical-multi-captures))))
         (pr-str canonical-multi-captures))
@@ -948,11 +948,11 @@
                (throw (ex-info "unexpected rename rejection"
                                {:values values})))
     :def-binding (fn [src name]
-                   (rco/def-binding {source-id modframe}
-                                    {source-id typeframe}
+                   (rco/def-binding {source-id modrecord}
+                                    {source-id typerecord}
                                     src name))
-    :typeframe {source-id typeframe}
-    :modframe {source-id modframe}
+    :typerecord {source-id typerecord}
+    :modrecord {source-id modrecord}
     :forms-of (fn [_] forms)
     :module-name (fn [_]
                    (rm/module-name ctx nil module-ents))
@@ -971,7 +971,7 @@
 (rvb/verb-rename! rename-verb "validator?" "predicate?" source-id)
 
 (check! "constraint references track a renamed declaration by identity"
-        (and (= "predicate?" (rr/sym-val ctx nil (get modframe "validator?")))
+        (and (= "predicate?" (rr/sym-val ctx nil (get modrecord "validator?")))
              (every? #(= "predicate?"
                          (rv/render-sym ctx nil BOUND REFERS FIXED %))
                      [named-constraint
@@ -1012,8 +1012,8 @@
                                {:values values})))
     :author-emit (fn [& values] (swap! set-body-events conj values))
     :def-binding (fn [src name]
-                   (rco/def-binding {source-id modframe}
-                                    {source-id typeframe}
+                   (rco/def-binding {source-id modrecord}
+                                    {source-id typerecord}
                                     src name))
     :form-for-victim (fn [_ binding] (form-for-binding binding))
     :scope-srcs (fn [_] [source-id])

@@ -16,15 +16,15 @@
 (defn triple-signature [value]
   [(t/triple-t1 value) (t/triple-t2 value) (t/triple-t3 value)])
 
-(defn live-triples [space frames]
-  (:live-propositions (fold/fold! space frames)))
+(defn live-triples [space records]
+  (:live-propositions (fold/fold! space records)))
 
-(defn triple-set [space frames]
-  (set (map triple-signature (live-triples space frames))))
+(defn triple-set [space records]
+  (set (map triple-signature (live-triples space records))))
 
-(defn frame-proposition [frame]
+(defn record-proposition [record]
   (t/commitoperation-proposition
-   (first (t/transactionframe-operations frame))))
+   (first (t/transactionrecord-operations record))))
 
 (defn identity-triple? [value]
   (contains? #{"predicate_name" "predicate_alias"}
@@ -74,21 +74,21 @@
         "@note\npredicate_name  note\npredicate_alias  :note\ncardinality  multi\nvalue_kind  literal\n---\n")
   (spit (str src "/03-alice.md")
         "@alice\ntitle  Alice\n:friend  bob\nnote  \"@bob\"\n---\n")
-  (let [frames (imp/load-corpus src)
-        triples (live-triples "predicate-roundtrip" frames)
+  (let [records (imp/load-corpus src)
+        triples (live-triples "predicate-roundtrip" records)
         signatures (set (map triple-signature triples))
-        frame-triples (map frame-proposition frames)
-        identity-count (count (filter identity-triple? frame-triples))
-        prefix-count (count (take-while identity-triple? frame-triples))
-        first-domain (first (drop-while identity-triple? frame-triples))]
-    (require-pass "import emits ordered one-assertion transaction frames"
+        record-triples (map record-proposition records)
+        identity-count (count (filter identity-triple? record-triples))
+        prefix-count (count (take-while identity-triple? record-triples))
+        first-domain (first (drop-while identity-triple? record-triples))]
+    (require-pass "import emits ordered one-assertion transaction records"
                   (every?
                    true?
                    (map-indexed
-                    (fn [position frame]
-                      (let [operations (t/transactionframe-operations frame)]
+                    (fn [position record]
+                      (let [operations (t/transactionrecord-operations record)]
                         (and (= (+ position 1)
-                                (t/transactionframe-sequence frame))
+                                (t/transactionrecord-sequence record))
                              (= 1 (count operations))
                              (= t/assert-action
                                 (t/commitoperation-action
@@ -96,7 +96,7 @@
                              (t/triple?
                               (t/commitoperation-proposition
                                (first operations))))))
-                    frames)))
+                    records)))
     (require-pass "identity metadata precedes dependent import triples"
                   (and first-domain
                        (pos? identity-count)
@@ -130,8 +130,8 @@
   (require-pass "legacy literal @ value remains quoted"
                 (str/includes? rendered "note  \"@literal\"")))
 
-(let [frames (imp/load-corpus "threads")
-      triples (live-triples "fixture-roundtrip" frames)
+(let [records (imp/load-corpus "threads")
+      triples (live-triples "fixture-roundtrip" records)
       before (set (map triple-signature triples))
       out (str (System/getProperty "java.io.tmpdir") "/store-rt-"
                (System/currentTimeMillis))]

@@ -20,7 +20,7 @@
     (f)
     nil
     (catch clojure.lang.ExceptionInfo error
-      (or (:fram/code (ex-data error)) (:type (ex-data error))))))
+      (or (:store/code (ex-data error)) (:type (ex-data error))))))
 
 (def scratch
   (.toFile
@@ -35,7 +35,7 @@
 (.addShutdownHook (Runtime/getRuntime) cleanup-hook)
 
 (def space "branch-reachability-gc-space")
-(def target (.getPath (io/file scratch "target.framlog")))
+(def target (.getPath (io/file scratch "target.storelog")))
 
 (defn write-bytes! [path ^bytes content]
   (let [file (java.io.File. (str path))]
@@ -51,7 +51,7 @@
   (.isFile (java.io.File. (branch/segment-path target sha))))
 
 (defn copied-segment! [name]
-  (let [source (.getPath (io/file scratch (str name ".framlog")))]
+  (let [source (.getPath (io/file scratch (str name ".storelog")))]
     (database/create-triple-log! source space)
     (database/assert! (database/open-database! source space)
                       (t/triple name :root true) {})

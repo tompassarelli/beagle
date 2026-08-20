@@ -1,6 +1,6 @@
-;; A slow read must not convoy FRAMRPC writers, and a client disconnect must
+;; A slow read must not convoy STORERPC writers, and a client disconnect must
 ;; stop the delayed work instead of leaving it running for a caller that is gone.
-;; Run from the repository root: bb -cp out tests/framrpc_latency_convoy_test.clj
+;; Run from the repository root: bb -cp out tests/store-rpc_latency_convoy_test.clj
 (require '[store.rpc :as wire]
          '[store.datalog :as datalog]
          '[store.query :as query]
@@ -42,20 +42,20 @@
 
 (defn shown [latencies] (mapv #(Double/parseDouble (format "%.1f" %)) latencies))
 
-(def space "framrpc-latency-convoy")
+(def space "store-rpc-latency-convoy")
 (def scratch
   (.toFile
    (java.nio.file.Files/createTempDirectory
-    "store-framrpc-latency-convoy-"
+    "store-store-rpc-latency-convoy-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (str (java.io.File. scratch "history.framlog")))
+(def log-path (str (java.io.File. scratch "history.storelog")))
 (def port (free-port))
 (def server (future (server/serve! port log-path space :active)))
 
 (def watchdog
   (future
     (Thread/sleep 100000)
-    (binding [*out* *err*] (println "framrpc-latency-convoy: hard timeout"))
+    (binding [*out* *err*] (println "store-rpc-latency-convoy: hard timeout"))
     (System/exit 124)))
 
 (def fixture-count 400)
@@ -109,7 +109,7 @@
            false)])])])))
 
 (try
-  (check! "listener starts on FRAMRPC v2"
+  (check! "listener starts on STORERPC v2"
           (some? (eventually #(request! port space :rpc/version wire/rpc-unit))))
 
   (doseq [batch (partition-all 100 (range fixture-count))]
@@ -185,8 +185,8 @@
       (with-open [socket (java.net.Socket.)]
         (.connect socket (java.net.InetSocketAddress. "127.0.0.1" (int port)) 1000)
         (let [output (.getOutputStream socket)]
-          (.write output (wire/encode-rpc-frame-v2!
-                          (wire/rpc-request-frame
+          (.write output (wire/encode-rpc-packet-v2!
+                          (wire/rpc-request-packet
                            900001
                            (wire/rpc-request!
                             space :rpc/query nil nil 60000
@@ -255,10 +255,10 @@
 (let [failures (remove second @checks)]
   (if (empty? failures)
     (do
-      (println (str "\nFRAMRPC latency convoy: " (count @checks) "/" (count @checks)
+      (println (str "\nSTORERPC latency convoy: " (count @checks) "/" (count @checks)
                     " PASS"))
       (shutdown-agents))
     (do
-      (println (str "\nFRAMRPC latency convoy: " (count failures) " FAILED"))
+      (println (str "\nSTORERPC latency convoy: " (count failures) " FAILED"))
       (shutdown-agents)
       (System/exit 1))))

@@ -1,7 +1,7 @@
-;; Ack, live view, and durable FRAMLOG must agree on content, count, and
+;; Ack, live view, and durable STORELOG must agree on content, count, and
 ;; per-writer order under concurrent socket writers, and expected-version OCC
 ;; must still fire on the race.
-;; Run from the repository root: bb -cp out tests/framrpc_write_conc_test.clj
+;; Run from the repository root: bb -cp out tests/store-rpc_write_conc_test.clj
 (require '[store.rpc :as wire]
          '[store.types :as t])
 
@@ -33,7 +33,7 @@
 (defn payload [response] (t/rpc-response-payload-value response))
 (defn error-code [response]
   (some-> response t/rpcresponse-error t/rpcerror-code))
-(defn fields [value tag count-value] (wire/rpc-record-fields! value tag count-value))
+(defn fields [value tag count-value] (wire/rpc-packet-fields! value tag count-value))
 (defn values-list [value] (wire/rpc-list-values! value))
 
 (defn action-results [response]
@@ -53,36 +53,36 @@
             {:error nil :rows all-rows}
             (recur (t/rpc-page-response-cursor-value page) all-rows)))))))
 
-;; One acked write == one FRAMLOG frame carrying exactly that proposition.
-(defn assert-frames [path]
+;; One acked write == one STORELOG record carrying exactly that proposition.
+(defn assert-records [path]
   (let [parsed (database/read-triple-log! path)]
     (assoc parsed :asserts
-           (vec (for [frame (:frames parsed)
-                      operation (:operations frame)
+           (vec (for [record (:records parsed)
+                      operation (:operations record)
                       :when (= :assert (:store-action operation))]
-                  {:tx-seq (:tx-seq frame)
+                  {:tx-seq (:tx-seq record)
                    :ordinal (:ordinal operation)
-                   :operations (count (:operations frame))
+                   :operations (count (:operations record))
                    :triple (:triple operation)})))))
 
 (def writers 8)
 (def per-writer 25)
 (def rounds 10)
 
-(def space "framrpc-write-conc")
+(def space "store-rpc-write-conc")
 (def scratch
   (.toFile
    (java.nio.file.Files/createTempDirectory
-    "store-framrpc-write-conc-"
+    "store-store-rpc-write-conc-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (str (java.io.File. scratch "history.framlog")))
+(def log-path (str (java.io.File. scratch "history.storelog")))
 (def port (free-port))
 (def server (future (server/serve! port log-path space :active)))
 
 (def watchdog
   (future
     (Thread/sleep 110000)
-    (binding [*out* *err*] (println "framrpc-write-conc: hard timeout"))
+    (binding [*out* *err*] (println "store-rpc-write-conc: hard timeout"))
     (System/exit 124)))
 
 (defn note-value [w i] (str "w" w "-i" i))
@@ -110,7 +110,7 @@
          :proposition proposition}))))
 
 (try
-  (check! "listener starts on FRAMRPC v2"
+  (check! "listener starts on STORERPC v2"
           (some? (eventually #(request! port space :rpc/version wire/rpc-unit))))
 
   ;; ---- A. disjoint subjects: 8 socket writers x 25 sequential writes --------
@@ -167,19 +167,19 @@
                      (= expected (set (:rows scanned)))
                      (= issued (count (distinct (:rows scanned)))))))
 
-      ;; durable FRAMLOG bytes, read through the database log reader
-      (let [durable (assert-frames log-path)
+      ;; durable STORELOG bytes, read through the database log reader
+      (let [durable (assert-records log-path)
             noted (filterv #(= :note (t/triple-t2 (:triple %))) (:asserts durable))
             by-writer (group-by #(t/triple-t1 (:triple %)) noted)
             version-of (into {} (map (juxt :proposition :version) all-acks))
             sequencer @server/commit-sequencer-stats]
-        (check! "A: FRAMLOG is a whole, untorn generation of one frame per write"
+        (check! "A: STORELOG is a whole, untorn generation of one record per write"
                 (and (nil? (:torn-tail durable))
-                     (= issued (count (:frames durable)))
+                     (= issued (count (:records durable)))
                      (= (mapv inc (range issued))
-                        (mapv :tx-seq (:frames durable)))
-                     (= issued (:frames sequencer))
-                     (< (:barriers sequencer) (:frames sequencer))
+                        (mapv :tx-seq (:records durable)))
+                     (= issued (:records sequencer))
+                     (< (:barriers sequencer) (:records sequencer))
                      (= (:barriers sequencer) (:publications sequencer))))
         (check! "A: the durable log holds each acked fact exactly once"
                 (and (= issued (count noted))
@@ -197,7 +197,7 @@
                             (and (= per-writer (count sequences))
                                  (apply < sequences))))
                         (range writers)))
-        (check! "A: every ack names the exact FRAMLOG frame that carries its fact"
+        (check! "A: every ack names the exact STORELOG record that carries its fact"
                 (and (= issued (count version-of))
                      (every? #(= (get version-of (:triple %)) (:tx-seq %)) noted))))))
 
@@ -236,7 +236,7 @@
           rejected (filterv #(some? (:error %)) results)
           head (t/rpcresponse-served-version
                 (request! port space :rpc/version wire/rpc-unit))
-          durable (assert-frames log-path)
+          durable (assert-records log-path)
           titles (filterv #(= :title (t/triple-t2 (:triple %))) (:asserts durable))]
       (check! "B: no writer thread threw on the racing socket path" (empty? @failures))
       (check! (str "B: every one of " attempts
@@ -264,7 +264,7 @@
                          :expected stale-base)
         head (t/rpcresponse-served-version
               (request! port space :rpc/version wire/rpc-unit))
-        durable (assert-frames log-path)
+        durable (assert-records log-path)
         live (paged-scan port space
                          (wire/rpc-triple-pattern! "stale-probe" nil nil) 64)]
     (check! "C: the five advancing writes all landed"
@@ -274,7 +274,7 @@
     (check! "C: the refused write moved no version"
             (= (+ stale-base 5) head))
     (check! "C: the refused write left no trace in the durable log"
-            (and (= head (count (:frames durable)))
+            (and (= head (count (:records durable)))
                  (not-any? #(= "stale-write" (t/triple-t3 (:triple %)))
                            (:asserts durable))))
     (check! "C: the live view holds the five advances and not the stale write"
@@ -290,13 +290,13 @@
 (let [failures (remove second @checks)]
   (if (empty? failures)
     (do
-      (println (str "\nFRAMRPC concurrent writers: " (count @checks) "/"
+      (println (str "\nSTORERPC concurrent writers: " (count @checks) "/"
                     (count @checks) " PASS ("
                     writers " writers x " per-writer " writes, "
                     writers " x " rounds " OCC racers)"))
       (shutdown-agents))
     (do
-      (println (str "\nFRAMRPC concurrent writers: " (count failures)
+      (println (str "\nSTORERPC concurrent writers: " (count failures)
                     " FAILED — log kept at " log-path))
       (shutdown-agents)
       (System/exit 1))))

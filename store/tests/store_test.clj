@@ -50,54 +50,54 @@
 (def withdrawals (store/withdrawals ctx))
 (def withdrawal-window
   (store/withdrawal-tuples-between (deref ctx) 2 3))
-(def historical-frames-result
-  (store/transaction-frames-between-result (deref ctx) -1 5))
+(def historical-records-result
+  (store/transaction-records-between-result (deref ctx) -1 5))
 
 (def corrupt-operation-store
   (assoc (deref ctx) :operations
          (atom (assoc (deref (t/termstore-operations (deref ctx))) 0
                       (assoc (first (deref (t/termstore-operations (deref ctx))))
                              :triple-handle 0)))))
-(def corrupt-operation-frames
-  (store/transaction-frames-between-result corrupt-operation-store -1 5))
+(def corrupt-operation-records
+  (store/transaction-records-between-result corrupt-operation-store -1 5))
 
 (def corrupt-triple-store
   (assoc (deref ctx) :triples
          (atom (assoc (deref (t/termstore-triples (deref ctx))) 0
                       (assoc (first (deref (t/termstore-triples (deref ctx))))
                              :t1 999999)))))
-(def corrupt-triple-frames
-  (store/transaction-frames-between-result corrupt-triple-store -1 5))
+(def corrupt-triple-records
+  (store/transaction-records-between-result corrupt-triple-store -1 5))
 
 (def corrupt-history-store
   (assoc (deref ctx) :operations
          (atom (assoc (deref (t/termstore-operations (deref ctx))) 0
                       (assoc (first (deref (t/termstore-operations (deref ctx))))
                              :action :invalid)))))
-(def corrupt-history-frames
-  (store/transaction-frames-between-result corrupt-history-store -1 5))
+(def corrupt-history-records
+  (store/transaction-records-between-result corrupt-history-store -1 5))
 
 (def replay-outcome-context (store/new-term-store "replay-outcome-space"))
 (def successful-replay
   (store/replay-transaction-result!
    replay-outcome-context
-   (store/transaction-frame 3 [(store/assert-operation proposition)])))
+   (store/transaction-record 3 [(store/assert-operation proposition)])))
 (def replay-before-rejection (store/dump-term-store replay-outcome-context))
 (def rejected-replay
   (store/replay-transaction-result!
    replay-outcome-context
-   (store/transaction-frame
+   (store/transaction-record
     2 [(store/assert-operation
         (t/triple "Bob" :email "bob@example.com"))])))
 (def overflow-replay
   (store/replay-transaction-result!
    replay-outcome-context
-   (store/transaction-frame
+   (store/transaction-record
     9223372036854775807
     [(store/assert-operation (t/triple "Max" :sequence "overflow"))])))
 (def invalid-replay
   (store/replay-transaction-result!
-   replay-outcome-context (t/->TransactionFrame -1 [])))
+   replay-outcome-context (t/->TransactionRecord -1 [])))
 
 (def restored (store/new-term-store "msa-space"))
 (store/load-term-store! restored dump)
@@ -185,7 +185,7 @@
          (= 2 (count withdrawals-after-noop)))]
    ["nested Triple terms survive as a live proposition"
     (= [nested-proposition] (store/live-propositions ctx))]
-   ["physical transaction rows preserve frame boundaries"
+   ["physical transaction rows preserve record boundaries"
     (and (= 5 (store/transaction-count ctx))
          (= 6 (store/operation-count ctx))
          (= [0 2 3 4 5]
@@ -208,16 +208,16 @@
    ["withdrawal/2 windows on the retraction and projects coordinates"
     (= [[(t/occurrence-coordinate tx3 0) first-coordinate]]
        withdrawal-window)]
-   ["typed historical frame outcomes reject corrupt state before resolution"
-    (and (store/transactionframesresult-ok historical-frames-result)
-         (= (store/transaction-frames-between (deref ctx) -1 5)
-            (store/transactionframesresult-frames historical-frames-result))
+   ["typed historical record outcomes reject corrupt state before resolution"
+    (and (store/transactionrecordsresult-ok historical-records-result)
+         (= (store/transaction-records-between (deref ctx) -1 5)
+            (store/transactionrecordsresult-records historical-records-result))
          (= :invalid-operation-handle
-            (store/transactionframesresult-code corrupt-operation-frames))
+            (store/transactionrecordsresult-code corrupt-operation-records))
          (= :invalid-term-handle
-            (store/transactionframesresult-code corrupt-triple-frames))
-         (= :invalid-transaction-frame
-            (store/transactionframesresult-code corrupt-history-frames)))]
+            (store/transactionrecordsresult-code corrupt-triple-records))
+         (= :invalid-transaction-record
+            (store/transactionrecordsresult-code corrupt-history-records)))]
    ["typed replay outcomes validate before mutation and preserve errors"
     (and (store/transactionreplayresult-ok successful-replay)
          (= 3 (store/current-sequence replay-outcome-context))
@@ -231,7 +231,7 @@
          (not (store/transactionreplayresult-ok overflow-replay))
          (nil? (store/transactionreplayresult-code overflow-replay))
          (nil? (store/transactionreplayresult-message overflow-replay))
-         (= :invalid-transaction-frame
+         (= :invalid-transaction-record
             (store/transactionreplayresult-code invalid-replay)))]
    ["dump carries SpaceId and the next logical sequence"
     (and (= "msa-space" (t/termstoredump-space-id dump))
@@ -261,8 +261,8 @@
        (error-type #(store/load-term-store! (store/new-term-store "msa-space")
                                             malformed-next-sequence)))]
    ["raw operation rows cannot smuggle an Atom in place of a Triple"
-    (= :invalid-transaction-frame
-       (error-type #(store/transaction-frame
+    (= :invalid-transaction-record
+       (error-type #(store/transaction-record
                      6 [(t/->CommitOperation t/assert-action "not-a-triple")])))]
    ["active occurrence index growth preserves exact withdrawal state"
     (and (= 257 growth-live-count)
@@ -287,7 +287,7 @@
     (= :nonmonotonic-transaction-sequence
        (error-type #(store/replay-transaction!
                      restored
-                     (store/transaction-frame 5 [(store/assert-operation proposition)]))))]])
+                     (store/transaction-record 5 [(store/assert-operation proposition)]))))]])
 
 (let [failures (remove second checks)]
   (doseq [[label ok] checks]

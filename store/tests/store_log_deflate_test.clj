@@ -1,6 +1,6 @@
-;; Deflate-flagged FRAMLOG generations: parity with plain logs, growth ratio,
+;; Deflate-flagged STORELOG generations: parity with plain logs, growth ratio,
 ;; and unchanged torn-tail semantics.
-;;   bb -cp out tests/framlog_deflate_test.clj
+;;   bb -cp out tests/store-log_deflate_test.clj
 (require '[clojure.java.io :as io]
          '[store.store :as store]
          '[store.types :as t])
@@ -14,7 +14,7 @@
 (def scratch
   (.getCanonicalFile
    (io/file (System/getProperty "java.io.tmpdir")
-            (str "framlog-deflate-" (System/nanoTime)))))
+            (str "store-log-deflate-" (System/nanoTime)))))
 (.mkdirs scratch)
 
 (def region-ids
@@ -26,8 +26,8 @@
                    (nth ["kind" "name" "room" "text" "bbox"] (mod i 5))
                    (str "v" (mod i 97))))))
 
-(def plain-path (str (io/file scratch "plain.framlog")))
-(def gz-path (str (io/file scratch "deflate.framlog")))
+(def plain-path (str (io/file scratch "plain.storelog")))
+(def gz-path (str (io/file scratch "deflate.storelog")))
 (database/create-triple-log! plain-path "deflate-parity")
 (database/create-triple-log! gz-path "deflate-parity" {:deflate? true})
 
@@ -57,14 +57,14 @@
                   (t/triple (str "extra-" i) "kind" "late")))
       result (database/commit! db {:operations (mapv store/assert-operation more)})]
   (check! "second deflate transaction commits" (:ok result))
-  (check! "reopen folds both deflate frames"
+  (check! "reopen folds both deflate records"
           (= (+ 4000 100)
              (count (database/live-occurrences
                      (database/open-database! gz-path "deflate-parity"))))))
 
-;; torn tail: truncate mid-frame, passive open reports, repair recovers
+;; torn tail: truncate mid-record, passive open reports, repair recovers
 (let [bytes (java.nio.file.Files/readAllBytes (.toPath (io/file gz-path)))
-      torn (str (io/file scratch "torn.framlog"))]
+      torn (str (io/file scratch "torn.storelog"))]
   (with-open [out (io/output-stream torn)]
     (.write out bytes 0 (- (alength bytes) 7)))
   (let [passive (database/open-database! torn "deflate-parity")]
@@ -75,17 +75,17 @@
 
 ;; corrupt compressed payload fails closed as corruption, not garbage data
 (let [bytes (java.nio.file.Files/readAllBytes (.toPath (io/file gz-path)))
-      broken (str (io/file scratch "broken.framlog"))
+      broken (str (io/file scratch "broken.storelog"))
       flip (int (/ (alength bytes) 2))]
   (aset bytes flip (unchecked-byte (bit-xor (aget bytes flip) 255)))
   (with-open [out (io/output-stream broken)]
     (.write out bytes))
-  (check! "bit-flipped deflate frame fails closed"
+  (check! "bit-flipped deflate record fails closed"
           (try (database/open-database! broken "deflate-parity") false
                (catch clojure.lang.ExceptionInfo e
-                 (= :corrupt-triple-log (:fram/code (ex-data e)))))))
+                 (= :corrupt-triple-log (:store/code (ex-data e)))))))
 
 (if (zero? @failures)
-  (println "\nframlog deflate: all checks PASS")
-  (do (println (str "\nframlog deflate: " @failures " FAILED"))
+  (println "\nstore-log deflate: all checks PASS")
+  (do (println (str "\nstore-log deflate: " @failures " FAILED"))
       (System/exit 1)))

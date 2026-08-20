@@ -152,7 +152,7 @@
 (try
   (when-not (zero? (:exit ingest))
     (binding [*out* *err*] (println (:err ingest))))
-  (check! "N2.6a ingests the scratch fixture into native FRAMLOG"
+  (check! "N2.6a ingests the scratch fixture into native STORELOG"
           (zero? (:exit ingest)))
   (check! "scratch native server serves the ingested corpus"
           (some? (and server (eventually #(version! port space)))))

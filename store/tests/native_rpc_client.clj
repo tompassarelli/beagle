@@ -2,7 +2,7 @@
   (:require [store.rt :as rt]))
 
 ;; Tests use the same bounded client as every CLI, MCP, and gateway adapter.
-(def read-frame! rt/read-rpc-frame!)
+(def read-packet! rt/read-rpc-packet!)
 
 (defn request! [port request-id request]
   ;; request-id remains in this test helper's historical signature. Production

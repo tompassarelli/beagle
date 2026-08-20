@@ -14,7 +14,7 @@ function sha256(bytes) {
 function historyBytes(spaceId) {
   const space = Buffer.from(spaceId, 'utf8');
   const bytes = Buffer.alloc(16 + space.length);
-  bytes.write('FRAMLOG\0', 0, 'ascii');
+  bytes.write('STORELOG\0', 0, 'ascii');
   bytes.writeUInt16LE(1, 8);
   bytes.writeUInt16LE(0, 10);
   bytes.writeUInt32LE(space.length, 12);
@@ -45,7 +45,7 @@ async function fixture(name) {
     format: 'beagle-store-backup/v1',
     history: {
       bytes: String(history.length),
-      file: 'history.framlog',
+      file: 'history.storelog',
       sha256: sha256(history),
     },
     servedVersion: '0',
@@ -53,7 +53,7 @@ async function fixture(name) {
   };
   const manifestBytes = canonicalManifestBytes(manifest);
   await Promise.all([
-    Bun.write(join(directory, 'history.framlog'), history),
+    Bun.write(join(directory, 'history.storelog'), history),
     Bun.write(join(directory, 'artifact.READY'), artifact),
     Bun.write(join(directory, 'manifest.json'), manifestBytes),
     Bun.write(
@@ -87,7 +87,7 @@ test('verifyBackup rejects changed authoritative history', async () => {
   const value = await fixture('changed-history');
   const changed = Buffer.from(value.history);
   changed[changed.length - 1] ^= 1;
-  await Bun.write(join(value.directory, 'history.framlog'), changed);
+  await Bun.write(join(value.directory, 'history.storelog'), changed);
   await expect(verifyBackup({ backup: value.directory }))
     .rejects.toMatchObject({ code: 'verification' });
 });

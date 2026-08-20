@@ -154,7 +154,7 @@ native_m0_type_6 store_stub_store_dispatch(
     native_m0_type_0 now_milliseconds);
 native_m0_type_8 store_stub_store_shutdown(native_m0_type_4 store);
 native_m0_type_5 store_stub_codec_read_request(native_arena *arena,
-                                               native_m0_type_9 frame);
+                                               native_m0_type_9 record);
 native_m0_type_7 store_stub_codec_write_response(
     native_arena *arena, const native_capability *capability,
     native_m0_type_6 response);
@@ -454,7 +454,7 @@ static unsigned int release_response_calls;
 static int64_t tail_items[] = {'T', 'A', 'I', 'L'};
 static native_vec tail_append = {tail_items, INT64_C(4), INT64_C(4), NULL};
 
-static const uint8_t response_frame[] = {
+static const uint8_t response_record[] = {
     0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xdd, 0xee};
@@ -567,20 +567,20 @@ native_m0_type_8 store_stub_store_shutdown(native_m0_type_4 store) {
 }
 
 native_m0_type_5 store_stub_codec_read_request(native_arena *arena,
-                                               native_m0_type_9 frame) {
+                                               native_m0_type_9 record) {
   native_m0_type_5 result = {FATAL, UINT64_C(0), UINT64_C(0)};
 
   read_calls += 1u;
-  if (frame != NULL && native_byte_source_length(frame) == INT64_C(29) &&
-      native_byte_source_at(frame, INT64_C(26)) == INT64_C(0xaa)) {
-    native_vec *copy = native_vec_new(arena, native_byte_source_length(frame),
+  if (record != NULL && native_byte_source_length(record) == INT64_C(29) &&
+      native_byte_source_at(record, INT64_C(26)) == INT64_C(0xaa)) {
+    native_vec *copy = native_vec_new(arena, native_byte_source_length(record),
                                       INT64_C(8), _Alignof(int64_t));
     int64_t index;
 
     result.field_0 = OK;
-    for (index = INT64_C(0); index < native_byte_source_length(frame);
+    for (index = INT64_C(0); index < native_byte_source_length(record);
          index += INT64_C(1)) {
-      int64_t value = native_byte_source_at(frame, index);
+      int64_t value = native_byte_source_at(record, index);
       copy = native_vec_push(arena, copy, &value, INT64_C(8),
                              _Alignof(int64_t));
     }
@@ -601,8 +601,8 @@ native_m0_type_7 store_stub_codec_write_response(
     const int64_t *body = native_vec_at(borrowed, INT64_C(26), INT64_C(8));
     if (*body == INT64_C(0xaa)) {
       result.field_0 = OK;
-      result.field_1 = make_vector(arena, response_frame,
-                                   sizeof(response_frame));
+      result.field_1 = make_vector(arena, response_record,
+                                   sizeof(response_record));
     }
   }
   return result;
@@ -645,12 +645,12 @@ cat >"$scratch/main.c" <<'C'
 
 bool generated_stub_observed_exact_calls(void);
 
-static const uint8_t request_frame[] = {
+static const uint8_t request_record[] = {
     0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xaa, 0xbb, 0xcc};
 
-static const uint8_t response_frame[] = {
+static const uint8_t response_record[] = {
     0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xdd, 0xee};
@@ -730,9 +730,9 @@ int main(int argc, char **argv) {
   store_server_request *request = NULL;
   store_server_request *failed = NULL;
   store_server_response *response = NULL;
-  uint8_t bad_frame[sizeof(request_frame)];
+  uint8_t bad_record[sizeof(request_record)];
   uint8_t oversized_header[26];
-  uint8_t received[sizeof(response_frame)];
+  uint8_t received[sizeof(response_record)];
   char error[BEAGLE_STORE_SERVER_ERROR_CAPACITY];
   int pair[2];
 
@@ -757,14 +757,14 @@ int main(int argc, char **argv) {
   }
   (void)close(pair[0]);
 
-  if (request_from_bytes(request_frame, 3u, &failed, error, sizeof(error)) !=
+  if (request_from_bytes(request_record, 3u, &failed, error, sizeof(error)) !=
           BEAGLE_STORE_SERVER_CLIENT_ERROR ||
       failed != NULL ||
-      strcmp(error, "generated request frame ended inside its header") != 0) {
+      strcmp(error, "generated request record ended inside its header") != 0) {
     return 4;
   }
 
-  memcpy(oversized_header, request_frame, sizeof(oversized_header));
+  memcpy(oversized_header, request_record, sizeof(oversized_header));
   oversized_header[14] = 0x01;
   oversized_header[15] = 0x00;
   oversized_header[16] = 0x10;
@@ -773,20 +773,20 @@ int main(int argc, char **argv) {
                          error, sizeof(error)) !=
           BEAGLE_STORE_SERVER_CLIENT_ERROR ||
       failed != NULL ||
-      strcmp(error, "generated request frame exceeds the body limit") != 0) {
+      strcmp(error, "generated request record exceeds the body limit") != 0) {
     return 5;
   }
 
-  memcpy(bad_frame, request_frame, sizeof(bad_frame));
-  bad_frame[26] = 0xee;
-  if (request_from_bytes(bad_frame, sizeof(bad_frame), &failed, error,
+  memcpy(bad_record, request_record, sizeof(bad_record));
+  bad_record[26] = 0xee;
+  if (request_from_bytes(bad_record, sizeof(bad_record), &failed, error,
                          sizeof(error)) != BEAGLE_STORE_SERVER_CLIENT_ERROR ||
       failed != NULL ||
       strcmp(error, "generated request decode failed") != 0) {
     return 6;
   }
 
-  if (request_from_bytes(request_frame, sizeof(request_frame), &request, error,
+  if (request_from_bytes(request_record, sizeof(request_record), &request, error,
                          sizeof(error)) != BEAGLE_STORE_SERVER_OK ||
       request == NULL ||
       store_server_store_dispatch(store, request, &response, error,
@@ -802,7 +802,7 @@ int main(int argc, char **argv) {
                                            sizeof(error)) !=
           BEAGLE_STORE_SERVER_OK ||
       !read_all(pair[1], received, sizeof(received)) ||
-      memcmp(received, response_frame, sizeof(received)) != 0) {
+      memcmp(received, response_record, sizeof(received)) != 0) {
     return 8;
   }
   (void)close(pair[0]);
@@ -836,12 +836,12 @@ typedef struct memory_host {
   size_t closes;
 } memory_host;
 
-static const uint8_t request_frame[] = {
+static const uint8_t request_record[] = {
     0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xaa, 0xbb, 0xcc};
 
-static const uint8_t response_frame[] = {
+static const uint8_t response_record[] = {
     0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xdd, 0xee};
@@ -926,8 +926,8 @@ static int storage_close(void *context) {
 }
 
 static bool response_is(const store_buffer *response) {
-  return response->length == sizeof(response_frame) &&
-         memcmp(response->data, response_frame, sizeof(response_frame)) == 0;
+  return response->length == sizeof(response_record) &&
+         memcmp(response->data, response_record, sizeof(response_record)) == 0;
 }
 
 int main(int argc, char **argv) {
@@ -957,7 +957,7 @@ int main(int argc, char **argv) {
       .log_path = argc == 2 ? argv[1] : NULL,
       .host = &host,
   };
-  store_slice request = {request_frame, sizeof(request_frame)};
+  store_slice request = {request_record, sizeof(request_record)};
   store_database *database = NULL;
   store_buffer response = {0};
   store_error error;
@@ -1014,12 +1014,12 @@ cat >"$scratch/host_client.c" <<'C'
 #include <time.h>
 #include <unistd.h>
 
-static const uint8_t request_frame[] = {
+static const uint8_t request_record[] = {
     0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xaa, 0xbb, 0xcc};
 
-static const uint8_t response_frame[] = {
+static const uint8_t response_record[] = {
     0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xdd, 0xee};
@@ -1123,7 +1123,7 @@ static int malformed_or_stall(const char *address, uint16_t port, bool stall) {
   int fd = connect_retry(address, port);
   ssize_t count;
 
-  if (fd < 0 || !write_all(fd, request_frame, 3u)) {
+  if (fd < 0 || !write_all(fd, request_record, 3u)) {
     return 3;
   }
   if (stall) {
@@ -1144,15 +1144,15 @@ static int malformed_or_stall(const char *address, uint16_t port, bool stall) {
 }
 
 static int valid(const char *address, uint16_t port) {
-  uint8_t received[sizeof(response_frame)];
+  uint8_t received[sizeof(response_record)];
   uint8_t extra;
   int fd = connect_retry(address, port);
   ssize_t count;
 
-  if (fd < 0 || !write_all(fd, request_frame, sizeof(request_frame)) ||
+  if (fd < 0 || !write_all(fd, request_record, sizeof(request_record)) ||
       shutdown(fd, SHUT_WR) != 0 ||
       !read_all(fd, received, sizeof(received)) ||
-      memcmp(received, response_frame, sizeof(received)) != 0) {
+      memcmp(received, response_record, sizeof(received)) != 0) {
     return 7;
   }
   do {
@@ -1279,11 +1279,11 @@ fi
 wait "$stall_pid" 2>/dev/null || true
 stall_pid=""
 for _ in {1..100}; do
-  grep -Fq 'generated request frame ended inside its header' \
+  grep -Fq 'generated request record ended inside its header' \
     "$scratch/any.err" && break
   sleep 0.02
 done
-grep -Fq 'generated request frame ended inside its header' "$scratch/any.err"
+grep -Fq 'generated request record ended inside its header' "$scratch/any.err"
 "$scratch/host-client" valid 127.0.0.2 "$any_port" || {
   cat "$scratch/any.err" >&2
   exit 1

@@ -1,4 +1,4 @@
-;; FRAMRPC v2 JVM listener: closed operation set, typed payloads, history,
+;; STORERPC v2 JVM listener: closed operation set, typed payloads, history,
 ;; query snapshots, leases, cancellation, malformed input, and restart replay.
 (require '[clojure.java.io :as io]
          '[store.rpc :as wire]
@@ -28,7 +28,7 @@
             :else (do (Thread/sleep 25) (recur (inc attempt)))))))
 
 (defn fields [value tag count-value]
-  (wire/rpc-record-fields! value tag count-value))
+  (wire/rpc-packet-fields! value tag count-value))
 
 (defn values-list [value]
   (wire/rpc-list-values! value))
@@ -130,13 +130,13 @@
    (java.nio.file.Files/createTempDirectory
     "store-native-rpc-"
     (make-array java.nio.file.attribute.FileAttribute 0))))
-(def log-path (str (io/file scratch "history.framlog")))
+(def log-path (str (io/file scratch "history.storelog")))
 (def space "native-rpc-test")
 (def port (free-port))
 (def server (future (server/serve! port log-path space :active)))
 
 (try
-  (check! "listener starts on FRAMRPC v2"
+  (check! "listener starts on STORERPC v2"
           (some? (eventually #(request! port space :rpc/version wire/rpc-unit))))
 
     (check! "operation disposition is exhaustive for the thirteen v2 operations"
@@ -155,23 +155,23 @@
   (let [response (request! port space :rpc/status wire/rpc-unit)
         [state live-count engine cache] (fields (payload response) :rpc/status 4)
         [hits misses bytes evictions] (fields cache :rpc/result-cache 4)]
-    (check! "rpc/status is a typed record"
+    (check! "rpc/status is a typed packet"
             (and (= :ready state) (= 0 live-count) (= :rpc/jvm engine)
                  (= [0 0 0 0] [hits misses bytes evictions]))))
 
-  (let [cancel-bytes (wire/encode-rpc-frame-v2! (wire/rpc-cancel-frame 44))]
+  (let [cancel-bytes (wire/encode-rpc-packet-v2! (wire/rpc-cancel-packet 44))]
     (aset-byte cancel-bytes 14 (unchecked-byte 255))
     (aset-byte cancel-bytes 15 (unchecked-byte 255))
     (aset-byte cancel-bytes 16 (unchecked-byte 255))
     (aset-byte cancel-bytes 17 (unchecked-byte 127))
-    (check! "oversized frames are rejected from the header before body allocation"
-            (= :rpc-frame-too-large
+    (check! "oversized packets are rejected from the header before body allocation"
+            (= :rpc-packet-too-large
                (try
-                 (server/read-rpc-frame!
+                 (server/read-rpc-packet!
                   (java.io.ByteArrayInputStream. cancel-bytes))
                  nil
                  (catch clojure.lang.ExceptionInfo error
-                   (:fram/code (ex-data error)))))))
+                   (:store/code (ex-data error)))))))
 
   (let [nested-subject (t/triple "source-file" :page 1)
         proposition (t/triple nested-subject :title "Door Schedule")
@@ -213,7 +213,7 @@
       (let [no-op (request! port space :rpc/retract
                             (wire/rpc-write! proposition wire/rpc-subject-any nil))
             [[_ changed occurrence]] (action-results no-op)]
-        (check! "missing retract records an occurrence without changing live state"
+        (check! "missing retract packets an occurrence without changing live state"
                 (and (false? changed)
                      (t/occurrence-coordinate? occurrence)
                      (= 3 (t/rpcresponse-served-version no-op)))))
@@ -248,7 +248,7 @@
 
       (let [history (request! port space :rpc/occurrences wire/rpc-unit)
             events (occurrence-results history)]
-        (check! "occurrences are typed protocol records with physical actions"
+        (check! "occurrences are typed protocol packets with physical actions"
                 (and (seq events)
                      (every? t/occurrence-coordinate? (map first events))
                      (every? #{:assert :retract} (map second events))
@@ -395,7 +395,7 @@
                 {#'server/cached-result!
                  (fn [& _]
                    (throw (ex-info "query evaluation stopped: query-work-limit"
-                                   {:fram/code :query-work-limit})))}
+                                   {:store/code :query-work-limit})))}
                 #(request!
                   port space :rpc/query
                   (wire/rpc-query-request! plan (wire/rpc-query-as-of! 1))))]
@@ -520,7 +520,7 @@
           [valid _] (fields (payload checked) :lease/check 2)
           [old-valid _] (fields (payload old-check) :lease/check 2)
           [released?] (fields (payload released) :lease/released 1)]
-      (check! "lease acquire/check/renew/release use typed Fence records"
+      (check! "lease acquire/check/renew/release use typed Fence packets"
               (and valid (not old-valid) released? (not= fence next-fence)))
       (check! "write fencing accepts the current epoch and rejects the stale one"
               (and (nil? (error-code fenced-write))
@@ -792,11 +792,11 @@
 
     (let [cancellation {:cancelled (atom false) :query-control (atom nil)}]
       (swap! server/active-requests assoc 777 cancellation)
-      (server/handle-rpc-frame! (wire/rpc-cancel-frame 777)
+      (server/handle-rpc-packet! (wire/rpc-cancel-packet 777)
                                       {:cancelled (atom false)
                                        :query-control (atom nil)})
       (swap! server/active-requests dissoc 777)
-      (check! "cancel frames target the matching active request id"
+      (check! "cancel packets target the matching active request id"
               @(:cancelled cancellation))))
 
   (finally
@@ -812,7 +812,7 @@
           status (request! restart-port space :rpc/status wire/rpc-unit)
           [_ _ _ cache] (fields (payload status) :rpc/status 4)
           cache-stats (fields cache :rpc/result-cache 4)]
-      (check! "restart replays native RPC mutations from FRAMLOG"
+      (check! "restart replays native RPC mutations from STORELOG"
               (and (pos? (t/rpcresponse-served-version version))
                    (= [(t/triple "later" :value 3)]
                       (triples-result scan :rpc/triples))
@@ -822,7 +822,7 @@
       (deref restarted 3000 nil))))
 
 (let [receipt-space "native-rpc-receipt-bound"
-      receipt-log-path (str (io/file scratch "receipt-bound-history.framlog"))
+      receipt-log-path (str (io/file scratch "receipt-bound-history.storelog"))
       receipt-port (free-port)
       receipt-server
       (future
@@ -901,7 +901,7 @@
       (deref receipt-server 3000 nil))))
 
 (let [lease-space "native-rpc-lease-preflight"
-      lease-log-path (str (io/file scratch "lease-preflight-history.framlog"))
+      lease-log-path (str (io/file scratch "lease-preflight-history.storelog"))
       lease-port (free-port)
       lease-server
       (future (server/serve! lease-port lease-log-path lease-space :active))]
@@ -937,7 +937,7 @@
       (deref lease-server 3000 nil))))
 
 (let [long-space (apply str (repeat wire/rpc-v2-max-space-bytes "s"))
-      long-log-path (str (io/file scratch "long-space-history.framlog"))
+      long-log-path (str (io/file scratch "long-space-history.storelog"))
       long-port (free-port)
       long-server
       (future (server/serve! long-port long-log-path long-space :active))]
@@ -966,8 +966,8 @@
            accepted-request
            {:cancelled (atom false) :query-control (atom nil)})
           encoded-accepted
-          (wire/encode-rpc-frame-v2!
-           (wire/rpc-response-frame 8001 accepted))
+          (wire/encode-rpc-packet-v2!
+           (wire/rpc-response-packet 8001 accepted))
           results (action-results accepted)
           coordinates
           (mapv #(nth % 2) results)
@@ -1013,7 +1013,7 @@
                    (every? #{proposition}
                            (triples-result after-success-scan :rpc/triples))))
       (check! "unencodable 244-action receipt preserves the 243-action commit"
-              (and (= :rpc-frame-too-large (error-code rejected))
+              (and (= :rpc-packet-too-large (error-code rejected))
                    (= (t/rpcresponse-served-version accepted)
                       (t/rpcresponse-served-version rejected)
                       (t/rpcresponse-served-version after-rejection-version)
@@ -1027,22 +1027,22 @@
            long-space :rpc/assert nil nil nil
            (wire/rpc-write! proposition wire/rpc-subject-any nil))
           encoded-request
-          (wire/encode-rpc-frame-v2! (wire/rpc-request-frame 9001 request))
+          (wire/encode-rpc-packet-v2! (wire/rpc-request-packet 9001 request))
           response
           (server/handle-rpc-request!
            request {:cancelled (atom false) :query-control (atom nil)})
           encoded-response
-          (wire/encode-rpc-frame-v2!
-           (wire/rpc-response-frame 9001 response))
+          (wire/encode-rpc-packet-v2!
+           (wire/rpc-response-packet 9001 response))
           [[input-index changed coordinate]] (action-results response)
           version
           (request! long-port long-space :rpc/version wire/rpc-unit)]
       (check! "near-max legal proposition commits with an encodable receipt"
               (and (nil? (error-code response))
                    (>= (alength encoded-request)
-                       (- wire/rpc-v2-max-frame-bytes 8192))
-                   (<= (alength encoded-request) wire/rpc-v2-max-frame-bytes)
-                   (<= (alength encoded-response) wire/rpc-v2-max-frame-bytes)
+                       (- wire/rpc-v2-max-packet-bytes 8192))
+                   (<= (alength encoded-request) wire/rpc-v2-max-packet-bytes)
+                   (<= (alength encoded-response) wire/rpc-v2-max-packet-bytes)
                    (= 0 input-index)
                    changed
                    (t/occurrence-coordinate? coordinate)
@@ -1062,4 +1062,4 @@
   (do
     (println (str "\n" (count @failures) " native RPC server checks failed"))
     (System/exit 1))
-  (println "\nFRAMRPC v2 JVM server: all checks passed"))
+  (println "\nSTORERPC v2 JVM server: all checks passed"))
