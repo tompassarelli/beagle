@@ -80,6 +80,9 @@
 (defn ^Boolean any-type? [t]
   (and (prim? t) (= (get t "name") "Any")))
 
+(defn ^Boolean reader-atom-type-text? [^String text]
+  (and (> (count text) 0) (nil? (re-find #"[\\s\\[\\](){}\";,]" text))))
+
 (defn ^String type->string [t]
   (cond
   (nil? t) "?"
@@ -99,7 +102,8 @@
   (cond
   (and all-prim (= (count members) 2) (>= (index-of2 names "Int") 0) (>= (index-of2 names "Float") 0)) "Number"
   (and (= (count members) 2) (some (fn [m] (and (prim? m) (= (get m "name") "Nil"))) members)) (let [non-nil (first (filter (fn [m] (not (and (prim? m) (= (get m "name") "Nil")))) members))]
-  (str (type->string non-nil) "?"))
+  (let [non-nil-text (type->string non-nil)]
+  (if (reader-atom-type-text? non-nil-text) (str non-nil-text "?") (str "(U " (str/join " " (mapv type->string members)) ")"))))
   :else (str "(U " (str/join " " (mapv type->string members)) ")")))
   (var-type? t) (get t "name")
   (poly-type? t) (let [vars (get t "vars")

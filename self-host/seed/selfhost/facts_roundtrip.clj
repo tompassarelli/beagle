@@ -732,6 +732,8 @@
 
 (declare canonical-layout-needed?)
 
+(declare cross-parameter-where-layout?)
+
 (defn- ^Boolean children-need-layout? [datum ^String ctx items]
   (loop [i 0]
   (cond
@@ -743,8 +745,22 @@
   (cond
   (= ctx "data") false
   (grammar-vector-break? datum ctx) true
+  (cross-parameter-where-layout? datum ctx) true
   :else (let [parts (sequence-parts datum)]
   (and (some? parts) (children-need-layout? datum ctx (get parts "items"))))))
+
+(defn- ^Boolean where-clause-datum? [datum]
+  (let [items (list-items datum)]
+  (and (> (count items) 0) (= (nth items 0) "where"))))
+
+(defn- ^Boolean cross-parameter-where-layout? [datum ^String ctx]
+  (let [items (list-items datum)
+   function-form? (and (> (count items) 0) (string? (nth items 0)) (some? (get #{"defn" "defn-" "fn"} (nth items 0))))]
+  (and (or (= ctx "arity-clause") function-form?) (loop [i 0]
+  (cond
+  (>= i (count items)) false
+  (where-clause-datum? (nth items i)) true
+  :else (recur (+ i 1)))))))
 
 (defn- head-keep [^String head after]
   (let [n (count after)

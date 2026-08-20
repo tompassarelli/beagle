@@ -1375,6 +1375,30 @@
   acc)))]
   parsed))
 
+(defn- parse-flat-triple-bindings! [b ^String context]
+  (let [items (unwrap-items b)
+   n (count items)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (>= (+ i 2) n) (do
+  (err! (str context " `" (binding-datum->src (nth items i)) "` requires a type and initializer"))
+  acc)
+  :else (let [binder (nth items i)
+   name (parse-binding-form! binder context)]
+  (recur (+ i 3) (conj acc (make-let-binding! name (parse-type* (nth items (+ i 1))) nil (parse-expr* (nth items (+ i 2)))))))))))
+
+(defn- parse-local-bindings! [b ^String context]
+  (let [items (unwrap-items b)]
+  (cond
+  (= (count items) 0) (parse-let-bindings! b)
+  (= (count items) 1) (do
+  (missing-binding-type! context (nth items 0))
+  [])
+  (type-expression-datum? (nth items 1)) (parse-flat-triple-bindings! b context)
+  :else (parse-let-bindings! b))))
+
 (defn parse-record-fields! [f]
   (let [items (unwrap-items f)
    style (or (binding-style items) "flat")]
@@ -2166,11 +2190,11 @@
    signature (parse-signature-tail! (nth rest-items 1) (subvec rest-items 2) false "fn")]
   (make-fn (get parsed-params "params") (get parsed-params "rest-param") (get signature "ret") (get signature "body")))
   (= head "fn") (err! "fn needs a return type and body — write `(fn [params] ReturnType body...)`")
-  (and (= head "let") (>= (count rest-items) 1)) (make-let (parse-let-bindings! (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (= head "let") (>= (count rest-items) 1)) (make-let (parse-local-bindings! (nth rest-items 0) "let binding") (mapv parse-expr* (subvec rest-items 1)))
   (and (= head "binding") (>= (count rest-items) 1)) {"node" "binding" "bindings" (parse-let-bindings! (nth rest-items 0)) "body" (mapv parse-expr* (subvec rest-items 1))}
   (= head "binding") (err! (str "malformed binding — expected (binding [*var* val ...] body...); got: " (str d)))
   (and (= head "letfn") (>= (count rest-items) 1)) (make-letfn (parse-letfn-fns! (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
-  (and (= head "loop") (>= (count rest-items) 1)) (make-loop (parse-let-bindings! (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (= head "loop") (>= (count rest-items) 1)) (make-loop (parse-local-bindings! (nth rest-items 0) "loop binding") (mapv parse-expr* (subvec rest-items 1)))
   (= head "recur") (make-recur (mapv parse-expr* rest-items))
   (and (= head "await") (= (count rest-items) 1)) (make-await (parse-expr* (nth rest-items 0)))
   (and (= head "set!") (= (count rest-items) 2)) (make-set! (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)))
@@ -2885,6 +2909,8 @@
   (> (count (parse-errors)) 0)))
   (expect! "let with bindings" (let [node (parse-expr* ["let" [BRACKET-TAG "x" 1 "y" 2] ["+" "x" "y"]])]
   (and (= (get node "node") "let") (= (count (get node "bindings")) 2) (= (get (nth (get node "bindings") 0) "name") "x") (= (get (nth (get node "bindings") 1) "name") "y"))))
+  (expect! "let with flat typed triples" (let [node (parse-expr* ["let" [BRACKET-TAG "x" "Int" 1 "y" "Int" 2] ["+" "x" "y"]])]
+  (and (= (count (get node "bindings")) 2) (= (get (get (nth (get node "bindings") 0) "ann") "name") "Int") (= (get (get (nth (get node "bindings") 1) "ann") "name") "Int"))))
   (expect! "binding form (dynamic-var rebinding, let-binding shape)" (let [node (parse-expr* ["binding" [BRACKET-TAG "*out*" "*err*"] ["println" ["#%string" "x"]]])]
   (and (= (get node "node") "binding") (= (nth (get node "bindings") 0) {"name" "*out*" "ann" nil "constraint" nil "value" {"node" "dynamic-var" "name" "*err*"}}) (= (count (get node "body")) 1))))
   (expect! "let structural typed binding" (let [node (parse-expr* ["let" [BRACKET-TAG ["t" "Any"] [":tx" "a"]] "t"])]
@@ -2907,6 +2933,8 @@
   (and (= (get node "node") "do") (= (count (get node "body")) 2))))
   (expect! "loop" (let [node (parse-expr* ["loop" [BRACKET-TAG "i" 0] ["recur" ["+" "i" 1]]])]
   (and (= (get node "node") "loop") (= (count (get node "bindings")) 1) (= (get (nth (get node "bindings") 0) "name") "i"))))
+  (expect! "loop with a flat typed triple" (let [node (parse-expr* ["loop" [BRACKET-TAG "i" "Int" 0] ["recur" ["+" "i" 1]]])]
+  (= (get (get (nth (get node "bindings") 0) "ann") "name") "Int")))
   (expect! "recur" (let [node (parse-expr* ["recur" 1 2])]
   (and (= (get node "node") "recur") (= (count (get node "args")) 2))))
   (expect! "for with binding" (let [node (parse-expr* ["for" [BRACKET-TAG "x" "items"] "x"])]
@@ -3090,6 +3118,8 @@
   (> (count (parse-errors)) 0)))
   (expect! "parse-let-bindings! plain" (let [bindings (parse-let-bindings! [BRACKET-TAG "x" 1 "y" 2])]
   (and (= (count bindings) 2) (= (get (nth bindings 0) "name") "x") (= (get (nth bindings 1) "name") "y"))))
+  (expect! "parse-local-bindings! flat triples" (let [bindings (parse-local-bindings! [BRACKET-TAG "x" "Int" 1 "y" "Int" 2] "let binding")]
+  (and (= (count bindings) 2) (= (get (get (nth bindings 0) "ann") "name") "Int") (= (get (get (nth bindings 1) "ann") "name") "Int"))))
   (expect! "unsafe-js rejected" (do
   (reset-errors!)
   (parse-expr* ["unsafe-js" ["#%string" "1+1"]])

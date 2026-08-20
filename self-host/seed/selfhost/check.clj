@@ -225,6 +225,9 @@
   (union-type? resolved) (boolean (some type-contains-inference-var? (get resolved "members")))
   :else false)))
 
+(defn ^Boolean reader-atom-type-text? [^String text]
+  (and (> (count text) 0) (nil? (re-find #"[\\s\\[\\](){}\";,]" text))))
+
 (defn ^String type->string [t]
   (cond
   (nil? t) "?"
@@ -242,7 +245,8 @@
   (cond
   (and (= (count members) 2) (every? prim? members) (boolean (some (fn [m] (= (get m "name") "Int")) members)) (boolean (some (fn [m] (= (get m "name") "Float")) members))) "Number"
   (and (= (count members) 2) (boolean (some nil-type? members))) (let [non-nil (first (filterv (fn [m] (not (nil-type? m))) members))]
-  (str (type->string non-nil) "?"))
+  (let [non-nil-text (type->string non-nil)]
+  (if (reader-atom-type-text? non-nil-text) (str non-nil-text "?") (str "(U " (str/join " " (mapv (fn [m] (type->string m)) members)) ")"))))
   :else (str "(U " (str/join " " (mapv (fn [m] (type->string m)) members)) ")")))
   (var-type? t) (get t "name")
   (poly-type? t) (let [bounds (get t "bounds")
@@ -459,6 +463,10 @@
 
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
+(def NIX-STDLIB {"==" (make-fn [ANY ANY] nil BOOL-TYPE) "!=" (make-fn [ANY ANY] nil BOOL-TYPE) "++" (make-poly ["A"] (let [items (make-app "Vec" [(make-var "A")])]
+  (make-fn [items] items items)) nil) "//" (let [attrs (make-app "Map" [ANY ANY])]
+  (make-fn [attrs] attrs attrs)) "->" (make-fn [BOOL-TYPE BOOL-TYPE] nil BOOL-TYPE)})
+
 (def HOSTED-NAMESPACE-CONTRACTS {"clojure.string" {"join" (make-fn [ANY] ANY (make-prim "String")) "split" (make-fn [(make-prim "String") (make-prim "Regex")] INT-TYPE (make-app "Vec" [(make-prim "String")])) "replace" (make-fn [(make-prim "String") (make-union [(make-prim "String") (make-prim "Regex")]) (make-prim "String")] nil (make-prim "String")) "trim" (make-fn [(make-prim "String")] nil (make-prim "String")) "triml" (make-fn [(make-prim "String")] nil (make-prim "String")) "trimr" (make-fn [(make-prim "String")] nil (make-prim "String")) "upper-case" (make-fn [(make-prim "String")] nil (make-prim "String")) "lower-case" (make-fn [(make-prim "String")] nil (make-prim "String")) "capitalize" (make-fn [(make-prim "String")] nil (make-prim "String")) "blank?" (make-fn [ANY] nil BOOL-TYPE) "includes?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE) "starts-with?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE) "ends-with?" (make-fn [(make-prim "String") (make-prim "String")] nil BOOL-TYPE) "reverse" (make-fn [(make-prim "String")] nil (make-prim "String")) "escape" (make-fn [(make-prim "String") ANY] nil (make-prim "String")) "re-quote-replacement" (make-fn [(make-prim "String")] nil (make-prim "String")) "index-of" (make-fn [(make-prim "String") ANY] INT-TYPE (make-union [INT-TYPE NIL-TYPE])) "last-index-of" (make-fn [(make-prim "String") ANY] INT-TYPE (make-union [INT-TYPE NIL-TYPE])) "split-lines" (make-fn [(make-prim "String")] nil (make-app "Vec" [(make-prim "String")])) "replace-first" (make-fn [(make-prim "String") ANY ANY] nil (make-prim "String"))}})
 
 (defn hosted-require-contracts [requires]
@@ -473,7 +481,32 @@
 
 (def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
 
-(def CORE-STDLIB {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE) "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE) "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE) "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE] nil FLOAT-TYPE)})
+(def CORE-STDLIB (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE) "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE) "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE) "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE] nil FLOAT-TYPE)} "host.fs/real-path" (make-fn [(make-prim "String")] nil (make-prim "host.fs/RealPathResult"))) "host.fs/mtime-nanoseconds" (make-fn [(make-prim "String")] nil (make-prim "host.fs/MtimeNanosecondsResult"))) "host.fs/create-temporary-sibling" (make-fn [(make-prim "String")] nil (make-prim "host.fs/CreateTemporarySiblingResult"))) "host.stdin/read-text-bounded" (make-fn [INT-TYPE] nil (make-prim "host.stdin/ReadTextBoundedResult"))) "host.fs/rename-file" (make-fn [(make-prim "String") (make-prim "String")] nil (make-prim "host.fs/RenameFileResult"))) "host.fs/remove-file" (make-fn [(make-prim "String")] nil (make-prim "host.fs/RemoveFileResult"))))
+
+(defn install-core-result-union! [^String union-name variants]
+  (swap! STATE assoc-in ["union-members" union-name] (mapv (fn [variant] (get variant "name")) variants))
+  (doseq [variant variants]
+  (let [name (get variant "name")
+   fields (get variant "fields")]
+  (swap! STATE assoc-in ["record-fields" name] (reduce (fn [out field] (assoc out (nth field 0) (nth field 1))) {} fields))
+  (swap! STATE assoc-in ["record-field-order" name] (mapv (fn [field] (nth field 0)) fields))))
+  nil)
+
+(defn install-core-filesystem-result-unions! []
+  (install-core-result-union! "host.fs/RealPathResult" [{"name" "host.fs/RealPathOk" "fields" [[":path" (make-prim "String")]]} {"name" "host.fs/RealPathError" "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.fs/MtimeNanosecondsResult" [{"name" "host.fs/MtimeNanosecondsOk" "fields" [[":nanoseconds" INT-TYPE]]} {"name" "host.fs/MtimeNanosecondsError" "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.fs/CreateTemporarySiblingResult" [{"name" "host.fs/CreateTemporarySiblingOk" "fields" [[":path" (make-prim "String")]]} {"name" "host.fs/CreateTemporarySiblingError" "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.stdin/ReadTextBoundedResult" [{"name" "host.stdin/ReadTextBoundedOk" "fields" [[":text" (make-prim "String")]]} {"name" "host.stdin/ReadTextBoundedOverflow" "fields" []} {"name" "host.stdin/ReadTextBoundedError" "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.fs/RenameFileResult" [{"name" "host.fs/RenameFileOk" "fields" []} {"name" "host.fs/RenameFileError" "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.fs/RemoveFileResult" [{"name" "host.fs/RemoveFileOk" "fields" []} {"name" "host.fs/RemoveFileError" "fields" [[":errno" INT-TYPE]]}])
+  nil)
+
+(defn target-stdlib [^String target]
+  (cond
+  (= target "core") (merge STDLIB CORE-STDLIB)
+  (= target "js") (merge STDLIB JS-ATOM-STDLIB)
+  (= target "nix") (merge STDLIB NIX-STDLIB)
+  :else STDLIB))
 
 (def JVM-INSTANCE-POSITION-METHODS {["Socket" "connect"] true ["java.net.Socket" "connect"] true})
 
@@ -557,7 +590,7 @@
    imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
    imported-proofs (reduce (fn [out entry] (if (and (map? entry) (string? (get entry "name")) (boolean? (get entry "synchronous"))) (reference-map-assoc out (get entry "name") (get entry "synchronous")) out)) {} imported)
    external-proofs (reduce (fn [out entry] (if (and (string? (get entry "name")) (nil? (reference-map-ref out (get entry "name") nil))) (reference-map-assoc out (get entry "name") (not (= (get entry "synchronous") false))) out)) imported-proofs (get prog "externs"))
-   builtin-proofs (reduce (fn [out name] (assoc out name true)) external-proofs (ordered-keys STDLIB))
+   builtin-proofs (reduce (fn [out name] (assoc out name true)) external-proofs (ordered-keys (target-stdlib (get prog "target"))))
    assumed (reduce (fn [out name] (assoc out name true)) builtin-proofs (ordered-keys local-definitions))]
   (loop [proofs assumed]
   (let [next (reduce (fn [out name] (let [form (get local-definitions name)
@@ -1201,16 +1234,22 @@
   (register-record-validator! name fields)
   env2))
 
+(defn register-nullary-union-members! [members type-params env]
+  (if (not (= (get (deref STATE) "target") "core")) env (reduce (fn [out ^String member] (let [ctor (str "->" member)]
+  (if (some? (get out ctor)) out (let [ctor-fn (make-fn [] nil (make-prim member))]
+  (assoc out ctor (if (or (nil? type-params) (= (count type-params) 0)) ctor-fn (make-poly type-params ctor-fn nil))))))) env members)))
+
 (defn register-union! [^String name members type-params member-fields env]
   (do
   (swap! STATE assoc-in ["union-members" name] members)
-  (if (or (nil? type-params) (= (count type-params) 0)) (let [env1 (assoc env name (make-union (mapv (fn [m] (make-prim m)) members)))]
-  (if (not (nil? member-fields)) (reduce (fn [e m] (let [fields (get member-fields m)]
-  (if (not (nil? fields)) (register-record! m fields e) e))) env1 members) env1)) (let [env1 (assoc env name (make-prim name))]
+  (if (or (nil? type-params) (= (count type-params) 0)) (let [env1 (assoc env name (make-union (mapv (fn [m] (make-prim m)) members)))
+   env2 (if (not (nil? member-fields)) (reduce (fn [e m] (let [fields (get member-fields m)]
+  (if (not (nil? fields)) (register-record! m fields e) e))) env1 members) env1)]
+  (register-nullary-union-members! members type-params env2)) (let [env1 (assoc env name (make-prim name))]
   (swap! STATE assoc-in ["parametric-unions" name] {"params" type-params "members" members "member-fields" member-fields})
   (doseq [member members]
   (swap! STATE assoc-in ["parametric-member-union" member] name))
-  (if (not (nil? member-fields)) (reduce (fn [e m] (let [fields (get member-fields m)]
+  (let [env2 (if (not (nil? member-fields)) (reduce (fn [e m] (let [fields (get member-fields m)]
   (if (not (nil? fields)) (let [m-type (make-prim m)
    m-lower (str/lower-case m)
    field-map (reduce (fn [fm f] (assoc fm (str ":" (get f "name")) (if (nil? (get f "ann")) ANY (get f "ann")))) {} fields)
@@ -1221,7 +1260,8 @@
   (swap! STATE assoc-in ["record-fields" m] field-map)
   (swap! STATE assoc-in ["record-field-order" m] field-order)
   (register-record-validator! m fields)
-  e2) e))) env1 members) env1)))))
+  e2) e))) env1 members) env1)]
+  (register-nullary-union-members! members type-params env2))))))
 
 (defn ^Boolean check-hvec-literal! [value expected env]
   (if (and (app-type? expected) (= (get expected "name") "HVec") (not (nil? value)) (= (get value "node") "vec")) (let [items (get value "items")
@@ -1758,12 +1798,11 @@
 (def CLJ-BUILTIN-DYNAMIC-VARS ["*out*" "*err*" "*in*" "*ns*" "*print-length*" "*print-level*" "*print-readably*" "*print-dup*" "*print-meta*" "*flush-on-newline*" "*warn-on-reflection*" "*unchecked-math*" "*math-context*" "*read-eval*" "*command-line-args*" "*file*" "*assert*" "*data-readers*" "*default-data-reader-fn*" "*compile-path*" "*source-path*" "*clojure-version*" "*agent*"])
 
 (defn build-initial-env! [prog]
-  (let [externs (get prog "externs")
+  (let [core-target? (= (get prog "target") "core")
+   _ (if core-target? (install-core-filesystem-result-unions!) nil)
+   externs (get prog "externs")
    forms (get prog "forms")
-   base-stdlib (cond
-  (= (get prog "target") "core") (merge STDLIB CORE-STDLIB)
-  (= (get prog "target") "js") (merge STDLIB JS-ATOM-STDLIB)
-  :else STDLIB)
+   base-stdlib (target-stdlib (get prog "target"))
    target-stdlib (merge base-stdlib (hosted-require-contracts (get prog "requires" [])))
    env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (reference-map-assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
@@ -2940,6 +2979,13 @@
    target (make-map-target ["missing"] false [])
    prog (make-prog [record (make-defn-node "f" [(make-param target (make-prim "Config"))] (make-prim "String") [(make-ref "missing")])])]
   (> (get (type-check! prog) "count") 0)))
+  (expect! "union: Core bare tag member owns a nullary constructor" (let [union-form {"node" "defunion" "name" "Action" "members" ["Start" "Stop"] "type-params" [] "member-fields" nil}
+   prog (assoc (make-prog [union-form (make-call "->Start" [])]) "target" "core")]
+  (= (get (type-check! prog) "count") 0)))
+  (expect! "union: hosted bare record member keeps constructor arity" (let [record (make-record-node "Start" [{"name" "code" "ann" (make-prim "Int")}])
+   union-form {"node" "defunion" "name" "Action" "members" ["Start"] "type-params" [] "member-fields" nil}
+   prog (make-prog [record union-form (make-call "->Start" [(make-lit "number" 1)])])]
+  (= (get (type-check! prog) "count") 0)))
   (expect! "destructure: nominal union projects a field shared by every member" (let [union-form {"node" "defunion" "name" "Named" "members" ["Person" "Company"] "type-params" [] "member-fields" {"Person" [{"name" "name" "ann" (make-prim "String")}] "Company" [{"name" "name" "ann" (make-prim "String")}]}}
    target (make-map-target ["name"] false [])
    prog (make-prog [union-form (make-defn-node "name-of" [(make-param target (make-prim "Named"))] (make-prim "String") [(make-ref "name")])])]
@@ -3221,6 +3267,15 @@
    identity-result (type-check! identity)
    identity-type (get-in (deref STATE) ["effective-definition-types" "identity"])]
   (and (diagnostics-include? constant-diagnostics "Core requires a closed monomorphic Native ABI") (= (get identity-result "count") 0) (fn-type? identity-type) (= (get (nth (get identity-type "params") 0) "name") "Int"))))
+  (expect! "nix-only operator contracts check without extern declarations" (let [one (make-lit "number" 1)
+   two (make-lit "number" 2)
+   left (make-vec-node [one])
+   right (make-vec-node [two])
+   attrs-a (make-map-node [(make-map-pair (make-lit "keyword" "a") one)])
+   attrs-b (make-map-node [(make-map-pair (make-lit "keyword" "b") two)])
+   prog (assoc (make-prog [(make-call "++" [left right]) (make-call "!=" [one two]) (make-call "==" [one one]) (make-call "//" [attrs-a attrs-b]) (make-call "->" [(make-lit "bool" true) (make-lit "bool" false)])]) "target" "nix")]
+  (= (count (check-program! prog)) 0)))
+  (expect! "nix-only operator contracts stay target-scoped" (and (some? (get (target-stdlib "nix") "++")) (nil? (get (target-stdlib "clj") "++"))))
   (expect! "E021: free dotted root rejected" (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [{"name" "config" "default" false}] "body" {"node" "ref" "name" "vendor.id"}}]}]
   (> (count (check-program! prog)) 0)))
   (expect! "E021: formal-rooted dotted accepted" (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [{"name" "config" "default" false}] "body" {"node" "ref" "name" "config.services.foo"}}]}]
