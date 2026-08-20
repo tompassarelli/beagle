@@ -214,9 +214,9 @@
            (resultadmissionrequest-status request))]]
     (if (= "ok" (resultadmissionrequest-status request))
       (conj base (->CompileQueryFact 4 :result/artifact digest 0
-                   (resultadmissionrequest-artifact-content-id request)))
+                   (or (resultadmissionrequest-artifact-content-id request) "")))
       (conj base (->CompileQueryFact 4 :result/diagnostic digest 0
-                   (resultadmissionrequest-diagnostic-content-id request))))))
+                   (or (resultadmissionrequest-diagnostic-content-id request) ""))))))
 
 (defn admit-and-identify-result [request ResultAdmissionRequest] ResultAdmission
   (match (admit-canonical-query (resultadmissionrequest-query request))
@@ -244,7 +244,7 @@
                             (resultadmissionrequest-target request)
                             (resultadmissionrequest-materializer-content-id request)
                             status artifact diagnostic)
-               digest String (result-digest normalized)]
+               (digest String) (result-digest normalized)]
            (->ResultAdmitted
              (->AdmittedResultClosure digest query
                (resultadmissionrequest-target normalized)

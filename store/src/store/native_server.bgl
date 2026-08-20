@@ -1,7 +1,8 @@
 #lang beagle
 
 (ns store.native-server
-  (:require [store.log-codec :as log]
+  (:require [beagle.fact-profile :as fact-profile]
+            [store.log-codec :as log]
             [store.native-dispatch :as dispatch]
             [store.native-wire-codec :as native-wire]
             [store.schema :as schema]
@@ -48,6 +49,18 @@
 
 (defrecord BytesResult [(status Int) (bytes (Vec Int))])
 
+;; Direct compiler calls carry fact-profile products through the same Store
+;; transaction boundary as RPC.  There is no second key encoding: every
+;; admitted canonical fact is one ordinary Store triple.
+(defrecord CompileDirectResult
+  [(status Int)
+   (error String?)
+   (next-store StoreResult)
+   (append-bytes (Vec Int))
+   (state-changed Bool)
+   (query fact-profile/AdmittedQueryClosure?)
+   (result fact-profile/AdmittedResultClosure?)])
+
 (defn error-or [(error String?) (fallback String)] String
   (if error error fallback))
 
@@ -71,6 +84,59 @@
   (->StoreResult
    status-ok store nil
    (storeresult-valid-log-bytes prior) empty-bytes ""))
+
+(defn compiler-fact-triple [(fact fact-profile/CompileQueryFact)] t/Triple
+  (t/triple (fact-profile/compilequeryfact-subject fact)
+            (fact-profile/compilequeryfact-relation fact)
+            (fact-profile/compilequeryfact-value fact)))
+
+(defn compiler-fact-operations
+  [(root (Atom t/TermStore)) (facts (Vec fact-profile/CompileQueryFact))]
+  (Vec t/CommitOperation)
+  (reduce
+   (fn [(operations (Vec t/CommitOperation))
+        (fact fact-profile/CompileQueryFact)] (Vec t/CommitOperation)
+     (let [proposition (compiler-fact-triple fact)]
+       (if (contains? (term-store/live-propositions root) proposition)
+         operations
+         (conj operations (t/->CommitOperation t/assert-action proposition)))))
+   [] facts))
+
+(defn compiler-commit!
+  [(prior StoreResult) (facts (Vec fact-profile/CompileQueryFact))
+   (query fact-profile/AdmittedQueryClosure?)
+   (result fact-profile/AdmittedResultClosure?)] CompileDirectResult
+  (let [current Store? (storeresult-store prior)]
+    (if (or (not= status-ok (storeresult-status prior)) (nil? current))
+      (->CompileDirectResult status-fatal
+                             (error-or (storeresult-error prior) "store boot failed")
+                             prior empty-bytes false query result)
+      (let [(store-value Store) current
+            session (schema/fork-session (store-session store-value))
+            root (schema/store-of session)
+            before (term-store/current-sequence root)
+            operations (compiler-fact-operations root facts)]
+        (if (empty? operations)
+          (->CompileDirectResult status-ok nil prior empty-bytes false query result)
+          (do
+            (term-store/commit-boundary!
+             root operations
+             (term-store/commit-metadata "store.compiler" "fact-profile" nil))
+            (schema/refresh! session)
+            (let [encoded (log/encode-store-append! root before)]
+              (if (= status-ok (log/bytesresult-status encoded))
+                (let [append (log/bytesresult-bytes encoded)
+                      next (->StoreResult status-ok
+                               (->Store (store-canonical-log-path store-value) session
+                                        (+ (store-log-byte-count store-value)
+                                           (count append)))
+                               nil (storeresult-valid-log-bytes prior)
+                               empty-bytes "")]
+                  (->CompileDirectResult status-ok nil next append true query result))
+                (->CompileDirectResult status-fatal
+                                       (error-or (log/bytesresult-error encoded)
+                                                 "compiler fact log encoding failed")
+                                       prior empty-bytes false query result)))))))))
 
 ;; The whole log is already borrowed here; slicing it into chunks would copy
 ;; every byte again.
@@ -354,5 +420,70 @@
 (defn server-codec-release-request [(request-result RequestResult)] Nil nil)
 
 (defn server-codec-release-response [(response-result ResponseResult)] Nil nil)
+
+;; These direct entries are intentionally positional: the C boundary passes
+;; raw fact-profile dimensions, never a serialized closure.
+(defn server-compile-query!
+  [(store-result StoreResult)
+   (source-closure-digest String)
+   (compiler-context String)
+   (profile String)
+   (targets (Vec String))
+   (rules-content-id String)
+   (schema-content-id String)
+   (expected-query-digest String?)] CompileDirectResult
+  (match (fact-profile/admit-and-identify-query
+          (fact-profile/->QueryAdmissionRequest
+           source-closure-digest compiler-context profile targets
+           rules-content-id schema-content-id))
+    [(fact-profile/QueryRejected code detail)
+     (->CompileDirectResult status-fatal detail store-result empty-bytes false nil nil)]
+    [(fact-profile/QueryAdmitted query)
+     (if (and expected-query-digest
+              (not= expected-query-digest
+                    (fact-profile/admittedqueryclosure-query-digest query)))
+       (->CompileDirectResult status-fatal "expected query digest does not match admission"
+                              store-result empty-bytes false nil nil)
+       ;; A query is admitted before it is read.  The fact set is returned in
+       ;; the typed closure; result discovery is deliberately fact-based.
+       (->CompileDirectResult status-ok nil store-result empty-bytes false query nil))]))
+
+(defn server-compile-append!
+  [(store-result StoreResult)
+   (source-closure-digest String)
+   (compiler-context String)
+   (profile String)
+   (targets (Vec String))
+   (rules-content-id String)
+   (schema-content-id String)
+   (expected-query-digest String?)
+   (target String)
+   (materializer-content-id String)
+   (status String)
+   (artifact-content-id String?)
+   (diagnostic-content-id String?)] CompileDirectResult
+  (match (fact-profile/admit-and-identify-query
+          (fact-profile/->QueryAdmissionRequest
+           source-closure-digest compiler-context profile targets
+           rules-content-id schema-content-id))
+    [(fact-profile/QueryRejected code detail)
+     (->CompileDirectResult status-fatal detail store-result empty-bytes false nil nil)]
+    [(fact-profile/QueryAdmitted query)
+     (if (and expected-query-digest
+              (not= expected-query-digest
+                    (fact-profile/admittedqueryclosure-query-digest query)))
+       (->CompileDirectResult status-fatal "expected query digest does not match admission"
+                              store-result empty-bytes false nil nil)
+       (match (fact-profile/admit-and-identify-result
+               (fact-profile/->ResultAdmissionRequest
+                query target materializer-content-id status artifact-content-id
+                diagnostic-content-id))
+         [(fact-profile/ResultRejected code detail)
+          (->CompileDirectResult status-fatal detail store-result empty-bytes false query nil)]
+         [(fact-profile/ResultAdmitted result)
+          (compiler-commit! store-result
+                            (concat (fact-profile/admittedqueryclosure-facts query)
+                                    (fact-profile/admittedresultclosure-facts result))
+                            query result)]))]))
 
 (defn main [] Int status-fatal)
