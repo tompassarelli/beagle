@@ -211,18 +211,21 @@
    (sha256 descriptor) descriptor])
 
 (defn admit-and-identify-result [request]
-  (let [{:keys [query payload]} request]
-    (cond
-      (not (instance? AdmittedQueryClosure query))
-      (->ResultRejected :result/invalid-query
-                        "result must belong to an admitted query closure")
-      (not (string? payload))
-      (->ResultRejected :result/invalid-payload "cache payload must be text")
-      :else
-      (let [payload-bytes (.getBytes ^String payload StandardCharsets/UTF_8)]
-        (->ResultAdmitted
-         (->AdmittedResultClosure query payload (alength payload-bytes)
-                                  (sha256 payload)))))))
+  (if-not (instance? ResultAdmissionRequest request)
+    (->ResultRejected :result/invalid-request
+                      "result admission requires a ResultAdmissionRequest")
+    (let [{:keys [query payload]} request]
+      (cond
+        (not (instance? AdmittedQueryClosure query))
+        (->ResultRejected :result/invalid-query
+                          "result must belong to an admitted query closure")
+        (not (string? payload))
+        (->ResultRejected :result/invalid-payload "cache payload must be text")
+        :else
+        (let [payload-bytes (.getBytes ^String payload StandardCharsets/UTF_8)]
+          (->ResultAdmitted
+           (->AdmittedResultClosure query payload (alength payload-bytes)
+                                    (sha256 payload))))))))
 
 (defn- descriptor-payload [store descriptor]
   (try

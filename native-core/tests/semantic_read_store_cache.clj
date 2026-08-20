@@ -62,6 +62,11 @@
    (let [query (admitted-query!)
          facts (:facts query)
          miss (cache/query! store query)]
+     (let [invalid-request
+           (cache/admit-and-identify-result {:query query :payload payload})]
+       (check! "result admission requires its typed request"
+               (and (cache/result-rejected? invalid-request)
+                    (= :result/invalid-request (:code invalid-request)))))
      (check! "admitted query preserves canonical order and entry slot"
              (and (= (vec (range 1 (inc (count facts)))) (mapv :order facts))
                   (= [9 :query/entry "query" 0 "demo.core/main"]
