@@ -6,7 +6,7 @@
 ;; fallback can satisfy it (../geom.bclj), and a silently-skipping resolver
 ;; accepts it as Any. Closed resolution must reject with exit 1 on both
 ;; compilers; an accept here is the fail-open divergence this fixture guards.
-(require fixtures.absent.geom :as g)
+(require [fixtures.absent.geom :as g])
 
 (defn use-absent [] Any
   (g/origin))

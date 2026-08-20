@@ -1,6 +1,6 @@
 #lang beagle/clj
 (ns fixtures.transitive-alias-owner)
 
-(require fixtures.transitive-alias-base :as base)
+(require [fixtures.transitive-alias-base :as base])
 
 (defrecord Holder [(slots base/Slots)])

@@ -1,7 +1,7 @@
 #lang beagle/clj
 (ns fixtures.transitive-alias-user)
 
-(require fixtures.transitive-alias-owner :as owner)
+(require [fixtures.transitive-alias-owner :as owner])
 
 (defn keep-slots [(slots (Atom (Vec Int)))] Any
   (owner/->Holder slots))

@@ -1,7 +1,7 @@
 #lang beagle/clj
 (ns fixtures.alias-user)
 
-(require fixtures.alias-owner :as owner)
+(require [fixtures.alias-owner :as owner])
 
 (defn store-string [] Any
   (owner/store "ok"))

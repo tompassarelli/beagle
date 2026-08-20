@@ -1,6 +1,6 @@
 #lang beagle/clj
 (ns fixtures.shapes)
-(require fixtures.geom :as g)
+(require [fixtures.geom :as g])
 
 ;; Cross-module refs: g/->Point (ctor), g/point-x (accessor), g/manhattan +
 ;; g/origin (fns), g/UNIT (var). The record TYPE crosses the boundary bare
