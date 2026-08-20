@@ -24,10 +24,20 @@
 ;; `let` is macro-eval's only binder, so a test seeds values by wrapping.
 (define (ev-let bindings expr)
   (macro-eval `(let ,(apply append
-                            (map (lambda (p) (list (car p) (list 'quote (cdr p))))
+                            (map (lambda (p) (list (car p) 'Any (list 'quote (cdr p))))
                                  bindings))
                  ,expr)
               (make-macro-env)))
+
+(test-case "let skips authored local type slots"
+  (check-equal?
+   (ev `(let (,BRACKET-TAG x Int 41 y Int (+ x 1)) y))
+   42))
+
+(test-case "fn skips authored parameter type slots"
+  (check-equal?
+   (ev `((fn (,BRACKET-TAG x Int y Int) Int (+ x y)) 20 22))
+   42))
 
 ;; --- quasiquote --------------------------------------------------------------
 
@@ -185,7 +195,7 @@
 
 (test-case "macro fn parameters accept a constraint without binding its metadata"
   (check-equal?
-   (ev '((fn [(value Int positive?)] Any value) 7))
+   (ev '((fn [value (Int where positive?)] Any value) 7))
    7))
 
 (test-case "make-defn with a structural param vector builds a typed signature"
@@ -216,13 +226,13 @@
   (check-exn #rx"must be a list" (lambda () (ev '(apply list 7)))))
 
 (test-case "mapcat flattens one level, which map cannot"
-  (check-equal? (ev '(mapcat (fn [x] Any (list x x)) (list 1 2))) '(1 1 2 2)))
+  (check-equal? (ev '(mapcat (fn [x Any] Any (list x x)) (list 1 2))) '(1 1 2 2)))
 
 (test-case "mapcat rejects a function that does not return a list"
-  (check-exn #rx"must return a list" (lambda () (ev '(mapcat (fn [x] Any x) (list 1 2))))))
+  (check-exn #rx"must return a list" (lambda () (ev '(mapcat (fn [x Any] Any x) (list 1 2))))))
 
 (test-case "map-indexed supplies the position a wire slot needs"
-  (check-equal? (ev '(map-indexed (fn [i x] Any (list i x)) (list (quote a) (quote b))))
+  (check-equal? (ev '(map-indexed (fn [i Int x Any] Any (list i x)) (list (quote a) (quote b))))
                 '((0 a) (1 b))))
 
 (test-case "range builds the index list"
@@ -262,13 +272,13 @@
 (test-case "distinct? sees duplicate names derived from a raw typed field vec"
   (check-false
    (ev-let `((fields . (,BRACKET-TAG (id String) (id String))))
-           '(let [field-names (map first fields)]
+           '(let [field-names (List Symbol) (map first fields)]
               (distinct? field-names)))))
 
 (test-case "reduce preserves Clojure accumulator-item order"
-  (check-equal? (ev '(reduce (fn [acc item] Any (- acc item)) 10 (list 1 2 3))) 4)
+  (check-equal? (ev '(reduce (fn [acc Int item Int] Int (- acc item)) 10 (list 1 2 3))) 4)
   (check-exn #rx"non-empty collection"
-             (lambda () (ev '(reduce (fn [acc item] Any (+ acc item)) (list))))))
+             (lambda () (ev '(reduce (fn [acc Int item Int] Int (+ acc item)) (list))))))
 
 (test-case "nested quasiquote tracks depth and tagged vec splice strips its tag"
   (check-equal?

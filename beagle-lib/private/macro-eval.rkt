@@ -350,15 +350,10 @@
                [e env])
       (cond
         [(null? rest) e]
-        [(and (pair? (cdr rest))
-              (or (symbol? (car rest))
-                  (and (list? (car rest))
-                       (memv (length (car rest)) '(2 3))
-                       (symbol? (caar rest)))))
-         (define binding (car rest))
-         (define name (if (symbol? binding) binding (car binding)))
-         (define val (macro-eval (cadr rest) e))
-         (loop (cddr rest) (hash-set e name val))]
+        [(and (pair? (cddr rest)) (symbol? (car rest)))
+         (define name (car rest))
+         (define val (macro-eval (caddr rest) e))
+         (loop (cdddr rest) (hash-set e name val))]
         [else (error 'macro-eval "bad let binding: ~v" (car rest))])))
   (eval-body body new-env))
 
@@ -420,16 +415,18 @@
   ;; The evaluator does not check types, but it consumes the mandatory
   ;; positional return type before retaining the function body.
   (define body (cddr parts))
+  (define raw-param-items (macro-seq raw-params "fn params"))
+  (unless (even? (length raw-param-items))
+    (error 'macro-eval "fn params must be binding/type pairs"))
   (define param-names
-    (map (lambda (p)
-           (cond
-             [(symbol? p) p]
-             [(and (list? p)
-                   (memv (length p) '(2 3))
-                   (symbol? (car p)))
-              (car p)]
-             [else (error 'macro-eval "bad fn param: ~v" p)]))
-         (macro-seq raw-params "fn params")))
+    (let loop ([items raw-param-items] [names '()])
+      (cond
+        [(null? items) (reverse names)]
+        [else
+         (define name (car items))
+         (unless (symbol? name)
+           (error 'macro-eval "bad fn param: ~v" name))
+         (loop (cddr items) (cons name names))])))
   (macro-closure param-names body env))
 
 ;; --- function application ----------------------------------------------------
