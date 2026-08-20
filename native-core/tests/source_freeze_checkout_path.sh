@@ -6,7 +6,26 @@ if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]]; then
   exec "$repo/native-core/tests/source_freeze_native.sh"
 fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/native-source-freeze-path.XXXXXX")"
-trap 'rm -rf "${work:?}"' EXIT
+case_pids=()
+
+cleanup() {
+  local status=$?
+  local pid
+  trap - EXIT TERM INT
+  set +e
+  for pid in "${case_pids[@]}"; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  for pid in "${case_pids[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  rm -rf "${work:?}"
+  exit "$status"
+}
+
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 run_case() {
   local label="$1"
@@ -46,5 +65,35 @@ run_case() {
   printf 'source-freeze path case %s: ACCEPTED from %s\n' "$label" "$cwd"
 }
 
-run_case repo "$repo"
-run_case tmp /tmp
+export -f run_case
+export repo work
+
+declare -A case_labels=()
+unshare --user --map-current-user --pid --fork --kill-child \
+  bash -c 'set -euo pipefail; run_case "$@"' source-freeze-case repo "$repo" &
+case_pids+=("$!")
+case_labels["$!"]=repo
+unshare --user --map-current-user --pid --fork --kill-child \
+  bash -c 'set -euo pipefail; run_case "$@"' source-freeze-case tmp /tmp &
+case_pids+=("$!")
+case_labels["$!"]=tmp
+
+live_pids=("${case_pids[@]}")
+for _ in repo tmp; do
+  finished_pid=
+  if wait -n -p finished_pid "${live_pids[@]}"; then
+    :
+  else
+    status=$?
+    printf 'source-freeze path case %s: FAILED exit %d\n' \
+      "${case_labels[$finished_pid]}" "$status" >&2
+    exit "$status"
+  fi
+  next_pids=()
+  for pid in "${live_pids[@]}"; do
+    if [[ "$pid" != "$finished_pid" ]]; then
+      next_pids+=("$pid")
+    fi
+  done
+  live_pids=("${next_pids[@]}")
+done

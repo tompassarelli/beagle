@@ -111,41 +111,43 @@
 (defn encode-id [id core/NativeId] String
   (canonical-record "id" [(core/nativeid-value id)]))
 
-(defn utf8-append
-  [bytes (Vec Int)
-   point Int] (Vec Int)
-  (cond
-    (< point 128)
-    (conj bytes point)
-    (< point 2048)
-    (conj (conj bytes (+ 192 (quot point 64))) (+ 128 (mod point 64)))
-    (< point 65536)
-    (conj (conj (conj bytes (+ 224 (quot point 4096)))
-            (+ 128 (mod (quot point 64) 64)))
-      (+ 128 (mod point 64)))
-    :else
-    (conj (conj (conj (conj bytes (+ 240 (quot point 262144)))
-                  (+ 128 (mod (quot point 4096) 64)))
-            (+ 128 (mod (quot point 64) 64)))
-      (+ 128 (mod point 64)))))
-
 ;; stdlib utf8-encode has no hosted clj lowering, so the digest encodes its own
 ;; bytes; a surrogate pair recombines into one code point first.
 (defn utf8-bytes [text String] (Vec Int)
   (let [units (Vec Any) (vec text)
-        size Int (count units)]
+        size Int (count units)
+        empty-bytes (Vec Int) []]
     (loop [index Int 0
-           bytes (Vec Int) []]
+           bytes (TransientVec Int) (transient empty-bytes)]
       (if (>= index size)
-        bytes
+        (persistent! bytes)
         (let [unit Int (int (nth units index))
               paired Bool (and (>= unit 55296) (< unit 56320) (< (+ index 1) size))
               point Int (if paired
                 (+ 65536
                   (+ (* (- unit 55296) 1024)
                     (- (int (nth units (+ index 1))) 56320)))
-                unit)]
-          (recur (+ index (if paired 2 1)) (utf8-append bytes point)))))))
+                unit)
+              next-index Int (+ index (if paired 2 1))]
+          (cond
+            (< point 128)
+            (recur next-index (conj! bytes point))
+            (< point 2048)
+            (recur next-index
+              (conj! (conj! bytes (+ 192 (quot point 64)))
+                (+ 128 (mod point 64))))
+            (< point 65536)
+            (recur next-index
+              (conj! (conj! (conj! bytes (+ 224 (quot point 4096)))
+                      (+ 128 (mod (quot point 64) 64)))
+                (+ 128 (mod point 64))))
+            :else
+            (recur next-index
+              (conj! (conj! (conj! (conj! bytes
+                          (+ 240 (quot point 262144)))
+                        (+ 128 (mod (quot point 4096) 64)))
+                    (+ 128 (mod (quot point 64) 64)))
+                (+ 128 (mod point 64))))))))))
 
 ;; Every encoding handed here is already tagged by its own canonical record, so
 ;; the digest needs no separate domain prefix.
