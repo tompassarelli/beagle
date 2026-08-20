@@ -2,23 +2,24 @@
 # Shared stage0 selection for parity harnesses. A default local native binary is
 # build output, not source truth: use it only when its sidecar proves it was
 # built from the checkout's exact blessed seed. An explicit override remains a
-# deliberate caller assertion; an empty override forces the bb seed.
+# deliberate caller assertion; every selected compiler must be native.
 
 beagle_select_stage0() {
   local seed_root="${1:?seed root required}"
   local default_native="${2:?default native path required}"
   local candidate explicit=0 sidecar current_hash recorded_hash reason
 
-  STAGE0=bb
+  STAGE0=native
   NATIVE_BIN=""
-  STAGE0_REASON="default native absent"
+  STAGE0_REASON="native unavailable"
 
   if [ "${BEAGLE_NATIVE_BIN+x}" = x ]; then
     explicit=1
     candidate="$BEAGLE_NATIVE_BIN"
     if [ -z "$candidate" ]; then
-      STAGE0_REASON="bb fallback explicitly requested"
-      return 0
+      STAGE0_REASON="BEAGLE_NATIVE_BIN is empty"
+      printf 'stage0: %s\n' "$STAGE0_REASON" >&2
+      return 2
     fi
   else
     candidate="$default_native"
@@ -31,7 +32,8 @@ beagle_select_stage0() {
       return 2
     fi
     STAGE0_REASON="$reason"
-    return 0
+    printf 'stage0: %s\n' "$STAGE0_REASON" >&2
+    return 2
   fi
 
   # Explicit paths are caller-owned artifacts (including immutable Nix store
@@ -47,24 +49,24 @@ beagle_select_stage0() {
   sidecar="${candidate}.seed-nar-hash"
   if [ ! -r "$sidecar" ]; then
     STAGE0_REASON="unverified default native (missing $sidecar)"
-    printf 'stage0: %s; using current bb seed\n' "$STAGE0_REASON" >&2
-    return 0
+    printf 'stage0: %s\n' "$STAGE0_REASON" >&2
+    return 2
   fi
   if ! command -v nix >/dev/null 2>&1; then
     STAGE0_REASON="cannot verify default native provenance (nix unavailable)"
-    printf 'stage0: %s; using current bb seed\n' "$STAGE0_REASON" >&2
-    return 0
+    printf 'stage0: %s\n' "$STAGE0_REASON" >&2
+    return 2
   fi
   if ! current_hash="$(nix hash path "$seed_root" 2>/dev/null)"; then
     STAGE0_REASON="cannot hash current seed at $seed_root"
-    printf 'stage0: %s; using current bb seed\n' "$STAGE0_REASON" >&2
-    return 0
+    printf 'stage0: %s\n' "$STAGE0_REASON" >&2
+    return 2
   fi
   recorded_hash="$(tr -d '\r\n' < "$sidecar")"
   if [ "$recorded_hash" != "$current_hash" ]; then
     STAGE0_REASON="stale default native (built from ${recorded_hash:-missing-hash}, current seed $current_hash)"
-    printf 'stage0: %s; using current bb seed\n' "$STAGE0_REASON" >&2
-    return 0
+    printf 'stage0: %s\n' "$STAGE0_REASON" >&2
+    return 2
   fi
 
   STAGE0=native
@@ -76,7 +78,5 @@ beagle_stage0_banner() {
   local seed_root="${1:?seed root required}"
   if [ "$STAGE0" = native ]; then
     printf '=== stage0: native (%s) [%s] ===\n' "$NATIVE_BIN" "$STAGE0_REASON"
-  else
-    printf '=== stage0: bb seed (%s) [%s] ===\n' "$seed_root" "$STAGE0_REASON"
   fi
 }

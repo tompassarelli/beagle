@@ -43,7 +43,6 @@
 (def racket-bin   (:racket opts))
 (def selfhost-bin (:selfhost-bin opts))
 (def target       (or (:target opts) "clj"))   ;; "clj" | "js" | "nix"
-(def bb-seed-cp   (str beagle-root "/self-host/seed"))
 
 ;; File extension for the chosen target
 (def corpus-ext
@@ -111,16 +110,13 @@
   (sh-api/sh racket-bin (str file) :env oracle-env))
 
 (defn run-selfhost [^java.io.File file]
-  ;; Run self-hosted compiler (native binary or bb fallback).
+  ;; Run the native self-hosted compiler.
   ;; clj: no --target flag (byte-identical to the original harness).
   ;; js/nix: pass --target <t> (contract from parallel port lanes).
   ;; Returns {:exit N :out "" :err ""}
   (let [extra-args (if (= target "clj") [] ["--target" target])]
-    (if (= selfhost-bin "bb_fallback")
-      (apply sh-api/sh "bb" "-cp" bb-seed-cp "-m" "selfhost.main" "emit"
-             (concat extra-args [(str file)]))
-      (apply sh-api/sh selfhost-bin "emit"
-             (concat extra-args [(str file)])))))
+    (apply sh-api/sh selfhost-bin "emit"
+           (concat extra-args [(str file)]))))
 
 ;; ─── Classification ──────────────────────────────────────────────────────────
 

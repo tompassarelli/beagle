@@ -121,16 +121,12 @@ run_phase() { # <name> <deadline-seconds> <command...>
 }
 
 # A checkout-local native is mutable build output. Use it only when its seed
-# provenance sidecar matches this checkout; otherwise use the current seed.
+# provenance sidecar matches this checkout; unverifiable artifacts fail.
 source self-host/native/stage0-select.sh
 beagle_select_stage0 "$OUT" self-host/native/beagle-selfhost || exit $?
 # Self-host CLI dispatch. Stage-isolated emission uses `emit-from-ast` so every
-# target follows the same native-or-seed route as the full compiler chain.
-if [ "$STAGE0" = native ]; then
-  SH_MAIN_CMD=("$NATIVE_BIN")
-else
-  SH_MAIN_CMD=(bb -cp "$OUT" -m selfhost.main)
-fi
+# target follows the native compiler route as the full compiler chain.
+SH_MAIN_CMD=("$NATIVE_BIN")
 beagle_stage0_banner "$OUT"
 
 BEAGLE_STORE_REPO="${BEAGLE_STORE_REPO:-$HOME/code/store/main}"

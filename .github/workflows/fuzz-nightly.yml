@@ -52,7 +52,7 @@ jobs:
             beagle-lib/ beagle-test/ beagle/
 
       # babashka — runs the generator, the harness, the gate, AND is the
-      # self-hosted compiler (bb seed fallback; no native binary needed in CI).
+      # self-hosted compiler (native binary required in CI).
       - name: Install babashka (pinned)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:

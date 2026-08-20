@@ -84,22 +84,14 @@ done
 command -v python3 >/dev/null 2>&1 || die "required command is unavailable: python3"
 command -v bb >/dev/null 2>&1 || die "required command is unavailable: bb"
 
-# An explicitly empty BEAGLE_NATIVE_BIN selects the checked-in seed fallback,
-# matching self-host/README.md. A non-empty path must be executable.
 if [[ "${BEAGLE_NATIVE_BIN+x}" == x ]]; then
     native_bin="$BEAGLE_NATIVE_BIN"
 else
-    native_bin=""
-    if [[ -x "$BEAGLE_DIR/self-host/native/beagle-selfhost" ]]; then
-        native_bin="$BEAGLE_DIR/self-host/native/beagle-selfhost"
-    fi
+    native_bin="$BEAGLE_DIR/self-host/native/beagle-selfhost"
 fi
-if [[ -n "$native_bin" ]]; then
-    [[ -x "$native_bin" ]] || die "native self-host binary is unavailable: $native_bin"
-    native_command=("$native_bin")
-else
-    native_command=(bb -cp "$BEAGLE_DIR/self-host/seed" -m selfhost.main)
-fi
+[[ -n "$native_bin" ]] || die "BEAGLE_NATIVE_BIN must name a native self-host binary"
+[[ -x "$native_bin" ]] || die "native self-host binary is unavailable: $native_bin"
+native_command=("$native_bin")
 
 normalized_sources=()
 source_ids=()

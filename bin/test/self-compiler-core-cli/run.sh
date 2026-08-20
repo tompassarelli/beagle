@@ -66,7 +66,7 @@ run_case() {
     printf '%s: %s START deadline=%ss\n' "$gate" "$label" "$deadline"
 
     set +e
-    env -u BEAGLE_NATIVE_BIN \
+    env BEAGLE_NATIVE_BIN="$native_bin" \
         BEAGLE_SELF_COMPILER_COMPILED_OUT="$scratch/compiled" \
         timeout --foreground --kill-after="${kill_grace}s" "$deadline" \
         "$root/bin/beagle-self-compiler-core" \
@@ -109,6 +109,7 @@ run_case() {
 }
 
 cd "$root"
+native_bin="${BEAGLE_NATIVE_BIN:-$root/.beagle/stage0-result/bin/beagle-selfhost}"
 run_case c17 "$scratch/c17-native" "$scratch/c17-oracle" 0
 
 # The same fixture is intentionally outside the QBE materializer slice. The
@@ -116,7 +117,7 @@ run_case c17 "$scratch/c17-native" "$scratch/c17-oracle" 0
 # and in the absence of published artifacts.
 printf '%s: qbe-refusal START deadline=%ss\n' "$gate" "$deadline"
 set +e
-env -u BEAGLE_NATIVE_BIN \
+env BEAGLE_NATIVE_BIN="$native_bin" \
     BEAGLE_SELF_COMPILER_COMPILED_OUT="$scratch/compiled" \
     timeout --foreground --kill-after="${kill_grace}s" "$deadline" \
     "$root/bin/beagle-self-compiler-core" \

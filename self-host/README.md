@@ -10,12 +10,11 @@ compiler is a self-contained GraalVM native-image
 .#beagle-selfhost`. Running the seed under [babashka](https://babashka.org)
 (`bb -cp seed …`) is a **dev convenience** and the substrate the remint
 fixpoint loop bootstraps from — the seed `.clj` *is* the native binary's
-source, held byte-identical to it. So: native binary = the artifact; bb seed =
-the fallback that always works. The parity harness (`verify-selfhost.sh`)
+source, held byte-identical to it. So: native binary = the runtime compiler
+artifact; the bb seed is only a build-time bootstrap boundary. The parity harness (`verify-selfhost.sh`)
 prefers a checkout-local native only when its `.seed-nar-hash` sidecar matches
-the exact seed; a missing or stale sidecar falls pointedly back to the current
-bb seed. Override the path deliberately with `BEAGLE_NATIVE_BIN`; set it empty
-to force the bb fallback.
+the exact seed; a missing or stale sidecar fails visibly. Override the native
+runtime path deliberately with `BEAGLE_NATIVE_BIN`; an empty path fails.
 
 ## Layout
 

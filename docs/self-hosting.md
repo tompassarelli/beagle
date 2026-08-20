@@ -31,12 +31,12 @@ native-image (`self-host/native/beagle-selfhost`), built reproducibly with `nix
 build .#beagle-selfhost`. Running the seed under babashka (`bb -cp
 self-host/seed …`) is a dev convenience and the substrate for the remint fixpoint
 loop — the two are held byte-identical, so the native binary is the distribution
-artifact and bb is the fallback.
+artifact; Babashka remains a build-time bootstrap boundary only.
 
 The parity harness (`self-host/verify-selfhost.sh`) prefers a checkout-local
 native binary only when its `.seed-nar-hash` sidecar matches the exact seed; a
-missing or stale sidecar falls back to the current bb seed. Override the path
-deliberately with `BEAGLE_NATIVE_BIN`, or set it empty to force the bb fallback.
+missing or stale sidecar fails visibly. Override the path deliberately with
+`BEAGLE_NATIVE_BIN`; an empty or unavailable native path fails.
 
 ## Opt-in development route
 

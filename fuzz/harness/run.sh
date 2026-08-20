@@ -6,7 +6,7 @@
 #
 # Env overrides:
 #   FUZZ_SELFHOST_BIN — path to the self-hosted compiler binary
-#                       (default: auto-detect native binary, fall back to bb)
+#                       (default: auto-detect native binary)
 #
 # Output:
 #   <out-dir>/report.edn          — summary + divergence list
@@ -59,8 +59,8 @@ if [[ -z "$SELFHOST_BIN" ]]; then
 fi
 
 if [[ -z "$SELFHOST_BIN" ]]; then
-  echo "run.sh: native selfhost binary not found; falling back to bb seed (slower)" >&2
-  SELFHOST_BIN="bb_fallback"
+  echo "run.sh: native selfhost binary not found" >&2
+  exit 2
 fi
 
 echo "run.sh: oracle=$RACKET"
