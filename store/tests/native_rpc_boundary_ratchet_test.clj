@@ -59,7 +59,6 @@
 
 (let [fast (file-source "bin/beagle-store-cli.clj")
       up (file-source "bin/beagle-store-up")
-      selfcheck-runner (file-source "bin/beagle-store-doctor")
       selfcheck (file-source "bin/beagle-store-doctor-probe.clj")]
   (check! "CLI EDN use is confined to the local human query parser"
           (= 2 (count (re-seq #"(?:clojure\.edn|edn/read-string)" fast)))
@@ -74,14 +73,7 @@
                (str/includes? selfcheck "native-request-to!"))
           nil)
   (check! "deep probes bind the exact runtime engine identity"
-          (and (str/includes? selfcheck-runner "native) EXPECTED_ENGINE=:rpc/native")
-               (str/includes? selfcheck-runner "graal) EXPECTED_ENGINE=:rpc/graal")
-               (str/includes? selfcheck-runner
-                              "jvm-oracle|jvm-dev) EXPECTED_ENGINE=:rpc/jvm")
-               (str/includes? selfcheck-runner
-                              "BEAGLE_STORE_SC_EXPECTED_ENGINE=\"$EXPECTED_ENGINE\"")
-               (str/includes? selfcheck
-                              "BEAGLE_STORE_SC_EXPECTED_ENGINE must be :rpc/native, :rpc/graal, or :rpc/jvm")
+          (and (str/includes? selfcheck "(def expected-engine :rpc/native)")
                (str/includes? selfcheck "(= expected-engine engine)"))
           nil))
 
@@ -90,11 +82,7 @@
       ingest (file-source "bin/beagle-store-ingest-code")
       status (file-source "bin/beagle-store-code-status")]
   (check! "STORELOG serving and code ingest retain distinct boundaries"
-          (and (str/includes? launcher "BEAGLE_STORE_SERVER_RUNTIME:-native")
-               (str/includes? launcher "artifact_dir/READY")
-               (str/includes? launcher "BEAGLE_STORE_GRAAL_ARTIFACT")
-               (str/includes? launcher "exec \"$graal_artifact\"")
-               (str/includes? launcher "jvm-oracle|jvm-dev")
+          (and (str/includes? launcher "artifact_dir/READY")
                (str/includes? launcher "exec \"$native_server\"")
                (str/includes? code-on "bin/beagle-store-server serve")
                (str/includes? code-on "--space-id \"$SPACE_ID\"")

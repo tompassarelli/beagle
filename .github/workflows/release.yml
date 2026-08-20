@@ -30,7 +30,6 @@ jobs:
     env:
       BEAGLE_HOME: ${{ github.workspace }}
       BEAGLE_STORE_BEAGLE: ${{ github.workspace }}/bin/beagle
-      BEAGLE_STORE_SERVER_RUNTIME: jvm-dev
     steps:
       - name: Check out the exact release candidate
         uses: actions/checkout@v5

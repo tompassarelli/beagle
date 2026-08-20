@@ -2,11 +2,6 @@
 /facts.log
 *.log
 
-# native build artifacts (build with native/build.sh)
-/native/beagle-store-server-graal
-/native/classes/
-/native/classpath.txt
-/native/.cpcache/
 /.cpcache/
 
 .DS_Store

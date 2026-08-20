@@ -54,9 +54,7 @@
          ["BEAGLE_STORE_LOG" "BEAGLE_STORE_THREADS" "BEAGLE_STORE_TELEMETRY_LOG" "BEAGLE_STORE_GRAPH_EDIT"
           "BEAGLE_STORE_FLIP" "BEAGLE_STORE_MCP_PROFILE" "BEAGLE_STORE_SERVER_TLS"]))
 (def server
-  (proc/process {:dir root :env (assoc inherited
-                                      "BEAGLE_STORE_SERVER_RUNTIME" "jvm-dev"
-                                      "BEAGLE_STORE_SNAPSHOT_BOOT" "0")
+  (proc/process {:dir root :env (assoc inherited "BEAGLE_STORE_SNAPSHOT_BOOT" "0")
                  :out :inherit :err :inherit}
                 "bin/beagle-store-server" "serve" (str port) log-path space))
 

@@ -130,15 +130,15 @@ exercises both Bun examples in memory without opening a server or port.
 
 ## Quickstart
 
-The checkout runtime needs Babashka for the CLI and Clojure/JVM for the server.
-Beagle is needed only when rebuilding graph-authored source; compiled Clojure is
-committed under `out/`. Store is used through the enclosing Beagle checkout;
-there is no standalone install step. Run these commands from the Beagle root.
+The checkout runtime needs Babashka for the CLI and a completed native server
+artifact. The launcher resolves the checkout's content-addressed artifact when
+one is not supplied explicitly. Store is used through the enclosing Beagle
+checkout; there is no standalone install step. Run these commands from the
+Beagle root.
 
 ```console
 $ export BEAGLE_STORE_SPACE_ID=store-demo
 $ export BEAGLE_STORE_LOG=/tmp/store-demo.storelog
-$ export BEAGLE_STORE_SERVER_RUNTIME=jvm-dev  # explicit checkout fallback
 $ bin/beagle store up
 $ bin/beagle store tell :contactable_at :member_of :contact_relations
 $ bin/beagle store tell '"alice@example.com"' :member_of :email_addresses
@@ -157,10 +157,10 @@ engine wire is binary Store RPC.
 
 ## Runtime surfaces
 
-- `bin/beagle-store-server` is the native-first server launcher. Its default route
+- `bin/beagle-store-server` is the native server launcher. A packaged tree
   requires `BEAGLE_STORE_NATIVE_ARTIFACT_DIR` to name a READY artifact containing
-  the native server executable; it never falls back silently. `jvm-oracle` and
-  `jvm-dev` are explicit retained routes. The launched server owns one database
+  the native server executable; a checkout resolves its own content-addressed
+  artifact when the variable is unset. The launched server owns one database
   (`SpaceId` plus `history.storelog`), accepts Store RPC v2's closed data surface
   of thirteen operations (exact wire version 2.0), and holds writer authority
   for its active lifetime. The native server additionally accepts the separately named

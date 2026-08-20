@@ -7,15 +7,7 @@
 (def port (Integer/parseInt (System/getenv "BEAGLE_STORE_SC_PORT")))
 (def space (System/getenv "BEAGLE_STORE_SC_SPACE"))
 (def phase (System/getenv "BEAGLE_STORE_SC_PHASE"))
-(def expected-engine
-  (case (System/getenv "BEAGLE_STORE_SC_EXPECTED_ENGINE")
-    ":rpc/native" :rpc/native
-    ":rpc/graal" :rpc/graal
-    ":rpc/jvm" :rpc/jvm
-    (throw
-     (ex-info
-      "BEAGLE_STORE_SC_EXPECTED_ENGINE must be :rpc/native, :rpc/graal, or :rpc/jvm"
-      {}))))
+(def expected-engine :rpc/native)
 (def results (atom []))
 (def request-id (atom 0))
 

@@ -27,7 +27,7 @@ import {
 const root = resolve(import.meta.dir, '..');
 const checks = [];
 const I64_MIN = -(1n << 63n);
-const expectedEngine = Bun.env.BEAGLE_STORE_EXPECTED_ENGINE ?? 'rpc/jvm';
+const expectedEngine = 'rpc/native';
 
 async function check(label, body) {
   await body();
@@ -77,7 +77,6 @@ async function startServer(port, log, space) {
     cwd: root,
     env: {
       ...Bun.env,
-      BEAGLE_STORE_SERVER_RUNTIME: Bun.env.BEAGLE_STORE_SERVER_RUNTIME ?? 'jvm-dev',
       BEAGLE_STORE_SPACE_ID: space,
       BEAGLE_STORE_GRAPH_OPS_LOG: 'off',
       BEAGLE_STORE_SERVER_QUIET: '1',

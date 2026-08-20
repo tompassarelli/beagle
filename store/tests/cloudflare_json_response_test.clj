@@ -125,8 +125,7 @@
       (fn []
         (reset! server
                 (proc/process
-                 {:dir root :env (assoc inherited "BEAGLE_STORE_SERVER_RUNTIME" "jvm-dev")
-                  :out :inherit :err :inherit}
+                 {:dir root :env inherited :out :inherit :err :inherit}
                  "bin/beagle-store-server" "serve" (str server-port) log-path space)))]
   (try
     (let [node @(proc/process {:dir root :out :string :err :string}

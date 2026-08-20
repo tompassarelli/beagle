@@ -59,8 +59,7 @@ under `store:src/store/` and the official client under `store:clients/bun/`.
 The public data boundary is Store RPC v2, not an incidental internal Clojure
 function. The checkout CLI requires `BEAGLE_STORE_SPACE_ID` and routes data commands
 through `store:bin/beagle store`; Bun applications use `store:clients/bun/store-rpc.mjs`.
-The native-first server is the default launcher; `jvm-dev` and `jvm-oracle` are
-explicit development routes.
+The server launcher executes only a READY native artifact.
 
 ## 1. Choose the profile; then establish Fact Normal Form
 

@@ -37,15 +37,6 @@ PORT="$(free_port 8200)" || exit 1
 DEAD="$(free_port $((PORT + 1)))" || exit 1
 SPACE="beagle-store-doctor"
 LOG="$SCRATCH/history.storelog"
-case "${BEAGLE_STORE_SERVER_RUNTIME:-native}" in
-  native) EXPECTED_ENGINE=:rpc/native ;;
-  graal) EXPECTED_ENGINE=:rpc/graal ;;
-  jvm-oracle|jvm-dev) EXPECTED_ENGINE=:rpc/jvm ;;
-  *)
-    echo "store selfcheck: unsupported BEAGLE_STORE_SERVER_RUNTIME: ${BEAGLE_STORE_SERVER_RUNTIME}" >&2
-    exit 2
-    ;;
-esac
 
 start_server() {
   BEAGLE_STORE_BIND=127.0.0.1 BEAGLE_STORE_SPACE_ID="$SPACE" \
@@ -82,7 +73,6 @@ fi
 live_port="$PORT"
 [[ "${BEAGLE_STORE_SELFCHECK_FAULT:-}" != "socket" ]] || live_port="$DEAD"
 BEAGLE_STORE_SC_PHASE=live BEAGLE_STORE_SC_PORT="$live_port" BEAGLE_STORE_SC_SPACE="$SPACE" \
-  BEAGLE_STORE_SC_EXPECTED_ENGINE="$EXPECTED_ENGINE" \
   bb -cp "$HERE/out" "$HERE/bin/beagle-store-doctor-probe.clj"
 live_rc=$?
 
@@ -96,7 +86,6 @@ if ! wait_port; then
   exit 1
 fi
 BEAGLE_STORE_SC_PHASE=restart BEAGLE_STORE_SC_PORT="$PORT" BEAGLE_STORE_SC_SPACE="$SPACE" \
-  BEAGLE_STORE_SC_EXPECTED_ENGINE="$EXPECTED_ENGINE" \
   bb -cp "$HERE/out" "$HERE/bin/beagle-store-doctor-probe.clj"
 restart_rc=$?
 
