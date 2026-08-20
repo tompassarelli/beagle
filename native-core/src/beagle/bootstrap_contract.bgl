@@ -1,0 +1,343 @@
+#lang beagle
+(ns beagle.bootstrap-contract
+  (:require [beagle.rule-scheduler :as scheduler]))
+
+(def bootstrap-contract-format String "beagle-native-bootstrap-contract/v1")
+(def compiler-rule-bundle-format String "beagle-native-compiler-rule-bundle/v1")
+(def seed-artifact-format String "beagle-native-seed-artifact/v1")
+(def compiler-lineage-format String "beagle-native-compiler-lineage/v1")
+
+(def default-profile String "release")
+(def default-target-id String "c17")
+(def compiler-artifact-relation String "compiler/artifact")
+(def default-max-rule-steps Int 128)
+
+(def compiler-schema-descriptor String
+  "beagle-native-compiler-schema-v1|query/kind|query/source|query/compiler|query/profile|query/target|query/rules|query/schema|compiler/syntax|compiler/expanded|compiler/typed|compiler/native|compiler/artifact")
+
+(def grammar-rule-descriptor String
+  "beagle-native-rule-module-v1|grammar|query/source|compiler/syntax")
+(def macro-rule-descriptor String
+  "beagle-native-rule-module-v1|macro|compiler/syntax|compiler/expanded")
+(def type-rule-descriptor String
+  "beagle-native-rule-module-v1|type|compiler/expanded|compiler/typed")
+(def lowering-rule-descriptor String
+  "beagle-native-rule-module-v1|lowering|compiler/typed|compiler/native")
+(def materializer-rule-descriptor String
+  "beagle-native-rule-module-v1|materializer|compiler/native|compiler/artifact")
+
+(def datum-reader-capability-descriptor String
+  "beagle-native-seed-capability-v1|datum-reader")
+(def store-evaluator-capability-descriptor String
+  "beagle-native-seed-capability-v1|store-evaluator")
+(def rule-scheduler-capability-descriptor String
+  "beagle-native-seed-capability-v1|rule-scheduler")
+(def materializer-capability-descriptor String
+  "beagle-native-seed-capability-v1|materializer")
+
+(defn content-id [payload String] String
+  (str "sha256:" (sha256-bytes (utf8-encode payload))))
+
+(def compiler-schema-content-id String
+  (content-id compiler-schema-descriptor))
+(def grammar-rule-content-id String
+  (content-id grammar-rule-descriptor))
+(def macro-rule-content-id String
+  (content-id macro-rule-descriptor))
+(def type-rule-content-id String
+  (content-id type-rule-descriptor))
+(def lowering-rule-content-id String
+  (content-id lowering-rule-descriptor))
+(def materializer-rule-content-id String
+  (content-id materializer-rule-descriptor))
+
+(def datum-reader-capability-content-id String
+  (content-id datum-reader-capability-descriptor))
+(def store-evaluator-capability-content-id String
+  (content-id store-evaluator-capability-descriptor))
+(def rule-scheduler-capability-content-id String
+  (content-id rule-scheduler-capability-descriptor))
+(def materializer-capability-content-id String
+  (content-id materializer-capability-descriptor))
+
+(def compiler-rule-set-descriptor String
+  (str "beagle-native-compiler-rules-v1|"
+       compiler-schema-content-id "|"
+       grammar-rule-content-id "|"
+       macro-rule-content-id "|"
+       type-rule-content-id "|"
+       lowering-rule-content-id "|"
+       materializer-rule-content-id))
+
+(def default-rule-set-content-id String
+  (content-id compiler-rule-set-descriptor))
+
+(def compiler-context-descriptor String
+  (str "beagle-native-compiler-context-v1|"
+       compiler-schema-content-id "|"
+       default-rule-set-content-id))
+
+(def default-compiler-context-id String
+  (content-id compiler-context-descriptor))
+
+(def compile-command-usage String
+  "usage: beagle compile SOURCE --out OUT")
+(def rebuild-next-command-usage String
+  "usage: beagle rebuild-next --bundle MANIFEST --out OUT --parent-lineage FILE")
+(def bootstrap-contract-command-usage String
+  "usage: beagle bootstrap-contract")
+
+(defrecord NativeRuleModuleV1
+  [order Int
+   kind Keyword
+   content-id String
+   rule scheduler/RuleSpecV1])
+
+(defrecord NativeCompilerRuleBundleV1
+  [format String
+   schema-content-id String
+   rule-set-content-id String
+   compiler-context-id String
+   profile String
+   targets (Vec String)
+   max-steps Int
+   modules (Vec NativeRuleModuleV1)])
+
+(defrecord NativeArtifactLayoutV1
+  [root String
+   executable-path String
+   manifest-path String
+   lineage-path String])
+
+(defrecord NativeSeedArtifactV1
+  [format String
+   artifact-content-id String
+   compiler-context-id String
+   schema-content-id String
+   rule-set-content-id String
+   target-id String
+   datum-reader-content-id String
+   store-evaluator-content-id String
+   rule-scheduler-content-id String
+   materializer-content-id String
+   entry-command String
+   hosted-runtime-required Bool])
+
+(defrecord NativeCompilerLineageV1
+  [format String
+   generation Int
+   artifact-content-id String
+   parent-artifact-content-id String?
+   parent-lineage-content-id String?
+   compiler-context-id String
+   schema-content-id String
+   rule-set-content-id String
+   target-id String])
+
+(defunion NativeBundleEvaluationV1
+  (NativeBundleEvaluatedV1 [result scheduler/FixedPointResultV1])
+  (NativeBundleRejectedV1 [code Keyword detail String]))
+
+(defn phase-rule
+  [content-id String input-relation String output-relation String]
+  scheduler/RuleSpecV1
+  (scheduler/->RuleSpecV1
+    content-id
+    [input-relation]
+    [output-relation]
+    (scheduler/->RuleSourceSpanV1 content-id 0 0 1 0)))
+
+(defn default-rule-modules [] (Vec NativeRuleModuleV1)
+  [(->NativeRuleModuleV1 0 :grammar grammar-rule-content-id
+     (phase-rule grammar-rule-content-id "query/source" "compiler/syntax"))
+   (->NativeRuleModuleV1 1 :macro macro-rule-content-id
+     (phase-rule macro-rule-content-id "compiler/syntax" "compiler/expanded"))
+   (->NativeRuleModuleV1 2 :type type-rule-content-id
+     (phase-rule type-rule-content-id "compiler/expanded" "compiler/typed"))
+   (->NativeRuleModuleV1 3 :lowering lowering-rule-content-id
+     (phase-rule lowering-rule-content-id "compiler/typed" "compiler/native"))
+   (->NativeRuleModuleV1 4 :materializer materializer-rule-content-id
+     (phase-rule materializer-rule-content-id "compiler/native"
+       compiler-artifact-relation))])
+
+(defn default-rule-bundle [] NativeCompilerRuleBundleV1
+  (->NativeCompilerRuleBundleV1
+    compiler-rule-bundle-format
+    compiler-schema-content-id
+    default-rule-set-content-id
+    default-compiler-context-id
+    default-profile
+    [default-target-id]
+    default-max-rule-steps
+    (default-rule-modules)))
+
+(defn default-rule-bundle? [bundle NativeCompilerRuleBundleV1] Bool
+  (= bundle (default-rule-bundle)))
+
+(defn bundle-rules
+  [bundle NativeCompilerRuleBundleV1] (Vec scheduler/RuleSpecV1)
+  (mapv
+    (fn [module NativeRuleModuleV1] scheduler/RuleSpecV1
+      (nativerulemodulev1-rule module))
+    (nativecompilerrulebundlev1-modules bundle)))
+
+(defn evaluate-normalized-bundle
+  [facts (Vec scheduler/RuleFactV1)
+   bundle NativeCompilerRuleBundleV1
+   evaluate scheduler/RuleEvaluatorV1]
+  NativeBundleEvaluationV1
+  (if (default-rule-bundle? bundle)
+    (->NativeBundleEvaluatedV1
+      (scheduler/run-to-fixed-point
+        facts
+        (bundle-rules bundle)
+        (nativecompilerrulebundlev1-max-steps bundle)
+        evaluate))
+    (->NativeBundleRejectedV1 :bootstrap/bundle-mismatch
+      "compiler bundle does not match the frozen schema and rule-set content IDs")))
+
+(defn native-artifact-layout [output-directory String] NativeArtifactLayoutV1
+  (->NativeArtifactLayoutV1
+    output-directory
+    (str output-directory "/bin/beagle")
+    (str output-directory "/beagle-native-artifact.manifest")
+    (str output-directory "/beagle-native-lineage.edn")))
+
+(defn bootstrap-contract-payload [] String
+  (str
+    bootstrap-contract-format "\n"
+    "compiler-context-content-id " default-compiler-context-id "\n"
+    "schema-content-id " compiler-schema-content-id "\n"
+    "rule-set-content-id " default-rule-set-content-id "\n"
+    "target-id " default-target-id "\n"
+    "profile " default-profile "\n"
+    "datum-reader-content-id " datum-reader-capability-content-id "\n"
+    "store-evaluator-content-id " store-evaluator-capability-content-id "\n"
+    "rule-scheduler-content-id " rule-scheduler-capability-content-id "\n"
+    "materializer-content-id " materializer-capability-content-id "\n"
+    "compile-command " compile-command-usage "\n"
+    "rebuild-next-command " rebuild-next-command-usage "\n"
+    "artifact-executable bin/beagle\n"
+    "artifact-manifest beagle-native-artifact.manifest\n"
+    "artifact-lineage beagle-native-lineage.edn\n"
+    "hosted-runtime-required false\n"))
+
+(defn exact-content-id? [value String] Bool
+  (and (= 71 (count value))
+       (= "sha256:" (subs value 0 7))
+       (loop [position Int 7]
+         (if (>= position (count value))
+           true
+           (if (str/includes? "0123456789abcdef"
+                 (subs value position (+ position 1)))
+             (recur (+ position 1))
+             false)))))
+
+(defn native-seed-artifact [artifact-content-id String] NativeSeedArtifactV1
+  (->NativeSeedArtifactV1
+    seed-artifact-format
+    artifact-content-id
+    default-compiler-context-id
+    compiler-schema-content-id
+    default-rule-set-content-id
+    default-target-id
+    datum-reader-capability-content-id
+    store-evaluator-capability-content-id
+    rule-scheduler-capability-content-id
+    materializer-capability-content-id
+    "rebuild-next"
+    false))
+
+(defn native-seed-artifact-valid? [artifact NativeSeedArtifactV1] Bool
+  (and (exact-content-id? (nativeseedartifactv1-artifact-content-id artifact))
+       (= artifact
+          (native-seed-artifact
+            (nativeseedartifactv1-artifact-content-id artifact)))))
+
+(defn optional-content-id-text [value String?] String
+  (if (nil? value) "nil" (str "\"" value "\"")))
+
+(defn lineage-payload [lineage NativeCompilerLineageV1] String
+  (str
+    "{:artifact-content-id \""
+    (nativecompilerlineagev1-artifact-content-id lineage)
+    "\" :compiler-context-id \""
+    (nativecompilerlineagev1-compiler-context-id lineage)
+    "\" :format \""
+    (nativecompilerlineagev1-format lineage)
+    "\" :generation "
+    (nativecompilerlineagev1-generation lineage)
+    " :parent-artifact-content-id "
+    (optional-content-id-text
+      (nativecompilerlineagev1-parent-artifact-content-id lineage))
+    " :parent-lineage-content-id "
+    (optional-content-id-text
+      (nativecompilerlineagev1-parent-lineage-content-id lineage))
+    " :rule-set-content-id \""
+    (nativecompilerlineagev1-rule-set-content-id lineage)
+    "\" :schema-content-id \""
+    (nativecompilerlineagev1-schema-content-id lineage)
+    "\" :target-id \""
+    (nativecompilerlineagev1-target-id lineage)
+    "\"}\n"))
+
+(defn lineage-content-id [lineage NativeCompilerLineageV1] String
+  (content-id (lineage-payload lineage)))
+
+(defn root-lineage [artifact-content-id String] NativeCompilerLineageV1
+  (->NativeCompilerLineageV1
+    compiler-lineage-format
+    0
+    artifact-content-id
+    nil
+    nil
+    default-compiler-context-id
+    compiler-schema-content-id
+    default-rule-set-content-id
+    default-target-id))
+
+(defn child-lineage
+  [artifact-content-id String parent NativeCompilerLineageV1]
+  NativeCompilerLineageV1
+  (->NativeCompilerLineageV1
+    compiler-lineage-format
+    (+ 1 (nativecompilerlineagev1-generation parent))
+    artifact-content-id
+    (nativecompilerlineagev1-artifact-content-id parent)
+    (lineage-content-id parent)
+    default-compiler-context-id
+    compiler-schema-content-id
+    default-rule-set-content-id
+    default-target-id))
+
+(defn lineage-valid? [lineage NativeCompilerLineageV1] Bool
+  (and (= compiler-lineage-format
+          (nativecompilerlineagev1-format lineage))
+       (>= (nativecompilerlineagev1-generation lineage) 0)
+       (exact-content-id?
+         (nativecompilerlineagev1-artifact-content-id lineage))
+       (= default-compiler-context-id
+          (nativecompilerlineagev1-compiler-context-id lineage))
+       (= compiler-schema-content-id
+          (nativecompilerlineagev1-schema-content-id lineage))
+       (= default-rule-set-content-id
+          (nativecompilerlineagev1-rule-set-content-id lineage))
+       (= default-target-id
+          (nativecompilerlineagev1-target-id lineage))
+       (if (= 0 (nativecompilerlineagev1-generation lineage))
+         (and (nil?
+                (nativecompilerlineagev1-parent-artifact-content-id lineage))
+              (nil?
+                (nativecompilerlineagev1-parent-lineage-content-id lineage)))
+         (and (some?
+                (nativecompilerlineagev1-parent-artifact-content-id lineage))
+              (some?
+                (nativecompilerlineagev1-parent-lineage-content-id lineage))
+              (exact-content-id?
+                (or
+                  (nativecompilerlineagev1-parent-artifact-content-id lineage)
+                  ""))
+              (exact-content-id?
+                (or
+                  (nativecompilerlineagev1-parent-lineage-content-id lineage)
+                  ""))))))

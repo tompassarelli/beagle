@@ -1,0 +1,75 @@
+#lang beagle
+(ns beagle.bootstrap-query
+  (:require [beagle.bootstrap-contract :as bootstrap]
+            [beagle.compiler-driver :as driver]
+            [beagle.rule-scheduler :as scheduler]))
+
+(defunion CompileQueryEvaluationV1
+  (CompileQueryEvaluatedV1
+    [query-id String result scheduler/FixedPointResultV1])
+  (CompileQueryRejectedV1 [code Keyword detail String]))
+
+(defn query-relation-name [relation Keyword] String
+  (cond
+    (= relation :query/kind) "query/kind"
+    (= relation :query/source) "query/source"
+    (= relation :query/compiler) "query/compiler"
+    (= relation :query/profile) "query/profile"
+    (= relation :query/target) "query/target"
+    (= relation :query/schema) "query/schema"
+    (= relation :query/rules) "query/rules"
+    :else ""))
+
+(defn supported-query-fact? [fact driver/CompileQueryFact] Bool
+  (not (= "" (query-relation-name
+                (driver/compilequeryfact-relation fact)))))
+
+(defn normalized-query-facts
+  [facts (Vec driver/CompileQueryFact)] (Vec scheduler/RuleFactV1)
+  (mapv
+    (fn [fact driver/CompileQueryFact] scheduler/RuleFactV1
+      (scheduler/->RuleFactV1
+        (query-relation-name (driver/compilequeryfact-relation fact))
+        (str (count (driver/compilequeryfact-subject fact)) ":"
+             (driver/compilequeryfact-subject fact) ":"
+             (driver/compilequeryfact-slot fact))
+        (driver/compilequeryfact-value fact)))
+    facts))
+
+(defn default-query? [query driver/CompileQuery] Bool
+  (let [request driver/CompileBundleRequest
+        (driver/compilequery-request query)]
+    (and (= (driver/compilequery-query-id query)
+            (driver/compile-query-id request))
+         (= (driver/compilequery-facts query)
+            (driver/compile-query-facts
+              (driver/compilequery-query-id query) request))
+         (= bootstrap/default-compiler-context-id
+            (driver/compilebundlerequest-compiler-context request))
+         (= bootstrap/default-profile
+            (driver/compilebundlerequest-profile request))
+         (= [bootstrap/default-target-id]
+            (driver/compilebundlerequest-targets request))
+         (= bootstrap/compiler-schema-content-id
+            (driver/compilebundlerequest-schema-content-id request))
+         (= bootstrap/default-rule-set-content-id
+            (driver/compilebundlerequest-rule-set-id request))
+         (every? supported-query-fact?
+           (driver/compilequery-facts query)))))
+
+(defn evaluate-default-compile-query
+  [query driver/CompileQuery evaluate scheduler/RuleEvaluatorV1]
+  CompileQueryEvaluationV1
+  (if (not (default-query? query))
+    (->CompileQueryRejectedV1 :bootstrap/query-mismatch
+      "compile query does not name the frozen compiler context, rule set, profile, and qbe target")
+    (match
+      (bootstrap/evaluate-normalized-bundle
+        (normalized-query-facts (driver/compilequery-facts query))
+        (bootstrap/default-rule-bundle)
+        evaluate)
+      [(NativeBundleRejectedV1 code detail)
+       (->CompileQueryRejectedV1 code detail)]
+      [(NativeBundleEvaluatedV1 result)
+       (->CompileQueryEvaluatedV1
+         (driver/compilequery-query-id query) result)])))

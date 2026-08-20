@@ -1,0 +1,135 @@
+#lang beagle
+(ns native.bootstrap-contract-fixture
+  (:require [beagle.bootstrap-contract :as bootstrap]
+            [beagle.rule-scheduler :as scheduler]))
+
+(def first-artifact-content-id String
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def second-artifact-content-id String
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def source-content-id String
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+
+(defn relation-present?
+  [facts (Vec scheduler/RuleFactV1) relation String] Bool
+  (some?
+    (some
+      (fn [fact scheduler/RuleFactV1] scheduler/RuleFactV1?
+        (if (= relation (scheduler/rulefactv1-relation fact)) fact nil))
+      facts)))
+
+(defn first-key [facts (Vec scheduler/RuleFactV1)] String
+  (if (empty? facts) "" (scheduler/rulefactv1-key (first facts))))
+
+(defn produce-after
+  [facts (Vec scheduler/RuleFactV1)
+   input-relation String
+   output-relation String]
+  scheduler/RuleEvaluationV1
+  (if (relation-present? facts input-relation)
+    (scheduler/->RuleProducedV1
+      [(scheduler/->RuleFactV1 output-relation (first-key facts)
+         (bootstrap/content-id output-relation))])
+    (scheduler/->RuleProducedV1 [])))
+
+(defn evaluate-rule
+  [rule scheduler/RuleSpecV1 facts (Vec scheduler/RuleFactV1)]
+  scheduler/RuleEvaluationV1
+  (let [rule-id String (scheduler/rulespecv1-id rule)]
+    (cond
+      (= rule-id bootstrap/grammar-rule-content-id)
+      (produce-after facts "query/source" "compiler/syntax")
+
+      (= rule-id bootstrap/macro-rule-content-id)
+      (produce-after facts "compiler/syntax" "compiler/expanded")
+
+      (= rule-id bootstrap/type-rule-content-id)
+      (produce-after facts "compiler/expanded" "compiler/typed")
+
+      (= rule-id bootstrap/lowering-rule-content-id)
+      (produce-after facts "compiler/typed" "compiler/native")
+
+      (= rule-id bootstrap/materializer-rule-content-id)
+      (produce-after facts "compiler/native"
+        bootstrap/compiler-artifact-relation)
+
+      :else
+      (scheduler/->RuleRejectedV1
+        (scheduler/->RuleErrorV1
+          rule-id
+          (scheduler/rulespecv1-source-span rule)
+          :fixture/unknown-rule
+          "fixture received a rule outside the frozen bundle")))))
+
+(defn artifact-present? [facts (Vec scheduler/RuleFactV1)] Bool
+  (relation-present? facts bootstrap/compiler-artifact-relation))
+
+(defn bundle-case [] Bool
+  (let [query-key String "71:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:0"
+        initial (Vec scheduler/RuleFactV1)
+        [(scheduler/->RuleFactV1 "query/kind" query-key "compile")
+         (scheduler/->RuleFactV1 "query/source" query-key source-content-id)
+         (scheduler/->RuleFactV1 "query/compiler" query-key
+           bootstrap/default-compiler-context-id)
+         (scheduler/->RuleFactV1 "query/profile" query-key
+           bootstrap/default-profile)
+         (scheduler/->RuleFactV1 "query/target" query-key
+           bootstrap/default-target-id)
+         (scheduler/->RuleFactV1 "query/rules" query-key
+           bootstrap/default-rule-set-content-id)
+         (scheduler/->RuleFactV1 "query/schema" query-key
+           bootstrap/compiler-schema-content-id)]]
+    (match
+      (bootstrap/evaluate-normalized-bundle
+        initial
+        (bootstrap/default-rule-bundle)
+        (fn [rule scheduler/RuleSpecV1
+             rule-facts (Vec scheduler/RuleFactV1)]
+          scheduler/RuleEvaluationV1
+          (evaluate-rule rule rule-facts)))
+      [(bootstrap/NativeBundleRejectedV1 code detail) false]
+      [(bootstrap/NativeBundleEvaluatedV1 raw-result)
+       (let [result scheduler/FixedPointResultV1 raw-result]
+         (match result
+           [(FixedPointReachedV1 reached-facts evidence steps)
+            (and (artifact-present? reached-facts) (> steps 0))]
+           [(FixedPointBoundReachedV1 reached-facts evidence steps bound)
+            false]
+           [(FixedPointFailedV1 reached-facts evidence steps error)
+            false]))])))
+
+(defn identity-case [] Bool
+  (and
+    (= bootstrap/compiler-schema-content-id
+      "sha256:73a09e036690613a4e533b49c1c306b2c604d02cad2f3a23fb48a1ffa367690b")
+    (= bootstrap/default-rule-set-content-id
+      "sha256:98402ceb2a2a4764c7ba4efe8679e3beed08af76cedde2fb172d8bb6700959c0")
+    (= bootstrap/default-compiler-context-id
+      "sha256:c5d00302bd1535d11436c013aa4af44687d24343cbd8285ac5993efe7156573d")
+    (= bootstrap/default-target-id "c17")))
+
+(defn lineage-case [] Bool
+  (let [seed bootstrap/NativeSeedArtifactV1
+        (bootstrap/native-seed-artifact first-artifact-content-id)
+        root bootstrap/NativeCompilerLineageV1
+        (bootstrap/root-lineage first-artifact-content-id)
+        child bootstrap/NativeCompilerLineageV1
+        (bootstrap/child-lineage second-artifact-content-id root)
+        layout bootstrap/NativeArtifactLayoutV1
+        (bootstrap/native-artifact-layout "/tmp/next")]
+    (and (bootstrap/native-seed-artifact-valid? seed)
+         (bootstrap/lineage-valid? root)
+         (bootstrap/lineage-valid? child)
+         (= first-artifact-content-id
+            (bootstrap/nativecompilerlineagev1-parent-artifact-content-id child))
+         (= (bootstrap/lineage-content-id root)
+            (bootstrap/nativecompilerlineagev1-parent-lineage-content-id child))
+         (= "/tmp/next/bin/beagle"
+            (bootstrap/nativeartifactlayoutv1-executable-path layout))
+         (= "/tmp/next/beagle-native-artifact.manifest"
+            (bootstrap/nativeartifactlayoutv1-manifest-path layout))
+         (= "/tmp/next/beagle-native-lineage.edn"
+            (bootstrap/nativeartifactlayoutv1-lineage-path layout)))))
+
+(defn main [] Int
+  (if (and (identity-case) (bundle-case) (lineage-case)) 0 1))
