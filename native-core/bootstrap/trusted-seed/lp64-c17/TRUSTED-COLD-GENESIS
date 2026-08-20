@@ -1,0 +1,9 @@
+beagle-native-cold-genesis/v1
+source-commit 071bf9b0a0e49dd3fe8914a3b78f88e5308f6a69
+trusted-boundary bin/beagle-native-exe
+hosted-driver-content-id sha256:8c8046e1084fe596dc1fd43a375ad7fad311e157fc30c1bf57cbefcffc5fd909
+c17-compiler-content-id sha256:92f5252a485bcb6d319c28b399fce8323a69cda560263284e0a7a82e5f1dee9a
+semantic-content-id sha256:4354d88cd31a26682015ccebf216faae5e13e8c063204f18631ab3b3a3c7af1a
+materialization-content-id sha256:b0be4bf7099192a14ee461cb0028a7996fc3388b3e6c95ec2027d6652443af8d
+executable-content-id sha256:b6717e9da9dce322c7038f25b7c5ea5f3a0331d01d4ef501e4ffd22b59e00729
+normal-hosted-runtime-required false
