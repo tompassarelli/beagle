@@ -27,13 +27,13 @@
 ;; ============================================================================
 (ns callgraph)
 
-(require clojure.edn :as edn)
+(require [clojure.edn :as edn])
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
-(require cheshire.core :as json)
+(require [cheshire.core :as json])
 
-(require resolve :as rsv)
+(require [resolve :as rsv])
 
 (defn parse-corpus! [(path String)] (Vec (Map Keyword Any))
   (let [(skips (Atom Int)) (atom 0) (lines (Vec String)) (str/split-lines (slurp path)) (acc (Map Keyword Any)) (reduce (fn

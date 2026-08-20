@@ -10,13 +10,13 @@
 ;; ============================================================================
 (ns supersession-check)
 
-(require store.store :as c)
+(require [store.store :as c])
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require clojure.edn :as edn)
+(require [clojure.edn :as edn])
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 (def space-id String "codegraph")
 

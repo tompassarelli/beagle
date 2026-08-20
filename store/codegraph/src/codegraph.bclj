@@ -13,15 +13,15 @@
 ;; ============================================================================
 (ns codegraph)
 
-(require store.store :as c)
+(require [store.store :as c])
 
-(require store.datalog :as d)
+(require [store.datalog :as d])
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require callgraph :as cg)
+(require [callgraph :as cg])
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 (defrecord Row
   [(name String)
