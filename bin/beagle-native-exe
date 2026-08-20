@@ -235,7 +235,8 @@ done
 bundle_ast="$work/source_bundle.ast.json"
 bundle_log="$work/source_bundle.ast.log"
 set +e
-"$BIN/beagle-ast" --bundle "${module_root_args[@]}" -- \
+BEAGLE_AST_CLOSURE_FIELDS="$closure_fields_file" \
+    "$BIN/beagle-ast" --bundle "${module_root_args[@]}" -- \
     "${normalized_sources[@]}" \
     >"$bundle_ast" 2>"$bundle_log"
 bundle_rc=$?
@@ -272,16 +273,21 @@ for index, source_id in enumerate(source_ids):
 PY
 
 ast_args=()
+verify_pids=()
 source_index=0
 for source in "${closure_sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
-    if ! bb "$BEAGLE_DIR/native-core/bin/verify-checked-program.clj" "$ast" \
-        >"$work/source_${source_index}.verify.log" 2>&1; then
-        sed -n '1,200p' "$work/source_${source_index}.verify.log" >&2
-        die "could not authenticate checked AST for source: $source"
-    fi
+    bb "$BEAGLE_DIR/native-core/bin/verify-checked-program.clj" "$ast" \
+        >"$work/source_${source_index}.verify.log" 2>&1 &
+    verify_pids+=("$!")
     ast_args+=("${closure_source_ids[$source_index]}" "$ast")
     source_index=$((source_index + 1))
+done
+for source_index in "${!closure_sources[@]}"; do
+    if ! wait "${verify_pids[$source_index]}"; then
+        sed -n '1,200p' "$work/source_${source_index}.verify.log" >&2
+        die "could not authenticate checked AST for source: ${closure_sources[$source_index]}"
+    fi
 done
 
 set +e
