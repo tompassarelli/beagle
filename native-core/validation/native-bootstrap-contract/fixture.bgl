@@ -11,6 +11,10 @@
   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 (def source-content-id String
   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def semantic-content-id String
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def materialization-content-id String
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 
 (defn relation-present?
   [facts (Vec scheduler/RuleFactV1) relation String] Bool
@@ -113,20 +117,29 @@
 
 (defn lineage-case [] Bool
   (let [seed bootstrap/NativeSeedArtifactV1
-        (bootstrap/native-seed-artifact first-artifact-content-id)
+        (bootstrap/native-seed-artifact
+          semantic-content-id materialization-content-id first-artifact-content-id)
         root bootstrap/NativeCompilerLineageV1
-        (bootstrap/root-lineage first-artifact-content-id)
+        (bootstrap/root-lineage
+          semantic-content-id materialization-content-id first-artifact-content-id)
         child bootstrap/NativeCompilerLineageV1
-        (bootstrap/child-lineage second-artifact-content-id root)
+        (bootstrap/child-lineage
+          semantic-content-id materialization-content-id
+          second-artifact-content-id root)
         layout bootstrap/NativeArtifactLayoutV1
         (bootstrap/native-artifact-layout "/tmp/next")]
     (and (bootstrap/native-seed-artifact-valid? seed)
          (bootstrap/lineage-valid? root)
          (bootstrap/lineage-valid? child)
+         (bootstrap/lineage-child-of? child root)
          (= first-artifact-content-id
-            (bootstrap/nativecompilerlineagev1-parent-artifact-content-id child))
+            (bootstrap/nativecompilerlineagev1-parent-executable-content-id child))
          (= (bootstrap/lineage-content-id root)
             (bootstrap/nativecompilerlineagev1-parent-lineage-content-id child))
+         (match (bootstrap/decode-lineage (bootstrap/lineage-payload child))
+           [(bootstrap/NativeCompilerLineageDecodeRejectedV1 detail) false]
+           [(bootstrap/NativeCompilerLineageDecodedV1 decoded)
+            (= child decoded)])
          (= "/tmp/next/bin/beagle"
             (bootstrap/nativeartifactlayoutv1-executable-path layout))
          (= "/tmp/next/beagle-native-artifact.manifest"

@@ -1012,9 +1012,11 @@
           nil))
       (facts/syntaxfactclosure-modules closure))))
 
-(defn write-output-metadata
+(defn write-success-output-metadata
   [output-directory String
-   artifact-id String
+   semantic-content-id String
+   materialization-content-id String
+   executable-path String
    result CompileBundleResult] CompileBundleResult
   (let [layout bootstrap/NativeArtifactLayoutV1
         (bootstrap/native-artifact-layout output-directory)
@@ -1022,11 +1024,20 @@
         (bootstrap/nativeartifactlayoutv1-manifest-path layout)
         lineage-path String
         (bootstrap/nativeartifactlayoutv1-lineage-path layout)
+        executable-content-id String
+        (bootstrap/executable-content-id executable-path)
         manifest String
-        (str (bootstrap/bootstrap-contract-payload)
-             "artifact-content-id " artifact-id "\n")
+        (bootstrap/native-seed-artifact-payload
+          (bootstrap/native-seed-artifact
+            semantic-content-id
+            materialization-content-id
+            executable-content-id))
         lineage String
-        (bootstrap/lineage-payload (bootstrap/root-lineage artifact-id))]
+        (bootstrap/lineage-payload
+          (bootstrap/root-lineage
+            semantic-content-id
+            materialization-content-id
+            executable-content-id))]
     (match (host.fs/make-parent-directories manifest-path)
       [(host.fs/MakeParentDirectoriesError errno)
        (->CompileBundleError errno "could not create bootstrap output directory")]
@@ -1040,15 +1051,22 @@
              (->CompileBundleError errno "could not write compiler lineage")]
             [(host.fs/WriteTextAtomicOk) result])])])))
 
-(defn complete-compile-output
+(defn write-output-metadata
   [output-directory String
    result CompileBundleResult] CompileBundleResult
   (match result
     [(CompileBundleError code detail) (->CompileBundleError code detail)]
     [(CompileBundleWarm content-id artifact-id executable-path)
-     (write-output-metadata output-directory artifact-id result)]
+     (write-success-output-metadata
+       output-directory content-id artifact-id executable-path result)]
     [(CompileBundleMaterialized content-id artifact-id executable-path)
-     (write-output-metadata output-directory artifact-id result)]))
+     (write-success-output-metadata
+       output-directory content-id artifact-id executable-path result)]))
+
+(defn complete-compile-output
+  [output-directory String
+   result CompileBundleResult] CompileBundleResult
+  (write-output-metadata output-directory result))
 
 (defn closure-source-paths
   [syntax facts/SyntaxFactClosure] (Vec String)

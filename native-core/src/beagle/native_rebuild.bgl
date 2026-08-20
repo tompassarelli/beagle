@@ -1,0 +1,262 @@
+#lang beagle
+(ns beagle.native-rebuild
+  (:require [beagle.artifact-linker :as linker]
+            [beagle.bootstrap-contract :as bootstrap]))
+
+(def max-rebuild-bundle-bytes Int 268435456)
+(def artifact-envelope-marker String "artifact-envelope")
+(def lineage-filename String "/beagle-native-lineage.edn")
+
+(defrecord NativeRebuildBundleV1
+  [semantic-content-id String
+   materialization-content-id String
+   artifact linker/TargetArtifactV1])
+
+(defrecord NativeManifestLineV1
+  [value String
+   next-offset Int])
+
+(defunion NativeManifestLineReadV1
+  (NativeManifestLineReadyV1 [line NativeManifestLineV1])
+  (NativeManifestLineRejectedV1 [detail String]))
+
+(defunion NativeRebuildBundleDecodeV1
+  (NativeRebuildBundleDecodedV1 [bundle NativeRebuildBundleV1])
+  (NativeRebuildBundleRejectedV1 [code Int detail String]))
+
+(defunion NativeRebuildResultV1
+  (NativeRebuildCompletedV1
+    [semantic-content-id String
+     materialization-content-id String
+     executable-content-id String
+     lineage-content-id String])
+  (NativeRebuildRejectedV1 [code Int detail String]))
+
+(defn read-manifest-line
+  [payload String
+   offset Int] NativeManifestLineReadV1
+  (let [line-end Int? (str/index-of payload "\n" offset)]
+    (if (nil? line-end)
+      (->NativeManifestLineRejectedV1
+        "rebuild bundle header is missing a newline")
+      (->NativeManifestLineReadyV1
+        (->NativeManifestLineV1
+          (subs payload offset line-end)
+          (+ line-end 1))))))
+
+(defn manifest-field
+  [line String
+   field String] String?
+  (let [prefix String (str field " ")]
+    (if (and (str/starts-with? line prefix)
+             (> (count line) (count prefix)))
+      (subs line (count prefix) (count line))
+      nil)))
+
+(defn artifact-file
+  [artifact linker/TargetArtifactV1
+   name String] linker/ArtifactFileV1?
+  (some
+    (fn [file linker/ArtifactFileV1] linker/ArtifactFileV1?
+      (if (= name (linker/artifactfilev1-name file)) file nil))
+    (linker/targetartifactv1-files artifact)))
+
+(defn artifact-semantic-content-id
+  [artifact linker/TargetArtifactV1] String?
+  (let [source-facts linker/ArtifactFileV1?
+        (artifact-file artifact "source.facts")
+        native-program linker/ArtifactFileV1?
+        (artifact-file artifact "module.native-program")]
+    (if (or (nil? source-facts) (nil? native-program))
+      nil
+      (bootstrap/rebuild-semantic-content-id
+        (linker/artifactfilev1-content-id source-facts)
+        (linker/artifactfilev1-content-id native-program)))))
+
+(defn decode-rebuild-envelope
+  [payload String
+   offset Int
+   semantic-content-id String
+   materialization-content-id String]
+  NativeRebuildBundleDecodeV1
+  (let [envelope String (subs payload offset (count payload))]
+    (match (linker/decode-artifact-envelope
+             materialization-content-id envelope)
+      [(linker/ArtifactEnvelopeDecodeErrorV1 detail)
+       (->NativeRebuildBundleRejectedV1 65 detail)]
+      [(linker/ArtifactEnvelopeDecodedV1 artifact)
+       (let [derived-semantic-content-id String?
+             (artifact-semantic-content-id artifact)]
+         (cond
+           (not= "c17" (linker/targetartifactv1-target artifact))
+           (->NativeRebuildBundleRejectedV1 65
+             "rebuild bundle target must be c17")
+
+           (nil? derived-semantic-content-id)
+           (->NativeRebuildBundleRejectedV1 65
+             "rebuild bundle omits normalized facts or native program")
+
+           (not= semantic-content-id derived-semantic-content-id)
+           (->NativeRebuildBundleRejectedV1 65
+             "rebuild bundle semantic content ID is invalid")
+
+           :else
+           (->NativeRebuildBundleDecodedV1
+             (->NativeRebuildBundleV1
+               semantic-content-id materialization-content-id artifact))))])))
+
+(defn decode-rebuild-bundle
+  [payload String] NativeRebuildBundleDecodeV1
+  (match (read-manifest-line payload 0)
+    [(NativeManifestLineRejectedV1 detail)
+     (->NativeRebuildBundleRejectedV1 65 detail)]
+    [(NativeManifestLineReadyV1 format-line)
+     (if (not= bootstrap/rebuild-bundle-format
+               (nativemanifestlinev1-value format-line))
+       (->NativeRebuildBundleRejectedV1 65
+         "rebuild bundle format is invalid")
+       (match (read-manifest-line payload
+                (nativemanifestlinev1-next-offset format-line))
+         [(NativeManifestLineRejectedV1 detail)
+          (->NativeRebuildBundleRejectedV1 65 detail)]
+         [(NativeManifestLineReadyV1 semantic-line)
+          (let [semantic-content-id String?
+                (manifest-field
+                  (nativemanifestlinev1-value semantic-line)
+                  "semantic-content-id")]
+            (if (or (nil? semantic-content-id)
+                    (not (bootstrap/exact-content-id? semantic-content-id)))
+              (->NativeRebuildBundleRejectedV1 65
+                "rebuild bundle semantic content ID is malformed")
+              (match (read-manifest-line payload
+                       (nativemanifestlinev1-next-offset semantic-line))
+                [(NativeManifestLineRejectedV1 detail)
+                 (->NativeRebuildBundleRejectedV1 65 detail)]
+                [(NativeManifestLineReadyV1 materialization-line)
+                 (let [materialization-content-id String?
+                       (manifest-field
+                         (nativemanifestlinev1-value materialization-line)
+                         "materialization-content-id")]
+                   (if (or (nil? materialization-content-id)
+                           (not (bootstrap/exact-content-id?
+                                  materialization-content-id)))
+                     (->NativeRebuildBundleRejectedV1 65
+                       "rebuild bundle materialization content ID is malformed")
+                     (match (read-manifest-line payload
+                              (nativemanifestlinev1-next-offset
+                                materialization-line))
+                       [(NativeManifestLineRejectedV1 detail)
+                        (->NativeRebuildBundleRejectedV1 65 detail)]
+                       [(NativeManifestLineReadyV1 marker-line)
+                        (if (not= artifact-envelope-marker
+                                  (nativemanifestlinev1-value marker-line))
+                          (->NativeRebuildBundleRejectedV1 65
+                            "rebuild bundle artifact marker is invalid")
+                          (decode-rebuild-envelope
+                            payload
+                            (nativemanifestlinev1-next-offset marker-line)
+                            semantic-content-id
+                            materialization-content-id))])))])))]))]))
+
+(defn read-rebuild-bundle
+  [path String] NativeRebuildBundleDecodeV1
+  (match (host.fs/read-text-bounded path max-rebuild-bundle-bytes)
+    [(host.fs/ReadTextBoundedError errno)
+     (->NativeRebuildBundleRejectedV1 errno
+       (str "could not read rebuild bundle: " path))]
+    [(host.fs/ReadTextBoundedOk payload)
+     (decode-rebuild-bundle payload)]))
+
+(defn parent-executable-path [lineage-path String] String?
+  (if (str/ends-with? lineage-path lineage-filename)
+    (str (subs lineage-path 0
+           (- (count lineage-path) (count lineage-filename)))
+         "/bin/beagle")
+    nil))
+
+(defn read-parent-lineage
+  [path String] bootstrap/NativeCompilerLineageDecodeV1
+  (match (host.fs/read-text-bounded path 65536)
+    [(host.fs/ReadTextBoundedError errno)
+     (bootstrap/->NativeCompilerLineageDecodeRejectedV1
+       (str "could not read parent lineage: " path))]
+    [(host.fs/ReadTextBoundedOk payload)
+     (bootstrap/decode-lineage payload)]))
+
+(defn write-rebuild-metadata
+  [layout bootstrap/NativeArtifactLayoutV1
+   bundle NativeRebuildBundleV1
+   executable-content-id String
+   parent bootstrap/NativeCompilerLineageV1]
+  NativeRebuildResultV1
+  (let [artifact bootstrap/NativeSeedArtifactV1
+        (bootstrap/native-seed-artifact
+          (nativerebuildbundlev1-semantic-content-id bundle)
+          (nativerebuildbundlev1-materialization-content-id bundle)
+          executable-content-id)
+        lineage bootstrap/NativeCompilerLineageV1
+        (bootstrap/child-lineage
+          (nativerebuildbundlev1-semantic-content-id bundle)
+          (nativerebuildbundlev1-materialization-content-id bundle)
+          executable-content-id
+          parent)
+        manifest-payload String
+        (bootstrap/native-seed-artifact-payload artifact)
+        lineage-payload String (bootstrap/lineage-payload lineage)]
+    (match (host.fs/write-text-atomic
+             (bootstrap/nativeartifactlayoutv1-manifest-path layout)
+             manifest-payload)
+      [(host.fs/WriteTextAtomicError errno)
+       (->NativeRebuildRejectedV1 errno
+         "could not write native artifact manifest")]
+      [(host.fs/WriteTextAtomicOk)
+       (match (host.fs/write-text-atomic
+                (bootstrap/nativeartifactlayoutv1-lineage-path layout)
+                lineage-payload)
+         [(host.fs/WriteTextAtomicError errno)
+          (->NativeRebuildRejectedV1 errno
+            "could not write native compiler lineage")]
+         [(host.fs/WriteTextAtomicOk)
+          (->NativeRebuildCompletedV1
+            (nativerebuildbundlev1-semantic-content-id bundle)
+            (nativerebuildbundlev1-materialization-content-id bundle)
+            executable-content-id
+            (bootstrap/lineage-content-id lineage))])])))
+
+(defn rebuild-next
+  [bundle NativeRebuildBundleV1
+   output-directory String
+   parent-lineage-path String] NativeRebuildResultV1
+  (let [parent-executable String?
+        (parent-executable-path parent-lineage-path)]
+    (if (nil? parent-executable)
+      (->NativeRebuildRejectedV1 64
+        "parent lineage must use the canonical package filename")
+      (match (read-parent-lineage parent-lineage-path)
+        [(bootstrap/NativeCompilerLineageDecodeRejectedV1 detail)
+         (->NativeRebuildRejectedV1 65 detail)]
+        [(bootstrap/NativeCompilerLineageDecodedV1 parent)
+         (let [actual-parent-executable-content-id String
+               (bootstrap/executable-content-id parent-executable)]
+           (if (not= actual-parent-executable-content-id
+                     (bootstrap/nativecompilerlineagev1-executable-content-id
+                       parent))
+             (->NativeRebuildRejectedV1 65
+               "parent lineage does not identify its exact executable bytes")
+             (let [layout bootstrap/NativeArtifactLayoutV1
+                   (bootstrap/native-artifact-layout output-directory)
+                   config linker/ArtifactLinkConfigV1
+                   (linker/->ArtifactLinkConfigV1
+                     (str output-directory "/artifacts")
+                     (bootstrap/nativeartifactlayoutv1-executable-path layout)
+                     "cc"
+                     "")]
+               (match (linker/write-and-link
+                        config (nativerebuildbundlev1-artifact bundle))
+                 [(linker/ArtifactLinkErrorV1 code detail)
+                  (->NativeRebuildRejectedV1 code detail)]
+                 [(linker/ArtifactLinkedV1 executable-path)
+                  (write-rebuild-metadata
+                    layout bundle
+                    (bootstrap/executable-content-id executable-path)
+                    parent)]))))]))))

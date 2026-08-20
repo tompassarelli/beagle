@@ -2,7 +2,8 @@
 (ns beagle.cli
   (:require [beagle.bootstrap-contract :as bootstrap]
             [beagle.compiler-driver :as driver]
-            [beagle.module-source-resolver :as resolver]))
+            [beagle.module-source-resolver :as resolver]
+            [beagle.native-rebuild :as rebuild]))
 
 (defunion CliModuleRootsResult
   (CliModuleRootsReady [roots (Vec resolver/ModuleSourceRootV1)])
@@ -11,7 +12,50 @@
 (defn write-usage [] Nil
   (do
     (host.stderr/write-line "usage: beagle syntax SOURCE")
-    (host.stderr/write-line bootstrap/compile-command-usage)))
+    (host.stderr/write-line bootstrap/compile-command-usage)
+    (host.stderr/write-line bootstrap/rebuild-next-command-usage)
+    (host.stderr/write-line bootstrap/bootstrap-contract-command-usage)))
+
+(defn bootstrap-contract-command [args (Vec String)] Int
+  (if (empty? args)
+    (do (print (bootstrap/bootstrap-contract-payload)) 0)
+    (if (and (= 1 (count args))
+             (or (= "--help" (first args)) (= "-h" (first args))))
+      (do (host.stderr/write-line bootstrap/bootstrap-contract-command-usage) 0)
+      (do (host.stderr/write-line bootstrap/bootstrap-contract-command-usage) 64))))
+
+(defn rebuild-next-command [args (Vec String)] Int
+  (if (and (= 1 (count args))
+           (or (= "--help" (first args)) (= "-h" (first args))))
+    (do (host.stderr/write-line bootstrap/rebuild-next-command-usage) 0)
+    (if (and (= 6 (count args))
+             (= "--bundle" (nth args 0))
+             (= "--out" (nth args 2))
+             (= "--parent-lineage" (nth args 4)))
+      (match (rebuild/read-rebuild-bundle (nth args 1))
+        [(rebuild/NativeRebuildBundleRejectedV1 code detail)
+         (do
+           (host.stderr/write-line (str "beagle: rebuild-next failed: " detail))
+           code)]
+        [(rebuild/NativeRebuildBundleDecodedV1 bundle)
+         (match (rebuild/rebuild-next bundle (nth args 3) (nth args 5))
+           [(rebuild/NativeRebuildRejectedV1 code detail)
+            (do
+              (host.stderr/write-line
+                (str "beagle: rebuild-next failed: " detail))
+              code)]
+           [(rebuild/NativeRebuildCompletedV1 semantic-content-id
+                                               materialization-content-id
+                                               executable-content-id
+                                               lineage-content-id)
+            (do
+              (host.stderr/write-line
+                (str "beagle: rebuild-next semantic=" semantic-content-id
+                     " materialization=" materialization-content-id
+                     " executable=" executable-content-id
+                     " lineage=" lineage-content-id))
+              0)])])
+      (do (host.stderr/write-line bootstrap/rebuild-next-command-usage) 64))))
 
 (defn syntax-command [args (Vec String)] Int
   (if (= 1 (count args))
@@ -126,6 +170,9 @@
       (cond
         (= command "syntax") (syntax-command command-args)
         (= command "compile") (compile-command command-args store)
+        (= command "rebuild-next") (rebuild-next-command command-args)
+        (= command "bootstrap-contract")
+        (bootstrap-contract-command command-args)
         (or (= command "--help") (= command "-h"))
         (do (write-usage) 0)
         :else
@@ -133,6 +180,27 @@
           (host.stderr/write-line (str "beagle: unknown command: " command))
           (write-usage)
           64)))))
+
+(defn native-main [args (Vec String)] Int
+  (if (empty? args)
+    (do (write-usage) 64)
+    (let [command String (first args)
+          command-args (Vec String) (subvec args 1)]
+      (cond
+        (= command "syntax") (syntax-command command-args)
+        (= command "rebuild-next") (rebuild-next-command command-args)
+        (= command "bootstrap-contract")
+        (bootstrap-contract-command command-args)
+        (or (= command "--help") (= command "-h"))
+        (do (write-usage) 0)
+        :else
+        (do
+          (host.stderr/write-line (str "beagle: unknown native command: " command))
+          (write-usage)
+          64)))))
+
+(defn main [args (Vec String)] Int
+  (native-main args))
 
 (defn -main [args (Vec String)] Int
   (main-with-store args host.store/compile))

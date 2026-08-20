@@ -1,16 +1,20 @@
 #lang beagle
 (ns beagle.bootstrap-contract
-  (:require [beagle.rule-scheduler :as scheduler]))
+  (:require [beagle.rule-scheduler :as scheduler]
+            [native.edn :as edn]))
 
 (def bootstrap-contract-format String "beagle-native-bootstrap-contract/v1")
 (def compiler-rule-bundle-format String "beagle-native-compiler-rule-bundle/v1")
-(def seed-artifact-format String "beagle-native-seed-artifact/v1")
-(def compiler-lineage-format String "beagle-native-compiler-lineage/v1")
+(def seed-artifact-format String "beagle-native-seed-artifact/v2")
+(def compiler-lineage-format String "beagle-native-compiler-lineage/v2")
+(def rebuild-bundle-format String "beagle-native-rebuild-bundle/v1")
+(def rebuild-semantic-format String "beagle-native-rebuild-semantic/v1")
 
 (def default-profile String "lp64")
 (def default-target-id String "c17")
 (def compiler-artifact-relation String "compiler/artifact")
 (def default-max-rule-steps Int 128)
+(def max-native-executable-bytes Int 134217728)
 
 (def compiler-schema-descriptor String
   "beagle-native-compiler-schema-v1|query/kind|query/source|query/compiler|query/profile|query/target|query/rules|query/schema|compiler/syntax|compiler/expanded|compiler/typed|compiler/native|compiler/artifact")
@@ -117,7 +121,9 @@
 
 (defrecord NativeSeedArtifactV1
   [format String
-   artifact-content-id String
+   semantic-content-id String
+   materialization-content-id String
+   executable-content-id String
    compiler-context-id String
    schema-content-id String
    rule-set-content-id String
@@ -132,13 +138,19 @@
 (defrecord NativeCompilerLineageV1
   [format String
    generation Int
-   artifact-content-id String
-   parent-artifact-content-id String?
+   semantic-content-id String
+   materialization-content-id String
+   executable-content-id String
+   parent-executable-content-id String?
    parent-lineage-content-id String?
    compiler-context-id String
    schema-content-id String
    rule-set-content-id String
    target-id String])
+
+(defunion NativeCompilerLineageDecodeV1
+  (NativeCompilerLineageDecodedV1 [lineage NativeCompilerLineageV1])
+  (NativeCompilerLineageDecodeRejectedV1 [detail String]))
 
 (defunion NativeBundleEvaluationV1
   (NativeBundleEvaluatedV1 [result scheduler/FixedPointResultV1])
@@ -212,6 +224,9 @@
 (defn bootstrap-contract-payload [] String
   (str
     bootstrap-contract-format "\n"
+    "seed-artifact-format " seed-artifact-format "\n"
+    "compiler-lineage-format " compiler-lineage-format "\n"
+    "rebuild-bundle-format " rebuild-bundle-format "\n"
     "compiler-context-content-id " default-compiler-context-id "\n"
     "schema-content-id " compiler-schema-content-id "\n"
     "rule-set-content-id " default-rule-set-content-id "\n"
@@ -228,6 +243,7 @@
     "artifact-executable bin/beagle\n"
     "artifact-manifest beagle-native-artifact.manifest\n"
     "artifact-lineage beagle-native-lineage.edn\n"
+    "artifact-identities semantic-content-id materialization-content-id executable-content-id\n"
     "hosted-runtime-required false\n"))
 
 (defn exact-content-id? [value String] Bool
@@ -241,10 +257,15 @@
              (recur (+ position 1))
              false)))))
 
-(defn native-seed-artifact [artifact-content-id String] NativeSeedArtifactV1
+(defn native-seed-artifact
+  [semantic-content-id String
+   materialization-content-id String
+   executable-content-id String] NativeSeedArtifactV1
   (->NativeSeedArtifactV1
     seed-artifact-format
-    artifact-content-id
+    semantic-content-id
+    materialization-content-id
+    executable-content-id
     default-compiler-context-id
     compiler-schema-content-id
     default-rule-set-content-id
@@ -257,27 +278,90 @@
     false))
 
 (defn native-seed-artifact-valid? [artifact NativeSeedArtifactV1] Bool
-  (and (exact-content-id? (nativeseedartifactv1-artifact-content-id artifact))
+  (and (exact-content-id?
+         (nativeseedartifactv1-semantic-content-id artifact))
+       (exact-content-id?
+         (nativeseedartifactv1-materialization-content-id artifact))
+       (exact-content-id?
+         (nativeseedartifactv1-executable-content-id artifact))
        (= artifact
           (native-seed-artifact
-            (nativeseedartifactv1-artifact-content-id artifact)))))
+            (nativeseedartifactv1-semantic-content-id artifact)
+            (nativeseedartifactv1-materialization-content-id artifact)
+            (nativeseedartifactv1-executable-content-id artifact)))))
+
+(defn native-seed-artifact-payload [artifact NativeSeedArtifactV1] String
+  (str
+    (nativeseedartifactv1-format artifact) "\n"
+    "semantic-content-id "
+    (nativeseedartifactv1-semantic-content-id artifact) "\n"
+    "materialization-content-id "
+    (nativeseedartifactv1-materialization-content-id artifact) "\n"
+    "executable-content-id "
+    (nativeseedartifactv1-executable-content-id artifact) "\n"
+    "compiler-context-content-id "
+    (nativeseedartifactv1-compiler-context-id artifact) "\n"
+    "schema-content-id "
+    (nativeseedartifactv1-schema-content-id artifact) "\n"
+    "rule-set-content-id "
+    (nativeseedartifactv1-rule-set-content-id artifact) "\n"
+    "target-id " (nativeseedartifactv1-target-id artifact) "\n"
+    "datum-reader-content-id "
+    (nativeseedartifactv1-datum-reader-content-id artifact) "\n"
+    "store-evaluator-content-id "
+    (nativeseedartifactv1-store-evaluator-content-id artifact) "\n"
+    "rule-scheduler-content-id "
+    (nativeseedartifactv1-rule-scheduler-content-id artifact) "\n"
+    "materializer-content-id "
+    (nativeseedartifactv1-materializer-content-id artifact) "\n"
+    "entry-command " (nativeseedartifactv1-entry-command artifact) "\n"
+    "hosted-runtime-required "
+    (if (nativeseedartifactv1-hosted-runtime-required artifact)
+      "true\n"
+      "false\n")))
+
+(defn rebuild-semantic-content-id
+  [source-facts-content-id String
+   native-program-content-id String] String
+  (content-id
+    (str rebuild-semantic-format "|"
+         default-compiler-context-id "|"
+         compiler-schema-content-id "|"
+         default-rule-set-content-id "|"
+         source-facts-content-id "|"
+         native-program-content-id)))
+
+(defn byte-source-bytes [source ByteSource] (Vec Int)
+  (loop [offset Int 0 bytes (Vec Int) []]
+    (if (>= offset (count source))
+      bytes
+      (recur (+ offset 1) (conj bytes (nth source offset))))))
+
+(defn executable-content-id [path String] String
+  (str "sha256:"
+    (sha256-bytes
+      (byte-source-bytes
+        (host.fs/read-byte-source-bounded-or-die
+          path max-native-executable-bytes)))))
 
 (defn optional-content-id-text [value String?] String
   (if (nil? value) "nil" (str "\"" value "\"")))
 
 (defn lineage-payload [lineage NativeCompilerLineageV1] String
   (str
-    "{:artifact-content-id \""
-    (nativecompilerlineagev1-artifact-content-id lineage)
-    "\" :compiler-context-id \""
+    "{:compiler-context-id \""
     (nativecompilerlineagev1-compiler-context-id lineage)
+    "\" :executable-content-id \""
+    (nativecompilerlineagev1-executable-content-id lineage)
     "\" :format \""
     (nativecompilerlineagev1-format lineage)
     "\" :generation "
     (nativecompilerlineagev1-generation lineage)
-    " :parent-artifact-content-id "
+    " :materialization-content-id \""
+    (nativecompilerlineagev1-materialization-content-id lineage)
+    "\" :parent-executable-content-id "
     (optional-content-id-text
-      (nativecompilerlineagev1-parent-artifact-content-id lineage))
+      (nativecompilerlineagev1-parent-executable-content-id lineage))
     " :parent-lineage-content-id "
     (optional-content-id-text
       (nativecompilerlineagev1-parent-lineage-content-id lineage))
@@ -285,6 +369,8 @@
     (nativecompilerlineagev1-rule-set-content-id lineage)
     "\" :schema-content-id \""
     (nativecompilerlineagev1-schema-content-id lineage)
+    "\" :semantic-content-id \""
+    (nativecompilerlineagev1-semantic-content-id lineage)
     "\" :target-id \""
     (nativecompilerlineagev1-target-id lineage)
     "\"}\n"))
@@ -292,11 +378,16 @@
 (defn lineage-content-id [lineage NativeCompilerLineageV1] String
   (content-id (lineage-payload lineage)))
 
-(defn root-lineage [artifact-content-id String] NativeCompilerLineageV1
+(defn root-lineage
+  [semantic-content-id String
+   materialization-content-id String
+   executable-content-id String] NativeCompilerLineageV1
   (->NativeCompilerLineageV1
     compiler-lineage-format
     0
-    artifact-content-id
+    semantic-content-id
+    materialization-content-id
+    executable-content-id
     nil
     nil
     default-compiler-context-id
@@ -305,13 +396,18 @@
     default-target-id))
 
 (defn child-lineage
-  [artifact-content-id String parent NativeCompilerLineageV1]
+  [semantic-content-id String
+   materialization-content-id String
+   executable-content-id String
+   parent NativeCompilerLineageV1]
   NativeCompilerLineageV1
   (->NativeCompilerLineageV1
     compiler-lineage-format
     (+ 1 (nativecompilerlineagev1-generation parent))
-    artifact-content-id
-    (nativecompilerlineagev1-artifact-content-id parent)
+    semantic-content-id
+    materialization-content-id
+    executable-content-id
+    (nativecompilerlineagev1-executable-content-id parent)
     (lineage-content-id parent)
     default-compiler-context-id
     compiler-schema-content-id
@@ -323,7 +419,11 @@
           (nativecompilerlineagev1-format lineage))
        (>= (nativecompilerlineagev1-generation lineage) 0)
        (exact-content-id?
-         (nativecompilerlineagev1-artifact-content-id lineage))
+         (nativecompilerlineagev1-semantic-content-id lineage))
+       (exact-content-id?
+         (nativecompilerlineagev1-materialization-content-id lineage))
+       (exact-content-id?
+         (nativecompilerlineagev1-executable-content-id lineage))
        (= default-compiler-context-id
           (nativecompilerlineagev1-compiler-context-id lineage))
        (= compiler-schema-content-id
@@ -334,18 +434,177 @@
           (nativecompilerlineagev1-target-id lineage))
        (if (= 0 (nativecompilerlineagev1-generation lineage))
          (and (nil?
-                (nativecompilerlineagev1-parent-artifact-content-id lineage))
+                (nativecompilerlineagev1-parent-executable-content-id lineage))
               (nil?
                 (nativecompilerlineagev1-parent-lineage-content-id lineage)))
          (and (some?
-                (nativecompilerlineagev1-parent-artifact-content-id lineage))
+                (nativecompilerlineagev1-parent-executable-content-id lineage))
               (some?
                 (nativecompilerlineagev1-parent-lineage-content-id lineage))
               (exact-content-id?
                 (or
-                  (nativecompilerlineagev1-parent-artifact-content-id lineage)
+                  (nativecompilerlineagev1-parent-executable-content-id lineage)
                   ""))
               (exact-content-id?
                 (or
                   (nativecompilerlineagev1-parent-lineage-content-id lineage)
                   ""))))))
+
+(defn edn-map-start? [events (Vec edn/EdnEvent) index Int] Bool
+  (if (>= index (count events))
+    false
+    (match (nth events index)
+      [(edn/EdnMapStart offset) true]
+      [(edn/EdnMapEnd offset) false]
+      [(edn/EdnVectorStart offset) false]
+      [(edn/EdnVectorEnd offset) false]
+      [(edn/EdnKeyword offset value) false]
+      [(edn/EdnString offset value) false]
+      [(edn/EdnInteger offset value) false]
+      [(edn/EdnBoolean offset value) false]
+      [(edn/EdnNil offset) false])))
+
+(defn edn-map-end? [events (Vec edn/EdnEvent) index Int] Bool
+  (if (>= index (count events))
+    false
+    (match (nth events index)
+      [(edn/EdnMapStart offset) false]
+      [(edn/EdnMapEnd offset) true]
+      [(edn/EdnVectorStart offset) false]
+      [(edn/EdnVectorEnd offset) false]
+      [(edn/EdnKeyword offset value) false]
+      [(edn/EdnString offset value) false]
+      [(edn/EdnInteger offset value) false]
+      [(edn/EdnBoolean offset value) false]
+      [(edn/EdnNil offset) false])))
+
+(defn edn-keyword-at?
+  [events (Vec edn/EdnEvent) index Int expected Keyword] Bool
+  (if (>= index (count events))
+    false
+    (match (nth events index)
+      [(edn/EdnMapStart offset) false]
+      [(edn/EdnMapEnd offset) false]
+      [(edn/EdnVectorStart offset) false]
+      [(edn/EdnVectorEnd offset) false]
+      [(edn/EdnKeyword offset value) (= expected value)]
+      [(edn/EdnString offset value) false]
+      [(edn/EdnInteger offset value) false]
+      [(edn/EdnBoolean offset value) false]
+      [(edn/EdnNil offset) false])))
+
+(defn edn-string-at [events (Vec edn/EdnEvent) index Int] String?
+  (if (>= index (count events))
+    nil
+    (match (nth events index)
+      [(edn/EdnMapStart offset) nil]
+      [(edn/EdnMapEnd offset) nil]
+      [(edn/EdnVectorStart offset) nil]
+      [(edn/EdnVectorEnd offset) nil]
+      [(edn/EdnKeyword offset value) nil]
+      [(edn/EdnString offset value) value]
+      [(edn/EdnInteger offset value) nil]
+      [(edn/EdnBoolean offset value) nil]
+      [(edn/EdnNil offset) nil])))
+
+(defn edn-int-at [events (Vec edn/EdnEvent) index Int] Int?
+  (if (>= index (count events))
+    nil
+    (match (nth events index)
+      [(edn/EdnMapStart offset) nil]
+      [(edn/EdnMapEnd offset) nil]
+      [(edn/EdnVectorStart offset) nil]
+      [(edn/EdnVectorEnd offset) nil]
+      [(edn/EdnKeyword offset value) nil]
+      [(edn/EdnString offset value) nil]
+      [(edn/EdnInteger offset value) value]
+      [(edn/EdnBoolean offset value) nil]
+      [(edn/EdnNil offset) nil])))
+
+(defn edn-nil-at? [events (Vec edn/EdnEvent) index Int] Bool
+  (if (>= index (count events))
+    false
+    (match (nth events index)
+      [(edn/EdnMapStart offset) false]
+      [(edn/EdnMapEnd offset) false]
+      [(edn/EdnVectorStart offset) false]
+      [(edn/EdnVectorEnd offset) false]
+      [(edn/EdnKeyword offset value) false]
+      [(edn/EdnString offset value) false]
+      [(edn/EdnInteger offset value) false]
+      [(edn/EdnBoolean offset value) false]
+      [(edn/EdnNil offset) true]
+      )))
+
+(defn lineage-events-shape?
+  [events (Vec edn/EdnEvent) generation Int] Bool
+  (and (= 24 (count events))
+       (edn-map-start? events 0)
+       (edn-keyword-at? events 1 :compiler-context-id)
+       (some? (edn-string-at events 2))
+       (edn-keyword-at? events 3 :executable-content-id)
+       (some? (edn-string-at events 4))
+       (edn-keyword-at? events 5 :format)
+       (some? (edn-string-at events 6))
+       (edn-keyword-at? events 7 :generation)
+       (some? (edn-int-at events 8))
+       (edn-keyword-at? events 9 :materialization-content-id)
+       (some? (edn-string-at events 10))
+       (edn-keyword-at? events 11 :parent-executable-content-id)
+       (if (= generation 0)
+         (edn-nil-at? events 12)
+         (some? (edn-string-at events 12)))
+       (edn-keyword-at? events 13 :parent-lineage-content-id)
+       (if (= generation 0)
+         (edn-nil-at? events 14)
+         (some? (edn-string-at events 14)))
+       (edn-keyword-at? events 15 :rule-set-content-id)
+       (some? (edn-string-at events 16))
+       (edn-keyword-at? events 17 :schema-content-id)
+       (some? (edn-string-at events 18))
+       (edn-keyword-at? events 19 :semantic-content-id)
+       (some? (edn-string-at events 20))
+       (edn-keyword-at? events 21 :target-id)
+       (some? (edn-string-at events 22))
+       (edn-map-end? events 23)))
+
+(defn decode-lineage [payload String] NativeCompilerLineageDecodeV1
+  (match (edn/decode payload)
+    [(edn/EdnDecodeError offset message)
+     (->NativeCompilerLineageDecodeRejectedV1
+       (str "invalid compiler lineage at " offset ": " message))]
+    [(edn/EdnDecoded events)
+     (let [generation Int (or (edn-int-at events 8) -1)]
+       (if (not (lineage-events-shape? events generation))
+         (->NativeCompilerLineageDecodeRejectedV1
+           "compiler lineage is not the canonical v2 map")
+         (let [lineage NativeCompilerLineageV1
+               (->NativeCompilerLineageV1
+                 (or (edn-string-at events 6) "")
+                 generation
+                 (or (edn-string-at events 20) "")
+                 (or (edn-string-at events 10) "")
+                 (or (edn-string-at events 4) "")
+                 (edn-string-at events 12)
+                 (edn-string-at events 14)
+                 (or (edn-string-at events 2) "")
+                 (or (edn-string-at events 18) "")
+                 (or (edn-string-at events 16) "")
+                 (or (edn-string-at events 22) ""))]
+           (if (and (lineage-valid? lineage)
+                    (= payload (lineage-payload lineage)))
+             (->NativeCompilerLineageDecodedV1 lineage)
+             (->NativeCompilerLineageDecodeRejectedV1
+               "compiler lineage IDs or canonical bytes are invalid")))))]))
+
+(defn lineage-child-of?
+  [child NativeCompilerLineageV1
+   parent NativeCompilerLineageV1] Bool
+  (and (lineage-valid? child)
+       (lineage-valid? parent)
+       (= (nativecompilerlineagev1-generation child)
+          (+ 1 (nativecompilerlineagev1-generation parent)))
+       (= (nativecompilerlineagev1-parent-executable-content-id child)
+          (nativecompilerlineagev1-executable-content-id parent))
+       (= (nativecompilerlineagev1-parent-lineage-content-id child)
+          (lineage-content-id parent))))
