@@ -9807,6 +9807,48 @@ static bool native_host_filesystem_capability_valid(
   return (capability != NULL) && (capability->token != UINT64_C(0));
 }
 
+int32_t native_host_filesystem_real_path_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text, uint64_t *out) {
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (out == NULL)) {
+    return EINVAL;
+  }
+  *out = UINT64_C(0);
+#if defined(__wasi__)
+  (void)path_text;
+  return ENOTSUP;
+#else
+  char *path = NULL;
+  char *resolved = NULL;
+  uint8_t *destination = NULL;
+  size_t length;
+  int32_t status = native_host_filesystem_path(path_text, &path);
+  uint64_t result;
+  if (status != 0) {
+    return status;
+  }
+  errno = 0;
+  resolved = realpath(path, NULL);
+  free(path);
+  if (resolved == NULL) {
+    return native_host_filesystem_errno();
+  }
+  length = strlen(resolved);
+  if (!native_utf8_valid((const uint8_t *)resolved, (uint64_t)length)) {
+    free(resolved);
+    return EILSEQ;
+  }
+  result = native_text_alloc(arena, (uint64_t)length, &destination);
+  if (length != (size_t)0U) {
+    memcpy(destination, resolved, length);
+  }
+  free(resolved);
+  *out = result;
+  return 0;
+#endif
+}
+
 bool native_host_filesystem_file_exists_v0(
     const native_capability *capability, uint64_t path_text) {
   char *path = NULL;

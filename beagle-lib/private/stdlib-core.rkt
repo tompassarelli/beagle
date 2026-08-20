@@ -80,6 +80,11 @@
     (list (p 'String))
     #f
     (p 'host.fs/PathKindResult))
+   (q 'host.fs 'real-path)
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'host.fs/RealPathResult))
    (q 'host.fs 'read-text-bounded)
    (type-fn
     (list (p 'String) (p 'Int))
@@ -250,6 +255,13 @@
      (list 'host.fs/PathKindOk
            (list (cons ':kind (p 'Int))))
      (list 'host.fs/PathKindError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/RealPathResult
+    (list
+     (list 'host.fs/RealPathOk
+           (list (cons ':path (p 'String))))
+     (list 'host.fs/RealPathError
            (list (cons ':errno (p 'Int))))))
    (list
     'host.fs/ReadTextBoundedResult

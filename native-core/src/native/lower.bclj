@@ -1290,6 +1290,10 @@
     (and (same-id? target-type (filesystem-int-outcome-type-id))
       (= name "host.fs/PathKindError")) "error"
     (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.fs/RealPathOk")) "ok"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.fs/RealPathError")) "error"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
       (= name "host.fs/ReadTextBoundedOk")) "ok"
     (and (same-id? target-type (filesystem-text-outcome-type-id))
       (= name "host.fs/ReadTextBoundedError")) "error"
@@ -1458,6 +1462,10 @@
 
     (= "host.fs/PathKindResult" spelling)
     (->TypeResolutionV0 (filesystem-int-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/RealPathResult" spelling)
+    (->TypeResolutionV0 (filesystem-text-outcome-type-id)
       (filesystem-outcome-types) [] true)
 
     (= "host.fs/ReadTextBoundedResult" spelling)
@@ -2479,6 +2487,7 @@
   (or (= name "host.fs/read-text-bounded")
       (= name "host.fs/list-directory-bounded")
       (= name "host.fs/path-kind")
+      (= name "host.fs/real-path")
       (= name "host.fs/write-text-atomic")
       (= name "host.fs/make-parent-directories")
       (= name "host.fs/append-text")
@@ -2496,6 +2505,7 @@
     (= name "host.fs/read-text-bounded") "read-text-bounded"
     (= name "host.fs/list-directory-bounded") "list-directory-bounded"
     (= name "host.fs/path-kind") "path-kind"
+    (= name "host.fs/real-path") "real-path"
     (= name "host.fs/write-text-atomic") "write-text-atomic"
     (= name "host.fs/make-parent-directories") "make-parent-directories"
     (= name "host.fs/append-text") "append-text"
@@ -2513,6 +2523,7 @@
   (or (same-id? candidate (host-filesystem-abi-id "read-text-bounded"))
       (same-id? candidate (host-filesystem-abi-id "list-directory-bounded"))
       (same-id? candidate (host-filesystem-abi-id "path-kind"))
+      (same-id? candidate (host-filesystem-abi-id "real-path"))
       (same-id? candidate (host-filesystem-abi-id "write-text-atomic"))
       (same-id? candidate
         (host-filesystem-abi-id "make-parent-directories"))
@@ -9972,6 +9983,7 @@
       (same-id? (nth value-types 1) (int-type-id)))
 
     (or (= callee "host.fs/path-kind")
+        (= callee "host.fs/real-path")
         (= callee "host.fs/make-parent-directories")
         (= callee "host.fs/mtime-nanoseconds")
         (= callee "host.fs/create-temporary-sibling")
@@ -10001,6 +10013,8 @@
     (= callee "selfhost.rt/abs-path") (text-type-id)
     (= callee "host.fs/read-text-bounded")
     (filesystem-text-outcome-type-id)
+    (= callee "host.fs/real-path")
+    (filesystem-text-outcome-type-id)
     (= callee "host.fs/create-temporary-sibling")
     (filesystem-text-outcome-type-id)
     (= callee "host.fs/list-directory-bounded")
@@ -10029,6 +10043,7 @@
           arena (U core/NativeId Nil)
           (if (or (= callee "selfhost.rt/abs-path")
                 (= callee "host.fs/read-text-bounded")
+                (= callee "host.fs/real-path")
                 (= callee "host.fs/list-directory-bounded")
                 (= callee "host.fs/create-temporary-sibling"))
             (arena-value-id owner)
@@ -20825,6 +20840,7 @@
         source-types (Vec core/TypeDef)
         (if (or
               (index-has-callee? index "host.fs/path-kind")
+              (index-has-callee? index "host.fs/real-path")
               (index-has-callee? index "host.fs/read-text-bounded")
               (index-has-callee? index "host.fs/list-directory-bounded")
               (index-has-callee? index "host.fs/write-text-atomic")
@@ -22028,6 +22044,13 @@
      [(borrowed-abi-value "path" (text-type-id))]
      (filesystem-int-outcome-type-id)
      false
+     layouts-digest)
+   (host-filesystem-abi
+     "real-path"
+     "native_host_filesystem_real_path_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     (filesystem-text-outcome-type-id)
+     true
      layouts-digest)
    (host-filesystem-abi
      "write-text-atomic"

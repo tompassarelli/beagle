@@ -1147,11 +1147,15 @@
     (reference-map-assoc
       (reference-map-assoc
         (reference-map-assoc
-          {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
-           "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
-           "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
-           "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
-                             nil FLOAT-TYPE)}
+          (reference-map-assoc
+            {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
+             "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
+             "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
+             "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
+                               nil FLOAT-TYPE)}
+            "host.fs/real-path"
+            (make-fn [(make-prim "String")] nil
+              (make-prim "host.fs/RealPathResult")))
           "host.fs/mtime-nanoseconds"
           (make-fn [(make-prim "String")] nil
             (make-prim "host.fs/MtimeNanosecondsResult")))
@@ -1184,6 +1188,11 @@
   nil)
 
 (defn install-core-filesystem-result-unions! [] Nil
+  (install-core-result-union! "host.fs/RealPathResult"
+    [{"name" "host.fs/RealPathOk"
+      "fields" [[":path" (make-prim "String")]]}
+     {"name" "host.fs/RealPathError"
+      "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/MtimeNanosecondsResult"
     [{"name" "host.fs/MtimeNanosecondsOk"
       "fields" [[":nanoseconds" INT-TYPE]]}

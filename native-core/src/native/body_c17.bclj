@@ -281,6 +281,7 @@
   (or (= symbol "native_host_filesystem_read_text_bounded_v0")
       (= symbol "native_host_filesystem_list_directory_bounded_v0")
       (= symbol "native_host_filesystem_path_kind_v0")
+      (= symbol "native_host_filesystem_real_path_v0")
       (= symbol "native_host_filesystem_write_text_atomic_v0")
       (= symbol "native_host_filesystem_make_parent_directories_v0")
       (= symbol "native_host_filesystem_append_text_v0")

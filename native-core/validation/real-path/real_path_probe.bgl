@@ -1,0 +1,19 @@
+#lang beagle
+(ns native.real-path-probe)
+
+(defn resolves? [link String target String] Bool
+  (match (host.fs/real-path link)
+    [(host.fs/RealPathOk path) (= path target)]
+    [(host.fs/RealPathError errno) false]))
+
+(defn missing? [path String] Bool
+  (match (host.fs/real-path path)
+    [(host.fs/RealPathOk resolved) false]
+    [(host.fs/RealPathError errno) (= errno 2)]))
+
+(defn probe [args (Vec String)] Int
+  (if (and (= (count args) 3)
+           (resolves? (nth args 0) (nth args 1))
+           (missing? (nth args 2)))
+    0
+    1))

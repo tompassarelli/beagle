@@ -682,6 +682,11 @@ uint64_t native_host_filesystem_abs_path_v0(
 /* Path kind result: 1 regular file, 2 directory, 3 symbolic link, 4 other. */
 int32_t native_host_filesystem_path_kind_v0(
     const native_capability *capability, uint64_t path, int64_t *out);
+/* Resolves symbolic links and dot components to an existing canonical path.
+   The returned Text is arena-owned. WASI returns ENOTSUP. */
+int32_t native_host_filesystem_real_path_v0(
+    native_arena *arena, const native_capability *capability, uint64_t path,
+    uint64_t *out);
 int32_t native_host_filesystem_read_text_bounded_v0(
     native_arena *arena, const native_capability *capability, uint64_t path,
     int64_t max_bytes, uint64_t *out);
