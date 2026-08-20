@@ -101,7 +101,7 @@
    closure-digest String
    profile Keyword
    root-resource t/Term
-   module-identities (Vec t/Term)
+   module-identities (Vec String)
    module-projections (Vec (Vec t/Triple))])
 
 (defunion ProgramAdmissionPlanResult
@@ -246,7 +246,7 @@
   [space-id String
    compiler-context String
    closure-digest String
-   entry-namespace String] t/Term
+   entry-namespace String] String
   (bootstrap/content-id
     (str program-root-domain
          (length-framed space-id)
@@ -254,7 +254,10 @@
          (length-framed closure-digest)
          (length-framed entry-namespace))))
 
-(defn module-identity [namespace String] t/Term namespace)
+(defn program-admission-root-value [plan ProgramAdmissionPlan] Any
+  (programadmissionplan-root-resource plan))
+
+(defn program-term-value [value t/Term] Any value)
 
 (defn plan-program-admission
   [config CompileSourceConfig
@@ -262,7 +265,7 @@
    entry-namespace String] ProgramAdmissionPlanResult
   (loop [remaining (Vec CheckedModuleFacts)
          (checkedfactclosure-modules checked)
-         identities (Vec t/Term) []
+         identities (Vec String) []
          projections (Vec (Vec t/Triple)) []]
     (if (empty? remaining)
       (let [syntax facts/SyntaxFactClosure
@@ -290,14 +293,14 @@
           (->ProgramAdmissionPlanningRejected 65
             "checked module does not declare a namespace")
           (match (program-projection/project-module
-                   (module-identity namespace)
+                   namespace
                    (checkedmodulefacts-raw module))
             [(program-projection/ProgramProjectionRejected code detail)
              (->ProgramAdmissionPlanningRejected 65 detail)]
             [(program-projection/ProgramProjected projected)
              (recur
                (vec (rest remaining))
-               (conj identities (module-identity namespace))
+               (conj identities namespace)
                (conj projections
                  (program-projection/programmoduleprojection-propositions
                    projected)))]))))))
@@ -534,8 +537,8 @@
   (match (store (->CompileStoreAdmitProgram plan))
     [(CompileStoreFailure code detail) (->CompileStoreFailure code detail)]
     [(CompileStoreProgramAdmitted root-resource root-version)
-     (if (and (= root-resource
-                 (programadmissionplan-root-resource plan))
+     (if (and (= (program-term-value root-resource)
+                 (program-admission-root-value plan))
               (>= root-version 0))
        (store
          (->CompileStoreLookup

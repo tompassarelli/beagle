@@ -1,0 +1,311 @@
+#lang beagle
+
+(ns native.program-compiler-admission-fixture
+  (:require [beagle.bootstrap-contract :as bootstrap]
+            [beagle.compiler-driver :as driver]
+            [beagle.fact-profile :as fact-profile]
+            [beagle.frontend-facts :as facts]
+            [beagle.parser-reader :as parser-reader]
+            [beagle.syntax-semantics :as semantics]
+            [store.types :as t]))
+
+(def first-path String "filesystem/entry-name.bgl")
+(def second-path String "another/location/utility.bgl")
+(def first-namespace String "declared.alpha")
+(def second-namespace String "declared.beta")
+
+(def first-source String
+  (str "#lang beagle\n"
+       "(ns declared.alpha)\n"
+       "(defn alpha [value Int] Int\n"
+       "  (+ value 1))\n"))
+
+(def second-source String
+  (str "#lang beagle\n"
+       "(ns declared.beta)\n"
+       "(defn beta [value Int] Int\n"
+       "  (* value 2))\n"))
+
+(defrecord PreparedModule
+  [raw facts/SyntaxFactBundle
+   normalized facts/SyntaxFactBundle])
+
+(defunion PrepareModuleResult
+  (ModulePrepared [module PreparedModule])
+  (ModulePreparationRejected [detail String]))
+
+(defn prepare-module [path String source String] PrepareModuleResult
+  (let [digest String (bootstrap/content-id source)]
+    (match (parser-reader/facts-from-source
+             path source digest "native-core")
+      [(facts/FactsRejected errors)
+       (->ModulePreparationRejected "raw source projection failed")]
+      [(facts/FactsRead raw)
+       (match (semantics/normalize raw)
+         [(facts/FactsRejected errors)
+          (->ModulePreparationRejected "normalization failed")]
+         [(facts/FactsRead normalized)
+          (->ModulePrepared (->PreparedModule raw normalized))])])))
+
+(defn test-closure
+  [first PreparedModule
+   second PreparedModule] facts/SyntaxFactClosure
+  (facts/->SyntaxFactClosure
+    first-path
+    [(preparedmodule-normalized first)
+     (preparedmodule-normalized second)]
+    (bootstrap/content-id "fixture-closure")
+    []))
+
+(defn test-config [space-id String] driver/CompileSourceConfig
+  (driver/->CompileSourceConfig
+    first-path
+    "unused-output"
+    "fixture.store"
+    space-id
+    "cc"
+    "qbe"))
+
+(defn proposition-present?
+  [propositions (Vec t/Triple)
+   t1 Any
+   t2 Any
+   t3 Any] Bool
+  (some?
+    (some
+      (fn [proposition t/Triple] t/Triple?
+        (if (and (= t1 (t/triple-t1 proposition))
+                 (and (= t2 (t/triple-t2 proposition))
+                      (= t3 (t/triple-t3 proposition))))
+          proposition
+          nil))
+      propositions)))
+
+(defn canonical-projections?
+  [projections (Vec (Vec t/Triple))] Bool
+  (every?
+    (fn [module-propositions (Vec t/Triple)] Bool
+      (every? t/triple? module-propositions))
+    projections))
+
+(defn plan-valid? [plan driver/ProgramAdmissionPlan] Bool
+  (let [identities (Vec String)
+        (driver/programadmissionplan-module-identities plan)
+        projections (Vec (Vec t/Triple))
+        (driver/programadmissionplan-module-projections plan)
+        root Any (driver/program-admission-root-value plan)
+        closure String (driver/programadmissionplan-closure-digest plan)
+        context String (driver/programadmissionplan-compiler-context plan)]
+    (and (= "fixture.store" (driver/programadmissionplan-store-log plan))
+      (and (= "space-a" (driver/programadmissionplan-space-id plan))
+        (and (= bootstrap/default-compiler-context-id context)
+          (and (= (bootstrap/content-id "fixture-closure") closure)
+            (and (= :program (driver/programadmissionplan-profile plan))
+              (and (= [first-namespace second-namespace] identities)
+                (and (= 2 (count projections))
+                  (and (canonical-projections? projections)
+                    (and
+                      (proposition-present?
+                        (nth projections 0)
+                        first-namespace :represented_by first-source)
+                      (and
+                        (proposition-present?
+                          (nth projections 1)
+                          second-namespace :represented_by second-source)
+                        (and
+                          (not
+                            (proposition-present?
+                              (nth projections 0)
+                              first-path :represented_by first-source))
+                          (and
+                            (= root
+                              (driver/initial-program-root-resource
+                                "space-a" context closure first-namespace))
+                            (and
+                              (not= root
+                                (driver/initial-program-root-resource
+                                  "space-b" context closure first-namespace))
+                              (and
+                                (not= root
+                                  (driver/initial-program-root-resource
+                                    "space-a" (bootstrap/content-id "other-compiler")
+                                    closure first-namespace))
+                                (and
+                                  (not= root
+                                    (driver/initial-program-root-resource
+                                      "space-a" context
+                                      (bootstrap/content-id "other-closure")
+                                      first-namespace))
+                                  (not= root
+                                    (driver/initial-program-root-resource
+                                      "space-a" context closure
+                                      second-namespace)))))))))))))))))))
+
+(def trace (Atom (Vec Keyword)) (atom []))
+
+(defn note! [event Keyword] Nil
+  (reset! trace (conj (deref trace) event))
+  nil)
+
+(defn cold-store!
+  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  (match request
+    [(driver/CompileStoreAdmitProgram plan)
+     (note! :admit)
+     (driver/->CompileStoreProgramAdmitted
+       (driver/programadmissionplan-root-resource plan) 0)]
+    [(driver/CompileStoreLookup store-log space-id query)
+     (note! :lookup-cold)
+     (driver/->CompileStoreCold)]
+    [(driver/CompileStoreAppend store-log space-id result artifact)
+     (driver/->CompileStoreFailure 70 "unexpected append")]))
+
+(defn warm-store!
+  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  (match request
+    [(driver/CompileStoreAdmitProgram plan)
+     (note! :admit)
+     (driver/->CompileStoreProgramAdmitted
+       (driver/programadmissionplan-root-resource plan) 7)]
+    [(driver/CompileStoreLookup store-log space-id query)
+     (note! :lookup-warm)
+     (match (fact-profile/admit-and-identify-result
+              (fact-profile/->ResultAdmissionRequest
+                query
+                bootstrap/default-target-id
+                bootstrap/materializer-capability-content-id
+                "rejected"
+                nil
+                (bootstrap/content-id "fixture-warm-rejection")))
+       [(fact-profile/ResultRejected code detail)
+        (driver/->CompileStoreFailure 70 detail)]
+       [(fact-profile/ResultAdmitted result)
+        (driver/->CompileStoreWarmRejected result "fixture warm result")])]
+    [(driver/CompileStoreAppend store-log space-id result artifact)
+     (driver/->CompileStoreFailure 70 "unexpected append")]))
+
+(defn wrong-root-store!
+  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  (match request
+    [(driver/CompileStoreAdmitProgram plan)
+     (note! :admit)
+     (driver/->CompileStoreProgramAdmitted "other-root" 0)]
+    [(driver/CompileStoreLookup store-log space-id query)
+     (note! :lookup-should-not-run)
+     (driver/->CompileStoreCold)]
+    [(driver/CompileStoreAppend store-log space-id result artifact)
+     (driver/->CompileStoreFailure 70 "unexpected append")]))
+
+(defn negative-version-store!
+  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  (match request
+    [(driver/CompileStoreAdmitProgram plan)
+     (note! :admit)
+     (driver/->CompileStoreProgramAdmitted
+       (driver/programadmissionplan-root-resource plan) -1)]
+    [(driver/CompileStoreLookup store-log space-id query)
+     (note! :lookup-should-not-run)
+     (driver/->CompileStoreCold)]
+    [(driver/CompileStoreAppend store-log space-id result artifact)
+     (driver/->CompileStoreFailure 70 "unexpected append")]))
+
+(defn cold? [response driver/CompileStoreResponse] Bool
+  (match response
+    [(driver/CompileStoreCold) true]
+    [(driver/CompileStoreWarm result artifact) false]
+    [(driver/CompileStoreWarmRejected result detail) false]
+    [(driver/CompileStoreProgramAdmitted root-resource root-version) false]
+    [(driver/CompileStorePersisted) false]
+    [(driver/CompileStoreFailure code detail) false]))
+
+(defn warm-rejected? [response driver/CompileStoreResponse] Bool
+  (match response
+    [(driver/CompileStoreWarmRejected result detail) true]
+    [(driver/CompileStoreCold) false]
+    [(driver/CompileStoreWarm result artifact) false]
+    [(driver/CompileStoreProgramAdmitted root-resource root-version) false]
+    [(driver/CompileStorePersisted) false]
+    [(driver/CompileStoreFailure code detail) false]))
+
+(defn failure? [response driver/CompileStoreResponse] Bool
+  (match response
+    [(driver/CompileStoreFailure code detail) true]
+    [(driver/CompileStoreCold) false]
+    [(driver/CompileStoreWarm result artifact) false]
+    [(driver/CompileStoreWarmRejected result detail) false]
+    [(driver/CompileStoreProgramAdmitted root-resource root-version) false]
+    [(driver/CompileStorePersisted) false]))
+
+(defn lookup-order-valid!
+  [plan driver/ProgramAdmissionPlan
+   query driver/CompileQuery] Bool
+  (reset! trace [])
+  (let [cold-response driver/CompileStoreResponse
+        (driver/lookup-admitted-program plan query cold-store!)
+        cold-order (Vec Keyword) (deref trace)]
+    (reset! trace [])
+    (let [warm-response driver/CompileStoreResponse
+          (driver/lookup-admitted-program plan query warm-store!)
+          warm-order (Vec Keyword) (deref trace)]
+      (reset! trace [])
+      (let [wrong-response driver/CompileStoreResponse
+            (driver/lookup-admitted-program plan query wrong-root-store!)
+            wrong-order (Vec Keyword) (deref trace)]
+        (reset! trace [])
+        (let [negative-response driver/CompileStoreResponse
+              (driver/lookup-admitted-program plan query negative-version-store!)
+              negative-order (Vec Keyword) (deref trace)]
+          (and (and (cold? cold-response)
+                    (= [:admit :lookup-cold] cold-order))
+            (and (and (warm-rejected? warm-response)
+                      (= [:admit :lookup-warm] warm-order))
+              (and (and (failure? wrong-response) (= [:admit] wrong-order))
+                (and (failure? negative-response)
+                     (= [:admit] negative-order))))))))))
+
+(defn query-result
+  [closure facts/SyntaxFactClosure] driver/CompileQueryAdmissionResult
+  (driver/compile-query
+    (driver/->CompileBundleRequest
+      "fixture.store"
+      "space-a"
+      bootstrap/default-compiler-context-id
+      bootstrap/default-profile
+      [bootstrap/default-target-id]
+      bootstrap/default-rule-set-content-id
+      bootstrap/compiler-schema-content-id
+      [first-path second-path]
+      closure)))
+
+(defn evaluate-plan!
+  [closure facts/SyntaxFactClosure
+   checked driver/CheckedFactClosure] Int
+  (match (driver/plan-program-admission
+           (test-config "space-a") checked first-namespace)
+    [(driver/ProgramAdmissionPlanningRejected code detail) 14]
+    [(driver/ProgramAdmissionPlanned plan)
+     (match (query-result closure)
+       [(driver/CompileQueryAdmissionRejected code detail) 15]
+       [(driver/CompileQueryReady query)
+        (if (not (plan-valid? plan))
+          16
+          (if (lookup-order-valid! plan query) 0 17))])]))
+
+(defn evaluate-modules!
+  [first PreparedModule
+   second PreparedModule] Int
+  (let [closure facts/SyntaxFactClosure (test-closure first second)]
+    (match (driver/check-fact-closure
+             closure
+             [(preparedmodule-raw first) (preparedmodule-raw second)])
+      [(driver/FactClosureRejected code detail) 13]
+      [(driver/FactClosureChecked checked)
+       (evaluate-plan! closure checked)])))
+
+(defn main! [args (Vec String)] Int
+  (match (prepare-module first-path first-source)
+    [(ModulePreparationRejected detail) 11]
+    [(ModulePrepared first)
+     (match (prepare-module second-path second-source)
+       [(ModulePreparationRejected detail) 12]
+       [(ModulePrepared second) (evaluate-modules! first second)])]))
