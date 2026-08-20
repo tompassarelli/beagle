@@ -25,7 +25,7 @@
 (load-file "database.clj")
 (load-file "writer_authority.clj")
 
-(def database (atom nil))
+(def active-store (atom nil))
 (def server-role (atom nil))
 (def writer-authority (atom nil))
 (def listener (atom nil))
@@ -51,7 +51,7 @@
 (def ^:private query-result-per-version-limit 8)
 (def ^:private query-result-byte-limit (* 64 1024 1024))
 (def query-archive-manifest (atom []))
-(def ^:private query-archive-databases (atom {}))
+(def ^:private query-history-stores (atom {}))
 (def ^:private query-archive-magic
   (.getBytes "STOREQAR1" java.nio.charset.StandardCharsets/UTF_8))
 (def ^:private text-index-version-limit 4)
@@ -208,15 +208,15 @@
   (.getPath (.getCanonicalFile (io/file (str path)))))
 
 (defn writer-authority-status []
-  (when @database
+  (when @active-store
     (let [physical (writer-authority/status
-                    @server-role @writer-authority (:log @database))
+                    @server-role @writer-authority (:log @active-store))
           lock-held (:write-authorized physical)
-          recovery (database/database-recovery-state @database)]
+          recovery (database/database-recovery-state @active-store)]
       (assoc physical
              :lock-held lock-held
              :write-authorized (and lock-held
-                                    (database/mutation-ready? @database))
+                                    (database/mutation-ready? @active-store))
              :database-recovery recovery))))
 
 (defn- writer-lock-held? []
@@ -225,7 +225,7 @@
 
 (defn write-authorized? []
   (boolean (and (writer-lock-held?)
-                (database/mutation-ready? @database))))
+                (database/mutation-ready? @active-store))))
 
 ;; A published snapshot has to stay frozen while later commits land, and a
 ;; TermStore is an identity the writer keeps mutating, so the read view is a
@@ -266,11 +266,11 @@
   (reset! active-requests {})
   (drop-query-caches!)
   (reset! query-archive-manifest [])
-  (reset! query-archive-databases {})
+  (reset! query-history-stores {})
   (reset! published-snapshot nil)
   (writer-authority/release! @writer-authority)
   (reset! writer-authority nil)
-  (reset! database nil)
+  (reset! active-store nil)
   (reset! server-role nil)
   (reset! listener nil)
   (close-request-log!)
@@ -299,7 +299,7 @@
        (let [opened (database/open-database!
                      canonical expected-space {:repair-torn? (= :active role)})]
          (advance-server-generation!)
-         (reset! database opened)
+         (reset! active-store opened)
          (read-query-archive-manifest! opened)
          (publish-snapshot! opened)
          (reset! server-role role)
@@ -313,11 +313,11 @@
 
 (defn- refresh-standby! []
   (when (= :standby @server-role)
-    (locking database
-      (let [current @database
+    (locking active-store
+      (let [current @active-store
             opened (database/open-database! (:log current) (:space-id current))]
         (advance-server-generation!)
-        (reset! database opened)
+        (reset! active-store opened)
         (publish-snapshot! opened)))))
 
 (defn native-op-disposition [operation]
@@ -377,7 +377,7 @@
   (when-not (writer-lock-held?)
     (server-fail! :rpc/writer-authority-required
                   "active writer authority is required" {}))
-  (database/require-mutation-ready! @database))
+  (database/require-mutation-ready! @active-store))
 
 (defn- require-version-expected! [version expected]
   (when (and (some? expected) (not= expected version))
@@ -849,7 +849,7 @@
 (defn seal-query-epoch!
   "Seal a canonical inclusive prefix and publish its range before cache GC."
   [upper-inclusive]
-  (let [db @database
+  (let [db @active-store
         head (current-version db)]
     (when (or (neg? upper-inclusive) (> upper-inclusive head))
       (server-fail! :query-invalid-snapshot
@@ -881,28 +881,28 @@
                    [java.nio.file.StandardCopyOption/ATOMIC_MOVE
                     java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
       (write-query-archive-manifest! db entries)
-      (reset! query-archive-databases {})
+      (reset! query-history-stores {})
       (drop-query-caches!)
       entry)))
 
 (defn expire-query-epoch!
   "Mark one sealed range unavailable by retention policy; canonical deletion is separate."
   [upper-inclusive]
-  (let [db @database
+  (let [db @active-store
         entries (mapv (fn [entry]
                         (cond-> entry
                           (= upper-inclusive (:upper entry))
                           (assoc :expired true)))
                       @query-archive-manifest)]
     (write-query-archive-manifest! db entries)
-    (reset! query-archive-databases {})
+    (reset! query-history-stores {})
     (drop-query-caches!)
     entries))
 
 (defn- query-archive-entry [version]
   (some #(when (<= (:lower %) version (:upper %)) %) @query-archive-manifest))
 
-(defn- query-history-database! [active version]
+(defn- query-history-store! [active version]
   (if-let [{:keys [expired path fingerprint upper] :as entry}
            (query-archive-entry version)]
     (do
@@ -910,7 +910,7 @@
         (server-fail! :query/snapshot-expired
                       "query snapshot was removed by explicit retention policy"
                       {:range [(:lower entry) upper]}))
-      (or (get @query-archive-databases [path fingerprint])
+      (or (get @query-history-stores [path fingerprint])
           (try
             (let [source (database/triple-log-prefix-source! path upper)]
               (when-not (= fingerprint (:fingerprint source))
@@ -919,7 +919,7 @@
                               {:range [(:lower entry) upper]}))
               (let [opened (database/open-database!
                             path (database/database-space active))]
-                (swap! query-archive-databases
+                (swap! query-history-stores
                        assoc [path fingerprint] opened)
                 opened))
             (catch Throwable error
@@ -939,18 +939,18 @@
                     "query snapshot is outside available history" {}))
     (if (= version head)
       @(database/database-store db)
-      (let [history-db (query-history-database! db version)
-            head-root @(database/database-store history-db)
-            base (load-query-checkpoint-root! history-db version)
+      (let [history-store (query-history-store! db version)
+            head-root @(database/database-store history-store)
+            base (load-query-checkpoint-root! history-store version)
             context (if base
                       (atom base)
                       (term-store/new-term-store
-                       (database/database-space history-db)))
+                       (database/database-space history-store)))
             lower-exclusive (dec (deref (t/termstore-next-sequence @context)))]
         (doseq [record (term-store/transaction-records-between
                        head-root lower-exclusive version)]
           (term-store/replay-transaction! context record))
-        (write-query-checkpoint! history-db version @context)))))
+        (write-query-checkpoint! history-store version @context)))))
 
 (defn- snapshot-image [version root]
   (let [context (atom root)]
@@ -1620,7 +1620,7 @@
         version (page-version snapshot page)
         cache-snapshot (assoc (select-keys snapshot [:generation :space])
                               :version version)
-        build #(let [db (database/store-view @database (:root snapshot))
+        build #(let [db (database/store-view @active-store (:root snapshot))
                      root (query-page-root! db version)
                      view (database/store-view db root)]
                  (collect-rows (database/live-propositions view)
@@ -1642,7 +1642,7 @@
         version (page-version snapshot page)
         cache-snapshot (assoc (select-keys snapshot [:generation :space])
                               :version version)
-        build #(let [db (database/store-view @database (:root snapshot))
+        build #(let [db (database/store-view @active-store (:root snapshot))
                      root (query-page-root! db version)
                      view (database/store-view db root)]
                  (collect-rows (database/occurrences view)
@@ -1667,7 +1667,7 @@
         cursor (when cursor-value (parse-query-cursor! cursor-value))
         direct-pattern (one-triple-pattern plan)
         direct? (some? direct-pattern)
-        db (database/store-view @database (:root published))
+        db (database/store-view @active-store (:root published))
         view (requested-query-view!
               requested-snapshot cursor (:version published))
         version (:version view)
@@ -1835,7 +1835,7 @@
 (defn- handle-lease-check! [payload cancellation snapshot]
   (let [[resource holder epoch] (parse-fence! payload)]
     (cancelled! cancellation)
-    (let [view (database/store-view @database (:root snapshot))
+    (let [view (database/store-view @active-store (:root snapshot))
           [current-holder current-epoch _ expires-ms]
           (or (current-fence view resource) [nil nil nil nil])
           matching (and (= holder current-holder) (= epoch current-epoch))
@@ -1847,7 +1847,7 @@
   (require-unit! payload)
   (cancelled! cancellation)
   (try
-    (let [db (database/store-view @database (:root snapshot))
+    (let [db (database/store-view @active-store (:root snapshot))
           dump (term-store/dump-term-store (database/database-store db))
           space-id (database/database-space db)
           copy (term-store/new-term-store space-id)
@@ -1867,7 +1867,7 @@
                  (or (.getMessage error) "validation failed"))])))))
 
 (defn- status-payload [snapshot]
-  (let [db (database/store-view @database (:root snapshot))
+  (let [db (database/store-view @active-store (:root snapshot))
         state (:status (database/database-recovery-state db))
         {:keys [hits misses bytes evictions]} @query-result-cache
         cache (rpc/rpc-record! :rpc/result-cache
@@ -1904,7 +1904,7 @@
 
 (defn- deliver-commit-cohort! [tickets]
   (try
-    (let [db @database
+    (let [db @active-store
           committed (database/commit-cohort! db (mapv :mutation tickets))
           record-count (:record-count committed)
           _ (swap! commit-sequencer-stats
@@ -2020,10 +2020,10 @@
         operation (t/rpcrequest-op request)
         served-version (volatile! nil)]
     (try
-      (when-not @database
+      (when-not @active-store
         (server-fail! :rpc/not-booted "database is not booted" {}))
       (refresh-standby!)
-      (when-not (= space (database/database-space @database))
+      (when-not (= space (database/database-space @active-store))
         (server-fail! :rpc/space-mismatch
                       "request SpaceId does not match the served space" {}))
       (when (= :unsupported (native-op-disposition operation))
@@ -2353,13 +2353,13 @@
         _ (start-connection-admission!)]
     (reset! listener server)
     (println (str "Beagle Store server listening on " bind-host ":" port
-                  " space=" (database/database-space @database)
+                  " space=" (database/database-space @active-store)
                   " role=" (name @server-role)))
     (flush)
     (emit-log-line!
      (str "store-rpc ts=" (Instant/now) " op=server/listen"
           " bind=" bind-host ":" port
-          " space=" (database/database-space @database)
+          " space=" (database/database-space @active-store)
           " role=" (name @server-role)
           " slow-ms=" slow-request-ms
           " quiet=" (if request-log-quiet? 1 0)

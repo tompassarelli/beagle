@@ -363,7 +363,7 @@
                        (wire/rpc-query-request!
                         occurrence-plan (wire/rpc-query-as-of! 1)))
                 _ (.delete (io/file (:path entry)))
-                _ (reset! (var-get #'server/query-archive-databases) {})
+                _ (reset! (var-get #'server/query-history-stores) {})
                 _ (#'server/drop-query-caches!)
                 unavailable (request!
                              port space :rpc/query
@@ -644,7 +644,7 @@
           scan-reference (fn []
                            (filterv #(= predicate (t/triple-t2 %))
                                     (database/live-propositions
-                                     @server/database)))
+                                     @server/active-store)))
           occurrence-reference (fn []
                                  (mapv
                                   (fn [occurrence]
@@ -652,7 +652,7 @@
                                      (t/operationoccurrence-coordinate occurrence)
                                      (t/operationoccurrence-action occurrence)
                                      (t/operationoccurrence-proposition occurrence)))
-                                  (database/occurrences @server/database)))]
+                                  (database/occurrences @server/active-store)))]
       (doseq [batch (partition-all 100 (range fixture-count))]
         (request! port space :rpc/batch
                   (wire/rpc-batch!
@@ -750,7 +750,7 @@
                     (wire/rpc-write! proposition wire/rpc-subject-any nil)))
         (let [reference (filterv #(= :page-dup (t/triple-t2 %))
                                  (database/live-propositions
-                                  @server/database))
+                                  @server/active-store))
               paged (paged-read port space :rpc/scan dup-payload
                                 3 :rpc/triples)]
           (check! "scan pages resume by position, not by row value"
@@ -1051,7 +1051,7 @@
                       (t/triple-t3 (t/triple-t1 coordinate))
                       (t/rpcresponse-served-version version))
                    (some #{proposition}
-                         (database/live-propositions @server/database)))))
+                         (database/live-propositions @server/active-store)))))
     (finally
       (server/shutdown!)
       (deref long-server 3000 nil))))
