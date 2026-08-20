@@ -335,6 +335,7 @@
       (= symbol "native_host_stderr_write_line_v0")
       (= symbol "native_host_filesystem_file_exists_v0")
       (= symbol "native_host_filesystem_abs_path_v0")
+      (= symbol "native_host_store_compile_v0")
       (= symbol "native_host_clock_monotonic_nanoseconds_v0")
       (= symbol "native_host_clock_wall_nanoseconds_v0")
       (= symbol "native_host_time_sleep_milliseconds_v0")))

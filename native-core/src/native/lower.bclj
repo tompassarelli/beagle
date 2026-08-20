@@ -2533,6 +2533,18 @@
 (defn host-filesystem-function-id [(operation String)] core/NativeId
   (lower-id "extern" [(str "host-filesystem-" operation "-v0")]))
 
+(defn host-store-abi-id [] core/NativeId
+  (lower-id "abi" ["host-store-compile-v0"]))
+
+(defn host-store-function-id [] core/NativeId
+  (lower-id "extern" ["host-store-compile-v0"]))
+
+(defn compile-store-request-type-id [] core/NativeId
+  (source-type-id "beagle.compiler-driver/CompileStoreRequest"))
+
+(defn compile-store-response-type-id [] core/NativeId
+  (source-type-id "beagle.compiler-driver/CompileStoreResponse"))
+
 (defn host-whole-input-abi-id [(operation String)] core/NativeId
   (lower-id "abi" [(str "host-whole-input-" operation "-v0")]))
 
@@ -2604,6 +2616,7 @@
       (same-id? candidate (host-filesystem-abi-id "unlock"))
       (same-id? candidate (host-filesystem-abi-id "file-exists"))
       (same-id? candidate (host-filesystem-abi-id "abs-path"))
+      (same-id? candidate (host-store-abi-id))
       (same-id? candidate (host-whole-input-abi-id "read-file-bounded"))
       (same-id? candidate (host-whole-input-abi-id "read-stdin-bounded"))))
 
@@ -10139,6 +10152,28 @@
             (core/->TokenFlowV0 [] [])))
         result-id result-type false))))
 
+(defn lower-host-store-call
+  [(owner core/NativeId)
+   (state BodyStateV0)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (if (not (and (= 1 (count value-types))
+                (same-id? (nth value-types 0)
+                  (compile-store-request-type-id))))
+    (fail-result state
+      "TODO-NATIVE-HOST-STORE-OPERAND: host.store/compile takes one CompileStoreRequest")
+    (let [result-id core/NativeId (state-id state owner "host-store-compile")]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 result-id (compile-store-response-type-id))
+            (host-store-abi-id)
+            values
+            (arena-value-id owner)
+            (core/->TokenFlowV0 [] [])))
+        result-id (compile-store-response-type-id) false))))
+
 (defn lower-whole-input-call
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -17518,6 +17553,9 @@
                 (lower-whole-input-call env owner current callee values
                   value-types)
 
+                (= callee "host.store/compile")
+                (lower-host-store-call owner current values value-types)
+
                 (host-filesystem-callee? callee)
                 (lower-host-filesystem-call owner current callee values value-types)
 
@@ -22085,6 +22123,22 @@
     "v0"
     layouts-digest))
 
+(defn host-store-abi [(layouts-digest String)] core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-store-abi-id)
+    (host-store-function-id)
+    "native_host_store_compile_v0"
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    [(borrowed-abi-value "request" (compile-store-request-type-id))]
+    (core/->AbiValueV0 "response" (compile-store-response-type-id)
+      (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
+    (type-id "LowerFailure")
+    [(allocate-effect-id) (host-filesystem-effect-id)]
+    [(allocate-capability-id) (host-filesystem-capability-id)]
+    "v0"
+    layouts-digest))
+
 (defn host-stdin-abi [(layouts-digest String)] core/AbiDeclV0
   (host-filesystem-abi
     "stdin-read-text-bounded"
@@ -22504,6 +22558,10 @@
               (host-stderr-write-line-abi-id))
           (conj with-stderr-write (host-stderr-write-line-abi digest))
           with-stderr-write)
+        with-store (Vec core/AbiDeclV0)
+        (if (any-function-calls-abi? functions (host-store-abi-id))
+          (conj with-stderr (host-store-abi digest))
+          with-stderr)
         filesystem-abis (Vec core/AbiDeclV0)
         (host-filesystem-abis digest)
         filesystem-base-used Bool
@@ -22520,10 +22578,10 @@
             (host-filesystem-abi-id "file-exists")))
         with-filesystem-base (Vec core/AbiDeclV0)
         (if filesystem-base-used
-          (vec (concat with-stderr
+          (vec (concat with-store
             [(nth filesystem-abis 0) (nth filesystem-abis 1)
              (nth filesystem-abis 2) (nth filesystem-abis 3)]))
-          with-stderr)
+          with-store)
         with-filesystem-parents (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions
               (host-filesystem-abi-id "make-parent-directories"))

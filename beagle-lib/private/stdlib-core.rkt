@@ -158,6 +158,11 @@
     (list (p 'Int))
     #f
     (p 'host.fs/UnlockResult))
+   (q 'host.store 'compile)
+   (type-fn
+    (list (p 'beagle.compiler-driver/CompileStoreRequest))
+    #f
+    (p 'beagle.compiler-driver/CompileStoreResponse))
    (q 'host.clock 'wall-nanoseconds)
    (type-fn '() #f (p 'Int))
    (q 'host.clock 'format-iso8601)
