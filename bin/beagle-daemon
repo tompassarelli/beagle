@@ -93,6 +93,14 @@ send_query() {
         fi
     fi
 
+    # Watching is stateful: a one-shot compiler has no persistent owner for
+    # the watcher threads.  Falling back here also makes the caller wait while
+    # that disposable process recursively checks the entire tree.
+    if [[ ${1:-} == "watch" ]]; then
+        echo '{"ok":false,"schemaVersion":1,"error":"watch requires a running compatible daemon"}'
+        return 1
+    fi
+
     # Fallback: no compatible daemon, or its endpoint did not answer in time.
     # One command followed by EOF yields one response and exits. Appending a
     # second `quit` response then truncating with `head` races pipefail against

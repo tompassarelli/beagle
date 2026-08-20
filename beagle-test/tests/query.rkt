@@ -115,6 +115,29 @@
        source-path)))
   (values status (get-output-string out) (get-output-string err)))
 
+(define (run-daemon-watch-without-live-daemon scratch watched-dir)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (define script
+    (string-append
+     "export BEAGLE_ZO_GATE_QUIET=1; "
+     "export BEAGLE_DAEMON_PORTFILE=\"$1/daemon.port\"; "
+     "export BEAGLE_DAEMON_PIDFILE=\"$1/daemon.pid\"; "
+     "export BEAGLE_DAEMON_IDENTITYFILE=\"$1/daemon.identity\"; "
+     "exec \"$2\" query watch \"$3\""))
+  (define status
+    (parameterize ([current-output-port out]
+                   [current-error-port err])
+      (system*/exit-code
+       (find-executable-path "bash")
+       "-c"
+       script
+       "daemon-watch-fallback-test"
+       (path->string scratch)
+       (path->string DAEMON-CLI)
+       (path->string watched-dir))))
+  (values status (get-output-string out) (get-output-string err)))
+
 (define SRC
   (string-append
    "(ns q)\n"
@@ -311,6 +334,22 @@
          (check-true (string-contains? out "\"signature\":\"(Fn [] Int)\""))
          (check-equal? err ""))))
     (lambda () (delete-directory/files scratch))))
+
+(test-case "daemon CLI never starts a disposable one-shot watcher"
+  (define scratch (make-temporary-file "beagle-daemon-watch-~a" 'directory))
+  (define watched-dir (make-temporary-file "beagle-daemon-watched-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define-values (status out err)
+        (run-daemon-watch-without-live-daemon scratch watched-dir))
+      (check-not-equal? status 0)
+      (check-true
+       (string-contains? out "watch requires a running compatible daemon"))
+      (check-equal? err ""))
+    (lambda ()
+      (delete-directory/files scratch)
+      (delete-directory/files watched-dir))))
 
 ;; The flat pair `[x Float]` is the CANONICAL field surface now, so what the
 ;; parser refuses here is the omitted type, named at the field it belongs to.
