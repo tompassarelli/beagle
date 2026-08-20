@@ -3696,29 +3696,54 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
   (let [raw-facts (slurp facts-path)
         raw-rows (slice/parse-facts raw-facts)
         strict-entry-abi? (boolean (some #{"wasm"} materializers))
-        cache-request
-        (semantic-cache/request
-         raw-facts
-         (System/getenv "BEAGLE_CORE_COMPILER_PROJECTION_ID")
-         (System/getenv "BEAGLE_CORE_SEMANTIC_READ_RULES_ID")
-         entries strict-entry-abi?)
+        cache-admission
+        (semantic-cache/admit-and-identify-query
+         (semantic-cache/->QueryAdmissionRequest
+          raw-facts
+          (System/getenv "BEAGLE_CORE_COMPILER_PROJECTION_ID")
+          (System/getenv "BEAGLE_CORE_SEMANTIC_READ_RULES_ID")
+          entries strict-entry-abi?))
+        cache-result
+        (if (semantic-cache/query-admitted? cache-admission)
+          (semantic-cache/query!
+           (System/getenv "BEAGLE_CORE_SEMANTIC_READ_STORE")
+           (semantic-cache/admitted-query cache-admission))
+          cache-admission)
+        cache-rejection
+        (cond
+          (semantic-cache/query-rejected? cache-admission) cache-admission
+          (semantic-cache/result-rejected? cache-result) cache-result
+          :else nil)
         cached-projected-facts
-        (semantic-cache/query!
-         (System/getenv "BEAGLE_CORE_SEMANTIC_READ_STORE") cache-request)
+        (when (semantic-cache/result-admitted? cache-result)
+          (semantic-cache/admitted-result-payload cache-result))
         projection
-        (when (nil? cached-projected-facts)
+        (when (semantic-cache/result-missing? cache-result)
           (project-entry-rows raw-rows entries strict-entry-abi?))]
     (binding [*out* *err*]
       (println (str "beagle build: semantic-read-cache "
-                    (if (nil? cached-projected-facts) "MISS " "HIT ")
-                    (:key cache-request))))
-    (if (and (nil? cached-projected-facts) (not (:ok? projection)))
+                    (cond
+                      cache-rejection "REJECTED "
+                      (semantic-cache/result-missing? cache-result) "MISS "
+                      :else "HIT ")
+                    (semantic-cache/admitted-query-digest cache-admission))))
+    (cond
+      cache-rejection
+      (do
+        (finish-stage! "source-projection" "REJECTED")
+        {:ok? false
+         :report (str "stage source-projection REJECTED\n"
+                      "semantic-read-cache "
+                      (semantic-cache/rejection-detail cache-rejection) "\n"
+                      "result FAIL semantic-read cache\n")})
+      (and (semantic-cache/result-missing? cache-result) (not (:ok? projection)))
       (do
         (finish-stage! "source-projection" "REJECTED")
         {:ok? false
          :report (str "stage source-projection REJECTED\n"
                       "entry-error " (:detail projection) "\n"
                       "result FAIL entry projection\n")})
+      :else
       (let [projected-facts
             (or cached-projected-facts
                 (rows-text
@@ -3726,16 +3751,24 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                   (:rows projection) (:index projection) (:selected projection)
                   (:ordered-definitions projection)
                   (:dependencies-by-id projection))))
-            _cache-publish
-            (when (nil? cached-projected-facts)
+            cache-publish
+            (when (semantic-cache/result-missing? cache-result)
               (semantic-cache/append!
                (System/getenv "BEAGLE_CORE_SEMANTIC_READ_STORE")
-               cache-request projected-facts))
-            rows (slice/parse-facts projected-facts)
-            _ (spit projected-facts-path projected-facts)
-            configuration ["profile=3" (str "abi=" abi-id)
-                           (str "source-facts-sha256="
-                                (subs (stages/content-digest projected-facts) 7))]
+               (semantic-cache/admitted-query cache-admission) projected-facts))]
+        (if (semantic-cache/result-rejected? cache-publish)
+          (do
+            (finish-stage! "source-projection" "REJECTED")
+            {:ok? false
+             :report (str "stage source-projection REJECTED\n"
+                          "semantic-read-cache "
+                          (semantic-cache/rejection-detail cache-publish) "\n"
+                          "result FAIL semantic-read cache append\n")})
+          (let [rows (slice/parse-facts projected-facts)
+                _ (spit projected-facts-path projected-facts)
+                configuration ["profile=3" (str "abi=" abi-id)
+                               (str "source-facts-sha256="
+                                    (subs (stages/content-digest projected-facts) 7))]
             _finish-projection (finish-stage! "source-projection" "ACCEPTED")
             _start-freeze (start-stage! "source-freeze")
             source (slice/source-program rows "beagle.core" "source.facts")
@@ -3893,7 +3926,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                                                      configuration)]
                           (assoc materialization
                                  :report (str checkpoint-head
-                                           (:report materialization))))))))))))))))
+                                           (:report materialization))))))))))))))))))
 
 (try
   (let [facts-path (System/getenv "BEAGLE_CORE_FACTS")

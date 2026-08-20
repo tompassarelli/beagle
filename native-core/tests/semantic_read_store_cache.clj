@@ -1,6 +1,9 @@
 (ns semantic-read-store-cache-test
-  (:require [semantic-read-store :as cache])
-  (:import [java.nio.file Files Path]
+  (:require [semantic-read-store :as cache]
+            [source-fact-store :as blobs]
+            [store.dev-compile-facts :as compile-facts])
+  (:import [java.nio.charset StandardCharsets]
+           [java.nio.file Files Path]
            [java.nio.file.attribute FileAttribute]))
 
 (defn check! [label condition]
@@ -13,10 +16,13 @@
       (doseq [path (reverse (vec (.toList paths)))]
         (Files/deleteIfExists path)))))
 
-(def scratch
-  (Files/createTempDirectory "beagle-semantic-read-store-"
-                             (make-array FileAttribute 0)))
-(def store (str (.resolve scratch "semantic.storelog")))
+(defn with-store [f]
+  (let [scratch (Files/createTempDirectory "beagle-semantic-read-store-"
+                                           (make-array FileAttribute 0))]
+    (try
+      (f (str (.resolve scratch "semantic.storelog")))
+      (finally (delete-tree! scratch)))))
+
 (def digest-a (str "sha256:" (apply str (repeat 64 "a"))))
 (def digest-b (str "sha256:" (apply str (repeat 64 "b"))))
 (def digest-c (str "sha256:" (apply str (repeat 64 "c"))))
@@ -33,22 +39,67 @@
        "2\tf0\tn\t1\n"))
 (def payload (str source-facts "1\tsemantic-read\tn\t1\n"))
 
-(try
-  (let [request (cache/request source-facts digest-b digest-c
-                               ["demo.core/main"] false)
-        changed-entry (cache/request source-facts digest-b digest-c
-                                     ["demo.core/other"] false)]
-    (check! "normalized query uses separate facts"
-            (and (vector? (:facts request))
-                 (some #(= "query/source-shard" (nth % 1)) (:facts request))
-                 (some #(= "query/interface" (nth % 1)) (:facts request))
-                 (some #(= "query/entry" (nth % 1)) (:facts request))))
-    (check! "first lookup misses" (nil? (cache/query! store request)))
-    (cache/append! store request payload)
-    (check! "exact lookup returns canonical projected facts"
-            (= payload (cache/query! store request)))
-    (check! "different reachability context misses"
-            (nil? (cache/query! store changed-entry)))
-    (println "semantic-read Store cache: miss -> append -> exact hit; entry change misses"))
-  (finally
-    (delete-tree! scratch)))
+(defn admitted-query! []
+  (let [admission
+        (cache/admit-and-identify-query
+         (cache/->QueryAdmissionRequest source-facts digest-b digest-c
+                                        ["demo.core/main"] false))]
+    (check! "query admission succeeds" (cache/query-admitted? admission))
+    (cache/admitted-query admission)))
+
+(defn cache-row [store query]
+  (first
+   (nth
+    (compile-facts/query!
+     store
+     [["typed" (:query-digest query) (:rules-content-id query)
+       (:compiler-projection-content-id query)
+       (:source-facts-content-id query)]])
+    4)))
+
+(with-store
+ (fn [store]
+   (let [query (admitted-query!)
+         facts (:facts query)
+         miss (cache/query! store query)]
+     (check! "admitted query preserves canonical order and entry slot"
+             (and (= (vec (range 1 (inc (count facts)))) (mapv :order facts))
+                  (= [9 :query/entry "query" 0 "demo.core/main"]
+                     (let [entry (last facts)]
+                       [(:order entry) (:relation entry) (:subject entry)
+                        (:slot entry) (:value entry)]))))
+     (check! "first lookup is absence" (cache/result-missing? miss))
+     (check! "append response is admitted"
+             (cache/result-admitted? (cache/append! store query payload)))
+     (let [hit (cache/query! store query)]
+       (check! "exact lookup returns verified payload"
+               (and (cache/result-admitted? hit)
+                    (= payload (cache/admitted-result-payload hit))
+                    (= (cache/sha256 payload)
+                       (cache/admitted-result-payload-content-id hit))))
+       (let [row (cache-row store query)
+             response ["store.dev-compile-facts/query-response-v1" "ONLINE"
+                       "revision" [] [["typed" (:query-digest query)]]]
+             malformed
+             (with-redefs [compile-facts/query! (fn [_ _] response)]
+               (cache/query! store query))
+             duplicate
+             (with-redefs [compile-facts/query!
+                           (fn [_ _]
+                             ["store.dev-compile-facts/query-response-v1" "ONLINE"
+                              "revision" [] [row row]])]
+               (cache/query! store query))]
+         (check! "malformed candidate rejects"
+                 (and (cache/result-rejected? malformed)
+                      (= :result/malformed-candidate (:code malformed))))
+         (check! "duplicate candidates reject"
+                 (and (cache/result-rejected? duplicate)
+                      (= :result/duplicate-candidates (:code duplicate))))
+         (Files/write (blobs/blob-path store (cache/sha256 payload))
+                      (.getBytes "corrupt" StandardCharsets/UTF_8)
+                      (make-array java.nio.file.OpenOption 0))
+         (let [corrupt (cache/query! store query)]
+           (check! "corrupt payload content ID rejects"
+                   (and (cache/result-rejected? corrupt)
+                        (= :result/payload-content-id-mismatch (:code corrupt))))))))
+   (println "semantic-read Store cache: exact hit and malformed/corrupt/duplicate rejection PASS")))
