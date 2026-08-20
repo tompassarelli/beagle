@@ -962,13 +962,13 @@
       [(not (magic-valid! decoder))
        (->DecodeResult nil "Store RPC magic does not match")]
       [:else
-       (let [major (read-u16-le! decoder "major version")
-             minor (read-u16-le! decoder "minor version")
-             kind (read-u8! decoder "packet kind")
+       (let [major Int (read-u16-le! decoder "major version")
+             minor Int (read-u16-le! decoder "minor version")
+             kind Int (read-u8! decoder "packet kind")
              header WireFields_store-rpc-v2-packet-header_request (read-store-rpc-v2-packet-header-request! decoder)
-             flags (wirefields_store-rpc-v2-packet-header_request-flags header)
-             body-length (wirefields_store-rpc-v2-packet-header_request-body-length header)
-             request-id (wirefields_store-rpc-v2-packet-header_request-request-id header)]
+             flags Int (wirefields_store-rpc-v2-packet-header_request-flags header)
+             body-length Int (wirefields_store-rpc-v2-packet-header_request-body-length header)
+             request-id Int (wirefields_store-rpc-v2-packet-header_request-request-id header)]
          (cond
            [(or (not= major 2) (not= minor 0))
             (->DecodeResult nil "Store RPC major/minor version is unsupported")]
