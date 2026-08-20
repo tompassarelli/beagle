@@ -1,6 +1,8 @@
 #lang beagle
 (ns native.bootstrap-contract-fixture
   (:require [beagle.bootstrap-contract :as bootstrap]
+            [beagle.bootstrap-query :as query]
+            [beagle.fact-profile :as profile]
             [beagle.rule-scheduler :as scheduler]))
 
 (def first-artifact-content-id String
@@ -64,39 +66,40 @@
 (defn artifact-present? [facts (Vec scheduler/RuleFactV1)] Bool
   (relation-present? facts bootstrap/compiler-artifact-relation))
 
-(defn bundle-case [] Bool
-  (let [query-key String "71:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:0"
-        initial (Vec scheduler/RuleFactV1)
-        [(scheduler/->RuleFactV1 "query/kind" query-key "compile")
-         (scheduler/->RuleFactV1 "query/source" query-key source-content-id)
-         (scheduler/->RuleFactV1 "query/compiler" query-key
-           bootstrap/default-compiler-context-id)
-         (scheduler/->RuleFactV1 "query/profile" query-key
-           bootstrap/default-profile)
-         (scheduler/->RuleFactV1 "query/target" query-key
-           bootstrap/default-target-id)
-         (scheduler/->RuleFactV1 "query/rules" query-key
-           bootstrap/default-rule-set-content-id)
-         (scheduler/->RuleFactV1 "query/schema" query-key
-           bootstrap/compiler-schema-content-id)]]
-    (match
-      (bootstrap/evaluate-normalized-bundle
-        initial
-        (bootstrap/default-rule-bundle)
-        (fn [rule scheduler/RuleSpecV1
-             rule-facts (Vec scheduler/RuleFactV1)]
-          scheduler/RuleEvaluationV1
-          (evaluate-rule rule rule-facts)))
-      [(bootstrap/NativeBundleRejectedV1 code detail) false]
-      [(bootstrap/NativeBundleEvaluatedV1 raw-result)
-       (let [result scheduler/FixedPointResultV1 raw-result]
-         (match result
-           [(FixedPointReachedV1 reached-facts evidence steps)
-            (and (artifact-present? reached-facts) (> steps 0))]
-           [(FixedPointBoundReachedV1 reached-facts evidence steps bound)
-            false]
-           [(FixedPointFailedV1 reached-facts evidence steps error)
-            false]))])))
+(defn admitted-query-case [] Bool
+  (let [request profile/QueryAdmissionRequest
+        (profile/->QueryAdmissionRequest
+          source-content-id
+          bootstrap/default-compiler-context-id
+          bootstrap/default-profile
+          [bootstrap/default-target-id]
+          bootstrap/default-rule-set-content-id
+          bootstrap/compiler-schema-content-id)]
+    (match (profile/admit-and-identify-query request)
+      [(QueryRejected code detail) false]
+      [(QueryAdmitted admitted)
+       (let [closure profile/AdmittedQueryClosure admitted]
+         (match
+           (query/evaluate-admitted-query
+             closure
+             (fn [rule scheduler/RuleSpecV1
+                  rule-facts (Vec scheduler/RuleFactV1)]
+               scheduler/RuleEvaluationV1
+               (evaluate-rule rule rule-facts)))
+           [(AdmittedQueryRejectedV1 code detail) false]
+           [(AdmittedQueryEvaluatedV1 query-digest raw-result)
+            (let [result scheduler/FixedPointResultV1 raw-result]
+              (match result
+                [(FixedPointReachedV1 reached-facts evidence steps)
+                 (and
+                   (= query-digest
+                     (profile/admittedqueryclosure-query-digest closure))
+                   (artifact-present? reached-facts)
+                   (> steps 0))]
+                [(FixedPointBoundReachedV1 reached-facts evidence steps bound)
+                 false]
+                [(FixedPointFailedV1 reached-facts evidence steps error)
+                 false]))]))])))
 
 (defn identity-case [] Bool
   (and
@@ -132,4 +135,4 @@
             (bootstrap/nativeartifactlayoutv1-lineage-path layout)))))
 
 (defn main [] Int
-  (if (and (identity-case) (bundle-case) (lineage-case)) 0 1))
+  (if (and (identity-case) (admitted-query-case) (lineage-case)) 0 1))
