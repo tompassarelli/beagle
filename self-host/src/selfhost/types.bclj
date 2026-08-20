@@ -131,15 +131,15 @@
     (union-type? t)
       (let [members (get t "members")
             all-prim (every? prim? members)
-            names (if all-prim (mapv (fn [m Any] String (get m "name")) members) [])]
+            names (if all-prim (mapv (fn [(m Any)] String (get m "name")) members) [])]
         (cond
           (and all-prim (= (count members) 2)
                (>= (index-of2 names "Int") 0) (>= (index-of2 names "Float") 0))
             "Number"
           (and (= (count members) 2)
-               (some (fn [m Any] Bool
+               (some (fn [(m Any)] Bool
                        (and (prim? m) (= (get m "name") "Nil"))) members))
-            (let [non-nil (first (filter (fn [m Any] Bool
+            (let [non-nil (first (filter (fn [(m Any)] Bool
                                             (not (and (prim? m) (= (get m "name") "Nil")))) members))]
               (let [non-nil-text (type->string non-nil)]
                 (if (reader-atom-type-text? non-nil-text)
@@ -154,7 +154,7 @@
       (let [vars (get t "vars")
             body (get t "body")
             bounds (get t "bounds")
-            var-strs (mapv (fn [v String] String
+            var-strs (mapv (fn [(v String)] String
                               (let [b (if (nil? bounds) nil (get bounds v))]
                                 (if (nil? b)
                                   v
@@ -167,7 +167,7 @@
 ;; --- unqualify-type-name -----------------------------------------------------
 
 (defn unqualify-name [(name String)] String
-  (let [idx Int (str-index-of name "/")]
+  (let [(idx Int) (str-index-of name "/")]
     (if (= idx -1)
       name
       (substring2 name (+ idx 1) (count name)))))
@@ -183,12 +183,12 @@
     (and (app-type? a) (app-type? b))
       (and (= (get a "name") (get b "name"))
            (= (count (get a "args")) (count (get b "args")))
-           (every? (fn [i Int] Bool
+           (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get a "args") i) (nth (get b "args") i)))
                    (range (count (get a "args")))))
     (and (union-type? a) (union-type? b))
       (and (= (count (get a "members")) (count (get b "members")))
-           (every? (fn [i Int] Bool
+           (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get a "members") i) (nth (get b "members") i)))
                    (range (count (get a "members")))))
     (and (var-type? a) (var-type? b))
@@ -211,22 +211,22 @@
       (type-compatible? (get actual "body") expected)
 
     (and (union-type? actual) (union-type? expected))
-      (every? (fn [a-alt Any] Bool
-                (some (fn [e-alt Any] Bool (type-compatible? a-alt e-alt))
+      (every? (fn [(a-alt Any)] Bool
+                (some (fn [(e-alt Any)] Bool (type-compatible? a-alt e-alt))
                       (get expected "members")))
               (get actual "members"))
 
     (union-type? expected)
-      (some (fn [alt Any] Bool (type-compatible? actual alt)) (get expected "members"))
+      (some (fn [(alt Any)] Bool (type-compatible? actual alt)) (get expected "members"))
 
     (union-type? actual)
-      (every? (fn [alt Any] Bool (type-compatible? alt expected)) (get actual "members"))
+      (every? (fn [(alt Any)] Bool (type-compatible? alt expected)) (get actual "members"))
 
     (and (prim? actual) (prim? expected))
       (or (= (get actual "name") (get expected "name"))
           (and (= (get actual "name") "Int") (= (get expected "name") "Float"))
           (and (= (get actual "name") "Int")
-               (boolean (some (fn [name String] Bool (= (get expected "name") name))
+               (boolean (some (fn [(name String)] Bool (= (get expected "name") name))
                               ["I8" "I16" "I32" "U8" "U16" "U32" "U64" "F32"])))
           (and (= (get actual "name") "Float") (= (get expected "name") "F32"))
           (= (unqualify-name (get actual "name"))
@@ -241,10 +241,10 @@
             en (count ep)]
         (and (<= an en)
              (or (= an en) (some? ar))
-             (every? (fn [i Int] Bool (type-compatible? (nth ep i) (nth ap i)))
+             (every? (fn [(i Int)] Bool (type-compatible? (nth ep i) (nth ap i)))
                      (range an))
              (or (nil? ar)
-                 (every? (fn [p Any] Bool (type-compatible? p ar))
+                 (every? (fn [(p Any)] Bool (type-compatible? p ar))
                          (drop an ep)))
              (or (nil? er)
                  (and (some? ar) (type-compatible? er ar)))
@@ -255,7 +255,7 @@
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "Atom") (= (get expected "name") "Atom"))
       (and (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [i Int] Bool
+           (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
 
@@ -263,7 +263,7 @@
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "Buffer") (= (get expected "name") "Buffer"))
       (and (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [i Int] Bool
+           (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
 
@@ -271,7 +271,7 @@
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "JsMap") (= (get expected "name") "JsMap"))
       (and (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [i Int] Bool
+           (every? (fn [(i Int)] Bool
                      (type-invariant-equal? (nth (get actual "args") i)
                        (nth (get expected "args") i)))
              (range (count (get actual "args")))))
@@ -280,25 +280,25 @@
     (and (app-type? actual) (= (get actual "name") "HVec")
          (app-type? expected) (= (get expected "name") "Vec")
          (= 1 (count (get expected "args"))))
-      (every? (fn [a Any] Bool
+      (every? (fn [(a Any)] Bool
                 (type-compatible? a (nth (get expected "args") 0)))
               (get actual "args"))
 
     (and (app-type? expected) (= (get expected "name") "Dyn"))
       (if (and (app-type? actual) (= (get actual "name") "Dyn"))
         (and (= (count (get actual "args")) (count (get expected "args")))
-             (every? (fn [i Int] Bool
+             (every? (fn [(i Int)] Bool
                        (type-invariant-equal? (nth (get actual "args") i)
                          (nth (get expected "args") i)))
                (range (count (get actual "args")))))
-        (boolean (some (fn [alt Any] Bool (type-compatible? actual alt))
+        (boolean (some (fn [(alt Any)] Bool (type-compatible? actual alt))
                    (get expected "args"))))
 
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
            (every? identity
-             (map-indexed (fn [i Int a Any] Bool
+             (map-indexed (fn [(i Int) (a Any)] Bool
                             (type-compatible? a (nth (get expected "args") i)))
                           (get actual "args"))))
 
@@ -319,15 +319,15 @@
       (make-var (get t "name"))
     (= (get t "kind") "fn")
       {"kind" "fn"
-       "params" (mapv (fn [p Any] Any (varize-type p vars)) (get t "params"))
+       "params" (mapv (fn [(p Any)] Any (varize-type p vars)) (get t "params"))
        "rest" (if (nil? (get t "rest")) nil (varize-type (get t "rest") vars))
        "ret" (varize-type (get t "ret") vars)}
     (= (get t "kind") "app")
       {"kind" "app" "name" (get t "name")
-       "args" (mapv (fn [a Any] Any (varize-type a vars)) (get t "args"))}
+       "args" (mapv (fn [(a Any)] Any (varize-type a vars)) (get t "args"))}
     (= (get t "kind") "union")
       {"kind" "union"
-       "members" (mapv (fn [m Any] Any (varize-type m vars)) (get t "members"))}
+       "members" (mapv (fn [(m Any)] Any (varize-type m vars)) (get t "members"))}
     :else t))
 
 ;; A forall var entry is a bare name (unbounded) or (T <: Bound).
@@ -373,7 +373,7 @@
                               (= (nth vars-form 0) "#%brackets"))
                        (subvec vars-form 1)
                        vars-form)
-            reserved? (some (fn [entry Any] Bool
+            reserved? (some (fn [(entry Any)] Bool
                               (= (if (string? entry)
                                    entry
                                    (if (and (vector? entry) (> (count entry) 0))
@@ -381,9 +381,9 @@
                                      nil))
                                  "Fn"))
                             raw-vars)
-            vars (vec (filter (fn [x Any] Bool (not (nil? x)))
+            vars (vec (filter (fn [(x Any)] Bool (not (nil? x)))
                               (mapv forall-entry-var raw-vars)))
-            bounds (reduce (fn [acc Any e Any] Any
+            bounds (reduce (fn [(acc Any) (e Any)] Any
                              (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:")
                                       (string? (nth e 0)))
                                (assoc acc (nth e 0) (varize-type (parse-type! (nth e 2)) vars))
@@ -502,17 +502,17 @@
 
     (fn-type? t)
       (make-fn
-        (mapv (fn [p Any] Any (apply-type-bindings p bindings)) (get t "params"))
+        (mapv (fn [(p Any)] Any (apply-type-bindings p bindings)) (get t "params"))
         (if (nil? (get t "rest")) nil (apply-type-bindings (get t "rest") bindings))
         (apply-type-bindings (get t "ret") bindings))
 
     (app-type? t)
       (make-app (get t "name")
-        (mapv (fn [a Any] Any (apply-type-bindings a bindings)) (get t "args")))
+        (mapv (fn [(a Any)] Any (apply-type-bindings a bindings)) (get t "args")))
 
     (union-type? t)
       (make-union
-        (mapv (fn [m Any] Any (apply-type-bindings m bindings)) (get t "members")))
+        (mapv (fn [(m Any)] Any (apply-type-bindings m bindings)) (get t "members")))
 
     (poly-type? t) t
 
@@ -674,17 +674,17 @@
     (= (parse-type! ["Fn" ["#%brackets" "Int" "&" "String"] "Bool"])
        (make-fn [(make-prim "Int")] (make-prim "String") (make-prim "Bool"))))
   (expect! "pt: retired arrow fn rejects"
-    (let [before Int (count (type-parse-errors))
+    (let [(before Int) (count (type-parse-errors))
           invalid (parse-type! ["#%brackets" "Int" "->" "String"])]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: malformed Fn rejects"
-    (let [before Int (count (type-parse-errors))
+    (let [(before Int) (count (type-parse-errors))
           invalid (parse-type! ["Fn" "Int" "String"])]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: bare Fn rejects"
-    (let [before Int (count (type-parse-errors))
+    (let [(before Int) (count (type-parse-errors))
           invalid (parse-type! "Fn")]
       (and (= (get invalid "kind") "invalid")
            (= (count (type-parse-errors)) (+ before 1)))))

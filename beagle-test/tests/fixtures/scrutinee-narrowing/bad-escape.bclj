@@ -6,7 +6,7 @@
   (Rect [(width Int) (height String)]))
 
 (defn area [(s Shape)] Int
-  (let [first Int (match s
+  (let [(first Int) (match s
                      [(Circle r) (circle-radius s)]
                      [(Rect w h) w])]
     (+ first (circle-radius s))))

@@ -4,8 +4,8 @@
 
 (defn finish
   [(pid Int) (stdout-fd Int) (expected-status Int) (result Int)] Int
-  (let [close-status Int (host.process/close stdout-fd)
-        wait-status Int (host.process/wait pid)]
+  (let [(close-status Int) (host.process/close stdout-fd)
+        (wait-status Int) (host.process/wait pid)]
     (if (and (= close-status 0) (= wait-status expected-status))
       result
       (+ result 100))))
@@ -40,7 +40,7 @@
      (match (host.process/read-line-bounded stdout-fd 4)
        [(host.process/ReadLineOk line eof)
         (if (and (= line "tick") (not eof))
-          (let [sleep-status Int (host.time/sleep-milliseconds 5)]
+          (let [(sleep-status Int) (host.time/sleep-milliseconds 5)]
             (if (= sleep-status 0)
               (finish pid stdout-fd 269 0)
               (finish pid stdout-fd 269 2)))

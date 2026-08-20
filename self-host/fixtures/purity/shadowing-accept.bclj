@@ -8,7 +8,7 @@
   (writer! value))
 
 (defn invoke-nested [(writer! Any) (value Any)] Any
-  (let [writer! (fn [item Any] Any item)]
+  (let [writer! (fn [(item Any)] Any item)]
     (writer! value)))
 
 (defn invoke-letfn [(value Any)] Any

@@ -62,7 +62,7 @@
   (if (some? (rr/refers-target ctx view BOUND REFERS node))
     (if (nil? node) [] [node])
     (if (= "list" (rr/kind-of ctx view node))
-      (reduce (fn [acc (Vec Any) ch Any] (Vec Any) (into acc (call-refs ctx view BOUND REFERS ch)))
+      (reduce (fn [(acc (Vec Any)) (ch Any)] (Vec Any) (into acc (call-refs ctx view BOUND REFERS ch)))
         []
         (rr/ordered-children ctx node))
       [])))
@@ -81,7 +81,7 @@
    (file-module-context Any)
    (ents-of Any)]
   (Map Any Any)
-  (reduce (fn [acc (Map Any Any) src String] (Map Any Any) (let [module-context (get file-module-context src {}) label (src-label ctx view src (get ents-of src []))] (reduce (fn
+  (reduce (fn [(acc (Map Any Any)) (src String)] (Map Any Any) (let [module-context (get file-module-context src {}) label (src-label ctx view src (get ents-of src []))] (reduce (fn
                                                                                                                                                                      [(a (Map Any Any))
                                                                                                                                                                       (nm Any)]
                                                                                                                                                                      (Map Any Any)
@@ -98,7 +98,7 @@
    (ents-of Any)
    (defn-meta (Map Any Any))]
   (Vec Any)
-  (reduce (fn [acc (Vec Any) src String] (Vec Any) (reduce (fn
+  (reduce (fn [(acc (Vec Any)) (src String)] (Vec Any) (reduce (fn
                                                                  [(a (Vec Any))
                                                                   (form Any)]
                                                                  (Vec Any)
@@ -136,7 +136,7 @@
    (srcs (Vec String))
    (ents-of Any)]
   (Map Any Keyword)
-  (reduce (fn [acc (Map Any Keyword) src String] (Map Any Keyword) (reduce (fn
+  (reduce (fn [(acc (Map Any Keyword)) (src String)] (Map Any Keyword) (reduce (fn
                                                                                  [(a (Map Any Keyword))
                                                                                   (f Any)]
                                                                                  (Map Any Keyword)
@@ -155,7 +155,7 @@
 ;; is built straight from propositions and no id interning (and no inverse map)
 ;; stands between a query answer and the identity it names.
 (defn- edge-propositions [(edges (Vec Any)) (predicate String)] (Vec Any)
-  (mapv (fn [e Any] Any (t/triple (nth e 0) predicate (nth e 1))) edges))
+  (mapv (fn [(e Any)] Any (t/triple (nth e 0) predicate (nth e 1))) edges))
 
 (defn blast-closure! [(edges (Vec Any))] (Map Keyword Any)
   (let [db (d/run-rules! (edge-propositions edges CALLS-DEFN)
@@ -183,7 +183,7 @@
                                                                                 [(leaf Any)]
                                                                                 Any
                                                                                 (t/triple leaf (if (= :private (get privacy leaf)) IS-PRIV IS-ROOT) leaf)) (vec (set (keys defn-meta)))) db (d/run-strata-db! (d/edb (vec (concat (edge-propositions edges CALLS-DEFN) marks))) [[(d/rule "live" [(d/variable "x")] [(d/relation-literal d/triple-relation [(d/variable "x") (d/constant IS-ROOT) (d/variable "x")])]) (d/rule "live" [(d/variable "y")] [(d/relation-literal d/triple-relation [(d/variable "x") (d/constant CALLS-DEFN) (d/variable "y")]) (d/relation-literal "live" [(d/variable "x")])])] [(d/rule "dead" [(d/variable "p")] [(d/relation-literal d/triple-relation [(d/variable "p") (d/constant IS-PRIV) (d/variable "p")]) (d/negated-literal "live" [(d/variable "p")])])]])]
-    (set (vec (keep (fn [row Any] Any (nth row 0)) (vec (d/facts db "dead")))))))
+    (set (vec (keep (fn [(row Any)] Any (nth row 0)) (vec (d/facts db "dead")))))))
 
 ;; ------------------------------------------------------------ call-edges ---
 

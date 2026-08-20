@@ -70,7 +70,7 @@
    (spelling String)
    (identity String)]
   (Map String String)
-  (let [prior String? (get spellings spelling)]
+  (let [(prior String?) (get spellings spelling)]
     (if (and (some? prior) (not (= prior identity)))
       (throw (ex-info (str "predicate spelling collision: " spelling
                            " resolves to both " prior " and " identity)
@@ -78,16 +78,16 @@
       (assoc spellings spelling identity))))
 
 (defn- predicate-registry [(triples (Vec t/Triple))] PredicateRegistry
-  (let [registry-triples (Vec t/Triple) (filterv identity-triple? triples)
-        canonical (Map String String)
+  (let [(registry-triples (Vec t/Triple)) (filterv identity-triple? triples)
+        (canonical (Map String String))
         (reduce
-         (fn [names (Map String String) value t/Triple] (Map String String)
+         (fn [(names (Map String String)) (value t/Triple)] (Map String String)
            (if (= "predicate_name" (triple-predicate value))
              (assoc names (triple-left value) (triple-right value))
              names))
          {}
          registry-triples)
-        by-name (Map String String)
+        (by-name (Map String String))
         (reduce
          (fn
            [(spellings (Map String String))
@@ -106,13 +106,13 @@
 (defn- predicate-id [(registry PredicateRegistry) (spelling String)] String
   (if (str/starts-with? spelling "@")
     spelling
-    (let [identity String?
+    (let [(identity String?)
           (get (predicateregistry-by-name registry) spelling)]
       (if (some? identity) identity (str "@" spelling)))))
 
 (defn- predicate-name [(registry PredicateRegistry) (spelling String)] String
-  (let [identity String (predicate-id registry spelling)
-        canonical String?
+  (let [(identity String) (predicate-id registry spelling)
+        (canonical String?)
         (get (predicateregistry-canonical registry) identity)]
     (if (some? canonical) canonical (strip-at identity))))
 
@@ -125,7 +125,7 @@
   (let [identity (predicate-id registry predicate)
         property-id (predicate-id registry property)]
     (reduce
-     (fn [found String? value t/Triple] String?
+     (fn [(found String?) (value t/Triple)] String?
        (if (and (= identity (predicate-id registry (triple-left value)))
                 (= property-id
                    (predicate-id registry (triple-predicate value))))
@@ -148,17 +148,17 @@
    (triples (Vec t/Triple))
    (predicate String)]
   String
-  (let [explicit String?
+  (let [(explicit String?)
         (predicate-property-value registry triples predicate "value_kind")]
     (if (some? explicit)
       explicit
       (if (fallback-ref? registry predicate) "ref" "literal"))))
 
 (defn- normalize-predicate-triples [(triples (Vec t/Triple))] (Vec t/Triple)
-  (let [registry PredicateRegistry (predicate-registry triples)
-        normalized (Vec t/Triple)
+  (let [(registry PredicateRegistry) (predicate-registry triples)
+        (normalized (Vec t/Triple))
         (mapv
-         (fn [value t/Triple] t/Triple
+         (fn [(value t/Triple)] t/Triple
            (let [predicate (predicate-name registry (triple-predicate value))
                  right (triple-right value)
                  normalized-right
@@ -171,7 +171,7 @@
     ;; Streaming consumers must see identity declarations before aliases are
     ;; used, even though the occurrence fold itself accepts either order.
     (vec (concat (filterv identity-triple? normalized)
-                 (filterv (fn [value t/Triple] Bool
+                 (filterv (fn [(value t/Triple)] Bool
                             (not (identity-triple? value)))
                           normalized)))))
 
@@ -195,8 +195,8 @@
           (warn (str path " — no @subject line found in head; dropping " n
                      " head line(s)")))
         [])
-      (let [subject String (str/trim (nth lines subject-index))
-            triples (Vec t/Triple)
+      (let [(subject String) (str/trim (nth lines subject-index))
+            (triples (Vec t/Triple))
             (loop [i Int (+ subject-index 1) acc (Vec t/Triple) []]
               (if (>= i n)
                 acc
@@ -209,7 +209,7 @@
                                    (t/triple subject
                                              (nth pair 0)
                                              (parse-obj (nth pair 1))))))))))
-            body String (doc-body doc)]
+            (body String) (doc-body doc)]
         (if (str/blank? body)
           triples
           (conj triples (t/triple subject "body" body)))))))
@@ -232,10 +232,10 @@
                     [(store/assert-operation (nth triples position))]))))))
 
 (defn load-corpus [(threads-dir String)] (Vec t/TransactionRecord)
-  (let [files (Vec String) (store.rt/list-md threads-dir)
-        triples (Vec t/Triple)
+  (let [(files (Vec String)) (store.rt/list-md threads-dir)
+        (triples (Vec t/Triple))
         (reduce
-         (fn [acc (Vec t/Triple) path String] (Vec t/Triple)
+         (fn [(acc (Vec t/Triple)) (path String)] (Vec t/Triple)
            (vec (concat acc (safe-file->triples path))))
          []
          files)]

@@ -30,4 +30,4 @@
   port)
 
 (defn request-ports [(requests (Vec Request))] (Vec Int)
-  (mapv (fn [{:keys [port]} Request] Int port) requests))
+  (mapv (fn [({:keys [port]} Request)] Int port) requests))

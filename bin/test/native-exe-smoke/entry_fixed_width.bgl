@@ -17,7 +17,7 @@
 (defn keep-u8 [(value U8)] U8 value)
 
 (defn layout-entry [] Int
-  (let [packed PackedValue
+  (let [(packed PackedValue)
         (->PackedValue (keep-i32 -42000) (keep-u32 4000000000)
           (keep-i16 -1234) (keep-u8 255))]
     (if (and (= packed packed)

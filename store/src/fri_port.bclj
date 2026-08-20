@@ -47,7 +47,7 @@
           :invalid-cache-source)))
 
 (defn- hex [(bytes Any)] String
-  (apply str (map (fn [value Any] String
+  (apply str (map (fn [(value Any)] String
                     (format "%02x" (bit-and value 255)))
                   bytes)))
 
@@ -59,12 +59,12 @@
 
 (defn- strict-utf8 [(value String) (context String)] Any
   (try
-    (let [encoder Any
+    (let [(encoder Any)
           (doto (.newEncoder StandardCharsets/UTF_8)
             (.onMalformedInput CodingErrorAction/REPORT)
             (.onUnmappableCharacter CodingErrorAction/REPORT))
-          buffer ByteBuffer (.encode encoder (CharBuffer/wrap value))
-          bytes Any (byte-array (.remaining buffer))]
+          (buffer ByteBuffer) (.encode encoder (CharBuffer/wrap value))
+          (bytes Any) (byte-array (.remaining buffer))]
       (.get buffer bytes)
       bytes)
     (catch (error java.nio.charset.CharacterCodingException)
@@ -72,7 +72,7 @@
 
 (defn- strict-utf8-string [(bytes Any) (context String)] String
   (try
-    (let [decoder Any
+    (let [(decoder Any)
           (doto (.newDecoder StandardCharsets/UTF_8)
             (.onMalformedInput CodingErrorAction/REPORT)
             (.onUnmappableCharacter CodingErrorAction/REPORT))]
@@ -100,13 +100,13 @@
     nil))
 
 (defn- write-u32-le! [(out Any) (value Int) (context String)] Nil
-  (let [checked Int (require-u32 value context)]
+  (let [(checked Int) (require-u32 value context)]
     (doseq [position (range 4)]
       (write-u8! out (unsigned-bit-shift-right checked (* position 8))))
     nil))
 
 (defn- write-i64-le! [(out Any) (value Int) (context String)] Nil
-  (let [checked Int (require-i64 value context)]
+  (let [(checked Int) (require-i64 value context)]
     (doseq [position (range 8)]
       (write-u8! out (unsigned-bit-shift-right checked (* position 8))))
     nil))
@@ -119,8 +119,8 @@
 (defn- read-u8! [(buffer ByteBuffer) (context String)] Int
   (do
     (ensure-remaining! buffer 1 context)
-    (let [position Int (.position buffer)
-          value Any (.get buffer position)]
+    (let [(position Int) (.position buffer)
+          (value Any) (.get buffer position)]
       (.position buffer (inc position))
       (bit-and 255 (int value)))))
 
@@ -138,18 +138,18 @@
 (defn- read-fixed! [(buffer ByteBuffer) (amount Int) (context String)] Any
   (do
     (ensure-remaining! buffer amount context)
-    (let [bytes Any (byte-array amount)]
+    (let [(bytes Any) (byte-array amount)]
       (.get buffer bytes)
       bytes)))
 
 (defn- write-sized-text! [(out Any) (value String) (context String)] Nil
-  (let [bytes Any (strict-utf8 value context)]
+  (let [(bytes Any) (strict-utf8 value context)]
     (write-u32-le! out (alength bytes) context)
     (.write out bytes)
     nil))
 
 (defn- read-sized-bytes! [(buffer ByteBuffer) (context String)] Any
-  (let [amount Int (read-u32-le! buffer context)]
+  (let [(amount Int) (read-u32-le! buffer context)]
     (if (> amount 2147483647)
       (fail (str "fri: " context " length exceeds JVM bounds") :invalid-fri-cache)
       (read-fixed! buffer amount context))))
@@ -187,7 +187,7 @@
     [(false? term) (write-u8! out 4)]
     [(true? term) (write-u8! out 5)]
     [(keyword? term)
-     (let [spelling String (subs (str term) 1)]
+     (let [(spelling String) (subs (str term) 1)]
        (when (empty? spelling)
          (fail "fri: TermCodecV1 Keyword is empty" :invalid-fri-cache))
        (write-u8! out 6)
@@ -204,7 +204,7 @@
   (do
     (when (> depth MAX-TERM-DEPTH)
       (fail "fri: TermCodecV1 depth exceeds 256" :invalid-fri-cache))
-    (let [tag Int (read-u8! buffer "Term tag")]
+    (let [(tag Int) (read-u8! buffer "Term tag")]
       (cond
         [(= tag 1) (read-sized-text! buffer "String atom")]
         [(= tag 2) (read-i64-le! buffer "Int atom")]
@@ -212,7 +212,7 @@
         [(= tag 4) false]
         [(= tag 5) true]
         [(= tag 6)
-         (let [spelling String (read-sized-text! buffer "Keyword atom")]
+         (let [(spelling String) (read-sized-text! buffer "Keyword atom")]
            (if (empty? spelling)
              (fail "fri: TermCodecV1 Keyword is empty" :invalid-fri-cache)
              (keyword spelling)))]
@@ -226,14 +226,14 @@
         [:else (fail "fri: unknown TermCodecV1 tag" :invalid-fri-cache)]))))
 
 (defn- encode-term-v1! [(term Any)] Any
-  (let [out ByteArrayOutputStream (ByteArrayOutputStream.)]
+  (let [(out ByteArrayOutputStream) (ByteArrayOutputStream.)]
     (write-term-v1! out term 0)
     (.toByteArray out)))
 
 (defn- decode-term-v1! [(bytes Any)] Any
-  (let [buffer ByteBuffer
+  (let [(buffer ByteBuffer)
         (doto (ByteBuffer/wrap bytes) (.order ByteOrder/LITTLE_ENDIAN))
-        term Any (read-term-v1! buffer 0)]
+        (term Any) (read-term-v1! buffer 0)]
     (if (= 0 (.remaining buffer))
       term
       (fail "fri: trailing bytes inside TermCodecV1 row" :invalid-fri-cache))))
@@ -265,30 +265,30 @@
 (defn- triple-handle [(position Int)] Int (inc (* 2 position)))
 
 (defn- index-data [(rows Any)] Any
-  (let [with-handles Any
-        (map-indexed (fn [position Int row t/TripleRow] Any
+  (let [(with-handles Any)
+        (map-indexed (fn [(position Int) (row t/TripleRow)] Any
                        [(triple-handle position) row])
                      rows)]
-    [(vec (sort (map (fn [entry Any] Any
+    [(vec (sort (map (fn [(entry Any)] Any
                        [(t/triplerow-t1 (nth entry 1)) (nth entry 0)])
                      with-handles)))
-     (vec (sort (map (fn [entry Any] Any
+     (vec (sort (map (fn [(entry Any)] Any
                        [(t/triplerow-t2 (nth entry 1)) (nth entry 0)])
                      with-handles)))
-     (vec (sort (map (fn [entry Any] Any
+     (vec (sort (map (fn [(entry Any)] Any
                        [(t/triplerow-t3 (nth entry 1)) (nth entry 0)])
                      with-handles)))
-     (vec (sort (map (fn [entry Any] Any
+     (vec (sort (map (fn [(entry Any)] Any
                        [(t/triplerow-t1 (nth entry 1))
                         (t/triplerow-t2 (nth entry 1))
                         (nth entry 0)])
                      with-handles)))
-     (vec (sort (map (fn [entry Any] Any
+     (vec (sort (map (fn [(entry Any)] Any
                        [(t/triplerow-t2 (nth entry 1))
                         (t/triplerow-t3 (nth entry 1))
                         (nth entry 0)])
                      with-handles)))
-     (vec (sort (map (fn [entry Any] Any
+     (vec (sort (map (fn [(entry Any)] Any
                        [(t/triplerow-t1 (nth entry 1))
                         (t/triplerow-t3 (nth entry 1))
                         (nth entry 0)])
@@ -297,18 +297,18 @@
 (declare atom-value resolve-handle)
 
 (defn- write-term-row! [(out Any) (term Any)] Nil
-  (let [bytes Any (encode-term-v1! term)]
+  (let [(bytes Any) (encode-term-v1! term)]
     (write-u32-le! out (alength bytes) "Term row length")
     (.write out bytes)
     nil))
 
 (defn- write-payload! [(dump t/TermStoreDump)] Any
-  (let [out ByteArrayOutputStream (ByteArrayOutputStream.)
-        atoms Any (t/termstoredump-atoms dump)
-        triples Any (t/termstoredump-triples dump)
-        transactions Any (t/termstoredump-transactions dump)
-        operations Any (t/termstoredump-operations dump)
-        indexes Any (index-data triples)]
+  (let [(out ByteArrayOutputStream) (ByteArrayOutputStream.)
+        (atoms Any) (t/termstoredump-atoms dump)
+        (triples Any) (t/termstoredump-triples dump)
+        (transactions Any) (t/termstoredump-transactions dump)
+        (operations Any) (t/termstoredump-operations dump)
+        (indexes Any) (index-data triples)]
     (write-u16-le! out store/term-store-dump-version)
     (write-u16-le! out PAYLOAD-FLAGS)
     (write-i64-le! out (t/termstoredump-next-sequence dump) "next sequence")
@@ -336,7 +336,7 @@
     (.toByteArray out)))
 
 (defn- read-count! [(buffer ByteBuffer) (context String) (minimum-row Int)] Int
-  (let [row-count Int (read-u32-le! buffer context)]
+  (let [(row-count Int) (read-u32-le! buffer context)]
     (if (or (> row-count 2147483647)
             (> (* row-count minimum-row) (.remaining buffer)))
       (fail (str "fri: impossible " context) :invalid-fri-cache)
@@ -346,9 +346,9 @@
   (decode-term-v1! (read-sized-bytes! buffer "Term row")))
 
 (defn- read-atoms! [(buffer ByteBuffer)] Any
-  (let [row-count Int (read-count! buffer "AtomRow count" 5)]
-    (mapv (fn [position Int] t/AtomRow
-            (let [term Any (read-term-row! buffer)]
+  (let [(row-count Int) (read-count! buffer "AtomRow count" 5)]
+    (mapv (fn [(position Int)] t/AtomRow
+            (let [(term Any) (read-term-row! buffer)]
               (if (t/triple? term)
                 (fail "fri: AtomRow decoded as Triple" :invalid-fri-cache)
                 (atom-row term))))
@@ -356,7 +356,7 @@
 
 (defn- initial-handles [(atoms Any)] Any
   (into {}
-        (map-indexed (fn [position Int row t/AtomRow] Any
+        (map-indexed (fn [(position Int) (row t/AtomRow)] Any
                        [(atom-value row) (atom-handle position)])
                      atoms)))
 
@@ -367,16 +367,16 @@
           :invalid-fri-cache)))
 
 (defn- read-triples! [(buffer ByteBuffer) (atoms Any)] Any
-  (let [row-count Int (read-count! buffer "TripleRow count" 8)]
+  (let [(row-count Int) (read-count! buffer "TripleRow count" 8)]
     (loop [position Int 0 rows Any [] handles Any (initial-handles atoms)]
       (if (>= position row-count)
         rows
-        (let [term Any (read-term-row! buffer)]
+        (let [(term Any) (read-term-row! buffer)]
           (if (not (t/triple? term))
             (fail "fri: TripleRow decoded as Atom" :invalid-fri-cache)
             (if (contains? handles term)
               (fail "fri: duplicate structural TripleRow" :invalid-fri-cache)
-              (let [row t/TripleRow
+              (let [(row t/TripleRow)
                     (t/->TripleRow
                      (required-handle handles (t/triple-t1 term))
                      (required-handle handles (t/triple-t2 term))
@@ -386,8 +386,8 @@
                        (assoc handles term (triple-handle position)))))))))))
 
 (defn- read-transactions! [(buffer ByteBuffer)] Any
-  (let [row-count Int (read-count! buffer "TransactionRow count" 24)]
-    (mapv (fn [position Int] t/TransactionRow
+  (let [(row-count Int) (read-count! buffer "TransactionRow count" 24)]
+    (mapv (fn [(position Int)] t/TransactionRow
             (t/->TransactionRow
              (read-i64-le! buffer "transaction sequence")
              (read-i64-le! buffer "first operation")
@@ -395,8 +395,8 @@
           (vec (range row-count)))))
 
 (defn- read-operations! [(buffer ByteBuffer)] Any
-  (let [row-count Int (read-count! buffer "OperationRow count" 25)]
-    (mapv (fn [position Int] t/OperationRow
+  (let [(row-count Int) (read-count! buffer "OperationRow count" 25)]
+    (mapv (fn [(position Int)] t/OperationRow
             (t/->OperationRow
              (read-i64-le! buffer "operation transaction")
              (read-i64-le! buffer "operation ordinal")
@@ -405,32 +405,32 @@
           (vec (range row-count)))))
 
 (defn- read-index! [(buffer ByteBuffer) (width Int)] Any
-  (let [row-count Int (read-count! buffer "slot index row count" (* width 8))]
-    (mapv (fn [position Int] Any
-            (mapv (fn [field Int] Int
+  (let [(row-count Int) (read-count! buffer "slot index row count" (* width 8))]
+    (mapv (fn [(position Int)] Any
+            (mapv (fn [(field Int)] Int
                     (read-i64-le! buffer "slot index handle"))
                   (vec (range width))))
           (vec (range row-count)))))
 
 (defn- read-indexes! [(buffer ByteBuffer)] Any
-  (mapv (fn [width Int] Any (read-index! buffer width)) [2 2 2 3 3 3]))
+  (mapv (fn [(width Int)] Any (read-index! buffer width)) [2 2 2 3 3 3]))
 
 (defn- read-payload! [(payload Any) (space-id String)] Any
-  (let [buffer ByteBuffer
+  (let [(buffer ByteBuffer)
         (doto (ByteBuffer/wrap payload) (.order ByteOrder/LITTLE_ENDIAN))
-        dump-version Int (read-u16-le! buffer "TermStoreDump version")
-        payload-flags Int (read-u16-le! buffer "payload flags")]
+        (dump-version Int) (read-u16-le! buffer "TermStoreDump version")
+        (payload-flags Int) (read-u16-le! buffer "payload flags")]
     (if (not (= dump-version store/term-store-dump-version))
       (fail "fri: invalid TermStore payload version" :invalid-fri-cache)
       (if (not (= payload-flags PAYLOAD-FLAGS))
         (fail "fri: unsupported payload flags" :invalid-fri-cache)
-        (let [next-sequence Int (read-i64-le! buffer "next sequence")
-              atoms Any (read-atoms! buffer)
-              triples Any (read-triples! buffer atoms)
-              transactions Any (read-transactions! buffer)
-              operations Any (read-operations! buffer)
-              indexes Any (read-indexes! buffer)
-              dump t/TermStoreDump
+        (let [(next-sequence Int) (read-i64-le! buffer "next sequence")
+              (atoms Any) (read-atoms! buffer)
+              (triples Any) (read-triples! buffer atoms)
+              (transactions Any) (read-transactions! buffer)
+              (operations Any) (read-operations! buffer)
+              (indexes Any) (read-indexes! buffer)
+              (dump t/TermStoreDump)
               (t/->TermStoreDump dump-version space-id next-sequence
                                  atoms triples transactions operations)]
           (if (not (= 0 (.remaining buffer)))
@@ -449,14 +449,14 @@
                   (t/termstoredump-space-id dump)))
         (fail "fri: cache source and TermStore belong to different spaces"
               :cache-space-mismatch)
-        (let [ctx Any (store/new-term-store (cachesource-space-id source))]
+        (let [(ctx Any) (store/new-term-store (cachesource-space-id source))]
           (store/load-term-store! ctx dump)
           ctx)))))
 
 (defn- write-bytes! [(path String) (bytes Any)] Nil
-  (let [target Any (File. path)
-        parent Any (.getParentFile target)
-        temporary Any (File. (str path ".tmp"))]
+  (let [(target Any) (File. path)
+        (parent Any) (.getParentFile target)
+        (temporary Any) (File. (str path ".tmp"))]
     (when (some? parent) (.mkdirs parent))
     (with-open [stream (FileOutputStream. temporary)]
       (.write stream bytes)
@@ -471,9 +471,9 @@
 (defn write-fri! [(dump Any) (path String) (source CacheSource)] Any
   (do
     (validate-dump! dump source)
-    (let [payload Any (write-payload! dump)
-          payload-sha Any (sha256-bytes payload)
-          buffer ByteArrayOutputStream (ByteArrayOutputStream.)]
+    (let [(payload Any) (write-payload! dump)
+          (payload-sha Any) (sha256-bytes payload)
+          (buffer ByteArrayOutputStream) (ByteArrayOutputStream.)]
       (.write buffer (strict-utf8 MAGIC "magic"))
       (write-u16-le! buffer FMT)
       (write-u16-le! buffer FLAGS)
@@ -484,7 +484,7 @@
       (.write buffer payload-sha)
       (write-i64-le! buffer (alength payload) "payload length")
       (.write buffer payload)
-      (let [bytes Any (.toByteArray buffer)]
+      (let [(bytes Any) (.toByteArray buffer)]
         (write-bytes! path bytes)
         (->CacheReceipt FMT
                         (cachesource-space-id source)
@@ -494,36 +494,36 @@
 
 (defn- read-envelope! [(path String)] Any
   (try
-    (let [bytes Any (Files/readAllBytes (.toPath (File. path)))
-          buffer ByteBuffer
+    (let [(bytes Any) (Files/readAllBytes (.toPath (File. path)))
+          (buffer ByteBuffer)
           (doto (ByteBuffer/wrap bytes) (.order ByteOrder/LITTLE_ENDIAN))
-          magic String
+          (magic String)
           (strict-utf8-string (read-fixed! buffer (count MAGIC) "cache magic")
                               "cache magic")]
       (if (not (= magic MAGIC))
         (fail "fri: invalid cache magic" :invalid-fri-cache)
-        (let [format Int (read-u16-le! buffer "cache format")
-              flags Int (read-u16-le! buffer "cache flags")]
+        (let [(format Int) (read-u16-le! buffer "cache format")
+              (flags Int) (read-u16-le! buffer "cache flags")]
           (if (not (= format FMT))
             (fail "fri: unsupported cache format" :invalid-fri-cache)
             (if (not (= flags FLAGS))
               (fail "fri: unsupported cache flags" :invalid-fri-cache)
-              (let [space-id String (read-sized-text! buffer "SpaceId")
-                    fingerprint String
+              (let [(space-id String) (read-sized-text! buffer "SpaceId")
+                    (fingerprint String)
                     (hex (read-fixed! buffer FINGERPRINT-BYTES
                                       "source fingerprint"))
-                    source-position Int
+                    (source-position Int)
                     (read-i64-le! buffer "source position")
-                    payload-sha Any
+                    (payload-sha Any)
                     (read-fixed! buffer FINGERPRINT-BYTES "payload checksum")
-                    payload-length Int
+                    (payload-length Int)
                     (read-i64-le! buffer "payload length")]
                 (if (or (< source-position 0)
                         (or (< payload-length 0)
                             (> payload-length 2147483647)))
                   (fail "fri: invalid source position or payload length"
                         :invalid-fri-cache)
-                  (let [payload Any
+                  (let [(payload Any)
                         (read-fixed! buffer payload-length "cache payload")]
                     (if (not (= 0 (.remaining buffer)))
                       (fail "fri: cache has trailing bytes" :invalid-fri-cache)
@@ -539,12 +539,12 @@
                       {:type :invalid-fri-cache :cause (str error)})))))
 
 (defn open-fri! [(path String) (source CacheSource)] Any
-  (let [envelope Any (read-envelope! path)
-        payload Any (:payload envelope)
-        stored-space Any (:space-id envelope)
-        stored-fingerprint Any (:fingerprint envelope)
-        stored-position Any (:source-position envelope)
-        stored-sha Any (:payload-sha envelope)]
+  (let [(envelope Any) (read-envelope! path)
+        (payload Any) (:payload envelope)
+        (stored-space Any) (:space-id envelope)
+        (stored-fingerprint Any) (:fingerprint envelope)
+        (stored-position Any) (:source-position envelope)
+        (stored-sha Any) (:payload-sha envelope)]
     (if (not (= stored-space (cachesource-space-id source)))
       (fail "fri: cache belongs to a different SpaceId" :cache-space-mismatch)
       (if (not (and (= stored-fingerprint (cachesource-fingerprint source))
@@ -553,14 +553,14 @@
               :cache-source-mismatch)
         (if (not (Arrays/equals stored-sha (sha256-bytes payload)))
           (fail "fri: cache payload checksum mismatch" :invalid-fri-cache)
-          (let [cache-data Any
+          (let [(cache-data Any)
                 (read-payload! payload stored-space)
-                dump t/TermStoreDump (:dump cache-data)
-                ctx Any (validate-dump! dump source)]
+                (dump t/TermStoreDump) (:dump cache-data)
+                (ctx Any) (validate-dump! dump source)]
             (->CacheImage source dump (:indexes cache-data) ctx)))))))
 
 (defn- atom-value [(row t/AtomRow)] Any
-  (let [kind Keyword (t/atomrow-kind row)]
+  (let [(kind Keyword) (t/atomrow-kind row)]
     (cond
       [(= kind :string) (t/atomrow-string-value row)]
       [(= kind :int) (t/atomrow-int-value row)]
@@ -574,10 +574,10 @@
 (defn- handle-position [(handle Int)] Int (quot handle 2))
 
 (defn- resolve-handle [(dump t/TermStoreDump) (handle Int)] Any
-  (let [position Int (handle-position handle)]
+  (let [(position Int) (handle-position handle)]
     (if (atom-handle? handle)
       (atom-value (nth (t/termstoredump-atoms dump) position))
-      (let [row t/TripleRow (nth (t/termstoredump-triples dump) position)]
+      (let [(row t/TripleRow) (nth (t/termstoredump-triples dump) position)]
         (t/triple (resolve-handle dump (t/triplerow-t1 row))
                   (resolve-handle dump (t/triplerow-t2 row))
                   (resolve-handle dump (t/triplerow-t3 row)))))))
@@ -585,62 +585,62 @@
 (defn- term-handles [(dump t/TermStoreDump)] Any
   (into {}
         (concat
-         (map-indexed (fn [position Int row t/AtomRow] Any
+         (map-indexed (fn [(position Int) (row t/AtomRow)] Any
                         [(atom-value row) (atom-handle position)])
                       (t/termstoredump-atoms dump))
-         (map-indexed (fn [position Int row t/TripleRow] Any
+         (map-indexed (fn [(position Int) (row t/TripleRow)] Any
                         [(resolve-handle dump (triple-handle position))
                          (triple-handle position)])
                       (t/termstoredump-triples dump)))))
 
 (defn- index-matches [(image Any) (index-position Int) (keys Any)] Any
-  (let [dump t/TermStoreDump (cacheimage-dump image)
-        handles Any (term-handles dump)
-        key-handles Any (mapv (fn [term Any] Any (get handles term)) keys)]
+  (let [(dump t/TermStoreDump) (cacheimage-dump image)
+        (handles Any) (term-handles dump)
+        (key-handles Any) (mapv (fn [(term Any)] Any (get handles term)) keys)]
     (if (some nil? key-handles)
       []
-      (let [entries Any (nth (cacheimage-indexes image) index-position)
-            key-count Int (count key-handles)]
-        (mapv (fn [entry Any] Any
+      (let [(entries Any) (nth (cacheimage-indexes image) index-position)
+            (key-count Int) (count key-handles)]
+        (mapv (fn [(entry Any)] Any
                 (resolve-handle dump (nth entry key-count)))
-              (filter (fn [entry Any] Bool
+              (filter (fn [(entry Any)] Bool
                         (= key-handles (subvec entry 0 key-count)))
                       entries))))))
 
 (defn- live-positions-as-of [(image Any) (sequence Int)] Any
   (if (< sequence 0)
     (fail "fri: as-of sequence must be non-negative" :invalid-as-of-sequence)
-    (let [dump t/TermStoreDump (cacheimage-dump image)
-          operations Any (t/termstoredump-operations dump)]
+    (let [(dump t/TermStoreDump) (cacheimage-dump image)
+          (operations Any) (t/termstoredump-operations dump)]
       (loop [position Int 0 active Any {} live Any []]
         (if (or (>= position (count operations))
                 (> (t/operationrow-tx-sequence (nth operations position)) sequence))
-          (vec (keep-indexed (fn [index Int present? Bool] Any
+          (vec (keep-indexed (fn [(index Int) (present? Bool)] Any
                                (when present? index))
                              live))
-          (let [row t/OperationRow (nth operations position)
-                handle Int (t/operationrow-triple-handle row)
-                positions Any (get active handle [])]
+          (let [(row t/OperationRow) (nth operations position)
+                (handle Int) (t/operationrow-triple-handle row)
+                (positions Any) (get active handle [])]
             (if (= t/assert-action (t/operationrow-action row))
               (recur (inc position)
                      (assoc active handle (conj positions position))
                      (conj live true))
               (if (empty? positions)
                 (recur (inc position) active (conj live false))
-                (let [target Int (peek positions)]
+                (let [(target Int) (peek positions)]
                   (recur (inc position)
                          (assoc active handle (pop positions))
                          (conj (assoc live target false) false)))))))))))
 
 (defn- occurrence-event
   [(dump t/TermStoreDump) (position Int)] t/OperationOccurrence
-  (let [row t/OperationRow (nth (t/termstoredump-operations dump) position)
-        transaction t/Triple
+  (let [(row t/OperationRow) (nth (t/termstoredump-operations dump) position)
+        (transaction t/Triple)
         (t/transaction-coordinate (t/termstoredump-space-id dump)
                                   (t/operationrow-tx-sequence row))
-        occurrence t/Triple
+        (occurrence t/Triple)
         (t/occurrence-coordinate transaction (t/operationrow-ordinal row))
-        proposition Any
+        (proposition Any)
         (resolve-handle dump (t/operationrow-triple-handle row))]
     (t/operation-occurrence
      occurrence (t/operationrow-action row) proposition)))
@@ -676,13 +676,13 @@
 (defn by-t13 [(image Any) (t1 Any) (t3 Any)] Any
   (index-matches image 5 [t1 t3]))
 (defn live-occurrences-as-of [(image Any) (sequence Int)] Any
-  (let [dump t/TermStoreDump (cacheimage-dump image)]
-    (mapv (fn [position Int] t/OperationOccurrence
+  (let [(dump t/TermStoreDump) (cacheimage-dump image)]
+    (mapv (fn [(position Int)] t/OperationOccurrence
             (occurrence-event dump position))
           (live-positions-as-of image sequence))))
 (defn live-propositions-as-of [(image Any) (sequence Int)] Any
-  (let [dump t/TermStoreDump (cacheimage-dump image)]
-    (mapv (fn [position Int] Any
+  (let [(dump t/TermStoreDump) (cacheimage-dump image)]
+    (mapv (fn [(position Int)] Any
             (resolve-handle
              dump
              (t/operationrow-triple-handle

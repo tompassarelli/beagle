@@ -518,7 +518,7 @@
 
 (defn utf8-bytes!
   [(encoder Encoder) (value String) (maximum Int) (label String)] (Vec Int)
-  (let [bytes (Vec Int) (utf8-encode value)]
+  (let [(bytes (Vec Int)) (utf8-encode value)]
     (if (> (count bytes) maximum)
       (do
         (encoder-error! encoder (str label " exceeds the UTF-8 byte limit"))
@@ -717,7 +717,7 @@
       [(integer? term)
        (do (append-u8! encoder 2) (append-i64-le! encoder term))]
       [(and (number? term) (not (integer? term)))
-       (let [float-term Float (double term)]
+       (let [(float-term Float) (double term)]
          (do
            (append-u8! encoder 3)
            (append-i64-le! encoder (float-to-bits float-term))))]
@@ -762,7 +762,7 @@
       (count (deref (encoder-bytes encoder))))))
 
 (defn canonical-term-sha256! [(term Any)] String
-  (let [result TermDigestResult (canonical-term-sha256-result! term)]
+  (let [(result TermDigestResult) (canonical-term-sha256-result! term)]
     (if (termdigestresult-ok result)
       (termdigestresult-digest result)
       (let [message (termdigestresult-message result)]
@@ -818,9 +818,9 @@
   (read-term! decoder 0))
 
 (defn read-page-request! [(decoder Decoder)] t/RpcPageRequest
-  (let [limit Int (read-u32-le! decoder "page limit")
-        cursor-present Bool (read-presence! decoder "page cursor presence")
-        cursor t/Term? (if cursor-present (read-term! decoder 0) nil)]
+  (let [(limit Int) (read-u32-le! decoder "page limit")
+        (cursor-present Bool) (read-presence! decoder "page cursor presence")
+        (cursor t/Term?) (if cursor-present (read-term! decoder 0) nil)]
     (t/->RpcPageRequest limit cursor)))
 
 (defn append-page-request! [(encoder Encoder) (page t/RpcPageRequest)] Nil
@@ -852,7 +852,7 @@
     (t/->RpcError code retryable message detail)))
 
 (defn read-request-body! [(decoder Decoder)] t/RpcRequest
-  (let [fields WireFields_rpc-v2-request-body_request
+  (let [(fields WireFields_rpc-v2-request-body_request)
         (read-rpc-v2-request-body-request! decoder)]
     (t/->RpcRequest
      (wirefields_rpc-v2-request-body_request-space fields)
@@ -887,7 +887,7 @@
        (let [major (read-u16-le! decoder "major version")
              minor (read-u16-le! decoder "minor version")
              kind (read-u8! decoder "packet kind")
-             header WireFields_store-rpc-v2-packet-header_request
+             (header WireFields_store-rpc-v2-packet-header_request)
              (read-store-rpc-v2-packet-header-request! decoder)
              flags (wirefields_store-rpc-v2-packet-header_request-flags header)
              body-length

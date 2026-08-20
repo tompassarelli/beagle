@@ -32,7 +32,7 @@
   (loop [index Int 0 inserted Bool false result (Vec core/TypeDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
-      (let [current core/TypeDef (nth sorted index)]
+      (let [(current core/TypeDef) (nth sorted index)]
         (if (and (not inserted) (id-before? (core/typedef-id item) (core/typedef-id current)))
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
@@ -49,7 +49,7 @@
   (loop [index Int 0 inserted Bool false result (Vec core/FunctionDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
-      (let [current core/FunctionDef (nth sorted index)]
+      (let [(current core/FunctionDef) (nth sorted index)]
         (if (and (not inserted) (id-before? (core/functiondef-id item) (core/functiondef-id current)))
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
@@ -67,7 +67,7 @@
   (loop [index Int 0 inserted Bool false result (Vec core/FieldLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
-      (let [current core/FieldLayoutV0 (nth sorted index)]
+      (let [(current core/FieldLayoutV0) (nth sorted index)]
         (if (and (not inserted)
                  (< (core/fieldlayoutv0-offset-bytes item)
                     (core/fieldlayoutv0-offset-bytes current)))
@@ -87,7 +87,7 @@
   (loop [index Int 0 inserted Bool false result (Vec core/UnionVariantLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
-      (let [current core/UnionVariantLayoutV0 (nth sorted index)]
+      (let [(current core/UnionVariantLayoutV0) (nth sorted index)]
         (if (and (not inserted)
                  (< (core/unionvariantlayoutv0-tag item)
                     (core/unionvariantlayoutv0-tag current)))
@@ -115,11 +115,11 @@
 (defn type-def-for
   [(types (Vec core/TypeDef))
    (target core/NativeId)] (U core/TypeDef Nil)
-  (let [index Int (type-index types target)]
+  (let [(index Int) (type-index types target)]
     (if (< index 0) nil (nth types index))))
 
 (defn text-type-def? [(definition core/TypeDef)] Bool
-  (let [shape core/TypeShape (core/typedef-shape definition)]
+  (let [(shape core/TypeShape) (core/typedef-shape definition)]
     (and (instance? native.core.AtomType shape)
       (instance? native.core.TextKind (core/atomtype-kind shape)))))
 
@@ -129,7 +129,7 @@
   (loop [index Int 0]
     (if (>= index (count layouts))
       nil
-      (let [layout core/LayoutDef (nth layouts index)]
+      (let [(layout core/LayoutDef) (nth layouts index)]
         (if (core/native-id= (core/layoutdef-type-id layout) target)
           layout
           (recur (+ index 1)))))))
@@ -170,14 +170,14 @@
   (instance? native.core.AtomCellShapeV0 (core/layoutdef-shape layout)))
 
 (defn record-layout-fields [(layout core/LayoutDef)] (Vec core/FieldLayoutV0)
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.RecordShapeV0 shape)
       (ordered-field-layouts (core/recordshapev0-fields shape))
       [])))
 
 (defn union-layout-variants
   [(layout core/LayoutDef)] (Vec core/UnionVariantLayoutV0)
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.UnionShapeV0 shape)
       (ordered-variants (core/unionshapev0-variants shape))
       [])))
@@ -187,7 +187,7 @@
   (loop [index Int 0 payloads (Vec core/NativeId) []]
     (if (>= index (count variants))
       payloads
-      (let [payload (U core/NativeId Nil)
+      (let [(payload (U core/NativeId Nil))
             (core/unionvariantlayoutv0-payload-type (nth variants index))]
         (recur (+ index 1) (if (nil? payload) payloads (conj payloads payload)))))))
 
@@ -220,10 +220,10 @@
 ;; stores by value. Vector elements and reference targets are pointers, so they
 ;; impose no declaration order.
 (defn layout-dependencies [(layout core/LayoutDef)] (Vec core/NativeId)
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (cond
       (instance? native.core.RecordShapeV0 shape)
-      (mapv (fn [field core/FieldLayoutV0] core/NativeId
+      (mapv (fn [(field core/FieldLayoutV0)] core/NativeId
               (core/fieldlayoutv0-type-id field))
         (record-layout-fields layout))
 
@@ -236,13 +236,13 @@
 (defn type-dependencies
   [(layouts (Vec core/LayoutDef))
    (type-def core/TypeDef)] (Vec core/NativeId)
-  (let [layout (U core/LayoutDef Nil)
+  (let [(layout (U core/LayoutDef Nil))
         (layout-for-type layouts (core/typedef-id type-def))
-        shape core/TypeShape (core/typedef-shape type-def)
-        layout-refs (Vec core/NativeId)
+        (shape core/TypeShape) (core/typedef-shape type-def)
+        (layout-refs (Vec core/NativeId))
         (if (nil? layout) [] (layout-dependencies layout))]
     (if (instance? native.core.FunctionType shape)
-      (let [rest-type (U core/NativeId Nil)
+      (let [(rest-type (U core/NativeId Nil))
             (core/functiontype-rest-type shape)]
         (vec (concat layout-refs
           (core/functiontype-parameter-types shape)
@@ -256,7 +256,7 @@
    (placed (Vec core/NativeId))
    (type-def core/TypeDef)] Bool
   (every?
-    (fn [target core/NativeId] Bool
+    (fn [(target core/NativeId)] Bool
       (or (not (type-emitted? types target)) (core/id-in? placed target)))
     (type-dependencies layouts type-def)))
 
@@ -285,16 +285,16 @@
 (defn dependency-ordered-types
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))] (Vec core/TypeDef)
-  (let [identity-order (Vec core/TypeDef) (id-ordered-types types)]
+  (let [(identity-order (Vec core/TypeDef)) (id-ordered-types types)]
     (loop [remaining (Vec core/TypeDef) identity-order
            placed (Vec core/NativeId) []
            result (Vec core/TypeDef) []]
       (if (= 0 (count remaining))
         result
-        (let [position Int (ready-index types layouts placed remaining)]
+        (let [(position Int) (ready-index types layouts placed remaining)]
           (if (< position 0)
             (vec (concat result remaining))
-            (let [chosen core/TypeDef (nth remaining position)]
+            (let [(chosen core/TypeDef) (nth remaining position)]
               (recur (drop-index remaining position)
                 (conj placed (core/typedef-id chosen))
                 (conj result chosen)))))))))
@@ -302,12 +302,12 @@
 (defn types-orderable?
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))] Bool
-  (let [identity-order (Vec core/TypeDef) (id-ordered-types types)]
+  (let [(identity-order (Vec core/TypeDef)) (id-ordered-types types)]
     (loop [remaining (Vec core/TypeDef) identity-order
            placed (Vec core/NativeId) []]
       (if (= 0 (count remaining))
         true
-        (let [position Int (ready-index types layouts placed remaining)]
+        (let [(position Int) (ready-index types layouts placed remaining)]
           (if (< position 0)
             false
             (recur (drop-index remaining position)
@@ -317,18 +317,18 @@
   [(type-def core/TypeDef)
    (types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))] Bool
-  (let [shape core/TypeShape (core/typedef-shape type-def)
-        layout-value (U core/LayoutDef Nil)
+  (let [(shape core/TypeShape) (core/typedef-shape type-def)
+        (layout-value (U core/LayoutDef Nil))
         (layout-for-type layouts (core/typedef-id type-def))]
     (if (nil? layout-value)
       false
-      (let [layout-shape core/LayoutShapeV0 (core/layoutdef-shape layout-value)
-            dependencies-present Bool
-            (every? (fn [target core/NativeId] Bool (type-emitted? types target))
+      (let [(layout-shape core/LayoutShapeV0) (core/layoutdef-shape layout-value)
+            (dependencies-present Bool)
+            (every? (fn [(target core/NativeId)] Bool (type-emitted? types target))
               (layout-dependencies layout-value))]
         (cond
           (instance? native.core.AtomType shape)
-          (let [kind core/AtomKind (core/atomtype-kind shape)]
+          (let [(kind core/AtomKind) (core/atomtype-kind shape)]
             (if (instance? native.core.BytesKind kind)
               (instance? native.core.BytesShapeV0 layout-shape)
               (if (instance? native.core.ScalarShapeV0 layout-shape)
@@ -370,7 +370,7 @@
       (instance? native.core.F64Atom atom)))
 
 (defn keyword-type-def? [(definition core/TypeDef)] Bool
-  (let [shape core/TypeShape (core/typedef-shape definition)]
+  (let [(shape core/TypeShape) (core/typedef-shape definition)]
     (and (instance? native.core.AtomType shape)
       (instance? native.core.KeywordKind (core/atomtype-kind shape)))))
 
@@ -405,9 +405,9 @@
     (every? block-supported? (core/functiondef-blocks function))))
 
 (defn program-supported? [(program core/NativeCoreProgram)] Bool
-  (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
-        types (Vec core/TypeDef) (core/nativecoreprogram-types program)]
-    (and (every? (fn [type-def core/TypeDef] Bool
+  (let [(layouts (Vec core/LayoutDef)) (core/nativecoreprogram-layouts program)
+        (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)]
+    (and (every? (fn [(type-def core/TypeDef)] Bool
                    (type-supported? type-def types layouts))
            types)
       (types-orderable? types layouts)
@@ -416,13 +416,13 @@
 (defn program-has-parallel-v0? [(program core/NativeCoreProgram)] Bool
   (some?
     (some
-      (fn [function core/FunctionDef] Bool
+      (fn [(function core/FunctionDef)] Bool
         (some?
           (some
-            (fn [block core/BasicBlock] Bool
+            (fn [(block core/BasicBlock)] Bool
               (some?
                 (some
-                  (fn [instruction core/Instruction] Bool
+                  (fn [(instruction core/Instruction)] Bool
                     (or
                       (instance? native.core.TiledStepF64InstructionV0
                         instruction)
@@ -442,7 +442,7 @@
   [(types (Vec core/TypeDef))
    (module-index Int)
    (target core/NativeId)] String
-  (let [index Int (type-index types target)]
+  (let [(index Int) (type-index types target)]
     (if (< index 0) "void" (type-name module-index index))))
 
 (defn size-align-assertions
@@ -460,15 +460,15 @@
   (loop [index Int 0 lines (Vec String) (size-align-assertions type-name-value layout)]
     (if (>= index (count fields))
       (join-lines lines)
-      (let [field core/FieldLayoutV0 (nth fields index)]
+      (let [(field core/FieldLayoutV0) (nth fields index)]
         (recur (+ index 1)
           (conj lines
             (str "_Static_assert(offsetof(" type-name-value ", field_" index ") == "
               (core/fieldlayoutv0-offset-bytes field) ", \"field offset\");")))))))
 
 (defn emit-atom-type [(type-name-value String) (layout core/LayoutDef)] String
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)
-        backing String
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)
+        (backing String)
         (if (instance? native.core.ScalarShapeV0 shape)
           (scalar-backing (core/scalarshapev0-representation shape))
           "const void *")]
@@ -498,9 +498,9 @@
    (module-index Int)
    (type-name-value String)
    (layout core/LayoutDef)] String
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.VectorShapeV0 shape)
-      (let [element String
+      (let [(element String)
             (c-type types module-index (core/vectorshapev0-element-type shape))]
         (str "/* vector of " element ", stride "
           (core/vectorshapev0-stride-bytes shape) " */\n"
@@ -514,9 +514,9 @@
    (type-name-value String)
    (layout core/LayoutDef)]
   String
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.BufferShapeV0 shape)
-      (let [element String
+      (let [(element String)
             (c-type types module-index (core/buffershapev0-element-type shape))]
         (str "/* mutable region-owned buffer of " element ", stride "
           (core/buffershapev0-stride-bytes shape) ", alignment "
@@ -530,7 +530,7 @@
    (module-index Int)
    (type-name-value String)
    (layout core/LayoutDef)] String
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.MapShapeV0 shape)
       (str "/* insertion-order map of "
         (c-type types module-index (core/mapshapev0-key-type shape))
@@ -546,7 +546,7 @@
    (module-index Int)
    (type-name-value String)
    (layout core/LayoutDef)] String
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.SetShapeV0 shape)
       (str "/* insertion-order set of "
         (c-type types module-index (core/setshapev0-element-type shape))
@@ -562,7 +562,7 @@
   (loop [index Int 0 lines (Vec String) []]
     (if (>= index (count fields))
       (join-lines lines)
-      (let [field core/FieldLayoutV0 (nth fields index)]
+      (let [(field core/FieldLayoutV0) (nth fields index)]
         (recur (+ index 1)
           (conj lines
             (str "  " (c-type types module-index (core/fieldlayoutv0-type-id field))
@@ -573,7 +573,7 @@
    (module-index Int)
    (type-name-value String)
    (layout core/LayoutDef)] String
-  (let [fields (Vec core/FieldLayoutV0) (record-layout-fields layout)]
+  (let [(fields (Vec core/FieldLayoutV0)) (record-layout-fields layout)]
     (str "typedef struct " type-name-value " {\n"
       (emit-record-fields types module-index fields)
       "} " type-name-value ";\n"
@@ -586,8 +586,8 @@
   (loop [index Int 0 lines (Vec String) []]
     (if (>= index (count variants))
       (join-lines lines)
-      (let [variant core/UnionVariantLayoutV0 (nth variants index)
-            payload (U core/NativeId Nil) (core/unionvariantlayoutv0-payload-type variant)]
+      (let [(variant core/UnionVariantLayoutV0) (nth variants index)
+            (payload (U core/NativeId Nil)) (core/unionvariantlayoutv0-payload-type variant)]
         (recur (+ index 1)
           (if (nil? payload)
             lines
@@ -599,8 +599,8 @@
   (loop [index Int 0 offset Int 0]
     (if (>= index (count variants))
       offset
-      (let [variant core/UnionVariantLayoutV0 (nth variants index)
-            candidate Int (core/unionvariantlayoutv0-payload-offset-bytes variant)]
+      (let [(variant core/UnionVariantLayoutV0) (nth variants index)
+            (candidate Int) (core/unionvariantlayoutv0-payload-offset-bytes variant)]
         (recur (+ index 1) (if (> candidate offset) candidate offset))))))
 
 ;; A C union places every member at one offset; the Native Core layout records a
@@ -611,19 +611,19 @@
    (module-index Int)
    (type-name-value String)
    (layout core/LayoutDef)] String
-  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
+  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
     (if (instance? native.core.UnionShapeV0 shape)
-      (let [variants (Vec core/UnionVariantLayoutV0) (union-layout-variants layout)
-            members String (emit-union-members types module-index variants)
-            tag-line String
+      (let [(variants (Vec core/UnionVariantLayoutV0)) (union-layout-variants layout)
+            (members String) (emit-union-members types module-index variants)
+            (tag-line String)
             (str "  " (c-type types module-index (core/unionshapev0-tag-type shape)) " tag;\n")
-            payload-block String
+            (payload-block String)
             (if (= 0 (count members)) "" (str "  union {\n" members "  } payload;\n"))
-            assertions (Vec String)
+            (assertions (Vec String))
             (conj (size-align-assertions type-name-value layout)
               (str "_Static_assert(offsetof(" type-name-value ", tag) == "
                 (core/unionshapev0-tag-offset-bytes shape) ", \"union tag offset\");"))
-            payload-assertion (Vec String)
+            (payload-assertion (Vec String))
             (if (= 0 (count members))
               assertions
               (conj assertions
@@ -653,7 +653,7 @@
    (type-def core/TypeDef)
    (layout core/LayoutDef)]
   String
-  (let [shape core/TypeShape (core/typedef-shape type-def)]
+  (let [(shape core/TypeShape) (core/typedef-shape type-def)]
     (if (not (instance? native.core.FunctionType shape))
       ""
       (str "typedef struct " type-name-value " {\n"
@@ -671,9 +671,9 @@
    (layouts (Vec core/LayoutDef))
    (module-index Int)
    (type-def core/TypeDef)] String
-  (let [index Int (type-index types (core/typedef-id type-def))
-        type-name-value String (type-name module-index index)
-        layout-value (U core/LayoutDef Nil)
+  (let [(index Int) (type-index types (core/typedef-id type-def))
+        (type-name-value String) (type-name module-index index)
+        (layout-value (U core/LayoutDef Nil))
         (layout-for-type layouts (core/typedef-id type-def))]
     (if (nil? layout-value)
       ""
@@ -732,8 +732,8 @@
   [(function core/FunctionDef)
    (block core/BasicBlock)
    (target core/NativeId)] String
-  (let [parameters (Vec core/Parameter) (core/functiondef-parameters function)
-        parameter-position Int (parameter-index parameters target)]
+  (let [(parameters (Vec core/Parameter)) (core/functiondef-parameters function)
+        (parameter-position Int) (parameter-index parameters target)]
     (if (>= parameter-position 0)
       (str "native_v_" parameter-position)
       (str "native_v_"
@@ -744,18 +744,18 @@
   [(types (Vec core/TypeDef))
    (module-index Int)
    (function core/FunctionDef)] String
-  (let [return-type (U core/NativeId Nil) (core/functiondef-return-type function)]
+  (let [(return-type (U core/NativeId Nil)) (core/functiondef-return-type function)]
     (if (nil? return-type) "void" (c-type types module-index return-type))))
 
 (defn emit-parameter-list
   [(types (Vec core/TypeDef))
    (module-index Int)
    (function core/FunctionDef)] String
-  (let [parameters (Vec core/Parameter) (core/functiondef-parameters function)
-        arena Bool (> (count (core/functiondef-regions function)) 0)
-        capability Bool (> (count (core/functiondef-capabilities function)) 0)
-        initial (Vec String) (if arena ["native_arena *arena"] [])
-        with-capability (Vec String)
+  (let [(parameters (Vec core/Parameter)) (core/functiondef-parameters function)
+        (arena Bool) (> (count (core/functiondef-regions function)) 0)
+        (capability Bool) (> (count (core/functiondef-capabilities function)) 0)
+        (initial (Vec String)) (if arena ["native_arena *arena"] [])
+        (with-capability (Vec String))
         (if capability (conj initial "const native_capability *capability") initial)]
     (loop [index Int 0 result String ""]
       (if (>= index (count parameters))
@@ -766,8 +766,8 @@
               (if (= (count result) 0) text (str text (if (= (count text) 0) "" ", ") result))
               (recur (+ extra-index 1)
                 (str text (if (= extra-index 0) "" ", ") (nth with-capability extra-index))))))
-        (let [parameter core/Parameter (nth parameters index)
-              fragment String
+        (let [(parameter core/Parameter) (nth parameters index)
+              (fragment String)
               (str (c-type types module-index (core/parameter-type-id parameter))
                 " native_v_" index)]
           (recur (+ index 1) (str result (if (= index 0) "" ", ") fragment)))))))
@@ -812,8 +812,8 @@
    (result-name String)
    (operation core/CheckedOperationV0)] String
   (if (instance? native.core.CheckedAddI64V0 operation)
-    (let [left String (value-name function block (core/checkedaddi64v0-left-id operation))
-          right String (value-name function block (core/checkedaddi64v0-right-id operation))]
+    (let [(left String) (value-name function block (core/checkedaddi64v0-left-id operation))
+          (right String) (value-name function block (core/checkedaddi64v0-right-id operation))]
       (str "  int64_t " result-name ";\n"
         "  if (((" right " > INT64_C(0)) && (" left " > (INT64_MAX - " right "))) ||\n"
         "      ((" right " < INT64_C(0)) && (" left " < (INT64_MIN - " right ")))) {\n"
@@ -828,12 +828,12 @@
    (block core/BasicBlock)
    (instruction-position Int)
    (instruction core/Instruction)] String
-  (let [result-name String
+  (let [(result-name String)
         (str "native_v_"
           (+ (count (core/functiondef-parameters function)) instruction-position))]
     (cond
       (instance? native.core.AtomInstruction instruction)
-      (let [atom-value core/NativeAtom (core/atominstruction-atom instruction)]
+      (let [(atom-value core/NativeAtom) (core/atominstruction-atom instruction)]
         (str "  " (atom-c-type atom-value) " " result-name " = "
           (emit-atom-expression atom-value) ";\n"
           "  (void)" result-name ";\n"))
@@ -861,10 +861,10 @@
         ";\n  (void)" result-name ";\n")
 
       (instance? native.core.DivF64InstructionV0 instruction)
-      (let [left String
+      (let [(left String)
             (value-name function block
               (core/divf64instructionv0-left-id instruction))
-            right String
+            (right String)
             (value-name function block
               (core/divf64instructionv0-right-id instruction))]
         (str "  if (" right " == 0.0) {\n"
@@ -882,7 +882,7 @@
 (defn emit-instructions
   [(function core/FunctionDef)
    (block core/BasicBlock)] String
-  (let [instructions (Vec core/Instruction) (core/basicblock-instructions block)]
+  (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
     (loop [index Int 0 result String ""]
       (if (>= index (count instructions))
         result
@@ -894,7 +894,7 @@
    (block core/BasicBlock)
    (terminator core/Terminator)] String
   (if (instance? native.core.ReturnTerminator terminator)
-    (let [return-value (U core/NativeId Nil) (core/returnterminator-value terminator)]
+    (let [(return-value (U core/NativeId Nil)) (core/returnterminator-value terminator)]
       (if (nil? return-value)
         "  return;\n"
         (str "  return " (value-name function block return-value) ";\n")))
@@ -909,8 +909,8 @@
    (module-index Int)
    (function-index Int)
    (function core/FunctionDef)] String
-  (let [block core/BasicBlock (nth (core/functiondef-blocks function) 0)
-        terminator core/Terminator (nth (core/basicblock-terminators block) 0)]
+  (let [(block core/BasicBlock) (nth (core/functiondef-blocks function) 0)
+        (terminator core/Terminator) (nth (core/basicblock-terminators block) 0)]
     (str (function-return-type types module-index function) " "
       (module-prefix module-index) "_fn_" function-index
       "(" (emit-parameter-list types module-index function) ") {\n"
@@ -934,7 +934,7 @@
    (layouts (Vec core/LayoutDef))
    (functions (Vec core/FunctionDef))
    (module-index Int)] String
-  (let [guard String (str "NATIVE_MODULE_" module-index "_ABI_H")]
+  (let [(guard String) (str "NATIVE_MODULE_" module-index "_ABI_H")]
     (str "/* Generated by native.fold-c17; do not edit. */\n"
       "#ifndef " guard "\n#define " guard "\n\n"
       "#include \"native_shim.h\"\n\n"
@@ -954,7 +954,7 @@
 (defn materialize-program
   [(program core/NativeCoreProgram)
    (module-index Int)] C17Materialization
-  (let [validation core/ValidationReport (core/validate-program program)]
+  (let [(validation core/ValidationReport) (core/validate-program program)]
     (cond
       (< module-index 0)
       (->C17Failure "module index must be nonnegative")
@@ -978,12 +978,12 @@
       (->C17Failure "native program uses a shape outside the restricted C17 reference slice")
 
       :else
-      (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
-            types (Vec core/TypeDef)
+      (let [(layouts (Vec core/LayoutDef)) (core/nativecoreprogram-layouts program)
+            (types (Vec core/TypeDef))
             (dependency-ordered-types (core/nativecoreprogram-types program) layouts)
-            functions (Vec core/FunctionDef) (ordered-functions (core/nativecoreprogram-functions program))
-            header-name String (str "module_" module-index ".h")
-            source-name String (str "module_" module-index ".c")]
+            (functions (Vec core/FunctionDef)) (ordered-functions (core/nativecoreprogram-functions program))
+            (header-name String) (str "module_" module-index ".h")
+            (source-name String) (str "module_" module-index ".c")]
         (->C17Success
           (->C17Artifact header-name
             (emit-header types layouts functions module-index)

@@ -62,15 +62,15 @@
       ["home-manager.users"])
     [(OptionPathError source-id offset message) false]
     [(OptionPaths occurrences)
-     (let [uses (Vec paths/RemovedPathUse)
+     (let [(uses (Vec paths/RemovedPathUse))
            (paths/removed-path-uses
              ["services.openssh.enable"
               "services.missing.enable"
               "services.printing.enable"]
              occurrences)
-           openssh paths/RemovedPathUse (nth uses 0)
-           printing paths/RemovedPathUse (nth uses 1)
-           openssh-occurrences (Vec paths/OptionPathOccurrence)
+           (openssh paths/RemovedPathUse) (nth uses 0)
+           (printing paths/RemovedPathUse) (nth uses 1)
+           (openssh-occurrences (Vec paths/OptionPathOccurrence))
            (paths/removedpathuse-occurrences openssh)]
        (and (= 2 (count uses))
             (= "services.openssh.enable"
@@ -88,7 +88,7 @@
                (count (paths/removedpathuse-occurrences printing)))))]))
 
 (defn ranking-case [] Bool
-  (let [ranked (Vec paths/PathSuggestion)
+  (let [(ranked (Vec paths/PathSuggestion))
         (paths/rank-path-suggestions "ab" ["ac" "zz" "aa" "abc"] 3)]
     (and (= 3 (paths/levenshtein-distance "kitten" "sitting"))
          (= 0 (paths/levenshtein-distance "same" "same"))

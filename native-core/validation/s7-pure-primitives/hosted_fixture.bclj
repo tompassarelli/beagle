@@ -2,7 +2,7 @@
 (ns native.s7-pure-primitives-hosted)
 
 (defn last-index-found? [] Bool
-  (let [found (U Int Nil) (clojure.string/last-index-of "ababa" "ba")]
+  (let [(found (U Int Nil)) (clojure.string/last-index-of "ababa" "ba")]
     (and (some? found) (= found 3))))
 
 (defn last-index-missing? [] Bool

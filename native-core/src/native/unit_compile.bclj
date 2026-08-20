@@ -59,7 +59,7 @@
    (target core/NativeId)]
   (U unit/UnitContractV0 Nil)
   (some
-    (fn [candidate unit/UnitContractV0] (U unit/UnitContractV0 Nil)
+    (fn [(candidate unit/UnitContractV0)] (U unit/UnitContractV0 Nil)
       (if (core/native-id= target (unit/unitcontractv0-unit-id candidate))
         candidate nil))
     contracts))
@@ -69,7 +69,7 @@
    (target core/NativeId)]
   (U unit/TypedUnitV0 Nil)
   (some
-    (fn [candidate unit/TypedUnitV0] (U unit/TypedUnitV0 Nil)
+    (fn [(candidate unit/TypedUnitV0)] (U unit/TypedUnitV0 Nil)
       (if (core/native-id= target (unit/typedunitv0-unit-id candidate))
         candidate nil))
     units))
@@ -97,7 +97,7 @@
   (loop [position Int 0 collected (Vec core/NativeId) []]
     (if (>= position (count read-set))
       collected
-      (let [read-unit (U stages/SourceUnitV0 Nil)
+      (let [(read-unit (U stages/SourceUnitV0 Nil))
             (unit/source-unit-for units (nth read-set position))]
         (recur (+ position 1)
           (if (nil? read-unit)
@@ -117,10 +117,10 @@
     (loop [position Int 0]
       (if (>= position (count read-set))
         ""
-        (let [read-id core/NativeId (nth read-set position)
-              supplied (U unit/UnitContractV0 Nil)
+        (let [(read-id core/NativeId) (nth read-set position)
+              (supplied (U unit/UnitContractV0 Nil))
               (contract-for read-contracts read-id)
-              candidate (U unit/UnitContractV0 Nil)
+              (candidate (U unit/UnitContractV0 Nil))
               (contract-for (preparedcandidatev0-contracts prepared) read-id)]
           (cond
             (nil? candidate)
@@ -142,36 +142,36 @@
    (semantic-contracts (Vec unit/SemanticFormContractV1))
    (configuration (Vec String))]
   UnitPreparationResultV0
-  (let [source stages/SourceStageV1
+  (let [(source stages/SourceStageV1)
         (stages/frozensourcestagev1-stage frozen-source)
-        units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)
-        modules (Vec stages/SourceModuleV1)
+        (units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
+        (modules (Vec stages/SourceModuleV1))
         (stages/sourcestagev1-modules source)]
     (if (not (unit/source-units-supported? units))
       (->UnitPreparationRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
         "preparation accepts exactly the nine defn branch corpus units")
-      (let [prelude lower/TypingPreludeV0
+      (let [(prelude lower/TypingPreludeV0)
             (lower/prepare-typing-prelude frozen-source configuration)
-            env lower/BodyEnvV0 (lower/typingpreludev0-env prelude)
-            index lower/SourceIndexV0 (lower/bodyenvv0-index env)
-            resolutions (Vec lower/FunctionResolutionV0)
+            (env lower/BodyEnvV0) (lower/typingpreludev0-env prelude)
+            (index lower/SourceIndexV0) (lower/bodyenvv0-index env)
+            (resolutions (Vec lower/FunctionResolutionV0))
             (lower/typingpreludev0-signature-resolutions prelude)]
         (loop [position Int 0 contracts (Vec unit/UnitContractV0) []]
           (if (>= position (count units))
             (->UnitPreparationAcceptedV0
               (->PreparedCandidateV0 frozen-source prelude contracts
                 semantic-contracts compiler-rule-epoch configuration))
-            (let [source-unit stages/SourceUnitV0 (nth units position)
-                  unit-id core/NativeId (stages/sourceunitv0-id source-unit)
-                  target-function core/NativeId
+            (let [(source-unit stages/SourceUnitV0) (nth units position)
+                  (unit-id core/NativeId) (stages/sourceunitv0-id source-unit)
+                  (target-function core/NativeId)
                   (lower/function-id unit-id
                     (stages/sourceunitv0-name source-unit))
-                  signature-position Int
+                  (signature-position Int)
                   (signature-index-for resolutions target-function)
-                  module (U stages/SourceModuleV1 Nil)
+                  (module (U stages/SourceModuleV1 Nil))
                   (unit/source-module-for modules
                     (stages/sourceunitv0-module-id source-unit))
-                  private-text String
+                  (private-text String)
                   (lower/fact-text index unit-id "private")]
               (cond
                 (< signature-position 0)
@@ -206,32 +206,32 @@
    (derivation-receipt unit/UnitDerivationReceiptV1)
    (expected-result-key String)]
   TypedUnitCompileResultV0
-  (let [source stages/SourceStageV1
+  (let [(source stages/SourceStageV1)
         (stages/frozensourcestagev1-stage
           (preparedcandidatev0-frozen-source prepared))
-        units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)
-        target (U stages/SourceUnitV0 Nil)
+        (units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
+        (target (U stages/SourceUnitV0 Nil))
         (unit/source-unit-for units target-unit-id)]
     (if (nil? target)
       (->TypedUnitCompileRejectedV0 "UNIT-TARGET-MISSING"
         "the requested unit is not in the frozen candidate source"
         target-unit-id)
-      (let [prelude lower/TypingPreludeV0
+      (let [(prelude lower/TypingPreludeV0)
             (preparedcandidatev0-prelude prepared)
-            env lower/BodyEnvV0 (lower/typingpreludev0-env prelude)
-            resolutions (Vec lower/FunctionResolutionV0)
+            (env lower/BodyEnvV0) (lower/typingpreludev0-env prelude)
+            (resolutions (Vec lower/FunctionResolutionV0))
             (lower/typingpreludev0-signature-resolutions prelude)
-            sources (Vec core/NativeId)
+            (sources (Vec core/NativeId))
             (lower/bodyenvv0-signature-sources env)
-            target-function core/NativeId
+            (target-function core/NativeId)
             (lower/function-id target-unit-id
               (stages/sourceunitv0-name target))
-            signature-position Int
+            (signature-position Int)
             (signature-index-for resolutions target-function)
-            context-detail String
+            (context-detail String)
             (dependency-context-mismatch prepared target-read-set
               read-contracts)
-            result-key String
+            (result-key String)
             (unit/unit-result-key derivation-receipt)]
         (cond
           (not= target-semantic-digest
@@ -280,10 +280,10 @@
             target-unit-id)
 
           :else
-          (let [resolution lower/FunctionResolutionV0
+          (let [(resolution lower/FunctionResolutionV0)
                 (lower/attach-body env (nth resolutions signature-position)
                   (nth sources signature-position))
-                function lower/TypedFunctionV0
+                (function lower/TypedFunctionV0)
                 (lower/functionresolutionv0-function resolution)
                 ;; The prelude's types are a BASE, never the closed set: a body
                 ;; contributes types of its own, such as the checked-arithmetic
@@ -291,27 +291,27 @@
                 ;; runs over all nine resolutions, applied to this one, and it
                 ;; must precede selection because reachability only follows
                 ;; references through types present in the vector it is given.
-                merged-types (Vec core/TypeDef)
+                (merged-types (Vec core/TypeDef))
                 (lower/collect-function-types (lower/bodyenvv0-types env)
                   [resolution])
-                unit-types (Vec core/TypeDef)
+                (unit-types (Vec core/TypeDef))
                 (unit/selected-types merged-types function)
                 ;; A target at the settlement fixpoint carries only the pure
                 ;; effect and no capability, so the whole-program effect and
                 ;; capability seeds select exactly what the clean path selects.
-                unit-effects (Vec core/EffectDef)
+                (unit-effects (Vec core/EffectDef))
                 (unit/selected-effects
                   (lower/slice-effects false false false false false false
                     false false)
                   function)
-                unit-capabilities (Vec core/CapabilityDef)
+                (unit-capabilities (Vec core/CapabilityDef))
                 (unit/selected-capabilities
                   (lower/slice-capabilities false false false false false false
                     false false)
                   function)
-                allowed (Vec core/NativeId)
+                (allowed (Vec core/NativeId))
                 (read-function-ids units target-read-set)
-                typed-unit unit/TypedUnitV0
+                (typed-unit unit/TypedUnitV0)
                 (unit/make-typed-unit target-unit-id function unit-types
                   unit-effects unit-capabilities)]
             (cond
@@ -350,24 +350,24 @@
    (expected-result-key String)
    (abi core/AbiProfileV0)]
   NativeUnitCompileResultV0
-  (let [source stages/SourceStageV1
+  (let [(source stages/SourceStageV1)
         (stages/frozensourcestagev1-stage
           (preparedcandidatev0-frozen-source prepared))
-        units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)
-        target (U stages/SourceUnitV0 Nil)
+        (units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
+        (target (U stages/SourceUnitV0 Nil))
         (unit/source-unit-for units target-unit-id)
-        found (U unit/TypedUnitV0 Nil)
+        (found (U unit/TypedUnitV0 Nil))
         (typed-unit-for candidate-typed-units target-unit-id)
-        function lower/TypedFunctionV0
+        (function lower/TypedFunctionV0)
         (unit/typedunitv0-function target-typed)
-        candidate-types (Vec core/TypeDef)
+        (candidate-types (Vec core/TypeDef))
         (unit/collect-types candidate-typed-units)
-        native-types (Vec core/TypeDef)
+        (native-types (Vec core/TypeDef))
         (lower/append-type-def candidate-types (lower/union-tag-type))
-        layout-resolutions (Vec lower/LayoutResolutionV0)
+        (layout-resolutions (Vec lower/LayoutResolutionV0))
         (lower/resolve-layouts native-types abi)
-        layouts (Vec core/LayoutDef) (lower/collect-layouts layout-resolutions)
-        layouts-digest String (lower/layout-digest layouts)]
+        (layouts (Vec core/LayoutDef)) (lower/collect-layouts layout-resolutions)
+        (layouts-digest String) (lower/layout-digest layouts)]
     (cond
       (nil? target)
       (->NativeUnitCompileRejectedV0 "UNIT-TARGET-MISSING"
@@ -422,17 +422,17 @@
         target-unit-id)
 
       :else
-      (let [native-function core/FunctionDef
+      (let [(native-function core/FunctionDef)
             (lower/lower-ready-function function)
-            export core/AbiDeclV0 (lower/function-abi function layouts-digest)
-            unit-layouts (Vec core/LayoutDef)
+            (export core/AbiDeclV0) (lower/function-abi function layouts-digest)
+            (unit-layouts (Vec core/LayoutDef))
             (unit/selected-layouts layouts
               (unit/typedunitv0-types target-typed))
-            unit-abis (Vec core/AbiDeclV0)
+            (unit-abis (Vec core/AbiDeclV0))
             (unit/selected-abis [export] function native-function)
-            unit-regions (Vec core/RegionDef)
+            (unit-regions (Vec core/RegionDef))
             (unit/selected-regions (lower/slice-regions) native-function)
-            native-unit unit/NativeUnitV0
+            (native-unit unit/NativeUnitV0)
             (unit/make-native-unit target-unit-id native-function unit-layouts
               unit-abis unit-regions)]
         (if (not (unit/native-unit-record-valid? native-unit))

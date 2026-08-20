@@ -8,7 +8,7 @@
 
 ;; probe 2: atom-backed accumulation (replaces JS .push mutation)
 (defn collect! [(xs (Vec Int))] (Vec Int)
-  (let [acc Any (atom [])]
+  (let [(acc Any) (atom [])]
     (doseq [x xs]
       (swap! acc conj (+ x 1)))
     (deref acc)))

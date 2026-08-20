@@ -171,7 +171,7 @@
 (defn bind! [(w Walk) (L Any) (target Any)] Any
   (do
     (ri/assert! (:ctx w) (nn L) (:REFERS w) (nn target))
-    (swap! (:nres w) (fn [n Int] Int (inc n)))))
+    (swap! (:nres w) (fn [(n Int)] Int (inc n)))))
 
 (defn bind-xmod! [(w Walk) (node Any) (x Any)] Any
   (if (or (nil? x) (nil? (get x :target)))
@@ -183,7 +183,7 @@
           (ri/assert! (:ctx w) (nn node) (:FIXED w) (ri/literal! "1")))
         (when (some? acc)
           (ri/assert! (:ctx w) (nn node) (:ACC w) (ri/literal! acc)))
-        (swap! (:nxmod w) (fn [n Int] Int (inc n)))
+        (swap! (:nxmod w) (fn [(n Int)] Int (inc n)))
         true))))
 
 (defn bound-render! [(w Walk) (node Any) (nm Any) (bt Any)] Any
@@ -213,7 +213,7 @@
       (if (some? b)
         (do
           (bind! w node b)
-          (swap! (:ntype w) (fn [n Int] Int (inc n)))
+          (swap! (:ntype w) (fn [(n Int)] Int (inc n)))
           true)
         (bind-xmod! w node (xr w node nm))))
     (= "list" (kd w node))
@@ -312,7 +312,7 @@
       false
       (do
         (bind! w node b)
-        (swap! (:ntype w) (fn [n Int] Int (inc n)))
+        (swap! (:ntype w) (fn [(n Int)] Int (inc n)))
         true))))
 
 (defn- try-ctor! [(w Walk) (node Any) (nm Any)] Bool
@@ -324,7 +324,7 @@
           (do
             (bind! w node b)
             (ri/assert! (:ctx w) (nn node) (:CTOR w) (ri/literal! pfx))
-            (swap! (:ntype w) (fn [n Int] Int (inc n)))
+            (swap! (:ntype w) (fn [(n Int)] Int (inc n)))
             true)
           (if (some? (bind-xmod! w node (xr w node stripped)))
             (do
@@ -339,7 +339,7 @@
       (do
         (bind! w node (nth a 0))
         (ri/assert! (:ctx w) (nn node) (:ACC w) (ri/literal! (nth a 1)))
-        (swap! (:ntype w) (fn [n Int] Int (inc n)))
+        (swap! (:ntype w) (fn [(n Int)] Int (inc n)))
         true))))
 
 (defn- walk-signature-types!
@@ -436,7 +436,7 @@
             (when (and (some? binding) (not= binding member))
               (do
                 (bind! w member binding)
-                (swap! (:ntype w) (fn [n Int] Int (inc n))))))
+                (swap! (:ntype w) (fn [(n Int)] Int (inc n))))))
           :else
           nil)))
       :else
@@ -491,7 +491,7 @@
           (and (some? qualifier) (try-ctor! w node nm))
           nil
           (some? qualifier)
-          (swap! (:nunres w) (fn [n Int] Int (inc n)))
+          (swap! (:nunres w) (fn [(n Int)] Int (inc n)))
           (try-type! w node nm)
           nil
           (try-ctor! w node nm)
@@ -499,7 +499,7 @@
           (try-accessor! w node nm)
           nil
           :else
-          (swap! (:nunres w) (fn [n Int] Int (inc n)))))
+          (swap! (:nunres w) (fn [(n Int)] Int (inc n)))))
       (= "list" k)
       (let [ks (kids w node) h (hd w node) hs (str h)]
         (cond
@@ -542,7 +542,7 @@
           (contains? rc/MATCH-FORMS hs)
           (do
             (walk! w (nth ks 1 nil) scope)
-            (doseq [clause (vec (filter (fn [cl Any] Bool (brk? w cl)) (vec (drop 2 ks))))]
+            (doseq [clause (vec (filter (fn [(cl Any)] Bool (brk? w cl)) (vec (drop 2 ks))))]
               (let [cc (vec (rest (kids w clause))) pat (nth cc 0 nil) body (vec (rest cc))]
                 (do
                   (walk-pat-heads! w pat scope walk!)
@@ -580,19 +580,19 @@
 (defn cbind! [(w Walk) (L Any) (target Any)] Any
   (do
     (ri/assert! (:ctx w) (nn L) (:REFERS w) (nn target))
-    (swap! (:ncomment w) (fn [n Int] Int (inc n)))))
+    (swap! (:ncomment w) (fn [(n Int)] Int (inc n)))))
 
 (defn- def-binding [(cp Corpus) (src Any) (nm Any)] Any
   (let [v (get (get (:module-context cp) src) nm)]
     (if (some? v) v (get (get (:type-context cp) src) nm))))
 
 (defn resolve-comment! [(w Walk) (cp Corpus) (e Any) (src Any)] Any
-  (doseq [seg (vec (filter (fn [s Any] Bool (= "symbol" (kd w s))) (rr/ordered-segs (:ctx w) e)))]
+  (doseq [seg (vec (filter (fn [(s Any)] Bool (= "symbol" (kd w s))) (rr/ordered-segs (:ctx w) e)))]
     (let [nm (sv w seg) qualifier (sq w seg) local (if (nil? qualifier) (def-binding cp src nm) nil) b (if (some? local) local (get (xr w seg nm) :target))]
       (when (some? b) (cbind! w seg b)))))
 
 (defn walk-comments! [(w Walk) (cp Corpus) (src Any)] Any
-  (doseq [e (vec (filter (fn [x Any] Bool (= "comment" (kd w x))) (vec (get (:ents cp) src []))))]
+  (doseq [e (vec (filter (fn [(x Any)] Bool (= "comment" (kd w x))) (vec (get (:ents cp) src []))))]
     (resolve-comment! w cp e src)))
 
 (defn- for-src [(w Walk) (cp Corpus) (src Any) (xres-for Any)] Walk
@@ -610,8 +610,8 @@
     (:ntype w)
     (:ncomment w)
     (xres-for src)
-    (fn [nm Any] Any (get (get (:type-context cp) src) nm))
-    (fn [nm Any] Any (get (get (:accessors cp) src) nm))))
+    (fn [(nm Any)] Any (get (get (:type-context cp) src) nm))
+    (fn [(nm Any)] Any (get (get (:accessors cp) src) nm))))
 
 (defn run-resolution-over!
   [(w Walk)
@@ -639,7 +639,7 @@
    (srcs (Vec Any))
    (ents-of Any)]
   (Map Keyword Any)
-  (let [per (fn [f Any] Any (reduce (fn
+  (let [per (fn [(f Any)] Any (reduce (fn
                                         [(m (Map Any Any))
                                          (s Any)]
                                         (Map Any Any)
@@ -661,22 +661,22 @@
                                                                                                                                                                                                        (Map Any Any)
                                                                                                                                                                                                        (let [ents (vec (get ents-of s []))] (assoc m (rm/module-name ctx view ents) (f ents)))) {} named))]
     {:module-context
-     (per (fn [ents (Vec Any)] Any (rm/module-defs ctx view ents)))
+     (per (fn [(ents (Vec Any))] Any (rm/module-defs ctx view ents)))
      :type-context
-     (per (fn [ents (Vec Any)] Any (rm/module-types ctx view ents)))
+     (per (fn [(ents (Vec Any))] Any (rm/module-types ctx view ents)))
      :accessors
-     (per (fn [ents (Vec Any)] Any (rm/module-accessors ctx view ents)))
+     (per (fn [(ents (Vec Any))] Any (rm/module-accessors ctx view ents)))
      :exports
-     (by-mod (fn [ents (Vec Any)] Any (let [e (rm/module-exports ctx view ents)] (if (empty? e) (rm/module-defs ctx view ents) e))))
+     (by-mod (fn [(ents (Vec Any))] Any (let [e (rm/module-exports ctx view ents)] (if (empty? e) (rm/module-defs ctx view ents) e))))
      :type-exports
-     (by-mod (fn [ents (Vec Any)] Any (rm/module-types ctx view ents)))
+     (by-mod (fn [(ents (Vec Any))] Any (rm/module-types ctx view ents)))
      :accessor-exports
-     (by-mod (fn [ents (Vec Any)] Any (rm/module-accessors ctx view ents)))}))
+     (by-mod (fn [(ents (Vec Any))] Any (rm/module-accessors ctx view ents)))}))
 
 (defn warm-groups [(ctx ri/Graph) (cache Any) (name->module Any)] Any
   (if (some? cache)
     cache
-    (reduce (fn [groups Any occ Any] Any (let [node-name (ri/value-at ctx occ) module (name->module node-name)] (if (some? module) (update groups module (fnil conj []) (ri/subject-at ctx occ)) groups)))
+    (reduce (fn [(groups Any) (occ Any)] Any (let [node-name (ri/value-at ctx occ) module (name->module node-name)] (if (some? module) (update groups module (fnil conj []) (ri/subject-at ctx occ)) groups)))
       {}
       (ri/by-predicate ctx "name"))))
 
@@ -710,14 +710,14 @@
     {:srcs
      srcs
      :module-context
-     (per-context (fn [ents (Vec Any)] Any (rm/module-defs ctx view ents)))
+     (per-context (fn [(ents (Vec Any))] Any (rm/module-defs ctx view ents)))
      :type-context
-     (per-context (fn [ents (Vec Any)] Any (rm/module-types ctx view ents)))
+     (per-context (fn [(ents (Vec Any))] Any (rm/module-types ctx view ents)))
      :accessors
-     (per-context (fn [ents (Vec Any)] Any (rm/module-accessors ctx view ents)))
+     (per-context (fn [(ents (Vec Any))] Any (rm/module-accessors ctx view ents)))
      :exports
-     (by-module (fn [ents (Vec Any)] Any (let [exports (rm/module-exports ctx view ents)] (if (empty? exports) (rm/module-defs ctx view ents) exports))))
+     (by-module (fn [(ents (Vec Any))] Any (let [exports (rm/module-exports ctx view ents)] (if (empty? exports) (rm/module-defs ctx view ents) exports))))
      :type-exports
-     (by-module (fn [ents (Vec Any)] Any (rm/module-types ctx view ents)))
+     (by-module (fn [(ents (Vec Any))] Any (rm/module-types ctx view ents)))
      :accessor-exports
-     (by-module (fn [ents (Vec Any)] Any (rm/module-accessors ctx view ents)))}))
+     (by-module (fn [(ents (Vec Any))] Any (rm/module-accessors ctx view ents)))}))

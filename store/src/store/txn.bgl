@@ -53,7 +53,7 @@
         (and (integer? (t/triple-t3 value)) (>= (t/triple-t3 value) 0))))))
 
 (defn mint! [(builder (Atom Builder))] t/Triple
-  (let [before Builder (deref builder) ordinal Int (builder-minted before)]
+  (let [(before Builder) (deref builder) (ordinal Int) (builder-minted before)]
     (do
       (swap! builder assoc :minted (inc ordinal))
       (mint-coordinate (builder-coordinate before) ordinal))))
@@ -64,7 +64,7 @@
   [(builder (Atom Builder)) (appended (Vec t/CommitOperation))] t/Triple
   (if (empty? appended)
     (throw (ex-info "store: an empty operation vector has no write identity" {:type :empty-operation-vector}))
-    (let [before Builder (deref builder) start Int (count (builder-operations before))]
+    (let [(before Builder) (deref builder) (start Int) (count (builder-operations before))]
       (do
         (swap! builder
           assoc
@@ -90,7 +90,7 @@
    (predicate Any)
    (value Any)]
   (Vec t/CommitOperation)
-  (conj (mapv (fn [event t/OperationOccurrence] t/CommitOperation (store/retract-operation (rot/proposition-of event))) (rot/newest-first (rot/by-t12 view subject predicate)))
+  (conj (mapv (fn [(event t/OperationOccurrence)] t/CommitOperation (store/retract-operation (rot/proposition-of event))) (rot/newest-first (rot/by-t12 view subject predicate)))
     (store/assert-operation (t/triple subject predicate value))))
 
 (defn update-single!
@@ -103,7 +103,7 @@
   (append! builder (compile-single-update view subject predicate value)))
 
 (defn commit! [(ctx (Atom t/TermStore)) (builder (Atom Builder))] t/Triple
-  (let [current Builder (deref builder) pinned t/Triple (builder-coordinate current)]
+  (let [(current Builder) (deref builder) (pinned t/Triple) (builder-coordinate current)]
     (if (not (= (t/triple-t1 pinned) (store/space-id ctx)))
       (throw (ex-info "store: transaction belongs to a different space" {:type :transaction-space-mismatch}))
       (if (not (= (t/triple-t3 pinned) (store/next-sequence ctx)))

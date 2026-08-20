@@ -90,7 +90,7 @@
 
 ;; --- catalog: the CLOSED, O(1) surface (exactly twelve tools) ----------------
 (defn catalog [(_propositions (Vec t/Triple))] (Vec ToolSpec)
-  (let [subj-param (Vec Param) [(->Param "subject" "string" true)] spo-params (Vec Param) [(->Param "subject" "string" true) (->Param "predicate" "string" true) (->Param "object" "string" true)]]
+  (let [(subj-param (Vec Param)) [(->Param "subject" "string" true)] (spo-params (Vec Param)) [(->Param "subject" "string" true) (->Param "predicate" "string" true) (->Param "object" "string" true)]]
     [(->ToolSpec "tell"
        (str "Assert the fact (subject, predicate, object). A single-valued "
          "predicate replaces its current value; a multi-valued one accumulates "
@@ -235,15 +235,15 @@
    (tool-name String)
    (args (Map Keyword Any))]
   Any
-  (let [tool String tool-name spec ToolSpec? (spec-by-name cat tool) session schema/Session (schema/session! ctx) propositions (Vec t/Triple) (rotation/propositions (rotation/all-occurrences (schema/view session)))]
+  (let [(tool String) tool-name (spec ToolSpec?) (spec-by-name cat tool) (session schema/Session) (schema/session! ctx) (propositions (Vec t/Triple)) (rotation/propositions (rotation/all-occurrences (schema/view session)))]
     (if (nil? spec)
       {:error [(str "unknown tool '" tool "' — call `tools` for the catalog")]}
-      (let [op Op (:op spec) miss (Vec String) (missing-req op args)]
+      (let [(op Op) (:op spec) (miss (Vec String)) (missing-req op args)]
         (if (not (empty? miss))
           {:error miss}
-          (let [subj Any (:subject args)
-                pred String (canonical-predicate session (str (:predicate args)))
-                te Any (at subj)]
+          (let [(subj Any) (:subject args)
+                (pred String) (canonical-predicate session (str (:predicate args)))
+                (te Any) (at subj)]
             (cond
               [(= op :tell)
                {:write
@@ -267,16 +267,16 @@
                  (ref-value session pred (:object args))}}]
               [(= op :show)
                {:rows
-                (mapv (fn [value t/Triple] PredVal (->PredVal (t/triple-t2 value) (t/triple-t3 value)))
+                (mapv (fn [(value t/Triple)] PredVal (->PredVal (t/triple-t2 value) (t/triple-t3 value)))
                   (k/by-t1 propositions te))}]
               [(= op :query)
-               (let [result q/QueryResult (q/run-syntax! propositions (:query args))]
+               (let [(result q/QueryResult) (q/run-syntax! propositions (:query args))]
                  (if (q/result-ok? result)
                    {:ok (q/result-rows result)}
                    {:error (mapv q/error-message (q/result-errors result))}))]
               [(= op :validate)
                {:rows
-                (mapv (fn [value t/Triple] ProfileViolation (->ProfileViolation (t/triple-t1 value) (t/triple-t3 value)))
+                (mapv (fn [(value t/Triple)] ProfileViolation (->ProfileViolation (t/triple-t1 value) (t/triple-t3 value)))
                   (k/lint-declared-profile propositions (store/space-id ctx)))}]
               [(= op :upsert-form)
                {:edit

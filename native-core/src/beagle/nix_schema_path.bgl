@@ -71,11 +71,11 @@
 (defn keyword-path
   [(prefix String) (event reader/ReaderEvent)]
   String?
-  (let [value String (reader/readerevent-value event)]
+  (let [(value String) (reader/readerevent-value event)]
     (if (or (not= (reader/readerevent-kind event) :keyword)
             (<= (count value) 1))
       nil
-      (let [segment String (subs value 1 (count value))]
+      (let [(segment String) (subs value 1 (count value))]
         (cond
           (> (count prefix) 0) (str prefix "." segment)
           (str/includes? segment ".") segment
@@ -84,7 +84,7 @@
 (defn occurrence-from-entry
   [(document SourceDocument) (entry SourceStackEntry)]
   OptionPathOccurrence?
-  (let [path String? (sourcestackentry-pending-path entry)]
+  (let [(path String?) (sourcestackentry-pending-path entry)]
     (if (nil? path)
       nil
       (->OptionPathOccurrence
@@ -98,7 +98,7 @@
    (ignored-roots (Vec String))
    (occurrences (Vec OptionPathOccurrence))]
   (Vec OptionPathOccurrence)
-  (let [occurrence OptionPathOccurrence?
+  (let [(occurrence OptionPathOccurrence?)
         (occurrence-from-entry document entry)]
     (if (nil? occurrence)
       occurrences
@@ -112,7 +112,7 @@
 (defn entry-value-ignored?
   [(entry SourceStackEntry) (ignored-roots (Vec String))]
   Bool
-  (let [path String? (sourcestackentry-pending-path entry)]
+  (let [(path String?) (sourcestackentry-pending-path entry)]
     (or (sourcestackentry-ignored entry)
         (and (some? path) (ignored-path? path ignored-roots)))))
 
@@ -130,8 +130,8 @@
   (Vec SourceStackEntry)
   (if (empty? stack)
     stack
-    (let [index Int (dec (count stack))
-          parent SourceStackEntry (nth stack index)]
+    (let [(index Int) (dec (count stack))
+          (parent SourceStackEntry) (nth stack index)]
       (if (map-stack-entry? parent)
         (assoc stack index (completed-map-item parent))
         stack))))
@@ -175,8 +175,8 @@
           (sourcedocument-source-id document)
           (count (sourcedocument-text document))
           "unterminated source container"))
-      (let [event reader/ReaderEvent (first remaining)
-            kind Keyword (reader/readerevent-kind event)]
+      (let [(event reader/ReaderEvent) (first remaining)
+            (kind Keyword) (reader/readerevent-kind event)]
         (cond
           (= kind :metadata)
           (->OptionPathError
@@ -193,21 +193,21 @@
               (rest remaining)
               (conj stack (->SourceStackEntry kind 0 "" false nil -1))
               occurrences)
-            (let [parent SourceStackEntry (peek stack)
-                  parent-map Bool (map-stack-entry? parent)
-                  value-position Bool
+            (let [(parent SourceStackEntry) (peek stack)
+                  (parent-map Bool) (map-stack-entry? parent)
+                  (value-position Bool)
                   (and parent-map (= (mod (sourcestackentry-items parent) 2) 1))
-                  value-ignored Bool
+                  (value-ignored Bool)
                   (if value-position
                     (entry-value-ignored? parent ignored-roots)
                     (sourcestackentry-ignored parent))
-                  child-prefix String
+                  (child-prefix String)
                   (if (and value-position
                            (= kind :map/open)
                            (some? (sourcestackentry-pending-path parent)))
                     (or (sourcestackentry-pending-path parent) "")
                     "")
-                  next-occurrences (Vec OptionPathOccurrence)
+                  (next-occurrences (Vec OptionPathOccurrence))
                   (if (and value-position (not= kind :map/open))
                     (append-entry-occurrence
                       document parent ignored-roots occurrences)
@@ -224,7 +224,7 @@
               (sourcedocument-source-id document)
               (reader/readerevent-offset event)
               "unexpected source container close")
-            (let [entry SourceStackEntry (peek stack)]
+            (let [(entry SourceStackEntry) (peek stack)]
               (if (and (map-stack-entry? entry)
                        (not= (mod (sourcestackentry-items entry) 2) 0))
                 (->OptionPathError
@@ -239,8 +239,8 @@
           :else
           (if (empty? stack)
             (recur (rest remaining) stack occurrences)
-            (let [index Int (dec (count stack))
-                  entry SourceStackEntry (nth stack index)]
+            (let [(index Int) (dec (count stack))
+                  (entry SourceStackEntry) (nth stack index)]
               (if (map-stack-entry? entry)
                 (recur
                   (rest remaining)
@@ -252,9 +252,9 @@
 (defn extract-nix-option-paths
   [(document SourceDocument) (ignored-roots (Vec String))]
   OptionPathExtraction
-  (let [read reader/DatumRead
+  (let [(read reader/DatumRead)
         (reader/read-events (sourcedocument-text document))
-        error String? (reader/datumread-error read)]
+        (error String?) (reader/datumread-error read)]
     (if (some? error)
       (->OptionPathError
         (sourcedocument-source-id document)
@@ -270,7 +270,7 @@
          matches (Vec OptionPathOccurrence) []]
     (if (empty? remaining)
       matches
-      (let [occurrence OptionPathOccurrence (first remaining)]
+      (let [(occurrence OptionPathOccurrence) (first remaining)]
         (recur
           (rest remaining)
           (if (= path (optionpathoccurrence-path occurrence))
@@ -285,8 +285,8 @@
          uses (Vec RemovedPathUse) []]
     (if (empty? remaining)
       uses
-      (let [path String (first remaining)
-            matches (Vec OptionPathOccurrence)
+      (let [(path String) (first remaining)
+            (matches (Vec OptionPathOccurrence))
             (occurrences-for-path path occurrences)]
         (recur
           (rest remaining)
@@ -302,8 +302,8 @@
       (recur (inc value) (conj row value)))))
 
 (defn levenshtein-distance [(left String) (right String)] Int
-  (let [left-length Int (count left)
-        right-length Int (count right)]
+  (let [(left-length Int) (count left)
+        (right-length Int) (count right)]
     (cond
       (= left-length 0) right-length
       (= right-length 0) left-length
@@ -312,19 +312,19 @@
              previous (Vec Int) (integer-row right-length)]
         (if (> left-index left-length)
           (nth previous right-length)
-          (let [current (Vec Int)
+          (let [(current (Vec Int))
                 (loop [right-index Int 1
                        row (Vec Int) [left-index]]
                   (if (> right-index right-length)
                     row
-                    (let [cost Int
+                    (let [(cost Int)
                           (if (= (subs left (dec left-index) left-index)
                                  (subs right (dec right-index) right-index))
                             0
                             1)
-                          insertion Int (inc (nth row (dec right-index)))
-                          deletion Int (inc (nth previous right-index))
-                          substitution Int
+                          (insertion Int) (inc (nth row (dec right-index)))
+                          (deletion Int) (inc (nth previous right-index))
+                          (substitution Int)
                           (+ cost (nth previous (dec right-index)))]
                       (recur
                         (inc right-index)
@@ -348,7 +348,7 @@
          inserted Bool false]
     (if (empty? remaining)
       (if inserted result (conj result suggestion))
-      (let [current PathSuggestion (first remaining)]
+      (let [(current PathSuggestion) (first remaining)]
         (if (and (not inserted) (suggestion-before? suggestion current))
           (recur remaining (conj result suggestion) true)
           (recur (rest remaining) (conj result current) inserted))))))
@@ -367,12 +367,12 @@
   (Vec PathSuggestion)
   (if (<= limit 0)
     []
-    (let [ranked (Vec PathSuggestion)
+    (let [(ranked (Vec PathSuggestion))
           (loop [remaining (Vec String) candidates
                  result (Vec PathSuggestion) []]
             (if (empty? remaining)
               result
-              (let [candidate String (first remaining)]
+              (let [(candidate String) (first remaining)]
                 (recur
                   (rest remaining)
                   (insert-suggestion

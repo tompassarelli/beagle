@@ -20,7 +20,7 @@
 
 (defn max-sequence [(records (Vec t/TransactionRecord))] Int
   (reduce
-   (fn [maximum Int record t/TransactionRecord] Int
+   (fn [(maximum Int) (record t/TransactionRecord)] Int
      (let [sequence (t/transactionrecord-sequence record)]
        (if (> sequence maximum) sequence maximum)))
    0

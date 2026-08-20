@@ -21,12 +21,12 @@
     [(ChoiceNamed value) value]))
 
 (defn main [] Int
-  (let [missing-items (U (Vec provider/Item) Nil)
+  (let [(missing-items (U (Vec provider/Item) Nil))
         (loaded (->LoadRejected 5))
-        present-items (U (Vec provider/Item) Nil)
+        (present-items (U (Vec provider/Item) Nil))
         (loaded (->LoadAccepted true))
-        missing-name (U String Nil) (choose (->ChoiceEmpty))
-        present-name (U String Nil) (choose (->ChoiceNamed "value"))]
+        (missing-name (U String Nil)) (choose (->ChoiceEmpty))
+        (present-name (U String Nil)) (choose (->ChoiceNamed "value"))]
     (if (and (nil? missing-items)
              (some? present-items)
              (nil? missing-name)

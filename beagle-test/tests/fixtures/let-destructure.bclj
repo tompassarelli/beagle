@@ -2,18 +2,18 @@
 (ns test.let-destructure)
 
 (defn seq-destructure-let [] String
-  (let [[a b] (HVec String String) ["hello" "world"]]
+  (let [([a b] (HVec String String)) ["hello" "world"]]
     (str a " " b)))
 
 (defn map-destructure-let [] String
-  (let [{:keys [x y] :or {x "" y ""}} (Map Keyword String)
+  (let [({:keys [x y] :or {x "" y ""}} (Map Keyword String))
         {:x "foo" :y "bar"}]
     (str x " " y)))
 
 (defn map-destructure-with-as [] String
-  (let [{:keys [x] :or {x ""} :as m} (Map Keyword String) {:x "baz"}]
+  (let [({:keys [x] :or {x ""} :as m} (Map Keyword String)) {:x "baz"}]
     (str x)))
 
 (defn nested-seq-destructure [] String
-  (let [[[a b] c] (HVec (Vec String) String) [["p" "q"] "r"]]
+  (let [([[a b] c] (HVec (Vec String) String)) [["p" "q"] "r"]]
     (str a b c)))

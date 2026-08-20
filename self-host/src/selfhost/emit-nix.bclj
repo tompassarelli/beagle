@@ -42,7 +42,7 @@
 (def nix-require-prefixes-ref Any (atom {}))
 
 (defn emit-expr* [(e Any) (depth Int)] String
-  (let [f (Fn [Any Int] String) (deref emit-expr-ref)] (f e depth)))
+  (let [(f (Fn [Any Int] String)) (deref emit-expr-ref)] (f e depth)))
 
 ;; --- indentation --------------------------------------------------------------
 (defn indent [(n Int)] String
@@ -66,22 +66,22 @@
     "null"})
 
 (defn hex-encode-utf8 [(s String)] String
-  (let [size Int (count s)]
+  (let [(size Int) (count s)]
     (loop [index Int 0 out String ""]
       (if (>= index size)
         out
-        (let [unit-char Any (subs s index (+ index 1))
-              unit Int (int (first unit-char))
-              paired Bool
+        (let [(unit-char Any) (subs s index (+ index 1))
+              (unit Int) (int (first unit-char))
+              (paired Bool)
               (and (>= unit 55296) (< unit 56320) (< (+ index 1) size))
-              point Int
+              (point Int)
               (if paired
                 (+ 65536
                   (+ (* (- unit 55296) 1024)
                     (-
                       (int
                         (first
-                          (let [low-char Any (subs s (+ index 1) (+ index 2))]
+                          (let [(low-char Any) (subs s (+ index 1) (+ index 2))]
                             low-char)))
                       56320)))
                 unit)]
@@ -221,7 +221,7 @@
 (defn exact-object-keys? [(value Any) (expected Any)] Bool
   (and (map? value)
        (= (count (keys value)) (count expected))
-       (every? (fn [key String] Bool (contains? value key)) expected)))
+       (every? (fn [(key String)] Bool (contains? value key)) expected)))
 
 (defn valid-record-update-contract? [(contract Any)] Bool
   (and (exact-object-keys?
@@ -436,12 +436,12 @@
                              {}))))
             entries (str/join ", "
                       (mapv
-                        (fn [k Any] String
+                        (fn [(k Any)] String
                           (if (not (string? k))
                             (throw (ex-info
                               "nested map destructuring in params is not supported by the nix backend — destructure the outer level and bind the rest with let"
                               {}))
-                            (let [entry (first (filterv (fn [d Any] Bool
+                            (let [entry (first (filterv (fn [(d Any)] Bool
                                                           (= (get d "key") k)) defaults))]
                               (str (mangle-name k)
                                 (if (nil? entry)
@@ -721,12 +721,12 @@
 
 ;; --- interpolated / multiline strings (emit-nix-strings.rkt) -----------------
 (defn emit-interp-string [(parts Any) (depth Int)] String
-  (let [chunks (mapv (fn [part Any] String (if (= (get part "type") "text") (escape-nix (get part "value")) (str "${" (emit-expr* (get part "value") depth) "}"))) parts)]
+  (let [chunks (mapv (fn [(part Any)] String (if (= (get part "type") "text") (escape-nix (get part "value")) (str "${" (emit-expr* (get part "value") depth) "}"))) parts)]
     (str "\"" (str/join "" chunks) "\"")))
 
 (defn emit-interp-string-inline [(parts Any) (depth Int)] String
   (str/join ""
-    (mapv (fn [part Any] String (if (= (get part "type") "text") (escape-nix-ml (get part "value")) (str "${" (emit-expr* (get part "value") depth) "}")))
+    (mapv (fn [(part Any)] String (if (= (get part "type") "text") (escape-nix-ml (get part "value")) (str "${" (emit-expr* (get part "value") depth) "}")))
       parts)))
 
 (defn emit-multiline-string [(lines Any) (depth Int)] String
@@ -829,13 +829,13 @@
 (defn emit-nix-list [(items Any) (depth Int)] String
   (if (= 0 (count items))
     "[ ]"
-    (let [item-strs (mapv (fn [i Any] String (paren-wrap (emit-expr* i depth) i)) items) single-line (str "[ " (str/join " " item-strs) " ]") base-indent (* depth 2) any-map (< 0 (count (filterv map-node? items)))]
+    (let [item-strs (mapv (fn [(i Any)] String (paren-wrap (emit-expr* i depth) i)) items) single-line (str "[ " (str/join " " item-strs) " ]") base-indent (* depth 2) any-map (< 0 (count (filterv map-node? items)))]
       (if (and (<= (count items) 6) (not any-map) (<= (+ base-indent (count single-line)) 80))
         single-line
         (let [ind (indent (+ depth 1))]
           (str "[\n"
             (str/join "\n"
-              (mapv (fn [i Any] String (str ind (paren-wrap (emit-expr* i (+ depth 1)) i)))
+              (mapv (fn [(i Any)] String (str ind (paren-wrap (emit-expr* i (+ depth 1)) i)))
                 items))
             "\n"
             (indent depth)
@@ -843,7 +843,7 @@
 
 ;; --- rec attrs ---------------------------------------------------------------
 (defn emit-nix-rec-attrs [(pairs Any) (depth Int)] String
-  (let [ind (indent (+ depth 1)) entries (mapv (fn [pair Any] String (str ind (mangle-name (get pair "key")) " = " (emit-expr* (get pair "val") (+ depth 1)) ";")) pairs)]
+  (let [ind (indent (+ depth 1)) entries (mapv (fn [(pair Any)] String (str ind (mangle-name (get pair "key")) " = " (emit-expr* (get pair "val") (+ depth 1)) ";")) pairs)]
     (str "rec {\n" (str/join "\n" entries) "\n" (indent depth) "}")))
 
 ;; --- fn-set (attrset-pattern lambda) -----------------------------------------
@@ -1031,7 +1031,7 @@
           "; in "
           body-str)
         (= pt "or")
-        (let [tests (mapv (fn [alt Any] String (if (= (get alt "type") "wildcard") "true" (str target " == " (emit-pat-datum (get alt "value"))))) (get pat "alternatives"))]
+        (let [tests (mapv (fn [(alt Any)] String (if (= (get alt "type") "wildcard") "true" (str target " == " (emit-pat-datum (get alt "value"))))) (get pat "alternatives"))]
           (str "if "
             (str/join " || " tests)
             " then "
@@ -1056,10 +1056,10 @@
                          (record-valued-expr? target-expr))
         updates (get e "updates")
         target-name "bgl____update__target"
-        update-name (fn [index Int] String
+        update-name (fn [(index Int)] String
                       (str "bgl____update__value__" index))
         entries (map-indexed
-                  (fn [index Int update Any] String
+                  (fn [(index Int) (update Any)] String
                     (let [
                           kw (get update "field")
                           field (if (str/starts-with? kw ":")
@@ -1093,7 +1093,7 @@
     (when (not (nil? contract))
       (doseq [update updates]
         (when (nil? (some
-                      (fn [field String] Any
+                      (fn [(field String)] Any
                         (when (= field (get update "field")) field))
                       (get contract "fieldOrder")))
           (throw (ex-info
@@ -1183,13 +1183,13 @@
 ;; --- loop/recur -> recursive nix function ------------------------------------
 (defn emit-loop! [(e Any) (depth Int)] String
   (let [bindings (get e "bindings")
-        _ (when (not (every? (fn [b Any] Bool (string? (get b "name"))) bindings))
+        _ (when (not (every? (fn [(b Any)] Bool (string? (get b "name"))) bindings))
             (throw (ex-info
               "destructuring in loop bindings is not supported by the nix backend — bind the aggregate to one loop name, then project inside the body"
               {})))
         body (get e "body")
         loop-params (mapv
-                      (fn [b Any] Any
+                      (fn [(b Any)] Any
                         {"type" "param"
                          "name" (get b "name")
                          "ann" (get b "ann")
@@ -1198,11 +1198,11 @@
                          (get b "constraintSynchronous")})
                       bindings)
         raw-loop-params (mapv
-                          (fn [p Any] Any
+                          (fn [(p Any)] Any
                             (assoc p "constraint" nil))
                           loop-params)
         loop-args (str/join " "
-                    (mapv (fn [p Any] String
+                    (mapv (fn [(p Any)] String
                             (mangle-name (get p "name")))
                       loop-params))
         prev (deref recur-name-ref)]
@@ -1234,11 +1234,11 @@
   (and (= (get key-arg "node") "literal") (= (get key-arg "kind") "keyword")))
 
 (defn emit-call! [(e Any) (depth Int)] String
-  (let [fn-expr Any (get e "fn") args Any (vec (get e "args")) n Int (count args) fname Any (call-fn-name e) pw Any (fn
+  (let [(fn-expr Any) (get e "fn") (args Any) (vec (get e "args")) (n Int) (count args) (fname Any) (call-fn-name e) (pw Any) (fn
                                                                                                                                 [(a
                                                                                                                                   Any)]
                                                                                                                                 String
-                                                                                                                                (paren-wrap (emit-expr* a depth) a)) E Any (fn
+                                                                                                                                (paren-wrap (emit-expr* a depth) a)) (E Any) (fn
                                                                                                                                                                                [(a
                                                                                                                                                                                  Any)]
                                                                                                                                                                                String
@@ -1462,7 +1462,7 @@
       (throw (ex-info "(nix/flake ...) requires an attrset literal" {})))
     (let [pairs (vec (map-pairs attrs))]
       (doseq [req FLAKE-REQUIRED]
-        (when (not (< 0 (count (filterv (fn [p Any] Bool (= (kw-key-string p) req)) pairs))))
+        (when (not (< 0 (count (filterv (fn [(p Any)] Bool (= (kw-key-string p) req)) pairs))))
           (throw (ex-info (str "(nix/flake ...): missing required key " req) {}))))
       (doseq [p pairs]
         (let [k (kw-key-string p)]
@@ -1496,13 +1496,13 @@
       {"node"
        "map"
        "pairs"
-       (mapv (fn [p Any] Any {"key" (rewrite-cfg-ref (get p "key") path-str) "val" (rewrite-cfg-ref (get p "val") path-str)})
+       (mapv (fn [(p Any)] Any {"key" (rewrite-cfg-ref (get p "key") path-str) "val" (rewrite-cfg-ref (get p "val") path-str)})
          (get e "pairs"))}
       (= (get e "node") "vec")
       {"node"
        "vec"
        "items"
-       (mapv (fn [i Any] Any (rewrite-cfg-ref i path-str))
+       (mapv (fn [(i Any)] Any (rewrite-cfg-ref i path-str))
          (get e "items"))}
       (= (get e "node") "call")
       {"node"
@@ -1510,15 +1510,15 @@
        "fn"
        (rewrite-cfg-ref (get e "fn") path-str)
        "args"
-       (mapv (fn [a Any] Any (rewrite-cfg-ref a path-str)) (get e "args"))}
+       (mapv (fn [(a Any)] Any (rewrite-cfg-ref a path-str)) (get e "args"))}
       (= (get e "node") "let")
       {"node"
        "let"
        "bindings"
-       (mapv (fn [b Any] Any {"name" (get b "name") "ann" (get b "ann") "value" (rewrite-cfg-ref (get b "value") path-str)})
+       (mapv (fn [(b Any)] Any {"name" (get b "name") "ann" (get b "ann") "value" (rewrite-cfg-ref (get b "value") path-str)})
          (get e "bindings"))
        "body"
-       (mapv (fn [x Any] Any (rewrite-cfg-ref x path-str)) (get e "body"))}
+       (mapv (fn [(x Any)] Any (rewrite-cfg-ref x path-str)) (get e "body"))}
       (= (get e "node") "if")
       {"node"
        "if"
@@ -1534,12 +1534,12 @@
        "cond"
        (rewrite-cfg-ref (get e "cond") path-str)
        "body"
-       (mapv (fn [x Any] Any (rewrite-cfg-ref x path-str)) (get e "body"))}
+       (mapv (fn [(x Any)] Any (rewrite-cfg-ref x path-str)) (get e "body"))}
       (= (get e "node") "do")
       {"node"
        "do"
        "body"
-       (mapv (fn [x Any] Any (rewrite-cfg-ref x path-str)) (get e "body"))}
+       (mapv (fn [(x Any)] Any (rewrite-cfg-ref x path-str)) (get e "body"))}
       (= (get e "node") "kw-access")
       (let [rewritten
               {"node"
@@ -1582,13 +1582,13 @@
       {"node"
        "nix-interpolated-string"
        "parts"
-       (mapv (fn [pt Any] Any (if (= (get pt "type") "text") pt {"type" "expr" "value" (rewrite-cfg-ref (get pt "value") path-str)}))
+       (mapv (fn [(pt Any)] Any (if (= (get pt "type") "text") pt {"type" "expr" "value" (rewrite-cfg-ref (get pt "value") path-str)}))
          (get e "parts"))}
       (= (get e "node") "nix-multiline-string")
       {"node"
        "nix-multiline-string"
        "lines"
-       (mapv (fn [ln Any] Any (cond (= (get ln "type") "text") ln (= (get ln "type") "interp") {"type" "interp" "parts" (mapv (fn
+       (mapv (fn [(ln Any)] Any (cond (= (get ln "type") "text") ln (= (get ln "type") "interp") {"type" "interp" "parts" (mapv (fn
                                                                                                                                   [(pt
                                                                                                                                     Any)]
                                                                                                                                   Any
@@ -1618,7 +1618,7 @@
 
 ;; --- records / enums / errors / scalars (top-def bodies) ---------------------
 (defn field-names-of [(fields Any)] (Vec String)
-  (mapv (fn [f Any] String (get f "name")) fields))
+  (mapv (fn [(f Any)] String (get f "name")) fields))
 
 (defn record-fields-constrained? [(fields Any)] Bool
   (< 0 (count (filterv constrained-binding? fields))))
@@ -1711,7 +1711,7 @@
                     " "
                     (str " "
                       (str/join " "
-                        (mapv (fn [field-name String] String
+                        (mapv (fn [(field-name String)] String
                                 (let [emitted (mangle-name field-name)]
                                   (str emitted " = " emitted ";")))
                           fnames))
@@ -1727,7 +1727,7 @@
                (emit-param-chain fields value-str depth)
                ";")
         accessors (mapv
-                    (fn [field-name String] String
+                    (fn [(field-name String)] String
                       (let [emitted (mangle-name field-name)
                             accessor (mangle-name
                                        (str tag "-" field-name))]
@@ -1759,12 +1759,12 @@
     (if (or (nil? mf) (false? mf))
       header
       (let [defs (mapv
-                   (fn [member String] String
+                   (fn [(member String)] String
                      (if (contains? mf member)
                        (emit-tagged-type-defs member (get mf member) depth)
                        ""))
                    members)
-            present (filterv (fn [s String] Bool (not (= s ""))) defs)]
+            present (filterv (fn [(s String)] Bool (not (= s ""))) defs)]
         (if (= 0 (count present))
           header
           (str header "\n" (str/join "\n" present)))))))
@@ -1779,7 +1779,7 @@
       name
       "\n"
       (str/join "\n"
-        (mapv (fn [member String] String
+        (mapv (fn [(member String)] String
                 (emit-tagged-type-defs
                   member
                   (if (and (map? mf) (contains? mf member))
@@ -1824,7 +1824,7 @@
         value-name "v"
         backing-check (scalar-backing-check (get e "backing") value-name)
         predicate-checks (mapv
-                           (fn [p Any] String
+                           (fn [(p Any)] String
                              (scalar-pred-to-nix value-name p))
                            (get e "predicates"))
         checks (into (if (nil? backing-check) [] [backing-check])
@@ -1834,7 +1834,7 @@
       (str ind
         ctor-name
         " = v: "
-        (str/join " " (mapv (fn [check String] String
+        (str/join " " (mapv (fn [(check String)] String
                               (str "assert " check ";"))
                         checks))
         " v;"))))
@@ -2004,7 +2004,7 @@
       (let [name (deref recur-name-ref)]
         (when (nil? name)
           (throw (ex-info "(recur ...) outside of (loop ...)" {})))
-        (let [arg-strs (mapv (fn [a Any] String (paren-wrap (emit-expr* a depth) a)) (get e "args"))]
+        (let [arg-strs (mapv (fn [(a Any)] String (paren-wrap (emit-expr* a depth) a)) (get e "args"))]
           (if (= 0 (count arg-strs))
             name
             (str name " " (str/join " " arg-strs)))))
@@ -2020,7 +2020,7 @@
         (emit-expr* (get e "fallback") depth)
         ")")
       (= node "target-case")
-      (let [cases (vec (get e "cases")) pick (fn [t String] Any (first (filterv (fn
+      (let [cases (vec (get e "cases")) pick (fn [(t String)] Any (first (filterv (fn
                                                                                     [(c
                                                                                       Any)]
                                                                                     Bool
@@ -2149,7 +2149,7 @@
       (let [mf (get form "member-fields")]
         (if (map? mf)
           (reduce
-            (fn [out Any member String] Any
+            (fn [(out Any) (member String)] Any
               (if (contains? mf member)
                 (add-record-type out member)
                 out))
@@ -2163,7 +2163,7 @@
 (defn program-record-types [(prog Any)] Any
   (let [imported-fields (get prog "imported-record-fields")
         from-fields (if (map? imported-fields)
-                      (reduce (fn [names Any name String] Any
+                      (reduce (fn [(names Any) (name String)] Any
                                 (assoc names name true))
                         {} (vec (keys imported-fields)))
                       {})]
@@ -2180,7 +2180,7 @@
       (let [mf (get form "member-fields")]
         (if (map? mf)
           (reduce
-            (fn [out Any member String] Any
+            (fn [(out Any) (member String)] Any
               (let [fields (get mf member)]
                 (if (and (some? fields)
                       (record-fields-constrained? fields))
@@ -2195,7 +2195,7 @@
 
 (defn build-nix-require-prefixes [(requires Any)] Any
   (reduce
-    (fn [prefixes Any entry Any] Any
+    (fn [(prefixes Any) (entry Any)] Any
       (let [namespace (get entry "ns")
             namespace-parts (str/split namespace #"\.")
             default-prefix (nth namespace-parts (- (count namespace-parts) 1))

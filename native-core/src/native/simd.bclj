@@ -252,7 +252,7 @@
         (core/ssavaluev0-id
           (core/buffersetcheckedinstructionv0-result set-instruction))]
     (every?
-      (fn [instruction core/Instruction] Bool
+      (fn [(instruction core/Instruction)] Bool
         (let [result (core/instruction-result-id instruction)]
           (or (core/native-id= result set-result)
             (core/id-in? pack-results result)
@@ -308,7 +308,7 @@
        (core/jumpterminator-arguments terminator))]
     (instance? native.core.SwitchTerminator terminator)
     (mapv
-      (fn [switch-case core/SwitchCaseV0] SimdControlEdgeV0
+      (fn [(switch-case core/SwitchCaseV0)] SimdControlEdgeV0
         (->SimdControlEdgeV0
           (core/switchcasev0-block-id switch-case)
           (core/switchcasev0-arguments switch-case)))
@@ -357,7 +357,7 @@
             edges (function-control-edges function)
             matching
             (vec (filter
-                   (fn [edge SimdControlEdgeV0] Bool
+                   (fn [(edge SimdControlEdgeV0)] Bool
                      (and (core/native-id=
                             (simdcontroledgev0-target-block-id edge)
                             (core/basicblock-id block))
@@ -430,7 +430,7 @@
   [(body core/BasicBlock)] (U core/BufferSetCheckedInstructionV0 Nil)
   (let [sets
         (vec (filter
-               (fn [instruction core/Instruction] Bool
+               (fn [(instruction core/Instruction)] Bool
                  (instance? native.core.BufferSetCheckedInstructionV0
                    instruction))
                (core/basicblock-instructions body)))]

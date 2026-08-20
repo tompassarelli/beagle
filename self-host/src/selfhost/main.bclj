@@ -127,7 +127,7 @@
 
 (defn- declared-extern-names [(datums Any)] Any
   (reduce
-    (fn [names Any d Any] Any
+    (fn [(names Any) (d Any)] Any
       (if (and (vector? d) (>= (count d) 2) (= (nth d 0) "declare-extern"))
         (let [head (nth d 1)]
           (cond
@@ -166,7 +166,7 @@
         providers
         (let [absolute (selfhost.rt/abs-path path)
               existing (get providers ns [])
-              already (filterv (fn [p String] Bool (= p absolute)) existing)]
+              already (filterv (fn [(p String)] Bool (= p absolute)) existing)]
           (if (> (count already) 0)
             providers
             (assoc providers ns (conj existing absolute))))))))
@@ -179,7 +179,7 @@
 
 (defn- join-comma [(xs Any)] String
   (reduce
-    (fn [acc String x String] String
+    (fn [(acc String) (x String)] String
       (if (= acc "") x (str acc ", " x)))
     ""
     xs))
@@ -187,7 +187,7 @@
 (defn- root-candidate-paths [(rn String) (importer-extension String)] Any
   (let [relative (ns-relative-source-path rn importer-extension)]
     (reduce
-      (fn [hits Any root Any] Any
+      (fn [(hits Any) (root Any)] Any
         (let [candidate (str (get root "dir") "/" relative)]
           (if (selfhost.rt/file-exists? candidate)
             (conj hits candidate)
@@ -243,10 +243,10 @@
   [(extern-names Any) (rn String) (prefix String) (refer-syms Any)] Bool
   (if (and (some? refer-syms) (> (count refer-syms) 0))
     (every?
-      (fn [name String] Bool
+      (fn [(name String)] Bool
         (> (count
              (filterv
-               (fn [e String] Bool
+               (fn [(e String)] Bool
                  (or (= e name)
                      (= e (str prefix "/" name))
                      (= e (str rn "/" name))))
@@ -255,7 +255,7 @@
       refer-syms)
     (> (count
          (filterv
-           (fn [e String] Bool
+           (fn [(e String)] Bool
              (or (str/starts-with? e (str prefix "/"))
                  (str/starts-with? e (str rn "/"))))
            extern-names))
@@ -272,7 +272,7 @@
 
 (defn- surface-type-aliases [(surfaces Any)] Any
   (reduce
-    (fn [aliases Any surface Any] Any
+    (fn [(aliases Any) (surface Any)] Any
       (into aliases (get surface "type-aliases" {})))
     {}
     surfaces))
@@ -333,7 +333,7 @@
    (seen-paths Any)]
   Any
   (reduce
-    (fn [surfaces Any r Any] Any
+    (fn [(surfaces Any) (r Any)] Any
       (let [ns (get r "ns")
             alias (get r "alias")
             refer (get r "refer")
@@ -407,7 +407,7 @@
 
 (defn- import-parametric-arities! [(surfaces Any)] Any
   (reduce
-    (fn [arities Any surface Any] Any
+    (fn [(arities Any) (surface Any)] Any
       (into arities
         (p/module-parametric-arities!
           (get surface "datums")
@@ -421,7 +421,7 @@
 
 (defn- import-nominal-type-names! [(surfaces Any)] (Map String Bool)
   (reduce
-    (fn [names Any surface Any] Any
+    (fn [(names Any) (surface Any)] Any
       (into names
         (p/module-nominal-type-names!
           (get surface "datums")
@@ -433,10 +433,10 @@
 (defn- resolve-imports! [(prog Any) (surfaces Any)] Any
   (let [own-externs (get prog "externs")
         imported (reduce
-                   (fn [acc Any surface Any] Any
+                   (fn [(acc Any) (surface Any)] Any
                      (into acc
                        (mapv
-                         (fn [extern Any] Any
+                         (fn [(extern Any)] Any
                            ;; Imported callables are unproved unless the
                            ;; checked provider separately publishes its
                            ;; authoritative ordinary and returned-callable
@@ -452,7 +452,7 @@
                    [] surfaces)
         record-contracts
           (reduce
-            (fn [acc Any surface Any] Any
+            (fn [(acc Any) (surface Any)] Any
               (into acc
                 (p/qualify-imported-record-contracts
                   (get surface "record-contracts")
@@ -461,7 +461,7 @@
             [] surfaces)
         callable-synchronization
           (reduce
-            (fn [acc Any surface Any] Any
+            (fn [(acc Any) (surface Any)] Any
               (into acc
                 (p/qualify-imported-callable-synchronization
                   (get surface "callable-synchronization")
@@ -480,20 +480,20 @@
 ;; the CLI --target is authoritative; a source-level (define-target ...) wins if
 ;; present (duplicate would be a parse error).
 (defn- has-define-target? [(datums Any)] Bool
-  (> (count (filterv (fn [d Any] Bool
+  (> (count (filterv (fn [(d Any)] Bool
                        (and (vector? d) (>= (count d) 2) (= (nth d 0) "define-target")))
                      datums)) 0))
 
 (defn- parse-file-target! [(path String) (target String)] Any
-  (let [source-snapshot Any (selfhost.rt/read-source-snapshot path)
-        source-text String (get source-snapshot "text")
-        source-id String (selfhost.rt/source-id path)
-        reader-output Any
+  (let [(source-snapshot Any) (selfhost.rt/read-source-snapshot path)
+        (source-text String) (get source-snapshot "text")
+        (source-id String) (selfhost.rt/source-id path)
+        (reader-output Any)
           (rd/read-program-with-syntax! source-text source-id)
-        datums0 Any (get reader-output "datums")
-        syntaxes0 Any (get reader-output "syntaxes")
-        datums Any (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
-        syntaxes Any
+        (datums0 Any) (get reader-output "datums")
+        (syntaxes0 Any) (get reader-output "syntaxes")
+        (datums Any) (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
+        (syntaxes Any)
           (if (has-define-target? datums0)
             syntaxes0
             (into
@@ -503,20 +503,20 @@
                  {"reader"
                   (syntax/make-reader-metadata "" "synthetic")})]
               syntaxes0))
-        surfaces Any (load-import-surfaces!
+        (surfaces Any) (load-import-surfaces!
                          (p/discover-requires! datums)
                          path
                          target
                          datums)
-        imported-arities Any (import-parametric-arities! surfaces)
-        imported-aliases Any (import-type-aliases surfaces)
-        imported-nominal-type-names Any (import-nominal-type-names! surfaces)
-        prog Any (resolve-imports!
+        (imported-arities Any) (import-parametric-arities! surfaces)
+        (imported-aliases Any) (import-type-aliases surfaces)
+        (imported-nominal-type-names Any) (import-nominal-type-names! surfaces)
+        (prog Any) (resolve-imports!
                     (p/parse-program-with-syntax-and-imports!
                       datums syntaxes imported-arities imported-aliases
                       imported-nominal-type-names)
                     surfaces)
-        perrs Any (p/parse-errors)]
+        (perrs Any) (p/parse-errors)]
     ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
     ;; parser collects + eprints, so the driver must fail explicitly: any parse
     ;; diagnostic => nonzero exit, no 'ok', no emit. (err! already printed each.)
@@ -531,10 +531,10 @@
 
 (defn- imported-record-field-order [(prog Any)] Any
   (reduce
-    (fn [out Any contract Any] Any
+    (fn [(out Any) (contract Any)] Any
       (assoc out (get contract "name")
         (mapv
-          (fn [field String] String
+          (fn [(field String)] String
             (if (str/starts-with? field ":") (subs field 1) field))
           (get contract "field-order"))))
     {}
@@ -542,7 +542,7 @@
 
 (defn- imported-record-namespaces [(prog Any)] Any
   (reduce
-    (fn [out Any contract Any] Any
+    (fn [(out Any) (contract Any)] Any
       (let [namespace (get contract "namespace")]
         (if (string? namespace)
           (assoc out (get contract "name") namespace)
@@ -551,7 +551,7 @@
     (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))
 
 (defn- check-or-die! [(prog Any)] Any
-  (let [errors Any (c/check-program! prog)]
+  (let [(errors Any) (c/check-program! prog)]
     (if (> (count errors) 0)
       (do
         (doseq [err errors]
@@ -578,7 +578,7 @@
 
 (defn- exact-checked-program-keys? [(projection Any)] Bool
   (and (= (count (keys projection)) (count CHECKED-PROGRAM-KEYS))
-       (every? (fn [key String] Bool (contains? projection key))
+       (every? (fn [(key String)] Bool (contains? projection key))
          CHECKED-PROGRAM-KEYS)))
 
 (defn- complete-binding? [(binding Any)] Bool
@@ -594,7 +594,7 @@
 (defn- exact-object-keys? [(value Any) (expected Any)] Bool
   (and (map? value)
        (= (count (keys value)) (count expected))
-       (every? (fn [key String] Bool (contains? value key)) expected)))
+       (every? (fn [(key String)] Bool (contains? value key)) expected)))
 
 (defn- valid-record-update-contract? [(contract Any)] Bool
   (and (exact-object-keys?
@@ -611,7 +611,7 @@
 
 (defn- params-complete? [(params Any)] Bool
   (and (vector? params)
-       (every? (fn [param Any] Bool
+       (every? (fn [(param Any)] Bool
                  (if (= (get param "type") "param")
                    (complete-binding? param)
                    true))
@@ -632,7 +632,7 @@
 (declare constraint-schema-complete?)
 
 (defn- map-children-complete? [(value Any)] Bool
-  (every? (fn [key Any] Bool
+  (every? (fn [(key Any)] Bool
             (constraint-schema-complete? (get value key)))
     (keys value)))
 
@@ -664,7 +664,7 @@
 
               (or (= node "for") (= node "doseq"))
               (every?
-                (fn [clause Any] Bool
+                (fn [(clause Any)] Bool
                   (cond
                     (= (get clause "type") "binding")
                     (complete-binding? clause)
@@ -680,7 +680,7 @@
               (let [member-fields (get value "member-fields")]
                 (or (nil? member-fields)
                     (false? member-fields)
-                    (every? (fn [name Any] Bool
+                    (every? (fn [(name Any)] Bool
                               (params-complete? (get member-fields name)))
                       (keys member-fields))))
 
@@ -689,7 +689,7 @@
 
               (= node "extend-type")
               (every?
-                (fn [impl Any] Bool
+                (fn [(impl Any)] Bool
                   (every? callable-shape-complete? (get impl "methods")))
                 (get value "impls"))
 
@@ -717,7 +717,7 @@
 
 (defn- checked-projection [(snapshot Any)] Any
   (let [prog (get snapshot "program")
-        externs (mapv (fn [extern Any] Any
+        externs (mapv (fn [(extern Any)] Any
                         {"name" (get extern "name")
                          "type" (get extern "type")})
                   (get prog "externs"))

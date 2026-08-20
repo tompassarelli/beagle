@@ -296,7 +296,7 @@
 ;; wrapper while retaining capitalized names as legal bare bindings.
 (defn- note-capitalized-binding! [(name Any) (where String)] Nil
   (when (string? name)
-    (let [head String (subs (str name) 0 (min 1 (count (str name))))]
+    (let [(head String) (subs (str name) 0 (min 1 (count (str name))))]
       (when (and (> (count head) 0) (not (= head (str/lower-case head))))
         (selfhost.rt/eprint (str "warning [capitalized-binding-name] `"
                               (str name)
@@ -404,7 +404,7 @@
     {"kind"
      "fn"
      "params"
-     (mapv (fn [p Any] Any (varize-type p vars)) (get t "params"))
+     (mapv (fn [(p Any)] Any (varize-type p vars)) (get t "params"))
      "rest"
      (if (nil? (get t "rest")) nil (varize-type (get t "rest") vars))
      "ret"
@@ -415,12 +415,12 @@
      "name"
      (get t "name")
      "args"
-     (mapv (fn [a Any] Any (varize-type a vars)) (get t "args"))}
+     (mapv (fn [(a Any)] Any (varize-type a vars)) (get t "args"))}
     (= (get t "kind") "union")
     {"kind"
      "union"
      "members"
-     (mapv (fn [m Any] Any (varize-type m vars)) (get t "members"))}
+     (mapv (fn [(m Any)] Any (varize-type m vars)) (get t "members"))}
     :else
     t))
 
@@ -606,7 +606,7 @@
 (defn- decorate-binder-identities! [(owner Any) (target Any)] Any
   (let [identities
         (reduce
-          (fn [out Any name String] Any
+          (fn [(out Any) (name String)] Any
             (let [id (consume-binder-id! name)]
               (if (nil? id) out (assoc out name id))))
           {}
@@ -1035,7 +1035,7 @@
            "providerId" (get type-name "providerId")
            "bindings" bindings}
           {"type" "record" "name" type-name "bindings" bindings})
-        names (mapv (fn [binding Any] Any (get binding "name")) bindings)]
+        names (mapv (fn [(binding Any)] Any (get binding "name")) bindings)]
     (decorate-binder-identities! wire
       (make-seq-destructure names false))))
 
@@ -1043,7 +1043,7 @@
   (decorate-binder-identities!
     {"type" "map" "entries" entries}
     (make-seq-destructure
-      (mapv (fn [entry Any] Any (get entry "name")) entries)
+      (mapv (fn [(entry Any)] Any (get entry "name")) entries)
       false)))
 
 (defn make-pat-var! [(name String)] Any
@@ -1101,7 +1101,7 @@
         (if (and (vector? provided) (= (count provided) (count datums)))
           provided
           (mapv
-            (fn [datum Any] Any
+            (fn [(datum Any)] Any
               (syntax/datum->beagle-syntax!
                 datum nil syntax/EMPTY-SCOPE-SET nil {}))
             datums))]
@@ -1188,11 +1188,11 @@
         (syntax/make-syntax-ident! payload span scopes origin properties)
       (= variant "list")
         (syntax/make-syntax-list!
-          (mapv (fn [child Any] Any (syntax-add-scope! child scope)) payload)
+          (mapv (fn [(child Any)] Any (syntax-add-scope! child scope)) payload)
           span scopes origin properties)
       (= variant "vector")
         (syntax/make-syntax-vector!
-          (mapv (fn [child Any] Any (syntax-add-scope! child scope)) payload)
+          (mapv (fn [(child Any)] Any (syntax-add-scope! child scope)) payload)
           span scopes origin properties)
       (= variant "unquote")
         (syntax/make-syntax-unquote!
@@ -1207,7 +1207,7 @@
 
 (defn- syntax-add-scopes! [(value Any) (scopes Any)] Any
   (reduce
-    (fn [result Any scope Any] Any
+    (fn [(result Any) (scope Any)] Any
       (syntax-add-scope! result scope))
     value scopes))
 
@@ -1249,7 +1249,7 @@
 
 (defn- merge-identities! [(left Any) (right Any)] Any
   (reduce
-    (fn [result Any name Any] Any
+    (fn [(result Any) (name Any)] Any
       (if (contains? result name)
         (do
           (err! (str "binding target repeats a name: " name))
@@ -1272,7 +1272,7 @@
       (= variant "vector")
         (let [state
               (reduce
-                (fn [current Any index Int] Any
+                (fn [(current Any) (index Int)] Any
                   (let [child (nth children index)
                         datum (scope-syntax-datum! child)]
                     (if (= datum "&")
@@ -1391,10 +1391,10 @@
 
 (defn- scope-walk-generic! [(value Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children value)]
-    (let [indices (Vec Int) (vec (range (count children)))]
+    (let [(indices (Vec Int)) (vec (range (count children)))]
       (rebuild-scope-sequence! value
         (mapv
-          (fn [index Int] Any
+          (fn [(index Int)] Any
             (scope-walk*
               (nth children index) table (conj (vec path) index) ctx))
           indices)))))
@@ -1443,10 +1443,10 @@
         scoped-bindings
         (scope-walk-sequential-bindings!
           (nth children 1) table (conj (vec path) 1) ctx)
-        body-indices (Vec Int) (vec (range 2 (count children)))
+        (body-indices (Vec Int)) (vec (range 2 (count children)))
         body
         (mapv
-          (fn [index Int] Any
+          (fn [(index Int)] Any
             (scope-walk*
               (syntax-add-scopes!
                 (nth children index) (get scoped-bindings "scopes"))
@@ -1470,7 +1470,7 @@
                   (if (= name "&") [] [name]))
               (= variant "vector")
                 (reduce
-                  (fn [names Any child Any] Any
+                  (fn [(names Any) (child Any)] Any
                     (into names (target-bound-names child)))
                   [] nested)
               (and (= variant "list")
@@ -1497,7 +1497,7 @@
             (target-bound-names value)))]
       (let [declarations
         (filterv
-          (fn [item Any] Bool
+          (fn [(item Any)] Bool
             (not (= (scope-syntax-datum! item) "&")))
           children)
         first-declaration
@@ -1511,7 +1511,7 @@
         logical-declarations
         (if (or legacy? (not flat?))
           (filterv
-            (fn [item Any] Bool
+            (fn [(item Any)] Bool
               (not (= (scope-syntax-datum! item) "&")))
             children)
           (loop [index Int 0 out Any []]
@@ -1523,7 +1523,7 @@
                 (recur (+ index 2) (conj out (nth children index))))))
         all-bound
         (reduce
-          (fn [names Any item Any] Any
+          (fn [(names Any) (item Any)] Any
             (into names (declaration-bound-names item)))
           [] logical-declarations)
         duplicate
@@ -1539,11 +1539,11 @@
             (err! (str "parameter list binds `" duplicate
                     "` more than once; every nested destructuring name and :as alias must be unique")))
         scope (syntax/fresh-scope-id! "parameter")
-        indices (Vec Int) (vec (range (count children)))
+        (indices (Vec Int)) (vec (range (count children)))
         state
         (if (or legacy? (not flat?))
           (reduce
-            (fn [current Any index Int] Any
+            (fn [(current Any) (index Int)] Any
               (let [item (nth children index)]
                 (if (= (scope-syntax-datum! item) "&")
                   (assoc current "children"
@@ -1600,13 +1600,13 @@
     (if (and (vector? children)
              (> (count children) 0)
              (= (get (nth children 0) "variant") "vector"))
-      (let [indices (Vec Int) (vec (range (count children)))
+      (let [(indices (Vec Int)) (vec (range (count children)))
             params
             (scope-walk-params!
               (nth children 0) table (conj (vec path) 0) ctx)]
         (rebuild-scope-sequence! clause
           (mapv
-            (fn [index Int] Any
+            (fn [(index Int)] Any
               (cond
                 (= index 0) (get params "value")
                 (= index 1) (nth children index)
@@ -1622,7 +1622,7 @@
   [(value Any) (table Any) (path Any) (ctx Any) (name-index Any)] Any
   (let [children (scope-sequence-children value)
         params-index (+ (if (nil? name-index) 0 (int name-index)) 1)
-        indices (Vec Int) (vec (range (count children)))]
+        (indices (Vec Int)) (vec (range (count children)))]
     (cond
       (or (>= params-index (count children))
           (nil? (scope-sequence-children (nth children params-index))))
@@ -1630,7 +1630,7 @@
 
       (and (= (get (nth children params-index) "variant") "list")
            (every?
-             (fn [clause Any] Bool
+             (fn [(clause Any)] Bool
                (let [clause-children (scope-sequence-children clause)]
                  (and (= (get clause "variant") "list")
                       (vector? clause-children)
@@ -1639,7 +1639,7 @@
              (subvec (vec children) params-index)))
         (rebuild-scope-sequence! value
           (mapv
-            (fn [index Int] Any
+            (fn [(index Int)] Any
               (if (>= index params-index)
                 (scope-walk-function-clause!
                   (nth children index) table (conj (vec path) index) ctx)
@@ -1655,7 +1655,7 @@
               return-index (+ params-index 1)]
           (rebuild-scope-sequence! value
             (mapv
-              (fn [index Int] Any
+              (fn [(index Int)] Any
                 (cond
                   (= index params-index) (get params "value")
                   (= index return-index) (nth children index)
@@ -1674,13 +1674,13 @@
         functions (nth children 1)
         fn-values (scope-sequence-children functions)
         scope (syntax/fresh-scope-id! "letfn")
-        fn-indices (Vec Int) (vec (range (count fn-values)))
-        rendered-indices (Vec Int)
+        (fn-indices (Vec Int)) (vec (range (count fn-values)))
+        (rendered-indices (Vec Int))
           (vec (range (count fn-values)))
-        body-indices (Vec Int) (vec (range 2 (count children)))
+        (body-indices (Vec Int)) (vec (range 2 (count children)))
         named
         (reduce
-          (fn [state Any index Int] Any
+          (fn [(state Any) (index Int)] Any
             (let [fn-value (nth fn-values index)
                   fn-children (scope-sequence-children fn-value)
                   bound
@@ -1697,14 +1697,14 @@
         rendered-functions
         (rebuild-scope-sequence! functions
           (mapv
-            (fn [index Int] Any
+            (fn [(index Int)] Any
               (scope-walk-function!
                 (syntax-add-scope! (nth (get named "values") index) scope)
                 (get named "table") (conj (vec path) 1 index) ctx 0))
             rendered-indices))
         body
         (mapv
-          (fn [index Int] Any
+          (fn [(index Int)] Any
             (scope-walk*
               (syntax-add-scope! (nth children index) scope)
               (get named "table") (conj (vec path) index) ctx))
@@ -1719,7 +1719,7 @@
   (let [children (scope-sequence-children value)
         clauses (nth children 1)
         items (scope-sequence-children clauses)
-        body-indices (Vec Int) (vec (range 2 (count children)))
+        (body-indices (Vec Int)) (vec (range 2 (count children)))
         state
         (loop [index Int 0
                out Any []
@@ -1774,7 +1774,7 @@
                "scopes" region-scopes}))
         body
         (mapv
-          (fn [index Int] Any
+          (fn [(index Int)] Any
             (scope-walk*
               (syntax-add-scopes! (nth children index) (get state "scopes"))
               (get state "table") (conj (vec path) index) ctx))
@@ -1792,10 +1792,10 @@
         (scope-walk-sequential-bindings!
           (nth children 1) table (conj (vec path) 1) ctx)
         head (scope-syntax-datum! (nth children 0))
-        indices (Vec Int) (vec (range (count children)))]
+        (indices (Vec Int)) (vec (range (count children)))]
     (rebuild-scope-sequence! value
       (mapv
-        (fn [index Int] Any
+        (fn [(index Int)] Any
           (cond
             (= index 1) (get bindings "value")
             (and (>= index 2)
@@ -1825,10 +1825,10 @@
         (scope-bind-declaration!
           (nth children binder-index) table scope binding-kind
           (conj (vec path) binder-index))
-        indices (Vec Int) (vec (range (count children)))]
+        (indices (Vec Int)) (vec (range (count children)))]
     (rebuild-scope-sequence! value
       (mapv
-        (fn [index Int] Any
+        (fn [(index Int)] Any
           (cond
             (= index binder-index) (get bound "value")
             (>= index body-start)
@@ -1850,7 +1850,7 @@
         origin (syntax/beagle-syntax-origin value)
         properties (syntax/beagle-syntax-properties value)
         generated
-        (fn [datum Any] Any
+        (fn [(datum Any)] Any
           (syntax/datum->beagle-syntax!
             datum span scopes origin properties))
         values (into [init] steps)
@@ -1907,7 +1907,7 @@
 (defn- scope-expand-thread!
   [(init Any) (steps Any) (position String)] Any
   (reduce
-    (fn [acc Any step Any] Any
+    (fn [(acc Any) (step Any)] Any
       (scope-thread-step-insert! acc step position))
     init steps))
 
@@ -1917,7 +1917,7 @@
         scopes (syntax/beagle-syntax-scopes value)
         origin (syntax/beagle-syntax-origin value)
         properties (syntax/beagle-syntax-properties value)
-        generated (fn [datum Any] Any
+        generated (fn [(datum Any)] Any
                     (scope-thread-generated! datum span scopes origin properties))
         n (count clauses)
         pairs (loop [i Int 0 out Any []]
@@ -1965,16 +1965,16 @@
         scopes (syntax/beagle-syntax-scopes value)
         origin (syntax/beagle-syntax-origin value)
         properties (syntax/beagle-syntax-properties value)
-        generated (fn [datum Any] Any
+        generated (fn [(datum Any)] Any
                     (scope-thread-generated! datum span scopes origin properties))
         position (if (= kind "some->") "first" "last")
         m (count steps)]
     (if (= m 0)
       init
-      (let [temps (mapv (fn [_ Any] Any (generated (fresh-lowered-sym! "some-thread")))
+      (let [temps (mapv (fn [(_ Any)] Any (generated (fresh-lowered-sym! "some-thread")))
                     (vec (range m)))
             threadeds (mapv
-                        (fn [i Int] Any
+                        (fn [(i Int)] Any
                           (scope-thread-step-insert!
                             (nth temps i) (nth steps i) position))
                         (vec (range m)))]
@@ -2010,7 +2010,7 @@
         scopes (syntax/beagle-syntax-scopes value)
         origin (syntax/beagle-syntax-origin value)
         properties (syntax/beagle-syntax-properties value)
-        generated (fn [datum Any] Any
+        generated (fn [(datum Any)] Any
                     (scope-thread-generated! datum span scopes origin properties))
         expansion
           (cond
@@ -2024,7 +2024,7 @@
         resolved (scope-walk* expansion table path ctx)
         surface-steps
           (mapv
-            (fn [index Int] Any
+            (fn [(index Int)] Any
               (scope-walk*
                 (nth steps index)
                 table
@@ -2058,10 +2058,10 @@
                      (scope-syntax-datum! (nth children 0)) nil)]
           (if (= head "or")
             {"value" pattern "table" table}
-            (let [indices (Vec Int) (vec (range 1 (count children)))
+            (let [(indices (Vec Int)) (vec (range 1 (count children)))
                   state
                   (reduce
-                    (fn [current Any index Int] Any
+                    (fn [(current Any) (index Int)] Any
                       (let [bound
                             (scope-walk-pattern!
                               (nth children index) (get current "table") scope
@@ -2079,10 +2079,10 @@
 
 (defn- scope-walk-match! [(value Any) (table Any) (path Any) (ctx Any)] Any
   (let [children (scope-sequence-children value)
-        clause-indices (Vec Int) (vec (range 2 (count children)))
+        (clause-indices (Vec Int)) (vec (range 2 (count children)))
         clauses
         (mapv
-          (fn [index Int] Any
+          (fn [(index Int)] Any
             (let [clause (nth children index)
                   clause-children (scope-sequence-children clause)
                   scope (syntax/fresh-scope-id! "pattern")
@@ -2090,12 +2090,12 @@
                   (scope-walk-pattern!
                     (nth clause-children 0) table scope
                     (conj (vec path) index 0))
-                  body-indices (Vec Int)
+                  (body-indices (Vec Int))
                     (vec (range 1 (count clause-children)))]
               (rebuild-scope-sequence! clause
                 (into [(get pattern "value")]
                   (mapv
-                    (fn [body-index Int] Any
+                    (fn [(body-index Int)] Any
                       (scope-walk*
                         (syntax-add-scope!
                           (nth clause-children body-index) scope)
@@ -2182,9 +2182,9 @@
 
 (defn- expand-and-resolve-program-syntax! [(syntaxes Any)] Any
   (let [module-scope (syntax/fresh-scope-id! "module")
-        indices (Vec Int) (vec (range (count syntaxes)))]
+        (indices (Vec Int)) (vec (range (count syntaxes)))]
     (mapv
-      (fn [index Int] Any
+      (fn [(index Int)] Any
         (let [value (nth syntaxes index)]
           (if (scope-meta-syntax?! value)
             value
@@ -2430,8 +2430,8 @@
   (err! (str context " vector mixes legacy grouped declarations with flat binding/type pairs; use strict pairs all the way through")))
 
 (defn parse-params! [(params-form Any)] Any
-  (let [items Any (unwrap-items params-form)
-        n Int (count items)
+  (let [(items Any) (unwrap-items params-form)
+        (n Int) (count items)
         amp-index (index-of-item items "&")
         before (if (= amp-index -1) items (subvec items 0 amp-index))
         after (if (= amp-index -1) [] (subvec items (+ amp-index 1)))
@@ -2448,7 +2448,7 @@
         fixed (cond
                 (= style "inferred")
                 (mapv
-                  (fn [item Any] Any
+                  (fn [(item Any)] Any
                     (cond
                       (structured-binding? item)
                         (do (mixed-bindings! "parameter")
@@ -2680,7 +2680,7 @@
     (= (count clauses) 0)
     []
     (bracketed? (nth clauses 0))
-    (mapv (fn [c Any] Any (let [items (if (bracketed? c) (bracket-body c) c)] (if (and (vector? items) (> (count items) 1)) {"test" (parse-cond-test! (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"test" (parse-cond-test! c) "body" []})))
+    (mapv (fn [(c Any)] Any (let [items (if (bracketed? c) (bracket-body c) c)] (if (and (vector? items) (> (count items) 1)) {"test" (parse-cond-test! (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"test" (parse-cond-test! c) "body" []})))
       clauses)
     :else
     (let [n (count clauses)]
@@ -2835,7 +2835,7 @@
     (parse-map-pattern! (subvec p 1))
     (and (string? record-name) (upper-case-start? record-name))
     (make-pat-record! record-head
-      (mapv (fn [b Any] Any {"name" b}) (subvec p 1)))
+      (mapv (fn [(b Any)] Any {"name" b}) (subvec p 1)))
     (string? p)
     (make-pat-var! p)
     :else
@@ -2843,13 +2843,13 @@
 
 (defn parse-match-form! [(target-datum Any) (clauses Any)] Any
   (make-match (parse-expr* target-datum)
-    (mapv (fn [c Any] Any (let [items (if (bracketed? c) (bracket-body c) c)] (if (and (vector? items) (>= (count items) 2)) {"pattern" (parse-pattern! (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"pattern" (parse-pattern! c) "body" []})))
+    (mapv (fn [(c Any)] Any (let [items (if (bracketed? c) (bracket-body c) c)] (if (and (vector? items) (>= (count items) 2)) {"pattern" (parse-pattern! (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"pattern" (parse-pattern! c) "body" []})))
       clauses)))
 
 ;; --- parse-with-form ---------------------------------------------------------
 (defn parse-with-form [(target-datum Any) (updates Any)] Any
   (make-with (parse-expr* target-datum)
-    (mapv (fn [u Any] Any (if (and (bracketed? u) (>= (count (bracket-body u)) 2)) (let [items (bracket-body u)] {"field" (nth items 0) "value" (parse-expr* (nth items 1))}) {"field" "" "value" nil}))
+    (mapv (fn [(u Any)] Any (if (and (bracketed? u) (>= (count (bracket-body u)) 2)) (let [items (bracket-body u)] {"field" (nth items 0) "value" (parse-expr* (nth items 1))}) {"field" "" "value" nil}))
       updates)))
 
 ;; --- nix formal / rec-attrs parsers (parse.rkt L3562-3615) --------------------
@@ -2862,8 +2862,8 @@
       (cond
         (>= i (count items))
         {"formals"
-         (mapv (fn [item Any] Any (cond (string? item) {"name" item "default" false} (and (bracketed? item) (= (count (bracket-body item)) 2)) {"name" (nth (bracket-body item) 0) "default" (parse-expr* (nth (bracket-body item) 1))} (and (vector? item) (= (count item) 2)) {"name" (nth item 0) "default" (parse-expr* (nth item 1))} :else (do (err! (str "fn-set formal: expected name or (name default), got " (str item))) {"name" (str item) "default" false})))
-           (filterv (fn [x Any] Bool (not= x "...")) before))
+         (mapv (fn [(item Any)] Any (cond (string? item) {"name" item "default" false} (and (bracketed? item) (= (count (bracket-body item)) 2)) {"name" (nth (bracket-body item) 0) "default" (parse-expr* (nth (bracket-body item) 1))} (and (vector? item) (= (count item) 2)) {"name" (nth item 0) "default" (parse-expr* (nth item 1))} :else (do (err! (str "fn-set formal: expected name or (name default), got " (str item))) {"name" (str item) "default" false})))
+           (filterv (fn [(x Any)] Bool (not= x "...")) before))
          "at-name"
          at-name}
         (= (nth items i) ":as")
@@ -2902,7 +2902,7 @@
 (defn parse-letfn-fns! [(form Any)] Any
   (let [items (unwrap-items form)]
     (mapv
-      (fn [item Any] Any
+      (fn [(item Any)] Any
         (if (and (vector? item)
               (>= (count item) 4)
               (string? (nth item 0))
@@ -3112,12 +3112,12 @@
       result)))
 
 (defn expand-thread-first [(init Any) (steps Any)] Any
-  (reduce (fn [acc Any step Any] Any (thread-step-insert acc step "first"))
+  (reduce (fn [(acc Any) (step Any)] Any (thread-step-insert acc step "first"))
     init
     steps))
 
 (defn expand-thread-last [(init Any) (steps Any)] Any
-  (reduce (fn [acc Any step Any] Any (thread-step-insert acc step "last"))
+  (reduce (fn [(acc Any) (step Any)] Any (thread-step-insert acc step "last"))
     init
     steps))
 
@@ -3246,7 +3246,7 @@
                  (bracketed? (nth md 1)))
             (let [member-name (nth md 0)
                   fields (parse-record-fields! (nth md 1))
-                  typed-fields (mapv (fn [p Any] Any
+                  typed-fields (mapv (fn [(p Any)] Any
                                        (assoc p "ann" (varize-type (get p "ann") type-vars)))
                                  fields)]
               (reject-reserved-type-name! member-name "defunion member")
@@ -3428,7 +3428,7 @@
       {"node"
        "target-case"
        "cases"
-       (mapv (fn [k String] Any {"target" k "body" (get cases k)})
+       (mapv (fn [(k String)] Any {"target" k "body" (get cases k)})
          (vec (sort (vec (keys cases)))))})))
 
 ;; --- parse-list-form!: the big dispatch ---------------------------------------
@@ -3567,11 +3567,11 @@
 
 (defn- pj-param-list! [(d Any)] Any
   (let [items (cond (bracketed? d) (bracket-body d) (vector? d) d :else [])]
-    (mapv (fn [item Any] Any (cond (jsq-sym? item) item (and (jsq-list? item) (= (count item) 2) (= (nth item 0) "spread")) {"spread" (nth item 1)} :else (do (err! (str "js/quote: parameter must be a symbol, got " (str item))) "_")))
+    (mapv (fn [(item Any)] Any (cond (jsq-sym? item) item (and (jsq-list? item) (= (count item) 2) (= (nth item 0) "spread")) {"spread" (nth item 1)} :else (do (err! (str "js/quote: parameter must be a symbol, got " (str item))) "_")))
       items)))
 
 (defn- pj-block-body [(stmts Any)] Any
-  (let [parsed (mapv (fn [s Any] Any (pj-stmt s)) stmts)]
+  (let [parsed (mapv (fn [(s Any)] Any (pj-stmt s)) stmts)]
     (if (= 1 (count parsed)) (nth parsed 0) {"jsk" "block" "stmts" parsed})))
 
 (defn- pj-object-literal [(items Any)] Any
@@ -3600,14 +3600,14 @@
          "callee"
          {"jsk" "splice-expr" "bexpr" (parse-expr* (nth sk 1))}
          "args"
-         (mapv (fn [a Any] Any (pj-expr a)) (subvec d 1))})
+         (mapv (fn [(a Any)] Any (pj-expr a)) (subvec d 1))})
       :else
       {"jsk"
        "call"
        "callee"
        (pj-expr head)
        "args"
-       (mapv (fn [a Any] Any (pj-expr a)) (subvec d 1))})))
+       (mapv (fn [(a Any)] Any (pj-expr a)) (subvec d 1))})))
 
 (defn- pj-list-expr! [(d Any)] Any
   (let [h (nth d 0) n (count d)]
@@ -3658,14 +3658,14 @@
        "callee"
        (pj-expr (nth d 1))
        "args"
-       (mapv (fn [a Any] Any (pj-expr a)) (subvec d 2))}
+       (mapv (fn [(a Any)] Any (pj-expr a)) (subvec d 2))}
       (and (= h "await") (= n 2))
       {"jsk" "await" "expr" (pj-expr (nth d 1))}
       (= h "tpl")
       {"jsk"
        "template"
        "parts"
-       (mapv (fn [p Any] Any (if (jsq-strlit? p) {"str" (extract-string p)} {"expr" (pj-expr p)}))
+       (mapv (fn [(p Any)] Any (if (jsq-strlit? p) {"str" (extract-string p)} {"expr" (pj-expr p)}))
          (subvec d 1))}
       (and (= h "spread") (= n 2))
       {"jsk" "spread" "expr" (pj-expr (nth d 1))}
@@ -3673,7 +3673,7 @@
       {"jsk"
        "array"
        "items"
-       (mapv (fn [a Any] Any (pj-expr a)) (subvec d 1))}
+       (mapv (fn [(a Any)] Any (pj-expr a)) (subvec d 1))}
       (= h "object")
       (pj-object-literal (subvec d 1))
       (and (= h "dot") (= n 3))
@@ -3725,7 +3725,7 @@
     {"jsk"
      "array"
      "items"
-     (mapv (fn [x Any] Any (pj-expr x)) (bracket-body d))}
+     (mapv (fn [(x Any)] Any (pj-expr x)) (bracket-body d))}
     (map-tagged? d)
     (pj-object-literal (map-body d))
     (jsq-list? d)
@@ -3815,7 +3815,7 @@
      "extends"
      extends-expr
      "methods"
-     (mapv (fn [m Any] Any (pj-method! m)) methods-raw)
+     (mapv (fn [(m Any)] Any (pj-method! m)) methods-raw)
      "export"
      export?}))
 
@@ -4021,7 +4021,7 @@
     (= 1 (count forms))
     (pj-stmt (nth forms 0))
     :else
-    {"jsk" "block" "stmts" (mapv (fn [f Any] Any (pj-stmt f)) forms)}))
+    {"jsk" "block" "stmts" (mapv (fn [(f Any)] Any (pj-stmt f)) forms)}))
 
 (defn parse-list-form! [(d Any)] Any
   (let [head (nth d 0) rest-items (subvec d 1)]
@@ -4302,9 +4302,9 @@
       (and (= head "with") (>= (count rest-items) 1))
       (parse-with-form (nth rest-items 0) (subvec rest-items 1))
       (= head "s")
-      (make-nix-interpolated-string (mapv (fn [part Any] Any (if (string-literal-datum? part) {"type" "text" "value" (extract-string part)} {"type" "expr" "value" (parse-expr* part)})) rest-items))
+      (make-nix-interpolated-string (mapv (fn [(part Any)] Any (if (string-literal-datum? part) {"type" "text" "value" (extract-string part)} {"type" "expr" "value" (parse-expr* part)})) rest-items))
       (= head "ms")
-      (make-nix-multiline-string (mapv (fn [line Any] Any (if (string-literal-datum? line) {"type" "text" "value" (extract-string line)} (let [e (parse-expr* line)] (if (= (get e "node") "nix-interpolated-string") {"type" "interp" "parts" (get e "parts")} {"type" "expr" "value" e})))) rest-items))
+      (make-nix-multiline-string (mapv (fn [(line Any)] Any (if (string-literal-datum? line) {"type" "text" "value" (extract-string line)} (let [e (parse-expr* line)] (if (= (get e "node") "nix-interpolated-string") {"type" "interp" "parts" (get e "parts")} {"type" "expr" "value" e})))) rest-items))
       (and (= head "p") (= (count rest-items) 1))
       (let [pd (nth rest-items 0)]
         (cond
@@ -4315,10 +4315,10 @@
           :else
           (err! "p: expected string or symbol")))
       (= head "inherit")
-      (make-nix-inherit (mapv (fn [n Any] Any (if (string? n) n (do (err! "inherit: expected symbol") (str n)))) rest-items))
+      (make-nix-inherit (mapv (fn [(n Any)] Any (if (string? n) n (do (err! "inherit: expected symbol") (str n)))) rest-items))
       (and (= head "inherit-from") (>= (count rest-items) 1))
       (make-nix-inherit-from (parse-expr* (nth rest-items 0))
-        (mapv (fn [n Any] Any (if (string? n) n (do (err! "inherit-from: expected symbol") (str n))))
+        (mapv (fn [(n Any)] Any (if (string? n) n (do (err! "inherit-from: expected symbol") (str n))))
           (subvec rest-items 1)))
       (= head "rec-attrs")
       (make-nix-rec-attrs (parse-nix-rec-pairs! rest-items))
@@ -4358,7 +4358,7 @@
       (let [fl (parse-nix-fn-set-formals! (nth rest-items 0)) formals (get fl "formals")]
         (if (not= (count formals) 2)
           (err! "nix/overlay: expected exactly two formals [final prev]")
-          (make-fn (mapv (fn [f Any] Any (make-param! (get f "name") nil nil)) formals)
+          (make-fn (mapv (fn [(f Any)] Any (make-param! (get f "name") nil nil)) formals)
             nil
             nil
             [(parse-expr* (nth rest-items 1))])))
@@ -4372,7 +4372,7 @@
       (and (= head "flake-input") (>= (count rest-items) 2))
       (make-flake-input (nth rest-items 0)
         (nth rest-items 1)
-        (mapv (fn [s Any] Any (str s)) (subvec rest-items 2)))
+        (mapv (fn [(s Any)] Any (str s)) (subvec rest-items 2)))
       (and (= head "assert") (= (count rest-items) 2))
       (err! "(assert ...) — bare `assert` is not supported. Use `(nix/assert COND BODY)`.")
       (and (= head "with-cfg") (= (count rest-items) 2))
@@ -4525,7 +4525,7 @@
 ;; The declaration is metadata, not an executable form.  Each vector member is
 ;; one complete `(name Scheme)` entry; adjacent tokens are never paired.
 (defn module-declared-contract! [(datums Any)] Any
-  (let [found (Atom (U Bool (Map String Any))) (atom false)]
+  (let [(found (Atom (U Bool (Map String Any)))) (atom false)]
     (doseq [d datums]
       (when (and (vector? d) (not (bracketed? d)) (> (count d) 0)
                  (= (nth d 0) "defcontract"))
@@ -4534,7 +4534,7 @@
           (if (and (= (count d) 2) (bracketed? (nth d 1)))
             (let [contract
                   (reduce
-                    (fn [out Any entry Any] Any
+                    (fn [(out Any) (entry Any)] Any
                       (if (and (vector? entry) (not (bracketed? entry))
                                (= (count entry) 2)
                                (string? (nth entry 0)))
@@ -4617,7 +4617,7 @@
       (let [items (if (bracketed? unq) (bracket-body unq) unq)]
         (if (and (>= (count items) 2) (every? string? items))
           (let [package-name (nth items 0)]
-            (mapv (fn [class-name String] String
+            (mapv (fn [(class-name String)] String
                     (str package-name "." class-name))
               (subvec items 1)))
           (do
@@ -4672,7 +4672,7 @@
     (map? value)
       (let [rendered
             (reduce
-              (fn [out Any key Any] Any
+              (fn [(out Any) (key Any)] Any
                 (assoc out key
                   (strip-thread-generated-identities! (get value key))))
               {}
@@ -4968,7 +4968,7 @@
 
 (defn- module-local-type-names [(datums Any)] Any
   (reduce
-    (fn [names Any d0 Any] Any
+    (fn [(names Any) (d0 Any)] Any
       (let [d (import-normalize d0)]
         (if (and (vector? d) (>= (count d) 2) (string? (nth d 0)))
           (let [head (nth d 0)]
@@ -4988,7 +4988,7 @@
                     with-union (if (string? union-name)
                                  (assoc names union-name true)
                                  names)]
-                (reduce (fn [out Any member Any] Any
+                (reduce (fn [(out Any) (member Any)] Any
                           (let [member-name (member-type-name member)]
                             (if (string? member-name)
                               (assoc out member-name true)
@@ -5004,13 +5004,13 @@
   (let [local-names (module-local-type-names datums)
         provider-ns (module-namespace datums)
         refer-set (if (some? refer-syms)
-                    (reduce (fn [out Any name Any] Any
+                    (reduce (fn [(out Any) (name Any)] Any
                               (assoc out name true))
                       {}
                       refer-syms)
                     {})]
     (reduce
-      (fn [out Any name Any] Any
+      (fn [(out Any) (name Any)] Any
         (let [with-prefix (if (= prefix "")
                             out
                             (assoc out (str prefix "/" name) true))
@@ -5027,7 +5027,7 @@
   (if (not (map? t))
     t
     (let [kind (get t "kind")
-          qualify-name (fn [name String] String
+          qualify-name (fn [(name String)] String
                          (if (= true (get local-type-names name))
                            (str provider-ns "/" name)
                            name))]
@@ -5037,19 +5037,19 @@
         (= kind "app")
         (assoc (assoc t "name" (qualify-name (get t "name")))
           "args"
-          (mapv (fn [arg Any] Any
+          (mapv (fn [(arg Any)] Any
                   (qualify-provider-type arg provider-ns local-type-names))
             (get t "args")))
         (= kind "union")
         (assoc t "members"
-          (mapv (fn [member Any] Any
+          (mapv (fn [(member Any)] Any
                   (qualify-provider-type member provider-ns local-type-names))
             (get t "members")))
         (= kind "fn")
         (assoc
           (assoc
             (assoc t "params"
-              (mapv (fn [param Any] Any
+              (mapv (fn [(param Any)] Any
                       (qualify-provider-type param provider-ns local-type-names))
                 (get t "params")))
             "rest"
@@ -5065,7 +5065,7 @@
               (qualify-provider-type (get t "body") provider-ns local-type-names))
             "bounds"
             (if (map? bounds)
-              (reduce (fn [out Any name Any] Any
+              (reduce (fn [(out Any) (name Any)] Any
                         (assoc out name
                           (qualify-provider-type
                             (get bounds name) provider-ns local-type-names)))
@@ -5104,13 +5104,13 @@
           (module-local-type-aliases-with-imports! datums imported-aliases)
         provider-ns (module-namespace datums)
         refer-set (if (some? refer-syms)
-                    (reduce (fn [out Any name Any] Any
+                    (reduce (fn [(out Any) (name Any)] Any
                               (assoc out name true))
                       {}
                       refer-syms)
                     {})]
     (reduce
-      (fn [out Any name Any] Any
+      (fn [(out Any) (name Any)] Any
         (let [expansion (get local-aliases name)
               prefixed (assoc out (str prefix "/" name) expansion)
               full (assoc prefixed (str provider-ns "/" name) expansion)]
@@ -5127,9 +5127,9 @@
   [(datums Any) (prefix String) (refer-syms Any)] Any
   (doseq [datum datums]
     (validate-reserved-type-declaration! (import-normalize datum)))
-  (let [refer-set (if (some? refer-syms) (reduce (fn [m Any s Any] Any (assoc m s true)) {} refer-syms) nil)]
+  (let [refer-set (if (some? refer-syms) (reduce (fn [(m Any) (s Any)] Any (assoc m s true)) {} refer-syms) nil)]
     (reduce
-      (fn [arities Any d0 Any] Any
+      (fn [(arities Any) (d0 Any)] Any
         (let [d (import-normalize d0)]
           (if (and (vector? d)
                 (not (bracketed? d))
@@ -5152,7 +5152,7 @@
 
 ;; Fn parameter/rest types for an imported defn signature.
 (defn- import-fn-ptypes! [(params-form Any)] Any
-  (mapv (fn [p Any] Any (let [a (get p "ann")] (if (some? a) a (make-prim "Any"))))
+  (mapv (fn [(p Any)] Any (let [a (get p "ann")] (if (some? a) a (make-prim "Any"))))
     (get (parse-params! params-form) "params")))
 
 (defn- import-fn-rest! [(params-form Any)] Any
@@ -5163,7 +5163,7 @@
 
 (defn- module-target-from-datums [(datums Any)] String
   (reduce
-    (fn [target String datum Any] String
+    (fn [(target String) (datum Any)] String
       (let [d (import-normalize datum)]
         (if (and (vector? d) (not (bracketed? d)) (= (count d) 2)
                  (= (nth d 0) "define-target") (string? (nth d 1)))
@@ -5186,14 +5186,14 @@
         contract-clj? (= (module-target-from-datums datums) "clj")
         local-type-names (module-local-type-names datums)
         refer-set (if (some? refer-syms)
-                    (reduce (fn [m Any s Any] Any (assoc m s true))
+                    (reduce (fn [(m Any) (s Any)] Any (assoc m s true))
                       {} refer-syms)
                     nil)
-        referred? (fn [nm Any] Bool
+        referred? (fn [(nm Any)] Bool
                     (and (some? refer-set) (= true (get refer-set nm))))
         out (atom [])
         seen (atom {})
-        emit! (fn [nm Any t Any] Nil
+        emit! (fn [(nm Any) (t Any)] Nil
                 (let [q (if (= prefix "")
                           nm
                           (str prefix "/" nm))
@@ -5228,7 +5228,7 @@
               (and (= head "defrecord") (= (count d) 3) (string? (nth d 1)))
               (let [nm (nth d 1) fields (parse-record-fields! (nth d 2)) nlow (str/lower-case nm)]
                 (emit! (str "->" nm)
-                  (make-fn-type (mapv (fn [f Any] Any (get f "ann")) fields)
+                  (make-fn-type (mapv (fn [(f Any)] Any (get f "ann")) fields)
                     nil
                     (make-prim nm)))
                 (when contract-clj?
@@ -5260,7 +5260,7 @@
                         (filterv string?
                           (mapv member-type-name (subvec d 2)))
                       qualified-members
-                        (mapv (fn [member String] Any
+                        (mapv (fn [(member String)] Any
                                 (make-prim
                                   (if (= prefix "")
                                     member
@@ -5294,7 +5294,7 @@
     (deref out)))
 
 (defn- surface-name-leaf [(name String)] String
-  (let [separator (U Int Nil) (str/last-index-of name "/")]
+  (let [(separator (U Int Nil)) (str/last-index-of name "/")]
     (if (nil? separator) name (subs name (+ separator 1)))))
 
 ;; This is the existing module-import publication path.  Provider checking has
@@ -5308,11 +5308,11 @@
     (if (= declared false)
       inferred
       (mapv
-        (fn [entry Any] Any
+        (fn [(entry Any)] Any
           (let [leaf (surface-name-leaf (get entry "name"))]
             (assoc entry "type" (get declared leaf))))
         (filterv
-          (fn [entry Any] Bool
+          (fn [(entry Any)] Bool
             (contains? declared (surface-name-leaf (get entry "name"))))
           inferred)))))
 
@@ -5332,14 +5332,14 @@
 (defn qualify-imported-record-contracts
   [(contracts Any) (prefix String) (refer-syms Any)] Any
   (let [refer-set (if (some? refer-syms)
-                    (reduce (fn [out Any name String] Any
+                    (reduce (fn [(out Any) (name String)] Any
                               (assoc out name true))
                       {} refer-syms)
                     {})]
     (vec
       (apply concat
         (mapv
-          (fn [contract Any] Any
+          (fn [(contract Any)] Any
             (let [name (get contract "name")
                   namespace (get contract "namespace")
                   qualified (assoc contract "name" (str prefix "/" name))
@@ -5359,14 +5359,14 @@
 (defn qualify-imported-callable-synchronization
   [(entries Any) (prefix String) (refer-syms Any)] Any
   (let [refer-set (if (some? refer-syms)
-                    (reduce (fn [out Any name String] Any
+                    (reduce (fn [(out Any) (name String)] Any
                               (assoc out name true))
                       {} refer-syms)
                     {})]
     (vec
       (apply concat
         (mapv
-          (fn [entry Any] Any
+          (fn [(entry Any)] Any
             (let [name (get entry "name")
                   qualified (assoc entry "name" (str prefix "/" name))]
               (if (= true (get refer-set name))
@@ -5996,12 +5996,12 @@
               "core" nil)
           union-entry
             (first
-              (filterv (fn [entry Any] Bool
+              (filterv (fn [(entry Any)] Bool
                          (= (get entry "name") "core/Op"))
                 surface))
           members (get (get union-entry "type") "members")]
       (= ["beagle.user/AddOp" "beagle.user/SubOp"]
-         (mapv (fn [member Any] String (get member "name")) members))))
+         (mapv (fn [(member Any)] String (get member "name")) members))))
   (expect! "import: function signatures qualify provider-local nominal types"
     (let [surface
             (import-module-surface!
@@ -6013,7 +6013,7 @@
               "core" nil)
           function-entry
             (first
-              (filterv (fn [entry Any] Bool
+              (filterv (fn [(entry Any)] Bool
                          (= (get entry "name") "core/consume"))
                 surface))
           function-type (get function-entry "type")]
@@ -6316,10 +6316,10 @@
                ["point-x" ["Fn" [BRACKET-TAG "Point"] "String"]]]]
              ["defrecord" "Point" [BRACKET-TAG ["x" "String"]]]])
           surface (get prog "inferred-public-surface")
-          names (mapv (fn [entry Any] Any (get entry "name")) surface)
+          names (mapv (fn [(entry Any)] Any (get entry "name")) surface)
           map-entry
           (first
-            (filterv (fn [entry Any] Bool
+            (filterv (fn [(entry Any)] Bool
                        (= (get entry "name") "map->Point"))
               surface))]
       (and (= names ["->Point" "map->Point" "point-x"])
@@ -6386,7 +6386,7 @@
            ["def" "out" ["identity" ["+" 1 2]]]]
           syntaxes
           (mapv
-            (fn [datum Any] Any
+            (fn [(datum Any)] Any
               (syntax/datum->beagle-syntax!
                 datum nil syntax/EMPTY-SCOPE-SET nil {}))
             datums)
@@ -6402,7 +6402,7 @@
                ["declare-extern" "$beagle$extern" "Any"]])
           errors (parse-errors)]
       (= (count
-           (filterv (fn [message String] Bool
+           (filterv (fn [(message String)] Bool
                       (str/includes? message "reserved compiler identifier prefix"))
              errors))
         3)))
@@ -6538,7 +6538,7 @@
       (and (= (get node "node") "fn")
         (= (get node "rest") false)
         (nil? (get node "ret"))
-        (= (mapv (fn [p Any] Any (get p "name")) (get node "params"))
+        (= (mapv (fn [(p Any)] Any (get p "name")) (get node "params"))
           ["final" "prev"]))))
   (expect! "nix: (nix/derivation attrs) -> nix-derivation"
     (= (get (parse-expr* ["nix/derivation" [BRACKET-TAG]]) "node")

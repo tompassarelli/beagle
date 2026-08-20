@@ -47,7 +47,7 @@
       :nodes (conj (vec (get state :nodes)) node))))
 
 (defn load-lines [(offset Int) (lines (Vec String))] (Map Keyword Any)
-  (reduce (fn [state (Map Keyword Any) line String] (Map Keyword Any)
+  (reduce (fn [(state (Map Keyword Any)) (line String)] (Map Keyword Any)
             (if (str/starts-with? line "[")
               (let [trip (edn/read-string line)
                     l (+ offset (int (nth trip 0)))
@@ -71,10 +71,10 @@
    (next-offset (Atom Int))
    (path String)]
   String
-  (let [lines (Vec String) (str/split-lines (slurp path))
-        heads (Vec String) (filterv (fn [l String] Bool (str/starts-with? l "@file")) lines)
-        src String (subs (nth heads 0) 6)
-        loaded (Map Keyword Any) (load-lines (deref next-offset) lines)]
+  (let [(lines (Vec String)) (str/split-lines (slurp path))
+        (heads (Vec String)) (filterv (fn [(l String)] Bool (str/starts-with? l "@file")) lines)
+        (src String) (subs (nth heads 0) 6)
+        (loaded (Map Keyword Any)) (load-lines (deref next-offset) lines)]
     (swap! file->nodes assoc src (vec (get loaded :nodes)))
     (reset! next-offset (inc (int (get loaded :top))))
     (when (pos? (count (vec (get loaded :operations))))
@@ -89,18 +89,18 @@
 ;; A snapshot of the live view, keyed by subject; every read below goes through
 ;; one. A commit invalidates it, so the caller rebuilds after editing.
 (defn live-index [(ctx Any)] (Map Any Any)
-  (group-by (fn [p Any] Any (t/triple-t1 p)) (c/live-propositions ctx)))
+  (group-by (fn [(p Any)] Any (t/triple-t1 p)) (c/live-propositions ctx)))
 
 (defn propositions-of [(index (Map Any Any)) (node Any)] (Vec Any)
   (vec (get index node [])))
 
 (defn symbol-leaf? [(index (Map Any Any)) (node Any)] Bool
-  (pos? (count (filterv (fn [p Any] Bool
+  (pos? (count (filterv (fn [(p Any)] Bool
                           (and (= kind-pred (t/triple-t2 p)) (= symbol-kind (t/triple-t3 p))))
                  (propositions-of index node)))))
 
 (defn field-child [(index (Map Any Any)) (node Any) (fname String)] Int
-  (let [hits (filterv (fn [p Any] Bool (= fname (t/triple-t2 p)))
+  (let [hits (filterv (fn [(p Any)] Bool (= fname (t/triple-t2 p)))
                (propositions-of index node))]
     (if (empty? hits)
       0
@@ -109,7 +109,7 @@
 
 (defn sym-val [(index (Map Any Any)) (node Any)] Any
   (if (and (> (int node) 0) (symbol-leaf? index node))
-    (let [hits (filterv (fn [p Any] Bool (= value-pred (t/triple-t2 p)))
+    (let [hits (filterv (fn [(p Any)] Bool (= value-pred (t/triple-t2 p)))
                  (propositions-of index node))]
       (if (empty? hits) nil (t/triple-t3 (nth hits 0))))
     nil))
@@ -125,8 +125,8 @@
    (file->nodes (Atom (Map Any Any)))
    (src String)]
   (Set Any)
-  (set (filterv (fn [nm Any] Bool (not (nil? nm)))
-         (mapv (fn [node Any] Any (binding-name index node))
+  (set (filterv (fn [(nm Any)] Bool (not (nil? nm)))
+         (mapv (fn [(node Any)] Any (binding-name index node))
            (vec (get (deref file->nodes) src []))))))
 
 ;; The rename is a retraction plus an assertion in one transaction: the kernel
@@ -137,7 +137,7 @@
    (target-nodes (Set Any))
    (propositions (Vec Any))]
   (Vec Any)
-  (vec (mapcat (fn [p Any] (Vec Any)
+  (vec (mapcat (fn [(p Any)] (Vec Any)
                  (let [node (t/triple-t1 p)]
                    (if (and (contains? target-nodes node) (symbol-leaf? index node))
                      [(c/retract-operation p)
@@ -162,8 +162,8 @@
   (spit out-path
     (str (str "@file " src "\n")
       (str/join ""
-        (mapv (fn [node Any] String
-                (str/join "" (mapv (fn [p Any] String (project-line p))
+        (mapv (fn [(node Any)] String
+                (str/join "" (mapv (fn [(p Any)] String (project-line p))
                                (propositions-of index node))))
           (vec (get (deref file->nodes) src []))))))
   nil)
@@ -173,25 +173,25 @@
     (str "/tmp/mutated-" (nth parts (dec (count parts))) ".edn")))
 
 (defn -main [& args] Nil
-  (let [argv (Vec Any) (vec args)
-        old-name String (str (nth argv 0))
-        new-name String (str (nth argv 1))
-        target-substr String (str (nth argv 2))
-        edn-files (Vec Any) (vec (drop 3 argv))
-        ctx Any (c/new-term-store space-id)
-        file->nodes (Atom (Map Any Any)) (atom {})
-        next-offset (Atom Int) (atom 0)
-        srcs (Vec String) (mapv (fn [p Any] String
+  (let [(argv (Vec Any)) (vec args)
+        (old-name String) (str (nth argv 0))
+        (new-name String) (str (nth argv 1))
+        (target-substr String) (str (nth argv 2))
+        (edn-files (Vec Any)) (vec (drop 3 argv))
+        (ctx Any) (c/new-term-store space-id)
+        (file->nodes (Atom (Map Any Any))) (atom {})
+        (next-offset (Atom Int)) (atom 0)
+        (srcs (Vec String)) (mapv (fn [(p Any)] String
                                    (load-edn! ctx file->nodes next-offset (str p)))
                              edn-files)
-        index (Map Any Any) (live-index ctx)
-        target-modules (Vec String) (filterv (fn [s String] Bool
+        (index (Map Any Any)) (live-index ctx)
+        (target-modules (Vec String)) (filterv (fn [(s String)] Bool
                                                 (str/includes? s target-substr))
                                        srcs)
-        target-nodes (Set Any) (set (vec (mapcat (fn [s String] (Vec Any)
+        (target-nodes (Set Any)) (set (vec (mapcat (fn [(s String)] (Vec Any)
                                                     (vec (get (deref file->nodes) s [])))
                                             target-modules)))
-        collisions (Vec String) (filterv (fn [m String] Bool
+        (collisions (Vec String)) (filterv (fn [(m String)] Bool
                                             (contains? (module-bindings index file->nodes m)
                                               new-name))
                                    target-modules)]
@@ -200,12 +200,12 @@
         (binding [*out* *err*]
           (println (str "REJECTED — `" new-name "` is already a binding in " m ".\n" "  A rename onto an existing binding would shadow/collide; the store refuses the write.\n" "  (Turtle #5 invariant: rename-doesn't-collide. No propositions were mutated.)")))
         (System/exit 3)))
-    (let [targets (filterv (fn [p Any] Bool
+    (let [targets (filterv (fn [(p Any)] Bool
                              (and (= value-pred (t/triple-t2 p)) (= old-name (t/triple-t3 p))))
                     (c/live-propositions ctx))
           operations (rename-operations index new-name target-nodes targets)
           renamed (quot (count operations) 2)
-          preserved (count (filterv (fn [p Any] Bool
+          preserved (count (filterv (fn [(p Any)] Bool
                                       (let [node (t/triple-t1 p)]
                                         (and (not (contains? target-nodes node))
                                           (symbol-leaf? index node))))
@@ -217,7 +217,7 @@
                                       "store/CommitOperationV1"
                                       "codegraph-v1")))
           projected (live-index ctx)
-          outs (mapv (fn [s String] String (out-path s)) srcs)]
+          outs (mapv (fn [(s String)] String (out-path s)) srcs)]
       (doseq [i (range (count srcs))]
         (project-file! projected file->nodes (nth srcs i) (nth outs i)))
       (binding [*out* *err*]

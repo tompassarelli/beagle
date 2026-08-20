@@ -112,7 +112,7 @@
 (defn- rule-text-attribute-scope
   [(rule d/Rule) (scope TextAttributeScope)] TextAttributeScope
   (reduce
-   (fn [current TextAttributeScope literal d/Literal] TextAttributeScope
+   (fn [(current TextAttributeScope) (literal d/Literal)] TextAttributeScope
      (literal-text-attribute-scope literal current))
    scope (d/rule-body rule)))
 
@@ -120,9 +120,9 @@
 
 (defn plan-text-attribute-scope [(plan QueryPlan)] TextAttributeScope
   (reduce
-   (fn [scope TextAttributeScope stratum (Vec d/Rule)] TextAttributeScope
+   (fn [(scope TextAttributeScope) (stratum (Vec d/Rule))] TextAttributeScope
      (reduce
-      (fn [current TextAttributeScope rule d/Rule] TextAttributeScope
+      (fn [(current TextAttributeScope) (rule d/Rule)] TextAttributeScope
         (rule-text-attribute-scope rule current))
       scope stratum))
    (empty-any-set) (queryplan-strata plan)))
@@ -133,10 +133,10 @@
   (not (empty? (findspec-aggregates find))))
 
 (def max-results Int
-  (let [raw Any (System/getenv "BEAGLE_STORE_MAX_RESULTS")
-        parsed (U Int Nil)
+  (let [(raw Any) (System/getenv "BEAGLE_STORE_MAX_RESULTS")
+        (parsed (U Int Nil))
         (if (and (string? raw) (not (= raw "")))
-          (let [text String raw] (parse-long text))
+          (let [(text String) raw] (parse-long text))
           nil)]
     (if (and (some? parsed) (> parsed 0)) parsed 100000)))
 
@@ -225,7 +225,7 @@
    (occurrences (Vec t/OperationOccurrence))
    (withdrawals (Vec t/Withdrawal))]
   ProjectionResult
-  (let [database d/Db
+  (let [(database d/Db)
         (d/edb-with-history propositions occurrences withdrawals)]
     (projection-from-candidates-result
      database (d/build-text-candidates-result! propositions))))
@@ -262,13 +262,13 @@
 (defn- empty-rules [] (Vec d/Rule) [])
 
 (defn- term-vars [(terms (Vec d/QueryTerm))] (Set String)
-  (reduce (fn [acc (Set String) term d/QueryTerm] (Set String)
+  (reduce (fn [(acc (Set String)) (term d/QueryTerm)] (Set String)
             (let [name (d/queryterm-variable term)]
               (if (some? name) (conj acc name) acc)))
           (empty-string-set) terms))
 
 (defn- term-errors [(terms (Vec d/QueryTerm)) (context String)] (Vec QueryError)
-  (reduce (fn [acc (Vec QueryError) term d/QueryTerm] (Vec QueryError)
+  (reduce (fn [(acc (Vec QueryError)) (term d/QueryTerm)] (Vec QueryError)
             (if (d/query-term? term)
               acc
               (conj acc (query-error :query-invalid-term
@@ -280,7 +280,7 @@
    (bound (Set String))
    (context String)]
   (Vec QueryError)
-  (reduce (fn [acc (Vec QueryError) name String] (Vec QueryError)
+  (reduce (fn [(acc (Vec QueryError)) (name String)] (Vec QueryError)
             (if (contains? bound name)
               acc
               (conj acc (query-error :query-unbound-variable
@@ -288,7 +288,7 @@
           [] (ordered-names (term-vars terms))))
 
 (defn- head-arities [(rules (Vec d/Rule))] (Map String Int)
-  (reduce (fn [acc (Map String Int) rule d/Rule] (Map String Int)
+  (reduce (fn [(acc (Map String Int)) (rule d/Rule)] (Map String Int)
             (let [relation (d/rule-head-relation rule)]
               (if (contains? acc relation)
                 acc
@@ -296,7 +296,7 @@
           {} rules))
 
 (defn- derived-relations [(rules (Vec d/Rule))] (Set String)
-  (reduce (fn [acc (Set String) rule d/Rule] (Set String)
+  (reduce (fn [(acc (Set String)) (rule d/Rule)] (Set String)
             (conj acc (d/rule-head-relation rule)))
           #{} rules))
 
@@ -446,7 +446,7 @@
 
 (defn- arity-errors [(rules (Vec d/Rule))] (Vec QueryError)
   (let [arities (head-arities rules)]
-    (reduce (fn [acc (Vec QueryError) rule d/Rule] (Vec QueryError)
+    (reduce (fn [(acc (Vec QueryError)) (rule d/Rule)] (Vec QueryError)
               (let [relation (d/rule-head-relation rule)
                     expected (get arities relation)
                     actual (count (d/rule-head-arguments rule))]
@@ -458,7 +458,7 @@
             (empty-query-errors) rules)))
 
 (defn- positive-relations [(rule d/Rule)] (Set String)
-  (reduce (fn [acc (Set String) literal d/Literal] (Set String)
+  (reduce (fn [(acc (Set String)) (literal d/Literal)] (Set String)
             (if (and (= :relation (d/literal-kind literal))
                      (not (d/literal-negated literal)))
               (conj acc (d/literal-relation literal))
@@ -472,7 +472,7 @@
             (Map String (Set String))
             (let [head (d/rule-head-relation rule)]
               (update acc head
-                      (fn [current (U (Set String) Nil)] (Set String)
+                      (fn [(current (U (Set String) Nil))] (Set String)
                         (set-union (or current (empty-string-set))
                                    (positive-relations rule))))))
           {} rules))
@@ -496,7 +496,7 @@
 
 (defn- recursive-relations [(rules (Vec d/Rule))] (Set String)
   (let [edges (dependency-edges rules)]
-    (reduce (fn [acc (Set String) rule d/Rule] (Set String)
+    (reduce (fn [(acc (Set String)) (rule d/Rule)] (Set String)
               (let [relation (d/rule-head-relation rule)]
                 (if (reaches? relation relation edges) (conj acc relation) acc)))
             (empty-string-set) rules)))
@@ -513,7 +513,7 @@
 (defn- recursive-builtin-errors [(rules (Vec d/Rule))] (Vec QueryError)
   (let [recursive (recursive-relations rules)]
     (reduce
-     (fn [acc (Vec QueryError) rule d/Rule] (Vec QueryError)
+     (fn [(acc (Vec QueryError)) (rule d/Rule)] (Vec QueryError)
        (if (and (contains? recursive (d/rule-head-relation rule))
                 (recursive-builtin? rule))
          (conj acc (query-error :query-recursive-builtin
@@ -534,7 +534,7 @@
             available (set-union lower current)
             errors2
             (reduce
-             (fn [acc (Vec QueryError) rule d/Rule] (Vec QueryError)
+             (fn [(acc (Vec QueryError)) (rule d/Rule)] (Vec QueryError)
                (reduce
                 (fn
                   [(inner (Vec QueryError)) (relation String)] (Vec QueryError)
@@ -686,11 +686,11 @@
           [(query-error :query-invalid-plan "query plan must contain at least one rule")]
           (empty-query-errors))
         rules-errors
-        (reduce (fn [acc (Vec QueryError) rule d/Rule] (Vec QueryError)
+        (reduce (fn [(acc (Vec QueryError)) (rule d/Rule)] (Vec QueryError)
                   (vec (concat acc (rule-errors! rule known arities))))
                 (empty-query-errors) rules)
         strata-errors
-        (reduce (fn [acc (Vec QueryError) message String] (Vec QueryError)
+        (reduce (fn [(acc (Vec QueryError)) (message String)] (Vec QueryError)
                   (conj acc (query-error :query-stratification message)))
                 (empty-query-errors) (d/strata-violations strata))]
     (vec (concat empty-errors
@@ -733,7 +733,7 @@
 (defn- syntax-term-errors [(values Any) (context String)] (Vec QueryError)
   (if (not (vector? values))
     [(query-error :query-invalid-syntax (str context " arguments must be a vector"))]
-    (reduce (fn [acc (Vec QueryError) value Any] (Vec QueryError)
+    (reduce (fn [(acc (Vec QueryError)) (value Any)] (Vec QueryError)
               (if (query-term-form? value)
                 acc
                 (conj acc (query-error :query-invalid-syntax
@@ -780,7 +780,7 @@
                           "rule head must contain string :rel and vector :args")])
           body-errors
           (if (vector? body)
-            (reduce (fn [acc (Vec QueryError) literal Any] (Vec QueryError)
+            (reduce (fn [(acc (Vec QueryError)) (literal Any)] (Vec QueryError)
                       (vec (concat acc (syntax-literal-errors literal))))
                     [] body)
             [(query-error :query-invalid-syntax "rule body must be a vector")])]
@@ -808,7 +808,7 @@
            spec-errors
            (if (vector? (:agg find))
              (reduce
-              (fn [acc (Vec QueryError) spec Any] (Vec QueryError)
+              (fn [(acc (Vec QueryError)) (spec Any)] (Vec QueryError)
                 (if (and (map? spec)
                          (and (keyword? (:op spec))
                               (or (nil? (:arg spec)) (integer? (:arg spec)))))
@@ -820,7 +820,7 @@
            having-errors
            (if (or (nil? (:having find)) (vector? (:having find)))
              (reduce
-              (fn [acc (Vec QueryError) clause Any] (Vec QueryError)
+              (fn [(acc (Vec QueryError)) (clause Any)] (Vec QueryError)
                 (if (and (map? clause)
                          (and (keyword? (:op clause))
                               (and (integer? (:agg clause))
@@ -835,7 +835,7 @@
 (defn- syntax-order-errors [(value Any)] (Vec QueryError)
   (if (or (nil? value) (vector? value))
     (reduce
-     (fn [errors (Vec QueryError) clause Any] (Vec QueryError)
+     (fn [(errors (Vec QueryError)) (clause Any)] (Vec QueryError)
        (if (and (map? clause)
                 (and (integer? (:column clause))
                      (contains? #{:asc :desc} (:direction clause))))
@@ -857,11 +857,11 @@
      [(query-error :query-invalid-syntax "rules or strata have an invalid shape")]]
     [:else
      (let [strata (raw-strata form)
-           rules (reduce (fn [acc (Vec Any) stratum Any] (Vec Any)
+           rules (reduce (fn [(acc (Vec Any)) (stratum Any)] (Vec Any)
                            (vec (concat acc stratum)))
                          [] strata)
            rule-errors
-           (reduce (fn [acc (Vec QueryError) rule Any] (Vec QueryError)
+           (reduce (fn [(acc (Vec QueryError)) (rule Any)] (Vec QueryError)
                      (vec (concat acc (syntax-rule-errors rule))))
                    [] rules)]
        (vec
@@ -880,7 +880,7 @@
   (if (variable-form? value) (d/variable (:var value)) (d/constant value)))
 
 (defn- compile-term-forms [(values (Vec Any))] (Vec d/QueryTerm)
-  (mapv (fn [value Any] d/QueryTerm (compile-term-form value)) values))
+  (mapv (fn [(value Any)] d/QueryTerm (compile-term-form value)) values))
 
 (defn- compile-literal-form [(literal Any)] d/Literal
   (cond
@@ -897,7 +897,7 @@
 (defn- compile-rule-form [(rule Any)] d/Rule
   (d/rule (:rel (:head rule))
           (compile-term-forms (:args (:head rule)))
-          (mapv (fn [literal Any] d/Literal (compile-literal-form literal))
+          (mapv (fn [(literal Any)] d/Literal (compile-literal-form literal))
                 (:body rule))))
 
 (defn- compile-find-form [(find Any)] FindSpec
@@ -906,10 +906,10 @@
     (aggregate-find
      (:rel find)
      (:group find)
-     (mapv (fn [spec Any] AggregateSpec
+     (mapv (fn [(spec Any)] AggregateSpec
              (aggregate-spec (:op spec) (:arg spec)))
            (:agg find))
-     (mapv (fn [clause Any] HavingClause
+     (mapv (fn [(clause Any)] HavingClause
              (having-clause (:op clause) (:agg clause) (:val clause)))
            (or (:having find) [])))))
 
@@ -921,14 +921,14 @@
       (if (not (empty? errors))
         (->CompileResult nil errors)
         (let [strata
-              (mapv (fn [stratum (Vec Any)] (Vec d/Rule)
-                      (mapv (fn [rule Any] d/Rule (compile-rule-form rule)) stratum))
+              (mapv (fn [(stratum (Vec Any))] (Vec d/Rule)
+                      (mapv (fn [(rule Any)] d/Rule (compile-rule-form rule)) stratum))
                     (raw-strata form))
               plan
               (ordered-query-plan
                (compile-find-form (:find form))
                strata
-               (mapv (fn [clause Any] OrderClause
+               (mapv (fn [(clause Any)] OrderClause
                        (order-clause (:column clause) (:direction clause)))
                      (or (:order-by form) []))
                (:limit form))
@@ -986,29 +986,29 @@
       rank-order
       (cond
         [(and (boolean? left) (boolean? right))
-         (let [left-bool Bool left
-               right-bool Bool right]
+         (let [(left-bool Bool) left
+               (right-bool Bool) right]
            (bool-compare left-bool right-bool))]
         [(and (number? left) (number? right))
          (if (and (integer? left) (integer? right))
-           (let [left-int Int left
-                 right-int Int right]
+           (let [(left-int Int) left
+                 (right-int Int) right]
              (int-compare left-int right-int))
-           (let [left-float Float (double left)
-                 right-float Float (double right)]
+           (let [(left-float Float) (double left)
+                 (right-float Float) (double right)]
              (float-compare left-float right-float)))]
         [(and (string? left) (string? right))
-         (let [left-string String left
-               right-string String right]
+         (let [(left-string String) left
+               (right-string String) right]
            (compare left-string right-string))]
         [(and (keyword? left) (keyword? right))
-         (let [left-keyword Keyword left
-               right-keyword Keyword right]
+         (let [(left-keyword Keyword) left
+               (right-keyword Keyword) right]
            (compare (str left-keyword) (str right-keyword)))]
         [(and (t/instant? left) (t/instant? right))
-         (let [left-instant t/Instant left
-               right-instant t/Instant right
-               seconds-order Int
+         (let [(left-instant t/Instant) left
+               (right-instant t/Instant) right
+               (seconds-order Int)
                (int-compare (t/instant-epoch-seconds left-instant)
                             (t/instant-epoch-seconds right-instant))]
            (if (zero? seconds-order)
@@ -1016,12 +1016,12 @@
                           (t/instant-nanos right-instant))
              seconds-order))]
         [(and (t/triple? left) (t/triple? right))
-         (let [left-triple t/Triple left
-               right-triple t/Triple right
-               first-order Int
+         (let [(left-triple t/Triple) left
+               (right-triple t/Triple) right
+               (first-order Int)
                (term-compare (t/triple-t1 left-triple)
                              (t/triple-t1 right-triple))
-               second-order Int
+               (second-order Int)
                (if (zero? first-order)
                  (term-compare (t/triple-t2 left-triple)
                                (t/triple-t2 right-triple))
@@ -1078,10 +1078,10 @@
   [(order (Vec OrderClause)) (rows (Vec d/Tuple))] (Vec d/Tuple)
   (if (<= (count rows) 1)
     rows
-    (let [middle Int (quot (count rows) 2)
-          left (Vec d/Tuple)
+    (let [(middle Int) (quot (count rows) 2)
+          (left (Vec d/Tuple))
           (merge-sort-ordered-rows order (subvec rows 0 middle))
-          right (Vec d/Tuple)
+          (right (Vec d/Tuple))
           (merge-sort-ordered-rows order (subvec rows middle))]
       (merge-ordered-row-vectors order left right))))
 
@@ -1120,19 +1120,19 @@
   (cond
     [(number? value)
      (if (integer? value)
-       (let [integer-value Int value] integer-value)
-       (let [float-value Float (double value)] float-value))]
+       (let [(integer-value Int) value] integer-value)
+       (let [(float-value Float) (double value)] float-value))]
     [(string? value)
-     (let [text String value
-           integer-result (U Int Nil) (parse-long text)]
+     (let [(text String) value
+           (integer-result (U Int Nil)) (parse-long text)]
        (if (some? integer-result)
-         (let [integer-value Int integer-result
-               numeric-value NumericAtom integer-value]
+         (let [(integer-value Int) integer-result
+               (numeric-value NumericAtom) integer-value]
            numeric-value)
-         (let [float-result (U Float Nil) (parse-double text)]
+         (let [(float-result (U Float Nil)) (parse-double text)]
            (if (some? float-result)
-             (let [float-value Float float-result
-                   numeric-value NumericAtom float-value]
+             (let [(float-value Float) float-result
+                   (numeric-value NumericAtom) float-value]
                numeric-value)
              nil))))]
     [:else nil]))
@@ -1140,18 +1140,18 @@
 (defn- required-number [(value Any)] NumericAtom
   (let [number (number-atom value)]
     (if (some? number)
-      (let [present NumericAtom number] present)
+      (let [(present NumericAtom) number] present)
       0)))
 
 (defn- numeric-int [(value NumericAtom)] Int
   (if (integer? value)
-    (let [integer-value Int value] integer-value)
+    (let [(integer-value Int) value] integer-value)
     0))
 
 (defn- numeric-float [(value NumericAtom)] Float
   (if (integer? value)
-    (let [integer-value Int value] (double integer-value))
-    (let [float-value Float value] float-value)))
+    (let [(integer-value Int) value] (double integer-value))
+    (let [(float-value Float) value] float-value)))
 
 (defn- nonnumeric-row? [(rows (Vec d/Tuple)) (position Int)] Bool
   (loop [index Int 0]
@@ -1168,8 +1168,8 @@
         nil
         (let [spec (nth specs index)]
           (if (contains? numeric-aggregate-operators (aggregatespec-operator spec))
-            (let [position Int (or (aggregatespec-argument spec) 0)
-                  bad Bool (nonnumeric-row? rows position)]
+            (let [(position Int) (or (aggregatespec-argument spec) 0)
+                  (bad Bool) (nonnumeric-row? rows position)]
               (if bad
                 (query-error :query-nonnumeric-aggregate
                              (str "aggregate position " position
@@ -1178,14 +1178,14 @@
             (recur (inc index))))))))
 
 (defn- group-rows [(rows (Vec d/Tuple)) (grouping (Vec Int))] AggregateGroups
-  (reduce (fn [acc AggregateGroups row d/Tuple] AggregateGroups
-            (let [key (mapv (fn [position Int] Any (nth row position)) grouping)
+  (reduce (fn [(acc AggregateGroups) (row d/Tuple)] AggregateGroups
+            (let [key (mapv (fn [(position Int)] Any (nth row position)) grouping)
                   key-text (row-key key)
                   groups (aggregategroups-by-key acc)
                   current (get groups key-text)]
               (if (some? current)
-                (let [group AggregateGroup current
-                      updated AggregateGroup (->AggregateGroup
+                (let [(group AggregateGroup) current
+                      (updated AggregateGroup) (->AggregateGroup
                                (aggregategroup-key group)
                                (conj (aggregategroup-members group) row))]
                   (->AggregateGroups (assoc groups key-text updated)
@@ -1196,26 +1196,26 @@
           (->AggregateGroups {} []) rows))
 
 (defn- all-integers? [(rows (Vec d/Tuple)) (position Int)] Bool
-  (every? (fn [row d/Tuple] Bool
+  (every? (fn [(row d/Tuple)] Bool
             (integer? (required-number (nth row position))))
           rows))
 
 (defn- sum-values [(rows (Vec d/Tuple)) (position Int)] NumericAtom
   (if (all-integers? rows position)
-    (reduce (fn [acc Int row d/Tuple] Int
+    (reduce (fn [(acc Int) (row d/Tuple)] Int
               (+ acc (numeric-int (required-number (nth row position)))))
             0 rows)
-    (reduce (fn [acc Float row d/Tuple] Float
+    (reduce (fn [(acc Float) (row d/Tuple)] Float
               (+ acc (numeric-float (required-number (nth row position)))))
             0.0 rows)))
 
 (defn- extreme-value
   [(rows (Vec d/Tuple)) (position Int) (maximum? Bool)] NumericAtom?
-  (reduce (fn [best NumericAtom? row d/Tuple] NumericAtom?
+  (reduce (fn [(best NumericAtom?) (row d/Tuple)] NumericAtom?
             (let [candidate (required-number (nth row position))]
               (if (nil? best)
                 candidate
-                (let [present-best NumericAtom best]
+                (let [(present-best NumericAtom) best]
                   (if (if maximum?
                         (> (numeric-float candidate) (numeric-float present-best))
                         (< (numeric-float candidate) (numeric-float present-best)))
@@ -1224,13 +1224,13 @@
 
 (defn- distinct-column-count [(rows (Vec d/Tuple)) (position Int)] Int
   (count
-   (reduce (fn [keys (Set String) row d/Tuple] (Set String)
+   (reduce (fn [(keys (Set String)) (row d/Tuple)] (Set String)
              (conj keys (term-key (nth row position))))
            (empty-string-set) rows)))
 
 (defn- aggregate-value [(rows (Vec d/Tuple)) (spec AggregateSpec)] NumericAtom
-  (let [operator Keyword (aggregatespec-operator spec)
-        position Int (or (aggregatespec-argument spec) 0)]
+  (let [(operator Keyword) (aggregatespec-operator spec)
+        (position Int) (or (aggregatespec-argument spec) 0)]
     (cond
       [(= operator :count) (count rows)]
       [(= operator :count-distinct)
@@ -1257,26 +1257,26 @@
 
 (defn- aggregate-values
   [(rows (Vec d/Tuple)) (specs (Vec AggregateSpec))] (Vec NumericAtom)
-  (mapv (fn [spec AggregateSpec] NumericAtom
+  (mapv (fn [(spec AggregateSpec)] NumericAtom
           (aggregate-value rows spec))
         specs))
 
 (defn- append-aggregate-values
   [(row d/Tuple) (values (Vec NumericAtom))] d/Tuple
-  (reduce (fn [current d/Tuple value NumericAtom] d/Tuple
+  (reduce (fn [(current d/Tuple) (value NumericAtom)] d/Tuple
             (if (integer? value)
-              (let [integer-value Int value
-                    element Any integer-value]
+              (let [(integer-value Int) value
+                    (element Any) integer-value]
                 (conj current element))
-              (let [float-value Float value
-                    element Any float-value]
+              (let [(float-value Float) value
+                    (element Any) float-value]
                 (conj current element))))
           row values))
 
 (defn- having-passes?
   [(row d/Tuple) (grouping-count Int) (clauses (Vec HavingClause))] Bool
   (every?
-   (fn [clause HavingClause] Bool
+   (fn [(clause HavingClause)] Bool
      (comparison-number
       (havingclause-operator clause)
       (required-number
@@ -1295,19 +1295,19 @@
           (let [groups (group-rows rows (findspec-grouping find))
                 aggregated
                 (reduce
-                 (fn [acc (Vec d/Tuple) group-key String] (Vec d/Tuple)
-                   (let [group-value Any (get (aggregategroups-by-key groups) group-key)
-                         group AggregateGroup
+                 (fn [(acc (Vec d/Tuple)) (group-key String)] (Vec d/Tuple)
+                   (let [(group-value Any) (get (aggregategroups-by-key groups) group-key)
+                         (group AggregateGroup)
                          (if (some? group-value)
-                           (let [present AggregateGroup group-value] present)
+                           (let [(present AggregateGroup) group-value] present)
                            (->AggregateGroup [] []))
-                         key d/Tuple (aggregategroup-key group)
-                         members (Vec d/Tuple) (aggregategroup-members group)
-                         values (Vec NumericAtom) (aggregate-values members (findspec-aggregates find))]
+                         (key d/Tuple) (aggregategroup-key group)
+                         (members (Vec d/Tuple)) (aggregategroup-members group)
+                         (values (Vec NumericAtom)) (aggregate-values members (findspec-aggregates find))]
                      (conj acc (append-aggregate-values key values))))
                  [] (aggregategroups-order groups))
                 survivors
-                (filterv (fn [row d/Tuple] Bool
+                (filterv (fn [(row d/Tuple)] Bool
                            (having-passes? row (count (findspec-grouping find))
                                            (findspec-having find)))
                          aggregated)
@@ -1357,10 +1357,10 @@
    (plan QueryPlan)
    (control d/QueryControl?)]
   QueryExecutionResult
-  (let [projection-result ProjectionResult
+  (let [(projection-result ProjectionResult)
         (project-with-history-result! propositions occurrences withdrawals)
-        projection-value Projection? (projection-result-projection projection-result)
-        error-value d/QueryEvaluationError? (projection-result-error projection-result)]
+        (projection-value Projection?) (projection-result-projection projection-result)
+        (error-value d/QueryEvaluationError?) (projection-result-error projection-result)]
     (cond
       [(some? projection-value)
        (run-plan-projected-result! projection-value plan control)]

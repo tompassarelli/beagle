@@ -47,8 +47,8 @@
 (defn view-cids [(ctx ri/Graph) (v Any) (cids (Vec Any))] (U (Vec Any) Nil)
   (if (nil? v)
     nil
-    (let [sel (reduce (fn [acc (Set Any) occ Any] (Set Any) (let [r (ri/value-at ctx occ)] (if (nil? r) acc (conj acc r)))) #{} (ri/by-subject-predicate ctx v "selects"))]
-      (filterv (fn [cid Any] Bool (contains? sel cid)) cids))))
+    (let [sel (reduce (fn [(acc (Set Any)) (occ Any)] (Set Any) (let [r (ri/value-at ctx occ)] (if (nil? r) acc (conj acc r)))) #{} (ri/by-subject-predicate ctx v "selects"))]
+      (filterv (fn [(cid Any)] Bool (contains? sel cid)) cids))))
 
 (defn- pool-of [(ctx ri/Graph) (view Any) (cids (Vec Any))] (Vec Any)
   (let [in-view (if (nil? view) nil (view-cids ctx view cids))]
@@ -62,7 +62,7 @@
     nil
     (if (nil? ctx)
       (first cids)
-      (first (sort-by (fn [cid Any] (Vec Any) (occ-key ctx cid))
+      (first (sort-by (fn [(cid Any)] (Vec Any) (occ-key ctx cid))
                (pool-of ctx view cids))))))
 
 (defn select-causal-1 [(ctx (U ri/Graph Nil)) (view Any) (cids (Vec Any))] Any
@@ -70,7 +70,7 @@
     nil
     (if (nil? ctx)
       (first cids)
-      (first (sort-by (fn [cid Any] (Vec Any) (occ-key ctx cid))
+      (first (sort-by (fn [(cid Any)] (Vec Any) (occ-key ctx cid))
                (pool-of ctx view cids))))))
 
 (defn- fact-r [(ctx (U ri/Graph Nil)) (cid Any)] Any
@@ -97,16 +97,16 @@
 (defn ordered-children [(ctx (U ri/Graph Nil)) (e Any)] (Vec Any)
   (if (or (nil? ctx) (nil? e))
     []
-    (let [pairs (reduce (fn [acc (Vec OrdPair) cid Any] (Vec OrdPair) (let [k (rc/ord-parse (ri/predicate-at ctx cid)) r (fact-r ctx cid)] (if (or (nil? k) (nil? r)) acc (conj acc (->OrdPair k r))))) [] (ri/by-subject ctx e))]
-      (mapv (fn [pr OrdPair] Any (:child pr))
-        (sort-by (fn [pr OrdPair] rc/OrdKey (:key pr)) rc/ord-cmp pairs)))))
+    (let [pairs (reduce (fn [(acc (Vec OrdPair)) (cid Any)] (Vec OrdPair) (let [k (rc/ord-parse (ri/predicate-at ctx cid)) r (fact-r ctx cid)] (if (or (nil? k) (nil? r)) acc (conj acc (->OrdPair k r))))) [] (ri/by-subject ctx e))]
+      (mapv (fn [(pr OrdPair)] Any (:child pr))
+        (sort-by (fn [(pr OrdPair)] rc/OrdKey (:key pr)) rc/ord-cmp pairs)))))
 
 (defn ordered-segs [(ctx (U ri/Graph Nil)) (e Any)] (Vec Any)
   (if (or (nil? ctx) (nil? e))
     []
-    (let [pairs (reduce (fn [acc (Vec SegPair) cid Any] (Vec SegPair) (let [p Any (ri/predicate-at ctx cid) r Any (fact-r ctx cid)] (if (and (string? p) (some? (re-matches SEG-RE (str p))) (some? r)) (let [n (parse-long (subs (str p) 3))] (if (nil? n) acc (conj acc (->SegPair n r)))) acc))) [] (ri/by-subject ctx e))]
-      (mapv (fn [pr SegPair] Any (:child pr))
-        (sort-by (fn [pr SegPair] Int (:idx pr)) pairs)))))
+    (let [pairs (reduce (fn [(acc (Vec SegPair)) (cid Any)] (Vec SegPair) (let [(p Any) (ri/predicate-at ctx cid) (r Any) (fact-r ctx cid)] (if (and (string? p) (some? (re-matches SEG-RE (str p))) (some? r)) (let [n (parse-long (subs (str p) 3))] (if (nil? n) acc (conj acc (->SegPair n r)))) acc))) [] (ri/by-subject ctx e))]
+      (mapv (fn [(pr SegPair)] Any (:child pr))
+        (sort-by (fn [(pr SegPair)] Int (:idx pr)) pairs)))))
 
 (defn head-sym [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
   (if (= "list" (kind-of ctx view e))
@@ -241,9 +241,9 @@
   (get (ri/writers-of context) builder-key))
 
 (defn- resync! [(context ri/Graph)] ri/Graph
-  (let [open txn/Builder (deref (builder context))
-        coordinate t/Triple (txn/builder-coordinate open)
-        store (Atom t/TermStore) (ri/store-of context)]
+  (let [(open txn/Builder) (deref (builder context))
+        (coordinate t/Triple) (txn/builder-coordinate open)
+        (store (Atom t/TermStore)) (ri/store-of context)]
     (ri/with-view! context
       (rot/staged (rot/project! store)
                   (t/triple-t1 coordinate)
@@ -260,13 +260,13 @@
 
 (defn assert!
   [(context ri/Graph) (subject Any) (predicate Any) (value Any)] t/Triple
-  (let [occurrence t/Triple
+  (let [(occurrence t/Triple)
         (txn/assert! (builder context) (t/triple subject predicate value))]
     (do (resync! context) occurrence)))
 
 (defn update-single!
   [(context ri/Graph) (subject Any) (predicate Any) (value Any)] t/Triple
-  (let [occurrence t/Triple
+  (let [(occurrence t/Triple)
         (txn/update-single! (builder context) (ri/view context)
                             subject predicate value)]
     (do (resync! context) occurrence)))
@@ -274,9 +274,9 @@
 ;; Commit reopens the builder in place against the advanced sequence, so the
 ;; context stays the caller's single durable handle across transactions.
 (defn commit! [(context ri/Graph)] t/Triple
-  (let [store (Atom t/TermStore) (ri/store-of context)
-        cell (Atom txn/Builder) (builder context)
-        coordinate t/Triple (txn/commit! store cell)]
+  (let [(store (Atom t/TermStore)) (ri/store-of context)
+        (cell (Atom txn/Builder)) (builder context)
+        (coordinate t/Triple) (txn/commit! store cell)]
     (do (reset! cell (deref (txn/open store)))
         (resync! context)
         coordinate)))

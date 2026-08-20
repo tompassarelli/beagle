@@ -10,7 +10,7 @@
   (loop [remaining (Vec reader/ReaderEvent) events]
     (if (empty? remaining)
       false
-      (let [event reader/ReaderEvent (first remaining)]
+      (let [(event reader/ReaderEvent) (first remaining)]
         (if (and (= kind (reader/readerevent-kind event))
                  (= value (reader/readerevent-value event)))
           true
@@ -25,7 +25,7 @@
   (loop [remaining (Vec reader/ReaderEvent) events]
     (if (empty? remaining)
       false
-      (let [event reader/ReaderEvent (first remaining)]
+      (let [(event reader/ReaderEvent) (first remaining)]
         (if (and (= kind (reader/readerevent-kind event))
                  (= value (reader/readerevent-value event))
                  (= depth (reader/readerevent-depth event)))
@@ -38,7 +38,7 @@
          total Int 0]
     (if (empty? remaining)
       total
-      (let [event reader/ReaderEvent (first remaining)]
+      (let [(event reader/ReaderEvent) (first remaining)]
         (recur (rest remaining)
                (if (and (= kind (reader/readerevent-kind event))
                         (= value (reader/readerevent-value event)))
@@ -46,8 +46,8 @@
                  total))))))
 
 (defn representative-case [] Bool
-  (let [result reader/DatumRead (reader/read-events representative-source)
-        events (Vec reader/ReaderEvent) (reader/datumread-events result)]
+  (let [(result reader/DatumRead) (reader/read-events representative-source)
+        (events (Vec reader/ReaderEvent)) (reader/datumread-events result)]
     (and (reader/read-ok? result)
          (contains-event-at? events :keyword ":tags" 2)
          (contains-event-at? events :keyword ":tags-opt-in" 2)
@@ -63,9 +63,9 @@
          (contains-event? events :string "tokyo-night-dark"))))
 
 (defn literal-case [] Bool
-  (let [result reader/DatumRead
+  (let [(result reader/DatumRead)
         (reader/read-events "{:value \"line\\nquote: \\\" and slash: \\\\\"}")
-        events (Vec reader/ReaderEvent) (reader/datumread-events result)]
+        (events (Vec reader/ReaderEvent)) (reader/datumread-events result)]
     (and (reader/read-ok? result)
          (contains-event? events :string "line\nquote: \" and slash: \\")
          (= "\"line\\nquote: \\\" and slash: \\\\\""
@@ -73,9 +73,9 @@
                                    "line\nquote: \" and slash: \\")))))
 
 (defn prefix-case [] Bool
-  (let [result reader/DatumRead
+  (let [(result reader/DatumRead)
         (reader/read-events "'x `y ~z ~@zs ^:private f v' #{x}")
-        events (Vec reader/ReaderEvent) (reader/datumread-events result)]
+        (events (Vec reader/ReaderEvent)) (reader/datumread-events result)]
     (and (reader/read-ok? result)
          (contains-event? events :quote "")
          (contains-event? events :quasiquote "")

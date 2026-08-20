@@ -6,7 +6,7 @@
 
 (defn direct-update [(counter Counter) (delta Int)] Counter
   (update counter :value
-    (fn [current Int] Int (+ current delta))))
+    (fn [(current Int)] Int (+ current delta))))
 
 (defn make-counter-cell [(initial Int)] (Atom Counter)
   (atom (->Counter initial)))
@@ -19,7 +19,7 @@
 
 (defn update-counter! [(cell (Atom Counter)) (delta Int)] Counter
   (swap! cell update :value
-    (fn [current Int] Int (+ current delta))))
+    (fn [(current Int)] Int (+ current delta))))
 
 (defn assoc-counter! [(cell (Atom Counter)) (replacement Int)] Counter
   (swap! cell assoc :value replacement))
@@ -40,7 +40,7 @@
 (def any-global (Atom Any) (atom 0))
 
 (defn local-any-cell [] (Atom Any)
-  (let [cell (Atom Any) (atom 0)] cell))
+  (let [(cell (Atom Any)) (atom 0)] cell))
 
 (defn make-any-cell [(initial Any)] (Atom Any)
   (atom initial))
@@ -60,9 +60,9 @@
   (compare-and-set! any-global expected replacement))
 
 (defn callable-cell-value [(base Int) (value Int)] Int
-  (let [cell (Atom (Fn [Int] Int))
-        (atom (fn [current Int] Int (+ base current)))
-        stored (Fn [Int] Int)
+  (let [(cell (Atom (Fn [Int] Int)))
+        (atom (fn [(current Int)] Int (+ base current)))
+        (stored (Fn [Int] Int))
         (deref cell)]
     (stored value)))
 

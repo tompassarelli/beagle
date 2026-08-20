@@ -172,7 +172,7 @@
     (atom? v)))
 
 (defn term-as-triple [(v Term)] Triple?
-  (let [candidate Any v]
+  (let [(candidate Any) v]
     (if (and (triple? candidate) (term? candidate)) candidate nil)))
 
 (defn triple [(t1 Term) (t2 Term) (t3 Term)] Triple
@@ -216,14 +216,14 @@
 
 (defn occurrence-before? [(left Triple) (right Triple)] Bool
   (if (and (occurrence-coordinate? left) (occurrence-coordinate? right))
-    (let [left-tx Triple (triple-t1 left)
-          right-tx Triple (triple-t1 right)
-          left-space String (triple-t1 left-tx)
-          right-space String (triple-t1 right-tx)
-          left-seq Int (triple-t3 left-tx)
-          right-seq Int (triple-t3 right-tx)
-          left-ordinal Int (triple-t3 left)
-          right-ordinal Int (triple-t3 right)]
+    (let [(left-tx Triple) (triple-t1 left)
+          (right-tx Triple) (triple-t1 right)
+          (left-space String) (triple-t1 left-tx)
+          (right-space String) (triple-t1 right-tx)
+          (left-seq Int) (triple-t3 left-tx)
+          (right-seq Int) (triple-t3 right-tx)
+          (left-ordinal Int) (triple-t3 left)
+          (right-ordinal Int) (triple-t3 right)]
       (if (= left-space right-space)
         (or (< left-seq right-seq)
             (and (= left-seq right-seq) (< left-ordinal right-ordinal)))
@@ -262,14 +262,14 @@
 
 (defn withdrawal
   [(retraction OperationOccurrence) (assertion OperationOccurrence)] Withdrawal
-  (let [retraction-coordinate Triple
+  (let [(retraction-coordinate Triple)
         (operationoccurrence-coordinate retraction)
-        assertion-coordinate Triple
+        (assertion-coordinate Triple)
         (operationoccurrence-coordinate assertion)]
     (if (and (retraction-occurrence? retraction)
              (assertion-occurrence? assertion))
-      (let [retraction-transaction Triple (triple-t1 retraction-coordinate)
-            assertion-transaction Triple (triple-t1 assertion-coordinate)]
+      (let [(retraction-transaction Triple) (triple-t1 retraction-coordinate)
+            (assertion-transaction Triple) (triple-t1 assertion-coordinate)]
         (if (and (= (operationoccurrence-proposition retraction)
                     (operationoccurrence-proposition assertion))
                  (and (= (triple-t1 retraction-transaction)

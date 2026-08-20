@@ -107,7 +107,7 @@
 (defn- hash-two [(a Any) (b Any)] Int (hash (->KeyTwo a b)))
 
 (defn- shape-hash [(shape Int) (event t/OperationOccurrence)] Int
-  (let [proposition t/Triple (proposition-of event)]
+  (let [(proposition t/Triple) (proposition-of event)]
     (cond
       [(= shape shape-t1) (hash-one (t/triple-t1 proposition))]
       [(= shape shape-t12)
@@ -117,8 +117,8 @@
 
 (defn- same-shape-key?
   [(shape Int) (left t/OperationOccurrence) (right t/OperationOccurrence)] Bool
-  (let [lp t/Triple (proposition-of left)
-        rp t/Triple (proposition-of right)]
+  (let [(lp t/Triple) (proposition-of left)
+        (rp t/Triple) (proposition-of right)]
     (cond
       [(= shape shape-t1) (= (t/triple-t1 lp) (t/triple-t1 rp))]
       [(= shape shape-t12)
@@ -138,7 +138,7 @@
 ;; The one term a single-term shape binds, read back off the event that named
 ;; the key. Shape 1 binds two terms and is compared field by field instead.
 (defn- shape-term [(shape Int) (event t/OperationOccurrence)] Any
-  (let [proposition t/Triple (proposition-of event)]
+  (let [(proposition t/Triple) (proposition-of event)]
     (cond
       [(= shape shape-t1) (t/triple-t1 proposition)]
       [(= shape shape-t2) (t/triple-t2 proposition)]
@@ -153,14 +153,14 @@
    (shape Int)
    (a Any)]
   (Vec t/OperationOccurrence)
-  (let [codes (Vec Int) (bucket-codes bucket)
-        chain (Vec Int) (bucket-chain bucket)]
+  (let [(codes (Vec Int)) (bucket-codes bucket)
+        (chain (Vec Int)) (bucket-chain bucket)]
     (loop [key Int
            (nth (bucket-heads bucket)
              (mod (hash-one a) (bucket-width bucket)))]
       (if (< key 0)
         empty-events
-        (let [code Int (nth codes key)]
+        (let [(code Int) (nth codes key)]
           (if (and (= shape (code-shape code))
                 (= a (shape-term shape (nth source (code-position code)))))
             (nth (bucket-events bucket) key)
@@ -172,16 +172,16 @@
    (a Any)
    (b Any)]
   (Vec t/OperationOccurrence)
-  (let [codes (Vec Int) (bucket-codes bucket)
-        chain (Vec Int) (bucket-chain bucket)]
+  (let [(codes (Vec Int)) (bucket-codes bucket)
+        (chain (Vec Int)) (bucket-chain bucket)]
     (loop [key Int
            (nth (bucket-heads bucket)
              (mod (hash-two a b) (bucket-width bucket)))]
       (if (< key 0)
         empty-events
-        (let [code Int (nth codes key)]
+        (let [(code Int) (nth codes key)]
           (if (and (= shape-t12 (code-shape code))
-                (let [proposition t/Triple
+                (let [(proposition t/Triple)
                       (proposition-of (nth source (code-position code)))]
                   (and (= a (t/triple-t1 proposition))
                     (= b (t/triple-t2 proposition)))))
@@ -193,13 +193,13 @@
    (source (Vec t/OperationOccurrence))
    (occurrence t/Triple)]
   t/OperationOccurrence?
-  (let [chain (Vec Int) (occurrenceindex-chain index)]
+  (let [(chain (Vec Int)) (occurrenceindex-chain index)]
     (loop [position Int
            (nth (occurrenceindex-heads index)
              (mod (hash-one occurrence) (occurrenceindex-width index)))]
       (if (< position 0)
         nil
-        (let [event t/OperationOccurrence (nth source position)]
+        (let [(event t/OperationOccurrence) (nth source position)]
           (if (= occurrence (occurrence-of event))
             event
             (recur (nth chain position))))))))
@@ -229,7 +229,7 @@
    (t2 Any)
    (t3 Any)]
   (Vec t/OperationOccurrence)
-  (let [kept Int
+  (let [(kept Int)
         (loop [position Int 0 total Int 0]
           (if (>= position (count base))
             total
@@ -253,7 +253,7 @@
   [(events (Vec t/OperationOccurrence))
    (proposition t/Triple)]
   (Vec t/OperationOccurrence)
-  (let [at Int
+  (let [(at Int)
         (loop [position Int (dec (count events))]
           (if (< position 0)
             -1
@@ -281,8 +281,8 @@
     (loop [events (Vec t/OperationOccurrence) base position Int 0]
       (if (>= position (count pending))
         events
-        (let [op t/OperationOccurrence (nth pending position)
-              proposition t/Triple (proposition-of op)]
+        (let [(op t/OperationOccurrence) (nth pending position)
+              (proposition t/Triple) (proposition-of op)]
           (recur
            (if (= t/assert-action (t/operationoccurrence-action op))
              (if (pattern-match? proposition t1 t2 t3)
@@ -376,17 +376,17 @@
 ;; withdraws exactly the occurrence the store's fold would withdraw.
 (defn event-at
   [(rotation Rotation) (occurrence t/Triple)] t/OperationOccurrence?
-  (let [base t/OperationOccurrence?
+  (let [(base t/OperationOccurrence?)
         (occurrence-event (rotation-by-occurrence rotation)
           (rotation-events rotation) occurrence)
-        candidate t/OperationOccurrence?
-        (let [pending (Vec t/OperationOccurrence)
+        (candidate t/OperationOccurrence?)
+        (let [(pending (Vec t/OperationOccurrence))
               (rotation-pending rotation)]
           (loop [position Int 0
                  found t/OperationOccurrence? base]
             (if (>= position (count pending))
               found
-              (let [op t/OperationOccurrence (nth pending position)]
+              (let [(op t/OperationOccurrence) (nth pending position)]
                 (recur (inc position)
                   (if (and (= t/assert-action
                               (t/operationoccurrence-action op))
@@ -395,10 +395,10 @@
                     found))))))]
     (if (nil? candidate)
       nil
-      (let [present t/OperationOccurrence candidate
-            live (Vec t/OperationOccurrence)
+      (let [(present t/OperationOccurrence) candidate
+            (live (Vec t/OperationOccurrence))
             (by-proposition rotation (proposition-of present))
-            survives Bool
+            (survives Bool)
             (loop [position Int 0]
               (if (>= position (count live))
                 false
@@ -418,22 +418,22 @@
   (if (empty? events) nil (last events)))
 
 (defn propositions [(events (Vec t/OperationOccurrence))] (Vec t/Triple)
-  (mapv (fn [event t/OperationOccurrence] t/Triple
+  (mapv (fn [(event t/OperationOccurrence)] t/Triple
           (proposition-of event))
         events))
 
 (defn subjects [(events (Vec t/OperationOccurrence))] (Vec Any)
-  (mapv (fn [event t/OperationOccurrence] Any
+  (mapv (fn [(event t/OperationOccurrence)] Any
           (t/triple-t1 (proposition-of event)))
     events))
 
 (defn values [(events (Vec t/OperationOccurrence))] (Vec Any)
-  (mapv (fn [event t/OperationOccurrence] Any
+  (mapv (fn [(event t/OperationOccurrence)] Any
           (t/triple-t3 (proposition-of event)))
     events))
 
 (defn occurrences [(events (Vec t/OperationOccurrence))] (Vec t/Triple)
-  (mapv (fn [event t/OperationOccurrence] t/Triple
+  (mapv (fn [(event t/OperationOccurrence)] t/Triple
           (occurrence-of event))
         events))
 
@@ -481,12 +481,12 @@
   (loop [chain (Vec Int) empty-ints key Int 0]
     (if (>= key (count codes))
       chain
-      (let [code Int (nth codes key)
-            slot Int
+      (let [(code Int) (nth codes key)
+            (slot Int)
             (mod (shape-hash (code-shape code)
                    (nth source (code-position code)))
               width)
-            linked (Vec Int) (conj chain (deref (nth heads slot)))]
+            (linked (Vec Int)) (conj chain (deref (nth heads slot)))]
         (do
           (reset! (nth heads slot) key)
           (recur linked (inc key)))))))
@@ -518,7 +518,7 @@
   (loop [key Int (deref (nth heads slot))]
     (if (< key 0)
       -1
-      (let [code Int (nth codes key)]
+      (let [(code Int) (nth codes key)]
         (if (and (= shape (code-shape code))
               (same-shape-key? shape event (nth source (code-position code))))
           key
@@ -544,26 +544,26 @@
         chain)
       (if (> shape last-shape)
         (recur width codes cells chain heads (inc position) first-shape)
-        (let [event t/OperationOccurrence
+        (let [(event t/OperationOccurrence)
               (checked-assertion (nth events position))
-              slot Int (mod (shape-hash shape event) width)
-              at Int
+              (slot Int) (mod (shape-hash shape event) width)
+              (at Int)
               (bucket-key-at codes chain heads events slot shape event)]
           (if (>= at 0)
             (do
               (swap! (nth cells at) conj event)
               (recur width codes cells chain heads position (inc shape)))
-            (let [appended Int (count codes)
-                  grown-codes (Vec Int) (conj codes (key-code position shape))
-                  grown-cells (Vec (Atom (Vec t/OperationOccurrence)))
+            (let [(appended Int) (count codes)
+                  (grown-codes (Vec Int)) (conj codes (key-code position shape))
+                  (grown-cells (Vec (Atom (Vec t/OperationOccurrence))))
                   (conj cells (atom [event]))
-                  grown-chain (Vec Int) (conj chain (deref (nth heads slot)))]
+                  (grown-chain (Vec Int)) (conj chain (deref (nth heads slot)))]
               (do
                 (reset! (nth heads slot) appended)
                 (if (> (count grown-codes) (* bucket-slot-load width))
-                  (let [widened Int (* 2 width)
-                        fresh (Vec (Atom Int)) (fresh-head-cells widened)
-                        relinked (Vec Int)
+                  (let [(widened Int) (* 2 width)
+                        (fresh (Vec (Atom Int))) (fresh-head-cells widened)
+                        (relinked (Vec Int))
                         (relinked-chain! grown-codes events fresh widened)]
                     (recur widened grown-codes grown-cells relinked fresh
                       position (inc shape)))
@@ -575,14 +575,14 @@
 ;; event onto its slot chain makes a repeated occurrence resolve newest-first.
 (defn- projected-occurrences!
   [(events (Vec t/OperationOccurrence)) (width Int)] OccurrenceIndex
-  (let [heads (Vec (Atom Int)) (fresh-head-cells width)]
+  (let [(heads (Vec (Atom Int))) (fresh-head-cells width)]
     (loop [chain (Vec Int) empty-ints position Int 0]
       (if (>= position (count events))
         (->OccurrenceIndex width (frozen-heads heads) chain)
-        (let [event t/OperationOccurrence
+        (let [(event t/OperationOccurrence)
               (checked-assertion (nth events position))
-              slot Int (mod (hash-one (occurrence-of event)) width)
-              linked (Vec Int) (conj chain (deref (nth heads slot)))]
+              (slot Int) (mod (hash-one (occurrence-of event)) width)
+              (linked (Vec Int)) (conj chain (deref (nth heads slot)))]
           (do
             (reset! (nth heads slot) position)
             (recur linked (inc position))))))))
@@ -592,7 +592,7 @@
    (version Int)
    (events (Vec t/OperationOccurrence))]
   Rotation
-  (let [total Int (count events)]
+  (let [(total Int) (count events)]
     (->Rotation space-id version events
       (projected-occurrences! events (initial-bucket-width total))
       (projected-bucket! events shape-t1 shape-t12
@@ -615,14 +615,14 @@
    (space-id String)
    (record t/TransactionRecord)]
   (Vec t/OperationOccurrence)
-  (let [coordinate t/Triple
+  (let [(coordinate t/Triple)
         (t/transaction-coordinate space-id (t/transactionrecord-sequence record))
-        operations (Vec t/CommitOperation) (t/transactionrecord-operations record)]
+        (operations (Vec t/CommitOperation)) (t/transactionrecord-operations record)]
     (loop [built (Vec t/OperationOccurrence) pending ordinal Int 0]
       (if (>= ordinal (count operations))
         built
-        (let [operation t/CommitOperation (nth operations ordinal)
-              proposition t/Triple (t/commitoperation-proposition operation)]
+        (let [(operation t/CommitOperation) (nth operations ordinal)
+              (proposition t/Triple) (t/commitoperation-proposition operation)]
           (recur
            (conj built
                  (t/operation-occurrence
@@ -645,15 +645,15 @@
       (t/->TransactionRecord sequence operations))))
 
 (defn refresh! [(rotation Rotation) (ctx (Atom t/TermStore))] Rotation
-  (let [space String (store/space-id ctx) target Int (store/current-sequence ctx) pinned Int (rotation-version rotation)]
+  (let [(space String) (store/space-id ctx) (target Int) (store/current-sequence ctx) (pinned Int) (rotation-version rotation)]
     (if (not (= space (rotation-space-id rotation)))
       (throw (ex-info "store: rotation belongs to a different space" {:type :rotation-space-mismatch}))
       (if (> pinned target)
         (throw (ex-info "store: rotation is ahead of the store it projects" {:type :rotation-ahead-of-store}))
         (if (= pinned target)
           rotation
-          (let [records (Vec t/TransactionRecord) (store/transaction-records-between (deref ctx) pinned target)
-                pending (Vec t/OperationOccurrence)
+          (let [(records (Vec t/TransactionRecord)) (store/transaction-records-between (deref ctx) pinned target)
+                (pending (Vec t/OperationOccurrence))
                 (loop [built (Vec t/OperationOccurrence)
                        (rotation-pending rotation)
                        position Int 0]
@@ -661,7 +661,7 @@
                     built
                     (recur (pending-with-record built space (nth records position))
                       (inc position))))
-                advanced Rotation
+                (advanced Rotation)
                 (->Rotation (rotation-space-id rotation) target
                   (rotation-events rotation)
                   (rotation-by-occurrence rotation) (rotation-spo rotation)

@@ -218,8 +218,8 @@
     (abiprofilev0-size-t-bytes abi)))
 
 (defn abi-bytes-span-align [(abi AbiProfileV0)] Int
-  (let [pointer-align Int (abiprofilev0-pointer-align abi)
-        size-t-align Int (abiprofilev0-size-t-align abi)]
+  (let [(pointer-align Int) (abiprofilev0-pointer-align abi)
+        (size-t-align Int) (abiprofilev0-size-t-align abi)]
     (if (> pointer-align size-t-align) pointer-align size-t-align)))
 
 (defrecord Parameter [(id NativeId) (type-id NativeId)])
@@ -972,7 +972,7 @@
   (loop [index Int 0 seen (Map String Int) {}]
     (if (>= index (count ids))
       true
-      (let [value String (nativeid-value (nth ids index))]
+      (let [(value String) (nativeid-value (nth ids index))]
         (if (contains? seen value)
           false
           (recur (+ index 1) (assoc seen value 1)))))))
@@ -981,7 +981,7 @@
   (loop [index Int 0 encoded-parts (Vec String) []]
     (if (>= index (count parts))
       (str/join "" encoded-parts)
-      (let [part String (nth parts index)]
+      (let [(part String) (nth parts index)]
         (recur (+ index 1)
                (conj encoded-parts (str (count part) ":" part)))))))
 
@@ -1028,7 +1028,7 @@
   (vec (concat left right)))
 
 (defn parameter-ids [(parameters (Vec Parameter))] (Vec NativeId)
-  (mapv (fn [parameter Parameter] NativeId (parameter-id parameter))
+  (mapv (fn [(parameter Parameter)] NativeId (parameter-id parameter))
     parameters))
 
 (defn instruction-result-id [(instruction Instruction)] NativeId
@@ -1170,7 +1170,7 @@
 
 (defn instruction-result-ids
   [(instructions (Vec Instruction))] (Vec NativeId)
-  (mapv (fn [instruction Instruction] NativeId (instruction-result-id instruction))
+  (mapv (fn [(instruction Instruction)] NativeId (instruction-result-id instruction))
     instructions))
 
 (defn type-definition-with-id
@@ -1179,7 +1179,7 @@
   (loop [position Int 0]
     (if (>= position (count types))
       nil
-      (let [definition TypeDef (nth types position)]
+      (let [(definition TypeDef) (nth types position)]
         (if (native-id= target (typedef-id definition))
           definition
           (recur (+ position 1)))))))
@@ -1188,16 +1188,16 @@
   [(types (Vec TypeDef))
    (owner NativeId)
    (target NativeId)] (U TypeField Nil)
-  (let [definition (U TypeDef Nil) (type-definition-with-id types owner)]
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types owner)]
     (if (nil? definition)
       nil
-      (let [shape TypeShape (typedef-shape definition)]
+      (let [(shape TypeShape) (typedef-shape definition)]
         (if (not (instance? native.core.RecordType shape))
           nil
           (loop [position Int 0 fields (Vec TypeField) (recordtype-fields shape)]
             (if (>= position (count fields))
               nil
-              (let [field TypeField (nth fields position)]
+              (let [(field TypeField) (nth fields position)]
                 (if (native-id= target (typefield-id field))
                   field
                   (recur (+ position 1) fields))))))))))
@@ -1208,7 +1208,7 @@
   (loop [position Int 0]
     (if (>= position (count parameters))
       nil
-      (let [parameter Parameter (nth parameters position)]
+      (let [(parameter Parameter) (nth parameters position)]
         (if (native-id= target (parameter-id parameter))
           (parameter-type-id parameter)
           (recur (+ position 1)))))))
@@ -1219,13 +1219,13 @@
   (loop [position Int 0]
     (if (>= position (count instructions))
       nil
-      (let [result SsaValueV0 (get (nth instructions position) :result)]
+      (let [(result SsaValueV0) (get (nth instructions position) :result)]
         (if (native-id= target (ssavaluev0-id result))
           (ssavaluev0-type-id result)
           (recur (+ position 1)))))))
 
 (defn block-value-type [(block BasicBlock) (target NativeId)] (U NativeId Nil)
-  (let [parameter-type (U NativeId Nil)
+  (let [(parameter-type (U NativeId Nil))
         (parameters-value-type (basicblock-parameters block) target)]
     (if (nil? parameter-type)
       (instructions-value-type (basicblock-instructions block) target)
@@ -1234,14 +1234,14 @@
 (defn function-value-type
   [(function FunctionDef)
    (target NativeId)] (U NativeId Nil)
-  (let [parameter-type (U NativeId Nil)
+  (let [(parameter-type (U NativeId Nil))
         (parameters-value-type (functiondef-parameters function) target)]
     (if (some? parameter-type)
       parameter-type
       (loop [position Int 0 blocks (Vec BasicBlock) (functiondef-blocks function)]
         (if (>= position (count blocks))
           nil
-          (let [value-type (U NativeId Nil)
+          (let [(value-type (U NativeId Nil))
                 (block-value-type (nth blocks position) target)]
             (if (nil? value-type)
               (recur (+ position 1) blocks)
@@ -1252,7 +1252,7 @@
          (basicblock-instructions block)]
     (if (>= position (count instructions))
       false
-      (let [instruction Instruction (nth instructions position)]
+      (let [(instruction Instruction) (nth instructions position)]
         (if (and (instance? native.core.ArenaInstruction instruction)
               (native-id= target (instruction-result-id instruction)))
           true
@@ -1272,7 +1272,7 @@
          (basicblock-instructions block)]
     (if (>= position (count instructions))
       nil
-      (let [instruction Instruction (nth instructions position)]
+      (let [(instruction Instruction) (nth instructions position)]
         (if (and (instance? native.core.ArenaInstruction instruction)
               (native-id= target (instruction-result-id instruction)))
           instruction
@@ -1283,7 +1283,7 @@
   (loop [position Int 0 blocks (Vec BasicBlock) (functiondef-blocks function)]
     (if (>= position (count blocks))
       nil
-      (let [producer (U Instruction Nil)
+      (let [(producer (U Instruction Nil))
             (block-arena-producer (nth blocks position) target)]
         (if (nil? producer)
           (recur (+ position 1) blocks)
@@ -1295,15 +1295,15 @@
    (instruction Instruction)] Bool
   (if (not (instance? native.core.RecordAssocInstructionV0 instruction))
     true
-    (let [result SsaValueV0 (recordassocinstructionv0-result instruction)
-          owner NativeId (ssavaluev0-type-id result)
-          source-type (U NativeId Nil)
+    (let [(result SsaValueV0) (recordassocinstructionv0-result instruction)
+          (owner NativeId) (ssavaluev0-type-id result)
+          (source-type (U NativeId Nil))
           (function-value-type function
             (recordassocinstructionv0-source-id instruction))
-          value-type (U NativeId Nil)
+          (value-type (U NativeId Nil))
           (function-value-type function
             (recordassocinstructionv0-value-id instruction))
-          field (U TypeField Nil)
+          (field (U TypeField Nil))
           (record-field-with-id types owner
             (recordassocinstructionv0-field-id instruction))]
       (if (or (nil? source-type) (nil? value-type) (nil? field))
@@ -1317,9 +1317,9 @@
   [(types (Vec TypeDef))
    (function FunctionDef)] Bool
   (every?
-    (fn [block BasicBlock] Bool
+    (fn [(block BasicBlock)] Bool
       (every?
-        (fn [instruction Instruction] Bool
+        (fn [(instruction Instruction)] Bool
           (record-assoc-instruction-valid? types function instruction))
         (basicblock-instructions block)))
     (functiondef-blocks function)))
@@ -1330,22 +1330,22 @@
    (instruction Instruction)] Bool
   (if (not (instance? native.core.RecordMaterializeInstructionV0 instruction))
     true
-    (let [result SsaValueV0
+    (let [(result SsaValueV0)
           (recordmaterializeinstructionv0-result instruction)
-          result-type NativeId (ssavaluev0-type-id result)
-          source-type (U NativeId Nil)
+          (result-type NativeId) (ssavaluev0-type-id result)
+          (source-type (U NativeId Nil))
           (function-value-type function
             (recordmaterializeinstructionv0-source-id instruction))
-          result-definition (U TypeDef Nil)
+          (result-definition (U TypeDef Nil))
           (type-definition-with-id types result-type)
-          source-definition (U TypeDef Nil)
+          (source-definition (U TypeDef Nil))
           (if (nil? source-type)
             nil
             (type-definition-with-id types source-type))]
       (if (or (nil? result-definition) (nil? source-definition))
         false
-        (let [result-shape TypeShape (typedef-shape result-definition)
-              source-shape TypeShape (typedef-shape source-definition)]
+        (let [(result-shape TypeShape) (typedef-shape result-definition)
+              (source-shape TypeShape) (typedef-shape source-definition)]
           (and (instance? native.core.RecordType result-shape)
             (instance? native.core.ReferenceType source-shape)
             (native-id=
@@ -1356,42 +1356,42 @@
   [(types (Vec TypeDef))
    (function FunctionDef)] Bool
   (every?
-    (fn [block BasicBlock] Bool
+    (fn [(block BasicBlock)] Bool
       (every?
-        (fn [instruction Instruction] Bool
+        (fn [(instruction Instruction)] Bool
           (record-materialize-instruction-valid? types function instruction))
         (basicblock-instructions block)))
     (functiondef-blocks function)))
 
 (defn type-id-is-i64? [(types (Vec TypeDef)) (target NativeId)] Bool
-  (let [definition (U TypeDef Nil) (type-definition-with-id types target)]
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       false
-      (let [shape TypeShape (typedef-shape definition)]
+      (let [(shape TypeShape) (typedef-shape definition)]
         (and (instance? native.core.AtomType shape)
           (instance? native.core.I64Kind (atomtype-kind shape)))))))
 
 (defn type-id-is-f64? [(types (Vec TypeDef)) (target NativeId)] Bool
-  (let [definition (U TypeDef Nil) (type-definition-with-id types target)]
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       false
-      (let [shape TypeShape (typedef-shape definition)]
+      (let [(shape TypeShape) (typedef-shape definition)]
         (and (instance? native.core.AtomType shape)
           (instance? native.core.F64Kind (atomtype-kind shape)))))))
 
 (defn type-id-is-bool? [(types (Vec TypeDef)) (target NativeId)] Bool
-  (let [definition (U TypeDef Nil) (type-definition-with-id types target)]
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       false
-      (let [shape TypeShape (typedef-shape definition)]
+      (let [(shape TypeShape) (typedef-shape definition)]
         (and (instance? native.core.AtomType shape)
           (instance? native.core.BoolKind (atomtype-kind shape)))))))
 
 (defn type-id-is-arena-handle? [(types (Vec TypeDef)) (target NativeId)] Bool
-  (let [definition (U TypeDef Nil) (type-definition-with-id types target)]
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       false
-      (let [shape TypeShape (typedef-shape definition)]
+      (let [(shape TypeShape) (typedef-shape definition)]
         (and (instance? native.core.ReferenceType shape)
           (native-id= target (referencetype-target-type shape)))))))
 
@@ -1400,7 +1400,7 @@
   (loop [position Int 0]
     (if (>= position (count regions))
       nil
-      (let [definition RegionDef (nth regions position)]
+      (let [(definition RegionDef) (nth regions position)]
         (if (native-id= target (regiondef-id definition))
           definition
           (recur (+ position 1)))))))
@@ -1410,13 +1410,13 @@
   (loop [position Int 0]
     (if (>= position (count capabilities))
       nil
-      (let [definition CapabilityDef (nth capabilities position)]
+      (let [(definition CapabilityDef) (nth capabilities position)]
         (if (native-id= target (capabilitydef-id definition))
           definition
           (recur (+ position 1)))))))
 
 (defn root-arena-region? [(regions (Vec RegionDef)) (target NativeId)] Bool
-  (let [definition (U RegionDef Nil)
+  (let [(definition (U RegionDef Nil))
         (region-definition-with-id regions target)]
     (and (some? definition)
       (nil? (regiondef-parent definition))
@@ -1428,13 +1428,13 @@
    (region NativeId)
    (mode String)]
   Bool
-  (let [definition (U CapabilityDef Nil)
+  (let [(definition (U CapabilityDef Nil))
         (capability-definition-with-id capabilities target)]
     (if (nil? definition)
       false
-      (let [capability-region (U NativeId Nil)
+      (let [(capability-region (U NativeId Nil))
             (capabilitydef-region definition)
-            kind CapabilityKind (capabilitydef-kind definition)]
+            (kind CapabilityKind) (capabilitydef-kind definition)]
         (and (some? capability-region)
           (native-id= region capability-region)
           (cond
@@ -1456,13 +1456,13 @@
    (region NativeId)
    (capability NativeId)]
   Bool
-  (let [producer (U Instruction Nil)
+  (let [(producer (U Instruction Nil))
         (function-arena-producer function arena-id)]
     (if (nil? producer)
       false
-      (let [result SsaValueV0 (get producer :result)
-            producer-region (U NativeId Nil) (get producer :region)
-            producer-capability (U NativeId Nil) (get producer :capability)]
+      (let [(result SsaValueV0) (get producer :result)
+            (producer-region (U NativeId Nil)) (get producer :region)
+            (producer-capability (U NativeId Nil)) (get producer :capability)]
         (and (some? producer-region)
           (some? producer-capability)
           (type-id-is-arena-handle? types (ssavaluev0-type-id result))
@@ -1471,10 +1471,10 @@
 
 (defn buffer-element-type
   [(types (Vec TypeDef)) (target NativeId)] (U NativeId Nil)
-  (let [definition (U TypeDef Nil) (type-definition-with-id types target)]
+  (let [(definition (U TypeDef Nil)) (type-definition-with-id types target)]
     (if (nil? definition)
       nil
-      (let [shape TypeShape (typedef-shape definition)]
+      (let [(shape TypeShape) (typedef-shape definition)]
         (if (instance? native.core.BufferTypeV0 shape)
           (buffertypev0-element-type shape)
           nil)))))
@@ -1488,15 +1488,15 @@
   Bool
   (cond
     (instance? native.core.BufferAllocateInstructionV0 instruction)
-    (let [result SsaValueV0
+    (let [(result SsaValueV0)
           (bufferallocateinstructionv0-result instruction)
-          result-element (U NativeId Nil)
+          (result-element (U NativeId Nil))
           (buffer-element-type types (ssavaluev0-type-id result))
-          length-type (U NativeId Nil)
+          (length-type (U NativeId Nil))
           (function-value-type function
             (bufferallocateinstructionv0-length-id instruction))
-          region NativeId (bufferallocateinstructionv0-region instruction)
-          capability NativeId
+          (region NativeId) (bufferallocateinstructionv0-region instruction)
+          (capability NativeId)
           (bufferallocateinstructionv0-capability instruction)]
       (and (some? result-element)
         (some? length-type)
@@ -1510,13 +1510,13 @@
           region capability)))
 
     (instance? native.core.BufferLengthInstructionV0 instruction)
-    (let [result SsaValueV0
+    (let [(result SsaValueV0)
           (bufferlengthinstructionv0-result instruction)
-          source-type (U NativeId Nil)
+          (source-type (U NativeId Nil))
           (function-value-type function
             (bufferlengthinstructionv0-source-id instruction))
-          region NativeId (bufferlengthinstructionv0-region instruction)
-          capability NativeId
+          (region NativeId) (bufferlengthinstructionv0-region instruction)
+          (capability NativeId)
           (bufferlengthinstructionv0-capability instruction)]
       (and (some? source-type)
         (some? (buffer-element-type types source-type))
@@ -1526,20 +1526,20 @@
         (buffer-capability-valid? capabilities capability region "read")))
 
     (instance? native.core.BufferGetCheckedInstructionV0 instruction)
-    (let [result SsaValueV0
+    (let [(result SsaValueV0)
           (buffergetcheckedinstructionv0-result instruction)
-          source-type (U NativeId Nil)
+          (source-type (U NativeId Nil))
           (function-value-type function
             (buffergetcheckedinstructionv0-source-id instruction))
-          index-type (U NativeId Nil)
+          (index-type (U NativeId Nil))
           (function-value-type function
             (buffergetcheckedinstructionv0-index-id instruction))
-          element-type (U NativeId Nil)
+          (element-type (U NativeId Nil))
           (if (nil? source-type)
             nil
             (buffer-element-type types source-type))
-          region NativeId (buffergetcheckedinstructionv0-region instruction)
-          capability NativeId
+          (region NativeId) (buffergetcheckedinstructionv0-region instruction)
+          (capability NativeId)
           (buffergetcheckedinstructionv0-capability instruction)]
       (and (some? element-type)
         (some? index-type)
@@ -1550,23 +1550,23 @@
         (buffer-capability-valid? capabilities capability region "read")))
 
     (instance? native.core.BufferSetCheckedInstructionV0 instruction)
-    (let [result SsaValueV0
+    (let [(result SsaValueV0)
           (buffersetcheckedinstructionv0-result instruction)
-          source-type (U NativeId Nil)
+          (source-type (U NativeId Nil))
           (function-value-type function
             (buffersetcheckedinstructionv0-source-id instruction))
-          index-type (U NativeId Nil)
+          (index-type (U NativeId Nil))
           (function-value-type function
             (buffersetcheckedinstructionv0-index-id instruction))
-          value-type (U NativeId Nil)
+          (value-type (U NativeId Nil))
           (function-value-type function
             (buffersetcheckedinstructionv0-value-id instruction))
-          element-type (U NativeId Nil)
+          (element-type (U NativeId Nil))
           (if (nil? source-type)
             nil
             (buffer-element-type types source-type))
-          region NativeId (buffersetcheckedinstructionv0-region instruction)
-          capability NativeId
+          (region NativeId) (buffersetcheckedinstructionv0-region instruction)
+          (capability NativeId)
           (buffersetcheckedinstructionv0-capability instruction)]
       (and (some? element-type)
         (some? index-type)
@@ -1579,17 +1579,17 @@
         (buffer-capability-valid? capabilities capability region "write")))
 
     (instance? native.core.TiledStepF64InstructionV0 instruction)
-    (let [result SsaValueV0 (tiledstepf64instructionv0-result instruction)
-          current-type (U NativeId Nil)
+    (let [(result SsaValueV0) (tiledstepf64instructionv0-result instruction)
+          (current-type (U NativeId Nil))
           (function-value-type function
             (tiledstepf64instructionv0-current-id instruction))
-          next-type (U NativeId Nil)
+          (next-type (U NativeId Nil))
           (function-value-type function
             (tiledstepf64instructionv0-next-id instruction))
-          region NativeId (tiledstepf64instructionv0-region instruction)
-          read NativeId
+          (region NativeId) (tiledstepf64instructionv0-region instruction)
+          (read NativeId)
           (tiledstepf64instructionv0-read-capability instruction)
-          write NativeId
+          (write NativeId)
           (tiledstepf64instructionv0-write-capability instruction)]
       (and (some? current-type)
         (some? next-type)
@@ -1597,7 +1597,7 @@
         (not (native-id=
                (tiledstepf64instructionv0-current-id instruction)
                (tiledstepf64instructionv0-next-id instruction)))
-        (let [element (U NativeId Nil)
+        (let [(element (U NativeId Nil))
               (if (nil? current-type) nil
                 (buffer-element-type types current-type))]
           (and (some? element) (type-id-is-f64? types element)))
@@ -1612,15 +1612,15 @@
         (buffer-capability-valid? capabilities write region "write")))
 
     (instance? native.core.F64BufferSumInstructionV0 instruction)
-    (let [result SsaValueV0 (f64buffersuminstructionv0-result instruction)
-          source-type (U NativeId Nil)
+    (let [(result SsaValueV0) (f64buffersuminstructionv0-result instruction)
+          (source-type (U NativeId Nil))
           (function-value-type function
             (f64buffersuminstructionv0-source-id instruction))
-          region NativeId (f64buffersuminstructionv0-region instruction)
-          read NativeId
+          (region NativeId) (f64buffersuminstructionv0-region instruction)
+          (read NativeId)
           (f64buffersuminstructionv0-read-capability instruction)]
       (and (some? source-type)
-        (let [element (U NativeId Nil)
+        (let [(element (U NativeId Nil))
               (if (nil? source-type) nil
                 (buffer-element-type types source-type))]
           (and (some? element) (type-id-is-f64? types element)))
@@ -1639,9 +1639,9 @@
    (function FunctionDef)]
   Bool
   (every?
-    (fn [block BasicBlock] Bool
+    (fn [(block BasicBlock)] Bool
       (every?
-        (fn [instruction Instruction] Bool
+        (fn [(instruction Instruction)] Bool
           (buffer-instruction-valid? types regions capabilities function
             instruction))
         (basicblock-instructions block)))
@@ -1669,13 +1669,13 @@
          found (Vec NativeId) []]
     (if (>= block-position (count blocks))
       found
-      (let [instructions (Vec Instruction)
+      (let [(instructions (Vec Instruction))
             (basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
           (loop [instruction-position Int 0 regions (Vec NativeId) found]
             (if (>= instruction-position (count instructions))
               regions
-              (let [region (U NativeId Nil)
+              (let [(region (U NativeId Nil))
                     (instruction-buffer-region
                       (nth instructions instruction-position))]
                 (recur (+ instruction-position 1)
@@ -1691,20 +1691,20 @@
         (append-ids found (function-buffer-regions (nth functions position)))))))
 
 (defn program-buffer-root-coherent? [(program NativeCoreProgram)] Bool
-  (let [regions (Vec NativeId) (program-buffer-regions program)]
+  (let [(regions (Vec NativeId)) (program-buffer-regions program)]
     (or (= 0 (count regions))
       (every?
-        (fn [region NativeId] Bool (native-id= region (nth regions 0)))
+        (fn [(region NativeId)] Bool (native-id= region (nth regions 0)))
         regions))))
 
 (defn program-buffer-instructions-valid? [(program NativeCoreProgram)] Bool
-  (let [types (Vec TypeDef) (nativecoreprogram-types program)
-        regions (Vec RegionDef) (nativecoreprogram-regions program)
-        capabilities (Vec CapabilityDef)
+  (let [(types (Vec TypeDef)) (nativecoreprogram-types program)
+        (regions (Vec RegionDef)) (nativecoreprogram-regions program)
+        (capabilities (Vec CapabilityDef))
         (nativecoreprogram-capabilities program)]
     (and (program-buffer-root-coherent? program)
       (every?
-        (fn [function FunctionDef] Bool
+        (fn [(function FunctionDef)] Bool
           (function-buffer-instructions-valid? types regions capabilities
             function))
         (nativecoreprogram-functions program)))))
@@ -1713,9 +1713,9 @@
   (match shape
     [(AtomType kind) []]
     [(RecordType fields)
-     (mapv (fn [field TypeField] NativeId (typefield-id field)) fields)]
+     (mapv (fn [(field TypeField)] NativeId (typefield-id field)) fields)]
     [(UnionType variants)
-     (mapv (fn [variant TypeVariant] NativeId (typevariant-id variant))
+     (mapv (fn [(variant TypeVariant)] NativeId (typevariant-id variant))
        variants)]
     [(VectorType element-type) []]
     [(BufferTypeV0 element-type) []]
@@ -1759,30 +1759,30 @@
         (append-ids ids (function-owned-ids (nth functions index)))))))
 
 (defn type-ids [(types (Vec TypeDef))] (Vec NativeId)
-  (mapv (fn [type-def TypeDef] NativeId (typedef-id type-def)) types))
+  (mapv (fn [(type-def TypeDef)] NativeId (typedef-id type-def)) types))
 
 (defn effect-ids [(effects (Vec EffectDef))] (Vec NativeId)
-  (mapv (fn [effect EffectDef] NativeId (effectdef-id effect)) effects))
+  (mapv (fn [(effect EffectDef)] NativeId (effectdef-id effect)) effects))
 
 (defn region-ids [(regions (Vec RegionDef))] (Vec NativeId)
-  (mapv (fn [region RegionDef] NativeId (regiondef-id region)) regions))
+  (mapv (fn [(region RegionDef)] NativeId (regiondef-id region)) regions))
 
 (defn capability-ids [(capabilities (Vec CapabilityDef))] (Vec NativeId)
-  (mapv (fn [capability CapabilityDef] NativeId (capabilitydef-id capability))
+  (mapv (fn [(capability CapabilityDef)] NativeId (capabilitydef-id capability))
     capabilities))
 
 (defn layout-ids [(layouts (Vec LayoutDef))] (Vec NativeId)
-  (mapv (fn [layout LayoutDef] NativeId (layoutdef-id layout)) layouts))
+  (mapv (fn [(layout LayoutDef)] NativeId (layoutdef-id layout)) layouts))
 
 (defn function-ids [(functions (Vec FunctionDef))] (Vec NativeId)
-  (mapv (fn [function FunctionDef] NativeId (functiondef-id function))
+  (mapv (fn [(function FunctionDef)] NativeId (functiondef-id function))
     functions))
 
 (defn abi-ids [(abis (Vec AbiDeclV0))] (Vec NativeId)
-  (mapv (fn [abi AbiDeclV0] NativeId (abideclv0-id abi)) abis))
+  (mapv (fn [(abi AbiDeclV0)] NativeId (abideclv0-id abi)) abis))
 
 (defn program-owned-ids [(program NativeCoreProgram)] (Vec NativeId)
-  (let [owned0 (Vec NativeId) [(nativecoreprogram-id program)] owned1 (Vec NativeId) (append-ids owned0 (all-type-owned-ids (nativecoreprogram-types program))) owned2 (Vec NativeId) (append-ids owned1 (effect-ids (nativecoreprogram-effects program))) owned3 (Vec NativeId) (append-ids owned2 (region-ids (nativecoreprogram-regions program))) owned4 (Vec NativeId) (append-ids owned3 (capability-ids (nativecoreprogram-capabilities program))) owned5 (Vec NativeId) (append-ids owned4 (layout-ids (nativecoreprogram-layouts program)))]
+  (let [(owned0 (Vec NativeId)) [(nativecoreprogram-id program)] (owned1 (Vec NativeId)) (append-ids owned0 (all-type-owned-ids (nativecoreprogram-types program))) (owned2 (Vec NativeId)) (append-ids owned1 (effect-ids (nativecoreprogram-effects program))) (owned3 (Vec NativeId)) (append-ids owned2 (region-ids (nativecoreprogram-regions program))) (owned4 (Vec NativeId)) (append-ids owned3 (capability-ids (nativecoreprogram-capabilities program))) (owned5 (Vec NativeId)) (append-ids owned4 (layout-ids (nativecoreprogram-layouts program)))]
     (append-ids
       (append-ids owned5 (all-function-owned-ids (nativecoreprogram-functions program)))
       (abi-ids (nativecoreprogram-abis program)))))
@@ -1810,13 +1810,13 @@
 (defn type-fields-refs-closed?
   [(fields (Vec TypeField))
    (known-types (Vec NativeId))] Bool
-  (every? (fn [field TypeField] Bool (id-in? known-types (typefield-type-id field)))
+  (every? (fn [(field TypeField)] Bool (id-in? known-types (typefield-type-id field)))
     fields))
 
 (defn type-variants-refs-closed?
   [(variants (Vec TypeVariant))
    (known-types (Vec NativeId))] Bool
-  (every? (fn [variant TypeVariant] Bool (optional-id-in? (typevariant-payload-type variant) known-types))
+  (every? (fn [(variant TypeVariant)] Bool (optional-id-in? (typevariant-payload-type variant) known-types))
     variants))
 
 (defn type-shape-refs-closed?
@@ -1841,8 +1841,8 @@
      (and (id-in? known-types value-type) (id-in? known-types failure-type))]))
 
 (defn types-refs-closed? [(types (Vec TypeDef))] Bool
-  (let [known-types (Vec NativeId) (type-ids types)]
-    (every? (fn [type-def TypeDef] Bool (type-shape-refs-closed? (typedef-shape type-def) known-types))
+  (let [(known-types (Vec NativeId)) (type-ids types)]
+    (every? (fn [(type-def TypeDef)] Bool (type-shape-refs-closed? (typedef-shape type-def) known-types))
       types)))
 
 (defn effect-kind-refs-closed?
@@ -1866,18 +1866,18 @@
   [(effects (Vec EffectDef))
    (known-regions (Vec NativeId))
    (known-capabilities (Vec NativeId))] Bool
-  (every? (fn [effect EffectDef] Bool (effect-kind-refs-closed? (effectdef-kind effect) known-regions known-capabilities))
+  (every? (fn [(effect EffectDef)] Bool (effect-kind-refs-closed? (effectdef-kind effect) known-regions known-capabilities))
     effects))
 
 (defn regions-refs-closed? [(regions (Vec RegionDef))] Bool
-  (let [known (Vec NativeId) (region-ids regions)]
-    (every? (fn [region RegionDef] Bool (optional-id-in? (regiondef-parent region) known))
+  (let [(known (Vec NativeId)) (region-ids regions)]
+    (every? (fn [(region RegionDef)] Bool (optional-id-in? (regiondef-parent region) known))
       regions)))
 
 (defn capabilities-refs-closed?
   [(capabilities (Vec CapabilityDef))
    (known-regions (Vec NativeId))] Bool
-  (every? (fn [capability CapabilityDef] Bool (optional-id-in? (capabilitydef-region capability) known-regions))
+  (every? (fn [(capability CapabilityDef)] Bool (optional-id-in? (capabilitydef-region capability) known-regions))
     capabilities))
 
 (defn field-layout-refs-closed?
@@ -1905,11 +1905,11 @@
     [(ScalarShapeV0 representation) true]
     [(BytesShapeV0 token) true]
     [(RecordShapeV0 fields)
-     (every? (fn [field FieldLayoutV0] Bool (field-layout-refs-closed? field known-members known-types)) fields)]
+     (every? (fn [(field FieldLayoutV0)] Bool (field-layout-refs-closed? field known-members known-types)) fields)]
     [(UnionShapeV0 tag-type tag-offset-bytes variants)
      (and (id-in? known-types tag-type)
        (>= tag-offset-bytes 0)
-       (every? (fn [variant UnionVariantLayoutV0] Bool (union-variant-layout-refs-closed? variant known-members known-types)) variants))]
+       (every? (fn [(variant UnionVariantLayoutV0)] Bool (union-variant-layout-refs-closed? variant known-members known-types)) variants))]
     [(VectorShapeV0 element-type stride-bytes)
      (and (id-in? known-types element-type) (> stride-bytes 0))]
     [(BufferShapeV0 element-type stride-bytes align-bytes)
@@ -1944,12 +1944,12 @@
 (defn layouts-refs-closed?
   [(layouts (Vec LayoutDef))
    (types (Vec TypeDef))] Bool
-  (let [known-types (Vec NativeId) (type-ids types) known-members (Vec NativeId) (type-member-ids types)]
-    (every? (fn [layout LayoutDef] Bool (layout-refs-closed? layout known-members known-types))
+  (let [(known-types (Vec NativeId)) (type-ids types) (known-members (Vec NativeId)) (type-member-ids types)]
+    (every? (fn [(layout LayoutDef)] Bool (layout-refs-closed? layout known-members known-types))
       layouts)))
 
 (defn basic-block-ids [(blocks (Vec BasicBlock))] (Vec NativeId)
-  (mapv (fn [block BasicBlock] NativeId (basicblock-id block)) blocks))
+  (mapv (fn [(block BasicBlock)] NativeId (basicblock-id block)) blocks))
 
 (defn native-atom-refs-closed?
   [(atom NativeAtom)
@@ -2142,7 +2142,7 @@
 (defn parameter-types-closed?
   [(parameters (Vec Parameter))
    (known-types (Vec NativeId))] Bool
-  (every? (fn [parameter Parameter] Bool (id-in? known-types (parameter-type-id parameter)))
+  (every? (fn [(parameter Parameter)] Bool (id-in? known-types (parameter-type-id parameter)))
     parameters))
 
 (defn terminator-block-refs-closed?
@@ -2154,7 +2154,7 @@
     [(BranchTerminator condition true-block false-block)
      (and (id-in? known-blocks true-block) (id-in? known-blocks false-block))]
     [(SwitchTerminator value-id cases)
-     (every? (fn [switch-case SwitchCaseV0] Bool (id-in? known-blocks (switchcasev0-block-id switch-case))) cases)]
+     (every? (fn [(switch-case SwitchCaseV0)] Bool (id-in? known-blocks (switchcasev0-block-id switch-case))) cases)]
     [(TrapTerminator failure-id) true]))
 
 (defn block-reference-closed?
@@ -2167,9 +2167,9 @@
    (known-owned (Vec NativeId))
    (known-blocks (Vec NativeId))] Bool
   (and (parameter-types-closed? (basicblock-parameters block) known-types)
-    (every? (fn [instruction Instruction] Bool (instruction-semantic-refs-closed? instruction known-functions known-abis known-regions known-capabilities known-types known-owned))
+    (every? (fn [(instruction Instruction)] Bool (instruction-semantic-refs-closed? instruction known-functions known-abis known-regions known-capabilities known-types known-owned))
       (basicblock-instructions block))
-    (every? (fn [terminator Terminator] Bool (terminator-block-refs-closed? terminator known-blocks))
+    (every? (fn [(terminator Terminator)] Bool (terminator-block-refs-closed? terminator known-blocks))
       (basicblock-terminators block))))
 
 (defn function-reference-closed?
@@ -2182,7 +2182,7 @@
    (known-functions (Vec NativeId))
    (known-abis (Vec NativeId))
    (known-owned (Vec NativeId))] Bool
-  (let [blocks (Vec BasicBlock) (functiondef-blocks function) known-blocks (Vec NativeId) (basic-block-ids blocks)]
+  (let [(blocks (Vec BasicBlock)) (functiondef-blocks function) (known-blocks (Vec NativeId)) (basic-block-ids blocks)]
     (and (parameter-types-closed? (functiondef-parameters function) known-types)
       (optional-id-in? (functiondef-return-type function) known-types)
       (id-in? known-blocks (functiondef-entry-block function))
@@ -2191,7 +2191,7 @@
       (ids-in? (functiondef-capabilities function) known-capabilities)
       (function-record-assocs-valid? types function)
       (function-record-materializations-valid? types function)
-      (every? (fn [block BasicBlock] Bool (block-reference-closed? block known-types known-functions known-abis known-regions known-capabilities known-owned known-blocks))
+      (every? (fn [(block BasicBlock)] Bool (block-reference-closed? block known-types known-functions known-abis known-regions known-capabilities known-owned known-blocks))
         blocks))))
 
 (defn functions-reference-closed?
@@ -2203,12 +2203,12 @@
    (known-capabilities (Vec NativeId))
    (known-abis (Vec NativeId))
    (known-owned (Vec NativeId))] Bool
-  (let [known-functions (Vec NativeId) (function-ids functions)]
-    (every? (fn [function FunctionDef] Bool (function-reference-closed? function types known-types known-effects known-regions known-capabilities known-functions known-abis known-owned))
+  (let [(known-functions (Vec NativeId)) (function-ids functions)]
+    (every? (fn [(function FunctionDef)] Bool (function-reference-closed? function types known-types known-effects known-regions known-capabilities known-functions known-abis known-owned))
       functions)))
 
 (defn program-reference-closed? [(program NativeCoreProgram)] Bool
-  (let [types (Vec TypeDef) (nativecoreprogram-types program) effects (Vec EffectDef) (nativecoreprogram-effects program) regions (Vec RegionDef) (nativecoreprogram-regions program) capabilities (Vec CapabilityDef) (nativecoreprogram-capabilities program) known-types (Vec NativeId) (type-ids types) known-effects (Vec NativeId) (effect-ids effects) known-regions (Vec NativeId) (region-ids regions) known-capabilities (Vec NativeId) (capability-ids capabilities) known-abis (Vec NativeId) (abi-ids (nativecoreprogram-abis program)) known-owned (Vec NativeId) (program-owned-ids program)]
+  (let [(types (Vec TypeDef)) (nativecoreprogram-types program) (effects (Vec EffectDef)) (nativecoreprogram-effects program) (regions (Vec RegionDef)) (nativecoreprogram-regions program) (capabilities (Vec CapabilityDef)) (nativecoreprogram-capabilities program) (known-types (Vec NativeId)) (type-ids types) (known-effects (Vec NativeId)) (effect-ids effects) (known-regions (Vec NativeId)) (region-ids regions) (known-capabilities (Vec NativeId)) (capability-ids capabilities) (known-abis (Vec NativeId)) (abi-ids (nativecoreprogram-abis program)) (known-owned (Vec NativeId)) (program-owned-ids program)]
     (and (types-refs-closed? types)
       (effects-refs-closed? effects known-regions known-capabilities)
       (regions-refs-closed? regions)
@@ -2466,22 +2466,22 @@
 (defn block-ssa-closed?
   [(block BasicBlock)
    (known-values (Vec NativeId))] Bool
-  (and (every? (fn [instruction Instruction] Bool (ids-in? (instruction-ssa-refs instruction) known-values)) (basicblock-instructions block))
-    (every? (fn [terminator Terminator] Bool (ids-in? (terminator-ssa-refs terminator) known-values))
+  (and (every? (fn [(instruction Instruction)] Bool (ids-in? (instruction-ssa-refs instruction) known-values)) (basicblock-instructions block))
+    (every? (fn [(terminator Terminator)] Bool (ids-in? (terminator-ssa-refs terminator) known-values))
       (basicblock-terminators block))))
 
 (defn function-ssa-closed? [(function FunctionDef)] Bool
-  (let [known-values (Vec NativeId) (function-value-ids function)]
+  (let [(known-values (Vec NativeId)) (function-value-ids function)]
     (and (unique-ids? known-values)
-      (every? (fn [block BasicBlock] Bool (block-ssa-closed? block known-values))
+      (every? (fn [(block BasicBlock)] Bool (block-ssa-closed? block known-values))
         (functiondef-blocks function)))))
 
 (defn program-ssa-closed? [(program NativeCoreProgram)] Bool
-  (every? (fn [function FunctionDef] Bool (function-ssa-closed? function))
+  (every? (fn [(function FunctionDef)] Bool (function-ssa-closed? function))
     (nativecoreprogram-functions program)))
 
 (defn functions-single-terminator? [(functions (Vec FunctionDef))] Bool
-  (every? (fn [function FunctionDef] Bool (every? (fn
+  (every? (fn [(function FunctionDef)] Bool (every? (fn
                                                           [(block BasicBlock)] Bool (= 1 (count (basicblock-terminators block)))) (functiondef-blocks function)))
     functions))
 
@@ -2606,7 +2606,7 @@
   [(block BasicBlock)
    (allowed-regions (Vec NativeId))
    (allowed-capabilities (Vec NativeId))] Bool
-  (every? (fn [instruction Instruction] Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))
+  (every? (fn [(instruction Instruction)] Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))
     (basicblock-instructions block)))
 
 (defn function-uses-allowed?
@@ -2617,11 +2617,11 @@
   (and (ids-in? (functiondef-effects function) allowed-effects)
     (ids-in? (functiondef-regions function) allowed-regions)
     (ids-in? (functiondef-capabilities function) allowed-capabilities)
-    (every? (fn [block BasicBlock] Bool (block-resources-allowed? block allowed-regions allowed-capabilities))
+    (every? (fn [(block BasicBlock)] Bool (block-resources-allowed? block allowed-regions allowed-capabilities))
       (functiondef-blocks function))))
 
 (defn program-allowed-sets-valid? [(program NativeCoreProgram)] Bool
-  (let [allowed-effects (Vec NativeId) (nativecoreprogram-allowed-effects program) allowed-regions (Vec NativeId) (nativecoreprogram-allowed-regions program) allowed-capabilities (Vec NativeId) (nativecoreprogram-allowed-capabilities program)]
+  (let [(allowed-effects (Vec NativeId)) (nativecoreprogram-allowed-effects program) (allowed-regions (Vec NativeId)) (nativecoreprogram-allowed-regions program) (allowed-capabilities (Vec NativeId)) (nativecoreprogram-allowed-capabilities program)]
     (and (unique-ids? allowed-effects)
       (unique-ids? allowed-regions)
       (unique-ids? allowed-capabilities)
@@ -2629,7 +2629,7 @@
       (ids-in? allowed-regions (region-ids (nativecoreprogram-regions program)))
       (ids-in? allowed-capabilities
         (capability-ids (nativecoreprogram-capabilities program)))
-      (every? (fn [function FunctionDef] Bool (function-uses-allowed? function allowed-effects allowed-regions allowed-capabilities))
+      (every? (fn [(function FunctionDef)] Bool (function-uses-allowed? function allowed-effects allowed-regions allowed-capabilities))
         (nativecoreprogram-functions program)))))
 
 (defn program-unique-ids? [(program NativeCoreProgram)] Bool
@@ -2641,7 +2641,7 @@
 ;; is the shape a materializer that has not learned epochs may still see.
 (defn block-epoch-0? [(block BasicBlock)] Bool
   (every?
-    (fn [instruction Instruction] Bool
+    (fn [(instruction Instruction)] Bool
       (and
         (not (instance? native.core.ArenaCloseInstructionV0 instruction))
         (not (instance? native.core.PromoteInstructionV0 instruction))))
@@ -2650,15 +2650,15 @@
 (defn program-epoch-0? [(program NativeCoreProgram)] Bool
   (and
     (every?
-      (fn [region RegionDef] Bool (nil? (regiondef-parent region)))
+      (fn [(region RegionDef)] Bool (nil? (regiondef-parent region)))
       (nativecoreprogram-regions program))
     (every?
-      (fn [function FunctionDef] Bool
+      (fn [(function FunctionDef)] Bool
         (every? block-epoch-0? (functiondef-blocks function)))
       (nativecoreprogram-functions program))))
 
 (defn validate-program [(program NativeCoreProgram)] ValidationReport
-  (let [unique-pass Bool (program-unique-ids? program) allowed-pass Bool (program-allowed-sets-valid? program) reference-pass Bool (program-reference-closed? program) terminator-pass Bool (functions-single-terminator? (nativecoreprogram-functions program)) ssa-pass Bool (program-ssa-closed? program) valid-ssa-pass Bool (and unique-pass reference-pass terminator-pass ssa-pass) results (Vec ObligationResult) [(->ObligationResult (->ValidSsaObligation true) valid-ssa-pass "IDs, references, terminators, and SSA uses form a closed function graph") (->ObligationResult (->BoundedEffectsObligation true) allowed-pass "declared resource use stays inside closed allowed sets")]]
+  (let [(unique-pass Bool) (program-unique-ids? program) (allowed-pass Bool) (program-allowed-sets-valid? program) (reference-pass Bool) (program-reference-closed? program) (terminator-pass Bool) (functions-single-terminator? (nativecoreprogram-functions program)) (ssa-pass Bool) (program-ssa-closed? program) (valid-ssa-pass Bool) (and unique-pass reference-pass terminator-pass ssa-pass) (results (Vec ObligationResult)) [(->ObligationResult (->ValidSsaObligation true) valid-ssa-pass "IDs, references, terminators, and SSA uses form a closed function graph") (->ObligationResult (->BoundedEffectsObligation true) allowed-pass "declared resource use stays inside closed allowed sets")]]
     (->ValidationReport (and unique-pass allowed-pass reference-pass terminator-pass ssa-pass)
       results)))
 

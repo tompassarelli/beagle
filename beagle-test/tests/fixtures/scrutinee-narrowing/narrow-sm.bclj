@@ -21,7 +21,7 @@
 
 ;; A local let binding is as stable as a parameter.
 (defn area-via-let [(s0 Shape)] Int
-  (let [s Shape s0]
+  (let [(s Shape) s0]
     (match s
       [(Circle r) (circle-radius s)]
       [(Rect w h) w])))

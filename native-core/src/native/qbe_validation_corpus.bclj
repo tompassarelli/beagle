@@ -1282,10 +1282,10 @@
 (defn numeric-function
   [(position String)
    (name String)] core/FunctionDef
-  (let [left core/NativeId (numeric-id (str position "-left"))
-        right core/NativeId (numeric-id (str position "-right"))
-        result core/NativeId (numeric-id (str position "-result"))
-        block core/NativeId (numeric-id (str position "-block"))]
+  (let [(left core/NativeId) (numeric-id (str position "-left"))
+        (right core/NativeId) (numeric-id (str position "-right"))
+        (result core/NativeId) (numeric-id (str position "-result"))
+        (block core/NativeId) (numeric-id (str position "-block"))]
     (core/->FunctionDef (numeric-id (str "fn-" position)) name
       [(core/->Parameter left (numeric-id "type-i64"))
        (core/->Parameter right (numeric-id "type-i64"))]

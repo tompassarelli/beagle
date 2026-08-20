@@ -4,12 +4,12 @@
 
 
 (defn refuses-named-callback [(value Int)] Int
-  (let [values (Vec Int) [value]]
+  (let [(values (Vec Int)) [value]]
     (count (mapv inc values))))
 
 (defn refuses-callback-recur [(value Int)] Int
-  (let [values (Vec Int) [value]]
+  (let [(values (Vec Int)) [value]]
     (reduce
-      (fn [total Int item Int] Int
+      (fn [(total Int) (item Int)] Int
         (recur total item))
       0 values)))

@@ -7,7 +7,7 @@
     [(host.clock/FormatIso8601Error errno) false]))
 
 (defn probe [(args (Vec String))] Int
-  (let [now Int (host.clock/wall-nanoseconds)]
+  (let [(now Int) (host.clock/wall-nanoseconds)]
     (if (and (> now 0)
              (format-case? 0 "1970-01-01T00:00:00Z")
              (format-case? 1000000 "1970-01-01T00:00:00.001Z")

@@ -77,10 +77,10 @@
 ;; The projection's dense integer for a node, assigned on first sight in mint
 ;; order: a coordinate inside one emitted EDN file, never read back as identity.
 (defn ordinal! [(g Graph) (node Any)] Int
-  (let [book (Map Any Int) (deref (graph-ordinals g)) hit Int? (get book node)]
+  (let [(book (Map Any Int)) (deref (graph-ordinals g)) (hit Int?) (get book node)]
     (if (some? hit)
       hit
-      (let [n Int (+ 1 (count book))]
+      (let [(n Int) (+ 1 (count book))]
         (do (swap! (graph-ordinals g) assoc node n) n)))))
 
 ;; ------------------------------------------------------------------- reads ---
@@ -98,26 +98,26 @@
   (rot/occurrences (rot/by-t23 (view g) predicate value)))
 
 (defn proposition-at [(g Graph) (occurrence Any)] Any
-  (let [event t/OperationOccurrence? (rot/event-at (view g) occurrence)]
+  (let [(event t/OperationOccurrence?) (rot/event-at (view g) occurrence)]
     (if (nil? event)
       nil
       (t/operationoccurrence-proposition event))))
 
 (defn subject-at [(g Graph) (occurrence Any)] Any
-  (let [p Any (proposition-at g occurrence)]
+  (let [(p Any) (proposition-at g occurrence)]
     (if (nil? p) nil (t/triple-t1 p))))
 
 (defn predicate-at [(g Graph) (occurrence Any)] Any
-  (let [p Any (proposition-at g occurrence)]
+  (let [(p Any) (proposition-at g occurrence)]
     (if (nil? p) nil (t/triple-t2 p))))
 
 (defn value-at [(g Graph) (occurrence Any)] Any
-  (let [p Any (proposition-at g occurrence)]
+  (let [(p Any) (proposition-at g occurrence)]
     (if (nil? p) nil (t/triple-t3 p))))
 
 ;; The value slot as a node reference; nil when it holds a literal.
 (defn target-at [(g Graph) (occurrence Any)] Any
-  (let [r Any (if (nil? occurrence) nil (value-at g occurrence))]
+  (let [(r Any) (if (nil? occurrence) nil (value-at g occurrence))]
     (if (minted-node-id? r) r nil)))
 
 (defn live-propositions [(g Graph)] (Vec t/Triple)
@@ -136,7 +136,7 @@
 ;; writers map; an unattributed transaction reads "".
 (defn writer-of [(g Graph) (occurrence Any)] String
   (if (t/occurrence-coordinate? occurrence)
-    (let [hit Any (get (graph-writers g) (t/triple-t1 occurrence))]
+    (let [(hit Any) (get (graph-writers g) (t/triple-t1 occurrence))]
       (if (nil? hit) "" (str hit)))
     (throw (ex-info "resolve: occurrence coordinate required" {:type :invalid-occurrence-coordinate :value occurrence}))))
 
@@ -154,14 +154,14 @@
 ;; Emits no operation: an ordinal against the builder's pinned transaction
 ;; coordinate, durable as soon as that transaction commits anything else.
 (defn mint! [(g Graph) (b (Atom txn/Builder))] Any
-  (let [node t/Triple (txn/mint! b)] (do (ordinal! g node) node)))
+  (let [(node t/Triple) (txn/mint! b)] (do (ordinal! g node) node)))
 
 (defn assert-on!
   [(b (Atom txn/Builder)) (subject Any) (predicate Any) (value Any)] Any
   (txn/assert! b (t/triple subject predicate value)))
 
 (defn retract-on! [(g Graph) (b (Atom txn/Builder)) (occurrence Any)] Any
-  (let [p Any (proposition-at g occurrence)]
+  (let [(p Any) (proposition-at g occurrence)]
     (if (nil? p) nil (txn/retract! b p))))
 
 (defn commit! [(g Graph) (b (Atom txn/Builder))] Graph
@@ -170,7 +170,7 @@
     (refresh! g)))
 
 (defn assert! [(g Graph) (subject Any) (predicate Any) (value Any)] Any
-  (let [b (Atom txn/Builder) (open g) occurrence Any (assert-on! b subject predicate value)]
+  (let [(b (Atom txn/Builder)) (open g) (occurrence Any) (assert-on! b subject predicate value)]
     (do (commit! g b) occurrence)))
 
 ;; Retire one live assertion: the withdrawal the old supersedes edge stood for.
@@ -178,5 +178,5 @@
 ;; retiring one of several EQUAL duplicates withdraws the newest rather than the
 ;; named one — the choice store.rotation and store/apply-operation-state make.
 (defn retire! [(g Graph) (occurrence Any)] Any
-  (let [b (Atom txn/Builder) (open g) target Any (retract-on! g b occurrence)]
+  (let [(b (Atom txn/Builder)) (open g) (target Any) (retract-on! g b occurrence)]
     (do (commit! g b) target)))

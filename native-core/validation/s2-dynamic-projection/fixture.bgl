@@ -37,7 +37,7 @@
         (doseq [item items]
           (integer? item))
         (reduce
-          (fn [total Int item Any] Int
+          (fn [(total Int) (item Any)] Int
             (if (integer? item) (+ total item) total))
           0
           doubled)))

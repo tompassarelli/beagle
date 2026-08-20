@@ -6,9 +6,9 @@
   (conj values value))
 
 (defn entry [] Int
-  (let [values (Vec Int)
+  (let [(values (Vec Int))
         (-> [1]
             (append-value 2)
             (append-value 3))
-        scalar Int (->> 4 (+ 5) (* 2))]
+        (scalar Int) (->> 4 (+ 5) (* 2))]
     (if (and (= values [1 2 3]) (= scalar 18)) 0 1)))

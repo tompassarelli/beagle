@@ -219,7 +219,7 @@
                                 (wire/empty-error-cell))]
     (if (< (- end start) 12)
       (->RecordDecodeResult nil "Store transaction log record header is truncated")
-      (let [transaction-fields WireFields_store-log-transaction_payload
+      (let [(transaction-fields WireFields_store-log-transaction_payload)
             (read-store-log-transaction-payload! decoder)
             sequence
             (wirefields_store-log-transaction_payload-sequence
@@ -248,7 +248,7 @@
                    [:else
                     (->RecordDecodeResult
                      (term-store/transaction-record sequence operations) nil)]))
-               (let [operation-fields WireFields_store-log-operation_payload
+               (let [(operation-fields WireFields_store-log-operation_payload)
                      (read-store-log-operation-payload! decoder)
                      actual
                      (wirefields_store-log-operation_payload-ordinal
@@ -795,8 +795,8 @@
             (not= configured-space-id (headerfields-space-id first-header)))
        (failed-boot "Store transaction log belongs to a different SpaceId")]
       [:else
-       (let [total Int (+ (count segments) 1)
-             chain-bytes Int
+       (let [(total Int) (+ (count segments) 1)
+             (chain-bytes Int)
              (loop [index Int 0 counted Int 0]
                (if (>= index total)
                  counted
@@ -804,7 +804,7 @@
                         (+ counted
                            (count (chainpiece-bytes
                                    (chain-piece-at segments tail index)))))))
-             root (Atom t/TermStore)
+             (root (Atom t/TermStore))
              (term-store/open-fold!
               (term-store/new-term-store-for-log
                (headerfields-space-id first-header) chain-bytes))]

@@ -43,11 +43,11 @@
 
 (defn probe [(args (Vec String))] Int
   (if (= (count args) 5)
-    (let [directory String (nth args 0)
-          path String (nth args 1)
-          missing String (nth args 2)
-          nested String (nth args 3)
-          append-path String (nth args 4)]
+    (let [(directory String) (nth args 0)
+          (path String) (nth args 1)
+          (missing String) (nth args 2)
+          (nested String) (nth args 3)
+          (append-path String) (nth args 4)]
       (if (and (make-parents-case? nested)
                (append-case? append-path)
                (write-case? path)

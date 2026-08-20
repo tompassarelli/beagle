@@ -11,7 +11,7 @@
   (count ["alpha" "beta"]))
 
 (defn from-typed-binding [] Int
-  (let [values (Vec Bool) [true false true]]
+  (let [(values (Vec Bool)) [true false true]]
     (if (nth values 2) 7 0)))
 
 (defn main [] Int

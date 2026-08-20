@@ -2,16 +2,16 @@
 (ns native.wasm32-transient-vec)
 
 (defn two-owner-loop [] Int
-  (let [empty-phi (Vec I16) []
-        empty-material (Vec U8) []
-        phi-value I16 -2
-        material-value U8 7]
+  (let [(empty-phi (Vec I16)) []
+        (empty-material (Vec U8)) []
+        (phi-value I16) -2
+        (material-value U8) 7]
     (loop [index Int 0
            phi (TransientVec I16) (transient empty-phi)
            material (TransientVec U8) (transient empty-material)]
       (if (= index 4)
-        (let [built-phi (Vec I16) (persistent! phi)
-              built-material (Vec U8) (persistent! material)]
+        (let [(built-phi (Vec I16)) (persistent! phi)
+              (built-material (Vec U8)) (persistent! material)]
           (if (and (= (count built-phi) 4)
                    (= (nth built-phi 0) phi-value)
                    (= (nth built-phi 3) phi-value)

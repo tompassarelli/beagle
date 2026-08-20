@@ -74,7 +74,7 @@
   (count sample-values))
 
 (defn local-shadow-size [] Int
-  (let [sample-values String "abc"] (count sample-values)))
+  (let [(sample-values String) "abc"] (count sample-values)))
 
 (defn render-float [(value Float)] String (str value))
 

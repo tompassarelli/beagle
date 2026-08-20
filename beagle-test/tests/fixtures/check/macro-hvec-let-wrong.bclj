@@ -1,5 +1,5 @@
 (defmacro make-invalid-pair []
-  `(let [candidate (HVec Int String) ["wrong" "ready"]]
+  `(let [(candidate (HVec Int String)) ["wrong" "ready"]]
      candidate))
 
 (defn invalid-pair [] (HVec Int String)

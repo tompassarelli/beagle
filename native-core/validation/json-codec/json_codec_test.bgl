@@ -114,7 +114,7 @@
     [(JsonDecodeError offset message) (str offset ":" message)]))
 
 (defn invalid-encode [] String
-  (let [events (Vec json/JsonEvent)
+  (let [(events (Vec json/JsonEvent))
         [(json/->JsonObjectStart 0)
          (json/->JsonKey 1 "missing")
          (json/->JsonObjectEnd 2)]]

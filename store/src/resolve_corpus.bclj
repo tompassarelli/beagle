@@ -95,7 +95,7 @@
                                                                                                                                                                    Any)]
                                                                                                                                                                  Any
                                                                                                                                                                  (get-in accessor-exports [m n]))]
-    (fn [qualifier Any nm Any] Any
+    (fn [(qualifier Any) (nm Any)] Any
       (cond
         (nil? nm)
         nil
@@ -143,9 +143,9 @@
 
 (defn module-imports [(ctx ri/Graph) (view Any) (ents-of Any) (src Any)] Any
   (let [imports (rm/parse-require ctx view (vec (get ents-of src [])))
-        refer (Map Any Any) (get imports :refer {})
-        as (Map Any Any) (get imports :as {})
-        rename (Map Any Any) (get imports :rename {})]
+        (refer (Map Any Any)) (get imports :refer {})
+        (as (Map Any Any)) (get imports :as {})
+        (rename (Map Any Any)) (get imports :rename {})]
     (into #{}
       (concat (set (vals refer))
         (set (vals as))
@@ -154,13 +154,13 @@
 (defn import-graph
   [(ctx ri/Graph) (view Any) (ents-of Any) (srcs (Vec Any))] Any
   (into {}
-    (map (fn [src Any] Any (let [ents (vec (get ents-of src []))] [(rm/module-name ctx view ents) (module-imports ctx view ents-of src)]))
-      (filter (fn [src Any] Bool (some? (rm/module-name ctx view (vec (get ents-of src [])))))
+    (map (fn [(src Any)] Any (let [ents (vec (get ents-of src []))] [(rm/module-name ctx view ents) (module-imports ctx view ents-of src)]))
+      (filter (fn [(src Any)] Bool (some? (rm/module-name ctx view (vec (get ents-of src [])))))
         srcs))))
 
 (defn module-has-macro? [(ctx ri/Graph) (view Any) (ents-of Any) (src Any)] Bool
   (let [ents (vec (get ents-of src []))]
-    (boolean (some (fn [form Any] Bool (let [def-form (rm/unwrap-def ctx view form) head (first (rr/ordered-children ctx def-form))] (= "defmacro" (rr/sym-val ctx view head)))) (rm/forms-of ctx view ents)))))
+    (boolean (some (fn [(form Any)] Bool (let [def-form (rm/unwrap-def ctx view form) head (first (rr/ordered-children ctx def-form))] (= "defmacro" (rr/sym-val ctx view head)))) (rm/forms-of ctx view ents)))))
 
 (defn lift-bound-to-refers!
   [(ctx ri/Graph) (KIND Any) (BOUND Any) (REFERS Any)] Any
@@ -171,11 +171,11 @@
           (ri/assert! ctx leaf REFERS target))))))
 
 (defn corpus-from-store! [(state CorpusState)] Any
-  (let [t0 Int (System/nanoTime) groups (rw/warm-groups (:ctx state) (:corpus-cache state) name->module) t-groups Int (System/nanoTime) tables (rw/scoped-corpus-tables (:ctx state) (:view state) groups (:corpus-scope state)) install (:install-warm state)]
+  (let [(t0 Int) (System/nanoTime) groups (rw/warm-groups (:ctx state) (:corpus-cache state) name->module) (t-groups Int) (System/nanoTime) tables (rw/scoped-corpus-tables (:ctx state) (:view state) groups (:corpus-scope state)) install (:install-warm state)]
     (do
       (install groups tables)
       (when (= "1" (System/getenv "BEAGLE_STORE_PROF"))
-        (let [profile (:profile state) t-done Int (System/nanoTime)]
+        (let [profile (:profile state) (t-done Int) (System/nanoTime)]
           (profile (format "  corpus-from-store!: groups=%.1fms contexts+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- t-done t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state))))))
       tables)))
 
@@ -272,7 +272,7 @@
       (boolean (re-matches NODE-REFERENCE-PREDICATE-RE predicate)))))
 
 (defn- compiler-lexical-binding-tables [(rows (Vec Any))] Any
-  (reduce (fn [tables Any row Any] Any
+  (reduce (fn [(tables Any) (row Any)] Any
             (let [[subject predicate object] row]
               (if (= "bindingId" predicate)
                 (let [node-by-id (:node-by-id tables)
@@ -313,12 +313,12 @@
                 (ri/assert-on! builder occurrence-entity "refers_to" binding-entity)))))))))
 
 (defn- structural-reader-rows [(rows (Vec Any))] (Vec Any)
-  (let [symbol-nodes (reduce (fn [nodes (Set Any) row Any] (Set Any)
+  (let [symbol-nodes (reduce (fn [(nodes (Set Any)) (row Any)] (Set Any)
                                (if (and (= "kind" (nth row 1 nil))
                                      (= "symbol" (nth row 2 nil)))
                                  (conj nodes (nth row 0))
                                  nodes)) #{} rows)]
-    (reduce (fn [result (Vec Any) row Any] (Vec Any)
+    (reduce (fn [(result (Vec Any)) (row Any)] (Vec Any)
               (let [subject (nth row 0 nil)
                     predicate (nth row 1 nil)
                     object (nth row 2 nil)]

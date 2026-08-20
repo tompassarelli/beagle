@@ -9,17 +9,17 @@
 
 (defn exercise
   [(path String) (fds (Vec Int)) (target-pid Int)] Int
-  (let [create-status Int (host.process/fifo-create path)
-        reader Int (host.process/fifo-open-read path)
-        write-status Int
+  (let [(create-status Int) (host.process/fifo-create path)
+        (reader Int) (host.process/fifo-open-read path)
+        (write-status Int)
           (host.process/fifo-write-deadline path "message\n" 25)
-        ready Int (host.process/poll-readable fds 25)
-        line-status Int (read-status reader)
-        pid Int (host.process/current-pid)
-        alive Bool (host.process/alive? pid)
-        signal-status Int (host.process/signal target-pid 15)
-        death-status Int (host.process/wait-not-alive target-pid 25)
-        close-status Int (host.process/close reader)]
+        (ready Int) (host.process/poll-readable fds 25)
+        (line-status Int) (read-status reader)
+        (pid Int) (host.process/current-pid)
+        (alive Bool) (host.process/alive? pid)
+        (signal-status Int) (host.process/signal target-pid 15)
+        (death-status Int) (host.process/wait-not-alive target-pid 25)
+        (close-status Int) (host.process/close reader)]
     (if (and (= create-status 0)
              (= write-status 0)
              (>= ready 0)

@@ -4,6 +4,6 @@
 ;; A zero-argument process entry still receives one nonzero root authority from
 ;; the native-exe host before it constructs or accesses mutable Buffer storage.
 (defn buffer-entry! [] Int
-  (let [buffer (Buffer Float) (double-array 2)]
+  (let [(buffer (Buffer Float)) (double-array 2)]
     (aset-double! buffer 1 7.0)
     (if (= (aget buffer 1) 7.0) 0 1)))

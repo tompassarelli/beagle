@@ -36,7 +36,7 @@
   (loop [remaining (Vec CommitIntent) intents writes (Vec Any) [] idempotent (Vec String) []]
     (if (empty? remaining)
       {:writes writes :idempotent idempotent}
-      (let [intent CommitIntent (first remaining) pred String (:pred intent)]
+      (let [(intent CommitIntent) (first remaining) (pred String) (:pred intent)]
         (cond
           (version-conflict? (:single intent)
             (:base-version intent)
@@ -83,12 +83,12 @@
   (loop [remaining (Vec GroupBatchItem) items index Int 0 groups (Vec GroupBatch) []]
     (if (empty? remaining)
       groups
-      (let [item GroupBatchItem (first remaining) group-index Int? (group-index groups (:path item))]
+      (let [(item GroupBatchItem) (first remaining) (group-index Int?) (group-index groups (:path item))]
         (if (nil? group-index)
           (recur (vec (rest remaining))
             (inc index)
             (conj groups (->GroupBatch (:path item) [index])))
-          (let [group GroupBatch (nth groups group-index)]
+          (let [(group GroupBatch) (nth groups group-index)]
             (recur (vec (rest remaining))
               (inc index)
               (assoc groups
@@ -280,7 +280,7 @@
     :return))
 
 (defn migrate-input-plan [(raw (Vec Any))] (Map Keyword Any)
-  (let [flat-max-tx (reduce max 0 (map (fn [line Any] Int (let [tx (get line :tx)] (if (int? tx) tx 0))) raw)) asserts (filterv (fn
+  (let [flat-max-tx (reduce max 0 (map (fn [(line Any)] Int (let [tx (get line :tx)] (if (int? tx) tx 0))) raw)) asserts (filterv (fn
                                                                                                                                     [(line Any)]
                                                                                                                                     Bool
                                                                                                                                     (boolean (and (get line :l) (get line :p) (get line :r)))) raw)]
@@ -293,10 +293,10 @@
    (schema-preds (Set String))]
   (Map Keyword Any)
   {:domain
-   (filterv (fn [pred String] Bool (not (contains? schema-preds pred)))
+   (filterv (fn [(pred String)] Bool (not (contains? schema-preds pred)))
      predicates)
    :card-only
-   (filterv (fn [pred String] Bool (and (not (contains? schema-preds pred)) (not (contains? by-pred pred))))
+   (filterv (fn [(pred String)] Bool (and (not (contains? schema-preds pred)) (not (contains? by-pred pred))))
      card-only)})
 
 (defn migrate-kernel-seed-plan
@@ -305,12 +305,12 @@
    (cmap (Map String Bool))
    (current-single (Set String))]
   (Vec String)
-  (filterv (fn [pred String] Bool (and (not (contains? schema-preds pred)) (not (contains? cmap pred)) (not (contains? current-single pred))))
+  (filterv (fn [(pred String)] Bool (and (not (contains? schema-preds pred)) (not (contains? cmap pred)) (not (contains? current-single pred))))
     single-valued))
 
 (defn tail-input-plan
   [(lines (Vec Any)) (schema-preds (Set String))] (Map Keyword Any)
-  (let [valid (filterv (fn [line Any] Bool (boolean (and (get line :l) (get line :p) (get line :r) (int? (get line :tx)) (not (contains? schema-preds (get line :p)))))) lines) max-tx (reduce max 0 (map (fn
+  (let [valid (filterv (fn [(line Any)] Bool (boolean (and (get line :l) (get line :p) (get line :r) (int? (get line :tx)) (not (contains? schema-preds (get line :p)))))) lines) max-tx (reduce max 0 (map (fn
                                                                                                                                                                                                               [(line Any)]
                                                                                                                                                                                                               Int
                                                                                                                                                                                                               (get line :tx)) valid))]
@@ -318,7 +318,7 @@
 
 (defn tail-keyed-latest
   [(single-preds (Set String)) (lines (Vec Any))] (Map Any Any)
-  (reduce (fn [latest (Map Any Any) line Any] (Map Any Any) (let [pred String (get line :p) key Any (if (contains? single-preds pred) [(get line :l) pred] [(get line :l) pred (get line :r)]) previous Any (get latest key) previous-tx Any (if (nil? previous) nil (get previous :tx)) line-tx Any (get line :tx)] (if (and (int? previous-tx) (int? line-tx) (>= previous-tx line-tx)) latest (assoc latest key line))))
+  (reduce (fn [(latest (Map Any Any)) (line Any)] (Map Any Any) (let [(pred String) (get line :p) (key Any) (if (contains? single-preds pred) [(get line :l) pred] [(get line :l) pred (get line :r)]) (previous Any) (get latest key) (previous-tx Any) (if (nil? previous) nil (get previous :tx)) (line-tx Any) (get line :tx)] (if (and (int? previous-tx) (int? line-tx) (>= previous-tx line-tx)) latest (assoc latest key line))))
     {}
     lines))
 
@@ -334,8 +334,8 @@
    (link-preds (Set String))]
   (Vec TailPredicatePlan)
   (into []
-    (concat (map (fn [pred String] TailPredicatePlan (let [want String (if (contains? single-preds pred) "single" "multi") action Keyword (cond (not (contains? declared-preds pred)) :define (not= want (get current-cardinality pred)) :update :else :keep) value-kind String (if (contains? link-preds pred) "ref" "literal")] (->TailPredicatePlan pred action want value-kind))) domain)
-      (map (fn [pred String] TailPredicatePlan (let [want String (if (contains? single-preds pred) "single" "multi") action Keyword (if (not= want (get current-cardinality pred)) :define :keep)] (->TailPredicatePlan pred action want "literal")))
+    (concat (map (fn [(pred String)] TailPredicatePlan (let [(want String) (if (contains? single-preds pred) "single" "multi") (action Keyword) (cond (not (contains? declared-preds pred)) :define (not= want (get current-cardinality pred)) :update :else :keep) (value-kind String) (if (contains? link-preds pred) "ref" "literal")] (->TailPredicatePlan pred action want value-kind))) domain)
+      (map (fn [(pred String)] TailPredicatePlan (let [(want String) (if (contains? single-preds pred) "single" "multi") (action Keyword) (if (not= want (get current-cardinality pred)) :define :keep)] (->TailPredicatePlan pred action want "literal")))
         card-only))))
 
 (defn tail-fact-decision
