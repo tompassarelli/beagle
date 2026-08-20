@@ -4659,7 +4659,7 @@
   [(index SourceIndexV0) (node core/NativeId) (name String)]
   (U core/NativeId Nil)
   (let [(items (Vec core/NativeId)) (binder-binding-items index node)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count items))
         nil
         (let [(item core/NativeId) (nth items position)]
@@ -8840,7 +8840,7 @@
 
 (defn payloadless-variant-of
   [(variants (Vec core/TypeVariant))] (U core/TypeVariant Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count variants))
       nil
       (let [(variant core/TypeVariant) (nth variants position)]
@@ -8914,8 +8914,8 @@
                         (core/->SsaValueV0 absent-id carrier)
                         (core/typevariant-id absent-variant) nil))
                     (cases (Vec core/SwitchCaseV0))
-                    (loop [(position Int) 0
-                           (collected (Vec core/SwitchCaseV0)) []]
+                    (loop [position Int 0
+                           collected (Vec core/SwitchCaseV0) []]
                       (if (>= position (count variants))
                         collected
                         (let [(variant core/TypeVariant) (nth variants position)
@@ -8935,8 +8935,8 @@
                     (state-close (state-bump seeded)
                       (core/->SwitchTerminator source-id cases))
                     (armed BodyStateV0)
-                    (loop [(position Int) 0
-                           (current BodyStateV0) switched]
+                    (loop [position Int 0
+                           current BodyStateV0 switched]
                       (if (or (>= position (count variants))
                               (state-blocked? current))
                         current
@@ -9020,8 +9020,8 @@
                     (vector-arm-id core/NativeId)
                     (state-id state owner "dynamic-nth-vector-arm")
                     (cases (Vec core/SwitchCaseV0))
-                    (loop [(position Int) 0
-                           (collected (Vec core/SwitchCaseV0)) []]
+                    (loop [position Int 0
+                           collected (Vec core/SwitchCaseV0) []]
                       (if (>= position (count variants))
                         collected
                         (let [(variant core/TypeVariant) (nth variants position)
@@ -9044,8 +9044,8 @@
                     (state-close (state-bump state)
                       (core/->SwitchTerminator source-id cases))
                     (armed BodyStateV0)
-                    (loop [(position Int) 0
-                           (current BodyStateV0) switched]
+                    (loop [position Int 0
+                           current BodyStateV0 switched]
                       (if (or (>= position (count variants))
                               (state-blocked? current))
                         current
@@ -15121,7 +15121,7 @@
   ExprResultV0
   (let [(map-type core/NativeId) (nth value-types 0)
         (uniform Bool)
-        (loop [(position Int) 1]
+        (loop [position Int 1]
           (cond
             (>= position (count value-types)) true
             (same-id? (nth value-types position) map-type)
@@ -15130,9 +15130,9 @@
     (if (not uniform)
       (fail-result state
         "TODO-NATIVE-MERGE-OPERANDS: merge lowers closed maps that share one native type")
-      (loop [(position Int) 1
-             (current BodyStateV0) state
-             (holder core/NativeId) (nth values 0)]
+      (loop [position Int 1
+             current BodyStateV0 state
+             holder core/NativeId (nth values 0)]
         (if (>= position (count values))
           (->ExprResultV0 current holder map-type false)
           (let [(merged ExprResultV0)
@@ -15176,9 +15176,9 @@
         "TODO-NATIVE-GET-IN-OPERAND: get-in lowers a dynamic carrier that admits a map")
 
       :else
-      (loop [(position Int) 0
-             (current BodyStateV0) (exprresultv0-state lowered)
-             (holder core/NativeId) (exprresultv0-value-id lowered)]
+      (loop [position Int 0
+             current BodyStateV0 (exprresultv0-state lowered)
+             holder core/NativeId (exprresultv0-value-id lowered)]
         (if (>= position (count items))
           (->ExprResultV0 current holder carrier false)
           (let [(key ExprResultV0)
@@ -19297,7 +19297,7 @@
                 ;; vector layout; mixed items enter through the dynamic domain.
                 (= "list" callee)
                 (let [(uniform Bool)
-                      (loop [(position Int) 1]
+                      (loop [position Int 1]
                         (cond
                           (>= position (count value-types)) true
                           (same-id? (nth value-types position)
