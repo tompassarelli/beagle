@@ -84,6 +84,8 @@ case "${1:-}" in
         index="${index%.bgl}"
         state="${FAKE_STATE:?}"
         expected="${FAKE_EXPECTED:?}"
+        invocation="$(mktemp "$state/invocation-$index.XXXXXX")"
+        printf '%s\n' "$index" >"$invocation"
         exec 9>"$state/worker-$index.lock"
         flock -x 9
         printf '%s\n' "$index" >"$state/start-$index"
@@ -170,6 +172,7 @@ run_case() {
     local barrier_workers="$5" expected_launched="$6"
     shift 6
     local state="$scratch/$name" status=0
+    local -a invocations=() task_invocations=()
     mkdir -p "$state/tmp" "$state/out" "$state/cache"
     set +e
     env \
@@ -204,7 +207,18 @@ run_case() {
         echo "ast-verify-parallel: $name expected status $expected_status, got $status" >&2
         return 1
     }
+    shopt -s nullglob
+    invocations=("$state"/invocation-*)
+    [[ "${#invocations[@]}" == "$expected_launched" ]] || {
+        echo "ast-verify-parallel: $name expected $expected_launched verifier tasks, got ${#invocations[@]}" >&2
+        return 1
+    }
     for ((index = 0; index < expected_launched; index++)); do
+        task_invocations=("$state"/invocation-"$index".*)
+        [[ "${#task_invocations[@]}" == 1 ]] || {
+            echo "ast-verify-parallel: $name verifier $index ran ${#task_invocations[@]} times" >&2
+            return 1
+        }
         [[ -f "$state/overlap-$index" ]] || {
             echo "ast-verify-parallel: $name verifier $index never reached the cohort barrier" >&2
             return 1
