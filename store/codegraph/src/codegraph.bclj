@@ -58,7 +58,7 @@
 
 (defn transitive
   [(adj (Map (Vec Any) (Set (Vec Any)))) (n (Vec Any))] (Set (Vec Any))
-  (loop [(seen (Set (Vec Any))) #{} (frontier (Vec (Vec Any))) (vec (get adj n #{}))]
+  (loop [seen (Set (Vec Any)) #{} frontier (Vec (Vec Any)) (vec (get adj n #{}))]
     (if (empty? frontier)
       seen
       (let [x (peek frontier) fr (pop frontier)]
@@ -74,7 +74,7 @@
                                                                                                    (nth p 1)) idx)) groups (vec (partition-by (fn
                                                                                                                                                 [(p (Vec Any))]
                                                                                                                                                 Any
-                                                                                                                                                (nth p 1)) sorted)) acc (loop [(gs (Vec (Vec (Vec Any)))) groups (start Int) 1 (acc (Map Any Double)) {}] (if (empty? gs) acc (let [g (vec (nth gs 0)) n (count g) r (/ (+ (* 2.0 start) (dec n)) 2.0)] (recur (vec (rest gs)) (+ start n) (reduce (fn
+                                                                                                                                                (nth p 1)) sorted)) acc (loop [gs (Vec (Vec (Vec Any))) groups start Int 1 acc (Map Any Double) {}] (if (empty? gs) acc (let [g (vec (nth gs 0)) n (count g) r (/ (+ (* 2.0 start) (dec n)) 2.0)] (recur (vec (rest gs)) (+ start n) (reduce (fn
                                                                                                                                                                                                                                                                                                                                                                                                      [(a (Map Any Double))
                                                                                                                                                                                                                                                                                                                                                                                                       (p (Vec Any))]
                                                                                                                                                                                                                                                                                                                                                                                                      (Map Any Double)

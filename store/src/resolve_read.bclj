@@ -115,7 +115,7 @@
     nil))
 
 (defn unwrap-meta [(ctx (U ri/Graph Nil)) (view Any) (e Any)] Any
-  (loop [(e Any) e (n Int) 0]
+  (loop [e Any e n Int 0]
     (if (and (some? e) (< n 64) (= "#%meta" (head-sym ctx view e)))
       (recur (nth (ordered-children ctx e) 2 nil) (inc n))
       e)))

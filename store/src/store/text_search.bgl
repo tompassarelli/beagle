@@ -96,7 +96,7 @@
 
 (defn word-tokens [(value String)] (Vec String)
   (let [(parts (Vec String)) (str/split value WORD-SEPARATOR-RE)]
-    (loop [(index Int) 0 (tokens (Vec String)) []]
+    (loop [index Int 0 tokens (Vec String) []]
       (if (>= index (count parts))
         tokens
         (let [(token String) (nth parts index)]
@@ -115,7 +115,7 @@
   (vowel? (subs value index (inc index))))
 
 (defn- has-vowel? [(value String)] Bool
-  (loop [index 0]
+  (loop [index Int 0]
     (if (>= index (count value))
       false
       (if (vowel-at? value index) true (recur (inc index))))))
@@ -183,7 +183,7 @@
   (set (mapv (fn [(token String)] String (english-stem token)) tokens)))
 
 (defn- trigrams [(value String)] (Set String)
-  (loop [(index Int) 0 (grams (Set String)) #{}]
+  (loop [index Int 0 grams (Set String) #{}]
     (if (> (+ index 3) (count value))
       grams
       (recur (inc index) (conj grams (subs value index (+ index 3)))))))
@@ -202,7 +202,7 @@
 (defn- token-rows-weight [(rows (Vec (Vec String)))] Int
   (reduce (fn [(total Int) (tokens (Vec String))] Int
             (let [(token-weight Int)
-                  (loop [(remaining (Vec String)) tokens (subtotal Int) 0]
+                  (loop [remaining (Vec String) tokens subtotal Int 0]
                     (if (empty? remaining)
                       subtotal
                       (recur (vec (rest remaining))
@@ -229,8 +229,8 @@
     nil))
 
 (defn- build-state [(rows (Vec t/Triple))] SearchBuildState
-  (loop [(handle Int) 0
-         (state SearchBuildState) (->SearchBuildState [] [] {} {})]
+  (loop [handle Int 0
+         state SearchBuildState (->SearchBuildState [] [] {} {})]
     (if (>= handle (count rows))
       state
       (let [(value Any) (t/triple-t3 (nth rows handle))]
@@ -425,8 +425,8 @@
   (let [(empty-handles (Vec Int)) []]
     (if (empty? vectors)
       empty-handles
-      (loop [(index Int) 1
-             (best (Vec Int)) (nth vectors 0)]
+      (loop [index Int 1
+             best (Vec Int) (nth vectors 0)]
         (if (>= index (count vectors))
           best
           (let [(candidate (Vec Int)) (nth vectors index)]
@@ -456,7 +456,7 @@
 
 (defn- sequence-at?
   [(haystack (Vec String)) (needle (Vec String)) (start Int)] Bool
-  (loop [offset 0]
+  (loop [offset Int 0]
     (if (>= offset (count needle))
       true
       (if (= (nth haystack (+ start offset)) (nth needle offset))
@@ -466,7 +466,7 @@
 (defn- sequence-contains? [(haystack (Vec String)) (needle (Vec String))] Bool
   (if (or (empty? needle) (> (count needle) (count haystack)))
     false
-    (loop [start 0]
+    (loop [start Int 0]
       (if (> (+ start (count needle)) (count haystack))
         false
         (if (sequence-at? haystack needle start)
@@ -740,7 +740,7 @@
    (needle Any)
    (candidates (Vec Int))]
   TextSearchHandlesResult
-  (loop [(position Int) 0 (matches (Vec Int)) []]
+  (loop [position Int 0 matches (Vec Int) []]
     (if (>= position (count candidates))
       (handles-ok matches)
       (let [(handle Int) (nth candidates position)
@@ -817,7 +817,7 @@
    (handles (Vec Int))]
   TextSearchRowsResult
   (let [(source-rows (Vec t/Triple)) (textsearchsource-rows source)]
-    (loop [(position Int) 0 (result-rows (Vec (Vec Any))) []]
+    (loop [position Int 0 result-rows (Vec (Vec Any)) []]
       (if (>= position (count handles))
         (rows-ok result-rows)
         (let [(handle Int) (nth handles position)

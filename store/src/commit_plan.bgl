@@ -33,7 +33,7 @@
 
 (defn commit-plan
   [(head-version Int) (intents (Vec CommitIntent))] (Map Keyword Any)
-  (loop [(remaining (Vec CommitIntent)) intents (writes (Vec Any)) [] (idempotent (Vec String)) []]
+  (loop [remaining (Vec CommitIntent) intents writes (Vec Any) [] idempotent (Vec String) []]
     (if (empty? remaining)
       {:writes writes :idempotent idempotent}
       (let [(intent CommitIntent) (first remaining) (pred String) (:pred intent)]
@@ -72,7 +72,7 @@
 (defrecord GroupBatch [(path String?) (indices (Vec Int))])
 
 (defn- group-index [(groups (Vec GroupBatch)) (path String?)] Int?
-  (loop [(remaining (Vec GroupBatch)) groups (index Int) 0]
+  (loop [remaining (Vec GroupBatch) groups index Int 0]
     (if (empty? remaining)
       nil
       (if (= (:path (first remaining)) path)
@@ -80,7 +80,7 @@
         (recur (vec (rest remaining)) (inc index))))))
 
 (defn group-batch-plan [(items (Vec GroupBatchItem))] (Vec GroupBatch)
-  (loop [(remaining (Vec GroupBatchItem)) items (index Int) 0 (groups (Vec GroupBatch)) []]
+  (loop [remaining (Vec GroupBatchItem) items index Int 0 groups (Vec GroupBatch) []]
     (if (empty? remaining)
       groups
       (let [(item GroupBatchItem) (first remaining) (group-index Int?) (group-index groups (:path item))]

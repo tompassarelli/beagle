@@ -78,7 +78,7 @@
           (.redirectOutput pb (java.io.File. "/dev/null"))
           (.redirectError pb (java.io.File. "/dev/null"))
           (.start pb))
-        (loop [n 0]
+        (loop [n Int 0]
           (cond
             (sidecar-up-with-state? state)
             true
@@ -186,7 +186,7 @@
                                                             (v Any)]
                                                            Any
                                                            v)]
-      (loop [acc []]
+      (loop [acc (Vec Any) []]
         (let [f (try (clojure.core/read opts rdr) (catch (t Throwable) {:store.defcheck/read-error (or (.getMessage t) (str (class t)))}))]
           (cond
             (and (map? f) (:store.defcheck/read-error f))
@@ -285,7 +285,7 @@
   (let [a (str a) b (str b) (m Int) (count a) (n Int) (count b)]
     (if (or (zero? m) (zero? n))
       (max m n)
-      (loop [(i Int) 1 (prev (Vec Int)) (vec (range (inc n)))]
+      (loop [i Int 1 prev (Vec Int) (vec (range (inc n)))]
         (if (> i m)
           (peek prev)
           (recur (inc i)
@@ -467,7 +467,7 @@
                                                     (let [ls (nth pair 0) pat (nth binding-pair 0) e (nth binding-pair 1)] (rec e ls) [(into ls (pattern-locals pat)) nil])) [locals nil] (partition 2 (if (vector? bvec) bvec [])))]
             (doseq [b (drop 2 form)] (rec b ls)))
           (or (= h (quote for)) (= h (quote doseq)))
-          (let [bvec (if (vector? (second form)) (second form) []) ls (loop [pairs (partition 2 bvec) ls locals] (if-let [[k v] (first pairs)] (cond (= k :let) (recur (rest pairs) (reduce (fn
+          (let [bvec (if (vector? (second form)) (second form) []) ls (loop [pairs Any (partition 2 bvec) ls Any locals] (if-let [[k v] (first pairs)] (cond (= k :let) (recur (rest pairs) (reduce (fn
                                                                                                                                                                                               [(l Any)
                                                                                                                                                                                                (pair Any)]
                                                                                                                                                                                               Any

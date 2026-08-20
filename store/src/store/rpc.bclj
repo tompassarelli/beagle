@@ -23,7 +23,7 @@
                  "TermCodecV1 limits must be positive and depth at most 256")))
 
 (defn- utf8-length! [(value String) (maximum Int) (label String)] Int
-  (loop [index 0 total 0]
+  (loop [index Int 0 total Int 0]
     (if (>= index (count value))
       total
       (let [unit (int (.charAt value index))
@@ -83,7 +83,7 @@
 (defn- codec-write-u32-le! [(out Any) (value Int)] Nil
   (if (and (>= value 0) (<= value 4294967295))
     (do
-      (loop [offset 0]
+      (loop [offset Int 0]
         (if (< offset 4)
           (do
             (codec-write-u8! out (unsigned-bit-shift-right value (* offset 8)))
@@ -93,7 +93,7 @@
     (codec-fail! :term-codec-integer-range "u32 value is out of range")))
 
 (defn- codec-write-i64-le! [(out Any) (value Int)] Nil
-  (loop [offset 0]
+  (loop [offset Int 0]
     (if (< offset 8)
       (do
         (codec-write-u8! out (unsigned-bit-shift-right value (* offset 8)))
@@ -778,7 +778,7 @@
     (rpc-response! space op served page error payload)))
 
 (defn- rpc-magic-valid! [(buffer Any)] Bool
-  (loop [index 0 valid true]
+  (loop [index Int 0 valid Bool true]
     (if (< index 8)
       (let [actual (rpc-read-u8! buffer "magic")
             expected (bit-and 255 (int (aget store-rpc-v2-magic index)))]
@@ -876,7 +876,7 @@
           rpc-list-end (reverse values)))
 
 (defn rpc-list-values! [(value Any)] (Vec Any)
-  (loop [(cursor Any) value (result (Vec Any)) [] (count-value Int) 0]
+  (loop [cursor Any value result (Vec Any) [] count-value Int 0]
     (cond
       [(= cursor rpc-list-end) result]
       [(>= count-value rpc-v2-max-term-nodes)

@@ -39,7 +39,7 @@
   (string-term (t/triple-t3 value)))
 
 (defn- vec-contains? [(values (Vec String)) (wanted String)] Bool
-  (loop [remaining values]
+  (loop [remaining (Vec String) values]
     (if (empty? remaining)
       false
       (if (= (first remaining) wanted)
@@ -130,7 +130,7 @@
 
 (defn- fallback-ref? [(registry PredicateRegistry) (predicate String)] Bool
   (let [identity (predicate-id registry predicate)]
-    (loop [remaining ref-predicates]
+    (loop [remaining (Vec String) ref-predicates]
       (if (empty? remaining)
         false
         (if (= identity (predicate-id registry (first remaining)))

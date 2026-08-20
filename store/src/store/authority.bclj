@@ -34,7 +34,7 @@
 
 (defn unicode-scalar-string? [(value Any)] Bool
   (if (string? value)
-    (loop [i 0]
+    (loop [i Int 0]
       (if (>= i (count value))
         true
         (let [n (int (.charAt value i))]
@@ -72,7 +72,7 @@
   (if (string? value)
     (and (unicode-scalar-string? value)
       (java.text.Normalizer/isNormalized value java.text.Normalizer$Form/NFC)
-      (loop [i 0]
+      (loop [i Int 0]
         (if (>= i (count value))
           true
           (let [n (int (.charAt value i))]
@@ -303,7 +303,7 @@
     false))
 
 (defn- source-extension [(path String)] String?
-  (loop [extensions beagle-source-extensions]
+  (loop [extensions (Vec String) beagle-source-extensions]
     (if (empty? extensions)
       nil
       (if (str/ends-with? path (first extensions))
@@ -320,7 +320,7 @@
 
 (defn unsigned-utf8-compare [(a String) (b String)] Int
   (let [aa (vec (.getBytes a java.nio.charset.StandardCharsets/UTF_8)) bb (vec (.getBytes b java.nio.charset.StandardCharsets/UTF_8)) stop (min (count aa) (count bb))]
-    (loop [i 0]
+    (loop [i Int 0]
       (if (= i stop)
         (compare (count aa) (count bb))
         (let [av (bit-and (int (nth aa i)) 255) bv (bit-and (int (nth bb i)) 255)]

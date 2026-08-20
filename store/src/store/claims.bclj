@@ -168,7 +168,7 @@
         (if (nil? t) nil (store.rt/parse-edn (str t)))))))
 
 (defn- version-chain [(co Any) (vid Any)] Any
-  (loop [v vid acc {}]
+  (loop [v Any vid acc Any {}]
     (if (or (nil? v) (contains? acc v))
       acc
       (let [r (version-record-of co v)]
@@ -177,7 +177,7 @@
 ;; A version record's overlay is authoritative for the slots it names; every
 ;; other slot, and every :inherit entry, defers to the record's :base.
 (defn- resolve-slot [(versions Any) (version Any) (slot Any)] Any
-  (loop [vid version]
+  (loop [vid Any version]
     (if (nil? vid)
       nil
       (let [record (get versions vid)]
@@ -193,7 +193,7 @@
               [:else {:blob-id (get e :blob-id)}])))))))
 
 (defn- chain-slots [(versions Any) (version Any)] Any
-  (loop [vid version acc []]
+  (loop [vid Any version acc Any []]
     (if (nil? vid)
       (vec (distinct acc))
       (let [record (get versions vid)]

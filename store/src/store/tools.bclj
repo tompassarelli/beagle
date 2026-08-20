@@ -76,7 +76,7 @@
   ["depends_on" "part_of" "relates_to" "clarifies" "amends"])
 
 (defn- fallback-ref? [(pred String)] Bool
-  (loop [remaining ref-kind-fallback]
+  (loop [remaining (Vec String) ref-kind-fallback]
     (if (empty? remaining)
       false
       (if (= pred (first remaining)) true (recur (rest remaining))))))
@@ -214,7 +214,7 @@
 
 ;; --- dispatch ---------------------------------------------------------------
 (defn- spec-by-name [(cat (Vec ToolSpec)) (name String)] ToolSpec?
-  (loop [cs cat]
+  (loop [cs (Vec ToolSpec) cat]
     (if (empty? cs)
       nil
       (if (= (:name (first cs)) name) (first cs) (recur (rest cs))))))

@@ -45,7 +45,7 @@
 (defn- split-doc [(content String)] Doc
   (let [lines (store.rt/split-on content "\n")
         n (count lines)]
-    (loop [i 0]
+    (loop [i Int 0]
       (cond
         [(>= i n) (->Doc content "")]
         [(= "---" (str/trim (nth lines i)))
@@ -136,7 +136,7 @@
 
 (defn- fallback-ref? [(registry PredicateRegistry) (predicate String)] Bool
   (let [identity (predicate-id registry predicate)]
-    (loop [remaining ref-predicates]
+    (loop [remaining (Vec String) ref-predicates]
       (if (empty? remaining)
         false
         (if (= identity (predicate-id registry (first remaining)))
@@ -183,7 +183,7 @@
         lines (store.rt/split-on (doc-head doc) "\n")
         n (count lines)
         subject-index
-        (loop [i 0]
+        (loop [i Int 0]
           (cond
             [(>= i n) -1]
             [(str/starts-with? (str/trim (nth lines i)) "@") i]
@@ -197,7 +197,7 @@
         [])
       (let [(subject String) (str/trim (nth lines subject-index))
             (triples (Vec t/Triple))
-            (loop [(i Int) (+ subject-index 1) (acc (Vec t/Triple)) []]
+            (loop [i Int (+ subject-index 1) acc (Vec t/Triple) []]
               (if (>= i n)
                 acc
                 (let [line (str/trim (nth lines i))]
@@ -222,7 +222,7 @@
       [])))
 
 (defn- number-records [(triples (Vec t/Triple))] (Vec t/TransactionRecord)
-  (loop [(position Int) 0 (records (Vec t/TransactionRecord)) []]
+  (loop [position Int 0 records (Vec t/TransactionRecord) []]
     (if (>= position (count triples))
       records
       (recur (+ position 1)

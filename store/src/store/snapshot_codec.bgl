@@ -268,7 +268,7 @@
 (defn- append-snapshot-labels! [(out wire/Encoder) (labels (Vec String))] Nil
   (do
     (wire/append-u32-le! out (count labels))
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count labels))
         nil
         (do
@@ -288,7 +288,7 @@
       (append-record! out payload))))
 
 (defn- append-atom-records! [(out wire/Encoder) (rows (Vec t/AtomRow))] Nil
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       nil
       (do
@@ -296,7 +296,7 @@
         (recur (+ position 1))))))
 
 (defn- append-triple-records! [(out wire/Encoder) (rows (Vec t/TripleRow))] Nil
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       nil
       (do
@@ -305,7 +305,7 @@
 
 (defn- append-transaction-records!
   [(out wire/Encoder) (rows (Vec t/TransactionRow))] Nil
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       nil
       (do
@@ -314,7 +314,7 @@
 
 (defn- append-operation-records!
   [(out wire/Encoder) (rows (Vec t/OperationRow))] Nil
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       nil
       (do
@@ -422,7 +422,7 @@
         (wire/decoder-error! decoder
                              "snapshot log set exceeds its label bound")
         empty-labels)
-      (loop [(position Int) 0 (current (Vec String)) empty-labels]
+      (loop [position Int 0 current (Vec String) empty-labels]
         (if (>= position label-count)
           current
           (recur (+ position 1)
@@ -517,11 +517,11 @@
    (space-id String)
    (next-sequence Int)]
   ReadResult
-  (loop [(position Int) start
-         (atoms (Vec t/AtomRow)) empty-atom-rows
-         (triples (Vec t/TripleRow)) empty-triple-rows
-         (transactions (Vec t/TransactionRow)) empty-transaction-rows
-         (operations (Vec t/OperationRow)) empty-operation-rows]
+  (loop [position Int start
+         atoms (Vec t/AtomRow) empty-atom-rows
+         triples (Vec t/TripleRow) empty-triple-rows
+         transactions (Vec t/TransactionRow) empty-transaction-rows
+         operations (Vec t/OperationRow) empty-operation-rows]
     (cond
       [(> (+ position 8) (count bytes))
        (failed-read "snapshot trailer is missing")]
@@ -572,7 +572,7 @@
                  (failed-read "snapshot record has an unknown kind")]))]))])))
 
 (defn- magic-at-start? [(bytes ByteSource)] Bool
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count snapshot-magic))
       true
       (if (= (nth bytes position) (nth snapshot-magic position))
@@ -614,7 +614,7 @@
 
 ;; The nine sidecar checks the declared contract names, answered against the log.
 (defn- label-present? [(labels (Vec String)) (label String)] Bool
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count labels))
       false
       (if (= label (nth labels position))

@@ -34,7 +34,7 @@
   (rr/head-sym ctx view e))
 
 (defn- wrapper [(ctx (U ri/Graph Nil)) (view Any) (ents (Vec Any))] Any
-  (loop [i 0]
+  (loop [i Int 0]
     (if (>= i (count ents))
       nil
       (let [e (nth ents i)]
@@ -50,7 +50,7 @@
 
 (defn ns-form [(ctx (U ri/Graph Nil)) (view Any) (ents (Vec Any))] Any
   (let [fs (forms-of ctx view ents)]
-    (loop [i 0]
+    (loop [i Int 0]
       (if (>= i (count fs))
         nil
         (let [f (nth fs i)] (if (= "ns" (hd ctx view f)) f (recur (inc i))))))))
@@ -93,10 +93,10 @@
    (modn Any)
    (kids (Vec Any))]
   (Map Keyword Any)
-  (let [idx (fn [(kw String)] Int? (loop [i 0] (if (>= i (count kids)) nil (if (= kw (str (sv ctx view (nth kids i)))) i (recur (inc i)))))) ri (idx ":refer") ai (idx ":as") rri (idx ":rename") nb (if (nil? ri) nil (nth kids (inc ri) nil)) refers (if (and (some? nb) (rb/brackets? ctx view nb)) (vec (keep (fn
+  (let [idx (fn [(kw String)] Int? (loop [i Int 0] (if (>= i (count kids)) nil (if (= kw (str (sv ctx view (nth kids i)))) i (recur (inc i)))))) ri (idx ":refer") ai (idx ":as") rri (idx ":rename") nb (if (nil? ri) nil (nth kids (inc ri) nil)) refers (if (and (some? nb) (rb/brackets? ctx view nb)) (vec (keep (fn
                                                                                                                                                                                                                                                                                                                     [(k Any)]
                                                                                                                                                                                                                                                                                                                     Any
-                                                                                                                                                                                                                                                                                                                    (sv ctx view k)) (vec (rest (rr/ordered-children ctx nb))))) []) alias (if (nil? ai) nil (sv ctx view (nth kids (inc ai) nil))) rmap (let [mb (if (nil? rri) nil (nth kids (inc rri) nil))] (if (and (some? mb) (rb/map-node? ctx view mb)) (loop [(cs (Vec Any)) (vec (rest (rr/ordered-children ctx mb))) (m (Vec Any)) []] (if (< (count cs) 2) m (recur (vec (drop 2 cs)) (conj m [(sv ctx view (nth cs 0)) (sv ctx view (nth cs 1))])))) [])) a1 (if (empty? refers) acc (assoc acc :refer (reduce (fn
+                                                                                                                                                                                                                                                                                                                    (sv ctx view k)) (vec (rest (rr/ordered-children ctx nb))))) []) alias (if (nil? ai) nil (sv ctx view (nth kids (inc ai) nil))) rmap (let [mb (if (nil? rri) nil (nth kids (inc rri) nil))] (if (and (some? mb) (rb/map-node? ctx view mb)) (loop [cs (Vec Any) (vec (rest (rr/ordered-children ctx mb))) m (Vec Any) []] (if (< (count cs) 2) m (recur (vec (drop 2 cs)) (conj m [(sv ctx view (nth cs 0)) (sv ctx view (nth cs 1))])))) [])) a1 (if (empty? refers) acc (assoc acc :refer (reduce (fn
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               [(m (Map Any Any))
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                (n Any)]
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               (Map Any Any)
@@ -115,7 +115,7 @@
                                                    [(acc (Map Keyword Any))
                                                     (f Any)]
                                                    (Map Keyword Any)
-                                                   (if (= "require" (hd ctx view f)) (let [kids (rr/ordered-children ctx f)] (merge-import-opts ctx view acc (sv ctx view (nth kids 1 nil)) (vec (drop 2 kids)))) acc)) {:refer {} :as {} :rename {}} fs) nf (ns-form ctx view ents) reqs (if (nil? nf) nil (loop [(cs (Vec Any)) (rr/ordered-children ctx nf)] (if (empty? cs) nil (let [c (nth cs 0)] (if (and (= "list" (rr/kind-of ctx view c)) (= ":require" (str (sv ctx view (nth (rr/ordered-children ctx c) 0 nil))))) c (recur (vec (rest cs))))))))]
+                                                   (if (= "require" (hd ctx view f)) (let [kids (rr/ordered-children ctx f)] (merge-import-opts ctx view acc (sv ctx view (nth kids 1 nil)) (vec (drop 2 kids)))) acc)) {:refer {} :as {} :rename {}} fs) nf (ns-form ctx view ents) reqs (if (nil? nf) nil (loop [cs (Vec Any) (rr/ordered-children ctx nf)] (if (empty? cs) nil (let [c (nth cs 0)] (if (and (= "list" (rr/kind-of ctx view c)) (= ":require" (str (sv ctx view (nth (rr/ordered-children ctx c) 0 nil))))) c (recur (vec (rest cs))))))))]
     (if (nil? reqs)
       bare
       (reduce (fn [(acc (Map Keyword Any)) (spec Any)] (Map Keyword Any) (if (rb/brackets? ctx view spec) (let [kids (vec (rest (rr/ordered-children ctx spec)))] (merge-import-opts ctx view acc (sv ctx view (nth kids 0 nil)) (vec (rest kids)))) acc))

@@ -438,7 +438,7 @@
     (+ b0 (bit-shift-left b1 8))))
 
 (defn read-u32-le! [(decoder Decoder) (context String)] Int
-  (loop [offset 0 value 0]
+  (loop [offset Int 0 value Int 0]
     (if (< offset 4)
       (recur (+ offset 1)
              (bit-or value
@@ -446,7 +446,7 @@
       value)))
 
 (defn read-i64-le! [(decoder Decoder) (context String)] Int
-  (loop [offset 0 value 0]
+  (loop [offset Int 0 value Int 0]
     (if (< offset 8)
       (recur (+ offset 1)
              (bit-or value
@@ -475,7 +475,7 @@
         nil)))
 
 (defn append-u16-le! [(encoder Encoder) (value Int)] Nil
-  (loop [offset 0]
+  (loop [offset Int 0]
     (if (< offset 2)
       (do
         (append-u8! encoder
@@ -485,7 +485,7 @@
 
 (defn append-u32-le! [(encoder Encoder) (value Int)] Nil
   (if (and (>= value 0) (<= value 4294967295))
-    (loop [offset 0]
+    (loop [offset Int 0]
       (if (< offset 4)
         (do
           (append-u8! encoder
@@ -495,7 +495,7 @@
     (encoder-error! encoder "Store RPC u32 value is out of range")))
 
 (defn append-i64-le! [(encoder Encoder) (value Int)] Nil
-  (loop [offset 0]
+  (loop [offset Int 0]
     (if (< offset 8)
       (do
         (append-u8! encoder
@@ -509,7 +509,7 @@
 ;; Push, never `into`: the native arena is bump-only, so rebuilding the byte
 ;; cell costs one arena copy of everything appended so far.
 (defn append-bytes! [(encoder Encoder) (bytes (Vec Int))] Nil
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count bytes))
       nil
       (do
@@ -863,7 +863,7 @@
      (wirefields_rpc-v2-request-body_request-payload fields))))
 
 (defn magic-valid! [(decoder Decoder)] Bool
-  (loop [index 0 valid true]
+  (loop [index Int 0 valid Bool true]
     (if (< index (count store-rpc-v2-magic))
       (recur (+ index 1)
              (and valid

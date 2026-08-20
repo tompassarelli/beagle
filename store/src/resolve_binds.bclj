@@ -149,7 +149,7 @@
       (tail ctx bracket))))
 
 (defn let-type-nodes [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [(nodes (Vec Any)) (tail ctx bracket) (types (Vec Any)) []]
+  (loop [nodes (Vec Any) (tail ctx bracket) types (Vec Any) []]
     (if (empty? nodes)
       types
       (let [parts (typed-binding-parts ctx view (nth nodes 0 nil)) type-node (if (nil? parts) nil (get parts :type))]
@@ -157,7 +157,7 @@
           (if (nil? type-node) types (conj types type-node)))))))
 
 (defn for-type-nodes [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [(nodes (Vec Any)) (tail ctx bracket) (types (Vec Any)) []]
+  (loop [nodes (Vec Any) (tail ctx bracket) types (Vec Any) []]
     (if (empty? nodes)
       types
       (let [binding (nth nodes 0 nil) marker (str (sv ctx view binding)) value (nth nodes 1 nil) rest-nodes (vec (drop 2 nodes))]
@@ -187,7 +187,7 @@
           []
           (tail ctx n))
         (map-node? ctx view n)
-        (loop [(ks (Vec Any)) (tail ctx n) (acc (Vec Any)) []]
+        (loop [ks (Vec Any) (tail ctx n) acc (Vec Any) []]
           (if (empty? ks)
             acc
             (let [k (first ks) kv (sv ctx view k) v2 (nth ks 1 nil) ks2 (vec (drop 2 ks))]
@@ -220,7 +220,7 @@
     (let [parts (typed-binding-parts ctx view node) binding (if (nil? parts) node (get parts :binding))]
       (cond
       (map-node? ctx view binding)
-      (loop [(ks (Vec Any)) (tail ctx binding) (acc (Vec Any)) []]
+      (loop [ks (Vec Any) (tail ctx binding) acc (Vec Any) []]
         (if (empty? ks)
           acc
           (let [k (first ks) kv (sv ctx view k) v2 (nth ks 1 nil) ks2 (vec (drop 2 ks))]
@@ -245,7 +245,7 @@
       []))))
 
 (defn param-binds [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [(ks (Vec Any)) (tail ctx bracket) (binds (Vec Any)) []]
+  (loop [ks (Vec Any) (tail ctx bracket) binds (Vec Any) []]
     (if (empty? ks)
       binds
       (let [node (first ks) parts (typed-binding-parts ctx view node) binding (if (nil? parts) node (get parts :binding))]
@@ -253,7 +253,7 @@
           (into binds (collect-bind-syms ctx view binding)))))))
 
 (defn let-bind-pairs [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [(ks (Vec Any)) (tail ctx bracket) (acc (Vec Any)) []]
+  (loop [ks (Vec Any) (tail ctx bracket) acc (Vec Any) []]
     (if (empty? ks)
       acc
       (let [raw-pat (first ks) parts (typed-binding-parts ctx view raw-pat) pat (if (nil? parts) raw-pat (get parts :binding)) val (nth ks 1 nil) constraint (if (nil? parts) nil (get parts :constraint))]
@@ -265,7 +265,7 @@
              constraint]))))))
 
 (defn for-bind-pairs [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
-  (loop [(ks (Vec Any)) (tail ctx bracket) (acc (Vec Any)) []]
+  (loop [ks (Vec Any) (tail ctx bracket) acc (Vec Any) []]
     (if (empty? ks)
       acc
       (let [k (first ks) kv (sv ctx view k) v (nth ks 1 nil) ks2 (vec (drop 2 ks))]

@@ -49,7 +49,7 @@
   (str "f" (str/join "." path) "~" tie))
 
 (defn ord-veccmp [(a (Vec Int)) (b (Vec Int))] Int
-  (loop [i 0]
+  (loop [i Int 0]
     (let [ae (>= i (count a)) be (>= i (count b))]
       (cond
         (and ae be)
@@ -79,7 +79,7 @@
     (ord-append lo)
     :else
     (let [lo2 (if (nil? lo) [0] lo)]
-      (loop [(i Int) 0 (acc (Vec Int)) []]
+      (loop [i Int 0 acc (Vec Int) []]
         (let [a (if (< i (count lo2)) (nth lo2 i) 0) b (if (< i (count hi)) (nth hi i) (+ a (* 2 ORD-STEP)))]
           (if (> (- b a) 1)
             (conj acc (quot (+ a b) 2))

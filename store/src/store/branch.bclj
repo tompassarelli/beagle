@@ -245,9 +245,9 @@
             (fail "branch ref CRC does not match" :invalid-branch-ref)]
            [:else
             (let [(segments (Vec SegmentRecord))
-                  (loop [(index Int) 2
-                         (known Any) #{}
-                         (acc (Vec SegmentRecord)) []]
+                  (loop [index Int 2
+                         known Any #{}
+                         acc (Vec SegmentRecord) []]
                     (if (>= index (dec (count lines)))
                       acc
                       (let [(line String) (nth lines index)]
@@ -268,7 +268,7 @@
 ;; The last transaction the sealed chain names, or 0 when it names none.
 (defn chain-end-sequence [(document RefDocument)] Int
   (let [(segments (Vec SegmentRecord)) (refdocument-segments document)]
-    (loop [(index Int) (dec (count segments))]
+    (loop [index Int (dec (count segments))]
       (if (neg? index)
         0
         (let [(end Int)

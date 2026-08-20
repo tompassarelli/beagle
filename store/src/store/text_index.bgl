@@ -112,7 +112,7 @@
         (row-count Int) (count rows)
         (empty-postings (Map String (Vec Int))) {}
         (postings (Map String (Vec Int)))
-        (loop [(handle Int) 0 (current (Map String (Vec Int))) empty-postings]
+        (loop [handle Int 0 current (Map String (Vec Int)) empty-postings]
           (if (>= handle row-count)
             current
             (let [(value Any) (t/triple-t3 (nth rows handle))]
@@ -158,8 +158,8 @@
   (let [(empty-handles (Vec Int)) []]
     (if (empty? posting-vectors)
       empty-handles
-      (loop [(position Int) 1
-             (best (Vec Int)) (nth posting-vectors 0)]
+      (loop [position Int 1
+             best (Vec Int) (nth posting-vectors 0)]
         (if (>= position (count posting-vectors))
           best
           (let [(candidate (Vec Int)) (nth posting-vectors position)]
@@ -207,7 +207,7 @@
       (let [(tokens (Vec String)) (textneedleresult-tokens needle-result)
             (rows (Vec t/Triple)) (textcandidatesource-rows source)
             (handles (Vec Int))
-            (loop [(handle Int) 0 (matches (Vec Int)) []]
+            (loop [handle Int 0 matches (Vec Int) []]
               (if (>= handle (count rows))
                 matches
                 (let [(value Any) (t/triple-t3 (nth rows handle))

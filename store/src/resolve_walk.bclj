@@ -161,7 +161,7 @@
 (defn- ar [(w Walk) (nm Any)] Any (let [f (:ares w)] (f nm)))
 
 (defn- scope-lookup [(scope (Vec Any)) (nm Any)] Any
-  (loop [i 0]
+  (loop [i Int 0]
     (if (>= i (count scope))
       nil
       (let [hit (get (nth scope i) nm)] (if (nil? hit) (recur (inc i)) hit)))))
@@ -294,7 +294,7 @@
 
 (defn walk-quasi-seq!
   [(w Walk) (children (Vec Any)) (scope (Vec Any)) (quoted? Bool) (wf Any)] Any
-  (loop [(cs (Vec Any)) children]
+  (loop [cs (Vec Any) children]
     (if (empty? cs)
       nil
       (let [v (sv w (nth cs 0 nil))]

@@ -716,7 +716,7 @@
   (vec (keep (fn [(cid Any)] Any (let [p (ri/predicate-at ctx cid) r (ri/target-at ctx cid)] (when (and (some? r) (string? p) (or (rc/ord-pos? p) (re-matches STRUCTURAL-SEG-RE p) (re-matches STRUCTURAL-COMMENT-RE p) (= p "tail"))) r))) (ri/by-subject ctx n))))
 
 (defn structural-descendants [(ctx ri/Graph) (root Any)] (Set Any)
-  (loop [seen #{} stack [root]]
+  (loop [seen (Set Any) #{} stack (Vec Any) [root]]
     (if (empty? stack)
       seen
       (let [n (peek stack)]

@@ -121,7 +121,7 @@
      :rpc/record)))
 
 (defn read-list [(value Any)] ValuesResult
-  (loop [(cursor Any) value (values (Vec Any)) [] (count-value Int) 0]
+  (loop [cursor Any value values (Vec Any) [] count-value Int 0]
     (cond
       [(= cursor :rpc/list-end) (values-ok values)]
       [(>= count-value max-list-values)
@@ -422,7 +422,7 @@
       :term-depth-exceeded
       "batch action count exceeds the TermCodecV1 depth bound")]
     [:else
-     (loop [(remaining (Vec Any)) values (index Int) 0 (actions (Vec Action)) []]
+     (loop [remaining (Vec Any) values index Int 0 actions (Vec Action) []]
        (if (empty? remaining)
          (->ActionPlan true actions nil nil)
          (let [(parsed ActionResult) (parse-action (first remaining) index)
@@ -445,7 +445,7 @@
       propositions))))
 
 (defn remove-last-equal [(values (Vec t/Triple)) (target t/Triple)] Removal
-  (loop [index (dec (count values))]
+  (loop [index Int (dec (count values))]
     (if (< index 0)
       (->Removal values false)
       (if (= target (nth values index))
@@ -462,7 +462,7 @@
 ;; operation or decision it produces. Materializing every live proposition is
 ;; an O(store) walk per mutation; it must not run for plans that cannot read it.
 (defn plan-reads-live? [(actions (Vec Action))] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count actions))
       false
       (let [(action Action) (nth actions index)]
@@ -473,10 +473,10 @@
 
 (defn prepare-actions
   [(live (Vec t/Triple)) (actions (Vec Action))] PreparedMutation
-  (loop [(remaining (Vec Action)) actions
-         (simulated (Vec t/Triple)) live
-         (operations (Vec t/CommitOperation)) []
-         (decisions (Vec Decision)) []]
+  (loop [remaining (Vec Action) actions
+         simulated (Vec t/Triple) live
+         operations (Vec t/CommitOperation) []
+         decisions (Vec Decision) []]
     (if (empty? remaining)
       (->PreparedMutation true operations decisions nil nil)
       (let [(action Action) (first remaining)
@@ -572,9 +572,9 @@
   (if transaction
     (let [(present-transaction t/Triple) transaction
           (results (Vec t/Triple))
-          (loop [(remaining (Vec Decision)) decisions
-                 (ordinal Int) 0
-                 (values (Vec t/Triple)) []]
+          (loop [remaining (Vec Decision) decisions
+                 ordinal Int 0
+                 values (Vec t/Triple) []]
             (if (empty? remaining)
               values
               (let [(decision Decision) (first remaining)]

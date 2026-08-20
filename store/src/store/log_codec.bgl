@@ -92,12 +92,12 @@
   (if error error fallback))
 
 (defn crc32 [(bytes (Vec Int))] Int
-  (loop [position 0 crc crc32-mask]
+  (loop [position Int 0 crc Int crc32-mask]
     (if (>= position (count bytes))
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
             next-crc
-            (loop [bit 0 value mixed]
+            (loop [bit Int 0 value Int mixed]
               (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
@@ -108,12 +108,12 @@
         (recur (+ position 1) (bit-and crc32-mask next-crc))))))
 
 (defn crc32-source [(bytes ByteSource)] Int
-  (loop [position 0 crc crc32-mask]
+  (loop [position Int 0 crc Int crc32-mask]
     (if (>= position (count bytes))
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
             next-crc
-            (loop [bit 0 value mixed]
+            (loop [bit Int 0 value Int mixed]
               (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
@@ -124,12 +124,12 @@
         (recur (+ position 1) (bit-and crc32-mask next-crc))))))
 
 (defn crc32-range-source [(bytes ByteSource) (start Int) (end Int)] Int
-  (loop [position start crc crc32-mask]
+  (loop [position Int start crc Int crc32-mask]
     (if (>= position end)
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
             next-crc
-            (loop [bit 0 value mixed]
+            (loop [bit Int 0 value Int mixed]
               (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
@@ -140,12 +140,12 @@
         (recur (+ position 1) (bit-and crc32-mask next-crc))))))
 
 (defn crc32-range [(bytes (Vec Int)) (start Int) (end Int)] Int
-  (loop [position start crc crc32-mask]
+  (loop [position Int start crc Int crc32-mask]
     (if (>= position end)
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
             next-crc
-            (loop [bit 0 value mixed]
+            (loop [bit Int 0 value Int mixed]
               (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
@@ -160,7 +160,7 @@
      (bit-shift-left (nth bytes (+ position 1)) 8)))
 
 (defn u32-le-at [(bytes ByteSource) (position Int)] Int
-  (loop [offset 0 value 0]
+  (loop [offset Int 0 value Int 0]
     (if (>= offset 4)
       value
       (recur
@@ -172,7 +172,7 @@
 (defn magic-at-start? [(bytes ByteSource)] Bool
   (if (< (count bytes) (count store-log-magic))
     false
-    (loop [position 0]
+    (loop [position Int 0]
       (if (>= position (count store-log-magic))
         true
         (if (= (nth bytes position) (nth store-log-magic position))
@@ -237,7 +237,7 @@
            (->RecordDecodeResult
             nil "Store transaction log record operation count is invalid")]
           [:else
-           (loop [(ordinal Int) 0 (operations (Vec t/CommitOperation)) []]
+           (loop [ordinal Int 0 operations (Vec t/CommitOperation) []]
              (if (>= ordinal operation-count)
                (let [error (deref (wire/decoder-error decoder))]
                  (cond
@@ -393,9 +393,9 @@
             false :invalid-transaction-record
             "Store transaction log record operation count is invalid")]
           [:else
-           (loop [(ordinal Int) 0
-                  (actions (Vec Keyword)) no-actions
-                  (handles (Vec Int)) no-handles]
+           (loop [ordinal Int 0
+                  actions (Vec Keyword) no-actions
+                  handles (Vec Int) no-handles]
              (if (>= ordinal operation-count)
                (if (not= 0 (wire/decoder-remaining decoder))
                  (term-store/->TransactionReplayResult
@@ -437,7 +437,7 @@
   [(stream BootStream) (bytes ByteSource) (position Int)] BootStream
   ;; replay is a loop, not a self-call: one C stack entry per Store transaction
   ;; log record overflows the wasm stack a few hundred commits in.
-  (loop [(stream BootStream) stream (position Int) position]
+  (loop [stream BootStream stream position Int position]
     (let [remaining (- (count bytes) position)]
       (cond
         [(< remaining 4) stream]
@@ -561,7 +561,7 @@
    (root (Atom t/TermStore))
    (header-bytes Int)]
   BootResult
-  (loop [valid-log-bytes header-bytes]
+  (loop [valid-log-bytes Int header-bytes]
     (let [remaining (wire/decoder-remaining decoder)]
       (cond
         [(= remaining 0)
@@ -712,10 +712,10 @@
    (end-sequence Int)
    (sealed Bool)]
   ChainFold
-  (loop [(position Int) header-bytes
-         (first-record Bool) true
-         (first-sequence Int) 0
-         (last-sequence Int) 0]
+  (loop [position Int header-bytes
+         first-record Bool true
+         first-sequence Int 0
+         last-sequence Int 0]
     (let [remaining (- (count bytes) position)
           short-piece
           (if sealed
@@ -797,7 +797,7 @@
       [:else
        (let [(total Int) (+ (count segments) 1)
              (chain-bytes Int)
-             (loop [(index Int) 0 (counted Int) 0]
+             (loop [index Int 0 counted Int 0]
                (if (>= index total)
                  counted
                  (recur (inc index)
@@ -808,9 +808,9 @@
              (term-store/open-fold!
               (term-store/new-term-store-for-log
                (headerfields-space-id first-header) chain-bytes))]
-         (loop [(index Int) 0
-                (tail-valid-bytes Int) 0
-                (expected-next Int) 1]
+         (loop [index Int 0
+                tail-valid-bytes Int 0
+                expected-next Int 1]
            (if (>= index total)
              (successful-boot! root tail-valid-bytes [])
              (let [piece (chain-piece-at segments tail index)
@@ -876,7 +876,7 @@
       (do
         (append-store-log-transaction-payload!
          payload sequence (count operations))
-        (loop [ordinal 0]
+        (loop [ordinal Int 0]
           (if (< ordinal (count operations))
             (let [operation (nth operations ordinal)
                   action (t/commitoperation-action operation)

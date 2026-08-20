@@ -47,7 +47,7 @@
     (t/triple :rpc/some value :rpc/option)))
 
 (defn read-list [(value Any)] ValuesResult
-  (loop [(cursor Any) value (values (Vec Any)) [] (count-value Int) 0]
+  (loop [cursor Any value values (Vec Any) [] count-value Int 0]
     (cond
       [(= cursor :rpc/list-end) (values-ok values)]
       [(>= count-value max-list-values)
@@ -174,9 +174,9 @@
       nil)))
 
 (defn current-lease [(session schema/Session) (resource Any)] LeaseState?
-  (loop [(remaining (Vec t/OperationOccurrence))
+  (loop [remaining (Vec t/OperationOccurrence)
          (rot/by-t12 (schema/view session) resource :kernel/lease)
-         (current LeaseState?) nil]
+         current LeaseState? nil]
     (if (empty? remaining)
       current
       (let [(candidate LeaseState?) (lease-state (first remaining))]

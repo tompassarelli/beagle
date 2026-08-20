@@ -368,7 +368,7 @@
 
 (defn- read-triples! [(buffer ByteBuffer) (atoms Any)] Any
   (let [(row-count Int) (read-count! buffer "TripleRow count" 8)]
-    (loop [position 0 rows [] handles (initial-handles atoms)]
+    (loop [position Int 0 rows Any [] handles Any (initial-handles atoms)]
       (if (>= position row-count)
         rows
         (let [(term Any) (read-term-row! buffer)]
@@ -612,7 +612,7 @@
     (fail "fri: as-of sequence must be non-negative" :invalid-as-of-sequence)
     (let [(dump t/TermStoreDump) (cacheimage-dump image)
           (operations Any) (t/termstoredump-operations dump)]
-      (loop [position 0 active {} live []]
+      (loop [position Int 0 active Any {} live Any []]
         (if (or (>= position (count operations))
                 (> (t/operationrow-tx-sequence (nth operations position)) sequence))
           (vec (keep-indexed (fn [(index Int) (present? Bool)] Any

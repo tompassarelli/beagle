@@ -45,7 +45,7 @@
    "clockify_id"])
 
 (defn vec-member? [(xs (Vec String)) (s String)] Bool
-  (loop [i 0]
+  (loop [i Int 0]
     (if (>= i (count xs)) false (if (= (nth xs i) s) true (recur (+ i 1))))))
 
 (defn emoji-single? [(p String)] Bool (str/starts-with? p "emoji_"))

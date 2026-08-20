@@ -12,7 +12,7 @@
 (def empty-slots TermSlots [])
 
 (defn fresh-slots [(width Int)] TermSlots
-  (loop [(slots TermSlots) empty-slots (position Int) 0]
+  (loop [slots TermSlots empty-slots position Int 0]
     (if (>= position width)
       slots
       (recur (conj slots (atom empty-positions)) (inc position)))))

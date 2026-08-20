@@ -35,12 +35,12 @@
   (and (string? space-id) (pos? (count space-id))))
 
 (defn- term-slots-width-for [(n Int)] Int
-  (loop [width initial-slots]
+  (loop [width Int initial-slots]
     (if (>= (* slot-load width) n) width (recur (* 2 width)))))
 
 (defn- build-atom-term-slots!
   [(atoms (Vec t/AtomRow)) (width Int)] slots/TermSlots
-  (loop [(slots slots/TermSlots) (slots/fresh-slots width) (position Int) 0]
+  (loop [slots slots/TermSlots (slots/fresh-slots width) position Int 0]
     (if (>= position (count atoms))
       slots
       (recur (slots/slot-add! slots (slots/slot-of (nth atoms position) width) position)
@@ -48,7 +48,7 @@
 
 (defn- build-triple-term-slots!
   [(rows (Vec t/TripleRow)) (width Int)] slots/TermSlots
-  (loop [(slots slots/TermSlots) (slots/fresh-slots width) (position Int) 0]
+  (loop [slots slots/TermSlots (slots/fresh-slots width) position Int 0]
     (if (>= position (count rows))
       slots
       (recur (slots/slot-add! slots (slots/slot-of (nth rows position) width) position)
@@ -56,7 +56,7 @@
 
 (defn- build-active-slots!
   [(buckets (Vec t/ActiveBucket)) (width Int)] slots/TermSlots
-  (loop [(slots slots/TermSlots) (slots/fresh-slots width) (position Int) 0]
+  (loop [slots slots/TermSlots (slots/fresh-slots width) position Int 0]
     (if (>= position (count buckets))
       slots
       (recur
@@ -200,7 +200,7 @@
   [(atoms (Vec t/AtomRow)) (slots slots/TermSlots) (value t/AtomRow)] Int
   (let [(positions (Vec Int))
         (deref (nth slots (slots/slot-of value (count slots))))]
-    (loop [offset 0]
+    (loop [offset Int 0]
       (if (>= offset (count positions))
         -1
         (let [position (nth positions offset)]
@@ -212,7 +212,7 @@
   [(rows (Vec t/TripleRow)) (slots slots/TermSlots) (value t/TripleRow)] Int
   (let [(positions (Vec Int))
         (deref (nth slots (slots/slot-of value (count slots))))]
-    (loop [offset 0]
+    (loop [offset Int 0]
       (if (>= offset (count positions))
         -1
         (let [position (nth positions offset)]
@@ -349,7 +349,7 @@
             (t3 Int?) (known-term-handle store (t/triple-t3 term))
             (handles (Vec Int?)) [t1 t2 t3]
             (all-known Bool)
-            (loop [position 0]
+            (loop [position Int 0]
               (if (>= position (count handles))
                 true
                 (if (some? (nth handles position))
@@ -450,7 +450,7 @@
         (buckets (Vec t/ActiveBucket)) (store-active-buckets store)
         (positions (Vec Int))
         (deref (nth slots (slots/slot-of handle (count slots))))]
-    (loop [offset 0]
+    (loop [offset Int 0]
       (if (>= offset (count positions))
         -1
         (let [position (nth positions offset)]
@@ -511,7 +511,7 @@
     store
     (let [(buckets (Vec t/ActiveBucket)) (store-active-buckets store)
           (opened (Vec t/ActiveBucket))
-          (loop [(built (Vec t/ActiveBucket)) empty-active-buckets (position Int) 0]
+          (loop [built (Vec t/ActiveBucket) empty-active-buckets position Int 0]
             (if (>= position (count buckets))
               built
               (recur
@@ -521,7 +521,7 @@
                       empty-ids))
                (inc position))))
           (cells (Vec (Atom (Vec Int))))
-          (loop [(built (Vec (Atom (Vec Int)))) empty-active-cells (position Int) 0]
+          (loop [built (Vec (Atom (Vec Int))) empty-active-cells position Int 0]
             (if (>= position (count buckets))
               built
               (recur
@@ -540,7 +540,7 @@
     (let [(buckets (Vec t/ActiveBucket)) (store-active-buckets store)
           (cells (Vec (Atom (Vec Int)))) (store-active-cells store)
           (closed (Vec t/ActiveBucket))
-          (loop [(built (Vec t/ActiveBucket)) empty-active-buckets (position Int) 0]
+          (loop [built (Vec t/ActiveBucket) empty-active-buckets position Int 0]
             (if (>= position (count buckets))
               built
               (recur
@@ -618,7 +618,7 @@
         (appended t/TermStore)
         (do
           (swap! (t/termstore-transactions store) conj transaction-row)
-          (loop [(ordinal Int) 0]
+          (loop [ordinal Int 0]
             (if (>= ordinal (count operations))
               store
               (let [(operation t/CommitOperation) (nth operations ordinal)
@@ -760,7 +760,7 @@
              (appended t/TermStore)
              (do
                (swap! (t/termstore-transactions before) conj transaction-row)
-               (loop [(ordinal Int) 0]
+               (loop [ordinal Int 0]
                  (if (>= ordinal (count actions))
                    before
                    (let [(row t/OperationRow)
@@ -809,7 +809,7 @@
 
 (defn- first-transaction-after
   [(transactions (Vec t/TransactionRow)) (sequence Int)] Int
-  (loop [low 0 high (count transactions)]
+  (loop [low Int 0 high Int (count transactions)]
     (if (>= low high)
       low
       (let [middle (quot (+ low high) 2)
@@ -858,7 +858,7 @@
      (subvec transactions first end))))
 
 (defn operation-postings [(store t/TermStore)] (Map Int (Vec Int))
-  (loop [(position Int) 0 (postings (Map Int (Vec Int))) {}]
+  (loop [position Int 0 postings (Map Int (Vec Int)) {}]
     (if (>= position (count (store-operations store)))
       postings
       (let [handle
@@ -872,7 +872,7 @@
                            (conj known position)))))))))
 
 (defn- lower-bound-position [(positions (Vec Int)) (target Int)] Int
-  (loop [low 0 high (count positions)]
+  (loop [low Int 0 high Int (count positions)]
     (if (>= low high)
       low
       (let [middle (quot (+ low high) 2)]
@@ -941,8 +941,8 @@
 
 (defn occurrences [(ctx (Atom t/TermStore))] (Vec t/OperationOccurrence)
   (let [(store t/TermStore) (deref ctx)]
-    (loop [(position Int) 0
-           (values (Vec t/OperationOccurrence)) []]
+    (loop [position Int 0
+           values (Vec t/OperationOccurrence) []]
       (if (>= position (count (store-operations store)))
         values
         (recur (inc position)
@@ -950,7 +950,7 @@
 
 (defn withdrawals [(ctx (Atom t/TermStore))] (Vec t/Withdrawal)
   (let [(store t/TermStore) (deref ctx)]
-    (loop [(position Int) 0 (values (Vec t/Withdrawal)) []]
+    (loop [position Int 0 values (Vec t/Withdrawal) []]
       (if (>= position (count (store-operations store)))
         values
         (let [target (nth (store-withdrawal-targets store) position)]
@@ -974,7 +974,7 @@
         (operation-range-bounds store lower-exclusive upper-inclusive)
         (start Int) (nth bounds 0)
         (end Int) (nth bounds 1)]
-    (loop [(position Int) start (rows (Vec (Vec Any))) []]
+    (loop [position Int start rows (Vec (Vec Any)) []]
       (if (>= position end)
         rows
         (let [(target Int) (nth (store-withdrawal-targets store) position)]
@@ -1008,8 +1008,8 @@
   (let [(store t/TermStore) (deref ctx)
         (operations (Vec t/OperationRow)) (store-operations store)
         (total Int) (count operations)]
-    (loop [(position Int) 0
-           (live (Vec t/OperationOccurrence)) []]
+    (loop [position Int 0
+           live (Vec t/OperationOccurrence) []]
       (if (>= position total)
         live
         (if (operation-live? store position (nth operations position))
@@ -1021,7 +1021,7 @@
   (let [(store t/TermStore) (deref ctx)
         (operations (Vec t/OperationRow)) (store-operations store)
         (total Int) (count operations)]
-    (loop [(position Int) 0 (live (Vec t/Triple)) []]
+    (loop [position Int 0 live (Vec t/Triple) []]
       (if (>= position total)
         live
         (let [(row t/OperationRow) (nth operations position)]
@@ -1051,7 +1051,7 @@
          (< (handle-position handle) triple-position))))
 
 (defn- valid-triple-rows? [(atom-count Int) (rows (Vec t/TripleRow))] Bool
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       true
       (let [(row t/TripleRow) (nth rows position)]
@@ -1079,7 +1079,7 @@
    (first-operation Int)
    (operation-count Int)]
   Bool
-  (loop [ordinal 0]
+  (loop [ordinal Int 0]
     (if (>= ordinal operation-count)
       true
       (if (valid-dump-operation?
@@ -1093,7 +1093,9 @@
    (triple-count Int)
    (next-sequence-value Int)]
   Bool
-  (loop [transaction-position 0 operation-position 0 previous-sequence -1]
+  (loop [transaction-position Int 0
+         operation-position Int 0
+         previous-sequence Int -1]
     (if (>= transaction-position (count transactions))
       (and (= operation-position (count operations))
            (if (< previous-sequence 0)
@@ -1129,7 +1131,7 @@
   (let [(atoms (Vec t/AtomRow)) (store-atoms store)
         (triples (Vec t/TripleRow)) (store-triples store)
         (operations (Vec t/OperationRow)) (store-operations store)]
-    (loop [position 0]
+    (loop [position Int 0]
       (if (>= position (count operations))
         nil
         (let [handle (t/operationrow-triple-handle (nth operations position))
@@ -1154,7 +1156,7 @@
             [:else (recur (inc position))]))))))
 
 (defn- valid-atom-rows? [(rows (Vec t/AtomRow))] Bool
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       true
       (if (valid-atom-row? (nth rows position))
@@ -1163,7 +1165,7 @@
 
 (defn- history-sequence-error
   [(transactions (Vec t/TransactionRow))] TransactionRecordsResult?
-  (loop [position 0 previous-sequence 0]
+  (loop [position Int 0 previous-sequence Int 0]
     (if (>= position (count transactions))
       nil
       (let [sequence (t/transactionrow-sequence (nth transactions position))]
@@ -1203,7 +1205,7 @@
         (start Int) (t/transactionrow-first-operation row)
         (stop Int) (+ start (t/transactionrow-operation-count row))
         (operations (Vec t/CommitOperation))
-        (loop [(position Int) start (current (Vec t/CommitOperation)) empty-commit-operations]
+        (loop [position Int start current (Vec t/CommitOperation) empty-commit-operations]
           (if (>= position stop)
             current
             (let [(operation t/OperationRow)
@@ -1226,7 +1228,7 @@
   (let [(transactions (Vec t/TransactionRow)) (store-transactions store)
         (first Int) (first-transaction-after transactions lower-exclusive)
         (end Int) (first-transaction-after transactions upper-inclusive)]
-    (loop [(position Int) first (records (Vec t/TransactionRecord)) empty-transaction-records]
+    (loop [position Int first records (Vec t/TransactionRecord) empty-transaction-records]
       (if (>= position end)
         records
         (recur (inc position)
@@ -1294,7 +1296,7 @@
                   (slots/fresh-slots (term-slots-width-for total)))
           (open-fold-state! store))]
     (close-fold-state!
-     (loop [(position Int) 0]
+     (loop [position Int 0]
        (if (>= position total)
          base
          (do

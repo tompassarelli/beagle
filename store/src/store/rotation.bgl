@@ -155,7 +155,7 @@
   (Vec t/OperationOccurrence)
   (let [(codes (Vec Int)) (bucket-codes bucket)
         (chain (Vec Int)) (bucket-chain bucket)]
-    (loop [(key Int)
+    (loop [key Int
            (nth (bucket-heads bucket)
              (mod (hash-one a) (bucket-width bucket)))]
       (if (< key 0)
@@ -174,7 +174,7 @@
   (Vec t/OperationOccurrence)
   (let [(codes (Vec Int)) (bucket-codes bucket)
         (chain (Vec Int)) (bucket-chain bucket)]
-    (loop [(key Int)
+    (loop [key Int
            (nth (bucket-heads bucket)
              (mod (hash-two a b) (bucket-width bucket)))]
       (if (< key 0)
@@ -194,7 +194,7 @@
    (occurrence t/Triple)]
   t/OperationOccurrence?
   (let [(chain (Vec Int)) (occurrenceindex-chain index)]
-    (loop [(position Int)
+    (loop [position Int
            (nth (occurrenceindex-heads index)
              (mod (hash-one occurrence) (occurrenceindex-width index)))]
       (if (< position 0)
@@ -230,7 +230,7 @@
    (t3 Any)]
   (Vec t/OperationOccurrence)
   (let [(kept Int)
-        (loop [(position Int) 0 (total Int) 0]
+        (loop [position Int 0 total Int 0]
           (if (>= position (count base))
             total
             (recur (inc position)
@@ -239,8 +239,8 @@
                 total))))]
     (if (= kept (count base))
       base
-      (loop [(built (Vec t/OperationOccurrence)) empty-events
-             (position Int) 0]
+      (loop [built (Vec t/OperationOccurrence) empty-events
+             position Int 0]
         (if (>= position (count base))
           built
           (recur
@@ -254,7 +254,7 @@
    (proposition t/Triple)]
   (Vec t/OperationOccurrence)
   (let [(at Int)
-        (loop [(position Int) (dec (count events))]
+        (loop [position Int (dec (count events))]
           (if (< position 0)
             -1
             (if (= proposition (proposition-of (nth events position)))
@@ -262,8 +262,8 @@
               (recur (dec position)))))]
     (if (< at 0)
       events
-      (loop [(built (Vec t/OperationOccurrence)) empty-events
-             (position Int) 0]
+      (loop [built (Vec t/OperationOccurrence) empty-events
+             position Int 0]
         (if (>= position (count events))
           built
           (recur (if (= position at) built (conj built (nth events position)))
@@ -278,7 +278,7 @@
   (Vec t/OperationOccurrence)
   (if (empty? pending)
     base
-    (loop [(events (Vec t/OperationOccurrence)) base (position Int) 0]
+    (loop [events (Vec t/OperationOccurrence) base position Int 0]
       (if (>= position (count pending))
         events
         (let [(op t/OperationOccurrence) (nth pending position)
@@ -382,8 +382,8 @@
         (candidate t/OperationOccurrence?)
         (let [(pending (Vec t/OperationOccurrence))
               (rotation-pending rotation)]
-          (loop [(position Int) 0
-                 (found t/OperationOccurrence?) base]
+          (loop [position Int 0
+                 found t/OperationOccurrence? base]
             (if (>= position (count pending))
               found
               (let [(op t/OperationOccurrence) (nth pending position)]
@@ -399,7 +399,7 @@
             (live (Vec t/OperationOccurrence))
             (by-proposition rotation (proposition-of present))
             (survives Bool)
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count live))
                 false
                 (if (= occurrence (occurrence-of (nth live position)))
@@ -450,13 +450,13 @@
 (def empty-head-cells (Vec (Atom Int)) [])
 
 (defn- fresh-head-cells [(width Int)] (Vec (Atom Int))
-  (loop [(cells (Vec (Atom Int))) empty-head-cells (position Int) 0]
+  (loop [cells (Vec (Atom Int)) empty-head-cells position Int 0]
     (if (>= position width)
       cells
       (recur (conj cells (atom -1)) (inc position)))))
 
 (defn- frozen-heads [(cells (Vec (Atom Int)))] (Vec Int)
-  (loop [(rows (Vec Int)) empty-ints (position Int) 0]
+  (loop [rows (Vec Int) empty-ints position Int 0]
     (if (>= position (count cells))
       rows
       (recur (conj rows (deref (nth cells position))) (inc position)))))
@@ -464,8 +464,8 @@
 (defn- close-event-cells
   [(cells (Vec (Atom (Vec t/OperationOccurrence))))]
   (Vec (Vec t/OperationOccurrence))
-  (loop [(lists (Vec (Vec t/OperationOccurrence))) empty-event-lists
-         (position Int) 0]
+  (loop [lists (Vec (Vec t/OperationOccurrence)) empty-event-lists
+         position Int 0]
     (if (>= position (count cells))
       lists
       (recur (conj lists (deref (nth cells position))) (inc position)))))
@@ -478,7 +478,7 @@
    (heads (Vec (Atom Int)))
    (width Int)]
   (Vec Int)
-  (loop [(chain (Vec Int)) empty-ints (key Int) 0]
+  (loop [chain (Vec Int) empty-ints key Int 0]
     (if (>= key (count codes))
       chain
       (let [(code Int) (nth codes key)
@@ -501,7 +501,7 @@
 ;; doubling: a doubling reallocates the whole slot-cell array and re-links
 ;; every key, and nothing the build allocates is ever given back.
 (defn- initial-bucket-width [(event-count Int)] Int
-  (loop [(width Int) bucket-initial-slots]
+  (loop [width Int bucket-initial-slots]
     (if (>= (* bucket-slot-load width) event-count)
       width
       (recur (* 2 width)))))
@@ -515,7 +515,7 @@
    (shape Int)
    (event t/OperationOccurrence)]
   Int
-  (loop [(key Int) (deref (nth heads slot))]
+  (loop [key Int (deref (nth heads slot))]
     (if (< key 0)
       -1
       (let [(code Int) (nth codes key)]
@@ -532,13 +532,13 @@
    (last-shape Int)
    (initial-width Int)]
   Bucket
-  (loop [(width Int) initial-width
-         (codes (Vec Int)) empty-ints
-         (cells (Vec (Atom (Vec t/OperationOccurrence)))) empty-event-cells
-         (chain (Vec Int)) empty-ints
-         (heads (Vec (Atom Int))) (fresh-head-cells initial-width)
-         (position Int) 0
-         (shape Int) first-shape]
+  (loop [width Int initial-width
+         codes (Vec Int) empty-ints
+         cells (Vec (Atom (Vec t/OperationOccurrence))) empty-event-cells
+         chain (Vec Int) empty-ints
+         heads (Vec (Atom Int)) (fresh-head-cells initial-width)
+         position Int 0
+         shape Int first-shape]
     (if (>= position (count events))
       (->Bucket width codes (close-event-cells cells) (frozen-heads heads)
         chain)
@@ -576,7 +576,7 @@
 (defn- projected-occurrences!
   [(events (Vec t/OperationOccurrence)) (width Int)] OccurrenceIndex
   (let [(heads (Vec (Atom Int))) (fresh-head-cells width)]
-    (loop [(chain (Vec Int)) empty-ints (position Int) 0]
+    (loop [chain (Vec Int) empty-ints position Int 0]
       (if (>= position (count events))
         (->OccurrenceIndex width (frozen-heads heads) chain)
         (let [(event t/OperationOccurrence)
@@ -618,7 +618,7 @@
   (let [(coordinate t/Triple)
         (t/transaction-coordinate space-id (t/transactionrecord-sequence record))
         (operations (Vec t/CommitOperation)) (t/transactionrecord-operations record)]
-    (loop [(built (Vec t/OperationOccurrence)) pending (ordinal Int) 0]
+    (loop [built (Vec t/OperationOccurrence) pending ordinal Int 0]
       (if (>= ordinal (count operations))
         built
         (let [(operation t/CommitOperation) (nth operations ordinal)
@@ -654,9 +654,9 @@
           rotation
           (let [(records (Vec t/TransactionRecord)) (store/transaction-records-between (deref ctx) pinned target)
                 (pending (Vec t/OperationOccurrence))
-                (loop [(built (Vec t/OperationOccurrence))
+                (loop [built (Vec t/OperationOccurrence)
                        (rotation-pending rotation)
-                       (position Int) 0]
+                       position Int 0]
                   (if (>= position (count records))
                     built
                     (recur (pending-with-record built space (nth records position))

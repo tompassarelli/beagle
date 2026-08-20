@@ -431,9 +431,9 @@
                  (empty-query-errors))
                (term-errors head-arguments "rule head"))))]
     (let [body (d/rule-body rule)]
-      (loop [(position Int) 0
-           (bound (Set String)) (empty-string-set)
-           (errors (Vec QueryError)) head-errors]
+      (loop [position Int 0
+             bound (Set String) (empty-string-set)
+             errors (Vec QueryError) head-errors]
         (if (>= position (count body))
           (vec (concat errors (unbound-errors head-arguments bound "rule head")))
           (let [literal (nth body position)]
@@ -479,9 +479,9 @@
 
 (defn- reaches?
   [(start String) (target String) (edges (Map String (Set String)))] Bool
-  (loop [(frontier (Vec String)) (vec (get edges start (empty-string-set)))
-         (position Int) 0
-         (seen (Set String)) (empty-string-set)]
+  (loop [frontier (Vec String) (vec (get edges start (empty-string-set)))
+         position Int 0
+         seen (Set String) (empty-string-set)]
     (if (>= position (count frontier))
       false
       (let [current (nth frontier position)]
@@ -503,7 +503,7 @@
 
 (defn- recursive-builtin? [(rule d/Rule)] Bool
   (let [body (d/rule-body rule)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count body))
         false
         (if (= :builtin (d/literal-kind (nth body position)))
@@ -524,9 +524,9 @@
 
 (defn- forward-errors
   [(strata (Vec (Vec d/Rule))) (all-derived (Set String))] (Vec QueryError)
-  (loop [(position Int) 0
-         (lower (Set String)) base-relations
-         (errors (Vec QueryError)) (empty-query-errors)]
+  (loop [position Int 0
+         lower (Set String) base-relations
+         errors (Vec QueryError) (empty-query-errors)]
     (if (>= position (count strata))
       errors
       (let [stratum (nth strata position)
@@ -638,9 +638,9 @@
   [(plan QueryPlan) (arities (Map String Int))] (Vec QueryError)
   (let [arity (result-arity (queryplan-find plan) arities)
         clause-errors
-        (loop [(remaining (Vec OrderClause)) (queryplan-order plan)
-               (seen (Set Int)) #{}
-               (errors (Vec QueryError)) []]
+        (loop [remaining (Vec OrderClause) (queryplan-order plan)
+               seen (Set Int) #{}
+               errors (Vec QueryError) []]
           (if (empty? remaining)
             errors
             (let [clause (first remaining)
@@ -715,7 +715,7 @@
   (or (variable-form? value) (t/term? value)))
 
 (defn- all-vectors? [(values (Vec Any))] Bool
-  (loop [remaining values]
+  (loop [remaining (Vec Any) values]
     (if (empty? remaining)
       true
       (if (vector? (first remaining)) (recur (rest remaining)) false))))
@@ -1034,7 +1034,7 @@
 
 (defn- ordered-row-compare
   [(order (Vec OrderClause)) (left d/Tuple) (right d/Tuple)] Int
-  (loop [remaining order]
+  (loop [remaining (Vec OrderClause) order]
     (if (empty? remaining)
       (compare (row-key left) (row-key right))
       (let [clause (first remaining)
@@ -1054,9 +1054,9 @@
    (left (Vec d/Tuple))
    (right (Vec d/Tuple))]
   (Vec d/Tuple)
-  (loop [(left-index Int) 0
-         (right-index Int) 0
-         (merged (Vec d/Tuple)) []]
+  (loop [left-index Int 0
+         right-index Int 0
+         merged (Vec d/Tuple) []]
     (cond
       [(>= left-index (count left))
        (into merged (subvec right right-index))]
@@ -1154,7 +1154,7 @@
     (let [(float-value Float) value] float-value)))
 
 (defn- nonnumeric-row? [(rows (Vec d/Tuple)) (position Int)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count rows))
       false
       (if (nil? (number-atom (nth (nth rows index) position)))
@@ -1163,7 +1163,7 @@
 
 (defn- numeric-column-error [(rows (Vec d/Tuple)) (find FindSpec)] QueryError?
   (let [specs (findspec-aggregates find)]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count specs))
         nil
         (let [spec (nth specs index)]
@@ -1456,7 +1456,7 @@
      (utf8-size (pr-str more))))
 
 (defn- fitting-prefix [(window (Vec d/Tuple)) (wanted Int)] Int
-  (loop [index 0 rows-size 2 best 0]
+  (loop [index Int 0 rows-size Int 2 best Int 0]
     (if (>= index wanted)
       best
       (let [row (nth window index)
@@ -1486,7 +1486,7 @@
     (d/raise-query-evaluation-error! error-value)))
 
 (defn- rows-after-key [(rows (Vec d/Tuple)) (after-key String)] (Vec d/Tuple)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       [(>= position (count rows)) []]
       [(= after-key (row-key (nth rows position)))

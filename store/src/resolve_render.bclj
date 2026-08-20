@@ -44,7 +44,7 @@
 
 (defn ultimate
   [(ctx (U ri/Graph Nil)) (view Any) (BOUND Any) (REFERS Any) (B Any)] Any
-  (loop [(b Any) B (n Int) 0]
+  (loop [b Any B n Int 0]
     (let [tgt (rr/refers-target ctx view BOUND REFERS b)]
       (if (and (some? tgt) (< n 64)) (recur tgt (inc n)) b))))
 

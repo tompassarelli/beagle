@@ -99,8 +99,8 @@
   [(values (Vec schema/OrderedResultSnapshot))
    (target schema/OrderedResultSnapshot)]
   (Vec schema/OrderedResultSnapshot)
-  (loop [(index Int) 0
-         (retained (Vec schema/OrderedResultSnapshot)) []]
+  (loop [index Int 0
+         retained (Vec schema/OrderedResultSnapshot) []]
     (if (>= index (count values))
       retained
       (let [(value schema/OrderedResultSnapshot) (nth values index)]
@@ -113,8 +113,8 @@
   [(values (Vec schema/OrderedResultEntry))
    (target-index Int)]
   (Vec schema/OrderedResultEntry)
-  (loop [(index Int) 0
-         (retained (Vec schema/OrderedResultEntry)) []]
+  (loop [index Int 0
+         retained (Vec schema/OrderedResultEntry) []]
     (if (>= index (count values))
       retained
       (recur (inc index)
@@ -126,7 +126,7 @@
   [(entries (Vec schema/OrderedResultEntry))
    (snapshot schema/OrderedResultSnapshot)]
   Bool
-  (loop [index 0]
+  (loop [index Int 0]
     (if (>= index (count entries))
       false
       (let [(entry schema/OrderedResultEntry) (nth entries index)]
@@ -139,7 +139,7 @@
 
 (defn result-entry-index
   [(entries (Vec schema/OrderedResultEntry)) (key schema/OrderedResultKey)] Int
-  (loop [index 0]
+  (loop [index Int 0]
     (if (>= index (count entries))
       -1
       (if (result-key-equal?
@@ -151,7 +151,7 @@
   [(entries (Vec schema/OrderedResultEntry))
    (snapshot schema/OrderedResultSnapshot)]
   Int
-  (loop [index 0 total 0]
+  (loop [index Int 0 total Int 0]
     (if (>= index (count entries))
       total
       (let [(entry schema/OrderedResultEntry) (nth entries index)
@@ -166,7 +166,7 @@
   [(entries (Vec schema/OrderedResultEntry))
    (snapshot schema/OrderedResultSnapshot)]
   Int
-  (loop [index 0]
+  (loop [index Int 0]
     (if (>= index (count entries))
       -1
       (let [(entry schema/OrderedResultEntry) (nth entries index)]
@@ -257,7 +257,7 @@
   [(state schema/OrderedResultCache)
    (snapshot schema/OrderedResultSnapshot)]
   schema/OrderedResultCache
-  (loop [bounded state]
+  (loop [bounded schema/OrderedResultCache state]
     (if (> (snapshot-entry-count
             (schema/orderedresultcache-entries bounded) snapshot)
            result-cache-per-snapshot-limit)
@@ -283,7 +283,7 @@
 
 (defn enforce-result-snapshot-limit
   [(state schema/OrderedResultCache)] schema/OrderedResultCache
-  (loop [bounded state]
+  (loop [bounded schema/OrderedResultCache state]
     (if (> (count (schema/orderedresultcache-snapshots bounded))
            result-cache-snapshot-limit)
       (let [(snapshot schema/OrderedResultSnapshot)
@@ -299,7 +299,7 @@
 
 (defn enforce-result-byte-limit
   [(state schema/OrderedResultCache)] schema/OrderedResultCache
-  (loop [bounded state]
+  (loop [bounded schema/OrderedResultCache state]
     (if (and (> (schema/orderedresultcache-bytes bounded)
                 result-cache-byte-limit)
              (not (empty? (schema/orderedresultcache-entries bounded))))
@@ -406,8 +406,8 @@
 
 (defn- rpc-nonempty-occurrence-list [(values (Vec t/Triple))] t/Triple
   (let [last-position (dec (count values))]
-    (loop [(position Int) (dec last-position)
-           (tail t/Triple)
+    (loop [position Int (dec last-position)
+           tail t/Triple
            (t/triple :rpc/list (nth values last-position) :rpc/list-end)]
       (if (< position 0)
         tail
@@ -424,7 +424,7 @@
             :rpc/record))
 
 (defn query-result-weight! [(rows (Vec d/Tuple))] Int
-  (loop [index 0 total (+ 32 (* 8 (count rows)))]
+  (loop [index Int 0 total Int (+ 32 (* 8 (count rows)))]
     (if (>= index (count rows))
       total
       (recur
@@ -434,7 +434,7 @@
            (rpc-query-row (nth rows index))))))))
 
 (defn triple-result-weight! [(rows (Vec t/Triple))] Int
-  (loop [index 0 total (+ 32 (* 8 (count rows)))]
+  (loop [index Int 0 total Int (+ 32 (* 8 (count rows)))]
     (if (>= index (count rows))
       total
       (recur
@@ -493,7 +493,7 @@
    nil))
 
 (defn read-list! [(context ReadContext) (value Any)] (Vec Any)
-  (loop [(cursor Any) value (values (Vec Any)) [] (count-value Int) 0]
+  (loop [cursor Any value values (Vec Any) [] count-value Int 0]
     (cond
       [(= cursor :rpc/list-end) values]
       [(>= count-value max-list-values)
@@ -919,7 +919,7 @@
             (let [(copy (Atom t/TermStore)) (store/new-term-store (store/space-id root))
                   (records (Vec t/TransactionRecord))
                   (store/transactionrecordsresult-records records-result)]
-              (loop [remaining records]
+              (loop [remaining (Vec t/TransactionRecord) records]
                 (if (empty? remaining)
                   copy
                   (let [(replay-result store/TransactionReplayResult)
@@ -1006,7 +1006,7 @@
   (if (contains? relations (d/rule-head-relation rule))
     true
     (let [(body (Vec d/Literal)) (d/rule-body rule)]
-      (loop [position 0]
+      (loop [position Int 0]
         (if (>= position (count body))
           false
           (if (contains? relations
@@ -1016,7 +1016,7 @@
 
 (defn- stratum-uses-any-relation?
   [(rules (Vec d/Rule)) (relations (Set String))] Bool
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rules))
       false
       (if (rule-uses-any-relation? (nth rules position) relations)
@@ -1029,7 +1029,7 @@
                  (query/findspec-relation (query/queryplan-find plan)))
     true
     (let [(strata (Vec (Vec d/Rule))) (query/queryplan-strata plan)]
-      (loop [stratum-position 0]
+      (loop [stratum-position Int 0]
         (if (>= stratum-position (count strata))
           false
           (if (stratum-uses-any-relation?
@@ -1095,7 +1095,7 @@
 
 (defn query-row-position!
   [(context ReadContext) (rows (Vec d/Tuple)) (after-row (Vec Any))] Int
-  (loop [position 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       (do
         (record-read-error!
