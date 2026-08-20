@@ -105,25 +105,31 @@ primitive or a code type. See the [naming ledger](docs/naming.md).
 - [Coming from Datomic](docs/coming-from-datomic.md) — the datom-to-occurrence bridge, the exact-difference table, and the honest not-yet list.
 - [Tool catalog](docs/tool-catalog.md) — exactly five public MCP data verbs.
 
-## Storage-only capability
+## Add Store to an existing system
 
-An existing application can adopt Store without adopting the Beagle language
-or compiler frontend. The same Store kernel is available in three
-storage-shaped profiles:
+An existing system can use Store for storage without adopting Beagle's language
+or compiler frontend, or an all-in-one application platform. Store remains the
+store engine integrated into Beagle; the consuming system selects one of these
+runtime boundaries:
 
-- [`examples/embedded-c.c`](examples/embedded-c.c) links the native ABI and
-  exchanges exact Store RPC packets without a server or socket. The same ABI is
-  exported by the Wasm embed artifact.
+- [`examples/embedded-c.c`](examples/embedded-c.c) links `native/store.h`,
+  opens a database, and exchanges one exact Store RPC packet for each native
+  entry-point call. It needs no Store server or socket. The wasm-embed artifact
+  exports the same ABI, with the embedder providing its clock and storage hooks.
 - [`examples/rpc-sidecar.mjs`](examples/rpc-sidecar.mjs) uses the official Bun
-  client directly against a private Store RPC sidecar.
-- [`examples/cache-profile.mjs`](examples/cache-profile.mjs) expresses value,
-  expiry, materialization provenance, replacement, and invalidation through
-  ordinary Store propositions and transactions. It is a policy profile, not a
-  second cache engine.
+  client against a private Store RPC sidecar. The application keeps its public
+  HTTP, authentication, and tenant policy at its own edge.
+- [`examples/cache-profile.mjs`](examples/cache-profile.mjs) models values,
+  expiry, materialization provenance, replacement, and invalidation as ordinary
+  Store propositions and transactions. It is application policy, not another
+  cache engine.
 
-These profiles share terms, transactions, occurrence history, query behavior,
-encoding, and refusals. Their runtime artifacts require neither the compiler
-frontend nor Racket. The exact boundary and its closed-surface evidence are in
+All three use the same Terms, transactions, occurrence history, query results,
+wire encoding, and refusals. The integration boundary determines process
+ownership and transport; cache behavior remains application policy. The
+native/Wasm runtime artifacts and Bun client do not require the compiler
+frontend or Racket to consume. Building those artifacts is the part that uses
+Beagle's compiler toolchain. The exact boundary and its evidence are in
 [isolation and deployment](docs/isolation-and-deployment.md#capability-profiles).
 `tests/store_capability_examples_smoke.sh` compiles and runs the C example and
 exercises both Bun examples in memory without opening a server or port.

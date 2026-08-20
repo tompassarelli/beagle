@@ -89,29 +89,38 @@ The official zero-dependency [`clients/bun/store-rpc.mjs`](../clients/bun/store-
 
 ## Capability profiles
 
-Store can fill a storage-shaped responsibility inside a brownfield system
-without becoming a separate product. A profile narrows the same kernel; it
-does not acquire independent semantics:
+An existing system can add Store alone: it need not adopt Beagle's language or
+compiler frontend, or an all-in-one platform. Store is still Beagle's
+integrated store engine, and every profile narrows the same kernel rather than
+creating different database semantics:
 
-- **Embedded native or Wasm.** Link `native/store.h` or instantiate
-  `lib/libstore.wasm`, supply storage and clock capabilities, and exchange one
-  exact Store RPC packet per typed entry point. There is no listener and no
-  compiler frontend in the runtime artifact.
-- **Private sidecar or service.** Run the native server beside the application
-  and use the official Bun client over Store RPC. TLS, authentication, tenant
-  selection, and public policy remain at the application edge.
-- **Cache-shaped policy.** Store live values, expiry, and materialization
-  provenance as ordinary propositions; reject expired values at read time and
-  retract them on replacement or invalidation. The transaction log retains the
-  history, and the snapshot remains derived restart acceleration. This adds no
-  cache-specific operation, storage engine, or identity rule.
+- **Embedded native or Wasm.** Link `native/store.h`, or instantiate
+  `lib/libstore.wasm` with the required clock and storage hooks. A typed entry
+  point exchanges one exact Store RPC request packet for one response packet.
+  Neither artifact has a listener. The native library can own a POSIX log and
+  its lock; a host-table embedder supplies storage and clock hooks and owns the
+  single-writer grant.
+- **Private Store RPC sidecar.** Run the native server beside the application
+  and use the official Bun client over the private RPC connection. TLS,
+  authentication, tenant selection, request limits, and public policy remain
+  at the application's edge.
+- **Cache-shaped policy.** Store values, expiry, and materialization provenance
+  as ordinary propositions; reject expired values at read time and retract them
+  on replacement or invalidation. The transaction log retains history and the
+  snapshot is derived restart acceleration. This adds no cache-specific
+  operation, storage engine, or identity rule.
 
 [`../examples/embedded-c.c`](../examples/embedded-c.c),
 [`../examples/rpc-sidecar.mjs`](../examples/rpc-sidecar.mjs), and
 [`../examples/cache-profile.mjs`](../examples/cache-profile.mjs) are the
-minimal runnable examples. Published native/Wasm artifacts and the Bun client
-package are sufficient; rebuilding them is the only path that needs Beagle's
-compiler toolchain.
+minimal runnable examples. Native/Wasm runtime artifacts and the Bun client are
+sufficient for the consuming system; building those artifacts is the only path
+that needs Beagle's compiler toolchain.
+
+The three profiles share Terms, transactions, occurrence history, queries,
+Store RPC encoding, and refusals. The integration boundary determines transport
+and which host owns the process, storage, and writer grant; cache behavior
+remains application policy.
 
 Store records data supplied through these capabilities; it does not execute an
 external plan merely because the plan or its content is present. In Beagle's
