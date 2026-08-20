@@ -40,6 +40,8 @@
 (define (br . xs) (cons BRACKET-TAG xs))
 (define (mt . xs) (cons MAP-TAG xs))
 (define (st . xs) (cons SET-TAG xs))
+(define (host-array . xs) (list '#%js (apply br xs)))
+(define (host-object . xs) (list '#%js (apply mt xs)))
 
 ;; Emit a strict JS module from body forms, with per-node type capture on (the
 ;; real emit path). Returns (values emitted-js type-table prog).
@@ -115,6 +117,52 @@
      `(def m Any ,(mt ':a (br 1 2) ':b (mt ':c 3))))
    (assert-native "vector literal (always native COW array)"
      `(def v Any ,(br 1 2 3)))
+   (test-case "ordinary values do not acquire a host runtime boundary"
+     (define-values (js tbl prog)
+       (emit+types (list `(def v Any ,(br 1 2 3))
+                         `(def m Any ,(mt ':a 1)))))
+     (check-false (string-contains? js "beagle/host.js"))
+     (check-false (string-contains? js "$$bh$")))
+   (test-case "#js arrays and objects emit distinct demand-tracked host values"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(def payload Any
+                 ,(host-array (host-object "row" (host-array 4 5)))))))
+     (check-true
+      (string-contains?
+       js
+       "import { host_array as $$bh$host_array, host_object as $$bh$host_object } from 'beagle/host.js';"))
+     (check-true
+      (string-contains?
+       js
+       "$$bh$host_array($$bh$host_object(\"row\", $$bh$host_array(4, 5)))")))
+   (test-case "host core operations route through only demanded host.js names"
+     (define-values (js tbl prog)
+       (emit+types
+        (list
+         `(defn read-host ,(br 'value 'JsArray) Any (aget value 0 "row" 1))
+         `(defn write-host ,(br 'value 'JsArray) Any (aset value 0 "row" 1 9))
+         `(defn length-host ,(br 'value 'JsArray) Int (alength value))
+         `(defn build-host ,(br 'value 'Any) Any
+            (do (array value)
+                (js-obj "value" value)
+                (into-array ,(br 'value))
+                (object-array 2)
+                (to-array ,(br 'value))
+                (clj->js ,(br 'value))
+                (js->clj (array value))))
+         `(defn inspect-host ,(br 'value 'JsObject) Any
+            (do (js-keys value)
+                (js-in "value" value)
+                (js-delete value "value"))))))
+     (for ([name (in-list '(aget alength array aset clj_to_js into_array
+                                 js_delete js_in js_keys js_obj js_to_clj
+                                 object_array to_array))])
+       (check-true
+        (string-contains? js (format "~a as $$bh$~a" name name))
+        (format "missing demand-tracked host import for ~a in:\n~a" name js)))
+     (check-false (string-contains? js "host_array as $$bh$host_array"))
+     (check-false (string-contains? js "host_object as $$bh$host_object")))
    (assert-hamt "set literal with compound elems uses value equality" "hamtSet("
      `(defn f ,(br) Bool (contains? ,(st (br 1 2) (br 3 4)) ,(br 1 2))))
    (assert-native "scalar assoc (key arg scalar)"
@@ -239,6 +287,8 @@
      (check-true (>= oracle 2) (format "oracle should see >=2 HAMT sites, saw ~a" oracle))
      (check-true (> (length (hamt-refs js)) 0)
                  (format "emit should contain hamt refs, got none in:\n~a" js))
-     (check-true (string-contains? js "{a: 1}")
-                 (format "the scalar map must stay native in:\n~a" js)))
+     (check-true (string-contains? js "const s = {")
+                 (format "the scalar map must stay a native object in:\n~a" js))
+     (check-false (string-contains? js "const s = hamtMap")
+                  (format "the scalar map must not be promoted to HAMT in:\n~a" js)))
  ))

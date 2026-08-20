@@ -438,12 +438,20 @@
                    [(= n 2) (format "~a.slice(0, -~a)" (emit-expr (cadr args)) (emit-expr (car args)))]
                    [else #f])]
     [(pr-str) (if (>= n 1) (runtime-call "pr_str" args) #f)]
-    [(to-array) (if (= n 1) (format "Array.from(~a)" (emit-expr (car args))) #f)]
-    [(aget) (if (= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
-    [(aset) (if (= n 3) (format "(~a[~a] = ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args))) #f)]
-    [(array-seq) (if (= n 1) (format "Array.from(~a)" (emit-expr (car args))) #f)]
-    [(clj->js) (if (= n 1) (emit-expr (car args)) #f)]
-    [(js->clj) (if (= n 1) (emit-expr (car args)) #f)]
+    [(to-array) (if (= n 1) (host-call "to_array" args) #f)]
+    [(aget) (if (>= n 2) (host-call "aget" args) #f)]
+    [(aset) (if (>= n 3) (host-call "aset" args) #f)]
+    [(alength) (if (= n 1) (host-call "alength" args) #f)]
+    [(array) (host-call "array" args)]
+    [(js-obj) (host-call "js_obj" args)]
+    [(into-array) (if (or (= n 1) (= n 2)) (host-call "into_array" args) #f)]
+    [(object-array) (if (= n 1) (host-call "object_array" args) #f)]
+    [(js-keys) (if (= n 1) (host-call "js_keys" args) #f)]
+    [(js-delete) (if (= n 2) (host-call "js_delete" args) #f)]
+    [(js-in) (if (= n 2) (host-call "js_in" args) #f)]
+    [(array-seq) (if (= n 1) (host-call "iterable_array" args) #f)]
+    [(clj->js) (if (= n 1) (host-call "clj_to_js" args) #f)]
+    [(js->clj) (if (= n 1) (host-call "js_to_clj" args) #f)]
     [(not=) (if (= n 2) (format "(~a !== ~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(seq) (if (= n 1)
                (format "(() => { const _x = ~a; return _x.length > 0 ? _x : null; })()" (emit-expr (car args)))
@@ -1160,6 +1168,12 @@
   (use-runtime!)
   (format "$$bc$~a(~a)" js-name (string-join (map emit-expr args) ", ")))
 
+;; Explicit JavaScript host values live in a separate runtime module from
+;; persistent Beagle values. The import set is derived from emitted calls, so a
+;; module pays for only the host operations it uses.
+(define (host-call js-name args)
+  (format "$$bh$~a(~a)" js-name (string-join (map emit-expr args) ", ")))
+
 ;; --- binding environment (for value-position wrapper resolution) -----------
 
 (define current-js-bound (make-parameter (set)))
@@ -1742,6 +1756,19 @@
                        (format "~a as $$bc$~a" nm nm)))
                  ", ")
                 (string-append js-runtime-prefix "core.js"))))
+    (define used-host
+      (sort (remove-duplicates
+             (regexp-match* #px"[$][$]bh[$]([a-z_]+)" body #:match-select cadr))
+            string<?))
+    (define host-import
+      (if (null? used-host)
+          ""
+          (format "import { ~a } from '~a';\n"
+                  (string-join
+                   (for/list ([name (in-list used-host)])
+                     (format "~a as $$bh$~a" name name))
+                   ", ")
+                  (string-append js-runtime-prefix "host.js"))))
     ;; Tree-shakeable named import of ONLY the HAMT ops this module emitted.
     (define hamt-import
       (let ([ops (sort (hash-keys (hamt-ops-used)) string<?)])
@@ -1750,7 +1777,8 @@
           (format "import { ~a } from '~a';\n"
                   (string-join ops ", ")
                   (string-append js-runtime-prefix "hamt.js")))))
-    (string-append rep-comment header runtime-import hamt-import "\n" body "\n")))
+    (string-append rep-comment header runtime-import host-import hamt-import
+                   "\n" body "\n")))
 
 ;; --- module header ---------------------------------------------------------
 
@@ -2093,6 +2121,13 @@
      (tally-rep! 'native)  ; vectors are always native (COW arrays)
      (format "[~a]"
              (string-join (map emit-expr (vec-form-items e)) ", "))]
+    [(js-host-array? e)
+     (host-call "host_array" (js-host-array-items e))]
+    [(js-host-object? e)
+     (host-call
+      "host_object"
+      (append-map (lambda (pair) (list (car pair) (cdr pair)))
+                  (js-host-object-pairs e)))]
     [(map-form? e)
      (cond
        ;; Compound-keyed map literal -> value-keyed HAMT (native object keys would
