@@ -1,0 +1,254 @@
+#lang beagle
+(ns native.region-decl-v1-fixture
+  (:require [beagle.region-decl-v1 :as graph]))
+
+(def module-id String
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+(def capsule-id String
+  "sha256:2222222222222222222222222222222222222222222222222222222222222222")
+(def type-a String
+  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+(def type-b String
+  "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+(def type-c String
+  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+(def type-d String
+  "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+(def tool-id String
+  "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+(def closure-id String
+  "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+
+(defn span [offset Int] graph/RegionSourceSpanV1
+  (graph/->RegionSourceSpanV1 module-id offset (+ offset 1)))
+
+(defn payload [offset Int] graph/SourceSliceV1
+  (graph/->SourceSliceV1 module-id offset (+ offset 10) type-d))
+
+(defn input
+  [local-port String
+   provider-region String
+   provider-port String
+   expected-type-id String
+   offset Int] graph/TypedInputV1
+  (graph/->TypedInputV1
+    local-port provider-region provider-port expected-type-id (span offset)))
+
+(defn output
+  [port String
+   type-id String
+   offset Int] graph/TypedOutputV1
+  (graph/->TypedOutputV1 port type-id (span offset)))
+
+(defn region
+  [name String
+   inputs (Vec graph/TypedInputV1)
+   outputs (Vec graph/TypedOutputV1)
+   offset Int] graph/RegionDeclV1
+  (graph/->RegionDeclV1
+    module-id name capsule-id inputs outputs (payload offset)
+    (span (+ offset 1)) (span (+ offset 2))))
+
+(defn problem-code [result graph/RegionGraphValidationV1] Keyword
+  (match result
+    [(RegionGraphReadyV1 schedule) :ready]
+    [(RegionGraphRejectedV1 problem)
+     (graph/regiongraphproblemv1-code problem)]))
+
+(defn problem-evidence
+  [result graph/RegionGraphValidationV1] (Vec String)
+  (match result
+    [(RegionGraphReadyV1 schedule) []]
+    [(RegionGraphRejectedV1 problem)
+     (graph/regiongraphproblemv1-evidence problem)]))
+
+(defn schedule-names
+  [result graph/RegionGraphValidationV1] (Vec String)
+  (match result
+    [(RegionGraphRejectedV1 problem) []]
+    [(RegionGraphReadyV1 schedule)
+     (graph/regionschedulev1-region-names schedule)]))
+
+(defn duplicate-region-case [] Bool
+  (= :region/duplicate-name
+     (problem-code
+       (graph/validate-and-schedule-regions
+         [(region "main" [] [] 0)
+          (region "main" [] [] 20)]))))
+
+(defn exactly-one-main-case [] Bool
+  (= :region/main-count
+     (problem-code
+       (graph/validate-and-schedule-regions
+         [(region "worker" [] [] 0)]))))
+
+(defn duplicate-input-port-case [] Bool
+  (let [provider graph/RegionDeclV1 (region "main" [] [(output "users" type-a 1)] 0)
+        consumer graph/RegionDeclV1 (region "ui"
+          [(input "users" "main" "users" type-a 20)
+           (input "users" "main" "users" type-a 30)]
+          []
+          10)]
+    (= :region/duplicate-input-port
+       (problem-code
+         (graph/validate-and-schedule-regions [consumer provider])))))
+
+(defn duplicate-output-port-case [] Bool
+  (= :region/duplicate-output-port
+     (problem-code
+       (graph/validate-and-schedule-regions
+         [(region "main" []
+            [(output "users" type-a 1)
+             (output "users" type-a 2)]
+            0)]))))
+
+(defn missing-provider-region-case [] Bool
+  (= :region/missing-provider-region
+     (problem-code
+       (graph/validate-and-schedule-regions
+         [(region "main" [] [] 0)
+          (region "ui"
+            [(input "users" "data" "users" type-a 20)]
+            []
+            10)]))))
+
+(defn missing-provider-output-case [] Bool
+  (= :region/missing-provider-output
+     (problem-code
+       (graph/validate-and-schedule-regions
+         [(region "main" [] [(output "users" type-a 1)] 0)
+          (region "ui"
+            [(input "audit" "main" "audit" type-a 20)]
+            []
+            10)]))))
+
+(defn provider-type-identity-case [] Bool
+  (= :region/provider-type-mismatch
+     (problem-code
+       (graph/validate-and-schedule-regions
+         [(region "main" [] [(output "users" type-a 1)] 0)
+          (region "ui"
+            [(input "users" "main" "users" type-b 20)]
+            []
+            10)]))))
+
+(defn cycle-case [] Bool
+  (let [result graph/RegionGraphValidationV1 (graph/validate-and-schedule-regions
+          [(region "worker"
+             [(input "from-main" "main" "value" type-a 20)]
+             [(output "value" type-a 21)]
+             10)
+           (region "main"
+             [(input "from-worker" "worker" "value" type-a 1)]
+             [(output "value" type-a 2)]
+             0)])]
+    (and (= :region/cycle (problem-code result))
+         (= ["main" "worker" "main"] (problem-evidence result)))))
+
+(defn stable-source-permutation-case [] Bool
+  (let [main-a graph/RegionDeclV1 (region "main" []
+          [(output "users" type-a 1)
+           (output "audit" type-b 2)]
+          0)
+        alpha-a graph/RegionDeclV1 (region "alpha"
+          [(input "users" "main" "users" type-a 20)]
+          [(output "enriched" type-c 21)]
+          10)
+        ui-a graph/RegionDeclV1 (region "ui"
+          [(input "audit" "main" "audit" type-b 40)]
+          [(output "html" type-c 41)]
+          30)
+        final-a graph/RegionDeclV1 (region "final"
+          [(input "html" "ui" "html" type-c 60)
+           (input "data" "alpha" "enriched" type-c 61)]
+          [(output "done" type-d 62)]
+          50)
+        first-regions (Vec graph/RegionDeclV1) [ui-a final-a main-a alpha-a]
+        main-b graph/RegionDeclV1 (region "main" []
+          [(output "audit" type-b 202)
+           (output "users" type-a 201)]
+          200)
+        alpha-b graph/RegionDeclV1 (region "alpha"
+          [(input "users" "main" "users" type-a 220)]
+          [(output "enriched" type-c 221)]
+          210)
+        ui-b graph/RegionDeclV1 (region "ui"
+          [(input "audit" "main" "audit" type-b 240)]
+          [(output "html" type-c 241)]
+          230)
+        final-b graph/RegionDeclV1 (region "final"
+          [(input "data" "alpha" "enriched" type-c 261)
+           (input "html" "ui" "html" type-c 260)]
+          [(output "done" type-d 262)]
+          250)
+        second-regions (Vec graph/RegionDeclV1) [alpha-b main-b final-b ui-b]
+        first-result graph/RegionGraphValidationV1 (graph/validate-and-schedule-regions first-regions)
+        second-result graph/RegionGraphValidationV1 (graph/validate-and-schedule-regions second-regions)
+        first-inputs (Vec graph/ResolvedInputV1) (graph/resolve-region-inputs final-a first-regions)
+        second-inputs (Vec graph/ResolvedInputV1) (graph/resolve-region-inputs final-b second-regions)
+        first-output-id String (graph/output-id
+          (graph/->RegionStoreResultV1
+            (graph/region-id final-a)
+            tool-id
+            (graph/output-interface-id final-a)
+            first-inputs))
+        second-output-id String (graph/output-id
+          (graph/->RegionStoreResultV1
+            (graph/region-id final-b)
+            tool-id
+            (graph/output-interface-id final-b)
+            second-inputs))]
+    (and
+      (= ["main" "alpha" "ui" "final"]
+         (schedule-names first-result))
+      (= (schedule-names first-result) (schedule-names second-result))
+      (= (graph/region-id main-a) (graph/region-id main-b))
+      (= (graph/output-interface-id main-a)
+         (graph/output-interface-id main-b))
+      (= (graph/input-interface-id final-a)
+         (graph/input-interface-id final-b))
+      (= first-inputs second-inputs)
+      (= first-output-id second-output-id)
+      (graph/exact-content-id? first-output-id))))
+
+(defn store-identities-case [] Bool
+  (let [resolved-a graph/ResolvedInputV1 (graph/->ResolvedInputV1 "a" type-a type-b)
+        resolved-b graph/ResolvedInputV1 (graph/->ResolvedInputV1 "b" type-c type-d)
+        reader-query graph/ReaderExecutionStoreQueryV1 (graph/->ReaderExecutionStoreQueryV1
+          tool-id closure-id type-a type-b type-c type-d)
+        reader-id String (graph/reader-execution-id reader-query)
+        expanded-a graph/ExpandedStoreQueryV1 (graph/->ExpandedStoreQueryV1
+          type-a reader-id tool-id closure-id
+          [type-b type-c]
+          [resolved-b resolved-a])
+        expanded-b graph/ExpandedStoreQueryV1 (graph/->ExpandedStoreQueryV1
+          type-a reader-id tool-id closure-id
+          [type-c type-b]
+          [resolved-a resolved-b])
+        expanded-id String (graph/expanded-id expanded-a)
+        checked-query graph/CheckedStoreQueryV1 (graph/->CheckedStoreQueryV1
+          expanded-id tool-id closure-id type-a type-b type-c type-d type-a)
+        checked-id String (graph/checked-id checked-query)
+        lowered-query graph/LoweredStoreQueryV1 (graph/->LoweredStoreQueryV1
+          checked-id tool-id closure-id type-a type-b type-c type-d module-id)
+        lowered-id String (graph/lowered-id lowered-query)]
+    (and (graph/exact-content-id? reader-id)
+         (= expanded-id (graph/expanded-id expanded-b))
+         (graph/exact-content-id? checked-id)
+         (graph/exact-content-id? lowered-id)
+         (not= checked-id lowered-id))))
+
+(defn main [] Int
+  (if (and
+        (duplicate-region-case)
+        (exactly-one-main-case)
+        (duplicate-input-port-case)
+        (duplicate-output-port-case)
+        (missing-provider-region-case)
+        (missing-provider-output-case)
+        (provider-type-identity-case)
+        (cycle-case)
+        (stable-source-permutation-case)
+        (store-identities-case))
+    0
+    1))

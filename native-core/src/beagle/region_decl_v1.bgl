@@ -1,0 +1,644 @@
+#lang beagle
+(ns beagle.region-decl-v1)
+
+(defrecord RegionSourceSpanV1
+  [source-content-id String
+   start-byte Int
+   end-byte Int])
+
+(defrecord SourceSliceV1
+  [source-content-id String
+   start-byte Int
+   end-byte Int
+   payload-byte-digest String])
+
+(defrecord TypedInputV1
+  [local-port String
+   provider-region String
+   provider-port String
+   expected-type-id String
+   edge-span RegionSourceSpanV1])
+
+(defrecord TypedOutputV1
+  [port String
+   type-id String
+   declaration-span RegionSourceSpanV1])
+
+(defrecord RegionDeclV1
+  [module-id String
+   region-name String
+   capsule-id String
+   inputs (Vec TypedInputV1)
+   outputs (Vec TypedOutputV1)
+   payload SourceSliceV1
+   header-span RegionSourceSpanV1
+   fence-span RegionSourceSpanV1])
+
+(defrecord ResolvedInputV1
+  [local-port String
+   provider-output-id String
+   checked-type-id String])
+
+(defrecord RegionGraphProblemV1
+  [code Keyword
+   region-name String
+   port-name String
+   evidence (Vec String)])
+
+(defrecord RegionScheduleV1
+  [regions (Vec RegionDeclV1)
+   region-names (Vec String)])
+
+(defunion RegionGraphValidationV1
+  (RegionGraphReadyV1 [schedule RegionScheduleV1])
+  (RegionGraphRejectedV1 [problem RegionGraphProblemV1]))
+
+;; Store query records carry only immutable semantic dimensions. Source paths,
+;; spans, fence spelling, declaration order, and formatter layout stay out.
+(defrecord ReaderExecutionStoreQueryV1
+  [reader-artifact-id String
+   reader-closure-id String
+   reader-protocol-id String
+   payload-byte-digest String
+   immutable-reader-resources-id String
+   granted-capability-set-id String])
+
+(defrecord ExpandedStoreQueryV1
+  [canonical-reader-ir-id String
+   reader-execution-id String
+   expander-artifact-id String
+   expander-closure-id String
+   interface-ids (Vec String)
+   resolved-inputs (Vec ResolvedInputV1)])
+
+(defrecord CheckedStoreQueryV1
+  [expanded-id String
+   checker-artifact-id String
+   checker-closure-id String
+   type-rule-id String
+   schema-id String
+   stdlib-id String
+   input-interface-id String
+   output-interface-id String])
+
+(defrecord LoweredStoreQueryV1
+  [checked-id String
+   lowerer-artifact-id String
+   lowerer-closure-id String
+   target-abi-id String
+   target-layout-id String
+   deterministic-options-id String
+   materializer-id String
+   toolchain-id String])
+
+(defrecord RegionStoreResultV1
+  [region-id String
+   derivation-id String
+   output-interface-id String
+   resolved-inputs (Vec ResolvedInputV1)])
+
+(defn exact-content-id? [value String] Bool
+  (some? (re-matches #"sha256:[0-9a-f]{64}" value)))
+
+(defn encode-part [value String] String
+  (str (count value) ":" value))
+
+(defn encode-parts [parts (Vec String)] String
+  (reduce
+    (fn
+      [encoding String
+       part String] String
+      (str encoding (encode-part part)))
+    ""
+    parts))
+
+(defn canonical-content-id
+  [domain String
+   parts (Vec String)] String
+  (str "sha256:"
+       (sha256-bytes
+         (utf8-encode
+           (encode-parts (conj parts domain))))))
+
+(defn contains-string?
+  [values (Vec String)
+   value String] Bool
+  (loop [index Int 0]
+    (if (>= index (count values))
+      false
+      (if (= value (nth values index))
+        true
+        (recur (+ index 1))))))
+
+(defn index-of-string
+  [values (Vec String)
+   value String] Int?
+  (loop [index Int 0]
+    (if (>= index (count values))
+      nil
+      (if (= value (nth values index))
+        index
+        (recur (+ index 1))))))
+
+(defn insert-string
+  [ordered (Vec String)
+   value String] (Vec String)
+  (loop [index Int 0
+         prefix (Vec String) []]
+    (if (>= index (count ordered))
+      (conj prefix value)
+      (let [current String (nth ordered index)]
+        (if (neg? (compare value current))
+          (reduce conj (conj prefix value) (subvec ordered index))
+          (recur (+ index 1) (conj prefix current)))))))
+
+(defn sorted-strings [values (Vec String)] (Vec String)
+  (reduce
+    (fn
+      [ordered (Vec String)
+       value String] (Vec String)
+      (insert-string ordered value))
+    []
+    values))
+
+(defn insert-region
+  [ordered (Vec RegionDeclV1)
+   value RegionDeclV1] (Vec RegionDeclV1)
+  (loop [index Int 0
+         prefix (Vec RegionDeclV1) []]
+    (if (>= index (count ordered))
+      (conj prefix value)
+      (let [current RegionDeclV1 (nth ordered index)]
+        (if (neg? (compare (regiondeclv1-region-name value)
+                           (regiondeclv1-region-name current)))
+          (reduce conj (conj prefix value) (subvec ordered index))
+          (recur (+ index 1) (conj prefix current)))))))
+
+(defn sorted-regions [regions (Vec RegionDeclV1)] (Vec RegionDeclV1)
+  (reduce
+    (fn
+      [ordered (Vec RegionDeclV1)
+       region RegionDeclV1] (Vec RegionDeclV1)
+      (insert-region ordered region))
+    []
+    regions))
+
+(defn insert-input
+  [ordered (Vec TypedInputV1)
+   value TypedInputV1] (Vec TypedInputV1)
+  (loop [index Int 0
+         prefix (Vec TypedInputV1) []]
+    (if (>= index (count ordered))
+      (conj prefix value)
+      (let [current TypedInputV1 (nth ordered index)]
+        (if (neg? (compare (typedinputv1-local-port value)
+                           (typedinputv1-local-port current)))
+          (reduce conj (conj prefix value) (subvec ordered index))
+          (recur (+ index 1) (conj prefix current)))))))
+
+(defn sorted-inputs [inputs (Vec TypedInputV1)] (Vec TypedInputV1)
+  (reduce
+    (fn
+      [ordered (Vec TypedInputV1)
+       input TypedInputV1] (Vec TypedInputV1)
+      (insert-input ordered input))
+    []
+    inputs))
+
+(defn insert-output
+  [ordered (Vec TypedOutputV1)
+   value TypedOutputV1] (Vec TypedOutputV1)
+  (loop [index Int 0
+         prefix (Vec TypedOutputV1) []]
+    (if (>= index (count ordered))
+      (conj prefix value)
+      (let [current TypedOutputV1 (nth ordered index)]
+        (if (neg? (compare (typedoutputv1-port value)
+                           (typedoutputv1-port current)))
+          (reduce conj (conj prefix value) (subvec ordered index))
+          (recur (+ index 1) (conj prefix current)))))))
+
+(defn sorted-outputs [outputs (Vec TypedOutputV1)] (Vec TypedOutputV1)
+  (reduce
+    (fn
+      [ordered (Vec TypedOutputV1)
+       output TypedOutputV1] (Vec TypedOutputV1)
+      (insert-output ordered output))
+    []
+    outputs))
+
+(defn insert-resolved-input
+  [ordered (Vec ResolvedInputV1)
+   value ResolvedInputV1] (Vec ResolvedInputV1)
+  (loop [index Int 0
+         prefix (Vec ResolvedInputV1) []]
+    (if (>= index (count ordered))
+      (conj prefix value)
+      (let [current ResolvedInputV1 (nth ordered index)
+            value-key String (str (resolvedinputv1-local-port value) "\u0000"
+                 (resolvedinputv1-provider-output-id value))
+            current-key String (str (resolvedinputv1-local-port current) "\u0000"
+                 (resolvedinputv1-provider-output-id current))]
+        (if (neg? (compare value-key current-key))
+          (reduce conj (conj prefix value) (subvec ordered index))
+          (recur (+ index 1) (conj prefix current)))))))
+
+(defn sorted-resolved-inputs [inputs (Vec ResolvedInputV1)] (Vec ResolvedInputV1)
+  (reduce
+    (fn
+      [ordered (Vec ResolvedInputV1)
+       input ResolvedInputV1] (Vec ResolvedInputV1)
+      (insert-resolved-input ordered input))
+    []
+    inputs))
+
+(defn region-for-name
+  [regions (Vec RegionDeclV1)
+   name String] RegionDeclV1?
+  (some
+    (fn [region RegionDeclV1] RegionDeclV1?
+      (if (= name (regiondeclv1-region-name region)) region nil))
+    regions))
+
+(defn output-for-port
+  [outputs (Vec TypedOutputV1)
+   port String] TypedOutputV1?
+  (some
+    (fn [output TypedOutputV1] TypedOutputV1?
+      (if (= port (typedoutputv1-port output)) output nil))
+    outputs))
+
+(defn first-duplicate-region-name [regions (Vec RegionDeclV1)] String?
+  (loop [index Int 1]
+    (if (>= index (count regions))
+      nil
+      (let [previous RegionDeclV1 (nth regions (- index 1))
+            current RegionDeclV1 (nth regions index)]
+        (if (= (regiondeclv1-region-name previous)
+               (regiondeclv1-region-name current))
+          (regiondeclv1-region-name current)
+          (recur (+ index 1)))))))
+
+(defn first-duplicate-input-port [inputs (Vec TypedInputV1)] String?
+  (let [ordered (Vec TypedInputV1) (sorted-inputs inputs)]
+    (loop [index Int 1]
+      (if (>= index (count ordered))
+        nil
+        (let [previous TypedInputV1 (nth ordered (- index 1))
+              current TypedInputV1 (nth ordered index)]
+          (if (= (typedinputv1-local-port previous)
+                 (typedinputv1-local-port current))
+            (typedinputv1-local-port current)
+            (recur (+ index 1))))))))
+
+(defn first-duplicate-output-port [outputs (Vec TypedOutputV1)] String?
+  (let [ordered (Vec TypedOutputV1) (sorted-outputs outputs)]
+    (loop [index Int 1]
+      (if (>= index (count ordered))
+        nil
+        (let [previous TypedOutputV1 (nth ordered (- index 1))
+              current TypedOutputV1 (nth ordered index)]
+          (if (= (typedoutputv1-port previous)
+                 (typedoutputv1-port current))
+            (typedoutputv1-port current)
+            (recur (+ index 1))))))))
+
+(defn main-count [regions (Vec RegionDeclV1)] Int
+  (reduce
+    (fn
+      [total Int
+       region RegionDeclV1] Int
+      (if (= "main" (regiondeclv1-region-name region)) (+ total 1) total))
+    0
+    regions))
+
+(defn duplicate-port-problem [regions (Vec RegionDeclV1)] RegionGraphProblemV1?
+  (loop [index Int 0]
+    (if (>= index (count regions))
+      nil
+      (let [region RegionDeclV1 (nth regions index)
+            input-port String? (first-duplicate-input-port (regiondeclv1-inputs region))
+            output-port String? (first-duplicate-output-port (regiondeclv1-outputs region))]
+        (cond
+          (some? input-port)
+          (->RegionGraphProblemV1
+            :region/duplicate-input-port
+            (regiondeclv1-region-name region)
+            input-port
+            [(regiondeclv1-region-name region) input-port])
+
+          (some? output-port)
+          (->RegionGraphProblemV1
+            :region/duplicate-output-port
+            (regiondeclv1-region-name region)
+            output-port
+            [(regiondeclv1-region-name region) output-port])
+
+          :else
+          (recur (+ index 1)))))))
+
+(defn input-reference-problem
+  [region RegionDeclV1
+   input TypedInputV1
+   regions (Vec RegionDeclV1)] RegionGraphProblemV1?
+  (let [provider RegionDeclV1? (region-for-name regions (typedinputv1-provider-region input))]
+    (if (nil? provider)
+      (->RegionGraphProblemV1
+        :region/missing-provider-region
+        (regiondeclv1-region-name region)
+        (typedinputv1-local-port input)
+        [(regiondeclv1-region-name region)
+         (typedinputv1-local-port input)
+         (typedinputv1-provider-region input)])
+      (let [output TypedOutputV1? (output-for-port
+              (regiondeclv1-outputs provider)
+              (typedinputv1-provider-port input))]
+        (cond
+          (nil? output)
+          (->RegionGraphProblemV1
+            :region/missing-provider-output
+            (regiondeclv1-region-name region)
+            (typedinputv1-local-port input)
+            [(regiondeclv1-region-name region)
+             (typedinputv1-local-port input)
+             (typedinputv1-provider-region input)
+             (typedinputv1-provider-port input)])
+
+          (not= (typedinputv1-expected-type-id input)
+                (typedoutputv1-type-id output))
+          (->RegionGraphProblemV1
+            :region/provider-type-mismatch
+            (regiondeclv1-region-name region)
+            (typedinputv1-local-port input)
+            [(regiondeclv1-region-name region)
+             (typedinputv1-local-port input)
+             (typedinputv1-provider-region input)
+             (typedinputv1-provider-port input)
+             (typedinputv1-expected-type-id input)
+             (typedoutputv1-type-id output)])
+
+          :else nil)))))
+
+(defn region-reference-problem
+  [region RegionDeclV1
+   regions (Vec RegionDeclV1)] RegionGraphProblemV1?
+  (let [inputs (Vec TypedInputV1) (sorted-inputs (regiondeclv1-inputs region))]
+    (loop [input-index Int 0]
+      (if (>= input-index (count inputs))
+        nil
+        (let [problem RegionGraphProblemV1? (input-reference-problem
+                region (nth inputs input-index) regions)]
+          (if (some? problem)
+            problem
+            (recur (+ input-index 1))))))))
+
+(defn reference-problem [regions (Vec RegionDeclV1)] RegionGraphProblemV1?
+  (loop [region-index Int 0]
+    (if (>= region-index (count regions))
+      nil
+      (let [region RegionDeclV1 (nth regions region-index)
+            problem RegionGraphProblemV1? (region-reference-problem region regions)]
+        (if (some? problem)
+          problem
+          (recur (+ region-index 1)))))))
+
+(defn region-ready?
+  [region RegionDeclV1
+   scheduled-names (Vec String)] Bool
+  (every?
+    (fn [input TypedInputV1] Bool
+      (contains-string?
+        scheduled-names
+        (typedinputv1-provider-region input)))
+    (regiondeclv1-inputs region)))
+
+(defn first-ready-region
+  [remaining (Vec RegionDeclV1)
+   scheduled-names (Vec String)] RegionDeclV1?
+  (some
+    (fn [region RegionDeclV1] RegionDeclV1?
+      (if (region-ready? region scheduled-names) region nil))
+    remaining))
+
+(defn remove-region
+  [regions (Vec RegionDeclV1)
+   name String] (Vec RegionDeclV1)
+  (reduce
+    (fn
+      [kept (Vec RegionDeclV1)
+       region RegionDeclV1] (Vec RegionDeclV1)
+      (if (= name (regiondeclv1-region-name region))
+        kept
+        (conj kept region)))
+    []
+    regions))
+
+(defn smallest-unresolved-provider
+  [region RegionDeclV1
+   remaining (Vec RegionDeclV1)] String?
+  (first
+    (sorted-strings
+      (reduce
+        (fn
+          [names (Vec String)
+           input TypedInputV1] (Vec String)
+          (let [name String (typedinputv1-provider-region input)]
+            (if (and (some? (region-for-name remaining name))
+                     (not (contains-string? names name)))
+              (conj names name)
+              names)))
+        []
+        (regiondeclv1-inputs region)))))
+
+(defn follow-cycle
+  [current String
+   remaining (Vec RegionDeclV1)
+   path (Vec String)] (Vec String)
+  (let [region RegionDeclV1? (region-for-name remaining current)]
+    (if (nil? region)
+      path
+      (let [next-name String? (smallest-unresolved-provider region remaining)]
+        (if (nil? next-name)
+          path
+          (let [seen-at Int? (index-of-string path next-name)]
+            (if (some? seen-at)
+              (conj (subvec path seen-at) next-name)
+              (recur next-name remaining (conj path next-name)))))))))
+
+(defn deterministic-cycle-evidence [remaining (Vec RegionDeclV1)] (Vec String)
+  (if (empty? remaining)
+    []
+    (let [start String (regiondeclv1-region-name (first remaining))]
+      (follow-cycle start remaining [start]))))
+
+(defn schedule-regions [regions (Vec RegionDeclV1)] RegionGraphValidationV1
+  (loop [remaining (Vec RegionDeclV1) regions
+         scheduled (Vec RegionDeclV1) []
+         names (Vec String) []]
+    (if (empty? remaining)
+      (->RegionGraphReadyV1 (->RegionScheduleV1 scheduled names))
+      (let [ready RegionDeclV1? (first-ready-region remaining names)]
+        (if (nil? ready)
+          (->RegionGraphRejectedV1
+            (->RegionGraphProblemV1
+              :region/cycle "" ""
+              (deterministic-cycle-evidence remaining)))
+          (let [name String (regiondeclv1-region-name ready)]
+            (recur
+              (remove-region remaining name)
+              (conj scheduled ready)
+              (conj names name))))))))
+
+(defn validate-and-schedule-regions [regions (Vec RegionDeclV1)] RegionGraphValidationV1
+  (let [ordered (Vec RegionDeclV1) (sorted-regions regions)
+        duplicate String? (first-duplicate-region-name ordered)
+        mains Int (main-count ordered)]
+    (cond
+      (some? duplicate)
+      (->RegionGraphRejectedV1
+        (->RegionGraphProblemV1
+          :region/duplicate-name duplicate "" [duplicate]))
+
+      (not= mains 1)
+      (->RegionGraphRejectedV1
+        (->RegionGraphProblemV1
+          :region/main-count "main" "" [(str mains)]))
+
+      :else
+      (let [port-problem RegionGraphProblemV1? (duplicate-port-problem ordered)]
+        (if (some? port-problem)
+          (->RegionGraphRejectedV1 port-problem)
+          (let [provider-problem RegionGraphProblemV1? (reference-problem ordered)]
+            (if (some? provider-problem)
+              (->RegionGraphRejectedV1 provider-problem)
+              (schedule-regions ordered))))))))
+
+(defn input-semantic-encoding [input TypedInputV1] String
+  (encode-parts
+    [(typedinputv1-local-port input)
+     (typedinputv1-provider-region input)
+     (typedinputv1-provider-port input)
+     (typedinputv1-expected-type-id input)]))
+
+(defn output-semantic-encoding [output TypedOutputV1] String
+  (encode-parts
+    [(typedoutputv1-port output)
+     (typedoutputv1-type-id output)]))
+
+(defn input-interface-id [region RegionDeclV1] String
+  (canonical-content-id
+    "beagle.region-decl/input-interface/v1"
+    (mapv input-semantic-encoding
+      (sorted-inputs (regiondeclv1-inputs region)))))
+
+(defn output-interface-id [region RegionDeclV1] String
+  (canonical-content-id
+    "beagle.region-decl/output-interface/v1"
+    (mapv output-semantic-encoding
+      (sorted-outputs (regiondeclv1-outputs region)))))
+
+(defn region-id [region RegionDeclV1] String
+  (canonical-content-id
+    "beagle.region-decl/region/v1"
+    [(regiondeclv1-module-id region)
+     (regiondeclv1-region-name region)
+     (regiondeclv1-capsule-id region)]))
+
+(defn provider-output-id
+  [provider RegionDeclV1
+   output TypedOutputV1] String
+  (canonical-content-id
+    "beagle.region-decl/provider-output/v1"
+    [(region-id provider)
+     (typedoutputv1-port output)
+     (typedoutputv1-type-id output)]))
+
+(defn resolve-region-inputs
+  [region RegionDeclV1
+   regions (Vec RegionDeclV1)] (Vec ResolvedInputV1)
+  (sorted-resolved-inputs
+    (reduce
+      (fn
+        [resolved (Vec ResolvedInputV1)
+         input TypedInputV1] (Vec ResolvedInputV1)
+        (let [provider RegionDeclV1? (region-for-name regions (typedinputv1-provider-region input))]
+          (if (nil? provider)
+            resolved
+            (let [output TypedOutputV1? (output-for-port
+                    (regiondeclv1-outputs provider)
+                    (typedinputv1-provider-port input))]
+              (if (nil? output)
+                resolved
+                (conj resolved
+                  (->ResolvedInputV1
+                    (typedinputv1-local-port input)
+                    (provider-output-id provider output)
+                    (typedoutputv1-type-id output))))))))
+      []
+      (regiondeclv1-inputs region))))
+
+(defn resolved-input-encoding [input ResolvedInputV1] String
+  (encode-parts
+    [(resolvedinputv1-local-port input)
+     (resolvedinputv1-provider-output-id input)
+     (resolvedinputv1-checked-type-id input)]))
+
+(defn resolved-input-encodings [inputs (Vec ResolvedInputV1)] (Vec String)
+  (mapv resolved-input-encoding (sorted-resolved-inputs inputs)))
+
+(defn reader-execution-id [query ReaderExecutionStoreQueryV1] String
+  (canonical-content-id
+    "beagle.region-decl/reader-execution/v1"
+    [(readerexecutionstorequeryv1-reader-artifact-id query)
+     (readerexecutionstorequeryv1-reader-closure-id query)
+     (readerexecutionstorequeryv1-reader-protocol-id query)
+     (readerexecutionstorequeryv1-payload-byte-digest query)
+     (readerexecutionstorequeryv1-immutable-reader-resources-id query)
+     (readerexecutionstorequeryv1-granted-capability-set-id query)]))
+
+(defn expanded-id [query ExpandedStoreQueryV1] String
+  (canonical-content-id
+    "beagle.region-decl/expanded/v1"
+    [(expandedstorequeryv1-canonical-reader-ir-id query)
+     (expandedstorequeryv1-reader-execution-id query)
+     (expandedstorequeryv1-expander-artifact-id query)
+     (expandedstorequeryv1-expander-closure-id query)
+     (encode-parts
+       (sorted-strings (expandedstorequeryv1-interface-ids query)))
+     (encode-parts
+       (resolved-input-encodings
+         (expandedstorequeryv1-resolved-inputs query)))]))
+
+(defn checked-id [query CheckedStoreQueryV1] String
+  (canonical-content-id
+    "beagle.region-decl/checked/v1"
+    [(checkedstorequeryv1-expanded-id query)
+     (checkedstorequeryv1-checker-artifact-id query)
+     (checkedstorequeryv1-checker-closure-id query)
+     (checkedstorequeryv1-type-rule-id query)
+     (checkedstorequeryv1-schema-id query)
+     (checkedstorequeryv1-stdlib-id query)
+     (checkedstorequeryv1-input-interface-id query)
+     (checkedstorequeryv1-output-interface-id query)]))
+
+(defn lowered-id [query LoweredStoreQueryV1] String
+  (canonical-content-id
+    "beagle.region-decl/lowered/v1"
+    [(loweredstorequeryv1-checked-id query)
+     (loweredstorequeryv1-lowerer-artifact-id query)
+     (loweredstorequeryv1-lowerer-closure-id query)
+     (loweredstorequeryv1-target-abi-id query)
+     (loweredstorequeryv1-target-layout-id query)
+     (loweredstorequeryv1-deterministic-options-id query)
+     (loweredstorequeryv1-materializer-id query)
+     (loweredstorequeryv1-toolchain-id query)]))
+
+(defn output-id [result RegionStoreResultV1] String
+  (canonical-content-id
+    "beagle.region-decl/output/v1"
+    [(regionstoreresultv1-region-id result)
+     (regionstoreresultv1-derivation-id result)
+     (regionstoreresultv1-output-interface-id result)
+     (encode-parts
+       (resolved-input-encodings
+         (regionstoreresultv1-resolved-inputs result)))]))
