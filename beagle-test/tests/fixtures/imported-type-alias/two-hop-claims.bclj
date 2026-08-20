@@ -2,7 +2,7 @@
 
 (ns two-hop-claims)
 
-(require two-hop-provider :as c)
+(require [two-hop-provider :as c])
 
 (def value Any "ready")
 (def accepted-string Bool (c/accepts? "ready"))

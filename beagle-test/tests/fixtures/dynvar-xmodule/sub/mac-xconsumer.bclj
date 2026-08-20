@@ -7,7 +7,7 @@
 ;; by macro expansion: `with-v` syntax-quotes (binding [p/*v* …] …). The expander
 ;; must keep the USE-SITE alias `p/*v*` (NOT qualify it to prov/*v*), so the
 ;; import set — keyed by the use-site name — still resolves its dynamic-ness.
-(require prov :as p)
+(require [prov :as p])
 
 (defmacro with-v [val body] `(binding [p/*v* ~val] ~body))
 

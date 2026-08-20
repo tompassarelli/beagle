@@ -2,7 +2,7 @@
 
 (ns two-hop-provider)
 
-(require alias-owner :as t)
+(require [alias-owner :as t])
 
 (defn accepts? [value t/StoreValue] Bool
   (string? value))

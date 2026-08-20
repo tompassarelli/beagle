@@ -2,6 +2,6 @@
 
 ;; The provider is never handed to the invocation; resolution has to find it.
 (ns modres.consumer-ok)
-(require modres.wire-format :as wf)
+(require [modres.wire-format :as wf])
 
 (defn go [] String (wf/encode 7))

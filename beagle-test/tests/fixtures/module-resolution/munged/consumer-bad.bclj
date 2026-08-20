@@ -4,6 +4,6 @@
 ;; proves the provider's INTERFACE actually loaded rather than the alias being
 ;; accepted as a phantom: a phantom types every call at Any and reports nothing.
 (ns modres.consumer-bad)
-(require modres.wire-format :as wf)
+(require [modres.wire-format :as wf])
 
 (defn go [] String (wf/encode "not-an-int"))

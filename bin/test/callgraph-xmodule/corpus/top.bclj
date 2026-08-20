@@ -1,4 +1,4 @@
 #lang beagle/clj
 (ns xm.top)
-(require xm.mid)
+(require [xm.mid])
 (defn use-it [z Int] Int (xm.mid/relay z))

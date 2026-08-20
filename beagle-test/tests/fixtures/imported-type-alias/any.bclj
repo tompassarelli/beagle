@@ -2,7 +2,7 @@
 
 (ns any)
 
-(require provider :as p)
+(require [provider :as p])
 
 (def value Any "ready")
 (def accepted Bool (p/accepts? value))

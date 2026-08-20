@@ -2,7 +2,7 @@
 
 (ns two-hop-schema)
 
-(require two-hop-provider :as c)
-(require alias-owner :as t)
+(require [two-hop-provider :as c])
+(require [alias-owner :as t])
 
 (def accepted Bool (c/accepts? "ready"))

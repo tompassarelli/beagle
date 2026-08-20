@@ -2,6 +2,6 @@
 
 (ns bad)
 
-(require provider :as p)
+(require [provider :as p])
 
 (def rejected Bool (p/accepts? 1.5))

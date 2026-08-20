@@ -2,7 +2,7 @@
 
 ;; Binds the REQUIRED module's ^:dynamic var across the module boundary —
 ;; standard in Clojure, and now type-checks in beagle (G-A).
-(require prov :as p)
+(require [prov :as p])
 
 (defn u [] String
   (binding [p/*v* "x"] (p/rd)))

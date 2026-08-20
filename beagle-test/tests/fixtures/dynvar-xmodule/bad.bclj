@@ -2,7 +2,7 @@
 
 ;; Binds a NON-dynamic imported var — must still be rejected. The cross-module
 ;; lookup (G-A) only admits vars that are actually ^:dynamic in their module.
-(require prov :as p)
+(require [prov :as p])
 
 (defn b [] Int
   (binding [p/plain 2] p/plain))

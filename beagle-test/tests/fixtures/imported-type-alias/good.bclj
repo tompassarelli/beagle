@@ -2,6 +2,6 @@
 
 (ns good)
 
-(require provider :as p)
+(require [provider :as p])
 
 (def accepted Bool (p/accepts? "ready"))

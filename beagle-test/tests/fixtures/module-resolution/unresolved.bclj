@@ -5,6 +5,6 @@
 ;; require must be REJECTED. Accepting it registers a phantom alias, and every
 ;; qualified call through that alias then types at an arbitrary type.
 (ns modres.solo)
-(require modres.nowhere :as gone)
+(require [modres.nowhere :as gone])
 
 (defn use-it [n Int] Int (gone/absolutely-not-a-function n))
