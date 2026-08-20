@@ -2,11 +2,11 @@
 (ns native.socket-capability-fixture)
 
 
-(require native.core :as core)
-(require native.lower :as lower)
-(require native.obligations :as obligations)
-(require native.body-c17 :as body)
-(require native.qbe :as qbe)
+(require [native.core :as core])
+(require [native.lower :as lower])
+(require [native.obligations :as obligations])
+(require [native.body-c17 :as body])
+(require [native.qbe :as qbe])
 
 (defn fixture-id [(name String)] core/NativeId
   (core/canonical-id "native-socket-capability-fixture-v0" [name]))

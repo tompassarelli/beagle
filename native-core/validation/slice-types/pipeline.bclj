@@ -2,11 +2,11 @@
 (ns native.slice-types-pipeline)
 
 
-(require native.core :as core)
-(require native.stages :as stages)
-(require native.lower :as lower)
-(require native.obligations :as obligations)
-(require native.c11 :as c11)
+(require [native.core :as core])
+(require [native.stages :as stages])
+(require [native.lower :as lower])
+(require [native.obligations :as obligations])
+(require [native.c11 :as c11])
 
 (defrecord FactV0
   [(subject Int)

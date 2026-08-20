@@ -2,14 +2,14 @@
 (ns native.main-capability-slice)
 
 
-(require native.core :as core)
-(require native.stages :as stages)
-(require native.lower :as lower)
-(require native.obligations :as obligations)
-(require native.slice :as slice)
-(require native.body-slice :as body-slice)
-(require native.body-c17 :as body)
-(require native.qbe :as qbe)
+(require [native.core :as core])
+(require [native.stages :as stages])
+(require [native.lower :as lower])
+(require [native.obligations :as obligations])
+(require [native.slice :as slice])
+(require [native.body-slice :as body-slice])
+(require [native.body-c17 :as body])
+(require [native.qbe :as qbe])
 
 (defn qbe-report [(result qbe/QbeMaterialization)] String
   (if (instance? native.qbe.QbeSuccess result)

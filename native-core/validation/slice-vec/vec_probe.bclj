@@ -6,7 +6,7 @@
 (ns store.vec-probe)
 
 
-(require store.types :as t)
+(require [store.types :as t])
 
 (defn bucket-size [(bucket t/ActiveBucket)] Int
   (count (t/activebucket-positions bucket)))

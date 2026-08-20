@@ -1,7 +1,7 @@
 #lang beagle/clj
 (ns native.keyword-access)
 
-(require native.keyword-provider :as provider)
+(require [native.keyword-provider :as provider])
 
 (defrecord Pair
   [left Int
