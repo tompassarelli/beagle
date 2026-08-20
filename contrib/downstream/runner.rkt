@@ -19,7 +19,7 @@
 ;;     flake-input splice / tag-strip (those mutate the tree; excluded honestly,
 ;;     the gate covers compiler acceptance of committed sources, not firn's
 ;;     generation pipeline)
-;;   * bounded per-consumer timeout, measured parallelism (jobs)
+;;   * bounded per-consumer timeout, measured compiler-process parallelism (jobs)
 ;;   * dirty-consumer refusal unless --allow-dirty
 ;;   * deterministic JSON receipt (schema beagle-downstream/1)
 (require racket/list
@@ -164,7 +164,7 @@
 
 ;; `derived` is the consumer's C1 membership, derived UP FRONT by run-consumers
 ;; in the caller's thread (never here in the worker) — see run-consumers for why.
-(define (compile-consumer c derived scratch timeout-secs consumers)
+(define (compile-consumer c derived scratch timeout-secs consumers job-sem)
   (define name (consumer-name c))
   (define repo (consumer-repo-path c))
   (define relpaths (consumer-result-relpaths derived))
@@ -196,6 +196,11 @@
   (define (remaining-seconds)
     (max 0.0
          (/ (- deadline-ms (current-inexact-milliseconds)) 1000.0)))
+  (define (with-job thunk)
+    (dynamic-wind
+     (lambda () (semaphore-wait job-sem))
+     thunk
+     (lambda () (semaphore-post job-sem))))
   ;; emit pass — grouped by per-file target override (registry file-targets),
   ;; each group a separate BUILD-EVAL invocation under its own `--target`.
   (define file-targets (consumer-result-file-targets derived))
@@ -212,30 +217,45 @@
   ;; those overridden rows: one candidate beagle-build invocation per source,
   ;; preserving the three owned module roots and the single consumer deadline.
   (define (compile-store-target-files files k)
-    (let loop ([remaining-files (sort files path<?)]
-               [status 0]
-               [stderr ""])
-      (cond
-        [(or (null? remaining-files) (not (equal? status 0)))
-         (values status stderr (eq? status 'timeout))]
-        [else
-         (define remaining (remaining-seconds))
-         (if (zero? remaining)
-             (values 'timeout stderr #t)
-             (let* ([source (car remaining-files)]
-                    [relative (find-relative-path repo source)]
-                    [destination
-                     (path-replace-extension (build-path out-dir relative) #".clj")])
-               (make-directory* (path-only destination))
-               (let-values ([(s e _timed-out?)
-                             (run-beagle-build
-                              (append (list "--target" (symbol->string k))
-                                      module-root-args
-                                      (list (path->string source)
-                                            (path->string destination)))
-                              remaining)])
-                 (loop (cdr remaining-files) s
-                       (string-append stderr e)))))])))
+    ;; Each Core manifest row is a complete, content-keyed build with a distinct
+    ;; destination. Run them concurrently under the same global job bound used
+    ;; by every other consumer compiler process; the Core cache owns duplicate
+    ;; work and publication locking. Preserve source order in diagnostics and in
+    ;; the selected failure so receipts stay deterministic.
+    (define ordered-files (sort files path<?))
+    (define outcomes (make-vector (length ordered-files) #f))
+    (define workers
+      (for/list ([source (in-list ordered-files)] [i (in-naturals)])
+        (thread
+         (lambda ()
+           (define outcome
+             (with-job
+              (lambda ()
+                (define remaining (remaining-seconds))
+                (if (zero? remaining)
+                    (list 'timeout "" #t)
+                    (let* ([relative (find-relative-path repo source)]
+                           [destination
+                            (path-replace-extension (build-path out-dir relative) #".clj")])
+                      (make-directory* (path-only destination))
+                      (let-values ([(s e timed-out?)
+                                    (run-beagle-build
+                                     (append (list "--target" (symbol->string k))
+                                             module-root-args
+                                             (list (path->string source)
+                                                   (path->string destination)))
+                                     remaining)])
+                        (list s e timed-out?)))))))
+           (vector-set! outcomes i outcome)))))
+    (for-each thread-wait workers)
+    (for/fold ([status 0] [stderr ""] [timed-out? #f])
+              ([outcome (in-vector outcomes)])
+      (define s (car outcome))
+      (define e (cadr outcome))
+      (define t? (caddr outcome))
+      (values (if (equal? status 0) s status)
+              (string-append stderr e)
+              (or timed-out? t?))))
   (define-values (status stderr timed-out?)
     (if (null? abs-files)
         (values 0 "" #f)
@@ -251,15 +271,20 @@
               [(and (string=? name "store") k)
                (compile-store-target-files (hash-ref groups k) k)]
               [else
-               (run-racket BUILD-EVAL (hash-ref groups k) extra out-dir '() remaining)]))
+               (with-job
+                (lambda ()
+                  (run-racket BUILD-EVAL (hash-ref groups k) extra out-dir '()
+                              (remaining-seconds))))]))
           (values (if (equal? status 0) s status) (string-append stderr e) (or timed-out? t?)))))
   ;; gjoa: additionally its own stricter gate — purity check, profile 3
   (define-values (status* stderr*)
     (if (and (string=? name "gjoa") (equal? status 0))
         (let-values ([(cs ce _t)
-                      (run-racket CHECK-EVAL abs-files (list "--profile" "3")
-                                  #f (list (cons "BEAGLE_PURITY" "error"))
-                                  (remaining-seconds))])
+                      (with-job
+                       (lambda ()
+                         (run-racket CHECK-EVAL abs-files (list "--profile" "3")
+                                     #f (list (cons "BEAGLE_PURITY" "error"))
+                                     (remaining-seconds))))])
           (values cs (string-append stderr ce)))
         (values status stderr)))
   (define dur (inexact->exact (round (- (current-inexact-milliseconds) t0))))
@@ -294,6 +319,9 @@
   (define name->done
     (for/hash ([c (in-list consumers)]) (values (consumer-name c) (make-semaphore 0))))
   (define present (for/set ([c (in-list consumers)]) (consumer-name c)))
+  ;; One permit means one compiler subprocess. Consumer coordinator threads do
+  ;; not hold permits while waiting, so Store can fan out its independent Core
+  ;; rows and North can still wait on Store at jobs=1 without deadlocking.
   (define job-sem (make-semaphore (max 1 jobs)))
   (define results (make-vector n #f))
   (define threads
@@ -305,13 +333,12 @@
                #:when (set-member? present d))
            (semaphore-wait (hash-ref name->done d)))
          (dynamic-wind
-          (lambda () (semaphore-wait job-sem))
+          void
           (lambda ()
             (vector-set! results i
                          (compile-consumer c (hash-ref derived-map (consumer-name c))
-                                           scratch timeout-secs consumers)))
+                                           scratch timeout-secs consumers job-sem)))
           (lambda ()
-            (semaphore-post job-sem)
             (semaphore-post (hash-ref name->done (consumer-name c)))))))))
   (for-each thread-wait threads)
   ;; deterministic order: by name

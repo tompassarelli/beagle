@@ -8,7 +8,7 @@
 #   bin/beagle-downstream --list --json PATH        # + list receipt (count+sha256)
 #   bin/beagle-downstream --run  --json PATH        # compile all + byte-clean receipt
 #   bin/beagle-downstream --run  --allow-dirty      # proceed past dirty consumer trees
-#   bin/beagle-downstream --run  --jobs N --timeout SECS
+#   bin/beagle-downstream --run  --jobs N --timeout SECS  # compiler processes
 #   bin/beagle-downstream ... --consumer NAME       # one consumer only
 #   bin/beagle-downstream ... --registry PATH       # alternate registry file
 #

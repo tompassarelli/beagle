@@ -245,7 +245,7 @@
      (check-equal? (run-result-diagnostics r) '())))
   (delete-directory/files base))
 
-(test-case "target overrides: Store compiles dependent Core files one at a time"
+(test-case "target overrides: Store compiles independent Core outputs under the job bound"
   (define base (make-temporary-file "c2-store-core-~a" 'directory))
   (define repo (build-path base "store"))
   (write-file! (build-path repo "src" "store" "base.bgl")
@@ -278,7 +278,7 @@
   (with-scratch
    (lambda (scratch)
      (define results (run-consumers (list store-spec) scratch
-                                    #:jobs 1 #:timeout 120))
+                                    #:jobs 2 #:timeout 120))
      (define r (result-named results "store"))
      (check-equal? (run-result-status r) "pass")
      (check-equal? (run-result-count r) 2)

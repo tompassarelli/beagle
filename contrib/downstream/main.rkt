@@ -24,6 +24,7 @@
          racket/string
          racket/date
          racket/runtime-path
+         racket/place
          json
          "registry.rkt"
          "runner.rkt")
@@ -68,7 +69,7 @@
   (define only (make-parameter #f))
   (define reg (make-parameter (registry-path)))
   (define mode (make-parameter #f))          ; 'list | 'run
-  (define jobs (make-parameter 4))
+  (define jobs (make-parameter (processor-count)))
   (define timeout-secs (make-parameter 300))
   (define allow-dirty (make-parameter #f))
   (define scratch-dir (make-parameter #f))
@@ -82,7 +83,7 @@
    [("--json") path "write the receipt as JSON to PATH" (json-out path)]
    [("--consumer") name "restrict to one consumer by name" (only name)]
    [("--registry") path "use an alternate registry file" (reg path)]
-   [("--jobs") n "max consumers compiled in parallel (default 4)" (jobs (string->number n))]
+   [("--jobs") n "max compiler subprocesses (default host processor count)" (jobs (string->number n))]
    [("--timeout") s "per-consumer compile timeout in seconds (default 300)" (timeout-secs (string->number s))]
    [("--allow-dirty") "compile even if a consumer worktree is dirty" (allow-dirty #t)]
    [("--scratch") dir "use DIR for scratch instead of a fresh temp dir" (scratch-dir dir)]
