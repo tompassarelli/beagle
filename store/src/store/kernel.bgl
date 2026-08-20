@@ -224,17 +224,20 @@
 (defn lint-declared-profile
   [triples (Vec t/Triple)
    space-id String] (Vec t/Triple)
-  (if (not (declared-relational-profile? triples space-id))
-    []
-    (let [vocabulary? Bool (declared-vocabulary-rule? triples space-id)
-          fact-normal-form? Bool (declared-fact-normal-form-profile? triples space-id)]
+  (let [relational? Bool (declared-relational-profile? triples space-id)
+        fact-normal-form? Bool (declared-fact-normal-form-profile? triples space-id)]
+    (if (not (or relational? fact-normal-form?))
+      []
+      (let [vocabulary? Bool (declared-vocabulary-rule? triples space-id)]
       (reduce
        (fn
          [violations (Vec t/Triple)
           proposition t/Triple] (Vec t/Triple)
          (if (profile-anchor? proposition)
            violations
-           (let [relational (Vec String) (relational-lint-errors proposition)
+           (let [relational (Vec String) (if relational?
+                                           (relational-lint-errors proposition)
+                                           [])
                  vocabulary (Vec String) (if vocabulary?
                    (into relational
                          (vocabulary-lint-errors triples proposition))
@@ -252,7 +255,7 @@
               violations
               rules))))
        []
-       triples))))
+       triples)))))
 
 (defn triple-eq?
   [left t/Triple
