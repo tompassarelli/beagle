@@ -16,6 +16,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/file.h>
+#if defined(__linux__)
+#include <sys/inotify.h>
+#endif
 #include <sys/socket.h>
 #include <sys/stat.h>
 #if !defined(__wasi__)
@@ -10363,6 +10366,139 @@ int32_t native_host_filesystem_list_directory_bounded_v0(
   native_host_filesystem_free_names(names, count);
   *out = result;
   return 0;
+}
+
+int32_t native_host_filesystem_wait_for_change_v0(
+    native_arena *arena, const native_capability *capability,
+    const native_vec *paths, uint64_t *out) {
+#if defined(__linux__)
+  const uint64_t *source;
+  int *watches = NULL;
+  size_t count;
+  size_t index;
+  int descriptor = -1;
+  int32_t status = 0;
+  uint64_t changed = UINT64_C(0);
+  bool have_change = false;
+  uint8_t events[8192];
+  struct pollfd poll_descriptor;
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (paths == NULL) || (out == NULL) || (paths->length <= INT64_C(0)) ||
+      (paths->elements == NULL) ||
+      ((uint64_t)paths->length > (uint64_t)(SIZE_MAX / sizeof(int)))) {
+    return EINVAL;
+  }
+  *out = UINT64_C(0);
+  count = (size_t)paths->length;
+  source = (const uint64_t *)paths->elements;
+  watches = (int *)malloc(count * sizeof(int));
+  if (watches == NULL) {
+    return ENOMEM;
+  }
+  descriptor = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+  if (descriptor < 0) {
+    status = native_host_filesystem_errno();
+    goto cleanup;
+  }
+  for (index = (size_t)0U; index < count; ++index) {
+    char *path = NULL;
+    status = native_host_filesystem_path(source[index], &path);
+    if (status != 0) {
+      goto cleanup;
+    }
+    watches[index] = inotify_add_watch(
+        descriptor, path, IN_ATTRIB | IN_CLOSE_WRITE | IN_DELETE_SELF |
+                              IN_MODIFY | IN_MOVE_SELF);
+    free(path);
+    if (watches[index] < 0) {
+      status = native_host_filesystem_errno();
+      goto cleanup;
+    }
+  }
+  poll_descriptor.fd = descriptor;
+  poll_descriptor.events = POLLIN;
+  poll_descriptor.revents = 0;
+  for (;;) {
+    int polled;
+    do {
+      polled = poll(&poll_descriptor, (nfds_t)1, -1);
+    } while ((polled < 0) && (errno == EINTR));
+    if (polled < 0) {
+      status = native_host_filesystem_errno();
+      goto cleanup;
+    }
+    if ((poll_descriptor.revents & POLLIN) == 0) {
+      status = EIO;
+      goto cleanup;
+    }
+    for (;;) {
+      ssize_t bytes;
+      do {
+        bytes = read(descriptor, events, sizeof(events));
+      } while ((bytes < 0) && (errno == EINTR));
+      if (bytes < 0) {
+        if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+          break;
+        }
+        status = native_host_filesystem_errno();
+        goto cleanup;
+      }
+      if (bytes == 0) {
+        break;
+      }
+      for (size_t offset = (size_t)0U; offset < (size_t)bytes;) {
+        const struct inotify_event *event =
+            (const struct inotify_event *)(events + offset);
+        size_t event_size = sizeof(*event) + (size_t)event->len;
+        if ((event_size > ((size_t)bytes - offset))) {
+          status = EIO;
+          goto cleanup;
+        }
+        if (!have_change && ((event->mask & IN_Q_OVERFLOW) != 0U)) {
+          /* The kernel lost event identity, but a watched path changed. */
+          changed = source[0];
+          have_change = true;
+        } else if (!have_change) {
+          for (index = (size_t)0U; index < count; ++index) {
+            if (watches[index] == event->wd) {
+              changed = source[index];
+              have_change = true;
+              break;
+            }
+          }
+        }
+        offset += event_size;
+      }
+    }
+    if (have_change) {
+      *out = changed;
+      status = 0;
+      goto cleanup;
+    }
+  }
+
+cleanup:
+  if (descriptor >= 0) {
+    if (close(descriptor) != 0) {
+      if (status == 0) {
+        status = native_host_filesystem_errno();
+      }
+    }
+  }
+  free(watches);
+  if (status != 0) {
+    *out = UINT64_C(0);
+  }
+  return status;
+#else
+  (void)arena;
+  (void)capability;
+  (void)paths;
+  if (out != NULL) {
+    *out = UINT64_C(0);
+  }
+  return ENOTSUP;
+#endif
 }
 
 #ifdef __wasi__
