@@ -125,7 +125,7 @@
   (if (scope-set-member? scopes scope) scopes (conj (vec scopes) scope)))
 
 (defn scope-set-remove [(scopes Any) (scope Any)] Any
-  (filterv (fn [(candidate Any)] Bool (not= candidate scope)) scopes))
+  (filterv (fn [candidate Any] Bool (not= candidate scope)) scopes))
 
 (defn scope-set-flip [(scopes Any) (scope Any)] Any
   (if (scope-set-member? scopes scope)
@@ -133,7 +133,7 @@
     (scope-set-add scopes scope)))
 
 (defn scope-set-subset? [(left Any) (right Any)] Bool
-  (every? (fn [(scope Any)] Bool (scope-set-member? right scope)) left))
+  (every? (fn [scope Any] Bool (scope-set-member? right scope)) left))
 
 (defn make-binding-id! [(stable String)] Any
   {"kind" "binding-id" "stable" stable})
@@ -173,7 +173,7 @@
         duplicate
         (first
           (filterv
-            (fn [(candidate Any)] Bool
+            (fn [candidate Any] Bool
               (= (get candidate "scopes") scopes))
             existing))]
     (when (some? duplicate)
@@ -190,15 +190,15 @@
         use-scopes (get identifier "scopes")
         applicable
         (filterv
-          (fn [(candidate Any)] Bool
+          (fn [candidate Any] Bool
             (scope-set-subset? (get candidate "scopes") use-scopes))
           (binding-table-bindings-for table name))
         maxima
         (filterv
-          (fn [(candidate Any)] Bool
+          (fn [candidate Any] Bool
             (not
               (some
-                (fn [(other Any)] Any
+                (fn [other Any] Any
                   (proper-scope-subset?
                     (get candidate "scopes")
                     (get other "scopes")))
@@ -211,7 +211,7 @@
       :else
         {"status" "ambiguous"
          "name" name
-         "bindingIds" (set (mapv (fn [(entry Any)] Any (get entry "id")) maxima))})))
+         "bindingIds" (set (mapv (fn [entry Any] Any (get entry "id")) maxima))})))
 
 (defn- syntax-contract-error! [(who String) (message String)] Any
   (throw (ex-info (str who ": " message) {})))
@@ -250,7 +250,7 @@
        (string? (get value "leaf"))))
 
 (defn symbol->structural-name! [(symbol String)] Any
-  (let [(slash (U Int Nil)) (str/index-of symbol "/")]
+  (let [slash (U Int Nil) (str/index-of symbol "/")]
     (if (and (some? slash) (> slash 0) (< (+ slash 1) (count symbol)))
       (make-structural-name!
         (subs symbol 0 slash)
@@ -410,14 +410,14 @@
     (bracketed? datum)
       (make-syntax-vector!
         (mapv
-          (fn [(child Any)] Any
+          (fn [child Any] Any
             (datum->beagle-syntax! child span scopes origin properties))
           (bracket-body datum))
         span scopes origin properties)
     (vector? datum)
       (make-syntax-list!
         (mapv
-          (fn [(child Any)] Any
+          (fn [child Any] Any
             (datum->beagle-syntax! child span scopes origin properties))
           datum)
         span scopes origin properties)
@@ -443,7 +443,7 @@
 (defn- restored-syntax [(restorations Any) (value Any)] Any
   (if (nil? restorations)
     nil
-    (loop [(entries Any) (deref restorations)]
+    (loop [entries Any (deref restorations)]
       (if (= (count entries) 0)
         nil
         (let [entry (nth entries 0)]
@@ -475,7 +475,7 @@
               (= variant "list")
                 (make-syntax-list!
                   (mapv
-                    (fn [(child Any)] Any
+                    (fn [child Any] Any
                       (beagle-syntax-flip-scope!
                         child scope restorations record-original))
                     payload)
@@ -483,7 +483,7 @@
               (= variant "vector")
                 (make-syntax-vector!
                   (mapv
-                    (fn [(child Any)] Any
+                    (fn [child Any] Any
                       (beagle-syntax-flip-scope!
                         child scope restorations record-original))
                     payload)
@@ -527,7 +527,7 @@
     (not (map? target)) target
     (= (get target "type") "map-destructure")
       (let [lower-name
-            (fn [(name Any)] Any
+            (fn [name Any] Any
               (if (string? name)
                 (binding-id-output-name (get identities name) name)
                 name))]
@@ -537,14 +537,14 @@
             "as" (lower-name (get target "as")))
           "or"
           (mapv
-            (fn [(entry Any)] Any
+            (fn [entry Any] Any
               (assoc entry "key" (lower-name (get entry "key"))))
             (get target "or"))))
     (= (get target "type") "seq-destructure")
       (assoc
         (assoc target "names"
           (mapv
-            (fn [(name Any)] Any
+            (fn [name Any] Any
               (lower-binding-target-output name identities))
             (get target "names")))
         "rest"
@@ -558,7 +558,7 @@
     :else
       (let [lowered
             (reduce
-              (fn [(out Any) (key Any)] Any
+              (fn [out Any key Any] Any
                 (assoc out key
                   (lower-binding-output-identities (get value key))))
               {}
@@ -582,7 +582,7 @@
           (= kind "record")
             (assoc lowered "bindings"
               (mapv
-                (fn [(binding Any)] Any
+                (fn [binding Any] Any
                   (assoc binding "name"
                     (binding-id-output-name
                       (get identities (get binding "name"))
@@ -591,7 +591,7 @@
           (= kind "map")
             (assoc lowered "entries"
               (mapv
-                (fn [(entry Any)] Any
+                (fn [entry Any] Any
                   (assoc entry "name"
                     (binding-id-output-name
                       (get identities (get entry "name"))
@@ -894,11 +894,11 @@
 (defn validate-identifier [(sym String)] Bool
   (let [bad-chars ";'\"` (){}[],"]
     (and (not (str/starts-with? sym "$beagle$"))
-      (every? (fn [(c String)] Bool (nil? (str/index-of bad-chars c)))
+      (every? (fn [c String] Bool (nil? (str/index-of bad-chars c)))
         (map str (seq sym))))))
 
 (defn validate-module-path [(path String)] Bool
-  (and (every? (fn [(c String)] Bool
+  (and (every? (fn [c String] Bool
                  (let [code (int (.charAt c 0))]
                    (or (upper-case-char? code)
                        (and (>= code 97) (<= code 122))

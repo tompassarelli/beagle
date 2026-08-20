@@ -67,7 +67,7 @@
             fallback))))))
 
 (defn string-qualified-reference [(spelling String)] Any
-  (let [(separator (U Int Nil)) (str/last-index-of spelling "/")]
+  (let [separator (U Int Nil) (str/last-index-of spelling "/")]
     (if (and (some? separator)
           (> separator 0)
           (< separator (- (count spelling) 1)))
@@ -297,7 +297,7 @@
        (str/starts-with? (get t "name") INFERENCE-VAR-PREFIX)))
 
 (defn fresh-inference-var! [] Any
-  (let [(counter Int)
+  (let [counter Int
         (get (deref STATE) "definition-inference-counter" 0)]
     (swap! STATE assoc "definition-inference-counter" (+ counter 1))
     (make-var (str INFERENCE-VAR-PREFIX counter))))
@@ -316,17 +316,17 @@
           (= name (get t "name"))
           (inference-var-occurs? name bound)))
     (fn-type? t)
-      (or (boolean (some (fn [(p Any)] Bool
+      (or (boolean (some (fn [p Any] Bool
                            (inference-var-occurs? name p))
                      (get t "params")))
           (and (not (nil? (get t "rest")))
                (inference-var-occurs? name (get t "rest")))
           (inference-var-occurs? name (get t "ret")))
     (app-type? t)
-      (boolean (some (fn [(a Any)] Bool (inference-var-occurs? name a))
+      (boolean (some (fn [a Any] Bool (inference-var-occurs? name a))
                  (get t "args")))
     (union-type? t)
-      (boolean (some (fn [(m Any)] Bool (inference-var-occurs? name m))
+      (boolean (some (fn [m Any] Bool (inference-var-occurs? name m))
                  (get t "members")))
     :else false))
 
@@ -428,14 +428,14 @@
       (let [params (get t "params")
             rest-t (get t "rest")
             ret (get t "ret")
-            param-strs (mapv (fn [(p Any)] String (type->string p)) params)]
+            param-strs (mapv (fn [p Any] String (type->string p)) params)]
         (if (not (nil? rest-t))
           (str "(Fn [" (str/join " " param-strs) " & " (type->string rest-t) "] " (type->string ret) ")")
           (str "(Fn [" (str/join " " param-strs) "] " (type->string ret) ")")))
     (app-type? t)
       (let [ctor (get t "name")
             args (get t "args")
-            arg-strs (mapv (fn [(a Any)] String (type->string a)) args)]
+            arg-strs (mapv (fn [a Any] String (type->string a)) args)]
         (str "(" ctor " " (str/join " " arg-strs) ")"))
     (union-type? t)
       (let [members (get t "members")]
@@ -443,25 +443,25 @@
           ;; (U Int Float) -> "Number" (oracle types.rkt union delaborator)
           (and (= (count members) 2)
                (every? prim? members)
-               (boolean (some (fn [(m Any)] Bool (= (get m "name") "Int")) members))
-               (boolean (some (fn [(m Any)] Bool (= (get m "name") "Float")) members)))
+               (boolean (some (fn [m Any] Bool (= (get m "name") "Int")) members))
+               (boolean (some (fn [m Any] Bool (= (get m "name") "Float")) members)))
             "Number"
           ;; (U T Nil) -> "T?"
           (and (= (count members) 2)
                (boolean (some nil-type? members)))
-            (let [non-nil (first (filterv (fn [(m Any)] Bool (not (nil-type? m))) members))]
+            (let [non-nil (first (filterv (fn [m Any] Bool (not (nil-type? m))) members))]
               (let [non-nil-text (type->string non-nil)]
                 (if (reader-atom-type-text? non-nil-text)
                   (str non-nil-text "?")
-                  (str "(U " (str/join " " (mapv (fn [(m Any)] String (type->string m)) members)) ")"))))
+                  (str "(U " (str/join " " (mapv (fn [m Any] String (type->string m)) members)) ")"))))
           :else
-            (str "(U " (str/join " " (mapv (fn [(m Any)] String (type->string m)) members)) ")")))
+            (str "(U " (str/join " " (mapv (fn [m Any] String (type->string m)) members)) ")")))
     (var-type? t) (get t "name")
     (poly-type? t)
       ;; Render bounded vars as (T <: Bound), bare vars as T — mirrors the oracle
       ;; type-poly delaborator (types.rkt).
       (let [bounds (get t "bounds")
-            var-strs (mapv (fn [(v String)] String
+            var-strs (mapv (fn [v String] String
                              (let [b (if (nil? bounds) nil (get bounds v))]
                                (if (nil? b)
                                  v
@@ -473,9 +473,9 @@
 ;; --- unqualify ---------------------------------------------------------------
 
 (defn unqualify-name [(name String)] String
-  (let [(idx (U Int Nil)) (str/index-of name "/")]
+  (let [idx (U Int Nil) (str/index-of name "/")]
     (if (some? idx)
-      (let [(offset Int) idx]
+      (let [offset Int idx]
         (subs name (+ offset 1)))
       name)))
 
@@ -493,12 +493,12 @@
     (and (app-type? a) (app-type? b))
       (and (= (get a "name") (get b "name"))
            (= (count (get a "args")) (count (get b "args")))
-           (every? (fn [(i Int)] Bool
+           (every? (fn [i Int] Bool
                      (type-invariant-equal? (nth (get a "args") i) (nth (get b "args") i)))
                    (range (count (get a "args")))))
     (and (union-type? a) (union-type? b))
       (and (= (count (get a "members")) (count (get b "members")))
-           (every? (fn [(i Int)] Bool
+           (every? (fn [i Int] Bool
                      (type-invariant-equal? (nth (get a "members") i) (nth (get b "members") i)))
                    (range (count (get a "members")))))
     (and (var-type? a) (var-type? b))
@@ -512,7 +512,7 @@
   (let [members (get-in (deref STATE) ["union-members" union-name])]
     (and (not (nil? members))
          (boolean
-           (some (fn [(member String)] Bool
+           (some (fn [member String] Bool
                    (or (= member member-name)
                        (= (unqualify-name member)
                           (unqualify-name member-name))))
@@ -537,17 +537,17 @@
       (type-compatible? (get actual "body") expected)
 
     (and (union-type? actual) (union-type? expected))
-      (every? (fn [(a-alt Any)] Bool
-                (boolean (some (fn [(e-alt Any)] Bool (type-compatible? a-alt e-alt))
+      (every? (fn [a-alt Any] Bool
+                (boolean (some (fn [e-alt Any] Bool (type-compatible? a-alt e-alt))
                                (get expected "members"))))
               (get actual "members"))
 
     (union-type? expected)
-      (boolean (some (fn [(alt Any)] Bool (type-compatible? actual alt))
+      (boolean (some (fn [alt Any] Bool (type-compatible? actual alt))
                      (get expected "members")))
 
     (union-type? actual)
-      (every? (fn [(alt Any)] Bool (type-compatible? alt expected))
+      (every? (fn [alt Any] Bool (type-compatible? alt expected))
               (get actual "members"))
 
     ;; A parametric member view retains the union's type arguments for field
@@ -597,10 +597,10 @@
             en (count ep)]
         (and (<= an en)
              (or (= an en) (some? ar))
-             (every? (fn [(i Int)] Bool (type-compatible? (nth ep i) (nth ap i)))
+             (every? (fn [i Int] Bool (type-compatible? (nth ep i) (nth ap i)))
                      (range an))
              (or (nil? ar)
-                 (every? (fn [(p Any)] Bool (type-compatible? p ar))
+                 (every? (fn [p Any] Bool (type-compatible? p ar))
                          (drop an ep)))
              (or (nil? er)
                  (and (some? ar) (type-compatible? er ar)))
@@ -614,7 +614,7 @@
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "Atom") (= (get expected "name") "Atom"))
       (and (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [(i Int)] Bool
+           (every? (fn [i Int] Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
 
@@ -622,7 +622,7 @@
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "Buffer") (= (get expected "name") "Buffer"))
       (and (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [(i Int)] Bool
+           (every? (fn [i Int] Bool
                      (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
 
@@ -630,7 +630,7 @@
     (and (app-type? actual) (app-type? expected)
          (= (get actual "name") "JsMap") (= (get expected "name") "JsMap"))
       (and (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [(i Int)] Bool
+           (every? (fn [i Int] Bool
                      (type-invariant-equal? (nth (get actual "args") i)
                        (nth (get expected "args") i)))
              (range (count (get actual "args")))))
@@ -642,24 +642,24 @@
     (and (app-type? actual) (= (get actual "name") "HVec")
          (app-type? expected) (= (get expected "name") "Vec")
          (= 1 (count (get expected "args"))))
-      (every? (fn [(a Any)] Bool
+      (every? (fn [a Any] Bool
                 (type-compatible? a (nth (get expected "args") 0)))
               (get actual "args"))
 
     (dynamic-type? expected)
       (if (dynamic-type? actual)
         (and (= (count (get actual "args")) (count (get expected "args")))
-             (every? (fn [(i Int)] Bool
+             (every? (fn [i Int] Bool
                        (type-invariant-equal? (nth (get actual "args") i)
                          (nth (get expected "args") i)))
                (range (count (get actual "args")))))
-        (boolean (some (fn [(alt Any)] Bool (type-compatible? actual alt))
+        (boolean (some (fn [alt Any] Bool (type-compatible? actual alt))
                    (get expected "args"))))
 
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
-           (every? (fn [(i Int)] Bool
+           (every? (fn [i Int] Bool
                      (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i)))
                    (range (count (get actual "args")))))
 
@@ -690,8 +690,8 @@
       (let [flat1 (if (union-type? t1) (get t1 "members") [t1])
             flat2 (if (union-type? t2) (get t2 "members") [t2])
             all (into (vec flat1) flat2)
-            deduped (reduce (fn [(acc Any) (t Any)] Any
-                              (if (boolean (some (fn [(a Any)] Bool (type-compatible? t a)) acc))
+            deduped (reduce (fn [acc Any t Any] Any
+                              (if (boolean (some (fn [a Any] Bool (type-compatible? t a)) acc))
                                 acc
                                 (conj acc t)))
                             [] all)]
@@ -702,7 +702,7 @@
 (defn merge-types-list [(types (Vec Any))] Any
   (if (= (count types) 0)
     ANY
-    (reduce (fn [(acc Any) (t Any)] Any (merge-types acc t))
+    (reduce (fn [acc Any t Any] Any (merge-types acc t))
             (nth types 0) types)))
 
 (defn nullable-type [(t Any)] Any
@@ -719,10 +719,10 @@
                       [remove-type])
             remaining
               (filterv
-                (fn [(alternative Any)] Bool
+                (fn [alternative Any] Bool
                   (not (boolean
                     (some
-                      (fn [(candidate Any)] Bool
+                      (fn [candidate Any] Bool
                         (type-invariant-equal? alternative candidate))
                       removed))))
                 (get current-type "args"))]
@@ -732,7 +732,7 @@
           :else (make-app "Dyn" remaining)))
     (union-type? current-type)
       (let [alts (get current-type "members")
-            remaining (filterv (fn [(alt Any)] Bool (not (type-equal? alt remove-type))) alts)]
+            remaining (filterv (fn [alt Any] Bool (not (type-equal? alt remove-type))) alts)]
         (cond
           (= (count remaining) (count alts)) current-type
           (= (count remaining) 0) current-type
@@ -769,7 +769,7 @@
 (defn collection-elem-type [(types (Vec Any))] Any
   (if (and (> (count types) 0)
            (not (any-type? (nth types 0)))
-           (every? (fn [(t Any)] Bool (type-compatible? t (nth types 0))) (drop 1 types)))
+           (every? (fn [t Any] Bool (type-compatible? t (nth types 0))) (drop 1 types)))
     (nth types 0)
     ANY))
 
@@ -793,7 +793,7 @@
     (and (prim? t) (= (get t "name") "Number")) "number"
     (and (union-type? t)
          (> (count (get t "members")) 0)
-         (every? (fn [(a Any)] Bool
+         (every? (fn [a Any] Bool
                    (let [c (numeric-class a)]
                      (or (= c "int") (= c "float") (= c "number"))))
                  (get t "members")))
@@ -810,19 +810,19 @@
                       (= (get declared "name") "Number")))))
       declared
     :else
-      (let [classes (mapv (fn [(t Any)] String (numeric-class t)) arg-types)]
+      (let [classes (mapv (fn [t Any] String (numeric-class t)) arg-types)]
         (cond
           (= op "/")
             (if (and (= 2 (count classes))
-                     (every? (fn [(class String)] Bool
+                     (every? (fn [class String] Bool
                                (or (= class "int") (= class "float"))) classes)
                      (boolean
-                       (some (fn [(class String)] Bool (= class "float")) classes)))
+                       (some (fn [class String] Bool (= class "float")) classes)))
               FLOAT-TYPE
               declared)
-          (boolean (some (fn [(c Any)] Bool (= c "other")) classes)) declared
-          (boolean (some (fn [(c Any)] Bool (= c "float")) classes)) FLOAT-TYPE
-          (boolean (some (fn [(c Any)] Bool (= c "number")) classes)) NUMBER-TYPE
+          (boolean (some (fn [c Any] Bool (= c "other")) classes)) declared
+          (boolean (some (fn [c Any] Bool (= c "float")) classes)) FLOAT-TYPE
+          (boolean (some (fn [c Any] Bool (= c "number")) classes)) NUMBER-TYPE
           :else INT-TYPE))))
 
 ;; --- polymorphic helpers (bindings is an atom holding a String->type map) -----
@@ -883,15 +883,15 @@
     (prim? t) t
     (fn-type? t)
       (make-fn
-        (mapv (fn [(p Any)] Any (apply-type-bindings p bindings)) (get t "params"))
+        (mapv (fn [p Any] Any (apply-type-bindings p bindings)) (get t "params"))
         (if (nil? (get t "rest")) nil (apply-type-bindings (get t "rest") bindings))
         (apply-type-bindings (get t "ret") bindings))
     (app-type? t)
       (make-app (get t "name")
-        (mapv (fn [(a Any)] Any (apply-type-bindings a bindings)) (get t "args")))
+        (mapv (fn [a Any] Any (apply-type-bindings a bindings)) (get t "args")))
     (union-type? t)
       (make-union
-        (mapv (fn [(m Any)] Any (apply-type-bindings m bindings)) (get t "members")))
+        (mapv (fn [m Any] Any (apply-type-bindings m bindings)) (get t "members")))
     (poly-type? t) t
     :else t))
 
@@ -1112,7 +1112,7 @@
 
 (defn hosted-require-contracts [(requires Any)] Any
   (reduce
-    (fn [(env Any) (require-spec Any)] Any
+    (fn [env Any require-spec Any] Any
       (let [namespace (get require-spec "ns")
             contracts (get HOSTED-NAMESPACE-CONTRACTS namespace)
             alias (get require-spec "alias")
@@ -1122,7 +1122,7 @@
           env
           (let [qualified
                 (reduce
-                  (fn [(out Any) (member Any)] Any
+                  (fn [out Any member Any] Any
                     (reference-map-assoc out
                       (make-qualified-ref prefix member namespace)
                       (get contracts member)))
@@ -1130,7 +1130,7 @@
                   (ordered-keys contracts))]
             (if (vector? referred)
               (reduce
-                (fn [(out Any) (member Any)] Any
+                (fn [out Any member Any] Any
                   (let [contract (get contracts member)]
                     (if (nil? contract) out (assoc out member contract))))
                 qualified
@@ -1147,25 +1147,17 @@
     (reference-map-assoc
       (reference-map-assoc
         (reference-map-assoc
-          (reference-map-assoc
-            (reference-map-assoc
-              {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
-               "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
-               "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
-               "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
-                                 nil FLOAT-TYPE)}
-              "host.fs/real-path"
-              (make-fn [(make-prim "String")] nil
-                (make-prim "host.fs/RealPathResult")))
-            "host.fs/mtime-nanoseconds"
-            (make-fn [(make-prim "String")] nil
-              (make-prim "host.fs/MtimeNanosecondsResult")))
-          "host.fs/create-temporary-sibling"
+          {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
+           "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
+           "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
+           "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
+                             nil FLOAT-TYPE)}
+          "host.fs/mtime-nanoseconds"
           (make-fn [(make-prim "String")] nil
-            (make-prim "host.fs/CreateTemporarySiblingResult")))
-        "host.stdin/read-text-bounded"
-        (make-fn [INT-TYPE] nil
-          (make-prim "host.stdin/ReadTextBoundedResult")))
+            (make-prim "host.fs/MtimeNanosecondsResult")))
+        "host.fs/create-temporary-sibling"
+        (make-fn [(make-prim "String")] nil
+          (make-prim "host.fs/CreateTemporarySiblingResult")))
       "host.fs/rename-file"
       (make-fn [(make-prim "String") (make-prim "String")] nil
         (make-prim "host.fs/RenameFileResult")))
@@ -1177,26 +1169,21 @@
   [(union-name String) (variants (Vec Any))]
   Nil
   (swap! STATE assoc-in ["union-members" union-name]
-    (mapv (fn [(variant Any)] String (get variant "name")) variants))
+    (mapv (fn [variant Any] String (get variant "name")) variants))
   (doseq [variant variants]
     (let [name (get variant "name")
           fields (get variant "fields")]
       (swap! STATE assoc-in ["record-fields" name]
         (reduce
-          (fn [(out Any) (field Any)] Any
+          (fn [out Any field Any] Any
             (assoc out (nth field 0) (nth field 1)))
           {}
           fields))
       (swap! STATE assoc-in ["record-field-order" name]
-        (mapv (fn [(field Any)] String (nth field 0)) fields))))
+        (mapv (fn [field Any] String (nth field 0)) fields))))
   nil)
 
 (defn install-core-filesystem-result-unions! [] Nil
-  (install-core-result-union! "host.fs/RealPathResult"
-    [{"name" "host.fs/RealPathOk"
-      "fields" [[":path" (make-prim "String")]]}
-     {"name" "host.fs/RealPathError"
-      "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/MtimeNanosecondsResult"
     [{"name" "host.fs/MtimeNanosecondsOk"
       "fields" [[":nanoseconds" INT-TYPE]]}
@@ -1206,12 +1193,6 @@
     [{"name" "host.fs/CreateTemporarySiblingOk"
       "fields" [[":path" (make-prim "String")]]}
      {"name" "host.fs/CreateTemporarySiblingError"
-      "fields" [[":errno" INT-TYPE]]}])
-  (install-core-result-union! "host.stdin/ReadTextBoundedResult"
-    [{"name" "host.stdin/ReadTextBoundedOk"
-      "fields" [[":text" (make-prim "String")]]}
-     {"name" "host.stdin/ReadTextBoundedOverflow" "fields" []}
-     {"name" "host.stdin/ReadTextBoundedError"
       "fields" [[":errno" INT-TYPE]]}])
   (install-core-result-union! "host.fs/RenameFileResult"
     [{"name" "host.fs/RenameFileOk" "fields" []}
@@ -1303,7 +1284,7 @@
   (cond
     (vector? value)
       (every?
-        (fn [(item Any)] Bool
+        (fn [item Any] Bool
           (constraint-value-synchronous? item proofs))
         value)
 
@@ -1323,7 +1304,7 @@
                (= (get value "async") true)) false
           (and (= node "js-class")
                (boolean
-                 (some (fn [(method Any)] Bool (= (get method "async") true))
+                 (some (fn [method Any] Bool (= (get method "async") true))
                    (get value "methods")))) false
 
           (= node "js-selector") true
@@ -1365,7 +1346,7 @@
 
           :else
             (every?
-              (fn [(key Any)] Bool
+              (fn [key Any] Bool
                 (constraint-value-synchronous? (get value key) proofs))
               (ordered-keys value))))
 
@@ -1387,7 +1368,7 @@
   (let [forms (get prog "forms")
         local-definitions
           (reduce
-            (fn [(out Any) (raw-form Any)] Any
+            (fn [out Any raw-form Any] Any
               (let [form (if (= (get raw-form "node") "with-meta")
                            (get raw-form "expr")
                            raw-form)
@@ -1400,7 +1381,7 @@
         imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
         imported-proofs
           (reduce
-            (fn [(out Any) (entry Any)] Any
+            (fn [out Any entry Any] Any
               (if (and (map? entry)
                        (string? (get entry "name"))
                        (boolean? (get entry "synchronous")))
@@ -1411,7 +1392,7 @@
             imported)
         external-proofs
           (reduce
-            (fn [(out Any) (entry Any)] Any
+            (fn [out Any entry Any] Any
               ;; Source `declare-extern` is a typed host boundary. Recursive
               ;; import facts are authoritative and must not be overwritten by
               ;; the compatibility extern projection of the same qualified or
@@ -1425,13 +1406,13 @@
             (get prog "externs"))
         builtin-proofs
           (reduce
-            (fn [(out Any) (name Any)] Any
+            (fn [out Any name Any] Any
               (assoc out name true))
             external-proofs
             (ordered-keys (target-stdlib (get prog "target"))))
         assumed
           (reduce
-            (fn [(out Any) (name Any)] Any
+            (fn [out Any name Any] Any
               (assoc out name true))
             builtin-proofs
             (ordered-keys local-definitions))]
@@ -1440,12 +1421,12 @@
     (loop [proofs assumed]
       (let [next
               (reduce
-                (fn [(out Any) (name Any)] Any
+                (fn [out Any name Any] Any
                   (let [form (get local-definitions name)
                         clauses (callable-form-clauses form)
                         synchronous?
                           (every?
-                            (fn [(clause Any)] Bool
+                            (fn [clause Any] Bool
                               (callable-clause-synchronous? clause proofs))
                             clauses)]
                     (assoc out name synchronous?)))
@@ -1466,7 +1447,7 @@
   (let [clauses (callable-form-clauses form)]
     (and (> (count clauses) 0)
          (every?
-           (fn [(clause Any)] Bool
+           (fn [clause Any] Bool
              (function-valued-type? (get clause "ret")))
            clauses))))
 
@@ -1512,7 +1493,7 @@
         (and (vector? clauses)
              (> (count clauses) 0)
              (every?
-               (fn [(clause Any)] Bool
+               (fn [clause Any] Bool
                  (and (constraint-value-synchronous?
                         (get clause "test") callable-proofs)
                       (callable-body-tail-synchronous?
@@ -1533,7 +1514,7 @@
       (let [bindings (get value "bindings")
             final-aliases
               (reduce
-                (fn [(env Any) (binding Any)] Any
+                (fn [env Any binding Any] Any
                   (let [target (get binding "name")
                         proof (callable-value-synchronous?
                                 (get binding "value")
@@ -1544,7 +1525,7 @@
                 aliases
                 bindings)]
         (and (constraint-value-synchronous?
-               (mapv (fn [(binding Any)] Any (get binding "value")) bindings)
+               (mapv (fn [binding Any] Any (get binding "value")) bindings)
                callable-proofs)
              (callable-body-tail-synchronous?
                (get value "body")
@@ -1557,7 +1538,7 @@
   (let [forms (get prog "forms")
         local-definitions
           (reduce
-            (fn [(out Any) (raw-form Any)] Any
+            (fn [out Any raw-form Any] Any
               (let [form (if (= (get raw-form "node") "with-meta")
                            (get raw-form "expr")
                            raw-form)]
@@ -1571,7 +1552,7 @@
         imported (get prog IMPORTED-CALLABLE-SYNCHRONIZATION-KEY [])
         imported-proofs
           (reduce
-            (fn [(out Any) (entry Any)] Any
+            (fn [out Any entry Any] Any
               (if (and (map? entry)
                        (string? (get entry "name"))
                        (boolean? (get entry "returnsSynchronousCallable")))
@@ -1582,7 +1563,7 @@
             imported)
         external-proofs
           (reduce
-            (fn [(out Any) (entry Any)] Any
+            (fn [out Any entry Any] Any
               (let [name (get entry "name")]
                 (if (and (string? name)
                       (nil? (reference-map-ref out name nil)))
@@ -1593,7 +1574,7 @@
             (get prog "externs"))
         assumed
           (reduce
-            (fn [(out Any) (name Any)] Any (assoc out name true))
+            (fn [out Any name Any] Any (assoc out name true))
             external-proofs
             (ordered-keys local-definitions))]
     ;; Greatest fixed point: recursive factories remain proven only when every
@@ -1601,11 +1582,11 @@
     (loop [proofs assumed]
       (let [next
               (reduce
-                (fn [(out Any) (name Any)] Any
+                (fn [out Any name Any] Any
                   (let [form (get local-definitions name)
                         proven?
                           (every?
-                            (fn [(clause Any)] Bool
+                            (fn [clause Any] Bool
                               (let [body (get clause "body")]
                                 (and (vector? body)
                                      (> (count body) 0)
@@ -1653,7 +1634,7 @@
             bounds-ok?
               (or (nil? bounds)
                   (every?
-                    (fn [(var Any)] Bool
+                    (fn [var Any] Bool
                       (let [bound (get bounds var)
                             bound-value (get (deref bindings) var)]
                         (or (nil? bound-value)
@@ -1756,7 +1737,7 @@
         t (get target "type")]
     (cond
       (= t "map-destructure")
-      (mapv (fn [(entry Any)] Any (get entry "value")) (get target "or"))
+      (mapv (fn [entry Any] Any (get entry "value")) (get target "or"))
       (= t "seq-destructure")
       (vec (apply concat (mapv destructure-default-exprs (get target "names"))))
       :else [])))
@@ -1788,7 +1769,7 @@
   (let [pdef (parametric-def-for-app target-type)
         members (if (nil? pdef) [] (get pdef "members"))]
     (if (and (not (nil? pdef))
-             (boolean (some (fn [(member String)] Bool (= member member-name))
+             (boolean (some (fn [member String] Bool (= member member-name))
                             members)))
       (make-app member-name (get target-type "args"))
       (make-prim member-name))))
@@ -1819,7 +1800,7 @@
         (if (nil? members)
           nil
           (let [declaring (filterv
-                            (fn [(member String)] Bool
+                            (fn [member String] Bool
                               (let [member-fields (get-in (deref STATE)
                                                     ["record-fields" member])]
                                 (and (not (nil? member-fields))
@@ -1828,7 +1809,7 @@
             (if (and (> (count declaring) 0)
                   (= (count declaring) (count members)))
               (merge-types-list
-                (mapv (fn [(member String)] Any
+                (mapv (fn [member String] Any
                         (resolve-parametric-field-type!
                           (get-in (deref STATE) ["record-fields" member keyword])
                           aggregate))
@@ -1842,7 +1823,7 @@
                 ": " message " (aggregate type " (type->string aggregate) ")")))
 
 (defn bind-destructure-any! [(env Any) (pattern Any) (owner Any)] Any
-  (let [out (reduce (fn [(acc Any) (name String)] Any
+  (let [out (reduce (fn [acc Any name String] Any
                       (binder-env-assoc acc owner name ANY))
               env (destructure-bound-names pattern))]
     (doseq [default (destructure-default-exprs pattern)]
@@ -1873,9 +1854,9 @@
                 (str "pattern requires " (count names)
                   " positional values, but the tuple has " (count elems)))
               (bind-destructure-any! env pattern owner))
-            (let [(indices (Vec Int)) (vec (range (count names)))
+            (let [indices (Vec Int) (vec (range (count names)))
                   with-fixed (reduce
-                               (fn [(out Any) (i Int)] Any
+                               (fn [out Any i Int] Any
                                  (bind-destructure-type! out (nth names i) (nth elems i) where owner))
                                env indices)]
               (if (nil? rest-name)
@@ -1888,7 +1869,7 @@
           (= (count (get aggregate "args")) 1))
         (let [elem-type (nullable-type (nth (get aggregate "args") 0))
               with-fixed (reduce
-                           (fn [(out Any) (target Any)] Any
+                           (fn [out Any target Any] Any
                              (bind-destructure-type! out target elem-type where owner))
                            env names)]
           (if (nil? rest-name)
@@ -1921,11 +1902,11 @@
           (bind-destructure-any! env pattern owner))
         (let [defaults (get pattern "or")
               projection (reduce
-                           (fn [(state Any) (name String)] Any
+                           (fn [state Any name String] Any
                              (let [keyword (str ":" name)
                                    default-entry (first
                                                    (filterv
-                                                     (fn [(entry Any)] Bool
+                                                     (fn [entry Any] Bool
                                                        (= (get entry "key") name))
                                                      defaults))
                                    nominal? (or (not (nil? field-map))
@@ -2037,9 +2018,9 @@
             (binding-constraint p)
             env
             "parameter"))))
-    (let [(indices (Vec Int)) (vec (range (count all-params)))]
+    (let [indices (Vec Int) (vec (range (count all-params)))]
       (reduce
-      (fn [(out Any) (i Int)] Any
+      (fn [out Any i Int] Any
         (let [p (nth all-params i)
               target (param-binding-target p)
               effective (nth effective-types i)]
@@ -2054,7 +2035,7 @@
 ;; Clojure (declare ...) so the forward ref resolves at load time.
 (defn extend-with-let-bindings! [(env Any) (bindings (Vec Any))] Any
   (reduce
-    (fn [(out Any) (b Any)] Any
+    (fn [out Any b Any] Any
       (let [declared (get b "ann")
             inferred (infer-expr-expected! (get b "value") out declared)
             bname (get b "name")]
@@ -2124,7 +2105,7 @@
   (if (dynamic-type? current)
     (let [matches
           (filterv
-            (fn [(alternative Any)] Bool
+            (fn [alternative Any] Bool
               (type-matches-predicate? alternative predicate-name))
             (get current "args"))]
       (cond
@@ -2194,7 +2175,7 @@
     (any-type? t) true
     (prim? t) (= (get t "name") "Bool")
     (union-type? t)
-      (reduce (fn [(acc Bool) (m Any)] Bool (or acc (type-could-be-false? m)))
+      (reduce (fn [acc Bool m Any] Bool (or acc (type-could-be-false? m)))
               false (get t "members"))
     :else false))
 
@@ -2209,8 +2190,8 @@
     nil))
 
 (defn unqualified-member-name [(name String)] String
-  (let [(dot-index (U Int Nil)) (str/last-index-of name ".")
-        (slash-index (U Int Nil)) (str/last-index-of name "/")
+  (let [dot-index (U Int Nil) (str/last-index-of name ".")
+        slash-index (U Int Nil) (str/last-index-of name "/")
         separator (cond
                     (nil? dot-index) slash-index
                     (nil? slash-index) dot-index
@@ -2219,7 +2200,7 @@
     (if (nil? separator) name (subs name (+ separator 1)))))
 
 (defn string-in? [(values Any) (wanted String)] Bool
-  (boolean (some (fn [(value String)] Bool (= value wanted)) values)))
+  (boolean (some (fn [value String] Bool (= value wanted)) values)))
 
 ;; Return the closed nominal alternatives represented by a type, including a
 ;; nominal union nested in a structural `(U NominalUnion Nil)`.
@@ -2235,7 +2216,7 @@
 
       (and (prim? value)
            (boolean
-             (some (fn [(members Any)] Bool
+             (some (fn [members Any] Bool
                      (string-in? members (get value "name")))
                    (vals (get (deref STATE) "union-members")))))
         [(get value "name")]
@@ -2246,7 +2227,7 @@
         [(get value "name")]
 
       (union-type? value)
-        (reduce (fn [(members Any) (alternative Any)] Any
+        (reduce (fn [members Any alternative Any] Any
                   (into members (closed-union-members alternative)))
                 [] (get value "members"))
 
@@ -2258,7 +2239,7 @@
       written
       (let [base (unqualified-member-name written)
             matches
-              (reduce (fn [(found Any) (member String)] Any
+              (reduce (fn [found Any member String] Any
                         (if (and (= base (unqualified-member-name member))
                                  (not (string-in? found member)))
                           (conj found member)
@@ -2278,14 +2259,14 @@
       (let [members (get-in (deref STATE)
                       ["union-members" (get current "name")])
             remaining (filterv
-                        (fn [(member String)] Bool (not= member member-name))
+                        (fn [member String] Bool (not= member member-name))
                         members)]
         (cond
           (= (count remaining) (count members)) current
           (= (count remaining) 0) current
           (= (count remaining) 1) (make-prim (first remaining))
           :else (make-union
-                  (mapv (fn [(member String)] Any (make-prim member))
+                  (mapv (fn [member String] Any (make-prim member))
                         remaining))))
 
     :else (remove-from-union current (make-prim member-name))))
@@ -2294,7 +2275,7 @@
   (cond
     (map? value)
       (let [nested
-            (reduce (fn [(found Any) (child Any)] Any
+            (reduce (fn [found Any child Any] Any
                       (merge found (unstable-binding-keys child)))
                     {} (vals value))
             target (if (= (get value "node") "set!")
@@ -2304,7 +2285,7 @@
           nested))
 
     (vector? value)
-      (reduce (fn [(found Any) (child Any)] Any
+      (reduce (fn [found Any child Any] Any
                 (merge found (unstable-binding-keys child)))
               {} value)
 
@@ -2352,8 +2333,8 @@
   (let [fn-name (call-fn-name cond-expr)
         args (get cond-expr "args")
         instance-result (instance-narrowings cond-expr env)
-        fold-branch (fn [(xs Any) (pick-then Bool)] Any
-                      (reduce (fn [(acc Any) (a Any)] Any
+        fold-branch (fn [xs Any pick-then Bool] Any
+                      (reduce (fn [acc Any a Any] Any
                                 (let [tn (test-narrowings a (merge env acc))]
                                   (merge acc (get tn (if pick-then "then" "else")))))
                               {} xs))]
@@ -2423,9 +2404,9 @@
                         env
                         (assoc env scrutinee
                           (member-view-type rec-name target-type)))
-              (indices (Vec Int)) (vec (range (count bindings)))]
+              indices (Vec Int) (vec (range (count bindings)))]
           (if (not (nil? field-map))
-            (reduce (fn [(arm-env Any) (i Int)] Any
+            (reduce (fn [arm-env Any i Int] Any
                       (let [b (nth bindings i)
                             kw (if (not (nil? field-order))
                                  (if (< i (count field-order)) (nth field-order i) nil)
@@ -2458,7 +2439,7 @@
                         (get-in (deref STATE) ["union-members" union-name])
                         nil)]
     (when (not (nil? union-members))
-      (let [matched-types (reduce (fn [(acc Any) (c Any)] Any
+      (let [matched-types (reduce (fn [acc Any c Any] Any
                                     (let [pat (get c "pattern")]
                                       (if (= (get pat "type") "record")
                                         (let [written (get pat "name")
@@ -2470,8 +2451,8 @@
                                               written canonical)))
                                         acc)))
                                   [] clauses)
-            missing (filterv (fn [(m Any)] Bool
-                               (nil? (some (fn [(x Any)] Bool (= x m)) matched-types)))
+            missing (filterv (fn [m Any] Bool
+                               (nil? (some (fn [x Any] Bool (= x m)) matched-types)))
                              union-members)]
         (when (> (count missing) 0)
           (emit-diag! (str "beagle: match on " union-name
@@ -2501,7 +2482,7 @@
   Any
   (let [body (get poly-t "body")
         bindings (atom {})
-        arg-types (mapv (fn [(a Any)] Any (infer-expr! a env)) args)
+        arg-types (mapv (fn [a Any] Any (infer-expr! a env)) args)
         fixed (get body "params")
         rest-t (get body "rest")
         n-fixed (count fixed)]
@@ -2526,7 +2507,7 @@
                                (type->string inferred) ", which doesn't satisfy bound "
                                (type->string bound))))))))
     (when require-complete?
-      (let [missing (filterv (fn [(var String)] Bool
+      (let [missing (filterv (fn [var String] Bool
                                (nil? (get (deref bindings) var)))
                       (get poly-t "vars"))]
         (when (> (count missing) 0)
@@ -2556,10 +2537,10 @@
 (defn last-expr-type-expected!
   [(body (Vec Any)) (env Any) (expected-result Any)] Any
   (let [n (count body)
-        (indices (Vec Int)) (vec (range n))]
+        indices (Vec Int) (vec (range n))]
     (if (= n 0)
       ANY
-      (reduce (fn [(acc Any) (i Int)] Any
+      (reduce (fn [acc Any i Int] Any
                 (let [e (nth body i)]
                   (when (and (< i (- n 1)) (bare-swallowed-ref? e env))
                     (emit-diag! (str "beagle: bare symbol `" (get e "name")
@@ -2588,7 +2569,7 @@
                   raw-value
                   (str ":" raw-value))]
       (if (and (vector? members)
-            (not (boolean (some (fn [(member Any)] Bool (= member value)) members))))
+            (not (boolean (some (fn [member Any] Bool (= member value)) members))))
         {"enum" (get expected "name") "members" members "value" value}
         nil))
     nil))
@@ -2606,7 +2587,7 @@
 (defn check-enum-comparison! [(fn-name Any) (args (Vec Any)) (env Any)] Nil
   (let [leaf (reference-leaf fn-name)]
     (when (and (or (= leaf "=") (= leaf "not=")) (= (count args) 2))
-      (let [check-side! (fn [(value-expr Any) (keyword-expr Any)] Nil
+      (let [check-side! (fn [value-expr Any keyword-expr Any] Nil
                           (when (= (get value-expr "node") "ref")
                             (let [value-type (infer-expr! value-expr env)
                                   violation
@@ -2632,13 +2613,13 @@
         rest-t (get fn-t "rest")
         n-fixed (count fixed)
         n-args (count args)
-        (argument-indices (Vec Int))
+        argument-indices (Vec Int)
           (vec (range (if (nil? rest-t)
                        (if (< n-fixed n-args) n-fixed n-args)
                        n-args)))
         fn-display (reference->string fn-name)
         fn-leaf (reference-leaf fn-name)
-        check-slot (fn [(i Int)] Any
+        check-slot (fn [i Int] Any
                      (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
                            expected-atom? (check-atom-ctor! (nth args i) expected env)
                            actual (if expected-atom?
@@ -2680,7 +2661,7 @@
 
 (defn infer-cond-clauses! [(clauses (Vec Any)) (env Any)] Any
   (let [final (reduce
-                (fn [(state Any) (c Any)] Any
+                (fn [state Any c Any] Any
                   (let [test (get c "test")
                         cur-env (get state "env")]
                     (infer-expr! test cur-env)
@@ -2697,7 +2678,7 @@
 
 (defn fields-have-constraints? [(fields Any)] Bool
   (boolean
-    (some (fn [(field Any)] Bool
+    (some (fn [field Any] Bool
             (not (nil? (binding-constraint field))))
       fields)))
 
@@ -2752,7 +2733,7 @@
                  (> (count alternatives) 0)
                  (every? prim? alternatives))
         (swap! STATE assoc-in ["union-members" name]
-          (mapv (fn [(alternative Any)] String
+          (mapv (fn [alternative Any] String
                   (get alternative "name"))
             alternatives)))))
   nil)
@@ -2781,17 +2762,17 @@
 (defn register-record! [(name String) (fields (Vec Any)) (env Any)] Any
   (let [rec-type (make-prim name)
         name-lower (str/lower-case name)
-        field-map (reduce (fn [(m Any) (f Any)] Any
+        field-map (reduce (fn [m Any f Any] Any
                             (assoc m (str ":" (get f "name"))
                                    (if (nil? (get f "ann")) ANY (get f "ann"))))
                           {} fields)
-        field-order (mapv (fn [(f Any)] String (str ":" (get f "name"))) fields)
-        env1 (reduce (fn [(e Any) (f Any)] Any
+        field-order (mapv (fn [f Any] String (str ":" (get f "name"))) fields)
+        env1 (reduce (fn [e Any f Any] Any
                        (assoc e (str name-lower "-" (get f "name"))
                               (make-fn [rec-type] nil (if (nil? (get f "ann")) ANY (get f "ann")))))
                      env fields)
         env2 (assoc env1 (str "->" name)
-                    (make-fn (mapv (fn [(f Any)] Any
+                    (make-fn (mapv (fn [f Any] Any
                                      (if (nil? (get f "ann")) ANY (get f "ann"))) fields)
                              nil rec-type))]
     (swap! STATE assoc-in ["record-fields" name] field-map)
@@ -2808,7 +2789,7 @@
   (if (not (= (get (deref STATE) "target") "core"))
     env
     (reduce
-      (fn [(out Any) (member String)] Any
+      (fn [out Any member String] Any
         (let [ctor (str "->" member)]
           (if (some? (get out ctor))
             out
@@ -2829,9 +2810,9 @@
   (do
     (swap! STATE assoc-in ["union-members" name] members)
     (if (or (nil? type-params) (= (count type-params) 0))
-      (let [env1 (assoc env name (make-union (mapv (fn [(m Any)] Any (make-prim m)) members)))
+      (let [env1 (assoc env name (make-union (mapv (fn [m Any] Any (make-prim m)) members)))
             env2 (if (not (nil? member-fields))
-                   (reduce (fn [(e Any) (m Any)] Any
+                   (reduce (fn [e Any m Any] Any
                              (let [fields (get member-fields m)]
                                (if (not (nil? fields)) (register-record! m fields e) e)))
                      env1 members)
@@ -2843,21 +2824,21 @@
         (doseq [member members]
           (swap! STATE assoc-in ["parametric-member-union" member] name))
         (let [env2 (if (not (nil? member-fields))
-          (reduce (fn [(e Any) (m Any)] Any
+          (reduce (fn [e Any m Any] Any
                     (let [fields (get member-fields m)]
                       (if (not (nil? fields))
                         (let [m-type (make-prim m)
                               m-lower (str/lower-case m)
-                              field-map (reduce (fn [(fm Any) (f Any)] Any
+                              field-map (reduce (fn [fm Any f Any] Any
                                                   (assoc fm (str ":" (get f "name"))
                                                          (if (nil? (get f "ann")) ANY (get f "ann"))))
                                                 {} fields)
-                              field-order (mapv (fn [(f Any)] String (str ":" (get f "name"))) fields)
-                              ctor-fn (make-fn (mapv (fn [(f Any)] Any
+                              field-order (mapv (fn [f Any] String (str ":" (get f "name"))) fields)
+                              ctor-fn (make-fn (mapv (fn [f Any] Any
                                                        (if (nil? (get f "ann")) ANY (get f "ann"))) fields)
                                                nil m-type)
                               e1 (assoc e (str "->" m) (make-poly type-params ctor-fn nil))
-                              e2 (reduce (fn [(ee Any) (f Any)] Any
+                              e2 (reduce (fn [ee Any f Any] Any
                                            (assoc ee (str m-lower "-" (get f "name"))
                                                   (make-poly type-params
                                                              (make-fn [m-type] nil
@@ -2904,7 +2885,7 @@
 (defn fresh-value-compatible?! [(value Any) (expected Any) (env Any)] Bool
   (cond
     (union-type? expected)
-    (boolean (some (fn [(alt Any)] Bool
+    (boolean (some (fn [alt Any] Bool
                      (fresh-value-compatible?! value alt env))
                (get expected "members")))
 
@@ -2912,10 +2893,10 @@
          (not (nil? value)) (= (get value "node") "vec"))
     (let [items (get value "items")
           elems (get expected "args")
-          (indices (Vec Int)) (vec (range (count items)))]
+          indices (Vec Int) (vec (range (count items)))]
       (and (= (count items) (count elems))
            (every? true?
-             (mapv (fn [(i Int)] Bool
+             (mapv (fn [i Int] Bool
                      (fresh-value-compatible?! (nth items i) (nth elems i) env))
                indices))))
 
@@ -3269,7 +3250,7 @@
           (last-expr-type! (get e "body") env))
 
     (= (get e "node") "letfn")
-      (let [body-env (reduce (fn [(be Any) (f Any)] Any
+      (let [body-env (reduce (fn [be Any f Any] Any
                                (let [rp (opt-field (get f "rest"))
                                      p-types (mapv param-type-or-any (get f "params"))
                                      rtype (if (not (nil? rp))
@@ -3402,15 +3383,15 @@
       (let [items (get e "items")]
         (if (= (count items) 0)
           (make-app "Vec" [ANY])
-          (let [elem-types (mapv (fn [(it Any)] Any (infer-expr! it env)) items)]
+          (let [elem-types (mapv (fn [it Any] Any (infer-expr! it env)) items)]
             (make-app "Vec" [(collection-elem-type elem-types)]))))
 
     (= (get e "node") "map")
       (let [pairs (get e "pairs")]
         (if (= (count pairs) 0)
           (make-app "Map" [ANY ANY])
-          (let [key-types (mapv (fn [(p Any)] Any (infer-expr! (get p "key") env)) pairs)
-                val-types (mapv (fn [(p Any)] Any (infer-expr! (get p "val") env)) pairs)]
+          (let [key-types (mapv (fn [p Any] Any (infer-expr! (get p "key") env)) pairs)
+                val-types (mapv (fn [p Any] Any (infer-expr! (get p "val") env)) pairs)]
             (make-app "Map" [(collection-elem-type key-types)
                              (collection-elem-type val-types)]))))
 
@@ -3418,10 +3399,10 @@
       (let [items (get e "items")]
         (if (= (count items) 0)
           (make-app "Set" [ANY])
-          (let [elem-types (mapv (fn [(it Any)] Any (infer-expr! it env)) items)
+          (let [elem-types (mapv (fn [it Any] Any (infer-expr! it env)) items)
                 first-t (nth elem-types 0)
                 all-same (and (not (any-type? first-t))
-                              (every? (fn [(t Any)] Bool (type-compatible? t first-t))
+                              (every? (fn [t Any] Bool (type-compatible? t first-t))
                                       (drop 1 elem-types)))]
             (if all-same
               (make-app "Set" [first-t])
@@ -3465,7 +3446,7 @@
     (= (get e "node") "condp")
       (do (infer-expr! (get e "pred") env)
           (infer-expr! (get e "test") env)
-          (let [clause-types (mapv (fn [(c Any)] Any
+          (let [clause-types (mapv (fn [c Any] Any
                                      (infer-expr! (get c "test") env)
                                      (infer-expr! (get c "body") env))
                                    (get e "clauses"))
@@ -3478,7 +3459,7 @@
 
     (= (get e "node") "for")
       (let [body-env (reduce
-                       (fn [(be Any) (c Any)] Any
+                       (fn [be Any c Any] Any
                          (let [ct (get c "type")]
                            (cond
                              (= ct "binding")
@@ -3516,7 +3497,7 @@
 
     (= (get e "node") "doseq")
       (let [body-env (reduce
-                       (fn [(be Any) (c Any)] Any
+                       (fn [be Any c Any] Any
                          (let [ct (get c "type")]
                            (cond
                              (= ct "binding")
@@ -3556,7 +3537,7 @@
       (let [target-type (infer-expr! (get e "target") env)
             scrutinee (stable-scrutinee-key (get e "target") env)
             clauses (get e "clauses")
-            arm-types (mapv (fn [(c Any)] Any
+            arm-types (mapv (fn [c Any] Any
                               (let [arm-env
                                     (narrow-env-for-match
                                       c target-type env scrutinee)]
@@ -3567,7 +3548,7 @@
 
     (= (get e "node") "try")
       (let [body-type (last-expr-type! (get e "body") env)
-            catch-types (mapv (fn [(c Any)] Any
+            catch-types (mapv (fn [c Any] Any
                                 (let [catch-env (if (not (nil? (get c "name")))
                                                   (binder-env-assoc env c (get c "name") ANY)
                                                   env)]
@@ -3699,7 +3680,7 @@
     ;; (f x)) likewise — arg 2 only runs when arg 1 was falsy). Result is Any.
     (and (= (get e "node") "call")
          (or (= (call-fn-name e) "and") (= (call-fn-name e) "or")))
-      (do (reduce (fn [(acc Any) (a Any)] Any
+      (do (reduce (fn [acc Any a Any] Any
                     (let [env* (merge env acc)]
                       (infer-expr! a env*)
                       (let [tn (test-narrowings a env*)]
@@ -3756,9 +3737,9 @@
                   (numeric-refine
                     (reference-leaf fn-name) arg-types (get raw-type "ret")))
               (and (not (nil? raw-type)) (union-type? raw-type)
-                   (every? (fn [(m Any)] Bool (fn-type? m)) (get raw-type "members")))
+                   (every? (fn [m Any] Bool (fn-type? m)) (get raw-type "members")))
                 (let [n-args (count args)
-                      matching (first (filter (fn [(alt Any)] Bool
+                      matching (first (filter (fn [alt Any] Bool
                                                 (= (count (get alt "params")) n-args))
                                               (get raw-type "members")))]
                   (if (not (nil? matching))
@@ -3817,7 +3798,7 @@
 
     (= (get e "node") "nix-fn-set")
       (let [formals (get e "formals")
-            body-env (reduce (fn [(out Any) (formal Any)] Any
+            body-env (reduce (fn [out Any formal Any] Any
                                (assoc out (get formal "name") ANY))
                        env formals)
             at-name (get e "at-name")
@@ -3869,7 +3850,7 @@
         target-stdlib (merge base-stdlib
                         (hosted-require-contracts (get prog "requires" [])))
         env-with-externs (if (not (nil? externs))
-                           (reduce (fn [(env Any) (ext Any)] Any
+                           (reduce (fn [env Any ext Any] Any
                                      (reference-map-assoc
                                        env (get ext "name") (get ext "type")))
                                    target-stdlib externs)
@@ -3879,20 +3860,20 @@
         ;; Stashed under a #% sentinel key that no surface ref can collide
         ;; with. clj builtins seed below (after the form pre-pass, so a user
         ;; def of *out* keeps its declared type).
-        dyn-from-defs (reduce (fn [(acc Any) (f Any)] Any
+        dyn-from-defs (reduce (fn [acc Any f Any] Any
                                 (if (and (= (get f "node") "def")
                                          (= (get f "dynamic") true))
                                   (assoc acc (get f "name") true)
                                   acc))
                               {} forms)
         dyn-vars (if (= (get prog "target") "clj")
-                   (reduce (fn [(acc Any) (nm String)] Any
+                   (reduce (fn [acc Any nm String] Any
                              (assoc acc nm true))
                            dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS)
                    dyn-from-defs)
         env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
         env-with-externs (if (= (get prog "target") "clj")
-                           (reduce (fn [(env Any) (nm String)] Any
+                           (reduce (fn [env Any nm String] Any
                                      (if (nil? (get env nm))
                                        (assoc env nm ANY)
                                        env))
@@ -3908,7 +3889,7 @@
             "#%returns-synchronous-callable"
               returns-synchronous-callable)]
     (reduce
-      (fn [(env Any) (raw-form Any)] Any
+      (fn [env Any raw-form Any] Any
         (let [form (if (= (get raw-form "node") "with-meta")
                      (get raw-form "expr")
                      raw-form)
@@ -3935,7 +3916,7 @@
                 (assoc env (get form "name") (make-fn p-types rtype ret)))
             (= node "defn-multi")
               (let [arities (get form "arities")
-                    alt-types (mapv (fn [(a Any)] Any
+                    alt-types (mapv (fn [a Any] Any
                                       (let [rp (opt-field (get a "rest"))
                                             p-types (mapv inference-param-type! (get a "params"))
                                             rtype (if (not (nil? rp))
@@ -3960,7 +3941,7 @@
                 [] (get form "member-fields") env)
             (= node "defprotocol")
               (reduce
-                (fn [(protocol-env Any) (method Any)] Any
+                (fn [protocol-env Any method Any] Any
                   (let [rest-param (opt-field (get method "rest"))]
                     (assoc protocol-env
                       (get method "name")
@@ -3994,7 +3975,7 @@
 
 (defn definition-type-table [(prog Any) (env Any)] Any
   (reduce
-    (fn [(out Any) (raw-form Any)] Any
+    (fn [out Any raw-form Any] Any
       (let [form (unwrap-definition raw-form)
             node (get form "node")
             name (get form "name")]
@@ -4028,7 +4009,7 @@
               (make-var public-name))))
       (fn-type? resolved)
         (make-fn
-          (mapv (fn [(p Any)] Any
+          (mapv (fn [p Any] Any
                   (rewrite-inference-vars! p mapping names))
             (get resolved "params"))
           (if (nil? (get resolved "rest"))
@@ -4037,12 +4018,12 @@
           (rewrite-inference-vars! (get resolved "ret") mapping names))
       (app-type? resolved)
         (make-app (get resolved "name")
-          (mapv (fn [(a Any)] Any
+          (mapv (fn [a Any] Any
                   (rewrite-inference-vars! a mapping names))
             (get resolved "args")))
       (union-type? resolved)
         (make-union
-          (mapv (fn [(m Any)] Any
+          (mapv (fn [m Any] Any
                   (rewrite-inference-vars! m mapping names))
             (get resolved "members")))
       :else resolved)))
@@ -4075,9 +4056,9 @@
                           fixed-types
                           (conj (vec fixed-types)
                             (make-app "Vec" [(get signature "rest")])))
-        (indices (Vec Int)) (vec (range (count all-params)))]
+        indices (Vec Int) (vec (range (count all-params)))]
     (reduce
-      (fn [(out Any) (i Int)] Any
+      (fn [out Any i Int] Any
         (let [parameter (nth all-params i)
               target (param-binding-target parameter)
               effective (nth effective-types i)]
@@ -4106,7 +4087,7 @@
 
 (defn finalize-callable-definition-types! [(prog Any) (env Any) (types Any)] Any
   (reduce
-    (fn [(state Any) (raw-form Any)] Any
+    (fn [state Any raw-form Any] Any
       (let [form (unwrap-definition raw-form)]
         (if (callable-definition? form)
           (let [name (get form "name")
@@ -4120,7 +4101,7 @@
 (defn infer-value-definition-types! [(prog Any) (initial-env Any)] Any
   (let [pending
           (reduce
-            (fn [(out Any) (raw-form Any)] Any
+            (fn [out Any raw-form Any] Any
               (let [form (unwrap-definition raw-form)]
                 (if (and (value-definition? form) (nil? (get form "ann")))
                   (conj out form)
@@ -4128,13 +4109,13 @@
             []
             (get prog "forms"))]
     (loop [env initial-env
-           types (definition-type-table prog initial-env)
+           types definition-type-table prog initial-env
            remaining pending]
       (if (= (count remaining) 0)
         {"env" env "types" types "ok" true}
         (let [step
                 (reduce
-                  (fn [(state Any) (form Any)] Any
+                  (fn [state Any form Any] Any
                     (if (= true (get state "failed"))
                       state
                       (let [before-diags (get (deref STATE) "diagnostics")
@@ -4363,7 +4344,7 @@
   ;; root before the first dot; nil for keyword (`:k`), no dot, or empty root.
   (if (str/starts-with? s ":")
     nil
-    (let [(i (U Int Nil)) (str/index-of s ".")]
+    (let [i (U Int Nil) (str/index-of s ".")]
       (if (or (nil? i) (= i 0)) nil (subs s 0 i)))))
 
 (defn nix-qualified? [(ref Any)] Bool
@@ -4373,7 +4354,7 @@
       (< 0
         (count
           (filterv
-            (fn [(p String)] Bool (str/starts-with? text p))
+            (fn [p String] Bool (str/starts-with? text p))
             NIX-QUALIFIED-PREFIXES)))))))
 
 ;; Collect every bound name (over-collection is safe — it only suppresses a
@@ -4387,9 +4368,9 @@
         (let [nm (get x "name")
               acc1 (if (string? nm) (conj acc nm) acc)
               acc2 (if (= (get x "node") "nix-with-cfg") (conj acc1 "cfg") acc1)]
-          (reduce (fn [(a Any) (v Any)] Any (nix-collect-bound v a)) acc2 (vec (vals x)))))
+          (reduce (fn [a Any v Any] Any (nix-collect-bound v a)) acc2 (vec (vals x)))))
     (vector? x)
-      (reduce (fn [(a Any) (v Any)] Any (nix-collect-bound v a)) acc x)
+      (reduce (fn [a Any v Any] Any (nix-collect-bound v a)) acc x)
     :else acc))
 
 (defn nix-free-dotted-walk! [(x Any) (under-with Bool) (bound Any)] Nil
@@ -4427,7 +4408,7 @@
 (defn check-nix-free-dotted! [(prog Any)] Nil
   (when (= (get prog "target") "nix")
     (let [forms (get prog "forms")
-          bound (reduce (fn [(a Any) (f Any)] Any (nix-collect-bound f a)) #{} forms)]
+          bound (reduce (fn [a Any f Any] Any (nix-collect-bound f a)) #{} forms)]
       (doseq [form forms]
         (nix-free-dotted-walk! form false bound))))
   nil)
@@ -4453,16 +4434,16 @@
       (let [acc1 (if (= (get x "node") "ref")
                    (conj acc x)
                    acc)]
-        (reduce (fn [(a Any) (v Any)] Any (collect-references v a)) acc1 (vec (vals x))))
+        (reduce (fn [a Any v Any] Any (collect-references v a)) acc1 (vec (vals x))))
     (vector? x)
-      (reduce (fn [(a Any) (v Any)] Any (collect-references v a)) acc x)
+      (reduce (fn [a Any v Any] Any (collect-references v a)) acc x)
     :else acc))
 
 (defn check-qualified-resolution! [(prog Any) (env Any)] Nil
   (let [target (get prog "target")]
     (when (= target "clj")
       (let [required (reduce
-                       (fn [(m Any) (r Any)] Any
+                       (fn [m Any r Any] Any
                          (let [ns (get r "ns")
                                alias (get r "alias")
                                m1 (assoc m ns true)]
@@ -4470,7 +4451,7 @@
                              (assoc m1 alias true)
                              m1)))
                        {"str" true} (get prog "requires"))
-            refs (reduce (fn [(a Any) (f Any)] Any (collect-references f a))
+            refs (reduce (fn [a Any f Any] Any (collect-references f a))
                    [] (get prog "forms"))
             seen (atom {})
             bad (atom [])]
@@ -4490,7 +4471,7 @@
           (let [vs (deref bad)
                 plural (> (count vs) 1)
                 lines (str/join "\n"
-                        (mapv (fn [(v Any)] String
+                        (mapv (fn [v Any] String
                                 (str "  " (get v "sym") " — alias `" (get v "prefix")
                                      "` is not required"))
                               vs))]
@@ -4523,12 +4504,12 @@
 
 (defn marker-add [(markers Any) (marker Any)] Any
   (if (or (nil? marker)
-          (boolean (some (fn [(present Any)] Bool (= present marker)) markers)))
+          (boolean (some (fn [present Any] Bool (= present marker)) markers)))
     markers
     (conj markers marker)))
 
 (defn origins-union [(left Any) (right Any)] Any
-  (reduce (fn [(out Any) (origin Any)] Any (assoc out origin true))
+  (reduce (fn [out Any origin Any] Any (assoc out origin true))
           left (ordered-keys right)))
 
 (defn purity-result [(state Any) (origins Any)] Any
@@ -4538,7 +4519,7 @@
   (assoc state "markers" (marker-add (get state "markers") marker)))
 
 (defn purity-fresh-id [(state Any)] Any
-  (let [(next-id Int) (get state "next-id")]
+  (let [next-id Int (get state "next-id")]
     {"id" next-id
      "state" (assoc state "next-id" (+ next-id 1))}))
 
@@ -4557,13 +4538,13 @@
 
 (defn purity-origins-live? [(state Any) (origins Any)] Bool
   (and (> (count origins) 0)
-       (every? (fn [(origin Any)] Bool
+       (every? (fn [origin Any] Bool
                  (= (purity-owner-status state origin) "live"))
                (ordered-keys origins))))
 
 (defn purity-set-origin-status [(state Any) (origins Any) (status String)] Any
   (assoc state "owners"
-    (reduce (fn [(owners Any) (origin Any)] Any
+    (reduce (fn [owners Any origin Any] Any
               (assoc owners origin status))
             (get state "owners") (ordered-keys origins))))
 
@@ -4611,7 +4592,7 @@
         prepared (if (and (not keep-owner) (> (count origins) 0))
                    (purity-escape-origins state origins node)
                    state)]
-    (reduce (fn [(next Any) (name String)] Any
+    (reduce (fn [next Any name String] Any
               (purity-bind-name next name (if keep-owner origins {})))
             prepared names)))
 
@@ -4623,25 +4604,25 @@
 
 (defn purity-join-states [(base Any) (states Any)] Any
   (let [origin-ids (reduce
-                     (fn [(ids Any) (state Any)] Any
-                       (reduce (fn [(out Any) (origin Any)] Any
+                     (fn [ids Any state Any] Any
+                       (reduce (fn [out Any origin Any] Any
                                  (assoc out origin true))
                                ids (ordered-keys (get state "owners"))))
                      {} states)
         owners (reduce
-                 (fn [(out Any) (origin Any)] Any
+                 (fn [out Any origin Any] Any
                    (assoc out origin
-                     (if (every? (fn [(state Any)] Bool
+                     (if (every? (fn [state Any] Bool
                                    (= (purity-owner-status state origin) "live"))
                                  states)
                        "live"
                        "dead")))
                  {} (ordered-keys origin-ids))
-        max-id (reduce (fn [(current Int) (state Any)] Int
+        max-id (reduce (fn [current Int state Any] Int
                          (let [candidate (get state "next-id")]
                            (if (> candidate current) candidate current)))
                        (get base "next-id") states)
-        all-markers (reduce (fn [(markers Any) (state Any)] Any
+        all-markers (reduce (fn [markers Any state Any] Any
                               (reduce marker-add markers (get state "markers")))
                             (get base "markers") states)]
     (assoc (assoc (assoc base "owners" owners) "next-id" max-id)
@@ -4652,7 +4633,7 @@
 (defn purity-analyze-sequence [(body Any) (state Any)] Any
   (if (= 0 (count body))
     (purity-result state {})
-    (loop [(remaining Any) body (current Any) state]
+    (loop [remaining Any body current Any state]
       (let [result (purity-analyze (first remaining) current)]
         (if (= 1 (count remaining))
           result
@@ -4670,19 +4651,19 @@
                      (if (= (get key "node") "js-selector") [] [key])
                      trailing))]
     (reduce
-      (fn [(next Any) (child Any)] Any
+      (fn [next Any child Any] Any
         (purity-analyze-and-escape child next node))
       state children)))
 
 (defn purity-analyze-defaults [(state Any) (target Any)] Any
-  (reduce (fn [(next Any) (default Any)] Any
+  (reduce (fn [next Any default Any] Any
             (purity-analyze-and-escape default next default))
           state (destructure-default-exprs target)))
 
 (defn purity-analyze-bindings
   [(bindings Any) (state Any) (allow-acquire Bool)] Any
   (reduce
-    (fn [(next Any) (binding Any)] Any
+    (fn [next Any binding Any] Any
       (let [target (get binding "name")
             acquire (and allow-acquire
                          (string? target)
@@ -4704,7 +4685,7 @@
                      params
                      (conj (vec params) rest-param))]
     (reduce
-      (fn [(next Any) (param Any)] Any
+      (fn [next Any param Any] Any
         (let [target (param-binding-target param)
               after-defaults (purity-analyze-defaults next target)]
           (purity-bind-target after-defaults target {} param false)))
@@ -4712,7 +4693,7 @@
 
 (defn purity-analyze-branches [(branches Any) (state Any)] Any
   (let [summary (reduce
-                  (fn [(acc Any) (branch Any)] Any
+                  (fn [acc Any branch Any] Any
                     (let [branch-base (purity-copy-path-state
                                         state (get acc "counter"))
                           result (purity-analyze-sequence branch branch-base)]
@@ -4728,10 +4709,10 @@
       (get summary "origins"))))
 
 (defn purity-analyze-cond-clauses [(clauses Any) (state Any)] Any
-  (loop [(remaining Any) clauses
-         (fallthrough Any) state
-         (results Any) []
-         (origins Any) {}]
+  (loop [remaining Any clauses
+         fallthrough Any state
+         results Any []
+         origins Any {}]
     (if (= 0 (count remaining))
       (purity-result
         (purity-join-states state (conj results fallthrough)) origins)
@@ -4756,7 +4737,7 @@
   [(clauses Any) (body Any) (state Any) (collects Bool)] Any
   (let [outer-scope (get state "scope")
         bound (reduce
-                (fn [(next Any) (clause Any)] Any
+                (fn [next Any clause Any] Any
                   (let [kind (get clause "type")]
                     (cond
                       (= kind "binding")
@@ -4784,7 +4765,7 @@
 
 (defn purity-map-pair-children [(pairs Any)] Any
   (vec (apply concat
-         (mapv (fn [(pair Any)] Any [(get pair "key") (get pair "val")])
+         (mapv (fn [pair Any] Any [(get pair "key") (get pair "val")])
                pairs))))
 
 (defn purity-unknown-children [(value Any)] Any
@@ -4795,7 +4776,7 @@
     (= (get value "node") "set") (get value "items")
     (= (get value "node") "map") (purity-map-pair-children (get value "pairs"))
     (= (get value "node") "with")
-      (conj (mapv (fn [(update Any)] Any (get update "value"))
+      (conj (mapv (fn [update Any] Any (get update "value"))
                   (get value "updates"))
             (get value "target"))
     (= (get value "node") "doto")
@@ -4804,7 +4785,7 @@
 
 (defn purity-analyze-unknown [(value Any) (state Any)] Any
   (purity-result
-    (reduce (fn [(next Any) (child Any)] Any
+    (reduce (fn [next Any child Any] Any
               (purity-analyze-and-escape child next value))
             state (purity-unknown-children value))
     {}))
@@ -4824,7 +4805,7 @@
     (cond
       (and (not qualified?) (= name "transient") (not primitive-shadowed))
         (let [after-args (reduce
-                           (fn [(next Any) (arg Any)] Any
+                           (fn [next Any arg Any] Any
                              (purity-analyze-and-escape arg next call))
                            state args)
               fresh (purity-fresh-id after-args)
@@ -4843,7 +4824,7 @@
               valid (purity-origins-live? after-owner owner-origins)
               marked (if valid after-owner (purity-note after-owner name))
               after-rest (reduce
-                           (fn [(next Any) (arg Any)] Any
+                           (fn [next Any arg Any] Any
                              (purity-analyze-and-escape arg next call))
                            marked (if (> (count args) 0) (rest args) []))]
           (cond
@@ -4864,7 +4845,7 @@
                              marked
                              (purity-analyze-and-escape fn-expr marked call))
               after-args (reduce
-                           (fn [(next Any) (arg Any)] Any
+                           (fn [next Any arg Any] Any
                              (purity-analyze-and-escape arg next call))
                            after-callee args)]
           (purity-result after-args {})))))
@@ -4874,15 +4855,15 @@
     (cond
       (= kind "var") [(get pattern "name")]
       (= kind "record")
-        (mapv (fn [(binding Any)] String (get binding "name"))
+        (mapv (fn [binding Any] String (get binding "name"))
               (get pattern "bindings"))
       (= kind "map")
-        (mapv (fn [(entry Any)] String (get entry "name"))
+        (mapv (fn [entry Any] String (get entry "name"))
               (get pattern "entries"))
       :else [])))
 
 (defn purity-bind-names [(state Any) (names Any)] Any
-  (reduce (fn [(next Any) (name String)] Any
+  (reduce (fn [next Any name String] Any
             (purity-bind-name next name {}))
           state names))
 
@@ -4923,7 +4904,7 @@
                   outer-targets (get state "recur-targets")
                   bindings (get value "bindings")
                   bound (purity-analyze-bindings bindings state true)
-                  targets (mapv (fn [(binding Any)] Any
+                  targets (mapv (fn [binding Any] Any
                                   (get binding "name"))
                             bindings)
                   nested (assoc bound "recur-targets" targets)
@@ -4938,9 +4919,9 @@
               (if (nil? targets)
                 (purity-analyze-unknown value state)
                 (let [analyzed
-                       (loop [(remaining Any) (get value "args")
-                              (next Any) state
-                              (results Any) []]
+                       (loop [remaining Any (get value "args")
+                              next Any state
+                              results Any []]
                          (if (= 0 (count remaining))
                            {"state" next "results" results}
                            (let [arg (first remaining)
@@ -4952,10 +4933,10 @@
                                        "origins" (get result "origins")})))))
                       after-args (get analyzed "state")
                       transferred
-                       (loop [(remaining-targets Any) targets
-                              (remaining-results Any) (get analyzed "results")
-                              (next Any) after-args
-                              (seen Any) {}]
+                       (loop [remaining-targets Any targets
+                              remaining-results Any (get analyzed "results")
+                              next Any after-args
+                              seen Any {}]
                          (if (or (= 0 (count remaining-targets))
                                  (= 0 (count remaining-results)))
                            {"state" next "seen" seen}
@@ -4966,12 +4947,12 @@
                                  binding (if (string? target)
                                            (get (get state "scope") target)
                                            nil)
-                                 (prior Any) (if (nil? binding)
+                                 prior Any (if (nil? binding)
                                                {}
                                                (get binding "origins"))
                                  prior-still-live
                                    (reduce
-                                     (fn [(live Any) (origin Any)] Any
+                                     (fn [live Any origin Any] Any
                                        (if (= (purity-owner-status next origin)
                                               "dead")
                                          live
@@ -4979,7 +4960,7 @@
                                      {} (ordered-keys prior))
                                  disjoint
                                    (every?
-                                     (fn [(origin Any)] Bool
+                                     (fn [origin Any] Bool
                                        (not (contains? seen origin)))
                                      (ordered-keys origins))
                                  exact-target
@@ -5011,7 +4992,7 @@
                                     (origins-union seen origins)))))]
                   (purity-result (get transferred "state") {}))))
           (= node "fn")
-            (let [(lambda-depth Int) (get state "lambda-depth")
+            (let [lambda-depth Int (get state "lambda-depth")
                   nested (assoc state "lambda-depth" (+ lambda-depth 1))
                   bound (purity-bind-params nested
                           (get value "params") (opt-field (get value "rest")))
@@ -5045,7 +5026,7 @@
                   after-test (purity-analyze-and-escape
                                (get value "test") after-pred value)
                   summary (reduce
-                            (fn [(acc Any) (clause Any)] Any
+                            (fn [acc Any clause Any] Any
                               (let [fallthrough (get acc "fallthrough")
                                     after-clause-test (purity-analyze-and-escape
                                                         (get clause "test")
@@ -5076,7 +5057,7 @@
                   (get default-result "origins"))))
           (= node "target-case")
             (purity-analyze-branches
-              (mapv (fn [(item Any)] Any [(get item "body")])
+              (mapv (fn [item Any] Any [(get item "body")])
                     (get value "cases"))
               state)
           (= node "rescue")
@@ -5097,12 +5078,12 @@
           (= node "letfn")
             (let [outer-scope (get state "scope")
                   fn-scope (reduce
-                             (fn [(next Any) (fn-def Any)] Any
+                             (fn [next Any fn-def Any] Any
                                (purity-bind-name next (get fn-def "name") {}))
                              state (get value "fns"))
                   after-fns (reduce
-                              (fn [(next Any) (fn-def Any)] Any
-                                (let [(lambda-depth Int)
+                              (fn [next Any fn-def Any] Any
+                                (let [lambda-depth Int
                                         (get next "lambda-depth")
                                       nested (assoc next "lambda-depth"
                                                (+ lambda-depth 1))
@@ -5130,7 +5111,7 @@
             ;; lexical binding. Calls in the body therefore retain their normal
             ;; module/local resolution and effect propagation.
             (let [after-bindings (reduce
-                                   (fn [(next Any) (binding Any)] Any
+                                   (fn [next Any binding Any] Any
                                      (purity-analyze-and-escape
                                        (get binding "value") next binding))
                                    state (get value "bindings"))]
@@ -5193,7 +5174,7 @@
           (= node "js-new")
             (purity-result
               (reduce
-                (fn [(next Any) (child Any)] Any
+                (fn [next Any child Any] Any
                   (purity-analyze-and-escape child next value))
                 state
                 (into [(get value "callee")] (get value "args")))
@@ -5242,7 +5223,7 @@
                                (get value "test") state value)
                   fallback (opt-field (get value "default"))
                   branches (conj
-                             (mapv (fn [(clause Any)] Any
+                             (mapv (fn [clause Any] Any
                                      [(get clause "body")])
                                    (get value "clauses"))
                              (if (nil? fallback) [] [fallback]))]
@@ -5251,7 +5232,7 @@
             (let [outer-scope (get state "scope")
                   normal (purity-analyze-sequence (get value "body") state)
                   catches (reduce
-                            (fn [(acc Any) (clause Any)] Any
+                            (fn [acc Any clause Any] Any
                               (let [base (purity-copy-path-state
                                            (get normal "state")
                                            (get acc "counter"))
@@ -5282,7 +5263,7 @@
             (let [after-target (purity-analyze-and-escape
                                  (get value "target") state value)
                   summary (reduce
-                            (fn [(acc Any) (clause Any)] Any
+                            (fn [acc Any clause Any] Any
                               (let [base (purity-copy-path-state
                                            after-target (get acc "counter"))
                                     bound (purity-bind-names base
@@ -5305,7 +5286,7 @@
               (= node "def") (= node "defonce"))
             (let [marked (purity-note state "definition-publication")
                   live (reduce
-                         (fn [(origins Any) (origin Any)] Any
+                         (fn [origins Any origin Any] Any
                            (if (= (purity-owner-status marked origin) "live")
                              (assoc origins origin true)
                              origins))
@@ -5359,7 +5340,7 @@
 
 (defn collect-purity-defs [(prog Any)] Any
   (reduce
-    (fn [(defs Any) (raw-form Any)] Any
+    (fn [defs Any raw-form Any] Any
       (let [form (purity-definition-form raw-form)
             node (get form "node")]
         (cond
@@ -5371,7 +5352,7 @@
           (= node "defn-multi")
             (conj defs {"name" (get form "name")
                         "clauses" (mapv
-                                    (fn [(arity Any)] Any
+                                    (fn [arity Any] Any
                                       {"params" (get arity "params")
                                        "rest" (opt-field (get arity "rest"))
                                        "body" (get arity "body")})
@@ -5380,11 +5361,11 @@
     [] (get prog "forms")))
 
 (defn purity-global-bindings [(prog Any)] Any
-  (let [externs (reduce (fn [(names Any) (entry Any)] Any
+  (let [externs (reduce (fn [names Any entry Any] Any
                           (assoc names (get entry "name") true))
                         {} (get prog "externs"))]
     (reduce
-      (fn [(names Any) (raw-form Any)] Any
+      (fn [names Any raw-form Any] Any
         (let [form (purity-definition-form raw-form)
               node (get form "node")]
           (if (or (= node "defn") (= node "defn-multi")
@@ -5395,7 +5376,7 @@
 
 (defn definition-effect-markers [(definition Any) (known Any) (globals Any)] Any
   (reduce
-    (fn [(markers Any) (clause Any)] Any
+    (fn [markers Any clause Any] Any
       ;; One multi-arity definition is one purity boundary, but each clause is
       ;; analyzed independently and retains its own ordered witnesses. Do not
       ;; deduplicate equal markers across clauses.
@@ -5408,7 +5389,7 @@
 
 (defn derive-effectful-defs [(defs Any) (globals Any)] Any
   (loop [known {}]
-    (let [next (reduce (fn [(acc Any) (definition Any)] Any
+    (let [next (reduce (fn [acc Any definition Any] Any
                          (if (> (count (definition-effect-markers
                                         definition known globals)) 0)
                            (assoc acc (get definition "name") true)
@@ -5460,7 +5441,7 @@
   (cond
     (vector? value)
       (reduce
-        (fn [(state Any) (item Any)] Any
+        (fn [state Any item Any] Any
           (let [tagged (tag-semantic-node-ids-from item (get state "next"))]
             {"value" (conj (get state "value") (get tagged "value"))
              "next" (get tagged "next")}))
@@ -5482,7 +5463,7 @@
             child-start (if semantic-node? (+ next-id 1) next-id)
             tagged
               (reduce
-                (fn [(state Any) (key Any)] Any
+                (fn [state Any key Any] Any
                   (if (or (= key WITH-CHECK-ID-KEY)
                           (= key KW-ACCESS-CHECK-ID-KEY)
                           (= key BINDING-CHECK-ID-KEY))
@@ -5523,7 +5504,7 @@
         binding-constraint-proofs)
 
     (vector? value)
-      (mapv (fn [(item Any)] Any
+      (mapv (fn [item Any] Any
               (decorate-tagged-value
                 item record-updates record-field-accesses
                 binding-constraint-proofs))
@@ -5535,7 +5516,7 @@
             binding-check-id (get value BINDING-CHECK-ID-KEY)
             decorated
               (reduce
-                (fn [(out Any) (key Any)] Any
+                (fn [out Any key Any] Any
                   (if (or (= key WITH-CHECK-ID-KEY)
                           (= key KW-ACCESS-CHECK-ID-KEY)
                           (= key BINDING-CHECK-ID-KEY)
@@ -5582,23 +5563,23 @@
     (var-type? t) (get replacements (get t "name") t)
     (fn-type? t)
       (make-fn
-        (mapv (fn [(p Any)] Any (substitute-contract-vars p replacements))
+        (mapv (fn [p Any] Any (substitute-contract-vars p replacements))
           (get t "params"))
         (if (nil? (get t "rest")) nil
           (substitute-contract-vars (get t "rest") replacements))
         (substitute-contract-vars (get t "ret") replacements))
     (app-type? t)
       (make-app (get t "name")
-        (mapv (fn [(a Any)] Any (substitute-contract-vars a replacements))
+        (mapv (fn [a Any] Any (substitute-contract-vars a replacements))
           (get t "args")))
     (union-type? t)
       (make-union
-        (mapv (fn [(member Any)] Any
+        (mapv (fn [member Any] Any
                 (substitute-contract-vars member replacements))
           (get t "members")))
     (poly-type? t)
       (let [nested
-            (reduce (fn [(out Any) (name String)] Any (dissoc out name))
+            (reduce (fn [out Any name String] Any (dissoc out name))
               replacements (get t "vars"))]
         (make-poly
           (get t "vars")
@@ -5609,14 +5590,14 @@
 (defn- freshen-contract-implementation! [(scheme Any)] Any
   (if (poly-type? scheme)
     (let [replacements
-          (reduce (fn [(out Any) (name String)] Any
+          (reduce (fn [out Any name String] Any
                     (assoc out name (fresh-inference-var!)))
             {} (get scheme "vars"))
           raw-bounds (get scheme "bounds")
           bounds
           (if (map? raw-bounds)
             (mapv
-              (fn [(name String)] Any
+              (fn [name String] Any
                 [(get replacements name)
                  (substitute-contract-vars (get raw-bounds name) replacements)])
               (ordered-keys raw-bounds))
@@ -5629,7 +5610,7 @@
   (if (poly-type? scheme)
     (let [replacements
           (reduce
-            (fn [(out Any) (name String)] Any
+            (fn [out Any name String] Any
               (assoc out name (make-prim (str "#%contract-rigid/" name))))
             {}
             (get scheme "vars"))]
@@ -5643,7 +5624,7 @@
     (unify-inference-types! instance expected)
     (and (type-compatible? (prune-inference-type instance) expected)
          (every?
-           (fn [(entry Any)] Bool
+           (fn [entry Any] Bool
              (let [solved (prune-inference-type (nth entry 0))]
                (or (inference-var? solved)
                    (type-compatible? solved (nth entry 1)))))
@@ -5651,14 +5632,14 @@
 
 (defn- named-surface [(surface Any)] Any
   (reduce
-    (fn [(out Any) (entry Any)] Any
+    (fn [out Any entry Any] Any
       (assoc out (get entry "name") (get entry "type")))
     {}
     surface))
 
 (defn- same-name-set? [(left Any) (right Any)] Bool
   (and (= (count (ordered-keys left)) (count (ordered-keys right)))
-       (every? (fn [(name String)] Bool (contains? right name)) (ordered-keys left))))
+       (every? (fn [name String] Bool (contains? right name)) (ordered-keys left))))
 
 (defn- sorted-names [(table Any)] Any
   (vec (sort (vec (keys table)))))
@@ -5669,7 +5650,7 @@
       (let [raw (named-surface (get prog "inferred-public-surface" []))
             inferred
             (reduce
-              (fn [(out Any) (name String)] Any
+              (fn [out Any name String] Any
                 (assoc out name (get effective name (get raw name))))
               {}
               (ordered-keys raw))]
@@ -5765,7 +5746,7 @@
 
 (defn local-record-names [(prog Any)] Any
   (reduce
-    (fn [(names Any) (form Any)] Any
+    (fn [names Any form Any] Any
       (let [node (get form "node")]
         (cond
           (= node "record")
@@ -5793,7 +5774,7 @@
           {}))
       (let [namespace (get prog "namespace")]
         (mapv
-          (fn [(name String)] Any
+          (fn [name String] Any
             (let [validator (get-in state ["record-validators" name])]
               {"name" name
                "namespace" namespace
@@ -5820,7 +5801,7 @@
             return-proofs
               (program-returns-synchronous-callable prog proofs)]
         (reduce
-          (fn [(out Any) (raw-form Any)] Any
+          (fn [out Any raw-form Any] Any
             (let [form (if (= (get raw-form "node") "with-meta")
                          (get raw-form "expr")
                          raw-form)
@@ -5932,7 +5913,7 @@
 
 (defn diagnostics-include? [(diagnostics Any) (fragment String)] Bool
   (boolean
-    (some (fn [(message String)] Bool (str/includes? message fragment))
+    (some (fn [message String] Bool (str/includes? message fragment))
       diagnostics)))
 
 ;; === test runner =============================================================
@@ -6243,8 +6224,8 @@
                     [(make-call "reset!" [(make-ref "cell") (make-lit "number" 1)])
                      (make-set!-node (make-ref "slot") (make-lit "number" 2))]
                     {})]
-      (and (boolean (some (fn [(m Any)] Bool (= m "reset!")) markers))
-           (boolean (some (fn [(m Any)] Bool (= m "set!")) markers)))))
+      (and (boolean (some (fn [m Any] Bool (= m "reset!")) markers))
+           (boolean (some (fn [m Any] Bool (= m "set!")) markers)))))
   (expect! "purity: nested let/if/do/fn forms are traversed"
     (let [nested (make-let-node
                    [(make-let-binding "x" nil (make-lit "number" 1))]
@@ -6255,7 +6236,7 @@
                                 "ret" ANY
                                 "body" [(make-call "swap!" [(make-ref "cell")])]}]}
                       (make-lit "nil" nil))])]
-      (boolean (some (fn [(m Any)] Bool (= m "swap!"))
+      (boolean (some (fn [m Any] Bool (= m "swap!"))
                      (collect-markers [nested] {})))))
   (expect! "purity: rescue/doto and future node children cannot hide markers"
     (let [wrapped {"node" "future-node"
@@ -6265,7 +6246,7 @@
                                       "forms" [(make-call "reset!" [])]}
                               "fallback" (make-lit "nil" nil)
                               "err" false}}]
-      (boolean (some (fn [(m Any)] Bool (= m "reset!"))
+      (boolean (some (fn [m Any] Bool (= m "reset!"))
                      (collect-markers [wrapped] {})))))
   (expect! "purity: local effects reach a source-order-independent fixed point"
     (let [forward [{"name" "outer" "clauses" [{"params" [] "rest" nil
@@ -6343,7 +6324,7 @@
        0))
   (expect! "purity: recur does not hide an escaping loop owner"
     (boolean
-      (some (fn [(marker Any)] Bool (= marker "transient-escape"))
+      (some (fn [marker Any] Bool (= marker "transient-escape"))
         (effective-markers
           [(make-loop-node
              [(make-let-binding "index" nil (make-lit "number" 0))
@@ -6361,7 +6342,7 @@
           {}))))
   (expect! "purity: recur rejects an aliased owner transfer"
     (boolean
-      (some (fn [(marker Any)] Bool (= marker "transient-escape"))
+      (some (fn [marker Any] Bool (= marker "transient-escape"))
         (effective-markers
           [(make-loop-node
              [(make-let-binding "index" nil (make-lit "number" 0))
@@ -6389,8 +6370,8 @@
                    (make-call "conj!" [(make-ref "owned") (make-lit "number" 2)])
                    (make-call "persistent!" [(make-ref "owned")])])]
           markers (effective-markers body {})]
-      (and (boolean (some (fn [(m Any)] Bool (= m "conj!")) markers))
-           (not (boolean (some (fn [(m Any)] Bool (= m "persistent!")) markers))))))
+      (and (boolean (some (fn [m Any] Bool (= m "conj!")) markers))
+           (not (boolean (some (fn [m Any] Bool (= m "persistent!")) markers))))))
   (expect! "purity: returning or capturing an owned transient is an escape"
     (let [escaped (make-let-node
                     [(make-let-binding "owned" nil
@@ -6402,9 +6383,9 @@
                      [{"node" "fn" "params" [] "rest" false "ret" ANY
                        "body" [(make-call "conj!"
                                  [(make-ref "owned") (make-lit "number" 1)])]}])]
-      (and (boolean (some (fn [(m Any)] Bool (= m "transient-escape"))
+      (and (boolean (some (fn [m Any] Bool (= m "transient-escape"))
                           (effective-markers [escaped] {})))
-           (boolean (some (fn [(m Any)] Bool (= m "transient-escape"))
+           (boolean (some (fn [m Any] Bool (= m "transient-escape"))
                           (effective-markers [captured] {}))))))
   (expect! "purity: strict non-bang boundary rejects an indirect effect"
     (do

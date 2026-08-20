@@ -111,9 +111,9 @@
   (cond
     (and (>= (compare c "0") 0) (<= (compare c "9") 0)) (compare c "0")
     (and (>= (compare c "a") 0) (<= (compare c "f") 0))
-      (let [(offset Int) (compare c "a")] (+ 10 offset))
+      (let [offset Int (compare c "a")] (+ 10 offset))
     (and (>= (compare c "A") 0) (<= (compare c "F") 0))
-      (let [(offset Int) (compare c "A")] (+ 10 offset))
+      (let [offset Int (compare c "A")] (+ 10 offset))
     :else 0))
 
 ;; \uXXXX -> the char. i points at the first hex digit.
@@ -140,13 +140,13 @@
     (and (= (count suffix) 5) (= (char-at suffix 0) "u"))
       (decode-u4 suffix 1)
     (= (count suffix) 1)
-      (let [(ch Any) (char-at suffix 0)]
+      (let [ch Any (char-at suffix 0)]
         (int (first ch)))
     :else 65533))
 
 (defn read-string-literal [(src String) (pos Int)] Any
   (let [len (count src)]
-    (loop [(i Int) (+ pos 1) (buf (Vec String)) []]
+    (loop [i Int (+ pos 1) buf (Vec String) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated string\n")
@@ -166,7 +166,7 @@
 ;; read-regex-pattern). pos points at the opening ".
 (defn read-regex-literal [(src String) (pos Int)] Any
   (let [len (count src)]
-    (loop [(i Int) (+ pos 1) (buf (Vec String)) []]
+    (loop [i Int (+ pos 1) buf (Vec String) []]
       (cond
         (>= i len)
           (do (selfhost.rt/eprint "beagle reader: unterminated regex literal\n")
@@ -197,7 +197,7 @@
     (if (or (>= open-pos len) (not= (char-at src open-pos) "\""))
       (do (selfhost.rt/eprint "beagle reader: expected '\"' after #r hashes\n")
           (make-result "" open-pos))
-      (loop [(i Int) (+ open-pos 1) (buf (Vec String)) []]
+      (loop [i Int (+ open-pos 1) buf (Vec String) []]
         (if (>= i len)
           (make-result [STRING-TAG (str/join "" buf)] i)
           (if (= (char-at src i) "\"")
@@ -271,7 +271,7 @@
 
 (defn read-delimited [(src String) (pos Int) (close String)] Any
   (let [len (count src)]
-    (loop [(p Int) (skip-ws src pos) (items (Vec Any)) []]
+    (loop [p Int (skip-ws src pos) items (Vec Any) []]
       (cond
         (>= p len)
           (do (selfhost.rt/eprint
@@ -514,9 +514,9 @@
 (defn- read-syntax-delimited!
   [(src String) (pos Int) (close String) (source-id Any)] Any
   (let [len (count src)]
-    (loop [(p Int) (skip-ws src pos)
-           (items (Vec Any)) []
-           (syntaxes (Vec Any)) []]
+    (loop [p Int (skip-ws src pos)
+           items (Vec Any) []
+           syntaxes (Vec Any) []]
       (cond
         (>= p len)
           (do (selfhost.rt/eprint
@@ -694,7 +694,7 @@
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
         start-pos (get lang-info "pos")]
-    (loop [(p Int) (skip-ws src start-pos) (datums (Vec Any)) []]
+    (loop [p Int (skip-ws src start-pos) datums (Vec Any) []]
       (if (>= p (count src))
         {"target" target "datums" datums}
         (let [result (read-datum src p)]
@@ -737,9 +737,9 @@
         target (get lang-info "target")
         start-pos (get lang-info "pos")
         read-result
-        (loop [(p Int) (skip-ws src start-pos)
-               (datums (Vec Any)) []
-               (syntaxes (Vec Any)) []]
+        (loop [p Int (skip-ws src start-pos)
+               datums (Vec Any) []
+               syntaxes (Vec Any) []]
           (if (>= p (count src))
             {"datums" datums "syntaxes" syntaxes}
             (let [result (read-syntax-datum! src p source-id)]

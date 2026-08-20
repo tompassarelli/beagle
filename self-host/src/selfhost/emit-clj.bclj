@@ -75,7 +75,7 @@
 (def emit-expr-ref Any (atom nil))
 
 (defn emit-expr* [(e Any)] String
-  (let [(f (Fn [Any] String)) (deref emit-expr-ref)]
+  (let [f (Fn [Any] String) (deref emit-expr-ref)]
     (f e)))
 
 ;; --- structural references --------------------------------------------------
@@ -108,12 +108,12 @@
 (defn register-refer-output-names! [(requires Any)] Nil
   (reset! refer-output-names
     (reduce
-      (fn [(out Any) (require Any)] Any
+      (fn [out Any require Any] Any
         (let [alias (get require "alias")
               refer (get require "refer")]
           (if (and (string? alias) (vector? refer))
             (reduce
-              (fn [(names Any) (name Any)] Any
+              (fn [names Any name Any] Any
                 (if (not (string? name))
                   names
                   (let [old (get names name)]
@@ -137,8 +137,8 @@
 ;; emitter-internal lookup uses the same structural identity as the AST.
 (defn metadata-reference-key [(key Any)] Any
   (if (string? key)
-    (let [(text String) key
-          (index (U Int Nil)) (str/last-index-of text "/")]
+    (let [text String key
+          index (U Int Nil) (str/last-index-of text "/")]
       (if (and (some? index)
             (> index 0)
             (< index (- (count text) 1)))
@@ -148,7 +148,7 @@
 
 (defn structuralize-reference-table [(table Any)] Any
   (reduce
-    (fn [(out Any) (key Any)] Any
+    (fn [out Any key Any] Any
       (assoc out (metadata-reference-key key) (get table key)))
     {} (vec (keys table))))
 
@@ -158,8 +158,8 @@
         (= "qualified-ref" (nth key 0)))
     (nth key 2)
     (if (string? key)
-      (let [(text String) key
-            (index (U Int Nil)) (str/last-index-of text "/")]
+      (let [text String key
+            index (U Int Nil) (str/last-index-of text "/")]
         (if (nil? index) text (subs text (+ index 1))))
       key)))
 
@@ -176,8 +176,8 @@
        (subs HEX-DIGITS (mod code 16) (+ (mod code 16) 1))))
 
 (defn escape-char [(c String)] String
-  (let [(cs Any) c
-        (code Any) (int (first cs))]
+  (let [cs Any c
+        code Any (int (first cs))]
     (cond
       (= c "\"") "\\\""
       (= c "\\") "\\\\"
@@ -191,8 +191,8 @@
 
 (defn write-clj-string [(s String)] String
   (let [n (count s)]
-    (loop [(i Int) 0
-           (acc (Vec String)) ["\""]]
+    (loop [i Int 0
+           acc (Vec String) ["\""]]
       (if (>= i n)
         (str/join "" (conj acc "\""))
         (recur (+ i 1) (conj acc (escape-char (subs s i (+ i 1)))))))))
@@ -245,7 +245,7 @@
               default-str (if (> (count defaults) 0)
                             (str " :or {"
                               (str/join " "
-                                (mapv (fn [(entry Any)] String
+                                (mapv (fn [entry Any] String
                                         (str (get entry "key") " "
                                           (emit-expr* (get entry "value"))))
                                   defaults))
@@ -350,13 +350,13 @@
   [(params Any) (rest-p Any) (body-str String)] Any
   (let [all (params+rest params rest-p)
         fixed-count (count params)
-        (all-indices (Vec Int)) (vec (range (count all)))
-        (fixed-indices (Vec Int)) (vec (range fixed-count))
-        raw-names (mapv (fn [(index Int)] String
+        all-indices (Vec Int) (vec (range (count all)))
+        fixed-indices (Vec Int) (vec (range fixed-count))
+        raw-names (mapv (fn [index Int] String
                           (callable-raw-name index fixed-count))
                     all-indices)
         fixed-raw (mapv
-                    (fn [(index Int)] String
+                    (fn [index Int] String
                       (let [raw (nth raw-names index)
                             param (nth params index)
                             target (param-binding-target param)]
@@ -374,7 +374,7 @@
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
         predicate-bindings
-          (loop [(index Int) 0 (acc (Vec String)) []]
+          (loop [index Int 0 acc (Vec String) []]
             (if (>= index (count all))
               acc
               (let [binding (nth all index)]
@@ -385,7 +385,7 @@
                            (emit-expr* (checked-binding-constraint binding))))
                     acc)))))
         checked-bindings
-          (mapv (fn [(index Int)] String
+          (mapv (fn [index Int] String
                   (let [binding (nth all index)
                         raw (nth raw-names index)
                         checked (str "$beagle$constraint$checked-param$" index)]
@@ -396,7 +396,7 @@
                         raw))))
             all-indices)
         target-bindings
-          (mapv (fn [(index Int)] String
+          (mapv (fn [index Int] String
                   (str (emit-binding-form (binding-target (nth all index))) " "
                        "$beagle$constraint$checked-param$" index))
             all-indices)]
@@ -433,7 +433,7 @@
 
 (defn emit-let-bindings! [(bindings Any)] String
   (str/join "\n   "
-    (loop [(index Int) 0 (acc (Vec String)) []]
+    (loop [index Int 0 acc (Vec String) []]
       (if (>= index (count bindings))
         acc
         (let [b (nth bindings index)
@@ -470,7 +470,7 @@
 
 (defn emit-dynamic-binding-chain! [(bindings Any) (body-str String)] String
   (let [capture-bindings
-          (loop [(index Int) 0 (acc (Vec String)) []]
+          (loop [index Int 0 acc (Vec String) []]
             (if (>= index (count bindings))
               acc
               (let [binding (nth bindings index)
@@ -486,9 +486,9 @@
                          (str "$beagle$constraint$checked-dynamic$" index " "
                            (emit-guarded-binding-value binding predicate-name raw-name))])))
                   (recur (+ index 1) base)))))
-        (dynamic-indices (Vec Int)) (vec (range (count bindings)))
+        dynamic-indices (Vec Int) (vec (range (count bindings)))
         dynamic-bindings
-          (mapv (fn [(index Int)] String
+          (mapv (fn [index Int] String
                   (let [binding (nth bindings index)]
                     (str (emit-binding-target! (get binding "name")) " "
                       (if (constraint-present? binding)
@@ -501,7 +501,7 @@
 
 (defn emit-for-clauses! [(clauses Any)] String
   (str/join "\n   "
-    (loop [(index Int) 0 (acc (Vec String)) []]
+    (loop [index Int 0 acc (Vec String) []]
       (if (>= index (count clauses))
         acc
         (let [c (nth clauses index)
@@ -533,17 +533,17 @@
 
 (defn emit-loop-with-constraints! [(e Any)] String
   (let [bindings (get e "bindings")
-        (loop-indices (Vec Int)) (vec (range (count bindings)))]
+        loop-indices (Vec Int) (vec (range (count bindings)))]
     (if (not (bindings-have-constraints? bindings))
       (str "(loop [" (emit-let-bindings! bindings) "]\n  "
            (emit-body-with-loop-context! (get e "body") "  " nil) ")")
-      (let [(loop-indices (Vec Int)) (vec (range (count bindings)))
+      (let [loop-indices (Vec Int) (vec (range (count bindings)))
             raw-names
-              (mapv (fn [(index Int)] String
+              (mapv (fn [index Int] String
                       (str "$beagle$constraint$raw-loop$" index))
                 loop-indices)
             init-bindings
-              (loop [(index Int) 0 (acc (Vec String)) []]
+              (loop [index Int 0 acc (Vec String) []]
                 (if (>= index (count bindings))
                   acc
                   (let [binding (nth bindings index)
@@ -563,7 +563,7 @@
                                  binding predicate-name raw))])))
                       (recur (+ index 1) (conj base (str target " " raw)))))))
             iteration-bindings
-              (mapv (fn [(index Int)] String
+              (mapv (fn [index Int] String
                       (let [binding (nth bindings index)
                             raw (nth raw-names index)
                             target (emit-binding-target! (get binding "name"))]
@@ -578,7 +578,7 @@
                             raw))))
                 loop-indices)
             loop-bindings
-              (mapv (fn [(index Int)] String
+              (mapv (fn [index Int] String
                       (str (nth raw-names index)
                            " (nth $beagle$constraint$initial-values " index ")"))
                 loop-indices)
@@ -630,10 +630,10 @@
 ;; --- ns emission (emit-clj.rkt emit-ns) -----------------------------------------
 
 (defn last-dot-segment [(s String)] String
-  (let [(idx (U Int Nil)) (str/last-index-of s ".")]
+  (let [idx (U Int Nil) (str/last-index-of s ".")]
     (if (nil? idx)
       s
-      (let [(offset Int) idx]
+      (let [offset Int idx]
         (subs s (+ offset 1))))))
 
 (defn emit-require [(r Any)] String
@@ -651,15 +651,15 @@
          "]")))
 
 (defn emit-import [(class-name String)] String
-  (let [(idx (U Int Nil)) (str/last-index-of class-name ".")]
+  (let [idx (U Int Nil) (str/last-index-of class-name ".")]
     (if (nil? idx)
       class-name
-      (let [(offset Int) idx]
+      (let [offset Int idx]
         (str "[" (subs class-name 0 offset) " "
              (subs class-name (+ offset 1)) "]")))))
 
 (defn has-clojure-string? [(rs Any)] Bool
-  (> (count (filterv (fn [(r Any)] Bool (= "clojure.string" (get r "ns"))) rs)) 0))
+  (> (count (filterv (fn [r Any] Bool (= "clojure.string" (get r "ns"))) rs)) 0))
 
 (defn emit-ns-form [(prog Any) (body String)] String
   (let [needs (some? (re-find #"[( \t\n]str/" body))
@@ -691,24 +691,24 @@
 ;; --- records / enums / unions ----------------------------------------------------
 
 (defn field-names-of [(fields Any)] (Vec String)
-  (mapv (fn [(f Any)] String (get f "name")) fields))
+  (mapv (fn [f Any] String (get f "name")) fields))
 
 (defn unqualify-name [(name String)] String
-  (let [(index (U Int Nil)) (str/last-index-of name "/")]
+  (let [index (U Int Nil) (str/last-index-of name "/")]
     (if (nil? index)
       name
-      (let [(offset Int) index]
+      (let [offset Int index]
         (subs name (+ offset 1))))))
 
 (defn record-validator-name [(name String)] String
   (str "$beagle$record$" (unqualify-name name) "$validate"))
 
 (defn emit-record-constructor-guards [(name String) (fields Any)] Any
-  (let [(field-indices (Vec Int)) (vec (range (count fields)))
+  (let [field-indices (Vec Int) (vec (range (count fields)))
         constrained
-          (filterv (fn [(entry Any)] Bool
+          (filterv (fn [entry Any] Bool
                      (constraint-present? (nth entry 1)))
-            (mapv (fn [(index Int)] Any [index (nth fields index)])
+            (mapv (fn [index Int] Any [index (nth fields index)])
               field-indices))]
     (if (= 0 (count constrained))
       []
@@ -725,7 +725,7 @@
                           (str " " (str/join " " (field-names-of fields))))
                         ")"))
             validation-bindings
-              (loop [(i Int) 0 (acc (Vec String)) []]
+              (loop [i Int 0 acc (Vec String) []]
                 (if (>= i (count constrained))
                   acc
                   (let [entry (nth constrained i)
@@ -758,14 +758,14 @@
         fnames (field-names-of fields)
         name-lower (str/lower-case name)
         record-line (str "(defrecord " name " [" (str/join " " fnames) "])")
-        accessors (mapv (fn [(fname String)] String
+        accessors (mapv (fn [fname String] String
                           (str "(defn " name-lower "-" fname " [r] (:" fname " r))"))
                         fnames)]
     (str/join "\n\n"
       (into (into [record-line] (emit-record-constructor-guards name fields)) accessors))))
 
 (defn emit-defenum [(e Any)] String
-  (let [vals-str (str/join " " (mapv (fn [(v Any)] String (str ":" v)) (get e "values")))]
+  (let [vals-str (str/join " " (mapv (fn [v Any] String (str ":" v)) (get e "values")))]
     (str "(def " (get e "name") "-values #{" vals-str "})")))
 
 ;; Accessors are mandatory: check.rkt registers `circle-radius` for every
@@ -774,7 +774,7 @@
   (let [fnames (field-names-of fields)
         m-lower (str/lower-case m)
         record-line (str "(defrecord " m " [" (str/join " " fnames) "])")
-        accessors (mapv (fn [(fname String)] String
+        accessors (mapv (fn [fname String] String
                           (str "(defn " m-lower "-" fname " [r] (:" fname " r))"))
                     fnames)]
     (str/join "\n\n"
@@ -787,7 +787,7 @@
       comment
       (str comment "\n"
            (str/join "\n"
-             (mapv (fn [(m String)] String
+             (mapv (fn [m String] String
                      (emit-variant-defrecord m (vec (get mf m))))
                    (get e "members")))))))
 
@@ -798,7 +798,7 @@
       comment
       (str comment "\n"
            (str/join "\n"
-             (mapv (fn [(m String)] String
+             (mapv (fn [m String] String
                      (emit-variant-defrecord m (vec (get mf m))))
                    (get e "members")))))))
 
@@ -812,7 +812,7 @@
     (if (= 0 (count predicates))
       (str ";; " name " : " (scalar-backing-label (get e "backing")) " (scalar)")
       (let [pre-exprs
-              (mapv (fn [(predicate Any)] String
+              (mapv (fn [predicate Any] String
                       (let [value (get predicate "value")]
                         (str "(" (get predicate "op") " v "
                           (if (double? value) (emit-float value) (str value)) ")")))
@@ -832,8 +832,8 @@
         rest-p (get method "rest")
         all (params+rest params rest-p)
         fixed-count (count params)
-        (all-indices (Vec Int)) (vec (range (count all)))
-        raw-names (mapv (fn [(index Int)] String
+        all-indices (Vec Int) (vec (range (count all)))
+        raw-names (mapv (fn [index Int] String
                           (callable-raw-name index fixed-count))
                     all-indices)
         rest-normalization
@@ -841,7 +841,7 @@
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
         predicate-bindings
-          (loop [(index Int) 0 (acc (Vec String)) []]
+          (loop [index Int 0 acc (Vec String) []]
             (if (>= index (count all))
               acc
               (let [param (nth all index)]
@@ -851,11 +851,11 @@
                       (str "$beagle$constraint$predicate$" index " "
                            (emit-expr* (checked-binding-constraint param))))
                     acc)))))
-        checked-names (mapv (fn [(index Int)] String
+        checked-names (mapv (fn [index Int] String
                               (str "$beagle$constraint$checked-param$" index))
                         all-indices)
         checked-bindings
-          (mapv (fn [(index Int)] String
+          (mapv (fn [index Int] String
                   (let [param (nth all index)
                         raw (nth raw-names index)]
                     (str (nth checked-names index) " "
@@ -896,11 +896,11 @@
   (let [protocol-name (get e "name")
         methods (get e "methods")
         raw-sigs
-          (mapv (fn [(method Any)] String
+          (mapv (fn [method Any] String
                   (let [params (get method "params")
                         rest-p (get method "rest")
-                        (indices (Vec Int)) (vec (range (count params)))
-                        fixed (mapv (fn [(index Int)] String
+                        indices (Vec Int) (vec (range (count params)))
+                        fixed (mapv (fn [index Int] String
                                       (str "$beagle$constraint$raw-param$" index))
                                 indices)
                         all (if (or (nil? rest-p) (false? rest-p))
@@ -911,14 +911,14 @@
             methods)]
     (str "(defprotocol " protocol-name "\n  " (str/join "\n  " raw-sigs) ")\n\n"
          (str/join "\n\n"
-           (mapv (fn [(method Any)] String
+           (mapv (fn [method Any] String
                    (emit-protocol-wrapper protocol-name method))
              methods)))))
 
 (defn emit-type-impl! [(impl Any)] String
   (let [protocol-name (get impl "protocol")
         method-lines
-          (mapv (fn [(method Any)] String
+          (mapv (fn [method Any] String
                   (let [body (emit-body-with-loop-context!
                                (get method "body") "    " nil)
                         callable (emit-callable-signature+body
@@ -946,7 +946,7 @@
     (cond
       (= t "literal") true
       (= t "or")
-        (= 0 (count (filterv (fn [(alt Any)] Bool
+        (= 0 (count (filterv (fn [alt Any] Bool
                                (let [at (get alt "type")]
                                  (not (or (= at "literal") (= at "wildcard")))))
                              (get pat "alternatives"))))
@@ -960,7 +960,7 @@
             non-tail (subvec cs 0 (- n 1))
             tail-pat (get (nth cs (- n 1)) "pattern")
             tt (get tail-pat "type")
-            bad (count (filterv (fn [(c Any)] Bool
+            bad (count (filterv (fn [c Any] Bool
                                   (not (case-foldable-pattern? (get c "pattern"))))
                                 non-tail))]
         (and (= bad 0)
@@ -1004,7 +1004,7 @@
         has-default (or (= tt "wildcard") (= tt "var"))
         dispatch (if has-default (subvec cs 0 (- n 1)) cs)
         clause-strs
-          (mapv (fn [(c Any)] String
+          (mapv (fn [c Any] String
                   (let [pat (get c "pattern")
                         body-str (emit-body (get c "body") "      ")
                         key-str (if (= (get pat "type") "literal")
@@ -1012,7 +1012,7 @@
                                   (str "("
                                        (str/join " "
                                          (mapv emit-pat-literal-value
-                                           (filterv (fn [(alt Any)] Bool
+                                           (filterv (fn [alt Any] Bool
                                                       (= (get alt "type") "literal"))
                                                     (get pat "alternatives"))))
                                        ")"))]
@@ -1040,7 +1040,7 @@
       (= pt "literal")
         (str (emit-pat-literal-test pat target-sym) " " body-str)
       (= pt "or")
-        (let [tests (mapv (fn [(alt Any)] String
+        (let [tests (mapv (fn [alt Any] String
                             (if (= (get alt "type") "wildcard")
                               "true"
                               (emit-pat-literal-test alt target-sym)))
@@ -1063,7 +1063,7 @@
                 (if (some? direct-fields)
                   []
                   (filterv
-                    (fn [(key Any)] Bool
+                    (fn [key Any] Bool
                       (= rec-name (reference-key-leaf key)))
                     (vec (sort (vec (keys (deref record-fields)))))))
               candidate (if (= 0 (count candidates)) nil (nth candidates 0))
@@ -1079,7 +1079,7 @@
                             (get (deref record-namespaces) candidate)))
               compatible
                 (every?
-                  (fn [(name String)] Bool
+                  (fn [name String] Bool
                     (and (= fields (get (deref record-fields) name))
                          (= namespace (get (deref record-namespaces) name))))
                   candidates)
@@ -1094,10 +1094,10 @@
                 (str "ambiguous imported record pattern: " rec-name) {})))
           (if (or (= 0 (count bindings)) (nil? fields))
             (str test " " body-str)
-            (let [(field-vector (Vec Any))
+            (let [field-vector (Vec Any)
                   (vec fields)
-                  pairs (loop [(i Int) 0
-                               (acc (Vec String)) []]
+                  pairs (loop [i Int 0
+                               acc (Vec String) []]
                           (if (or (>= i (count bindings))
                                   (>= i (count field-vector)))
                             acc
@@ -1107,16 +1107,16 @@
               (str test " (let [" (str/join " " pairs) "] " body-str ")"))))
       (= pt "map")
         (let [entries (vec (get pat "entries"))
-              key-of (fn [(en Any)] String
+              key-of (fn [en Any] String
                        (let [k (get en "key")]
                          (if (map? k) (get k "value") (str k))))
-              tests (mapv (fn [(en Any)] String
+              tests (mapv (fn [en Any] String
                             (str "(some? (" (key-of en) " " target-sym "))"))
                           entries)
               test (if (= 1 (count tests))
                      (nth tests 0)
                      (str "(and " (str/join " " tests) ")"))
-              binds (mapv (fn [(en Any)] String
+              binds (mapv (fn [en Any] String
                             (str (get en "name") " (" (key-of en) " " target-sym ")"))
                           entries)]
           (if (= 0 (count binds))
@@ -1132,7 +1132,7 @@
       (let [target-sym (fresh-match-sym!)]
         (emit-case-folded-match clauses target-sym target-str))
       (let [target-sym (fresh-match-sym!)
-            cond-pairs (mapv (fn [(c Any)] String (emit-match-arm! c target-sym)) clauses)]
+            cond-pairs (mapv (fn [c Any] String (emit-match-arm! c target-sym)) clauses)]
         (str "(let [" target-sym " " target-str "]\n  (cond\n    "
              (str/join "\n    " cond-pairs) "))")))))
 
@@ -1146,7 +1146,7 @@
 (defn exact-object-keys? [(value Any) (expected Any)] Bool
   (and (map? value)
        (= (count (keys value)) (count expected))
-       (every? (fn [(key String)] Bool (contains? value key)) expected)))
+       (every? (fn [key String] Bool (contains? value key)) expected)))
 
 (defn valid-record-update-contract? [(contract Any)] Bool
   (and (exact-object-keys?
@@ -1256,7 +1256,7 @@
       (= node "defn-multi")
         (let [kw (if (get e "private") "defn-" "defn")
               name (get e "name")
-              arity-strs (mapv (fn [(a Any)] String
+              arity-strs (mapv (fn [a Any] String
                                  (let [body (emit-body-with-loop-context!
                                               (get a "body") "    " nil)
                                        callable (emit-callable-signature+body
@@ -1336,7 +1336,7 @@
         (str "(do\n  " (emit-body (get e "body") "  ") ")")
 
       (= node "cond")
-        (let [pairs (mapv (fn [(c Any)] String
+        (let [pairs (mapv (fn [c Any] String
                             (let [test (get c "test")
                                   test-str (cond
                                              (and (= (get test "node") "literal")
@@ -1394,7 +1394,7 @@
         (str "[" (str/join " " (mapv emit-expr* (get e "items"))) "]")
 
       (= node "map")
-        (let [strs (mapv (fn [(p Any)] String
+        (let [strs (mapv (fn [p Any] String
                            (str (emit-expr* (get p "key")) " " (emit-expr* (get p "val"))))
                          (get e "pairs"))]
           (str "{" (str/join " " strs) "}"))
@@ -1440,7 +1440,7 @@
 
       (= node "try")
         (let [body-str (emit-body (get e "body") "  ")
-              catch-strs (mapv (fn [(c Any)] String
+              catch-strs (mapv (fn [c Any] String
                                  (str "\n  (catch " (get c "type") " " (get c "name")
                                       "\n    " (emit-body (get c "body") "    ") ")"))
                                (get e "catches"))
@@ -1453,7 +1453,7 @@
       (= node "condp")
         (let [pred (emit-expr* (get e "pred"))
               test-val (emit-expr* (get e "test"))
-              clause-strs (mapv (fn [(c Any)] String
+              clause-strs (mapv (fn [c Any] String
                                   (str (emit-expr* (get c "test")) " "
                                        (emit-expr* (get c "body"))))
                                 (get e "clauses"))
@@ -1467,7 +1467,7 @@
         (emit-match! e)
 
       (= node "with")
-        (let [update-strs (mapv (fn [(u Any)] String
+        (let [update-strs (mapv (fn [u Any] String
                                   (str (get u "field") " " (emit-expr* (get u "value"))))
                                 (get e "updates"))
               updated (str "(assoc " (emit-expr* (get e "target")) " "
@@ -1477,7 +1477,7 @@
           (when (not (nil? contract))
             (doseq [update (get e "updates")]
               (when (not (some? (some
-                                  (fn [(field String)] Any
+                                  (fn [field String] Any
                                     (when (= field (get update "field")) field))
                                   (get contract "fieldOrder"))))
                 (throw (ex-info
@@ -1514,7 +1514,7 @@
             (str "(set! " (emit-expr* target) " " val ")")))
 
       (= node "letfn")
-        (let [fn-strs (mapv (fn [(f Any)] String
+        (let [fn-strs (mapv (fn [f Any] String
                               (let [body (emit-body-with-loop-context!
                                            (get f "body") "    " nil)
                                     callable (emit-callable-signature+body
@@ -1530,8 +1530,8 @@
       (= node "target-case")
         (let [cases (vec (get e "cases"))
               want (deref emit-target)
-              pick (fn [(t String)] Any
-                     (first (filterv (fn [(c Any)] Bool (= (get c "target") t)) cases)))
+              pick (fn [t String] Any
+                     (first (filterv (fn [c Any] Bool (= (get c "target") t)) cases)))
               branch0 (pick want)
               branch (if (nil? branch0) (pick "clj") branch0)]
           (if (nil? branch) "nil" (emit-expr* (get branch "body"))))
