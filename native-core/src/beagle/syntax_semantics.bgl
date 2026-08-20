@@ -1,0 +1,294 @@
+#lang beagle
+(ns beagle.syntax-semantics
+  (:require [beagle.frontend-facts :as facts]))
+
+(defrecord SemanticState
+  [rows (Vec facts/CompilerFact)
+   next-order Int])
+
+(defrecord SemanticEmission
+  [state SemanticState
+   subject String])
+
+(defunion SemanticStep
+  (SemanticProduced [emission SemanticEmission])
+  (SemanticRejected [error facts/FactError]))
+
+(defn fallback-span [bundle facts/SyntaxFactBundle] facts/SourceSpan
+  (facts/->SourceSpan (facts/syntaxfactbundle-path bundle) 0 0 0 0))
+
+(defn fact-text [fact facts/CompilerFact] String?
+  (match (facts/compilerfact-value fact)
+    [(facts/FactText value) value]
+    [(facts/FactNodeRef node-id) nil]
+    [(facts/FactBool value) nil]
+    [(facts/FactInt value) nil]
+    [(facts/FactNil) nil]))
+
+(defn fact-node [fact facts/CompilerFact] String?
+  (match (facts/compilerfact-value fact)
+    [(facts/FactNodeRef node-id) node-id]
+    [(facts/FactText value) nil]
+    [(facts/FactBool value) nil]
+    [(facts/FactInt value) nil]
+    [(facts/FactNil) nil]))
+
+(defn find-fact
+  [rows (Vec facts/CompilerFact) relation Keyword subject String slot Int]
+  facts/CompilerFact?
+  (loop [remaining (Vec facts/CompilerFact) rows]
+    (if (empty? remaining)
+      nil
+      (let [fact facts/CompilerFact (first remaining)]
+        (if (and (= relation (facts/compilerfact-relation fact))
+                 (= subject (facts/compilerfact-subject fact))
+                 (= slot (facts/compilerfact-slot fact)))
+          fact
+          (recur (rest remaining)))))))
+
+(defn node-kind [rows (Vec facts/CompilerFact) subject String] String?
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/node subject 0)]
+    (if (nil? fact) nil (fact-text fact))))
+
+(defn node-value [rows (Vec facts/CompilerFact) subject String] String?
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/value subject 0)]
+    (if (nil? fact) nil (fact-text fact))))
+
+(defn edge-target
+  [rows (Vec facts/CompilerFact) subject String slot Int] String?
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/edge subject slot)]
+    (if (nil? fact) nil (fact-node fact))))
+
+(defn node-span
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact) subject String]
+  facts/SourceSpan
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/node subject 0)]
+    (if (nil? fact)
+      (fallback-span bundle)
+      (let [span facts/SourceSpan? (facts/compilerfact-span fact)]
+        (if (nil? span) (fallback-span bundle) span)))))
+
+(defn append-node
+  [state SemanticState subject String kind String span facts/SourceSpan]
+  SemanticState
+  (->SemanticState
+    (conj (semanticstate-rows state)
+      (facts/syntax-node-fact (semanticstate-next-order state) subject
+        (facts/->FactText kind) span))
+    (+ 1 (semanticstate-next-order state))))
+
+(defn append-value
+  [state SemanticState subject String value facts/FactValue span facts/SourceSpan]
+  SemanticState
+  (->SemanticState
+    (conj (semanticstate-rows state)
+      (facts/syntax-value-fact (semanticstate-next-order state) subject 0 value span))
+    (+ 1 (semanticstate-next-order state))))
+
+(defn append-edge
+  [state SemanticState subject String slot Int target String span facts/SourceSpan]
+  SemanticState
+  (->SemanticState
+    (conj (semanticstate-rows state)
+      (facts/syntax-edge-fact (semanticstate-next-order state)
+        subject slot target span))
+    (+ 1 (semanticstate-next-order state))))
+
+(defn reject
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)
+   subject String code Keyword message String] SemanticStep
+  (->SemanticRejected
+    (facts/->FactError (node-span bundle rows subject) code message)))
+
+(defn digit? [character String] Bool
+  (or (= character "0") (= character "1") (= character "2")
+      (= character "3") (= character "4") (= character "5")
+      (= character "6") (= character "7") (= character "8")
+      (= character "9")))
+
+(defn integer-text? [value String] Bool
+  (let [length Int (count value)
+        start Int (if (and (> length 0) (= "-" (subs value 0 1))) 1 0)]
+    (if (>= start length)
+      false
+      (loop [index Int start]
+        (if (>= index length)
+          true
+          (if (digit? (subs value index (+ index 1)))
+            (recur (+ index 1))
+            false))))))
+
+(defn emit-type
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)
+   state SemanticState subject String] SemanticStep
+  (let [kind String? (node-kind rows subject)
+        span facts/SourceSpan (node-span bundle rows subject)]
+    (cond
+      (= kind "symbol")
+      (let [name String? (node-value rows subject)]
+        (if (nil? name)
+          (reject bundle rows subject :semantics/type-name
+            "type name symbol has no text value")
+          (->SemanticProduced
+            (->SemanticEmission
+              (append-value (append-node state subject "type-name" span)
+                subject (facts/->FactText name) span)
+              subject))))
+
+      (= kind "list")
+      (let [constructor-node String? (edge-target rows subject 0)
+            argument-node String? (edge-target rows subject 1)
+            extra-node String? (edge-target rows subject 2)
+            constructor String?
+            (if (nil? constructor-node) nil (node-value rows constructor-node))]
+        (if (or (nil? constructor-node) (nil? argument-node)
+                (some? extra-node) (nil? constructor))
+          (reject bundle rows subject :semantics/type-application
+            "type application must contain one constructor and one argument")
+          (match (emit-type bundle rows state argument-node)
+            [(SemanticRejected error) (->SemanticRejected error)]
+            [(SemanticProduced emitted)
+             (let [base SemanticState (semanticemission-state emitted)
+                   typed SemanticState (append-node base subject "type-application" span)
+                   named SemanticState (append-value typed subject
+                                         (facts/->FactText constructor) span)]
+               (->SemanticProduced
+                 (->SemanticEmission
+                   (append-edge named subject 0 argument-node span)
+                   subject)))])))
+
+      :else
+      (reject bundle rows subject :semantics/type
+        "type annotation must be a symbol or unary type application"))))
+
+(defn emit-binding
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)
+   state SemanticState name-node String type-node String] SemanticStep
+  (let [name String? (node-value rows name-node)
+        kind String? (node-kind rows name-node)
+        span facts/SourceSpan (node-span bundle rows name-node)]
+    (if (or (not= kind "symbol") (nil? name))
+      (reject bundle rows name-node :semantics/binding-name
+        "function parameter name must be a symbol")
+      (match (emit-type bundle rows state type-node)
+        [(SemanticRejected error) (->SemanticRejected error)]
+        [(SemanticProduced emitted)
+         (let [base SemanticState (semanticemission-state emitted)
+               typed SemanticState (append-node base name-node "binding" span)
+               named SemanticState (append-value typed name-node
+                                     (facts/->FactText name) span)]
+           (->SemanticProduced
+             (->SemanticEmission
+               (append-edge named name-node 0 type-node span)
+               name-node)))]))))
+
+(defn emit-literal
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)
+   state SemanticState subject String] SemanticStep
+  (let [kind String? (node-kind rows subject)
+        value String? (node-value rows subject)
+        span facts/SourceSpan (node-span bundle rows subject)]
+    (if (and (= kind "symbol") (some? value) (integer-text? value))
+      (->SemanticProduced
+        (->SemanticEmission
+          (append-value (append-node state subject "integer-literal" span)
+            subject (facts/->FactText value) span)
+          subject))
+      (reject bundle rows subject :semantics/body
+        "bootstrap function body must be an integer literal"))))
+
+(defn emit-function
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)
+   state SemanticState subject String] SemanticStep
+  (let [name-node String? (edge-target rows subject 1)
+        params-node String? (edge-target rows subject 2)
+        return-node String? (edge-target rows subject 3)
+        body-node String? (edge-target rows subject 4)
+        extra-node String? (edge-target rows subject 5)
+        name String? (if (nil? name-node) nil (node-value rows name-node))]
+    (if (or (nil? name-node) (nil? params-node) (nil? return-node)
+            (nil? body-node) (some? extra-node) (nil? name)
+            (not= "symbol" (node-kind rows name-node))
+            (not= "vector" (node-kind rows params-node)))
+      (reject bundle rows subject :semantics/function-shape
+        "defn must contain a symbol name, parameter vector, return type, and one body")
+      (let [parameter-name String? (edge-target rows params-node 0)
+            parameter-type String? (edge-target rows params-node 1)
+            extra-parameter String? (edge-target rows params-node 2)]
+        (if (or (nil? parameter-name) (nil? parameter-type) (some? extra-parameter))
+          (reject bundle rows params-node :semantics/parameter-shape
+            "bootstrap function must contain exactly one typed parameter")
+          (match (emit-binding bundle rows state parameter-name parameter-type)
+            [(SemanticRejected error) (->SemanticRejected error)]
+            [(SemanticProduced binding)
+             (match (emit-type bundle rows (semanticemission-state binding) return-node)
+               [(SemanticRejected error) (->SemanticRejected error)]
+               [(SemanticProduced returned)
+                (match (emit-literal bundle rows (semanticemission-state returned) body-node)
+                  [(SemanticRejected error) (->SemanticRejected error)]
+                  [(SemanticProduced body)
+                   (let [span facts/SourceSpan (node-span bundle rows subject)
+                         base SemanticState (semanticemission-state body)
+                         typed SemanticState (append-node base subject "function" span)
+                         named SemanticState (append-value typed subject
+                                               (facts/->FactText name) span)
+                         parameterized SemanticState
+                         (append-edge named subject 0 parameter-name span)
+                         returning SemanticState
+                         (append-edge parameterized subject 1 return-node span)]
+                     (->SemanticProduced
+                       (->SemanticEmission
+                         (append-edge returning subject 2 body-node span)
+                         subject)))])])]))))))
+
+(defn form-head
+  [rows (Vec facts/CompilerFact) subject String] String?
+  (let [head String? (edge-target rows subject 0)]
+    (if (nil? head) nil (node-value rows head))))
+
+(defn namespace-name
+  [rows (Vec facts/CompilerFact)] String?
+  (loop [remaining (Vec facts/CompilerFact) rows]
+    (if (empty? remaining)
+      nil
+      (let [fact facts/CompilerFact (first remaining)
+            subject String (facts/compilerfact-subject fact)]
+        (if (and (= :syntax/node (facts/compilerfact-relation fact))
+                 (= "list" (fact-text fact))
+                 (= "ns" (form-head rows subject)))
+          (let [name-node String? (edge-target rows subject 1)]
+            (if (nil? name-node) nil (node-value rows name-node)))
+          (recur (rest remaining)))))))
+
+(defn normalize-facts
+  [bundle facts/SyntaxFactBundle rows (Vec facts/CompilerFact)] facts/FactReadResult
+  (loop [remaining (Vec facts/CompilerFact) rows
+         state SemanticState (->SemanticState [] 0)]
+    (if (empty? remaining)
+      (facts/->FactsRead
+        (facts/->SyntaxFactBundle
+          (facts/syntaxfactbundle-path bundle)
+          (namespace-name rows)
+          (facts/syntaxfactbundle-source-digest bundle)
+          (facts/syntaxfactbundle-profile bundle)
+          (semanticstate-rows state)
+          (facts/syntaxfactbundle-imports bundle)
+          (facts/syntaxfactbundle-rewrites bundle)))
+      (let [fact facts/CompilerFact (first remaining)
+            subject String (facts/compilerfact-subject fact)]
+        (if (and (= :syntax/node (facts/compilerfact-relation fact))
+                 (= "list" (fact-text fact))
+                 (= "defn" (form-head rows subject)))
+          (match (emit-function bundle rows state subject)
+            [(SemanticRejected error) (facts/->FactsRejected [error])]
+            [(SemanticProduced emitted)
+             (recur (rest remaining) (semanticemission-state emitted))])
+          (recur (rest remaining) state))))))
+
+(defn normalize [bundle facts/SyntaxFactBundle] facts/FactReadResult
+  (let [rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts bundle)]
+    (if (not (facts/canonical-fact-order? rows))
+      (facts/->FactsRejected
+        [(facts/->FactError (fallback-span bundle) :semantics/fact-order
+           "generic syntax facts must have strictly increasing nonnegative order")])
+      (normalize-facts bundle rows))))

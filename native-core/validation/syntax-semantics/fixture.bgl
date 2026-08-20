@@ -1,0 +1,22 @@
+#lang beagle
+(ns syntax-semantics.fixture
+  (:require [beagle.checker :as checker]
+            [beagle.frontend-facts :as facts]
+            [beagle.parser-reader :as parser]
+            [beagle.syntax-semantics :as semantics]))
+
+(def smoke-source String
+  "#lang beagle\n(ns smoke)\n(defn main [args (Vec String)] Int\n  0)\n")
+
+(defn main [args (Vec String)] Int
+  (match (parser/facts-from-source
+           "smoke.bgl" smoke-source "fixture-digest" "core")
+    [(facts/FactsRejected errors) 1]
+    [(facts/FactsRead generic)
+     (match (semantics/normalize generic)
+       [(facts/FactsRejected errors) 2]
+       [(facts/FactsRead semantic)
+        (match (checker/check-facts semantic)
+          [(checker/CheckRejected rejection) 3]
+          [(checker/FactsChecked checked)
+           (if (= 3 (count (checker/checkedfacts-lowerings checked))) 0 4)])])]))
