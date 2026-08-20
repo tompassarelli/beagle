@@ -17,11 +17,13 @@
   (server/->StoreResult server/status-fatal nil detail 0 [] ""))
 
 (defn open-store [path String space-id String] server/StoreResult
-  (match (host.fs/read-text-bounded path max-store-log-bytes)
-    [(host.fs/ReadTextBoundedOk text)
-     (server/server-store-boot! path space-id (utf8-encode text) [])]
-    [(host.fs/ReadTextBoundedError errno)
-     (failed-store (str "could not read Store log: " path))]))
+  (match (host.fs/append-text path "")
+    [(host.fs/AppendTextError errno)
+     (failed-store (str "could not create Store log: " path))]
+    [(host.fs/AppendTextOk)
+     (let [source ByteSource
+           (host.fs/read-byte-source-bounded-or-die path max-store-log-bytes)]
+       (server/server-store-boot! path space-id source (subvec source 0 0)))]))
 
 (defn append-log! [path String bytes (Vec Int)] String?
   (if (empty? bytes)
