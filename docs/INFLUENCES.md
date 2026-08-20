@@ -20,15 +20,17 @@ The deeper bet is the Turtles Thesis:
 > worlds; external reality is connected through explicit observations and
 > capability-controlled effects.
 
-A program world is a durable semantic explanation, not a universal key or one
-physical/security domain. It relates layered identities and equivalence
-relations for content, assertion occurrences, revisions, and artifacts; content
-identity is not trust. `Declared`, `Derived`, `Observed`, `Desired`,
-`EffectAttempt`, and `EffectReceipt` remain non-interchangeable: plans are
-pure, an external effect requires an explicit capability and yields a receipt,
-and a later observation is needed before the receipt supports a claim about
-external reality. Target outputs are replaceable materializations with explicit
-capability envelopes.
+A program world is the broad semantic snapshot concept, not a Store branch, a
+universal key, or one physical/security domain. One durable identity,
+explanation, dependency, and provenance model relates distinct content,
+assertion, revision, rule, and artifact identities; content identity is not
+trust. `Declared`, `Derived`, and `Observed` are epistemic origins, while
+`Intent`, `Authorization`, `Attempt`, and `EffectReceipt` form a separate
+action protocol. Pure plans and artifacts can be derived from durable semantic
+branches or worlds; an external effect requires a capability and yields a
+receipt plus later observations. External reality thereby participates in the
+same typed fact system without being assumed pure. Target outputs are
+replaceable materializations with explicit capability envelopes.
 
 ## Lean — diagnostics, as a discipline
 

@@ -17,32 +17,47 @@ provenance relations. Those layers do not share one key: content identity is
 not assertion identity, artifact identity, or authority, and content identity
 is not trust.
 
-The repository currently ships four surfaces:
+The repository separates five surfaces:
 
-- the Beagle language authors code and data through one structural model;
-- the compiler and runtime check, query, incrementally materialize, and execute
-  language programs;
-- Beagle Store owns durable terms, transactions, occurrences, history,
-  querying, indexing, snapshots, and cold persistence;
-- capability interfaces expose only the Store-shaped part to an existing
-  application through the native/Wasm ABI, Store RPC, or a cache policy.
+- the typed Lisp/Clojure-derived surface authors code and data;
+- Beagle Store owns durable terms, occurrences, transaction history, querying,
+  indexing, snapshots, and cold persistence;
+- the compiler checks programs and records semantic dependencies and
+  provenance;
+- targets materialize the shared checked core under explicit capability
+  envelopes; and
+- the effect/observation boundary connects pure plans to external reality.
 
 The compiler's AST and fact projections and Store's Term and occurrence model
 are separate current surfaces. Connecting them through the world protocol is
 the direction, not a claim that every layer already shares one representation.
 Within that direction, facts are view-admitted propositions, judgments select
 or derive conclusions, and target outputs are replaceable materializations.
-The durable world distinguishes `Declared`, `Derived`, `Observed`, `Desired`,
-`EffectAttempt`, and `EffectReceipt`; desired state cannot satisfy observed
-state, and a receipt does not replace a subsequent observation. Hashes identify
-records while authority, evidence, freshness, and policy determine what they
-justify.
+One durable identity, explanation, dependency, and provenance model relates
+them without assigning everything one key. Hashes identify records while
+authority, evidence, freshness, and policy determine what they justify.
 
-Pure planning describes effects. A host executes an external effect only when
-it holds the target's declared capability, then returns a receipt as a new
-semantic record. Planning, scheduling, reconciliation, and effect semantics
-remain part of the system even when native execution removes steady-state host
-scripts.
+A program world is the broad semantic snapshot concept: a versioned selection
+of evidence, rules, judgments, and plans. It is not a Store branch. Branches and
+named roots select histories; many branches, roots, physical Stores,
+materializations, execution domains, trust domains, and failure domains may
+participate in the model without becoming one cluster, transaction boundary,
+or access-control domain.
+
+Epistemic origins and the action protocol are orthogonal. `Declared`,
+`Derived`, and `Observed` say how a fact entered an explanation. `Intent`,
+`Authorization`, `Attempt`, and `EffectReceipt` record an external action's
+protocol. Desired state and deployment plans may be derived purely; desired
+state cannot satisfy observed state, and a receipt does not replace a later
+observation.
+
+Pure artifacts are reproducible projections of named semantic branches or
+worlds. External reality participates in the same typed fact system through
+observations and receipts, but is not assumed pure. A host executes an effect
+only when it holds the target's declared capability, then returns a receipt and
+subsequent observations as new semantic records. Planning, scheduling,
+reconciliation, and effect semantics remain part of the system even when native
+execution removes steady-state host scripts.
 
 The external boundary is a capability boundary, not an ownership boundary.
 Adapters may select transport, deployment, retention, and materialization
@@ -51,10 +66,21 @@ rules, or encoding. A brownfield application can therefore use Store without
 shipping the language frontend or Racket, while the engine remains built,
 versioned, and tested in this repository.
 
-Semantic agreement does not collapse physical or security domains. Separate
-worlds, Store spaces, processes, deployments, and trust domains can agree on
-content while retaining different authority, retention, availability, and
-execution policy.
+Logical or type unification does not collapse physical or security domains.
+Separate Store spaces, processes, deployments, transaction boundaries, access
+controls, trust domains, and failure domains can agree on content while
+retaining different authority, retention, availability, and execution policy.
+
+Store may present a database-, storage-, or cache-shaped boundary to a
+brownfield system. Its defining role inside Beagle remains the cohesive durable
+semantic substrate, not a separately designed database product.
+
+Incremental materialization is accountable to five reusable-result-key
+properties: completeness, narrowness, identification cost, stability, and
+compiler-rule identity. Warm work must be proportional to the invalidated
+semantic region plus bounded identification and authentication overhead, and a
+warm result must equal a clean result. This is a correctness and work-bound
+invariant, not a published throughput claim.
 
 The detailed contracts and runnable storage-only examples live in
 [`store/README.md`](../store/README.md#storage-only-capability) and
@@ -83,6 +109,12 @@ first executable seam exports and runs only a validated parameterless `Int`
 entry; an entryless build remains an explicitly non-executable projection. The
 lowering tool may run from hosted `.bclj` during compiler bootstrapping without
 making `.bgl` a hosted or target-neutral source profile.
+
+Native lowering deliberately differs from JVM Clojure. A `.bclj` capsule
+instead targets the Java/Clojure runtime and may support JVM Clojure features
+admitted by that profile; Native Core restrictions do not apply categorically
+to it. All targets remain replaceable materializations of shared checked input,
+with target-specific capabilities carried explicitly.
 
 `check` is where the NixOS option schema (loaded from a cache at compile time)
 becomes typed context: unknown option paths fail at parse time, wrong-typed

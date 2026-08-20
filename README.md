@@ -5,55 +5,70 @@
 **Beagle is a durable programming system driven through semantic
 computation.**
 
+Beagle has five distinct surfaces that share one checked semantic core:
+
+- a typed Lisp authoring surface derived from Clojure;
+- Beagle Store, the durable semantic substrate;
+- a compiler that checks programs and records dependency and provenance;
+- replaceable target materializations with explicit capability envelopes; and
+- an effect and observation boundary between pure computation and external
+  reality.
+
 The system thesis is:
 
 > Pure software artifacts are reproducible projections of durable semantic
 > worlds; external reality is connected through explicit observations and
 > capability-controlled effects.
 
-Beagle has one durable identity and explanation model. A program world
-(`WORLD`) is a versioned semantic explanation: facts, judgments, provenance,
-and plans from which pure, reproducible artifacts are projected. It distinguishes
-what was declared, derived, observed, and effect-recorded. Desired state is not
-observed state; an authorized effect returns a receipt and new observations,
-which can then support claims about external reality.
+Beagle has one durable identity, explanation, dependency, and provenance
+model. That does not mean one key or one machine. Content, assertion
+occurrences, semantic revisions, compiler rules, and artifacts keep distinct
+identities. Many versioned branches and roots, physical Stores, execution
+domains, trust domains, failure domains, and materializations can participate
+without being collapsed. Matching content establishes identity, not trust,
+authority, co-location, or transaction scope.
 
-Content, an assertion occurrence, a world revision, and a produced artifact
-have distinct identities. Hashes identify records, while authority, evidence,
-freshness, and policy determine what a record justifies. Content identity is
-not trust.
+A program world (`WORLD`) is the broad semantic snapshot concept: a versioned
+selection of facts, judgments, rules, plans, and provenance. It is not a Store
+branch. A branch or named root selects durable semantic history; several may
+contribute to, or be projected from, a world without becoming the same thing.
+Pure artifacts are reproducible projections of named durable branches or
+worlds. External reality can participate in the same typed fact system through
+observations and receipts, but is never assumed pure.
 
-The language is a typed Lisp with a Clojure-derived core. Its compiler and
-runtime operate through this semantic model. **Beagle Store** is the integrated
-durable identity, provenance, transaction-history, and query subsystem—not a
-separate database product. One model can support many versioned worlds,
-materializations, and execution domains without merging their physical or
-security boundaries.
+Beagle keeps two classifications separate. `Declared`, `Derived`, and
+`Observed` are epistemic origins: how a fact entered an explanation. Acting on
+the outside world follows an action protocol of `Intent`, `Authorization`,
+`Attempt`, and `EffectReceipt`. Desired deployment state and plans may be
+derived purely; execution requires a capability, and produces receipts and
+later observations rather than retroactively making the plan an observation.
 
-External execution is capability-controlled. JavaScript, Clojure, Nix, C17,
-and Wasm are replaceable materializations with explicit target capabilities;
-shared content identity never grants permission to execute. See the
-[system architecture](docs/architecture.md#one-semantic-substrate). An existing
-system can also adopt Store through a bounded capability interface without
-adopting the language frontend; see the
+**Beagle Store** supplies durable terms, assertion occurrences, transaction
+history, identity, provenance, and query. Inside Beagle it is the cohesive
+semantic substrate, not a bolted-on database product. Existing systems may
+still consume it through database-, storage-, or cache-shaped capability
+interfaces without adopting the language frontend; see the
 [brownfield capability guide](store/docs/isolation-and-deployment.md#capability-profiles).
 
-Derived: Clojure's vocabulary and structural authoring model — its form
-library, s-expressions, data literals, `defn`/`let`/destructuring/threading
-ergonomics. Beagle owns static types, effects, and checked semantic
-identity/provenance. Execution and memory semantics belong to each profile: the
-Clojure-targeted region/profile retains the Clojure runtime facilities supplied
-by its execution runtime, including lazy sequences, dynamic vars, and
-GC-backed persistent collections; Native Core lowering alone rejects JVM
-dependence and uses Store-backed durability, arenas/regions, and explicit
-native capabilities. JavaScript and Nix profiles likewise expose admitted host
-semantics, not one shared runtime.
+Targets are replaceable materializations of the shared checked core, with
+target-specific capabilities explicit. Bare `.bgl` lowers deliberately to
+Native Core rather than JVM Clojure semantics. A `.bclj` capsule targets the
+Java/Clojure runtime and may use JVM Clojure features admitted by that profile;
+Native Core's constraints are not a categorical statement about every Beagle
+profile.
+
+Incremental reuse has a measurable invariant. A reusable-result key is judged
+by completeness, narrowness, identification cost, stability, and compiler-rule
+identity. Warm work must be proportional to the invalidated semantic region
+plus bounded identification and authentication overhead, and a warm result
+must equal a clean result. The repository publishes no benchmark claim from
+that invariant alone.
 
 Design principle: "If Clojure already has a form whose semantics are correct
 for Beagle, inherit it. If the semantics differ, name the difference."
 
-Beagle preserves Clojure where preservation has semantic value, never for
-compatibility's sake. It is one source language whose parser, checker,
+Beagle preserves Clojure where preservation has semantic value. It is one
+source language whose parser, checker,
 canonicalizer, and repair tools give people and agents the same answer: what
 went wrong, where it occurred, and what a valid next edit is.
 

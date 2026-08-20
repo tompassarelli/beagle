@@ -15,21 +15,29 @@ These are the boundaries that explain what Beagle is for:
 - **Not merely a Clojure subset** — Beagle is an independent typed Lisp with a
   Clojure-derived authoring core. Clojure vocabulary is inherited where its
   semantics fit; types, effects, execution, and data are Beagle's own.
-- **Not one universal identity or a universal trust domain** — a program world
-  is a durable semantic explanation, related through named layered equivalence
-  relations. Content, assertions, revisions, and artifacts retain distinct
-  identities; content identity does not grant authority. Logical unification
-  does not collapse physical storage, execution, deployment, or security
-  domains.
-- **Not an effect system that confuses intent with reality** — `Declared`,
-  `Derived`, `Observed`, `Desired`, `EffectAttempt`, and `EffectReceipt` are
-  non-interchangeable modes. Plans are pure; an external effect needs an
-  explicit capability, leaves a receipt, and needs observation before it
-  justifies a claim about the outside world.
+- **Not one universal identity or a universal trust domain** — one durable
+  identity, explanation, dependency, and provenance model relates distinct
+  content, assertion, revision, rule, and artifact identities. A world is a
+  broad semantic snapshot, not a Store branch. Logical or type unification
+  does not collapse clusters, transactions, physical Stores, access controls,
+  execution domains, trust domains, or failure domains.
+- **Not an effect system that confuses knowledge with action** — `Declared`,
+  `Derived`, and `Observed` are epistemic origins. `Intent`, `Authorization`,
+  `Attempt`, and `EffectReceipt` form a separate action protocol. Plans may be
+  derived purely; an external effect needs an explicit capability and yields a
+  receipt plus later observations.
 - **Not a fixed target contract** — target outputs are replaceable
-  materializations with explicit capability envelopes. Versioned
-  representations and migrations are the production model, not a promise of
-  backwards compatibility.
+  materializations of shared checked input with explicit capability envelopes.
+  Bare `.bgl` selects deliberate Native Core lowering; `.bclj` targets the
+  Java/Clojure runtime and may admit JVM Clojure facilities.
+- **Not a separate database product inside the language** — Store is Beagle's
+  cohesive durable semantic substrate. A brownfield consumer may use a
+  database-, storage-, or cache-shaped boundary without redefining Store's
+  identity, provenance, or transaction model.
+- **Not opaque incremental magic** — reusable-result keys are measured for
+  completeness, narrowness, identification cost, stability, and compiler-rule
+  identity. Warm work is bounded by the invalidated semantic region plus
+  identification/authentication overhead, and warm equals clean.
 
 - **Not a schema language or general validation system** — static type
   information erases, and only an explicitly authored binding constraint emits
