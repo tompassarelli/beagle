@@ -30,3 +30,14 @@
 (defunion Stmt Emit Skip)
 (defrecord Emit [(text String)])
 (defrecord Skip [(reason String)])
+
+;; A union field whose nominal type crosses the same module boundary. Narrowing
+;; the imported member must retain a printable provider-qualified field type.
+(defrecord PublicationRef [(name String)])
+(defunion Root
+  (Plugin [(publication PublicationRef)])
+  Application)
+
+(defrecord Alpha [(name String)])
+(defrecord Beta [(name String)])
+(defrecord Gamma [(name String)])

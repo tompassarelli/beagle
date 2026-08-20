@@ -57,6 +57,13 @@
   (check-exn #rx"expected return String"
              (lambda () (check-file "bad-parametric.bclj"))))
 
+(test-case "an imported union field retains its qualified nominal type"
+  (check-not-exn (lambda () (check-file "ok-qualified-field-type.bclj"))))
+
+(test-case "qualified match patterns remain printable in checker diagnostics"
+  (check-not-exn
+   (lambda () (check-file "ok-qualified-pattern-diagnostic.bclj"))))
+
 ;; A bare member NAMES a sibling record rather than declaring a nullary variant;
 ;; the import must not overwrite that record's ctor arity or field map.
 (test-case "imported union over bare record names keeps each member's arity"

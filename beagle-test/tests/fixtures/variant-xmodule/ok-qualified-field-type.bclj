@@ -1,0 +1,8 @@
+#lang beagle/clj
+
+(require prov :as p)
+
+(defn publication [(root p/Root)] p/PublicationRef
+  (match root
+    [(Plugin publication) publication]
+    [(Application) (p/->PublicationRef "fallback")]))

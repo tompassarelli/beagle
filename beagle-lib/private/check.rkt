@@ -5278,29 +5278,30 @@
        (define (fields-of ctor) (map binder-of (hash-ref RECORD-FIELD-ORDER ctor '())))
        (define (clause-skeleton ctor)
          (define fs (fields-of ctor))
+         (define ctor-name (reference->string ctor))
          (define pat
            (if (null? fs)
-               (format "(~a)" ctor)
-               (format "(~a ~a)" ctor (string-join fs " "))))
+               (format "(~a)" ctor-name)
+               (format "(~a ~a)" ctor-name (string-join fs " "))))
          ;; A throw arm typechecks against any match result type, so the
          ;; inserted skeletons re-verify green and leave an explicit
          ;; unhandled-case marker for the agent to flesh out.
-         (format "[~a (throw \"TODO: handle ~a\")]" pat ctor))
+         (format "[~a (throw \"TODO: handle ~a\")]" pat ctor-name))
        (define missing-cases
          (for/list ([m (in-list missing)])
-           (hasheq 'ctor (symbol->string m)
+           (hasheq 'ctor (reference->string m)
                    'fields (fields-of m))))
        (raise-diag 'exhaustive-match
          (format "match on ~a is not exhaustive; missing cases: ~a"
                  union-name
-                 (string-join (map symbol->string missing) ", "))
+                 (string-join (map reference->string missing) ", "))
          ;; Details must be JSON-legal: raw symbols crash write-json (so the
          ;; agent-facing JSON for the whole exhaustive-match class was broken).
          ;; Stringify, and add structured per-case info + ready-to-insert
          ;; clause skeletons for the authoring loop.
-         (hasheq 'union-name (symbol->string union-name)
-                 'missing (map symbol->string missing)
-                 'matched (map symbol->string matched-types)
+         (hasheq 'union-name (reference->string union-name)
+                 'missing (map reference->string missing)
+                 'matched (map reference->string matched-types)
                  'missing-cases missing-cases
                  'fix-clauses (map clause-skeleton missing))
          #:src src))]
@@ -5319,13 +5320,13 @@
         (fprintf (current-error-port)
                  "warning: match may be non-exhaustive~a\n  matched: ~a\n  possibly missing: ~a\n"
                  (if line (format " at ~a:~a" (or file "?") line) "")
-                 (string-join (map symbol->string matched-types) ", ")
-                 (string-join (map symbol->string universe-candidates) ", "))]
+                 (string-join (map reference->string matched-types) ", ")
+                 (string-join (map reference->string universe-candidates) ", "))]
        [(and has-wildcard?
              (>= (length matched-types) 3))
         (define siblings (find-sibling-records matched-types))
         (when (not (null? siblings))
-          (define sibling-strs (map symbol->string siblings))
+          (define sibling-strs (map reference->string siblings))
           (define display-strs
             (if (> (length sibling-strs) 6)
               (append (take sibling-strs 6)
@@ -5336,7 +5337,7 @@
                    (length siblings)
                    (if (= 1 (length siblings)) "" "s")
                    (if line (format " at ~a:~a" (or file "?") line) "")
-                   (string-join (map symbol->string matched-types) ", ")
+                   (string-join (map reference->string matched-types) ", ")
                    (string-join display-strs ", ")))])]))
 
 ;; --- keyword field lookup --------------------------------------------------

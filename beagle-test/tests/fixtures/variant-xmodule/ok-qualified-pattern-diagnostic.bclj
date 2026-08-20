@@ -1,0 +1,10 @@
+#lang beagle/clj
+
+(require prov :as p)
+
+(defn qualified-patterns [(value Any)] String
+  (match value
+    [(p/Alpha name) name]
+    [(p/Beta name) name]
+    [(p/Gamma name) name]
+    [_ "other"]))
