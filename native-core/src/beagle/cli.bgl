@@ -62,16 +62,4 @@
           64)))))
 
 (defn -main [args (Vec String)] Int
-  (if (empty? args)
-    (do (write-usage) 64)
-    (let [(command String) (first args)
-          (command-args (Vec String)) (subvec args 1)]
-      (cond
-        (= command "syntax") (syntax-command command-args)
-        (or (= command "--help") (= command "-h"))
-        (do (write-usage) 0)
-        :else
-        (do
-          (host.stderr/write-line (str "beagle: unknown command: " command))
-          (write-usage)
-          64)))))
+  (main-with-store args host.store/compile))
