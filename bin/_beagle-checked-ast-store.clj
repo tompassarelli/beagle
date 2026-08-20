@@ -3,24 +3,31 @@
 (require '[clojure.edn :as edn]
          '[store.dev-compile-facts :as compile-facts])
 
-(import '[java.nio.charset StandardCharsets]
+(import '[java.io FileOutputStream]
+        '[java.nio.charset StandardCharsets]
+        '[java.nio.file CopyOption FileAlreadyExistsException Files StandardCopyOption]
+        '[java.nio.file.attribute FileAttribute]
         '[java.security MessageDigest])
 
 (def fact-kind "DevCompileUnitResultV1")
 (def fact-stage "typed")
+(def blob-kind "beagle.checked-ast/blob-v1")
 
 (defn fail! [message status]
   (binding [*out* *err*]
     (println (str "beagle checked AST Store: " message)))
   (System/exit status))
 
-(defn sha256 [^String value]
+(defn sha256-bytes [^bytes value]
   (str
    "sha256:"
    (apply str
           (map #(format "%02x" (bit-and (int %) 255))
                (.digest (MessageDigest/getInstance "SHA-256")
-                        (.getBytes value StandardCharsets/UTF_8))))))
+                        value)))))
+
+(defn sha256 [^String value]
+  (sha256-bytes (.getBytes value StandardCharsets/UTF_8)))
 
 (defn exact-sha256? [value]
   (and (string? value) (boolean (re-matches #"sha256:[0-9a-f]{64}" value))))
@@ -43,8 +50,55 @@
    (sha256 payload)
    payload])
 
+(defn blob-path [store digest]
+  (let [directory (.toPath (java.io.File. (str store ".objects")))]
+    (.resolve directory (subs digest 7))))
+
+(defn read-valid-blob! [store byte-count digest]
+  (let [path (blob-path store digest)
+        bytes (Files/readAllBytes path)]
+    (when-not (and (= byte-count (alength bytes))
+                   (= digest (sha256-bytes bytes)))
+      (fail! "content-addressed checked AST blob is invalid" 2))
+    bytes))
+
+(defn publish-blob! [store ^bytes bytes]
+  (let [digest (sha256-bytes bytes)
+        path (blob-path store digest)
+        directory (.getParent path)]
+    (Files/createDirectories directory (make-array FileAttribute 0))
+    (if (Files/isRegularFile path (make-array java.nio.file.LinkOption 0))
+      (read-valid-blob! store (alength bytes) digest)
+      (let [temporary (Files/createTempFile
+                       directory ".checked-ast-" ".tmp"
+                       (make-array FileAttribute 0))]
+        (try
+          (with-open [output (FileOutputStream. (.toFile temporary))]
+            (.write output bytes)
+            (.force (.getChannel output) true))
+          (try
+            (Files/move temporary path
+                        (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
+            (catch FileAlreadyExistsException _
+              (Files/deleteIfExists temporary)))
+          (finally
+            (Files/deleteIfExists temporary)))
+        (read-valid-blob! store (alength bytes) digest)))
+    [blob-kind (alength bytes) digest]))
+
+(defn exact-blob-payload [store payload]
+  (let [descriptor (edn/read-string payload)]
+    (when (and (vector? descriptor)
+               (= 3 (count descriptor))
+               (= blob-kind (nth descriptor 0))
+               (integer? (nth descriptor 1))
+               (<= 0 (nth descriptor 1))
+               (exact-sha256? (nth descriptor 2))
+               (= payload (pr-str descriptor)))
+      (read-valid-blob! store (nth descriptor 1) (nth descriptor 2)))))
+
 (defn exact-row-payload
-  [row result-key compiler-context profile unit-id]
+  [store row result-key compiler-context profile unit-id]
   (when (and (vector? row)
              (= 4 (count row))
              (= fact-stage (nth row 0))
@@ -63,7 +117,7 @@
                  (= compiler-context (nth parsed 3))
                  (= profile (nth parsed 4))
                  (= unit-id (nth parsed 5)))
-        (nth parsed 8)))))
+        (exact-blob-payload store (nth parsed 8))))))
 
 (defn query! [store result-key compiler-context profile unit-id]
   (let [response
@@ -81,17 +135,18 @@
             (try
               (vec
                (keep #(exact-row-payload
-                       % result-key compiler-context profile unit-id)
+                       store % result-key compiler-context profile unit-id)
                      rows))
               (catch Exception error
                 (fail! (str "stored envelope is invalid: " (.getMessage error)) 2)))]
         (when-not (and (= 1 (count rows)) (= 1 (count payloads)))
           (fail! "result key has duplicate, conflicting, or mismatched facts" 2))
-        (print (first payloads))
+        (.write System/out ^bytes (first payloads))
         (flush)))))
 
 (defn append! [store result-key compiler-context profile unit-id payload-path]
-  (let [payload (slurp payload-path)
+  (let [payload-bytes (Files/readAllBytes (.toPath (java.io.File. payload-path)))
+        payload (pr-str (publish-blob! store payload-bytes))
         value (envelope result-key compiler-context profile unit-id payload)
         encoding (pr-str value)
         fact-id (sha256 encoding)

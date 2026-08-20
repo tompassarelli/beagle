@@ -29,6 +29,8 @@ if run_store query "$store" "$key" "$context" "$profile" "$unit" \
 fi
 
 run_store append "$store" "$key" "$context" "$profile" "$unit" "$payload"
+[[ "$(wc -c <"$store")" -lt 4096 ]]
+[[ -f "$store.objects/$(sha256sum "$payload" | awk '{print $1}')" ]]
 run_store query "$store" "$key" "$context" "$profile" "$unit" >"$scratch/query"
 cmp -s "$payload" "$scratch/query"
 

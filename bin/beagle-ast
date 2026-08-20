@@ -92,7 +92,7 @@ reuse=0
 [[ "$bundle" == 1 &&
    "${BEAGLE_CHECKED_AST_REUSE:-1}" != 0 &&
    "${BEAGLE_FACT_REUSE_FORBIDDEN:-0}" != 1 ]] && reuse=1
-ast_store="${BEAGLE_CHECKED_AST_STORE:-${BEAGLE_DEV_FACT_STORE:-$BEAGLE_ROOT/.beagle/dev-compile-facts.storelog}}"
+ast_store="${BEAGLE_CHECKED_AST_STORE:-$BEAGLE_ROOT/.beagle/checked-ast.storelog}"
 ast_profile="beagle-ast-v2"
 ast_unit="$(if [[ "$bundle" == 1 ]]; then echo bundle; else echo single; fi)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/beagle-ast.XXXXXX")"
