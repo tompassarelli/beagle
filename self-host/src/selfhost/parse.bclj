@@ -6844,7 +6844,7 @@
   (expect! "binding-conditional synthesized test preserves the lexical edge"
     (let [prog (parse-program!
             [["defn" "keep" [BRACKET-TAG] "Int"
-              ["if-let" [BRACKET-TAG "x" 1] "x" 0]]])
+              ["if-let" [BRACKET-TAG "x" "Int" 1] "x" 0]]])
           form (nth (get prog "forms") 0)
           outer (nth (get form "body") 0)
           binding (nth (get outer "bindings") 0)
