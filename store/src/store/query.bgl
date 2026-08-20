@@ -1489,7 +1489,7 @@
   (try
     (execution-result-or-raise!
      (run-plan-projected-result! projection plan control))
-    (catch (problem Exception) (abort-result problem))))
+    (catch Exception problem (abort-result problem))))
 
 (defn run-plan-projected!
   [projection Projection
@@ -1650,7 +1650,7 @@
                            "page contains a row too large for the bounded response")
                           max-page-wire-bytes)
                          (page-envelope window count-value)))))))
-             (catch (problem Exception) (abort-page problem)))))])))
+             (catch Exception problem (abort-page problem)))))])))
 
 (defn run-page-projected!
   [projection Projection
