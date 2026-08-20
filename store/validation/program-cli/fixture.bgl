@@ -4,7 +4,6 @@
   (:require [beagle.frontend-facts :as facts]
             [beagle.parser-reader :as parser-reader]
             [beagle.program-projection :as projection]
-            [store.compiler-adapter :as adapter]
             [store.kernel :as kernel]
             [store.native-dispatch :as dispatch]
             [store.native-server :as server]
@@ -19,6 +18,29 @@
 (def other-root String "program-cli-other-root-v1")
 (def module String "fixture/shadowing-rename.bgl")
 (def other-module String "fixture/other-root.bgl")
+(def max-store-log-bytes Int 67108864)
+
+(defn failed-store [detail String] server/StoreResult
+  (server/->StoreResult server/status-fatal nil detail 0 [] ""))
+
+(defn append-log! [path String bytes (Vec Int)] String?
+  (if (empty? bytes)
+    nil
+    (match (host.fs/append-bytes path bytes)
+      [(host.fs/AppendBytesOk) nil]
+      [(host.fs/AppendBytesError errno) "could not append fixture Store log"])))
+
+(defn open-store! [path String] server/StoreResult
+  (match (host.fs/append-text path "")
+    [(host.fs/AppendTextError errno)
+     (failed-store "could not create fixture Store log")]
+    [(host.fs/AppendTextOk)
+     (let [source ByteSource
+           (host.fs/read-byte-source-bounded-or-die path max-store-log-bytes)]
+       (server/server-store-boot! path space-id source (subvec source 0 0)))]))
+
+(defn persist-boot! [path String opened server/StoreResult] String?
+  (append-log! path (server/storeresult-boot-append opened)))
 
 (def source String
   (str
@@ -129,10 +151,10 @@
                                  (= text (cli/render-term parsed)))))))))])))
 
 (defn seed! [path String propositions (Vec t/Triple)] Int
-  (let [opened server/StoreResult (adapter/open-store! path space-id)
+  (let [opened server/StoreResult (open-store! path)
         store-value server/Store? (server/storeresult-store opened)]
     (if (or (nil? store-value)
-            (some? (adapter/persist-boot! path opened)))
+            (some? (persist-boot! path opened)))
       74
       (let [store server/Store store-value
             actions (Vec Any) (mapv rpc-action propositions)
@@ -150,7 +172,7 @@
                 (not (server/responseresult-state-changed result)))
           74
           (let [write-error String?
-                (adapter/append-log!
+                (append-log!
                   path (server/responseresult-append-bytes result))]
             (if (some? write-error) 74 0)))))))
 
