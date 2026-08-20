@@ -1,0 +1,23 @@
+#lang beagle
+(ns native.fact-materializer-clj-fixture
+  (:require [beagle.fact-materializer-clj-render :as render]))
+
+(def expected String "(ns smoke)\n(defn main [args]\n  7)\n")
+
+(defn main [args (Vec String)] Int
+  (let [first-result render/ClojureRenderResult (render/render-clojure-entry "smoke" "main" 7)
+        second-result render/ClojureRenderResult (render/render-clojure-entry "smoke" "main" 7)]
+    (match first-result
+      [(render/ClojureRenderRejected detail) 1]
+      [(render/ClojureRendered first-payload first-filename)
+       (match second-result
+         [(render/ClojureRenderRejected detail) 2]
+         [(render/ClojureRendered second-payload second-filename)
+          (if (and (= expected first-payload)
+                   (= first-payload second-payload)
+                   (= "smoke.clj" first-filename)
+                   (= first-filename second-filename))
+            (match (render/render-clojure-entry "smoke) (boom" "main" 7)
+              [(render/ClojureRenderRejected detail) 0]
+              [(render/ClojureRendered payload filename) 3])
+            4)])])))

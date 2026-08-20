@@ -1,0 +1,32 @@
+#lang beagle
+(ns beagle.fact-materializer-clj-render)
+
+(defunion ClojureRenderResult
+  (ClojureRendered
+    [payload String
+     filename String])
+  (ClojureRenderRejected [detail String]))
+
+(defn clojure-namespace? [value String] Bool
+  (some? (re-matches #"[A-Za-z_][A-Za-z0-9_.-]*" value)))
+
+(defn clojure-definition? [value String] Bool
+  (some? (re-matches #"[A-Za-z_][A-Za-z0-9_!?+*<>=.-]*" value)))
+
+(defn render-clojure-entry
+  [namespace String
+   definition String
+   value Int] ClojureRenderResult
+  (cond
+    (not (clojure-namespace? namespace))
+    (->ClojureRenderRejected "unsafe Clojure namespace")
+
+    (not (clojure-definition? definition))
+    (->ClojureRenderRejected "unsafe Clojure definition")
+
+    :else
+    (->ClojureRendered
+      (str "(ns " namespace ")\n"
+           "(defn " definition " [args]\n"
+           "  " value ")\n")
+      (str namespace ".clj"))))
