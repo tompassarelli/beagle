@@ -151,7 +151,7 @@
   (check-true (string-contains? out "if true then 1 else 0")))
 
 (test-case "let emits sequential non-recursive binding applications"
-  (define out (nix-emit "(define-target nix) (let [x 1 y 2] (+ x y))"))
+  (define out (nix-emit "(define-target nix) (let [x Int 1 y Int 2] (+ x y))"))
   (check-false (string-contains? out "builtins.deepSeq x"))
   (check-false (string-contains? out "builtins.deepSeq y"))
   (check-true (string-contains? out "x + y")))
@@ -161,7 +161,7 @@
     (constrained-emit
      (string-append
       "(def x 7) "
-      "(let [x x ignored (let [(bad Int positive?) -1] 0)] x)")))
+      "(let [x Int x ignored Any (let [(bad Int positive?) -1] 0)] x)")))
   (check-true (string-contains? out "((x:"))
   ;; The source `x` is the application argument, not a recursive `x = x`.
   (check-false (string-contains? out "x = x;"))
@@ -642,7 +642,7 @@
     (string-append
      "(define-target nix) "
      "(nix/module [config lib] "
-     "  (let [enabled true] "
+     "  (let [enabled Bool true] "
      "    {:tags [desktop] "
      "     :tags-opt-in [experimental] "
      "     :tag-overrides {:desktop {:demo true}} "

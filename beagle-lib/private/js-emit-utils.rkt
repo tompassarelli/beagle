@@ -1,7 +1,6 @@
 #lang racket/base
 
-;; Shared utilities for JS emission — used by emit-js.rkt, emit-jst.rkt,
-;; and emit-js-quote.rkt.
+;; Shared utilities for JS emission.
 
 (require racket/string)
 
@@ -19,11 +18,6 @@
       [else
        (loop (+ i 1) (cons (string-ref pat i) acc))])))
 
-(define (escape-js-template-string s)
-  (regexp-replace* #rx"\\$\\{"
-    (regexp-replace* #rx"`" s "\\\\`")
-    "\\\\${"))
-
 (define (mangle-name sym)
   (mangle-str (symbol->string sym)))
 
@@ -39,8 +33,7 @@
 ;;
 ;; DELIBERATELY EXCLUDED: `true` `false` `this` `super`. beagle carries these as
 ;; literal / keyword SYMBOLS that the emitter routes through mangle-name to emit
-;; as the bare JS keyword (a boolean literal is the symbol `true`; a jst method
-;; body refers to `this`). Mangling them would corrupt those intentional
+;; as the bare JS keyword. Mangling them would corrupt those intentional
 ;; emissions into `true$` / `this$`. (`nil` never reaches here — emit-js lowers
 ;; it to `null` directly — so `null` in this set only ever guards a real
 ;; user-authored identifier.)
@@ -100,31 +93,6 @@
       (string-append "." name)
       (string-append "[" (js-string-lit name) "]")))
 
-;; --- canonical JS binary/assign operator tables -----------------------------
-;; Shared by parse-js-quote (recognition during parse) and the emitters
-;; (rendering during emit). Single source of truth.
-
-(define JS-BINARY-OPS
-  (hasheq '+ "+" '- "-" '* "*" '/ "/" '% "%"
-          '** "**" '=== "===" '!== "!==" '== "==" '!= "!="
-          '< "<" '> ">" '<= "<=" '>= ">="
-          'and "&&" 'or "||" 'nullish "??"
-          'bit-and "&" 'bit-or "|" 'bit-xor "^"
-          '<< "<<" '>> ">>" '>>> ">>>"
-          'in "in" 'instanceof "instanceof"))
-
-(define JS-ASSIGN-OPS
-  (hasheq '+= "+=" '-= "-=" '*= "*=" '/= "/="
-          '%= "%=" '**= "**="
-          'and= "&&=" 'or= "||=" 'nullish= "??="
-          'bit-and= "&=" 'bit-or= "|=" 'bit-xor= "^="
-          '<<= "<<=" '>>= ">>=" '>>>= ">>>="))
-
-(define (js-binary-op? sym)
-  (and (symbol? sym) (hash-has-key? JS-BINARY-OPS sym)))
-(define (js-assign-op? sym)
-  (and (symbol? sym) (hash-has-key? JS-ASSIGN-OPS sym)))
-
 (define current-emit-expr (make-parameter #f))
 
 ;; Render a string VALUE as a valid JS double-quoted string literal. Racket's
@@ -155,10 +123,8 @@
   (get-output-string out))
 
 (provide
- escape-js-regex-slash escape-js-template-string
+ escape-js-regex-slash
  js-string-lit
  mangle-name mangle-str mangle-prop mangle-chars
  js-member-identifier? js-selector-suffix
- JS-BINARY-OPS JS-ASSIGN-OPS
- js-binary-op? js-assign-op?
  current-emit-expr)

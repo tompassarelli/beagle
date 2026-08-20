@@ -92,7 +92,7 @@
   (test-suite
    "binding constraints in module interfaces"
 
-   (test-case "schema v7 preserves constraint AST and synchronization proof"
+   (test-case "schema v11 preserves constraint AST and synchronization proof"
      (define positive
        (published
         (string-append
@@ -118,7 +118,7 @@
      (define positive-binding (binding-ref positive 'keep))
      (define constraint
        (car (interface-binding-constraints positive-binding)))
-     (check-equal? (module-interface-schema-version positive) 9)
+     (check-equal? (module-interface-schema-version positive) 11)
      (check-true (interface-constraint? constraint))
      (check-false (interface-constraint-synchronous? constraint))
      (check-false (interface-constraint-provider constraint))
@@ -160,8 +160,8 @@
         "(define-target js)\n"
         "(declare-extern fetch-flag (Fn [Int] (Promise Bool)))\n"
         "(js/export\n"
-        "  (defn remote-valid? [(value Int)] Bool\n"
-        "    (js/await (fetch-flag value))))\n"))
+        "  (defn ^:async remote-valid? [(value Int)] (Promise Bool)\n"
+        "    (await (fetch-flag value))))\n"))
      (define provider-stxs (read-forms provider-source))
      (define provider-program
        (checked-program
@@ -197,7 +197,7 @@
      (check-pred beagle-diagnostic? error)
      (when (beagle-diagnostic? error)
        (check-eq? (beagle-diagnostic-kind error) 'binding-constraint)
-       (check-regexp-match #rx"not proven synchronous" (exn-message error))))
+       (check-regexp-match #rx"predicate return type is not Bool" (exn-message error))))
 
    (test-case "protocol-keyed contracts survive method collisions and imports"
      (define provider-source

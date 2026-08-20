@@ -38,8 +38,8 @@
     (src-loc 1 0 'layout.bclj 'original #f source-position 1))
   (define source
     (datum->beagle-syntax
-     '(let (#%brackets x 1)
-        (let (#%brackets x 2) x))
+     '(let (#%brackets x Int 1)
+        (let (#%brackets x Int 2) x))
      span))
   (define resolved
     (car (expand-and-resolve-program (make-macro-registry) (list source))))
@@ -59,8 +59,8 @@
     (racket-syntax->beagle-syntax
      (datum->syntax
       #f
-      '(let (#%brackets x 1)
-         (let (#%brackets x 2) x)))
+      '(let (#%brackets x Int 1)
+         (let (#%brackets x Int 2) x)))
      #""))
   (define resolved
     (car (expand-and-resolve-program (make-macro-registry) (list source))))

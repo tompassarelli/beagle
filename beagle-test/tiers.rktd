@@ -183,7 +183,6 @@
             "emit-js.rkt"
             "emit-sql.rkt"
             "js-fixtures.rkt"
-            "js-quote.rkt"
             "jst.rkt"
             "sql-fixtures.rkt"
             "sql-roundtrip.rkt"

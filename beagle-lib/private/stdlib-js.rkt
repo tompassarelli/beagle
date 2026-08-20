@@ -6,7 +6,7 @@
 ;;
 ;; Qualifier/member identity mirrors the JS `Namespace.member` access form;
 ;; the JS emitter joins it only at output. Member-of-instance methods use
-;; `js/call` and are not declared in this table.
+;; direct member syntax and are not declared in this table.
 
 (require racket/set
          "ast.rkt"
@@ -176,14 +176,23 @@
             #:rest (p 'Any))
 
    ;; --- globals ---------------------------------------------------------------
+   (q 'js 'JSON)     (p 'Any)
    'Math             (p 'JsMath)
+   (q 'js 'Math)     (p 'JsMath)
    'Map              (poly-fn
                       '(K V)
                       '()
                       (type-app 'JsMap (list (tv 'K) (tv 'V))))
+   (q 'js 'Map)      (poly-fn
+                      '(K V)
+                      '()
+                      (type-app 'JsMap (list (tv 'K) (tv 'V))))
    'Date             (p 'JsDate)
+   (q 'js 'Date)     (p 'JsDate)
    'performance      (p 'JsPerformance)
+   (q 'js 'performance) (p 'JsPerformance)
    'globalThis       (p 'Any)
+   (q 'js 'globalThis) (p 'Any)
    ))
 
 ;; Positive contracts for native members used by typed Beagle code.  This is

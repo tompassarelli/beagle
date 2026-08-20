@@ -2,7 +2,7 @@
 (ns selfhost.fixtures.invalid.grey-js-map-invariance)
 
 (defn consume-dynamic-values [(values (JsMap String Any))] Int
-  (js/get values .size))
+  (.size values))
 
 (defn invalid-map-widening [(values (JsMap String Int))] Int
   (consume-dynamic-values values))

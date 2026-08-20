@@ -517,7 +517,7 @@
       IMPORTED-CALLABLE-SYNCHRONIZATION-KEY callable-synchronization)))
 
 ;; Inject the requested emit target into the datum stream when the source
-;; declares none, so parse (js/quote combiner, target-case) + emit agree. The
+;; declares none, so parse target-case + emit agree. The
 ;; #lang line is consumed by the reader (target dropped from read-program), and
 ;; the CLI --target is authoritative; a source-level (define-target ...) wins if
 ;; present (duplicate would be a parse error).

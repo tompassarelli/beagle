@@ -1,5 +1,5 @@
 #lang beagle/js
 
-(require provider :as p)
+(require [provider :as p])
 
 (defn keep [value (p/Pair String)] String "bad")

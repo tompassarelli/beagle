@@ -428,11 +428,11 @@
     ]
   },
   "summary": {
-    "dimensions": 2062,
+    "dimensions": 1992,
     "buckets": {
-      "DECIDED-AND-ENUMERATED": 9,
-      "DECIDED-NOT-ENUMERATED": 237,
-      "UNDECIDED": 1816
+      "DECIDED-AND-ENUMERATED": 246,
+      "DECIDED-NOT-ENUMERATED": 0,
+      "UNDECIDED": 1746
     }
   },
   "rows": [
@@ -446,7 +446,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -458,6 +458,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-evaluation-minus-order"
       ]
     },
     {
@@ -470,7 +473,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -482,6 +485,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-strictness-minus-laziness"
       ]
     },
     {
@@ -494,7 +500,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -506,6 +512,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-allocation-minus-representation"
       ]
     },
     {
@@ -518,7 +527,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -530,6 +539,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-effects"
       ]
     },
     {
@@ -542,7 +554,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -554,6 +566,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-identity-minus-equality"
       ]
     },
     {
@@ -566,7 +581,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -578,6 +593,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-failure-minus-behavior"
       ]
     },
     {
@@ -590,7 +608,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -602,6 +620,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-star-evaluation-minus-order"
       ]
     },
     {
@@ -614,7 +635,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -626,6 +647,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-star-strictness-minus-laziness"
       ]
     },
     {
@@ -638,7 +662,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -650,6 +674,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-star-allocation-minus-representation"
       ]
     },
     {
@@ -662,7 +689,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -674,6 +701,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-star-effects"
       ]
     },
     {
@@ -686,7 +716,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -698,6 +728,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-star-identity-minus-equality"
       ]
     },
     {
@@ -710,7 +743,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -722,6 +755,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-star-failure-minus-behavior"
       ]
     },
     {
@@ -734,7 +770,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -746,6 +782,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-slash-evaluation-minus-order"
       ]
     },
     {
@@ -758,7 +797,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -770,6 +809,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-slash-strictness-minus-laziness"
       ]
     },
     {
@@ -782,7 +824,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -794,6 +836,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-slash-allocation-minus-representation"
       ]
     },
     {
@@ -806,7 +851,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -818,6 +863,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-slash-effects"
       ]
     },
     {
@@ -830,7 +878,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -842,6 +890,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-slash-identity-minus-equality"
       ]
     },
     {
@@ -854,7 +905,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -866,6 +917,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-slash-failure-minus-behavior"
       ]
     },
     {
@@ -878,7 +932,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -890,6 +944,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-plus-evaluation-minus-order"
       ]
     },
     {
@@ -902,7 +959,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -914,6 +971,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-plus-strictness-minus-laziness"
       ]
     },
     {
@@ -926,7 +986,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -938,6 +998,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-plus-allocation-minus-representation"
       ]
     },
     {
@@ -950,7 +1013,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -962,6 +1025,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-plus-effects"
       ]
     },
     {
@@ -974,7 +1040,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -986,6 +1052,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-plus-identity-minus-equality"
       ]
     },
     {
@@ -998,7 +1067,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -1010,6 +1079,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-plus-failure-minus-behavior"
       ]
     },
     {
@@ -1022,7 +1094,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1033,6 +1105,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-lt-evaluation-minus-order"
       ]
     },
     {
@@ -1045,7 +1120,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1056,6 +1131,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-lt-strictness-minus-laziness"
       ]
     },
     {
@@ -1068,7 +1146,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1079,6 +1157,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-lt-allocation-minus-representation"
       ]
     },
     {
@@ -1091,7 +1172,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1102,6 +1183,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-lt-effects"
       ]
     },
     {
@@ -1114,7 +1198,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1125,6 +1209,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-lt-identity-minus-equality"
       ]
     },
     {
@@ -1137,7 +1224,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1148,6 +1235,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-lt-failure-minus-behavior"
       ]
     },
     {
@@ -1160,7 +1250,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1171,6 +1261,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-lte-minus-evaluation-minus-order"
       ]
     },
     {
@@ -1183,7 +1276,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1194,6 +1287,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-lte-minus-strictness-minus-laziness"
       ]
     },
     {
@@ -1206,7 +1302,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1217,6 +1313,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-lte-minus-allocation-minus-representation"
       ]
     },
     {
@@ -1229,7 +1328,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1240,6 +1339,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-lte-minus-effects"
       ]
     },
     {
@@ -1252,7 +1354,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1263,6 +1365,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-lte-minus-identity-minus-equality"
       ]
     },
     {
@@ -1275,7 +1380,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1286,6 +1391,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-lte-minus-failure-minus-behavior"
       ]
     },
     {
@@ -1298,7 +1406,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -1308,6 +1416,9 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-eq-strictness-minus-laziness"
       ]
     },
     {
@@ -1320,7 +1431,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -1330,6 +1441,9 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-eq-effects"
       ]
     },
     {
@@ -1342,7 +1456,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -1352,6 +1466,11 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-equality-hashing-core",
+        "hl-equality-hashing-hosted-js",
+        "div-eq-failure-minus-behavior"
       ]
     },
     {
@@ -1436,7 +1555,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1447,6 +1566,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gt-evaluation-minus-order"
       ]
     },
     {
@@ -1459,7 +1581,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1470,6 +1592,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gt-strictness-minus-laziness"
       ]
     },
     {
@@ -1482,7 +1607,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1493,6 +1618,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gt-allocation-minus-representation"
       ]
     },
     {
@@ -1505,7 +1633,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1516,6 +1644,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gt-effects"
       ]
     },
     {
@@ -1528,7 +1659,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1539,6 +1670,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gt-identity-minus-equality"
       ]
     },
     {
@@ -1551,7 +1685,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1562,6 +1696,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gt-failure-minus-behavior"
       ]
     },
     {
@@ -1574,7 +1711,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1585,6 +1722,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-gte-minus-evaluation-minus-order"
       ]
     },
     {
@@ -1597,7 +1737,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1608,6 +1748,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-gte-minus-strictness-minus-laziness"
       ]
     },
     {
@@ -1620,7 +1763,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1631,6 +1774,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-gte-minus-allocation-minus-representation"
       ]
     },
     {
@@ -1643,7 +1789,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1654,6 +1800,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-gte-minus-effects"
       ]
     },
     {
@@ -1666,7 +1815,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1677,6 +1826,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-gte-minus-identity-minus-equality"
       ]
     },
     {
@@ -1689,7 +1841,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-float-order",
@@ -1700,6 +1852,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-minus-gte-minus-failure-minus-behavior"
       ]
     },
     {
@@ -1902,7 +2057,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -1912,6 +2067,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-and-evaluation-minus-order"
       ]
     },
     {
@@ -1924,7 +2085,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -1934,6 +2095,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-and-strictness-minus-laziness"
       ]
     },
     {
@@ -1946,7 +2113,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -1956,6 +2123,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-and-allocation-minus-representation"
       ]
     },
     {
@@ -1968,7 +2138,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -1978,6 +2148,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-and-effects"
       ]
     },
     {
@@ -1990,7 +2166,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -2000,6 +2176,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-and-identity-minus-equality"
       ]
     },
     {
@@ -2012,7 +2194,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -2022,6 +2204,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-and-failure-minus-behavior"
       ]
     },
     {
@@ -2178,7 +2363,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -2189,6 +2374,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-array-minus-map-evaluation-minus-order"
       ]
     },
     {
@@ -2201,7 +2389,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -2212,6 +2400,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-array-minus-map-strictness-minus-laziness"
       ]
     },
     {
@@ -2224,7 +2415,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -2235,6 +2426,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-array-minus-map-allocation-minus-representation"
       ]
     },
     {
@@ -2451,7 +2645,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-collection-admission",
@@ -2461,6 +2655,11 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-assoc-failure-minus-behavior"
       ]
     },
     {
@@ -2557,7 +2756,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -2568,6 +2767,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-await-evaluation-minus-order"
       ]
     },
     {
@@ -2580,7 +2782,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -2591,6 +2793,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-await-strictness-minus-laziness"
       ]
     },
     {
@@ -2615,7 +2820,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -2626,6 +2831,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-await-effects"
       ]
     },
     {
@@ -2650,7 +2858,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "ownership-promotion",
@@ -2661,6 +2869,9 @@
             "DECIDED rule 6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-bgl-slash-promote-evaluation-minus-order"
       ]
     },
     {
@@ -2673,7 +2884,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "ownership-promotion",
@@ -2684,6 +2895,9 @@
             "DECIDED rule 6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-bgl-slash-promote-strictness-minus-laziness"
       ]
     },
     {
@@ -2696,7 +2910,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "ownership-promotion",
@@ -2707,6 +2921,11 @@
             "DECIDED rule 6"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-native-core-gc-ownership-core",
+        "hl-native-core-gc-ownership-hosted-js",
+        "div-bgl-slash-promote-allocation-minus-representation"
       ]
     },
     {
@@ -2719,7 +2938,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "ownership-promotion",
@@ -2730,6 +2949,9 @@
             "DECIDED rule 6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-bgl-slash-promote-effects"
       ]
     },
     {
@@ -2742,7 +2964,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "ownership-promotion",
@@ -2753,6 +2975,11 @@
             "DECIDED rule 6"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-native-core-gc-ownership-core",
+        "hl-native-core-gc-ownership-hosted-js",
+        "div-bgl-slash-promote-identity-minus-equality"
       ]
     },
     {
@@ -2765,7 +2992,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "ownership-promotion",
@@ -2776,6 +3003,11 @@
             "DECIDED rule 6"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-native-core-gc-ownership-core",
+        "hl-native-core-gc-ownership-hosted-js",
+        "div-bgl-slash-promote-failure-minus-behavior"
       ]
     },
     {
@@ -3652,7 +3884,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -3662,6 +3894,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-boolean-evaluation-minus-order"
       ]
     },
     {
@@ -3674,7 +3909,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -3684,6 +3919,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-boolean-strictness-minus-laziness"
       ]
     },
     {
@@ -3696,7 +3934,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -3706,6 +3944,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-boolean-allocation-minus-representation"
       ]
     },
     {
@@ -3718,7 +3962,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -3728,6 +3972,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-boolean-effects"
       ]
     },
     {
@@ -3740,7 +3990,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -3750,6 +4000,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-boolean-identity-minus-equality"
       ]
     },
     {
@@ -3762,7 +4018,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -3772,6 +4028,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-boolean-failure-minus-behavior"
       ]
     },
     {
@@ -4808,7 +5067,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -4818,6 +5077,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-cond-evaluation-minus-order"
       ]
     },
     {
@@ -4830,7 +5095,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -4840,6 +5105,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-cond-strictness-minus-laziness"
       ]
     },
     {
@@ -4852,7 +5123,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -4862,6 +5133,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-cond-allocation-minus-representation"
       ]
     },
     {
@@ -4874,7 +5148,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -4884,6 +5158,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-cond-effects"
       ]
     },
     {
@@ -4896,7 +5176,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -4906,6 +5186,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-cond-identity-minus-equality"
       ]
     },
     {
@@ -4918,7 +5201,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -4928,6 +5211,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-cond-failure-minus-behavior"
       ]
     },
     {
@@ -5180,7 +5466,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-collection-admission",
@@ -5190,6 +5476,11 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-conj-failure-minus-behavior"
       ]
     },
     {
@@ -5598,7 +5889,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -5610,6 +5901,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-dec-evaluation-minus-order"
       ]
     },
     {
@@ -5622,7 +5916,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -5634,6 +5928,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-dec-strictness-minus-laziness"
       ]
     },
     {
@@ -5646,7 +5943,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -5658,6 +5955,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-dec-allocation-minus-representation"
       ]
     },
     {
@@ -5670,7 +5970,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -5682,6 +5982,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-dec-effects"
       ]
     },
     {
@@ -5694,7 +5997,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -5706,6 +6009,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-dec-identity-minus-equality"
       ]
     },
     {
@@ -5718,7 +6024,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -5730,6 +6036,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-dec-failure-minus-behavior"
       ]
     },
     {
@@ -6750,7 +7059,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-persistent-updates",
@@ -6761,6 +7070,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-disj-evaluation-minus-order"
       ]
     },
     {
@@ -6773,7 +7085,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-persistent-updates",
@@ -6784,6 +7096,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-disj-strictness-minus-laziness"
       ]
     },
     {
@@ -6796,7 +7113,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-persistent-updates",
@@ -6807,6 +7124,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-disj-allocation-minus-representation"
       ]
     },
     {
@@ -6999,7 +7321,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -7011,6 +7333,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-do-evaluation-minus-order"
       ]
     },
     {
@@ -7023,7 +7348,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -7035,6 +7360,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-do-strictness-minus-laziness"
       ]
     },
     {
@@ -7047,7 +7375,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -7059,6 +7387,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-do-allocation-minus-representation"
       ]
     },
     {
@@ -7071,7 +7402,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -7083,6 +7414,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-do-effects"
       ]
     },
     {
@@ -7407,7 +7741,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -7419,6 +7753,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-double-evaluation-minus-order"
       ]
     },
     {
@@ -7431,7 +7768,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -7443,6 +7780,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-double-strictness-minus-laziness"
       ]
     },
     {
@@ -7455,7 +7795,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -7467,6 +7807,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-double-allocation-minus-representation"
       ]
     },
     {
@@ -7479,7 +7822,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -7491,6 +7834,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-double-effects"
       ]
     },
     {
@@ -7503,7 +7849,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -7515,6 +7861,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-double-identity-minus-equality"
       ]
     },
     {
@@ -7527,7 +7876,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -7539,6 +7888,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-double-failure-minus-behavior"
       ]
     },
     {
@@ -8677,7 +9029,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-callback-effects",
@@ -8687,6 +9039,11 @@
             "DECIDED rule 2"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-filter-effects"
       ]
     },
     {
@@ -9095,7 +9452,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9107,6 +9464,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-evaluation-minus-order"
       ]
     },
     {
@@ -9119,7 +9479,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9131,6 +9491,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-strictness-minus-laziness"
       ]
     },
     {
@@ -9143,7 +9506,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9155,6 +9518,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-allocation-minus-representation"
       ]
     },
     {
@@ -9167,7 +9533,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9179,6 +9545,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-effects"
       ]
     },
     {
@@ -9191,7 +9560,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9203,6 +9572,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-identity-minus-equality"
       ]
     },
     {
@@ -9215,7 +9587,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9227,6 +9599,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-from-minus-bits-failure-minus-behavior"
       ]
     },
     {
@@ -9239,7 +9614,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9251,6 +9626,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-evaluation-minus-order"
       ]
     },
     {
@@ -9263,7 +9641,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9275,6 +9653,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-strictness-minus-laziness"
       ]
     },
     {
@@ -9287,7 +9668,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9299,6 +9680,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-allocation-minus-representation"
       ]
     },
     {
@@ -9311,7 +9695,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9323,6 +9707,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-effects"
       ]
     },
     {
@@ -9335,7 +9722,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9347,6 +9734,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-identity-minus-equality"
       ]
     },
     {
@@ -9359,7 +9749,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -9371,6 +9761,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-float-minus-to-minus-bits-failure-minus-behavior"
       ]
     },
     {
@@ -10019,7 +10412,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "symbol-generated",
@@ -10029,6 +10422,9 @@
             "DECIDED rules 4-5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gensym-evaluation-minus-order"
       ]
     },
     {
@@ -10041,7 +10437,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "symbol-generated",
@@ -10051,6 +10447,9 @@
             "DECIDED rules 4-5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-gensym-strictness-minus-laziness"
       ]
     },
     {
@@ -10459,7 +10858,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -10469,6 +10868,9 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-hash-evaluation-minus-order"
       ]
     },
     {
@@ -10481,7 +10883,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -10491,6 +10893,9 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-hash-strictness-minus-laziness"
       ]
     },
     {
@@ -10503,7 +10908,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -10513,6 +10918,9 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-hash-allocation-minus-representation"
       ]
     },
     {
@@ -10525,7 +10933,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -10535,6 +10943,9 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "div-hash-effects"
       ]
     },
     {
@@ -10547,7 +10958,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -10557,6 +10968,11 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-equality-hashing-core",
+        "hl-equality-hashing-hosted-js",
+        "div-hash-identity-minus-equality"
       ]
     },
     {
@@ -10569,7 +10985,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -10579,6 +10995,11 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-equality-hashing-core",
+        "hl-equality-hashing-hosted-js",
+        "div-hash-failure-minus-behavior"
       ]
     },
     {
@@ -10591,7 +11012,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -10602,6 +11023,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-map-evaluation-minus-order"
       ]
     },
     {
@@ -10614,7 +11040,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -10625,6 +11051,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-map-strictness-minus-laziness"
       ]
     },
     {
@@ -10637,7 +11068,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -10648,6 +11079,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-map-allocation-minus-representation"
       ]
     },
     {
@@ -10684,7 +11120,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-collection-admission",
@@ -10694,6 +11130,13 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "hl-equality-hashing-core",
+        "hl-equality-hashing-hosted-js",
+        "div-hash-minus-map-failure-minus-behavior"
       ]
     },
     {
@@ -10706,7 +11149,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -10717,6 +11160,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-set-evaluation-minus-order"
       ]
     },
     {
@@ -10729,7 +11177,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -10740,6 +11188,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-set-strictness-minus-laziness"
       ]
     },
     {
@@ -10752,7 +11205,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -10763,6 +11216,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-hash-minus-set-allocation-minus-representation"
       ]
     },
     {
@@ -10799,7 +11257,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-collection-admission",
@@ -10809,6 +11267,13 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "hl-equality-hashing-core",
+        "hl-equality-hashing-hosted-js",
+        "div-hash-minus-set-failure-minus-behavior"
       ]
     },
     {
@@ -10821,7 +11286,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-operations",
@@ -10831,6 +11296,11 @@
             "DECIDED rules 1-6"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-equality-hashing-core",
+        "hl-equality-hashing-hosted-js",
+        "div-identical-q-failure-minus-behavior"
       ]
     },
     {
@@ -10915,7 +11385,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -10925,6 +11395,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-if-evaluation-minus-order"
       ]
     },
     {
@@ -10937,7 +11413,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -10947,6 +11423,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-if-strictness-minus-laziness"
       ]
     },
     {
@@ -10959,7 +11441,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -10969,6 +11451,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-if-allocation-minus-representation"
       ]
     },
     {
@@ -10981,7 +11466,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -10991,6 +11476,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-if-effects"
       ]
     },
     {
@@ -11003,7 +11494,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -11013,6 +11504,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-if-identity-minus-equality"
       ]
     },
     {
@@ -11025,7 +11519,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -11035,6 +11529,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-if-failure-minus-behavior"
       ]
     },
     {
@@ -11263,7 +11760,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -11275,6 +11772,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-inc-evaluation-minus-order"
       ]
     },
     {
@@ -11287,7 +11787,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -11299,6 +11799,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-inc-strictness-minus-laziness"
       ]
     },
     {
@@ -11311,7 +11814,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -11323,6 +11826,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-inc-allocation-minus-representation"
       ]
     },
     {
@@ -11335,7 +11841,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -11347,6 +11853,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-inc-effects"
       ]
     },
     {
@@ -11359,7 +11868,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -11371,6 +11880,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-inc-identity-minus-equality"
       ]
     },
     {
@@ -11383,7 +11895,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -11395,6 +11907,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-inc-failure-minus-behavior"
       ]
     },
     {
@@ -12166,366 +12681,6 @@
       "bucket": "UNDECIDED"
     },
     {
-      "dimension": "js/-::evaluation-order",
-      "builtin": "js/-",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/-::strictness-laziness",
-      "builtin": "js/-",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/-::allocation-representation",
-      "builtin": "js/-",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/-::effects",
-      "builtin": "js/-",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/-::identity-equality",
-      "builtin": "js/-",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/!::evaluation-order",
-      "builtin": "js/!",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/!::strictness-laziness",
-      "builtin": "js/!",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/!::allocation-representation",
-      "builtin": "js/!",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/!::effects",
-      "builtin": "js/!",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/!::identity-equality",
-      "builtin": "js/!",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/+::evaluation-order",
-      "builtin": "js/+",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/+::strictness-laziness",
-      "builtin": "js/+",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/+::allocation-representation",
-      "builtin": "js/+",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/+::effects",
-      "builtin": "js/+",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/+::identity-equality",
-      "builtin": "js/+",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/await::evaluation-order",
-      "builtin": "js/await",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/await::strictness-laziness",
-      "builtin": "js/await",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/await::allocation-representation",
-      "builtin": "js/await",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/await::effects",
-      "builtin": "js/await",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/await::identity-equality",
-      "builtin": "js/await",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/call::evaluation-order",
-      "builtin": "js/call",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/call::strictness-laziness",
-      "builtin": "js/call",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/call::allocation-representation",
-      "builtin": "js/call",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/call::effects",
-      "builtin": "js/call",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/call::identity-equality",
-      "builtin": "js/call",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/class::evaluation-order",
-      "builtin": "js/class",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/class::strictness-laziness",
-      "builtin": "js/class",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/class::allocation-representation",
-      "builtin": "js/class",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/class::effects",
-      "builtin": "js/class",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/class::identity-equality",
-      "builtin": "js/class",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
       "dimension": "js/delete!::evaluation-order",
       "builtin": "js/delete!",
       "question": "evaluation-order",
@@ -12706,66 +12861,6 @@
       "bucket": "UNDECIDED"
     },
     {
-      "dimension": "js/get::evaluation-order",
-      "builtin": "js/get",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/get::strictness-laziness",
-      "builtin": "js/get",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/get::allocation-representation",
-      "builtin": "js/get",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/get::effects",
-      "builtin": "js/get",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/get::identity-equality",
-      "builtin": "js/get",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
       "dimension": "js/import-meta::evaluation-order",
       "builtin": "js/import-meta",
       "question": "evaluation-order",
@@ -12886,366 +12981,6 @@
       "bucket": "UNDECIDED"
     },
     {
-      "dimension": "js/new::evaluation-order",
-      "builtin": "js/new",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/new::strictness-laziness",
-      "builtin": "js/new",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/new::allocation-representation",
-      "builtin": "js/new",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/new::effects",
-      "builtin": "js/new",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/new::identity-equality",
-      "builtin": "js/new",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/quote::evaluation-order",
-      "builtin": "js/quote",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/quote::strictness-laziness",
-      "builtin": "js/quote",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/quote::allocation-representation",
-      "builtin": "js/quote",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/quote::effects",
-      "builtin": "js/quote",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/quote::identity-equality",
-      "builtin": "js/quote",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/return::evaluation-order",
-      "builtin": "js/return",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/return::strictness-laziness",
-      "builtin": "js/return",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/return::allocation-representation",
-      "builtin": "js/return",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/return::effects",
-      "builtin": "js/return",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/return::identity-equality",
-      "builtin": "js/return",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/set!::evaluation-order",
-      "builtin": "js/set!",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/set!::strictness-laziness",
-      "builtin": "js/set!",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/set!::allocation-representation",
-      "builtin": "js/set!",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/set!::effects",
-      "builtin": "js/set!",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/set!::identity-equality",
-      "builtin": "js/set!",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/spread::evaluation-order",
-      "builtin": "js/spread",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/spread::strictness-laziness",
-      "builtin": "js/spread",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/spread::allocation-representation",
-      "builtin": "js/spread",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/spread::effects",
-      "builtin": "js/spread",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/spread::identity-equality",
-      "builtin": "js/spread",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/template::evaluation-order",
-      "builtin": "js/template",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/template::strictness-laziness",
-      "builtin": "js/template",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/template::allocation-representation",
-      "builtin": "js/template",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/template::effects",
-      "builtin": "js/template",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/template::identity-equality",
-      "builtin": "js/template",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
       "dimension": "js/typeof::evaluation-order",
       "builtin": "js/typeof",
       "question": "evaluation-order",
@@ -13296,66 +13031,6 @@
     {
       "dimension": "js/typeof::identity-equality",
       "builtin": "js/typeof",
-      "question": "identity-equality",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/void::evaluation-order",
-      "builtin": "js/void",
-      "question": "evaluation-order",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/void::strictness-laziness",
-      "builtin": "js/void",
-      "question": "strictness-laziness",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/void::allocation-representation",
-      "builtin": "js/void",
-      "question": "allocation-representation",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/void::effects",
-      "builtin": "js/void",
-      "question": "effects",
-      "profiles": [
-        "Core",
-        "Hosted Clojure",
-        "Hosted JavaScript",
-        "Hosted Nix"
-      ],
-      "bucket": "UNDECIDED"
-    },
-    {
-      "dimension": "js/void::identity-equality",
-      "builtin": "js/void",
       "question": "identity-equality",
       "profiles": [
         "Core",
@@ -13915,7 +13590,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -13927,6 +13602,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-let-evaluation-minus-order"
       ]
     },
     {
@@ -13939,7 +13617,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -13951,6 +13629,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-let-strictness-minus-laziness"
       ]
     },
     {
@@ -13963,7 +13644,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -13975,6 +13656,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-let-allocation-minus-representation"
       ]
     },
     {
@@ -13987,7 +13671,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "macro-sequential-evaluation",
@@ -13999,6 +13683,9 @@
             "DECIDED rule 7"
           ]
         }
+      ],
+      "caseIds": [
+        "div-let-effects"
       ]
     },
     {
@@ -14107,7 +13794,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -14118,6 +13805,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-list-evaluation-minus-order"
       ]
     },
     {
@@ -14130,7 +13820,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -14141,6 +13831,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-list-strictness-minus-laziness"
       ]
     },
     {
@@ -14153,7 +13846,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -14164,6 +13857,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-list-allocation-minus-representation"
       ]
     },
     {
@@ -14356,7 +14052,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -14368,6 +14064,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-long-evaluation-minus-order"
       ]
     },
     {
@@ -14380,7 +14079,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -14392,6 +14091,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-long-strictness-minus-laziness"
       ]
     },
     {
@@ -14404,7 +14106,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -14416,6 +14118,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-long-allocation-minus-representation"
       ]
     },
     {
@@ -14428,7 +14133,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -14440,6 +14145,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-long-effects"
       ]
     },
     {
@@ -14452,7 +14160,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -14464,6 +14172,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-long-identity-minus-equality"
       ]
     },
     {
@@ -14476,7 +14187,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-explicit-conversions",
@@ -14488,6 +14199,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-long-failure-minus-behavior"
       ]
     },
     {
@@ -14572,7 +14286,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-callback-effects",
@@ -14582,6 +14296,11 @@
             "DECIDED rule 2"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-map-effects"
       ]
     },
     {
@@ -15698,7 +15417,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -15710,6 +15429,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-mod-evaluation-minus-order"
       ]
     },
     {
@@ -15722,7 +15444,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -15734,6 +15456,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-mod-strictness-minus-laziness"
       ]
     },
     {
@@ -15746,7 +15471,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -15758,6 +15483,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-mod-allocation-minus-representation"
       ]
     },
     {
@@ -15770,7 +15498,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -15782,6 +15510,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-mod-effects"
       ]
     },
     {
@@ -15794,7 +15525,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -15806,6 +15537,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-mod-identity-minus-equality"
       ]
     },
     {
@@ -15818,7 +15552,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -15830,6 +15564,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-mod-failure-minus-behavior"
       ]
     },
     {
@@ -15902,7 +15639,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -15913,6 +15650,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-monotonic-minus-nanoseconds-evaluation-minus-order"
       ]
     },
     {
@@ -15925,7 +15665,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -15936,6 +15676,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-monotonic-minus-nanoseconds-strictness-minus-laziness"
       ]
     },
     {
@@ -15960,7 +15703,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -15971,6 +15714,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-monotonic-minus-nanoseconds-effects"
       ]
     },
     {
@@ -17215,7 +16961,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -17225,6 +16971,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-not-evaluation-minus-order"
       ]
     },
     {
@@ -17237,7 +16986,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -17247,6 +16996,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-not-strictness-minus-laziness"
       ]
     },
     {
@@ -17259,7 +17011,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -17269,6 +17021,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-not-allocation-minus-representation"
       ]
     },
     {
@@ -17281,7 +17039,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -17291,6 +17049,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-not-effects"
       ]
     },
     {
@@ -17303,7 +17067,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -17313,6 +17077,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-not-identity-minus-equality"
       ]
     },
     {
@@ -17325,7 +17095,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -17335,6 +17105,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-not-failure-minus-behavior"
       ]
     },
     {
@@ -18031,7 +17804,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -18041,6 +17814,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-or-evaluation-minus-order"
       ]
     },
     {
@@ -18053,7 +17832,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -18063,6 +17842,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-or-strictness-minus-laziness"
       ]
     },
     {
@@ -18075,7 +17860,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -18085,6 +17870,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-or-allocation-minus-representation"
       ]
     },
     {
@@ -18097,7 +17885,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -18107,6 +17895,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-or-effects"
       ]
     },
     {
@@ -18119,7 +17913,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -18129,6 +17923,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-or-identity-minus-equality"
       ]
     },
     {
@@ -18141,7 +17941,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -18151,6 +17951,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-or-failure-minus-behavior"
       ]
     },
     {
@@ -18295,7 +18098,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-parser",
@@ -18306,6 +18109,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-parse-minus-double-evaluation-minus-order"
       ]
     },
     {
@@ -18318,7 +18124,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-parser",
@@ -18329,6 +18135,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-parse-minus-double-strictness-minus-laziness"
       ]
     },
     {
@@ -18341,7 +18150,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-parser",
@@ -18352,6 +18161,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-parse-minus-double-allocation-minus-representation"
       ]
     },
     {
@@ -18364,7 +18176,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-parser",
@@ -18375,6 +18187,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-parse-minus-double-effects"
       ]
     },
     {
@@ -18387,7 +18202,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-parser",
@@ -18398,6 +18213,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-parse-minus-double-identity-minus-equality"
       ]
     },
     {
@@ -18410,7 +18228,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-parser",
@@ -18421,6 +18239,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-parse-minus-double-failure-minus-behavior"
       ]
     },
     {
@@ -19693,7 +19514,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -19705,6 +19526,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-quot-evaluation-minus-order"
       ]
     },
     {
@@ -19717,7 +19541,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -19729,6 +19553,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-quot-strictness-minus-laziness"
       ]
     },
     {
@@ -19741,7 +19568,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -19753,6 +19580,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-quot-allocation-minus-representation"
       ]
     },
     {
@@ -19765,7 +19595,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -19777,6 +19607,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-quot-effects"
       ]
     },
     {
@@ -19789,7 +19622,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -19801,6 +19634,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-quot-identity-minus-equality"
       ]
     },
     {
@@ -19813,7 +19649,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -19825,6 +19661,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-quot-failure-minus-behavior"
       ]
     },
     {
@@ -19837,7 +19676,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -19848,6 +19687,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-evaluation-minus-order"
       ]
     },
     {
@@ -19860,7 +19702,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -19871,6 +19713,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-strictness-minus-laziness"
       ]
     },
     {
@@ -19895,7 +19740,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -19906,6 +19751,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-effects"
       ]
     },
     {
@@ -19942,7 +19790,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -19953,6 +19801,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-minus-int-evaluation-minus-order"
       ]
     },
     {
@@ -19965,7 +19816,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -19976,6 +19827,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-minus-int-strictness-minus-laziness"
       ]
     },
     {
@@ -20000,7 +19854,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20011,6 +19865,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-minus-int-effects"
       ]
     },
     {
@@ -20047,7 +19904,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20058,6 +19915,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-minus-nth-evaluation-minus-order"
       ]
     },
     {
@@ -20070,7 +19930,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20081,6 +19941,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-minus-nth-strictness-minus-laziness"
       ]
     },
     {
@@ -20105,7 +19968,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20116,6 +19979,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rand-minus-nth-effects"
       ]
     },
     {
@@ -20152,7 +20018,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20163,6 +20029,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-random-minus-sample-evaluation-minus-order"
       ]
     },
     {
@@ -20175,7 +20044,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20186,6 +20055,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-random-minus-sample-strictness-minus-laziness"
       ]
     },
     {
@@ -20210,7 +20082,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20221,6 +20093,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-random-minus-sample-effects"
       ]
     },
     {
@@ -20257,7 +20132,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20268,6 +20143,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-random-minus-uuid-evaluation-minus-order"
       ]
     },
     {
@@ -20280,7 +20158,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20291,6 +20169,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-random-minus-uuid-strictness-minus-laziness"
       ]
     },
     {
@@ -20315,7 +20196,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -20326,6 +20207,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-random-minus-uuid-effects"
       ]
     },
     {
@@ -20962,7 +20846,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-callback-effects",
@@ -20972,6 +20856,11 @@
             "DECIDED rule 2"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-effects"
       ]
     },
     {
@@ -21008,7 +20897,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-traversal",
@@ -21019,6 +20908,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-evaluation-minus-order"
       ]
     },
     {
@@ -21031,7 +20925,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-traversal",
@@ -21042,6 +20936,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-strictness-minus-laziness"
       ]
     },
     {
@@ -21054,7 +20953,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-traversal",
@@ -21065,6 +20964,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-allocation-minus-representation"
       ]
     },
     {
@@ -21077,7 +20981,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-callback-effects",
@@ -21087,6 +20991,11 @@
             "DECIDED rule 2"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-reduce-minus-kv-effects"
       ]
     },
     {
@@ -21339,7 +21248,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -21351,6 +21260,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rem-evaluation-minus-order"
       ]
     },
     {
@@ -21363,7 +21275,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -21375,6 +21287,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rem-strictness-minus-laziness"
       ]
     },
     {
@@ -21387,7 +21302,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -21399,6 +21314,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rem-allocation-minus-representation"
       ]
     },
     {
@@ -21411,7 +21329,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -21423,6 +21341,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rem-effects"
       ]
     },
     {
@@ -21435,7 +21356,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -21447,6 +21368,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rem-identity-minus-equality"
       ]
     },
     {
@@ -21459,7 +21383,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "number-checked-arithmetic",
@@ -21471,6 +21395,9 @@
             "Contract closure"
           ]
         }
+      ],
+      "caseIds": [
+        "div-rem-failure-minus-behavior"
       ]
     },
     {
@@ -22563,7 +22490,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-traversal",
@@ -22574,6 +22501,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-seq-evaluation-minus-order"
       ]
     },
     {
@@ -22586,7 +22518,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-traversal",
@@ -22597,6 +22529,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-seq-strictness-minus-laziness"
       ]
     },
     {
@@ -22609,7 +22546,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-traversal",
@@ -22620,6 +22557,11 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-seq-allocation-minus-representation"
       ]
     },
     {
@@ -22884,7 +22826,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -22895,6 +22837,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-set-strictness-minus-laziness"
       ]
     },
     {
@@ -22919,7 +22864,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "equality-collection-admission",
@@ -22929,6 +22874,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-set-failure-minus-behavior"
       ]
     },
     {
@@ -23157,7 +23105,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "explicit-nondeterminism",
@@ -23168,6 +23116,9 @@
             "DECIDED rule 3"
           ]
         }
+      ],
+      "caseIds": [
+        "div-shuffle-effects"
       ]
     },
     {
@@ -23564,7 +23515,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-stable-sort",
@@ -23574,6 +23525,11 @@
             "DECIDED rules 4-5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-sort-effects"
       ]
     },
     {
@@ -23598,7 +23554,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-stable-sort",
@@ -23608,6 +23564,11 @@
             "DECIDED rules 4-5"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-collection-ordering-core",
+        "hl-collection-ordering-hosted-js",
+        "div-sort-failure-minus-behavior"
       ]
     },
     {
@@ -24496,7 +24457,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "symbol-constructor",
@@ -24507,6 +24468,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-symbol-evaluation-minus-order"
       ]
     },
     {
@@ -24519,7 +24483,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "symbol-constructor",
@@ -24530,6 +24494,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-symbol-strictness-minus-laziness"
       ]
     },
     {
@@ -24571,7 +24538,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "symbol-constructor",
@@ -24582,6 +24549,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-symbol-effects"
       ]
     },
     {
@@ -26956,7 +26926,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -26967,6 +26937,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-vector-evaluation-minus-order"
       ]
     },
     {
@@ -26979,7 +26952,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -26990,6 +26963,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-vector-strictness-minus-laziness"
       ]
     },
     {
@@ -27002,7 +26978,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "collection-constructors",
@@ -27013,6 +26989,9 @@
             "DECIDED rule 5"
           ]
         }
+      ],
+      "caseIds": [
+        "div-vector-allocation-minus-representation"
       ]
     },
     {
@@ -27133,7 +27112,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -27143,6 +27122,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-when-evaluation-minus-order"
       ]
     },
     {
@@ -27155,7 +27140,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -27165,6 +27150,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-when-strictness-minus-laziness"
       ]
     },
     {
@@ -27177,7 +27168,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -27187,6 +27178,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-when-allocation-minus-representation"
       ]
     },
     {
@@ -27199,7 +27193,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -27209,6 +27203,12 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "hl-truthiness-core",
+        "hl-truthiness-hosted-clj",
+        "hl-truthiness-hosted-js",
+        "div-when-effects"
       ]
     },
     {
@@ -27221,7 +27221,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -27231,6 +27231,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-when-identity-minus-equality"
       ]
     },
     {
@@ -27243,7 +27246,7 @@
         "Hosted JavaScript",
         "Hosted Nix"
       ],
-      "bucket": "DECIDED-NOT-ENUMERATED",
+      "bucket": "DECIDED-AND-ENUMERATED",
       "governingRules": [
         {
           "mappingId": "truthiness-forms",
@@ -27253,6 +27256,9 @@
             "DECIDED rules 1-4"
           ]
         }
+      ],
+      "caseIds": [
+        "div-when-failure-minus-behavior"
       ]
     },
     {

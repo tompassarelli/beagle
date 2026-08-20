@@ -51,7 +51,7 @@
   (string-append
    "#lang beagle/clj\n\n"
    "(ns parity.consumer)\n"
-   "(require parity.provider)\n\n"
+   "(require [parity.provider])\n\n"
    "(defn consume [(x Int)] Int (parity.provider/mid x))\n"))
 
 (define renamed-provider-source

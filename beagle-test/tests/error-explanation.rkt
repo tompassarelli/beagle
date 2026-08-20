@@ -24,7 +24,7 @@
   '(arity type-mismatch return-type def-type let-binding exhaustive-match
     scalar-predicate scalar-predicate-declaration type-bound target-form sql-group-by sql-table
     sql-column sql-type nixos-unknown-option nixos-type-mismatch
-    template-splice macro-expansion-type-error unresolved-alias unresolved-call
+    macro-expansion-type-error unresolved-alias unresolved-call
     unspecified-semantics
     native-abi))
 
@@ -61,7 +61,7 @@
 ;; example actually PARSES as current beagle surface. (This is what would
 ;; have caught the E007 `:where [...]` defect that the regex missed.) The
 ;; target-agnostic codes E001-E008 are clj-parseable; E009-E018 are
-;; target-specific (js/sql/nix/js-quote) and excluded here. Examples carry
+;; target-specific (JavaScript/SQL/Nix) and excluded here. Examples carry
 ;; deliberate TYPE errors, which are NOT parse errors, so parse must succeed.
 (define (parses-clean? src)
   (define tmp (make-temporary-file "expl-example-~a.bclj"))

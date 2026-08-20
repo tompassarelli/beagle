@@ -125,11 +125,11 @@
 
 (test-case "defmacro: my-let unquotes a bracketed binding"
   ;; (defmacro my-let [bindings body] `(let ,bindings ,body))
-  ;; (my-let [a 1] a) → (let [a 1] a)
+  ;; (my-let [a Any 1] a) → (let [a Any 1] a)
   (define p (parse-prog
              `(defmacro my-let ,(br 'bindings 'body)
                 (quasiquote (let (unquote bindings) (unquote body))))
-             `(def y (my-let ,(br 'a 1) a))))
+             `(def y (my-let ,(br 'a 'Any 1) a))))
   (define f (car (program-forms p)))
   (check-true (def-form? f))
   (define value (def-form-value f))
@@ -184,7 +184,7 @@
   (define qualified
     (qualify-imported-macro-template
      (list 'quasiquote
-           (list 'let (br 'x 'x)
+           (list 'let (br 'x 'Any 'x)
                  (list 'helper 'x)))
      '()
      (hasheq 'x #t 'helper #t)
@@ -192,7 +192,7 @@
   (check-equal?
    qualified
    (list 'quasiquote
-         (list 'let (br 'x 'provider/x)
+         (list 'let (br 'x 'Any 'provider/x)
                (list 'provider/helper 'x)))))
 
 (test-case "imported macro qualification resolves structural type slots at definition site"
@@ -200,7 +200,7 @@
     (qualify-imported-macro-template
      (list 'quasiquote
            (list 'fn
-                 (br (list 'x 'Box))
+                 (br 'x 'Box)
                  (list 'Result 'Box)
                  'x))
      '()
@@ -210,7 +210,7 @@
    qualified
    (list 'quasiquote
          (list 'fn
-               (br (list 'x 'provider/Box))
+               (br 'x 'provider/Box)
                (list 'provider/Result 'provider/Box)
                'x))))
 
@@ -218,7 +218,7 @@
   (define reg (make-macro-registry))
   (define declaration-name-body
     `(map
-      (fn ,(br 'field) Any
+      (fn ,(br 'field 'Any) Any
         (if (list? field)
             (if (= (count field) 2)
                 (syntax-name field)
@@ -254,7 +254,7 @@
     (string-append
      "(defmacro field-names [fields]\n"
      "  (map-indexed\n"
-     "   (fn [i field] Any\n"
+     "   (fn [i Int field Any] Any\n"
      "     (if (list? field)\n"
      "         (syntax-name field)\n"
      "         (syntax-error-at fields i\n"
@@ -284,7 +284,7 @@
     (string-append
      "(defmacro field-names [fields]\n"
      "  (map-indexed\n"
-     "   (fn [i field] Any\n"
+     "   (fn [i Int field Any] Any\n"
      "     (if (list? field)\n"
      "         (if (= (count field) 2)\n"
      "             (syntax-name field)\n"
@@ -307,7 +307,7 @@
                         "(id String valid-id? extra)")
           (check-equal? (hash-ref details 'error-line) 14)
           (check-equal? (hash-ref details 'error-col) 14)
-          (check-equal? (hash-ref details 'error-pos) 443)
+          (check-equal? (hash-ref details 'error-pos) 451)
           (check-equal? (hash-ref details 'error-span) 27))])
     (parse-source-text source)
     (fail "wrong-arity source-local macro declaration unexpectedly parsed")))
@@ -503,8 +503,8 @@
         (list
          '(define-target js)
          (list 'ns 'test-consumer (list ':require require-spec))
-         (list 'defrecord 'Box (br (list 'value 'Int)))
-         (list 'defn 'normalize (br (list 'value 'Int)) 'Int 'value)
+         (list 'defrecord 'Box (br 'value 'Int))
+         (list 'defn 'normalize (br 'value 'Int) 'Int 'value)
          invocation))
    #:source-path "test-consumer.bjs"
    #:module-resolver

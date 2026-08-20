@@ -1,0 +1,33 @@
+#lang beagle/js
+(ns fixtures.js-protocol-dispatch)
+
+(defprotocol Renderable
+  (render [self Any] String))
+
+(defprotocol Scalable
+  (scale [self Any factor Int] Int))
+
+(defrecord Label [(text String)])
+(defrecord Counter [(value Int)])
+
+(extend-type Label
+  Renderable
+  (render [self Label] String (label-text self)))
+
+(extend-type Counter
+  Renderable
+  (render [self Counter] String (str (counter-value self))))
+
+(extend-type Counter
+  Scalable
+  (scale [self Counter factor Int] Int
+    (* (counter-value self) factor)))
+
+(defn render-label [] String
+  (render (->Label "typed")))
+
+(defn render-counter [] String
+  (render (->Counter 7)))
+
+(defn scale-counter [] Int
+  (scale (->Counter 7) 6))

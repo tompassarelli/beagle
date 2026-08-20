@@ -102,8 +102,8 @@
     (capture-js-constraint-error
      (string-append
       "(declare-extern fetch-flag (Fn [Int] (Promise Bool)))\n"
-      "(defn async-leaf [(value Int)] Bool\n"
-      "  (js/await (fetch-flag value)))\n"
+      "(defn ^:async async-leaf [(value Int)] (Promise Bool)\n"
+      "  (await (fetch-flag value)))\n"
       "(defn middle [(value Int)] Bool (async-leaf value))\n"
       "(defn constrained [(value Int middle)] Int value)\n")))
   (when (beagle-diagnostic? error)
@@ -111,15 +111,18 @@
 
 (test-case "a higher-order call cannot launder an async predicate value"
   (define error
-    (capture-js-constraint-error
-     (string-append
-      "(declare-extern fetch-flag (Fn [Int] (Promise Bool)))\n"
-      "(declare-extern pass (Fn [(Fn [Int] Bool)] (Fn [Int] Bool)))\n"
-      "(defn async-leaf [(value Int)] Bool\n"
-      "  (js/await (fetch-flag value)))\n"
-      "(defn constrained [(value Int (pass async-leaf))] Int value)\n")))
+    (with-handlers ([exn:fail? values])
+      (check-js-source
+       (string-append
+        "(declare-extern fetch-flag (Fn [Int] (Promise Bool)))\n"
+        "(declare-extern pass (Fn [(Fn [Int] Bool)] (Fn [Int] Bool)))\n"
+        "(defn ^:async async-leaf [(value Int)] (Promise Bool)\n"
+        "  (await (fetch-flag value)))\n"
+        "(defn constrained [(value Int (pass async-leaf))] Int value)\n"))
+      #f))
+  (check-pred beagle-diagnostic? error)
   (when (beagle-diagnostic? error)
-    (check-regexp-match #rx"not proven synchronous" (exn-message error))))
+    (check-eq? (beagle-diagnostic-kind error) 'type-mismatch)))
 
 (test-case "a call-produced predicate fails closed without return-effect metadata"
   (define error

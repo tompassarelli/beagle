@@ -102,9 +102,9 @@
    "(def ^:private z 1)"
    ;; JS selector tokens remain byte-exact through the shared reader; target
    ;; ownership is decided later by the parser/checker.
-   "(js/get object .field)"
-   "(js/call object .ready?)"
-   "(js/set! object .dash-name value)"
+   "(.field object)"
+   "(.ready? object)"
+   "(set! (.-dash-name object) value)"
    ;; regex + raw string
    "#\"a.*b\""
    "#r#\"raw \\ \" string\"#"

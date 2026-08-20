@@ -107,7 +107,7 @@
      (compile '(defn accept [(value Int positive?)] Int value)))))
 
 (test-case "let emits with brackets"
-  (define out (compile '(def y (let [x 1 y 2] (+ x y)))))
+  (define out (compile `(def y (let ,(br 'x 'Int 1 'y 'Int 2) (+ x y)))))
   (check-true (matches? #rx"\\(let \\[" out)))
 
 (test-case "if with and without else"
@@ -202,7 +202,7 @@
     (compile-rooted-require
      'beagle.example.helpers
      "beagle/example/helpers.bclj"
-     '(require beagle.example.helpers :as h)))
+     (list 'require (br 'beagle.example.helpers ':as 'h))))
   (check-true (matches? #rx":require" out))
   (check-true (matches? #rx"\\[beagle\\.example\\.helpers :as h\\]" out)))
 
@@ -211,18 +211,18 @@
     (compile-rooted-require
      'beagle.helpers
      "beagle/helpers.bclj"
-     '(require beagle.helpers)))
+     (list 'require (br 'beagle.helpers))))
   (check-true (matches? #rx"\\[beagle\\.helpers :as helpers\\]" out)))
 
 (test-case "clojure namespace require emits in ns :require"
-  (define out (compile '(require clojure.string :as str)
+  (define out (compile `(require ,(br 'clojure.string ':as 'str))
                        '(def x (str/upper-case "hi"))))
   (check-true (matches? #rx"\\[clojure\\.string :as str\\]" out))
   (check-true (matches? #rx"str/upper-case" out)))
 
 (test-case "multiple clojure requires emit correctly"
-  (define out (compile '(require clojure.string :as str)
-                       '(require clojure.set :as cset)
+  (define out (compile `(require ,(br 'clojure.string ':as 'str))
+                       `(require ,(br 'clojure.set ':as 'cset))
                        '(def x 1)))
   (check-true (matches? #rx"\\[clojure\\.string :as str\\]" out))
   (check-true (matches? #rx"\\[clojure\\.set :as cset\\]" out)))
@@ -238,7 +238,7 @@
   (check-false (matches? #rx"re-pattern" out)))
 
 (test-case "regex in function call emits correctly"
-  (define out (compile '(require clojure.string :as str)
+  (define out (compile `(require ,(br 'clojure.string ':as 'str))
                        '(def x (str/split "a b" (#%regex "\\s+")))))
   (check-true (matches? #rx"str/split" out))
   (check-true (matches? #rx"#\"\\\\s\\+\"" out)))
@@ -267,7 +267,7 @@
 
 (test-case "loop/recur emits"
   (define out (compile
-               '(def x (loop [acc 0 n 10]
+               `(def x (loop ,(br 'acc 'Int 0 'n 'Int 10)
                   (if (= n 0) acc (recur (+ acc n) (- n 1)))))))
   (check-true (matches? #rx"\\(loop \\[acc 0" out))
   (check-true (matches? #rx"\\(recur \\(\\+ acc n\\)" out)))
@@ -295,9 +295,9 @@
                `(defmacro with-temp ,(br 'val 'body)
                   ,(list 'quasiquote
                          (list 'let
-                               (br 'x (list 'unquote 'val))
+                               (br 'x 'Int (list 'unquote 'val))
                                (list 'unquote 'body))))
-               '(def y (let [x 42] (with-temp 1 x)))))
+               `(def y (let ,(br 'x 'Int 42) (with-temp 1 x)))))
   (check-true (matches? #rx"\\(let \\[x 42\\]" out))
   (check-false (matches? #rx"\\(let \\[x 1\\]" out)))
 
@@ -373,7 +373,7 @@
   (check-true (matches? #rx"\\[java\\.util ArrayList\\]" out)))
 
 (test-case "import with require emits both"
-  (define out (compile '(require clojure.string :as str)
+  (define out (compile `(require ,(br 'clojure.string ':as 'str))
                        '(import java.io.File)
                        '(def x 1)))
   (check-true (matches? #rx":require" out))
@@ -384,13 +384,16 @@
 ;; --- try/catch/finally -------------------------------------------------------
 
 (test-case "try/catch emits as Clojure try/catch"
-  (define out (compile '(def x (try (/ 1 0) (catch (e Exception) (str e))))))
+  (define out (compile '(def x (try (/ 1 0) (catch Exception e (str e))))))
   (check-true (matches? #rx"\\(try" out))
   (check-true (matches? #rx"\\(catch Exception e" out))
   (check-true (matches? #rx"\\(str e\\)" out)))
 
 (test-case "try/catch/finally emits all parts"
-  (define out (compile '(def x (try (risky) (catch (e Exception) "err") (finally (cleanup))))))
+  (define out
+    (compile
+     '(def x
+        (try (risky) (catch Exception e "err") (finally (cleanup))))))
   (check-true (matches? #rx"\\(try" out))
   (check-true (matches? #rx"\\(catch Exception e" out))
   (check-true (matches? #rx"\\(finally" out))
@@ -398,8 +401,8 @@
 
 (test-case "try with multiple catches emits both"
   (define out (compile '(def x (try (risky)
-    (catch (e ArithmeticException) "math")
-    (catch (e Exception) "other")))))
+    (catch ArithmeticException e "math")
+    (catch Exception e "other")))))
   (check-true (matches? #rx"ArithmeticException" out))
   (check-true (matches? #rx"Exception e" out)))
 
@@ -684,7 +687,7 @@
   (check-true (matches? #rx"\\^\\{:stretch 1\\}" out))
   (check-true (matches? #rx"\\^\\{:stretch 2\\}" out)))
 
-;; when-let / if-let removed — interim (let [x v] (if x …)) pattern emits
+;; when-let / if-let removed — interim (let [x Any v] (if x …)) pattern emits
 ;; standard let + if Clojure forms (already covered by let/if emit tests).
 
 (test-case "with-open emits"
@@ -927,7 +930,7 @@
 ;; --- ns emits combined :require + :import correctly ------------------------
 
 (test-case "ns with both :require and :import emits both clauses"
-  (define out (compile '(require clojure.string :as str)
+  (define out (compile `(require ,(br 'clojure.string ':as 'str))
                        '(import java.io.File)
                        '(def x 1)))
   (check-true (matches? #rx":require" out))

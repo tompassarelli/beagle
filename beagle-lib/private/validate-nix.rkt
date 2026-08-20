@@ -579,21 +579,6 @@
       [(jst-in? e)
        (walk (jst-in-receiver e) scope)
        (walk (jst-in-key e) scope)]
-      [(jst-class? e)
-       (when (jst-class-extends e) (walk (jst-class-extends e) scope))
-       (for ([method (in-list (jst-class-methods e))])
-         (walk-param-constraints
-          (jst-method-params method) (jst-method-rest-param method) scope)
-         (define method-scope
-           (scope-merge
-            (scope-merge
-             scope
-             (params-scope (jst-method-params method)
-                           (jst-method-rest-param method)))
-            (hash "this" #t)))
-         (for-each
-          (lambda (body-expr) (walk body-expr method-scope))
-          (jst-method-body method)))]
       [else (void)]))
 
   (define empty-scope (make-immutable-hash))

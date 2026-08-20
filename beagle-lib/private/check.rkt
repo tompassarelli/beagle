@@ -278,12 +278,8 @@
 
 (define TARGET-ONLY-FORMS
   (hash
-   js-quote-form?           'js
    await-form?              'js
-   jst-return?              'js
-   jst-class?               'js
-   jst-method?              'js
-   jst-dot?                 'js
+   async-callable?          'js
    jst-selector?            'js
    jst-get?                 'js
    jst-call?                'js
@@ -291,11 +287,7 @@
    jst-new?                 'js
    jst-delete?              'js
    jst-in?                  'js
-   jst-spread?              'js
    jst-typeof?              'js
-   jst-template?            'js
-   jst-binary?              'js
-   jst-unary?               'js
    jst-export?              'js
    nix-inherit?             'nix
    nix-inherit-from?        'nix
@@ -317,24 +309,16 @@
 ;; Map predicate → display name for error messages.
 (define TARGET-FORM-NAMES
   (hash
-   js-quote-form?           "js/quote"
-   await-form?              "js/await"
-   jst-return?              "js/return"
-   jst-class?               "js/class"
-   jst-method?              "js/method"
-   jst-dot?                 "js/."
+   await-form?              "await"
+   async-callable?          "^:async"
    jst-selector?            "JavaScript member selector"
-   jst-get?                 "js/get"
-   jst-call?                "js/call"
-   jst-set?                 "js/set!"
-   jst-new?                 "js/new"
+   jst-get?                 "property access"
+   jst-call?                "member call"
+   jst-set?                 "property assignment"
+   jst-new?                 "new"
    jst-delete?              "js/delete!"
    jst-in?                  "js/in?"
-   jst-spread?              "js/spread"
    jst-typeof?              "js/typeof"
-   jst-template?            "js/template"
-   jst-binary?              "js/binary"
-   jst-unary?               "js/unary"
    jst-export?              "js/export"
    nix-inherit?             "inherit"
    nix-inherit-from?        "inherit-from"
@@ -523,7 +507,6 @@
     [(target-form)        "E009"]
     [(nixos-unknown-option) "E014"]
     [(nixos-type-mismatch)  "E015"]
-    [(template-splice)     "E016"]
     [(macro-expansion-type-error) "E017"]
     [(unresolved-alias)    "E018"]
     [(purity-leak)         "E019"]
@@ -1168,6 +1151,7 @@
                (parameterize ([current-macro-expansion-ctx
                                (if (eq? macro-ctx #f) #f macro-ctx)]
                               [current-unstable-bindings (collect-set!-targets form)])
+                 (check-authored-await-ownership! form)
                  (check-target-form form)
                  (check-form form env)))
              (check-qualified-resolution! prog env)
@@ -2683,7 +2667,7 @@
     (unless sync-proof
       (raise-binding-constraint
        target declared predicate resolved context
-       "the predicate is not proven synchronous; js/await, async call chains, and callables without interface synchronization metadata are not allowed"
+       "the predicate is not proven synchronous; await, async call chains, and callables without interface synchronization metadata are not allowed"
        owner))
     (define proof
       (binding-constraint-contract #t sync-proof))
@@ -2875,11 +2859,7 @@
         [else #t])))
   (define (walk value)
     (cond
-      [(or (await-form? value)
-           (js-ast-await? value)
-           (and (js-ast-function? value) (js-ast-function-async? value))
-           (and (js-ast-method? value) (js-ast-method-async? value))
-           (and (jst-method? value) (jst-method-async? value)))
+      [(await-form? value)
        #f]
       [(call-form? value)
        (define callee (call-form-fn value))
@@ -2948,13 +2928,6 @@
       [(doseq-form? value)
        (and (clauses-sync? (doseq-form-clauses value))
             (all-sync? (doseq-form-body value)))]
-      [(jst-class? value)
-       (and
-        (or (not (jst-class-extends value))
-            (walk (jst-class-extends value)))
-        (for/and ([method (in-list (jst-class-methods value))])
-          (walk method)))]
-      [(js-quote-form? value) (walk (js-quote-form-body value))]
       [(pair? value) (and (walk (car value)) (walk (cdr value)))]
       [(vector? value)
        (for/and ([item (in-vector value)]) (walk item))]
@@ -2993,7 +2966,7 @@
       (when (and refer (memq name refer))
         (hash-set! proofs name provider))))
   ;; Typed externs and platform/builtin callables have no Beagle body capable
-  ;; of hiding js/await. Their type declarations are the host boundary proof.
+  ;; of hiding await. Their type declarations are the host boundary proof.
   ;; Imported interface bindings are also projected into PROGRAM-EXTERNS for
   ;; type lookup; never let that semantic projection overwrite the
   ;; provider's authoritative positive/negative synchronization fact above.
@@ -3449,15 +3422,6 @@
       [(nix-derivation? value) (walk (nix-derivation-attrs value) scope)]
       [(nix-flake? value) (walk (nix-flake-attrs value) scope)]
       [(nix-with-cfg? value) (walk (nix-with-cfg-body value) scope)]
-      [(js-quote-form? value) (walk (js-quote-form-body value) scope)]
-      [(js-ast-splice-expr? value)
-       (walk (js-ast-splice-expr-beagle-expr value) scope)]
-      [(js-ast-splice-stmts? value)
-       (walk (js-ast-splice-stmts-beagle-expr value) scope)]
-      [(js-ast-splice-json? value)
-       (walk (js-ast-splice-json-beagle-expr value) scope)]
-      [(jst-return? value) (walk (jst-return-expr value) scope)]
-      [(jst-dot? value) (walk (jst-dot-object value) scope)]
       [(jst-get? value)
        (walk (jst-get-receiver value) scope)
        (unless (jst-selector? (jst-get-key value))
@@ -3483,13 +3447,7 @@
        (walk (jst-in-receiver value) scope)
        (unless (jst-selector? (jst-in-key value))
          (walk (jst-in-key value) scope))]
-      [(jst-spread? value) (walk (jst-spread-expr value) scope)]
       [(jst-typeof? value) (walk (jst-typeof-expr value) scope)]
-      [(jst-template? value) (walk-body (jst-template-parts value) scope)]
-      [(jst-binary? value)
-       (walk (jst-binary-left value) scope)
-       (walk (jst-binary-right value) scope)]
-      [(jst-unary? value) (walk (jst-unary-expr value) scope)]
       [(jst-export? value) (walk (jst-export-form value) scope)]
       [(jst-export-default? value)
        (walk (jst-export-default-form value) scope)]
@@ -4592,6 +4550,69 @@
      (infer-jst-new e env expected)]
     [else (infer-expr e env)]))
 
+(define (promise-payload-type type)
+  (and (type-app? type)
+       (eq? (type-app-ctor type) 'Promise)
+       (= 1 (length (type-app-args type)))
+       (car (type-app-args type))))
+
+(define (check-authored-async-return! name return-type form)
+  (unless (promise-payload-type return-type)
+    (raise-diag
+     'return-type
+     (format "defn ~a marked ^:async must declare (Promise T), got ~a"
+             name (type->string return-type))
+     (hasheq 'name (symbol->string name)
+             'required-return "(Promise T)"
+             'actual-return (type->string return-type))
+     #:src (src-for form))))
+
+(define (check-authored-async-contract! form)
+  (define callable (async-callable-form form))
+  (cond
+    [(defn-form? callable)
+     (check-authored-async-return!
+      (defn-form-name callable) (defn-form-return-type callable) callable)]
+    [(defn-multi? callable)
+     (for ([arity (in-list (defn-multi-arities callable))])
+       (check-authored-async-return!
+        (defn-multi-name callable) (arity-clause-return-type arity) callable))]
+    [else
+     (raise-diag
+      'bad-form
+      "^:async may annotate only a defn or multi-arity defn"
+      (hasheq 'metadata ":async")
+      #:src (src-for form))]))
+
+(define (check-authored-await-ownership! form)
+  (define (walk value owned?)
+    (cond
+      [(await-form? value)
+       (unless owned?
+         (raise-diag
+          'target-form
+          "bare await is only valid inside a ^:async defn"
+          (hasheq 'form "await" 'required-owner "^:async")
+          #:src (src-for value)))
+       (walk (await-form-expr value) owned?)]
+      [(async-callable? value)
+       (walk (async-callable-form value) #t)]
+      [(pair? value)
+       (walk (car value) owned?)
+       (walk (cdr value) owned?)]
+      [(vector? value)
+       (for ([item (in-vector value)]) (walk item owned?))]
+      [(hash? value)
+       (for ([(key item) (in-hash value)])
+         (walk key owned?)
+         (walk item owned?))]
+      [(struct? value)
+       (define fields (struct->vector value))
+       (for ([i (in-range 1 (vector-length fields))])
+         (walk (vector-ref fields i) owned?))]
+      [else (void)]))
+  (walk form #f))
+
 (define (check-form form env)
   (match form
     [(def-form name expected-type value _ _)
@@ -4742,6 +4763,10 @@
     [(deferror-form _ _ _) (void)]
     [(? defscalar-form? scalar)
      (check-scalar-predicate-declarations! scalar)]
+
+    [(? async-callable?)
+     (check-authored-async-contract! form)
+     (check-form (async-callable-form form) env)]
 
     [(? with-meta?) (check-form (with-meta-expr form) env)]
 
@@ -5792,6 +5817,12 @@
   (store-type! e t)
   t)
 
+(define (this-as-call? e)
+  (and (call-form? e)
+       (eq? (call-form-fn e) 'this-as)
+       (= (length (call-form-args e)) 2)
+       (symbol? (car (call-form-args e)))))
+
 (define (infer-expr* e env)
   (check-target-form e)
   (check-int-literal-range! e)
@@ -5804,6 +5835,20 @@
          (hash-ref env (canonicalize-qualified-sym e) #f)
          (schema-type-for-config-sym e)
          ANY)]
+    [(this-as-call? e)
+     (unless (eq? (current-check-target) 'js)
+       (raise-diag
+        'target-form
+        (format "this-as is only supported on the JavaScript target (current target: ~a)"
+                (current-check-target))
+        (hasheq 'form "this-as"
+                'required-target "js"
+                'current-target
+                (symbol->string (or (current-check-target) 'unknown)))
+        #:src (src-for e)))
+     (define body-env (mut-copy env))
+     (hash-set! body-env (car (call-form-args e)) ANY)
+     (infer-expr (cadr (call-form-args e)) body-env)]
     [(qualified-ref? e)
      (reference-hash-ref env e ANY)]
     [(resolved-ref? e)
@@ -6152,21 +6197,15 @@
      ANY]
     [(await-form? e)
      (define inner-type (infer-expr (await-form-expr e) env))
-     (if (and (type-app? inner-type)
-              (eq? (type-app-ctor inner-type) 'Promise)
-              (= 1 (length (type-app-args inner-type))))
-       (car (type-app-args inner-type))
-       ANY)]
-    [(js-quote-form? e)
-     ;; Type-check all beagle splice expressions inside the JS AST
-     (infer-js-ast-splices (js-quote-form-body e) env)
-     (type-prim 'JsAst)]
-
+     (define payload (promise-payload-type inner-type))
+     (unless payload
+       (raise-diag
+        'type-mismatch
+        (format "await: expected (Promise T), got ~a" (type->string inner-type))
+        (type-mismatch-details (type-app 'Promise (list ANY)) inner-type)
+        #:src (src-for e)))
+     payload]
     ;; --- Typed JS target forms (js/*) -----------------------------------------
-    [(jst-return? e)   (if (jst-return-expr e) (infer-expr (jst-return-expr e) env) (type-prim 'Nil))]
-    [(jst-class? e)    (infer-jst-class e env)]
-    [(jst-method? e)   (infer-jst-method e env)]
-    [(jst-dot? e)      (infer-jst-dot-expr e env)]
     [(jst-selector? e) ANY]
     [(jst-get? e)      (infer-jst-get e env)]
     [(jst-call? e)     (infer-jst-call e env)]
@@ -6180,27 +6219,7 @@
     [(jst-in? e)
      (traverse-jst-member (jst-in-receiver e) (jst-in-key e) '() env)
      (type-prim 'Bool)]
-    [(jst-spread? e)   (infer-expr (jst-spread-expr e) env)]
     [(jst-typeof? e)   (infer-expr (jst-typeof-expr e) env) (type-prim 'String)]
-    [(jst-template? e)
-     (for-each (lambda (p)
-                 (unless (string? p)
-                   (define t (infer-expr p env))
-                   (when (and t (type-app? t)
-                              (memq (type-app-ctor t) '(Vec Map Set List)))
-                     (raise-diag 'template-splice
-                       (format "template splice has type ~a — collections don't stringify meaningfully in JS"
-                               (type->string t))
-                       (hasheq 'actual (type->string t))))))
-               (jst-template-parts e))
-     (type-prim 'String)]
-    [(jst-binary? e)   (jst-infer-binary-type e env)]
-    [(jst-unary? e)    (infer-expr (jst-unary-expr e) env)
-                       (case (jst-unary-op e)
-                         [(!) (type-prim 'Bool)]
-                         [(typeof) (type-prim 'String)]
-                         [(void) (type-prim 'Nil)]
-                         [else ANY])]
     [(jst-export? e)   (infer-expr (jst-export-form e) env)]
     ;; --- end Typed JS target forms --------------------------------------------
 
@@ -6807,131 +6826,6 @@
        (<= (car best) (max 2 (quotient (string-length authored-str) 4)))
        (cdr best)))
 
-;; Traverse a JS AST node and type-check all beagle splice expressions.
-(define (infer-js-ast-splices node env)
-  (cond
-    ;; Splice nodes — these contain beagle expressions to type-check
-    [(js-ast-splice-expr? node)
-     (infer-expr (js-ast-splice-expr-beagle-expr node) env)]
-    [(js-ast-splice-stmts? node)
-     (infer-expr (js-ast-splice-stmts-beagle-expr node) env)]
-    [(js-ast-splice-json? node)
-     (infer-expr (js-ast-splice-json-beagle-expr node) env)]
-
-    ;; Statement nodes
-    [(js-ast-block? node)
-     (for ([s (in-list (js-ast-block-stmts node))])
-       (infer-js-ast-splices s env))]
-    [(js-ast-const? node)
-     (infer-js-ast-splices (js-ast-const-value node) env)]
-    [(js-ast-let? node)
-     (infer-js-ast-splices (js-ast-let-value node) env)]
-    [(js-ast-assign? node)
-     (infer-js-ast-splices (js-ast-assign-target node) env)
-     (infer-js-ast-splices (js-ast-assign-value node) env)]
-    [(js-ast-return? node)
-     (when (js-ast-return-expr node)
-       (infer-js-ast-splices (js-ast-return-expr node) env))]
-    [(js-ast-if? node)
-     (infer-js-ast-splices (js-ast-if-test node) env)
-     (infer-js-ast-splices (js-ast-if-then node) env)
-     (when (js-ast-if-else-branch node)
-       (infer-js-ast-splices (js-ast-if-else-branch node) env))]
-    [(js-ast-for-of? node)
-     (infer-js-ast-splices (js-ast-for-of-iterable node) env)
-     (infer-js-ast-splices (js-ast-for-of-body node) env)]
-    [(js-ast-while? node)
-     (infer-js-ast-splices (js-ast-while-test node) env)
-     (infer-js-ast-splices (js-ast-while-body node) env)]
-    [(js-ast-throw? node)
-     (infer-js-ast-splices (js-ast-throw-expr node) env)]
-    [(js-ast-try? node)
-     (infer-js-ast-splices (js-ast-try-body node) env)
-     (when (js-ast-try-catch-body node)
-       (infer-js-ast-splices (js-ast-try-catch-body node) env))
-     (when (js-ast-try-finally-body node)
-       (infer-js-ast-splices (js-ast-try-finally-body node) env))]
-    [(js-ast-expr-stmt? node)
-     (infer-js-ast-splices (js-ast-expr-stmt-expr node) env)]
-
-    ;; Declarations
-    [(js-ast-function? node)
-     (infer-js-ast-splices (js-ast-function-body node) env)]
-    [(js-ast-class? node)
-     (when (js-ast-class-extends-expr node)
-       (infer-js-ast-splices (js-ast-class-extends-expr node) env))
-     (for ([m (in-list (js-ast-class-methods node))])
-       (infer-js-ast-splices m env))]
-    [(js-ast-method? node)
-     (infer-js-ast-splices (js-ast-method-body node) env)]
-
-    ;; Expressions
-    [(js-ast-call? node)
-     (infer-js-ast-splices (js-ast-call-callee node) env)
-     (for ([a (in-list (js-ast-call-args node))])
-       (infer-js-ast-splices a env))]
-    [(js-ast-member? node)
-     (infer-js-ast-splices (js-ast-member-object node) env)]
-    [(js-ast-index? node)
-     (infer-js-ast-splices (js-ast-index-object node) env)
-     (infer-js-ast-splices (js-ast-index-index-expr node) env)]
-    [(js-ast-arrow? node)
-     (infer-js-ast-splices (js-ast-arrow-body node) env)]
-    [(js-ast-ternary? node)
-     (infer-js-ast-splices (js-ast-ternary-test node) env)
-     (infer-js-ast-splices (js-ast-ternary-then node) env)
-     (infer-js-ast-splices (js-ast-ternary-else-expr node) env)]
-    [(js-ast-binary? node)
-     (infer-js-ast-splices (js-ast-binary-left node) env)
-     (infer-js-ast-splices (js-ast-binary-right node) env)]
-    [(js-ast-unary? node)
-     (infer-js-ast-splices (js-ast-unary-expr node) env)]
-    [(js-ast-template? node)
-     (for ([p (in-list (js-ast-template-parts node))])
-       (unless (string? p) (infer-js-ast-splices p env)))]
-    [(js-ast-array? node)
-     (for ([i (in-list (js-ast-array-items node))])
-       (infer-js-ast-splices i env))]
-    [(js-ast-object? node)
-     (for ([pair (in-list (js-ast-object-pairs node))])
-       (infer-js-ast-splices (car pair) env)
-       (infer-js-ast-splices (cdr pair) env))]
-    [(js-ast-spread? node)
-     (infer-js-ast-splices (js-ast-spread-expr node) env)]
-    [(js-ast-await? node)
-     (infer-js-ast-splices (js-ast-await-expr node) env)]
-    [(js-ast-new? node)
-     (infer-js-ast-splices (js-ast-new-callee node) env)
-     (for ([a (in-list (js-ast-new-args node))])
-       (infer-js-ast-splices a env))]
-    [(js-ast-typeof? node)
-     (infer-js-ast-splices (js-ast-typeof-expr node) env)]
-
-    ;; Leaf nodes — nothing to traverse
-    [(js-ast-ident? node) (void)]
-    [(js-ast-literal? node) (void)]
-
-    [else (void)]))
-
-;; --- Typed JS target (jst-*) inference helpers -----------------------------
-
-(define (jst-infer-body body env)
-  (if (null? body)
-      ANY
-      (begin
-        (for ([f (in-list (drop-right body 1))])
-          (infer-expr f env))
-        (infer-expr (last body) env))))
-
-(define (jst-infer-binary-type e env)
-  (define lt (infer-expr (jst-binary-left e) env))
-  (define rt (infer-expr (jst-binary-right e) env))
-  (case (jst-binary-op e)
-    [(=== !== == != < > <= >= in instanceof) (type-prim 'Bool)]
-    [(and or nullish) (merge-types lt rt)]
-    [(+ - * / % **) (merge-types lt rt)]
-    [else ANY]))
-
 (define (traverse-jst-member receiver key trailing env)
   (infer-expr receiver env)
   (unless (jst-selector? key)
@@ -7007,7 +6901,7 @@
        [(jst-static-member-contract receiver-type selector) => values]
        [(jst-closed-record-receiver? receiver-type)
         (raise-unknown-jst-record-member
-         "js/get" receiver-type selector e)]
+         "property access" receiver-type selector e)]
        [else ANY])]))
 
 (define (infer-jst-call e env)
@@ -7037,18 +6931,18 @@
           [else
            (raise-diag
             'type-mismatch
-            (format "js/call: .~a on ~a has non-callable type ~a"
+            (format "member call: .~a on ~a has non-callable type ~a"
                     selector
                     (type->string receiver-type)
                     (type->string contract))
-            (hasheq 'form "js/call"
+            (hasheq 'form "member call"
                     'member selector
                     'receiver-type (type->string receiver-type)
                     'actual (type->string contract))
             #:src (src-for e))])]
        [(jst-closed-record-receiver? receiver-type)
        (raise-unknown-jst-record-member
-         "js/call" receiver-type selector e)]
+         "member call" receiver-type selector e)]
        [else
         (for-each (lambda (arg) (infer-expr arg env)) args)
         ANY])]))
@@ -7056,9 +6950,9 @@
 (define (raise-readonly-jst-member receiver-type selector node)
   (raise-diag
    'type-mismatch
-   (format "js/set!: .~a on ~a is not writable"
+   (format "property assignment: .~a on ~a is not writable"
            selector (type->string receiver-type))
-   (hasheq 'form "js/set!"
+   (hasheq 'form "property assignment"
            'member selector
            'receiver-type (type->string receiver-type))
    #:src (src-for node)))
@@ -7070,10 +6964,11 @@
               (type-compatible? actual expected))
     (raise-diag
      'type-mismatch
-     (format "js/set!: member value expected ~a, got ~a"
+     (format "property assignment: member value expected ~a, got ~a"
              (type->string expected) (type->string actual))
      (type-mismatch-details expected actual)
-     #:src (src-for node))))
+     #:src (src-for node)))
+  actual)
 
 (define (infer-jst-set e env)
   (define receiver (jst-set-receiver e))
@@ -7091,16 +6986,14 @@
        (jst-record-member-contract receiver-type selector))
      (cond
        [record-contract
-        (check-jst-member-write! record-contract value env e)
-        ANY]
+        (check-jst-member-write! record-contract value env e)]
        [(jst-static-member-contract receiver-type selector)
         (raise-readonly-jst-member receiver-type selector e)]
        [(jst-closed-record-receiver? receiver-type)
         (raise-unknown-jst-record-member
-         "js/set!" receiver-type selector e)]
+         "property assignment" receiver-type selector e)]
        [else
-        (infer-expr value env)
-        ANY])]))
+        (infer-expr value env)])]))
 
 (define (infer-jst-new e env [expected-result #f])
   (define args (jst-new-args e))
@@ -7111,49 +7004,11 @@
         raw-contract))
   (cond
     [(type-fn? contract)
-     (check-args 'js/new contract args env e)
+     (check-args 'new contract args env e)
      (zonk-type (type-fn-ret contract))]
     [else
      (for-each (lambda (arg) (infer-expr arg env)) args)
      ANY]))
-
-(define (infer-jst-dot-expr e env)
-  (infer-expr (jst-dot-object e) env)
-  ANY)
-
-(define (infer-jst-class e env)
-  (when (jst-class-extends e)
-    (infer-expr (jst-class-extends e) env))
-  (for ([m (in-list (jst-class-methods e))])
-    (infer-jst-method m env (and (jst-class-extends e) #t)))
-  ANY)
-
-(define (infer-jst-method e env [derived? #f])
-  (define all-params
-    (if (jst-method-rest-param e)
-        (append (jst-method-params e) (list (jst-method-rest-param e)))
-        (jst-method-params e)))
-  (define body-env (extend-with-params env all-params))
-  (hash-set! body-env 'this ANY)
-  (when derived?
-    (hash-set! body-env 'super ANY))
-  (define body (jst-method-body e))
-  (define actual-ret (jst-infer-body body body-env))
-  (define expected-ret (jst-method-return-type e))
-  (unless (declared-return-compatible? actual-ret expected-ret)
-    (raise-diag 'return-type
-                (format "js/method ~a: expected return ~a, got ~a"
-                        (jst-method-name e)
-                        (type->string expected-ret)
-                        (type->string actual-ret))
-                (hash-set* (type-mismatch-details expected-ret actual-ret)
-                           'name (symbol->string (jst-method-name e)))
-                #:src (or (and (pair? body) (src-for (last body)))
-                          (and (pair? body)
-                               (body-loc-at body (sub1 (length body)))))))
-  ANY)
-
-;; --- end Typed JS target inference helpers ---------------------------------
 
 (define (infer-cond-clauses clauses env)
   (let loop ([cls clauses] [current-env env] [acc '()])
@@ -7234,7 +7089,7 @@
                 (type-poly-vars poly-type)))
       (when (pair? missing)
         (raise-diag 'cannot-infer
-                    (format "js/new cannot infer type parameter~a ~a without an expected result type"
+                    (format "new cannot infer type parameter~a ~a without an expected result type"
                             (if (= (length missing) 1) "" "s")
                             (string-join (map symbol->string missing) ", "))
                     (hasheq 'parameters (map symbol->string missing)))))
@@ -8232,6 +8087,7 @@
        ;; symbol. Skip the undefined-function check (nothing to look
        ;; up); still walk the evaluated callee and args.
        (when (and (symbol? fn)
+                  (not (this-as-call? e))
                   (not (hash-has-key? KNOWN-FNS fn))
                   (not (set-member? (current-local-bindings) fn))
                   (not (memq fn '(recur throw)))
@@ -8483,25 +8339,6 @@
       [(jst-in? e)
        (walk (jst-in-receiver e))
        (unless (jst-selector? (jst-in-key e)) (walk (jst-in-key e)))]
-      [(jst-class? e)
-       (when (jst-class-extends e)
-         (walk (jst-class-extends e)))
-       (for ([method (in-list (jst-class-methods e))])
-         (walk-param-constraints (jst-method-params method)
-                                 (jst-method-rest-param method))
-         (define param-locals
-           (set-add
-            (add-binding-targets-to-set
-             (current-local-bindings)
-             (jst-method-params method)
-             (jst-method-rest-param method))
-            'this))
-         (define class-locals
-           (if (jst-class-extends e)
-               (set-add param-locals 'super)
-               param-locals))
-         (parameterize ([current-local-bindings class-locals])
-           (for-each walk (jst-method-body method))))]
       [(match-form? e)
        (walk (match-form-target e))
        (for ([c (in-list (match-form-clauses e))])
@@ -8644,14 +8481,6 @@
      (or (expr-involves-scalar? (jst-in-receiver e))
          (and (not (jst-selector? (jst-in-key e)))
               (expr-involves-scalar? (jst-in-key e))))]
-    [(jst-class? e)
-     (or (and (jst-class-extends e)
-              (expr-involves-scalar? (jst-class-extends e)))
-         (for/or ([method (in-list (jst-class-methods e))])
-           (or (params-involve-scalar? (jst-method-params method)
-                                       (jst-method-rest-param method))
-               (for/or ([body-expr (in-list (jst-method-body method))])
-                 (expr-involves-scalar? body-expr)))))]
     [(if-form? e)
      (or (expr-involves-scalar? (if-form-then-expr e))
          (and (if-form-else-expr e) (expr-involves-scalar? (if-form-else-expr e))))]
@@ -8757,12 +8586,6 @@
       [(jst-in? expr)
        (go (jst-in-receiver expr))
        (unless (jst-selector? (jst-in-key expr)) (go (jst-in-key expr)))]
-      [(jst-class? expr)
-       (when (jst-class-extends expr) (go (jst-class-extends expr)))
-       (for ([method (in-list (jst-class-methods expr))])
-         (go-param-constraints (jst-method-params method)
-                               (jst-method-rest-param method))
-         (for-each go (jst-method-body method)))]
       [(match-form? expr)
        (go (match-form-target expr))
        (for ([c (in-list (match-form-clauses expr))])
@@ -8903,10 +8726,6 @@
      (list (string->symbol (string-append "->" spelling))
            (string->symbol
             (string-append (string-downcase spelling) "-value")))]
-    ;; A top-level JS class is a lexical module binding. Nested classes remain
-    ;; local and are therefore not namespace-publication effects, but the
-    ;; module binding still shadows a primitive at every function body.
-    [(jst-class? form) (list (jst-class-name form))]
     [else '()]))
 
 (define (pattern-bound-names pattern)
@@ -9548,7 +9367,7 @@
          (jst-call-args value) value state)
         (seteq))]
       [(jst-set? value)
-       (note! 'js/set! value)
+       (note! 'set! value)
        (values
         (analyze-jst-member
          (jst-set-receiver value) (jst-set-key value)
@@ -9965,12 +9784,6 @@
       [(jst-in? e)
        (go (jst-in-receiver e) l)
        (unless (jst-selector? (jst-in-key e)) (go (jst-in-key e) l))]
-      [(jst-class? e)
-       (when (jst-class-extends e) (go (jst-class-extends e) l))
-       (for ([method (in-list (jst-class-methods e))])
-         (go-param-constraints (jst-method-params method) l
-                               (jst-method-rest-param method))
-         (go-body (jst-method-body method) l))]
       [(with-meta? e) (go (with-meta-expr e) l)]
       [(jst-export? e) (go (jst-export-form e) l)]
       [(jst-export-default? e) (go (jst-export-default-form e) l)]

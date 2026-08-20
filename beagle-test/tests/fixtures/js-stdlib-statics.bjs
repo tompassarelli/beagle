@@ -3,33 +3,33 @@
 (ns js-stdlib-statics)
 
 (defn parse-config [s String] Any
-  (js/call JSON .parse s))
+  (.parse JSON s))
 
 (defn to-config [obj Any] String
-  (js/call JSON .stringify obj))
+  (.stringify JSON obj))
 
 (defn floor-of [x Float] Int
-  (js/call Math .floor x))
+  (.floor Math x))
 
 (defn sqrt-of [x Float] Float
-  (js/call Math .sqrt x))
+  (.sqrt Math x))
 
 (defn pow-of
   [x Float
    y Float] Float
-  (js/call Math .pow x y))
+  (.pow Math x y))
 
 (defn random-float [] Float
-  (js/call Math .random))
+  (.random Math))
 
 (defn pi-times [n Float] Float
-  (* (js/get Math .PI) n))
+  (* (.PI Math) n))
 
 (defn integer? [x Any] Bool
-  (js/call Number .isInteger x))
+  (.isInteger Number x))
 
 (defn nan? [x Any] Bool
-  (js/call Number .isNaN x))
+  (.isNaN Number x))
 
 (defn parse-int [s String] Int
-  (js/call Number .parseInt s))
+  (.parseInt Number s))

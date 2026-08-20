@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns fixtures.i1.this-as-non-js)
+
+(defn invalid-this [] Any
+  (this-as self self))

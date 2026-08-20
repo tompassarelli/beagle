@@ -1,7 +1,75 @@
 const keywordValues = new Map();
 const listValues = new WeakSet();
 const eagerSeqValues = new WeakSet();
+const recordTypeValues = new WeakMap();
 const NOT_FOUND = Symbol("beagle/not-found");
+
+function protocolIdentity(kind, value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${kind} identity must be a non-empty string`);
+  }
+  return value;
+}
+
+export function record_value(typeValue, value) {
+  const type = protocolIdentity("record type", typeValue);
+  if (value === null || typeof value !== "object") {
+    throw new TypeError("record value must be an object");
+  }
+  recordTypeValues.set(value, type);
+  return Object.freeze(value);
+}
+
+export function record_type(value) {
+  const type = value !== null && typeof value === "object"
+    ? recordTypeValues.get(value)
+    : undefined;
+  if (type === undefined) throw new TypeError("value has no Beagle record identity");
+  return type;
+}
+
+export function protocol_registry(entries) {
+  const protocols = new Map();
+  for (const [protocolValue, typeValue, methodValues] of entries) {
+    const protocol = protocolIdentity("protocol", protocolValue);
+    const type = protocolIdentity("record type", typeValue);
+    let types = protocols.get(protocol);
+    if (types === undefined) {
+      types = new Map();
+      protocols.set(protocol, types);
+    }
+    if (types.has(type)) {
+      throw new TypeError(`duplicate protocol implementation: ${protocol} for ${type}`);
+    }
+    const methods = Object.create(null);
+    for (const [method, implementation] of Object.entries(methodValues)) {
+      if (typeof implementation !== "function") {
+        throw new TypeError(`protocol method ${method} must be a function`);
+      }
+      methods[method] = implementation;
+    }
+    types.set(type, Object.freeze(methods));
+  }
+  const lookup = (protocolValue, typeValue, method) => {
+    const protocol = protocolIdentity("protocol", protocolValue);
+    const type = protocolIdentity("record type", typeValue);
+    const implementation = protocols.get(protocol)?.get(type)?.[method];
+    if (typeof implementation !== "function") {
+      throw new TypeError(`missing protocol implementation: ${protocol}.${method} for ${type}`);
+    }
+    return implementation;
+  };
+  return Object.freeze(lookup);
+}
+
+export function protocol_dispatch(
+  registry, protocol, type, method, receiver, ...args
+) {
+  if (typeof registry !== "function") {
+    throw new TypeError("protocol registry must be callable");
+  }
+  return registry(protocol, type, method)(receiver, ...args);
+}
 
 class BeagleKeyword {
   constructor(text) {

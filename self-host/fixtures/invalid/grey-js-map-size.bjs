@@ -2,5 +2,5 @@
 (ns selfhost.fixtures.invalid.grey-js-map-size)
 
 (def invalid-map-size String
-  (let [values (js/new Map)]
-    (js/get values .size)))
+  (let [values (new Map)]
+    (.size values)))

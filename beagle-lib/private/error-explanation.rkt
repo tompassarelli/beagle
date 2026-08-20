@@ -3,7 +3,7 @@
 ;; In-compiler error-explanation registry — the single source of truth for
 ;; diagnostic explanations. Replaces the out-of-band bin/beagle-explain bash
 ;; associative-array DB, which lived outside the compiler, carried no
-;; severity/sinceVersion, was missing E016-E018, and showed the now-rejected
+;; severity/sinceVersion, was missing E017-E018, and showed the now-rejected
 ;; `:` annotation syntax in its examples.
 ;;
 ;; This is the analog of Lean's named-error -> ErrorExplanation registry
@@ -101,9 +101,9 @@
 
    (E "E009" "Target-specific form in wrong target"
       "A form that only works in one target was used in a different target file."
-      "Agents use JS-specific forms (js/await, js-quote) in .bclj files or vice versa."
-      ";; In a .bclj file:\n(js/await (fetch \"/api\"))  ;; ERROR: js/await is only supported in beagle/js"
-      ";; In a .bjs file:\n(js/await (fetch \"/api\"))"
+      "Agents use JavaScript-only await forms in .bclj files or vice versa."
+      ";; In a .bclj file:\n(await (fetch \"/api\"))  ;; ERROR: await is only supported in beagle/js"
+      ";; In a .bjs file:\n(defn ^:async fetch-text [] (Promise String) (await (fetch \"/api\")))"
       "Move this code to a file with the correct target extension.")
 
    (E "E014" "Unknown NixOS option"
@@ -121,14 +121,6 @@
       "Fix the value type to match the schema. Use: beagle-schema <path>")
 
    ;; --- added: codes the compiler stamps but the bash DB never had ---------
-   (E "E016" "Template splice shape error"
-      "A JST/JS template splice has an invalid shape."
-      "Agents build js-quote templates with a malformed splice form."
-      "(js-quote (fn-call ~@args extra))  ;; ERROR: splice must be the whole argument list"
-      "(js-quote (fn-call ~@args))"
-      "Fix the template so the splice occupies a valid position."
-      #:since "0.16")
-
    (E "E017" "Macro expansion type error"
       "A macro expanded and parsed, but its result failed type-checking."
       "The macro template produces a form whose inferred type doesn't fit the call context. Distinct from E002 so telemetry separates macro-typing bugs from author-written type errors."

@@ -219,7 +219,7 @@ JS
                    "")
                  "\n")))
 
-(test-case "js-array-methods — js/call array methods run"
+(test-case "js-array-methods — direct member calls run"
   (define-values (ok? out err)
     (emit-and-run "js-array-methods" #<<JS
 const xs = [10, 20, 30];
@@ -333,7 +333,7 @@ BJS
 (println (checked-value (->Checked 3)))
 (println total)
 (println once)
-(println (js/get Color-values .size))
+(println (.size Color-values))
 (println (->Amount 1))
 (println (amount-value 1))
 (println (scalar/amount-value (scalar/->Amount 5)))

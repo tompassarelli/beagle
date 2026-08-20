@@ -41,7 +41,7 @@
 
 ;; --- stdlib statics (Math/JSON/Number) -------------------------------------
 
-(test-case "js-stdlib-statics fixture — js/call and js/get emit dotted access"
+(test-case "js-stdlib-statics fixture — direct members emit dotted access"
   (define out (js-fixture "js-stdlib-statics.bjs"))
   (check-true (string-contains? out "JSON.parse(s)"))
   (check-true (string-contains? out "JSON.stringify(obj)"))
@@ -84,7 +84,7 @@
 
 ;; --- Array prototype methods -----------------------------------------------
 
-(test-case "js-array-methods fixture — js/call dispatch on instance"
+(test-case "js-array-methods fixture — direct dispatch on instance"
   (define out (js-fixture "js-array-methods.bjs"))
   (check-true (string-contains? out "xs.push(x)"))
   (check-true (string-contains? out "xs.pop()"))
@@ -105,12 +105,3 @@
   (check-true (string-contains? out "async function load_and_classify"))
   (check-true (string-contains? out "await fetch_product(id)"))
   (check-true (string-contains? out "function classify(p)")))
-
-;; --- existing jsquote-demo (js/quote class/async/throw) --------------------
-
-(test-case "jsquote-demo fixture — js/quote emits structural JS"
-  (define out (js-fixture "jsquote-demo.bjs"))
-  (check-true (string-contains? out "const greeting = \"Hello, World!\""))
-  (check-true (string-contains? out "function validateAge"))
-  (check-true (string-contains? out "async function fetchData"))
-  (check-true (string-contains? out "await fetch(url)")))

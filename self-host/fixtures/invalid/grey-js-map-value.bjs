@@ -2,4 +2,4 @@
 (ns selfhost.fixtures.invalid.grey-js-map-value)
 
 (defn invalid-map-value [(values (JsMap String Int))] (JsMap String Int)
-  (js/call values .set "key" "bad"))
+  (.set values "key" "bad"))

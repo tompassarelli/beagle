@@ -15,7 +15,7 @@ This file begins at v0.16.0. Prior history lives in git tags (v0.7.1 → v0.15.3
 - **A qualified call to an imported export emits a member access.** Once the importer made exported names known to the consumer, the bound-name early-out in the call path returned the raw `sim/step` spelling and emitted the syntactically invalid `sim/step(...)`. A local binding never carries a namespace prefix, so a slash-bearing name is now dotted regardless of whether the interface makes it known — in both the Racket and self-hosted emitters.
 ### Added
 
-- **`beagle ts-externs ENTRY.d.ts`** — typed beagle wrappers generated from a package's TypeScript declarations. Beagle could not read `.d.ts`, so every npm dependency was hand-declared as `Any` and unchecked; the declaration corpus that already describes those packages was unreachable. The mapping is lossy by design and degrades rather than guesses: primitives, arrays, and promises map; classes, generics, tuples, and function types become `Any`. Optional parameters become clauses of one multi-arity `defn`, TS overloads collapse into the same name, variadic signatures become a rest param forwarded with `js/spread`, and primitive-typed properties get a reader and a writer. What survives is what beagle can enforce: arity, primitive argument types, and whether the member exists at all.
+- **`beagle ts-externs ENTRY.d.ts`** — typed beagle wrappers generated from a package's TypeScript declarations. Beagle could not read `.d.ts`, so every npm dependency was hand-declared as `Any` and unchecked; the declaration corpus that already describes those packages was unreachable. The mapping is lossy by design and degrades rather than guesses: primitives, arrays, and promises map; classes, generics, tuples, and function types become `Any`. Optional parameters become clauses of one multi-arity `defn`, TS overloads collapse into the same name, variadic signatures retain their aggregate tail through `Function.apply`, and primitive-typed properties get a reader and a writer. What survives is what beagle can enforce: arity, primitive argument types, and whether the member exists at all.
 
 ## [0.22.0] — 2026-08-16
 
@@ -56,7 +56,7 @@ A patch release of JS-target hardening, driven entirely by authoring a real down
 
 ### Fixed
 
-- **Async IIFEs are awaited in value/statement position** (678bbd1): a `try`/`loop`/`doseq` containing `js/await` compiles to an async IIFE; bound in a `let` without an enclosing `js/await`, it was emitted *without* `await`, so the binding held a pending Promise that downstream code then read synchronously. `emit-js` now awaits async IIFEs in value/statement position — tail position correctly left alone, and the exact `(async () => ` prefix match never double-awaits.
+- **Async IIFEs are awaited in value/statement position** (678bbd1): a `try`/`loop`/`doseq` containing `await` compiles to an async IIFE; bound in a `let` without an enclosing `await`, it was emitted *without* `await`, so the binding held a pending Promise that downstream code then read synchronously. `emit-js` now awaits async IIFEs in value/statement position — tail position correctly left alone, and the exact `(async () => ` prefix match never double-awaits.
 - **Macro-only `:refer`s are no longer emitted as runtime imports** (69c718a): a refer that resolves to a macro is compile-time only and has no runtime export, but it was emitted in `import { … }` — silently fine when a bundler tree-shakes the dead import, a load-time "does not provide an export named X" for any *unbundled* ESM consumer. `emit-module-header` now drops macro refers and omits the import line entirely when a require's refers are all macros.
 - **The purity check now covers exported functions** (5e18635): `check-purity!` descended only into list-shaped wrapper forms, so `js/export` / `js/export-default` (which parse to *structs*) hid every exported defn — the public API — from the `!`-effect check. Now descends into `jst-export` / `jst-export-default` / `with-meta`.
 
@@ -87,7 +87,7 @@ Where 0.16 locked the surface, 0.17 turns the compiler into something its own re
 - `beagle-doctor` proves the authoring loop works, with a dynamic target inventory and a correct `raco` probe (a0e60513, 2c5a56b2).
 - Source positions carry origin/canonical with precise column propagation; macro expansions inherit the call-site source position (de155bae, 3a9af8f6).
 - Generated, example-verified capability cheatsheet that can't rot (10d50241).
-- JS emitter live again: `@x` deref sugar, `js/import-meta`, `js/export-default`, async `loop`/`recur` via `js/await`, destructuring `:or`/`:as`, kebab-case property mangling, statement-position IIFE elimination (e7823757 + series).
+- JS emitter live again: `@x` deref sugar, `js/import-meta`, `js/export-default`, async `loop`/`recur` via bare `await`, destructuring `:or`/`:as`, kebab-case property mangling, statement-position IIFE elimination (e7823757 + series).
 - `!`-purity static pass (`check-purity!`), shipped dark then enabled by default as an error (c118f21, 0130145).
 - `(:gen-class)` in `ns` for clj AOT/native entry; batch `declare-extern` — `(declare-extern [a b c] Type)` (f82e6fa, 47f093c5).
 - Multi-module type awareness for package targets; qualified-call resolution for clj/cljs with fixed sibling imports (f2b8f2f3, 8b927611).
@@ -144,7 +144,7 @@ The surface stopped accreting. v0.16 locks beagle's authoring layer to a three-s
 - Keyword access canonicalization: `(:k target)` and `(get target :k)` both lower to a single `kw-access` AST node (2eb7baa).
 - Conditional family completed: `when`, `when-not`, `if-not`, `unless`, `if-let`, `when-let`, `if-some`, `when-some`, `cond`, `condp`.
 - Stdlib sugar: `inc`, `dec`, `not=` typed in `stdlib-portable.rkt`.
-- Per-target prefixes `nix/`, `js/`, `sql/` for forms whose meaning diverges from Clojure (e.g. `nix/assert`, `nix/with-cfg`, `js/await`).
+- Per-target prefixes `nix/`, `js/`, `sql/` for forms whose meaning diverges from Clojure (e.g. `nix/assert`, `nix/with-cfg`, `js/import-meta`).
 - Structured diagnostic taxonomy: `cause-class?`, `surface-divergence`, `type-error`, `logic-error` exported from `diagnostic-kind.rkt`; consumed by `bin/beagle rejection-stats`.
 - `bin/beagle rejection-stats <dir|glob> [verify-script]` aggregates failure causes by class.
 - Schema-typed NixOS option paths: 16k options loaded into the typed environment via `nixos-schema.rkt`.

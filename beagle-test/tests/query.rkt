@@ -240,7 +240,7 @@
   (check-equal? (cadddr match) 'query.fixture)
   ;; An exported declaration reports its own line, not the `js/export`
   ;; wrapper's: the wrapper carries no declaration a reader can jump to.
-  (check-equal? (list-ref match 4) 7))
+  (check-equal? (list-ref match 4) 9))
 
 (test-case "sig: generated record accessor and constructor are queryable"
   (define accessor-out
@@ -265,7 +265,7 @@
   (check-equal? (length matches) 1)
   (define match (car matches))
   (check-equal? (hash-ref match 'namespace) 'query.fixture)
-  (check-equal? (hash-ref match 'line) 19)
+  (check-equal? (hash-ref match 'line) 21)
   (check-regexp-match
    #rx"query.fixture/player-collision-radius : \\(Fn \\[\\] Float\\)"
    (fixture-query-output

@@ -76,24 +76,25 @@
       (check-regexp-match #rx"\\(\\[\\(width Float\\)\\] Any" text)
       (check-regexp-match #rx"\\(\\[\\(width Float\\) \\(height Float\\)\\] Any" text)
       (check-false (regexp-match? #rx"make-box-2" text))
-      (check-true (string-contains? text "(js/new Box width height)"))
+      (check-true (string-contains? text "(new Box width height)"))
       ;; Own and inherited declarations keep their receiver and argument arity.
       (check-regexp-match #rx"\\(\\[\\(self Any\\) \\(factor Float\\)\\] Any" text)
       (check-regexp-match #rx"\\(\\[\\(self Any\\) \\(x Float\\) \\(y Float\\) \\(z Float\\)\\] Any" text)
       (check-regexp-match #rx"defn thing-inherited \\[\\(self Any\\) \\(level Float\\)\\] Bool" text)
-      (check-true (string-contains? text "(js/call self .scale factor)"))
-      ;; A variadic signature becomes a rest param forwarded with js/spread.
-      (check-regexp-match #rx"box-add \\[\\(self Any\\) & \\(children \\(Vec Any\\)\\)\\]" text)
-      (check-regexp-match #rx"js/spread children" text)
+      (check-true (string-contains? text "(.scale self factor)"))
+      ;; A variadic signature becomes a rest param forwarded through the
+      ;; receiver-preserving Function.apply boundary.
+      (check-regexp-match #rx"box-add \\[\\(self Any\\) & \\(children \\(List Any\\)\\)\\]" text)
+      (check-regexp-match #rx"\\.apply \\(\\.add self\\) self \\(concat \\[\\] \\(vec children\\)\\)" text)
       ;; A tuple-union rest type degrades to Any, but the rest binding remains
-      ;; the aggregate that js/spread consumes.
-      (check-regexp-match #rx"box-set \\[\\(self Any\\) & \\(args \\(Vec Any\\)\\)\\]" text)
-      (check-regexp-match #rx"js/spread args" text)
+      ;; the aggregate passed to Function.apply.
+      (check-regexp-match #rx"box-set \\[\\(self Any\\) & \\(args \\(List Any\\)\\)\\]" text)
+      (check-regexp-match #rx"\\.apply \\(\\.set self\\) self \\(concat \\[\\] \\(vec args\\)\\)" text)
       ;; A primitive property gets a reader and a writer; a non-primitive gets neither.
       (check-regexp-match #rx"defn box-width \\[\\(self Any\\)\\] Float" text)
       (check-regexp-match #rx"defn set-box-width!" text)
-      (check-true (string-contains? text "(js/get self .width)"))
-      (check-true (string-contains? text "(js/set! self .width value)"))
+      (check-true (string-contains? text ".-width self"))
+      (check-true (string-contains? text "(set! (.-width self) value)"))
       (check-false (regexp-match? #rx"defn box-nested" text))
       ;; A readonly property gets a reader only.
       (check-regexp-match #rx"defn box-is-box" text)

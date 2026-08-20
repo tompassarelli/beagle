@@ -1,6 +1,6 @@
 #lang beagle/js
 
-(require provider :as p)
+(require [provider :as p])
 
 (defn keep-local [value (Box String Int)] (Box String Int) value)
 

@@ -250,35 +250,36 @@
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int))
 
-;; -- let bindings: structural `(binding Type) VALUE` ------------------------
+;; -- let bindings: fixed-arity `binding Type VALUE` -------------------------
 
-(test-case "(let [(n Int) 42] n) — structural typed let binding"
-  (define f (car (parse-one (L 'let (br (L 'n 'Int) 42) 'n))))
+(test-case "(let [n Int 42] n) — fixed-arity typed let binding"
+  (define f (car (parse-one (L 'let (br 'n 'Int 42) 'n))))
   (check-true (let-form? f))
   (define b (car (let-form-bindings f)))
   (check-eq? (let-binding-name b) 'n)
   (check-eq? (type-prim-name (let-binding-type b)) 'Int)
   (check-equal? (let-binding-value b) 42))
 
-(test-case "typed and bare let bindings compose structurally"
+(test-case "typed let bindings compose in fixed arity"
   (define f
-    (car (parse-one (L 'let (br (L 'n 'Int) 42 'm "foo") 'n))))
+    (car (parse-one (L 'let (br 'n 'Int 42 'm 'String "foo") 'n))))
   (check-not-false (let-binding-type (car (let-form-bindings f))))
-  (check-false (let-binding-type (cadr (let-form-bindings f)))))
+  (check-eq? (type-prim-name (let-binding-type (cadr (let-form-bindings f))))
+             'String))
 
-(test-case "let binding constraint stays inside its declaration form"
+(test-case "fixed-arity let binding has no separate constraint slot"
   (define f
     (car (parse-one
-          (L 'let (br (L 'n 'Int 'positive?) 42) 'n))))
+          (L 'let (br 'n 'Int 42) 'n))))
   (define b (car (let-form-bindings f)))
   (check-eq? (let-binding-name b) 'n)
   (check-eq? (type-prim-name (let-binding-type b)) 'Int)
-  (check-equal? (let-binding-constraint b) 'positive?))
+  (check-false (let-binding-constraint b)))
 
-(test-case "(let [(n Int) 42 (m Any) \"foo\"] ...) preserves explicit Any"
+(test-case "(let [n Int 42 m Any \"foo\"] ...) preserves explicit Any"
   (define f
     (car (parse-one
-          (L 'let (br (L 'n 'Int) 42 (L 'm 'Any) "foo") 'n))))
+          (L 'let (br 'n 'Int 42 'm 'Any "foo") 'n))))
   (check-equal? (length (let-form-bindings f)) 2)
   (define b0 (car (let-form-bindings f)))
   (define b1 (cadr (let-form-bindings f)))
@@ -500,14 +501,14 @@
 ;; --- let / fn / if / cond / when / do --------------------------------------
 
 (test-case "let binding"
-  (define f (car (parse-one '(let [x 1 y 2] (+ x y)))))
+  (define f (car (parse-one '(let [x Int 1 y Int 2] (+ x y)))))
   (check-true   (let-form? f))
   (check-equal? (length (let-form-bindings f)) 2)
   (check-eq?    (let-binding-name (car (let-form-bindings f))) 'x)
   (check-equal? (let-binding-value (car (let-form-bindings f))) 1))
 
 (test-case "let bindings carry their declared types"
-  (define f (car (parse-one '(let [(x Int) 1 (y Int) 2] x))))
+  (define f (car (parse-one '(let [x Int 1 y Int 2] x))))
   (check-eq? (type-prim-name (let-binding-type (car (let-form-bindings f)))) 'Int)
   (check-eq? (type-prim-name (let-binding-type (cadr (let-form-bindings f)))) 'Int))
 
@@ -698,13 +699,13 @@
 ;; --- require ---------------------------------------------------------------
 
 (test-case "require with no alias"
-  (define p (parse-rooted-require '(require other.ns)))
+  (define p (parse-rooted-require (L 'require (br 'other.ns))))
   (check-equal? (length (program-requires p)) 1)
   (check-eq? (require-entry-ns    (car (program-requires p))) 'other.ns)
   (check-false (require-entry-alias (car (program-requires p)))))
 
 (test-case "require with :as alias"
-  (define p (parse-rooted-require '(require other.ns :as o)))
+  (define p (parse-rooted-require (L 'require (br 'other.ns ':as 'o))))
   (define r (car (program-requires p)))
   (check-eq? (require-entry-ns r)    'other.ns)
   (check-eq? (require-entry-alias r) 'o))
@@ -745,7 +746,7 @@
              `(defmacro with-temp ,(br 'val 'body)
                 ,(list 'quasiquote
                        (list 'let
-                             (br 'x (list 'unquote 'val))
+                             (br 'x 'Any (list 'unquote 'val))
                              (list 'unquote 'body))))
              '(def y (with-temp 1 42))))
   (define f (car (program-forms p)))
@@ -1032,7 +1033,7 @@
 
 (test-case "try with single catch"
   (define f
-    (car (parse-one '(try (/ 1 0) (catch (e Exception) (println e))))))
+    (car (parse-one '(try (/ 1 0) (catch Exception e (println e))))))
   (check-true (try-form? f))
   (check-equal? (length (try-form-body f)) 1)
   (check-equal? (length (try-form-catches f)) 1)
@@ -1044,7 +1045,7 @@
 
 (test-case "try with catch and finally"
   (define f (car (parse-one
-    '(try (open-file "x") (catch (e Exception) (log e)) (finally (cleanup))))))
+    '(try (open-file "x") (catch Exception e (log e)) (finally (cleanup))))))
   (check-true (try-form? f))
   (check-equal? (length (try-form-catches f)) 1)
   (check-true (list? (try-form-finally-body f)))
@@ -1053,8 +1054,8 @@
 (test-case "try with multiple catches"
   (define f (car (parse-one
     '(try (risky)
-       (catch (e ArithmeticException) "math-error")
-       (catch (e Exception) "other-error")))))
+       (catch ArithmeticException e "math-error")
+       (catch Exception e "other-error")))))
   (check-equal? (length (try-form-catches f)) 2)
   (check-eq? (catch-clause-exception-type (car (try-form-catches f))) 'ArithmeticException)
   (check-eq? (catch-clause-exception-type (cadr (try-form-catches f))) 'Exception))
@@ -1254,8 +1255,8 @@
   (check-equal? (map-destructure-keys (param-name p)) '(name age))
   (check-eq? (map-destructure-as-name (param-name p)) 'm))
 
-(test-case "map destructure in let binding"
-  (define f (car (parse-one `(let ,(br (mp ':keys (br 'x 'y)) 'point) (+ x y)))))
+(test-case "map destructure in typed let binding"
+  (define f (car (parse-one `(let ,(br (mp ':keys (br 'x 'y)) 'Any 'point) (+ x y)))))
   (check-true (let-form? f))
   (define b (car (let-form-bindings f)))
   (check-true (map-destructure? (let-binding-name b))))
@@ -1282,8 +1283,8 @@
   (check-equal? (seq-destructure-names (param-name p)) '(a b))
   (check-eq? (seq-destructure-rest-name (param-name p)) 'rest))
 
-(test-case "sequential destructure in let binding"
-  (define f (car (parse-one `(let ,(br (br 'a 'b) 'coll) (+ a b)))))
+(test-case "sequential destructure in typed let binding"
+  (define f (car (parse-one `(let ,(br (br 'a 'b) 'Any 'coll) (+ a b)))))
   (check-true (let-form? f))
   (define b (car (let-form-bindings f)))
   (check-true (seq-destructure? (let-binding-name b)))
@@ -1525,23 +1526,23 @@
 ;; tracked in design-principle.md) will not reuse these names.
 ;;
 ;; Lowerings:
-;;   (if-let    [x v] t e)    → (let [x v] (if x t e))
-;;   (when-let  [x v] body…)  → (let [x v] (if x (do body…)))
-;;   (if-some   [x v] t e)    → (let [x v] (if (not (nil? x)) t e))
-;;   (when-some [x v] body…)  → (let [x v] (if (not (nil? x)) (do body…)))
+;;   (if-let    [x v] t e)    → (let [x Any v] (if x t e))
+;;   (when-let  [x v] body…)  → (let [x Any v] (if x (do body…)))
+;;   (if-some   [x v] t e)    → (let [x Any v] (if (not (nil? x)) t e))
+;;   (when-some [x v] body…)  → (let [x Any v] (if (not (nil? x)) (do body…)))
 
 (test-case "if-let lowers to let+if (identity-preserving)"
   (define got
     (car (parse-one '(if-let [v (get m :key)] (str v) "nope"))))
   (define want
-    (car (parse-one '(let [v (get m :key)] (if v (str v) "nope")))))
+    (car (parse-one '(let [v Any (get m :key)] (if v (str v) "nope")))))
   (check-equal? got want))
 
 (test-case "when-let lowers to let+if+do (single body)"
   (define got
     (car (parse-one '(when-let [x (get m :key)] (println x)))))
   (define want
-    (car (parse-one '(let [x (get m :key)] (if x (do (println x)))))))
+    (car (parse-one '(let [x Any (get m :key)] (if x (do (println x)))))))
   (check-equal? got want))
 
 (test-case "when-let lowers to let+if+do (multi-body)"
@@ -1550,7 +1551,7 @@
                        (println x)
                        (str x "!")))))
   (define want
-    (car (parse-one '(let [x (get m :key)]
+    (car (parse-one '(let [x Any (get m :key)]
                        (if x (do (println x) (str x "!")))))))
   (check-equal? got want))
 
@@ -1558,7 +1559,7 @@
   (define got
     (car (parse-one '(if-some [v (get m :key)] (str v) "nope"))))
   (define want
-    (car (parse-one '(let [v (get m :key)]
+    (car (parse-one '(let [v Any (get m :key)]
                        (if (not (nil? v)) (str v) "nope")))))
   (check-equal? got want))
 
@@ -1566,7 +1567,7 @@
   (define got
     (car (parse-one '(when-some [x (get m :key)] (println x)))))
   (define want
-    (car (parse-one '(let [x (get m :key)]
+    (car (parse-one '(let [x Any (get m :key)]
                        (if (not (nil? x)) (do (println x)))))))
   (check-equal? got want))
 
@@ -1576,7 +1577,7 @@
                        (println x)
                        (str x "!")))))
   (define want
-    (car (parse-one '(let [x (get m :key)]
+    (car (parse-one '(let [x Any (get m :key)]
                        (if (not (nil? x))
                            (do (println x) (str x "!")))))))
   (check-equal? got want))
@@ -1815,15 +1816,15 @@
                 '(clojure.set clojure.walk)))
 
 (test-case "require with :as and :refer combined"
-  (define p (parse-prog (L 'require 'clojure.string ':as 'str
-                           ':refer (br 'join 'trim))))
+  (define p (parse-prog (L 'require (br 'clojure.string ':as 'str
+                                      ':refer (br 'join 'trim)))))
   (define r (car (program-requires p)))
   (check-eq? (require-entry-alias r) 'str)
   (check-equal? (require-entry-refer r) '(join trim)))
 
-(parse-err/rx ":refer :all rejected pointing at explicit symbols"
-  #rx"explicitly"
-  (L 'require 'foo.bar ':refer ':all))
+(parse-err/rx ":refer :all rejected by canonical refer list"
+  #rx"duplicate-free list of symbols"
+  (L 'require (br 'foo.bar ':refer ':all)))
 
 (test-case "import package-list form expands to qualified classes"
   (define p (parse-prog (L 'import (L 'java.time 'LocalDate 'Duration))))
@@ -1925,7 +1926,7 @@
 
 (test-case "nested seq destructure parses recursively"
   (define f (car (parse-one
-                  (L 'let (br (br 'a (br 'b 'c)) (br 1 (br 2 3)))
+                  (L 'let (br (br 'a (br 'b 'c)) 'Any (br 1 (br 2 3)))
                      (L '+ 'a 'b 'c)))))
   (check-true (let-form? f)))
 
@@ -1946,7 +1947,7 @@
           (display (string-append
                     "#lang beagle/clj\n"
                     "(def ^:dynamic *x* Int 0)\n"
-                    "(defn f [(n Int)] Int (binding [*x* n] *x*))\n")
+                    "(defn f [(n Int)] Int (binding [*x* Int n] *x*))\n")
                    out)))
       (define stxs (read-beagle-syntax tmp))
       (define datums (map syntax->datum stxs))
@@ -2044,4 +2045,4 @@
      (parse-source-text
       (string-append
        "(def values [1 2 3])\n"
-       "(defn f [] (Vec Int) (let [x 1 y 2] [x y]))\n")))))
+       "(defn f [] (Vec Int) (let [x Int 1 y Int 2] [x y]))\n")))))

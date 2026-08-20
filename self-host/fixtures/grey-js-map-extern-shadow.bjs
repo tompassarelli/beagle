@@ -4,4 +4,4 @@
 (declare-extern Map Any)
 
 (defn shadowed-map-constructor [] Any
-  (js/new Map))
+  (new Map))

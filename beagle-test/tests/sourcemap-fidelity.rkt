@@ -42,9 +42,8 @@
 ;;      they fall back to top-of-form positioning. The SQL target is in
 ;;      the gated tier and not exercised by this benchmark.
 ;;
-;;   3. Typed JS template-splice (check.rkt:1707) and type-bound
-;;      (check.rkt:2179) sites also omit `#:src`. JS target is in the
-;;      demoted/gated tier; not exercised here.
+;;   3. The type-bound diagnostic site (check.rkt:2179) also omits
+;;      `#:src`.
 ;;
 ;;   4. emit-clj reader metadata: synthesized AST nodes from the
 ;;      rewrite arms now carry correct srcloc, so the existing

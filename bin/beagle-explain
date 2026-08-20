@@ -4,7 +4,7 @@
 # Thin wrapper over the in-compiler registry
 # (beagle-lib/private/error-explanation.rkt) — the single source of truth.
 # The old bash associative-array DB was retired: it lived outside the
-# compiler, carried no severity/sinceVersion, was missing E016-E018, and
+# compiler, carried no severity/sinceVersion, was missing E017-E018, and
 # its examples used the now-rejected `:` annotation syntax.
 #
 # Usage:

@@ -2,4 +2,4 @@
 (ns selfhost.fixtures.invalid.grey-js-math-ceil-argument)
 
 (def invalid-ceiling Int
-  (js/call Math .ceil "bad"))
+  (.ceil Math "bad"))

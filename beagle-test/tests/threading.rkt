@@ -77,15 +77,15 @@
 
 (test-case "(as-> 1 v (+ v 2) (* v 3)) lowers to nested let chain"
   (define got  (strip-marker (car (parse-one '(as-> 1 v (+ v 2) (* v 3))))))
-  ;; expected: (let [v 1] (let [v (+ v 2)] (let [v (* v 3)] v)))
-  (define want (car (parse-one '(let [v 1]
-                                  (let [v (+ v 2)]
-                                    (let [v (* v 3)] v))))))
+  ;; expected: (let [v Any 1] (let [v Any (+ v 2)] (let [v Any (* v 3)] v)))
+  (define want (car (parse-one '(let [v Any 1]
+                                  (let [v Any (+ v 2)]
+                                    (let [v Any (* v 3)] v))))))
   (check-equal? got want))
 
-(test-case "(as-> init name) with no steps is just (let [name init] name)"
+(test-case "(as-> init name) with no steps is just (let [name Any init] name)"
   (define got  (strip-marker (car (parse-one '(as-> init n)))))
-  (define want (car (parse-one '(let [n init] n))))
+  (define want (car (parse-one '(let [n Any init] n))))
   (check-equal? got want))
 
 (test-case "as-> rejects non-symbol placeholder"

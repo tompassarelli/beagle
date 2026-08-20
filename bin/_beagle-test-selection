@@ -201,7 +201,6 @@ beagle_selection_classify_path() {
 
         # --- JavaScript / TypeScript target -------------------------------
         beagle-lib/private/emit-js*.rkt|\
-        beagle-lib/private/parse-js-quote.rkt|\
         beagle-lib/private/emit-jst.rkt|\
         beagle-lib/private/parse-jst.rkt|\
         beagle-lib/private/js-*.rkt|\

@@ -475,32 +475,32 @@
 ;; =============================================================================
 
 (check-module-ok "cross-file import: typed defn callable with prefix"
-  '(require mathlib)
+  "(require [mathlib])"
   '(def x Int (mathlib/add 1 2)))
 
 (check-module-ok "cross-file import: typed def accessible with prefix"
-  '(require mathlib)
+  "(require [mathlib])"
   '(def x Float mathlib/pi))
 
 (check-module-err "cross-file import: type error caught across files"
-  '(require mathlib)
+  "(require [mathlib])"
   '(def x Int (mathlib/greet "tom")))
 
 (check-module-err "cross-file import: arg type error caught"
-  '(require mathlib)
+  "(require [mathlib])"
   '(def x Int (mathlib/add "one" 2)))
 
 (check-module-ok "cross-file import with :as alias"
-  '(require mathlib :as m)
+  "(require [mathlib :as m])"
   '(def x Int (m/add 1 2)))
 
 (check-module-err "cross-file import: untyped defn still has arity"
-  '(require mathlib)
+  "(require [mathlib])"
   '(def x (mathlib/untyped-inc 1 2 3)))
 
 (check-module-err/rx "cross-file import: missing module is rejected"
   #rx"required namespace nonexistent\\.module could not be resolved"
-  '(require nonexistent.module)
+  "(require [nonexistent.module])"
   '(def x 42))
 
 ;; =============================================================================
@@ -508,33 +508,33 @@
 ;; =============================================================================
 
 (check-module-ok "cross-file defrecord: constructor callable with prefix"
-  '(require shapes)
+  "(require [shapes])"
   '(def c (shapes/->Circle 5)))
 
 (check-module-ok "cross-file defrecord: accessor returns correct type"
-  '(require shapes)
+  "(require [shapes])"
   '(def c (shapes/->Circle 5))
   '(def r Int (shapes/circle-radius c)))
 
 (check-module-ok "cross-file defrecord: multi-field constructor"
-  '(require shapes)
+  "(require [shapes])"
   '(def r (shapes/->Rect 10 20)))
 
 (check-module-ok "cross-file defrecord: cross-module function uses imported record"
-  '(require shapes)
+  "(require [shapes])"
   '(def c (shapes/->Circle 5))
   '(def a Int (shapes/circle-area c)))
 
 (check-module-err "cross-file defrecord: constructor wrong arg type errors"
-  '(require shapes)
+  "(require [shapes])"
   '(def c (shapes/->Circle "five")))
 
 (check-module-err "cross-file defrecord: constructor wrong arity errors"
-  '(require shapes)
+  "(require [shapes])"
   '(def c (shapes/->Circle 1 2)))
 
 (check-module-err "cross-file defrecord: accessor wrong return type errors"
-  '(require shapes)
+  "(require [shapes])"
   '(def c (shapes/->Circle 5))
   '(def r String (shapes/circle-radius c)))
 
@@ -631,13 +631,13 @@
 ;; =============================================================================
 
 (check-ok "try/catch passes type check"
-  '(def x Any (try (/ 1 0) (catch (e Exception) (str e)))))
+  '(def x Any (try (/ 1 0) (catch Exception e (str e)))))
 
 (check-ok "try/catch/finally passes type check"
-  '(def x (try (+ 1 1) (catch (e Exception) "err") (finally (println "done")))))
+  '(def x (try (+ 1 1) (catch Exception e "err") (finally (println "done")))))
 
 (check-ok "try with typed body passes"
-  '(def x Any (try (+ 1 1) (catch (e Exception) 0))))
+  '(def x Any (try (+ 1 1) (catch Exception e 0))))
 
 ;; =============================================================================
 ;; Tests — doseq
@@ -1171,20 +1171,20 @@
 
 ;; Cross-module Result import
 (check-module-ok "cross-file Result: constructor callable with prefix"
-  '(require result)
+  "(require [result])"
   '(def ok-val (result/->Ok 42)))
 
 (check-module-ok "cross-file Result: Err constructor callable"
-  '(require result)
+  "(require [result])"
   '(def err-val (result/->Err "something went wrong")))
 
 (check-module-ok "cross-file Result: accessor returns correct type"
-  '(require result)
+  "(require [result])"
   '(def e (result/->Err "fail"))
   '(def msg String (result/err-error e)))
 
 (check-module-ok "cross-file Result: exhaustive match on imported union passes"
-  "(require result :as p)"
+  "(require [result :as p])"
   #<<BEAGLE
 (defn handle [(r (p/Result String String))] String
   (match r
@@ -1194,7 +1194,7 @@ BEAGLE
   )
 
 (check-module-err "cross-file Result: non-exhaustive match on imported union errors"
-  "(require result :as p)"
+  "(require [result :as p])"
   #<<BEAGLE
 (defn handle [(r (p/Result String String))] String
   (match r
@@ -1399,119 +1399,117 @@ BEAGLE
 ;; Authored records are closed; native JS prototypes are open but selected
 ;; members carry precise positive contracts.
 
-(check-js-ok "js/get infers registered record property type"
+(check-js-ok "direct property access infers registered record property type"
   '(defrecord Bounds [(width Float) (height Float)])
   '(defn padded-width [(box Bounds)] Float
-     (+ (js/get box .width) 1.0)))
+     (+ (.-width box) 1.0)))
 
-(check-js-ok "js/call infers registered callable-field result"
+(check-js-ok "direct member call infers registered callable-field result"
   `(defrecord Formatter ((render ,(fn-ty '(Int) 'String))))
   '(defn rendered-index [(formatter Formatter)] Int
-     (+ (js/call (js/call formatter .render 1) .indexOf "x") 1)))
+     (+ (.indexOf (.render formatter 1) "x") 1)))
 
-(check-js-err/rx "js/call checks registered callable-field arguments"
+(check-js-err/rx "direct member calls check registered callable-field arguments"
   #rx"arg 1 expected Int, got String"
   `(defrecord Formatter ((render ,(fn-ty '(Int) 'String))))
   '(defn render-wrong [(formatter Formatter)] String
-     (js/call formatter .render "wrong")))
+     (.render formatter "wrong")))
 
-(check-js-err/rx "js/get rejects unknown member on a registered record"
-  #rx"js/get: \\.depth is not a member of Bounds"
+(check-js-err/rx "direct property access rejects an unknown member on a registered record"
+  #rx"property access: \\.depth is not a member of Bounds"
   '(defrecord Bounds [(width Float)])
   '(defn read-depth [(box Bounds)] Any
-     (js/get box .depth)))
+     (.-depth box)))
 
-(check-js-ok "js/get infers a common field across a nominal record union"
+(check-js-ok "direct property access infers a common field across a nominal record union"
   '(defrecord LeftBound [(width Float)])
   '(defrecord RightBound [(width Float)])
   '(defunion EitherBound LeftBound RightBound)
   '(defn union-width [(box EitherBound)] Float
-     (+ (js/get box .width) 1.0)))
+     (+ (.-width box) 1.0)))
 
-(check-js-ok "js/get exposes the emitted discriminator on a typed union"
+(check-js-ok "direct property access exposes the emitted discriminator on a typed union"
   `(defunion Result (Ok ,(br '(value String))) (Err ,(br '(message String))))
   '(defn result-tag [(result Result)] String
-     (js/get result ._tag)))
+     (.-_tag result)))
 
 (check-js-ok "union discriminator equality narrows direct and local projections"
   `(defunion Result (Ok ,(br '(value String))) (Err ,(br '(message String))))
   '(defn direct-result-value [(result Result)] String
-     (if (= (js/get result ._tag) "Ok")
-       (js/get result .value)
-       (js/get result .message)))
+     (if (= (.-_tag result) "Ok")
+       (.-value result)
+       (.-message result)))
   '(defn local-result-value [(result Result)] String
-     (let [(tag String) (js/get result ._tag)]
+     (let [(tag String) (.-_tag result)]
        (cond
-         (= tag "Ok") (js/get result .value)
-         (= tag "Err") (js/get result .message)
+         (= tag "Ok") (.-value result)
+         (= tag "Err") (.-message result)
          :else "unreachable"))))
 
 (check-js-ok "ordinary local equality bypasses qualified-name lookup"
   '(defn choose-column [(kind String) (col String)] String
      (if (= kind "column") col kind)))
 
-(check-js-err/rx "js/get rejects unknown member on a nominal record union"
-  #rx"js/get: \\.depth is not a member of EitherBound"
+(check-js-err/rx "direct property access rejects an unknown member on a nominal record union"
+  #rx"property access: \\.depth is not a member of EitherBound"
   '(defrecord LeftBound [(width Float)])
   '(defrecord RightBound [(width Float)])
   '(defunion EitherBound LeftBound RightBound)
   '(defn union-depth [(box EitherBound)] Any
-     (js/get box .depth)))
+     (.-depth box)))
 
-(check-js-err/rx "js/call rejects a non-callable registered field"
-  #rx"js/call: \\.width on Bounds has non-callable type Float"
+(check-js-err/rx "direct member calls reject a non-callable registered field"
+  #rx"member call: \\.width on Bounds has non-callable type Float"
   '(defrecord Bounds [(width Float)])
   '(defn call-width [(box Bounds)] Any
-     (js/call box .width)))
+     (.width box)))
 
-(check-js-ok "js/get leaves dynamic keys and Any receivers dynamic"
-  '(defn dynamic-read [(object Any) (key String)] Any
-     (js/get object key))
+(check-js-ok "direct property access leaves Any receivers open"
   '(defn open-read [(object Any)] Any
-     (js/get object .notDeclared)))
+     (.-notDeclared object)))
 
 (check-js-ok "js members type Vec length and element-aware indexOf"
   '(defn vec-position [(values (Vec String)) (target String)] Int
-     (+ (js/get values .length)
-        (js/call values .indexOf target))))
+     (+ (.-length values)
+        (.indexOf values target))))
 
 (check-js-err/rx "Vec indexOf rejects a different element type"
   #rx"arg 1 expected Int, got String"
   '(defn wrong-index [(values (Vec Int))] Int
-     (js/call values .indexOf "wrong")))
+     (.indexOf values "wrong")))
 
 (check-js-ok "js member types String indexOf"
   '(defn string-position [(value String) (needle String)] Int
-     (+ (js/call value .indexOf needle) 1)))
+     (+ (.indexOf value needle) 1)))
 
 (check-js-ok "js member types String trim and slice"
   '(defn trimmed [(value String)] String
-     (js/call value .trim))
+     (.trim value))
   '(defn sliced [(value String)] String
-     (js/call value .slice 1 3)))
+     (.slice value 1 3)))
 
 (check-js-err/rx "String indexOf rejects a non-String needle"
   #rx"arg 1 expected String, got Int"
   '(defn wrong-string-index [(value String)] Int
-     (js/call value .indexOf 1)))
+     (.indexOf value 1)))
 
 (check-js-ok "js member types bounded Math numeric results"
   '(defn float-math [(x Number) (y Number)] Float
-     (+ (js/call Math .sqrt x)
-        (js/call Math .pow x y)))
+     (+ (.sqrt Math x)
+        (.pow Math x y)))
   '(defn integer-math [(x Number)] Int
-     (+ (js/call Math .floor x)
-        (js/call Math .round x))))
+     (+ (.floor Math x)
+        (.round Math x))))
 
 (check-js-ok "js Math abs preserves exact numeric type"
   '(defn integer-magnitude [(value Int)] Int
-     (js/call Math .abs value))
+     (.abs Math value))
   '(defn float-magnitude [(value Float)] Float
-     (js/call Math .abs value)))
+     (.abs Math value)))
 
 (check-js-ok "js Date and performance clocks have numeric results"
-  '(defn wall-milliseconds [] Int (js/call Date .now))
-  '(defn monotonic-milliseconds [] Float (js/call performance .now)))
+  '(defn wall-milliseconds [] Int (.now Date))
+  '(defn monotonic-milliseconds [] Float (.now performance)))
 
 (check-js-ok "closed records express typed host member interfaces"
   `(defrecord HostNodeList
@@ -1520,19 +1518,19 @@ BEAGLE
      [(querySelectorAll ,(fn-ty '(String) 'HostNodeList))
       (contains ,(fn-ty '(Any) 'Bool))])
   '(defn enabled-control-count [(panel HostQueryRoot)] Int
-     (let [controls (js/call panel .querySelectorAll "button:not(:disabled)")]
-       (if (js/call panel .contains nil)
-         (js/get controls .length)
+     (let [controls (.querySelectorAll panel "button:not(:disabled)")]
+       (if (.contains panel nil)
+         (.-length controls)
          0))))
 
 (check-js-err/rx "js Math member rejects a non-numeric argument"
   #rx"expected .*Number.*got String"
   '(defn wrong-math [] Float
-     (js/call Math .sqrt "wrong")))
+     (.sqrt Math "wrong")))
 
 (check-js-ok "a lexical Math binding shadows the JS global contract"
   '(defn shadowed-math [(Math Any)] Any
-     (js/call Math .sqrt "dynamic")))
+     (.sqrt Math "dynamic")))
 
 (check-js-ok "js atom family preserves its invariant element type"
   '(defn update-cell! [] Int
@@ -1568,39 +1566,39 @@ BEAGLE
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-                    '(defn f [(url String)] (Promise String) (js/await (fetch-data url)))))))
+                    '(defn (#%meta :async f) [(url String)] (Promise String) (await (fetch-data url)))))))
 
 (test-case "Promise return with unwrapped body type accepted"
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern load ,(fn-ty '() '(Promise Int)))
-                    '(defn f [] (Promise Int) (js/await (load)))))))
+                    '(defn (#%meta :async f) [] (Promise Int) (await (load)))))))
 
 (test-case "nested await in let type-checks"
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-name ,(fn-ty '(Int) '(Promise String)))
-                    '(defn f [(id Int)] (Promise String)
-                       (let [name (js/await (fetch-name id))]
+                    '(defn (#%meta :async f) [(id Int)] (Promise String)
+                       (let [name (await (fetch-name id))]
                          (str "Hello " name)))))))
 
 (check-js-err "Promise return type mismatch caught"
   `(declare-extern load ,(fn-ty '() '(Promise Int)))
-  '(defn f [] (Promise String) (js/await (load))))
+  '(defn (#%meta :async f) [] (Promise String) (await (load))))
 
 ;; =============================================================================
 ;; Target-form gating — cross-target rejection
 ;; =============================================================================
 ;; await rejected outside beagle/js
 (check-err/rx "await rejected in beagle/clj"
-  #rx"js/await is only supported in beagle/js"
+  #rx"await is only supported in beagle/js"
   `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-  '(defn f [(url String)] (Promise String) (js/await (fetch-data url))))
+  '(defn (#%meta :async f) [(url String)] (Promise String) (await (fetch-data url))))
 
 (check-nix-err/rx "await rejected in beagle/nix"
-  #rx"js/await is only supported in beagle/js"
+  #rx"await is only supported in beagle/js"
   `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-  '(defn f [(url String)] (Promise String) (js/await (fetch-data url))))
+  '(defn (#%meta :async f) [(url String)] (Promise String) (await (fetch-data url))))
 
 ;; Nix forms rejected outside beagle/nix
 (check-err/rx "inherit rejected in beagle/clj"
@@ -1783,7 +1781,7 @@ BEAGLE
 
 (check-ok "stdlib: element type flows through split + first"
   '(define-target clj)
-  '(require clojure.string :as str)
+  (list 'require (br 'clojure.string ':as 'str))
   '(defn f [(s String)] String
      (first (str/split s (#%regex ",")))))
 
@@ -1791,7 +1789,7 @@ BEAGLE
 ;; Clojure. Regression for the extern arity fix (was: "expected 2 arg(s), got 3").
 (check-ok "stdlib: clojure.string/index-of accepts 2-arg and 3-arg from-index"
   '(define-target clj)
-  '(require clojure.string :as str)
+  (list 'require (br 'clojure.string ':as 'str))
   '(defn f2 [(s String) (sep String)] Int?
      (str/index-of s sep))
   '(defn f3 [(s String) (sep String) (start Int)] Int?
@@ -1825,7 +1823,7 @@ BEAGLE
 
 (check-ok "qualified: required alias resolves"
   '(define-target clj)
-  '(require babashka.fs :as fs)
+  (list 'require (br 'babashka.fs ':as 'fs))
   '(def x Bool (fs/exists? "/tmp")))
 
 (check-silent "foreign :refer call is a known imported binding"
@@ -1838,7 +1836,7 @@ BEAGLE
 (check-warns "qualified: catalog miss in known namespace notes did-you-mean"
   #rx"did you mean: fs/exists\\?"
   '(define-target clj)
-  '(require babashka.fs :as fs)
+  (list 'require (br 'babashka.fs ':as 'fs))
   '(def x Any (fs/exits? "/tmp")))
 
 (test-case "qualified: explicit host provider externs are authorized"
@@ -1857,7 +1855,7 @@ BEAGLE
        (check-prog/source
         (build-path scratch "consumer.bclj")
         '(define-target clj)
-        '(require selmer.parser :as tmpl)
+        (list 'require (br 'selmer.parser ':as 'tmpl))
         `(declare-extern tmpl/render ,(fn-ty '(String Any) 'Any))
         `(declare-extern tmpl/render-file ,(fn-ty '(String Any) 'Any))
         (list 'def 'x 'Any (list 'tmpl/render "t" (mt)))
@@ -1988,21 +1986,21 @@ BEAGLE
 
 (check-ok "binding a ^:dynamic var is accepted"
   '(def (#%meta :dynamic *x*) Int 0)
-  '(defn f [] Int (binding [*x* 5] *x*)))
+  '(defn f [] Int (binding [*x* Int 5] *x*)))
 
 (check-err/rx "binding a non-dynamic var is rejected, pointing at ^:dynamic"
   #rx"dynamic"
   '(def *y* Int 0)
-  '(defn f [] Int (binding [*y* 5] *y*)))
+  '(defn f [] Int (binding [*y* Int 5] *y*)))
 
 (check-err/rx "binding an undeclared var is rejected as non-dynamic"
   #rx"dynamic"
-  '(defn f [] Int (binding [*z* 5] 0)))
+  '(defn f [] Int (binding [*z* Int 5] 0)))
 
 (check-err/rx "binding a ^:dynamic Int var with a String mismatches"
   #rx"expected Int|got String"
   '(def (#%meta :dynamic *n*) Int 0)
-  '(defn f [] Int (binding [*n* "oops"] *n*)))
+  '(defn f [] Int (binding [*n* Int "oops"] *n*)))
 
 ;; --- typed JVM-class interop (CLASS-TABLE receiver-typing) ----------------
 ;; FQCN constructors + receiver-typed methods/statics resolve against the JVM

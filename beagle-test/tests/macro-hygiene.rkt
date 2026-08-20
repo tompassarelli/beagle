@@ -71,10 +71,10 @@
    "#lang beagle/clj\n"
    "(ns capture.matrix)\n"
    "(defmacro around [body]\n"
-   "  `(let [tmp 1]\n"
+   "  `(let [tmp Any 1]\n"
    "     (do tmp ~body)))\n"
-   "(defn capture-matrix [(tmp Int)] Int\n"
-   "  (around (do tmp (let [tmp 2] tmp))))\n"))
+   "(defn capture-matrix [tmp Int] Int\n"
+   "  (around (do tmp (let [tmp Int 2] tmp))))\n"))
 
 (define (capture-matrix)
   (define source-bytes (string->bytes/utf-8 CAPTURE-MATRIX-SOURCE))
@@ -158,7 +158,7 @@
    reg 'with-tmp 'defmacro '(body)
    (list 'quasiquote
          (list 'let
-               (br 'tmp 1)
+               (br 'tmp 'Any 1)
                'tmp
                (list 'unquote 'body))))
   (define caller-scope (fresh-scope-id 'caller-lexical))
@@ -194,10 +194,10 @@
   (define reg (make-macro-registry))
   (register-macro!
    reg 'with-tmp 'defmacro '()
-   (list 'quasiquote (list 'let (br 'tmp 1) 'tmp)))
+   (list 'quasiquote (list 'let (br 'tmp 'Any 1) 'tmp)))
   (check-equal?
    (expand-fully reg '(with-tmp))
-   (list 'let (br 'tmp 1) 'tmp)))
+   (list 'let (br 'tmp 'Any 1) 'tmp)))
 
 (test-case "scope hygiene: antiquoted caller identity and scopes cannot be captured"
   (define matrix (capture-matrix))

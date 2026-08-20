@@ -14,7 +14,7 @@
    "#lang beagle/nix\n"
    "\n"
    "(ns demo.module)\n"
-   "(require shared.lib)\n"
+   "(require [shared.lib])\n"
    "\n"
    "(nix/module [config lib ...]\n"
    "  {:tags [desktop cli-tools]\n"

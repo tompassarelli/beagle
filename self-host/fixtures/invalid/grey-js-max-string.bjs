@@ -2,4 +2,4 @@
 (ns selfhost.fixtures.invalid.grey-js-max-string)
 
 (def invalid-maximum Int
-  (js/call Math .max 1 "bad"))
+  (.max Math 1 "bad"))

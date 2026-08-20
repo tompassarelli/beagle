@@ -287,149 +287,6 @@
     [(void? d) 'null]
     [else (error 'beagle-ast-json "unsupported quoted datum: ~v" d)]))
 
-;; Preserve the complete js/quote tree across the Racket-AST -> self-host
-;; bridge.  These keys are the wire contract consumed by selfhost.emit-js.
-(define (js-param->json p)
-  (cond
-    [(symbol? p) (symbol->string p)]
-    [(and (list? p) (= (length p) 2) (eq? (car p) 'spread))
-     (hasheq 'spread (symbol->string (cadr p)))]
-    [else (error 'beagle-ast-json "unsupported js/quote parameter: ~v" p)]))
-
-(define (js-literal->json v)
-  (cond
-    [(string? v)  (hasheq 'jsk "literal" 'kind "string" 'value v)]
-    [(number? v)  (hasheq 'jsk "literal" 'kind "number" 'value v)]
-    [(boolean? v) (hasheq 'jsk "literal" 'kind "bool" 'value v)]
-    [(eq? v 'null)      (hasheq 'jsk "literal" 'kind "null")]
-    [(eq? v 'undefined) (hasheq 'jsk "literal" 'kind "undefined")]
-    [else (error 'beagle-ast-json "unsupported js/quote literal: ~v" v)]))
-
-(define (js-ast->json n)
-  (cond
-    [(js-ast-block? n)
-     (hasheq 'jsk "block" 'stmts (map js-ast->json (js-ast-block-stmts n)))]
-    [(js-ast-const? n)
-     (hasheq 'jsk "const" 'name (symbol->string (js-ast-const-name n))
-             'value (js-ast->json (js-ast-const-value n)))]
-    [(js-ast-let? n)
-     (hasheq 'jsk "let" 'name (symbol->string (js-ast-let-name n))
-             'value (js-ast->json (js-ast-let-value n)))]
-    [(js-ast-assign? n)
-     (hasheq 'jsk "assign" 'target (js-ast->json (js-ast-assign-target n))
-             'value (js-ast->json (js-ast-assign-value n)))]
-    [(js-ast-return? n)
-     (hasheq 'jsk "return"
-             'expr (and (js-ast-return-expr n) (js-ast->json (js-ast-return-expr n))))]
-    [(js-ast-if? n)
-     (hasheq 'jsk "if" 'test (js-ast->json (js-ast-if-test n))
-             'then (js-ast->json (js-ast-if-then n))
-             'else (and (js-ast-if-else-branch n)
-                        (js-ast->json (js-ast-if-else-branch n))))]
-    [(js-ast-for-of? n)
-     (hasheq 'jsk "for-of" 'binding (symbol->string (js-ast-for-of-binding n))
-             'iterable (js-ast->json (js-ast-for-of-iterable n))
-             'body (js-ast->json (js-ast-for-of-body n)))]
-    [(js-ast-while? n)
-     (hasheq 'jsk "while" 'test (js-ast->json (js-ast-while-test n))
-             'body (js-ast->json (js-ast-while-body n)))]
-    [(js-ast-throw? n)
-     (hasheq 'jsk "throw" 'expr (js-ast->json (js-ast-throw-expr n)))]
-    [(js-ast-try? n)
-     (hasheq 'jsk "try" 'body (js-ast->json (js-ast-try-body n))
-             'catch-name (and (js-ast-try-catch-name n)
-                              (symbol->string (js-ast-try-catch-name n)))
-             'catch-body (and (js-ast-try-catch-body n)
-                              (js-ast->json (js-ast-try-catch-body n)))
-             'finally-body (and (js-ast-try-finally-body n)
-                                (js-ast->json (js-ast-try-finally-body n))))]
-    [(js-ast-expr-stmt? n)
-     (hasheq 'jsk "expr-stmt" 'expr (js-ast->json (js-ast-expr-stmt-expr n)))]
-    [(js-ast-function? n)
-     (hasheq 'jsk "function" 'name (symbol->string (js-ast-function-name n))
-             'params (map js-param->json (js-ast-function-params n))
-             'body (js-ast->json (js-ast-function-body n))
-             'async (and (js-ast-function-async? n) #t)
-             'export (and (js-ast-function-export? n) #t))]
-    [(js-ast-class? n)
-     (hasheq 'jsk "class" 'name (symbol->string (js-ast-class-name n))
-             'extends (and (js-ast-class-extends-expr n)
-                           (js-ast->json (js-ast-class-extends-expr n)))
-             'methods (map js-ast->json (js-ast-class-methods n)))]
-    [(js-ast-method? n)
-     (hasheq 'jsk "method"
-             'name (and (js-ast-method-name n) (symbol->string (js-ast-method-name n)))
-             'params (map js-param->json (js-ast-method-params n))
-             'body (js-ast->json (js-ast-method-body n))
-             'static (and (js-ast-method-static? n) #t)
-             'async (and (js-ast-method-async? n) #t)
-             'kind (symbol->string (js-ast-method-kind n)))]
-    [(js-ast-call? n)
-     (hasheq 'jsk "call" 'callee (js-ast->json (js-ast-call-callee n))
-             'args (map js-ast->json (js-ast-call-args n)))]
-    [(js-ast-member? n)
-     (hasheq 'jsk "member" 'object (js-ast->json (js-ast-member-object n))
-             'property (if (js-ast-member-computed? n)
-                           (js-ast->json (js-ast-member-property n))
-                           (symbol->string (js-ast-member-property n)))
-             'computed (and (js-ast-member-computed? n) #t))]
-    [(js-ast-index? n)
-     (hasheq 'jsk "index" 'object (js-ast->json (js-ast-index-object n))
-             'idx (js-ast->json (js-ast-index-index-expr n)))]
-    [(js-ast-arrow? n)
-     (hasheq 'jsk "arrow" 'params (map js-param->json (js-ast-arrow-params n))
-             'body (js-ast->json (js-ast-arrow-body n)))]
-    [(js-ast-ternary? n)
-     (hasheq 'jsk "ternary" 'test (js-ast->json (js-ast-ternary-test n))
-             'then (js-ast->json (js-ast-ternary-then n))
-             'else (js-ast->json (js-ast-ternary-else-expr n)))]
-    [(js-ast-binary? n)
-     (hasheq 'jsk "binary"
-             'op (hash-ref JS-BINARY-OPS (js-ast-binary-op n)
-                           (lambda () (symbol->string (js-ast-binary-op n))))
-             'left (js-ast->json (js-ast-binary-left n))
-             'right (js-ast->json (js-ast-binary-right n)))]
-    [(js-ast-unary? n)
-     (hasheq 'jsk "unary" 'op (symbol->string (js-ast-unary-op n))
-             'expr (js-ast->json (js-ast-unary-expr n))
-             'prefix (and (js-ast-unary-prefix? n) #t))]
-    [(js-ast-template? n)
-     (hasheq 'jsk "template"
-             'parts (map (lambda (p)
-                           (if (string? p)
-                               (hasheq 'str p)
-                               (hasheq 'expr (js-ast->json p))))
-                         (js-ast-template-parts n)))]
-    [(js-ast-array? n)
-     (hasheq 'jsk "array" 'items (map js-ast->json (js-ast-array-items n)))]
-    [(js-ast-object? n)
-     (hasheq 'jsk "object"
-             'pairs (map (lambda (p)
-                           (hasheq 'key (js-ast->json (car p))
-                                   'val (js-ast->json (cdr p))))
-                         (js-ast-object-pairs n)))]
-    [(js-ast-spread? n)
-     (hasheq 'jsk "spread" 'expr (js-ast->json (js-ast-spread-expr n)))]
-    [(js-ast-await? n)
-     (hasheq 'jsk "await" 'expr (js-ast->json (js-ast-await-expr n)))]
-    [(js-ast-new? n)
-     (hasheq 'jsk "new" 'callee (js-ast->json (js-ast-new-callee n))
-             'args (map js-ast->json (js-ast-new-args n)))]
-    [(js-ast-typeof? n)
-     (hasheq 'jsk "typeof" 'expr (js-ast->json (js-ast-typeof-expr n)))]
-    [(js-ast-ident? n)
-     (hasheq 'jsk "ident" 'name (symbol->string (js-ast-ident-name n)))]
-    [(js-ast-literal? n) (js-literal->json (js-ast-literal-value n))]
-    [(js-ast-splice-expr? n)
-     (hasheq 'jsk "splice-expr"
-             'bexpr (expr->json (js-ast-splice-expr-beagle-expr n)))]
-    [(js-ast-splice-stmts? n)
-     (hasheq 'jsk "splice-stmts"
-             'bexpr (expr->json (js-ast-splice-stmts-beagle-expr n)))]
-    [(js-ast-splice-json? n)
-     (hasheq 'jsk "splice-json"
-             'bexpr (expr->json (js-ast-splice-json-beagle-expr n)))]
-    [else (error 'beagle-ast-json "unsupported js/quote AST node: ~v" n)]))
 
 (define (expansion-context->json ctx)
   (hasheq
@@ -952,12 +809,10 @@
      (hash-set (expr->json (with-meta-expr e))
                'metadata (expr->json (with-meta-metadata e)))]
 
-    [(js-quote-form? e)
-     (define wire (hasheq 'node "js-quote" 'body (js-ast->json (js-quote-form-body e))))
-     (define source (node-source->json e))
-     (if (and source (not (current-checked-projection?)))
-         (hash-set wire 'source source)
-         wire)]
+    [(async-callable? e)
+     ;; Preserve the callable node for AST-JSON consumers while projecting its
+     ;; authored asynchronous ownership onto the callable itself.
+     (hash-set (expr->json (async-callable-form e)) 'async #t)]
 
     ;; threading-marker: KIND + surface ARGS drive the clj emitter's
     ;; surface reconstruction; DESUGARED is what check (and emit-nix) walk.
@@ -970,34 +825,6 @@
              'desugared (expr->json (threading-marker-desugared e)))]
 
     ;; --- typed JavaScript forms ---
-    [(jst-return? e)
-     (hasheq 'node "js-return"
-             'expr (and (jst-return-expr e)
-                        (expr->json (jst-return-expr e))))]
-
-    [(jst-class? e)
-     (hasheq 'node "js-class"
-             'name (symbol->string (jst-class-name e))
-             'extends (and (jst-class-extends e)
-                           (expr->json (jst-class-extends e)))
-             'methods
-             (for/list ([method (in-list (jst-class-methods e))])
-               (hasheq 'name (symbol->string (jst-method-name method))
-                       'params (map param->json (jst-method-params method))
-                       'rest (and (jst-method-rest-param method)
-                                  (param->json
-                                   (jst-method-rest-param method)))
-                       'ret (type->json (jst-method-return-type method))
-                       'body (map expr->json (jst-method-body method))
-                       'static (and (jst-method-static? method) #t)
-                       'async (and (jst-method-async? method) #t)
-                       'kind (symbol->string (jst-method-kind method))))
-             'export (and (jst-class-export? e) #t))]
-
-    [(jst-dot? e)
-     (hasheq 'node "js-dot"
-             'object (expr->json (jst-dot-object e))
-             'property (symbol->string (jst-dot-property e)))]
     [(jst-selector? e)
      (hasheq 'node "js-selector" 'name (jst-selector-name e))]
     [(jst-get? e)
@@ -1026,26 +853,8 @@
      (hasheq 'node "js-in"
              'receiver (expr->json (jst-in-receiver e))
              'key (expr->json (jst-in-key e)))]
-    [(jst-spread? e)
-     (hasheq 'node "js-spread" 'expr (expr->json (jst-spread-expr e)))]
     [(jst-typeof? e)
      (hasheq 'node "js-typeof" 'expr (expr->json (jst-typeof-expr e)))]
-    [(jst-template? e)
-     (hasheq 'node "js-template"
-             'parts
-             (for/list ([part (in-list (jst-template-parts e))])
-               (if (string? part)
-                   (hasheq 'type "text" 'value part)
-                   (hasheq 'type "expr" 'value (expr->json part)))))]
-    [(jst-binary? e)
-     (hasheq 'node "js-binary"
-             'op (symbol->string (jst-binary-op e))
-             'left (expr->json (jst-binary-left e))
-             'right (expr->json (jst-binary-right e)))]
-    [(jst-unary? e)
-     (hasheq 'node "js-unary"
-             'op (symbol->string (jst-unary-op e))
-             'expr (expr->json (jst-unary-expr e)))]
     [(jst-export? e)
      (hasheq 'node "js-export" 'form (expr->json (jst-export-form e)))]
     [(jst-export-default? e)

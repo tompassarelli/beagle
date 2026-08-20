@@ -35,6 +35,15 @@
 (test-case "cheatsheet is non-empty"
   (check-true (pair? CHEATSHEET)))
 
+(test-case "cheatsheet covers the canonical JavaScript interop surface"
+  (define forms (map cheat-form CHEATSHEET))
+  (for ([form (in-list '("direct JavaScript interop"
+                         "^:async + await"
+                         "this-as"
+                         ".. receiver chain"))])
+    (check-not-false (member form forms)
+                     (format "cheatsheet should cover ~a" form))))
+
 (for ([c (in-list CHEATSHEET)])
   (test-case (format "cheatsheet example parses + checks clean [~a]: ~a"
                      (cheat-target c)

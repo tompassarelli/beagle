@@ -379,26 +379,26 @@
    (check-js-contains "await -> await keyword"
      "await"
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-     '(defn f [(url String)] (Promise String) (js/await (fetch-data url))))
+     '(defn (#%meta :async f) [(url String)] (Promise String) (await (fetch-data url))))
 
    (check-js-contains "defn with await -> async function"
      "async function"
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-     '(defn f [(url String)] (Promise String) (js/await (fetch-data url))))
+     '(defn (#%meta :async f) [(url String)] (Promise String) (await (fetch-data url))))
 
-   (check-js-contains "await nested in js/call -> async function"
+   (check-js-contains "await nested in a member call -> async function"
      "async function parse_loaded"
      `(declare-extern load-text ,(fn-ty '() '(Promise String)))
      '(declare-extern JSON Any)
-     '(defn parse-loaded [] Any
-        (js/call JSON .parse (js/await (load-text)))))
+     '(defn (#%meta :async parse-loaded) [] (Promise Any)
+        (.parse JSON (await (load-text)))))
 
-   (check-js-contains "await nested in js/set! -> async function"
+   (check-js-contains "await nested in a property assignment -> async function"
      "async function set_loaded_bang"
      `(declare-extern load-text ,(fn-ty '() '(Promise String)))
      '(declare-extern globalThis Any)
-     '(defn set-loaded! [] Any
-        (js/set! globalThis .loaded (js/await (load-text)))))
+     '(defn (#%meta :async set-loaded!) [] (Promise Any)
+        (set! (.-loaded globalThis) (await (load-text)))))
 
    (test-case "exported defn detects await through JS expression containers"
      (define result
@@ -411,10 +411,10 @@
          '(declare-extern JSON Any)
          '(declare-extern state Any)
          '(js/export
-           (defn check! [] Any
-             (let [parsed (js/call JSON .parse
-                            (js/await (read-file "gjoa.json" "utf8")))]
-               (js/set! state .versions (js/await (fetch-versions)))
+           (defn (#%meta :async check!) [] (Promise Any)
+             (let [parsed (.parse JSON
+                            (await (read-file "gjoa.json" "utf8")))]
+               (set! (.-versions state) (await (fetch-versions)))
                parsed))))))
      (check-true
       (string-contains? result "export async function check_bang()")
@@ -422,16 +422,11 @@
      (check-true
       (string-contains? result
                         "JSON.parse(await read_file(\"gjoa.json\", \"utf8\"))")
-      (format "expected await below js/call in:\n~a" result))
+      (format "expected await below a member call in:\n~a" result))
      (check-true
       (string-contains? result
                         "state.versions = await fetch_versions()")
-      (format "expected await below js/set! in:\n~a" result)))
-
-   (check-js-contains "fn with await -> async arrow"
-     "async ("
-     `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-     '(def f Any (fn [(url String)] (Promise String) (js/await (fetch-data url)))))
+      (format "expected await below a property assignment in:\n~a" result)))
 
    (check-js-contains "defn without await -> no async"
      "function g("
@@ -455,30 +450,30 @@
      "const c ="
      '(defn scan [(s String) (n Int)] Int
        (loop [i 0]
-         (let [c (js/call s .charCodeAt i)]
+         (let [c (.charCodeAt s i)]
            (if (= c n) i (recur (+ i 1)))))))
 
    (check-js-contains "loop with let + recur has continue at correct level"
      "continue;"
      '(defn scan [(s String) (n Int)] Int
        (loop [i 0]
-         (let [c (js/call s .charCodeAt i)]
+         (let [c (.charCodeAt s i)]
            (if (= c n) i (recur (+ i 1)))))))
 
    (check-js-contains "async loop/recur -> async IIFE with while"
      "async () =>"
      `(declare-extern read-next ,(fn-ty '(Any) '(Promise Any)))
-     '(defn read-all [(r Any)] Any
+     '(defn (#%meta :async read-all) [(r Any)] (Promise Any)
        (loop [buf nil]
-         (let [v (js/await (read-next r))]
+         (let [v (await (read-next r))]
            (if (nil? v) buf (recur v))))))
 
    (check-js-contains "async loop/recur -> await inside while body"
      "await read_next"
      `(declare-extern read-next ,(fn-ty '(Any) '(Promise Any)))
-     '(defn read-all [(r Any)] Any
+     '(defn (#%meta :async read-all) [(r Any)] (Promise Any)
        (loop [buf nil]
-         (let [v (js/await (read-next r))]
+         (let [v (await (read-next r))]
            (if (nil? v) buf (recur v))))))
 
    (check-js-contains "sync loop -> no async prefix"
@@ -531,17 +526,17 @@
 
    ;; --- interop --------------------------------------------------------------
 
-   (check-js-contains "js/call selector -> member call"
+   (check-js-contains "member selector -> member call"
      ".toString("
-     '(defn f [(x Any)] String (js/call x .toString)))
+     '(defn f [(x Any)] String (.toString x)))
 
    (check-js-contains "Class/method -> dot call"
      "Math.abs("
      '(defn f [(x Int)] Int (Math/abs x)))
 
-   (check-js-contains "js/new -> new keyword"
+   (check-js-contains "new -> new keyword"
      "new Date("
-     '(def d Any (js/new Date 2024)))
+     '(def d Any (new Date 2024)))
 
    ;; --- multi-arity ----------------------------------------------------------
 
@@ -584,18 +579,18 @@
    (check-js-contains "await in nested let propagates async"
      "async"
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-     '(defn f [(url String)] (Promise String)
+     '(defn (#%meta :async f) [(url String)] (Promise String)
        (let [x "prefix"]
-         (let [result (js/await (fetch-data url))]
+         (let [result (await (fetch-data url))]
            (str x result)))))
 
    (check-js-contains "multi-arity with await -> async dispatch"
      "async function"
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-     `(defn load
-       (,(br '(url String)) (Promise String) (js/await (fetch-data url)))
+     `(defn (#%meta :async load)
+       (,(br '(url String)) (Promise String) (await (fetch-data url)))
        (,(br '(url String) '(fallback String)) (Promise String)
-         (let [r (js/await (fetch-data url))] (if (nil? r) fallback r)))))
+         (let [r (await (fetch-data url))] (if (nil? r) fallback r)))))
 
    (check-js-contains "record field access chains"
      ".x"
@@ -719,7 +714,7 @@
    (check-js-contains "alias-qualified constructor -> new alias.Class()"
      "new THREE.Scene()"
      '(require three :as THREE)
-     '(defn f [] Any (js/new THREE/Scene)))
+     '(defn f [] Any (new THREE/Scene)))
 
    ;; --- additional stdlib translations ----------------------------------------
 
@@ -960,20 +955,20 @@
 
    ;; --- Receiver-first JavaScript interop -------------------------------------
 
-   (test-case "js/get emits property access, not method call"
+   (test-case "direct property access does not emit a method call"
      (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(declare-extern obj Any)
-                                   '(defn f [(obj Any)] Any (js/get obj .name)))))
+                                   '(defn f [(obj Any)] Any (.name obj)))))
      (check-true (string-contains? result "obj.name")
                  (format "expected property access, got:\n~a" result))
      (check-false (string-contains? result "obj.name(")
                   "should not have parens for property access"))
 
-   (test-case "js/call emits a receiver-preserving member call"
+   (test-case "direct member call preserves the receiver"
      (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(declare-extern client Any)
                                    '(defn f [(client Any)] Any
-                                      (js/call client .newSession)))))
+                                      (.newSession client)))))
      (check-true (string-contains? result "client.newSession()")
                  (format "expected a direct member call, got:\n~a" result)))
 
@@ -1033,28 +1028,28 @@
      (check-equal? stderr-output ""
                    "expected no warning for translated function"))
 
-   (check-js-contains "js/set! keeps a static selector byte-exact"
+   (check-js-contains "property assignment keeps a static selector byte-exact"
      "obj[\"my-prop\"] = 99"
      '(declare-extern obj Any)
-     '(defn f! [(obj Any)] Any (js/set! obj .my-prop 99)))
+     '(defn f! [(obj Any)] Any (set! (.-my-prop obj) 99)))
 
-   (check-js-contains "js/set! emits nil as null"
+   (check-js-contains "property assignment emits nil as null"
      "target.value = null"
-     '(defn clear! [(target Any)] Any (js/set! target .value nil)))
+     '(defn clear! [(target Any)] Any (set! (.-value target) nil)))
 
-   (check-js-contains "js/get keeps a static selector byte-exact"
+   (check-js-contains "direct property access keeps a static selector byte-exact"
      "obj[\"my-prop\"]"
      '(declare-extern obj Any)
-     '(defn f [(obj Any)] Any (js/get obj .my-prop)))
+     '(defn f [(obj Any)] Any (.my-prop obj)))
 
    (test-case "selector bytes and map underscores stay literal"
      (define result
        (js-emit
         (list '(ns test.app) '(define-target js)
-              '(defn read-wall [(obj Any)] Any (js/get obj .wall_s))
-              '(defn call-context [(obj Any)] Any (js/call obj .ctx_str))
+              '(defn read-wall [(obj Any)] Any (.wall_s obj))
+              '(defn call-context [(obj Any)] Any (.ctx_str obj))
               '(defn write-total! [(obj Any) (v Any)] Any
-                 (js/set! obj .total_str v))
+                 (set! (.-total_str obj) v))
               `(def metrics Any ,(mt ':wall_s 1 ':ctx_str 2 ':total_str 3))
               '(defrecord Snapshot [(wall_s Int) (ctx_str String) (total_str String)]))))
      (for ([expected (in-list '("obj.wall_s"
@@ -1078,11 +1073,11 @@
      (define result
        (js-emit
         (list '(ns test.app) '(define-target js)
-              '(defn underscore [(obj Any)] Any (js/get obj ._private))
-              '(defn hyphen [(obj Any)] Any (js/get obj .dash-name))
-              '(defn question [(obj Any)] Any (js/get obj .ready?))
-              '(defn bang [(obj Any)] Any (js/get obj .save!))
-              '(defn reserved [(obj Any)] Any (js/get obj .delete)))))
+              '(defn underscore [(obj Any)] Any (._private obj))
+              '(defn hyphen [(obj Any)] Any (.dash-name obj))
+              '(defn question [(obj Any)] Any (.ready? obj))
+              '(defn bang [(obj Any)] Any (.save! obj))
+              '(defn reserved [(obj Any)] Any (.delete obj)))))
      (for ([expected (in-list '("obj._private"
                                 "obj[\"dash-name\"]"
                                 "obj[\"ready?\"]"

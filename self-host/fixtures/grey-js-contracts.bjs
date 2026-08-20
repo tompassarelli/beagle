@@ -5,78 +5,78 @@
   [7 "north"])
 
 (defn canonical-prefix [(value String)] String
-  (js/call (js/call value .trim) .slice 0 5))
+  (.slice (.trim value) 0 5))
 
 (defn typed-index [(value String)] Int
-  (js/call value .indexOf "north"))
+  (.indexOf value "north"))
 
 (def absolute-count Int
-  (js/call Math .abs -7))
+  (.abs Math -7))
 
 (def absolute-distance Float
-  (js/call Math .abs -7.5))
+  (.abs Math -7.5))
 
 (def sine Float
-  (js/call Math .sin 0.5))
+  (.sin Math 0.5))
 
 (def cosine Float
-  (js/call Math .cos 0.5))
+  (.cos Math 0.5))
 
 (def arctangent Float
-  (js/call Math .atan 0.5))
+  (.atan Math 0.5))
 
 (def arctangent-two Float
-  (js/call Math .atan2 0.5 1.0))
+  (.atan2 Math 0.5 1.0))
 
 (def exponential Float
-  (js/call Math .exp 0.5))
+  (.exp Math 0.5))
 
 (def minimum Float
-  (js/call Math .min 0.5 1.0))
+  (.min Math 0.5 1.0))
 
 (def maximum Int
-  (js/call Math .max 1 2))
+  (.max Math 1 2))
 
 (def map-size Int
-  (let [(values (JsMap Any Any)) (js/new Map)]
-    (js/get values .size)))
+  (let [(values (JsMap Any Any)) (new Map)]
+    (.size values)))
 
 (defn string-index [] (JsMap String Int)
-  (js/new Map))
+  (new Map))
 
 (defn map-lookup
   [(values (JsMap String Int))
    (key String)]
   (U Int Nil)
-  (js/call values .get key))
+  (.get values key))
 
 (defn map-insert
   [(values (JsMap String Int))
    (key String)
    (value Int)]
   (JsMap String Int)
-  (js/call values .set key value))
+  (.set values key value))
 
 (def tangent Float
-  (js/call Math .tan 0.5))
+  (.tan Math 0.5))
 
 (def wall-clock Int
-  (js/call Date .now))
+  (.now Date))
 
 (def monotonic-clock Float
-  (js/call performance .now))
+  (.now performance))
 
 (def ceiling Int
-  (js/call Math .ceil 1.5))
+  (.ceil Math 1.5))
 
 (def circle-ratio Float
-  (js/get Math .PI))
+  (.PI Math))
 
 (defn pointer-x [(event JsPointerEvent)] Float
-  (js/get event .clientX))
+  (.clientX event))
 
 (defn canvas-left [(canvas JsCanvas)] Float
-  (js/get (js/call canvas .getBoundingClientRect) .left))
+  (.-left (.getBoundingClientRect canvas)))
 
 (def mixed-ratio Float
   (/ 3 2.0))

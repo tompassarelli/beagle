@@ -274,7 +274,7 @@
                         "v === 0"))
      (check-true
       (string-contains? (checked-overlay-module-emitted consumer)
-                        "import { __gtZero }")))))
+                        "import { \"->Zero\" as __gtZero }")))))
 
 (test-case "full overlay can provide context while only an explicit set is checked"
   (with-overlay-files
@@ -1238,7 +1238,7 @@
         valid-interface
         [schema-version 1]))
      (check-exn
-      #rx"uses interface schema v1; this compiler requires v9"
+      #rx"uses interface schema v1; this compiler requires v11"
       (lambda () (parse-consumer stale-interface)))
      (define valid-box
        (module-interface-type-export-ref valid-interface 'Box))
@@ -1284,10 +1284,10 @@
       (overlay-check-result-ok? second)
       "a prior parse must not license an unrelated bare alias"))))
 
-(test-case "interface v9 includes dynamic-var status in consumer pruning"
+(test-case "interface v11 includes dynamic-var status in consumer pruning"
   (with-overlay-files
    (lambda (root provider-source _consumer-source)
-     (check-equal? INTERFACE-SCHEMA-VERSION 9)
+     (check-equal? INTERFACE-SCHEMA-VERSION 11)
      (check-true INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
      (define plain-edn
        (candidate!

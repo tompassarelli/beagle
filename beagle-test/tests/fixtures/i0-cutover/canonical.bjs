@@ -1,0 +1,23 @@
+#lang beagle/js
+
+(ns fixture.i0.cutover)
+
+(defrecord Profile [name String])
+
+(defn trim-text [text String] String
+  (.trim text))
+
+(defn item-count [items (Vec Int)] Int
+  (.-length items))
+
+(defn rename! [profile Profile] String
+  (set! (.-name profile) "Bea"))
+
+(defn current-date [] Any
+  (new js/Date))
+
+(defn pi [] Float
+  (.-PI js/Math))
+
+(defn floor-value [value Float] Float
+  (.floor js/Math value))

@@ -171,7 +171,7 @@
   (and (> (count sym) 1) (= (char-at sym 0) ".")))
 
 (defn parse-js-member-key [datum]
-  (if (and (string? datum) (dot-method-sym? datum)) {"node" "js-selector" "name" (subs datum 1)} (parse-expr* datum)))
+  (if (and (string? datum) (dot-method-sym? datum)) {"node" "js-selector" "name" (subs datum (if (str/starts-with? datum ".-") 2 1))} (parse-expr* datum)))
 
 (defn ^Boolean qualified-ref? [ref]
   (and (map? ref) (= (get ref "node") "ref") (string? (get ref "qualifier")) (string? (get ref "name"))))
@@ -646,6 +646,8 @@
 
 (def CURRENT-REGISTRY-CELL (atom nil))
 
+(def CURRENT-PARSE-TARGET (atom "clj"))
+
 (def PROGRAM-SYNTAXES-PENDING (atom nil))
 
 (def PROGRAM-SYNTAXES (atom []))
@@ -1108,7 +1110,6 @@
   (and (= head "rescue") (= (count raw) 4)) (scope-walk-single-binder! value table path ctx 2 3 "rescue")
   (and (= head "as->") (>= (count raw) 3)) (scope-walk-as-thread! value table path ctx)
   (and (has-item? ["->" "->>" "cond->" "cond->>" "some->" "some->>"] head) (>= (count raw) 2)) (scope-walk-thread! value table path ctx)
-  (= head "js/quote") value
   (= head "match") (scope-walk-match! value table path ctx)
   :else (scope-walk-generic! value table path ctx)))
   :else value)))
@@ -1640,7 +1641,7 @@
   (if (vector? step) (if (= position "first") (vec (concat [(nth step 0)] [val] (subvec step 1))) (conj step val)) [step val]))
 
 (defn ^Boolean receiver-first-js-thread-head? [head]
-  (and (string? head) (or (= head "js/get") (= head "js/call") (= head "js/set!") (= head "js/delete!") (= head "js/in?"))))
+  (and (string? head) (or (= head "js/delete!") (= head "js/in?"))))
 
 (defn parse-thread-surface-expr! [form]
   (if (and (vector? form) (> (count form) 0) (receiver-first-js-thread-head? (nth form 0))) (let [head (nth form 0)
@@ -1861,259 +1862,6 @@
   acc)))]
   (if (= (count cases) 0) (err! "target-case: no branches provided") {"node" "target-case" "cases" (mapv (fn [^String k] {"target" k "body" (get cases k)}) (vec (sort (vec (keys cases)))))})))
 
-(def JSQ-BINARY-OPS {"+" "+" "-" "-" "*" "*" "/" "/" "%" "%" "**" "**" "===" "===" "!==" "!==" "==" "==" "!=" "!=" "<" "<" ">" ">" "<=" "<=" ">=" ">=" "and" "&&" "or" "||" "nullish" "??" "bit-and" "&" "bit-or" "|" "bit-xor" "^" "<<" "<<" ">>" ">>" ">>>" ">>>" "in" "in" "instanceof" "instanceof"})
-
-(def JSQ-ASSIGN-OPS {"+=" "+=" "-=" "-=" "*=" "*=" "/=" "/=" "%=" "%=" "**=" "**=" "and=" "&&=" "or=" "||=" "nullish=" "??=" "bit-and=" "&=" "bit-or=" "|=" "bit-xor=" "^=" "<<=" "<<=" ">>=" ">>=" ">>>=" ">>>="})
-
-(defn- ^Boolean jsq-binary-op? [s]
-  (and (string? s) (contains? JSQ-BINARY-OPS s)))
-
-(defn- ^Boolean jsq-assign-op? [s]
-  (and (string? s) (contains? JSQ-ASSIGN-OPS s)))
-
-(defn- ^String jsq-strip-assign-op [^String s]
-  (let [js (get JSQ-ASSIGN-OPS s)]
-  (subs js 0 (- (count js) 1))))
-
-(defn- ^Boolean jsq-strlit? [d]
-  (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string")))
-
-(defn- ^Boolean jsq-sym? [d]
-  (string? d))
-
-(defn- ^Boolean jsq-list? [d]
-  (and (vector? d) (> (count d) 0) (not (bracketed? d)) (not (map-tagged? d)) (not (set-tagged? d)) (not (jsq-strlit? d))))
-
-(defn- ^Boolean jsq-splice-sym? [d]
-  (and (string? d) (> (count d) 1) (= (char-at d 0) "~")))
-
-(defn- jsq-splice-kind [^String d]
-  (cond
-  (and (> (count d) 2) (= (char-at d 1) "@")) ["stmts" (subs d 2)]
-  (and (> (count d) 2) (= (char-at d 1) "%")) ["json" (subs d 2)]
-  :else ["expr" (subs d 1)]))
-
-(def JSQ-EXPR-CELL (atom nil))
-
-(def JSQ-STMT-CELL (atom nil))
-
-(defn- pj-expr [d]
-  (apply (deref JSQ-EXPR-CELL) [d]))
-
-(defn- pj-stmt [d]
-  (apply (deref JSQ-STMT-CELL) [d]))
-
-(defn- pj-param-list! [d]
-  (let [items (cond
-  (bracketed? d) (bracket-body d)
-  (vector? d) d
-  :else [])]
-  (mapv (fn [item] (cond
-  (jsq-sym? item) item
-  (and (jsq-list? item) (= (count item) 2) (= (nth item 0) "spread")) {"spread" (nth item 1)}
-  :else (do
-  (err! (str "js/quote: parameter must be a symbol, got " (str item)))
-  "_"))) items)))
-
-(defn- pj-block-body [stmts]
-  (let [parsed (mapv (fn [s] (pj-stmt s)) stmts)]
-  (if (= 1 (count parsed)) (nth parsed 0) {"jsk" "block" "stmts" parsed})))
-
-(defn- pj-object-literal [items]
-  (let [pairs (loop [rest items
-   acc []]
-  (if (< (count rest) 2) acc (recur (subvec rest 2) (conj acc {"key" (pj-expr (nth rest 0)) "val" (pj-expr (nth rest 1))}))))]
-  {"jsk" "object" "pairs" pairs}))
-
-(defn- pj-call-or-member [d]
-  (let [head (nth d 0)]
-  (cond
-  (and (jsq-sym? head) (dot-method-sym? head)) (let [method-name (subs head 1)
-   obj (pj-expr (nth d 1))
-   args (mapv (fn [a] (pj-expr a)) (subvec d 2))]
-  {"jsk" "call" "callee" {"jsk" "member" "object" obj "property" method-name "computed" false} "args" args})
-  (jsq-splice-sym? head) (let [sk (jsq-splice-kind head)]
-  {"jsk" "call" "callee" {"jsk" "splice-expr" "bexpr" (parse-expr* (nth sk 1))} "args" (mapv (fn [a] (pj-expr a)) (subvec d 1))})
-  :else {"jsk" "call" "callee" (pj-expr head) "args" (mapv (fn [a] (pj-expr a)) (subvec d 1))})))
-
-(defn- pj-list-expr! [d]
-  (let [h (nth d 0)
-   n (count d)]
-  (cond
-  (and (= h "=>") (= n 3)) {"jsk" "arrow" "params" (pj-param-list! (nth d 1)) "body" (pj-expr (nth d 2))}
-  (and (= h "=>") (> n 3)) {"jsk" "arrow" "params" (pj-param-list! (nth d 1)) "body" (pj-block-body (subvec d 2))}
-  (and (= h "?") (= n 4)) {"jsk" "ternary" "test" (pj-expr (nth d 1)) "then" (pj-expr (nth d 2)) "else" (pj-expr (nth d 3))}
-  (and (jsq-binary-op? h) (= n 3)) {"jsk" "binary" "op" (get JSQ-BINARY-OPS h) "left" (pj-expr (nth d 1)) "right" (pj-expr (nth d 2))}
-  (and (= h "!") (= n 2)) {"jsk" "unary" "op" "!" "expr" (pj-expr (nth d 1)) "prefix" true}
-  (and (= h "typeof") (= n 2)) {"jsk" "typeof" "expr" (pj-expr (nth d 1))}
-  (and (= h "void") (= n 2)) {"jsk" "unary" "op" "void" "expr" (pj-expr (nth d 1)) "prefix" true}
-  (and (= h "delete") (= n 2)) {"jsk" "unary" "op" "delete" "expr" (pj-expr (nth d 1)) "prefix" true}
-  (= h "new") {"jsk" "new" "callee" (pj-expr (nth d 1)) "args" (mapv (fn [a] (pj-expr a)) (subvec d 2))}
-  (and (= h "await") (= n 2)) {"jsk" "await" "expr" (pj-expr (nth d 1))}
-  (= h "tpl") {"jsk" "template" "parts" (mapv (fn [p] (if (jsq-strlit? p) {"str" (extract-string p)} {"expr" (pj-expr p)})) (subvec d 1))}
-  (and (= h "spread") (= n 2)) {"jsk" "spread" "expr" (pj-expr (nth d 1))}
-  (= h "array") {"jsk" "array" "items" (mapv (fn [a] (pj-expr a)) (subvec d 1))}
-  (= h "object") (pj-object-literal (subvec d 1))
-  (and (= h "dot") (= n 3)) {"jsk" "member" "object" (pj-expr (nth d 1)) "property" (nth d 2) "computed" false}
-  (and (= h "bracket") (= n 3)) {"jsk" "index" "object" (pj-expr (nth d 1)) "idx" (pj-expr (nth d 2))}
-  :else (pj-call-or-member d))))
-
-(defn- pj-expr-impl! [d]
-  (cond
-  (jsq-strlit? d) {"jsk" "literal" "kind" "string" "value" (extract-string d)}
-  (boolean? d) {"jsk" "literal" "kind" "bool" "value" d}
-  (number? d) {"jsk" "literal" "kind" "number" "value" d}
-  (= d "true") {"jsk" "literal" "kind" "bool" "value" true}
-  (= d "false") {"jsk" "literal" "kind" "bool" "value" false}
-  (= d "null") {"jsk" "literal" "kind" "null"}
-  (= d "undefined") {"jsk" "literal" "kind" "undefined"}
-  (= d "this") {"jsk" "ident" "name" "this"}
-  (jsq-splice-sym? d) (let [sk (jsq-splice-kind d)
-   kind (nth sk 0)]
-  (cond
-  (= kind "expr") {"jsk" "splice-expr" "bexpr" (parse-expr* (nth sk 1))}
-  (= kind "json") {"jsk" "splice-json" "bexpr" (parse-expr* (nth sk 1))}
-  :else (do
-  (err! "js/quote: ~@splice not allowed in expression context")
-  {"jsk" "ident" "name" "_"})))
-  (jsq-sym? d) {"jsk" "ident" "name" d}
-  (bracketed? d) {"jsk" "array" "items" (mapv (fn [x] (pj-expr x)) (bracket-body d))}
-  (map-tagged? d) (pj-object-literal (map-body d))
-  (jsq-list? d) (pj-list-expr! d)
-  :else (do
-  (err! (str "js/quote: unsupported expression: " (str d)))
-  {"jsk" "ident" "name" "_"})))
-
-(defn- pj-function! [rest ^Boolean async?]
-  (let [name-d (nth rest 0)
-   params (pj-param-list! (nth rest 1))
-   body-forms (subvec rest 2)]
-  {"jsk" "function" "name" name-d "params" params "body" (pj-block-body body-forms) "async" async? "export" false}))
-
-(defn- pj-method-modifiers! [d]
-  (let [head (nth d 0)]
-  (cond
-  (= head "constructor") [false false "constructor" (subvec d 1)]
-  (= head "static") (let [r (pj-method-modifiers! (subvec d 1))]
-  [true (nth r 1) (nth r 2) (nth r 3)])
-  (= head "async") (let [r (pj-method-modifiers! (subvec d 1))]
-  [(nth r 0) true (nth r 2) (nth r 3)])
-  (= head "get") [false false "get" (subvec d 1)]
-  (= head "set") [false false "set" (subvec d 1)]
-  (= head "method") [false false "method" (subvec d 1)]
-  (jsq-sym? head) [false false "method" d]
-  :else (do
-  (err! (str "js/quote method: unexpected modifier " (str head)))
-  [false false "method" d]))))
-
-(defn- pj-method! [d]
-  (let [mods (pj-method-modifiers! d)
-   static? (nth mods 0)
-   async? (nth mods 1)
-   kind (nth mods 2)
-   rest (nth mods 3)]
-  (if (= kind "constructor") {"jsk" "method" "name" "constructor" "params" (pj-param-list! (nth rest 0)) "body" (pj-block-body (subvec rest 1)) "static" static? "async" async? "kind" "constructor"} {"jsk" "method" "name" (nth rest 0) "params" (pj-param-list! (nth rest 1)) "body" (pj-block-body (subvec rest 2)) "static" static? "async" async? "kind" kind})))
-
-(defn- pj-class! [rest ^Boolean export?]
-  (let [name-d (nth rest 0)
-   remaining (subvec rest 1)
-   has-extends (and (> (count remaining) 0) (= (nth remaining 0) "extends") (> (count remaining) 1))
-   extends-expr (if has-extends (pj-expr (nth remaining 1)) false)
-   methods-raw (if has-extends (subvec remaining 2) remaining)]
-  {"jsk" "class" "name" name-d "extends" extends-expr "methods" (mapv (fn [m] (pj-method! m)) methods-raw) "export" export?}))
-
-(defn- pj-try! [rest]
-  (let [split (loop [forms rest
-   body-acc []]
-  (if (= 0 (count forms)) [body-acc []] (let [f (nth forms 0)]
-  (if (and (jsq-list? f) (or (= (nth f 0) "catch") (= (nth f 0) "finally"))) [body-acc forms] (recur (subvec forms 1) (conj body-acc f))))))
-   body-forms (nth split 0)
-   cf (nth split 1)]
-  (loop [items cf
-   catch-name false
-   catch-body false
-   finally-body false]
-  (if (= 0 (count items)) {"jsk" "try" "body" (pj-block-body body-forms) "catch-name" catch-name "catch-body" catch-body "finally-body" finally-body} (let [c (nth items 0)]
-  (cond
-  (= (nth c 0) "catch") (recur (subvec items 1) (nth c 1) (pj-block-body (subvec c 2)) finally-body)
-  (= (nth c 0) "finally") (recur (subvec items 1) catch-name catch-body (pj-block-body (subvec c 1)))
-  :else (do
-  (err! "js/quote try: expected catch/finally")
-  (recur (subvec items 1) catch-name catch-body finally-body))))))))
-
-(defn- pj-split-if-else [body]
-  (loop [rest body
-   then-acc []]
-  (cond
-  (= 0 (count rest)) [then-acc []]
-  (= (nth rest 0) "else") [then-acc (subvec rest 1)]
-  :else (recur (subvec rest 1) (conj then-acc (nth rest 0))))))
-
-(defn- pj-export! [inner]
-  (cond
-  (and (jsq-list? inner) (= (nth inner 0) "function")) (assoc (pj-function! (subvec inner 1) false) "export" true)
-  (and (jsq-list? inner) (= (nth inner 0) "async")) (let [rest-items (subvec inner 1)]
-  (cond
-  (and (> (count rest-items) 0) (jsq-list? (nth rest-items 0)) (= (nth (nth rest-items 0) 0) "function")) (assoc (pj-function! (subvec (nth rest-items 0) 1) true) "export" true)
-  (and (> (count rest-items) 0) (= (nth rest-items 0) "function")) (assoc (pj-function! (subvec rest-items 1) true) "export" true)
-  :else (do
-  (err! "js/quote: export async must be followed by function")
-  {"jsk" "block" "stmts" []})))
-  (and (jsq-list? inner) (= (nth inner 0) "class")) (pj-class! (subvec inner 1) true)
-  :else (do
-  (err! (str "js/quote: export requires function/async function/class, got " (str inner)))
-  {"jsk" "block" "stmts" []})))
-
-(defn- pj-list-stmt! [d]
-  (let [h (nth d 0)
-   n (count d)]
-  (cond
-  (and (= h "const") (= n 3) (jsq-sym? (nth d 1))) {"jsk" "const" "name" (nth d 1) "value" (pj-expr (nth d 2))}
-  (and (= h "let") (= n 3) (jsq-sym? (nth d 1))) {"jsk" "let" "name" (nth d 1) "value" (pj-expr (nth d 2))}
-  (and (= h "=") (= n 3)) {"jsk" "assign" "target" (pj-expr (nth d 1)) "value" (pj-expr (nth d 2))}
-  (and (jsq-assign-op? h) (= n 3)) {"jsk" "assign" "target" (pj-expr (nth d 1)) "value" {"jsk" "binary" "op" (jsq-strip-assign-op h) "left" (pj-expr (nth d 1)) "right" (pj-expr (nth d 2))}}
-  (and (= h "return") (= n 1)) {"jsk" "return" "expr" false}
-  (and (= h "return") (= n 2)) {"jsk" "return" "expr" (pj-expr (nth d 1))}
-  (and (= h "if") (= n 3)) {"jsk" "if" "test" (pj-expr (nth d 1)) "then" (pj-block-body [(nth d 2)]) "else" false}
-  (and (= h "if") (= n 4)) {"jsk" "if" "test" (pj-expr (nth d 1)) "then" (pj-block-body [(nth d 2)]) "else" (pj-block-body [(nth d 3)])}
-  (and (= h "if") (> n 4)) (let [sp (pj-split-if-else (subvec d 2))]
-  {"jsk" "if" "test" (pj-expr (nth d 1)) "then" (pj-block-body (nth sp 0)) "else" (if (= 0 (count (nth sp 1))) false (pj-block-body (nth sp 1)))})
-  (and (= h "for-of") (jsq-sym? (nth d 1))) {"jsk" "for-of" "binding" (nth d 1) "iterable" (pj-expr (nth d 2)) "body" (pj-block-body (subvec d 3))}
-  (= h "while") {"jsk" "while" "test" (pj-expr (nth d 1)) "body" (pj-block-body (subvec d 2))}
-  (and (= h "throw") (= n 2)) {"jsk" "throw" "expr" (pj-expr (nth d 1))}
-  (= h "try") (pj-try! (subvec d 1))
-  (and (= h "export") (= n 2)) (pj-export! (nth d 1))
-  (and (= h "async") (> n 1) (= (nth d 1) "function")) (pj-function! (subvec d 2) true)
-  (and (= h "async") (= n 2)) (pj-function! (subvec (nth d 1) 1) true)
-  (= h "function") (pj-function! (subvec d 1) false)
-  (= h "class") (pj-class! (subvec d 1) false)
-  (and (jsq-binary-op? h) (= n 3)) {"jsk" "expr-stmt" "expr" {"jsk" "binary" "op" (get JSQ-BINARY-OPS h) "left" (pj-expr (nth d 1)) "right" (pj-expr (nth d 2))}}
-  (and (jsq-sym? h) (not (jsq-splice-sym? h))) {"jsk" "expr-stmt" "expr" (pj-call-or-member d)}
-  :else {"jsk" "expr-stmt" "expr" (pj-expr d)})))
-
-(defn- pj-stmt-impl! [d]
-  (cond
-  (jsq-list? d) (pj-list-stmt! d)
-  (jsq-splice-sym? d) (let [sk (jsq-splice-kind d)
-   kind (nth sk 0)]
-  (cond
-  (= kind "stmts") {"jsk" "splice-stmts" "bexpr" (parse-expr* (nth sk 1))}
-  (= kind "expr") {"jsk" "expr-stmt" "expr" {"jsk" "splice-expr" "bexpr" (parse-expr* (nth sk 1))}}
-  :else {"jsk" "expr-stmt" "expr" {"jsk" "splice-json" "bexpr" (parse-expr* (nth sk 1))}}))
-  :else {"jsk" "expr-stmt" "expr" (pj-expr d)}))
-
-(defn- install-jsq! []
-  (reset! JSQ-EXPR-CELL pj-expr-impl!)
-  (reset! JSQ-STMT-CELL pj-stmt-impl!)
-  nil)
-
-(defn- pj-body! [forms]
-  (install-jsq!)
-  (cond
-  (= 0 (count forms)) {"jsk" "block" "stmts" []}
-  (= 1 (count forms)) (pj-stmt (nth forms 0))
-  :else {"jsk" "block" "stmts" (mapv (fn [f] (pj-stmt f)) forms)}))
-
 (defn parse-list-form! [d]
   (let [head (nth d 0)
    rest-items (subvec d 1)]
@@ -2133,12 +1881,8 @@
   (and (string? head) (= head "unsafe")) (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
   (and (string? head) (str/starts-with? head "unsafe-")) (err! (str "(" head " \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead"))
   (= head "fmt") (err! "(fmt ...) is not supported — use str / format")
-  (= head "js/quote") {"node" "js-quote" "body" (pj-body! rest-items)}
   (and (= head "js/typeof") (= (count rest-items) 1)) (make-js-typeof (parse-expr* (nth rest-items 0)))
-  (= head "js/get") (if (= (count rest-items) 2) (make-js-get (parse-expr* (nth rest-items 0)) (parse-js-member-key (nth rest-items 1))) (err! "js/get expects exactly a receiver and member key"))
-  (= head "js/call") (if (>= (count rest-items) 2) (make-js-call (parse-expr* (nth rest-items 0)) (parse-js-member-key (nth rest-items 1)) (mapv parse-expr* (subvec rest-items 2))) (err! "js/call expects a receiver, member key, and optional arguments"))
-  (= head "js/set!") (if (= (count rest-items) 3) (make-js-set (parse-expr* (nth rest-items 0)) (parse-js-member-key (nth rest-items 1)) (parse-expr* (nth rest-items 2))) (err! "js/set! expects exactly a receiver, member key, and value"))
-  (= head "js/new") (if (>= (count rest-items) 1) (make-js-new (parse-expr* (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1))) (err! "js/new expects a constructor and optional arguments"))
+  (= head "new") (if (>= (count rest-items) 1) (make-js-new (parse-expr* (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1))) (err! "new expects a constructor and optional arguments"))
   (= head "js/delete!") (if (= (count rest-items) 2) (make-js-delete (parse-expr* (nth rest-items 0)) (parse-js-member-key (nth rest-items 1))) (err! "js/delete! expects exactly a receiver and member key"))
   (= head "js/in?") (if (= (count rest-items) 2) (make-js-in (parse-expr* (nth rest-items 0)) (parse-js-member-key (nth rest-items 1))) (err! "js/in? expects exactly a receiver and member key"))
   (= head "def") (parse-def-form! "def" rest-items)
@@ -2196,7 +1940,9 @@
   (and (= head "loop") (>= (count rest-items) 1)) (make-loop (parse-local-bindings! (nth rest-items 0) "loop binding") (mapv parse-expr* (subvec rest-items 1)))
   (= head "recur") (make-recur (mapv parse-expr* rest-items))
   (and (= head "await") (= (count rest-items) 1)) (make-await (parse-expr* (nth rest-items 0)))
-  (and (= head "set!") (= (count rest-items) 2)) (make-set! (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)))
+  (and (= head "set!") (= (count rest-items) 2)) (let [target (parse-expr* (nth rest-items 0))
+   value (parse-expr* (nth rest-items 1))]
+  (if (= (get target "node") "js-get") (make-js-set (get target "receiver") (get target "key") value) (make-set! target value)))
   (and (= head "for") (>= (count rest-items) 1)) (make-for (parse-for-clauses! (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
   (and (= head "if") (= (count rest-items) 3)) (make-if (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)) (parse-expr* (nth rest-items 2)))
   (and (= head "if") (= (count rest-items) 2)) (make-if (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)) nil)
@@ -2284,7 +2030,11 @@
   (and (= head ":") (= (count rest-items) 2)) (make-ascription (parse-expr* (nth rest-items 0)) (parse-type* (nth rest-items 1)))
   (= head ":") (err! (str "ascription requires exactly `(: expr Type)`, got: " (str d)))
   (and (string? head) (keyword-sym? head) (>= (count rest-items) 1)) (make-kw-access head (parse-expr* (nth rest-items 0)) (if (>= (count rest-items) 2) (parse-expr* (nth rest-items 1)) nil))
-  (and (string? head) (dot-method-sym? head) (>= (count rest-items) 1)) (make-method-call head (parse-expr* (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (string? head) (str/starts-with? head ".-") (= (count rest-items) 1)) (let [receiver (parse-expr* (nth rest-items 0))]
+  (if (= (deref CURRENT-PARSE-TARGET) "js") (make-js-get receiver (parse-js-member-key head)) (make-method-call head receiver [])))
+  (and (string? head) (dot-method-sym? head) (>= (count rest-items) 1)) (let [receiver (parse-expr* (nth rest-items 0))
+   args (mapv parse-expr* (subvec rest-items 1))]
+  (if (= (deref CURRENT-PARSE-TARGET) "js") (make-js-call receiver (parse-js-member-key head) args) (make-method-call head receiver args)))
   (string? head) (let [ref (lower-qualified-reference! head)
    parsed-args (mapv parse-expr* rest-items)]
   (if (and (not (nil? ref)) (static-method-ref? ref)) (make-static-call ref parsed-args) (make-call (if (nil? ref) (make-ref! head) ref) parsed-args)))
@@ -2341,7 +2091,6 @@
 (defn- decode-require-libspec! [spec ^Boolean report?]
   (let [unq (if (and (vector? spec) (= (count spec) 2) (= (nth spec 0) "quote")) (nth spec 1) spec)]
   (cond
-  (string? unq) {"ns" unq "alias" false "refer" false}
   (bracketed? unq) (let [items (bracket-body unq)]
   (if (and (> (count items) 0) (string? (nth items 0))) (let [rn (nth items 0)
    n (count items)]
@@ -2361,7 +2110,7 @@
   nil)))
   :else (do
   (if report? (do
-  (err! (str "require: bad libspec " (str unq) " — expected a namespace symbol or [lib :as alias] / [lib :refer [syms]]"))))
+  (err! (str "require: libspec must use canonical vector syntax [source :as alias :refer [names]], got: " (str unq)))))
   nil))))
 
 (defn- parse-require-libspec! [spec]
@@ -2392,13 +2141,10 @@
   (let [r (decode-require-libspec! spec false)]
   (if (some? r) (do
   (swap! requires conj r))))))))
-  (= head "require") (let [specs (subvec d 1)]
-  (if (and (> (count specs) 0) (string? (nth specs 0))) (let [r (decode-require-libspec! (vec (concat [BRACKET-TAG] specs)) false)]
-  (if (some? r) (do
-  (swap! requires conj r)))) (doseq [spec specs]
+  (= head "require") (doseq [spec (subvec d 1)]
   (let [r (decode-require-libspec! spec false)]
   (if (some? r) (do
-  (swap! requires conj r)))))))
+  (swap! requires conj r)))))
   :else nil)))))
   (deref requires)))
 
@@ -2416,6 +2162,7 @@
 
 (defn parse-program! [datums]
   (reset-errors!)
+  (reset! CURRENT-PARSE-TARGET "clj")
   (mac/reset-lowering-counter!)
   (syntax/reset-scope-counter!)
   (install-program-syntaxes! datums)
@@ -2506,16 +2253,14 @@
   nil)))]
   (if (bracketed? name-form) (doseq [nm (bracket-body name-form)]
   (add-extern! nm)) (add-extern! name-form))) (err! "malformed declare-extern — expected (declare-extern name TYPE) or (declare-extern [name1 name2 ...] TYPE)"))
-  (= head "require") (let [specs (subvec d 1)]
-  (if (and (> (count specs) 0) (string? (nth specs 0))) (let [r (parse-require-libspec! (vec (concat [BRACKET-TAG] specs)))]
-  (if (some? r) (do
-  (swap! requires conj r)))) (doseq [spec specs]
+  (= head "require") (doseq [spec (subvec d 1)]
   (let [r (parse-require-libspec! spec)]
   (if (some? r) (do
-  (swap! requires conj r)))))))
+  (swap! requires conj r)))))
   (= head "import") (doseq [spec (subvec d 1)]
   (swap! imports into (parse-import-spec! spec "import")))
   :else nil)))))
+  (reset! CURRENT-PARSE-TARGET (deref target))
   (let [resolved-syntaxes (expand-and-resolve-program-syntax! (deref PROGRAM-SYNTAXES))
    resolved-datums (mapv mac/macro-datum resolved-syntaxes)]
   (install-resolved-identities! resolved-syntaxes)
@@ -2813,7 +2558,6 @@
   (expect! "cond :else canonicalizes to ref else (oracle parity)" (let [node (parse-expr* ["cond" [BRACKET-TAG "x" "a"] [BRACKET-TAG ":else" "b"]])]
   (= (get (nth (get node "clauses") 1) "test") {"node" "ref" "name" "else"})))
   (expect! "literal: nil (null) — no value key (ast-json parity)" (= (parse-expr* nil) {"node" "literal" "kind" "nil"}))
-  (expect! "js/quote null and undefined omit sentinel values (ast-json parity)" (and (= (pj-expr-impl! "null") {"jsk" "literal" "kind" "null"}) (= (pj-expr-impl! "undefined") {"jsk" "literal" "kind" "undefined"})))
   (expect! "literal: nil symbol" (= (get (parse-expr* "nil") "kind") "nil"))
   (expect! "literal: keyword" (= (parse-expr* ":name") {"node" "literal" "kind" "keyword" "value" "name"}))
   (expect! "literal: string datum" (= (parse-expr* ["#%string" "hi"]) {"node" "literal" "kind" "string" "value" "hi"}))
@@ -2992,21 +2736,15 @@
    declared-rest (get (nth (get protocol "methods") 0) "rest")
    impl-rest (get (nth (get (nth (get extension "impls") 0) "methods") 0) "rest")]
   (and (= (get declared-rest "name") "more") (= (get (get declared-rest "constraint") "name") "nonempty?") (= (get impl-rest "name") "more") (= (get (get impl-rest "constraint") "name") "nonempty?"))))
-  (expect! "method-call" (let [node (parse-expr* [".push" "arr" 42])]
-  (and (= (get node "node") "method-call") (= (get node "method") ".push") (= (get (get node "target") "name") "arr"))))
-  (expect! "js/get static selector" (= (parse-expr* ["js/get" "obj" ".raw_name"]) {"node" "js-get" "receiver" {"node" "ref" "name" "obj"} "key" {"node" "js-selector" "name" "raw_name"}}))
-  (expect! "js/get dynamic key" (= (get (get (parse-expr* ["js/get" "obj" "key"]) "key") "node") "ref"))
-  (expect! "js/call receiver-first arguments" (let [node (parse-expr* ["js/call" "obj" ".run" 1 2])]
+  (expect! "direct property access" (let [node (nth (get (parse-program! [["define-target" "js"] [".-raw_name" "obj"]]) "forms") 0)]
+  (= node {"node" "js-get" "receiver" {"node" "ref" "name" "obj"} "key" {"node" "js-selector" "name" "raw_name"}})))
+  (expect! "direct member call" (let [node (nth (get (parse-program! [["define-target" "js"] [".run" "obj" 1 2]]) "forms") 0)]
   (and (= (get node "node") "js-call") (= (get (get node "receiver") "name") "obj") (= (get (get node "key") "name") "run") (= (count (get node "args")) 2))))
-  (expect! "js/set! receiver-first" (= (get (parse-expr* ["js/set!" "obj" ".field" 1]) "node") "js-set"))
-  (expect! "js/new callee-first" (= (get (parse-expr* ["js/new" "Ctor" 1]) "node") "js-new"))
+  (expect! "direct property assignment" (= (get (nth (get (parse-program! [["define-target" "js"] ["set!" [".-field" "obj"] 1]]) "forms") 0) "node") "js-set"))
+  (expect! "new constructor" (= (get (parse-expr* ["new" "Ctor" 1]) "node") "js-new"))
   (expect! "js/delete! receiver-first" (= (get (parse-expr* ["js/delete!" "obj" ".field"]) "node") "js-delete"))
   (expect! "js/in? receiver-first" (= (get (parse-expr* ["js/in?" "obj" ".field"]) "node") "js-in"))
   (expect! "js/typeof" (= (get (parse-expr* ["js/typeof" "obj"]) "node") "js-typeof"))
-  (expect! "js/get rejects wrong arity" (do
-  (reset-errors!)
-  (parse-expr* ["js/get" "obj"])
-  (= (parse-errors) ["js/get expects exactly a receiver and member key"])))
   (expect! "kw-access without default — false (ast-json parity)" (let [node (parse-expr* [":name" "m"])]
   (and (= (get node "node") "kw-access") (= (get node "kw") ":name") (= (get node "default") false))))
   (expect! "kw-access with default" (let [node (parse-expr* [":name" "m" "fallback"])]
@@ -3231,7 +2969,7 @@
   (expect! "parse-program! reserves compiler prefix across metadata binders" (let [_ (parse-program! [["ns" "$beagle$ns"] ["defmacro" "$beagle$macro" [BRACKET-TAG] 1] ["declare-extern" "$beagle$extern" "Any"]])
    errors (parse-errors)]
   (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))
-  (expect! "parse-program! require :as (fold shape)" (let [prog (parse-program! [["ns" "store.fold"] ["require" "store.kernel" ":as" "k"]])]
+  (expect! "parse-program! require :as (fold shape)" (let [prog (parse-program! [["ns" "store.fold"] ["require" [BRACKET-TAG "store.kernel" ":as" "k"]]])]
   (= (get prog "requires") [{"ns" "store.kernel" "alias" "k" "refer" false}])))
   (expect! "parse-program! ns docstring dropped" (let [prog (parse-program! [["ns" "store.fold" ["#%string" "Replay the log."]]])]
   (and (= (get prog "namespace") "store.fold") (= (count (get prog "forms")) 0))))
@@ -3239,9 +2977,9 @@
   (= (get prog "requires") [{"ns" "clojure.string" "alias" "str" "refer" false}])))
   (expect! "parse-program! ns :import retains complete declarations" (let [prog (parse-program! [["ns" "my.app" [":import" ["java.nio.charset" "StandardCharsets"] "java.util.zip.CRC32"]]])]
   (= (get prog "imports") ["java.nio.charset.StandardCharsets" "java.util.zip.CRC32"])))
-  (expect! "parse-program! require :refer" (let [prog (parse-program! [["require" "my.lib" ":refer" ["#%brackets" "f" "g"]]])]
+  (expect! "parse-program! require :refer" (let [prog (parse-program! [["require" [BRACKET-TAG "my.lib" ":refer" [BRACKET-TAG "f" "g"]]]])]
   (= (get prog "requires") [{"ns" "my.lib" "alias" false "refer" ["f" "g"]}])))
-  (expect! "require discovery matches authoritative require parsing" (let [datums [["ns" "my.app" [":require" ["#%brackets" "my.lib" ":as" "m"]]] ["require" "other.lib" ":refer" ["#%brackets" "f"]]]]
+  (expect! "require discovery matches authoritative require parsing" (let [datums [["ns" "my.app" [":require" ["#%brackets" "my.lib" ":as" "m"]]] ["require" [BRACKET-TAG "other.lib" ":refer" [BRACKET-TAG "f"]]]]]
   (= (discover-requires! datums) (get (parse-program! datums) "requires"))))
   (expect! "parse-program! default target clj + gen-class false" (let [prog (parse-program! [["ns" "x.y"]])]
   (and (= (get prog "target") "clj") (= (get prog "gen-class") false))))

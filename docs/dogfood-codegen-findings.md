@@ -35,8 +35,8 @@ statement position (value unused). Two concrete consequences:
    lowers to `xs.forEach(…)`, a statement) spliced into a ternary arm emits invalid
    JS:
    ```clojure
-   (cond (node? v) (js/call out .push v)
-         (array? v) (doseq [e v] (js/call out .push e)) ; -> ... ? v.forEach(...); : null
+   (cond (node? v) (.push out v)
+         (array? v) (doseq [e v] (.push out e)) ; -> ... ? v.forEach(...); : null
          :else nil)
    ```
    emits `... ? v.forEach((e) => {…}); : null` — **`Unexpected :`**. (Cost a real
@@ -77,7 +77,7 @@ unaffected.
 ## 3. Closed extern surfaces — an unknown selector emits with only a NOTE
 
 **Surfaced by:** an externs sweep where a typo in
-`(js/call Math .roundmin min)` compiled to `Math.roundmin(min)` (a runtime
+`(.roundmin Math min)` compiled to `Math.roundmin(min)` (a runtime
 crash) with only a Levenshtein NOTE — caught by byte-diff, not by `check`.
 
 **Why it's a NOTE (deliberate):** `check.rkt` documents that the typed catalog is
@@ -89,7 +89,7 @@ member just not yet typed).
 sets. For a closed extern surface, an unknown selector becomes an ERROR and
 catches the `.roundmin` class at check time. The same mechanism applied to a
 user-declared host object is the enabling precondition for typed Firefox-API
-seams: today `(js/call gBrowser .bogusMethod x)` emits freely (see #7).
+seams: today `(.bogusMethod gBrowser x)` emits freely (see #7).
 
 **Status:** Unresolved in this historical record; it needs a closed-namespace
 marker.
@@ -129,17 +129,17 @@ current file's own `declare-extern`s. (Benign — verbose-profile only — but w
 
 ---
 
-## 6. Member values use `js/get`
+## 6. Member values use direct property access
 
 **Surfaced by:** probing whether Firefox host-global properties could be typed.
 
-Property reads are receiver-first and explicit. A static selector names the
-foreign member without becoming a value on its own:
+Property reads are direct and explicit. A static selector names the foreign
+member without becoming a value on its own:
 ```clojure
 (declare-extern gBrowser Any)
-(def t Any (js/get gBrowser .selectedTab))
+(def t Any (.selectedTab gBrowser))
 ```
-Dynamic member names use the same operator with an expression key.
+Member names are static selectors.
 
 ---
 
@@ -148,7 +148,7 @@ Dynamic member names use the same operator with an expression key.
 **Surfaced by:** evaluating whether typed member declarations could enforce the
 Firefox API seam surface.
 
-**The issue:** `(js/call gBrowser .bogusMethod x)` emits
+**The issue:** `(.bogusMethod gBrowser x)` emits
 `gBrowser.bogusMethod(x)` freely when `gBrowser` has the open `Any` boundary.
 The selector makes the member identity explicit, but it does not claim that the
 host object's member set is complete. Same root as #3.
@@ -156,19 +156,17 @@ host object's member set is complete. Same root as #3.
 
 ---
 
-## 8. Dynamic object access uses the member operators
+## 8. Direct object access uses static selectors
 
-`aset` remains an array operation. JavaScript object members use the same
-receiver-first operators for static selectors and dynamic key expressions:
+`aset` remains an array operation. JavaScript object members use direct
+property access and assignment with static selectors:
 
 ```clojure
-(js/set! obj .knownMember value)
-(js/set! obj key value)
-(js/get obj key)
+(set! (.-knownMember obj) value)
+(.-knownMember obj)
 ```
 
-Dynamic keys emit bracket access. This keeps array indexing and foreign object
-membership as separate operations.
+This keeps array indexing and foreign object membership as separate operations.
 
 ---
 
@@ -180,7 +178,7 @@ uses one spelling:
 
 ```clojure
 (let [m {:emit_sha256 "abc"}]
-  (js/get m .emit_sha256))
+  (.emit_sha256 m))
 ```
 
 Static selectors emit dot access when their exact bytes form a legal JavaScript
@@ -228,9 +226,9 @@ parse.
 **The issue:** an inline anonymous fn whose body is a single map literal lowered to
 an arrow with a BLOCK body:
 ```clojure
-(js/call xs .map
+(.map xs
   (fn [(g Any)] Any
-    {:pref (js/get g .name) :what (js/get g .vector)}))
+    {:pref (.name g) :what (.vector g)}))
 ;; emitted:  xs.map((g) => {pref: g.name, what: g.vector})   ← {…} is a JS block
 ;;           -> SyntaxError: "Expected ; but found :"
 ;; correct:  xs.map((g) => ({pref: g.name, what: g.vector}))  ← ({…}) returns the object

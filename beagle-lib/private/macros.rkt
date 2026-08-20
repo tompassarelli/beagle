@@ -786,21 +786,27 @@
                [result '()])
       (cond
         [(null? items) (values (rewrap bindings (reverse result)) current-env)]
-        [(null? (cdr items))
+        [(or (null? (cdr items)) (null? (cddr items)))
          (values
           (rewrap bindings
-                  (reverse (cons (walk (car items) current-env) result)))
+                  (append (reverse result)
+                          (for/list ([item (in-list items)])
+                            (walk item current-env))))
           current-env)]
         [else
          (define declaration (car items))
-         (define rhs (cadr items))
+         (define type-datum (cadr items))
+         (define rhs (caddr items))
          (define-values (rendered-declaration local-renames names)
            (transform-declaration declaration current-env))
+         (define rendered-type (protect-type type-datum))
          (define rendered-rhs
            (defer-forward-quotes (walk rhs current-env) names))
-         (loop (cddr items)
+         (loop (cdddr items)
                (scope-extend current-env local-renames)
-               (cons rendered-rhs (cons rendered-declaration result)))])))
+               (cons rendered-rhs
+                     (cons rendered-type
+                           (cons rendered-declaration result))))])))
 
   (define (param-declarations params)
     (let loop ([items (unwrap-brackets* params)] [result '()])
@@ -810,7 +816,9 @@
          (if (pair? (cdr items))
              (reverse (cons (cadr items) result))
              (reverse result))]
-        [else (loop (cdr items) (cons (car items) result))])))
+        [(pair? (cdr items))
+         (loop (cddr items) (cons (car items) result))]
+        [else (reverse (cons (car items) result))])))
 
   (define (transform-params params env)
     (define declarations (param-declarations params))
@@ -829,21 +837,34 @@
         [(null? items) (values (rewrap params (reverse result)) body-env)]
         [(eq? (car items) '&)
          (cond
-           [(pair? (cdr items))
+           [(and (pair? (cdr items)) (pair? (cddr items)))
             (define-values (rendered local-renames _names)
               (transform-declaration
                (cadr items) env #:forbidden all-names))
             (values
-             (rewrap params (reverse (cons rendered (cons '& result))))
+             (rewrap
+              params
+              (append
+               (reverse
+                (cons (protect-type (caddr items))
+                      (cons rendered (cons '& result))))
+               (for/list ([item (in-list (cdddr items))])
+                 (walk item env))))
              (scope-extend body-env local-renames))]
            [else (values (rewrap params (reverse (cons '& result))) body-env)])]
-        [else
+        [(pair? (cdr items))
          (define-values (rendered local-renames _names)
            (transform-declaration
             (car items) env #:forbidden all-names))
-         (loop (cdr items)
+         (loop (cddr items)
                (scope-extend body-env local-renames)
-               (cons rendered result))])))
+               (cons (protect-type (cadr items))
+                     (cons rendered result)))]
+        [else
+         (values
+          (rewrap params
+                  (reverse (cons (walk (car items) env) result)))
+          body-env)])))
 
   (define (walk-let-like datum env)
     (define-values (bindings body-env)

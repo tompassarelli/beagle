@@ -67,7 +67,7 @@
          (define-target js)
          (require ir :as ir)
          (def program Any (ir/->IrProgram "test"))
-         (def scene Any (js/new ir/Scene)))))
+         (def scene Any (new ir/Scene)))))
     (check-true (string-contains? emitted "ir.IrProgram(\"test\")"))
     (check-true (string-contains? emitted "new ir.Scene()")))
 

@@ -33,12 +33,12 @@
 
 (test-case "await rejected on nix target"
   (check-exn exn:fail?
-             (lambda () (nix-emit "(js/await (some-call))"))))
+             (lambda () (nix-emit "(await (some-call))"))))
 
-(test-case "bare (await ...) rejected with namespacing hint"
+(test-case "await reports its JavaScript target outside beagle/js"
   (check-exn (lambda (e)
                (and (exn:fail? e)
-                    (regexp-match? #rx"js/await" (exn-message e))))
+                    (regexp-match? #rx"await" (exn-message e))))
              (lambda () (nix-emit "(await (some-call))"))))
 
 ;; --- defn multi-arity rejected ----------------------------------------------
@@ -97,7 +97,8 @@
 ;; --- try-form unwraps the tryEval struct ------------------------------------
 
 (test-case "try-form unwraps tryEval to value-or-null"
-  (define out (nix-emit "(def x (try (foo)))"))
+  (define out
+    (nix-emit "(def x (try (foo) (catch :default error nil)))"))
   (check-true (string-contains? out "builtins.tryEval"))
   (check-true (string-contains? out "bgl____try.success"))
   (check-true (string-contains? out "bgl____try.value")))

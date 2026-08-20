@@ -48,8 +48,6 @@
 ;;
 ;;   target-form        : a form is rejected for the current target
 ;;                        (e.g. set literal on nix). Surface-level.
-;;   template-splice    : a JST template splice has bad shape.
-;;                        Surface-level.
 ;;   arity              : wrong number of arguments to a typed call.
 ;;   type-mismatch      : value type does not match annotation/expected.
 ;;   return-type        : function body's inferred return doesn't
@@ -123,7 +121,6 @@
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
-   'template-splice     'surface-divergence
    'arity               'type-error
    'type-mismatch       'type-error
    'return-type         'type-error

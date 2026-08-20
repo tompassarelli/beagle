@@ -4,5 +4,5 @@
 (defn safe-parse [s String] Int
   (try
     (parse-long s)
-    (catch (e Exception)
+    (catch Exception e
       0)))

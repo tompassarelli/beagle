@@ -280,12 +280,12 @@
    ;; --- let -----------------------------------------------------------------
 
    (check-clj-output "let binds correctly"
-     (list '(defn f [] Int (let [x 10 y 20] (+ x y))))
+     (list '(defn f [] Int (let [x Int 10 y Int 20] (+ x y))))
      "(println (f))"
      "30")
 
    (check-clj-output "nested let scoping"
-     (list '(defn f [] Int (let [x 1] (let [x 2] x))))
+     (list '(defn f [] Int (let [x Int 1] (let [x Int 2] x))))
      "(println (f))"
      "2")
 
@@ -436,13 +436,17 @@
 
    (check-clj-output "as-> surface form executes correctly"
      (list '(defn t-as [(x Int)] Int
-              (as-> x v (+ v 1) (* v 2))))
+              (as-> x v
+                (if (int? v) (+ v 1) 0)
+                (if (int? v) (* v 2) 0))))
      "(println (t-as 3))"
      "8")
 
    (check-clj-output "cond-> surface form executes correctly"
-     (list '(defn t-cond [(x Int) (b Bool)] Int
-              (cond-> x b (+ 10) false (+ 100))))
+     (list '(defn add-int [(value Any) (delta Int)] Int
+              (if (int? value) (+ value delta) 0))
+           '(defn t-cond [(x Int) (b Bool)] Int
+              (cond-> x b (add-int 10) false (add-int 100))))
      "(println (t-cond 5 true)) (println (t-cond 5 false))"
      "15\n5")
 
@@ -453,8 +457,10 @@
      "[2 3 4]\n[1 2 3]")
 
    (check-clj-output "some-> surface form executes correctly"
-     (list '(defn t-some [(x (U Int Nil))] Any
-              (some-> x inc inc)))
+     (list '(defn checked-inc [(value Any)] Int
+              (if (int? value) (inc value) 0))
+           '(defn t-some [(x (U Int Nil))] Any
+              (some-> x checked-inc checked-inc)))
      "(println (t-some 5)) (println (t-some nil))"
      "7\nnil")
 
@@ -470,12 +476,13 @@
      (list '(defn safe-div [(a Int) (b Int)] String
               (try
                 (do (/ a b) "ok")
-                (catch (e Exception) "error"))))
+                (catch Exception e "error"))))
      "(println (safe-div 10 2)) (println (safe-div 10 0))"
      "ok\nerror")
 
    (check-clj-output "try/catch as expression in let"
-     (list '(defn f [] Int (let [x (try 42 (catch (e Exception) 0))] (+ x 1))))
+     (list '(defn f [] Int
+              (let [x Int (try 42 (catch Exception e 0))] (+ x 1))))
      "(println (f))"
      "43")
 
@@ -510,7 +517,7 @@
      (list '(def (#%meta :dynamic *mult*) Int 1)
            '(defn scaled [(n Int)] Int (* n *mult*))
            '(defn scaled-by [(n Int) (m Int)] Int
-              (binding [*mult* m] (scaled n))))
+              (binding [*mult* Int m] (scaled n))))
      "(println (scaled 5))
       (println (scaled-by 5 10))
       (println (scaled 5))"
@@ -519,7 +526,8 @@
    (check-clj-output "binding rebinds multiple dynamic vars at once"
      (list '(def (#%meta :dynamic *a*) Int 1)
            '(def (#%meta :dynamic *b*) Int 2)
-           '(defn combine [] Int (binding [*a* 10 *b* 20] (+ *a* *b*))))
+           '(defn combine [] Int
+              (binding [*a* Int 10 *b* Int 20] (+ *a* *b*))))
      "(println (combine))"
      "30")
 
@@ -929,7 +937,9 @@
 
    (check-clj-output "if-let with map destructuring binds the keys"
      (list `(defn f [(m (Map Keyword Int))] Int
-              (if-let [,(mt ':keys (br 'a 'b) ':or (mt 'a 0 'b 0)) m]
+              (if-let [,(mt ':keys (br 'a 'b) ':or (mt 'a 0 'b 0))
+                       (Map Keyword Int)
+                       m]
                 (+ a b)
                 0)))
      "(println (f {:a 3 :b 4}))"
@@ -937,7 +947,7 @@
 
    (check-clj-output "when-let with seq destructuring"
      (list `(defn f [(xs (HVec Int Int))] Int?
-              (when-let [,(br 'a 'b) xs] (+ a b))))
+              (when-let [,(br 'a 'b) (HVec Int Int) xs] (+ a b))))
      "(println (f [10 20]))"
      "30")
 
@@ -1014,7 +1024,7 @@
         (measure ,(br '(self Measurable) '(declared Int positive?)) Int)))
     'constraints.protocol-impl
     (list
-     '(require constraints.protocol :as p)
+     `(require ,(br 'constraints.protocol ':as 'p))
      '(defn under-ten? [(value Int)] Bool (< value 10))
      '(defrecord Meter [(label String)])
      `(extend-type Meter
@@ -1042,7 +1052,7 @@
      '(defrecord Score [(value Int positive?) (label String)]))
     'constraints.record-user
     (list
-     '(require constraints.records :as records)
+     `(require ,(br 'constraints.records ':as 'records))
      `(defn change [(score records/Score) (value Int)] records/Score
         (with score ,(br ':value 'value))))
     (string-append
@@ -1062,7 +1072,8 @@
      '(defrecord Score [(value Int positive?) (label String)]))
     'constraints.referred-record-user
     (list
-     `(require constraints.referred-records :refer ,(br 'Score '->Score))
+     `(require
+       ,(br 'constraints.referred-records ':refer (br 'Score '->Score)))
      `(defn change [(score Score) (value Int)] Score
         (with score ,(br ':value 'value))))
     (string-append
@@ -1080,7 +1091,7 @@
     (list '(defrecord Widget [(label String)]))
     'models.widget-user
     (list
-     '(require models.widgets :as models)
+     `(require ,(br 'models.widgets ':as 'models))
      `(defn label-of [(value Any)] Any
         (match value
           ,(br '(models/Widget label) 'label)

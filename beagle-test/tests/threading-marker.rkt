@@ -111,7 +111,7 @@
   (check-eq? (threading-marker-kind f) 'some->)
   ;; orig-args: (x f)
   (check-equal? (threading-marker-orig-args f) '(x f))
-  ;; desugared is a let-form (let [g x] (if (nil? g) nil (f g)))
+  ;; desugared is a let-form (let [g Any x] (if (nil? g) nil (f g)))
   (check-true (let-form? (threading-marker-desugared f))))
 
 (test-case "(some->> coll (map f)) kind 'some->>"

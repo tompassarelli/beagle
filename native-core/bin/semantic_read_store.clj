@@ -152,7 +152,6 @@
 
 (defn- valid-entries? [entries]
   (and (vector? entries)
-       (seq entries)
        (every? nonempty-string? entries)
        (= (count entries) (count (set entries)))))
 
@@ -204,7 +203,7 @@
                      "rules must be a lower-case sha256 content ID")
     (not (valid-entries? entries))
     (->QueryRejected :query/invalid-entries
-                     "entries must be non-empty, non-empty strings with no duplicates")
+                     "entries must be a vector of non-empty strings with no duplicates")
     (not (instance? Boolean strict-entry-abi?))
     (->QueryRejected :query/invalid-strict-entry-abi
                      "strict entry ABI must be boolean")

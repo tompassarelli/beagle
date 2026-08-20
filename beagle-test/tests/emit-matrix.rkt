@@ -110,17 +110,17 @@
    (list 'higher-order     "(def m (mapv str [1 2 3]))")
    (list 'kw-as-fn         "(def x (:k {:k 1}))")
    (list 'get-with-default "(def x (get {:k 1} :j 0))")
-   ;; --- JavaScript-only receiver-first operators -----------------------------
+   ;; --- JavaScript-only primitives and direct members -----------------------
    ;; The matrix's clj/nix rows prove these target-owned nodes reject pointedly
    ;; instead of falling through a foreign emitter traversal.
    (list 'js-get
-         "(declare-extern object Any)\n(def x Any (js/get object .value))")
+         "(declare-extern object Any)\n(def x Any (.value object))")
    (list 'js-call
-         "(declare-extern object Any)\n(def x Any (js/call object .method 1))")
+         "(declare-extern object Any)\n(def x Any (.method object 1))")
    (list 'js-set
-         "(declare-extern object Any)\n(def x Any (js/set! object .value 1))")
+         "(declare-extern object Any)\n(def x Any (set! (.-value object) 1))")
    (list 'js-new
-         "(declare-extern Constructor Any)\n(def x Any (js/new Constructor 1))")
+         "(declare-extern Constructor Any)\n(def x Any (new Constructor 1))")
    (list 'js-delete
          "(declare-extern object Any)\n(def x Bool (js/delete! object .value))")
    (list 'js-in

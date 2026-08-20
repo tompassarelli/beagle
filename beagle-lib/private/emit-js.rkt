@@ -14,7 +14,7 @@
          "js-capabilities.rkt"
          "js-emit-utils.rkt"
          "emit-jst.rkt"
-         "emit-js-quote.rkt")
+         "js-sourcemap-v3.rkt")
 
 (define current-js-semantic-contracts (make-parameter #f))
 
@@ -41,6 +41,20 @@
 ;; to export every binding; single-binding forms use it to suppress a second
 ;; export prefix from the batch demand plan.
 (define current-js-export-marked? (make-parameter #f))
+(define current-js-source-map-markers (make-parameter #f))
+(define current-js-source-map-src-table (make-parameter #f))
+
+(define (with-js-source-map-marker node render)
+  (define markers (current-js-source-map-markers))
+  (define source-table (current-js-source-map-src-table))
+  (define location (and markers source-table (hash-ref source-table node #f)))
+  (if (and location (loc-blamable? location))
+      (let ([marker-id (hash-count markers)])
+        (hash-set! markers marker-id location)
+        (string-append (string #\nul) "beagle-src:" (number->string marker-id)
+                       (string #\nul)
+                       (render)))
+      (render)))
 
 (define (js-defn-signature form #:async? async? #:name name #:params params)
   (format "~afunction ~a(~a)" (if async? "async " "") name params))
@@ -688,16 +702,12 @@
   (label target))
 
 ;; Constraints are synchronous unary predicates. Generic structural descent is
-;; deliberate: an await hidden inside a nested fn/js-quote must not escape the
+;; deliberate: an await hidden inside a nested callable must not escape the
 ;; normal async walker merely because constraint metadata is not executable as
 ;; the surrounding body.
 (define (constraint-contains-async? node)
   (cond
-    [(or (await-form? node)
-         (js-ast-await? node)
-         (and (js-ast-function? node) (js-ast-function-async? node))
-         (and (js-ast-method? node) (js-ast-method-async? node))
-         (and (jst-method? node) (jst-method-async? node)))
+    [(await-form? node)
      #t]
     [(pair? node)
      (or (constraint-contains-async? (car node))
@@ -734,7 +744,7 @@
      (error 'beagle-js
             (string-append
              "binding constraint for ~a must be a synchronous unary predicate; "
-             "js/await and async functions are not allowed")
+             "await and async functions are not allowed")
             (binding-target-label binding))]
     [(let ([proof (binding-constraint-proof binding)])
        (not (and (binding-constraint-contract? proof)
@@ -760,7 +770,7 @@
 
 (define (expr-has-await? e)
   (cond
-    [(or (await-form? e) (js-ast-await? e)) #t]
+    [(await-form? e) #t]
     ;; A nested callable owns its own async status. Creating one must not make
     ;; the enclosing function or IIFE async merely because its body awaits.
     [(or (fn-form? e)
@@ -768,9 +778,7 @@
          (letfn-fn? e)
          (defn-form? e)
          (defn-multi? e)
-         (js-ast-function? e)
-         (js-ast-method? e)
-         (jst-method? e))
+         (async-callable? e))
      #f]
     ;; letfn's declarations are callable boundaries, but its executable body
     ;; still belongs to the enclosing function.
@@ -801,7 +809,7 @@
     (format "(async () => { ~a })()" body-str)
     (format "(() => { ~a })()" body-str)))
 
-;; A control-flow form (try/do/let/loop/when/match…) containing js/await compiles
+;; A control-flow form (try/do/let/loop/when/match…) containing await compiles
 ;; to an async IIFE `(async () => {...})()`, which RETURNS A PROMISE. In value or
 ;; statement position that promise must be awaited — otherwise the binding holds a
 ;; pending promise and code after it runs before it settles (the recurring
@@ -825,6 +833,7 @@
 (define current-js-record-constructors (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
+(define current-js-namespace (make-parameter 'beagle.user))
 (define current-js-module-bindings (make-parameter (hasheq)))
 (define current-js-public-esm-members (make-parameter (hasheq)))
 
@@ -1233,6 +1242,108 @@
   (use-runtime!)
   (format "$$bc$~a(~a)" js-name (string-join rendered-args ", ")))
 
+(define PROTOCOL-REGISTRY-NAME "$beagle$protocol$registry")
+
+(define (identity-part->string value)
+  (if (symbol? value) (symbol->string value) (format "~a" value)))
+
+(define (normalized-js-identity name #:record? [record? #f])
+  (define provider
+    (or (and (qualified-ref? name) (qualified-ref-provider-id name))
+        (and record? (hash-ref (current-js-record-ns) name #f))
+        (hash-ref (current-js-symbol-ns) name #f)
+        (current-js-namespace)))
+  (define local-name
+    (if (qualified-ref? name) (qualified-ref-name name) name))
+  (format "~a/~a"
+          (identity-part->string provider)
+          (identity-part->string local-name)))
+
+(define (emit-protocol-implementation-method method)
+  (define implementation
+    (fn-form (impl-method-params method)
+             (impl-method-rest-param method)
+             (impl-method-return-type method)
+             (impl-method-body method)))
+  (format "~v: ~a"
+          (symbol->string (impl-method-name method))
+          (emit-expr implementation)))
+
+(define (emit-protocol-registry prog)
+  (define entries
+    (for*/list ([raw (in-list (program-forms prog))]
+                [extension (in-value (unwrap-definition-form raw))]
+                #:when (extend-type-form? extension)
+                [implementation (in-list (extend-type-form-impls extension))])
+      (format "[~v, ~v, {~a}]"
+              (normalized-js-identity
+               (type-impl-protocol-name implementation))
+              (normalized-js-identity
+               (extend-type-form-type-name extension)
+               #:record? #t)
+              (string-join
+               (map emit-protocol-implementation-method
+                    (type-impl-methods implementation))
+               ", "))))
+  (if (null? entries)
+      ""
+      (format "const ~a = ~a;"
+              PROTOCOL-REGISTRY-NAME
+              (runtime-render-call
+               "protocol_registry"
+               (list (format "[\n  ~a\n]"
+                             (string-join entries ",\n  ")))))))
+
+(define (protocol-forward-sources params rest-param)
+  (define bindings (param-bindings params rest-param))
+  (define hide-all? (bindings-have-constraints? bindings))
+  (define fixed
+    (for/list ([parameter (in-list params)] [index (in-naturals)])
+      (if (or hide-all? (pattern-param? parameter))
+          (format "$beagle$param$~a" index)
+          (emit-js-param parameter))))
+  (values
+   fixed
+   (and rest-param
+        (if hide-all? "$beagle$param$rest" (emit-js-param rest-param)))))
+
+(define (emit-protocol-method protocol-name method)
+  (define params (protocol-method-params method))
+  (define rest-param (protocol-method-rest-param method))
+  (when (null? params)
+    (error 'beagle-js "protocol method ~a has no receiver"
+           (protocol-method-name method)))
+  (define rendered-params (emit-js-params params rest-param))
+  (define rename-env (callable-param-rename-env params rest-param))
+  (define setup (emit-js-param-setup params rest-param rename-env))
+  (define-values (fixed-sources rest-source)
+    (protocol-forward-sources params rest-param))
+  (define receiver (car fixed-sources))
+  (define dispatch
+    (runtime-render-call
+     "protocol_dispatch"
+     (append
+      (list PROTOCOL-REGISTRY-NAME
+            (format "~v" (normalized-js-identity protocol-name))
+            (runtime-render-call "record_type" (list receiver))
+            (format "~v" (symbol->string (protocol-method-name method)))
+            receiver)
+      (cdr fixed-sources)
+      (if rest-source (list (string-append "..." rest-source)) '()))))
+  (format "function ~a(~a) {\n  ~areturn ~a;\n}"
+          (mangle-name (protocol-method-name method))
+          rendered-params
+          (if (null? setup)
+              ""
+              (string-append (string-join setup "\n  ") "\n  "))
+          dispatch))
+
+(define (emit-protocol protocol)
+  (string-join
+   (for/list ([method (in-list (protocol-form-methods protocol))])
+     (emit-protocol-method (protocol-form-name protocol) method))
+   "\n\n"))
+
 ;; Explicit JavaScript host values live in a separate runtime module from
 ;; persistent Beagle values. The import set is derived from emitted calls, so a
 ;; module pays for only the host operations it uses.
@@ -1290,20 +1401,19 @@
   (parameterize ([current-js-bound (set-union (current-js-bound) (list->set syms))])
     (thunk)))
 
-;; Typed-JS class methods are emitted in a separate module, but their bodies
-;; may contain ordinary Beagle AST that routes back through `emit-expr`. Bridge
-;; the method's hidden constrained-parameter names into this emitter too.
-(current-jst-with-binding-env
- (lambda (names rename-additions thunk)
-   (define merged-rename-env
-     (for/fold ([env (current-rename-env)])
-               ([(name js-name) (in-hash rename-additions)])
-       (hash-set env name js-name)))
-   (parameterize
-       ([current-js-bound
-         (set-union (current-js-bound) (list->set names))]
-        [current-rename-env merged-rename-env])
-     (thunk))))
+;; ClojureScript's `this-as` introduces a lexical name for the dynamic receiver.
+;; An arrow preserves the surrounding function's `this` while keeping the
+;; authored name scoped to the body expression.
+(define (emit-this-as args)
+  (match args
+    [(list (? symbol? binding) body)
+     (format "((~a) => ~a)(this)"
+             (mangle-name binding)
+             (with-bindings (list binding)
+               (lambda () (emit-expr body))))]
+    [_
+     (error 'beagle-js
+            "this-as expects a binding name and one body expression")]))
 
 ;; Seed the rep-selection envs from a param list (typed `:-` params): a param's
 ;; declared type populates current-type-env (so var key/elem args resolve) and,
@@ -1666,6 +1776,9 @@
         [(defn-form? f)     (set-add s (defn-form-name f))]
         [(defn-multi? f)    (set-add s (defn-multi-name f))]
         [(record-form? f)   (set-add s (record-form-name f))]
+        [(protocol-form? f)
+         (for/fold ([next s]) ([method (in-list (protocol-form-methods f))])
+           (set-add next (protocol-method-name method)))]
         [(defenum-form? f)  (set-add s (defenum-form-name f))]
         [(defunion-form? f) (set-add s (defunion-form-name f))]
         [(deferror-form? f) (set-add s (deferror-form-name f))]
@@ -1799,13 +1912,12 @@
                   (build-record-constructor-set prog)]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
+                 [current-js-namespace (program-namespace prog)]
                  [current-js-module-bindings
                   (build-js-module-binding-table prog)]
                  [current-js-public-esm-members
                   (build-js-public-esm-member-table prog)]
                  [current-js-semantic-contracts (program-semantic-contracts prog)]
-                 [current-jst-semantic-contracts
-                  (program-semantic-contracts prog)]
                  [current-type-table (program-type-table prog)]  ; P3: per-node arg types for scalar-=== dispatch (#f when capture off)
                  [current-binder-types (program-binder-type-table prog)]
                  [needs-runtime? #f]
@@ -1816,8 +1928,12 @@
     (define header (emit-module-header prog))
     (define body
       (string-join
-       (for/list ([form (in-list (program-forms prog))])
-         (emit-form form))
+       (filter
+        (lambda (emitted) (not (string=? emitted "")))
+        (cons
+         (emit-protocol-registry prog)
+         (for/list ([form (in-list (program-forms prog))])
+           (emit-form form))))
        "\n\n"))
     (define public-exports
       (emit-public-esm-exports local-interface public-esm-exports))
@@ -1900,6 +2016,93 @@
                    "\n" body
                    (if (string=? public-exports "") "\n"
                        (string-append "\n\n" public-exports "\n")))))
+
+;; --- source maps -----------------------------------------------------------
+
+;; The parser preserves source locations on normalized AST nodes in the
+;; program's source table.  Source-map construction stays outside individual
+;; rendering clauses: it never changes JavaScript bytes or public ESM names.
+(define (utf16-width character)
+  (if (> (char->integer character) #xffff) 2 1))
+
+(define (source-map-original-position source-text location)
+  ;; `src-loc-pos` is a 1-based source character offset.  Prefer it over the
+  ;; reader's tab-expanded column so V3 columns follow JavaScript's UTF-16
+  ;; convention.  Location-less synthetic glue never reaches this function.
+  (define position (src-loc-pos location))
+  (if (and (exact-integer? position) (positive? position))
+      (let loop ([offset 0] [line 0] [column 0]
+                 [limit (min (string-length source-text) (sub1 position))])
+        (if (= offset limit)
+            (values line column)
+            (let ([character (string-ref source-text offset)])
+              (if (char=? character #\newline)
+                  (loop (add1 offset) (add1 line) 0 limit)
+                  (loop (add1 offset) line (+ column (utf16-width character)) limit)))))
+      (values (sub1 (src-loc-line location)) (src-loc-col location))))
+
+(define (starts-with-at? text index prefix)
+  (and (<= (+ index (string-length prefix)) (string-length text))
+       (string=? (substring text index (+ index (string-length prefix))) prefix)))
+
+(define (marker-id-at text index)
+  (define prefix (string-append (string #\nul) "beagle-src:"))
+  (and (starts-with-at? text index prefix)
+       (let loop ([cursor (+ index (string-length prefix))] [digits '()])
+         (cond
+           [(starts-with-at? text cursor (string #\nul))
+            (and (pair? digits)
+                 (cons (string->number (list->string (reverse digits)))
+                       (add1 cursor)))]
+           [(and (< cursor (string-length text))
+                 (char-numeric? (string-ref text cursor)))
+            (loop (add1 cursor) (cons (string-ref text cursor) digits))]
+           [else #f]))))
+
+(define (strip-source-map-markers annotated markers source-content)
+  (define output (open-output-string))
+  (define seen-generated-positions (make-hash))
+  (let loop ([offset 0] [line 0] [column 0] [segments '()])
+    (cond
+      [(= offset (string-length annotated))
+       (values (get-output-string output) (reverse segments))]
+      [(marker-id-at annotated offset)
+       =>
+       (lambda (marker)
+         (define marker-id (car marker))
+         (define location (hash-ref markers marker-id))
+         (define position-key (cons line column))
+         (define next-segments
+           (if (hash-ref seen-generated-positions position-key #f)
+               segments
+               (let-values ([(original-line original-column)
+                             (source-map-original-position source-content location)])
+                 (hash-set! seen-generated-positions position-key #t)
+                 (cons (source-map-v3-segment line column 0
+                                              original-line original-column #f)
+                       segments))))
+         (loop (cdr marker) line column next-segments))]
+      [else
+       (define character (string-ref annotated offset))
+       (write-char character output)
+       (if (char=? character #\newline)
+           (loop (add1 offset) (add1 line) 0 segments)
+           (loop (add1 offset) line (+ column (utf16-width character)) segments))])))
+
+(define (js-emit-program-with-source-map prog source-id source-content output-file)
+  (define markers (make-hash))
+  (define annotated
+    (parameterize ([current-js-source-map-markers markers]
+                   [current-js-source-map-src-table (program-src-table prog)])
+      (js-emit-program prog)))
+  (define-values (source segments)
+    (strip-source-map-markers annotated markers source-content))
+  (values source
+          (source-map-v3-document output-file
+                                  (list source-id)
+                                  (list source-content)
+                                  '()
+                                  segments)))
 
 ;; --- module header ---------------------------------------------------------
 
@@ -2041,12 +2244,20 @@
 
 ;; --- top-level forms -------------------------------------------------------
 
-(define (emit-js-multi-arity-function arities [name #f])
-  (define async? (for/or ([a (in-list arities)])
-                   (or (params-have-constraint-await?
-                        (arity-clause-params a)
-                        (arity-clause-rest-param a))
-                       (contains-await? (arity-clause-body a)))))
+(define (emit-js-multi-arity-function arities [name #f]
+                                      #:force-async? [force-async? #f]
+                                      #:reject-unowned-async? [reject-unowned-async? #f])
+  (define inferred-async?
+    (for/or ([a (in-list arities)])
+      (or (params-have-constraint-await?
+           (arity-clause-params a)
+           (arity-clause-rest-param a))
+          (contains-await? (arity-clause-body a)))))
+  (when (and reject-unowned-async? inferred-async?)
+    (error 'beagle-js
+           "a top-level function requiring await must be marked ^:async"))
+  (define async? (or force-async?
+                     (and (not reject-unowned-async?) inferred-async?)))
   (define branches
     (for/list ([a (in-list arities)])
       (define n (length (arity-clause-params a)))
@@ -2100,8 +2311,65 @@
           (if name (format " ~a" name) "")
           (string-join branches "\n")))
 
-(define (emit-form f)
+(define (emit-js-defn f #:force-async? [force-async? #f])
+  (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
+  (define param-rename-env
+    (callable-param-rename-env
+     (defn-form-params f) (defn-form-rest-param f)))
+  (define setup
+    (emit-js-param-setup
+     (defn-form-params f) (defn-form-rest-param f)
+     param-rename-env))
+  (define requires-async?
+    (or (params-have-constraint-await?
+         (defn-form-params f) (defn-form-rest-param f))
+        (contains-await? (defn-form-body f))))
+  (when (and (not force-async?) requires-async?)
+    (error 'beagle-js
+           "a top-level function requiring await must be marked ^:async"))
+  (define async? force-async?)
+  (define bound (binding-names-from-params (defn-form-params f) (defn-form-rest-param f)))
+  (define emitted-body
+    (with-param-envs (defn-form-params f)
+      (lambda ()
+        (parameterize ([current-rename-env param-rename-env])
+          (with-bindings bound
+            (lambda () (emit-body-return (defn-form-body f) "  ")))))
+      (defn-form-rest-param f)))
+  (define inner
+    (string-join (append setup (list emitted-body)) "\n  "))
+  (format "~a~a {\n  ~a\n}"
+          (if (exported-binding? (defn-form-name f) (defn-form-private? f))
+              "export "
+              "")
+          (js-defn-signature f
+                             #:async? async?
+                             #:name (mangle-name (defn-form-name f))
+                             #:params params)
+          inner))
+
+(define (emit-js-async-callable f)
   (cond
+    [(defn-form? f) (emit-js-defn f #:force-async? #t)]
+    [(defn-multi? f)
+     (format "~a~a"
+             (if (exported-binding? (defn-multi-name f) (defn-multi-private? f))
+                 "export "
+                 "")
+             (emit-js-multi-arity-function
+              (defn-multi-arities f)
+              (mangle-name (defn-multi-name f))
+              #:force-async? #t))]
+    [else
+     (error 'beagle-js
+            "authored async marker requires a callable definition, got: ~v"
+            f)]))
+
+(define (emit-form f)
+  (with-js-source-map-marker
+   f
+   (lambda ()
+    (cond
     [(def-form? f)
      (format "~aconst ~a = ~a;"
              (if (exported-binding? (def-form-name f)) "export " "")
@@ -2114,38 +2382,7 @@
              (mangle-name (defonce-form-name f))
              (emit-expr (defonce-form-value f)))]
 
-    [(defn-form? f)
-     (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
-     (define param-rename-env
-       (callable-param-rename-env
-        (defn-form-params f) (defn-form-rest-param f)))
-     (define setup
-       (emit-js-param-setup
-        (defn-form-params f) (defn-form-rest-param f)
-        param-rename-env))
-     (define async?
-       (or (params-have-constraint-await?
-            (defn-form-params f) (defn-form-rest-param f))
-           (contains-await? (defn-form-body f))))
-     (define bound (binding-names-from-params (defn-form-params f) (defn-form-rest-param f)))
-     (define emitted-body
-       (with-param-envs (defn-form-params f)
-         (lambda ()
-           (parameterize ([current-rename-env param-rename-env])
-             (with-bindings bound
-               (lambda () (emit-body-return (defn-form-body f) "  ")))))
-         (defn-form-rest-param f)))
-     (define inner
-       (string-join (append setup (list emitted-body)) "\n  "))
-     (format "~a~a {\n  ~a\n}"
-             (if (exported-binding? (defn-form-name f) (defn-form-private? f))
-                 "export "
-                 "")
-             (js-defn-signature f
-                                #:async? async?
-                                #:name (mangle-name (defn-form-name f))
-                                #:params params)
-             inner)]
+    [(defn-form? f) (emit-js-defn f)]
 
     [(defn-multi? f)
      (format "~a~a"
@@ -2154,7 +2391,11 @@
                  "")
              (emit-js-multi-arity-function
               (defn-multi-arities f)
-              (mangle-name (defn-multi-name f))))]
+              (mangle-name (defn-multi-name f))
+              #:reject-unowned-async? #t))]
+
+    [(async-callable? f)
+     (emit-js-async-callable (async-callable-form f))]
 
     [(record-form? f)
      (emit-record f)]
@@ -2201,35 +2442,31 @@
     [(defscalar-form? f)
      (emit-defscalar f)]
 
-    [(protocol-form? f)
-     (error 'beagle-js "protocol-form is not supported for JS target")]
+    [(protocol-form? f) (emit-protocol f)]
     [(defmulti-form? f)
      (error 'beagle-js "defmulti is not supported for JS target")]
     [(defmethod-form? f)
      (error 'beagle-js "defmethod is not supported for JS target")]
-    [(extend-type-form? f)
-     (error 'beagle-js "extend-type is not supported for JS target")]
-
-    [(js-quote-form? f)
-     (emit-js-ast-node (js-quote-form-body f) 0)]
+    [(extend-type-form? f) ""]
 
     ;; --- Typed JS target forms (jst-*) ----------------------------------------
-    [(jst-class? f)    (emit-jst-class f)]
     [(jst-export? f)
      (emit-form (jst-export-form f))]
     [(jst-export-default? f) (string-append "export default " (emit-form (jst-export-default-form f)))]
-    [(jst-return? f)   (emit-jst-return f)]
 
     ;; Top-level effect-position forms: route ctrl-flow (if/cond/when/let/do)
     ;; through the statement lowering; emit-stmt-inline falls back to
     ;; emit-expr-stmt for plain expressions, so non-ctrl-flow output is unchanged.
-    [else (emit-stmt-inline f "")]))
+    [else (emit-stmt-inline f "")]))))
 
 ;; --- expressions -----------------------------------------------------------
 
 (define (emit-expr e)
-  (parameterize ([current-js-context 'expr])
-    (emit-expr-core e)))
+  (with-js-source-map-marker
+   e
+   (lambda ()
+     (parameterize ([current-js-context 'expr])
+       (emit-expr-core e)))))
 
 (define (emit-expr-stmt e)
   (define s (await-async-iife (emit-expr-core e)))
@@ -2311,25 +2548,15 @@
     [(threading-marker? e)
      (emit-expr (threading-marker-desugared e))]
 
-    [(js-quote-form? e)
-     (emit-js-ast-node (js-quote-form-body e) 0)]
-
     ;; --- Typed JS target expression forms (jst-*) -----------------------------
-    [(jst-dot? e)      (emit-jst-dot e)]
     [(jst-get? e)      (emit-jst-get e)]
     [(jst-call? e)     (emit-jst-call e)]
     [(jst-set? e)      (emit-jst-set e)]
     [(jst-new? e)      (emit-jst-new e)]
     [(jst-delete? e)   (emit-jst-delete e)]
     [(jst-in? e)       (emit-jst-in e)]
-    [(jst-spread? e)   (format "...~a" (emit-jst-expr (jst-spread-expr e)))]
     [(jst-import-meta? e) "import.meta"]
     [(jst-typeof? e)   (emit-jst-typeof e)]
-    [(jst-template? e) (emit-jst-template e)]
-    [(jst-binary? e)   (emit-jst-binary e)]
-    [(jst-unary? e)    (emit-jst-unary e)]
-    [(jst-class? e)    (emit-jst-class e)]
-    [(jst-return? e)   (emit-jst-return e)]
     [(jst-export? e)
      (emit-form (jst-export-form e))]
     [(jst-export-default? e) (string-append "export default " (emit-form (jst-export-default-form e)))]
@@ -2964,6 +3191,8 @@
      (define fn-sym (call-form-fn e))
      (define args (call-form-args e))
      (cond
+       [(eq? fn-sym 'this-as)
+        (emit-this-as args)]
        [(and (qualified-set-member? (current-js-scalar-fns) fn-sym)
              (= 1 (length args)))
         (emit-expr (car args))]
@@ -3138,8 +3367,21 @@
                 [raw (in-list field-raw-params)])
        (emit-binding-constraint-statement field raw))))
   (define validator (emit-record-validator member-name fields))
+  (define record-value
+    (runtime-render-call
+     "record_value"
+     (list
+      (format "~v" (normalized-js-identity member-name #:record? #t))
+      (format "{ _tag: ~v~a }"
+              (symbol->string member-name)
+              (if (null? field-params) ""
+                  (string-append ", "
+                                 (string-join
+                                  (map (lambda (prop param) (format "~a: ~a" prop param))
+                                       field-props field-params)
+                                  ", ")))))))
   (define factory
-    (format "~afunction ~a(~a) { ~a~areturn Object.freeze({ _tag: ~v~a }); }"
+    (format "~afunction ~a(~a) { ~a~areturn ~a; }"
             (if (or (current-js-export-marked?) (exported-binding? constructor-name))
                 "export "
                 "")
@@ -3155,13 +3397,7 @@
                 (string-append
                  (string-join field-installs " ")
                  " "))
-            (symbol->string member-name)
-            (if (null? field-params) ""
-                (string-append ", "
-                               (string-join
-                                (map (lambda (prop param) (format "~a: ~a" prop param))
-                                     field-props field-params)
-                                ", ")))))
+            record-value))
   (define accessors
     (for/list ([field-name (in-list (map (compose symbol->string param-name) fields))]
                [prop (in-list field-props)])
@@ -3245,8 +3481,14 @@
          field-props field-params))
   (define constructor-name
     (string->symbol (string-append "->" name-str)))
+  (define record-value
+    (runtime-render-call
+     "record_value"
+     (list
+      (format "~v" (normalized-js-identity name #:record? #t))
+      (format "{_tag: ~v, ~a}" name-str (string-join field-entries ", ")))))
   (define factory
-    (format "~afunction ~a(~a) {\n  ~a~areturn Object.freeze({_tag: ~v, ~a});\n}"
+    (format "~afunction ~a(~a) {\n  ~a~areturn ~a;\n}"
             (if (or (current-js-export-marked?) (exported-binding? constructor-name))
                 "export "
                 "")
@@ -3262,8 +3504,7 @@
                 (string-append
                  (string-join field-installs "\n  ")
                  "\n  "))
-            name-str
-            (string-join field-entries ", ")))
+            record-value))
   (define accessors
     (for/list ([field-name (in-list field-source-names)]
                [prop (in-list field-props)])
@@ -3312,12 +3553,20 @@
   (define validator
     (and (record-update-contract? contract)
          (record-update-runtime-validator contract)))
-  (if validator
-      ;; The checker resolves this conceptual symbol to the provider-owned
-      ;; helper. Qualified imports route through their namespace object;
-      ;; referred helpers are synthesized into the named ESM import list.
-      (format "Object.freeze(~a(~a))" (emit-expr validator) value)
-      (format "Object.freeze(~a)" value)))
+  (define validated-value
+    (if validator
+        ;; The checker resolves this conceptual symbol to the provider-owned
+        ;; helper. Qualified imports route through their namespace object;
+        ;; referred helpers are synthesized into the named ESM import list.
+        (format "~a(~a)" (emit-expr validator) value)
+        value))
+  (if statically-record?
+      (runtime-render-call
+       "record_value"
+       (list
+        (format "~v" (normalized-js-identity record-name #:record? #t))
+        validated-value))
+      (format "Object.freeze(~a)" validated-value)))
 
 ;; --- match -----------------------------------------------------------------
 
@@ -4506,12 +4755,15 @@
      ;; anyway, so the function falls through to an implicit undefined return.
      (emit-doseq e)]
     [(when-form? e)
-     (define inner (string-append indent "  "))
-     (format "if (~a) {\n~a~a\n~a}"
-             (emit-truthy-expr (when-form-cond-expr e))
-             inner
-             (emit-body-return (when-form-body e) inner)
-             indent)]
+     (with-js-source-map-marker
+      e
+      (lambda ()
+        (define inner (string-append indent "  "))
+        (format "if (~a) {\n~a~a\n~a}"
+                (emit-truthy-expr (when-form-cond-expr e))
+                inner
+                (emit-body-return (when-form-body e) inner)
+                indent)))]
     [(when-let-form? e)
      (define val-str (emit-expr (when-let-form-expr e)))
      (define name (mangle-name (when-let-form-name e)))
@@ -4569,11 +4821,14 @@
                  inner else-str
                  indent)))]
     [(and (if-form? e) (not (if-form-else-expr e)))
-     (define inner (string-append indent "  "))
-     (format "if (~a) {\n~a~a\n~a}"
-             (emit-truthy-expr (if-form-cond-expr e))
-             inner (emit-return-position (if-form-then-expr e) inner)
-             indent)]
+     (with-js-source-map-marker
+      e
+      (lambda ()
+        (define inner (string-append indent "  "))
+        (format "if (~a) {\n~a~a\n~a}"
+                (emit-truthy-expr (if-form-cond-expr e))
+                inner (emit-return-position (if-form-then-expr e) inner)
+                indent)))]
     [(and (if-form? e) (if-form-else-expr e)
           (or (stmt-inline? (if-form-then-expr e))
               (stmt-inline? (if-form-else-expr e))
@@ -4581,13 +4836,16 @@
                    (not (if-form-else-expr (if-form-then-expr e))))
               (and (if-form? (if-form-else-expr e))
                    (not (if-form-else-expr (if-form-else-expr e))))))
-     (define inner (string-append indent "  "))
-     (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
-             (emit-truthy-expr (if-form-cond-expr e))
-             inner (emit-return-position (if-form-then-expr e) inner)
-             indent
-             inner (emit-return-position (if-form-else-expr e) inner)
-             indent)]
+     (with-js-source-map-marker
+      e
+      (lambda ()
+        (define inner (string-append indent "  "))
+        (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
+                (emit-truthy-expr (if-form-cond-expr e))
+                inner (emit-return-position (if-form-then-expr e) inner)
+                indent
+                inner (emit-return-position (if-form-else-expr e) inner)
+                indent)))]
     [else
      (format "return ~a;" (emit-expr e))]))
 
@@ -4631,12 +4889,15 @@
     [(do-form? e)
      (emit-body-stmts (do-form-body e) indent)]
     [(when-form? e)
-     (define inner (string-append indent "  "))
-     (format "if (~a) {\n~a~a\n~a}"
-             (emit-truthy-expr (when-form-cond-expr e))
-             inner
-             (emit-body-stmts (when-form-body e) inner)
-             indent)]
+     (with-js-source-map-marker
+      e
+      (lambda ()
+        (define inner (string-append indent "  "))
+        (format "if (~a) {\n~a~a\n~a}"
+                (emit-truthy-expr (when-form-cond-expr e))
+                inner
+                (emit-body-stmts (when-form-body e) inner)
+                indent)))]
     [(when-let-form? e)
      (define val-str (emit-expr (when-let-form-expr e)))
      (define name (mangle-name (when-let-form-name e)))
@@ -4650,21 +4911,27 @@
                  (emit-body-stmts (when-let-form-body e) inner)
                  indent)))]
     [(and (if-form? e) (not (if-form-else-expr e)))
-     (define inner (string-append indent "  "))
-     (format "if (~a) {\n~a~a\n~a}"
-             (emit-truthy-expr (if-form-cond-expr e))
-             inner
-             (emit-body-stmts-inline (list (if-form-then-expr e)) inner)
-             indent)]
+     (with-js-source-map-marker
+      e
+      (lambda ()
+        (define inner (string-append indent "  "))
+        (format "if (~a) {\n~a~a\n~a}"
+                (emit-truthy-expr (if-form-cond-expr e))
+                inner
+                (emit-body-stmts-inline (list (if-form-then-expr e)) inner)
+                indent)))]
     ;; EFFECT position: if-WITH-else lowers to `if(c){...}else{...}`. Value/tail
     ;; positions keep the ternary (emit-expr-core / emit-return-position). Both
     ;; branches recurse through emit-body-stmts-inline so nested ctrl-flow lowers.
     [(if-form? e)
-     (define inner (string-append indent "  "))
-     (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
-             (emit-truthy-expr (if-form-cond-expr e))
-             inner (emit-body-stmts-inline (list (if-form-then-expr e)) inner) indent
-             inner (emit-body-stmts-inline (list (if-form-else-expr e)) inner) indent)]
+     (with-js-source-map-marker
+      e
+      (lambda ()
+        (define inner (string-append indent "  "))
+        (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
+                (emit-truthy-expr (if-form-cond-expr e))
+                inner (emit-body-stmts-inline (list (if-form-then-expr e)) inner) indent
+                inner (emit-body-stmts-inline (list (if-form-else-expr e)) inner) indent)))]
     ;; EFFECT position: cond lowers to an if / else-if / else chain. No trailing
     ;; `else { return null; }` — a statement context needs no value fallthrough.
     [(cond-form? e)
@@ -4724,4 +4991,5 @@
 (register-backend! 'js js-backend)
 
 (provide js-backend
-         current-js-export-names)
+         current-js-export-names
+         js-emit-program-with-source-map)

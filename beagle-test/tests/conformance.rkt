@@ -16,7 +16,7 @@
 ;;
 ;; Two runnable targets are wired here:
 ;;   - clj : compile .bclj, run via Babashka (bb), print with pr-str
-;;   - js  : compile .bjs,  run via node,      print structurally (JSON)
+;;   - js  : compile .bjs,  run via node,      print with Beagle pr-str
 ;; Nix eval is unwired in this environment, so it is not wired. The TARGETS
 ;; table below is the single extension point:
 ;; add a target descriptor (header / extension / runner / printer) and the
@@ -37,10 +37,8 @@
 ;; coerce compound keys to "[object Object]" and collide, but Beagle routes
 ;; compound-key maps to lib/beagle/hamt.js instead.
 ;;
-;; DIVERGENCES (below CORPUS): a parallel list of DELIBERATE Beagle-JS ≠ Clojure
-;; differences, pinned in BOTH directions — clj must return its value AND js its
-;; (different) value. If js UNEXPECTEDLY matches clj, the test FAILS: the
-;; divergence was resolved and the entry should graduate into CORPUS.
+;; Target printers preserve scalar identity at the observation boundary: a
+;; keyword prints as `:x`, while a string prints as `"x"`.
 ;;
 ;; Run: raco test beagle-test/tests/conformance.rkt
 ;;  or: bin/beagle-test --active-only
@@ -162,26 +160,10 @@
   (values ok? (get-output-string out-cap) (get-output-string err-cap)))
 
 ;; ---------------------------------------------------------------------------
-;; Normalization: collapse the printed result from each target into a single
-;; canonical token so a value-level comparison ignores cosmetic rendering
-;; differences (CLJ prints `:x`; JS prints `x`; CLJ prints `true`; JSON prints
-;; `true`). We deliberately normalize keyword-vs-string for the *looked-up
-;; value* case so a genuine value agreement is not masked by representation;
-;; the boolean/number cases need no special handling. If a target ever prints
-;; an object/array reference token, normalization will NOT turn `false` into
-;; `true` — the gap stays visible.
+;; Both runners print through their target's `pr-str`, so whitespace is the only
+;; normalization permitted. In particular, `:x` and `"x"` remain distinct.
 (define (normalize s)
-  (string-trim
-   ;; strip a single leading `:` so keyword `:x` and string `x`/`"x"` collapse
-   (let ([t (string-trim s)])
-     (cond
-       [(and (> (string-length t) 0) (char=? (string-ref t 0) #\:))
-        (substring t 1)]
-       [(and (>= (string-length t) 2)
-             (char=? (string-ref t 0) #\")
-             (char=? (string-ref t (sub1 (string-length t))) #\"))
-        (substring t 1 (sub1 (string-length t)))]
-       [else t]))))
+  (string-trim s))
 
 ;; ---------------------------------------------------------------------------
 ;; TARGET DESCRIPTORS — the extension point. Each target knows how to wrap a
@@ -211,9 +193,9 @@
       (display "\n(println (pr-str (result)))\n" p)))
   (run-capture BB-PATH (path->string run-path)))
 
-;; JS target: header `#lang beagle/js`, export the fn, run via node, print via
-;; JSON.stringify so compound structure is visible (and arrays/objects don't
-;; collapse to `[object Object]`).
+;; JS target: header `#lang beagle/js`, export the fn, run via node, and observe
+;; the result through the same public `pr-str` boundary that emitted programs
+;; use. This preserves keyword identity instead of exposing its JS object shape.
 ;; Per-node type capture drives P3 representation selection: compound-key maps
 ;; use hamtMap and value sets use hamtSet.
 (define (js-wrap expr ret)
@@ -231,7 +213,12 @@
   (call-with-output-file run-path #:exists 'truncate
     (lambda (p)
       (display body p)
-      (display "\nconsole.log(JSON.stringify(result()));\n" p)))
+      (display
+       (string-append
+        "\nimport { pr_str as $beagle$conformance$pr_str } "
+        "from 'beagle/core.js';\n"
+        "console.log($beagle$conformance$pr_str(result()));\n")
+       p)))
   (run-capture NODE-PATH (path->string run-path)))
 
 (define CLJ-TARGET (target "clj" "bclj" clj-wrap clj-run))
@@ -271,6 +258,7 @@
    (list "scalar-str-eq"  "(= \"a\" \"a\")" "Bool" 'scalar)
    (list "truthy-zero"    "(if 0 \"t\" \"f\")" "String" 'scalar)
    (list "truthy-empty"   "(if \"\" \"t\" \"f\")" "String" 'scalar)
+   (list "keyword-str"    "(str :foo)" "String" 'scalar)
 
    ;; COMPOUND VALUE EQUALITY — RED today (= -> === ref equality on JS).
    (list "map-eq-true"   "(= {:a 1} {:a 1})"  "Bool" 'compound)
@@ -280,10 +268,8 @@
    (list "distinct-by-value"
          "(count (distinct [{:a 1} {:a 1}]))" "Int" 'compound)
 
-   ;; COMPOUND KEY BY VALUE — the looked-up value. CLJ prints :x, JS prints x;
-   ;; normalization collapses keyword/string so a genuine value match is GREEN.
-   ;; (JS object-key coercion happens to find it; representation differs — see
-   ;; KNOWN GAPS in the harness report.)
+   ;; COMPOUND KEY BY VALUE — the looked-up keyword remains a keyword at the
+   ;; observable boundary on both targets.
    (list "map-by-vec-key" "(get {[1 2] :x} [1 2])" "Keyword" 'compound)
 
    ;; ========================================================================
@@ -438,90 +424,8 @@
                                 (target-name tgt) name expr
                                 clj-val (target-name tgt) val kind))]))))))]))
 
-;; ===========================================================================
-;; DIVERGENCES — deliberate, pinned Beagle-JS ≠ Clojure differences.
-;;
-;; Unlike CORPUS (where every non-oracle target must AGREE with CLJ), these are
-;; places Beagle-JS INTENTIONALLY differs from Clojure — emergent from emitting
-;; idiomatic JS rather than re-implementing Clojure's runtime. Each is pinned in
-;; BOTH directions: clj must produce `clj-want` AND js must produce `js-want`.
-;; If js UNEXPECTEDLY matches clj, the test FAILS — the divergence was resolved
-;; and the entry should graduate into CORPUS as a real agreement.
-;;
-;; CRITICAL: the divergence runner compares RAW output (no keyword-stripping
-;; `normalize`) — `normalize` would collapse `:foo` and `"foo"` and MASK the
-;; kw-as-string divergence. We trim whitespace only.
-;;
-;; Each entry: (name expr return-type clj-want js-want)
-;;   - clj-want / js-want are the RAW printed tokens (clj via pr-str; js via
-;;     JSON.stringify), whitespace-trimmed.
-;; ===========================================================================
-
-(define (raw s) (string-trim s))
-
-(define DIVERGENCES
-  (list
-   ;; keyword→string: (str :foo) is ":foo" in Clojure, "foo" in Beagle-JS
-   ;; (keywords emit as bare strings). RAW compare is mandatory here.
-   (list "div-kw-as-string" "(str :foo)" "String" "\":foo\"" "\"foo\"")))
-
-;; Evaluate a case on a target and return the RAW (un-normalized) printed token,
-;; or a status tag string on failure. Mirrors eval-case but skips `normalize`.
-(define (eval-case-raw tgt case-name expr ret)
-  (define src-text ((target-wrap tgt) expr ret))
-  (define src-path
-    (build-path tmp-dir (string-append case-name "-raw." (target-ext tgt))))
-  (define out-ext (if (string=? (target-name tgt) "js") "mjs" "clj"))
-  (define out-path
-    (build-path tmp-dir (string-append case-name "-raw." (target-name tgt) "." out-ext)))
-  (define-values (compiled? cerr) (compile-beagle src-text src-path out-path))
-  (cond
-    [(not (and compiled? (file-exists? out-path)))
-     (values 'compile-fail cerr)]
-    [else
-     (define-values (ran? out err) ((target-run tgt) out-path))
-     (if ran?
-         (values 'ok (raw out))
-         (values 'run-fail (string-append "stdout:\n" out "\nstderr:\n" err)))]))
-
-(define (run-divergences)
-  (run-tests
-   (test-suite "pinned Beagle-JS ≠ Clojure divergences"
-     (for/list ([d (in-list DIVERGENCES)])
-       (define name (list-ref d 0))
-       (define expr (list-ref d 1))
-       (define ret  (list-ref d 2))
-       (define clj-want (list-ref d 3))
-       (define js-want  (list-ref d 4))
-       (test-case (string-append name " :: " expr)
-         ;; ---- clj direction: oracle must produce the pinned clj value ----
-         (define-values (clj-st clj-val) (eval-case-raw CLJ-TARGET name expr ret))
-         (check-eq? clj-st 'ok
-                    (format "DIVERGENCE (clj) failed to evaluate ~a: ~a" name clj-val))
-         (check-equal? clj-val clj-want
-                       (format "~a: clj produced ~a, divergence pins clj at ~a"
-                               name clj-val clj-want))
-         ;; ---- js direction: must produce the pinned js value (≠ clj) ----
-         (define-values (js-st js-val) (eval-case-raw JS-TARGET name expr ret))
-         (check-eq? js-st 'ok
-                    (format "DIVERGENCE (js) failed to evaluate ~a: ~a" name js-val))
-         (check-equal? js-val js-want
-                       (format
-                        (string-append
-                         "~a: js produced ~a, divergence pins js at ~a.\n"
-                         "  If js now equals the clj value (~a), the DIVERGENCE\n"
-                         "  was RESOLVED — move this entry into CORPUS as an agreement.")
-                        name js-val js-want clj-want)))))))
-
 ;; Own the scratch root under exception-/signal-safe containment: bind tmp-dir,
-;; plant the node_modules scaffold, then run both suites. Output and diagnostics
-;; are byte-unchanged — only the previously-orphaned root's lifetime is fixed.
-;;
-;; `run-conformance` and `run-divergences` were two TOP-LEVEL forms, so `raco
-;; test` echoed each suite's failure-count (a bare `0`) between them. Now that
-;; both run inside one containment extent, only the final value is echoed by
-;; raco; reproduce the first suite's echo explicitly — matching raco's own rule
-;; (echo non-void results only) — so stdout stays byte-identical.
+;; plant the node_modules scaffold, then run the suite.
 (call-with-scratch-containment
  "beagle-conformance-~a"
  (lambda (root)
@@ -533,6 +437,4 @@
    ;; on a normal `raco test` / `racket` run, so output stays byte-identical.
    (when (getenv "BEAGLE_SCRATCH_SELFTEST_RAISE")
      (error 'scratch-selftest "planted exception in contained extent"))
-   (let ([r (run-conformance)])
-     (unless (void? r) (println r)))
-   (run-divergences)))
+   (run-conformance)))

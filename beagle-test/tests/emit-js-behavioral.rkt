@@ -204,11 +204,11 @@
       `(def and-events Any ,(br))
       `(def or-events Any ,(br))
       '(defn note! [(value Any)] Any
-         (do (js/call ordered-events .push value) true))
+         (do (.push ordered-events value) true))
       '(defn observe-and! [(value Any)] Any
-         (do (js/call and-events .push value) value))
+         (do (.push and-events value) value))
       '(defn observe-or! [(value Any)] Any
-         (do (js/call or-events .push value) value))
+         (do (.push or-events value) value))
       '(defn ordered! [(limit Int)] Any
          (loop [at Int 0 prior Int -1]
            (or (and (= at limit) prior)
@@ -331,32 +331,17 @@ console.assert(threw, 'frozen record should reject mutation');
      "main();"
      "7")
 
-   ;; js/quote emits fixed JS labels: `.delete`/`.get` on a real Map must call
-   ;; the native methods, not the mangled `.delete$` (which throws TypeError).
-   (check-js-behavior "js/quote reserved-word methods call native Map"
-     (list '(js/quote
-              (const m (new Map))
-              (.set m "k" 1)
-              (const before (.get m "k"))
-              (.delete m "k")
-              (const after (.get m "k"))
-              (if (!== before 1)
-                (throw (new Error "get returned wrong value")))
-              (if (!== after undefined)
-                (throw (new Error "delete did not remove key")))))
-     "")
-
    (check-js-output "selector punctuation is byte-exact"
      (list '(defn invoke-ready [(gate Any)] Bool
-              (js/call gate .ready?)))
+              (.ready? gate)))
      "console.log(invoke_ready({ 'ready?'() { return true; } }));"
      "true")
 
    (check-js-output "authored underscore selectors and map keys round-trip"
      (list '(defn exercise! [(obj Any)] String
-              (do (js/set! obj .total_str
-                    (str (js/get obj .wall_s) ":" (js/call obj .ctx_str)))
-                  (js/get obj .total_str)))
+              (do (set! (.-total_str obj)
+                    (str (.-wall_s obj) ":" (.ctx_str obj)))
+                  (.-total_str obj)))
            `(defn snapshot [] Any ,(mt ':wall_s 8 ':ctx_str "ctx" ':total_str "total")))
      "console.log(exercise_bang({wall_s: 'wall', ctx_str() { return 'ctx'; }, total_str: ''}));
 console.log(JSON.stringify(snapshot()));"
@@ -626,13 +611,14 @@ console.log(JSON.stringify(snapshot()));"
               '(guard Int checked))
          Int
          outer)
-      `(def observations Any ,(br))
+      `(def observations (Atom (Vec Int)) (atom ,(br)))
       '(defn observe-positive! [(candidate Int)] Bool
-         (do (js/set! observations (js/get observations .length) candidate)
+         (do (reset! observations (conj (deref observations) candidate))
              (> candidate 0)))
+      '(defn observation-values [] (Vec Int) (deref observations))
       '(defn sequential-loop! [(start Int)] Int
          (loop [(left Int observe-positive!) start
-                (right Int (fn [(candidate Int)] Bool (> candidate left)))
+                (right Int checked)
                 (+ left 1)]
            (if (= left 1)
                right
@@ -640,7 +626,7 @@ console.log(JSON.stringify(snapshot()));"
      (string-append
       "console.log(parameter_collision_bang(2)); console.log(let_collision_bang(3));\n"
       "console.log(destructure_default({}, 1)); console.log(sequential_loop_bang(2));\n"
-      "console.log(JSON.stringify(observations));\n"
+      "console.log(JSON.stringify(observation_values()));\n"
       "for (const call of [() => parameter_collision_bang(0), "
       "() => let_collision_bang(0), () => sequential_loop_bang(0)]) { try { call(); } "
       "catch (error) { console.log(error.message); }}")
@@ -660,19 +646,6 @@ console.log(JSON.stringify(snapshot()));"
            3)))
      "console.log(sibling_lets(1, 2));"
      "3")
-
-   (check-js-output "typed JS methods enforce constraints before hidden installs"
-     (list
-      '(defn value [(candidate Int)] Bool (> candidate 0))
-      '(js/class Meter
-         (constructor [(value Int value)]
-           Any
-           (js/set! this .value value))
-         (read [] Int (js/return (js/get this .value)))))
-     (string-append
-      "console.log(new Meter(4).read());\n"
-      "try { new Meter(0); } catch (error) { console.log(error.message); }")
-     "4\nBinding constraint failed: value")
 
    (check-js-output "for modifiers and doseq enforce constraints exactly once"
      (list
@@ -696,7 +669,7 @@ console.log(JSON.stringify(snapshot()));"
            twice))
       '(defn collect! [(values (Vec Int))] Nil
          (doseq [(value Int positive?) values]
-           (js/call (deref observed) .push value))))
+           (.push (deref observed) value))))
      (string-append
       "console.log(JSON.stringify(project_bang([{}, {value: 2}, {value: -2}])));\n"
       "console.log(row_checks.value); console.log(default_builds.value);\n"
@@ -915,8 +888,8 @@ JS
 
    ;; --- interop -------------------------------------------------------------
 
-   (check-js-output "js/call member"
-     (list '(defn f [(x Any)] String (js/call x .toString)))
+   (check-js-output "direct member call"
+     (list '(defn f [(x Any)] String (.toString x)))
      "console.log(f(42));"
      "42")
 
@@ -925,45 +898,36 @@ JS
      "console.log(f(-7));"
      "7")
 
-   (check-js-output "js/new constructor"
-     (list '(def d Any (js/new Date 2024)))
+   (check-js-output "direct constructor"
+     (list '(def d Any (new Date 2024)))
      "console.log(typeof d);"
      "object")
 
-   (check-js-output "receiver-first operators preserve selectors, dynamic keys, and this"
+   (check-js-output "direct members preserve selectors and the receiver"
      (list
-      '(defn read-static [(object Any)] Any (js/get object .value))
-      '(defn read-dynamic [(object Any) (key String)] Any
-         (js/get object key))
+      '(defn read-static [(object Any)] Any (.-value object))
       '(defn call-static [(object Any) (n Int)] Any
-         (js/call object .add n))
-      '(defn call-dynamic [(object Any) (key String) (n Int)] Any
-         (js/call object key n))
+         (.add object n))
       '(defn write! [(object Any) (value Any)] Any
-         (js/set! object .value value))
+         (set! (.-value object) value))
       '(defn remove! [(object Any)] Bool (js/delete! object .trash))
       '(defn owns-value? [(object Any)] Bool (js/in? object .value))
       '(defn value-kind [(value Any)] String (js/typeof value)))
      (string-append
       "const object = {value: 3, trash: true, add(n) { return this.value + n; }};\n"
       "console.log(read_static(object));\n"
-      "console.log(read_dynamic(object, 'value'));\n"
       "console.log(call_static(object, 4));\n"
-      "console.log(call_dynamic(object, 'add', 5));\n"
       "console.log(write_bang(object, 9));\n"
       "console.log(owns_value_p(object));\n"
       "console.log(remove_bang(object));\n"
       "console.log('trash' in object);\n"
       "console.log(value_kind(object.value));")
-     "3\n3\n7\n8\n9\ntrue\ntrue\nfalse\nnumber")
+     "3\n7\n9\ntrue\ntrue\nfalse\nnumber")
 
    (check-js-output "receiver and dynamic key expressions evaluate once in source order"
      (list
       `(declare-extern receiver! ,(fn-ty '() 'Any))
       `(declare-extern key! ,(fn-ty '(String) 'String))
-      '(defn get-once! [] Any (js/get (receiver!) (key! "value")))
-      '(defn call-once! [] Any (js/call (receiver!) (key! "add") 2))
-      '(defn set-once! [] Any (js/set! (receiver!) (key! "value") 8))
       '(defn delete-once! [] Bool
          (js/delete! (receiver!) (key! "trash")))
       '(defn in-once! [] Bool (js/in? (receiver!) (key! "value"))))
@@ -976,38 +940,23 @@ JS
       "  events = []; const value = operation();\n"
       "  console.log(`${label}:${value}:${events.join(',')}`);\n"
       "};\n"
-      "observe('get', get_once_bang);\n"
-      "observe('call', call_once_bang);\n"
-      "observe('set', set_once_bang);\n"
       "observe('delete', delete_once_bang);\n"
       "observe('in', in_once_bang);")
      (string-append
-      "get:3:receiver,key\n"
-      "call:5:receiver,key\n"
-      "set:8:receiver,key\n"
       "delete:true:receiver,key\n"
       "in:true:receiver,key"))
 
-   (check-js-output "threading inserts the receiver into JavaScript operators"
+   (check-js-output "threading retains the remaining JavaScript primitives"
      (list
-      '(defn threaded-read [(object Any)] Any
-         (-> object (js/get .value)))
-      '(defn threaded-call [(object Any)] Any
-         (-> object (js/call .add 2)))
-      '(defn threaded-write! [(object Any)] Any
-         (-> object (js/set! .value 10)))
       '(defn threaded-in? [(object Any)] Bool
          (-> object (js/in? .value)))
       '(defn threaded-typeof [(object Any)] String
          (-> object js/typeof)))
      (string-append
       "const object = {value: 3, add(n) { return this.value + n; }};\n"
-      "console.log(threaded_read(object));\n"
-      "console.log(threaded_call(object));\n"
-      "console.log(threaded_write_bang(object));\n"
       "console.log(threaded_in_p(object));\n"
       "console.log(threaded_typeof(object));")
-     "3\n5\n10\ntrue\nobject")
+     "true\nobject")
 
    ;; A set!-mutated let local must execute as mutable JS (`let`, not `const`).
    ;; Static emitter coverage alone misses "Assignment to constant variable".
@@ -1032,7 +981,8 @@ JS
 
    (check-js-output "async/await basic"
      (list `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
-           '(defn f [(x String)] (Promise String) (js/await (fetch-data x))))
+           '(defn (#%meta :async f) [(x String)] (Promise String)
+              (await (fetch-data x))))
      "
 globalThis.fetch_data = async (x) => 'got:' + x;
 f('hello').then(r => console.log(r));
@@ -1041,9 +991,9 @@ f('hello').then(r => console.log(r));
 
    (check-js-output "await in nested let"
      (list `(declare-extern get-val ,(fn-ty '(Int) '(Promise Int)))
-           '(defn f [(n Int)] (Promise Int)
-              (let [a (js/await (get-val n))
-                    b (js/await (get-val (+ n 1)))]
+           '(defn (#%meta :async f) [(n Int)] (Promise Int)
+              (let [a (await (get-val n))
+                    b (await (get-val (+ n 1)))]
                 (+ a b))))
      "
 globalThis.get_val = async (n) => n * 10;
@@ -1051,13 +1001,11 @@ f(3).then(r => console.log(r));
 "
      "70")
 
-   (check-js-behavior "async letfn declarations do not async-wrap a sync body"
-     (list `(declare-extern fetch-value ,(fn-ty '(Int) '(Promise Int)))
-           '(defn outer [] Int
-              (letfn [(later [(value Int)] (Promise Int)
-                        (js/await (fetch-value value)))]
+   (check-js-behavior "sync letfn declarations do not wrap a sync body"
+     (list '(defn outer [] Int
+              (letfn [(later [(value Int)] Int (+ value 1))]
                 42)))
-     "if (outer() !== 42) throw new Error('letfn body became a Promise');")
+     "if (outer() !== 42) throw new Error('letfn body became wrapped');")
 
    ;; --- munge disambiguation ------------------------------------------------
 
@@ -1329,7 +1277,7 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
    (check-js-output "loop with let containing recur"
      (list '(defn find-char [(s String) (target Int)] Int
               (loop [i Int 0]
-                (let [c Int (js/call s .charCodeAt i)]
+                (let [c Int (.charCodeAt s i)]
                   (if (= c target) i (recur (+ i 1)))))))
      "console.log(find_char('hello', 108));"
      "2")

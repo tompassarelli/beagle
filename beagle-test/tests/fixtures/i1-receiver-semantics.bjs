@@ -1,0 +1,20 @@
+#lang beagle/js
+(ns fixtures.i1.receiver-semantics)
+
+(defn call-identity [receiver Any] Any
+  (.identity receiver))
+
+(defn extract-identity [receiver Any] Any
+  (.-identity receiver))
+
+(defn capture-this [] Any
+  (this-as self self))
+
+(defn chained-once [factory (Fn [] Any)] Any
+  (.. (factory) (child) (value)))
+
+(defrecord TypedLeaf [value (Fn [] Int)])
+(defrecord TypedRoot [child (Fn [] TypedLeaf)])
+
+(defn typed-chain [root TypedRoot] Int
+  (.. root (child) (value)))

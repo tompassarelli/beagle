@@ -1,0 +1,7 @@
+#lang beagle/js
+
+;; F2 rejection: ^:async owns a Promise return contract, never a bare value.
+(ns f2.async.async-non-promise-return)
+
+(defn ^:async async-non-promise-return [] Int
+  1)

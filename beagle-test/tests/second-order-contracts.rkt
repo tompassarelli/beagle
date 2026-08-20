@@ -31,7 +31,7 @@
    (lambda ()
      (check-js-prog
       '(defn count-to-one [] Int
-         (loop [(n Int) 0]
+         (loop [n Int 0]
            (if (< n 1) (recur (+ n 1)) n)))))))
 
 (test-case "JsMath sine and cosine require Number and return Float"
@@ -39,36 +39,36 @@
    (lambda ()
      (check-js-prog
       '(defn wave [(angle Number)] Float
-         (+ (js/call Math .sin angle)
-            (js/call Math .cos angle))))))
+         (+ (.sin Math angle)
+            (.cos Math angle))))))
   (check-exn
    #rx"expected .*Number.*got String"
    (lambda ()
      (check-js-prog
       '(defn invalid-wave [] Float
-         (js/call Math .sin "not a number"))))))
+         (.sin Math "not a number"))))))
 
 (test-case "JsMath numeric members require Number and preserve precise results"
   (check-not-exn
    (lambda ()
      (check-js-prog
       '(defn angle [(value Number)] Float
-         (+ (js/call Math .atan value)
-            (js/call Math .atan2 value value)
-            (js/call Math .exp value)
-            (js/call Math .tan value)))
+         (+ (.atan Math value)
+            (.atan2 Math value value)
+            (.exp Math value)
+            (.tan Math value)))
       '(defn minimum [(left Float) (right Float)] Float
-         (js/call Math .min left right))
+         (.min Math left right))
       '(defn maximum [(left Int) (right Int)] Int
-         (js/call Math .max left right)))))
+         (.max Math left right)))))
   (for ([invalid
          (in-list
-          '((defn invalid-atan [] Float (js/call Math .atan "bad"))
-            (defn invalid-atan2 [] Float (js/call Math .atan2 1.0 "bad"))
-            (defn invalid-exp [] Float (js/call Math .exp "bad"))
-            (defn invalid-tan [] Float (js/call Math .tan "bad"))
-            (defn invalid-min [] Float (js/call Math .min 1.0 "bad"))
-            (defn invalid-max [] Int (js/call Math .max 1 "bad"))))])
+          '((defn invalid-atan [] Float (.atan Math "bad"))
+            (defn invalid-atan2 [] Float (.atan2 Math 1.0 "bad"))
+            (defn invalid-exp [] Float (.exp Math "bad"))
+            (defn invalid-tan [] Float (.tan Math "bad"))
+            (defn invalid-min [] Float (.min Math 1.0 "bad"))
+            (defn invalid-max [] Int (.max Math 1 "bad"))))])
     (check-exn #rx"(Int|Number|Float).*String|String.*(Int|Number|Float)"
                (lambda () (check-js-prog invalid)))))
 
@@ -77,89 +77,89 @@
    (lambda ()
      (check-js-prog
       '(defn empty-map-size [] Int
-         (let [(values (JsMap String Int)) (js/new Map)]
-           (js/get values .size)))
+         (let [(values (JsMap String Int)) (new Map)]
+           (.-size values)))
       '(defn string-index [] (JsMap String Int)
-         (js/new Map))
+         (new Map))
       '(defn lookup [(values (JsMap String Int)) (key String)] (U Int Nil)
-         (js/call values .get key))
+         (.get values key))
       '(defn insert
          [(values (JsMap String Int)) (key String) (value Int)]
          (JsMap String Int)
-         (js/call values .set key value)))))
+         (.set values key value)))))
   (check-exn
    #rx"expected (return )?String, got Int"
    (lambda ()
      (check-js-prog
       '(defn invalid-map-size [] String
-         (let [(values (JsMap String Int)) (js/new Map)]
-           (js/get values .size))))))
+         (let [(values (JsMap String Int)) (new Map)]
+           (.-size values))))))
   (check-exn
    #rx"expected .*String.*got Int|expected String, got Int"
    (lambda ()
      (check-js-prog
       '(defn invalid-map-key [(values (JsMap String Int))] (U Int Nil)
-         (js/call values .get 1)))))
+         (.get values 1)))))
   (check-exn
    #rx"expected .*Int.*got String|expected Int, got String"
    (lambda ()
      (check-js-prog
       '(defn invalid-map-value [(values (JsMap String Int))] (JsMap String Int)
-         (js/call values .set "key" "bad")))))
+         (.set values "key" "bad")))))
   (check-exn
    #rx"JsMap String Int.*JsMap String Any|JsMap String Any.*JsMap String Int"
    (lambda ()
      (check-js-prog
       '(defn consume-dynamic-values [(values (JsMap String Any))] Int
-         (js/get values .size))
+         (.-size values))
       '(defn invalid-map-widening [(values (JsMap String Int))] Int
          (consume-dynamic-values values)))))
   (check-exn
-   #rx"js/new cannot infer type parameters K, V without an expected result type"
+   #rx"new cannot infer type parameters K, V without an expected result type"
    (lambda ()
-     (check-js-prog '(def empty-native-map (js/new Map)))))
+     (check-js-prog '(def empty-native-map (new Map)))))
   (check-not-exn
    (lambda ()
      (check-js-prog
       '(declare-extern Map Any)
-      '(defn shadowed-map-constructor [] Any (js/new Map))))))
+      '(defn shadowed-map-constructor [] Any (new Map))))))
 
 (test-case "hosted Math and performance contracts preserve numeric results"
   (check-not-exn
    (lambda ()
      (check-js-prog
       '(defn host-metrics [(value Float)] Float
-         (+ (js/call Math .ceil value)
-            (js/call Math .max value 0.0)
-            (js/get Math .PI)
-            (js/call performance .now))))))
+         (+ (.ceil Math value)
+            (.max Math value 0.0)
+            (.-PI Math)
+            (.now performance))))))
   (check-exn
    #rx"expected Number, got String"
    (lambda ()
      (check-js-prog
       '(defn invalid-ceiling [] Int
-         (js/call Math .ceil "bad"))))))
+         (.ceil Math "bad"))))))
 
 (test-case "DOM pointer and rectangle receivers expose numeric geometry"
   (check-not-exn
    (lambda ()
      (check-js-prog
       '(defn pointer-x [(event JsPointerEvent)] Float
-         (js/get event .clientX))
+         (.-clientX event))
       '(defn canvas-left [(canvas JsCanvas)] Float
-         (js/get (js/call canvas .getBoundingClientRect) .left)))))
+         (.-left (.getBoundingClientRect canvas))))))
   (check-exn
    #rx"expected return String, got Float"
    (lambda ()
      (check-js-prog
       '(defn invalid-pointer-x [(event JsPointerEvent)] String
-         (js/get event .clientX)))))
+         (.-clientX event)))))
   (check-exn
    #rx"expected return String, got Float"
    (lambda ()
      (check-js-prog
       '(defn invalid-canvas-left [(canvas JsCanvas)] String
-         (js/get (js/call canvas .getBoundingClientRect) .left))))))
+         (.-left (.getBoundingClientRect canvas)))))))
 
 (test-case "an explicit Atom Any accepts concrete writes without alias widening"
   (check-not-exn

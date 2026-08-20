@@ -65,15 +65,14 @@
   (check-true (string-contains? output "let cfg = $beagle$param$0[1];"))
   (check-true (string-contains? output "[\"foo_bar\"]")))
 
-(test-case "JS fn, letfn, multi-arity, and JST methods use aggregate slots"
+(test-case "JS fn, letfn, and multi-arity use aggregate slots"
   (define output
     (compile
      'js
      (string-append
       "(def f Any (fn [([x y] (HVec Int Int))] Int x))\n"
       "(defn outer [] Int (letfn [(g [([x y] (HVec Int Int))] Int y)] (g [1 2])))\n"
-      "(defn multi ([([x y] (HVec Int Int))] Int x) ([(x Int)] Int x))\n"
-      "(js/class Pair (first [([x y] (HVec Int Int))] Int (js/return x)))")))
+      "(defn multi ([([x y] (HVec Int Int))] Int x) ([(x Int)] Int x))")))
   (check-true (string-contains? output "$beagle$param$0"))
   (check-true (string-contains? output "...$beagle$args"))
   (check-false (string-contains? output "#(struct:")))

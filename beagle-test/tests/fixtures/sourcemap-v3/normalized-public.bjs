@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns sourcemap.v3.public)
+
+(js/export
+  (defn normalized [value Int] Nil
+    (when true
+      (println value))))

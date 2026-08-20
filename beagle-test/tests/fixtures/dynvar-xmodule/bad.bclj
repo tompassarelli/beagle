@@ -5,4 +5,4 @@
 (require [prov :as p])
 
 (defn b [] Int
-  (binding [p/plain 2] p/plain))
+  (binding [p/plain Int 2] p/plain))

@@ -631,7 +631,7 @@
          (list
           (generated 'let)
           (make-syntax-vector
-           (list name (car values)) span scopes origin properties)
+           (list name (generated 'Any) (car values)) span scopes origin properties)
           (chain (cdr values)))
          span scopes origin properties)))
   (define resolved-expansion
@@ -745,9 +745,6 @@
         (walk-single-binder-form value table path ctx 2 3 'rescue)]
        [(and (eq? head 'as->) (>= (length raw) 3))
         (walk-as-thread value table path ctx)]
-       ;; JavaScript quote data is owned by the JS parser.  In particular,
-       ;; `(let name value)` is a JS declaration, not a Beagle lexical form.
-       [(eq? head 'js/quote) value]
        [(eq? head 'match) (walk-match value table path ctx)]
        [else (walk-generic-sequence value table path ctx)])]
     [else value]))

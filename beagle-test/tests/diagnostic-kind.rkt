@@ -83,9 +83,6 @@
 (test-case "surface-divergence: target-form maps to surface-divergence"
   (check-eq? (kind->cause-class 'target-form) 'surface-divergence))
 
-(test-case "surface-divergence: template-splice maps to surface-divergence"
-  (check-eq? (kind->cause-class 'template-splice) 'surface-divergence))
-
 (test-case "type-error: unknown kinds default to type-error (not logic-error)"
   ;; The histogram must NOT silently bucket unknown rejections into
   ;; logic-error — that bucket stays empty by design.
@@ -125,7 +122,7 @@
   ;; do — confirm by sampling all documented kinds and asserting none
   ;; map to 'logic-error.
   (define documented-kinds
-    '(target-form template-splice arity type-mismatch return-type def-type
+    '(target-form arity type-mismatch return-type def-type
                   let-binding type-bound scalar-predicate
                   scalar-predicate-declaration exhaustive-match
                   native-abi
@@ -354,14 +351,13 @@
   ;; JSON-serializable so it rides the error stream to beagle-repair.
   (check-true (jsexpr? s)))
 
-(test-case "bare-nix family + await + has all attach replace-head suggestions"
+(test-case "bare-nix family + has all attach replace-head suggestions"
   (for ([triple (in-list (list (list '(with-cfg p b) "with-cfg" "nix/with-cfg")
                                (list '(fn-set f b)   "fn-set"   "nix/fn-set")
                                (list '(module f b)   "module"   "nix/module")
                                (list '(overlay f b)  "overlay"  "nix/overlay")
                                (list '(derivation a) "derivation" "nix/derivation")
                                (list '(flake a)      "flake"    "nix/flake")
-                               (list '(await x)      "await"    "js/await")
                                (list '(has m k)      "has"      "contains?")))])
     (define form (car triple))
     (define s (suggestion-for form))
@@ -405,24 +401,18 @@
     (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error-raised))
   (check-pred beagle-diagnostic? e)
   (define d (beagle-diagnostic-details e))
-  ;; human strings unchanged (the ~hundreds of regex-matching tests still pass)
-  (check-equal? (hash-ref d 'expected) "(Vec Int)")
-  (check-equal? (hash-ref d 'actual) "(Vec String)")
-  ;; STRUCTURED type data — what agents / the authoring loop consume
+  ;; Vector literal checking pinpoints the incompatible element.
+  (check-equal? (hash-ref d 'expected) "Int")
+  (check-equal? (hash-ref d 'actual) "String")
+  ;; STRUCTURED type data — what agents / the authoring loop consume.
   (define et (hash-ref d 'expected-type))
-  (check-equal? (hash-ref et 'kind) "app")
-  (check-equal? (hash-ref et 'ctor) "Vec")
-  (check-equal? (hash-ref (car (hash-ref et 'args)) 'name) "Int")
-  (check-equal? (hash-ref (car (hash-ref (hash-ref d 'actual-type) 'args)) 'name) "String")
-  ;; the repair compiler reasons over the STRUCTURE: same ctor, element differs
+  (check-equal? (hash-ref et 'kind) "prim")
+  (check-equal? (hash-ref et 'name) "Int")
+  (check-equal? (hash-ref (hash-ref d 'actual-type) 'name) "String")
+  ;; Scalar mismatches have no collection conversion plan. The Map case below
+  ;; covers the structured collection repair plan.
   (define plan (generate-fix-plan e #f))
-  (check-equal? (hash-ref plan 'category) "collection-element-type")
-  (check-true (regexp-match? #rx"Int" (hash-ref plan 'description)))
-  ;; structured conversion data (agent-consumable, not prose)
-  (check-equal? (hash-ref plan 'collection) "Vec")
-  (check-equal? (hash-ref plan 'position) 0)
-  (check-equal? (hash-ref plan 'from-type) "String")
-  (check-equal? (hash-ref plan 'to-type) "Int"))
+  (check-false plan))
 
 (test-case "structural fix-plan blames the DIFFERING type argument, not the first (Map)"
   ;; Regression: (Map Keyword Int) vs (Map Keyword String) differs only in the

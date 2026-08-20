@@ -112,7 +112,7 @@
 (ok "union and error fields"
     "(defunion Shape (Circle [(radius Int)]))\n(defunion :throwable Boom (Boom [(message String)]))")
 (ok "catch binding"
-    "(defn f [] Int (try 1 (catch (e Exception) 0)))")
+    "(defn f [] Int (try 1 (catch Exception e 0)))")
 
 ;; Every executable/declaration signature has a mandatory positional return.
 (ok "defn return"             "(defn f [(x Int)] Int x)")
@@ -171,8 +171,8 @@
         #rx"rest parameter must bind one name"
         "(defn f [x Int & [y z] (HVec Int Int)] Int x)")
 (err/rx "catch cannot destructure"
-        #rx"catch binding must be"
-        "(defn f [] Int (try 1 (catch ([e more] (HVec Exception Any)) 0)))")
+        #rx"catch name must be a symbol"
+        "(defn f [] Int (try 1 (catch Exception [e more] 0)))")
 (err/rx "duplicate nested parameter name rejected"
         #rx"binds `x` more than once"
         "(defn f [([x x] (HVec Int Int))] Int x)")

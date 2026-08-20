@@ -49,7 +49,7 @@ Enumeration of named constants.
 ### typed binding pairs
 Target: `clj`
 
-A typed binding vector alternates `binding-form Type` — strict pairs all the way through. Every binder carries an authored type; an omitted one is a rejection naming that binder. Sequential and associative destructures may occupy `binding-form`; the whole pattern is ONE binder, and its complete incoming aggregate is what the type describes, so projected names need no annotations of their own. More than one binding in a vector always breaks one complete binding per line, at every binding site and with no width threshold; any single binding stays inline, including a refinement. Record fields take the same pair law, and metadata flattened out of its declaration is rejected. Executable signatures place their mandatory return on the same line as the parameter vector's closing `]`; a type-level function signature is `(Fn [ParamType ...] ReturnType)`. A per-binding constraint is a refinement type expression, `(Int where positive?)`; a cross-parameter `(where ...)` clause always occupies its own line after the return type.
+A typed binding vector alternates `binding-form Type` — strict pairs all the way through. Every binder carries an authored type; an omitted one is a rejection naming that binder. Sequential and associative destructures may occupy `binding-form`; the whole pattern is ONE binder, and its complete incoming aggregate is what the type describes, so projected names need no annotations of their own. More than one binding in a vector always breaks one complete binding per line, at every binding site and with no width threshold; any single binding stays inline, including a refinement. Record fields take the same pair law, and metadata flattened out of its declaration is rejected. Executable signatures place their mandatory return on the same line as the parameter vector's closing `]`; a type-level function signature is `(Fn [ParamType ...] ReturnType)`. A per-binding constraint is a refinement type expression, `(Int where positive?)`; a cross-parameter `(where ...)` clause always occupies its own line after the return type. The legacy grouped spelling is still read while the corpus migrates, but canonical writers emit only the pair form.
 
 ```clojure
 (defrecord Size
@@ -151,28 +151,46 @@ Declare a host function/value with a type so typed code can call into the target
 (declare-extern host/now (Fn [] Int))
 ```
 
-### js/get / js/call / js/set!
+### direct JavaScript interop
 Target: `js`
 
-Receiver-first JavaScript member operations. `.member` is a static selector operand, never a standalone value; a dynamic key expression uses bracket access. Calls stay attached to the receiver so JavaScript `this` is preserved.
+Direct properties and member calls preserve their receiver. Use `.-member` for a static property, `set!` to write it, and bare `new` to construct a host value.
 
 ```clojure
-(declare-extern [obj key] Any)
-(def static-value Any (js/get obj .raw_name))
-(def dynamic-value Any (js/get obj key))
-(def called Any (js/call obj .run 1))
-(def assigned Any (js/set! obj key 2))
+(declare-extern [js/Ctor obj] Any)
+(def static-value Any (.-raw_name obj))
+(def called Any (.run obj 1))
+(def assigned Any (set! (.-raw_name obj) 2))
+(def created Any (new js/Ctor))
 ```
 
-### js/new / js/delete! / js/in? / js/typeof
+### ^:async + await
 Target: `js`
 
-JavaScript-only construction and primitive operations. Member selectors preserve their authored bytes; `js/in?` is receiver-first even though JavaScript emits the key before `in`.
+Mark a function `^:async` when it uses bare `await`; its declared return remains a `Promise` of the awaited value type.
 
 ```clojure
-(declare-extern [Ctor obj] Any)
-(def created Any (js/new Ctor))
-(def removed Bool (js/delete! obj .temporary))
-(def present Bool (js/in? obj .ready))
-(def kind String (js/typeof obj))
+(declare-extern load (Fn [] (Promise Int)))
+(defn ^:async load-value [] (Promise Int)
+  (await (load)))
+```
+
+### this-as
+Target: `js`
+
+Bind JavaScript `this` explicitly for one expression; the form is available on the JavaScript target only.
+
+```clojure
+(defn capture-this [] Any
+  (this-as self self))
+```
+
+### .. receiver chain
+Target: `js`
+
+Thread one JavaScript receiver through member-call steps without losing method receiver semantics.
+
+```clojure
+(declare-extern factory (Fn [] Any))
+(def chained Any (.. (factory) (child) (value)))
 ```

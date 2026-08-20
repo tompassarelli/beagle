@@ -50,6 +50,14 @@
     (check! "query admission succeeds" (cache/query-admitted? admission))
     (cache/admitted-query admission)))
 
+(defn admitted-whole-program-query! []
+  (let [admission
+        (cache/admit-and-identify-query
+         (cache/->QueryAdmissionRequest source-facts digest-b digest-c [] false))]
+    (check! "whole-program query admission succeeds"
+            (cache/query-admitted? admission))
+    (cache/admitted-query admission)))
+
 (defn cache-row [store query]
   (first
    (nth
@@ -63,6 +71,8 @@
 (with-store
  (fn [store]
    (let [query (admitted-query!)
+         whole-program-query (admitted-whole-program-query!)
+         whole-program-query-again (admitted-whole-program-query!)
          row-admission
          (cache/admit-and-identify-query
           (cache/->QueryAdmissionRequest source-rows digest-b digest-c
@@ -87,7 +97,34 @@
                      (let [entry (last facts)]
                        [(:order entry) (:relation entry) (:subject entry)
                         (:slot entry) (:value entry)]))))
+     (check! "whole-program query has a deterministic identity distinct from named entries"
+             (and (= [] (:entries whole-program-query))
+                  (= (:query-digest whole-program-query)
+                     (:query-digest whole-program-query-again))
+                  (not= (:query-digest query)
+                        (:query-digest whole-program-query))))
+     (doseq [[label entries] [["non-vector entries" "demo.core/main"]
+                             ["blank entry" [""]]
+                             ["duplicate entries" ["demo.core/main"
+                                                   "demo.core/main"]]]]
+       (let [admission
+             (cache/admit-and-identify-query
+              (cache/->QueryAdmissionRequest source-facts digest-b digest-c
+                                               entries false))]
+         (check! label
+                 (and (cache/query-rejected? admission)
+                      (= :query/invalid-entries (:code admission))))))
      (check! "first lookup is absence" (cache/result-missing? miss))
+     (let [whole-miss (cache/query! store whole-program-query)]
+       (check! "whole-program first lookup is absence"
+               (cache/result-missing? whole-miss))
+       (check! "whole-program append response is admitted"
+               (cache/result-admitted?
+                (cache/append! store whole-program-query payload)))
+       (let [whole-hit (cache/query! store whole-program-query)]
+         (check! "whole-program exact lookup returns verified payload"
+                 (and (cache/result-admitted? whole-hit)
+                      (= payload (cache/admitted-result-payload whole-hit))))))
      (check! "append response is admitted"
              (cache/result-admitted? (cache/append! store query payload)))
      (let [hit (cache/query! store query)]

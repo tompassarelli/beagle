@@ -277,7 +277,7 @@
   (check-not-exn
    (lambda ()
      (checked
-      "(require clojure.string :as str)\n(defn clean [(s String)] String (str/replace s \"-\" \"_\"))"))))
+      "(require [clojure.string :as str])\n(defn clean [(s String)] String (str/replace s \"-\" \"_\"))"))))
 
 (test-case "qualified stdlib catalog keys are structural"
   (check-true

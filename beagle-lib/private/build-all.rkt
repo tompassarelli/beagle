@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require racket/path
+(require json
+         racket/path
          racket/file
          racket/list
          racket/set
@@ -9,7 +10,9 @@
          "check.rkt"
          "emit.rkt"
          (only-in "emit-nix.rkt" current-nix-module-omit-attrs)
-         (only-in "emit-js.rkt" current-js-export-names)
+         (only-in "emit-js.rkt"
+                  current-js-export-names
+                  js-emit-program-with-source-map)
          "lint.rkt"
          "module-overlay-check.rkt"
          "module-source-root.rkt"
@@ -21,7 +24,6 @@
          "extensions.rkt"
          "targets.rkt"
          "nix-project.rkt"
-         (only-in "batch-compile.rkt" compile-source-for-target)
          ;; #33 datum-IR: build straight from fact triples, skipping the text trip
          (only-in "facts-roundtrip.rkt" edn-triples->syntax read-edn-triples))
 
@@ -43,6 +45,36 @@
 
 (define (canonical-source-id path)
   (path->string (simplify-path (path->complete-path path))))
+
+(define (source-map-source-id path)
+  (path->string (file-name-from-path (string->path path))))
+
+(define (write-js-artifacts prog path out-path source)
+  (define source-content (file->string path))
+  (define map-path
+    (string->path (string-append (path->string out-path) ".map")))
+  (define map-name (path->string (file-name-from-path map-path)))
+  (define js-name (path->string (file-name-from-path out-path)))
+  (define-values (mapped-source document)
+    (js-emit-program-with-source-map prog
+                                     (source-map-source-id path)
+                                     source-content
+                                     js-name))
+  (unless (string=? source mapped-source)
+    (error 'beagle-build-all
+           "source-map annotation changed JavaScript bytes for ~a"
+           path))
+  (define source-with-url
+    (string-append
+     source
+     (if (string-suffix? source "\n") "" "\n")
+     "//# sourceMappingURL=" map-name "\n"))
+  (with-output-to-file out-path #:exists 'replace
+    (lambda () (display source-with-url)))
+  (call-with-output-file map-path #:exists 'replace
+    (lambda (port)
+      (write-json document port)
+      (newline port))))
 
 (define (emit-checked-program prog path out-dir in-place? export-plan
                               #:warning-count [warning-count 0]
@@ -87,8 +119,10 @@
   (when out-dir-part
     (make-directory* out-dir-part))
 
-  (with-output-to-file out-path #:exists 'replace
-    (lambda () (display source)))
+  (if (eq? target 'js)
+      (write-js-artifacts prog path out-path source)
+      (with-output-to-file out-path #:exists 'replace
+        (lambda () (display source))))
 
   (if (positive? warning-count)
       (eprintf "  ~a -> ~a [~a warning(s)]\n"
@@ -164,22 +198,41 @@
     (build-from-stxs
      (read-beagle-syntax path) path out-dir json? warn? in-place? export-plan)))
 
-;; Retargeted text front-end: force `target` through compile-source-for-target
-;; instead of trusting the source's own #lang, mirroring `beagle-build --target`
-;; for a batch (a whole invocation compiles under ONE forced target). Output
-;; naming here is scratch-only (basename + target ext) — never a real ns path.
+;; Retargeted text front-end: force `target` through the same reader → parse →
+;; check → emit stages without trusting the source's own #lang. Output naming
+;; here is scratch-only (basename + target ext) — never a real ns path.
+(define (compile-target-program path target)
+  ;; Keep the checked program that produced the JavaScript so the annotated
+  ;; source-map pass observes the identical type and source-location tables.
+  (define prog
+    (parse-program
+     (retarget-beagle-syntax (read-beagle-syntax path) target)
+     #:source-path path))
+  (type-check-with-locs!
+   prog
+   (lambda (error _location) (raise error))
+   #:capture-types? #t)
+  (unless (getenv "BEAGLE_NO_LINT")
+    (lint-program! prog)
+    (check-scalar-provenance! prog))
+  prog)
+
 (define (build-one-file-target path out-dir json? target)
   (with-handlers
     ([exn:fail? (lambda (e)
                   (if json? (write-json-error e #f)
                       (eprintf "  ~a: ~a\n" path (exn-message e)))
                   #f)])
-    (define source (compile-source-for-target path target))
+    (define prog (compile-target-program path target))
+    (define source (emit-program prog))
     (define base (regexp-replace #rx"\\.b[a-z]+$"
                                  (path->string (file-name-from-path path)) ""))
     (define out-path (build-path (or out-dir ".") (string-append base (extension-for-target target))))
     (when out-dir (make-directory* out-dir))
-    (with-output-to-file out-path #:exists 'replace (lambda () (display source)))
+    (if (eq? target 'js)
+        (write-js-artifacts prog path out-path source)
+        (with-output-to-file out-path #:exists 'replace
+          (lambda () (display source))))
     (eprintf "  ~a -> ~a\n" path (path->string out-path))
     #t))
 

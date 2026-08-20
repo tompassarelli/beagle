@@ -6,9 +6,9 @@
 ;; emit `(x) => ({…})` (an object return), not `(x) => {…}` (a JS block). See the
 ;; arrow-objlit fix in emit-js.rkt.
 (defn pairs [xs Any] Any
-  (js/call xs .map
+  (.map xs
     (fn [g Any] Any
-      {:k (js/get g .name) :v (js/get g .v)})))
+      {:k (.name g) :v (.v g)})))
 
 (defn empties [xs Any] Any
-  (js/call xs .map (fn [_x Any] Any {})))
+  (.map xs (fn [_x Any] Any {})))

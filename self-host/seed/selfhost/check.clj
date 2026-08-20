@@ -450,7 +450,7 @@
   (swap! STATE update "diagnostics" conj msg)
   nil)
 
-(def JS-TARGET-FORM-NAMES {"js-selector" "JavaScript member selector" "js-get" "js/get" "js-call" "js/call" "js-set" "js/set!" "js-new" "js/new" "js-delete" "js/delete!" "js-in" "js/in?" "js-typeof" "js/typeof"})
+(def JS-TARGET-FORM-NAMES {"js-selector" "JavaScript member selector" "js-get" "property access" "js-call" "member call" "js-set" "property assignment" "js-new" "new" "js-delete" "js/delete!" "js-in" "js/in?" "js-typeof" "js/typeof"})
 
 (defn js-target-form-name [value]
   (if (map? value) (get JS-TARGET-FORM-NAMES (get value "node")) nil))
@@ -693,7 +693,7 @@
   (type-contains-any? callable) (binding-constraint-error! (get owner "name") declared callable context "the predicate signature contains Any")
   (not (type-compatible? effective (nth (get callable "params") 0))) (binding-constraint-error! (get owner "name") declared callable context (str "its input does not accept " (type->string effective)))
   (not (type-compatible? (get callable "ret") BOOL-TYPE)) (binding-constraint-error! (get owner "name") declared callable context "the predicate return type is not Bool")
-  (not (constraint-synchronization-proof predicate env)) (binding-constraint-error! (get owner "name") declared callable context "the predicate is not proven synchronous; js/await, async call chains, and callables without interface synchronization metadata are not allowed")
+  (not (constraint-synchronization-proof predicate env)) (binding-constraint-error! (get owner "name") declared callable context "the predicate is not proven synchronous; await, async call chains, and callables without interface synchronization metadata are not allowed")
   :else (remember-binding-constraint-proof! owner true))))))
   nil)))
 
@@ -1084,7 +1084,7 @@
   (if require-complete? (do
   (let [missing (filterv (fn [^String var] (nil? (get (deref bindings) var))) (get poly-t "vars"))]
   (if (> (count missing) 0) (do
-  (emit-diag! (str "beagle: js/new cannot infer type parameter" (if (= (count missing) 1) " " "s ") (str/join ", " missing) " without an expected result type")))))))
+  (emit-diag! (str "beagle: new cannot infer type parameter" (if (= (count missing) 1) " " "s ") (str/join ", " missing) " without an expected result type")))))))
   (apply-type-bindings body bindings)))
 
 (defn resolve-poly-call! [poly-t args env]
@@ -1332,18 +1332,18 @@
   (cond
   (poly-type? member-type) (let [resolved (resolve-poly-call! member-type args env)]
   (if (fn-type? resolved) (do
-  (check-args! (str "js/call ." selector) resolved args env)
+  (check-args! (str "member call ." selector) resolved args env)
   (get resolved "ret")) (do
   (doseq [arg args]
   (infer-expr! arg env))
   ANY)))
   (fn-type? member-type) (do
-  (check-args! (str "js/call ." selector) member-type args env)
+  (check-args! (str "member call ." selector) member-type args env)
   (get member-type "ret"))
   :else (do
   (doseq [arg args]
   (infer-expr! arg env))
-  (emit-diag! (str "beagle: js/call: ." selector " on " owner " has non-callable type " (type->string member-type)))
+  (emit-diag! (str "beagle: member call: ." selector " on " owner " has non-callable type " (type->string member-type)))
   ANY)))
 
 (defn infer-js-member! [^String operation receiver key trailing env]
@@ -1370,7 +1370,7 @@
   (nil? member-type) (do
   (doseq [value trailing]
   (infer-expr! value env))
-  (emit-diag! (str "beagle: js/" operation ": ." selector " is not a member of " (get resolved "owner")))
+  (emit-diag! (str "beagle: " (if (= operation "get") "property access" "member call") ": ." selector " is not a member of " (get resolved "owner")))
   ANY)
   (= operation "get") member-type
   :else (infer-js-member-call! selector (get resolved "owner") member-type trailing env))))))
@@ -1379,7 +1379,7 @@
   (let [raw-contract (infer-expr! callee env)
    contract (if (poly-type? raw-contract) (resolve-poly-call-expected! raw-contract args env expected-result true) raw-contract)]
   (if (fn-type? contract) (do
-  (check-args! "js/new" contract args env)
+  (check-args! "new" contract args env)
   (get contract "ret")) (do
   (doseq [arg args]
   (infer-expr! arg env))
@@ -2464,7 +2464,7 @@
   (= node "js-selector") (purity-result state {})
   (= node "js-get") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [] value state) {})
   (= node "js-call") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") (get value "args") value state) {})
-  (= node "js-set") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [(get value "value")] value (purity-note state "js/set!")) {})
+  (= node "js-set") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [(get value "value")] value (purity-note state "property assignment")) {})
   (= node "js-new") (purity-result (reduce (fn [next child] (purity-analyze-and-escape child next value)) state (into [(get value "callee")] (get value "args"))) {})
   (= node "js-delete") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [] value (purity-note state "js/delete!")) {})
   (= node "js-in") (purity-result (purity-analyze-js-member (get value "receiver") (get value "key") [] value state) {})
@@ -2853,7 +2853,7 @@
    body (make-js-call-node (make-ref "renderer") (make-js-selector "render") [(make-lit "string" "wrong")])
    prog (make-prog [record (make-defn-node "bad-render" [(make-param "renderer" (make-prim "Renderer"))] (make-prim "String") [body])])
    diagnostics (check-program! prog)]
-  (diagnostics-include? diagnostics "call to js/call .render: arg 1 expected Int, got String")))
+  (diagnostics-include? diagnostics "call to member call .render: arg 1 expected Int, got String")))
   (expect! "js-member: polymorphic callable record field resolves result" (let [identity-type (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) nil)
    record (make-record-node "Callable" [(make-param "apply" identity-type)])
    body (make-js-call-node (make-ref "callable") (make-js-selector "apply") [(make-lit "string" "value")])
@@ -2878,12 +2878,12 @@
    body (make-js-get-node (make-ref "person") (make-js-selector "missing"))
    prog (make-prog [record (make-defn-node "missing" [(make-param "person" (make-prim "Person"))] ANY [body])])
    diagnostics (check-program! prog)]
-  (diagnostics-include? diagnostics "beagle: js/get: .missing is not a member of Person")))
+  (diagnostics-include? diagnostics "beagle: property access: .missing is not a member of Person")))
   (expect! "js-member: calling a non-callable record field rejects" (let [record (make-record-node "Person" [(make-param "age" (make-prim "Int"))])
    body (make-js-call-node (make-ref "person") (make-js-selector "age") [])
    prog (make-prog [record (make-defn-node "bad-age-call" [(make-param "person" (make-prim "Person"))] ANY [body])])
    diagnostics (check-program! prog)]
-  (diagnostics-include? diagnostics "beagle: js/call: .age on Person has non-callable type Int")))
+  (diagnostics-include? diagnostics "beagle: member call: .age on Person has non-callable type Int")))
   (expect! "js-member: open/Any receivers and dynamic key remain Any" (let [any-static (make-js-get-node (make-ref "dynamic") (make-js-selector "missing"))
    vec-static (make-js-get-node (make-ref "values") (make-js-selector "nativeMethod"))
    dynamic-key (make-js-get-node (make-ref "values") (make-ref "key"))]

@@ -459,9 +459,9 @@
 (define (rest-type->beagle t)
   ;; A TypeScript tuple-union rest type degrades to Any, but a Beagle rest
   ;; binding always receives the aggregate collection.
-  (if (regexp-match? #rx"^\\(Vec .+\\)$" t)
-      t
-      (format "(Vec ~a)" t)))
+  (if (regexp-match? #rx"^\\(Vec (.+)\\)$" t)
+      (format "(List ~a)" (cadr (regexp-match #rx"^\\(Vec (.+)\\)$" t)))
+      (format "(List ~a)" t)))
 
 (define (params->beagle params)
   (string-join
@@ -476,10 +476,24 @@
 (define (arg-refs params)
   (string-join
    (for/list ([p (in-list params)] [i (in-naturals)])
-     (if (ts-param-rest? p)
-         (format "(js/spread ~a)" (param-name-for p i))
-         (param-name-for p i)))
+     (param-name-for p i))
    " "))
+
+(define (rest-param params)
+  (for/first ([p (in-list params)] [i (in-naturals)]
+              #:when (ts-param-rest? p))
+    (param-name-for p i)))
+
+(define (rest-args params)
+  (define rest-name (rest-param params))
+  (and rest-name
+       (format "(concat [~a] (vec ~a))"
+               (string-join
+                (for/list ([p (in-list params)] [i (in-naturals)]
+                           #:unless (ts-param-rest? p))
+                  (param-name-for p i))
+                " ")
+               rest-name)))
 
 ;; clause: (list params ret-type body-format), body-format taking the argument list.
 (define (emit-clauses name clauses)
@@ -552,13 +566,15 @@
     ;; A class with no declared constructor still constructs with zero arguments.
     (emit! (format "make-~a" prefix)
            (if (null? ctors)
-               (list (list '() "Any" (format "(js/new ~a)" cname)))
+               (list (list '() "Any" (format "(new ~a)" cname)))
                (member-clauses ctors
                                values
                                (lambda (params m)
-                                 (if (null? params)
-                                     (format "(js/new ~a)" cname)
-                                     (format "(js/new ~a ~a)" cname (arg-refs params))))))))
+                                 (define args (rest-args params))
+                                 (cond
+                                   [args (format "(.construct js/Reflect ~a ~a)" cname args)]
+                                   [(null? params) (format "(new ~a)" cname)]
+                                   [else (format "(new ~a ~a)" cname (arg-refs params))]))))))
 
   (for ([group (in-list (group-members (ts-class-members c) 'method))])
     (define name (car group))
@@ -566,9 +582,11 @@
            (member-clauses (cdr group)
                            (lambda (params) (cons (ts-param "self" "any" #f #f) params))
                            (lambda (params m)
-                             (if (null? params)
-                                 (format "(js/call self .~a)" name)
-                                 (format "(js/call self .~a ~a)" name (arg-refs params)))))))
+                             (define args (rest-args params))
+                             (cond
+                               [args (format "(.apply (.~a self) self ~a)" name args)]
+                               [(null? params) (format "(.~a self)" name)]
+                               [else (format "(.~a self ~a)" name (arg-refs params))])))))
 
   (for ([group (in-list (if runtime? (group-members (ts-class-members c) 'static-method) '()))])
     (define name (car group))
@@ -576,12 +594,14 @@
            (member-clauses (cdr group)
                            values
                            (lambda (params m)
-                             (if (null? params)
-                                 (format "(~a/~a)" cname name)
-                                 (format "(~a/~a ~a)" cname name (arg-refs params)))))))
+                             (define args (rest-args params))
+                             (cond
+                               [args (format "(.apply (.~a ~a) ~a ~a)" name cname cname args)]
+                               [(null? params) (format "(.~a ~a)" name cname)]
+                               [else (format "(.~a ~a ~a)" name cname (arg-refs params))])))))
 
   ;; Only primitive-typed properties are worth wrapping: an `Any` accessor adds
-  ;; no information beyond direct `js/get`.
+  ;; no information beyond direct property access.
   (define seen-props (make-hash))
   (for ([m (in-list (ts-class-members c))]
         #:when (eq? (ts-member-kind m) 'property)
@@ -592,12 +612,12 @@
       (define self-param (list (ts-param "self" "any" #f #f)))
       (emit! (format "~a-~a" prefix (kebab (ts-member-name m)))
              (list (list self-param bt
-                         (format "(js/get self .~a)" (ts-member-name m)))))
+                         (format "(.-~a self)" (ts-member-name m)))))
       (unless (ts-member-readonly? m)
         (emit! (format "set-~a-~a!" prefix (kebab (ts-member-name m)))
                (list (list (append self-param (list (ts-param "value" (ts-member-type m) #f #f)))
                            "Nil"
-                           (format "(do (js/set! self .~a value) nil)" (ts-member-name m))))))))
+                           (format "(do (set! (.-~a self) value) nil)" (ts-member-name m))))))))
   (values (get-output-string out) (unbox emitted-any?)))
 
 (define (emit-module namespace module-spec classes names runtime-exported?)

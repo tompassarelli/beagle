@@ -1,0 +1,9 @@
+#lang beagle/js
+
+;; F2 rejection: bare await belongs only to an authored ^:async callable.
+(ns f2.async.await-outside-async)
+
+(declare-extern load (Fn [] (Promise Int)))
+
+(defn await-outside-async [] (Promise Int)
+  (await (load)))

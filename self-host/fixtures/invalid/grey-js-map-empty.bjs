@@ -2,4 +2,4 @@
 (ns selfhost.fixtures.invalid.grey-js-map-empty)
 
 (def empty-native-map
-  (js/new Map))
+  (new Map))

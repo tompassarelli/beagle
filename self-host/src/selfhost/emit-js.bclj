@@ -2,7 +2,7 @@
 (ns selfhost.emit-js)
 
 ;; Self-hosted JavaScript emitter. Port of beagle-lib/private/emit-js.rkt
-;; (+ js-emit-utils.rkt, js-capabilities.rkt, emit-js-quote.rkt), consuming the
+;; (+ js-emit-utils.rkt, js-capabilities.rkt), consuming the
 ;; SAME string-keyed AST-JSON that selfhost.emit-clj consumes (ast-json.rkt shape).
 ;; Runs as emitted clj under babashka. Byte-parity target: BEAGLE_EMIT_SRCLOC=0
 ;; oracle js emission.
@@ -66,19 +66,6 @@
 
 (defn emit-form* [f Any] String
   (let [g (Fn [Any] String) (deref form-ref)] (g f)))
-
-;; js/quote (js-ast) recursion hubs
-(def ajs-expr-ref Any (atom nil))
-(def ajs-stmt-ref Any (atom nil))
-(def ajs-block-ref Any (atom nil))
-(defn ajs-stmt*
-  [n Any
-   depth Int] String
-  (let [f (Fn [Any Int] String) (deref ajs-stmt-ref)] (f n depth)))
-(defn ajs-block*
-  [n Any
-   depth Int] String
-  (let [f (Fn [Any Int] String) (deref ajs-block-ref)] (f n depth)))
 
 ;; --- bound-var / inline-scope helpers -----------------------------------------
 
@@ -591,7 +578,7 @@
       (constraint-contains-async? constraint)
         (throw (ex-info
                  (str "binding constraint for " (binding-target-label binding)
-                   " must be a synchronous unary predicate; js/await and async functions are not allowed") {}))
+                   " must be a synchronous unary predicate; await and async functions are not allowed") {}))
       :else
         (str "if (!(" (emit-expr*! constraint) ")(" source ")) throw new Error("
           (js-string-lit (str "Binding constraint failed: " (binding-target-label binding))) ");"))))
@@ -603,7 +590,7 @@
       (and (map? els) (= (get els "node") "literal") (= (get els "kind") "bool") (false? (get els "value")))))
 
 ;; --- await detection (emit-js.rkt contains-await? / expr-has-await?) ----------
-;; await is the js/await static-call. Descends control-flow + call args but NOT
+;; await descends control-flow + call args but NOT
 ;; fn bodies (an inner arrow's await doesn't make the outer fn async).
 
 (defn expr-has-await? [e Any] Bool
@@ -2176,175 +2163,6 @@
    bind-names Any] String
   (emit-loop-stmt-with! e bind-names (fn [value-str String] String (str "return " value-str ";"))))
 
-;; --- js/quote emission (port of beagle-lib/private/emit-js-quote.rkt) ---------
-
-(defn indent-str [depth Int] String
-  (let [spaces (Vec Int) (vec (range (* depth 2)))]
-    (str/join "" (mapv (fn [x Any] String " ") spaces))))
-
-(defn escape-js-template-string [s String] String
-  (str/replace (str/replace s "`" "\\`") "${" "\\${"))
-
-(defn ajs-ident [s String] String (mangle-name s))
-
-(defn ajs-params [params Any] String
-  (str/join ", "
-    (mapv (fn [p Any] String
-            (if (string? p) (ajs-ident p) (str "..." (ajs-ident (get p "spread"))))) params)))
-
-;; expression dispatch
-(defn ajs-expr! [n Any] String
-  (let [k (get n "jsk")]
-    (cond
-      (= k "literal")
-        (let [kind (get n "kind")
-              v (get n "value")]
-          (cond
-            (= kind "string") (js-string-lit v)
-            (= kind "number") (str v)
-            (= kind "bool") (if v "true" "false")
-            (= kind "null") "null"
-            (= kind "undefined") "undefined"
-            :else (str v)))
-      (= k "ident") (ajs-ident (get n "name"))
-      (= k "splice-expr") (emit-expr*! (get n "bexpr"))
-      (= k "splice-json") (str "JSON.parse(" (emit-expr*! (get n "bexpr")) ")")
-      (= k "call")
-        (str (ajs-expr! (get n "callee")) "(" (str/join ", " (mapv ajs-expr! (get n "args"))) ")")
-      (= k "member")
-        (if (get n "computed")
-          (str (ajs-expr! (get n "object")) "[" (ajs-expr! (get n "property")) "]")
-          ;; PROPERTY position: fixed authored JS label -> mangle-prop, no `$`
-          (str (ajs-expr! (get n "object")) "." (mangle-prop (get n "property"))))
-      (= k "index")
-        (str (ajs-expr! (get n "object")) "[" (ajs-expr! (get n "idx")) "]")
-      (= k "arrow")
-        (let [params-str (ajs-params (get n "params"))
-              body (get n "body")]
-          (if (and (map? body) (= (get body "jsk") "block"))
-            (str "(" params-str ") => " (ajs-block* body 0))
-            (str "(" params-str ") => " (ajs-expr! body))))
-      (= k "ternary")
-        (str "(" (ajs-expr! (get n "test")) " ? " (ajs-expr! (get n "then")) " : " (ajs-expr! (get n "else")) ")")
-      (= k "binary")
-        (str "(" (ajs-expr! (get n "left")) " " (get n "op") " " (ajs-expr! (get n "right")) ")")
-      (= k "unary")
-        (if (get n "prefix")
-          (str (get n "op") (ajs-expr! (get n "expr")))
-          (str (ajs-expr! (get n "expr")) (get n "op")))
-      (= k "template")
-        (str "`" (str/join ""
-                   (mapv (fn [p Any] String
-                           (if (contains? p "str") (escape-js-template-string (get p "str"))
-                             (str "${" (ajs-expr! (get p "expr")) "}"))) (get n "parts"))) "`")
-      (= k "array") (str "[" (str/join ", " (mapv ajs-expr! (get n "items"))) "]")
-      (= k "object")
-        (str "{" (str/join ", "
-               (mapv (fn [p Any] String
-                       (let [key (get p "key")
-                             val (get p "val")]
-                         (cond
-                           (= (get key "jsk") "ident")
-                             ;; KEY is a property (mangle-prop); VALUE ident is a
-                             ;; binding ref (mangle-name). Shorthand only when equal.
-                             (let [kk (mangle-prop (get key "name"))
-                                   vv (ajs-expr! val)]
-                               (if (and (= (get val "jsk") "ident") (= kk (ajs-ident (get val "name")))) kk (str kk ": " vv)))
-                           (= (get key "jsk") "literal") (str (ajs-expr! key) ": " (ajs-expr! val))
-                           :else (str "[" (ajs-expr! key) "]: " (ajs-expr! val))))) (get n "pairs"))) "}")
-      (= k "spread") (str "..." (ajs-expr! (get n "expr")))
-      (= k "await") (str "await " (ajs-expr! (get n "expr")))
-      (= k "new") (str "new " (ajs-expr! (get n "callee")) "(" (str/join ", " (mapv ajs-expr! (get n "args"))) ")")
-      (= k "typeof") (str "typeof " (ajs-expr! (get n "expr")))
-      (= k "function")
-        (str (if (get n "async") "async " "") "function " (ajs-ident (get n "name"))
-             "(" (ajs-params (get n "params")) ") " (ajs-block* (get n "body") 0))
-      :else (str "/* js/quote: unhandled node " k " */"))))
-
-(defn ajs-function-decl
-  [n Any
-   depth Int] String
-  (let [ind (indent-str depth)]
-    (str ind (if (get n "export") "export " "") (if (get n "async") "async " "")
-         "function " (ajs-ident (get n "name")) "(" (ajs-params (get n "params")) ") "
-         (ajs-block* (get n "body") depth))))
-
-(defn ajs-method
-  [n Any
-   depth Int] String
-  (let [ind (indent-str depth)
-        kind (get n "kind")
-        kind-prefix (cond (= kind "get") "get " (= kind "set") "set " :else "")
-        name-str (if (= kind "constructor") "constructor" (ajs-ident (get n "name")))]
-    (str ind (if (get n "static") "static " "") (if (get n "async") "async " "") kind-prefix
-         name-str "(" (ajs-params (get n "params")) ") " (ajs-block* (get n "body") depth))))
-
-(defn ajs-class-decl!
-  [n Any
-   depth Int] String
-  (let [ind (indent-str depth)
-        ext (get n "extends")
-        extends-str (if (absent? ext) "" (str " extends " (ajs-expr! ext)))
-        inner (+ depth 1)
-        methods-str (str/join "\n\n" (mapv (fn [m Any] String (ajs-method m inner)) (get n "methods")))]
-    (str ind "class " (ajs-ident (get n "name")) extends-str " {\n" methods-str "\n" ind "}")))
-
-(defn ajs-stmt!
-  [n Any
-   depth Int] String
-  (let [ind (indent-str depth)
-        k (get n "jsk")]
-    (cond
-      (= k "block") (str/join "\n" (mapv (fn [s Any] String (ajs-stmt* s depth)) (get n "stmts")))
-      (= k "const") (str ind "const " (ajs-ident (get n "name")) " = " (ajs-expr! (get n "value")) ";")
-      (= k "let") (str ind "let " (ajs-ident (get n "name")) " = " (ajs-expr! (get n "value")) ";")
-      (= k "assign") (str ind (ajs-expr! (get n "target")) " = " (ajs-expr! (get n "value")) ";")
-      (= k "return") (if (absent? (get n "expr")) (str ind "return;") (str ind "return " (ajs-expr! (get n "expr")) ";"))
-      (= k "if")
-        (let [test-str (ajs-expr! (get n "test"))
-              then-str (ajs-block* (get n "then") depth)
-              el (get n "else")]
-          (if (absent? el)
-            (str ind "if (" test-str ") " then-str)
-            (str ind "if (" test-str ") " then-str " else " (ajs-block* el depth))))
-      (= k "for-of")
-        (str ind "for (const " (ajs-ident (get n "binding")) " of " (ajs-expr! (get n "iterable")) ") "
-             (ajs-block* (get n "body") depth))
-      (= k "while") (str ind "while (" (ajs-expr! (get n "test")) ") " (ajs-block* (get n "body") depth))
-      (= k "throw") (str ind "throw " (ajs-expr! (get n "expr")) ";")
-      (= k "try")
-        (let [body-str (ajs-block* (get n "body") depth)
-              cn (get n "catch-name")
-              catch-str (if (absent? cn) ""
-                          (str " catch (" (ajs-ident cn) ") " (ajs-block* (get n "catch-body") depth)))
-              fb (get n "finally-body")
-              finally-str (if (absent? fb) "" (str " finally " (ajs-block* fb depth)))]
-          (str ind "try " body-str catch-str finally-str))
-      (= k "expr-stmt") (str ind (ajs-expr! (get n "expr")) ";")
-      (= k "function") (ajs-function-decl n depth)
-      (= k "class") (ajs-class-decl! n depth)
-      (= k "splice-stmts") (str ind (emit-expr*! (get n "bexpr")))
-      :else (str ind (ajs-expr! n) ";"))))
-
-(defn ajs-block
-  [n Any
-   depth Int] String
-  (let [inner (+ depth 1)
-        stmts (if (and (map? n) (= (get n "jsk") "block")) (get n "stmts") [n])
-        body (str/join "\n" (mapv (fn [s Any] String (ajs-stmt* s inner)) stmts))
-        ind (indent-str depth)]
-    (str "{\n" body "\n" ind "}")))
-
-(defn emit-js-ast-node!
-  [node Any
-   depth Int] String
-  (let [k (get node "jsk")]
-    (cond
-      (= k "block") (str/join "\n" (mapv (fn [s Any] String (ajs-stmt! s depth)) (get node "stmts")))
-      (= k "function") (ajs-function-decl node depth)
-      (= k "class") (ajs-class-decl! node depth)
-      :else (ajs-stmt! node depth))))
-
 ;; --- fn / call / expression dispatcher ----------------------------------------
 
 (defn emit-fn! [e Any] String
@@ -2743,7 +2561,6 @@
                        "; if (r && r.__tag === \"Ok\") return r.value; const " err-name " = r; return " (emit-expr*! (get e "fallback")) ";") false))
         (= node "await") (str "await " (emit-expr*! (get e "expr")))
         (= node "block-string") (js-string-lit (get e "text"))
-        (= node "js-quote") (emit-js-ast-node! (get e "body") 0)
         (= node "defenum") (emit-defenum e)
         (= node "defunion") (emit-defunion! e)
         (= node "deferror") (emit-deferror! e)
@@ -2834,9 +2651,6 @@
       (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
       (and (= node "static-call") (qualified-reference=? f "js" "export"))
         (str "export " (emit-form! (nth (get f "args") 0)))
-      (and (= node "static-call") (qualified-reference=? f "js" "quote"))
-        (emit-js-ast-node! (get f "js-body") 0)
-      (= node "js-quote") (emit-js-ast-node! (get f "body") 0)
       ;; Top-level effect-position forms: route ctrl-flow through the statement
       ;; lowering; emit-stmt-inline! falls back to emit-expr-stmt! for plain exprs.
       :else (emit-stmt-inline! f ""))))
@@ -2964,9 +2778,6 @@
   (reset! body-stmts-ref emit-body-stmts)
   (reset! stmt-inline-ref emit-stmt-inline!)
   (reset! form-ref emit-form!)
-  (reset! ajs-expr-ref ajs-expr!)
-  (reset! ajs-stmt-ref ajs-stmt!)
-  (reset! ajs-block-ref ajs-block)
   nil)
 
 (defn emit-program! [prog Any] String
@@ -3110,18 +2921,18 @@
   (let [receiver {"node" "ref" "name" "obj"}
         selector {"node" "js-selector" "name" "raw_name"}
         dynamic-key {"node" "ref" "name" "key"}]
-    (expect! "js/get static selector"
+    (expect! "property access static selector"
       (= (emit-expr! {"node" "js-get" "receiver" receiver "key" selector})
         "obj.raw_name"))
-    (expect! "js/get dynamic key"
+    (expect! "property access dynamic key"
       (= (emit-expr! {"node" "js-get" "receiver" receiver "key" dynamic-key})
         "obj[key]"))
-    (expect! "js/call preserves receiver member call"
+    (expect! "member call preserves receiver member call"
       (= (emit-expr! {"node" "js-call" "receiver" receiver
                        "key" {"node" "js-selector" "name" "run"}
                        "args" [{"node" "literal" "kind" "number" "value" 1}]})
         "obj.run(1)"))
-    (expect! "js/set! assigns through the member"
+    (expect! "property assignment assigns through the member"
       (= (emit-expr! {"node" "js-set" "receiver" receiver "key" dynamic-key
                        "value" {"node" "literal" "kind" "number" "value" 2}})
         "(obj[key] = 2)"))
@@ -3131,7 +2942,7 @@
     (expect! "js/in? reverses its static receiver-first surface"
       (= (emit-expr! {"node" "js-in" "receiver" receiver "key" selector})
         "(\"raw_name\" in obj)")))
-  (expect! "js/new preserves qualified constructor references"
+  (expect! "new preserves qualified constructor references"
     (do
       (reset! module-bindings {"three.core" "THREE" "T" "THREE"})
       (let [result (= (emit-expr! {"node" "js-new"
@@ -3180,7 +2991,7 @@
                 "if (value._tag === \"Account\") { const id = value.id; return id; } else")]
         (reset! record-fields {})
         result)))
-  (expect! "js/new parenthesizes computed constructors"
+  (expect! "new parenthesizes computed constructors"
     (= (emit-expr! {"node" "js-new"
                      "callee" {"node" "call"
                                 "fn" {"node" "ref" "name" "factory"}

@@ -23,7 +23,6 @@
          "callable-arity.rkt"
          "module-interface.rkt"
          "parse-jst.rkt"
-         "parse-js-quote.rkt"
          "diagnostic-kind.rkt"
          "syntax/tokenize.rkt"
          ;; THE single beagle readtable lives in reader-impl.rkt (the #lang
@@ -1321,6 +1320,7 @@
 (define current-candidate-type-bindings (make-parameter #f))
 (define current-candidate-type-prefixes (make-parameter #f))
 (define current-module-resolution-closed? (make-parameter #f))
+(define current-parse-target (make-parameter DEFAULT-TARGET))
 
 (define INTERFACE-TYPE-EXPORT-KINDS
   '(record protocol enum union parametric-union union-member
@@ -2495,6 +2495,7 @@
                    [current-src-table src-table]
                    [current-body-locs-table body-locs-table]
                    [current-macro-derived-table macro-derived-table]
+                   [current-parse-target target]
                    [current-user-parametric-arities
                     (current-user-parametric-arities)]
                    [current-type-aliases (current-type-aliases)])
@@ -2682,8 +2683,9 @@
       (stx-ref children 0)
       value))
 
-(define (syntax-binder-identities value)
-  (define target (binder-target-syntax value))
+(define (syntax-binder-identities value [whole-pattern? #f])
+  (define target
+    (if whole-pattern? value (binder-target-syntax value)))
   (define (walk syntax-value identities)
     (define datum (->datum syntax-value))
     (define id (syntax-binding-id syntax-value))
@@ -2701,6 +2703,13 @@
    binder
    (if source-syntax
        (syntax-binder-identities source-syntax)
+       #hasheq())))
+
+(define (register-syntax-pattern-binder! binder pattern-syntax)
+  (register-binder-identities!
+   binder
+   (if pattern-syntax
+       (syntax-binder-identities pattern-syntax #t)
        #hasheq())))
 
 (define (expansion-origin->ctx origin)
@@ -3189,38 +3198,69 @@
   (foldl (lambda (step acc) (thread-step-insert acc step 'last))
          init steps))
 
-;; A receiver-first JS operator is intentionally incomplete while it occupies
-;; a thread-step slot: the threader supplies its receiver before the expanded
-;; form reaches the real operator parser. Keep the marker's surface copy as a
-;; generic call-shaped AST so parsing that non-authoritative copy cannot reject
-;; before insertion. The expanded form below still passes through the exact
-;; js/* arity parser and is the only form checked or emitted for JS.
-(define JS-RECEIVER-THREAD-HEADS
-  '(js/get js/call js/set! js/delete! js/in?))
+;; ClojureScript's `..` is syntax for a left-associated chain. Lower it to the
+;; same typed member nodes as direct `.member` / `.-field` forms so every step
+;; is checked against the preceding result type.
+(define (parse-dot-chain-step step receiver)
+  (define d (->datum step))
+  (define subs (stx-subs step))
+  (define loc (and (syntax? step) (stx->src-loc step)))
+  (define (selector raw-name property?)
+    (define spelling (symbol->string raw-name))
+    (define name
+      (if (and property?
+               (> (string-length spelling) 1)
+               (char=? (string-ref spelling 0) #\-))
+          (substring spelling 1)
+          spelling))
+    (when (string=? name "")
+      (raise-parse-error 'bad-form ".. member name cannot be empty"))
+    (store-src! (jst-selector name) loc))
+  (cond
+    [(symbol? d)
+     (store-src! (jst-get receiver (selector d #t)) loc)]
+    [(and (pair? d) (symbol? (car d)))
+     (define method (car d))
+     (define spelling (symbol->string method))
+     (when (or (string-prefix? spelling ".")
+               (string-prefix? spelling "-"))
+       (raise-parse-error
+        'bad-form
+        ".. call steps use `(member args...)`; property steps use `-member`"))
+     (store-src!
+      (jst-call receiver
+                (selector method #f)
+                (map parse-expr (or (stx-tail subs 1) (cdr d))))
+      loc)]
+    [else
+     (raise-parse-error
+      'bad-form
+      ".. member steps must be `-property` or `(method args...)`, got: ~v"
+      d)]))
 
-(define (parse-thread-surface-expr form)
-  (define d (->datum form))
-  (define subs (stx-subs form))
-  (if (and (pair? d) (memq (car d) JS-RECEIVER-THREAD-HEADS))
-      (store-src!
-       (call-form (or (lower-qualified-reference (car d)) (car d))
-                  (map parse-expr (or (stx-tail subs 1) (cdr d))))
-       (and (syntax? form) (stx->src-loc form)))
-      (parse-expr form)))
+(define (parse-dot-chain receiver steps)
+  (when (null? steps)
+    (raise-parse-error
+     'bad-form
+     ".. expects a receiver and at least one member step"))
+  (foldl parse-dot-chain-step (parse-expr receiver) steps))
 
 ;; (as-> init name s1 s2 …)
-;;   → (let [name init] (let [name s1] (let [name s2] … name)))
+;;   → (let [name Any init] (let [name Any s1] (let [name Any s2] … name)))
 ;; The placeholder `name` is bound to each successive step's value. The
 ;; body of the innermost let is just `name` so the form's value is the
 ;; final step's value. Each `let` shadows the previous binding, mirroring
 ;; Clojure's semantics: each step sees `name` bound to the prior step's
 ;; value, regardless of where `name` appears (or whether it appears at all).
+(define (synthesized-local-binding name value)
+  (list BRACKET-TAG name 'Any value))
+
 (define (expand-as-thread init name steps)
   (define (chain values)
     (cond
       [(null? values) name]
       [else
-       (list 'let (list BRACKET-TAG name (car values))
+       (list 'let (synthesized-local-binding name (car values))
              (chain (cdr values)))]))
   (chain (cons init steps)))
 
@@ -3251,9 +3291,9 @@
   (cond
     [(null? pairs)
      ;; (cond-> x) with no clauses — degenerate; just bind & return.
-     (list 'let (list BRACKET-TAG g0 init) g0)]
+     (list 'let (synthesized-local-binding g0 init) g0)]
     [else
-     (list 'let (list BRACKET-TAG g0 init)
+     (list 'let (synthesized-local-binding g0 init)
            (let chain-loop ([qs pairs] [g g0])
              (cond
                [(null? qs) g]
@@ -3262,7 +3302,8 @@
                 (define step (cdr (car qs)))
                 (define threaded (thread-step-insert g step position))
                 (define g* (fresh-lowered-sym 'cond-thread))
-                (list 'let (list BRACKET-TAG g* (list 'if test threaded g))
+                (list 'let (synthesized-local-binding
+                            g* (list 'if test threaded g))
                       (chain-loop (cdr qs) g*))])))]))
 
 ;; (some-> x f g h)
@@ -3285,7 +3326,7 @@
          [else
           (define g (fresh-lowered-sym 'some-thread))
           (define threaded (thread-step-insert g (car rest) position))
-          (list 'let (list BRACKET-TAG g prev)
+          (list 'let (synthesized-local-binding g prev)
                 (list 'if (list 'nil? g)
                       'nil
                       (if (null? (cdr rest))
@@ -3358,7 +3399,7 @@
     [(and (= (length binder-part) 1) (symbol? (car binder-part)))
      (define name (car binder-part))
      (define name-source (car binder-part-source))
-     (define binding (list BRACKET-TAG name-source val-stx))
+     (define binding (synthesized-local-binding name-source val-stx))
      (define test (success-test name-source))
      (case head
        [(if-let if-some)
@@ -3377,12 +3418,12 @@
      (define test (success-test g))
      (case head
        [(if-let if-some)
-        (list 'let (list BRACKET-TAG g val-stx)
+        (list 'let (synthesized-local-binding g val-stx)
               (list 'if test
                     (list 'let inner-binding (car rest-items))
                     (cadr rest-items)))]
        [(when-let when-some)
-        (list 'let (list BRACKET-TAG g val-stx)
+        (list 'let (synthesized-local-binding g val-stx)
               (list 'if test
                     (list 'let inner-binding (cons 'do rest-items))))])]))
 
@@ -3511,17 +3552,18 @@
                        (parse-body (or (stx-tail subs 2) body)))]
       [_ (parse-list-form* d subs)])))
 
-;; `binding` — dynamic-extent rebinding of `^:dynamic` vars. Same binding-pair
-;; surface as `let`, but the targets are existing dynamic vars (checked), not
-;; new lexical locals. Reuses parse-let-bindings (types come from the var).
+;; `binding` — dynamic-extent rebinding of `^:dynamic` vars. It shares the
+;; fixed-arity `name Type initializer` surface with `let` and `loop`; the
+;; targets are existing dynamic vars rather than new lexical locals.
 (register-combiner! 'binding
   (lambda (d subs)
     (match d
       [(list 'binding bindings-form body ...)
-       (binding-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+       (binding-form (parse-local-bindings
+                      (or (stx-ref subs 1) bindings-form) "binding")
                      (parse-body (or (stx-tail subs 2) body)))]
       [_ (raise-parse-error 'bad-form
-                            "malformed binding — expected (binding [*var* val ...] body...); got: ~v" d)])))
+                            "malformed binding — expected (binding [*var* Type val ...] body...); got: ~v" d)])))
 
 ;; `for` — list comprehension (clauses: bindings, :when, :let).
 (register-combiner! 'for
@@ -3627,8 +3669,11 @@
   (lambda (d subs)
     (match d
       [(list 'set! target-expr val-expr)
-       (set!-form (parse-expr (or (stx-ref subs 1) target-expr))
-                  (parse-expr (or (stx-ref subs 2) val-expr)))]
+       (define target (parse-expr (or (stx-ref subs 1) target-expr)))
+       (define value (parse-expr (or (stx-ref subs 2) val-expr)))
+       (if (jst-get? target)
+           (jst-set (jst-get-receiver target) (jst-get-key target) value)
+           (set!-form target value))]
       [_ (parse-list-form* d subs)])))
 
 ;; `defrecord` — typed record shape.
@@ -3812,6 +3857,36 @@
          [else (loop (cddr kvs))]))]
     [else #f]))
 
+(define (meta-flag? mv flag)
+  (cond
+    [(eq? mv flag) #t]
+    [(and (pair? mv) (eq? (car mv) '#%map))
+     (let loop ([kvs (cdr mv)])
+       (cond
+         [(or (null? kvs) (null? (cdr kvs))) #f]
+         [(and (eq? (car kvs) flag) (eq? (cadr kvs) 'true)) #t]
+         [else (loop (cddr kvs))]))]
+    [else #f]))
+
+(define (meta-async? mv) (meta-flag? mv ':async))
+
+(define (meta-private? mv)
+  ;; Existing defn metadata was private by default. ^:async is the one new
+  ;; public marker; longhand metadata can still combine it with :private.
+  (and (not (eq? mv ':async))
+       (or (not (meta-async? mv)) (meta-flag? mv ':private))))
+
+(define (wrap-authored-async mv form)
+  (if (meta-async? mv) (async-callable form) form))
+
+(define (attach-defn-doc form doc)
+  (cond
+    [(async-callable? form)
+     (async-callable (attach-defn-doc (async-callable-form form) doc))]
+    [(defn-form? form) (struct-copy defn-form form [doc doc])]
+    [(defn-multi? form) (struct-copy defn-multi form [doc doc])]
+    [else form]))
+
 ;; `def` — top-level binding; positional `NAME TYPE VALUE`, optional docstring; optional
 ;; `^:dynamic` (and other) metadata on the name; any other def shape guarded
 ;; (no silent call-form bypass).
@@ -3895,10 +3970,7 @@
        (and subs (>= (length subs) 4)
             (list* (list-ref subs 0) (list-ref subs 1) (list-tail subs 3))))
      (define parsed (parse-list-form (list* head name-form rest) stripped-subs))
-     (cond
-       [(defn-form? parsed) (struct-copy defn-form parsed [doc doc])]
-       [(defn-multi? parsed) (struct-copy defn-multi parsed [doc doc])]
-       [else parsed])]
+     (attach-defn-doc parsed doc)]
 
     ;; Attr-map metadata on defn is not supported — docstrings are the
     ;; supported documentation surface.
@@ -3918,12 +3990,20 @@
     ;; defn with ^:private metadata on name
     [(list 'defn (list '#%meta _ (? symbol? name)) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
-     (defn-multi name (map parse-arity-clause
-                           (or (stx-tail subs 2)
-                               (cons first-clause rest-clauses))) #t #f)]
+     (define mv (cadr (cadr d)))
+     (wrap-authored-async
+      mv
+      (defn-multi name (map parse-arity-clause
+                            (or (stx-tail subs 2)
+                                (cons first-clause rest-clauses)))
+                  (meta-private? mv) #f))]
 
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form return-type tail ...)
-     (parse-single-defn name params-form return-type tail subs #t)]
+     (define mv (cadr (cadr d)))
+     (wrap-authored-async
+      mv
+      (parse-single-defn name params-form return-type tail subs
+                         (meta-private? mv)))]
 
     ;; defn- (private defn)
     [(list 'defn- (? symbol? name) first-clause rest-clauses ...)
@@ -4080,13 +4160,15 @@
       [(list 'as-> init (? symbol? name) steps ...)
        (define orig-stxs (or (and subs (stx-tail subs 1))
                              (cons init (cons name steps))))
+       (define resolved
+         (and (syntax? (current-form-stx))
+              (syntax-property
+               (current-form-stx) 'beagle-as-thread-resolved)))
        (threading-marker
         'as->
         (map parse-thread-surface-expr orig-stxs)
         (parse-expr
-         (or (and (syntax? (current-form-stx))
-                  (syntax-property
-                   (current-form-stx) 'beagle-as-thread-resolved))
+         (or resolved
              (rewrite-as
               (expand-as-thread (or (stx-ref subs 1) init)
                                 name
@@ -4095,6 +4177,30 @@
        (raise-parse-error 'bad-form
                           "as-> expects a symbol placeholder: (as-> init name steps...)")]
       [_ (parse-list-form* d subs)])))
+
+;; ClojureScript receiver forms. `..` disappears into typed JS member nodes;
+;; `this-as` retains a dedicated call marker because the shared AST has no
+;; target-neutral representation for JavaScript's dynamic `this` value.
+(register-combiner! '..
+  (lambda (d subs)
+    (match d
+      [(list '.. receiver steps ...)
+       (parse-dot-chain (or (stx-ref subs 1) receiver)
+                        (or (and subs (stx-tail subs 2)) steps))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'this-as
+  (lambda (d subs)
+    (match d
+      [(list 'this-as (? symbol? binding) body)
+       (validate-identifier! binding "this-as binding")
+       (call-form 'this-as
+                  (list binding
+                        (parse-expr (or (stx-ref subs 2) body))))]
+      [_
+       (raise-parse-error
+        'bad-form
+        "this-as expects a binding name and one body expression")])))
 
 ;; `some->` — short-circuit thread-first.
 (register-combiner! 'some->
@@ -4198,22 +4304,13 @@
                     #f)]
       [_ (parse-list-form* d subs)])))
 
-;; `js/await` — JS-async await (namespaced).
-(register-combiner! 'js/await
-  (lambda (d subs)
-    (match d
-      [(list 'js/await inner)
-       (await-form (parse-expr (or (stx-ref subs 1) inner)))]
-      [_ (parse-list-form* d subs)])))
-
-;; `await` — bare `await` rejected with a pointed migration message to js/await.
+;; Bare `await` is the authored async surface. The checker accepts it only
+;; inside a ^:async callable and derives its value type from (Promise T).
 (register-combiner! 'await
   (lambda (d subs)
     (match d
-      [(list 'await _)
-       (raise-parse-error 'bare-js-form
-                          "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`."
-                          #:suggestion (replace-head-suggestion 'await 'js/await))]
+      [(list 'await inner)
+       (await-form (parse-expr (or (stx-ref subs 1) inner)))]
       [_ (parse-list-form* d subs)])))
 
 ;; `fmt` — removed 2026-06-12 (zero corpus hits; not Clojure). Pointed rejection.
@@ -4268,7 +4365,7 @@
 
 ;; --- module family migrated to the compile-time combiner registry ---
 
-;; `unsafe` (+ unsafe-js/-clj/-py/-rkt/-nix/-expr) — shared (or …) rejection arm
+;; `unsafe` target escape forms — shared (or …) rejection arm
 ;; migrated to the compile-time combiner registry (see register-combiner!).
 (define (unsafe-family-combiner d subs)
   (match d
@@ -4572,52 +4669,6 @@
       [_ (parse-list-form* d subs)])))
 
 ;; --- js family migrated to the compile-time combiner registry ---
-;; NOTE: `js/await` was already registered by the control family; skipped here.
-
-;; `js/quote` migrated to the compile-time combiner registry (see register-combiner!).
-(register-combiner! 'js/quote
-  (lambda (d subs)
-    (match d
-      [(cons 'js/quote body)
-       (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
-      [_ (parse-list-form* d subs)])))
-
-;; `js/return` migrated to the compile-time combiner registry (see register-combiner!).
-(register-combiner! 'js/return
-  (lambda (d subs)
-    (match d
-      [(list 'js/return)
-       (jst-return #f)]
-      [(list 'js/return expr-form)
-       (jst-return (parse-expr expr-form))]
-      [_ (parse-list-form* d subs)])))
-
-;; `js/class` migrated to the compile-time combiner registry (see register-combiner!).
-(register-combiner! 'js/class
-  (lambda (d subs)
-    (match d
-      [(list* 'js/class name-form rest)
-       (parse-jst-class name-form rest)]
-      [_ (parse-list-form* d subs)])))
-
-;; `js/template` migrated to the compile-time combiner registry (see register-combiner!).
-(register-combiner! 'js/template
-  (lambda (d subs)
-    (match d
-      [(cons 'js/template parts)
-       (jst-template (map (lambda (p)
-                            (define v (->datum p))
-                            (if (string? v) v (parse-expr p)))
-                          (cdr d)))]
-      [_ (parse-list-form* d subs)])))
-
-;; `js/spread` migrated to the compile-time combiner registry (see register-combiner!).
-(register-combiner! 'js/spread
-  (lambda (d subs)
-    (match d
-      [(list 'js/spread expr-form)
-       (jst-spread (parse-expr expr-form))]
-      [_ (parse-list-form* d subs)])))
 
 ;; `js/typeof` migrated to the compile-time combiner registry (see register-combiner!).
 (register-combiner! 'js/typeof
@@ -4626,44 +4677,6 @@
       [(list 'js/typeof expr-form)
        (jst-typeof (parse-expr expr-form))]
       [_ (parse-list-form* d subs)])))
-
-(register-combiner! 'js/get
-  (lambda (d subs)
-    (match d
-      [(list 'js/get receiver key)
-       (jst-get (parse-expr (or (stx-ref subs 1) receiver))
-                (parse-jst-member-key (or (stx-ref subs 2) key)))]
-      [_ (raise-parse-error 'bad-form
-                            "js/get expects exactly a receiver and member key")])))
-
-(register-combiner! 'js/call
-  (lambda (d subs)
-    (match d
-      [(list* 'js/call receiver key args)
-       (jst-call (parse-expr (or (stx-ref subs 1) receiver))
-                 (parse-jst-member-key (or (stx-ref subs 2) key))
-                 (map parse-expr (or (stx-tail subs 3) args)))]
-      [_ (raise-parse-error 'bad-form
-                            "js/call expects a receiver, member key, and optional arguments")])))
-
-(register-combiner! 'js/set!
-  (lambda (d subs)
-    (match d
-      [(list 'js/set! receiver key value)
-       (jst-set (parse-expr (or (stx-ref subs 1) receiver))
-                (parse-jst-member-key (or (stx-ref subs 2) key))
-                (parse-expr (or (stx-ref subs 3) value)))]
-      [_ (raise-parse-error 'bad-form
-                            "js/set! expects exactly a receiver, member key, and value")])))
-
-(register-combiner! 'js/new
-  (lambda (d subs)
-    (match d
-      [(list* 'js/new callee args)
-       (jst-new (parse-expr (or (stx-ref subs 1) callee))
-                (map parse-expr (or (stx-tail subs 2) args)))]
-      [_ (raise-parse-error 'bad-form
-                            "js/new expects a constructor and optional arguments")])))
 
 (register-combiner! 'js/delete!
   (lambda (d subs)
@@ -4696,10 +4709,7 @@
   (lambda (d subs)
     (match d
       [(list 'js/export inner-form)
-       (define inner (parse-expr (or (stx-ref subs 1) inner-form)))
-       (cond
-         [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
-         [else (jst-export inner)])]
+       (jst-export (parse-expr (or (stx-ref subs 1) inner-form)))]
       [_ (parse-list-form* d subs)])))
 
 ;; `js/export-default` migrated to the compile-time combiner registry (see register-combiner!).
@@ -4708,39 +4718,6 @@
     (match d
       [(list 'js/export-default inner-form)
        (jst-export-default (parse-expr (or (stx-ref subs 1) inner-form)))]
-      [_ (parse-list-form* d subs)])))
-
-;; `js/!` migrated to the compile-time combiner registry (see register-combiner!).
-(register-combiner! 'js/!
-  (lambda (d subs)
-    (match d
-      [(list 'js/! expr-form)
-       (jst-unary '! (parse-expr expr-form))]
-      [_ (parse-list-form* d subs)])))
-
-;; `js/void` migrated to the compile-time combiner registry (see register-combiner!).
-(register-combiner! 'js/void
-  (lambda (d subs)
-    (match d
-      [(list 'js/void expr-form)
-       (jst-unary 'void (parse-expr expr-form))]
-      [_ (parse-list-form* d subs)])))
-
-;; `js/-` and `js/+` share one arm (see register-combiner!): both register to this
-;; handler, which keeps the (or 'js/- 'js/+) pattern. The shared arm is deleted once.
-(register-combiner! 'js/-
-  (lambda (d subs)
-    (match d
-      [(list (and op (or 'js/- 'js/+)) expr-form)
-       (define js-op (if (eq? op 'js/-) '- '+))
-       (jst-unary js-op (parse-expr expr-form))]
-      [_ (parse-list-form* d subs)])))
-(register-combiner! 'js/+
-  (lambda (d subs)
-    (match d
-      [(list (and op (or 'js/- 'js/+)) expr-form)
-       (define js-op (if (eq? op 'js/-) '- '+))
-       (jst-unary js-op (parse-expr expr-form))]
       [_ (parse-list-form* d subs)])))
 
 (define (parse-list-form d subs)
@@ -4761,7 +4738,7 @@
 
 (define (parse-list-form* d subs)
   (match d
-    ;; `unsafe` family (unsafe/-js/-clj/-py/-rkt/-nix/-expr) migrated to the
+    ;; `unsafe` target escape family migrated to the
     ;; compile-time combiner registry (see register-combiner!).
 
     ;; `def` migrated to the compile-time combiner registry (see register-combiner!).
@@ -4798,8 +4775,7 @@
     ;; `loop` migrated to the compile-time combiner registry (see register-combiner!).
     ;; `recur` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; `js/await` migrated to the compile-time combiner registry (see register-combiner!).
-    ;; `await` (bare) migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `await` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; --- Nix-specific forms --------------------------------------------------
 
@@ -4858,19 +4834,6 @@
     ;; `flake` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; --- end Nix-specific forms ----------------------------------------------
-
-    ;; --- JS-specific forms (js/*) ---------------------------------------------
-    ;; js/quote, js/return, js/class, js/template, js/spread, js/typeof,
-    ;; js/import-meta, js/export, js/export-default, js/!, js/void, js/-, js/+
-    ;; migrated to the compile-time combiner registry (see register-combiner!).
-    ;; The predicate-headed jst-binary-op arm below stays (no literal head).
-
-    [(list (? jst-binary-op? op) left-form right-form)
-     (jst-binary (hash-ref JST-BINARY-OPS op) (parse-expr left-form) (parse-expr right-form))]
-
-    ;; --- end Typed JS target forms --------------------------------------------
-
-    ;; --- end JS-specific forms ------------------------------------------------
 
     ;; `set!` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -4953,9 +4916,25 @@
     [(list (? keyword-sym? kw) target)
      (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
 
-    [(list (? dot-method-sym? m) target args ...)
-     (method-call m (parse-expr (or (stx-ref subs 1) target))
-                    (map parse-expr (or (stx-tail subs 2) args)))]
+    [(list (and key
+                (? (lambda (m)
+                     (and (dot-method-sym? m)
+                          (string-prefix? (symbol->string m) ".-")))))
+           target)
+     (define parsed-target (parse-expr (or (stx-ref subs 1) target)))
+     (if (eq? (current-parse-target) 'js)
+         (jst-get parsed-target
+                  (parse-jst-member-key (or (stx-ref subs 0) key)))
+         (method-call key parsed-target '()))]
+
+    [(list (? dot-method-sym? key) target args ...)
+     (define parsed-target (parse-expr (or (stx-ref subs 1) target)))
+     (define parsed-args (map parse-expr (or (stx-tail subs 2) args)))
+     (if (eq? (current-parse-target) 'js)
+         (jst-call parsed-target
+                   (parse-jst-member-key (or (stx-ref subs 0) key))
+                   parsed-args)
+         (method-call key parsed-target parsed-args))]
 
     ;; `fmt` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -5072,13 +5051,9 @@
     ;; `get` (literal-key) migrated to the compile-time combiner registry (see register-combiner!).
     ;; Dynamic-key (get target expr) falls through to the call-form arm below, as before.
 
-    ;; `new` is a host special form, not Beagle's constructor surface. Letting
-    ;; it fall through as a call emits `new$(...)` on JS and defers the mistake
-    ;; to a runtime ReferenceError. Constructors use Clojure's `Class.` head.
-    [(list 'new _ ...)
-     (raise-parse-error 'bare-constructor-form
-       "(`new` ...) is not a Beagle constructor call. Use `(X. args...)`, for example `(Set. xs)`."
-       #:suggestion "(X. args...)")]
+    [(list* 'new callee args)
+     (jst-new (parse-expr (or (stx-ref subs 1) callee))
+              (map parse-expr (or (stx-tail subs 2) args)))]
 
     ;; `%` is the anonymous-fn argument shorthand, only meaningful inside #(...).
     ;; The reader rewrites `%` -> `%1` inside #(), so a bare `%` at parse time can
@@ -5436,12 +5411,12 @@
     (error 'beagle "match clause needs a pattern and at least one body expression"))
   (define pattern-source (or (and item-stxs (car item-stxs)) (car items)))
   (define parsed-pattern (parse-pattern pattern-source))
-  (register-syntax-binder! parsed-pattern pattern-source)
+  (register-syntax-pattern-binder! parsed-pattern pattern-source)
   (define parsed-clause
     (match-clause
      parsed-pattern
      (map parse-expr (or (and item-stxs (cdr item-stxs)) (cdr items)))))
-  (register-syntax-binder! parsed-clause pattern-source))
+  (register-syntax-pattern-binder! parsed-clause pattern-source))
 
 (define (record-pattern-name? value)
   (define name
@@ -5497,12 +5472,27 @@
 
 ;; --- params + bindings -----------------------------------------------------
 
+(define (type-declaration-datum? datum)
+  ;; Classification must not discard a generic annotation merely because its
+  ;; eventual arity diagnostic makes `parse-type` fail.  In `[value (Box)]`,
+  ;; `Box` is still the declared type; treating it as a following parameter
+  ;; hides the useful `Box expects 1 argument` error.
+  (define (constructor-name? value)
+    (and (symbol? value)
+         (let ([spelling (symbol->string value)])
+           (or (hash-has-key? (current-user-parametric-arities) value)
+               (regexp-match? #rx"^[A-Z]" spelling)
+               (regexp-match? #rx"/[A-Z]" spelling)))))
+  (or (type-expression-datum? datum)
+      (constructor-name? datum)
+      (and (pair? datum) (constructor-name? (car datum)))))
+
 (define (binding-style items)
   (cond
     [(null? items) #f]
     [(structured-binding? (car items)) 'legacy]
     [(and (pair? (cdr items))
-          (type-expression-datum? (cadr items)))
+          (type-declaration-datum? (cadr items)))
      'flat]
     [else 'inferred]))
 
@@ -5823,11 +5813,9 @@
              (and stxs (cdddr stxs))
              (cons (register-syntax-binder! binding binder-stx) acc))])))
 
-;; Ruling 22 deliberately stages the migration: local-binding vectors dual-read
-;; until the corpus has authored every type, then the final migration commit
-;; removes the legacy pair/grouped path. A type-shaped second slot selects the
-;; new `binding Type initializer` grammar; all other vectors retain the current
-;; pair reader during that bounded bridge.
+;; Structural constrained declarations have priority over the flat classifier:
+;; their initializer may itself be a singleton type datum (for example `2`),
+;; but that must not turn `[(n Int positive?) 2]` into a malformed flat vector.
 (define (parse-local-bindings b context)
   (define items (bracket-items b (string-append context "s")))
   (cond
@@ -5836,7 +5824,9 @@
      (define item-stxs (bracket-stxs (stx-subs b) (->datum b)))
      (raise-missing-binding-type context (car items)
                                  (and item-stxs (car item-stxs)))]
-    [(type-expression-datum? (cadr items))
+    [(structured-binding? (car items))
+     (parse-let-bindings b)]
+    [(type-declaration-datum? (cadr items))
      (parse-flat-triple-bindings b context)]
     [else (parse-let-bindings b)]))
 
@@ -6213,7 +6203,6 @@
  (all-from-out "ast.rkt")
  (all-from-out "module-interface.rkt")
  (all-from-out "parse-jst.rkt")
- (all-from-out "parse-js-quote.rkt")
  parse-program
  parse-program/bytes
  parse-program/file
@@ -6236,3 +6225,18 @@
  beagle-parse-error-details
  raise-parse-error
  ann)
+;; These receiver-first JavaScript primitives are incomplete while they occupy
+;; a thread-step slot: the threader supplies the receiver before the expanded
+;; form reaches the primitive parser.
+(define JS-RECEIVER-THREAD-HEADS
+  '(js/delete! js/in?))
+
+(define (parse-thread-surface-expr form)
+  (define d (->datum form))
+  (define subs (stx-subs form))
+  (if (and (pair? d) (memq (car d) JS-RECEIVER-THREAD-HEADS))
+      (store-src!
+       (call-form (or (lower-qualified-reference (car d)) (car d))
+                  (map parse-expr (or (stx-tail subs 1) (cdr d))))
+       (and (syntax? form) (stx->src-loc form)))
+      (parse-expr form)))

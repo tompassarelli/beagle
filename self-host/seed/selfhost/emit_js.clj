@@ -67,20 +67,6 @@
   (let [g (deref form-ref)]
   (g f)))
 
-(def ajs-expr-ref (atom nil))
-
-(def ajs-stmt-ref (atom nil))
-
-(def ajs-block-ref (atom nil))
-
-(defn ^String ajs-stmt* [n depth]
-  (let [f (deref ajs-stmt-ref)]
-  (f n depth)))
-
-(defn ^String ajs-block* [n depth]
-  (let [f (deref ajs-block-ref)]
-  (f n depth)))
-
 (defn ^Boolean bound? [^String n]
   (contains? (deref bound-vars) n))
 
@@ -369,7 +355,7 @@
   (let [constraint (binding-constraint binding)]
   (cond
   (nil? constraint) nil
-  (constraint-contains-async? constraint) (throw (ex-info (str "binding constraint for " (binding-target-label binding) " must be a synchronous unary predicate; js/await and async functions are not allowed") {}))
+  (constraint-contains-async? constraint) (throw (ex-info (str "binding constraint for " (binding-target-label binding) " must be a synchronous unary predicate; await and async functions are not allowed") {}))
   :else (str "if (!(" (emit-expr*! constraint) ")(" source ")) throw new Error(" (js-string-lit (str "Binding constraint failed: " (binding-target-label binding))) ");"))))
 
 (defn ^Boolean else-less-if? [els]
@@ -1202,125 +1188,6 @@
 (defn ^String emit-loop-stmt! [e bind-names]
   (emit-loop-stmt-with! e bind-names (fn [^String value-str] (str "return " value-str ";"))))
 
-(defn ^String indent-str [depth]
-  (let [spaces (vec (range (* depth 2)))]
-  (str/join "" (mapv (fn [x] " ") spaces))))
-
-(defn ^String escape-js-template-string [^String s]
-  (str/replace (str/replace s "`" "\\`") "${" "\\${"))
-
-(defn ^String ajs-ident [^String s]
-  (mangle-name s))
-
-(defn ^String ajs-params [params]
-  (str/join ", " (mapv (fn [p] (if (string? p) (ajs-ident p) (str "..." (ajs-ident (get p "spread"))))) params)))
-
-(defn ^String ajs-expr! [n]
-  (let [k (get n "jsk")]
-  (cond
-  (= k "literal") (let [kind (get n "kind")
-   v (get n "value")]
-  (cond
-  (= kind "string") (js-string-lit v)
-  (= kind "number") (str v)
-  (= kind "bool") (if v "true" "false")
-  (= kind "null") "null"
-  (= kind "undefined") "undefined"
-  :else (str v)))
-  (= k "ident") (ajs-ident (get n "name"))
-  (= k "splice-expr") (emit-expr*! (get n "bexpr"))
-  (= k "splice-json") (str "JSON.parse(" (emit-expr*! (get n "bexpr")) ")")
-  (= k "call") (str (ajs-expr! (get n "callee")) "(" (str/join ", " (mapv ajs-expr! (get n "args"))) ")")
-  (= k "member") (if (get n "computed") (str (ajs-expr! (get n "object")) "[" (ajs-expr! (get n "property")) "]") (str (ajs-expr! (get n "object")) "." (mangle-prop (get n "property"))))
-  (= k "index") (str (ajs-expr! (get n "object")) "[" (ajs-expr! (get n "idx")) "]")
-  (= k "arrow") (let [params-str (ajs-params (get n "params"))
-   body (get n "body")]
-  (if (and (map? body) (= (get body "jsk") "block")) (str "(" params-str ") => " (ajs-block* body 0)) (str "(" params-str ") => " (ajs-expr! body))))
-  (= k "ternary") (str "(" (ajs-expr! (get n "test")) " ? " (ajs-expr! (get n "then")) " : " (ajs-expr! (get n "else")) ")")
-  (= k "binary") (str "(" (ajs-expr! (get n "left")) " " (get n "op") " " (ajs-expr! (get n "right")) ")")
-  (= k "unary") (if (get n "prefix") (str (get n "op") (ajs-expr! (get n "expr"))) (str (ajs-expr! (get n "expr")) (get n "op")))
-  (= k "template") (str "`" (str/join "" (mapv (fn [p] (if (contains? p "str") (escape-js-template-string (get p "str")) (str "${" (ajs-expr! (get p "expr")) "}"))) (get n "parts"))) "`")
-  (= k "array") (str "[" (str/join ", " (mapv ajs-expr! (get n "items"))) "]")
-  (= k "object") (str "{" (str/join ", " (mapv (fn [p] (let [key (get p "key")
-   val (get p "val")]
-  (cond
-  (= (get key "jsk") "ident") (let [kk (mangle-prop (get key "name"))
-   vv (ajs-expr! val)]
-  (if (and (= (get val "jsk") "ident") (= kk (ajs-ident (get val "name")))) kk (str kk ": " vv)))
-  (= (get key "jsk") "literal") (str (ajs-expr! key) ": " (ajs-expr! val))
-  :else (str "[" (ajs-expr! key) "]: " (ajs-expr! val))))) (get n "pairs"))) "}")
-  (= k "spread") (str "..." (ajs-expr! (get n "expr")))
-  (= k "await") (str "await " (ajs-expr! (get n "expr")))
-  (= k "new") (str "new " (ajs-expr! (get n "callee")) "(" (str/join ", " (mapv ajs-expr! (get n "args"))) ")")
-  (= k "typeof") (str "typeof " (ajs-expr! (get n "expr")))
-  (= k "function") (str (if (get n "async") "async " "") "function " (ajs-ident (get n "name")) "(" (ajs-params (get n "params")) ") " (ajs-block* (get n "body") 0))
-  :else (str "/* js/quote: unhandled node " k " */"))))
-
-(defn ^String ajs-function-decl [n depth]
-  (let [ind (indent-str depth)]
-  (str ind (if (get n "export") "export " "") (if (get n "async") "async " "") "function " (ajs-ident (get n "name")) "(" (ajs-params (get n "params")) ") " (ajs-block* (get n "body") depth))))
-
-(defn ^String ajs-method [n depth]
-  (let [ind (indent-str depth)
-   kind (get n "kind")
-   kind-prefix (cond
-  (= kind "get") "get "
-  (= kind "set") "set "
-  :else "")
-   name-str (if (= kind "constructor") "constructor" (ajs-ident (get n "name")))]
-  (str ind (if (get n "static") "static " "") (if (get n "async") "async " "") kind-prefix name-str "(" (ajs-params (get n "params")) ") " (ajs-block* (get n "body") depth))))
-
-(defn ^String ajs-class-decl! [n depth]
-  (let [ind (indent-str depth)
-   ext (get n "extends")
-   extends-str (if (absent? ext) "" (str " extends " (ajs-expr! ext)))
-   inner (+ depth 1)
-   methods-str (str/join "\n\n" (mapv (fn [m] (ajs-method m inner)) (get n "methods")))]
-  (str ind "class " (ajs-ident (get n "name")) extends-str " {\n" methods-str "\n" ind "}")))
-
-(defn ^String ajs-stmt! [n depth]
-  (let [ind (indent-str depth)
-   k (get n "jsk")]
-  (cond
-  (= k "block") (str/join "\n" (mapv (fn [s] (ajs-stmt* s depth)) (get n "stmts")))
-  (= k "const") (str ind "const " (ajs-ident (get n "name")) " = " (ajs-expr! (get n "value")) ";")
-  (= k "let") (str ind "let " (ajs-ident (get n "name")) " = " (ajs-expr! (get n "value")) ";")
-  (= k "assign") (str ind (ajs-expr! (get n "target")) " = " (ajs-expr! (get n "value")) ";")
-  (= k "return") (if (absent? (get n "expr")) (str ind "return;") (str ind "return " (ajs-expr! (get n "expr")) ";"))
-  (= k "if") (let [test-str (ajs-expr! (get n "test"))
-   then-str (ajs-block* (get n "then") depth)
-   el (get n "else")]
-  (if (absent? el) (str ind "if (" test-str ") " then-str) (str ind "if (" test-str ") " then-str " else " (ajs-block* el depth))))
-  (= k "for-of") (str ind "for (const " (ajs-ident (get n "binding")) " of " (ajs-expr! (get n "iterable")) ") " (ajs-block* (get n "body") depth))
-  (= k "while") (str ind "while (" (ajs-expr! (get n "test")) ") " (ajs-block* (get n "body") depth))
-  (= k "throw") (str ind "throw " (ajs-expr! (get n "expr")) ";")
-  (= k "try") (let [body-str (ajs-block* (get n "body") depth)
-   cn (get n "catch-name")
-   catch-str (if (absent? cn) "" (str " catch (" (ajs-ident cn) ") " (ajs-block* (get n "catch-body") depth)))
-   fb (get n "finally-body")
-   finally-str (if (absent? fb) "" (str " finally " (ajs-block* fb depth)))]
-  (str ind "try " body-str catch-str finally-str))
-  (= k "expr-stmt") (str ind (ajs-expr! (get n "expr")) ";")
-  (= k "function") (ajs-function-decl n depth)
-  (= k "class") (ajs-class-decl! n depth)
-  (= k "splice-stmts") (str ind (emit-expr*! (get n "bexpr")))
-  :else (str ind (ajs-expr! n) ";"))))
-
-(defn ^String ajs-block [n depth]
-  (let [inner (+ depth 1)
-   stmts (if (and (map? n) (= (get n "jsk") "block")) (get n "stmts") [n])
-   body (str/join "\n" (mapv (fn [s] (ajs-stmt* s inner)) stmts))
-   ind (indent-str depth)]
-  (str "{\n" body "\n" ind "}")))
-
-(defn ^String emit-js-ast-node! [node depth]
-  (let [k (get node "jsk")]
-  (cond
-  (= k "block") (str/join "\n" (mapv (fn [s] (ajs-stmt! s depth)) (get node "stmts")))
-  (= k "function") (ajs-function-decl node depth)
-  (= k "class") (ajs-class-decl! node depth)
-  :else (ajs-stmt! node depth))))
-
 (defn ^String emit-fn! [e]
   (let [params (emit-js-params! (get e "params") (get e "rest"))
    body (get e "body")
@@ -1524,7 +1391,6 @@
   (iife (str "const r = " (emit-expr*! (get e "expr")) "; if (r && r.__tag === \"Ok\") return r.value; const " err-name " = r; return " (emit-expr*! (get e "fallback")) ";") false))
   (= node "await") (str "await " (emit-expr*! (get e "expr")))
   (= node "block-string") (js-string-lit (get e "text"))
-  (= node "js-quote") (emit-js-ast-node! (get e "body") 0)
   (= node "defenum") (emit-defenum e)
   (= node "defunion") (emit-defunion! e)
   (= node "deferror") (emit-deferror! e)
@@ -1573,8 +1439,6 @@
   (= node "defprotocol") (throw (ex-info "protocol-form is not supported for JS target" {}))
   (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
   (and (= node "static-call") (qualified-reference=? f "js" "export")) (str "export " (emit-form! (nth (get f "args") 0)))
-  (and (= node "static-call") (qualified-reference=? f "js" "quote")) (emit-js-ast-node! (get f "js-body") 0)
-  (= node "js-quote") (emit-js-ast-node! (get f "body") 0)
   :else (emit-stmt-inline! f ""))))
 
 (defn ^String last-seg [^String s]
@@ -1658,9 +1522,6 @@
   (reset! body-stmts-ref emit-body-stmts)
   (reset! stmt-inline-ref emit-stmt-inline!)
   (reset! form-ref emit-form!)
-  (reset! ajs-expr-ref ajs-expr!)
-  (reset! ajs-stmt-ref ajs-stmt!)
-  (reset! ajs-block-ref ajs-block)
   nil)
 
 (defn ^String emit-program! [prog]
@@ -1758,13 +1619,13 @@
   (let [receiver {"node" "ref" "name" "obj"}
    selector {"node" "js-selector" "name" "raw_name"}
    dynamic-key {"node" "ref" "name" "key"}]
-  (expect! "js/get static selector" (= (emit-expr! {"node" "js-get" "receiver" receiver "key" selector}) "obj.raw_name"))
-  (expect! "js/get dynamic key" (= (emit-expr! {"node" "js-get" "receiver" receiver "key" dynamic-key}) "obj[key]"))
-  (expect! "js/call preserves receiver member call" (= (emit-expr! {"node" "js-call" "receiver" receiver "key" {"node" "js-selector" "name" "run"} "args" [{"node" "literal" "kind" "number" "value" 1}]}) "obj.run(1)"))
-  (expect! "js/set! assigns through the member" (= (emit-expr! {"node" "js-set" "receiver" receiver "key" dynamic-key "value" {"node" "literal" "kind" "number" "value" 2}}) "(obj[key] = 2)"))
+  (expect! "property access static selector" (= (emit-expr! {"node" "js-get" "receiver" receiver "key" selector}) "obj.raw_name"))
+  (expect! "property access dynamic key" (= (emit-expr! {"node" "js-get" "receiver" receiver "key" dynamic-key}) "obj[key]"))
+  (expect! "member call preserves receiver member call" (= (emit-expr! {"node" "js-call" "receiver" receiver "key" {"node" "js-selector" "name" "run"} "args" [{"node" "literal" "kind" "number" "value" 1}]}) "obj.run(1)"))
+  (expect! "property assignment assigns through the member" (= (emit-expr! {"node" "js-set" "receiver" receiver "key" dynamic-key "value" {"node" "literal" "kind" "number" "value" 2}}) "(obj[key] = 2)"))
   (expect! "js/delete! emits the JavaScript primitive" (= (emit-expr! {"node" "js-delete" "receiver" receiver "key" selector}) "delete obj.raw_name"))
   (expect! "js/in? reverses its static receiver-first surface" (= (emit-expr! {"node" "js-in" "receiver" receiver "key" selector}) "(\"raw_name\" in obj)")))
-  (expect! "js/new preserves qualified constructor references" (do
+  (expect! "new preserves qualified constructor references" (do
   (reset! module-bindings {"three.core" "THREE" "T" "THREE"})
   (let [result (= (emit-expr! {"node" "js-new" "callee" {"node" "ref" "qualifier" "T" "name" "Scene" "providerId" "three.core"} "args" []}) "new THREE.Scene()")]
   (reset! module-bindings {})
@@ -1778,7 +1639,7 @@
   (let [result (= (emit-match-arm! {"pattern" {"type" "record" "qualifier" "models" "name" "Account" "providerId" nil "bindings" [{"name" "id"}]} "body" [{"node" "ref" "name" "id"}]} "value") "if (value._tag === \"Account\") { const id = value.id; return id; } else")]
   (reset! record-fields {})
   result)))
-  (expect! "js/new parenthesizes computed constructors" (= (emit-expr! {"node" "js-new" "callee" {"node" "call" "fn" {"node" "ref" "name" "factory"} "args" []} "args" []}) "new (factory())()"))
+  (expect! "new parenthesizes computed constructors" (= (emit-expr! {"node" "js-new" "callee" {"node" "call" "fn" {"node" "ref" "name" "factory"} "args" []} "args" []}) "new (factory())()"))
   (expect! "js/in? evaluates receiver then dynamic key exactly once" (let [emitted (emit-expr! {"node" "js-in" "receiver" {"node" "call" "fn" {"node" "ref" "name" "receiver!"} "args" []} "key" {"node" "call" "fn" {"node" "ref" "name" "key!"} "args" []}})]
   (and (appears-once? emitted "receiver_bang()") (appears-once? emitted "key_bang()") (appears-before? emitted "receiver_bang()" "key_bang()"))))
   (expect! "js/typeof" (= (emit-expr! {"node" "js-typeof" "expr" {"node" "ref" "name" "obj"}}) "typeof obj"))

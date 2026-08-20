@@ -12,11 +12,15 @@
      (datum->syntax #f form))
    id))
 
+(define (br . xs)
+  (cons (string->symbol "#%brackets") xs))
+
 (define consumer-forms
-  '((ns receipts.consumer)
-    (define-target clj)
-    (require receipts.provider)
-    (def observed Int receipts.provider/missing)))
+  (list
+   '(ns receipts.consumer)
+   '(define-target clj)
+   (list 'require (br 'receipts.provider))
+   '(def observed Int receipts.provider/missing)))
 
 (define (provider-forms members)
   `((ns receipts.provider)

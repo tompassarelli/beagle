@@ -3,36 +3,36 @@
 (ns js-object-statics)
 
 (defn obj-keys [o Any] (Vec String)
-  (js/call Object .keys o))
+  (.keys Object o))
 
 (defn obj-values [o Any] (Vec Any)
-  (js/call Object .values o))
+  (.values Object o))
 
 (defn obj-entries [o Any] (Vec (Vec Any))
-  (js/call Object .entries o))
+  (.entries Object o))
 
 (defn merge-objects
   [a Any
    b Any] Any
-  (js/call Object .assign a b))
+  (.assign Object a b))
 
 (defn freeze-it [o Any] Any
-  (js/call Object .freeze o))
+  (.freeze Object o))
 
 (defn is-frozen? [o Any] Bool
-  (js/call Object .isFrozen o))
+  (.isFrozen Object o))
 
 (defn from-entries [pairs (Vec (Vec Any))] Any
-  (js/call Object .fromEntries pairs))
+  (.fromEntries Object pairs))
 
 (defn parse-int-of [s String] Int
-  (js/call Number .parseInt s 10))
+  (.parseInt Number s 10))
 
 (defn parse-float-of [s String] Float
-  (js/call Number .parseFloat s))
+  (.parseFloat Number s))
 
 (defn array-from [iter Any] (Vec Any)
-  (js/call Array .from iter))
+  (.from Array iter))
 
 (defn array-is? [x Any] Bool
-  (js/call Array .isArray x))
+  (.isArray Array x))

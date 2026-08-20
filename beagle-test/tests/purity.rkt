@@ -269,9 +269,9 @@
   (check-equal?
    (violations
     '(defn loop-build [xs ys] Any
-       (loop [index 0
-              left (transient xs)
-              right (transient ys)]
+       (loop [index Int 0
+              left Any (transient xs)
+              right Any (transient ys)]
          (if (= index 3)
              [(persistent! left) (persistent! right)]
              (recur (+ index 1)
@@ -324,7 +324,7 @@
   (check-equal?
    (violations
     '(defn borrowed-loop [work] Any
-       (loop [index 0 owner work]
+       (loop [index Int 0 owner Any work]
          (if (= index 1)
              (persistent! owner)
              (recur (+ index 1) (conj! owner index))))))
@@ -332,7 +332,7 @@
   (check-equal?
    (violations
     '(defn escaping-loop [xs] Any
-       (loop [index 0 owner (transient xs)]
+       (loop [index Int 0 owner Any (transient xs)]
          (if (= index 1)
              owner
              (recur (+ index 1) (conj! owner index))))))
@@ -340,9 +340,9 @@
   (check-equal?
    (violations
     '(defn aliased-loop [xs ys] Any
-       (loop [index 0
-              left (transient xs)
-              right (transient ys)]
+       (loop [index Int 0
+              left Any (transient xs)
+              right Any (transient ys)]
          (recur (+ index 1) (conj! left index) left))))
    '(aliased-loop))
   ;; A transient bound in a `let` and never consumed is abandoned at the
@@ -367,7 +367,7 @@
            '(defn side-effect-loop-shadow [values] Any
               (doseq [writer values] (writer nil)))
            '(defn catch-shadow [] Any
-              (try nil (catch (writer Exception) (writer nil))))))
+              (try nil (catch Exception writer (writer nil))))))
   (check-equal? (map purity-violation-name (purity-violations p)) '(writer))
   ;; Use the source reader here: Racket datum brackets cannot represent a
   ;; Beagle map destructuring target faithfully.
@@ -578,18 +578,6 @@
            '(define-target clj)
            '(defprotocol transient (value [self] Any))
            '(defn expose [item] Any (persistent! (transient item)))))
-  (define violations (purity-violations p))
-  (check-equal? (map purity-violation-name violations) '(expose))
-  (check-equal?
-   (map purity-witness-marker
-        (purity-violation-witnesses (car violations)))
-   '(persistent!)))
-
-(test-case "JS class names participate in global primitive shadowing"
-  (define p
-    (prog* '(ns t.class-shadow) '(define-target js)
-           '(js/class transient)
-           '(defn expose [value] Any (persistent! (transient value)))))
   (define violations (purity-violations p))
   (check-equal? (map purity-violation-name violations) '(expose))
   (check-equal?

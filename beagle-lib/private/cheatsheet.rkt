@@ -106,23 +106,31 @@
           "Declare a host function/value with a type so typed code can call into the target runtime."
           "(declare-extern host/now (Fn [] Int))")
 
-   (cheat "js/get / js/call / js/set!" "Interop" 'js
-          "Receiver-first JavaScript member operations. `.member` is a static selector operand, never a standalone value; a dynamic key expression uses bracket access. Calls stay attached to the receiver so JavaScript `this` is preserved."
+   (cheat "direct JavaScript interop" "Interop" 'js
+          "Direct properties and member calls preserve their receiver. Use `.-member` for a static property, `set!` to write it, and bare `new` to construct a host value."
           (string-append
-           "(declare-extern [obj key] Any)\n"
-           "(def static-value Any (js/get obj .raw_name))\n"
-           "(def dynamic-value Any (js/get obj key))\n"
-           "(def called Any (js/call obj .run 1))\n"
-           "(def assigned Any (js/set! obj key 2))"))
+           "(declare-extern [js/Ctor obj] Any)\n"
+           "(def static-value Any (.-raw_name obj))\n"
+           "(def called Any (.run obj 1))\n"
+           "(def assigned Any (set! (.-raw_name obj) 2))\n"
+           "(def created Any (new js/Ctor))"))
 
-   (cheat "js/new / js/delete! / js/in? / js/typeof" "Interop" 'js
-          "JavaScript-only construction and primitive operations. Member selectors preserve their authored bytes; `js/in?` is receiver-first even though JavaScript emits the key before `in`."
+   (cheat "^:async + await" "Interop" 'js
+          "Mark a function `^:async` when it uses bare `await`; its declared return remains a `Promise` of the awaited value type."
           (string-append
-           "(declare-extern [Ctor obj] Any)\n"
-           "(def created Any (js/new Ctor))\n"
-           "(def removed Bool (js/delete! obj .temporary))\n"
-           "(def present Bool (js/in? obj .ready))\n"
-           "(def kind String (js/typeof obj))"))))
+           "(declare-extern load (Fn [] (Promise Int)))\n"
+           "(defn ^:async load-value [] (Promise Int)\n"
+           "  (await (load)))"))
+
+   (cheat "this-as" "Interop" 'js
+          "Bind JavaScript `this` explicitly for one expression; the form is available on the JavaScript target only."
+          "(defn capture-this [] Any\n  (this-as self self))")
+
+   (cheat ".. receiver chain" "Interop" 'js
+          "Thread one JavaScript receiver through member-call steps without losing method receiver semantics."
+          (string-append
+           "(declare-extern factory (Fn [] Any))\n"
+           "(def chained Any (.. (factory) (child) (value)))"))))
 
 (define (cheat-categories)
   ;; preserve first-appearance order
