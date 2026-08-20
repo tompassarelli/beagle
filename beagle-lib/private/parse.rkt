@@ -3692,7 +3692,7 @@
   (lambda (d subs)
     (parse-target-case (or (stx-tail subs 1) (cdr d)))))
 
-;; `try` — try/catch/finally; delegates to the unchanged parse-try-form.
+;; `try` — try/catch/finally; delegates to the canonical catch parser.
 (register-combiner! 'try
   (lambda (d subs)
     (parse-try-form (or (stx-tail subs 1) (cdr d)))))
@@ -5351,47 +5351,61 @@
          (loop (cdr items) (cons (car items) body))])))
   (when (null? body-forms)
     (error 'beagle "try requires at least one body expression"))
+  (unless (or (pair? catch-forms) finally-form)
+    (error 'beagle "try requires at least one catch or finally clause"))
   (try-form (map parse-expr body-forms)
             catch-forms
             finally-form))
 
 (define (parse-catch-finally items)
-  (let loop ([rest items] [catches '()] [fin #f])
+  (let loop ([rest items] [catches '()] [fin #f] [default-seen? #f])
     (define first-d (and (pair? rest) (->datum (car rest))))
     (cond
       [(null? rest) (values (reverse catches) fin)]
       [(and (pair? first-d) (eq? (car first-d) 'catch))
        (define clause-d first-d)
        (define clause-subs (stx-subs (car rest)))
-       (when (< (length clause-d) 3)
-         (error 'beagle "catch clause needs (catch (name ExType) body...)"))
-       (define binding (cadr clause-d))
-       (unless (and (structured-binding? binding)
-                    (= (length binding) 2)
-                    (symbol? (car binding)))
+       (when (< (length clause-d) 4)
+         (error 'beagle "catch clause needs (catch ExType name body...)"))
+       (define ex-type (cadr clause-d))
+       (define name (caddr clause-d))
+       (unless (symbol? name)
          (raise-parse-error
           'inline-type-annotation
-          "catch binding must be `(name ExType)`, got: ~v"
-          binding))
-       (define name (car binding))
-       (define ex-type (cadr binding))
-       (parse-type ex-type)
-       (define body (or (stx-tail clause-subs 2) (cddr clause-d)))
+          "catch name must be a symbol, got: ~v"
+          name))
+       (define default? (eq? ex-type ':default))
+       (when default-seen?
+         (error 'beagle
+                (if default?
+                    "try permits only one default catch"
+                    "default catch must be the last catch clause")))
+       (unless default?
+         (unless (symbol? ex-type)
+           (error 'beagle "catch type must be a nominal type name, got: ~v"
+                  ex-type))
+         (parse-type ex-type))
+       (define body (or (stx-tail clause-subs 3) (cdddr clause-d)))
        (define parsed-catch
          (catch-clause ex-type name (map parse-expr body)))
        (register-syntax-binder!
         parsed-catch
-        (stx-ref clause-subs 1))
+        (stx-ref clause-subs 2))
        (loop (cdr rest)
              (cons parsed-catch catches)
-             fin)]
+             fin
+             default?)]
       [(and (pair? first-d) (eq? (car first-d) 'finally))
        (define clause-d first-d)
        (define clause-subs (stx-subs (car rest)))
        (when (< (length clause-d) 2)
          (error 'beagle "finally clause needs at least one body expression"))
+       (when fin
+         (error 'beagle "try permits only one finally clause"))
+       (unless (null? (cdr rest))
+         (error 'beagle "finally must be the last try clause"))
        (define body (or (stx-tail clause-subs 1) (cdr clause-d)))
-       (loop (cdr rest) catches (map parse-expr body))]
+       (loop (cdr rest) catches (map parse-expr body) default-seen?)]
       [else (error 'beagle "unexpected form after catch/finally: ~v" first-d)])))
 
 ;; (parse-case-form / parse-case-pairs removed 2026-06-12 — dead since the
