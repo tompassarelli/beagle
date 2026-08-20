@@ -175,7 +175,7 @@ done
 
 if [[ -z "$native_bin" ]]; then
     echo "$gate: existing route 4/8/16 exact serial bytes PASS" >&2
-    echo "$gate: native full-compiler route, native 1/4/8/16 identity, and empty-cache fram-server-native-v1 16-worker <=${cold_deadline}s await BEAGLE_NATIVE_COMPILER_BIN" >&2
+    echo "$gate: native full-compiler route, native 1/4/8/16 identity, and empty-cache store-server-native-v1 16-worker <=${cold_deadline}s await BEAGLE_NATIVE_COMPILER_BIN" >&2
     exit 2
 fi
 [[ -x "$native_bin" ]] || {
@@ -210,51 +210,55 @@ for workers in 4 8 16; do
     echo "$gate: native workers=$workers exact serial bytes PASS"
 done
 
-# fram-server-native-v1 is the checked 21-source closure and eight server ABI
+# store-server-native-v1 is the checked 21-source closure and eight server ABI
 # entries.  The selected compiler binary is an allowed prior input; this run
 # gives every semantic/native cache a fresh root and admits exactly one timed
 # 16-worker lowering/emission sample.
-fram_root="${BEAGLE_T0_FRAM_ROOT:-/home/tom/code/fram/main}"
-[[ -d "$fram_root/src/fram" ]] || {
-    echo "$gate: fram-server-native-v1 source root is unavailable: $fram_root" >&2
+store_root="${BEAGLE_T0_STORE_ROOT:-$root/store}"
+closure_manifest="$store_root/native/core_closure_sources.txt"
+[[ -f "$closure_manifest" ]] || {
+    echo "$gate: store-server-native-v1 closure manifest is unavailable: $closure_manifest" >&2
     exit 2
 }
-mapfile -t fram_sources < <(
-    find "$fram_root/src/fram" -maxdepth 1 -type f -name '*.bgl' -printf '%f\n' |
-        LC_ALL=C sort
-)
-[[ "${#fram_sources[@]}" == 21 ]] || {
-    echo "$gate: fram-server-native-v1 requires 21 sources, found ${#fram_sources[@]}" >&2
+mapfile -t store_sources <"$closure_manifest"
+[[ "${#store_sources[@]}" == 21 ]] || {
+    echo "$gate: store-server-native-v1 requires 21 sources, found ${#store_sources[@]}" >&2
     exit 2
 }
-fram_entries=(
-    fram.native-server/server-generated-abi
-    fram.native-server/server-store-boot!
-    fram.native-server/server-store-dispatch!
-    fram.native-server/server-store-shutdown
-    fram.native-server/server-codec-read-request!
-    fram.native-server/server-codec-write-response!
-    fram.native-server/server-codec-release-request
-    fram.native-server/server-codec-release-response
+for source in "${store_sources[@]}"; do
+    [[ -f "$store_root/$source" ]] || {
+        echo "$gate: store-server-native-v1 source is unavailable: $store_root/$source" >&2
+        exit 2
+    }
+done
+store_entries=(
+    store.native-server/server-generated-abi
+    store.native-server/server-store-boot!
+    store.native-server/server-store-dispatch!
+    store.native-server/server-store-shutdown
+    store.native-server/server-codec-read-request!
+    store.native-server/server-codec-write-response!
+    store.native-server/server-codec-release-request
+    store.native-server/server-codec-release-response
 )
-cold_args=(--materializer c17 --emit-workers 16 --out "$scratch/fram-cold")
-for entry in "${fram_entries[@]}"; do
+cold_args=(--materializer c17 --emit-workers 16 --out "$scratch/store-cold")
+for entry in "${store_entries[@]}"; do
     cold_args+=(--entry "$entry")
 done
-cold_args+=("${fram_sources[@]}")
+cold_args+=("${store_sources[@]}")
 
-echo "$gate: fram-server-native-v1 empty-cache 16-worker sample START"
+echo "$gate: store-server-native-v1 empty-cache 16-worker sample START"
 (
-    cd "$fram_root/src/fram"
+    cd "$store_root"
     BEAGLE_NATIVE_COMPILER_BIN="$native_bin" \
-        BEAGLE_CORE_BUILD_CACHE="$scratch/fram-empty-cache" \
+        BEAGLE_CORE_BUILD_CACHE="$scratch/store-empty-cache" \
         BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS="$((cold_deadline + 60))" \
         BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS="$cold_deadline" \
         "$root/bin/beagle-build-core" "${cold_args[@]}"
-) >"$scratch/fram-cold.stdout" 2>"$scratch/fram-cold.stderr"
+) >"$scratch/store-cold.stdout" 2>"$scratch/store-cold.stderr"
 cold_seconds="$(sed -n \
     's/^beagle build: phase core-lowering SECONDS \([0-9][0-9]*\)$/\1/p' \
-    "$scratch/fram-cold.stderr")"
+    "$scratch/store-cold.stderr")"
 [[ "$cold_seconds" =~ ^[0-9]+$ && "$cold_seconds" -le "$cold_deadline" ]] || {
     echo "$gate: COLD-EMIT-T0 missing or over limit: seconds=${cold_seconds:-missing} limit=$cold_deadline" >&2
     exit 1
