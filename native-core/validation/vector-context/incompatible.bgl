@@ -1,0 +1,6 @@
+#lang beagle
+(ns native.vector-context-incompatible
+  (:require [native.vector-context-provider :as p]))
+
+(defn incompatible-events [] (Vec p/Event)
+  [(p/->EventStarted 0) "not an event"])

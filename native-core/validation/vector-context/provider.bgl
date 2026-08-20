@@ -1,0 +1,8 @@
+#lang beagle
+(ns native.vector-context-provider)
+
+(defrecord Item [id String])
+
+(defunion Event
+  (EventStarted [offset Int])
+  (EventText [offset Int text String]))

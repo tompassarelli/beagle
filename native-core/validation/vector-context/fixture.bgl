@@ -1,0 +1,16 @@
+#lang beagle
+(ns native.vector-context
+  (:require [native.vector-context-provider :as p]))
+
+(defrecord Entry [id String])
+
+(defn accessor-values [items (Vec p/Item)] (Vec String)
+  (mapv p/item-id items))
+
+(defn sealed-events [] (Vec p/Event)
+  [(p/->EventStarted 0) (p/->EventText 1 "text")])
+
+(defn empty-exact [] (U (Vec Entry) Nil)
+  (let [empty (Vec Entry) []
+        initial (U (Vec Entry) Nil) empty]
+    initial))
