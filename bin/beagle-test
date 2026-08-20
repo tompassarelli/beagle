@@ -704,6 +704,7 @@ if [[ "$BEAGLE_TEST_SELECT_CHANGED" == 1 ]]; then
             run_beagle_test_phase "$beagle_test_phase" \
                 "$BEAGLE_ROOT/bin/test/$beagle_test_phase/run.sh" || exit $?
         done
+        BEAGLE_GATE_NO_CACHE="$BEAGLE_SELECTION_BYPASS_CACHE" \
         run_beagle_test_phase "tier-selected" \
             "$BEAGLE_ROOT/bin/_beagle-test-selected-units" \
             "${BEAGLE_SELECTION_SUITES[@]}" || exit $?

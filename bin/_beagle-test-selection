@@ -77,6 +77,46 @@ BEAGLE_SUITES_DOCS=(
     license-metadata.rkt
 )
 
+# The front end's ordinary edit loop needs pointed compiler feedback, not the
+# native publication and checkout-isolation proofs from the release gate.  The
+# groups below are deliberately conservative clusters rather than a one-file
+# guess: each compiler seam runs its direct contract plus the neighbouring
+# reader/checker contracts most likely to expose a broken IR boundary.  The
+# plain `bin/beagle test` release gate remains the exhaustive proof.
+BEAGLE_SUITES_FRONTEND_FOCUS=(
+    parse.rkt
+    annotation-parse.rkt
+    quasi-quote-reader.rkt
+    reader-conditionals.rkt
+    reader-path-parity.rkt
+    reader-shorthand.rkt
+    syntax.rkt
+    defmacro.rkt
+    macro-eval.rkt
+    macro-hygiene.rkt
+    syntax-match.rkt
+    annotation-macros.rkt
+    rewrite-roundtrip.rkt
+    signature-format.rkt
+)
+
+BEAGLE_SUITES_CHECKER_FOCUS=(
+    check.rkt
+    types.rkt
+    definition-inference.rkt
+    effective-signature-publication.rkt
+    declared-module-contracts.rkt
+    binding-constraint-check.rkt
+    binding-constraint-interface.rkt
+    generic-type-arity.rkt
+    scrutinee-narrowing.rkt
+    purity.rkt
+    structured-diagnostics.rkt
+    expected-errors.rkt
+    type-inference-core.rkt
+    type-view.rkt
+)
+
 # --- gate phases -----------------------------------------------------------
 #
 # The four shell phases are not suites and are selected separately.
@@ -105,7 +145,10 @@ BEAGLE_SUITES_DOCS=(
 # drives is Clojure-hosted, and the reading that says a Clojure emitter change
 # cannot reach it is less certain than the same reading for Nix and
 # JavaScript. When the reading is less certain, run it.
-BEAGLE_PHASES_ALWAYS=(checkout-first qualified-ref-scaffold)
+# A narrowed compiler run is immediate feedback, not a release proof.  Whole-
+# checkout guards are selected only when one of their own inputs changes; they
+# no longer add unrelated process trees to every focused edit.
+BEAGLE_PHASES_ALWAYS=()
 
 # --- change discovery ------------------------------------------------------
 
@@ -172,6 +215,25 @@ beagle_selection_classify_path() {
         beagle-lib/clj/*)
             echo "group:clj" ;;
 
+        # --- shared compiler, focused edit loop -----------------------------
+        # These are the two high-frequency compiler seams.  Unknown/shared
+        # modules still fall through to the exhaustive sweep below.
+        beagle-lib/private/parse.rkt|\
+        beagle-lib/private/macros.rkt|\
+        beagle-lib/private/macro-eval.rkt|\
+        beagle-lib/private/syntax.rkt|\
+        beagle-lib/private/tags.rkt|\
+        beagle-lib/private/rewrite.rkt|\
+        beagle-lib/private/signature-format.rkt)
+            echo "group:frontend-focus" ;;
+        beagle-lib/private/check.rkt|\
+        beagle-lib/private/types.rkt|\
+        beagle-lib/private/module-interface.rkt|\
+        beagle-lib/private/diagnostic-kind.rkt|\
+        beagle-lib/private/error-explanation.rkt|\
+        beagle-lib/private/type-view.rkt)
+            echo "group:checker-focus" ;;
+
         # --- a test file is its own reason to run ---------------------------
         # Editing a suite selects that suite. It does NOT narrow anything
         # else: a suite file is evidence about itself only.
@@ -217,6 +279,8 @@ beagle_selection_reason() {
         group:js)   echo "JavaScript/TypeScript emitter surface" ;;
         group:clj)  echo "Clojure emitter surface" ;;
         group:docs) echo "documentation read only by the doc/cheatsheet/license gates" ;;
+        group:frontend-focus) echo "focused reader/parser/macro compiler contracts" ;;
+        group:checker-focus) echo "focused checker/type-system contracts" ;;
         suite:*)    echo "the suite's own file" ;;
         phase:*)    echo "gate phase input" ;;
         none)       echo "not an input to any gate phase" ;;
@@ -263,6 +327,7 @@ beagle_selection_compute() {
     BEAGLE_SELECTION_SUITES=()
     BEAGLE_SELECTION_PHASES=()
     BEAGLE_SELECTION_TRACE=()
+    BEAGLE_SELECTION_BYPASS_CACHE=0
 
     if ! mapfile -t paths < <(beagle_selection_changed_paths "$root"); then
         BEAGLE_SELECTION_WHY="no merge base with main could be resolved, so the changed set is unknown"
@@ -289,6 +354,12 @@ beagle_selection_compute() {
                             for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done
                             phases[consumer-smoke]=1 ;;
                 group:docs) for s in "${BEAGLE_SUITES_DOCS[@]}"; do suites["$s"]=1; done ;;
+                group:frontend-focus)
+                            for s in "${BEAGLE_SUITES_FRONTEND_FOCUS[@]}"; do suites["$s"]=1; done
+                            BEAGLE_SELECTION_BYPASS_CACHE=1 ;;
+                group:checker-focus)
+                            for s in "${BEAGLE_SUITES_CHECKER_FOCUS[@]}"; do suites["$s"]=1; done
+                            BEAGLE_SELECTION_BYPASS_CACHE=1 ;;
                 suite:*)    suites["${token#suite:}"]=1 ;;
                 phase:*)    phases["${token#phase:}"]=1 ;;
                 none)       ;;
@@ -359,6 +430,9 @@ beagle_selection_report() {
     for s in "${BEAGLE_SELECTION_SUITES[@]}"; do
         echo "beagle-test:   RUN  $s"
     done
+    if [[ "$BEAGLE_SELECTION_BYPASS_CACHE" == 1 ]]; then
+        echo "beagle-test: cache bypassed: selected compiler inputs changed, so stale proof lookup/tracing is outside this edit loop"
+    fi
     echo "beagle-test: suites skipped ($((${#active[@]} - ${#BEAGLE_SELECTION_SUITES[@]}))): no changed path maps to them"
     for s in "${active[@]}"; do
         [[ -n "${selected[$s]+set}" ]] || echo "beagle-test:   skip $s"
