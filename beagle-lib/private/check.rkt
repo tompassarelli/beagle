@@ -4480,11 +4480,26 @@
          #t)))
 
 (define (infer-expr-with-expected e env expected)
-  (if (and expected (jst-new? e))
-      (begin
-        (check-target-form e)
-        (infer-jst-new e env expected))
-      (infer-expr e env)))
+  (cond
+    [(and (type-app? expected)
+          (eq? (type-app-ctor expected) 'Vec)
+          (= (length (type-app-args expected)) 1)
+          (vec-form? e))
+     (define element-type (car (type-app-args expected)))
+     (for ([item (in-list (vec-form-items e))])
+       (define actual (infer-expr item env))
+       (unless (fresh-value-compatible? item element-type env)
+         (raise-diag
+          'type-mismatch
+          (format "Vector elements must have compatible types: expected ~a, got ~a"
+                  (type->string element-type) (type->string actual))
+          (type-mismatch-details element-type actual)
+          #:src (or (src-for item) (src-for e)))))
+     expected]
+    [(and expected (jst-new? e))
+     (check-target-form e)
+     (infer-jst-new e env expected)]
+    [else (infer-expr e env)]))
 
 (define (check-form form env)
   (match form
