@@ -213,7 +213,7 @@ PY
         --interface-sha256 "${closure_source_ids[$index]}=$interface_digest"
     )
 done
-facts="$work/source.facts"
+facts="$work/source-facts.manifest"
 bb "$BEAGLE_DIR/native-core/bin/source-facts.clj" \
     "${projector_args[@]}" --output "$facts" --include-defs
 
@@ -280,6 +280,6 @@ fi
 # supplies the authenticated self-host projections and keeps every public flag
 # and stream of the existing Core CLI unchanged.
 BEAGLE_CORE_FRONTEND_DIR="$frontend" \
-BEAGLE_CORE_FRONTEND_FACTS="$facts" \
+BEAGLE_CORE_FRONTEND_FACTS_MANIFEST="$facts" \
 BEAGLE_CORE_COMPILED_OVERRIDE="$compiled" \
     "$BIN/beagle-build-core" "${original_args[@]}"

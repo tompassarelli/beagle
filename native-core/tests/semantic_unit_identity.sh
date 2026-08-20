@@ -130,7 +130,7 @@ for version in base inserted mutated shadow-let shadow-parameter; do
   bb "$repo/native-core/bin/source-facts.clj" \
     --input "$scratch/$version.ast.json=semantic/unit_fixture.bgl" \
     --interface-sha256 "semantic/unit_fixture.bgl=$interface_sha256" \
-    --output "$scratch/$version.facts" --include-defs
+    --output "$scratch/$version.facts.manifest" --include-defs
 done
 
 real_fixture="$repo/native-core/validation/scalar-numerics/fixture.bgl"
@@ -178,9 +178,9 @@ bb -cp "$scratch/out" -e '
                    (= definition-name (slice/row-text row)))
           (slice/slicefactv0-subject row)))
       rows))
-  (let [base-rows (slice/parse-facts (slurp (first *command-line-args*)))
-        inserted-rows (slice/parse-facts (slurp (second *command-line-args*)))
-        mutated-rows (slice/parse-facts (slurp (nth *command-line-args* 2)))
+  (let [base-rows (slice/read-fact-manifest (first *command-line-args*))
+        inserted-rows (slice/read-fact-manifest (second *command-line-args*))
+        mutated-rows (slice/read-fact-manifest (nth *command-line-args* 2))
         base-id (definition-subject base-rows "stable")
         inserted-id (definition-subject inserted-rows "stable")
         mutated-id (definition-subject mutated-rows "stable")
@@ -197,9 +197,9 @@ bb -cp "$scratch/out" -e '
         (slice/row-first-text inserted-rows inserted-id "semantic-unit-sha256")
         mutated-semantic
         (slice/row-first-text mutated-rows mutated-id "semantic-unit-sha256")
-        shadow-let-rows (slice/parse-facts (slurp (nth *command-line-args* 3)))
+        shadow-let-rows (slice/read-fact-manifest (nth *command-line-args* 3))
         shadow-parameter-rows
-        (slice/parse-facts (slurp (nth *command-line-args* 4)))
+        (slice/read-fact-manifest (nth *command-line-args* 4))
         shadow-let-id (definition-subject shadow-let-rows "shadow")
         shadow-parameter-id (definition-subject shadow-parameter-rows "shadow")
         shadow-let-semantic
@@ -279,6 +279,7 @@ bb -cp "$scratch/out" -e '
       (doseq [failure failures] (binding [*out* *err*] (println failure)))
       (throw (ex-info "semantic unit identity contract failed" {:failures failures})))
     (println "semantic unit identity: parameter-position stability, shadowing distinction, semantic/interface separation, and lossless atom encoding PASS"))' \
-  "$scratch/base.facts" "$scratch/inserted.facts" "$scratch/mutated.facts" \
-  "$scratch/shadow-let.facts" "$scratch/shadow-parameter.facts" \
+  "$scratch/base.facts.manifest" "$scratch/inserted.facts.manifest" \
+  "$scratch/mutated.facts.manifest" "$scratch/shadow-let.facts.manifest" \
+  "$scratch/shadow-parameter.facts.manifest" \
   "$interface_sha256"

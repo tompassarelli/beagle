@@ -12,7 +12,7 @@ fi
 
 fixture="$here/fixture.bgl"
 ast="$scratch/fixture.ast.json"
-facts="$scratch/fixture.facts"
+facts="$scratch/fixture.facts.manifest"
 interface_digest="$scratch/fixture.interface.sha256"
 compiled="$scratch/compiled"
 artifacts="$scratch/artifacts"

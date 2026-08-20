@@ -42,6 +42,19 @@
 (defn sha256 [^String value]
   (sha256-bytes (.getBytes value StandardCharsets/UTF_8)))
 
+(defn sha256-source-rows [rows]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (doseq [row rows]
+      (doseq [position (range 4)]
+        (.update digest (.getBytes ^String (nth row position)
+                                   StandardCharsets/UTF_8))
+        (.update digest (.getBytes ^String (if (= position 3) "\n" "\t")
+                                   StandardCharsets/UTF_8))))
+    (str "sha256:"
+         (apply str
+                (map #(format "%02x" (bit-and (int %) 255))
+                     (.digest digest))))))
+
 (defn- exact-digest? [value]
   (and (string? value)
        (boolean (re-matches #"sha256:[0-9a-f]{64}" value))))
@@ -64,9 +77,8 @@
   (sha256 (apply str (map query-fact-encoding facts))))
 
 (defn- source-rows [source-facts]
-  (if-not (string? source-facts)
-    (->QueryRejected :query/invalid-source-facts
-                     "source facts must be text")
+  (cond
+    (string? source-facts)
     (try
       (loop [lines (remove str/blank? (str/split-lines source-facts)) rows []]
         (if-let [line (first lines)]
@@ -77,7 +89,16 @@
                                "source facts must have four tab-separated fields")))
           rows))
       (catch Exception error
-        (->QueryRejected :query/malformed-source-facts (.getMessage error))))))
+        (->QueryRejected :query/malformed-source-facts (.getMessage error))))
+
+    (and (vector? source-facts)
+         (every? #(and (vector? %) (= 4 (count %)) (every? string? %))
+                 source-facts))
+    source-facts
+
+    :else
+    (->QueryRejected :query/invalid-source-facts
+                     "source facts must be canonical text or four-field rows")))
 
 (defn- one-text [by-subject subject predicate]
   (let [values (get-in by-subject [subject predicate] [])]
@@ -194,7 +215,10 @@
         (let [modules (module-identities rows)]
           (if (query-rejected? modules)
             modules
-            (let [source-facts-content-id (sha256 source-facts)
+            (let [source-facts-content-id
+                  (if (string? source-facts)
+                    (sha256 source-facts)
+                    (sha256-source-rows rows))
                   facts (canonical-query-facts
                          source-facts-content-id compiler-projection-content-id
                          rules-content-id entries strict-entry-abi? modules)]

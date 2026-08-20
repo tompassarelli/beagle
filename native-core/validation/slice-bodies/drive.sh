@@ -31,7 +31,7 @@ logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/types.ast.json")"
 bb "$here/ast-facts.clj" \
   --input "$scratch/types.ast.json=$logical" \
-  --output "$generated/types.facts" \
+  --output "$generated/types.facts.manifest" \
   --include-defs
 sha256sum "$src" | cut -d' ' -f1 >"$generated/source.sha256"
 
@@ -65,7 +65,7 @@ done
 bb -cp "$scratch/out" -e "
 (require 'native.body-slice)
 (spit \"$generated/report.txt\"
-  (native.body-slice/emit-slice! \"$generated/types.facts\" \"store.types\"
+  (native.body-slice/emit-manifest-slice! \"$generated/types.facts.manifest\" \"store.types\"
     \"$logical\"
     \"$generated\" \"native-slice-bodies-v0\" \"$abi\"))"
 
@@ -78,13 +78,15 @@ if [[ "${NATIVE_SLICE_SOURCE_ID_PROOF:-0}" == 1 ]]; then
 fi
 
 publish_results() {
-  local -a names=(types.facts report.txt module_0.h module_0.c)
+  local -a names=(types.facts.manifest report.txt module_0.h module_0.c)
   [[ -f "$generated/source.sha256" ]] && names+=(source.sha256)
   local name
   mkdir -p "$art"
   for name in "${names[@]}"; do
     cp -- "$generated/$name" "$art/$name"
   done
+  cp -a "$generated/types.facts.manifest.segments" \
+    "$art/types.facts.manifest.segments"
 }
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then

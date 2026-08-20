@@ -1,5 +1,6 @@
 (ns semantic-read-store-cache-test
-  (:require [semantic-read-store :as cache]
+  (:require [clojure.string :as str]
+            [semantic-read-store :as cache]
             [source-fact-store :as blobs]
             [store.dev-compile-facts :as compile-facts])
   (:import [java.nio.charset StandardCharsets]
@@ -38,6 +39,8 @@
        "2\tform-kind\tt\tseq\n"
        "2\tf0\tn\t1\n"))
 (def payload (str source-facts "1\tsemantic-read\tn\t1\n"))
+(def source-rows
+  (mapv #(str/split % #"\t" -1) (str/split-lines source-facts)))
 
 (defn admitted-query! []
   (let [admission
@@ -60,8 +63,19 @@
 (with-store
  (fn [store]
    (let [query (admitted-query!)
+         row-admission
+         (cache/admit-and-identify-query
+          (cache/->QueryAdmissionRequest source-rows digest-b digest-c
+                                         ["demo.core/main"] false))
          facts (:facts query)
          miss (cache/query! store query)]
+     (check! "segmented rows preserve the canonical text query identity"
+             (and (cache/query-admitted? row-admission)
+                  (= (:query-digest query)
+                     (:query-digest (cache/admitted-query row-admission)))
+                  (= (:source-facts-content-id query)
+                     (:source-facts-content-id
+                      (cache/admitted-query row-admission)))))
      (let [invalid-request
            (cache/admit-and-identify-result {:query query :payload payload})]
        (check! "result admission requires its typed request"

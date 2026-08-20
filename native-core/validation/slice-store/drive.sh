@@ -50,6 +50,13 @@ bb "$here/ast-facts.clj" \
   "$scratch/types.ast.json=$types_logical=$scratch/types.interface.sha256" \
   "$scratch/store.ast.json=$store_logical=$scratch/store.interface.sha256" \
   "$scratch/store.facts"
+store_facts_digest="$(sha256sum "$scratch/store.facts" | awk '{print $1}')"
+mkdir "$scratch/store.facts.manifest.segments"
+cp "$scratch/store.facts" \
+  "$scratch/store.facts.manifest.segments/000000-$store_facts_digest.facts"
+printf '%s\n%s\n' 'beagle-source-facts-manifest-v1' \
+  "store.facts.manifest.segments/000000-$store_facts_digest.facts" \
+  >"$scratch/store.facts.manifest"
 cp "$scratch/store.facts" "$art/store.facts"
 { sha256sum "$slots"; sha256sum "$dep"; sha256sum "$src"; } \
   | cut -d' ' -f1 >"$art/source.sha256"
@@ -84,7 +91,7 @@ done
 bb -Xmx4g -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
-  (native.slice/emit-slice! \"$scratch/store.facts\" \"store.store\"
+  (native.slice/emit-slice! \"$scratch/store.facts.manifest\" \"store.store\"
     \"$store_logical\" \"$art\" \"native-slice-store-v0\" \"$abi\"))"
 
 cat "$art/report.txt"

@@ -479,7 +479,7 @@ trap cleanup EXIT
 trap interrupted HUP INT TERM
 mkdir -p "$work/artifacts"
 
-facts="$work/source.facts"
+facts="$work/source-facts.manifest"
 projector_args=()
 wasm_checked_sources=()
 source_snapshot_paths=()
@@ -987,12 +987,12 @@ fi
 if [[ "$core_result_early_hit" != 1 && "$core_checkpoint_early_hit" != 1 ]]; then
 if [[ -n "${BEAGLE_CORE_FRONTEND_DIR:-}" ]]; then
     frontend_dir="$BEAGLE_CORE_FRONTEND_DIR"
-    frontend_facts="${BEAGLE_CORE_FRONTEND_FACTS:-}"
+    frontend_facts="${BEAGLE_CORE_FRONTEND_FACTS_MANIFEST:-}"
     [[ -d "$frontend_dir" ]] ||
         die "native Core frontend directory is unavailable: $frontend_dir"
     [[ -f "$frontend_facts" ]] ||
-        die "native Core frontend facts are unavailable: $frontend_facts"
-    cp -- "$frontend_facts" "$facts"
+        die "native Core frontend facts manifest is unavailable: $frontend_facts"
+    facts="$frontend_facts"
     source_index=0
     for source in "${normalized_sources[@]}"; do
         ast="$frontend_dir/source_${source_index}.ast.json"
@@ -1853,7 +1853,7 @@ release_core_result_lock
 if [[ "$core_result_cache_hit" != 1 ]]; then
 core_c17_attestation_report=""
 reuse_core_c17_attestation || true
-export BEAGLE_CORE_FACTS="$facts"
+export BEAGLE_CORE_FACTS_MANIFEST="$facts"
 export BEAGLE_CORE_ARTIFACTS="$work/artifacts"
 export BEAGLE_CORE_COMMIT="$compiler_commit"
 export BEAGLE_CORE_ABI="$abi"
@@ -3640,16 +3640,22 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
          "\n")))
 
 (defn compile-core!
-  [facts-path projected-facts-path artifacts-dir compiler-commit entries
+  [facts-manifest-path projected-facts-path artifacts-dir compiler-commit entries
    materializers abi-id abi simd-required?]
   (start-stage! "source-projection")
-  (let [raw-facts (slurp facts-path)
-        raw-rows (slice/parse-facts raw-facts)
+  (let [raw-rows (slice/read-fact-manifest facts-manifest-path)
+        cache-source-rows
+        (mapv (fn [row]
+                [(slice/slicefactv0-subject row)
+                 (slice/slicefactv0-predicate row)
+                 (slice/slicefactv0-kind row)
+                 (slice/slicefactv0-object row)])
+              raw-rows)
         strict-entry-abi? (boolean (some #{"wasm"} materializers))
         cache-admission
         (semantic-cache/admit-and-identify-query
          (semantic-cache/->QueryAdmissionRequest
-          raw-facts
+          cache-source-rows
           (System/getenv "BEAGLE_CORE_COMPILER_PROJECTION_ID")
           (System/getenv "BEAGLE_CORE_SEMANTIC_READ_RULES_ID")
           entries strict-entry-abi?))
@@ -3669,7 +3675,14 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
           (semantic-cache/admitted-result-payload cache-result))
         projection
         (when (semantic-cache/result-missing? cache-result)
-          (project-entry-rows raw-rows entries strict-entry-abi?))]
+          (project-entry-rows raw-rows entries strict-entry-abi?))
+        projected-rows
+        (when (and (semantic-cache/result-missing? cache-result)
+                   (:ok? projection))
+          (semantic-read-set-rows
+           (:rows projection) (:index projection) (:selected projection)
+           (:ordered-definitions projection)
+           (:dependencies-by-id projection)))]
     (binding [*out* *err*]
       (println (str "beagle build: semantic-read-cache "
                     (cond
@@ -3695,12 +3708,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                       "result FAIL entry projection\n")})
       :else
       (let [projected-facts
-            (or cached-projected-facts
-                (rows-text
-                 (semantic-read-set-rows
-                  (:rows projection) (:index projection) (:selected projection)
-                  (:ordered-definitions projection)
-                  (:dependencies-by-id projection))))
+            (or cached-projected-facts (rows-text projected-rows))
             cache-publish
             (when (semantic-cache/result-missing? cache-result)
               (semantic-cache/append!
@@ -3714,7 +3722,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                           "semantic-read-cache "
                           (semantic-cache/rejection-detail cache-publish) "\n"
                           "result FAIL semantic-read cache append\n")})
-          (let [rows (slice/parse-facts projected-facts)
+          (let [rows (or projected-rows (slice/parse-facts projected-facts))
                 _ (spit projected-facts-path projected-facts)
                 configuration ["profile=3" (str "abi=" abi-id)
                                (str "source-facts-sha256="
@@ -3891,7 +3899,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                                            (:report materialization))))))))))))))))))
 
 (try
-  (let [facts-path (System/getenv "BEAGLE_CORE_FACTS")
+  (let [facts-manifest-path (System/getenv "BEAGLE_CORE_FACTS_MANIFEST")
         projected-facts-path (System/getenv "BEAGLE_CORE_PROJECTED_FACTS")
         artifacts-dir (System/getenv "BEAGLE_CORE_ARTIFACTS")
         compiler-commit (System/getenv "BEAGLE_CORE_COMMIT")
@@ -3913,7 +3921,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                   :report (str "abi-error unknown abi profile " abi-id "\n"
                                "result FAIL unknown abi profile\n")}
                  (if (str/blank? checkpoint-wire-path)
-                   (compile-core! facts-path projected-facts-path artifacts-dir
+                   (compile-core! facts-manifest-path projected-facts-path artifacts-dir
                                   compiler-commit entries materializers abi-id abi
                                   simd-required?)
                    (resume-core!

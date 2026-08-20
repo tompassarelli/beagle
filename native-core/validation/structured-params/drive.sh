@@ -30,6 +30,25 @@ multi_ast="$scratch/multi.ast.json"
 multi_facts="$scratch/multi.facts"
 report="$scratch/affordance.json"
 
+manifest_rows() {
+  local manifest="$1" directory header relative_path
+  directory="$(dirname "$manifest")"
+  IFS= read -r header <"$manifest"
+  [[ "$header" == "beagle-source-facts-manifest-v1" ]] || {
+    echo "drive.sh: malformed source facts manifest: $manifest" >&2
+    return 1
+  }
+  tail -n +2 "$manifest" |
+    while IFS= read -r relative_path; do
+      [[ -n "$relative_path" && "$relative_path" != /* &&
+         "$relative_path" != *"/../"* && "$relative_path" != ../* ]] || {
+        echo "drive.sh: unsafe source facts segment: $relative_path" >&2
+        return 1
+      }
+      cat "$directory/$relative_path"
+    done
+}
+
 "$repo/bin/beagle" check --agent "$source_file"
 if "$repo/bin/beagle" check --agent "$polymorphic_source" \
     >"$scratch/polymorphic-check.log" 2>&1; then
@@ -73,7 +92,7 @@ bb "$repo/native-core/bin/source-facts.clj" \
   --input "$constraint_ast=native-core/validation/structured-params/constraint_fixture.bgl" \
   --output "$constraint_lower_facts" \
   --form 'positive?' --form constrained
-rg -q $'\tconstraint\tn\t' "$scratch/constraint.facts"
+rg -q $'\tconstraint\tn\t' <(manifest_rows "$scratch/constraint.facts")
 
 bb -e '
   (let [rows (map #(clojure.string/split % #"\t")
@@ -101,8 +120,9 @@ bb -e '
       (let [[_ constraint] constraint-owner]
         (assert (= "ref" (get objects [constraint "form-kind"])))
         (assert (= "positive?" (get objects [constraint "name"]))))))' \
-  "$scratch/constraint.facts"
-[[ "$(rg -c $'\tconstraint\tn\t' "$scratch/constraint.facts")" -eq 14 ]]
+  <(manifest_rows "$scratch/constraint.facts")
+[[ "$(manifest_rows "$scratch/constraint.facts" |
+  rg -c $'\tconstraint\tn\t')" -eq 14 ]]
 
 bb -e '
   (require (quote [cheshire.core :as json]))
@@ -131,12 +151,12 @@ bb "$repo/native-core/bin/source-facts.clj" \
   --input "$ast=native-core/validation/structured-params/fixture.bgl" \
   --output "$facts" --include-defs
 
-rg -q $'\tform-kind\tt\tmap-destructure$' "$facts"
-rg -q $'\tform-kind\tt\tseq-destructure$' "$facts"
-rg -q $'\tform-kind\tt\tbinding-default$' "$facts"
-rg -q $'\tname\tt\thost-name$' "$facts"
-rg -q $'\teffective-type\tn\t' "$facts"
-rg -q $'\tform-kind\tt\ttype-fn$' "$facts"
+rg -q $'\tform-kind\tt\tmap-destructure$' <(manifest_rows "$facts")
+rg -q $'\tform-kind\tt\tseq-destructure$' <(manifest_rows "$facts")
+rg -q $'\tform-kind\tt\tbinding-default$' <(manifest_rows "$facts")
+rg -q $'\tname\tt\thost-name$' <(manifest_rows "$facts")
+rg -q $'\teffective-type\tn\t' <(manifest_rows "$facts")
+rg -q $'\tform-kind\tt\ttype-fn$' <(manifest_rows "$facts")
 
 bb -e '
   (let [rows (map #(clojure.string/split % #"\t")
@@ -154,7 +174,8 @@ bb -e '
     (assert inferred)
     (assert (nil? (text param "ann")))
     (assert (= "type-fn" (text effective "form-kind")))
-    (assert (= "Int" (text effective-param "name"))))' "$facts"
+    (assert (= "Int" (text effective-param "name"))))' \
+  <(manifest_rows "$facts")
 
 bb -e '
   (require (quote [cheshire.core :as json]))
@@ -297,7 +318,7 @@ diagnostic_codes() {
              (quote [native.stages :as stages])
              (quote [native.lower :as lower])
              (quote [native.slice :as slice]))
-    (let [rows (slice/parse-facts (slurp (first *command-line-args*)))
+    (let [rows (slice/read-fact-manifest (first *command-line-args*))
           source (slice/source-program rows "test" "fixture.bgl")
           frozen (lower/sourcefreezeacceptedv0-frozen
                    (lower/freeze-source-stage source "test" ["profile=3"]))
@@ -314,7 +335,7 @@ assert_typing_accepted() {
     (require (quote [native.core :as core])
              (quote [native.lower :as lower])
              (quote [native.slice :as slice]))
-    (let [rows (slice/parse-facts (slurp (first *command-line-args*)))
+    (let [rows (slice/read-fact-manifest (first *command-line-args*))
           source (slice/source-program rows "test" "fixture.bgl")
           frozen (lower/sourcefreezeacceptedv0-frozen
                    (lower/freeze-source-stage source "test" ["profile=3"]))

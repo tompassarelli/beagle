@@ -31,8 +31,8 @@
         (str "lowered fn_" position " " (core/functiondef-name function) "\n"))
       (c17/ordered-functions functions))))
 
-(defn emit! [facts-path artifacts-dir]
-  (let [rows (slice/parse-facts (slurp facts-path))
+(defn emit! [facts-manifest-path artifacts-dir]
+  (let [rows (slice/read-fact-manifest facts-manifest-path)
         configuration ["profile=3" "abi=lp64"]
         source (slice/source-program rows "native.closure-abi"
                  "native-core/validation/closure-abi/fixture.bgl")

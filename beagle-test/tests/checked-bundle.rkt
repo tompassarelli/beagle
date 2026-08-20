@@ -234,7 +234,7 @@
         "--input" (format "~a=~a" ast-path source-id)
         "--interface-sha256"
         (format "~a=~a" source-id (hash-ref module 'interfaceSha256))))))
-  (define facts-path (build-path directory "source.facts"))
+  (define facts-path (build-path directory "source.facts.manifest"))
   (define-values (status _output errors)
     (run-command
      (path->string (find-executable-path "bb"))
@@ -242,7 +242,20 @@
       (list (root/ "native-core/bin/source-facts.clj"))
       arguments
       (list "--output" (path->string facts-path) "--include-defs"))))
-  (values status (and (zero? status) (file->string facts-path)) errors))
+  (define facts
+    (and
+     (zero? status)
+     (let ([manifest-lines (file->lines facts-path)])
+       (unless
+           (and (pair? manifest-lines)
+                (string=? (car manifest-lines)
+                          "beagle-source-facts-manifest-v1"))
+         (error 'bundle->source-facts "source facts manifest is malformed"))
+       (apply
+        string-append
+        (for/list ([relative-path (in-list (cdr manifest-lines))])
+          (file->string (build-path directory relative-path)))))))
+  (values status facts errors))
 
 (define (facts->rows facts)
   (for/list ([line (in-list (string-split facts "\n"))]

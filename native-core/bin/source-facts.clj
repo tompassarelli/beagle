@@ -9,6 +9,8 @@
          '[clojure.java.shell :as shell]
          '[clojure.string])
 (import '[java.nio.charset StandardCharsets]
+        '[java.nio.file Files]
+        '[java.nio.file.attribute FileAttribute]
         '[java.security MessageDigest])
 
 (load-file
@@ -996,11 +998,44 @@
     value))
 
 (defn offset-shard-rows [shard offset]
-  (mapv
+  (map
     (fn [[subject predicate kind object]]
       [(offset-node subject offset) predicate kind
        (if (= "n" kind) (offset-node object offset) object)])
     (get shard "rows")))
+
+(defn fact-rows-text [fact-rows]
+  (let [emitted (StringBuilder.)]
+    (doseq [[subject predicate kind object] fact-rows]
+      (doto emitted
+        (.append subject)
+        (.append "\t")
+        (.append predicate)
+        (.append "\t")
+        (.append kind)
+        (.append "\t")
+        (.append object)
+        (.append "\n")))
+    (str emitted)))
+
+(defn write-fact-segment!
+  [segment-directory relative-directory position fact-rows]
+  (let [text (fact-rows-text fact-rows)
+        digest (subs (sha256-text text) 7)
+        filename (format "%06d-%s.facts" position digest)
+        relative-path (str relative-directory "/" filename)]
+    (spit (io/file segment-directory filename) text :encoding "UTF-8")
+    relative-path))
+
+(defn program-structure-rows [modules sequence-node]
+  (concat
+    [["0" "form-kind" "t" "program-root"]
+     [sequence-node "form-kind" "t" "seq"]]
+    (map-indexed
+      (fn [position module]
+        [sequence-node (str "f" position) "n" module])
+      modules)
+    [["0" "modules" "n" sequence-node]]))
 
 (let [arguments *command-line-args*
       input-specs (option-values arguments "--input")
@@ -1104,39 +1139,41 @@
                 (source-fact-shard-entry (:key input) context
                   (:relative-path input) (pr-str shard))))
             (filterv #(not (:hit? %)) results))))
-      (let [{:keys [rows modules offset]}
+      (let [manifest-file (.getCanonicalFile (io/file out))
+            manifest-directory (.getParentFile manifest-file)
+            _ (when-not manifest-directory
+                (throw (ex-info "--output must name a manifest file" {:output out})))
+            relative-directory (str (.getName manifest-file) ".segments")
+            segment-directory (io/file manifest-directory relative-directory)
+            _ (Files/createDirectories (.toPath manifest-directory)
+                (make-array FileAttribute 0))
+            _ (Files/createDirectories (.toPath segment-directory)
+                (make-array FileAttribute 0))
+            {:keys [modules offset segment-paths]}
             (reduce
-              (fn [{:keys [rows modules offset]} shard]
-                {:rows (into rows (offset-shard-rows shard offset))
-                 :modules (conj modules
+              (fn [{:keys [modules offset segment-paths]} [position shard]]
+                {:modules (conj modules
                             (offset-node (get shard "moduleRoot") offset))
-                 :offset (+ offset (get shard "nodeCount"))})
-              {:rows [] :modules [] :offset 0}
-              shards)
+                 :offset (+ offset (get shard "nodeCount"))
+                 :segment-paths
+                 (conj segment-paths
+                   (write-fact-segment!
+                     segment-directory relative-directory position
+                     (offset-shard-rows shard offset)))})
+              {:modules [] :offset 0 :segment-paths []}
+              (map-indexed vector shards))
             sequence-node (str (inc offset))
-            final-rows
-            (into rows
-              (concat
-                [["0" "form-kind" "t" "program-root"]
-                 [sequence-node "form-kind" "t" "seq"]]
-                (map-indexed
-                  (fn [position module]
-                    [sequence-node (str "f" position) "n" module])
-                  modules)
-                [["0" "modules" "n" sequence-node]]))]
+            segment-paths
+            (conj segment-paths
+              (write-fact-segment!
+                segment-directory relative-directory (count shards)
+                (program-structure-rows modules sequence-node)))]
         (binding [*out* *err*]
           (println (str "source-facts: Store shards hits="
                      (count (filter :hit? results))
                      " misses=" (count (remove :hit? results)))))
-        (let [emitted (StringBuilder.)]
-          (doseq [[s p k o] final-rows]
-            (doto emitted
-              (.append s)
-              (.append "\t")
-              (.append p)
-              (.append "\t")
-              (.append k)
-              (.append "\t")
-              (.append o)
-              (.append "\n")))
-          (spit out (str emitted)))))))
+        (spit manifest-file
+          (str "beagle-source-facts-manifest-v1\n"
+               (clojure.string/join "\n" segment-paths)
+               "\n")
+          :encoding "UTF-8")))))

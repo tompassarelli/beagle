@@ -36,6 +36,13 @@ fi
 logical="$(jq -er '.sourceId | select(type == "string" and length > 0)' \
   "$scratch/types.ast.json")"
 bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/types.facts"
+types_facts_digest="$(sha256sum "$scratch/types.facts" | awk '{print $1}')"
+mkdir "$scratch/types.facts.manifest.segments"
+cp "$scratch/types.facts" \
+  "$scratch/types.facts.manifest.segments/000000-$types_facts_digest.facts"
+printf '%s\n%s\n' 'beagle-source-facts-manifest-v1' \
+  "types.facts.manifest.segments/000000-$types_facts_digest.facts" \
+  >"$scratch/types.facts.manifest"
 cp "$scratch/types.facts" "$art/types.facts"
 sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
 
@@ -54,7 +61,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
 bb -cp "$scratch/out" -e "
 (require 'native.slice)
 (spit \"$art/report.txt\"
-  (native.slice/emit-slice! \"$scratch/types.facts\" \"store.types\"
+  (native.slice/emit-slice! \"$scratch/types.facts.manifest\" \"store.types\"
     \"$logical\" \"$art\" \"native-slice-types-full-v0\" \"$abi\"))"
 
 cat "$art/report.txt"

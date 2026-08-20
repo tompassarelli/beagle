@@ -95,6 +95,72 @@
           (recur (+ index 1)
             (if (= 0 (count parsed)) rows (conj rows (nth parsed 0)))))))))
 
+(def source-facts-manifest-v1 String "beagle-source-facts-manifest-v1")
+
+(defn path-directory [path String] String
+  (loop [index Int (- (count path) 1)]
+    (if (< index 0)
+      "."
+      (if (= "/" (char-at path index))
+        (if (= index 0) "/" (subs path 0 index))
+        (recur (- index 1))))))
+
+(defn safe-relative-segment-path? [path String] Bool
+  (if (or (= 0 (count path)) (= "/" (char-at path 0)))
+    false
+    (let [parts (Vec String) (split-on path "/")]
+      (loop [index Int 0]
+        (if (>= index (count parts))
+          true
+          (let [part String (nth parts index)]
+            (if (or (= "" part) (= "." part) (= ".." part))
+              false
+              (recur (+ index 1)))))))))
+
+(defn segment-content-digest [path String] String
+  (let [parts (Vec String) (split-on path "/")
+        filename String (nth parts (- (count parts) 1))
+        name-parts (Vec String) (split-on filename "-")]
+    (if (= 2 (count name-parts))
+      (let [digest-and-extension String (nth name-parts 1)]
+        (if (and (= 70 (count digest-and-extension))
+                 (= ".facts" (subs digest-and-extension 64 70)))
+          (str "sha256:" (subs digest-and-extension 0 64))
+          ""))
+      "")))
+
+(defn read-fact-manifest [manifest-path String] (Vec SliceFactV0)
+  (let [manifest-lines (Vec String) (split-on (slurp manifest-path) "\n")]
+    (if (or (= 0 (count manifest-lines))
+            (not= source-facts-manifest-v1 (nth manifest-lines 0)))
+      (throw (ex-info "source facts manifest has an unknown format" {}))
+      (loop [index Int 1
+             segment-count Int 0
+             rows (Vec SliceFactV0) []]
+        (if (>= index (count manifest-lines))
+          (if (= segment-count 0)
+            (throw (ex-info "source facts manifest contains no segments" {}))
+            rows)
+          (let [relative-path String (nth manifest-lines index)]
+            (if (= "" relative-path)
+              (if (= index (- (count manifest-lines) 1))
+                (if (= segment-count 0)
+                  (throw (ex-info "source facts manifest contains no segments" {}))
+                  rows)
+                (throw (ex-info "source facts manifest contains an empty segment path" {})))
+              (if (not (safe-relative-segment-path? relative-path))
+                (throw (ex-info "source facts manifest contains an unsafe segment path" {}))
+                (let [segment-path String
+                      (str (path-directory manifest-path) "/" relative-path)
+                      segment-text String (slurp segment-path)
+                      expected-digest String (segment-content-digest relative-path)]
+                  (if (or (= "" expected-digest)
+                          (not= expected-digest
+                            (stages/content-digest segment-text)))
+                    (throw (ex-info "source facts segment digest does not match its manifest path" {}))
+                    (recur (+ index 1) (+ segment-count 1)
+                      (into rows (parse-facts segment-text)))))))))))))
+
 (defn add-unique-string
   [unique UniqueStringsV0
    candidate String] UniqueStringsV0
@@ -599,7 +665,7 @@
    artifacts-dir String
    compiler-commit String
    abi core/AbiProfileV0] String
-  (let [rows (Vec SliceFactV0) (parse-facts (slurp facts-path))
+  (let [rows (Vec SliceFactV0) (read-fact-manifest facts-path)
         configuration (Vec String) ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
         program stages/SourceStageV1 (source-program rows module-name relative-path)
         freeze-result lower/SourceFreezeResultV0 (lower/freeze-source-stage program compiler-commit configuration)]

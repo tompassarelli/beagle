@@ -317,15 +317,14 @@
                       (str head "qbe-materialize OK "
                         (qbe/qbeartifact-module-name artifact) "\n"))))))))))))
 
-(defn emit-slice-for-abi!
-  [facts-path String
+(defn emit-slice-rows-for-abi!
+  [rows (Vec slice/SliceFactV0)
    module-name String
    relative-path String
    artifacts-dir String
    compiler-commit String
    abi core/AbiProfileV0] String
-  (let [rows (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
-        configuration (Vec String) ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
+  (let [configuration (Vec String) ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
         source stages/SourceStageV1 (slice/source-program rows module-name relative-path)
         freeze-result lower/SourceFreezeResultV0 (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
@@ -385,6 +384,26 @@
                     (body/bodyartifactv0-header-name artifact) " "
                     (body/bodyartifactv0-source-name artifact) "\n"))))))))))
 
+(defn emit-slice-for-abi!
+  [facts-path String
+   module-name String
+   relative-path String
+   artifacts-dir String
+   compiler-commit String
+   abi core/AbiProfileV0] String
+  (emit-slice-rows-for-abi! (slice/parse-facts (slurp facts-path))
+    module-name relative-path artifacts-dir compiler-commit abi))
+
+(defn emit-manifest-slice-for-abi!
+  [facts-manifest-path String
+   module-name String
+   relative-path String
+   artifacts-dir String
+   compiler-commit String
+   abi core/AbiProfileV0] String
+  (emit-slice-rows-for-abi! (slice/read-fact-manifest facts-manifest-path)
+    module-name relative-path artifacts-dir compiler-commit abi))
+
 (defn emit-slice!
   [facts-path String
    module-name String
@@ -397,6 +416,19 @@
       (str "stage abi REJECTED unknown abi profile " abi-id "\n")
       (emit-slice-for-abi! facts-path module-name relative-path artifacts-dir
         compiler-commit profile))))
+
+(defn emit-manifest-slice!
+  [facts-manifest-path String
+   module-name String
+   relative-path String
+   artifacts-dir String
+   compiler-commit String
+   abi-id String] String
+  (let [profile (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
+    (if (nil? profile)
+      (str "stage abi REJECTED unknown abi profile " abi-id "\n")
+      (emit-manifest-slice-for-abi! facts-manifest-path module-name relative-path
+        artifacts-dir compiler-commit profile))))
 
 (defn emit-dual-slice-for-abi!
   [facts-path String
