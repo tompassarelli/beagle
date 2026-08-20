@@ -1074,6 +1074,12 @@
 (defn filesystem-text-outcome-type-id [] core/NativeId
   (type-id "HostFilesystemTextOutcome"))
 
+(defn filesystem-wait-result-type-id [] core/NativeId
+  (type-id "HostFilesystemWaitResult"))
+
+(defn filesystem-wait-outcome-type-id [] core/NativeId
+  (type-id "HostFilesystemWaitOutcome"))
+
 (defn stdin-text-result-type-id [] core/NativeId
   (type-id "HostStdinTextResult"))
 
@@ -1122,6 +1128,21 @@
   (core/->TypeDef (filesystem-text-outcome-type-id) "HostFilesystemTextOutcome"
     (core/->OutcomeType (type-id "String") (filesystem-text-result-type-id))))
 
+(defn filesystem-wait-result-type [] core/TypeDef
+  (core/->TypeDef (filesystem-wait-result-type-id) "HostFilesystemWaitResult"
+    (core/->UnionType
+      [(core/->TypeVariant
+         (variant-id "HostFilesystemWaitResult" "ok") "ok" (type-id "String"))
+       (core/->TypeVariant
+         (variant-id "HostFilesystemWaitResult" "error") "error"
+         (type-id "String"))])))
+
+(defn filesystem-wait-outcome-type [] core/TypeDef
+  (core/->TypeDef
+    (filesystem-wait-outcome-type-id) "HostFilesystemWaitOutcome"
+    (core/->OutcomeType
+      (type-id "String") (filesystem-wait-result-type-id))))
+
 (defn stdin-text-result-type [] core/TypeDef
   (core/->TypeDef (stdin-text-result-type-id) "HostStdinTextResult"
     (core/->UnionType
@@ -1161,6 +1182,7 @@
    (filesystem-paths-type)
    (filesystem-int-result-type) (filesystem-int-outcome-type)
    (filesystem-text-result-type) (filesystem-text-outcome-type)
+   (filesystem-wait-result-type) (filesystem-wait-outcome-type)
    (stdin-text-result-type) (stdin-text-outcome-type)
    (filesystem-paths-result-type) (filesystem-paths-outcome-type)
    (filesystem-nil-result-type) (filesystem-nil-outcome-type)])
@@ -1318,6 +1340,10 @@
       (= name "host.fs/ReadTextBoundedOk")) "ok"
     (and (same-id? target-type (filesystem-text-outcome-type-id))
       (= name "host.fs/ReadTextBoundedError")) "error"
+    (and (same-id? target-type (filesystem-wait-outcome-type-id))
+      (= name "host.fs/WaitForChangeOk")) "ok"
+    (and (same-id? target-type (filesystem-wait-outcome-type-id))
+      (= name "host.fs/WaitForChangeError")) "error"
     (and (same-id? target-type (stdin-text-outcome-type-id))
       (= name "host.stdin/ReadTextBoundedOk")) "ok"
     (and (same-id? target-type (stdin-text-outcome-type-id))
@@ -1497,6 +1523,10 @@
 
     (= "host.fs/ReadTextBoundedResult" spelling)
     (->TypeResolutionV0 (filesystem-text-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/WaitForChangeResult" spelling)
+    (->TypeResolutionV0 (filesystem-wait-outcome-type-id)
       (filesystem-outcome-types) [] true)
 
     (= "host.stdin/ReadTextBoundedResult" spelling)
@@ -2527,6 +2557,7 @@
       (= name "host.fs/create-temporary-sibling")
       (= name "host.fs/rename-file")
       (= name "host.fs/remove-file")
+      (= name "host.fs/wait-for-change")
       (= name "host.fs/lock-exclusive")
       (= name "host.fs/unlock")
       (= name "selfhost.rt/file-exists?")
@@ -2546,6 +2577,7 @@
     (= name "host.fs/create-temporary-sibling") "create-temporary-sibling"
     (= name "host.fs/rename-file") "rename-file"
     (= name "host.fs/remove-file") "remove-file"
+    (= name "host.fs/wait-for-change") "wait-for-change"
     (= name "host.fs/lock-exclusive") "lock-exclusive"
     (= name "host.fs/unlock") "unlock"
     (= name "selfhost.rt/file-exists?") "file-exists"
@@ -2567,6 +2599,7 @@
         (host-filesystem-abi-id "create-temporary-sibling"))
       (same-id? candidate (host-filesystem-abi-id "rename-file"))
       (same-id? candidate (host-filesystem-abi-id "remove-file"))
+      (same-id? candidate (host-filesystem-abi-id "wait-for-change"))
       (same-id? candidate (host-filesystem-abi-id "lock-exclusive"))
       (same-id? candidate (host-filesystem-abi-id "unlock"))
       (same-id? candidate (host-filesystem-abi-id "file-exists"))
@@ -10032,6 +10065,10 @@
     (and (= 1 (count value-types))
       (text-operand? (nth value-types 0)))
 
+    (= callee "host.fs/wait-for-change")
+    (and (= 1 (count value-types))
+      (same-id? (nth value-types 0) (filesystem-paths-type-id)))
+
     (or (= callee "host.fs/write-text-atomic")
         (= callee "host.fs/append-text")
         (= callee "host.fs/rename-file"))
@@ -10057,6 +10094,8 @@
     (stdin-text-outcome-type-id)
     (= callee "host.fs/create-temporary-sibling")
     (filesystem-text-outcome-type-id)
+    (= callee "host.fs/wait-for-change")
+    (filesystem-wait-outcome-type-id)
     (= callee "host.fs/list-directory-bounded")
     (filesystem-paths-outcome-type-id)
     (or (= callee "host.fs/path-kind")
@@ -10086,7 +10125,8 @@
                 (= callee "host.fs/real-path")
                 (= callee "host.stdin/read-text-bounded")
                 (= callee "host.fs/list-directory-bounded")
-                (= callee "host.fs/create-temporary-sibling"))
+                (= callee "host.fs/create-temporary-sibling")
+                (= callee "host.fs/wait-for-change"))
             (arena-value-id owner)
             nil)]
       (->ExprResultV0
@@ -20893,6 +20933,7 @@
               (index-has-callee? index "host.fs/create-temporary-sibling")
               (index-has-callee? index "host.fs/rename-file")
               (index-has-callee? index "host.fs/remove-file")
+              (index-has-callee? index "host.fs/wait-for-change")
               (index-has-callee? index "host.fs/lock-exclusive")
               (index-has-callee? index "host.fs/unlock")
               (index-has-callee? index "host.clock/format-iso8601")
@@ -22053,6 +22094,15 @@
     true
     layouts-digest))
 
+(defn host-filesystem-wait-abi [(layouts-digest String)] core/AbiDeclV0
+  (host-filesystem-abi
+    "wait-for-change"
+    "native_host_filesystem_wait_for_change_v0"
+    [(borrowed-abi-value "paths" (filesystem-paths-type-id))]
+    (filesystem-wait-outcome-type-id)
+    true
+    layouts-digest))
+
 (defn host-whole-input-abi [(operation String) (layouts-digest String)]
   core/AbiDeclV0
   (core/->AbiDeclV0
@@ -22509,6 +22559,11 @@
               (host-filesystem-abi-id "stdin-read-text-bounded"))
           (conj with-filesystem-abs-path (host-stdin-abi digest))
           with-filesystem-abs-path)
+        with-filesystem-wait (Vec core/AbiDeclV0)
+        (if (any-function-calls-abi? functions
+              (host-filesystem-abi-id "wait-for-change"))
+          (conj with-stdin (host-filesystem-wait-abi digest))
+          with-stdin)
         process-abis (Vec core/AbiDeclV0) (host-process-abis digest)
         called-process-abis (Vec core/AbiDeclV0)
         (filterv
@@ -22516,7 +22571,7 @@
             (any-function-calls-abi? functions (core/abideclv0-id abi)))
           process-abis)
         with-process (Vec core/AbiDeclV0)
-        (vec (concat with-stdin called-process-abis))
+        (vec (concat with-filesystem-wait called-process-abis))
         with-time-sleep (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions (host-time-sleep-abi-id))
           (conj with-process (host-time-sleep-abi digest))
@@ -23978,6 +24033,8 @@
                      (host-filesystem-abi-id "lock-exclusive")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "unlock")) 1 0)
+               (if (any-function-calls-abi? typed-functions
+                     (host-filesystem-abi-id "wait-for-change")) 1 0)
                (count
                  (filterv
                    (fn [abi core/AbiDeclV0] Bool

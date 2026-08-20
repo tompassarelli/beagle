@@ -135,6 +135,11 @@
     (list (p 'String))
     #f
     (p 'host.fs/RemoveFileResult))
+   (q 'host.fs 'wait-for-change)
+   (type-fn
+    (list (type-app 'Vec (list (p 'String))))
+    #f
+    (p 'host.fs/WaitForChangeResult))
    ;; lock-exclusive transfers one descriptor holding a non-blocking exclusive
    ;; lease on the path's open file description; unlock consumes it. The kernel
    ;; releases the lease on close or on process death. Contention is EAGAIN.
@@ -334,6 +339,13 @@
      (list 'host.fs/RemoveFileOk '())
      (list 'host.fs/RemoveFileError
            (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/WaitForChangeResult
+    (list
+     (list 'host.fs/WaitForChangeOk
+           (list (cons ':path (p 'String))))
+     (list 'host.fs/WaitForChangeError
+           (list (cons ':message (p 'String))))))
    (list
     'host.fs/LockExclusiveResult
     (list
