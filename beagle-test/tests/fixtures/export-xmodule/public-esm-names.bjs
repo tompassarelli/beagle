@@ -1,5 +1,7 @@
 #lang beagle/js
 
+(ns export-xmodule.public-esm-names)
+
 (require '["@scope/package/subpath" :as package])
 
 (js/export

@@ -9,6 +9,7 @@
          racket/set
          "types.rkt"          ; type-prim?/type-prim-name for scalar-=== dispatch
          "parse.rkt"
+         "module-interface.rkt"
          "emit-dispatch.rkt"
          "js-capabilities.rkt"
          "js-emit-utils.rkt"
@@ -802,6 +803,7 @@
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
 (define current-js-module-bindings (make-parameter (hasheq)))
+(define current-js-public-esm-members (make-parameter (hasheq)))
 
 (define (qualified-ref-same-binding? left right)
   (and (qualified-ref? left)
@@ -829,13 +831,28 @@
            (hash-ref bindings (qualified-ref-provider-id ref) #f))
       (hash-ref bindings (qualified-ref-qualifier ref) #f)))
 
+(define (qualified-public-esm-name ref)
+  (define names (current-js-public-esm-members))
+  (or (and (qualified-ref-provider-id ref)
+           (hash-ref names
+                     (cons (qualified-ref-provider-id ref)
+                           (qualified-ref-name ref))
+                     #f))
+      (hash-ref names
+                (cons (qualified-ref-qualifier ref) (qualified-ref-name ref))
+                #f)))
+
 (define (emit-qualified-reference ref #:constructor? [constructor? #f])
   (define member
     (mangle-str (qualified-runtime-member ref constructor?)))
   (cond
     [(eq? (qualified-ref-qualifier ref) 'js) member]
     [(qualified-module-binding ref)
-     => (lambda (binding) (string-append binding "." member))]
+     => (lambda (binding)
+          (define public-name (qualified-public-esm-name ref))
+          (if public-name
+              (format "~a[~v]" binding public-name)
+              (string-append binding "." member)))]
     [else
      (string-append
       (mangle-name (qualified-ref-qualifier ref)) "." member)]))
@@ -1674,17 +1691,44 @@
           (mangle-name prefix)))
     (hash-set (hash-set table prefix binding) namespace binding)))
 
+(define (build-js-public-esm-member-table prog)
+  (for/fold ([table (hasheq)])
+            ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (define prefix (module-import-prefix import))
+    (define namespace (module-interface-namespace interface))
+    (for/fold ([next table])
+              ([name (in-list
+                      (sort (hash-keys (module-interface-public-esm-exports
+                                        interface))
+                            symbol<?))])
+      (define public-name
+        (module-interface-public-esm-name interface name))
+      (hash-set
+       (hash-set next (cons prefix name) public-name)
+       (cons namespace name) public-name))))
+
 (define (js-module-binding-name prefix)
   (hash-ref (current-js-module-bindings) prefix
             (lambda () (mangle-name prefix))))
 
-(define (exported-binding? name [private? #f])
-  (define names (current-js-export-names))
-  (and (not private?)
-       (not (current-js-export-marked?))
-       names
-       (or (set-member? names '*)
-           (set-member? names name))))
+(define (exported-binding? _name [_private? #f]) #f)
+
+(define (public-esm-runtime-name interface name)
+  (define binding (module-interface-binding-ref interface name #f))
+  (if (and binding
+           (record-constructor-kind? (interface-binding-kind binding))
+           (string-prefix? (symbol->string name) "->"))
+      (string->symbol (substring (symbol->string name) 2))
+      name))
+
+(define (emit-public-esm-exports interface public-esm-exports)
+  (string-join
+   (for/list ([name (in-list (sort (hash-keys public-esm-exports) symbol<?))])
+     (format "export { ~a as ~v };"
+             (mangle-name (public-esm-runtime-name interface name))
+             (hash-ref public-esm-exports name)))
+   "\n"))
 
 ;; Base path for beagle's JS runtime modules. The emit imports 'beagle/core.js'
 ;; (and 'beagle/hamt.js' once rep-selection lands); this prefix replaces the
@@ -1706,8 +1750,11 @@
 
 (define (js-emit-program prog)
   (validate-js-target! prog)
-  (define requested-exports (or (current-js-export-names) (set)))
-  (parameterize ([current-js-export-names requested-exports]
+  (define local-interface
+    (program->module-interface prog #:provisional? #t))
+  (define public-esm-exports
+    (module-interface-public-esm-exports local-interface))
+  (parameterize ([current-js-export-names (list->set (hash-keys public-esm-exports))]
                  [current-js-context 'stmt]
                  [match-counter (box 0)]
                  [logical-counter (box 0)]
@@ -1724,6 +1771,8 @@
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
                  [current-js-module-bindings
                   (build-js-module-binding-table prog)]
+                 [current-js-public-esm-members
+                  (build-js-public-esm-member-table prog)]
                  [current-js-semantic-contracts (program-semantic-contracts prog)]
                  [current-jst-semantic-contracts
                   (program-semantic-contracts prog)]
@@ -1740,6 +1789,8 @@
        (for/list ([form (in-list (program-forms prog))])
          (emit-form form))
        "\n\n"))
+    (define public-exports
+      (emit-public-esm-exports local-interface public-esm-exports))
     ;; PHASE D: opt-in static per-alloc-site rep metric header.
     (define rep-comment
       (let ([t (rep-counts)])
@@ -1797,7 +1848,9 @@
                   (string-join ops ", ")
                   (string-append js-runtime-prefix "hamt.js")))))
     (string-append rep-comment header runtime-import host-import hamt-import
-                   "\n" body "\n")))
+                   "\n" body
+                   (if (string=? public-exports "") "\n"
+                       (string-append "\n\n" public-exports "\n")))))
 
 ;; --- module header ---------------------------------------------------------
 
@@ -1880,6 +1933,15 @@
             name)]
       [(eq? kind 'extern) #f]
       [else name]))
+  (define (runtime-import-spec entry source-name local-name)
+    (define import (require-module-import prog entry))
+    (define interface (and import (module-import-interface import)))
+    (define public-name
+      (and interface
+           (module-interface-public-esm-name interface source-name #f)))
+    (if public-name
+        (format "~v as ~a" public-name (mangle-name local-name))
+        (mangle-name local-name)))
   ;; A `:refer`'d name that resolved to a macro is compile-time only — it's
   ;; expanded away and never referenced at runtime, and the target module emits
   ;; no runtime export for it. Emitting it in `import { … }` produces an ESM that
@@ -1903,14 +1965,20 @@
                  (append
                   (filter-map
                    (lambda (name)
-                     (and (not (hash-ref macros name #f))
-                          (runtime-import-name r name)))
+                     (define local-name
+                       (and (not (hash-ref macros name #f))
+                            (runtime-import-name r name)))
+                     (and local-name (cons name local-name)))
                    refer)
-                  (referred-record-validators r refer)))])
+                  (for/list ([name (in-list (referred-record-validators r refer))])
+                    (cons name name))))])
            (if (null? runtime-refer)
              ""
              (format "import { ~a } from '~a';"
-                     (string-join (map mangle-name runtime-refer) ", ")
+                     (string-join
+                      (for/list ([entry (in-list runtime-refer)])
+                        (runtime-import-spec r (car entry) (cdr entry)))
+                      ", ")
                      module-path)))
          (let ([alias (or (require-entry-alias r)
                           (let ([parts (string-split ns-str ".")])
@@ -2099,11 +2167,7 @@
     ;; --- Typed JS target forms (jst-*) ----------------------------------------
     [(jst-class? f)    (emit-jst-class f)]
     [(jst-export? f)
-     (define inner (jst-export-form f))
-     (parameterize ([current-js-export-marked? #t])
-       (if (multi-binding-form? inner)
-           (emit-form inner)
-           (string-append "export " (emit-form inner))))]
+     (emit-form (jst-export-form f))]
     [(jst-export-default? f) (string-append "export default " (emit-form (jst-export-default-form f)))]
     [(jst-return? f)   (emit-jst-return f)]
 
@@ -2218,11 +2282,7 @@
     [(jst-class? e)    (emit-jst-class e)]
     [(jst-return? e)   (emit-jst-return e)]
     [(jst-export? e)
-     (define inner (jst-export-form e))
-     (parameterize ([current-js-export-marked? #t])
-       (if (multi-binding-form? inner)
-           (emit-form inner)
-           (string-append "export " (emit-form inner))))]
+     (emit-form (jst-export-form e))]
     [(jst-export-default? e) (string-append "export default " (emit-form (jst-export-default-form e)))]
 
     [(if-form? e)

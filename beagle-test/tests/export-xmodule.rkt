@@ -36,6 +36,10 @@
       (fixture-provider "same-basename/host/notifications.bjs" 'host.notifications))]
     [(string-suffix? name ".bclj")
      (list (fixture-provider "clj-prov.bclj" 'export-xmodule.clj-prov))]
+    [(string=? name "public-esm-consumer.bjs")
+     (list
+      (fixture-provider "public-esm-names.bjs"
+                        'export-xmodule.public-esm-names))]
     [else
      (list (fixture-provider "provider.bjs" 'export-xmodule.provider))]))
 
@@ -118,24 +122,16 @@
   (define prog (fixture-program "top-level-libspec.bjs"))
   (type-check! prog)
   (define requires (program-requires prog))
-  (check-equal? (length requires) 2)
+  (check-equal? (length requires) 1)
   (define native
     (for/first ([entry (in-list requires)]
                 #:when (eq? (module-identity-kind (require-entry-identity entry))
                             'native-esm))
       entry))
-  (define global
-    (for/first ([entry (in-list requires)]
-                #:when (eq? (module-identity-kind (require-entry-identity entry))
-                            'global))
-      entry))
   (check-equal?
    (module-identity-value (require-entry-identity native))
    "@scope/package/subpath")
   (check-equal? (require-entry-rename native) (hasheq 'make 'build))
-  (check-equal?
-   (module-identity-value (require-entry-identity global))
-   'Idiomorph)
   (define serialized-requires (hash-ref (program->json prog) 'requires))
   (define serialized-native
     (for/first ([entry (in-list serialized-requires)]
@@ -144,7 +140,8 @@
       entry))
   (check-equal? (hash-ref (hash-ref serialized-native 'identity) 'value)
                 "@scope/package/subpath")
-  (check-equal? (hash-ref serialized-native 'rename) (hasheq "make" "build"))
+  (check-equal? (hash->list (hash-ref serialized-native 'rename))
+                (list (cons "make" "build")))
   (define interface
     (program->module-interface prog #:source-id "top-level-libspec.bjs"))
   (check-equal? (module-interface-requires interface) requires))
@@ -168,6 +165,22 @@
   (check-equal?
    (require-entry-identity native)
    (module-identity 'native-esm "@scope/package/subpath")))
+
+(test-case "JS emission aliases private bindings to verbatim public ESM names"
+  (define js (emit-program (fixture-program "public-esm-names.bjs")))
+  (check-regexp-match #rx"import [*] as package[$] from '@scope/package/subpath';" js)
+  (check-regexp-match #rx"function send_message\\(" js)
+  (check-regexp-match #rx"function wire__name\\(" js)
+  (check-regexp-match #rx"export \\{ send_message as \"send-message\" \\};" js)
+  (check-regexp-match #rx"export \\{ wire__name as \"wire_name\" \\};" js)
+  (check-false (regexp-match? #rx"export function send_message" js)))
+
+(test-case "JS imports use the provider's verbatim public ESM names"
+  (define js (emit-program (fixture-program "public-esm-consumer.bjs")))
+  (check-regexp-match
+   #rx"import \\{ \"send-message\" as send_message, \"wire_name\" as wire__name \\} from './public-esm-names.js';"
+   js)
+  (check-regexp-match #rx"send_message\\(wire__name\\(text\\)\\)" js))
 
 (test-case "a correct call to a js/export'd function still checks"
   (check-not-exn (lambda () (check-file "ok.bjs"))))
@@ -230,9 +243,12 @@
   (define prog (fixture-program "exported-record.bjs"))
   (check-not-exn (lambda () (type-check! prog)))
   (define js (emit-program prog))
-  (check-regexp-match #rx"export function Pos\\(" js)
-  (check-regexp-match #rx"export function pos_x\\(" js)
-  (check-regexp-match #rx"export function pos_z\\(" js)
+  (check-regexp-match #rx"function Pos\\(" js)
+  (check-regexp-match #rx"function pos_x\\(" js)
+  (check-regexp-match #rx"function pos_z\\(" js)
+  (check-regexp-match #rx"export \\{ Pos as \"->Pos\" \\};" js)
+  (check-regexp-match #rx"export \\{ pos_x as \"pos-x\" \\};" js)
+  (check-regexp-match #rx"export \\{ pos_z as \"pos-z\" \\};" js)
   ;; The constructor is called by the name it is defined under.
   (check-regexp-match #rx"return Pos\\(0[.]0, 0[.]0\\)" js)
   (check-false (regexp-match? #rx"__gtPos" js)))
