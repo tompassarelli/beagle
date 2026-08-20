@@ -1,0 +1,122 @@
+#lang beagle
+(ns beagle.frontend-facts)
+
+(defrecord SourceSpan
+  [path String
+   start-byte Int
+   end-byte Int
+   line Int
+   column Int])
+
+(defunion FactValue
+  (FactNodeRef [node-id String])
+  (FactText [value String])
+  (FactBool [value Bool])
+  (FactInt [value Int])
+  FactNil)
+
+(defrecord CompilerFact
+  [order Int
+   relation Keyword
+   subject String
+   slot Int
+   value FactValue
+   span SourceSpan?])
+
+(defrecord ImportEdgeFact
+  [order Int
+   importer String
+   required String
+   alias String?
+   referred (Vec String)
+   span SourceSpan])
+
+(defrecord MacroRewriteFact
+  [order Int
+   macro-id String
+   input-node String
+   result-node String
+   span SourceSpan])
+
+(defrecord TypePropositionFact
+  [order Int
+   proposition-id String
+   subject String
+   rule String
+   detail String
+   span SourceSpan?])
+
+(defrecord TypeEvidenceFact
+  [order Int
+   proposition-id String
+   subject String
+   accepted Bool
+   evidence String
+   span SourceSpan?])
+
+(defrecord OrderedLoweringFact
+  [order Int
+   relation Keyword
+   subject String
+   slot Int
+   value FactValue
+   span SourceSpan?])
+
+(defrecord SyntaxFactBundle
+  [path String
+   namespace String?
+   source-digest String
+   profile String
+   facts (Vec CompilerFact)
+   imports (Vec ImportEdgeFact)
+   rewrites (Vec MacroRewriteFact)])
+
+(defrecord SyntaxFactClosure
+  [entry-path String
+   modules (Vec SyntaxFactBundle)
+   closure-digest String
+   interface-digests (Vec String)])
+
+(defrecord FactError
+  [span SourceSpan
+   code Keyword
+   message String])
+
+(defunion FactReadResult
+  (FactsRead [bundle SyntaxFactBundle])
+  (FactsRejected [errors (Vec FactError)]))
+
+(defn source-module-fact
+  [order Int subject String value FactValue span SourceSpan?] CompilerFact
+  (->CompilerFact order :syntax/node subject 0 value span))
+
+(defn syntax-node-fact
+  [order Int subject String value FactValue span SourceSpan?] CompilerFact
+  (->CompilerFact order :syntax/node subject 0 value span))
+
+(defn syntax-value-fact
+  [order Int subject String slot Int value FactValue span SourceSpan?] CompilerFact
+  (->CompilerFact order :syntax/value subject slot value span))
+
+(defn syntax-edge-fact
+  [order Int subject String slot Int target String span SourceSpan?] CompilerFact
+  (->CompilerFact order :syntax/edge subject slot (->FactNodeRef target) span))
+
+(defn canonical-node-subject
+  [source-digest String start-byte Int end-byte Int relation Keyword slot Int] String
+  (let [encoding String
+        (str (count source-digest) ":" source-digest
+             ":" start-byte
+             ":" end-byte
+             ":" (str relation)
+             ":" slot)]
+    (str "sha256:" (sha256-bytes (utf8-encode encoding)))))
+
+(defn canonical-fact-order? [facts (Vec CompilerFact)] Bool
+  (loop [index Int 0 previous Int -1]
+    (if (>= index (count facts))
+      true
+      (let [order Int (compilerfact-order (nth facts index))]
+        (if (or (< order 0) (<= order previous))
+          false
+          (recur (+ index 1) order))))))
