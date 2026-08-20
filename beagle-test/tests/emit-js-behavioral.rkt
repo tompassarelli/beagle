@@ -56,6 +56,25 @@
 (define BEAGLE-CORE-JS-PATH
   (collection-file-path "lib/beagle/core.js" "beagle"))
 (define BEAGLE-CORE-JS (path->string BEAGLE-CORE-JS-PATH))
+(define BEAGLE-EXCEPTION-DISPATCH-JS
+  (path->string
+   (collection-file-path "lib/beagle/exception-dispatch.js" "beagle")))
+(define BEAGLE-EXCEPTION-INFO-JS
+  (path->string
+   (collection-file-path "lib/beagle/exception-info.js" "beagle")))
+
+(define (resolve-beagle-runtime-imports raw-js)
+  (for/fold ([js raw-js])
+            ([replacement
+              (in-list
+               (list (cons "beagle/core.js" BEAGLE-CORE-JS)
+                     (cons "beagle/exception-dispatch.js"
+                           BEAGLE-EXCEPTION-DISPATCH-JS)
+                     (cons "beagle/exception-info.js"
+                           BEAGLE-EXCEPTION-INFO-JS)))])
+    (string-replace js
+                    (format "from '~a'" (car replacement))
+                    (format "from '~a'" (cdr replacement)))))
 
 (define (run-js-test beagle-forms assertions-js)
   (define raw-js
@@ -63,7 +82,7 @@
                      beagle-forms)))
   (define js-code
     (string-append
-     (string-replace raw-js "from 'beagle/core.js'" (format "from '~a'" BEAGLE-CORE-JS))
+     (resolve-beagle-runtime-imports raw-js)
      "\n\n// --- assertions ---\n"
      assertions-js
      "\n"))
@@ -482,10 +501,10 @@ console.log(JSON.stringify(snapshot()));"
 
    (check-js-output "binding constraints guard params, rest, let, and fn"
      (list '(defn positive? [(value Int)] Bool (> value 0))
-           '(defn all-positive? [(values (Vec Int))] Bool
+           '(defn all-positive? [(values (List Int))] Bool
               (every? positive? values))
            '(defn constrained-rest
-              [(head Int positive?) & (tail (Vec Int) all-positive?)]
+              [(head Int positive?) & (tail (List Int) all-positive?)]
               Int
               (+ head (count tail)))
            '(defn local [(input Int)] Int
@@ -758,16 +777,98 @@ console.log(JSON.stringify(snapshot()));"
 
    (check-js-output "try/catch returns catch value on error"
      (list '(defn safe-div [(a Int) (b Int)] Int
-              (try (/ a b) (catch (e Exception) -1))))
+              (try (/ a b) (catch :default error -1))))
      "console.log(safe_div(10, 2));"
      "5")
 
    (check-js-output "try/catch as expression in let"
      (list '(defn f [] Int
-              (let [x (try 42 (catch (e Exception) 0))]
+              (let [x (try 42 (catch :default error 0))]
                 (+ x 1))))
      "console.log(f());"
      "43")
+
+   (test-case "exception imports are demand tracked"
+     (define plain-js
+       (js-emit
+        (list '(ns test.plain)
+              '(define-target js)
+              '(defn value [] Int 1))))
+     (check-false (string-contains? plain-js "exception-dispatch.js"))
+     (check-false (string-contains? plain-js "exception-info.js"))
+
+     (define typed-js
+       (js-emit
+        (list '(ns test.typed)
+              '(define-target js)
+              '(defn recover [] Int
+                 (try 1 (catch js/Error error 0))))))
+     (check-true (string-contains? typed-js "catch_dispatch as $$bd$catch_dispatch"))
+     (check-false (string-contains? typed-js "default_catch"))
+     (check-false (string-contains? typed-js "exception-info.js"))
+
+     (define default-js
+       (js-emit
+        (list '(ns test.default)
+              '(define-target js)
+              '(defn recover [] Int
+                 (try 1 (catch :default error 0))))))
+     (check-true (string-contains? default-js "catch_dispatch as $$bd$catch_dispatch"))
+     (check-true (string-contains? default-js "default_catch as $$bd$default_catch"))
+
+     (define info-js
+       (js-emit
+        (list '(ns test.info)
+              '(define-target js)
+              `(defn make-error [] Any (ex-info "failed" ,(mt)))
+              '(defn recover [] Int
+                 (try 1 (catch ExceptionInfo error 0))))))
+     (check-true
+      (string-contains? info-js
+                        "ExceptionInfo as $$be$ExceptionInfo")))
+
+   (check-js-output "ordered typed/default catches bind only the selected name, rethrow identity, and preserve finally"
+     (list
+      '(def finalized Any (atom false))
+      '(defn clear-finalized! [] Any (reset! finalized false))
+      '(defn finalized? [] Bool (deref finalized))
+      `(defn throw-info [] Any
+         (throw (ex-info "failed" ,(mt ':phase "compile"))))
+      `(defn recover! ,(br 'thunk (fn-ty '() 'Any)) Any
+         (try
+          (thunk)
+          (catch ExceptionInfo info (ex-message info))
+          (catch js/TypeError type-error (ex-message type-error))
+          (catch :default fallback fallback)
+          (finally (reset! finalized true))))
+      `(defn ordered ,(br 'thunk (fn-ty '() 'Any)) String
+         (try
+          (thunk)
+          (catch js/Error broad "broad")
+          (catch ExceptionInfo narrow "narrow")))
+      `(defn typed-only ,(br 'thunk (fn-ty '() 'Any)) Any
+         (try
+          (thunk)
+          (catch js/TypeError type-error type-error))))
+     #<<JS
+console.log(recover_bang(throw_info));
+console.log(finalized_p());
+clear_finalized_bang();
+console.log(recover_bang(() => { throw new TypeError("bad type"); }));
+console.log(finalized_p());
+clear_finalized_bang();
+console.log(recover_bang(() => { throw 42; }));
+console.log(finalized_p());
+console.log(ordered(throw_info));
+const marker = { marker: true };
+try {
+  typed_only(() => { throw marker; });
+  console.log("not-rethrown");
+} catch (caught) {
+  console.log(caught === marker);
+}
+JS
+     "failed\ntrue\nbad type\ntrue\n42\ntrue\nbroad\ntrue")
 
    ;; --- do ------------------------------------------------------------------
 

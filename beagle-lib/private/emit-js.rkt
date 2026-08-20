@@ -69,6 +69,13 @@
   (set-box! b (add1 n))
   n)
 
+(define catch-counter (make-parameter (box 0)))
+(define (next-catch-id!)
+  (define b (catch-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  n)
+
 ;; --- special float values ---------------------------------------------------
 
 (define (emit-js-number n)
@@ -295,7 +302,7 @@
     [(and) (emit-logical-expr 'and args)]
     [(or) (emit-logical-expr 'or args)]
     [(throw) (if (= n 1) (format "(() => { throw ~a; })()" (emit-expr (car args))) #f)]
-    [(ex-info) (if (= n 2) (format "Object.assign(new Error(~a), {data: ~a})"
+    [(ex-info) (if (= n 2) (format "new $$be$ExceptionInfo(~a, ~a)"
                                    (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(ex-message) (if (= n 1) (format "~a.message" (emit-expr (car args))) #f)]
     [(ex-data) (if (= n 1) (format "~a.data" (emit-expr (car args))) #f)]
@@ -1781,6 +1788,7 @@
                  [match-counter (box 0)]
                  [logical-counter (box 0)]
                  [constrained-binding-counter (box 0)]
+                 [catch-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
                  [current-js-record-field-bindings
                   (build-record-field-binding-table prog)]
@@ -1869,7 +1877,26 @@
           (format "import { ~a } from '~a';\n"
                   (string-join ops ", ")
                   (string-append js-runtime-prefix "hamt.js")))))
+    (define used-exception-dispatch
+      (sort (remove-duplicates
+             (regexp-match* #px"[$][$]bd[$]([a-z_]+)" body #:match-select cadr))
+            string<?))
+    (define exception-dispatch-import
+      (if (null? used-exception-dispatch)
+          ""
+          (format "import { ~a } from '~a';\n"
+                  (string-join
+                   (for/list ([name (in-list used-exception-dispatch)])
+                     (format "~a as $$bd$~a" name name))
+                   ", ")
+                  (string-append js-runtime-prefix "exception-dispatch.js"))))
+    (define exception-info-import
+      (if (string-contains? body "$$be$ExceptionInfo")
+          (format "import { ExceptionInfo as $$be$ExceptionInfo } from '~a';\n"
+                  (string-append js-runtime-prefix "exception-info.js"))
+          ""))
     (string-append rep-comment header runtime-import host-import hamt-import
+                   exception-dispatch-import exception-info-import
                    "\n" body
                    (if (string=? public-exports "") "\n"
                        (string-append "\n\n" public-exports "\n")))))
@@ -2787,20 +2814,46 @@
      (emit-expr branch)]
     [(try-form? e)
      (define body-str (emit-body-return (try-form-body e) "  "))
-     (define catch-strs
-       (for/list ([c (try-form-catches e)])
-         (with-bindings (list (catch-clause-name c))
-           (lambda ()
-             (define authored-name (catch-clause-name c))
-             (define name
-               (mangle-name (binder-output-symbol c authored-name)))
-             (parameterize
-                 ([current-rename-env
-                   (rename-env-set-binder
-                    (current-rename-env) c authored-name name)])
-               (format "catch (~a) {\n    ~a\n  }"
-                       name
-                       (emit-body-return (catch-clause-body c) "    ")))))))
+     (define catches (try-form-catches e))
+     (define catch-str
+       (if (null? catches)
+           ""
+           (let* ([caught-name (format "_catch_~a" (next-catch-id!))]
+                  [catch-type
+                   (lambda (c)
+                     (define exception-type (catch-clause-exception-type c))
+                     (cond
+                       [(eq? exception-type ':default) "$$bd$default_catch"]
+                       [(eq? exception-type 'ExceptionInfo) "$$be$ExceptionInfo"]
+                       [(and (symbol? exception-type)
+                             (string-prefix? (symbol->string exception-type) "js/"))
+                        (mangle-str (substring (symbol->string exception-type) 3))]
+                       [(symbol? exception-type) (mangle-name exception-type)]
+                       [else
+                        (error 'beagle-js
+                               "unsupported JavaScript catch type: ~v"
+                               exception-type)]))]
+                  [type-list
+                   (string-join (map catch-type catches) ", ")]
+                  [case-strs
+                   (for/list ([c (in-list catches)] [index (in-naturals)])
+                     (with-bindings (list (catch-clause-name c))
+                       (lambda ()
+                         (define authored-name (catch-clause-name c))
+                         (define name
+                           (mangle-name (binder-output-symbol c authored-name)))
+                         (parameterize
+                             ([current-rename-env
+                               (rename-env-set-binder
+                                (current-rename-env) c authored-name name)])
+                           (format
+                            "case ~a: {\n        const ~a = ~a;\n        ~a\n      }"
+                            index name caught-name
+                            (emit-body-return (catch-clause-body c) "        "))))))])
+             (format
+              " catch (~a) {\n    switch ($$bd$catch_dispatch(~a, [~a])) {\n      ~a\n    }\n  }"
+              caught-name caught-name type-list
+              (string-join case-strs "\n      ")))))
      (define finally-str
        (if (try-form-finally-body e)
          (format " finally {\n    ~a\n  }"
@@ -2808,8 +2861,10 @@
          ""))
      (define has-await (or (contains-await? (try-form-body e))
                             (for/or ([c (try-form-catches e)])
-                              (contains-await? (catch-clause-body c)))))
-     (iife (format "try {\n    ~a\n  } ~a~a" body-str (string-join catch-strs " ") finally-str)
+                              (contains-await? (catch-clause-body c)))
+                            (and (try-form-finally-body e)
+                                 (contains-await? (try-form-finally-body e)))))
+     (iife (format "try {\n    ~a\n  }~a~a" body-str catch-str finally-str)
            #:async? has-await)]
 
     [(doseq-form? e)
