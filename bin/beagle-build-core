@@ -2129,45 +2129,62 @@ bb -cp "$compiled" -e '
                   (lower/resolve-source-name index module-name spelling))]
     (unique-nodes (get definitions resolved []))))
 
-(defn type-spellings [index node fuel]
-  (if (<= fuel 0)
-    []
-    (let [kind (lower/fact-text index node "form-kind")
-          own (if (#{"type-prim" "type-app"} kind)
-                [(lower/fact-text index node "name")]
-                [])]
-      (vec
-       (distinct
-        (concat (remove str/blank? own)
-                (mapcat #(type-spellings index % (dec fuel))
-                        (lower/index-child-nodes index node))))))))
+(defn definition-spellings [index definition definition-ids]
+  (loop [queue (conj clojure.lang.PersistentQueue/EMPTY definition)
+         seen #{}
+         references #{}
+         types #{}]
+    (if (empty? queue)
+      {:references references :types types}
+      (let [node (peek queue)
+            remaining (pop queue)
+            identity (id-value node)]
+        (if (or (contains? seen identity)
+                (and (not= identity (id-value definition))
+                     (contains? definition-ids identity)))
+          (recur remaining (conj seen identity) references types)
+          (let [kind (lower/fact-text index node "form-kind")
+                reference
+                (when (and (= "ref" kind)
+                           (str/blank?
+                            (lower/fact-text index node "binding-id")))
+                  (lower/source-reference-spelling index node))
+                type-name
+                (when (#{"type-prim" "type-app"} kind)
+                  (lower/fact-text index node "name"))]
+            (recur
+             (into remaining (lower/index-child-nodes index node))
+             (conj seen identity)
+             (if (str/blank? reference) references (conj references reference))
+             (if (str/blank? type-name) types (conj types type-name)))))))))
 
-(defn dependency-nodes [definitions index definition]
+(defn dependency-nodes [definitions index definition definition-ids]
   (let [module-name (lower/source-module-name index definition)
-        fuel (inc (lower/index-facts index))
+        spellings (definition-spellings index definition definition-ids)
         references
         (vec
-         (distinct
-          (concat
-           (lower/source-direct-ref-names index definition [] fuel)
-           (if (= "unsupported-extend-type" (definition-kind index definition))
-             (remove str/blank?
-                     (map #(lower/fact-text index % "protocol")
-                          (definition-child-items index definition "impls")))
-             []))))
-        types (type-spellings index definition fuel)]
+         (concat
+          (:references spellings)
+          (if (= "unsupported-extend-type" (definition-kind index definition))
+            (remove str/blank?
+                    (map #(lower/fact-text index % "protocol")
+                         (definition-child-items index definition "impls")))
+            [])))
+        types (:types spellings)]
     (unique-nodes
      (concat
       (mapcat #(resolved-definition-nodes definitions index module-name %) references)
       (mapcat #(resolved-definition-nodes definitions index module-name %) types)))))
 
 (defn dependency-resolver [definitions index]
-  (let [cache (volatile! {})]
+  (let [cache (volatile! {})
+        definition-ids (set (map id-value (definition-nodes index)))]
     (fn [definition]
       (let [identity (id-value definition)]
         (if (contains? @cache identity)
           (get @cache identity)
-          (let [dependencies (vec (dependency-nodes definitions index definition))]
+          (let [dependencies
+                (vec (dependency-nodes definitions index definition definition-ids))]
             (vswap! cache assoc identity dependencies)
             dependencies))))))
 
