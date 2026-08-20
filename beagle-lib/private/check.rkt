@@ -6818,16 +6818,22 @@
    receiver-type
    (string->symbol (string-append ":" selector))))
 
+(define (jst-union-receiver? receiver-type)
+  (or (and (type-prim? receiver-type)
+           (hash-ref UNION-MEMBERS (type-prim-name receiver-type) #f))
+      (and (type-app? receiver-type)
+           (hash-ref UNION-MEMBERS (type-app-ctor receiver-type) #f))))
+
 (define (jst-static-member-contract receiver-type selector)
-  (or (jst-record-member-contract receiver-type selector)
+  (or (and (string=? selector "_tag")
+           (jst-union-receiver? receiver-type)
+           (type-prim 'String))
+      (jst-record-member-contract receiver-type selector)
       (jst-native-member-contract receiver-type selector)))
 
 (define (jst-closed-record-receiver? receiver-type)
   (or (record-field-map-for-type receiver-type)
-      (and (type-prim? receiver-type)
-           (hash-ref UNION-MEMBERS (type-prim-name receiver-type) #f))
-      (and (type-app? receiver-type)
-           (hash-ref UNION-MEMBERS (type-app-ctor receiver-type) #f))))
+      (jst-union-receiver? receiver-type)))
 
 (define (raise-unknown-jst-record-member form-name receiver-type selector node)
   (raise-diag

@@ -1421,6 +1421,11 @@ BEAGLE
   '(defn union-width [(box EitherBound)] Float
      (+ (js/get box .width) 1.0)))
 
+(check-js-ok "js/get exposes the emitted discriminator on a typed union"
+  `(defunion Result (Ok ,(br '(value String))) (Err ,(br '(message String))))
+  '(defn result-tag [(result Result)] String
+     (js/get result ._tag)))
+
 (check-js-err/rx "js/get rejects unknown member on a nominal record union"
   #rx"js/get: \\.depth is not a member of EitherBound"
   '(defrecord LeftBound [(width Float)])
