@@ -5,15 +5,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 supervisor="$root/native-core/bin/run-bounded"
+module_helper="$root/bin/_beagle-core-compiler-module-cache.clj"
 kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
 overall_timeout="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-600}"
 # The projection key names emitted bytes, not this script's scheduling and
-# cache machinery. Keep this recipe id stable while sources, the Racket
-# compiler closure, and the post-emission rewrites below produce the same
-# bytes; bump it only when that output contract changes. Its initial value is
-# the last live-script digest so existing authenticated projections remain
-# addressable across this orchestration-only speedup.
-projection_recipe_sha256="a9741457aeeb07a6b33c8ee55521b9bfbbe0bfaaaac10db91434698d4a43d17c"
+# cache machinery. The canonical projection is source-location-free: diagnostic
+# locations remain checker evidence and are not executable artifact identity.
+projection_recipe_sha256="eec9758bd1e41a13a613bfd59088bbf40013db6e956519f23810fe1582a56b92"
 
 sources=(
     native-core/src/native/core.bclj
@@ -95,8 +93,20 @@ done
     echo "beagle core compiler projection: invalid kill grace" >&2
     exit 2
 }
+[[ "$cache_root" == /* ]] || {
+    echo "beagle core compiler projection: cache root must be absolute" >&2
+    exit 2
+}
 [[ -x "$supervisor" ]] || {
     echo "beagle core compiler projection: build supervisor is unavailable" >&2
+    exit 2
+}
+[[ -f "$module_helper" ]] || {
+    echo "beagle core compiler projection: module compiler helper is unavailable" >&2
+    exit 2
+}
+command -v bb >/dev/null 2>&1 || {
+    echo "beagle core compiler projection: bb is unavailable" >&2
     exit 2
 }
 if [[ "$print_key" == 1 ]]; then
@@ -129,20 +139,17 @@ if [[ "$print_key" != 1 &&
         "${supervised_args[@]}"
 fi
 
-# The closure of a compiled projection: the compiler-module sources, every
-# program that reads or transforms them on the way to the emitted Clojure, and
-# the toolchain pin that selects the Racket those programs run under. Nothing
-# downstream of emission belongs here — the build driver, the emission manager
-# and the finalizer consume the projection, so they cannot change its bytes.
+# The closure of a compiled projection: compiler-module sources, the checked-in
+# self-host seed that parses/checks/emits them, and the deterministic assembly
+# recipe. The hosted Racket compiler is deliberately not on this path.
 write_input_manifest() {
     local destination="$1" relative digest_index input_index
     local -a inputs present_inputs present_flags digests
     inputs=("${sources[@]}"
             bin/beagle-core-compiler-projection
-            bin/beagle-build-all
-            bin/_beagle-racket
+            bin/_beagle-core-compiler-module-cache.clj
             native-core/bin/run-bounded
-            share/targets.sh flake.nix flake.lock)
+            flake.nix flake.lock)
     # Presence is decided once and the hash list is built from that same
     # decision, so a file appearing or vanishing mid-scan cannot slide the
     # digests out of step with the names they label. Every build asks for this
@@ -169,7 +176,7 @@ write_input_manifest() {
         }
     fi
     {
-        printf 'beagle-core-compiler-projection-input/v2\n'
+        printf 'beagle-core-compiler-projection-input/v3\n'
         digest_index=0
         for input_index in "${!inputs[@]}"; do
             # An absent input is its own key value: dropping a file must move
@@ -184,10 +191,13 @@ write_input_manifest() {
                 printf '%s absent\n' "${inputs[$input_index]}"
             fi
         done
-        find "$root/beagle-lib" -name compiled -prune -o -name '*.rkt' -print0 |
+        find "$root/self-host/seed" -type f -name '*.clj' -print0 |
             LC_ALL=C sort -z | xargs -0 sha256sum |
             awk -v prefix="${#root}" \
                 '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+        printf 'bb %s\n' "$(realpath "$(command -v bb)")"
+        printf 'bb-sha256 %s\n' \
+            "$(sha256sum "$(realpath "$(command -v bb)")" | awk '{print $1}')"
     } >"$destination"
 }
 
@@ -233,19 +243,178 @@ cache_entry_valid() {
     (cd "$entry/compiled" && sha256sum --check --strict ../artifacts.sha256 >/dev/null 2>&1)
 }
 
-build_projection() {
-    local compiled="$1" build_log="$2" source generated core_records
-    local build_args=()
-    for source in "${sources[@]}"; do
-        build_args+=("$root/$source")
+module_build_order=(
+    core stages obligations simd lower c11 slice unit_reuse unit_compile
+    fold_c17 body_c17 qbe body_slice
+)
+declare -A module_sources=()
+for source in "${sources[@]}"; do
+    module_sources["$(basename "$source" .bclj)"]="$source"
+done
+
+write_module_recipe_manifest() {
+    local destination="$1" bb_path
+    bb_path="$(realpath "$(command -v bb)")"
+    {
+        printf 'beagle-core-compiler-module-recipe/v1\n'
+        printf 'projection-recipe-sha256 %s\n' "$projection_recipe_sha256"
+        printf 'helper-sha256 %s\n' "$(sha256sum "$module_helper" | awk '{print $1}')"
+        find "$root/self-host/seed" -type f -name '*.clj' -print0 |
+            LC_ALL=C sort -z | xargs -0 sha256sum |
+            awk -v prefix="${#root}" \
+                '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+        printf 'bb %s\n' "$bb_path"
+        printf 'bb-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
+    } >"$destination"
+}
+
+write_module_input_manifest() {
+    local destination="$1" module="$2" recipe_digest="$3" dependency entry
+    {
+        printf 'beagle-core-compiler-module-input/v1\n'
+        printf 'recipe-sha256 %s\n' "$recipe_digest"
+        printf 'module %s\n' "$module"
+        printf 'source %s %s\n' "${module_sources[$module]}" \
+            "$(sha256sum "$root/${module_sources[$module]}" | awk '{print $1}')"
+        for dependency in "${module_build_order[@]}"; do
+            [[ -n "${module_entries[$dependency]:-}" ]] || continue
+            entry="${module_entries[$dependency]}"
+            printf 'provider-interface %s %s\n' "$dependency" \
+                "$(sha256sum "$entry/interface.json" | awk '{print $1}')"
+        done
+    } >"$destination"
+}
+
+module_entry_valid() {
+    local entry="$1" key="$2" manifest_digest expected actual
+    [[ -d "$entry" && ! -L "$entry" ]] || return 1
+    for expected in input.manifest artifact.clj surface.json interface.json \
+            artifacts.sha256 READY; do
+        [[ -f "$entry/$expected" && ! -L "$entry/$expected" ]] || return 1
     done
-    echo "beagle core compiler projection: construction START (one-time, overall build deadline=${overall_timeout}s)" >&2
-    if ! "$root/bin/beagle-build-all" \
-        --module-root "native-core/src=$root/native-core/src" \
-        "${build_args[@]}" --out "$compiled" >"$build_log" 2>&1; then
-        sed -n '1,200p' "$build_log" >&2
+    actual="$(find "$entry" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' |
+        LC_ALL=C sort)"
+    expected="$(printf '%s\n' READY artifact.clj artifacts.sha256 input.manifest \
+        interface.json surface.json | LC_ALL=C sort)"
+    [[ "$actual" == "$expected" ]] || return 1
+    [[ "$(sha256sum "$entry/input.manifest" | awk '{print $1}')" == "$key" ]] ||
         return 1
-    fi
+    manifest_digest="$(sha256sum "$entry/artifacts.sha256" | awk '{print $1}')"
+    [[ "$(<"$entry/READY")" == \
+       "beagle-core-compiler-module/v1 $key $manifest_digest" ]] || return 1
+    (cd "$entry" && sha256sum --check --strict artifacts.sha256 >/dev/null 2>&1)
+}
+
+build_projection() {
+    local compiled="$1" build_log="$2" object_root="$3"
+    local module source dependency entry key stage fresh corrupt core_records
+    local recipe_digest manifest_digest started ended elapsed recipe_manifest
+    local recipe_recheck projection_manifest projection_recheck
+    local module_lock_fd
+    local -a source_args surface_args
+    declare -gA module_entries=()
+    mkdir -p "$compiled/native" "$object_root/.locks" "$object_root/.staging"
+    projection_manifest="$(mktemp "$object_root/.staging/projection.XXXXXX")"
+    write_input_manifest "$projection_manifest"
+    recipe_manifest="$(mktemp "$object_root/.staging/recipe.XXXXXX")"
+    write_module_recipe_manifest "$recipe_manifest"
+    recipe_digest="$(sha256sum "$recipe_manifest" | awk '{print $1}')"
+    echo "beagle core compiler projection: construction START (per-module, overall build deadline=${overall_timeout}s)" >&2
+    : >"$build_log"
+    for module in "${module_build_order[@]}"; do
+        source="${module_sources[$module]}"
+        fresh="$(mktemp "$object_root/.staging/input.$module.XXXXXX")"
+        write_module_input_manifest "$fresh" "$module" "$recipe_digest"
+        key="$(sha256sum "$fresh" | awk '{print $1}')"
+        entry="$object_root/$key"
+        exec {module_lock_fd}>"$object_root/.locks/$key.lock"
+        flock -x "$module_lock_fd"
+        stage="$(mktemp "$object_root/.staging/locked.$module.XXXXXX")"
+        write_module_input_manifest "$stage" "$module" "$recipe_digest"
+        cmp -s "$fresh" "$stage" || {
+            echo "beagle core compiler projection: module input changed before cache admission: $module" >&2
+            return 1
+        }
+        rm -f "$stage"
+        stage=""
+        if ! module_entry_valid "$entry" "$key"; then
+            if [[ -e "$entry" ]]; then
+                corrupt="$object_root/.staging/corrupt.$key.$$"
+                mv "$entry" "$corrupt"
+                rm -rf "${corrupt:?}"
+            fi
+            stage="$(mktemp -d "$object_root/.staging/module.$module.XXXXXX")"
+            mv "$fresh" "$stage/input.manifest"
+            fresh=""
+            source_args=()
+            for dependency in "${sources[@]}"; do
+                [[ "$dependency" == "$source" ]] ||
+                    source_args+=(--source "$root/$dependency")
+            done
+            surface_args=()
+            for dependency in "${module_build_order[@]}"; do
+                [[ -n "${module_entries[$dependency]:-}" ]] || continue
+                surface_args+=(--surface \
+                    "$root/${module_sources[$dependency]}=${module_entries[$dependency]}/surface.json")
+            done
+            started="$(date +%s%N)"
+            if ! bb -cp "$root/self-host/seed" "$module_helper" compile \
+                    "${source_args[@]}" "${surface_args[@]}" \
+                    --artifact "$stage/artifact.clj" \
+                    --surface-out "$stage/surface.json" \
+                    --interface-out "$stage/interface.json" \
+                    "$root/$source" >>"$build_log" 2>&1; then
+                sed -n '1,200p' "$build_log" >&2
+                return 1
+            fi
+            ended="$(date +%s%N)"
+            elapsed=$(( (ended - started + 999999999) / 1000000000 ))
+            fresh="$(mktemp "$object_root/.staging/recheck.$module.XXXXXX")"
+            write_module_input_manifest "$fresh" "$module" "$recipe_digest"
+            cmp -s "$fresh" "$stage/input.manifest" || {
+                echo "beagle core compiler projection: source closure changed while compiling $module" >&2
+                return 1
+            }
+            rm -f "$fresh"
+            fresh=""
+            (cd "$stage" && sha256sum artifact.clj interface.json surface.json \
+                >artifacts.sha256)
+            manifest_digest="$(sha256sum "$stage/artifacts.sha256" | awk '{print $1}')"
+            printf 'beagle-core-compiler-module/v1 %s %s\n' \
+                "$key" "$manifest_digest" >"$stage/READY"
+            module_entry_valid "$stage" "$key" || {
+                echo "beagle core compiler projection: staged module proof is invalid: $module" >&2
+                return 1
+            }
+            mv "$stage" "$entry"
+            echo "beagle core compiler projection: module MISS $module $key seconds=$elapsed" >&2
+        else
+            rm -f "$fresh"
+            fresh=""
+            echo "beagle core compiler projection: module HIT $module $key" >&2
+        fi
+        module_entries[$module]="$entry"
+        cp -- "$entry/artifact.clj" "$compiled/native/$module.clj"
+        cmp -s "$entry/artifact.clj" "$compiled/native/$module.clj" || {
+            echo "beagle core compiler projection: assembled module differs from authenticated object: $module" >&2
+            return 1
+        }
+        exec {module_lock_fd}>&-
+    done
+    recipe_recheck="$(mktemp "$object_root/.staging/recipe-recheck.XXXXXX")"
+    write_module_recipe_manifest "$recipe_recheck"
+    cmp -s "$recipe_manifest" "$recipe_recheck" || {
+        echo "beagle core compiler projection: module recipe changed during assembly" >&2
+        return 1
+    }
+    projection_recheck="$(mktemp "$object_root/.staging/projection-recheck.XXXXXX")"
+    write_input_manifest "$projection_recheck"
+    cmp -s "$projection_manifest" "$projection_recheck" || {
+        echo "beagle core compiler projection: projection input changed during assembly" >&2
+        return 1
+    }
+    rm -f "$recipe_manifest" "$recipe_recheck" \
+        "$projection_manifest" "$projection_recheck"
     core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
         "$compiled/native/core.clj" | tr '\n' ' ')"
     for module in stages simd lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
@@ -296,7 +465,7 @@ if [[ "$cache_requested" == 1 ]]; then
     work="$(mktemp -d "$cache_root/.staging/projection.XXXXXX")"
     write_input_manifest "$work/input.manifest"
     echo "beagle core compiler projection: cache MISS $key" >&2
-    build_projection "$work/compiled" "$work/build.log"
+    build_projection "$work/compiled" "$work/build.log" "$cache_root/modules"
     rm -f "$work/build.log"
     (cd "$work/compiled" && find . -type f -print0 | LC_ALL=C sort -z |
         xargs -0 sha256sum >"$work/artifacts.sha256")
@@ -317,5 +486,6 @@ fi
 out_parent="$(dirname -- "$out")"
 mkdir -p "$out_parent"
 work="$(mktemp -d "$out_parent/.beagle-core-compiler-projection.XXXXXX")"
-build_projection "$work/compiled" "${log:-$work/build.log}"
+mkdir -p "$cache_root"
+build_projection "$work/compiled" "${log:-$work/build.log}" "$cache_root/modules"
 mv "$work/compiled" "$out"
