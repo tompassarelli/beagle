@@ -12814,7 +12814,7 @@
       (= "record" kind)
       (let [variant (U core/TypeVariant Nil)
             (union-variant-named types target-type
-              (fact-text index pattern "name"))]
+              (match-record-spelling index pattern))]
         (if (some? variant)
           (lower-union-variant-test types owner state target-id target-type
             (core/typevariant-id variant))
@@ -12975,7 +12975,7 @@
             (match-pattern-binding-items index pattern)
             variant (U core/TypeVariant Nil)
             (union-variant-named types target-type
-              (fact-text index pattern "name"))]
+              (match-record-spelling index pattern))]
         (if (some? variant)
           (let [record-type (U core/NativeId Nil)
                 (variant-record-type-id types variant)]
