@@ -24,8 +24,8 @@
 (require store.store :as store)
 
 ;; A key is never materialized. It is NAMED by the event that first carried it
-;; plus the key shape, and hashed through one of these stack records, so
-;; neither a build step nor a probe allocates a key tuple. Distinct record
+;; plus the key shape, and hashed through one of these stack entries, so
+;; neither a build step nor a probe allocates a key tuple. Distinct entry
 ;; shapes hash apart, so two shapes sharing a bucket cannot collide by
 ;; construction; the entry comparison still settles equality term by term.
 (defrecord KeyOne [(a Any)])
@@ -607,17 +607,17 @@
   (projected! (store/space-id ctx) (store/current-sequence ctx)
     (store/live-occurrences ctx)))
 
-;; --- The pending tail. A committed frame joins the tail as one system
+;; --- The pending tail. A committed record joins the tail as one system
 ;; occurrence per operation; the tail folds down only at a projection point.
 
-(defn- pending-with-frame
+(defn- pending-with-record
   [(pending (Vec t/OperationOccurrence))
    (space-id String)
-   (frame t/TransactionFrame)]
+   (record t/TransactionRecord)]
   (Vec t/OperationOccurrence)
   (let [(coordinate t/Triple)
-        (t/transaction-coordinate space-id (t/transactionframe-sequence frame))
-        (operations (Vec t/CommitOperation)) (t/transactionframe-operations frame)]
+        (t/transaction-coordinate space-id (t/transactionrecord-sequence record))
+        (operations (Vec t/CommitOperation)) (t/transactionrecord-operations record)]
     (loop [(built (Vec t/OperationOccurrence)) pending (ordinal Int) 0]
       (if (>= ordinal (count operations))
         built
@@ -641,8 +641,8 @@
    (operations (Vec t/CommitOperation))]
   Rotation
   (assoc rotation :pending
-    (pending-with-frame (rotation-pending rotation) space-id
-      (t/->TransactionFrame sequence operations))))
+    (pending-with-record (rotation-pending rotation) space-id
+      (t/->TransactionRecord sequence operations))))
 
 (defn refresh! [(rotation Rotation) (ctx (Atom t/TermStore))] Rotation
   (let [(space String) (store/space-id ctx) (target Int) (store/current-sequence ctx) (pinned Int) (rotation-version rotation)]
@@ -652,14 +652,14 @@
         (throw (ex-info "store: rotation is ahead of the store it projects" {:type :rotation-ahead-of-store}))
         (if (= pinned target)
           rotation
-          (let [(frames (Vec t/TransactionFrame)) (store/transaction-frames-between (deref ctx) pinned target)
+          (let [(records (Vec t/TransactionRecord)) (store/transaction-records-between (deref ctx) pinned target)
                 (pending (Vec t/OperationOccurrence))
                 (loop [(built (Vec t/OperationOccurrence))
                        (rotation-pending rotation)
                        (position Int) 0]
-                  (if (>= position (count frames))
+                  (if (>= position (count records))
                     built
-                    (recur (pending-with-frame built space (nth frames position))
+                    (recur (pending-with-record built space (nth records position))
                       (inc position))))
                 (advanced Rotation)
                 (->Rotation (rotation-space-id rotation) target

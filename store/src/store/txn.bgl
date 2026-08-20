@@ -4,7 +4,8 @@
 ;; monotonic mint-ordinal allocator, and the single-cardinality update compiler.
 ;; A minted identity is the coordinate Term (tx-coordinate :mint-ordinal n);
 ;; ordinary propositions say what it represents. Commit is OCC-guarded on the
-;; pinned sequence, so a coordinate minted here can never name another frame.
+;; pinned sequence, so a coordinate minted here can never name another
+;; transaction record.
 (ns store.txn)
 
 

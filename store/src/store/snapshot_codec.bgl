@@ -1,5 +1,5 @@
 #lang beagle
-;; Snapshot v1: a store image beside the canonical FRAMLOG, never a rewrite of
+;; Snapshot v1: a store image beside the canonical Store transaction log, never a rewrite of
 ;; it. Rows are emitted in position order, which IS fold order because every
 ;; intern conjoins at the end, so re-loading assigns identical handles.
 (ns store.snapshot-codec
@@ -81,7 +81,7 @@
   [(route Keyword) (reason Keyword?) (report String) (image Image?)])
 
 (wire/defwire snapshot-record
-  (framed :u32le :crc32)
+  (packet-encoded :u32le :crc32)
   (tagged :u8
     [1 atom
      [(row (codec t/AtomRow :atom
@@ -149,7 +149,7 @@
 
 ;; Every record is length-prefixed and CRC-checked on its own, so one damaged
 ;; row is detected without trusting any other byte of the image.
-(defn- frame-record! [(out wire/Encoder) (payload wire/Encoder)] Nil
+(defn- append-record! [(out wire/Encoder) (payload wire/Encoder)] Nil
   (let [(error String?) (deref (wire/encoder-error payload))
         (bytes (Vec Int)) (deref (wire/encoder-bytes payload))]
     (if error
@@ -229,7 +229,7 @@
   (let [(payload wire/Encoder) (new-encoder)]
     (do
       (append-snapshot-record-atom! payload row)
-      (frame-record! out payload))))
+      (append-record! out payload))))
 
 (defn- append-triple-record! [(out wire/Encoder) (row t/TripleRow)] Nil
   (let [(start Int)
@@ -285,7 +285,7 @@
        payload (sidecar-sequence sidecar) (sidecar-watermark sidecar) labels
        (sidecar-image-start sidecar) (sidecar-image-end sidecar)
        (sidecar-stamp sidecar) (sidecar-fingerprint sidecar))
-      (frame-record! out payload))))
+      (append-record! out payload))))
 
 (defn- append-atom-records! [(out wire/Encoder) (rows (Vec t/AtomRow))] Nil
   (loop [position 0]
@@ -321,7 +321,7 @@
         (append-operation-record! out (nth rows position))
         (recur (+ position 1))))))
 
-;; WATERMARK is the canonical FRAMLOG byte count the image already accounts
+;; WATERMARK is the canonical Store transaction log byte count the image already accounts
 ;; for; boot replays only the bytes past it.
 (defn encode-snapshot!
   [(root (Atom t/TermStore))
@@ -621,13 +621,14 @@
         true
         (recur (+ position 1))))))
 
-;; -1 when the tail is empty or does not start a readable FRAMLOG frame header.
+;; -1 when the tail is empty or does not start with a readable transaction
+;; record header in the Store transaction log.
 (defn- tail-first-sequence! [(log-bytes ByteSource) (watermark Int)] Int
   (if (>= watermark (count log-bytes))
     -1
     (let [decoder (payload-decoder log-bytes watermark (count log-bytes))
-          _ (wire/read-u32-le! decoder "snapshot tail frame length")
-          sequence (wire/read-i64-le! decoder "snapshot tail frame sequence")]
+          _ (wire/read-u32-le! decoder "snapshot tail transaction record length")
+          sequence (wire/read-i64-le! decoder "snapshot tail transaction record sequence")]
       (if (deref (wire/decoder-error decoder)) -1 sequence))))
 
 (defn- sidecar-reason!

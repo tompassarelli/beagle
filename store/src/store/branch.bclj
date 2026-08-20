@@ -1,6 +1,6 @@
 #lang beagle/clj
-;; A branch ref names the sealed FRAMLOG segments a branch folds before its
-;; tail; the tail is located by convention and is never listed in the ref.
+;; A branch ref names the sealed Store transaction log segments a branch folds
+;; before its tail; the tail is located by convention and is never listed.
 (ns store.branch
   (:require [clojure.string :as str])
   (:import [java.io ByteArrayOutputStream]
@@ -9,10 +9,10 @@
            [java.util.zip CRC32]))
 
 
-(def ref-format String "framref/v1")
-(def fork-marker-format String "framfork/v1")
-(def reseal-marker-format String "framreseal/v1")
-(def branch-revision-format String "frambranch-revision/v2")
+(def ref-format String "revision-ref/v1")
+(def fork-marker-format String "branch-fork/v1")
+(def reseal-marker-format String "branch-reseal/v1")
+(def branch-revision-format String "branch-revision/v2")
 ;; The unnamed tail at <log> keeps this spelling in <log>.refs/.
 (def default-branch String "main")
 (def max-branch-name-length Int 64)
@@ -53,7 +53,7 @@
 (defrecord ResealMarker [(branch String) (segment String) (ref-identity String)])
 
 (defn- fail [(message String) (code Keyword)] Any
-  (throw (ex-info message {:type code :fram/code code})))
+  (throw (ex-info message {:type code :store-log/code code})))
 
 (defn valid-segment-name? [(value String)] Bool
   (some? (re-matches #"[0-9a-f]{64}" value)))
@@ -130,7 +130,8 @@
                  (format "%02x" (bit-and (int value) 255)))
                (vec (.digest (MessageDigest/getInstance "SHA-256") bytes)))))
 
-;; V2 binds the exact ordered committed frame bytes through history-sha256.
+;; V2 binds the exact ordered committed transaction record bytes through
+;; history-sha256.
 ;; Physical segment identities and boundaries are deliberately absent, so a
 ;; lossless reseal preserves revision identity. Text values carry u32
 ;; little-endian byte lengths and the sequence is i64.

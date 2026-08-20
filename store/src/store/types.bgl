@@ -30,8 +30,8 @@
 (defrecord Triple [(t1 Any) (t2 Any) (t3 Any)])
 (defalias Term (Dyn String Int Float Bool Keyword Instant Triple))
 
-;; FRAMRPC payloads are closed records over the same recursive Term vocabulary.
-;; A cancel frame carries only its header request-id; event bodies use RpcResponse.
+;; Store RPC payloads are closed records over the same recursive Term vocabulary.
+;; A cancel packet carries only its header request-id; event bodies use RpcResponse.
 (defrecord RpcPageRequest [(limit Int) (cursor Term?)])
 (defrecord RpcPageResponse [(ordinal Int) (next-cursor Term?) (done Bool)])
 (defrecord RpcError
@@ -50,7 +50,7 @@
    (page RpcPageResponse?)
    (error RpcError?)
    (payload Term?)])
-(defrecord RpcFrameV2
+(defrecord StoreRpcPacketV2
   [(kind Keyword)
    (flags Int)
    (request-id Int)
@@ -67,7 +67,7 @@
 (defn rpc-error? [(v Any)] Bool (instance? RpcError v))
 (defn rpc-request? [(v Any)] Bool (instance? RpcRequest v))
 (defn rpc-response? [(v Any)] Bool (instance? RpcResponse v))
-(defn rpc-frame-v2? [(v Any)] Bool (instance? RpcFrameV2 v))
+(defn store-rpc-packet-v2? [(v Any)] Bool (instance? StoreRpcPacketV2 v))
 
 ;; These bridges preserve the closed Term fields while working around Beagle's
 ;; current inability to pass a recursive Dyn through a module boundary.
@@ -107,7 +107,7 @@
    (shape-schema-id String)
    (profile String?)
    (validation-attestation CommitValidationAttestation)])
-(defrecord TransactionFrame [(sequence Int) (operations (Vec CommitOperation))])
+(defrecord TransactionRecord [(sequence Int) (operations (Vec CommitOperation))])
 ;; An operation occurrence records an assertion or retraction of proposition
 ;; content. Keeping it outside Term prevents system history from masquerading
 ;; as an ordinary semantic Triple.
@@ -147,7 +147,7 @@
 (defn commit-validation-attestation? [(v Any)] Bool
   (instance? CommitValidationAttestation v))
 (defn commit-metadata? [(v Any)] Bool (instance? CommitMetadata v))
-(defn transaction-frame? [(v Any)] Bool (instance? TransactionFrame v))
+(defn transaction-record? [(v Any)] Bool (instance? TransactionRecord v))
 (defn term-store-dump? [(v Any)] Bool (instance? TermStoreDump v))
 (defn operation-occurrence? [(v Any)] Bool (instance? OperationOccurrence v))
 (defn withdrawal? [(v Any)] Bool (instance? Withdrawal v))

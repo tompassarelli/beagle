@@ -1,5 +1,5 @@
 #lang beagle/clj
-;; Pure projection of ordered transaction frames through the authoritative
+;; Pure projection of ordered transaction records through the authoritative
 ;; recursive TermStore history.
 (ns store.fold)
 (require store.store :as store)
@@ -14,17 +14,17 @@
    (version Int)
    (dump t/TermStoreDump)])
 
-(defn transaction-frame
-  [(sequence Int) (operations (Vec t/CommitOperation))] t/TransactionFrame
-  (store/transaction-frame sequence operations))
+(defn transaction-record
+  [(sequence Int) (operations (Vec t/CommitOperation))] t/TransactionRecord
+  (store/transaction-record sequence operations))
 
-(defn max-sequence [(frames (Vec t/TransactionFrame))] Int
+(defn max-sequence [(records (Vec t/TransactionRecord))] Int
   (reduce
-   (fn [(maximum Int) (frame t/TransactionFrame)] Int
-     (let [sequence (t/transactionframe-sequence frame)]
+   (fn [(maximum Int) (record t/TransactionRecord)] Int
+     (let [sequence (t/transactionrecord-sequence record)]
        (if (> sequence maximum) sequence maximum)))
    0
-   frames))
+   records))
 
 (defn- project [(ctx (Atom t/TermStore))] Fold
   (->Fold (store/space-id ctx)
@@ -35,9 +35,9 @@
           (store/current-sequence ctx)
           (store/dump-term-store ctx)))
 
-(defn fold! [(space-id String) (frames (Vec t/TransactionFrame))] Fold
+(defn fold! [(space-id String) (records (Vec t/TransactionRecord))] Fold
   (let [ctx (store/new-term-store space-id)]
-    (doseq [frame frames] (store/replay-transaction! ctx frame))
+    (doseq [record records] (store/replay-transaction! ctx record))
     (project ctx)))
 
 (defn refold! [(space-id String) (dump Any)] Fold

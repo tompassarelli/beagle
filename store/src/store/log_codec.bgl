@@ -9,19 +9,19 @@
 
 (def status-ok Int 0)
 (def status-fatal Int 2)
-(def framlog-version Int 1)
-(def framlog-flags Int 0)
+(def store-log-version Int 1)
+(def store-log-flags Int 0)
 ;; Header flag bit 1: this generation continues a sealed segment chain and is
 ;; not a whole store on its own, so every single-file open must refuse it.
-(def framlog-continuation-flag Int 2)
+(def store-log-continuation-flag Int 2)
 (def max-codec-count Int 2147483647)
 (def max-term-depth Int 256)
-(def framlog-stream-max-chunk-bytes Int 1048602)
-(def framlog-stream-max-space-bytes Int 4096)
-(def framlog-stream-max-payload-bytes Int 1048576)
+(def store-log-stream-max-chunk-bytes Int 1048602)
+(def store-log-stream-max-space-bytes Int 4096)
+(def store-log-stream-max-payload-bytes Int 1048576)
 (def crc32-mask Int 4294967295)
 (def crc32-polynomial Int 3988292384)
-(def framlog-magic (Vec Int) [70 82 65 77 76 79 71 0])
+(def store-log-magic (Vec Int) [83 84 79 82 69 76 79 71])
 
 (defrecord BootResult
   [(status Int)
@@ -39,7 +39,7 @@
 
 (defrecord BytesResult [(status Int) (bytes (Vec Int)) (error String?)])
 
-(defrecord FrameDecodeResult [(frame t/TransactionFrame?) (error String?)])
+(defrecord RecordDecodeResult [(record t/TransactionRecord?) (error String?)])
 
 ;; One member of a branch's fold order: a sealed segment's bytes, or the tail's.
 ;; start-sequence and end-sequence are the ref's record of the member's span,
@@ -58,29 +58,29 @@
 (defrecord HeaderFields
   [(ok Bool) (space-id String) (flags Int) (header-bytes Int) (error String?)])
 
-(wire/defwire framlog-header
-  (framed :none :none)
+(wire/defwire store-log-header
+  (packet-encoded :none :none)
   (tagged :none
     [0 header
-     [(version :u16le "FRAMLOG version")
-      (flags :u16le "FRAMLOG flags")
-      (space-id (bounded-text max-codec-count) "FRAMLOG SpaceId")]]))
+     [(version :u16le "Store transaction log version")
+      (flags :u16le "Store transaction log flags")
+      (space-id (bounded-text max-codec-count) "Store transaction log SpaceId")]]))
 
-(wire/defwire framlog-transaction
-  (framed :u32le :crc32)
+(wire/defwire store-log-transaction
+  (packet-encoded :u32le :crc32)
   (tagged :none
     [0 payload
-     [(sequence :i64le "FRAMLOG transaction sequence")
-      (operation-count :u32le "FRAMLOG operation count")]]))
+     [(sequence :i64le "Store transaction log transaction sequence")
+      (operation-count :u32le "Store transaction log operation count")]]))
 
-(wire/defwire framlog-operation
-  (framed :none :none)
+(wire/defwire store-log-operation
+  (packet-encoded :none :none)
   (tagged :none
     [0 payload
-     [(ordinal :u32le "FRAMLOG operation ordinal")
-      (action :u8 "FRAMLOG operation action")
-      (proposition (codec t/Triple :term append-framlog-term!
-                          read-framlog-term! -1))]]))
+     [(ordinal :u32le "Store transaction log operation ordinal")
+      (action :u8 "Store transaction log operation action")
+      (proposition (codec t/Triple :term append-store-log-term!
+                          read-store-log-term! -1))]]))
 
 (defn failed-boot [(message String)] BootResult
   (->BootResult status-fatal nil 0 [] message))
@@ -170,22 +170,22 @@
                 (nth bytes (+ position offset)) (* offset 8)))))))
 
 (defn magic-at-start? [(bytes ByteSource)] Bool
-  (if (< (count bytes) (count framlog-magic))
+  (if (< (count bytes) (count store-log-magic))
     false
     (loop [position 0]
-      (if (>= position (count framlog-magic))
+      (if (>= position (count store-log-magic))
         true
-        (if (= (nth bytes position) (nth framlog-magic position))
+        (if (= (nth bytes position) (nth store-log-magic position))
           (recur (+ position 1))
           false)))))
 
-(defn- append-framlog-term! [(encoder wire/Encoder) (term t/Triple)] Nil
+(defn- append-store-log-term! [(encoder wire/Encoder) (term t/Triple)] Nil
   (do
     (reset! (wire/encoder-nodes encoder) 0)
     (wire/append-term-limited!
      encoder term 0 max-codec-count max-codec-count max-term-depth)))
 
-(defn- read-framlog-term! [(decoder wire/Decoder)] t/Triple
+(defn- read-store-log-term! [(decoder wire/Decoder)] t/Triple
   (let [_ (reset! (wire/decoder-nodes decoder) 0)
         proposition
         (wire/read-term-limited!
@@ -195,76 +195,76 @@
       triple
       (do
         (wire/decoder-error!
-         decoder "FRAMLOG operation proposition is not a Triple")
+         decoder "Store transaction log operation proposition is not a Triple")
         (t/triple "" "" "")))))
 
 (defn encode-header! [(space-id String)] BytesResult
   (if (= 0 (count space-id))
-    (failed-bytes "FRAMLOG SpaceId must be nonempty")
+    (failed-bytes "Store transaction log SpaceId must be nonempty")
     (let [encoder (wire/->Encoder (wire/empty-byte-cell) (atom 0)
                                   (wire/empty-error-cell))]
       (do
-        (swap! (wire/encoder-bytes encoder) into framlog-magic)
-        (append-framlog-header-header!
-         encoder framlog-version framlog-flags space-id)
+        (swap! (wire/encoder-bytes encoder) into store-log-magic)
+        (append-store-log-header-header!
+         encoder store-log-version store-log-flags space-id)
         (let [error (deref (wire/encoder-error encoder))]
           (if error
-            (failed-bytes (str "FRAMLOG header encode failed: " error))
+            (failed-bytes (str "Store transaction log header encode failed: " error))
             (->BytesResult status-ok
                            (deref (wire/encoder-bytes encoder)) nil)))))))
 
-(defn decode-frame-payload-range!
-  [(bytes ByteSource) (start Int) (end Int)] FrameDecodeResult
+(defn decode-record-payload-range!
+  [(bytes ByteSource) (start Int) (end Int)] RecordDecodeResult
   (let [decoder (wire/->Decoder bytes (atom start) end (atom 0)
                                 (wire/empty-error-cell))]
     (if (< (- end start) 12)
-      (->FrameDecodeResult nil "FRAMLOG transaction header is truncated")
-      (let [(transaction-fields WireFields_framlog-transaction_payload)
-            (read-framlog-transaction-payload! decoder)
+      (->RecordDecodeResult nil "Store transaction log record header is truncated")
+      (let [(transaction-fields WireFields_store-log-transaction_payload)
+            (read-store-log-transaction-payload! decoder)
             sequence
-            (wirefields_framlog-transaction_payload-sequence
+            (wirefields_store-log-transaction_payload-sequence
              transaction-fields)
             operation-count
-            (wirefields_framlog-transaction_payload-operation-count
+            (wirefields_store-log-transaction_payload-operation-count
              transaction-fields)]
         (cond
           [(deref (wire/decoder-error decoder))
-           (->FrameDecodeResult nil (deref (wire/decoder-error decoder)))]
+           (->RecordDecodeResult nil (deref (wire/decoder-error decoder)))]
           [(< sequence 0)
-           (->FrameDecodeResult nil
-                                "FRAMLOG transaction sequence is negative")]
+           (->RecordDecodeResult nil
+                                "Store transaction log sequence is negative")]
           [(or (= operation-count 0) (> operation-count max-codec-count))
-           (->FrameDecodeResult
-            nil "FRAMLOG transaction operation count is invalid")]
+           (->RecordDecodeResult
+            nil "Store transaction log record operation count is invalid")]
           [:else
            (loop [(ordinal Int) 0 (operations (Vec t/CommitOperation)) []]
              (if (>= ordinal operation-count)
                (let [error (deref (wire/decoder-error decoder))]
                  (cond
-                   [error (->FrameDecodeResult nil error)]
+                   [error (->RecordDecodeResult nil error)]
                    [(not= 0 (wire/decoder-remaining decoder))
-                    (->FrameDecodeResult
-                     nil "FRAMLOG transaction has trailing payload bytes")]
+                    (->RecordDecodeResult
+                     nil "Store transaction log record has trailing payload bytes")]
                    [:else
-                    (->FrameDecodeResult
-                     (term-store/transaction-frame sequence operations) nil)]))
-               (let [(operation-fields WireFields_framlog-operation_payload)
-                     (read-framlog-operation-payload! decoder)
+                    (->RecordDecodeResult
+                     (term-store/transaction-record sequence operations) nil)]))
+               (let [(operation-fields WireFields_store-log-operation_payload)
+                     (read-store-log-operation-payload! decoder)
                      actual
-                     (wirefields_framlog-operation_payload-ordinal
+                     (wirefields_store-log-operation_payload-ordinal
                       operation-fields)
                      action
-                     (wirefields_framlog-operation_payload-action
+                     (wirefields_store-log-operation_payload-action
                       operation-fields)
                      triple
-                     (wirefields_framlog-operation_payload-proposition
+                     (wirefields_store-log-operation_payload-proposition
                       operation-fields)
                      error (deref (wire/decoder-error decoder))]
                  (cond
-                   [error (->FrameDecodeResult nil error)]
+                   [error (->RecordDecodeResult nil error)]
                    [(not= actual ordinal)
-                    (->FrameDecodeResult
-                     nil "FRAMLOG operation ordinals are not contiguous")]
+                    (->RecordDecodeResult
+                     nil "Store transaction log operation ordinals are not contiguous")]
                    [(= action 1)
                     (recur (+ ordinal 1)
                            (conj operations
@@ -274,13 +274,13 @@
                            (conj operations
                                  (term-store/retract-operation triple)))]
                    [:else
-                    (->FrameDecodeResult
-                     nil "FRAMLOG contains an unknown operation action")]))))])))))
+                    (->RecordDecodeResult
+                     nil "Store transaction log contains an unknown operation action")]))))])))))
 
-(defn decode-frame-payload! [(payload ByteSource)] FrameDecodeResult
-  (decode-frame-payload-range! payload 0 (count payload)))
+(defn decode-record-payload! [(payload ByteSource)] RecordDecodeResult
+  (decode-record-payload-range! payload 0 (count payload)))
 
-(defn start-framlog-stream [(configured-space-id String)] BootStream
+(defn start-store-log-stream [(configured-space-id String)] BootStream
   (->BootStream configured-space-id nil 0 [] nil))
 
 (defn failed-boot-stream [(stream BootStream) (message String)] BootStream
@@ -295,9 +295,9 @@
 
 (def no-handles (Vec Int) [])
 
-;; Fused frame replay: the wire walk interns terms as it reads them, so a
-;; replayed frame allocates its rows and nothing shaped like a term tree.
-;; Mirrors decode-frame-payload-range!'s validation, spelling for spelling.
+;; Fused record replay: the wire walk interns terms as it reads them, so a
+;; replayed record allocates its rows and nothing shaped like a term tree.
+;; Mirrors decode-record-payload-range!'s validation, spelling for spelling.
 (defn- intern-wire-term!
   [(decoder wire/Decoder) (root (Atom t/TermStore)) (depth Int)] Int
   (if (not (wire/decoder-node-limited! decoder depth max-codec-count
@@ -363,7 +363,7 @@
            (wire/decoder-error! decoder "TermCodecV1 contains an unknown tag")
            -1)]))))
 
-(defn- replay-frame-fused!
+(defn- replay-record-fused!
   [(root (Atom t/TermStore))
    (bytes ByteSource)
    (start Int)
@@ -373,25 +373,25 @@
                                 (wire/empty-error-cell))]
     (if (< (- end start) 12)
       (term-store/->TransactionReplayResult
-       false :invalid-transaction-frame
-       "FRAMLOG transaction header is truncated")
-      (let [sequence (wire/read-i64-le! decoder "FRAMLOG transaction sequence")
+       false :invalid-transaction-record
+       "Store transaction log record header is truncated")
+      (let [sequence (wire/read-i64-le! decoder "Store transaction log transaction sequence")
             operation-count
-            (wire/read-u32-le! decoder "FRAMLOG operation count")]
+            (wire/read-u32-le! decoder "Store transaction log operation count")]
         (cond
           [(deref (wire/decoder-error decoder))
            (term-store/->TransactionReplayResult
-            false :invalid-transaction-frame
+            false :invalid-transaction-record
             (error-or (deref (wire/decoder-error decoder))
-                      "FRAMLOG transaction decode failed"))]
+                      "Store transaction log record decode failed"))]
           [(< sequence 0)
            (term-store/->TransactionReplayResult
-            false :invalid-transaction-frame
-            "FRAMLOG transaction sequence is negative")]
+            false :invalid-transaction-record
+            "Store transaction log sequence is negative")]
           [(or (= operation-count 0) (> operation-count max-codec-count))
            (term-store/->TransactionReplayResult
-            false :invalid-transaction-frame
-            "FRAMLOG transaction operation count is invalid")]
+            false :invalid-transaction-record
+            "Store transaction log record operation count is invalid")]
           [:else
            (loop [(ordinal Int) 0
                   (actions (Vec Keyword)) no-actions
@@ -399,29 +399,29 @@
              (if (>= ordinal operation-count)
                (if (not= 0 (wire/decoder-remaining decoder))
                  (term-store/->TransactionReplayResult
-                  false :invalid-transaction-frame
-                  "FRAMLOG transaction has trailing payload bytes")
+                  false :invalid-transaction-record
+                  "Store transaction log record has trailing payload bytes")
                  (term-store/append-replayed-transaction! root sequence
                                                           actions handles))
                (let [actual
-                     (wire/read-u32-le! decoder "FRAMLOG operation ordinal")
-                     action (wire/read-u8! decoder "FRAMLOG operation action")
+                     (wire/read-u32-le! decoder "Store transaction log operation ordinal")
+                     action (wire/read-u8! decoder "Store transaction log operation action")
                      _ (reset! (wire/decoder-nodes decoder) 0)
                      handle (intern-wire-term! decoder root 0)
                      error (deref (wire/decoder-error decoder))]
                  (cond
                    [error
                     (term-store/->TransactionReplayResult
-                     false :invalid-transaction-frame
-                     (str "FRAMLOG transaction decode failed: " error))]
+                     false :invalid-transaction-record
+                     (str "Store transaction log record decode failed: " error))]
                    [(not= actual ordinal)
                     (term-store/->TransactionReplayResult
-                     false :invalid-transaction-frame
-                     "FRAMLOG operation ordinals are not contiguous")]
+                     false :invalid-transaction-record
+                     "Store transaction log operation ordinals are not contiguous")]
                    [(not (term-store/triple-handle-shape? handle))
                     (term-store/->TransactionReplayResult
-                     false :invalid-transaction-frame
-                     "FRAMLOG operation proposition is not a Triple")]
+                     false :invalid-transaction-record
+                     "Store transaction log operation proposition is not a Triple")]
                    [(= action 1)
                     (recur (+ ordinal 1) (conj actions t/assert-action)
                       (conj handles handle))]
@@ -430,25 +430,25 @@
                       (conj handles handle))]
                    [:else
                     (term-store/->TransactionReplayResult
-                     false :invalid-transaction-frame
-                     "FRAMLOG contains an unknown operation action")]))))])))))
+                     false :invalid-transaction-record
+                     "Store transaction log contains an unknown operation action")]))))])))))
 
-(defn consume-framlog-frames!
+(defn consume-store-log-records!
   [(stream BootStream) (bytes ByteSource) (position Int)] BootStream
-  ;; replay is a loop, not a self-call: one C stack frame per FRAMLOG frame
-  ;; overflows the wasm stack a few hundred commits in.
+  ;; replay is a loop, not a self-call: one C stack entry per Store transaction
+  ;; log record overflows the wasm stack a few hundred commits in.
   (loop [(stream BootStream) stream (position Int) position]
     (let [remaining (- (count bytes) position)]
       (cond
         [(< remaining 4) stream]
         [:else
          (let [payload-length (u32-le-at bytes position)
-               frame-length (+ payload-length 8)]
+               record-length (+ payload-length 8)]
            (cond
-             [(> payload-length framlog-stream-max-payload-bytes)
+             [(> payload-length store-log-stream-max-payload-bytes)
               (failed-boot-stream
-               stream "FRAMLOG frame exceeds the supported byte range")]
-             [(< remaining frame-length) stream]
+               stream "Store transaction log record exceeds the supported byte range")]
+             [(< remaining record-length) stream]
              [:else
               (let [payload-start (+ position 4)
                     payload-end (+ payload-start payload-length)
@@ -458,30 +458,30 @@
                     root (bootstream-store stream)]
                 (cond
                   [(not= stored-crc actual-crc)
-                   (failed-boot-stream stream "FRAMLOG frame CRC does not match")]
+                   (failed-boot-stream stream "Store transaction log record CRC does not match")]
                   [(nil? root)
-                   (failed-boot-stream stream "FRAMLOG header was not decoded")]
+                   (failed-boot-stream stream "Store transaction log header was not decoded")]
                   [:else
                    (let [replayed
-                         (replay-frame-fused! root bytes payload-start
+                         (replay-record-fused! root bytes payload-start
                                               payload-end)]
                      (if (term-store/transactionreplayresult-ok replayed)
                        (recur
                         (->BootStream
                          (bootstream-configured-space-id stream)
                          root
-                         (+ (bootstream-valid-log-bytes stream) frame-length)
+                         (+ (bootstream-valid-log-bytes stream) record-length)
                          []
                          nil)
-                        (+ position frame-length))
+                        (+ position record-length))
                        (failed-boot-stream
                         stream
                         (or (term-store/transactionreplayresult-message replayed)
-                            "FRAMLOG transaction sequence does not advance"))))]))]))]))))
+                            "Store transaction log transaction sequence does not advance"))))]))]))]))))
 
-(defn consume-framlog-header!
+(defn consume-store-log-header!
   [(stream BootStream) (bytes ByteSource)] BootStream
-  (let [minimum-header-bytes (+ (count framlog-magic) 8)]
+  (let [minimum-header-bytes (+ (count store-log-magic) 8)]
     (cond
       [(= 0 (count bytes))
        (let [header
@@ -495,49 +495,49 @@
            (failed-boot-stream
             stream
             (error-or (bytesresult-error header)
-                      "FRAMLOG header encode failed"))))]
+                      "Store transaction log header encode failed"))))]
       [(< (count bytes) minimum-header-bytes)
-       (failed-boot-stream stream "FRAMLOG header is truncated")]
+       (failed-boot-stream stream "Store transaction log header is truncated")]
       [(not (magic-at-start? bytes))
        (failed-boot-stream
-        stream "FRAMLOG magic does not match")]
+        stream "Store transaction log magic does not match")]
       [:else
-       (let [version (u16-le-at bytes (count framlog-magic))
-             flags (u16-le-at bytes (+ (count framlog-magic) 2))
-             space-length (u32-le-at bytes (+ (count framlog-magic) 4))
+       (let [version (u16-le-at bytes (count store-log-magic))
+             flags (u16-le-at bytes (+ (count store-log-magic) 2))
+             space-length (u32-le-at bytes (+ (count store-log-magic) 4))
              header-bytes (+ minimum-header-bytes space-length)]
          (cond
-           [(or (not= version framlog-version) (not= flags framlog-flags))
+           [(or (not= version store-log-version) (not= flags store-log-flags))
             (failed-boot-stream
-             stream "FRAMLOG version or flags are unsupported")]
+             stream "Store transaction log version or flags are unsupported")]
            [(or (= space-length 0)
-                (> space-length framlog-stream-max-space-bytes))
-            (failed-boot-stream stream "FRAMLOG SpaceId length is invalid")]
+                (> space-length store-log-stream-max-space-bytes))
+            (failed-boot-stream stream "Store transaction log SpaceId length is invalid")]
            [(< (count bytes) header-bytes)
             (failed-boot-stream
-             stream "FRAMLOG header is truncated inside SpaceId")]
+             stream "Store transaction log header is truncated inside SpaceId")]
            [:else
             (let [decoder
                   (wire/->Decoder bytes (atom minimum-header-bytes)
                                   header-bytes (atom 0)
                                   (wire/empty-error-cell))
                   space-id
-                  (wire/read-utf8! decoder space-length "FRAMLOG SpaceId")
+                  (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
                   error (deref (wire/decoder-error decoder))]
               (cond
                 [error
                  (failed-boot-stream
-                  stream (error-or error "FRAMLOG SpaceId decode failed"))]
+                  stream (error-or error "Store transaction log SpaceId decode failed"))]
                 [(= 0 (count space-id))
                  (failed-boot-stream
-                  stream "FRAMLOG SpaceId must be nonempty")]
+                  stream "Store transaction log SpaceId must be nonempty")]
                 [(and
                   (not= 0 (count (bootstream-configured-space-id stream)))
                   (not= (bootstream-configured-space-id stream) space-id))
                  (failed-boot-stream
-                  stream "FRAMLOG belongs to a different SpaceId")]
+                  stream "Store transaction log belongs to a different SpaceId")]
                 [:else
-                 (consume-framlog-frames!
+                 (consume-store-log-records!
                   (->BootStream
                    (bootstream-configured-space-id stream)
                    (term-store/open-fold!
@@ -556,7 +556,7 @@
   (->BootResult status-ok (canonical-store-copy! (term-store/close-fold! root))
                 valid-log-bytes boot-append nil))
 
-(defn replay-complete-frames!
+(defn replay-complete-records!
   [(decoder wire/Decoder)
    (root (Atom t/TermStore))
    (header-bytes Int)]
@@ -569,19 +569,19 @@
         [(< remaining 4)
          (successful-boot! root valid-log-bytes [])]
         [:else
-         (let [frame-start (deref (wire/decoder-position decoder))
+         (let [record-start (deref (wire/decoder-position decoder))
                payload-length
-               (wire/read-u32-le! decoder "FRAMLOG frame payload length")]
+               (wire/read-u32-le! decoder "Store transaction log record payload length")]
            (cond
              [(deref (wire/decoder-error decoder))
               (failed-boot
                (error-or (deref (wire/decoder-error decoder))
-                         "FRAMLOG frame decode failed"))]
+                         "Store transaction log record decode failed"))]
              [(> payload-length max-codec-count)
-              (failed-boot "FRAMLOG frame exceeds the supported byte range")]
+              (failed-boot "Store transaction log record exceeds the supported byte range")]
              [(< (wire/decoder-remaining decoder) (+ payload-length 4))
               (do
-                (reset! (wire/decoder-position decoder) frame-start)
+                (reset! (wire/decoder-position decoder) record-start)
                 (successful-boot! root valid-log-bytes []))]
              [:else
               (let [payload-start (deref (wire/decoder-position decoder))
@@ -590,29 +590,29 @@
                     (subvec (wire/decoder-bytes decoder)
                             payload-start payload-end)
                     _ (reset! (wire/decoder-position decoder) payload-end)
-                    stored-crc (wire/read-u32-le! decoder "FRAMLOG frame CRC")
+                    stored-crc (wire/read-u32-le! decoder "Store transaction log record CRC")
                     actual-crc (crc32-source payload)
-                    decoded (decode-frame-payload! payload)
-                    frame (framedecoderesult-frame decoded)]
+                    decoded (decode-record-payload! payload)
+                    record (recorddecoderesult-record decoded)]
                 (cond
                   [(not= stored-crc actual-crc)
-                   (failed-boot "FRAMLOG frame CRC does not match")]
-                  [(framedecoderesult-error decoded)
+                   (failed-boot "Store transaction log record CRC does not match")]
+                  [(recorddecoderesult-error decoded)
                    (failed-boot
-                    (str "FRAMLOG transaction decode failed: "
-                         (framedecoderesult-error decoded)))]
-                  [(nil? frame)
-                   (failed-boot "FRAMLOG transaction decoder returned no frame")]
-                  [(< (t/transactionframe-sequence frame)
+                    (str "Store transaction log record decode failed: "
+                         (recorddecoderesult-error decoded)))]
+                  [(nil? record)
+                   (failed-boot "Store transaction log decoder returned no record")]
+                  [(< (t/transactionrecord-sequence record)
                       (term-store/next-sequence root))
                    (failed-boot
-                    "FRAMLOG transaction sequence does not advance")]
+                    "Store transaction log transaction sequence does not advance")]
                   [:else
                    (do
-                     (term-store/replay-transaction! root frame)
+                     (term-store/replay-transaction! root record)
                      (recur (deref (wire/decoder-position decoder))))]))]))]))))
 
-(defn boot-framlog! [(configured-space-id String) (bytes ByteSource)] BootResult
+(defn boot-store-log! [(configured-space-id String) (bytes ByteSource)] BootResult
   (cond
     [(= 0 (count bytes))
      (let [header (encode-header! configured-space-id)]
@@ -622,41 +622,41 @@
           0 (bytesresult-bytes header))
          (failed-boot
           (error-or (bytesresult-error header)
-                    "FRAMLOG header encode failed"))))]
+                    "Store transaction log header encode failed"))))]
     [(not (magic-at-start? bytes))
-     (failed-boot "FRAMLOG magic does not match")]
+     (failed-boot "Store transaction log magic does not match")]
     [:else
-     (let [decoder (wire/->Decoder bytes (atom (count framlog-magic))
+     (let [decoder (wire/->Decoder bytes (atom (count store-log-magic))
                                    (count bytes)
                                    (atom 0) (wire/empty-error-cell))]
        (if (< (wire/decoder-remaining decoder) 8)
-         (failed-boot "FRAMLOG header is truncated")
-         (let [version (wire/read-u16-le! decoder "FRAMLOG version")
-               flags (wire/read-u16-le! decoder "FRAMLOG flags")
+         (failed-boot "Store transaction log header is truncated")
+         (let [version (wire/read-u16-le! decoder "Store transaction log version")
+               flags (wire/read-u16-le! decoder "Store transaction log flags")
                space-length
-               (wire/read-u32-le! decoder "FRAMLOG SpaceId length")]
+               (wire/read-u32-le! decoder "Store transaction log SpaceId length")]
            (cond
-             [(or (not= version framlog-version) (not= flags framlog-flags))
-              (failed-boot "FRAMLOG version or flags are unsupported")]
+             [(or (not= version store-log-version) (not= flags store-log-flags))
+              (failed-boot "Store transaction log version or flags are unsupported")]
              [(or (= space-length 0) (> space-length max-codec-count))
-              (failed-boot "FRAMLOG SpaceId length is invalid")]
+              (failed-boot "Store transaction log SpaceId length is invalid")]
              [(< (wire/decoder-remaining decoder) space-length)
-              (failed-boot "FRAMLOG header is truncated inside SpaceId")]
+              (failed-boot "Store transaction log header is truncated inside SpaceId")]
              [:else
               (let [space-id
-                    (wire/read-utf8! decoder space-length "FRAMLOG SpaceId")
+                    (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
                     error (deref (wire/decoder-error decoder))]
                 (cond
                   [error
                    (failed-boot
-                    (error-or error "FRAMLOG SpaceId decode failed"))]
+                    (error-or error "Store transaction log SpaceId decode failed"))]
                   [(= 0 (count space-id))
-                   (failed-boot "FRAMLOG SpaceId must be nonempty")]
+                   (failed-boot "Store transaction log SpaceId must be nonempty")]
                   [(and (not= 0 (count configured-space-id))
                         (not= configured-space-id space-id))
-                   (failed-boot "FRAMLOG belongs to a different SpaceId")]
+                   (failed-boot "Store transaction log belongs to a different SpaceId")]
                   [:else
-                   (replay-complete-frames!
+                   (replay-complete-records!
                     decoder
                     (term-store/open-fold!
                      (term-store/new-term-store-for-log space-id (count bytes)))
@@ -665,42 +665,42 @@
 (defn- failed-header [(message String)] HeaderFields
   (->HeaderFields false "" 0 0 message))
 
-(defn decode-framlog-header! [(bytes ByteSource)] HeaderFields
-  (let [minimum-header-bytes (+ (count framlog-magic) 8)]
+(defn decode-store-log-header! [(bytes ByteSource)] HeaderFields
+  (let [minimum-header-bytes (+ (count store-log-magic) 8)]
     (cond
       [(< (count bytes) minimum-header-bytes)
-       (failed-header "FRAMLOG header is truncated")]
+       (failed-header "Store transaction log header is truncated")]
       [(not (magic-at-start? bytes))
-       (failed-header "FRAMLOG magic does not match")]
+       (failed-header "Store transaction log magic does not match")]
       [:else
-       (let [version (u16-le-at bytes (count framlog-magic))
-             flags (u16-le-at bytes (+ (count framlog-magic) 2))
-             space-length (u32-le-at bytes (+ (count framlog-magic) 4))
+       (let [version (u16-le-at bytes (count store-log-magic))
+             flags (u16-le-at bytes (+ (count store-log-magic) 2))
+             space-length (u32-le-at bytes (+ (count store-log-magic) 4))
              header-bytes (+ minimum-header-bytes space-length)]
          (cond
-           [(or (not= version framlog-version)
-                (and (not= flags framlog-flags)
-                     (not= flags framlog-continuation-flag)))
-            (failed-header "FRAMLOG version or flags are unsupported")]
+           [(or (not= version store-log-version)
+                (and (not= flags store-log-flags)
+                     (not= flags store-log-continuation-flag)))
+            (failed-header "Store transaction log version or flags are unsupported")]
            [(or (= space-length 0)
-                (> space-length framlog-stream-max-space-bytes))
-            (failed-header "FRAMLOG SpaceId length is invalid")]
+                (> space-length store-log-stream-max-space-bytes))
+            (failed-header "Store transaction log SpaceId length is invalid")]
            [(< (count bytes) header-bytes)
-            (failed-header "FRAMLOG header is truncated inside SpaceId")]
+            (failed-header "Store transaction log header is truncated inside SpaceId")]
            [:else
             (let [decoder
                   (wire/->Decoder bytes (atom minimum-header-bytes)
                                   header-bytes (atom 0)
                                   (wire/empty-error-cell))
                   space-id
-                  (wire/read-utf8! decoder space-length "FRAMLOG SpaceId")
+                  (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
                   error (deref (wire/decoder-error decoder))]
               (cond
                 [error
                  (failed-header
-                  (error-or error "FRAMLOG SpaceId decode failed"))]
+                  (error-or error "Store transaction log SpaceId decode failed"))]
                 [(= 0 (count space-id))
-                 (failed-header "FRAMLOG SpaceId must be nonempty")]
+                 (failed-header "Store transaction log SpaceId must be nonempty")]
                 [:else
                  (->HeaderFields true space-id flags header-bytes nil)]))]))])))
 
@@ -713,7 +713,7 @@
    (sealed Bool)]
   ChainFold
   (loop [(position Int) header-bytes
-         (first-frame Bool) true
+         (first-record Bool) true
          (first-sequence Int) 0
          (last-sequence Int) 0]
     (let [remaining (- (count bytes) position)
@@ -721,7 +721,7 @@
           (if sealed
             (->ChainFold
              false position first-sequence last-sequence true
-             "FRAMLOG segment ends inside a transaction frame")
+             "Store transaction log segment ends inside a transaction record")
             (->ChainFold true position first-sequence last-sequence true nil))]
       (cond
         [(= remaining 0)
@@ -729,13 +729,13 @@
         [(< remaining 4) short-piece]
         [:else
          (let [payload-length (u32-le-at bytes position)
-               frame-length (+ payload-length 8)]
+               record-length (+ payload-length 8)]
            (cond
-             [(> payload-length framlog-stream-max-payload-bytes)
+             [(> payload-length store-log-stream-max-payload-bytes)
               (->ChainFold
                false position first-sequence last-sequence false
-               "FRAMLOG frame exceeds the supported byte range")]
-             [(< remaining frame-length) short-piece]
+               "Store transaction log record exceeds the supported byte range")]
+             [(< remaining record-length) short-piece]
              [:else
               (let [payload-start (+ position 4)
                     payload-end (+ payload-start payload-length)
@@ -743,57 +743,57 @@
                     actual-crc
                     (crc32-range-source bytes payload-start payload-end)
                     decoded
-                    (decode-frame-payload-range! bytes payload-start payload-end)
-                    frame (framedecoderesult-frame decoded)]
+                    (decode-record-payload-range! bytes payload-start payload-end)
+                    record (recorddecoderesult-record decoded)]
                 (cond
                   [(not= stored-crc actual-crc)
                    (->ChainFold
                     false position first-sequence last-sequence false
-                    "FRAMLOG frame CRC does not match")]
-                  [(framedecoderesult-error decoded)
+                    "Store transaction log record CRC does not match")]
+                  [(recorddecoderesult-error decoded)
                    (->ChainFold
                     false position first-sequence last-sequence false
-                    (str "FRAMLOG transaction decode failed: "
-                         (framedecoderesult-error decoded)))]
-                  [(nil? frame)
+                    (str "Store transaction log record decode failed: "
+                         (recorddecoderesult-error decoded)))]
+                  [(nil? record)
                    (->ChainFold
                     false position first-sequence last-sequence false
-                    "FRAMLOG transaction decoder returned no frame")]
+                    "Store transaction log decoder returned no record")]
                   [:else
                    (let [replayed
-                         (term-store/replay-transaction-result! root frame)]
+                         (term-store/replay-transaction-result! root record)]
                      (if (term-store/transactionreplayresult-ok replayed)
-                       (recur (+ position frame-length) false
-                              (if first-frame
-                                (t/transactionframe-sequence frame)
+                       (recur (+ position record-length) false
+                              (if first-record
+                                (t/transactionrecord-sequence record)
                                 first-sequence)
-                              (t/transactionframe-sequence frame))
+                              (t/transactionrecord-sequence record))
                        (->ChainFold
                         false position first-sequence last-sequence false
                         (or (term-store/transactionreplayresult-message replayed)
-                            "FRAMLOG transaction sequence does not advance"))))]))]))]))))
+                            "Store transaction log transaction sequence does not advance"))))]))]))]))))
 
 (defn- chain-piece-at
   [(segments (Vec ChainPiece)) (tail ChainPiece) (index Int)] ChainPiece
   (if (< index (count segments)) (nth segments index) tail))
 
 ;; Fold a branch: every sealed segment in ref order, then its tail. A sealed
-;; segment must consume exactly; only the tail may end inside a frame.
+;; segment must consume exactly; only the tail may end inside a record.
 ;; Hosted ref folding and this native path share store.chain-rules.
-(defn boot-framlog-chain!
+(defn boot-store-log-chain!
   [(configured-space-id String)
    (segments (Vec ChainPiece))
    (tail ChainPiece)]
   BootResult
-  (let [first-header (decode-framlog-header! (chainpiece-bytes (chain-piece-at segments tail 0)))]
+  (let [first-header (decode-store-log-header! (chainpiece-bytes (chain-piece-at segments tail 0)))]
     (cond
       [(not (headerfields-ok first-header))
        (failed-boot
         (error-or (headerfields-error first-header)
-                  "FRAMLOG header is unreadable"))]
+                  "Store transaction log header is unreadable"))]
       [(and (not= 0 (count configured-space-id))
             (not= configured-space-id (headerfields-space-id first-header)))
-       (failed-boot "FRAMLOG belongs to a different SpaceId")]
+       (failed-boot "Store transaction log belongs to a different SpaceId")]
       [:else
        (let [(total Int) (+ (count segments) 1)
              (chain-bytes Int)
@@ -815,12 +815,12 @@
              (successful-boot! root tail-valid-bytes [])
              (let [piece (chain-piece-at segments tail index)
                    sealed (< index (count segments))
-                   header (decode-framlog-header! (chainpiece-bytes piece))]
+                   header (decode-store-log-header! (chainpiece-bytes piece))]
                (cond
                  [(not (headerfields-ok header))
                   (failed-boot
                    (error-or (headerfields-error header)
-                             "FRAMLOG header is unreadable"))]
+                             "Store transaction log header is unreadable"))]
                  [:else
                   (let [folded
                         (fold-chain-piece!
@@ -830,7 +830,7 @@
                          (chainpiece-end-sequence piece) sealed)]
                     (if (chainfold-ok folded)
                       (let [continuation
-                            (= framlog-continuation-flag
+                            (= store-log-continuation-flag
                                (headerfields-flags header))
                             fault
                             (if sealed
@@ -864,17 +864,17 @@
                             expected-next))))
                       (failed-boot
                        (error-or (chainfold-error folded)
-                                 "FRAMLOG chain fold failed"))))])))))])))
+                                 "Store transaction log chain fold failed"))))])))))])))
 
-(defn append-frame-bytes! [(frame t/TransactionFrame)] BytesResult
+(defn append-record-bytes! [(record t/TransactionRecord)] BytesResult
   (let [payload (wire/->Encoder (wire/empty-byte-cell) (atom 0)
                                 (wire/empty-error-cell))
-        operations (t/transactionframe-operations frame)
-        sequence (t/transactionframe-sequence frame)]
+        operations (t/transactionrecord-operations record)
+        sequence (t/transactionrecord-sequence record)]
     (if (or (< sequence 0) (= 0 (count operations)))
-      (failed-bytes "FRAMLOG transaction frame is invalid")
+      (failed-bytes "Store transaction log transaction record is invalid")
       (do
-        (append-framlog-transaction-payload!
+        (append-store-log-transaction-payload!
          payload sequence (count operations))
         (loop [ordinal 0]
           (if (< ordinal (count operations))
@@ -887,8 +887,8 @@
                     [:else 0])]
               (if (= action-tag 0)
                 (wire/encoder-error!
-                 payload "FRAMLOG operation action must be assert or retract")
-                (append-framlog-operation-payload!
+                 payload "Store transaction log operation action must be assert or retract")
+                (append-store-log-operation-payload!
                  payload ordinal action-tag
                  (t/commitoperation-proposition operation)))
               (recur (+ ordinal 1)))
@@ -897,7 +897,7 @@
               payload-bytes (deref (wire/encoder-bytes payload))]
           (if payload-error
             (failed-bytes
-             (str "FRAMLOG transaction encode failed: " payload-error))
+             (str "Store transaction log record encode failed: " payload-error))
             (let [out (wire/->Encoder (wire/empty-byte-cell) (atom 0)
                                       (wire/empty-error-cell))]
               (wire/append-u32-le! out (count payload-bytes))
@@ -905,7 +905,7 @@
               (wire/append-u32-le! out (crc32 payload-bytes))
               (let [error (deref (wire/encoder-error out))]
                 (if error
-                  (failed-bytes (str "FRAMLOG frame encode failed: " error))
+                  (failed-bytes (str "Store transaction log record encode failed: " error))
                   (->BytesResult status-ok
                                  (deref (wire/encoder-bytes out)) nil))))))))))
 
@@ -914,16 +914,16 @@
   (let [current (term-store/current-sequence root)]
     (cond
       [(or (< lower-exclusive 0) (> lower-exclusive current))
-       (failed-bytes "FRAMLOG append lower bound is outside store history")]
+       (failed-bytes "Store transaction log append lower bound is outside store history")]
       [(= lower-exclusive current)
        (->BytesResult status-ok [] nil)]
       [(not= current (+ lower-exclusive 1))
-       (failed-bytes "FRAMLOG dispatch produced more than one transaction")]
+       (failed-bytes "Store transaction log dispatch produced more than one transaction")]
       [:else
-       (let [frames
-             (term-store/transaction-frames-between
+       (let [records
+             (term-store/transaction-records-between
               (deref root) lower-exclusive current)]
-         (if (= 1 (count frames))
-           (append-frame-bytes! (nth frames 0))
+         (if (= 1 (count records))
+           (append-record-bytes! (nth records 0))
            (failed-bytes
-            "FRAMLOG append did not resolve exactly one transaction")))])))
+            "Store transaction log append did not resolve exactly one transaction")))])))
