@@ -75,6 +75,11 @@
     (list (p 'Any) (p 'Any))
     #f
     (p 'Bool))
+   (q 'host.store 'compile)
+   (type-fn
+    (list (p 'beagle.compiler-driver/CompileStoreRequest))
+    #f
+    (p 'beagle.compiler-driver/CompileStoreResponse))
    (q 'host.fs 'path-kind)
    (type-fn
     (list (p 'String))
