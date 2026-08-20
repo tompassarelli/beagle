@@ -8,6 +8,12 @@ dtrace, smap).
 Static reference docs are intentionally thin while the surface moves — the
 compiler is the reference, fronted by one CLI.
 
+The CLI describes shipped source profiles and materializers, not a single
+universal deployment identity. A materializer is a replaceable projection of a
+checked program. Its digest identifies that projection and its recorded inputs;
+it neither grants trust nor authorizes execution. External execution remains
+subject to the target's explicit capability envelope.
+
 ## Authoring
 
 ```sh
@@ -84,6 +90,11 @@ adds `module_0.wasm`, its SHA-256 digest, `module_0.wasm.seams`, and two reports
 runtime paths. With no `--entry`, the reactor is classified as a non-executable
 projection and exports only `_initialize` and `memory`. No materializer is
 implicit, and hosted `.bclj` is not accepted by the Core build path.
+
+These files are materializations, not the durable program world itself: a later
+materializer can replace them without changing what the checked program means.
+Building records an artifact; it does not grant the authority to perform an
+external effect.
 
 ### Wasm executable entries (wasm-entry-abi v1)
 

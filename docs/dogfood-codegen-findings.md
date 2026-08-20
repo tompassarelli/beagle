@@ -5,6 +5,8 @@ from a text→graph migration but from using Beagle in a downstream JavaScript
 project: an externs sweep, a cross-module `:require` refactor, and a projector
 subsystem. Each entry records either an incorrect emit or an incorrect checker
 signal. Unresolved entries are historical findings, not product commitments.
+For current language, target, and execution claims, use the README and the
+current surface documentation rather than inferring them from this ledger.
 
 The bar: a real wrong-emit, crash, or false check signal, with a minimal repro.
 

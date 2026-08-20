@@ -12,6 +12,10 @@ This document fixes the current source-head MCP data surface at exactly five pub
 
 The advertised list is closed. Missing arguments and unknown names fail. Dispatch accepts only the names above. Graph-authoring verbs belong to a separate sealed control service.
 
+These are Store data capabilities, not a program-world or external-effect API.
+They record and query assertions; they do not turn desired state into observed
+state, execute a plan, or grant trust because content or hashes match.
+
 ## Value boundary
 
 The kernel accepts recursive typed [Terms](glossary.md#semantic-kernel), but current MCP writes intentionally expose String `subject`, `predicate`, and `object`; show takes one subject String; ask's advertised constant schema covers Strings and numbers. This edge limitation is not a second kernel model.

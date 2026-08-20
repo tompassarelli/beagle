@@ -258,7 +258,9 @@ between branches and no merge. It is durable on-disk vocabulary — the
 `store.branch` module, `<log>.refs/` and `<log>.branches/` beside the store, and
 the `revision-ref/v1` and `branch-fork/v1` format tags.
 
-This reverses the [world](#world--chosen-2026-07-26-retired-2026-08-07) bench,
+This reverses the
+[world](#world--system-term-chosen-2026-07-26-service-retired-2026-08-07-reconciled-2026-08-20)
+bench,
 which rejected **branch** as describing mechanics rather than what is branching.
 That ruling was about a query-visibility scope. Here the mechanics are the
 thing, and the git prior — a named ref into one shared immutable history that
@@ -269,8 +271,10 @@ names its result.
 
 Rejected bench:
 
-- **world**, bare **version** — retired 2026-08-07 and spent for new naming;
-  the closed-wire `:rpc/version` operation remains live.
+- **world**, bare **version** — rejected for this on-disk branch primitive.
+  `world` now names the system-level semantic explanation, while the old
+  service and its bare `version` vocabulary remain retired; the closed-wire
+  `:rpc/version` operation remains live.
 - **lane** — carries no prior about sharing history with what it came from.
 - **timeline** — imports an ordering across branches that no branch promises.
 - **line** — too weak to carry a module name and a directory name.

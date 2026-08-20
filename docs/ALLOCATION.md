@@ -16,6 +16,15 @@ serves both:
    and retention belong to typed facts and explicit branch roots, not to the
    incidental graph of native addresses used to materialize them.
 
+This is one allocation boundary inside a broader program-world protocol, not a
+claim that the Store itself already is every durable world or executor. The
+current Store is the assertion/history substrate; a program world is the
+durable semantic explanation that can relate those assertions, judgments,
+plans, and materializations. Its identities are layered rather than universal:
+content, occurrence, revision, and artifact are distinct, and content identity
+is not trust. The logical relation does not merge physical storage, deployment,
+execution, or security domains.
+
 The familiar allocation argument is usually drawn as a triangle. Rust makes
 lifetime and aliasing statically provable, but ownership, borrowing, and
 lifetimes become part of program structure. Zig gives the program direct
@@ -266,6 +275,14 @@ materialization; facts, revisions, and named roots belong to history.
 Beagle Store currently provides structural identity and a private physical
 representation. It does not yet make durable reachability, compaction, and
 reclamation one completed product contract.
+
+Likewise, the Store's current facts are not interchangeable claims about the
+outside world. `Declared`, `Derived`, `Observed`, `Desired`, `EffectAttempt`,
+and `EffectReceipt` name distinct epistemic modes in the destination protocol.
+A plan remains pure; any effectful target requires an explicit capability,
+returns a receipt, and needs later observation before it supports an external
+claim. Materializers remain replaceable outputs with their own capabilities,
+not the authority to make an assertion true.
 
 The intended contract is explicit: compare-and-swap selects one durable
 revision; compaction changes physical organization without changing the history

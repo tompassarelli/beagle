@@ -47,6 +47,19 @@ judgment in it. *(Prior art: OODA; the agentic loop.)*
 **task loop** — project scale: many reasoning loops under one goal. Above it
 sits the program.
 
+**program world (`WORLD`)** — the durable semantic explanation in which a
+program's declared and derived facts, judgments, plans, materializations, and
+provenance can be related. It is not one universal key: content, assertion,
+revision, and artifact have distinct identities, and content identity is not
+trust. Logical relation does not merge the physical, execution, or security
+domains that hold those things.
+
+**epistemic mode** — the status of a record, not a cosmetic label.
+`Declared`, `Derived`, `Observed`, `Desired`, `EffectAttempt`, and
+`EffectReceipt` are non-interchangeable. An authoring loop may produce a pure
+plan; external execution requires an explicit capability, produces a receipt,
+and still needs a later observation before it supports a claim about reality.
+
 ## Composition
 
 ```
@@ -60,6 +73,11 @@ program
 - the **blast zone** feeds the reasoning loop *before* an edit
 - **diagnostics** feed the authoring loop *after* a check
 - **witnesses** close the reasoning loop *after* green
+
+The compiler work is a compounding compiler-development feedback loop. As the
+repository and compiler scale, a one-function edit should touch only its true
+dependents and agree with sampled clean results. An unchanged cache hit alone
+does not demonstrate that edit proportionality.
 
 ## Deprecated
 

@@ -3,6 +3,12 @@
 The full mechanics live in [`self-host/README.md`](../self-host/README.md); this
 page is the summary the README points at.
 
+This page separates shipped evidence from the destination. The evidence below
+is about the current compiler routes and their checks. The destination is a
+native executor whose steady-state use no longer needs host scripts; that does
+not remove the planning, scheduling, reconciliation, or receipt-bearing effect
+semantics that connect programs to external reality.
+
 ## The compiler compiles itself
 
 The `clj`-target compiler is written in Beagle (`self-host/`). The checked-in
@@ -66,3 +72,9 @@ These gates are correctness gates: byte-exact bootstrap fixpoint, oracle
 agreement, and differential fuzz with no exemptions. They say nothing about
 compile speed or runtime speed, and the repository publishes no performance
 measurements.
+
+The intended compounding compiler-development feedback loop is stronger than a
+cache-hit claim: as the repository and compiler scale, a one-function edit
+should visit only its true dependents and agree with sampled clean results.
+An unchanged hit alone does not establish edit proportionality; this remains a
+validation target, not current performance evidence.

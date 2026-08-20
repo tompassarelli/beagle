@@ -3,7 +3,10 @@
 Bare `#lang beagle` on `.bgl` selects Native Core; `.bgl` is not a neutral
 container for a later target choice. `beagle build --materializer c17|qbe|wasm
 --out DIR FILE.bgl` first freezes `module.native-program`, then writes only the
-selected projection. `wasm` requires `--abi wasm32`; it is currently the named
+selected projection. Materializers are replaceable outputs, each with an
+explicit target capability envelope for any external interaction: a digest
+identifies the recorded artifact and inputs, but never grants trust or execution
+authority. `wasm` requires `--abi wasm32`; it is currently the named
 Restricted-C17-to-wasi-clang bootstrap rather than a direct emitter. Its reactor
 without an entry exports only `_initialize` and `memory`. Each `--entry` names
 one public, parameterless `Int` function and exports the stable

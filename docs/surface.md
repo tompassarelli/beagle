@@ -5,6 +5,11 @@
 type-checked by the test suite. This page lists surface features the cheatsheet
 does not enumerate. When the two disagree, the cheatsheet wins.
 
+Beagle's language surface is an independent typed Lisp with a Clojure-derived
+authoring core. It is distinct from the Store, deployment shapes, and target
+materializations: shared semantic content does not collapse their physical or
+trust boundaries.
+
 ```clojure
 ;; every value declaration carries an authored type
 (defn double [n Int] Int (* n 2))

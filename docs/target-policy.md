@@ -22,6 +22,11 @@ used by code-as-facts; "lossless" means reader-datum identity, not byte
 identity. The two projections share the fact layer, not a fidelity contract, so
 no single sentence describes both.
 
+Targets produce replaceable materializations of a checked program, not another
+program identity. Each target carries an explicit capability envelope for any
+external interaction it permits. A content digest identifies an input or
+output; it does not confer trust, authority, or permission to execute.
+
 Bare `#lang beagle` on `.bgl` names the Native Core profile and always lowers
 to a frozen native program. `.bgl` never means target-neutral or "no target
 selected"; only the resulting native program is backend-neutral. Hosted profiles

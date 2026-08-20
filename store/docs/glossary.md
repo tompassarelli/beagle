@@ -56,12 +56,29 @@ semantics.
 
 **fact** — A proposition admitted by a particular view's rules, not a stored kernel type.
 
+**judgment** — A reasoned selection or conclusion over propositions and their
+provenance. System-level vocabulary, not a Store kernel type.
+
+**program world (`WORLD`)** — Beagle's system-level durable, versioned semantic
+explanation from which materializations may be derived. It is not a Store
+primitive, the retired Worlds service, or a universal identity key. Store may
+hold evidence used by a world while the world retains its own revision and
+provenance identity.
+
+**epistemic mode** — One of `Declared`, `Derived`, `Observed`, `Desired`,
+`EffectAttempt`, or `EffectReceipt`. These are system-level roles that a Store
+profile may model with ordinary Terms, not built-in Term tags. Desired state
+cannot satisfy observed state; an effect receipt still requires a subsequent
+observation before it supports a claim about external reality.
+
 **Turtle** — The “turtles all the way down” architecture prior: prefer the same
 recursive Term language for semantic content and structural coordinates when
 the model permits. It never makes operation or withdrawal rows into domain
 propositions and is never a primitive or storage type.
 
-**profile** — An optional, stored contract that validates a space's propositions above the unchanged kernel.
+**profile** — An optional, stored contract that interprets a space's
+propositions above the unchanged kernel. Current profile checking is advisory
+lint; write-path enforcement is not built.
 
 **EAV reading** — The relational profile's role names for the positions: entity (t1), attribute (t2), value (t3). Profile vocabulary only, never kernel roles.
 

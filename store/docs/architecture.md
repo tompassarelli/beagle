@@ -33,6 +33,14 @@ semantic proposition Triples. Transaction sequence and operation ordinal define
 replay order. Recorded, valid, and observation time are metadata and never
 proposition identity. See [ontology](ontology.md) for modeling rules.
 
+Store is the current durable assertion and history substrate, not the whole
+program-world protocol. A profile may represent `Declared`, `Derived`,
+`Observed`, `Desired`, `EffectAttempt`, and `EffectReceipt` as ordinary Terms,
+but the kernel does not make those modes interchangeable: desired content is
+not evidence of observed state, and a receipt is not the subsequent observation
+that can corroborate an external result. Store records what a writer supplied;
+it neither executes effects nor promotes structural identity into trust.
+
 ## Storage, writer, and readers
 
 `TermStore` interns Atoms and recursive Triples. `AtomRow`, `TripleRow`,
@@ -173,6 +181,10 @@ fails on account of an image. The log stays authoritative — a checkpoint
 appends nothing to it and changes no store state.
 
 The engine has no tenant authorization. Loopback/private Store RPC, process, SpaceId, and log form a trust domain; authenticated TLS belongs at a gateway or sidecar. Bind, wire, deployment, and probe details are consolidated in [isolation and deployment](isolation-and-deployment.md).
+
+Equal Terms can appear in several such domains without sharing authority,
+freshness, retention, or execution policy. Logical agreement therefore never
+merges physical Store spaces or their security boundaries.
 
 ## Executable contracts
 

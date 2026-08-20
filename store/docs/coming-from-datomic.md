@@ -61,6 +61,12 @@ structural set semantics and exposes that content once. A retraction withdraws
 the newest live equal occurrence, so older duplicates may remain; the
 `withdrawal` relation records exactly which assertion it cancelled.
 
+These are layered identities, not one universal key. Structural equality says
+that proposition content matches; it does not say that two assertion acts, two
+world revisions, or two trust domains are the same. Hashes can identify
+records, while authority, evidence, freshness, and policy determine what those
+records justify.
+
 *Sidebar — the RDF-star prior.* RDF-star lets a quoted triple stand in the
 object position so you can say things about statements. Beagle Store generalizes that
 to all three positions and any depth: a Triple is a Term, so

@@ -46,6 +46,12 @@ live String values in the third position and speak the
 [EAV reading](ontology.md#profiles-and-anchoring) because that reading is what
 a text search of a value assumes.
 
+A query derives rows; it does not certify them as true, trusted, fresh, or
+observed. Profiles may distinguish declared, derived, observed, desired,
+effect-attempt, and effect-receipt propositions, and plans must preserve those
+non-interchangeable modes. Structural equality or a matching digest alone
+cannot promote one mode into another.
+
 ## Rules
 
 This query derives each directly stated contact endpoint:

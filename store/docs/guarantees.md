@@ -112,7 +112,7 @@ vocabulary is exempt.
 |---|---|
 | P1 | A space without a complete profile declaration retains current freeform write behavior |
 | P3 | The prospective admission verdict and advisory lint verdict agree for R1-R4 |
-| P5 | Under R5 a declaring space rejects a namespaced non-`:kernel/` t2 whose membership is unasserted, and spaces that omit R5 are unaffected |
+| P5 | Under R5 advisory lint reports a namespaced non-`:kernel/` t2 whose membership is unasserted, and spaces that omit R5 are unaffected. The write remains accepted until enforce mode is built |
 
 ## Write semantics
 
@@ -153,5 +153,9 @@ Clients must retry transient transport errors with bounded backoff, paginate eve
 
 - No engine access control: isolate by process, network, `SpaceId`, and log
   ([`isolation-and-deployment.md`](isolation-and-deployment.md)).
-- Single-machine, single-writer receipts — not distributed consensus.
+- Single-machine, single-writer mutation receipts — not distributed consensus
+  or evidence that an external effect occurred.
 - Equal propositions are not deduplicated: assertion always creates a new occurrence.
+- Equal content and matching hashes do not confer writer authority, trust,
+  freshness, or permission to execute; those belong to the surrounding trust
+  and capability domain.

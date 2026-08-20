@@ -23,6 +23,10 @@ A downstream compiler is a useful measurement case: its compiler and generated
 applications should be measured separately so an implementation detail in the
 compiler does not silently become a generated-application dependency.
 
+The structural hash discussed here is a language-level equality aid. It is not
+a claim of Store provenance, artifact trust, or authority to execute an external
+effect; those remain separate layers of the durable semantic protocol.
+
 ---
 
 ## 1. Current state (verified)

@@ -1,20 +1,34 @@
 # Influences
 
-Beagle is a typed Clojure subset that compiles one AST to idiomatic code in
-many languages. None of its *ingredients* are new — typed Lisps exist, Lean's
-error machinery exists, Kernel's combiner-uniformity exists. What makes Beagle
-a thing is what those ingredients are pointed at:
+Beagle is an independent typed Lisp with a Clojure-derived authoring core. It
+compiles one typed representation to idiomatic code in multiple target
+profiles. None of its *ingredients* are new — typed Lisps exist, Lean's error
+machinery exists, Kernel's combiner-uniformity exists. What makes Beagle a
+thing is what those ingredients are pointed at:
 
 > **The compiler is a feedback engine for an agent, not a translator for a
 > human.** Most languages' errors are designed for a person to read and act on.
 > Beagle's are designed for a *program* to act on — structured, located,
 > canonicalization-aware diagnostics and machine-applicable fixes that re-verify.
 
-Everything below earns its seat by serving that thesis.
+Everything below earns its seat by serving that thesis and the compounding
+compiler-development feedback loop it enables.
 
-The deeper bet is the Turtles Thesis: one provenanced substrate can hold
-language facts, memory, and durable state, while execution and source files
-remain accountable projections of it.
+The deeper bet is the Turtles Thesis:
+
+> Pure software artifacts are reproducible projections of durable semantic
+> worlds; external reality is connected through explicit observations and
+> capability-controlled effects.
+
+A program world is a durable semantic explanation, not a universal key or one
+physical/security domain. It relates layered identities and equivalence
+relations for content, assertion occurrences, revisions, and artifacts; content
+identity is not trust. `Declared`, `Derived`, `Observed`, `Desired`,
+`EffectAttempt`, and `EffectReceipt` remain non-interchangeable: plans are
+pure, an external effect requires an explicit capability and yields a receipt,
+and a later observation is needed before the receipt supports a claim about
+external reality. Target outputs are replaceable materializations with explicit
+capability envelopes.
 
 ## Lean — diagnostics, as a discipline
 
@@ -315,16 +329,16 @@ On top of that foundation sits the part with no upstream analogue: the
 compiler enumerates missing match cases, emits clause skeletons, and applies
 fixes that typecheck. That is Beagle's own frontier, not a steal.
 
-## The thesis, carried to its conclusion
+## Current evidence and destination
 
 The bet is that **one typed authoring IR with an authoring loop can target many
 real ecosystems at once** — and that authoring against it beats writing each
 target by hand. The breadth is not a distraction from the pitch; it *is* the
 pitch. A single AST that lowers idiomatically to lazy Nix attrsets *and* eager
-Clojure maps *and* JS — never a lowest-common-denominator transpile — is the
-proof that the approach generalizes across genuinely different runtime models.
+Clojure maps *and* JS is current evidence across different runtime models, not
+a claim that every target, executor, or world-protocol connection has shipped.
 
-This is already demonstrated where it is hardest, not merely aspired to:
+Current shipped evidence includes:
 
 - **Nix** — firn, a complete NixOS system typed end-to-end against its
   16k-option schema. The target where the pain is most real (untyped,
@@ -334,8 +348,12 @@ This is already demonstrated where it is hardest, not merely aspired to:
 - **JavaScript** — gjoa, a Firefox overlay UI, 43 `.bjs` modules ported from
   TypeScript.
 
-Each target that lands clean is the same thesis carried one ecosystem further.
-The frontier is the *depth* of the authoring loop, not the count of targets.
+Each target that lands clean carries the thesis one ecosystem further. The
+destination is a compounding compiler-development feedback loop in which, as
+the repository and compiler scale, a one-function edit touches only true
+dependents and agrees with sampled clean results. An unchanged cache hit alone
+does not prove edit proportionality. The frontier is the *depth* of the
+authoring loop, not the count of targets.
 
 ---
 
