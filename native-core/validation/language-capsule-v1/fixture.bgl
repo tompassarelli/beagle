@@ -1,0 +1,118 @@
+#lang beagle
+(ns native.language-capsule-v1-fixture
+  (:require [beagle.language-capsule-v1 :as capsule]))
+
+(defn fixture-id [label String] String
+  (capsule/semanticidentityv1-content-id
+    (capsule/semantic-identity-v1 "fixture/language-capsule-v1" [label])))
+
+(def reader-protocol-a capsule/ProtocolIdentityV1
+  (capsule/protocol-identity-v1
+    :reader (fixture-id "reader-protocol-a") (fixture-id "reader-abi")))
+
+(def reader-protocol-b capsule/ProtocolIdentityV1
+  (capsule/protocol-identity-v1
+    :reader (fixture-id "reader-protocol-b") (fixture-id "reader-abi")))
+
+(def reader-component-a capsule/ComponentIdentityV1
+  (capsule/component-identity-v1
+    :reader (fixture-id "reader-artifact-a") (fixture-id "reader-closure")))
+
+(def reader-component-b capsule/ComponentIdentityV1
+  (capsule/component-identity-v1
+    :reader (fixture-id "reader-artifact-b") (fixture-id "reader-closure")))
+
+(def filesystem-request capsule/SemanticIdentityV1
+  (capsule/capability-request-identity-v1
+    :filesystem (fixture-id "source-tree") (fixture-id "read-only")))
+
+(def network-request capsule/SemanticIdentityV1
+  (capsule/capability-request-identity-v1
+    :network (fixture-id "registry") (fixture-id "offline-only")))
+
+(defn make-capsule
+  [reader capsule/ComponentIdentityV1
+   protocol capsule/ProtocolIdentityV1
+   requests (Vec capsule/SemanticIdentityV1)] capsule/LanguageCapsuleV1
+  (capsule/language-capsule-v1
+    (fixture-id "manifest")
+    :shared-datum
+    [reader]
+    [protocol]
+    (fixture-id "deterministic-options")
+    requests))
+
+(defn semantic-separation-case [] Bool
+  (let [base capsule/LanguageCapsuleV1 (make-capsule reader-component-a reader-protocol-a [filesystem-request])
+        same-semantics capsule/LanguageCapsuleV1 (make-capsule reader-component-a reader-protocol-a [filesystem-request])
+        changed-component capsule/LanguageCapsuleV1 (make-capsule reader-component-b reader-protocol-a [filesystem-request])
+        changed-protocol capsule/LanguageCapsuleV1 (make-capsule reader-component-a reader-protocol-b [filesystem-request])
+        changed-capability capsule/LanguageCapsuleV1 (make-capsule reader-component-a reader-protocol-a [network-request])
+        semantic-id capsule/SemanticIdentityV1 (capsule/languagecapsulev1-semantic-identity base)
+        provenance-a capsule/ProvenanceReceiptV1 (capsule/provenance-receipt-v1
+          semantic-id (fixture-id "source-bytes-a") "/src/one.bgl"
+          10 80 "BGL_A" (fixture-id "layout-a"))
+        provenance-b capsule/ProvenanceReceiptV1 (capsule/provenance-receipt-v1
+          semantic-id (fixture-id "source-bytes-b") "/moved/two.bgl"
+          40 140 "BGL_B" (fixture-id "layout-b"))]
+    (and
+      (= semantic-id
+         (capsule/languagecapsulev1-semantic-identity same-semantics))
+      (not= semantic-id
+        (capsule/languagecapsulev1-semantic-identity changed-component))
+      (not= semantic-id
+        (capsule/languagecapsulev1-semantic-identity changed-protocol))
+      (not= semantic-id
+        (capsule/languagecapsulev1-semantic-identity changed-capability))
+      (= semantic-id
+        (capsule/provenancereceiptv1-semantic-identity provenance-a))
+      (= semantic-id
+        (capsule/provenancereceiptv1-semantic-identity provenance-b))
+      (not=
+        (capsule/provenancereceiptv1-identity provenance-a)
+        (capsule/provenancereceiptv1-identity provenance-b)))))
+
+(defn grant-receipt-separation-case [] Bool
+  (let [requests (Vec capsule/SemanticIdentityV1) [filesystem-request]
+        base capsule/LanguageCapsuleV1 (make-capsule reader-component-a reader-protocol-a requests)
+        grant capsule/CapabilityGrantV1 (capsule/capability-grant-v1
+          requests requests (fixture-id "policy") (fixture-id "resources"))
+        admission capsule/AdmissionReceiptV1 (capsule/admission-receipt-v1
+          base grant (fixture-id "registry-snapshot") :admitted)
+        execution capsule/ExecutionReceiptV1 (capsule/execution-receipt-v1
+          base grant reader-component-a (fixture-id "payload")
+          (fixture-id "resources") (fixture-id "reader-product"))
+        capsule-id capsule/SemanticIdentityV1 (capsule/languagecapsulev1-semantic-identity base)
+        request-set-id capsule/SemanticIdentityV1 (capsule/requested-capability-set-identity-v1 requests)
+        grant-id capsule/SemanticIdentityV1 (capsule/capabilitygrantv1-identity grant)
+        admission-id capsule/SemanticIdentityV1 (capsule/admissionreceiptv1-identity admission)
+        execution-id capsule/SemanticIdentityV1 (capsule/executionreceiptv1-identity execution)]
+    (and
+      (= request-set-id
+        (capsule/capabilitygrantv1-requested-capability-set-identity grant))
+      (= request-set-id
+        (capsule/executionreceiptv1-requested-capability-set-identity execution))
+      (not= capsule-id request-set-id)
+      (not= request-set-id grant-id)
+      (not= grant-id admission-id)
+      (not= grant-id execution-id)
+      (not= admission-id execution-id))))
+
+(defn typed-ports-case [] Bool
+  (let [input capsule/TypedInputPortV1 (capsule/->TypedInputPortV1
+          "users" "main" "users" (fixture-id "UsersTable"))
+        output capsule/TypedOutputPortV1 (capsule/->TypedOutputPortV1 "html" (fixture-id "String"))]
+    (and
+      (= "users" (capsule/typedinputportv1-local-port input))
+      (= "main" (capsule/typedinputportv1-provider-region input))
+      (= "users" (capsule/typedinputportv1-provider-port input))
+      (= "html" (capsule/typedoutputportv1-port output))
+      (not= (capsule/typedinputportv1-expected-type-id input)
+        (capsule/typedoutputportv1-type-id output)))))
+
+(defn main [] Int
+  (if (and (semantic-separation-case)
+           (grant-receipt-separation-case)
+           (typed-ports-case))
+    0
+    1))

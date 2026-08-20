@@ -1,0 +1,294 @@
+#lang beagle
+(ns beagle.language-capsule-v1)
+
+(defrecord SemanticIdentityV1 [content-id String])
+
+(defrecord ComponentIdentityV1
+  [identity SemanticIdentityV1
+   role Keyword
+   artifact-content-id String
+   dependency-closure-id String])
+
+(defrecord ProtocolIdentityV1
+  [identity SemanticIdentityV1
+   role Keyword
+   protocol-content-id String
+   abi-content-id String])
+
+(defrecord TypedInputPortV1
+  [local-port String
+   provider-region String
+   provider-port String
+   expected-type-id String])
+
+(defrecord TypedOutputPortV1
+  [port String
+   type-id String])
+
+(defrecord LanguageCapsuleV1
+  [semantic-identity SemanticIdentityV1
+   manifest-content-id String
+   reader-kind Keyword
+   components (Vec ComponentIdentityV1)
+   protocols (Vec ProtocolIdentityV1)
+   deterministic-options-id String
+   requested-capabilities (Vec SemanticIdentityV1)])
+
+(defrecord CapabilityGrantV1
+  [identity SemanticIdentityV1
+   requested-capability-set-identity SemanticIdentityV1
+   granted-capability-set-identity SemanticIdentityV1
+   admission-policy-content-id String
+   immutable-resource-set-id String])
+
+(defrecord AdmissionReceiptV1
+  [identity SemanticIdentityV1
+   capsule-identity SemanticIdentityV1
+   grant-identity SemanticIdentityV1
+   registry-snapshot-content-id String
+   decision Keyword])
+
+(defrecord ExecutionReceiptV1
+  [identity SemanticIdentityV1
+   capsule-identity SemanticIdentityV1
+   requested-capability-set-identity SemanticIdentityV1
+   grant-identity SemanticIdentityV1
+   reader-component-identity SemanticIdentityV1
+   payload-content-id String
+   immutable-resource-set-id String
+   result-content-id String])
+
+(defrecord ProvenanceReceiptV1
+  [identity SemanticIdentityV1
+   semantic-identity SemanticIdentityV1
+   source-bytes-content-id String
+   source-path String
+   start-byte Int
+   end-byte Int
+   fence String
+   source-layout-content-id String])
+
+(defn canonical-part-v1 [value String] String
+  (str (count (utf8-encode value)) ":" value))
+
+(defn semantic-identity-v1
+  [domain String
+   parts (Vec String)] SemanticIdentityV1
+  (let [encoding String (loop [index Int 0
+                               encoded String (str "beagle-domain-separated-identity/v1"
+                    (canonical-part-v1 domain))]
+                          (if (>= index (count parts))
+            encoded
+            (recur (+ index 1)
+              (str encoded (canonical-part-v1 (nth parts index))))))]
+    (->SemanticIdentityV1
+      (str "sha256:" (sha256-bytes (utf8-encode encoding))))))
+
+(defn insert-canonical-string
+  [values (Vec String)
+   value String] (Vec String)
+  (loop [index Int 0
+         prefix (Vec String) []]
+    (if (>= index (count values))
+      (conj prefix value)
+      (let [current String (nth values index)]
+        (cond
+          (= value current) values
+          (neg? (compare value current))
+          (reduce conj (conj prefix value) (subvec values index))
+          :else
+          (recur (+ index 1) (conj prefix current)))))))
+
+(defn canonical-strings [values (Vec String)] (Vec String)
+  (reduce
+    (fn
+      [ordered (Vec String)
+       value String] (Vec String)
+      (insert-canonical-string ordered value))
+    []
+    values))
+
+(defn canonical-strings-encoding [values (Vec String)] String
+  (let [ordered (Vec String) (canonical-strings values)]
+    (loop [index Int 0
+           encoded String (str (count ordered) ":")]
+      (if (>= index (count ordered))
+        encoded
+        (recur (+ index 1)
+          (str encoded (canonical-part-v1 (nth ordered index))))))))
+
+(defn semantic-identity-content-ids [identities (Vec SemanticIdentityV1)] (Vec String)
+  (mapv
+    (fn [identity SemanticIdentityV1] String
+      (semanticidentityv1-content-id identity))
+    identities))
+
+(defn component-content-ids [components (Vec ComponentIdentityV1)] (Vec String)
+  (mapv
+    (fn [component ComponentIdentityV1] String
+      (semanticidentityv1-content-id
+        (componentidentityv1-identity component)))
+    components))
+
+(defn protocol-content-ids [protocols (Vec ProtocolIdentityV1)] (Vec String)
+  (mapv
+    (fn [protocol ProtocolIdentityV1] String
+      (semanticidentityv1-content-id
+        (protocolidentityv1-identity protocol)))
+    protocols))
+
+(defn component-identity-v1
+  [role Keyword
+   artifact-content-id String
+   dependency-closure-id String] ComponentIdentityV1
+  (let [identity SemanticIdentityV1 (semantic-identity-v1
+          "beagle/language-capsule/component/v1"
+          [(str role) artifact-content-id dependency-closure-id])]
+    (->ComponentIdentityV1
+      identity role artifact-content-id dependency-closure-id)))
+
+(defn protocol-identity-v1
+  [role Keyword
+   protocol-content-id String
+   abi-content-id String] ProtocolIdentityV1
+  (let [identity SemanticIdentityV1 (semantic-identity-v1
+          "beagle/language-capsule/protocol/v1"
+          [(str role) protocol-content-id abi-content-id])]
+    (->ProtocolIdentityV1 identity role protocol-content-id abi-content-id)))
+
+(defn capability-request-identity-v1
+  [capability Keyword
+   immutable-resource-id String
+   deterministic-options-id String] SemanticIdentityV1
+  (semantic-identity-v1
+    "beagle/language-capsule/capability-request/v1"
+    [(str capability) immutable-resource-id deterministic-options-id]))
+
+(defn capability-set-identity-v1
+  [domain String
+   capabilities (Vec SemanticIdentityV1)] SemanticIdentityV1
+  (semantic-identity-v1 domain
+    [(canonical-strings-encoding
+       (semantic-identity-content-ids capabilities))]))
+
+(defn requested-capability-set-identity-v1 [capabilities (Vec SemanticIdentityV1)] SemanticIdentityV1
+  (capability-set-identity-v1
+    "beagle/language-capsule/requested-capability-set/v1"
+    capabilities))
+
+(defn granted-capability-set-identity-v1 [capabilities (Vec SemanticIdentityV1)] SemanticIdentityV1
+  (capability-set-identity-v1
+    "beagle/language-capsule/granted-capability-set/v1"
+    capabilities))
+
+(defn capsule-semantic-identity-v1
+  [manifest-content-id String
+   reader-kind Keyword
+   components (Vec ComponentIdentityV1)
+   protocols (Vec ProtocolIdentityV1)
+   deterministic-options-id String
+   requested-capabilities (Vec SemanticIdentityV1)] SemanticIdentityV1
+  (semantic-identity-v1
+    "beagle/language-capsule/semantic/v1"
+    [manifest-content-id
+     (str reader-kind)
+     (canonical-strings-encoding (component-content-ids components))
+     (canonical-strings-encoding (protocol-content-ids protocols))
+     deterministic-options-id
+     (semanticidentityv1-content-id
+       (requested-capability-set-identity-v1 requested-capabilities))]))
+
+(defn language-capsule-v1
+  [manifest-content-id String
+   reader-kind Keyword
+   components (Vec ComponentIdentityV1)
+   protocols (Vec ProtocolIdentityV1)
+   deterministic-options-id String
+   requested-capabilities (Vec SemanticIdentityV1)] LanguageCapsuleV1
+  (->LanguageCapsuleV1
+    (capsule-semantic-identity-v1
+      manifest-content-id reader-kind components protocols
+      deterministic-options-id requested-capabilities)
+    manifest-content-id
+    reader-kind
+    components
+    protocols
+    deterministic-options-id
+    requested-capabilities))
+
+(defn capability-grant-v1
+  [requested-capabilities (Vec SemanticIdentityV1)
+   granted-capabilities (Vec SemanticIdentityV1)
+   admission-policy-content-id String
+   immutable-resource-set-id String] CapabilityGrantV1
+  (let [requested-set SemanticIdentityV1 (requested-capability-set-identity-v1 requested-capabilities)
+        granted-set SemanticIdentityV1 (granted-capability-set-identity-v1 granted-capabilities)
+        identity SemanticIdentityV1 (semantic-identity-v1
+          "beagle/language-capsule/capability-grant/v1"
+          [(semanticidentityv1-content-id requested-set)
+           (semanticidentityv1-content-id granted-set)
+           admission-policy-content-id
+           immutable-resource-set-id])]
+    (->CapabilityGrantV1 identity requested-set granted-set
+      admission-policy-content-id immutable-resource-set-id)))
+
+(defn admission-receipt-v1
+  [capsule LanguageCapsuleV1
+   grant CapabilityGrantV1
+   registry-snapshot-content-id String
+   decision Keyword] AdmissionReceiptV1
+  (let [capsule-id SemanticIdentityV1 (languagecapsulev1-semantic-identity capsule)
+        grant-id SemanticIdentityV1 (capabilitygrantv1-identity grant)
+        identity SemanticIdentityV1 (semantic-identity-v1
+          "beagle/language-capsule/admission-receipt/v1"
+          [(semanticidentityv1-content-id capsule-id)
+           (semanticidentityv1-content-id grant-id)
+           registry-snapshot-content-id
+           (str decision)])]
+    (->AdmissionReceiptV1
+      identity capsule-id grant-id registry-snapshot-content-id decision)))
+
+(defn execution-receipt-v1
+  [capsule LanguageCapsuleV1
+   grant CapabilityGrantV1
+   reader-component ComponentIdentityV1
+   payload-content-id String
+   immutable-resource-set-id String
+   result-content-id String] ExecutionReceiptV1
+  (let [capsule-id SemanticIdentityV1 (languagecapsulev1-semantic-identity capsule)
+        requested-set SemanticIdentityV1 (capabilitygrantv1-requested-capability-set-identity grant)
+        grant-id SemanticIdentityV1 (capabilitygrantv1-identity grant)
+        reader-id SemanticIdentityV1 (componentidentityv1-identity reader-component)
+        identity SemanticIdentityV1 (semantic-identity-v1
+          "beagle/language-capsule/execution-receipt/v1"
+          [(semanticidentityv1-content-id capsule-id)
+           (semanticidentityv1-content-id requested-set)
+           (semanticidentityv1-content-id grant-id)
+           (semanticidentityv1-content-id reader-id)
+           payload-content-id
+           immutable-resource-set-id
+           result-content-id])]
+    (->ExecutionReceiptV1
+      identity capsule-id requested-set grant-id reader-id payload-content-id
+      immutable-resource-set-id result-content-id)))
+
+(defn provenance-receipt-v1
+  [semantic-identity SemanticIdentityV1
+   source-bytes-content-id String
+   source-path String
+   start-byte Int
+   end-byte Int
+   fence String
+   source-layout-content-id String] ProvenanceReceiptV1
+  (let [identity SemanticIdentityV1 (semantic-identity-v1
+          "beagle/language-capsule/provenance-receipt/v1"
+          [(semanticidentityv1-content-id semantic-identity)
+           source-bytes-content-id
+           source-path
+           (str start-byte)
+           (str end-byte)
+           fence
+           source-layout-content-id])]
+    (->ProvenanceReceiptV1
+      identity semantic-identity source-bytes-content-id source-path
+      start-byte end-byte fence source-layout-content-id)))
