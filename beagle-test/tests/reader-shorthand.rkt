@@ -104,6 +104,23 @@
   (check-equal? (rd "#js []") '(#%js (#%brackets))))
 (test-case "#js {…} reads as (#%js (#%map …))"
   (check-equal? (rd "#js {:a 1}") '(#%js (#%map :a 1))))
+(test-case "nested #js markers remain distinct phase-stable reader forms"
+  (define datum (rd "#js [#js {:a #js [1]} {:persistent [2]}]"))
+  (check-equal?
+   datum
+   '(#%js
+     (#%brackets
+      (#%js (#%map :a (#%js (#%brackets 1))))
+      (#%map :persistent (#%brackets 2)))))
+  (check-eq? (car datum) '#%js)
+  (check-eq? (car (cadr datum)) '#%brackets))
+(test-case "#js syntax spans the complete tagged container"
+  (define source "#js [1 #js {:a 2}]")
+  (define in (open-input-string source))
+  (port-count-lines! in)
+  (define stx (beagle-read-syntax 'host-literals-h0 in))
+  (check-equal? (syntax-position stx) 1)
+  (check-equal? (syntax-span stx) (string-length source)))
 (test-case "#js is guarded — #jsx is NOT the js tagged literal"
   ;; the 3rd char is a symbol constituent, so the js arm must not fire;
   ;; it falls through to the default reader (reads `#jsx…` some other way,

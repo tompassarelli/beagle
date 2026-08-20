@@ -201,7 +201,8 @@
        (error 'beagle "#js: expected a form (vector/map) to follow"))
      (define result (list %js form))
      (if src
-       (datum->syntax #f result (vector src line col pos #f))
+       (datum->syntax #f result
+                      (vector src line col pos (container-span port pos)))
        result)]
     [(and (char? next) (char=? next #\{))
      (read-char port)

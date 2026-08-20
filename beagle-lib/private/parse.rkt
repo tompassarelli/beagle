@@ -2719,6 +2719,10 @@
      (lower-reference d x)]
     [(and (pair? d) (eq? (car d) '#%regex) (= (length d) 2) (string? (cadr d)))
      (regex-lit (cadr d))]
+    [(and (pair? d) (eq? (car d) '#%js))
+     (unless (= (length d) 2)
+       (error 'beagle "#js: expected exactly one vector or map literal"))
+     (parse-js-host-literal (or (stx-ref subs 1) (cadr d)))]
     [(bracketed? d)
      (vec-form (map parse-expr (or (stx-tail subs 1) (bracket-body d))))]
     [(map-tagged? d)
@@ -5102,6 +5106,30 @@
        (loop (cddr rest)
              (cons (cons (parse-expr (car rest)) (parse-expr (cadr rest)))
                    acc))])))
+
+(define (parse-js-host-literal form)
+  (define datum (->datum form))
+  (define subs (stx-subs form))
+  (cond
+    [(bracketed? datum)
+     (js-host-array
+      (map parse-expr (or (stx-tail subs 1) (bracket-body datum))))]
+    [(map-tagged? datum)
+     (define items (or (stx-tail subs 1) (map-body datum)))
+     (let loop ([rest items] [pairs '()])
+       (cond
+         [(null? rest) (js-host-object (reverse pairs))]
+         [(null? (cdr rest))
+          (error 'beagle
+                 "#js object literal: odd number of forms (expected key/value pair after position ~a)"
+                 (length pairs))]
+         [else
+          (loop (cddr rest)
+                (cons (cons (parse-expr (car rest))
+                            (parse-expr (cadr rest)))
+                      pairs))]))]
+    [else
+     (error 'beagle "#js: expected a vector or map literal, got: ~v" datum)]))
 
 ;; A cond clause test of `:else` (Clojure idiom) or bare `else` is the
 ;; "always true" fallthrough. Canonicalize both to the symbol `'else` so
