@@ -145,10 +145,12 @@
   (if (string? key)
     (let [text String key
           index (U Int Nil) (str/last-index-of text "/")]
-      (if (and (some? index)
-            (> index 0)
-            (< index (- (count text) 1)))
-        ["qualified-ref" (subs text 0 index) (subs text (+ index 1))]
+      (if (some? index)
+        (let [offset Int index]
+          (if (and (> offset 0)
+                   (< offset (- (count text) 1)))
+            ["qualified-ref" (subs text 0 offset) (subs text (+ offset 1))]
+            text))
         text))
     key))
 
@@ -168,7 +170,10 @@
     (if (string? key)
       (let [text String key
             index (U Int Nil) (str/last-index-of text "/")]
-        (if (nil? index) text (subs text (+ index 1))))
+        (if (nil? index)
+          text
+          (let [offset Int index]
+            (subs text (+ offset 1)))))
       key)))
 
 ;; --- Clojure-readable string writer ------------------------------------------
@@ -370,16 +375,14 @@
   [params Any
    rest-p Any
    body-str String] Any
-  (let [all (params+rest params rest-p)
-        fixed-count (count params)
-        all-indices (Vec Int)
-        vec (range (count all))
-        fixed-indices Vec
-        Int (vec (range fixed-count))
-        raw-names (mapv (fn [index Int] String
+  (let [all Any (params+rest params rest-p)
+        fixed-count Int (count params)
+        all-indices (Vec Int) (vec (range (count all)))
+        fixed-indices (Vec Int) (vec (range fixed-count))
+        raw-names (Vec String) (mapv (fn [index Int] String
                           (callable-raw-name index fixed-count))
                     all-indices)
-        fixed-raw (mapv
+        fixed-raw (Vec String) (mapv
                     (fn [index Int] String
                       (let [raw (nth raw-names index)
                             param (nth params index)
@@ -389,14 +392,14 @@
                           (str (clj-tag-prefix (get param "ann")) raw)
                           raw)))
                     fixed-indices)
-        params-str (str/join " "
+        params-str String (str/join " "
                      (if (or (nil? rest-p) (false? rest-p))
                        fixed-raw
                        (into fixed-raw ["&" CLJ-HOST-REST])))
-        rest-normalization (if (or (nil? rest-p) (false? rest-p))
+        rest-normalization (Vec String) (if (or (nil? rest-p) (false? rest-p))
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
-        predicate-bindings (loop [index Int 0
+        predicate-bindings (Vec String) (loop [index Int 0
                                   acc (Vec String) []]
                              (if (>= index (count all))
               acc
@@ -407,7 +410,7 @@
                       (str "$beagle$constraint$predicate$" index " "
                            (emit-expr* (checked-binding-constraint binding))))
                     acc)))))
-        checked-bindings (mapv (fn [index Int] String
+        checked-bindings (Vec String) (mapv (fn [index Int] String
                   (let [binding (nth all index)
                         raw (nth raw-names index)
                         checked (str "$beagle$constraint$checked-param$" index)]
@@ -417,7 +420,7 @@
                           (str "$beagle$constraint$predicate$" index) raw)
                         raw))))
             all-indices)
-        target-bindings (mapv (fn [index Int] String
+        target-bindings (Vec String) (mapv (fn [index Int] String
                   (str (emit-binding-form (binding-target (nth all index))) " "
                        "$beagle$constraint$checked-param$" index))
             all-indices)]
@@ -564,17 +567,17 @@
             :else (recur (+ index 1) acc)))))))
 
 (defn emit-loop-with-constraints! [e Any] String
-  (let [bindings (get e "bindings")
+  (let [bindings Any (get e "bindings")
         loop-indices (Vec Int) (vec (range (count bindings)))]
     (if (not (bindings-have-constraints? bindings))
       (str "(loop [" (emit-let-bindings! bindings) "]\n  "
            (emit-body-with-loop-context! (get e "body") "  " nil) ")")
       (let [loop-indices (Vec Int) (vec (range (count bindings)))
-            raw-names
+            raw-names (Vec String)
               (mapv (fn [index Int] String
                       (str "$beagle$constraint$raw-loop$" index))
                 loop-indices)
-            init-bindings
+            init-bindings (Vec String)
               (loop [index Int 0
                      acc (Vec String) []]
                 (if (>= index (count bindings))
@@ -594,7 +597,7 @@
                                (emit-guarded-binding-value
                                  binding predicate-name raw))])))
                       (recur (+ index 1) (conj base (str target " " raw)))))))
-            iteration-bindings
+            iteration-bindings (Vec String)
               (mapv (fn [index Int] String
                       (let [binding (nth bindings index)
                             raw (nth raw-names index)
@@ -609,12 +612,12 @@
                                  "))")
                             raw))))
                 loop-indices)
-            loop-bindings
+            loop-bindings (Vec String)
               (mapv (fn [index Int] String
                       (str (nth raw-names index)
                            " (nth $beagle$constraint$initial-values " index ")"))
                 loop-indices)
-            body (emit-body-with-loop-context!
+            body String (emit-body-with-loop-context!
                    (get e "body") "    " (count bindings))]
         (str "(let [$beagle$constraint$initial-values (let ["
              (str/join "\n       " init-bindings) "] ["
@@ -743,7 +746,7 @@
   [name String
    fields Any] Any
   (let [field-indices (Vec Int) (vec (range (count fields)))
-        constrained
+        constrained (Vec Any)
           (filterv (fn [entry Any] Bool
                      (constraint-present? (nth entry 1)))
             (mapv (fn [index Int] Any [index (nth fields index)])
@@ -870,19 +873,19 @@
 (defn emit-protocol-wrapper
   [protocol-name String
    method Any] String
-  (let [params (get method "params")
-        rest-p (get method "rest")
-        all (params+rest params rest-p)
-        fixed-count (count params)
+  (let [params Any (get method "params")
+        rest-p Any (get method "rest")
+        all Any (params+rest params rest-p)
+        fixed-count Int (count params)
         all-indices (Vec Int) (vec (range (count all)))
-        raw-names (mapv (fn [index Int] String
+        raw-names (Vec String) (mapv (fn [index Int] String
                           (callable-raw-name index fixed-count))
                     all-indices)
-        rest-normalization
+        rest-normalization (Vec String)
           (if (or (nil? rest-p) (false? rest-p))
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
-        predicate-bindings
+        predicate-bindings (Vec String)
           (loop [index Int 0
                  acc (Vec String) []]
             (if (>= index (count all))
@@ -894,10 +897,10 @@
                       (str "$beagle$constraint$predicate$" index " "
                            (emit-expr* (checked-binding-constraint param))))
                     acc)))))
-        checked-names (mapv (fn [index Int] String
+        checked-names (Vec String) (mapv (fn [index Int] String
                               (str "$beagle$constraint$checked-param$" index))
                         all-indices)
-        checked-bindings
+        checked-bindings (Vec String)
           (mapv (fn [index Int] String
                   (let [param (nth all index)
                         raw (nth raw-names index)]
@@ -907,15 +910,15 @@
                           (str "$beagle$constraint$predicate$" index) raw)
                         raw))))
             all-indices)
-        call-args (if (= 0 (count predicate-bindings)) raw-names checked-names)
-        raw-method (protocol-raw-method-name protocol-name (get method "name"))
-        call (if (or (nil? rest-p) (false? rest-p))
+        call-args (Vec String) (if (= 0 (count predicate-bindings)) raw-names checked-names)
+        raw-method String (protocol-raw-method-name protocol-name (get method "name"))
+        call String (if (or (nil? rest-p) (false? rest-p))
                (str "(" raw-method
                  (if (= 0 (count call-args))
                    ""
                    (str " " (str/join " " call-args))) ")")
                (str "(apply " raw-method " " (str/join " " call-args) ")"))
-        signature (str/join " "
+        signature String (str/join " "
                     (if (or (nil? rest-p) (false? rest-p))
                       (subvec raw-names 0 fixed-count)
                       (into (subvec raw-names 0 fixed-count)
@@ -939,13 +942,13 @@
   (let [protocol-name (get e "name")
         methods (get e "methods")
         raw-sigs (mapv (fn [method Any] String
-                  (let [params (get method "params")
-                        rest-p (get method "rest")
+                  (let [params Any (get method "params")
+                        rest-p Any (get method "rest")
                         indices (Vec Int) (vec (range (count params)))
-                        fixed (mapv (fn [index Int] String
+                        fixed (Vec String) (mapv (fn [index Int] String
                                       (str "$beagle$constraint$raw-param$" index))
                                 indices)
-                        all (if (or (nil? rest-p) (false? rest-p))
+                        all (Vec String) (if (or (nil? rest-p) (false? rest-p))
                               fixed
                               (into fixed ["&" "$beagle$constraint$raw-rest"]))]
                     (str "(" (protocol-raw-method-name protocol-name (get method "name"))
@@ -1137,7 +1140,7 @@
             (str test " " body-str)
             (let [field-vector (Vec Any)
                   (vec fields)
-                  pairs (loop [i Int 0
+                  pairs (Vec String) (loop [i Int 0
                                acc (Vec String) []]
                           (if (or (>= i (count bindings))
                                   (>= i (count field-vector)))
