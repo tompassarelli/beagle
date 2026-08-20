@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+die() {
+    echo "beagle dev unit rule identity: $*" >&2
+    exit 2
+}
+
+compiled=""
+driver=""
+store_adapter=""
+profile=""
+abi=""
+
+while (($# > 0)); do
+    case "$1" in
+        --compiled)
+            (($# >= 2)) || die "--compiled needs a directory"
+            compiled="$2"
+            shift 2
+            ;;
+        --driver)
+            (($# >= 2)) || die "--driver needs a file"
+            driver="$2"
+            shift 2
+            ;;
+        --store-adapter)
+            (($# >= 2)) || die "--store-adapter needs a file"
+            store_adapter="$2"
+            shift 2
+            ;;
+        --profile)
+            (($# >= 2)) || die "--profile needs an identity"
+            profile="$2"
+            shift 2
+            ;;
+        --abi)
+            (($# >= 2)) || die "--abi needs a target"
+            abi="$2"
+            shift 2
+            ;;
+        *)
+            die "unknown option: $1"
+            ;;
+    esac
+done
+
+[[ -d "$compiled/native" ]] || die "compiled native module directory is unavailable: $compiled/native"
+[[ -f "$driver" ]] || die "build driver is unavailable: $driver"
+[[ -f "$store_adapter" ]] || die "Store adapter is unavailable: $store_adapter"
+[[ -n "$profile" && "$profile" != *$'\n'* ]] || die "profile identity is malformed"
+[[ -n "$abi" && "$abi" != *$'\n'* ]] || die "ABI target is malformed"
+
+modules=(core stages obligations lower unit_reuse unit_compile)
+for module in "${modules[@]}"; do
+    [[ -f "$compiled/native/$module.clj" ]] ||
+        die "compiled unit-rule module is unavailable: $compiled/native/$module.clj"
+done
+
+adapter_digest="$({
+    awk '
+        /^\(def dev-fact-kind / {
+            if (started) exit 2
+            started = 1
+            emitting = 1
+        }
+        /^\(defn dev-fact-report / {
+            if (!emitting) exit 3
+            finished = 1
+            emitting = 0
+        }
+        emitting { print }
+        END {
+            if (!started || !finished) exit 4
+        }
+    ' "$driver"
+} | sha256sum | awk '{print $1}')" ||
+    die "cannot isolate the executable dev-unit adapter in $driver"
+
+bb_path="$(realpath "$(command -v bb)")"
+self="$(realpath "$0")"
+
+identity="$({
+    printf 'beagle-dev-unit-rule-epoch/v1\n'
+    printf 'identity-helper-sha256 %s\n' "$(sha256sum "$self" | awk '{print $1}')"
+    printf 'adapter-sha256 %s\n' "$adapter_digest"
+    for module in "${modules[@]}"; do
+        printf 'module %s %s\n' "$module" \
+            "$(sha256sum "$compiled/native/$module.clj" | awk '{print $1}')"
+    done
+    printf 'store-adapter-sha256 %s\n' \
+        "$(sha256sum "$store_adapter" | awk '{print $1}')"
+    printf 'babashka-sha256 %s\n' "$(sha256sum "$bb_path" | awk '{print $1}')"
+    printf 'profile %s\n' "$profile"
+    printf 'target-abi %s\n' "$abi"
+} | sha256sum | awk '{print $1}')"
+
+printf 'sha256:%s\n' "$identity"
