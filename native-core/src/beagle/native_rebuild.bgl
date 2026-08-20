@@ -37,14 +37,16 @@
 (defn read-manifest-line
   [payload String
    offset Int] NativeManifestLineReadV1
-  (let [line-end Int? (str/index-of payload "\n" offset)]
-    (if (nil? line-end)
+  (loop [line-end Int offset]
+    (if (>= line-end (count payload))
       (->NativeManifestLineRejectedV1
         "rebuild bundle header is missing a newline")
-      (->NativeManifestLineReadyV1
-        (->NativeManifestLineV1
-          (subs payload offset line-end)
-          (+ line-end 1))))))
+      (if (= "\n" (subs payload line-end (+ line-end 1)))
+        (->NativeManifestLineReadyV1
+          (->NativeManifestLineV1
+            (subs payload offset line-end)
+            (+ line-end 1)))
+        (recur (+ line-end 1))))))
 
 (defn manifest-field
   [line String
