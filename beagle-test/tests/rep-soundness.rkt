@@ -107,6 +107,14 @@
     (check-true (> (oracle-hamt-site-count tbl) 0)
                 (format "oracle must predict >=1 HAMT site for ~a" name))))
 
+(define (check-runtime-route js name)
+  (check-true
+   (string-contains? js (format "~a as $$bc$~a" name name))
+   (format "missing demand-tracked core.js import for ~a in:\n~a" name js))
+  (check-true
+   (string-contains? js (format "$$bc$~a(" name))
+   (format "missing core.js call for ~a in:\n~a" name js)))
+
 (run-tests
  (test-suite "P3 rep-selection soundness gate"
 
@@ -163,6 +171,79 @@
         (format "missing demand-tracked host import for ~a in:\n~a" name js)))
      (check-false (string-contains? js "host_array as $$bh$host_array"))
      (check-false (string-contains? js "host_object as $$bh$host_object")))
+
+   ;; ---- C0 ordinary collection identity and runtime routing -----------------
+   (test-case "hash-map/hash-set constructors route through value-semantic runtime"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(def m Any (hash-map :same #f "same" 0 (symbol "same") ""))
+              `(def s Any (hash-set ,(br 1 2) ,(br 1 2))))))
+     (check-runtime-route js "map_value")
+     (check-runtime-route js "set_value"))
+
+   (test-case "list construction and predicates preserve list/vector/seq categories"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(def xs Any (list 1 2))
+              `(def v Any ,(br 1 2))
+              `(defn is-list ,(br '(x Any)) Bool (list? x))
+              `(defn is-seq ,(br '(x Any)) Bool (seq? x))
+              `(defn is-vector ,(br '(x Any)) Bool (vector? x)))))
+     (check-runtime-route js "list")
+     (check-runtime-route js "list_p")
+     (check-runtime-route js "seq_p")
+     (check-true
+      (and (string-contains? js "!$$bc$list_p(x)")
+           (string-contains? js "!$$bc$seq_p(x)"))
+      (format "vector? must exclude branded list/sequence arrays in:\n~a" js)))
+
+   (test-case "indexed assoc and list builders route through category dispatch"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(defn replace-at ,(br) Any (assoc ,(br 1 2) 1 9))
+              `(defn prepend ,(br) Any (conj (list 1 2) 3))
+              `(defn collect ,(br) Any (into (list 1) ,(br 2 3))))))
+     (for ([name (in-list '(assoc_value conj_value into_value))])
+       (check-runtime-route js (symbol->string name))))
+
+   (test-case "nil/map/set/list sequence operations use the collection boundary"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(defn to-seq ,(br '(x Any)) Any (seq x))
+              `(defn head ,(br '(x Any)) Any (first x))
+              `(defn tail ,(br '(x Any)) Any (rest x))
+              `(defn following ,(br '(x Any)) Any (next x))
+              `(defn vacant? ,(br '(x Any)) Bool (empty? x)))))
+     (for ([name (in-list '(seq first rest next empty_p))])
+       (check-runtime-route js (symbol->string name))))
+
+   (test-case "for results are branded eager sequences"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(defn doubled ,(br '(xs (Vec Int))) (Vec Int)
+                 (for ,(br 'x 'xs) (* x 2))))))
+     (check-runtime-route js "eager_seq"))
+
+   (test-case "get-in traverses HAMT maps through the polymorphic runtime read"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(defn read-leaf ,(br) Any
+                 (get-in ,(mt (br 1 2) (mt ':leaf #f))
+                         ,(br (br 1 2) ':leaf))))))
+     (check-true (string-contains? js "hamtMap("))
+     (check-runtime-route js "get_in"))
+
+   (test-case "assoc-in selects HAMT writes for compound-key maps"
+     (define-values (js tbl prog)
+       (emit+types
+        (list `(defn write-leaf ,(br) Any
+                 (assoc-in ,(mt (br 1 2) (mt ':leaf #f))
+                           ,(br (br 1 2) ':leaf)
+                           #t)))))
+     (check-true
+      (string-contains? js "hamtMapAssoc(")
+      (format "assoc-in over a HAMT map must select hamtMapAssoc in:\n~a" js)))
+
    (assert-hamt "set literal with compound elems uses value equality" "hamtSet("
      `(defn f ,(br) Bool (contains? ,(st (br 1 2) (br 3 4)) ,(br 1 2))))
    (assert-native "scalar assoc (key arg scalar)"
