@@ -7,6 +7,13 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 supervisor="$root/native-core/bin/run-bounded"
 kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
 overall_timeout="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-600}"
+# The projection key names emitted bytes, not this script's scheduling and
+# cache machinery. Keep this recipe id stable while sources, the Racket
+# compiler closure, and the post-emission rewrites below produce the same
+# bytes; bump it only when that output contract changes. Its initial value is
+# the last live-script digest so existing authenticated projections remain
+# addressable across this orchestration-only speedup.
+projection_recipe_sha256="a9741457aeeb07a6b33c8ee55521b9bfbbe0bfaaaac10db91434698d4a43d17c"
 
 sources=(
     native-core/src/native/core.bclj
@@ -144,7 +151,9 @@ write_input_manifest() {
     present_inputs=()
     present_flags=()
     for relative in "${inputs[@]}"; do
-        if [[ -f "$root/$relative" ]]; then
+        if [[ "$relative" == bin/beagle-core-compiler-projection ]]; then
+            present_flags+=(2)
+        elif [[ -f "$root/$relative" ]]; then
             present_flags+=(1)
             present_inputs+=("$root/$relative")
         else
@@ -169,6 +178,8 @@ write_input_manifest() {
             if [[ "${present_flags[$input_index]}" == 1 ]]; then
                 printf '%s %s\n' "${inputs[$input_index]}" "${digests[$digest_index]}"
                 digest_index=$((digest_index + 1))
+            elif [[ "${present_flags[$input_index]}" == 2 ]]; then
+                printf '%s %s\n' "${inputs[$input_index]}" "$projection_recipe_sha256"
             else
                 printf '%s absent\n' "${inputs[$input_index]}"
             fi
