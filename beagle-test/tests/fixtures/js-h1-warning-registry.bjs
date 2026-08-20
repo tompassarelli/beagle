@@ -1,0 +1,12 @@
+#lang beagle/js
+
+(ns test.js-h1-warning-registry)
+
+(def values JsArray (array 1 2 3))
+(def object JsObject (js-obj "answer" 42))
+(def copied JsArray (into-array values))
+(def allocated JsArray (object-array 3))
+(def length Int (alength values))
+(def property-keys JsArray (js-keys object))
+(def deleted Bool (js-delete object "answer"))
+(def present Bool (js-in "answer" object))

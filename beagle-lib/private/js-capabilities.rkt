@@ -44,6 +44,8 @@
        'vector? 'map? 'set? 'sequential? 'seq? 'coll?
        'take-last 'drop-last
        'pr-str 'to-array 'aget 'aset 'array-seq 'clj->js 'js->clj
+       'alength 'array 'js-obj 'into-array 'object-array
+       'js-keys 'js-delete 'js-in
        'not= 'seq
        ;; batch 2
        'butlast 'nfirst 'nnext 'fnext 'ffirst 'nthrest 'nthnext
