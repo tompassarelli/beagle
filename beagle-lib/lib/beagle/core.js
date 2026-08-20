@@ -1,4 +1,7 @@
 const keywordValues = new Map();
+const listValues = new WeakSet();
+const eagerSeqValues = new WeakSet();
+const NOT_FOUND = Symbol("beagle/not-found");
 
 class BeagleKeyword {
   constructor(text) {
@@ -55,6 +58,7 @@ export function print_str(...xs) {
 function prValue(x) {
   if (x == null) return "nil";
   if (x instanceof BeagleKeyword || x instanceof BeagleSymbol) return String(x);
+  if (listValues.has(x) || eagerSeqValues.has(x)) return `(${x.map(prValue).join(" ")})`;
   if (Array.isArray(x)) return `[${x.map(prValue).join(" ")}]`;
   if (typeof x === "string") return JSON.stringify(x);
   return String(x);
@@ -136,15 +140,16 @@ export function map_indexed(f, coll) {
 export function assoc_in(m, path, v) {
   if (path.length === 0) return v;
   const [k, ...rest] = path;
-  const p = property_key(k);
-  return { ...m, [p]: rest.length === 0 ? v : assoc_in(m[p] || {}, rest, v) };
+  if (rest.length === 0) return assoc_value(m, k, v);
+  const child = get(m, k, NOT_FOUND);
+  return assoc_value(m, k, assoc_in(child === NOT_FOUND || child == null ? map_value() : child, rest, v));
 }
 
 export function update_in(m, path, f) {
   if (path.length === 0) return f(m);
   const [k, ...rest] = path;
-  const p = property_key(k);
-  return { ...m, [p]: rest.length === 0 ? f(m[p]) : update_in(m[p] || {}, rest, f) };
+  const child = get(m, k, null);
+  return assoc_value(m, k, rest.length === 0 ? f(child) : update_in(child, rest, f));
 }
 
 export function select_keys(m, ks) {
@@ -258,7 +263,14 @@ export function map_vals(f, m) {
 
 export function disj(s, ...ks) {
   const r = new Set(s);
-  for (const k of ks) r.delete(k);
+  for (const k of ks) {
+    for (const value of r) {
+      if (equivV(value, k)) {
+        r.delete(value);
+        break;
+      }
+    }
+  }
   return r;
 }
 
@@ -599,6 +611,131 @@ export function get(coll, k, notFound = null) {
   return notFound;
 }
 
+function markList(values) {
+  listValues.add(values);
+  return values;
+}
+
+function markEagerSeq(values) {
+  eagerSeqValues.add(values);
+  return values;
+}
+
+function sequenceArray(coll) {
+  if (coll == null) return [];
+  if (Array.isArray(coll) || typeof coll === "string") return Array.from(coll);
+  if (coll instanceof Set) return Array.from(coll);
+  if (isHamt(coll)) {
+    const entries = hamtWalk(coll.root, []);
+    return coll._bg === "hamtMap" ? entries : entries.map(entry => entry[0]);
+  }
+  if (isPlainObject(coll)) {
+    return Object.entries(coll).map(([key, value]) => [property_value(key), value]);
+  }
+  if (typeof coll[Symbol.iterator] === "function") return Array.from(coll);
+  throw new TypeError("value is not sequenceable");
+}
+
+export function map_value(...keyvals) {
+  if (keyvals.length % 2 !== 0) throw new TypeError("map expects key/value pairs");
+  const result = Object.create(null);
+  for (let index = 0; index < keyvals.length; index += 2) {
+    result[property_key(keyvals[index])] = keyvals[index + 1];
+  }
+  return result;
+}
+
+export function set_value(coll = []) {
+  const result = new Set();
+  for (const item of sequenceArray(coll)) {
+    if (![...result].some(existing => equivV(existing, item))) result.add(item);
+  }
+  return result;
+}
+
+export function list(...items) { return markList(items); }
+export function list_p(value) { return listValues.has(value); }
+export function eager_seq(coll) { return markEagerSeq(sequenceArray(coll)); }
+export function seq_p(value) { return eagerSeqValues.has(value); }
+
+export function seq(coll) {
+  const values = sequenceArray(coll);
+  return values.length === 0 ? null : markEagerSeq(values);
+}
+
+export function first(coll) {
+  const values = sequenceArray(coll);
+  return values.length === 0 ? null : values[0];
+}
+
+export function rest(coll) {
+  return markEagerSeq(sequenceArray(coll).slice(1));
+}
+
+export function next(coll) {
+  const values = sequenceArray(coll).slice(1);
+  return values.length === 0 ? null : markEagerSeq(values);
+}
+
+export function empty_p(coll) {
+  return sequenceArray(coll).length === 0;
+}
+
+export function assoc_value(coll, key, value) {
+  if (coll == null) coll = map_value();
+  if (isHamt(coll)) {
+    throw new TypeError("assoc on a HAMT requires the emitter-selected HAMT operation");
+  }
+  if (Array.isArray(coll)) {
+    if (listValues.has(coll) || eagerSeqValues.has(coll)) {
+      throw new TypeError("assoc expects a vector or map, not a list or sequence");
+    }
+    if (!Number.isInteger(key) || key < 0 || key > coll.length) {
+      throw new RangeError("vector assoc index out of bounds");
+    }
+    const result = coll.slice();
+    if (key === result.length) result.push(value);
+    else result[key] = value;
+    return result;
+  }
+  if (!isPlainObject(coll)) throw new TypeError("assoc expects a map or vector");
+  return { ...coll, [property_key(key)]: value };
+}
+
+export function conj_value(coll, ...items) {
+  if (coll == null || listValues.has(coll) || eagerSeqValues.has(coll)) {
+    const result = coll == null ? [] : sequenceArray(coll);
+    for (const item of items) result.unshift(item);
+    return markList(result);
+  }
+  if (Array.isArray(coll)) return [...coll, ...items];
+  if (coll instanceof Set) {
+    const result = set_value(coll);
+    for (const item of items) {
+      if (![...result].some(existing => equivV(existing, item))) result.add(item);
+    }
+    return result;
+  }
+  if (isPlainObject(coll)) {
+    return items.reduce((result, entry) => {
+      if (!Array.isArray(entry) || entry.length !== 2) {
+        throw new TypeError("map conj expects key/value entries");
+      }
+      return assoc_value(result, entry[0], entry[1]);
+    }, coll);
+  }
+  if (isHamt(coll)) {
+    throw new TypeError("conj on a HAMT requires the emitter-selected HAMT operation");
+  }
+  throw new TypeError("conj expects a collection");
+}
+
+export function into_value(target, source) {
+  let result = target;
+  for (const item of sequenceArray(source)) result = conj_value(result, item);
+  return result;
+}
+
 export function keys(coll) {
   // map keys, rep-polymorphic: HAMT -> traversed keys; native object map -> own keys.
   if (coll == null) return [];
@@ -674,10 +811,10 @@ export function hashV(x) {
 export function get_in(m, path) {
   let v = m;
   for (const k of path) {
-    if (v == null) return null;
-    v = v[property_key(k)];
+    v = get(v, k, NOT_FOUND);
+    if (v === NOT_FOUND) return null;
   }
-  return v ?? null;
+  return v;
 }
 
 export function take_nth(n, coll) {
