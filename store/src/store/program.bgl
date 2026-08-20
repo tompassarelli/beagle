@@ -52,6 +52,22 @@
 (defn profile-value [root ProgramRoot] Any
   (programroot-profile root))
 
+;; Program admission cannot rely on Float identity until the Store host and
+;; wire agree on one canonical equality contract for NaN and signed zero.
+(defn- program-term-admissible? [value Any] Bool
+  (if (t/triple? value)
+    (and (program-term-admissible? (t/triple-t1 value))
+         (and (program-term-admissible? (t/triple-t2 value))
+              (program-term-admissible? (t/triple-t3 value))))
+    (and (t/atom? value)
+         (not (and (number? value) (not (integer? value)))))))
+
+(defn- program-propositions-admissible? [root ProgramRoot] Bool
+  (every?
+    (fn [proposition t/Triple] Bool
+      (program-term-admissible? proposition))
+    (programroot-propositions root)))
+
 (defn proposition-present?
   [root ProgramRoot
    t1 Any
@@ -88,7 +104,8 @@
 (defn kernel-fact-normal-form-valid? [root ProgramRoot] Bool
   (let [triples (Vec t/Triple) (programroot-propositions root)
         space-id String (programroot-space-id root)]
-    (empty? (kernel/lint-declared-profile triples space-id))))
+    (and (program-propositions-admissible? root)
+         (empty? (kernel/lint-declared-profile triples space-id)))))
 
 (defn source-for-module
   [root ProgramRoot
@@ -137,21 +154,36 @@
           :else (recur (rest remaining) module-count))))))
 
 (defn span-valid? [span Any] Bool
-  (and (t/triple? span)
-       (and (integer? (t/triple-t1 span))
-            (and (= through-byte (t/triple-t2 span))
-                 (and (integer? (t/triple-t3 span))
-                      (and (>= (t/triple-t1 span) 0)
-                           (<= (t/triple-t1 span) (t/triple-t3 span))))))))
+  (if (t/triple? span)
+    (let [span-value t/Triple span
+          start Any (t/triple-t1 span-value)
+          relation Any (t/triple-t2 span-value)
+          end Any (t/triple-t3 span-value)]
+      (if (and (integer? start) (integer? end))
+        (let [start-byte Int start
+              end-byte Int end]
+          (and (= through-byte relation)
+               (and (>= start-byte 0) (<= start-byte end-byte))))
+        false))
+    false))
 
 (defn span-valid-for-module?
   [root ProgramRoot
    module Any
    span Any] Bool
   (let [source String? (source-for-module root module)]
-    (and (some? source)
-         (and (span-valid? span)
-              (<= (t/triple-t3 span) (count (utf8-encode source)))))))
+    (if (string? source)
+      (let [present-source String source]
+        (if (t/triple? span)
+          (let [span-value t/Triple span
+                end Any (t/triple-t3 span-value)]
+            (if (integer? end)
+              (let [end-byte Int end]
+                (and (span-valid? span-value)
+                     (<= end-byte (count (utf8-encode present-source)))))
+              false))
+          false))
+      false)))
 
 (defn containing-source-module
   [root ProgramRoot
@@ -282,7 +314,8 @@
     (and (> (count (programroot-space-id root)) 0)
          (and (>= (programroot-store-version root) 0)
               (and (t/atom? resource)
-                   (and (= profile program-profile)
+                   (and (program-term-admissible? resource)
+                        (and (= profile program-profile)
                         (and (proposition-present?
                                root space-id kernel/profile-anchor
                                (kernel/profile-header
@@ -300,7 +333,7 @@
                                                    root resource member-of program-roots)
                                                  (proposition-present?
                                                    root resource admitted-by
-                                                   program-profile))))))))))))
+                                                   program-profile)))))))))))))
 
 (defn validate-root [root ProgramRoot] ProgramAdmission
   (cond

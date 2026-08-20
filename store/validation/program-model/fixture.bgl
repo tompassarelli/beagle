@@ -35,17 +35,17 @@
    (t/triple program/declares-at program/member-of program/relationships)
    (t/triple program/through-byte program/member-of program/relationships)])
 
-(defn content-propositions [] (Vec t/Triple)
+(defn content-propositions [root-resource t/Term] (Vec t/Triple)
   [(t/triple space-id kernel/profile-anchor
      (kernel/profile-header profile program/fact-profile-kind
        kernel/observe-profile-mode))
    (kernel/profile-rule profile kernel/fact-normal-form-profile-rule)
    (t/triple profile program/member-of program/profiles)
    (t/triple rule program/member-of program/profile-rules)
-   (t/triple root program/member-of program/program-roots)
-   (t/triple root program/admitted-by profile)
-   (t/triple root program/contains module-a)
-   (t/triple root program/contains module-b)
+   (t/triple root-resource program/member-of program/program-roots)
+   (t/triple root-resource program/admitted-by profile)
+   (t/triple root-resource program/contains module-a)
+   (t/triple root-resource program/contains module-b)
    (t/triple module-a program/member-of program/modules)
    (t/triple module-b program/member-of program/modules)
    (t/triple module-a program/represented-by source-a)
@@ -63,28 +63,109 @@
    (t/triple reference-a program/refers-to binding-a)
    (t/triple module-b program/depends-on module-a)])
 
+(defn root-with-additions
+  [root-resource t/Term
+   additions (Vec t/Triple)] program/ProgramRoot
+  (program/->ProgramRoot space-id root-resource 7 profile
+    (into
+      (into (relationship-declarations)
+            (content-propositions root-resource))
+      additions)))
+
 (defn canonical-root [] program/ProgramRoot
-  (program/->ProgramRoot space-id root 7 profile
-    (into (relationship-declarations) (content-propositions))))
+  (root-with-additions root []))
+
+(def float-atom Float 7.5)
+(def nested-float-relation t/Triple
+  (t/triple module-a program/depends-on float-atom))
+
+(defn valid-canonical-atoms-root [] program/ProgramRoot
+  (root-with-additions
+    root
+    [(t/triple 42 program/depends-on module-a)
+     (t/triple true program/depends-on false)
+     (t/triple :canonical program/depends-on (t/instant 123 456))
+     (t/triple
+       (t/triple 1 program/depends-on :canonical)
+       program/depends-on
+       module-a)]))
+
+(defn float-proposition-roots [] (Vec program/ProgramRoot)
+  [(root-with-additions
+     root
+     [(t/triple float-atom program/depends-on module-a)])
+   (root-with-additions
+     root
+     [(t/triple float-atom program/member-of program/relationships)
+      (t/triple module-a float-atom module-b)])
+   (root-with-additions
+     root
+     [(t/triple module-a program/depends-on float-atom)])
+   (root-with-additions
+     root
+     [(t/triple
+        (t/triple float-atom program/depends-on module-a)
+        program/depends-on
+        module-b)])
+   (root-with-additions
+     root
+     [(t/triple nested-float-relation program/member-of program/relationships)
+      (t/triple module-a nested-float-relation module-b)])
+   (root-with-additions
+     root
+     [(t/triple
+        module-a
+        program/depends-on
+        (t/triple module-b program/depends-on float-atom))])])
+
+(defn float-propositions-rejected? [] Bool
+  (every?
+    (fn [candidate program/ProgramRoot] Bool
+      (not (program/admitted-root? candidate)))
+    (float-proposition-roots)))
+
+(defn canonical-root-observations?
+  [candidate program/ProgramRoot] Bool
+  (let [source String? (program/source-for-module candidate module-a)
+        observed-module Any
+        (program/reference-module candidate reference-a)
+        observed-span Any
+        (program/reference-span candidate reference-a)
+        root-resource Any (program/root-resource-value candidate)
+        first-proposition t/Triple
+        (first (program/programroot-propositions candidate))]
+    (if (string? source)
+      (let [source-value String source]
+        (if (string? observed-module)
+          (let [module-value String observed-module]
+            (if (t/triple? observed-span)
+              (let [span-value t/Triple observed-span]
+                (if (string? root-resource)
+                  (let [resource-value String root-resource]
+                    (and (program/admitted-root? candidate)
+                         (and (= source-a source-value)
+                              (and (= space-id
+                                      (program/programroot-space-id candidate))
+                                   (and (= module-a module-value)
+                                        (and (= span-a span-value)
+                                             (and (= 7
+                                                     (program/programroot-store-version
+                                                       candidate))
+                                                  (and (= root resource-value)
+                                                       (t/triple?
+                                                         first-proposition)))))))))
+                  false))
+              false))
+          false))
+      false)))
 
 (defn main [] Int
-  (let [candidate program/ProgramRoot (canonical-root)]
-    (if (and (program/admitted-root? candidate)
-             (and (= source-a (program/source-for-module candidate module-a))
-                  (and (= space-id (program/programroot-space-id candidate))
-                       (and (= module-a
-                          (program/reference-module candidate reference-a))
-                       (and (= span-a
-                               (program/reference-span candidate reference-a))
-                            (and (= 7 (program/programroot-store-version candidate))
-                                 (and (t/atom?
-                                        (program/root-resource-value candidate))
-                                      (and (t/triple?
-                                             (first
-                                               (program/programroot-propositions candidate)))
-                                           (not=
-                                             (program/root-resource-value candidate)
-                                             (first
-                                               (program/programroot-propositions candidate)))))))))))
-      0
-      1)))
+  (let [candidate program/ProgramRoot (canonical-root)
+        canonical-atoms program/ProgramRoot (valid-canonical-atoms-root)
+        float-root program/ProgramRoot (root-with-additions float-atom [])]
+    (cond
+      [(not (canonical-root-observations? candidate)) 1]
+      [(not (program/admitted-root? canonical-atoms)) 1]
+      [(program/admitted-root? float-root) 1]
+      [(not (float-propositions-rejected?)) 1]
+      [:else 0])))
