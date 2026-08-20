@@ -4,7 +4,10 @@
          racket/file
          racket/runtime-path
          racket/string
-         beagle/private/callable-arity)
+         beagle/private/callable-arity
+         (only-in beagle/private/tags BRACKET-TAG)
+         beagle/private/parse
+         beagle/private/emit)
 
 (define-runtime-path fixtures-dir "fixtures/f0-callables")
 
@@ -12,6 +15,22 @@
   (callable-clause-shape 1 #f 'one))
 (define rest-from-two
   (callable-clause-shape 2 #t 'two-or-more))
+
+(define (br . xs) (cons BRACKET-TAG xs))
+
+(define (emit-anonymous-multi-rest)
+  (define program
+    (parse-program
+     (map (lambda (form) (datum->syntax #f form))
+          (list
+           '(ns f0.callables.anonymous-multi-rest)
+           '(define-target js)
+           `(def choose Any
+              (fn
+                (,(br '(value Int)) Int value)
+                (,(br '(first Int) '(second Int) '& '(more (List Int))) Int
+                 (+ first second (count more)))))))))
+  (emit-program program))
 
 (test-case "callable shape selects one non-overlapping clause"
   (define shape (make-callable-shape (list fixed-one rest-from-two)))
@@ -57,3 +76,12 @@
    (string-contains? (fixture "arity-overlap.bjs") "& more (List Int)"))
   (check-true
    (string-contains? (fixture "rest-seq-expectations.bjs") "(seq more)")))
+
+(test-case "anonymous multi-arity function emits standard JS dispatch"
+  (define output (emit-anonymous-multi-rest))
+  (check-true (string-contains? output "const choose = function(...$beagle$args)"))
+  (check-true (string-contains? output "arguments.length === 1"))
+  (check-true (string-contains? output "arguments.length >= 2"))
+  (check-true (string-contains? output "$beagle$args.slice(2)"))
+  (check-false (string-contains? output "$arity"))
+  (check-false (string-contains? output "applyTo")))

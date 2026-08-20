@@ -722,6 +722,7 @@
     ;; A nested callable owns its own async status. Creating one must not make
     ;; the enclosing function or IIFE async merely because its body awaits.
     [(or (fn-form? e)
+         (fn-multi? e)
          (letfn-fn? e)
          (defn-form? e)
          (defn-multi? e)
@@ -1905,6 +1906,65 @@
 
 ;; --- top-level forms -------------------------------------------------------
 
+(define (emit-js-multi-arity-function arities [name #f])
+  (define async? (for/or ([a (in-list arities)])
+                   (or (params-have-constraint-await?
+                        (arity-clause-params a)
+                        (arity-clause-rest-param a))
+                       (contains-await? (arity-clause-body a)))))
+  (define branches
+    (for/list ([a (in-list arities)])
+      (define n (length (arity-clause-params a)))
+      (define rest? (arity-clause-rest-param a))
+      (define arity-bindings
+        (param-bindings (arity-clause-params a) rest?))
+      (define arity-rename-env
+        (if (bindings-have-constraints? arity-bindings)
+            (hidden-binding-rename-env arity-bindings "arity")
+            (current-rename-env)))
+      (define param-binding-strs
+        (apply append
+               (for/list ([p (in-list (arity-clause-params a))]
+                          [i (in-naturals)])
+                 (emit-js-argument-binding-setup
+                  p
+                  (format "$beagle$args[~a]" i)
+                  (format "$beagle$arg$~a" i)
+                  #:install-rename-env arity-rename-env))))
+      (define rest-str
+        (if rest?
+          (emit-js-argument-binding-setup
+           rest?
+           (format "$beagle$args.slice(~a)" n)
+           "$beagle$arg$rest"
+           #:install-rename-env arity-rename-env)
+          '()))
+      (define all-bindings (append param-binding-strs rest-str))
+      (define arity-bound
+        (binding-names-from-params
+         (arity-clause-params a) (arity-clause-rest-param a)))
+      (define body
+        (with-param-envs
+         (arity-clause-params a)
+         (lambda ()
+           (parameterize ([current-rename-env arity-rename-env])
+             (with-bindings arity-bound
+               (lambda ()
+                 (emit-body-return (arity-clause-body a) "    ")))))
+         (arity-clause-rest-param a)))
+      (define bindings-str (string-join all-bindings "\n    "))
+      (define inner
+        (if (null? all-bindings)
+          body
+          (format "~a\n    ~a" bindings-str body)))
+      (if rest?
+        (format "  if (arguments.length >= ~a) {\n    ~a\n  }" n inner)
+        (format "  if (arguments.length === ~a) {\n    ~a\n  }" n inner))))
+  (format "~afunction~a(...$beagle$args) {\n~a\n  throw new Error('No matching arity: ' + $beagle$args.length);\n}"
+          (if async? "async " "")
+          (if name (format " ~a" name) "")
+          (string-join branches "\n")))
+
 (define (emit-form f)
   (cond
     [(def-form? f)
@@ -1953,63 +2013,13 @@
              inner)]
 
     [(defn-multi? f)
-     (define name (mangle-name (defn-multi-name f)))
-     (define arities (defn-multi-arities f))
-     (define async? (for/or ([a (in-list arities)])
-                      (or (params-have-constraint-await?
-                           (arity-clause-params a)
-                           (arity-clause-rest-param a))
-                          (contains-await? (arity-clause-body a)))))
-     (define branches
-       (for/list ([a (in-list arities)])
-         (define n (length (arity-clause-params a)))
-         (define rest? (arity-clause-rest-param a))
-         (define arity-bindings
-           (param-bindings (arity-clause-params a) rest?))
-         (define arity-rename-env
-           (if (bindings-have-constraints? arity-bindings)
-               (hidden-binding-rename-env arity-bindings "arity")
-               (current-rename-env)))
-         (define param-binding-strs
-           (apply append
-                  (for/list ([p (in-list (arity-clause-params a))]
-                             [i (in-naturals)])
-                    (emit-js-argument-binding-setup
-                     p
-                     (format "$beagle$args[~a]" i)
-                     (format "$beagle$arg$~a" i)
-                     #:install-rename-env arity-rename-env))))
-         (define rest-str
-           (if rest?
-             (emit-js-argument-binding-setup
-              rest?
-              (format "$beagle$args.slice(~a)" n)
-              "$beagle$arg$rest"
-              #:install-rename-env arity-rename-env)
-             '()))
-         (define all-bindings (append param-binding-strs rest-str))
-         (define arity-bound (binding-names-from-params (arity-clause-params a) (arity-clause-rest-param a)))
-         (define body (with-param-envs (arity-clause-params a)
-                        (lambda ()
-                          (parameterize
-                              ([current-rename-env
-                                arity-rename-env])
-                            (with-bindings arity-bound
-                              (lambda ()
-                                (emit-body-return
-                                 (arity-clause-body a) "    ")))))
-                        (arity-clause-rest-param a)))
-         (define bindings-str (string-join all-bindings "\n    "))
-         (define inner (if (null? all-bindings) body (format "~a\n    ~a" bindings-str body)))
-         (if rest?
-           (format "  if (arguments.length >= ~a) {\n    ~a\n  }" n inner)
-           (format "  if (arguments.length === ~a) {\n    ~a\n  }" n inner))))
-     (format "~a~afunction ~a(...$beagle$args) {\n~a\n  throw new Error('No matching arity: ' + $beagle$args.length);\n}"
+     (format "~a~a"
              (if (exported-binding? (defn-multi-name f) (defn-multi-private? f))
                  "export "
                  "")
-             (if async? "async " "")
-             name (string-join branches "\n"))]
+             (emit-js-multi-arity-function
+              (defn-multi-arities f)
+              (mangle-name (defn-multi-name f))))]
 
     [(record-form? f)
      (emit-record f)]
@@ -2553,6 +2563,9 @@
                         (append setup (list (emit-body-return body "")))
                         " ")))))))
       (fn-form-rest-param e))]
+
+    [(fn-multi? e)
+     (emit-js-multi-arity-function (fn-multi-arities e))]
 
     [(letfn-form? e)
      (define fns (letfn-form-fns e))
@@ -3831,6 +3844,14 @@
              #:when (param-constraint p))
          (walk (param-constraint p)))
        (for-each walk (fn-form-body e))]
+      [(fn-multi? e)
+       (for ([a (in-list (fn-multi-arities e))])
+         (for ([p (in-list
+                   (param-bindings
+                    (arity-clause-params a) (arity-clause-rest-param a)))]
+               #:when (param-constraint p))
+           (walk (param-constraint p)))
+         (for-each walk (arity-clause-body a)))]
       [(cond-form? e) (for ([c (in-list (cond-form-clauses e))])
                         (walk (cond-clause-test c)) (for-each walk (cond-clause-body c)))]
       [(for-form? e) (for ([c (in-list (for-form-clauses e))])
