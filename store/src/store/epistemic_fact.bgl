@@ -1,7 +1,10 @@
 #lang beagle
 
 (ns store.epistemic-fact
-  (:require [store.types :as t]))
+  (:require [store.rotation :as rotation]
+            [store.store :as store]
+            [store.txn :as txn]
+            [store.types :as t]))
 
 ;; A world is an immutable explanation root.  Physical placement and trust are
 ;; referenced facts elsewhere; they are deliberately not folded into identity.
@@ -240,3 +243,301 @@
       [(RequireDesired) (instance? Desired provenance)]
       [(RequireEffectAttempt) (instance? EffectAttempt provenance)]
       [(RequireEffectReceipt) (instance? EffectReceipt provenance)])))
+
+(def fact-world Keyword :epistemic/world)
+(def fact-proposition Keyword :epistemic/proposition)
+(def fact-mode Keyword :epistemic/mode)
+(def fact-authority Keyword :epistemic/authority)
+(def fact-evidence Keyword :epistemic/evidence)
+(def fact-rule Keyword :epistemic/rule)
+(def fact-premise Keyword :epistemic/premise)
+(def fact-premise-ordinal Keyword :epistemic/premise-ordinal)
+(def fact-premise-value Keyword :epistemic/premise-value)
+(def fact-observer Keyword :epistemic/observer)
+(def fact-observed-at-ms Keyword :epistemic/observed-at-ms)
+(def fact-valid-until-ms Keyword :epistemic/valid-until-ms)
+(def fact-plan Keyword :epistemic/plan)
+(def fact-attempt Keyword :epistemic/attempt)
+(def fact-capability Keyword :epistemic/capability)
+(def fact-receipt Keyword :epistemic/receipt)
+(def fact-issuer Keyword :epistemic/issuer)
+
+(def declared-mode Keyword :declared)
+(def derived-mode Keyword :derived)
+(def observed-mode Keyword :observed)
+(def desired-mode Keyword :desired)
+(def effect-attempt-mode Keyword :effect-attempt)
+(def effect-receipt-mode Keyword :effect-receipt)
+
+(defrecord DerivedPremise [(ordinal Int) (value String)])
+(defalias DerivedPremises (U (Vec String) Nil))
+
+(defunion FactPersistence
+  (FactPersisted
+    [fact EpistemicFact
+     transaction t/Triple])
+  (FactNotPersisted [rejection FactAdmission]))
+
+(defunion FactReconstruction
+  (FactMissing [detail String])
+  (FactMalformed [detail String])
+  (FactReconstructed [fact EpistemicFact]))
+
+(defn premise-subject [fact-id String ordinal Int] t/Triple
+  (t/triple fact-id fact-premise ordinal))
+
+(defn derived-premise-triples
+  [fact-id String
+   premises (Vec String)] (Vec t/Triple)
+  (loop [ordinal Int 0
+         rows (Vec t/Triple) []]
+    (if (>= ordinal (count premises))
+      rows
+      (let [subject t/Triple (premise-subject fact-id ordinal)]
+        (recur
+         (inc ordinal)
+         (conj
+          (conj
+           (conj rows (t/triple fact-id fact-premise subject))
+           (t/triple subject fact-premise-ordinal ordinal))
+          (t/triple subject fact-premise-value (nth premises ordinal))))))))
+
+(defn fact-triples [fact EpistemicFact] (Vec t/Triple)
+  (let [fact-id String (epistemicfact-fact-id fact)
+        base (Vec t/Triple)
+        [(t/triple fact-id fact-world (epistemicfact-world-id fact))
+         (t/triple fact-id fact-proposition (epistemicfact-proposition fact))]]
+    (match (epistemicfact-provenance fact)
+      [(Declared authority-id evidence-id)
+       (conj
+        (conj
+         (conj base (t/triple fact-id fact-mode declared-mode))
+         (t/triple fact-id fact-authority authority-id))
+        (t/triple fact-id fact-evidence evidence-id))]
+      [(Derived rule-id premise-ids evidence-id)
+       (into
+        (conj
+         (conj
+          (conj base (t/triple fact-id fact-mode derived-mode))
+          (t/triple fact-id fact-rule rule-id))
+         (t/triple fact-id fact-evidence evidence-id))
+        (derived-premise-triples fact-id premise-ids))]
+      [(Observed observer-id evidence-id observed-at-ms valid-until-ms)
+       (conj
+        (conj
+         (conj
+          (conj
+           (conj base (t/triple fact-id fact-mode observed-mode))
+           (t/triple fact-id fact-observer observer-id))
+          (t/triple fact-id fact-evidence evidence-id))
+         (t/triple fact-id fact-observed-at-ms observed-at-ms))
+        (t/triple fact-id fact-valid-until-ms valid-until-ms))]
+      [(Desired authority-id plan-id evidence-id)
+       (conj
+        (conj
+         (conj
+          (conj base (t/triple fact-id fact-mode desired-mode))
+          (t/triple fact-id fact-authority authority-id))
+         (t/triple fact-id fact-plan plan-id))
+        (t/triple fact-id fact-evidence evidence-id))]
+      [(EffectAttempt attempt-id plan-id capability-id evidence-id)
+       (conj
+        (conj
+         (conj
+          (conj
+           (conj base (t/triple fact-id fact-mode effect-attempt-mode))
+           (t/triple fact-id fact-attempt attempt-id))
+          (t/triple fact-id fact-plan plan-id))
+         (t/triple fact-id fact-capability capability-id))
+        (t/triple fact-id fact-evidence evidence-id))]
+      [(EffectReceipt receipt-id attempt-id capability-id issuer-id evidence-id)
+       (conj
+        (conj
+         (conj
+          (conj
+           (conj
+            (conj base (t/triple fact-id fact-mode effect-receipt-mode))
+            (t/triple fact-id fact-receipt receipt-id))
+           (t/triple fact-id fact-attempt attempt-id))
+          (t/triple fact-id fact-capability capability-id))
+         (t/triple fact-id fact-issuer issuer-id))
+        (t/triple fact-id fact-evidence evidence-id))])))
+
+(defn persist-admitted!
+  [root (Atom t/TermStore)
+   context AdmissionContext
+   fact EpistemicFact] FactPersistence
+  (match (admit-fact context fact)
+    [(FactAdmitted admitted)
+     (let [builder (Atom txn/Builder) (txn/open root)]
+       (do
+        (doseq [row (fact-triples admitted)] (txn/assert! builder row))
+        (->FactPersisted admitted (txn/commit! root builder))))]
+    [(FactRejected code detail) (->FactNotPersisted (->FactRejected code detail))]))
+
+(defn property-values
+  [view rotation/Rotation
+   subject Any
+   predicate Keyword] (Vec Any)
+  (mapv
+   (fn [event t/OperationOccurrence] Any
+     (t/triple-t3 (rotation/proposition-of event)))
+   (rotation/by-t12 view subject predicate)))
+
+(defn only-value [values (Vec Any)] Any?
+  (if (= 1 (count values)) (nth values 0) nil))
+
+(defn only-string [values (Vec Any)] String?
+  (let [value Any? (only-value values)]
+    (if (string? value) value nil)))
+
+(defn only-int [values (Vec Any)] Int?
+  (let [value Any? (only-value values)]
+    (if (integer? value) value nil)))
+
+(defn only-keyword [values (Vec Any)] Keyword?
+  (let [value Any? (only-value values)]
+    (if (keyword? value) value nil)))
+
+(defn only-triple [values (Vec Any)] t/Triple?
+  (let [value Any? (only-value values)]
+    (if (t/triple? value) value nil)))
+
+(defn nonempty-only-string
+  [view rotation/Rotation
+   subject Any
+   predicate Keyword] String?
+  (let [value String? (only-string (property-values view subject predicate))]
+    (if (and (some? value) (nonempty-id? value)) value nil)))
+
+(defn parsed-derived-premise
+  [view rotation/Rotation
+   fact-id String
+   subject Any] DerivedPremise?
+  (if (not (t/triple? subject))
+    nil
+    (let [ordinal Int?
+          (only-int (property-values view subject fact-premise-ordinal))
+          value String?
+          (nonempty-only-string view subject fact-premise-value)]
+      (if (and (some? ordinal)
+               (and (some? value)
+                    (and (>= ordinal 0)
+                         (= subject (premise-subject fact-id ordinal)))))
+        (->DerivedPremise ordinal value)
+        nil))))
+
+(defn premise-at
+  [premises (Vec DerivedPremise)
+   ordinal Int] String?
+  (loop [position Int 0
+         matches Int 0
+         found String ""]
+    (if (>= position (count premises))
+      (if (= matches 1) found nil)
+      (let [premise DerivedPremise (nth premises position)]
+        (if (= ordinal (derivedpremise-ordinal premise))
+          (recur (inc position) (inc matches) (derivedpremise-value premise))
+          (recur (inc position) matches found))))))
+
+(defn derived-premises
+  [view rotation/Rotation
+   fact-id String] DerivedPremises
+  (let [references (Vec Any) (property-values view fact-id fact-premise)]
+    (if (= 0 (count references))
+      nil
+      (loop [position Int 0
+             parsed (Vec DerivedPremise) []]
+        (if (>= position (count references))
+          (loop [ordinal Int 0
+                 values (Vec String) []]
+            (if (>= ordinal (count parsed))
+              values
+              (let [value String? (premise-at parsed ordinal)]
+                (if (some? value)
+                  (recur (inc ordinal) (conj values value))
+                  nil))))
+          (let [premise DerivedPremise?
+                (parsed-derived-premise view fact-id (nth references position))]
+            (if (some? premise)
+              (recur (inc position) (conj parsed premise))
+              nil)))))))
+
+(defn reconstructed-provenance
+  [view rotation/Rotation
+   fact-id String
+   mode Keyword] EpistemicProvenance?
+  (cond
+    [(= mode declared-mode)
+     (let [authority String? (nonempty-only-string view fact-id fact-authority)
+           evidence String? (nonempty-only-string view fact-id fact-evidence)]
+       (if (and (some? authority) (some? evidence))
+         (->Declared authority evidence)
+         nil))]
+    [(= mode derived-mode)
+     (let [rule String? (nonempty-only-string view fact-id fact-rule)
+           evidence String? (nonempty-only-string view fact-id fact-evidence)
+           premises DerivedPremises (derived-premises view fact-id)]
+       (if (and (some? rule) (and (some? evidence) (some? premises)))
+         (->Derived rule premises evidence)
+         nil))]
+    [(= mode observed-mode)
+     (let [observer String? (nonempty-only-string view fact-id fact-observer)
+           evidence String? (nonempty-only-string view fact-id fact-evidence)
+           observed-at-ms Int? (only-int (property-values view fact-id fact-observed-at-ms))
+           valid-until-ms Int? (only-int (property-values view fact-id fact-valid-until-ms))]
+       (if (and (some? observer)
+                (and (some? evidence)
+                     (and (some? observed-at-ms) (some? valid-until-ms))))
+         (->Observed observer evidence observed-at-ms valid-until-ms)
+         nil))]
+    [(= mode desired-mode)
+     (let [authority String? (nonempty-only-string view fact-id fact-authority)
+           plan String? (nonempty-only-string view fact-id fact-plan)
+           evidence String? (nonempty-only-string view fact-id fact-evidence)]
+       (if (and (some? authority) (and (some? plan) (some? evidence)))
+         (->Desired authority plan evidence)
+         nil))]
+    [(= mode effect-attempt-mode)
+     (let [attempt String? (nonempty-only-string view fact-id fact-attempt)
+           plan String? (nonempty-only-string view fact-id fact-plan)
+           capability String? (nonempty-only-string view fact-id fact-capability)
+           evidence String? (nonempty-only-string view fact-id fact-evidence)]
+       (if (and (some? attempt)
+                (and (some? plan) (and (some? capability) (some? evidence))))
+         (->EffectAttempt attempt plan capability evidence)
+         nil))]
+    [(= mode effect-receipt-mode)
+     (let [receipt String? (nonempty-only-string view fact-id fact-receipt)
+           attempt String? (nonempty-only-string view fact-id fact-attempt)
+           capability String? (nonempty-only-string view fact-id fact-capability)
+           issuer String? (nonempty-only-string view fact-id fact-issuer)
+           evidence String? (nonempty-only-string view fact-id fact-evidence)]
+       (if (and (some? receipt)
+                (and (some? attempt)
+                     (and (some? capability)
+                          (and (some? issuer) (some? evidence)))))
+         (->EffectReceipt receipt attempt capability issuer evidence)
+         nil))]
+    [:else nil]))
+
+(defn reconstruct-fact
+  [view rotation/Rotation
+   fact-id String] FactReconstruction
+  (let [rows (Vec t/OperationOccurrence) (rotation/by-t1 view fact-id)]
+    (if (empty? rows)
+      (->FactMissing "epistemic fact has no persisted rows")
+      (let [world String? (nonempty-only-string view fact-id fact-world)
+            proposition t/Triple? (only-triple (property-values view fact-id fact-proposition))
+            mode Keyword? (only-keyword (property-values view fact-id fact-mode))]
+        (if (and (nonempty-id? fact-id)
+                 (and (some? world) (and (some? proposition) (some? mode))))
+          (let [provenance EpistemicProvenance?
+                (reconstructed-provenance view fact-id mode)]
+            (if (some? provenance)
+              (->FactReconstructed
+               (->EpistemicFact fact-id world proposition provenance))
+              (->FactMalformed
+               "epistemic provenance rows are missing, ambiguous, or inconsistent")))
+          (->FactMalformed
+           "epistemic envelope rows are missing, ambiguous, or malformed"))))))

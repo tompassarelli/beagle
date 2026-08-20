@@ -2,6 +2,8 @@
 
 (ns store.epistemic-fact-fixture
   (:require [store.epistemic-fact :as epistemic]
+            [store.rotation :as rotation]
+            [store.store :as store]
             [store.types :as t]))
 
 (def world epistemic/WorldRoot
@@ -9,14 +11,14 @@
 
 (def context epistemic/AdmissionContext
   (epistemic/->AdmissionContext
-   world ["premise-a"] ["cap-build"]
+   world ["premise-a" "premise-b"] ["cap-build"]
    [(epistemic/->AttemptReference "attempt-a" "cap-build")]
    100))
 
 (def invalid-world-context epistemic/AdmissionContext
-  (epistemic/->AdmissionContext
+   (epistemic/->AdmissionContext
    (epistemic/->WorldRoot "world-a" "schema-a" "rules-a" "" [])
-   ["premise-a"] ["cap-build"]
+   ["premise-a" "premise-b"] ["cap-build"]
    [(epistemic/->AttemptReference "attempt-a" "cap-build")]
    100))
 
@@ -39,6 +41,27 @@
     [(epistemic/FactAdmitted admitted) false]
     [(epistemic/FactRejected observed detail) (= code observed)]))
 
+(defn persisted? [result epistemic/FactPersistence] Bool
+  (match result
+    [(epistemic/FactPersisted fact transaction) true]
+    [(epistemic/FactNotPersisted rejection) false]))
+
+(defn reconstructs?
+  [view rotation/Rotation
+   expected epistemic/EpistemicFact] Bool
+  (match (epistemic/reconstruct-fact view (epistemic/epistemicfact-fact-id expected))
+    [(epistemic/FactReconstructed actual) (= expected actual)]
+    [(epistemic/FactMissing detail) false]
+    [(epistemic/FactMalformed detail) false]
+    [_ false]))
+
+(defn malformed? [view rotation/Rotation fact-id String] Bool
+  (match (epistemic/reconstruct-fact view fact-id)
+    [(epistemic/FactMalformed detail) true]
+    [(epistemic/FactMissing detail) false]
+    [(epistemic/FactReconstructed fact) false]
+    [_ false]))
+
 (def desired epistemic/EpistemicFact
   (fact "fact-desired"
         (epistemic/->Desired "operator" "plan-a" "evidence-desired")))
@@ -53,7 +76,8 @@
 
 (def derived epistemic/EpistemicFact
   (fact "fact-derived"
-        (epistemic/->Derived "rule-a" ["premise-a"] "evidence-derived")))
+        (epistemic/->Derived
+         "rule-a" ["premise-b" "premise-a"] "evidence-derived")))
 
 (def receipt epistemic/EpistemicFact
   (fact "fact-receipt"
@@ -66,40 +90,57 @@
          "attempt-a" "plan-a" "cap-build" "evidence-attempt")))
 
 (defn main [] Int
-  (if (and
-       (admitted? (epistemic/admit-fact context declared))
-       (admitted? (epistemic/admit-fact context desired))
-       (rejected-as?
-        (epistemic/admit-fact invalid-world-context desired)
-        :epistemic/invalid-world-root)
-       (not (epistemic/satisfies? desired (epistemic/require-observed)))
-       (epistemic/satisfies? observed (epistemic/require-observed))
-       (admitted? (epistemic/admit-fact context observed))
-       (admitted? (epistemic/admit-fact context derived))
-       (admitted? (epistemic/admit-fact context attempt))
-       (rejected-as?
-        (epistemic/admit-fact
-         context
-         (fact "fact-unknown-premise"
-               (epistemic/->Derived
-                "rule-a" ["premise-missing"] "evidence-derived")))
-        :epistemic/invalid-derived)
-       (admitted? (epistemic/admit-fact context receipt))
-       (epistemic/satisfies? receipt (epistemic/require-effect-receipt))
-       (rejected-as?
-        (epistemic/admit-fact
-         context
-         (fact "fact-wrong-capability"
-               (epistemic/->EffectReceipt
-                "receipt-b" "attempt-a" "cap-deploy" "runner"
-                "evidence-receipt")))
-        :epistemic/invalid-effect-receipt)
-       (rejected-as?
-        (epistemic/admit-fact
-         context
-         (fact "fact-expired"
-               (epistemic/->Observed
-                "observer" "evidence-observed" 70 90)))
-        :epistemic/invalid-observed))
-    0
-    1))
+  (let [root (Atom t/TermStore) (store/new-term-store "epistemic-space")
+        derived-result epistemic/FactPersistence
+        (epistemic/persist-admitted! root context derived)
+        receipt-result epistemic/FactPersistence
+        (epistemic/persist-admitted! root context receipt)
+        duplicate-first epistemic/FactPersistence
+        (epistemic/persist-admitted! root context declared)
+        duplicate-second epistemic/FactPersistence
+        (epistemic/persist-admitted! root context declared)
+        view rotation/Rotation (rotation/project! root)]
+    (if (and
+         (admitted? (epistemic/admit-fact context declared))
+         (admitted? (epistemic/admit-fact context desired))
+         (rejected-as?
+          (epistemic/admit-fact invalid-world-context desired)
+          :epistemic/invalid-world-root)
+         (not (epistemic/satisfies? desired (epistemic/require-observed)))
+         (epistemic/satisfies? observed (epistemic/require-observed))
+         (admitted? (epistemic/admit-fact context observed))
+         (admitted? (epistemic/admit-fact context derived))
+         (admitted? (epistemic/admit-fact context attempt))
+         (rejected-as?
+          (epistemic/admit-fact
+           context
+           (fact "fact-unknown-premise"
+                 (epistemic/->Derived
+                  "rule-a" ["premise-missing"] "evidence-derived")))
+          :epistemic/invalid-derived)
+         (admitted? (epistemic/admit-fact context receipt))
+         (epistemic/satisfies? receipt (epistemic/require-effect-receipt))
+         (rejected-as?
+          (epistemic/admit-fact
+           context
+           (fact "fact-wrong-capability"
+                 (epistemic/->EffectReceipt
+                  "receipt-b" "attempt-a" "cap-deploy" "runner"
+                  "evidence-receipt")))
+          :epistemic/invalid-effect-receipt)
+         (rejected-as?
+          (epistemic/admit-fact
+           context
+           (fact "fact-expired"
+                 (epistemic/->Observed
+                  "observer" "evidence-observed" 70 90)))
+          :epistemic/invalid-observed)
+         (persisted? derived-result)
+         (persisted? receipt-result)
+         (persisted? duplicate-first)
+         (persisted? duplicate-second)
+         (reconstructs? view derived)
+         (reconstructs? view receipt)
+         (malformed? view "fact-declared"))
+      0
+      1)))
