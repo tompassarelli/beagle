@@ -18,6 +18,7 @@ set -euo pipefail
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
+SEMANTIC_READ_STORE="$BEAGLE_DIR/native-core/bin/semantic_read_store.clj"
 AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
 CORE_COMPILER_PROJECTION="$BIN/beagle-core-compiler-projection"
@@ -431,6 +432,8 @@ for command in bb flock python3 sha256sum sync timeout; do
     command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
+[[ -f "$SEMANTIC_READ_STORE" ]] ||
+    die "semantic-read Store adapter is unavailable: $SEMANTIC_READ_STORE"
 [[ -f "$AST_VERIFIER" ]] || die "checked-AST verifier is unavailable: $AST_VERIFIER"
 [[ -f "$FINALIZER" ]] || die "build finalizer is unavailable: $FINALIZER"
 [[ -x "$CORE_COMPILER_PROJECTION" ]] ||
@@ -609,6 +612,7 @@ cache_key_material() {
                 native-core/bin/emit-workers
                 native-core/bin/run-bounded
                 native-core/bin/run-bounded.rkt
+                native-core/bin/semantic_read_store.clj
                 native-core/validation/build-finalize.clj
                 share/targets.sh
                 flake.nix
@@ -1932,6 +1936,9 @@ export BEAGLE_CORE_DEV_FACT_REUSE="$dev_fact_reuse"
 export BEAGLE_CORE_DEV_FACT_STORE="$dev_fact_store"
 export BEAGLE_CORE_REPO_ROOT="$BEAGLE_DIR"
 export BEAGLE_CORE_COMPILER_SOURCE_DIGEST="$compiler_source_digest"
+export BEAGLE_CORE_COMPILER_PROJECTION_ID="sha256:$projection_cache_key"
+export BEAGLE_CORE_SEMANTIC_READ_RULES_ID="sha256:$compiler_source_digest"
+export BEAGLE_CORE_SEMANTIC_READ_STORE="$cache_root/semantic-read.storelog"
 if [[ "$core_checkpoint_cache_hit" == 1 ]]; then
     export BEAGLE_CORE_CHECKPOINT_WIRE=\
 "$work/core-checkpoint-hit/frozen-native-stage.wire-v1"
@@ -1948,7 +1955,7 @@ fi
 
 set +e
 run_phase core-lowering "${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}" \
-bb -cp "$compiled" -e '
+bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
 (require (quote [native.core :as core])
          (quote [native.stages :as stages])
          (quote [native.simd :as simd])
@@ -1961,6 +1968,7 @@ bb -cp "$compiled" -e '
          (quote [native.body-c17 :as body])
          (quote [native.body-slice :as body-slice])
          (quote [native.qbe :as qbe])
+         (quote [semantic-read-store :as semantic-cache])
          (quote [clojure.edn :as edn])
          (quote [clojure.java.shell :as shell])
          (quote [clojure.string :as str]))
@@ -3620,20 +3628,44 @@ bb -cp "$compiled" -e '
   [facts-path projected-facts-path artifacts-dir compiler-commit entries
    materializers abi-id abi simd-required?]
   (start-stage! "source-projection")
-  (let [raw-rows (slice/parse-facts (slurp facts-path))
+  (let [raw-facts (slurp facts-path)
+        raw-rows (slice/parse-facts raw-facts)
         strict-entry-abi? (boolean (some #{"wasm"} materializers))
-        projection (project-entry-rows raw-rows entries strict-entry-abi?)]
-    (if-not (:ok? projection)
+        cache-request
+        (semantic-cache/request
+         raw-facts
+         (System/getenv "BEAGLE_CORE_COMPILER_PROJECTION_ID")
+         (System/getenv "BEAGLE_CORE_SEMANTIC_READ_RULES_ID")
+         entries strict-entry-abi?)
+        cached-projected-facts
+        (semantic-cache/query!
+         (System/getenv "BEAGLE_CORE_SEMANTIC_READ_STORE") cache-request)
+        projection
+        (when (nil? cached-projected-facts)
+          (project-entry-rows raw-rows entries strict-entry-abi?))]
+    (binding [*out* *err*]
+      (println (str "beagle build: semantic-read-cache "
+                    (if (nil? cached-projected-facts) "MISS " "HIT ")
+                    (:key cache-request))))
+    (if (and (nil? cached-projected-facts) (not (:ok? projection)))
       (do
         (finish-stage! "source-projection" "REJECTED")
         {:ok? false
          :report (str "stage source-projection REJECTED\n"
                       "entry-error " (:detail projection) "\n"
                       "result FAIL entry projection\n")})
-      (let [rows (semantic-read-set-rows
+      (let [projected-facts
+            (or cached-projected-facts
+                (rows-text
+                 (semantic-read-set-rows
                   (:rows projection) (:index projection)
-                  (:selected projection) (:dependency-for projection))
-            projected-facts (rows-text rows)
+                  (:selected projection) (:dependency-for projection))))
+            _cache-publish
+            (when (nil? cached-projected-facts)
+              (semantic-cache/append!
+               (System/getenv "BEAGLE_CORE_SEMANTIC_READ_STORE")
+               cache-request projected-facts))
+            rows (slice/parse-facts projected-facts)
             _ (spit projected-facts-path projected-facts)
             configuration ["profile=3" (str "abi=" abi-id)
                            (str "source-facts-sha256="
