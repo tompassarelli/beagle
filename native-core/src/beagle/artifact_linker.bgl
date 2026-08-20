@@ -195,16 +195,17 @@
           [(ArtifactFilesDecodeErrorV1 detail)
            (->ArtifactEnvelopeDecodeErrorV1 detail)]
           [(ArtifactFilesDecodedV1 files next-index)
-           (if (or (not= (+ next-index 1) (count events))
-                   (not (json-array-end? (nth events next-index))))
-             (->ArtifactEnvelopeDecodeErrorV1
-               "artifact envelope contains trailing events")
-             (let [artifact TargetArtifactV1
-                   (->TargetArtifactV1 target files encoding digest)]
-               (if (artifact-valid? artifact)
-                 (->ArtifactEnvelopeDecodedV1 artifact)
-                 (->ArtifactEnvelopeDecodeErrorV1
-                   "artifact envelope target or digest is invalid"))))])))))
+           (let [after-files Int next-index]
+             (if (or (not= (+ after-files 1) (count events))
+                     (not (json-array-end? (nth events after-files))))
+               (->ArtifactEnvelopeDecodeErrorV1
+                 "artifact envelope contains trailing events")
+               (let [artifact TargetArtifactV1
+                     (->TargetArtifactV1 target files encoding digest)]
+                 (if (artifact-valid? artifact)
+                   (->ArtifactEnvelopeDecodedV1 artifact)
+                   (->ArtifactEnvelopeDecodeErrorV1
+                     "artifact envelope target or digest is invalid")))))])))))
 
 (defn decode-artifact-envelope
   [claimed-content-id String
