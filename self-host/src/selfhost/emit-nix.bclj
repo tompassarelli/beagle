@@ -1417,8 +1417,8 @@
       (and (some? fname) (= fname "get"))
       (if (< n 2)
         (str "builtins.getAttr " (str/join " " (mapv emit args)))
-        (let [key-arg (nth args 1)
-              target-str (pw (nth args 0))]
+        (let [key-arg Any (nth args 1)
+              target-str String (pw (nth args 0))]
           (if (get-is-keyword? key-arg)
             (str target-str "."
               (keyword-selection-field
@@ -1480,7 +1480,7 @@
       (and (some? fname) (= fname "println"))
       (str "builtins.trace " (pw (nth args 0)) " null")
       (qualified-reference? fn-expr)
-      (let [nix-name (mangle-qualified-name fn-expr)]
+      (let [nix-name String (mangle-qualified-name fn-expr)]
         (if (= 0 n) (str nix-name " null")
           (str nix-name " " (str/join " " (mapv pw args)))))
       :else
