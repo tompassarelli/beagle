@@ -6,8 +6,8 @@
             [store.types :as t]))
 
 (def space-id String "program-space")
-(def profile String "program-profile-v1")
-(def rule String "program-admission")
+(def profile Keyword :program)
+(def rule String "FNF")
 (def base-root-resource String "root-v7")
 (def next-root-resource String "root-v8")
 (def collision-root-resource String "root-collision")
@@ -69,7 +69,6 @@
    (relationship program/depends-on)
    (relationship program/derived-from)
    (relationship program/admitted-by)
-   (relationship program/includes)
    (relationship program/has-span)
    (relationship program/through-byte)
    (relationship program/named)
@@ -77,7 +76,6 @@
    (t/triple profile kernel/profile-includes
      kernel/fact-normal-form-profile-rule)
    (t/triple profile program/member-of program/profiles)
-   (t/triple profile program/includes rule)
    (t/triple rule program/member-of program/profile-rules)])
 
 (def propositions (Vec t/Triple)

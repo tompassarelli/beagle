@@ -5,8 +5,8 @@
             [store.program :as program]
             [store.types :as t]))
 
-(def profile String "program-profile-v1")
-(def rule String "fnf-rule-v1")
+(def profile Keyword :program)
+(def rule String "FNF")
 (def space-id String "program-fixture")
 (def root String "program-root-7")
 (def module-a String "module-a")
@@ -30,7 +30,6 @@
    (t/triple program/depends-on program/member-of program/relationships)
    (t/triple program/derived-from program/member-of program/relationships)
    (t/triple program/admitted-by program/member-of program/relationships)
-   (t/triple program/includes program/member-of program/relationships)
    (t/triple program/has-span program/member-of program/relationships)
    (t/triple program/named program/member-of program/relationships)
    (t/triple program/declares-at program/member-of program/relationships)
@@ -42,7 +41,6 @@
        kernel/observe-profile-mode))
    (kernel/profile-rule profile kernel/fact-normal-form-profile-rule)
    (t/triple profile program/member-of program/profiles)
-   (t/triple profile program/includes rule)
    (t/triple rule program/member-of program/profile-rules)
    (t/triple root program/member-of program/program-roots)
    (t/triple root program/admitted-by profile)

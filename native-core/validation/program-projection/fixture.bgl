@@ -234,10 +234,7 @@
       (structural-reference? (first top-references))
       (structural-reference? (first shadow-references))
       (= after-source (represented-source after-propositions))
-      (= after-propositions clean-propositions)
-      (proposition-present?
-        after-propositions projection/declares-at
-        projection/member-of projection/relationships))))
+      (= after-propositions clean-propositions))))
 
 (defn main [args (Vec String)] Int
   (match (project-source before-source)

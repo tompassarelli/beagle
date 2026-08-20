@@ -7,8 +7,8 @@
 
 (def root-a String "root-a")
 (def root-b String "root-b")
-(def profile String "program-profile-v1")
-(def rule String "program-admission")
+(def profile Keyword :program)
+(def rule String "FNF")
 (def module-def String "module-def")
 (def module-caller String "module-caller")
 (def module-other String "module-other")
@@ -51,7 +51,6 @@
    (relationship :depends_on)
    (relationship :derived_from)
    (relationship :admitted_by)
-   (relationship :includes)
    (relationship :has_span)
    (relationship :through_byte)
    (relationship :named)
@@ -60,7 +59,6 @@
    (t/triple profile kernel/profile-includes
              kernel/fact-normal-form-profile-rule)
    (t/triple profile :member_of :profiles)
-   (t/triple profile :includes rule)
    (t/triple rule :member_of :profile_rules)])
 
 (def root-a-propositions (Vec t/Triple)

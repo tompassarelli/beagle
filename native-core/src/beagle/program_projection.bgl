@@ -12,15 +12,11 @@
 (def represented-by Keyword :represented_by)
 (def refers-to Keyword :refers_to)
 (def depends-on Keyword :depends_on)
-(def derived-from Keyword :derived_from)
-(def admitted-by Keyword :admitted_by)
-(def includes Keyword :includes)
 (def has-span Keyword :has_span)
 (def named Keyword :named)
 (def through-byte Keyword :through_byte)
 (def declares-at Keyword :declares_at)
 
-(def relationships Keyword :relationships)
 (def modules Keyword :modules)
 (def bindings Keyword :bindings)
 (def references Keyword :references)
@@ -238,20 +234,6 @@
                   (recur (vec (rest remaining)) (conj functions function))))
               (recur (vec (rest remaining)) functions))))))))
 
-(defn relationship-declarations [] (Vec t/Triple)
-  [(t/triple member-of member-of relationships)
-   (t/triple contains member-of relationships)
-   (t/triple represented-by member-of relationships)
-   (t/triple refers-to member-of relationships)
-   (t/triple depends-on member-of relationships)
-   (t/triple derived-from member-of relationships)
-   (t/triple admitted-by member-of relationships)
-   (t/triple includes member-of relationships)
-   (t/triple has-span member-of relationships)
-   (t/triple named member-of relationships)
-   (t/triple through-byte member-of relationships)
-   (t/triple declares-at member-of relationships)])
-
 (defn append-unique-triple
   [propositions (Vec t/Triple) proposition t/Triple] (Vec t/Triple)
   (if (some?
@@ -432,8 +414,7 @@
           "raw syntax facts do not contain a complete top-level function projection")
         (let [base (Vec t/Triple)
               (conj
-                (conj (relationship-declarations)
-                      (t/triple logical-module member-of modules))
+                [(t/triple logical-module member-of modules)]
                 (t/triple logical-module represented-by
                           (facts/syntaxfactbundle-source-text bundle)))
               declared (Vec t/Triple)

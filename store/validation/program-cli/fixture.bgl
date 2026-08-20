@@ -12,8 +12,8 @@
             [store.types :as t]))
 
 (def space-id String "program-cli-space")
-(def profile String "program-cli-profile")
-(def rule String "program-cli-admission")
+(def profile Keyword :program)
+(def rule String "FNF")
 (def root String "program-cli-root-v1")
 (def other-root String "program-cli-other-root-v1")
 (def module String "fixture/shadowing-rename.bgl")
@@ -96,7 +96,6 @@
     [(t/triple profile kernel/profile-includes
        kernel/fact-normal-form-profile-rule)
      (t/triple profile program/member-of program/profiles)
-     (t/triple profile program/includes rule)
      (t/triple rule program/member-of program/profile-rules)
      (t/triple space-id kernel/profile-anchor
        (kernel/profile-header profile program/fact-profile-kind

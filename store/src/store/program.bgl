@@ -28,7 +28,8 @@
 (def depends-on Keyword :depends_on)
 (def derived-from Keyword :derived_from)
 (def admitted-by Keyword :admitted_by)
-(def includes Keyword :includes)
+(def captures Keyword :captures)
+(def compiled-with Keyword :compiled_with)
 (def has-span Keyword :has_span)
 (def named Keyword :named)
 (def declares-at Keyword :declares_at)
@@ -41,6 +42,7 @@
 (def modules Keyword :modules)
 (def bindings Keyword :bindings)
 (def references Keyword :references)
+(def program-profile Keyword :program)
 (def fact-profile-kind String "fact-oriented")
 
 ;; ProgramRoot keeps a closed Term field; this bridge works around Beagle's
@@ -78,11 +80,10 @@
                       (and (relation-declared? root depends-on)
                            (and (relation-declared? root derived-from)
                                 (and (relation-declared? root admitted-by)
-                                     (and (relation-declared? root includes)
-                                          (and (relation-declared? root has-span)
-                                               (and (relation-declared? root named)
-                                                    (and (relation-declared? root declares-at)
-                                                         (relation-declared? root through-byte)))))))))))))
+                                     (and (relation-declared? root has-span)
+                                          (and (relation-declared? root named)
+                                               (and (relation-declared? root declares-at)
+                                                    (relation-declared? root through-byte))))))))))))
 
 (defn kernel-fact-normal-form-valid? [root ProgramRoot] Bool
   (let [triples (Vec t/Triple) (programroot-propositions root)
@@ -281,39 +282,25 @@
     (and (> (count (programroot-space-id root)) 0)
          (and (>= (programroot-store-version root) 0)
               (and (t/atom? resource)
-                   (and (proposition-present?
-                          root space-id kernel/profile-anchor
-                          (kernel/profile-header
-                            profile fact-profile-kind
-                            kernel/observe-profile-mode))
+                   (and (= profile program-profile)
                         (and (proposition-present?
-                               root profile kernel/profile-includes
-                               kernel/fact-normal-form-profile-rule)
+                               root space-id kernel/profile-anchor
+                               (kernel/profile-header
+                                 program-profile fact-profile-kind
+                                 kernel/observe-profile-mode))
                              (and (proposition-present?
-                                    root profile member-of profiles)
-                                  (and (some?
-                                         (some
-                                           (fn [proposition t/Triple] t/Triple?
-                                             (let [rule Any (t/triple-t3 proposition)]
-                                               (if (and
-                                                     (= profile
-                                                        (t/triple-t1 proposition))
-                                                     (and
-                                                       (= includes
-                                                          (t/triple-t2 proposition))
-                                                       (and
-                                                         (t/atom? rule)
-                                                         (proposition-present?
-                                                           root rule member-of
-                                                           profile-rules))))
-                                                 proposition
-                                                 nil)))
-                                           (programroot-propositions root)))
+                                    root program-profile kernel/profile-includes
+                                    kernel/fact-normal-form-profile-rule)
+                                  (and (proposition-present?
+                                         root program-profile member-of profiles)
                                        (and (proposition-present?
-                                              root resource member-of program-roots)
-                                            (proposition-present?
-                                              root resource admitted-by
-                                              profile)))))))))))
+                                              root kernel/fact-normal-form-profile-rule
+                                              member-of profile-rules)
+                                            (and (proposition-present?
+                                                   root resource member-of program-roots)
+                                                 (proposition-present?
+                                                   root resource admitted-by
+                                                   program-profile))))))))))))
 
 (defn validate-root [root ProgramRoot] ProgramAdmission
   (cond

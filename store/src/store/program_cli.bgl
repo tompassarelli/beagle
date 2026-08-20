@@ -441,24 +441,11 @@
         known
         (recur expanded)))))
 
-(defn- profile-rules
-  [profile t/Term propositions (Vec t/Triple)] (Vec Any)
-  (let [profile-value Any (term-value profile)]
-    (reduce
-      (fn [rules (Vec Any) proposition t/Triple] (Vec Any)
-        (if (and (= profile-value (t/triple-t1 proposition))
-                 (= program/includes (t/triple-t2 proposition)))
-          (let [rule Any (t/triple-t3 proposition)]
-            (if (value-present? rules rule) rules (conj rules rule)))
-          rules))
-      empty-any propositions)))
-
 (defn- root-proposition?
   [proposition t/Triple
    closure (Vec Any)
    space-id String
-   profile t/Term
-   rules (Vec Any)] Bool
+   profile t/Term] Bool
   (let [subject Any (t/triple-t1 proposition)
         relation Any (t/triple-t2 proposition)
         object Any (t/triple-t3 proposition)
@@ -474,11 +461,9 @@
       (and (= subject profile-value)
            (or (and (= relation kernel/profile-includes)
                     (= object kernel/fact-normal-form-profile-rule))
-               (or (and (= relation program/member-of)
-                        (= object program/profiles))
-                   (and (= relation program/includes)
-                        (value-present? rules object)))))
-      (and (value-present? rules subject)
+               (and (= relation program/member-of)
+                    (= object program/profiles))))
+      (and (= subject kernel/fact-normal-form-profile-rule)
            (and (= relation program/member-of)
                 (= object program/profile-rules)))
       (and (= relation program/member-of)
@@ -487,11 +472,10 @@
 (defn- root-scoped-propositions
   [space-id String root-resource t/Term profile t/Term
    propositions (Vec t/Triple)] (Vec t/Triple)
-  (let [closure (Vec Any) (root-closure root-resource propositions)
-        rules (Vec Any) (profile-rules profile propositions)]
+  (let [closure (Vec Any) (root-closure root-resource propositions)]
     (filterv
       (fn [proposition t/Triple] Bool
-        (root-proposition? proposition closure space-id profile rules))
+        (root-proposition? proposition closure space-id profile))
       propositions)))
 
 (defn- load-history!
