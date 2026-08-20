@@ -1,6 +1,7 @@
 #lang beagle
 (ns compiler-import-closure.fixture
-  (:require [beagle.compiler-driver :as driver]
+  (:require [beagle.bootstrap-contract :as bootstrap]
+            [beagle.compiler-driver :as driver]
             [beagle.frontend-facts :as facts]
             [beagle.parser :as parser]
             [beagle.parser-reader :as parser-reader]
@@ -16,7 +17,7 @@
   "#lang beagle\n(ns app.main (:require [app.mid :as mid]))\n(defn main [args (Vec String)] Int 0)\n")
 
 (def mid-source String
-  "#lang beagle\n(ns app.mid (:require [app.leaf :as leaf]))\n(defn value [arg Int] Int 1)\n")
+  "#lang beagle\n(ns app.mid (:require [app.leaf :as leaf] [clojure.string :as str]))\n(defn value [arg Int] Int 1)\n")
 
 (def leaf-source String
   "#lang beagle\n(ns app.leaf)\n(defn value [arg Int] Int 2)\n")
@@ -68,6 +69,20 @@
           "app/leaf.bgl" true "sha256:leaf")]
     (if reversed [present absent] [absent present])))
 
+(def external-interface-path String "platform/clojure/string.interface")
+
+(defn external-resolution
+  [request driver/ImportResolutionRequestV1]
+  driver/ImportResolutionResponseV1
+  (let [dependency driver/ImportResolutionDependencyV1
+        (driver/->ImportResolutionDependencyV1
+          external-interface-path
+          true
+          bootstrap/clojure-string-interface-content-id)]
+    (driver/->ImportResolutionExternalV1
+      (receipt request [dependency] external-interface-path)
+      bootstrap/clojure-string-interface-content-id)))
+
 (defn resolve-fixture
   [request driver/ImportResolutionRequestV1
    reversed Bool] driver/ImportResolutionResponseV1
@@ -93,6 +108,9 @@
           (driver/->ImportResolutionFailedV1 resolved-receipt 70
             "fixture leaf source did not normalize")
           (driver/->ImportResolutionFoundV1 resolved-receipt source)))
+
+      (= "clojure.string" required)
+      (external-resolution request)
 
       :else
       (driver/->ImportResolutionMissingV1
@@ -150,7 +168,11 @@
         modules (Vec facts/SyntaxFactBundle)
         (facts/syntaxfactclosure-modules closure)
         receipts (Vec driver/ImportResolutionReceiptV1)
-        (driver/collectedsourcefactsv1-receipts collected)]
+        (driver/collectedsourcefactsv1-receipts collected)
+        external-imports (Vec driver/ExternalImportResolutionV1)
+        (driver/collectedsourcefactsv1-external-imports collected)
+        mid-imports (Vec facts/ImportEdgeFact)
+        (facts/syntaxfactbundle-imports (nth modules 1))]
     (and (= 3 (count modules))
          (= "app/leaf.bgl"
             (facts/syntaxfactbundle-path (nth modules 0)))
@@ -160,8 +182,27 @@
             (facts/syntaxfactbundle-path (nth modules 2)))
          (= ["app/leaf.bgl" "app/mid.bgl" "app/main.bgl"]
             (driver/closure-source-paths closure))
-         (= 2 (count receipts))
-         (canonical-receipt? (first receipts)))))
+         (= 3 (count receipts))
+         (canonical-receipt? (first receipts))
+         (= 1 (count mid-imports))
+         (= "app.leaf"
+            (facts/importedgefact-required (first mid-imports)))
+         (= 1 (count external-imports))
+         (= "app/mid.bgl"
+            (driver/externalimportresolutionv1-importer-path
+              (first external-imports)))
+         (= 1
+            (driver/externalimportresolutionv1-import-order
+              (first external-imports)))
+         (= "clojure.string"
+            (driver/externalimportresolutionv1-required-namespace
+              (first external-imports)))
+         (= bootstrap/clojure-string-interface-content-id
+            (driver/externalimportresolutionv1-interface-content-id
+              (first external-imports)))
+         (= external-interface-path
+            (driver/importresolutionreceiptv1-selected-path
+              (nth receipts 2))))))
 
 (defn transitive-closure-deterministic? [ignored Int] Bool
   (let [entry driver/ResolvedSourceFactsV1?
@@ -181,7 +222,9 @@
                     (facts/syntaxfactclosure-closure-digest
                       (driver/collectedsourcefactsv1-closure reversed)))
                  (= (driver/collectedsourcefactsv1-receipts forward)
-                    (driver/collectedsourcefactsv1-receipts reversed)))])]))))
+                    (driver/collectedsourcefactsv1-receipts reversed))
+                 (= (driver/collectedsourcefactsv1-external-imports forward)
+                    (driver/collectedsourcefactsv1-external-imports reversed)))])]))))
 
 (defn missing-provider-rejected? [ignored Int] Bool
   (let [entry driver/ResolvedSourceFactsV1?

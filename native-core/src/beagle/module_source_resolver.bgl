@@ -1,6 +1,7 @@
 #lang beagle
 (ns beagle.module-source-resolver
-  (:require [beagle.compiler-driver :as driver]
+  (:require [beagle.bootstrap-contract :as bootstrap]
+            [beagle.compiler-driver :as driver]
             [beagle.frontend-facts :as facts]
             [beagle.parser :as parser]
             [beagle.parser-reader :as parser-reader]
@@ -334,17 +335,48 @@
     dependencies
     selected))
 
+(def clojure-string-namespace String "clojure.string")
+(def clojure-string-interface-path String
+  "platform/clojure/string.interface")
+
+(defn resolve-clojure-string
+  [request driver/ImportResolutionRequestV1]
+  driver/ImportResolutionResponseV1
+  (let [dependency driver/ImportResolutionDependencyV1
+        (driver/->ImportResolutionDependencyV1
+          clojure-string-interface-path
+          true
+          bootstrap/clojure-string-interface-content-id)]
+    (driver/->ImportResolutionExternalV1
+      (request-receipt
+        request
+        [dependency]
+        clojure-string-interface-path)
+      bootstrap/clojure-string-interface-content-id)))
+
 (defn resolve-import
   [roots (Vec ModuleSourceRootV1)
    request driver/ImportResolutionRequestV1]
   driver/ImportResolutionResponseV1
   (let [required String
         (driver/importresolutionrequestv1-required-namespace request)]
-    (if (or (empty? roots) (not (canonical-namespace? required)))
+    (cond
+      (not (canonical-namespace? required))
       (driver/->ImportResolutionFailedV1
         (request-receipt request [] nil)
         64
-        "import resolution requires roots and a canonical namespace")
+        "import resolution requires a canonical namespace")
+
+      (= required clojure-string-namespace)
+      (resolve-clojure-string request)
+
+      (empty? roots)
+      (driver/->ImportResolutionFailedV1
+        (request-receipt request [] nil)
+        64
+        "source import resolution requires exact module roots")
+
+      :else
       (let [state CandidateScanStateV1
             (reduce
               (fn [scan CandidateScanStateV1

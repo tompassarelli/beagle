@@ -26,6 +26,9 @@
 (def materializer-rule-descriptor String
   "beagle-native-rule-module-v1|materializer|compiler/native|compiler/artifact")
 
+(def clojure-string-interface-descriptor String
+  "beagle-native-external-interface/v1|clojure.string|join:(Any,rest Any)->String|split:(String,Regex,rest Int)->Vec<String>|replace:(String,U<String,Regex>,String)->String|trim:(String)->String|triml:(String)->String|trimr:(String)->String|upper-case:(String)->String|lower-case:(String)->String|capitalize:(String)->String|blank?:(Any)->Bool|includes?:(String,String)->Bool|starts-with?:(String,String)->Bool|ends-with?:(String,String)->Bool|reverse:(String)->String|escape:(String,Any)->String|re-quote-replacement:(String)->String|index-of:(String,Any,rest Int)->U<Int,Nil>|last-index-of:(String,Any,rest Int)->U<Int,Nil>|split-lines:(String)->Vec<String>|replace-first:(String,Any,Any)->String")
+
 (def datum-reader-capability-descriptor String
   "beagle-native-seed-capability-v1|datum-reader")
 (def store-evaluator-capability-descriptor String
@@ -50,6 +53,8 @@
   (content-id lowering-rule-descriptor))
 (def materializer-rule-content-id String
   (content-id materializer-rule-descriptor))
+(def clojure-string-interface-content-id String
+  (content-id clojure-string-interface-descriptor))
 
 (def datum-reader-capability-content-id String
   (content-id datum-reader-capability-descriptor))
@@ -63,6 +68,7 @@
 (def compiler-rule-set-descriptor String
   (str "beagle-native-compiler-rules-v1|"
        compiler-schema-content-id "|"
+       clojure-string-interface-content-id "|"
        grammar-rule-content-id "|"
        macro-rule-content-id "|"
        type-rule-content-id "|"
@@ -209,6 +215,8 @@
     "compiler-context-content-id " default-compiler-context-id "\n"
     "schema-content-id " compiler-schema-content-id "\n"
     "rule-set-content-id " default-rule-set-content-id "\n"
+    "clojure-string-interface-content-id "
+    clojure-string-interface-content-id "\n"
     "target-id " default-target-id "\n"
     "profile " default-profile "\n"
     "datum-reader-content-id " datum-reader-capability-content-id "\n"
