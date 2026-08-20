@@ -24,7 +24,7 @@
 
 (defrecord SsaValidationIndexV0
   [(definitions (Map String DefSiteV0))
-   (paths-avoiding (Map String Bool))])
+   (dominators (Map String String))])
 
 (defrecord CheckedUseScanV0 [(handled Bool) (legal Bool)])
 
@@ -88,10 +88,6 @@
 
 (defn native-id-key [(id core/NativeId)] String
   (core/nativeid-value id))
-
-(defn avoiding-path-key [(avoided core/NativeId) (target core/NativeId)] String
-  (let [(avoided-value String) (native-id-key avoided)]
-    (str (count avoided-value) ":" avoided-value (native-id-key target))))
 
 (defn index-parameter-sites
   [(definitions (Map String DefSiteV0))
@@ -236,61 +232,142 @@
     (terminator-successors (nth (core/basicblock-terminators block) 0))
     []))
 
-(defn reachable-blocks-avoiding
+(defn predecessor-index
+  [(blocks (Vec core/BasicBlock))] (Map String (Vec core/NativeId))
+  (loop [block-position Int 0
+         predecessors (Map String (Vec core/NativeId)) {}]
+    (if (>= block-position (count blocks))
+      predecessors
+      (let [(block core/BasicBlock) (nth blocks block-position)
+            (block-id core/NativeId) (core/basicblock-id block)
+            (successors (Vec core/NativeId)) (block-successors block)
+            (next-predecessors (Map String (Vec core/NativeId)))
+            (loop [successor-position Int 0
+                   current (Map String (Vec core/NativeId)) predecessors]
+              (if (>= successor-position (count successors))
+                current
+                (let [(successor core/NativeId) (nth successors successor-position)
+                      (successor-key String) (native-id-key successor)
+                      (found (Vec core/NativeId)) (get current successor-key [])]
+                  (recur (+ successor-position 1)
+                    (assoc current successor-key (conj found block-id))))))]
+        (recur (+ block-position 1) next-predecessors)))))
+
+(defn reachable-block-order
   [(blocks (Map String core/BasicBlock))
-   (entry core/NativeId)
-   (avoided core/NativeId)] (Map String Bool)
+   (entry core/NativeId)] (Vec core/NativeId)
   (loop [position Int 0
          pending (Vec core/NativeId) [entry]
-         seen (Map String Bool) {}]
+         seen (Map String Bool) {}
+         order (Vec core/NativeId) []]
     (if (>= position (count pending))
-      seen
+      order
       (let [(current core/NativeId) (nth pending position)
-            (current-key String) (native-id-key current)]
+            (current-key String) (native-id-key current)
+            (block (U core/BasicBlock Nil)) (get blocks current-key)]
         (cond
-          (core/native-id= current avoided)
-          (recur (+ position 1) pending seen)
-
           (= true (get seen current-key))
-          (recur (+ position 1) pending seen)
+          (recur (+ position 1) pending seen order)
+
+          (nil? block)
+          (recur (+ position 1) pending (assoc seen current-key true) order)
 
           :else
-          (let [(block (U core/BasicBlock Nil)) (get blocks current-key)
-                (next-pending (Vec core/NativeId))
-                (if (nil? block)
-                  pending
-                  (core/append-ids pending (block-successors block)))]
-            (recur (+ position 1) next-pending (assoc seen current-key true))))))))
+          (recur (+ position 1)
+            (core/append-ids pending (block-successors block))
+            (assoc seen current-key true)
+            (conj order current)))))))
 
-(defn paths-avoiding-index [(function core/FunctionDef)] (Map String Bool)
+(defn block-order-index
+  [(blocks (Vec core/NativeId))] (Map String Int)
+  (loop [position Int 0 order (Map String Int) {}]
+    (if (>= position (count blocks))
+      order
+      (recur (+ position 1)
+        (assoc order (native-id-key (nth blocks position)) position)))))
+
+(defn intersect-dominator-chains
+  [(dominators (Map String String))
+   (order (Map String Int))
+   (left String)
+   (right String)] String
+  (loop [left-key String left right-key String right]
+    (cond
+      (= left-key right-key) left-key
+      (> (get order left-key -1) (get order right-key -1))
+      (recur (get dominators left-key "") right-key)
+      :else
+      (recur left-key (get dominators right-key "")))))
+
+(defn common-predecessor-dominator
+  [(predecessors (Vec core/NativeId))
+   (dominators (Map String String))
+   (order (Map String Int))] String
+  (loop [position Int 0 candidate String ""]
+    (if (>= position (count predecessors))
+      candidate
+      (let [(predecessor-key String)
+            (native-id-key (nth predecessors position))]
+        (if (contains? dominators predecessor-key)
+          (recur (+ position 1)
+            (if (= "" candidate)
+              predecessor-key
+              (intersect-dominator-chains dominators order
+                predecessor-key candidate)))
+          (recur (+ position 1) candidate))))))
+
+(defn dominator-index [(function core/FunctionDef)] (Map String String)
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
         (blocks-by-id (Map String core/BasicBlock)) (block-index blocks)
-        (entry core/NativeId) (core/functiondef-entry-block function)]
-    (loop [avoided-position Int 0 paths (Map String Bool) {}]
-      (if (>= avoided-position (count blocks))
-        paths
-        (let [(avoided core/NativeId)
-              (core/basicblock-id (nth blocks avoided-position))]
-          (if (core/native-id= avoided entry)
-            (recur (+ avoided-position 1) paths)
-            (let [(reachable (Map String Bool))
-                  (reachable-blocks-avoiding blocks-by-id entry avoided)
-                  (next-paths (Map String Bool))
-                  (loop [target-position Int 0 current (Map String Bool) paths]
-                    (if (>= target-position (count blocks))
-                      current
-                      (let [(target core/NativeId)
-                            (core/basicblock-id (nth blocks target-position))]
-                        (recur (+ target-position 1)
-                          (if (= true (get reachable (native-id-key target)))
-                            (assoc current (avoiding-path-key avoided target) true)
-                            current)))))]
-              (recur (+ avoided-position 1) next-paths))))))))
+        (entry core/NativeId) (core/functiondef-entry-block function)
+        (reachable (Vec core/NativeId)) (reachable-block-order blocks-by-id entry)
+        (order (Map String Int)) (block-order-index reachable)
+        (predecessors (Map String (Vec core/NativeId))) (predecessor-index blocks)]
+    (if (= 0 (count reachable))
+      {}
+      (let [(entry-key String) (native-id-key entry)]
+        (loop [dominators (Map String String) {entry-key entry-key}]
+          (let [(next-dominators (Map String String))
+                (loop [position Int 1 current (Map String String) dominators]
+                  (if (>= position (count reachable))
+                    current
+                    (let [(block-key String) (native-id-key (nth reachable position))
+                          (block-predecessors (Vec core/NativeId))
+                          (get predecessors block-key [])
+                          (candidate String)
+                          (common-predecessor-dominator block-predecessors current order)]
+                      (recur (+ position 1)
+                        (if (= "" candidate)
+                          current
+                          (assoc current block-key candidate))))))]
+            (if (= dominators next-dominators)
+              dominators
+              (recur next-dominators))))))))
+
+(defn block-dominates?
+  [(dominators (Map String String))
+   (definition-block core/NativeId)
+   (use-block core/NativeId)] Bool
+  (let [(definition-key String) (native-id-key definition-block)
+        (use-key String) (native-id-key use-block)]
+    (cond
+      ;; The previous avoiding-path index found no path to an unreachable use,
+      ;; so every other block was considered to dominate it.
+      (not (contains? dominators use-key)) true
+      (not (contains? dominators definition-key)) false
+      :else
+      (loop [current String use-key]
+        (if (= current definition-key)
+          true
+          (let [(parent String) (get dominators current "")]
+            (if (or (= "" parent) (= parent current))
+              false
+              (recur parent))))))))
 
 (defn ssa-validation-index [(function core/FunctionDef)] SsaValidationIndexV0
   (->SsaValidationIndexV0
     (definition-index function)
-    (paths-avoiding-index function)))
+    (dominator-index function)))
 
 (defn indexed-def-site
   [(index SsaValidationIndexV0)
@@ -314,9 +391,8 @@
       (core/native-id= (defsitev0-block-id site)
         (core/functiondef-entry-block function)) true
       :else
-      (not (= true
-        (get (ssavalidationindexv0-paths-avoiding index)
-          (avoiding-path-key (defsitev0-block-id site) use-block)))))))
+      (block-dominates? (ssavalidationindexv0-dominators index)
+        (defsitev0-block-id site) use-block))))
 
 (defn refs-dominate?
   [(validation-index SsaValidationIndexV0)
