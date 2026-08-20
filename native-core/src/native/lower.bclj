@@ -24318,6 +24318,15 @@
      "v0"
      layouts-digest)])
 
+(defn called-abis
+  [(functions (Vec TypedFunctionV0))
+   (abis (Vec core/AbiDeclV0))]
+  (Vec core/AbiDeclV0)
+  (filterv
+    (fn [abi core/AbiDeclV0] Bool
+      (any-function-calls-abi? functions (core/abideclv0-id abi)))
+    abis))
+
 (defn slice-abis
   [(functions (Vec TypedFunctionV0))
    (native-functions (Vec core/FunctionDef))
@@ -24374,90 +24383,31 @@
           with-stderr)
         filesystem-abis (Vec core/AbiDeclV0)
         (host-filesystem-abis digest)
-        filesystem-base-used Bool
-        (or
-          (any-function-calls-abi? functions
-            (host-filesystem-abi-id "read-text-bounded"))
-          (any-function-calls-abi? functions
-            (host-filesystem-abi-id "list-directory-bounded"))
-          (any-function-calls-abi? functions
-            (host-filesystem-abi-id "path-kind"))
-          (any-function-calls-abi? functions
-            (host-filesystem-abi-id "write-text-atomic"))
-          (any-function-calls-abi? functions
-            (host-filesystem-abi-id "file-exists")))
-        with-filesystem-base (Vec core/AbiDeclV0)
-        (if filesystem-base-used
-          (vec (concat with-store
-            [(nth filesystem-abis 0) (nth filesystem-abis 1)
-             (nth filesystem-abis 2) (nth filesystem-abis 3)]))
-          with-store)
-        with-filesystem-parents (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-filesystem-abi-id "make-parent-directories"))
-          (conj with-filesystem-base (nth filesystem-abis 4))
-          with-filesystem-base)
-        with-filesystem-append (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-filesystem-abi-id "append-text"))
-          (conj with-filesystem-parents (nth filesystem-abis 5))
-          with-filesystem-parents)
+        called-filesystem-abis (Vec core/AbiDeclV0)
+        (called-abis functions filesystem-abis)
+        with-filesystem (Vec core/AbiDeclV0)
+        (vec (concat with-store called-filesystem-abis))
         with-filesystem-append-bytes (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions
               (host-filesystem-abi-id "append-bytes"))
-          (conj with-filesystem-append
+          (conj with-filesystem
             (host-filesystem-append-bytes-abi digest))
-          with-filesystem-append)
-        with-filesystem-lock (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-filesystem-abi-id "lock-exclusive"))
-          (conj with-filesystem-append-bytes (nth filesystem-abis 6))
-          with-filesystem-append-bytes)
-        with-filesystem (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-filesystem-abi-id "unlock"))
-          (conj with-filesystem-lock (nth filesystem-abis 7))
-          with-filesystem-lock)
-        with-filesystem-file-exists (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-filesystem-abi-id "file-exists"))
-          (conj with-filesystem (nth filesystem-abis 8))
           with-filesystem)
-        with-filesystem-abs-path (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-filesystem-abi-id "abs-path"))
-          (conj with-filesystem-file-exists (nth filesystem-abis 9))
-          with-filesystem-file-exists)
         with-stdin (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions
               (host-filesystem-abi-id "stdin-read-text-bounded"))
-          (conj with-filesystem-abs-path (host-stdin-abi digest))
-          with-filesystem-abs-path)
+          (conj with-filesystem-append-bytes (host-stdin-abi digest))
+          with-filesystem-append-bytes)
         with-filesystem-wait (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions
               (host-filesystem-abi-id "wait-for-change"))
           (conj with-stdin (host-filesystem-wait-abi digest))
           with-stdin)
-        with-whole-input-file (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-whole-input-abi-id "read-file-bounded"))
-          (conj with-filesystem-wait
-            (host-whole-input-abi "read-file-bounded" digest))
-          with-filesystem-wait)
-        with-whole-input (Vec core/AbiDeclV0)
-        (if (any-function-calls-abi? functions
-              (host-whole-input-abi-id "read-stdin-bounded"))
-          (conj with-whole-input-file
-            (host-whole-input-abi "read-stdin-bounded" digest))
-          with-whole-input-file)
         process-abis (Vec core/AbiDeclV0) (host-process-abis digest)
         called-process-abis (Vec core/AbiDeclV0)
-        (filterv
-          (fn [abi core/AbiDeclV0] Bool
-            (any-function-calls-abi? functions (core/abideclv0-id abi)))
-          process-abis)
+        (called-abis functions process-abis)
         with-process (Vec core/AbiDeclV0)
-        (vec (concat with-whole-input called-process-abis))
+        (vec (concat with-filesystem-wait called-process-abis))
         with-time-sleep (Vec core/AbiDeclV0)
         (if (any-function-calls-abi? functions (host-time-sleep-abi-id))
           (conj with-process (host-time-sleep-abi digest))
@@ -25900,43 +25850,17 @@
                      (host-stderr-write-line-abi-id)) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-store-abi-id)) 1 0)
-               (if (or
-                     (any-function-calls-abi? typed-functions
-                       (host-filesystem-abi-id "read-text-bounded"))
-                     (any-function-calls-abi? typed-functions
-                       (host-filesystem-abi-id "list-directory-bounded"))
-                     (any-function-calls-abi? typed-functions
-                       (host-filesystem-abi-id "path-kind"))
-                     (any-function-calls-abi? typed-functions
-                       (host-filesystem-abi-id "write-text-atomic"))
-                     (any-function-calls-abi? typed-functions
-                       (host-filesystem-abi-id "file-exists")))
-                 4 0)
+               (count
+                 (called-abis typed-functions
+                   (host-filesystem-abis (layout-digest layouts))))
                (if (any-function-calls-abi? typed-functions
-                     (host-filesystem-abi-id "file-exists")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-filesystem-abi-id "abs-path")) 1 0)
+                     (host-filesystem-abi-id "append-bytes")) 1 0)
                (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "stdin-read-text-bounded")) 1 0)
                (if (any-function-calls-abi? typed-functions
-                     (host-filesystem-abi-id "make-parent-directories")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-filesystem-abi-id "append-text")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-filesystem-abi-id "lock-exclusive")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-filesystem-abi-id "unlock")) 1 0)
-               (if (any-function-calls-abi? typed-functions
                      (host-filesystem-abi-id "wait-for-change")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-whole-input-abi-id "read-file-bounded")) 1 0)
-               (if (any-function-calls-abi? typed-functions
-                     (host-whole-input-abi-id "read-stdin-bounded")) 1 0)
                (count
-                 (filterv
-                   (fn [abi core/AbiDeclV0] Bool
-                     (any-function-calls-abi? typed-functions
-                       (core/abideclv0-id abi)))
+                 (called-abis typed-functions
                    (host-process-abis (layout-digest layouts))))
                (if (any-function-calls-abi? typed-functions
                      (host-time-sleep-abi-id)) 1 0)
