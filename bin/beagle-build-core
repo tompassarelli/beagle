@@ -3869,7 +3869,18 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                           (spit (str artifacts-dir "/module.simd-plan-v0")
                             (simd/simdplanv0-encoding simd-plan)))
                         _start-obligations (start-stage! "native-obligations")
-                        verdicts (obligations/validate-native-core-program projected abi)
+                        verdicts
+                        (mapv deref
+                          [(future (obligations/valid-ssa projected))
+                           (future (obligations/exhaustive-matches projected))
+                           (future (obligations/closed-layouts projected abi))
+                           (future (obligations/checked-arithmetic projected))
+                           (future (obligations/legal-abi projected))
+                           (future (obligations/discharged-tokens projected))
+                           (future (obligations/bounded-effects projected))
+                           (future (obligations/epoch-soundness projected))
+                           (future (obligations/leak-freedom projected))
+                           (future (obligations/deterministic-parallelism projected))])
                         head (str
                               (native-report-head rows entries source program projected
                                                   native-program epoch-result abi verdicts)
