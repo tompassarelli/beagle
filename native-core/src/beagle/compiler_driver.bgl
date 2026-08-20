@@ -10,8 +10,10 @@
             [beagle.frontend-facts :as facts]
             [beagle.parser :as parser]
             [beagle.parser-reader :as parser-reader]
+            [beagle.program-projection :as program-projection]
             [beagle.rule-scheduler :as scheduler]
-            [beagle.syntax-semantics :as semantics]))
+            [beagle.syntax-semantics :as semantics]
+            [store.types :as t]))
 
 (def max-source-bytes Int 67108864)
 
@@ -61,7 +63,8 @@
   (SourceFactsClosureRejected [code Int detail String]))
 
 (defrecord CheckedModuleFacts
-  [syntax facts/SyntaxFactBundle
+  [raw facts/SyntaxFactBundle
+   syntax facts/SyntaxFactBundle
    checked checker/CheckedFacts])
 
 (defrecord CheckedFactClosure
@@ -88,7 +91,25 @@
    c-compiler String
    qbe-compiler String])
 
+;; This plan crosses the compiler/Store authority boundary only long enough for
+;; the Store host to admit a durable ProgramRoot. Its program content is still
+;; canonical recursive Triples, never a stored compiler-specific row.
+(defrecord ProgramAdmissionPlan
+  [store-log String
+   space-id String
+   compiler-context String
+   closure-digest String
+   profile Keyword
+   root-resource t/Term
+   module-identities (Vec t/Term)
+   module-projections (Vec (Vec t/Triple))])
+
+(defunion ProgramAdmissionPlanResult
+  (ProgramAdmissionPlanned [plan ProgramAdmissionPlan])
+  (ProgramAdmissionPlanningRejected [code Int detail String]))
+
 (defunion CompileStoreRequest
+  (CompileStoreAdmitProgram [plan ProgramAdmissionPlan])
   (CompileStoreLookup
     [store-log String
      space-id String
@@ -107,6 +128,9 @@
   (CompileStoreWarmRejected
     [result profile/AdmittedResultClosure
      detail String])
+  (CompileStoreProgramAdmitted
+    [root-resource t/Term
+     root-version Int])
   CompileStorePersisted
   (CompileStoreFailure [code Int detail String]))
 
@@ -168,8 +192,21 @@
     [(parser/ExplicitBundleRejectedV1 errors)
      (->SourceFactsClosureRejected 65 (fact-errors-detail errors))]))
 
+(defn raw-modules-at-path
+  [raw-modules (Vec facts/SyntaxFactBundle)
+   path String] (Vec facts/SyntaxFactBundle)
+  (reduce
+    (fn [matches (Vec facts/SyntaxFactBundle)
+         candidate facts/SyntaxFactBundle] (Vec facts/SyntaxFactBundle)
+      (if (= path (facts/syntaxfactbundle-path candidate))
+        (conj matches candidate)
+        matches))
+    []
+    raw-modules))
+
 (defn check-fact-closure
-  [syntax facts/SyntaxFactClosure] CheckFactClosureResult
+  [syntax facts/SyntaxFactClosure
+   raw-modules (Vec facts/SyntaxFactBundle)] CheckFactClosureResult
   (loop [remaining (Vec facts/SyntaxFactBundle)
          (facts/syntaxfactclosure-modules syntax)
          checked-modules (Vec CheckedModuleFacts) []]
@@ -178,13 +215,92 @@
       (let [bundle facts/SyntaxFactBundle (first remaining)]
         (match (checker/check-facts bundle)
           [(checker/FactsChecked checked)
-           (recur (rest remaining)
-             (conj checked-modules (->CheckedModuleFacts bundle checked)))]
+           (let [matches (Vec facts/SyntaxFactBundle)
+                 (raw-modules-at-path
+                   raw-modules
+                   (facts/syntaxfactbundle-path bundle))]
+             (if (not= 1 (count matches))
+               (->FactClosureRejected 65
+                 "checked module must have exactly one raw bundle at its exact source path")
+               (let [raw facts/SyntaxFactBundle (first matches)]
+                 (if (not= (facts/syntaxfactbundle-namespace raw)
+                           (facts/syntaxfactbundle-namespace bundle))
+                   (->FactClosureRejected 65
+                     "raw and normalized module namespace declarations disagree")
+                   (recur (rest remaining)
+                     (conj checked-modules
+                       (->CheckedModuleFacts raw bundle checked)))))))]
           [(checker/CheckRejected rejection)
            (->FactClosureRejected 65
              (str (checker/checkrejection-rule rejection) ": "
                   (checker/checkrejection-subject rejection) ": "
                   (checker/checkrejection-detail rejection)))])))))
+
+(def program-profile Keyword :program)
+(def program-root-domain String "beagle-program-root/v1")
+
+(defn length-framed [value String] String
+  (str (count (utf8-encode value)) ":" value))
+
+(defn initial-program-root-resource
+  [space-id String
+   compiler-context String
+   closure-digest String
+   entry-namespace String] t/Term
+  (bootstrap/content-id
+    (str program-root-domain
+         (length-framed space-id)
+         (length-framed compiler-context)
+         (length-framed closure-digest)
+         (length-framed entry-namespace))))
+
+(defn module-identity [namespace String] t/Term namespace)
+
+(defn plan-program-admission
+  [config CompileSourceConfig
+   checked CheckedFactClosure
+   entry-namespace String] ProgramAdmissionPlanResult
+  (loop [remaining (Vec CheckedModuleFacts)
+         (checkedfactclosure-modules checked)
+         identities (Vec t/Term) []
+         projections (Vec (Vec t/Triple)) []]
+    (if (empty? remaining)
+      (let [syntax facts/SyntaxFactClosure
+            (checkedfactclosure-syntax checked)
+            space-id String (compilesourceconfig-space-id config)
+            compiler-context String bootstrap/default-compiler-context-id
+            closure-digest String
+            (facts/syntaxfactclosure-closure-digest syntax)]
+        (->ProgramAdmissionPlanned
+          (->ProgramAdmissionPlan
+            (compilesourceconfig-store-log config)
+            space-id
+            compiler-context
+            closure-digest
+            program-profile
+            (initial-program-root-resource
+              space-id compiler-context closure-digest entry-namespace)
+            identities
+            projections)))
+      (let [module CheckedModuleFacts (first remaining)
+            normalized facts/SyntaxFactBundle
+            (checkedmodulefacts-syntax module)
+            namespace String? (facts/syntaxfactbundle-namespace normalized)]
+        (if (nil? namespace)
+          (->ProgramAdmissionPlanningRejected 65
+            "checked module does not declare a namespace")
+          (match (program-projection/project-module
+                   (module-identity namespace)
+                   (checkedmodulefacts-raw module))
+            [(program-projection/ProgramProjectionRejected code detail)
+             (->ProgramAdmissionPlanningRejected 65 detail)]
+            [(program-projection/ProgramProjected projected)
+             (recur
+               (vec (rest remaining))
+               (conj identities (module-identity namespace))
+               (conj projections
+                 (program-projection/programmoduleprojection-propositions
+                   projected)))]))))))
 
 (defn link-query-artifact
   [query CompileQuery
@@ -369,7 +485,10 @@
     [(CompileStoreWarm warm-result warm-artifact)
      (->CompileBundleError 74 "Store returned a warm result during append")]
     [(CompileStoreWarmRejected rejected detail)
-     (->CompileBundleError 74 "Store returned a rejection during result append")]))
+     (->CompileBundleError 74 "Store returned a rejection during result append")]
+    [(CompileStoreProgramAdmitted root-resource root-version)
+     (->CompileBundleError 74
+       "Store returned a program admission during result append")]))
 
 (defn compile-admitted-artifact
   [query CompileQuery
@@ -408,18 +527,45 @@
        [(CompileQueryEvaluationReady)
         (compile-admitted-artifact query artifact config store)])]))
 
+(defn lookup-admitted-program
+  [plan ProgramAdmissionPlan
+   query CompileQuery
+   store CompileStore] CompileStoreResponse
+  (match (store (->CompileStoreAdmitProgram plan))
+    [(CompileStoreFailure code detail) (->CompileStoreFailure code detail)]
+    [(CompileStoreProgramAdmitted root-resource root-version)
+     (if (and (= root-resource
+                 (programadmissionplan-root-resource plan))
+              (>= root-version 0))
+       (store
+         (->CompileStoreLookup
+           (programadmissionplan-store-log plan)
+           (programadmissionplan-space-id plan)
+           (compilequery-admitted query)))
+       (->CompileStoreFailure 74
+         "Store admitted a different ProgramRoot or a negative version"))]
+    [(CompileStoreCold)
+     (->CompileStoreFailure 74
+       "Store omitted ProgramRoot admission before compile lookup")]
+    [(CompileStoreWarm result artifact)
+     (->CompileStoreFailure 74
+       "Store returned a warm compile result during ProgramRoot admission")]
+    [(CompileStoreWarmRejected result detail)
+     (->CompileStoreFailure 74
+       "Store returned a compile rejection during ProgramRoot admission")]
+    [(CompileStorePersisted)
+     (->CompileStoreFailure 74
+       "Store returned a persistence receipt during ProgramRoot admission")]))
+
 (defn compile-stored-query
   [query CompileQuery
    checked CheckedFactClosure
    entry-namespace String
    entry-definition String
    config linker/ArtifactLinkConfigV1
+   program-plan ProgramAdmissionPlan
    store CompileStore] CompileBundleResult
-  (match (store
-           (->CompileStoreLookup
-             (compilebundlerequest-store-log (compilequery-request query))
-             (compilebundlerequest-space-id (compilequery-request query))
-             (compilequery-admitted query)))
+  (match (lookup-admitted-program program-plan query store)
     [(CompileStoreFailure code detail) (->CompileBundleError code detail)]
     [(CompileStoreWarm result artifact)
      (if (warm-result-valid? query result artifact)
@@ -439,7 +585,10 @@
        config store)]
     [(CompileStorePersisted)
      (->CompileBundleError 74
-       "Store returned an append acknowledgment during lookup")]))
+       "Store returned an append acknowledgment during lookup")]
+    [(CompileStoreProgramAdmitted root-resource root-version)
+     (->CompileBundleError 74
+       "Store returned a second ProgramRoot admission during lookup")]))
 
 (defn entry-namespace [closure facts/SyntaxFactClosure] String?
   (let [entry-path String (facts/syntaxfactclosure-entry-path closure)]
@@ -494,41 +643,46 @@
    checked CheckedFactClosure
    namespace String
    store CompileStore] CompileBundleResult
-  (let [path String (compilesourceconfig-source-path config)
-        request CompileBundleRequest
-        (->CompileBundleRequest
-          (compilesourceconfig-store-log config)
-          (compilesourceconfig-space-id config)
-          bootstrap/default-compiler-context-id
-          bootstrap/default-profile
-          [bootstrap/default-target-id]
-          bootstrap/default-rule-set-content-id
-          bootstrap/compiler-schema-content-id
-          [path]
-          syntax)]
-    (match (compile-query request)
-      [(CompileQueryAdmissionRejected code detail)
-       (->CompileBundleError 65 detail)]
-      [(CompileQueryReady query)
-       (let [layout bootstrap/NativeArtifactLayoutV1
-             (bootstrap/native-artifact-layout
-               (compilesourceconfig-output-directory config))
-             link-config linker/ArtifactLinkConfigV1
-             (linker/->ArtifactLinkConfigV1
-               (str (compilesourceconfig-output-directory config) "/artifacts")
-               (bootstrap/nativeartifactlayoutv1-executable-path layout)
-               (compilesourceconfig-c-compiler config)
-               (compilesourceconfig-qbe-compiler config))]
-         (complete-compile-output
-           (compilesourceconfig-output-directory config)
-           (compile-stored-query query checked namespace "main"
-             link-config store)))])))
+  (match (plan-program-admission config checked namespace)
+    [(ProgramAdmissionPlanningRejected code detail)
+     (->CompileBundleError code detail)]
+    [(ProgramAdmissionPlanned program-plan)
+     (let [path String (compilesourceconfig-source-path config)
+           request CompileBundleRequest
+           (->CompileBundleRequest
+             (compilesourceconfig-store-log config)
+             (compilesourceconfig-space-id config)
+             bootstrap/default-compiler-context-id
+             bootstrap/default-profile
+             [bootstrap/default-target-id]
+             bootstrap/default-rule-set-content-id
+             bootstrap/compiler-schema-content-id
+             [path]
+             syntax)]
+       (match (compile-query request)
+         [(CompileQueryAdmissionRejected code detail)
+          (->CompileBundleError 65 detail)]
+         [(CompileQueryReady query)
+          (let [layout bootstrap/NativeArtifactLayoutV1
+                (bootstrap/native-artifact-layout
+                  (compilesourceconfig-output-directory config))
+                link-config linker/ArtifactLinkConfigV1
+                (linker/->ArtifactLinkConfigV1
+                  (str (compilesourceconfig-output-directory config) "/artifacts")
+                  (bootstrap/nativeartifactlayoutv1-executable-path layout)
+                  (compilesourceconfig-c-compiler config)
+                  (compilesourceconfig-qbe-compiler config))]
+            (complete-compile-output
+              (compilesourceconfig-output-directory config)
+              (compile-stored-query query checked namespace "main"
+                link-config program-plan store)))]))]))
 
 (defn compile-closed-source
   [config CompileSourceConfig
    syntax facts/SyntaxFactClosure
+   raw-modules (Vec facts/SyntaxFactBundle)
    store CompileStore] CompileBundleResult
-  (match (check-fact-closure syntax)
+  (match (check-fact-closure syntax raw-modules)
     [(FactClosureRejected code detail) (->CompileBundleError code detail)]
     [(FactClosureChecked checked)
      (let [namespace String? (entry-namespace syntax)]
@@ -549,7 +703,7 @@
          [(SourceFactsClosureRejected code detail)
           (->CompileBundleError code detail)]
          [(SourceFactsClosed syntax)
-          (compile-closed-source config syntax store)])])))
+          (compile-closed-source config syntax [raw] store)])])))
 
 (defn materialize-and-link
   [query CompileQuery
