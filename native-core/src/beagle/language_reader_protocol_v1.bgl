@@ -1,0 +1,335 @@
+#lang beagle
+(ns beagle.language-reader-protocol-v1
+  (:require [beagle.language-capsule-v1 :as capsule]))
+
+(defrecord ReaderByteSpanV1
+  [start-byte Int
+   end-byte Int])
+
+(defrecord SourceSliceV1
+  [payload String
+   payload-content-id String
+   start-byte Int
+   end-byte Int
+   provenance-receipt-identity capsule/SemanticIdentityV1
+   bounded Bool])
+
+(defrecord ReaderRequestV1
+  [source-slice SourceSliceV1
+   capsule-identity capsule/SemanticIdentityV1
+   reader-component capsule/ComponentIdentityV1
+   reader-protocol capsule/ProtocolIdentityV1])
+
+(defrecord ReaderIrEventV1
+  [kind Keyword
+   value String
+   literal String
+   depth Int])
+
+(defrecord ReaderDiagnosticV1
+  [code Keyword
+   severity Keyword
+   message String
+   original-origin ReaderByteSpanV1])
+
+(defrecord ReaderSourceMapEntryV1
+  [event-index Int
+   original-origin ReaderByteSpanV1
+   generated-origin ReaderByteSpanV1])
+
+(defrecord ReaderProductCandidateV1
+  [canonical-ir-id capsule/SemanticIdentityV1
+   canonical-ir-bytes (Vec Int)
+   canonical-ir-events (Vec ReaderIrEventV1)
+   provenance-map-id capsule/SemanticIdentityV1
+   source-map (Vec ReaderSourceMapEntryV1)
+   diagnostics (Vec ReaderDiagnosticV1)])
+
+(defrecord ReaderProductV1
+  [canonical-ir-id capsule/SemanticIdentityV1
+   canonical-ir-bytes (Vec Int)
+   canonical-ir-events (Vec ReaderIrEventV1)
+   provenance-map-id capsule/SemanticIdentityV1
+   source-map (Vec ReaderSourceMapEntryV1)
+   diagnostics (Vec ReaderDiagnosticV1)])
+
+(defunion ReaderAcceptanceV1
+  (ReaderProductAcceptedV1 [product ReaderProductV1])
+  (ReaderProductRejectedV1 [diagnostics (Vec ReaderDiagnosticV1)]))
+
+(defn content-id-v1
+  [domain String
+   value String] String
+  (capsule/semanticidentityv1-content-id
+    (capsule/semantic-identity-v1 domain [value])))
+
+(defn source-payload-content-id-v1 [payload String] String
+  (content-id-v1 "beagle/reader/source-payload/v1" payload))
+
+(defn source-slice-v1
+  [payload String
+   start-byte Int
+   end-byte Int
+   provenance-receipt-identity capsule/SemanticIdentityV1
+   bounded Bool] SourceSliceV1
+  (->SourceSliceV1
+    payload
+    (source-payload-content-id-v1 payload)
+    start-byte
+    end-byte
+    provenance-receipt-identity
+    bounded))
+
+(defn reader-ir-prefix-v1 [event-count Int] String
+  (str "beagle-reader-ir/v1"
+       (capsule/canonical-part-v1 (str event-count))))
+
+(defn reader-ir-event-encoding-v1 [event ReaderIrEventV1] String
+  (str (capsule/canonical-part-v1 (str (readerireventv1-kind event)))
+       (capsule/canonical-part-v1 (readerireventv1-value event))
+       (capsule/canonical-part-v1 (readerireventv1-literal event))
+       (capsule/canonical-part-v1 (str (readerireventv1-depth event)))))
+
+(defn reader-ir-encoding-v1 [events (Vec ReaderIrEventV1)] String
+  (reduce
+    (fn
+      [encoding String
+       event ReaderIrEventV1] String
+      (str encoding (reader-ir-event-encoding-v1 event)))
+    (reader-ir-prefix-v1 (count events))
+    events))
+
+(defn reader-ir-bytes-v1 [events (Vec ReaderIrEventV1)] (Vec Int)
+  (utf8-encode (reader-ir-encoding-v1 events)))
+
+(defn reader-ir-identity-v1 [events (Vec ReaderIrEventV1)] capsule/SemanticIdentityV1
+  (capsule/semantic-identity-v1
+    "beagle/reader/canonical-ir/v1"
+    [(reader-ir-encoding-v1 events)]))
+
+(defn source-map-entry-encoding-v1 [entry ReaderSourceMapEntryV1] String
+  (let [original ReaderByteSpanV1 (readersourcemapentryv1-original-origin entry)
+        generated ReaderByteSpanV1 (readersourcemapentryv1-generated-origin entry)]
+    (str
+      (capsule/canonical-part-v1
+        (str (readersourcemapentryv1-event-index entry)))
+      (capsule/canonical-part-v1
+        (str (readerbytespanv1-start-byte original)))
+      (capsule/canonical-part-v1
+        (str (readerbytespanv1-end-byte original)))
+      (capsule/canonical-part-v1
+        (str (readerbytespanv1-start-byte generated)))
+      (capsule/canonical-part-v1
+        (str (readerbytespanv1-end-byte generated))))))
+
+(defn source-map-encoding-v1 [entries (Vec ReaderSourceMapEntryV1)] String
+  (reduce
+    (fn
+      [encoding String
+       entry ReaderSourceMapEntryV1] String
+      (str encoding (source-map-entry-encoding-v1 entry)))
+    (str "beagle-reader-source-map/v1"
+         (capsule/canonical-part-v1 (str (count entries))))
+    entries))
+
+(defn provenance-map-identity-v1
+  [request ReaderRequestV1
+   entries (Vec ReaderSourceMapEntryV1)] capsule/SemanticIdentityV1
+  (let [slice SourceSliceV1 (readerrequestv1-source-slice request)
+        component capsule/ComponentIdentityV1 (readerrequestv1-reader-component request)
+        protocol capsule/ProtocolIdentityV1 (readerrequestv1-reader-protocol request)]
+    (capsule/semantic-identity-v1
+      "beagle/reader/provenance-map/v1"
+      [(capsule/semanticidentityv1-content-id
+         (sourceslicev1-provenance-receipt-identity slice))
+       (sourceslicev1-payload-content-id slice)
+       (str (sourceslicev1-start-byte slice))
+       (str (sourceslicev1-end-byte slice))
+       (capsule/semanticidentityv1-content-id
+         (readerrequestv1-capsule-identity request))
+       (capsule/semanticidentityv1-content-id
+         (capsule/componentidentityv1-identity component))
+       (capsule/semanticidentityv1-content-id
+         (capsule/protocolidentityv1-identity protocol))
+       (source-map-encoding-v1 entries)])))
+
+(defn canonical-byte-vector-v1? [bytes (Vec Int)] Bool
+  (and
+    (loop [index Int 0]
+      (if (>= index (count bytes))
+        true
+        (let [byte Int (nth bytes index)]
+          (if (or (< byte 0) (> byte 255))
+            false
+            (recur (+ index 1))))))
+    (= bytes (utf8-encode (utf8-decode bytes)))))
+
+(defn utf8-byte-boundary-v1?
+  [bytes (Vec Int)
+   offset Int] Bool
+  (and (>= offset 0)
+       (<= offset (count bytes))
+       (or (= offset 0)
+           (= offset (count bytes))
+           (let [byte Int (nth bytes offset)]
+             (or (< byte 128) (> byte 191))))))
+
+(defn source-byte-boundary-v1?
+  [slice SourceSliceV1
+   absolute-byte Int] Bool
+  (let [relative-byte Int (- absolute-byte (sourceslicev1-start-byte slice))
+        bytes (Vec Int) (utf8-encode (sourceslicev1-payload slice))]
+    (utf8-byte-boundary-v1? bytes relative-byte)))
+
+(defn source-slice-valid-v1? [slice SourceSliceV1] Bool
+  (let [payload String (sourceslicev1-payload slice)]
+    (and (sourceslicev1-bounded slice)
+         (>= (sourceslicev1-start-byte slice) 0)
+         (= (sourceslicev1-end-byte slice)
+            (+ (sourceslicev1-start-byte slice)
+               (count (utf8-encode payload))))
+         (= (sourceslicev1-payload-content-id slice)
+            (source-payload-content-id-v1 payload)))))
+
+(defn reader-request-valid-v1? [request ReaderRequestV1] Bool
+  (let [component capsule/ComponentIdentityV1 (readerrequestv1-reader-component request)
+        protocol capsule/ProtocolIdentityV1 (readerrequestv1-reader-protocol request)]
+    (and
+      (source-slice-valid-v1? (readerrequestv1-source-slice request))
+      (= :reader (capsule/componentidentityv1-role component))
+      (= :reader (capsule/protocolidentityv1-role protocol))
+      (= (capsule/componentidentityv1-identity component)
+         (capsule/componentidentityv1-identity
+           (capsule/component-identity-v1
+             (capsule/componentidentityv1-role component)
+             (capsule/componentidentityv1-artifact-content-id component)
+             (capsule/componentidentityv1-dependency-closure-id component))))
+      (= (capsule/protocolidentityv1-identity protocol)
+         (capsule/protocolidentityv1-identity
+           (capsule/protocol-identity-v1
+             (capsule/protocolidentityv1-role protocol)
+             (capsule/protocolidentityv1-protocol-content-id protocol)
+             (capsule/protocolidentityv1-abi-content-id protocol)))))))
+
+(defn original-origin-valid-v1?
+  [slice SourceSliceV1
+   span ReaderByteSpanV1] Bool
+  (and (>= (readerbytespanv1-start-byte span)
+           (sourceslicev1-start-byte slice))
+       (<= (readerbytespanv1-end-byte span)
+           (sourceslicev1-end-byte slice))
+       (<= (readerbytespanv1-start-byte span)
+           (readerbytespanv1-end-byte span))
+       (source-byte-boundary-v1? slice
+         (readerbytespanv1-start-byte span))
+       (source-byte-boundary-v1? slice
+         (readerbytespanv1-end-byte span))))
+
+(defn generated-origin-valid-v1?
+  [bytes (Vec Int)
+   span ReaderByteSpanV1] Bool
+  (and (<= 0 (readerbytespanv1-start-byte span))
+       (<= (readerbytespanv1-start-byte span)
+           (readerbytespanv1-end-byte span))
+       (<= (readerbytespanv1-end-byte span) (count bytes))
+       (utf8-byte-boundary-v1? bytes
+         (readerbytespanv1-start-byte span))
+       (utf8-byte-boundary-v1? bytes
+         (readerbytespanv1-end-byte span))))
+
+(defn source-map-valid-v1?
+  [slice SourceSliceV1
+   bytes (Vec Int)
+   events (Vec ReaderIrEventV1)
+   entries (Vec ReaderSourceMapEntryV1)] Bool
+  (and (= (count entries) (count events))
+       (loop [index Int 0
+              previous-original-start Int (sourceslicev1-start-byte slice)
+              previous-generated-end Int 0]
+         (if (>= index (count entries))
+           true
+           (let [entry ReaderSourceMapEntryV1 (nth entries index)
+                 original ReaderByteSpanV1 (readersourcemapentryv1-original-origin entry)
+                 generated ReaderByteSpanV1 (readersourcemapentryv1-generated-origin entry)]
+             (if (and (= index
+                         (readersourcemapentryv1-event-index entry))
+                      (>= (readerbytespanv1-start-byte original)
+                          previous-original-start)
+                      (>= (readerbytespanv1-start-byte generated)
+                          previous-generated-end)
+                      (original-origin-valid-v1? slice original)
+                      (generated-origin-valid-v1? bytes generated))
+               (recur (+ index 1)
+                 (readerbytespanv1-start-byte original)
+                 (readerbytespanv1-end-byte generated))
+               false))))))
+
+(defn diagnostics-valid-v1?
+  [slice SourceSliceV1
+   diagnostics (Vec ReaderDiagnosticV1)] Bool
+  (loop [index Int 0
+         previous-start Int (sourceslicev1-start-byte slice)
+         previous-end Int (sourceslicev1-start-byte slice)]
+    (if (>= index (count diagnostics))
+      true
+      (let [diagnostic ReaderDiagnosticV1 (nth diagnostics index)
+            span ReaderByteSpanV1 (readerdiagnosticv1-original-origin diagnostic)
+            start Int (readerbytespanv1-start-byte span)
+            end Int (readerbytespanv1-end-byte span)]
+        (if (and (original-origin-valid-v1? slice span)
+                 (or (> start previous-start)
+                     (and (= start previous-start) (>= end previous-end))))
+          (recur (+ index 1) start end)
+          false)))))
+
+(defn contains-error-diagnostic-v1? [diagnostics (Vec ReaderDiagnosticV1)] Bool
+  (some
+    (fn [diagnostic ReaderDiagnosticV1] Bool
+      (= :error (readerdiagnosticv1-severity diagnostic)))
+    diagnostics))
+
+(defn reader-product-candidate-valid-v1?
+  [request ReaderRequestV1
+   candidate ReaderProductCandidateV1] Bool
+  (let [slice SourceSliceV1 (readerrequestv1-source-slice request)
+        events (Vec ReaderIrEventV1) (readerproductcandidatev1-canonical-ir-events candidate)
+        bytes (Vec Int) (readerproductcandidatev1-canonical-ir-bytes candidate)
+        source-map (Vec ReaderSourceMapEntryV1) (readerproductcandidatev1-source-map candidate)
+        diagnostics (Vec ReaderDiagnosticV1) (readerproductcandidatev1-diagnostics candidate)]
+    (and
+      (reader-request-valid-v1? request)
+      (canonical-byte-vector-v1? bytes)
+      (= bytes (reader-ir-bytes-v1 events))
+      (= (readerproductcandidatev1-canonical-ir-id candidate)
+         (reader-ir-identity-v1 events))
+      (source-map-valid-v1? slice bytes events source-map)
+      (= (readerproductcandidatev1-provenance-map-id candidate)
+         (provenance-map-identity-v1 request source-map))
+      (diagnostics-valid-v1? slice diagnostics))))
+
+(defn protocol-rejection-diagnostic-v1 [request ReaderRequestV1] ReaderDiagnosticV1
+  (let [slice SourceSliceV1 (readerrequestv1-source-slice request)
+        start Int (sourceslicev1-start-byte slice)]
+    (->ReaderDiagnosticV1
+      :reader/invalid-product
+      :error
+      "reader product failed canonical encoding, UTF-8, ordering, identity, or containment validation"
+      (->ReaderByteSpanV1 start start))))
+
+(defn accept-reader-product-v1
+  [request ReaderRequestV1
+   candidate ReaderProductCandidateV1] ReaderAcceptanceV1
+  (let [diagnostics (Vec ReaderDiagnosticV1) (readerproductcandidatev1-diagnostics candidate)]
+    (if (reader-product-candidate-valid-v1? request candidate)
+      (if (contains-error-diagnostic-v1? diagnostics)
+        (->ReaderProductRejectedV1 diagnostics)
+        (->ReaderProductAcceptedV1
+          (->ReaderProductV1
+            (readerproductcandidatev1-canonical-ir-id candidate)
+            (readerproductcandidatev1-canonical-ir-bytes candidate)
+            (readerproductcandidatev1-canonical-ir-events candidate)
+            (readerproductcandidatev1-provenance-map-id candidate)
+            (readerproductcandidatev1-source-map candidate)
+            diagnostics)))
+      (->ReaderProductRejectedV1
+        [(protocol-rejection-diagnostic-v1 request)]))))

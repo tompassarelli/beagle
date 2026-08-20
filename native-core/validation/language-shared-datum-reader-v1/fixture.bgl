@@ -1,0 +1,164 @@
+#lang beagle
+(ns native.language-shared-datum-reader-v1-fixture
+  (:require [beagle.language-capsule-v1 :as capsule]
+            [beagle.language-container-cst :as container]
+            [beagle.language-reader-protocol-v1 :as protocol]
+            [beagle.language-shared-datum-reader-v1 :as shared]))
+
+(def shared-payload String
+  "{:message \"☺\" :values [1 2 #{:x :y}]}\n")
+
+(def framing-a String
+  (str "; framing A\n"
+       "#lang bgl sample main\n"
+       "  :in []\n"
+       "  :out []\n"
+       "  :end FRAME_A\n"
+       shared-payload
+       "FRAME_A\n"
+       "] outside the bounded payload\n"))
+
+(def framing-b String
+  (str "\n\n; moved framing B\n"
+       "#lang bgl sample main\n"
+       "  :in []\n"
+       "  :out []\n"
+       "  :end DIFFERENT_FRAME\n"
+       shared-payload
+       "DIFFERENT_FRAME\n"
+       "{:also outside}\n"))
+
+(def malformed-framing String
+  (str "#lang bgl sample main\n"
+       "  :in []\n"
+       "  :out []\n"
+       "  :end BAD_FRAME\n"
+       "{:values [1 2}\n"
+       "BAD_FRAME\n"))
+
+(defn fixture-identity-v1 [label String] capsule/SemanticIdentityV1
+  (capsule/semantic-identity-v1
+    "fixture/language-shared-datum-reader-v1"
+    [label]))
+
+(def capsule-identity capsule/SemanticIdentityV1
+  (fixture-identity-v1 "capsule"))
+
+(def reader-component capsule/ComponentIdentityV1
+  (capsule/component-identity-v1
+    :reader
+    (capsule/semanticidentityv1-content-id
+      (fixture-identity-v1 "reader-artifact"))
+    (capsule/semanticidentityv1-content-id
+      (fixture-identity-v1 "reader-closure"))))
+
+(def reader-protocol capsule/ProtocolIdentityV1
+  (capsule/protocol-identity-v1
+    :reader
+    (capsule/semanticidentityv1-content-id
+      (fixture-identity-v1 "reader-protocol"))
+    (capsule/semanticidentityv1-content-id
+      (fixture-identity-v1 "reader-abi"))))
+
+(defn first-region-v1 [source String] container/ContainerRegionV1
+  (first
+    (container/languagecontainercstv1-regions
+      (container/scan-container source))))
+
+(defn request-v1
+  [source String
+   provenance capsule/SemanticIdentityV1] protocol/ReaderRequestV1
+  (shared/reader-request-from-region-v1
+    (first-region-v1 source)
+    provenance
+    capsule-identity
+    reader-component
+    reader-protocol))
+
+(defn read-v1
+  [source String
+   provenance capsule/SemanticIdentityV1] protocol/ReaderAcceptanceV1
+  (shared/read-shared-datum-request-v1
+    (request-v1 source provenance)))
+
+(defn valid-and-bounded-case-v1 [] Bool
+  (let [provenance capsule/SemanticIdentityV1 (fixture-identity-v1 "provenance-a")
+        region container/ContainerRegionV1 (first-region-v1 framing-a)]
+    (and
+      (= shared-payload (container/containerregionv1-payload region))
+      (container/containerregionv1-terminated region)
+      (match (read-v1 framing-a provenance)
+        [(protocol/ReaderProductAcceptedV1 product)
+         (and (> (count (protocol/readerproductv1-canonical-ir-events product)) 0)
+              (= 0 (count (protocol/readerproductv1-diagnostics product))))]
+        [(protocol/ReaderProductRejectedV1 diagnostics) false]))))
+
+(defn malformed-case-v1 [] Bool
+  (let [provenance capsule/SemanticIdentityV1 (fixture-identity-v1 "malformed-provenance")
+        request protocol/ReaderRequestV1 (request-v1 malformed-framing provenance)
+        slice protocol/SourceSliceV1 (protocol/readerrequestv1-source-slice request)]
+    (match (shared/read-shared-datum-request-v1 request)
+      [(protocol/ReaderProductAcceptedV1 product) false]
+      [(protocol/ReaderProductRejectedV1 diagnostics)
+       (let [diagnostic protocol/ReaderDiagnosticV1 (first diagnostics)
+             span protocol/ReaderByteSpanV1 (protocol/readerdiagnosticv1-original-origin diagnostic)]
+         (and (= 1 (count diagnostics))
+              (= :reader/malformed-shared-datum
+                 (protocol/readerdiagnosticv1-code diagnostic))
+              (protocol/original-origin-valid-v1? slice span)))])))
+
+(defn framing-provenance-separation-case-v1 [] Bool
+  (let [provenance-a capsule/SemanticIdentityV1 (fixture-identity-v1 "provenance-a")
+        provenance-b capsule/SemanticIdentityV1 (fixture-identity-v1 "provenance-b")]
+    (match (read-v1 framing-a provenance-a)
+      [(protocol/ReaderProductRejectedV1 diagnostics) false]
+      [(protocol/ReaderProductAcceptedV1 product-a)
+       (match (read-v1 framing-b provenance-b)
+         [(protocol/ReaderProductRejectedV1 diagnostics) false]
+         [(protocol/ReaderProductAcceptedV1 product-b)
+          (and
+            (= (protocol/readerproductv1-canonical-ir-bytes product-a)
+               (protocol/readerproductv1-canonical-ir-bytes product-b))
+            (= (protocol/readerproductv1-canonical-ir-id product-a)
+               (protocol/readerproductv1-canonical-ir-id product-b))
+            (not=
+              (protocol/readerproductv1-provenance-map-id product-a)
+              (protocol/readerproductv1-provenance-map-id product-b)))])])))
+
+(defn source-map-containment-rejection-case-v1 [] Bool
+  (let [request protocol/ReaderRequestV1 (request-v1 framing-a (fixture-identity-v1 "provenance-a"))
+        slice protocol/SourceSliceV1 (protocol/readerrequestv1-source-slice request)]
+    (match (shared/read-shared-datum-request-v1 request)
+      [(protocol/ReaderProductRejectedV1 diagnostics) false]
+      [(protocol/ReaderProductAcceptedV1 product)
+       (let [source-map (Vec protocol/ReaderSourceMapEntryV1) (protocol/readerproductv1-source-map product)
+             first-entry protocol/ReaderSourceMapEntryV1 (first source-map)
+             bad-original protocol/ReaderByteSpanV1 (protocol/->ReaderByteSpanV1
+               (- (protocol/sourceslicev1-start-byte slice) 1)
+               (protocol/readerbytespanv1-end-byte
+                 (protocol/readersourcemapentryv1-original-origin first-entry)))
+             bad-entry protocol/ReaderSourceMapEntryV1 (protocol/->ReaderSourceMapEntryV1
+               (protocol/readersourcemapentryv1-event-index first-entry)
+               bad-original
+               (protocol/readersourcemapentryv1-generated-origin first-entry))
+             bad-map (Vec protocol/ReaderSourceMapEntryV1) (assoc source-map 0 bad-entry)
+             candidate protocol/ReaderProductCandidateV1 (protocol/->ReaderProductCandidateV1
+               (protocol/readerproductv1-canonical-ir-id product)
+               (protocol/readerproductv1-canonical-ir-bytes product)
+               (protocol/readerproductv1-canonical-ir-events product)
+               (protocol/provenance-map-identity-v1 request bad-map)
+               bad-map
+               [])]
+         (match (protocol/accept-reader-product-v1 request candidate)
+           [(protocol/ReaderProductAcceptedV1 accepted) false]
+           [(protocol/ReaderProductRejectedV1 diagnostics)
+            (= :reader/invalid-product
+               (protocol/readerdiagnosticv1-code (first diagnostics)))]))])))
+
+(defn main [] Int
+  (if (and (valid-and-bounded-case-v1)
+           (malformed-case-v1)
+           (framing-provenance-separation-case-v1)
+           (source-map-containment-rejection-case-v1))
+    0
+    1))

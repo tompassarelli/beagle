@@ -1,0 +1,157 @@
+#lang beagle
+(ns beagle.language-shared-datum-reader-v1
+  (:require [beagle.datum-reader :as datum]
+            [beagle.language-capsule-v1 :as capsule]
+            [beagle.language-container-cst :as container]
+            [beagle.language-reader-protocol-v1 :as protocol]))
+
+(defrecord SharedDatumProjectionV1
+  [events (Vec protocol/ReaderIrEventV1)
+   source-map (Vec protocol/ReaderSourceMapEntryV1)])
+
+(defn payload-byte-offset-v1
+  [payload String
+   character-offset Int] Int
+  (count (utf8-encode (subs payload 0 character-offset))))
+
+(defn datum-event-end-offset-v1
+  [payload String
+   event datum/ReaderEvent] Int
+  (if (= :string (datum/readerevent-kind event))
+    (datum/tokenscan-next-offset
+      (datum/scan-string payload (datum/readerevent-offset event)))
+    (+ (datum/readerevent-offset event)
+       (count (datum/readerevent-literal event)))))
+
+(defn reader-ir-event-v1 [event datum/ReaderEvent] protocol/ReaderIrEventV1
+  (protocol/->ReaderIrEventV1
+    (datum/readerevent-kind event)
+    (datum/readerevent-value event)
+    (datum/readerevent-literal event)
+    (datum/readerevent-depth event)))
+
+(defn reader-ir-events-v1
+  [events (Vec datum/ReaderEvent)] (Vec protocol/ReaderIrEventV1)
+  (mapv reader-ir-event-v1 events))
+
+(defn project-shared-datum-v1
+  [slice protocol/SourceSliceV1
+   datum-events (Vec datum/ReaderEvent)] SharedDatumProjectionV1
+  (let [ir-events (Vec protocol/ReaderIrEventV1) (reader-ir-events-v1 datum-events)
+        prefix String (protocol/reader-ir-prefix-v1 (count ir-events))]
+    (loop [index Int 0
+           generated-offset Int (count (utf8-encode prefix))
+           source-map (Vec protocol/ReaderSourceMapEntryV1) []]
+      (if (>= index (count datum-events))
+        (->SharedDatumProjectionV1 ir-events source-map)
+        (let [datum-event datum/ReaderEvent (nth datum-events index)
+              ir-event protocol/ReaderIrEventV1 (nth ir-events index)
+              original-start Int (+ (protocol/sourceslicev1-start-byte slice)
+                 (payload-byte-offset-v1
+                   (protocol/sourceslicev1-payload slice)
+                   (datum/readerevent-offset datum-event)))
+              original-end Int (+ (protocol/sourceslicev1-start-byte slice)
+                 (payload-byte-offset-v1
+                   (protocol/sourceslicev1-payload slice)
+                   (datum-event-end-offset-v1
+                     (protocol/sourceslicev1-payload slice)
+                     datum-event)))
+              generated-end Int (+ generated-offset
+                 (count (utf8-encode
+                          (protocol/reader-ir-event-encoding-v1 ir-event))))]
+          (recur
+            (+ index 1)
+            generated-end
+            (conj source-map
+              (protocol/->ReaderSourceMapEntryV1
+                index
+                (protocol/->ReaderByteSpanV1 original-start original-end)
+                (protocol/->ReaderByteSpanV1
+                  generated-offset generated-end)))))))))
+
+(defn source-slice-from-region-v1
+  [region container/ContainerRegionV1
+   provenance-receipt-identity capsule/SemanticIdentityV1] protocol/SourceSliceV1
+  (let [span container/ContainerSpanV1 (container/containerregionv1-payload-span region)]
+    (protocol/source-slice-v1
+      (container/containerregionv1-payload region)
+      (container/containerspanv1-start-byte span)
+      (container/containerspanv1-end-byte span)
+      provenance-receipt-identity
+      (container/containerregionv1-terminated region))))
+
+(defn reader-request-from-region-v1
+  [region container/ContainerRegionV1
+   provenance-receipt-identity capsule/SemanticIdentityV1
+   capsule-identity capsule/SemanticIdentityV1
+   reader-component capsule/ComponentIdentityV1
+   reader-protocol capsule/ProtocolIdentityV1] protocol/ReaderRequestV1
+  (protocol/->ReaderRequestV1
+    (source-slice-from-region-v1 region provenance-receipt-identity)
+    capsule-identity
+    reader-component
+    reader-protocol))
+
+(defn diagnostic-offset-byte-v1
+  [slice protocol/SourceSliceV1
+   character-offset Int] Int
+  (+ (protocol/sourceslicev1-start-byte slice)
+     (payload-byte-offset-v1
+       (protocol/sourceslicev1-payload slice)
+       character-offset)))
+
+(defn malformed-datum-diagnostic-v1
+  [slice protocol/SourceSliceV1
+   result datum/DatumRead] protocol/ReaderDiagnosticV1
+  (let [offset Int (diagnostic-offset-byte-v1 slice (datum/datumread-error-offset result))
+        detail String? (datum/datumread-error result)]
+    (protocol/->ReaderDiagnosticV1
+      :reader/malformed-shared-datum
+      :error
+      (if (some? detail) detail "malformed shared datum")
+      (protocol/->ReaderByteSpanV1 offset offset))))
+
+(defn unbounded-slice-diagnostic-v1
+  [slice protocol/SourceSliceV1] protocol/ReaderDiagnosticV1
+  (let [end Int (protocol/sourceslicev1-end-byte slice)]
+    (protocol/->ReaderDiagnosticV1
+      :reader/unbounded-source-slice
+      :error
+      "shared-datum reader requires a terminated bounded container payload"
+      (protocol/->ReaderByteSpanV1 end end))))
+
+(defn read-shared-datum-request-v1
+  [request protocol/ReaderRequestV1] protocol/ReaderAcceptanceV1
+  (let [slice protocol/SourceSliceV1 (protocol/readerrequestv1-source-slice request)]
+    (if (not (protocol/sourceslicev1-bounded slice))
+      (protocol/->ReaderProductRejectedV1
+        [(unbounded-slice-diagnostic-v1 slice)])
+      (let [result datum/DatumRead (datum/read-events (protocol/sourceslicev1-payload slice))]
+        (if (not (datum/read-ok? result))
+          (protocol/->ReaderProductRejectedV1
+            [(malformed-datum-diagnostic-v1 slice result)])
+          (let [projection SharedDatumProjectionV1 (project-shared-datum-v1 slice (datum/datumread-events result))
+                events (Vec protocol/ReaderIrEventV1) (shareddatumprojectionv1-events projection)
+                source-map (Vec protocol/ReaderSourceMapEntryV1) (shareddatumprojectionv1-source-map projection)
+                candidate protocol/ReaderProductCandidateV1 (protocol/->ReaderProductCandidateV1
+                  (protocol/reader-ir-identity-v1 events)
+                  (protocol/reader-ir-bytes-v1 events)
+                  events
+                  (protocol/provenance-map-identity-v1 request source-map)
+                  source-map
+                  [])]
+            (protocol/accept-reader-product-v1 request candidate)))))))
+
+(defn read-shared-datum-region-v1
+  [region container/ContainerRegionV1
+   provenance-receipt-identity capsule/SemanticIdentityV1
+   capsule-identity capsule/SemanticIdentityV1
+   reader-component capsule/ComponentIdentityV1
+   reader-protocol capsule/ProtocolIdentityV1] protocol/ReaderAcceptanceV1
+  (read-shared-datum-request-v1
+    (reader-request-from-region-v1
+      region
+      provenance-receipt-identity
+      capsule-identity
+      reader-component
+      reader-protocol)))
