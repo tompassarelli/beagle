@@ -1,0 +1,146 @@
+#lang beagle
+(ns beagle.fact-materializer-clj
+  (:require [beagle.artifact-linker :as artifact]
+            [beagle.checker :as checker]
+            [beagle.fact-materializer :as shape]
+            [beagle.fact-materializer-clj-render :as render]
+            [beagle.fact-profile :as profile]
+            [beagle.frontend-facts :as facts]))
+
+(defrecord ClojureFactMaterializationRequest
+  [query profile/AdmittedQueryClosure
+   syntax facts/SyntaxFactClosure
+   checked-modules (Vec checker/CheckedFacts)
+   entry-namespace String
+   entry-definition String])
+
+(defunion ClojureFactMaterializationResult
+  (ClojureFactMaterialized [artifact artifact/TargetArtifactV1])
+  (ClojureFactMaterializationRejected
+    [code Keyword
+     detail String]))
+
+(defn reject
+  [code Keyword
+   detail String] ClojureFactMaterializationResult
+  (->ClojureFactMaterializationRejected code detail))
+
+(defn target-selected?
+  [targets (Vec String)
+   target String] Bool
+  (loop [index Int 0]
+    (if (>= index (count targets))
+      false
+      (if (= target (nth targets index))
+        true
+        (recur (+ index 1))))))
+
+(defn emit-clojure
+  [query profile/AdmittedQueryClosure
+   namespace String
+   definition String
+   value Int] ClojureFactMaterializationResult
+  (match (render/render-clojure-entry namespace definition value)
+    [(render/ClojureRenderRejected detail)
+     (reject :materialize/unsafe-identifier detail)]
+    [(render/ClojureRendered payload filename)
+     (let [digest String (artifact/content-digest payload)
+           file artifact/ArtifactFileV1 (artifact/->ArtifactFileV1
+             filename payload digest
+             (count (utf8-encode payload)) digest)
+           encoding String (str "clj:"
+                (profile/admittedqueryclosure-query-digest query)
+                ":" digest)]
+       (->ClojureFactMaterialized
+         (artifact/->TargetArtifactV1
+           "clj" [file] encoding (artifact/content-digest encoding))))]))
+
+(defn materialize-admitted
+  [request ClojureFactMaterializationRequest
+   query profile/AdmittedQueryClosure] ClojureFactMaterializationResult
+  (let [closure facts/SyntaxFactClosure (clojurefactmaterializationrequest-syntax request)
+        modules (Vec facts/SyntaxFactBundle) (facts/syntaxfactclosure-modules closure)
+        checked-modules (Vec checker/CheckedFacts) (clojurefactmaterializationrequest-checked-modules request)
+        namespace String (clojurefactmaterializationrequest-entry-namespace request)
+        definition String (clojurefactmaterializationrequest-entry-definition request)
+        position Int (shape/module-position modules namespace)]
+    (cond
+      (not (target-selected? (profile/admittedqueryclosure-targets query) "clj"))
+      (reject :materialize/missing-target "admitted query does not select clj")
+
+      (not= (profile/admittedqueryclosure-source-closure-digest query)
+            (facts/syntaxfactclosure-closure-digest closure))
+      (reject :materialize/closure-mismatch
+        "admitted query source closure does not match syntax facts")
+
+      (not= (count modules) (count checked-modules))
+      (reject :materialize/closure-mismatch
+        "syntax modules and checked modules are not aligned")
+
+      (= position -1)
+      (reject :materialize/missing-entry
+        (str "entry namespace is missing: " namespace))
+
+      (= position -2)
+      (reject :materialize/ambiguous-entry
+        (str "entry namespace is ambiguous: " namespace))
+
+      :else
+      (let [module facts/SyntaxFactBundle (nth modules position)
+            checked checker/CheckedFacts (nth checked-modules position)
+            rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts module)
+            functions (Vec String) (shape/function-subjects rows definition)]
+        (if (not= 1 (count functions))
+          (reject :materialize/ambiguous-entry
+            (str "entry function must resolve exactly once: " definition))
+          (let [function String (first functions)
+                parameters (Vec String) (shape/node-values rows function 0)
+                returns (Vec String) (shape/node-values rows function 1)
+                bodies (Vec String) (shape/node-values rows function 2)]
+            (if (or (not= 1 (count parameters))
+                    (not= 1 (count returns))
+                    (not= 1 (count bodies)))
+              (reject :materialize/unsupported-shape
+                "entry function shape is missing or ambiguous")
+              (let [parameter String (first parameters)
+                    return-node String (first returns)
+                    body String (first bodies)
+                    parameter-kinds (Vec String) (shape/text-values rows :syntax/node parameter 0)
+                    return-kinds (Vec String) (shape/text-values rows :syntax/node return-node 0)
+                    return-names (Vec String) (shape/text-values rows :syntax/value return-node 0)
+                    body-kinds (Vec String) (shape/text-values rows :syntax/node body 0)
+                    values (Vec Int) (shape/int-values rows body 0)]
+                (cond
+                  (or (not= 1 (count parameter-kinds))
+                      (not= "binding" (first parameter-kinds))
+                      (not (shape/lowering-type?
+                             checked parameter "(Vec String)")))
+                  (reject :materialize/unsupported-shape
+                    "Clojure entry requires one typed (Vec String) parameter")
+
+                  (or (not= 1 (count return-kinds))
+                      (not= "type-name" (first return-kinds))
+                      (not= 1 (count return-names))
+                      (not= "Int" (first return-names))
+                      (not (shape/accepted-proposition?
+                             checked function "function/declared-return" "Int")))
+                  (reject :materialize/unsupported-shape
+                    "Clojure entry requires an accepted declared Int return")
+
+                  (or (not= 1 (count body-kinds))
+                      (not= "integer-literal" (first body-kinds))
+                      (not= 1 (count values))
+                      (not (shape/lowering-type? checked body "Int")))
+                  (reject :materialize/unsupported-shape
+                    "Clojure entry requires one checked integer literal body")
+
+                  :else
+                  (emit-clojure query namespace definition (first values)))))))))))
+
+(defn materialize [request ClojureFactMaterializationRequest] ClojureFactMaterializationResult
+  (match (profile/admit-canonical-query
+           (clojurefactmaterializationrequest-query request))
+    [(profile/QueryRejected code detail)
+     (reject code detail)]
+    [(profile/QueryAdmitted admitted)
+     (materialize-admitted request admitted)]))

@@ -1,0 +1,415 @@
+#lang beagle
+(ns beagle.js-materializer
+  (:require [beagle.checker :as checker]
+            [beagle.datum-reader :as reader]
+            [beagle.frontend-facts :as facts]))
+
+;; This is the fieldwise boundary of compiler-driver/CheckedFactClosure.  Keeping
+;; it structural means the driver can route JavaScript later without a cycle.
+(defrecord JavaScriptTargetProfile [module-format String])
+
+(defrecord JavaScriptArtifact
+  [name String
+   payload String
+   content-id String
+   payload-byte-count Int
+   payload-sha256 String
+   encoding String
+   digest String])
+
+(defunion JavaScriptMaterializationResult
+  (JavaScriptMaterialized [artifact JavaScriptArtifact])
+  (JavaScriptMaterializationRejected
+    [code Int
+     detail String]))
+
+(defrecord Definition
+  [subject String
+   name String
+   parameter-name String?
+   parameter-type String?
+   return-type String
+   body String])
+
+(defunion DefinitionsResult
+  (DefinitionsBuilt [definitions (Vec Definition)])
+  (DefinitionsRejected [detail String]))
+
+(defunion ExpressionResult
+  (ExpressionEmitted [text String])
+  (ExpressionRejected [detail String]))
+
+(defn content-digest [text String] String
+  (str "sha256:" (sha256-bytes (utf8-encode text))))
+
+(defn text-values
+  [rows (Vec facts/CompilerFact)
+   relation Keyword
+   subject String
+   slot Int] (Vec String)
+  (reduce
+    (fn
+      [values (Vec String)
+       row facts/CompilerFact] (Vec String)
+      (if (and (= relation (facts/compilerfact-relation row))
+               (= subject (facts/compilerfact-subject row))
+               (= slot (facts/compilerfact-slot row)))
+        (match (facts/compilerfact-value row)
+          [(facts/FactText value) (conj values value)]
+          [(facts/FactNodeRef node-id) values]
+          [(facts/FactBool value) values]
+          [(facts/FactInt value) values]
+          [(facts/FactNil) values])
+        values))
+    [] rows))
+
+(defn node-values-at
+  [rows (Vec facts/CompilerFact) subject String slot Int] (Vec String)
+  (reduce
+    (fn
+      [values (Vec String)
+       row facts/CompilerFact] (Vec String)
+      (if (and (= :syntax/edge (facts/compilerfact-relation row))
+               (= subject (facts/compilerfact-subject row))
+               (= slot (facts/compilerfact-slot row)))
+        (match (facts/compilerfact-value row)
+          [(facts/FactNodeRef node-id) (conj values node-id)]
+          [(facts/FactText value) values]
+          [(facts/FactBool value) values]
+          [(facts/FactInt value) values]
+          [(facts/FactNil) values])
+        values))
+    [] rows))
+
+(defn int-values
+  [rows (Vec facts/CompilerFact) subject String] (Vec Int)
+  (reduce
+    (fn
+      [values (Vec Int)
+       row facts/CompilerFact] (Vec Int)
+      (if (and (= :syntax/value (facts/compilerfact-relation row))
+               (= subject (facts/compilerfact-subject row))
+               (= 0 (facts/compilerfact-slot row)))
+        (match (facts/compilerfact-value row)
+          [(facts/FactInt value) (conj values value)]
+          [(facts/FactText value) values]
+          [(facts/FactNodeRef node-id) values]
+          [(facts/FactBool value) values]
+          [(facts/FactNil) values])
+        values))
+    [] rows))
+
+(defn node-kind [rows (Vec facts/CompilerFact) subject String] String?
+  (let [kinds (Vec String) (text-values rows :syntax/node subject 0)]
+    (if (= 1 (count kinds)) (first kinds) nil)))
+
+(defn name-character? [character String] Bool
+  (str/includes?
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$."
+    character))
+
+(defn safe-name? [name String] Bool
+  (and (> (count name) 0)
+       (loop [offset Int 0]
+         (if (= offset (count name))
+           true
+           (if (name-character? (subs name offset (+ offset 1)))
+             (recur (+ offset 1))
+             false)))))
+
+(defn safe-namespace? [name String] Bool
+  (and (safe-name? name)
+       (not= (subs name 0 1) ".")
+       (not= (subs name (- (count name) 1) (count name)) ".")
+       (loop [offset Int 0
+              previous-dot Bool false]
+         (if (= offset (count name))
+           true
+           (let [character String (subs name offset (+ offset 1))]
+             (if (= character ".")
+               (if previous-dot false (recur (+ offset 1) true))
+               (recur (+ offset 1) false)))))))
+
+(defn js-identifier-character? [character String] Bool
+  (str/includes?
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$"
+    character))
+
+(defn js-identifier? [name String] Bool
+  (and (> (count name) 0)
+       (not= (subs name 0 1) "0")
+       (not= (subs name 0 1) "1")
+       (not= (subs name 0 1) "2")
+       (not= (subs name 0 1) "3")
+       (not= (subs name 0 1) "4")
+       (not= (subs name 0 1) "5")
+       (not= (subs name 0 1) "6")
+       (not= (subs name 0 1) "7")
+       (not= (subs name 0 1) "8")
+       (not= (subs name 0 1) "9")
+       (not= name "default")
+       (not= name "function")
+       (not= name "return")
+       (not= name "export")
+       (not= name "const")
+       (not= name "let")
+       (not= name "var")
+       (loop [offset Int 0]
+         (if (= offset (count name))
+           true
+           (if (js-identifier-character? (subs name offset (+ offset 1)))
+             (recur (+ offset 1))
+             false)))))
+
+(defn accepted-type? [checked checker/CheckedFacts subject String expected String] Bool
+  (reduce
+    (fn
+      [accepted Bool
+       proposition facts/TypePropositionFact] Bool
+      (if accepted
+        true
+        (if (and (= subject (facts/typepropositionfact-subject proposition))
+                 (= expected (facts/typepropositionfact-detail proposition)))
+          (reduce
+            (fn
+              [found Bool
+               evidence facts/TypeEvidenceFact] Bool
+              (or found
+                  (and (= (facts/typepropositionfact-proposition-id proposition)
+                          (facts/typeevidencefact-proposition-id evidence))
+                       (= subject (facts/typeevidencefact-subject evidence))
+                       (facts/typeevidencefact-accepted evidence))))
+            false
+            (checker/checkedfacts-evidence checked))
+          false)))
+    false
+    (checker/checkedfacts-propositions checked)))
+
+(defn lowering-type? [checked checker/CheckedFacts subject String expected String] Bool
+  (reduce
+    (fn
+      [found Bool
+       lowering facts/OrderedLoweringFact] Bool
+      (or found
+          (and (= subject (facts/orderedloweringfact-subject lowering))
+               (match (facts/orderedloweringfact-value lowering)
+                 [(facts/FactText value) (= expected value)]
+                 [(facts/FactNodeRef node-id) false]
+                 [(facts/FactBool value) false]
+                 [(facts/FactInt value) false]
+                 [(facts/FactNil) false]))))
+    false
+    (checker/checkedfacts-lowerings checked)))
+
+(defn supported-type? [value String] Bool
+  (or (= value "Int") (= value "String")))
+
+(defn function-subjects [rows (Vec facts/CompilerFact)] (Vec String)
+  (reduce
+    (fn
+      [subjects (Vec String)
+       row facts/CompilerFact] (Vec String)
+      (if (and (= :syntax/node (facts/compilerfact-relation row))
+               (= "function" (match (facts/compilerfact-value row)
+                                [(facts/FactText value) value]
+                                [(facts/FactNodeRef node-id) ""]
+                                [(facts/FactBool value) ""]
+                                [(facts/FactInt value) ""]
+                                [(facts/FactNil) ""])))
+        (conj subjects (facts/compilerfact-subject row))
+        subjects))
+    [] rows))
+
+(defn definition-from
+  [rows (Vec facts/CompilerFact) checked checker/CheckedFacts subject String]
+  Definition?
+  (let [names (Vec String) (text-values rows :syntax/value subject 0)
+        parameters (Vec String) (node-values-at rows subject 0)
+        returns (Vec String) (node-values-at rows subject 1)
+        bodies (Vec String) (node-values-at rows subject 2)]
+    (if (or (not= 1 (count names))
+            (> (count parameters) 1)
+            (not= 1 (count returns))
+            (not= 1 (count bodies))
+            (not (js-identifier? (first names))))
+      nil
+      (let [return-node String (first returns)
+            body String (first bodies)
+            return-kind String? (node-kind rows return-node)
+            return-names (Vec String) (text-values rows :syntax/value return-node 0)]
+        (if (or (not= return-kind "type-name")
+                (not= 1 (count return-names))
+                (not (supported-type? (first return-names)))
+                (not (accepted-type? checked subject (first return-names))))
+          nil
+          (if (empty? parameters)
+            (->Definition subject (first names) nil nil (first return-names) body)
+            (let [parameter String (first parameters)
+                  parameter-names (Vec String) (text-values rows :syntax/value parameter 0)
+                  type-nodes (Vec String) (node-values-at rows parameter 0)]
+              (if (or (not= "binding" (node-kind rows parameter))
+                      (not= 1 (count parameter-names))
+                      (not (js-identifier? (first parameter-names)))
+                      (not= 1 (count type-nodes)))
+                nil
+                (let [type-node String (first type-nodes)
+                      type-names (Vec String) (text-values rows :syntax/value type-node 0)]
+                  (if (or (not= "type-name" (node-kind rows type-node))
+                          (not= 1 (count type-names))
+                          (not (supported-type? (first type-names)))
+                          (not (lowering-type? checked parameter (first type-names))))
+                    nil
+                    (->Definition subject (first names) (first parameter-names)
+                      (first type-names) (first return-names) body)))))))))))
+
+(defn definitions-from-module
+  [module facts/SyntaxFactBundle checked checker/CheckedFacts] DefinitionsResult
+  (let [rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts module)
+        subjects (Vec String) (function-subjects rows)]
+    (loop [remaining (Vec String) subjects
+           definitions (Vec Definition) []]
+      (if (empty? remaining)
+        (if (empty? definitions)
+          (->DefinitionsRejected "JavaScript module contains no functions")
+          (->DefinitionsBuilt definitions))
+        (let [definition Definition? (definition-from rows checked (first remaining))]
+          (if (nil? definition)
+            (->DefinitionsRejected "function shape, identifier, or accepted type is unsupported")
+            (recur (rest remaining) (conj definitions definition))))))))
+
+(defn definition-by-name
+  [definitions (Vec Definition)
+   name String] Definition?
+  (loop [remaining (Vec Definition) definitions
+         found Definition? nil]
+    (if (empty? remaining)
+      found
+      (let [candidate Definition (first remaining)]
+        (if (= name (definition-name candidate))
+          (if (nil? found)
+            (recur (rest remaining) candidate)
+            nil)
+          (recur (rest remaining) found))))))
+
+(defn emit-expression
+  [rows (Vec facts/CompilerFact)
+   checked checker/CheckedFacts
+   definitions (Vec Definition)
+   subject String
+   expected String] ExpressionResult
+  (let [kind String? (node-kind rows subject)]
+    (cond
+      (= kind "integer-literal")
+      (let [values (Vec Int) (int-values rows subject)]
+        (if (and (= expected "Int")
+                 (= 1 (count values))
+                 (lowering-type? checked subject "Int"))
+          (->ExpressionEmitted (str (first values)))
+          (->ExpressionRejected "integer literal lacks accepted Int lowering")))
+
+      (= kind "string-literal")
+      (let [values (Vec String) (text-values rows :syntax/value subject 0)]
+        (if (and (= expected "String")
+                 (= 1 (count values))
+                 (accepted-type? checked subject "String"))
+          (->ExpressionEmitted (reader/render-string-literal (first values)))
+          (->ExpressionRejected "string literal lacks accepted String proposition")))
+
+      (= kind "direct-call")
+      (let [names (Vec String) (text-values rows :syntax/value subject 0)
+            arguments (Vec String) (node-values-at rows subject 0)]
+        (if (or (not= 1 (count names))
+                (not (accepted-type? checked subject expected)))
+          (->ExpressionRejected "direct call is missing accepted result type")
+          (let [target Definition? (definition-by-name definitions (first names))]
+            (if (or (nil? target)
+                    (not= expected (definition-return-type target))
+                    (not= (if (nil? (definition-parameter-name target)) 0 1)
+                          (count arguments)))
+              (->ExpressionRejected "direct call target or arity is unsupported")
+              (if (empty? arguments)
+                (->ExpressionEmitted (str (definition-name target) "()"))
+                (let [parameter-type String (str (definition-parameter-type target))]
+                  (match (emit-expression rows checked definitions (first arguments)
+                           parameter-type)
+                    [(ExpressionEmitted argument)
+                     (->ExpressionEmitted
+                       (str (definition-name target) "(" argument ")"))]
+                    [(ExpressionRejected detail) (->ExpressionRejected detail)])))))))
+
+      :else
+      (->ExpressionRejected "expression is outside the JavaScript materializer subset"))))
+
+(defn emit-definition
+  [rows (Vec facts/CompilerFact)
+   checked checker/CheckedFacts
+   definitions (Vec Definition)
+   definition Definition] ExpressionResult
+  (match (emit-expression rows checked definitions (definition-body definition)
+           (definition-return-type definition))
+    [(ExpressionEmitted body)
+     (->ExpressionEmitted
+       (str "export function " (definition-name definition) "("
+            (if (nil? (definition-parameter-name definition)) ""
+              (definition-parameter-name definition)) ") {\n"
+            "  return " body ";\n"
+            "}\n"))]
+    [(ExpressionRejected detail) (->ExpressionRejected detail)]))
+
+(defn emit-module
+  [namespace String
+   rows (Vec facts/CompilerFact)
+   checked checker/CheckedFacts
+   definitions (Vec Definition)] ExpressionResult
+  (loop [remaining (Vec Definition) definitions
+         emitted String (str "// beagle namespace: " namespace "\n")]
+    (if (empty? remaining)
+      (->ExpressionEmitted emitted)
+      (match (emit-definition rows checked definitions (first remaining))
+        [(ExpressionEmitted definition)
+         (recur (rest remaining) (str emitted definition))]
+        [(ExpressionRejected detail) (->ExpressionRejected detail)]))))
+
+(defn materialize
+  [syntax facts/SyntaxFactClosure
+   checked-modules (Vec checker/CheckedFacts)
+   profile JavaScriptTargetProfile] JavaScriptMaterializationResult
+  (let [modules (Vec facts/SyntaxFactBundle) (facts/syntaxfactclosure-modules syntax)]
+    (cond
+      (not= "es-module" (javascripttargetprofile-module-format profile))
+      (->JavaScriptMaterializationRejected 64
+        "JavaScript materializer requires the es-module target profile")
+
+      (not= 1 (count modules))
+      (->JavaScriptMaterializationRejected 65
+        "JavaScript materializer currently requires exactly one checked module")
+
+      (not= 1 (count checked-modules))
+      (->JavaScriptMaterializationRejected 65
+        "syntax modules and checked modules are not aligned")
+
+      :else
+      (let [module facts/SyntaxFactBundle (first modules)
+            checked checker/CheckedFacts (first checked-modules)
+            namespace String? (facts/syntaxfactbundle-namespace module)
+            rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts module)]
+        (if (or (nil? namespace) (not (safe-namespace? namespace)))
+          (->JavaScriptMaterializationRejected 65
+            "JavaScript materializer requires one safe module namespace")
+          (match (definitions-from-module module checked)
+            [(DefinitionsRejected detail)
+             (->JavaScriptMaterializationRejected 65 detail)]
+            [(DefinitionsBuilt definitions)
+             (match (emit-module namespace rows checked definitions)
+               [(ExpressionRejected detail)
+                (->JavaScriptMaterializationRejected 65 detail)]
+               [(ExpressionEmitted payload)
+                (let [content-id String (content-digest payload)
+                      encoding String (str "js-es-module:"
+                           (facts/syntaxfactclosure-closure-digest syntax)
+                           ":" content-id)]
+                  (->JavaScriptMaterialized
+                    (->JavaScriptArtifact
+                      "module.js" payload content-id
+                      (count (utf8-encode payload)) content-id encoding
+                      (content-digest encoding))))])]))))))
