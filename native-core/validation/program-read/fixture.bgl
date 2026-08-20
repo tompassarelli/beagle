@@ -1,29 +1,49 @@
 #lang beagle
 (ns program-read.fixture
   (:require [beagle.program-read :as read]
-            [store.datalog :as d]
-            [store.query :as query]
+            [store.kernel :as kernel]
+            [store.program :as program]
             [store.types :as t]))
 
-(def root-a Keyword :root-a)
-(def root-b Keyword :root-b)
-(def profile Keyword :profile-v1)
-(def module-a Keyword :module-a)
-(def module-b Keyword :module-b)
-(def module-dependent Keyword :module-dependent)
-(def module-outsider Keyword :module-outsider)
-(def binding-a Keyword :binding-a)
-(def binding-b Keyword :binding-b)
+(def root-a String "root-a")
+(def root-b String "root-b")
+(def profile String "program-profile-v1")
+(def rule String "program-admission")
+(def module-def String "module-def")
+(def module-caller String "module-caller")
+(def module-other String "module-other")
+(def binding-selected t/Triple (t/triple module-def :declares_at 0))
+(def binding-sibling t/Triple (t/triple module-def :declares_at 1))
+(def binding-shadow t/Triple (t/triple module-def :declares_at 2))
+(def binding-caller t/Triple (t/triple module-caller :declares_at 0))
+(def binding-other t/Triple (t/triple module-other :declares_at 0))
 
-(def span-a t/Triple (t/triple 10 :through_byte 20))
-(def span-b t/Triple (t/triple 30 :through_byte 40))
-(def reference-a t/Triple (t/triple module-a :has_span span-a))
-(def reference-b t/Triple (t/triple module-b :has_span span-b))
+(def selected-span t/Triple (t/triple 10 :through_byte 20))
+(def sibling-span t/Triple (t/triple 22 :through_byte 28))
+(def shadow-span t/Triple (t/triple 30 :through_byte 40))
+(def caller-binding-span t/Triple (t/triple 5 :through_byte 9))
+(def other-binding-span t/Triple (t/triple 10 :through_byte 20))
+(def selected-reference-span t/Triple (t/triple 45 :through_byte 51))
+(def shadow-reference-span t/Triple (t/triple 55 :through_byte 61))
+(def other-reference-span t/Triple (t/triple 45 :through_byte 51))
+(def selected-reference t/Triple
+  (t/triple module-caller :has_span selected-reference-span))
+(def shadow-reference t/Triple
+  (t/triple module-def :has_span shadow-reference-span))
+(def other-reference t/Triple
+  (t/triple module-other :has_span other-reference-span))
+
+(def source-def String
+  "0123456789helper--taken-shadowed-helper-------------------------------")
+(def source-caller String
+  "caller-binding-----------------------------helper()----------------")
+(def source-other String
+  "other-root-helper--------------------------helper()----------------")
 
 (defn relationship [term Keyword] t/Triple
   (t/triple term :member_of :relationships))
 
-(def propositions (Vec t/Triple)
+(def vocabulary-and-profile (Vec t/Triple)
   [(relationship :member_of)
    (relationship :contains)
    (relationship :represented_by)
@@ -35,45 +55,97 @@
    (relationship :has_span)
    (relationship :through_byte)
    (relationship :named)
+   (relationship :declares_at)
 
+   (t/triple profile kernel/profile-includes
+             kernel/fact-normal-form-profile-rule)
    (t/triple profile :member_of :profiles)
+   (t/triple profile :includes rule)
+   (t/triple rule :member_of :profile_rules)])
+
+(def root-a-propositions (Vec t/Triple)
+  (into vocabulary-and-profile
+   [(t/triple
+     "space-a"
+     kernel/profile-anchor
+     (kernel/profile-header
+      profile program/fact-profile-kind kernel/observe-profile-mode))
    (t/triple root-a :member_of :program_roots)
    (t/triple root-a :admitted_by profile)
+   (t/triple root-a :contains module-def)
+   (t/triple root-a :contains module-caller)
+
+   (t/triple module-def :member_of :modules)
+   (t/triple module-def :represented_by source-def)
+   (t/triple module-def :contains binding-selected)
+   (t/triple module-def :contains binding-sibling)
+   (t/triple module-def :contains binding-shadow)
+   (t/triple module-def :contains shadow-reference)
+   (t/triple binding-selected :member_of :bindings)
+   (t/triple binding-selected :named "helper")
+   (t/triple binding-selected :has_span selected-span)
+   (t/triple binding-sibling :member_of :bindings)
+   (t/triple binding-sibling :named "taken")
+   (t/triple binding-sibling :has_span sibling-span)
+   (t/triple binding-shadow :member_of :bindings)
+   (t/triple binding-shadow :named "helper")
+   (t/triple binding-shadow :has_span shadow-span)
+   (t/triple shadow-reference :member_of :references)
+   (t/triple shadow-reference :refers_to binding-shadow)
+
+   (t/triple module-caller :member_of :modules)
+   (t/triple module-caller :represented_by source-caller)
+   (t/triple module-caller :contains binding-caller)
+   (t/triple module-caller :contains selected-reference)
+   (t/triple binding-caller :member_of :bindings)
+   (t/triple binding-caller :named "caller-local")
+   (t/triple binding-caller :has_span caller-binding-span)
+   (t/triple selected-reference :member_of :references)
+   (t/triple selected-reference :refers_to binding-selected)
+   (t/triple binding-caller :depends_on binding-selected)]))
+
+(def root-b-propositions (Vec t/Triple)
+  (into vocabulary-and-profile
+   [(t/triple
+     "space-b"
+     kernel/profile-anchor
+     (kernel/profile-header
+      profile program/fact-profile-kind kernel/observe-profile-mode))
    (t/triple root-b :member_of :program_roots)
    (t/triple root-b :admitted_by profile)
+   (t/triple root-b :contains module-other)
+   (t/triple module-other :member_of :modules)
+   (t/triple module-other :represented_by source-other)
+   (t/triple module-other :contains binding-other)
+   (t/triple module-other :contains other-reference)
+   (t/triple binding-other :member_of :bindings)
+   (t/triple binding-other :named "helper")
+   (t/triple binding-other :has_span other-binding-span)
+   (t/triple other-reference :member_of :references)
+   (t/triple other-reference :refers_to binding-other)]))
 
-   (t/triple root-a :contains module-a)
-   (t/triple root-a :contains module-dependent)
-   (t/triple module-a :member_of :modules)
-   (t/triple module-a :contains binding-a)
-   (t/triple module-a :contains reference-a)
-   (t/triple binding-a :member_of :bindings)
-   (t/triple binding-a :named "helper")
-   (t/triple reference-a :member_of :references)
-   (t/triple reference-a :refers_to binding-a)
-   (t/triple module-dependent :member_of :modules)
-   (t/triple module-dependent :depends_on module-a)
+(def root-a-view program/ProgramRoot
+  (program/->ProgramRoot "space-a" root-a 2 profile root-a-propositions))
+(def root-b-view program/ProgramRoot
+  (program/->ProgramRoot "space-b" root-b 2 profile root-b-propositions))
 
-   (t/triple root-b :contains module-b)
-   (t/triple root-b :contains module-outsider)
-   (t/triple module-b :member_of :modules)
-   (t/triple module-b :contains binding-b)
-   (t/triple module-b :contains reference-b)
-   (t/triple binding-b :member_of :bindings)
-   (t/triple binding-b :named "helper")
-   (t/triple reference-b :member_of :references)
-   (t/triple reference-b :refers_to binding-b)
-   (t/triple module-outsider :member_of :modules)
-   (t/triple module-outsider :depends_on module-a)])
-
-(def named-proposition t/Triple (t/triple binding-a :named "helper"))
+(def named-proposition t/Triple
+  (t/triple binding-selected :named "helper"))
 (def assertion-coordinate t/Triple
   (t/occurrence-coordinate
-   (t/transaction-coordinate "program-read-fixture" 1)
+   (t/transaction-coordinate "space-a" 1)
    0))
 (def retraction-coordinate t/Triple
   (t/occurrence-coordinate
-   (t/transaction-coordinate "program-read-fixture" 2)
+   (t/transaction-coordinate "space-a" 2)
+   0))
+(def future-coordinate t/Triple
+  (t/occurrence-coordinate
+   (t/transaction-coordinate "space-a" 3)
+   0))
+(def other-space-coordinate t/Triple
+  (t/occurrence-coordinate
+   (t/transaction-coordinate "space-b" 1)
    0))
 (def assertion t/OperationOccurrence
   (t/->OperationOccurrence
@@ -81,77 +153,135 @@
 (def retraction t/OperationOccurrence
   (t/->OperationOccurrence
    retraction-coordinate t/retract-action named-proposition))
-(def occurrences (Vec t/OperationOccurrence) [assertion retraction])
-(def withdrawals (Vec t/Withdrawal) [(t/->Withdrawal retraction assertion)])
+(def future-assertion t/OperationOccurrence
+  (t/->OperationOccurrence
+   future-coordinate t/assert-action named-proposition))
+(def other-space-assertion t/OperationOccurrence
+  (t/->OperationOccurrence
+   other-space-coordinate t/assert-action named-proposition))
+(def occurrences (Vec t/OperationOccurrence)
+  [assertion retraction future-assertion other-space-assertion])
+(def withdrawals (Vec t/Withdrawal)
+  [(t/->Withdrawal retraction assertion)])
 
-(defn rows [plan query/QueryPlan] (Vec d/Tuple)
-  (query/result-rows (query/run! propositions plan)))
+(defn contains-term? [values (Vec Any) expected Any] Bool
+  (contains? (set values) expected))
 
-(defn history-rows [plan query/QueryPlan] (Vec d/Tuple)
-  (let [execution query/QueryExecutionResult
-        (query/run-plan-with-history-result!
-         propositions occurrences withdrawals plan nil)
-        result query/QueryResult?
-        (query/execution-query-result execution)]
-    (if (some? result)
-      (let [present query/QueryResult result]
-        (query/result-rows present))
-      [])))
+(defn contains-triple?
+  [values (Vec t/Triple)
+   expected t/Triple] Bool
+  (contains? (set values) expected))
 
-(defn contains-row?
-  [rows-value (Vec d/Tuple)
-   expected d/Tuple] Bool
-  (contains? (set rows-value) expected))
+(defn contains-anchor?
+  [anchors (Vec read/ProgramSourceAnchor)
+   module Any
+   anchor Any
+   kind Keyword
+   detail Any] Bool
+  (some?
+   (some
+    (fn [value read/ProgramSourceAnchor] read/ProgramSourceAnchor?
+      (if (and (= module (read/programsourceanchor-module value))
+               (and (= anchor (read/programsourceanchor-anchor value))
+                    (and (= kind (read/programsourceanchor-kind value))
+                         (= detail (read/programsourceanchor-detail value)))))
+        value
+        nil))
+    anchors)))
 
-(defn plans-valid? [] Bool
-  (let [history read/ProgramHistoryQueryPlans
-        (read/history-queries root-a named-proposition)]
-    (every?
-     (fn [plan query/QueryPlan] Bool
-       (query/compile-ok? (query/compile-query! plan)))
-     [(read/inspect-query root-a)
-      (read/definition-query root-a "helper")
-      (read/references-query root-a binding-a)
-      (read/impact-query root-a module-a)
-      (read/programhistoryqueryplans-occurrences history)
-      (read/programhistoryqueryplans-withdrawals history)])))
+(defn contains-scope-binding?
+  [values (Vec read/ProgramScopeBinding)
+   scope Any
+   binding Any
+   name String] Bool
+  (some?
+   (some
+    (fn [value read/ProgramScopeBinding] read/ProgramScopeBinding?
+      (if (and (= scope (read/programscopebinding-scope value))
+               (and (= binding (read/programscopebinding-binding value))
+                    (= name (read/programscopebinding-name value))))
+        value
+        nil))
+    values)))
 
 (defn root-scoped-live-reads? [] Bool
-  (let [inspect-rows (Vec d/Tuple) (rows (read/inspect-query root-a))]
+  (let [inspected (Vec t/Triple) (read/inspect root-a-view)
+        definitions (Vec Any) (read/definition root-a-view "helper")]
     (and
-     (= [[binding-a]] (rows (read/definition-query root-a "helper")))
-     (= [[reference-a]] (rows (read/references-query root-a binding-a)))
-     (= [[module-dependent]] (rows (read/impact-query root-a module-a)))
-     (contains-row? inspect-rows [binding-a :named "helper"])
-     (contains-row? inspect-rows [reference-a :refers_to binding-a])
-     (not (contains-row? inspect-rows [binding-b :named "helper"]))
-     (not (contains-row?
-           inspect-rows
-           [module-outsider :depends_on module-a])))))
+     (contains-term? definitions binding-selected)
+     (contains-term? definitions binding-shadow)
+     (not (contains-term? definitions binding-other))
+     (= [selected-reference]
+        (read/references root-a-view binding-selected))
+     (= [binding-caller]
+        (read/impact root-a-view binding-selected))
+     (contains-triple?
+      inspected
+      (t/triple binding-selected :named "helper"))
+     (contains-triple?
+      inspected
+      (t/triple shadow-reference :refers_to binding-shadow))
+     (not (contains-triple?
+           inspected
+           (t/triple binding-other :named "helper"))))))
 
 (defn occurrence-native-history? [] Bool
-  (let [history read/ProgramHistoryQueryPlans
-        (read/history-queries root-a named-proposition)
-        outsider read/ProgramHistoryQueryPlans
-        (read/history-queries root-b named-proposition)]
+  (let [selected read/ProgramHistory
+        (read/history
+         root-a-view named-proposition occurrences withdrawals)
+        outsider read/ProgramHistory
+        (read/history
+         root-b-view named-proposition occurrences withdrawals)]
     (and
-     (= [[assertion-coordinate :assert named-proposition]
-         [retraction-coordinate :retract named-proposition]]
-        (history-rows
-         (read/programhistoryqueryplans-occurrences history)))
-     (= [[retraction-coordinate assertion-coordinate]]
-        (history-rows
-         (read/programhistoryqueryplans-withdrawals history)))
-     (empty?
-      (history-rows
-       (read/programhistoryqueryplans-occurrences outsider)))
-     (empty?
-      (history-rows
-       (read/programhistoryqueryplans-withdrawals outsider))))))
+     (= [assertion retraction]
+        (read/programhistory-occurrences selected))
+     (= [(t/->Withdrawal retraction assertion)]
+        (read/programhistory-withdrawals selected))
+     (empty? (read/programhistory-occurrences outsider))
+     (empty? (read/programhistory-withdrawals outsider)))))
+
+(defn rename-selection? [] Bool
+  (match (read/rename-selection root-a-view binding-selected)
+    [(read/ProgramRenameSelectionRejected code detail) false]
+    [(read/ProgramRenameSelected selection)
+     (let [anchors (Vec read/ProgramSourceAnchor)
+           (read/programrenameselection-source-anchors selection)
+           scope-bindings (Vec read/ProgramScopeBinding)
+           (read/programrenameselection-scope-bindings selection)]
+       (and
+        (= binding-selected
+           (read/programrenameselection-binding selection))
+        (= module-def
+           (read/programrenameselection-module selection))
+        (= "helper"
+           (read/programrenameselection-name selection))
+        (= selected-span
+           (read/programrenameselection-span selection))
+        (= [selected-reference]
+           (read/programrenameselection-references selection))
+        (= [binding-caller]
+           (read/programrenameselection-dependents selection))
+        (contains-anchor?
+         anchors module-def binding-selected :binding selected-span)
+        (contains-anchor?
+         anchors module-def binding-sibling :binding sibling-span)
+        (contains-anchor?
+         anchors module-def binding-shadow :binding shadow-span)
+        (contains-anchor?
+         anchors module-def shadow-reference :reference binding-shadow)
+        (contains-anchor?
+         anchors module-caller binding-caller :binding caller-binding-span)
+        (contains-anchor?
+         anchors module-caller selected-reference :reference binding-selected)
+        (not (contains-anchor?
+              anchors module-other binding-other :binding other-binding-span))
+        (contains-scope-binding?
+         scope-bindings module-def binding-sibling "taken")
+        (contains-scope-binding?
+         scope-bindings module-def binding-shadow "helper")))]))
 
 (defn main [args (Vec String)] Int
-  (if (and (plans-valid?)
-           (root-scoped-live-reads?)
-           (occurrence-native-history?))
+  (if (and (root-scoped-live-reads?)
+           (and (occurrence-native-history?) (rename-selection?)))
     0
     1))

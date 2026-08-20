@@ -1,8 +1,9 @@
 #lang beagle
-;; Program reads are typed views over Store's canonical relations. Query-local
-;; rule names organize a plan; they are never persisted vocabulary.
+;; Program reads execute typed Store plans over one immutable ProgramRoot.
+;; Query-local relation names organize evaluation and are never persisted.
 (ns beagle.program-read
   (:require [store.datalog :as d]
+            [store.program :as program]
             [store.query :as query]
             [store.types :as t]))
 
@@ -11,22 +12,60 @@
 (def refers-to Keyword :refers_to)
 (def depends-on Keyword :depends_on)
 (def admitted-by Keyword :admitted_by)
+(def has-span Keyword :has_span)
 (def named Keyword :named)
 
 (def relationships Keyword :relationships)
 (def profiles Keyword :profiles)
 (def program-roots Keyword :program_roots)
+(def modules Keyword :modules)
 (def bindings Keyword :bindings)
-(def references Keyword :references)
+(def references-vocabulary Keyword :references)
 
 (def rooted-relation String "rooted")
+(def containing-module-relation String "containing-module")
+(def affected-module-relation String "affected-module")
 (def inspect-relation String "inspect")
 (def definition-relation String "definition")
 (def references-relation String "references")
 (def dependency-relation String "dependency")
 (def impact-relation String "impact")
+(def binding-detail-relation String "binding-detail")
+(def source-anchor-relation String "source-anchor")
+(def scope-binding-relation String "scope-binding")
 (def occurrences-relation String "occurrences")
 (def withdrawals-relation String "withdrawals")
+
+(defrecord ProgramHistory
+  [occurrences (Vec t/OperationOccurrence)
+   withdrawals (Vec t/Withdrawal)])
+
+;; Recursive Term fields remain Any at this ABI boundary. Every constructor
+;; below validates them with store.types/term? before presenting the record.
+(defrecord ProgramSourceAnchor
+  [module Any
+   anchor Any
+   kind Keyword
+   detail Any])
+
+(defrecord ProgramScopeBinding
+  [scope Any
+   binding Any
+   name String])
+
+(defrecord ProgramRenameSelection
+  [binding Any
+   module Any
+   name String
+   span Any
+   references (Vec Any)
+   dependents (Vec Any)
+   source-anchors (Vec ProgramSourceAnchor)
+   scope-bindings (Vec ProgramScopeBinding)])
+
+(defunion ProgramRenameSelectionResult
+  (ProgramRenameSelected [selection ProgramRenameSelection])
+  (ProgramRenameSelectionRejected [code Keyword detail String]))
 
 (defrecord ProgramHistoryQueryPlans
   [occurrences query/QueryPlan
@@ -35,8 +74,8 @@
 (defn- variable [name String] d/QueryTerm
   (d/variable name))
 
-;; QueryTerm.value is the Store query boundary's deliberate Any bridge for the
-;; recursive Term union; d/constant performs the canonical runtime check.
+;; QueryTerm.value is Store query's deliberate Any bridge for recursive Term;
+;; d/constant performs the canonical runtime check.
 (defn- constant [value Any] d/QueryTerm
   (d/constant value))
 
@@ -73,19 +112,66 @@
    (d/rule
     rooted-relation
     [(variable "child")]
-    [(d/relation-literal
-      rooted-relation
-      [(variable "parent")])
+    [(d/relation-literal rooted-relation [(variable "parent")])
      (triple-literal
       (variable "parent")
       (constant contains)
       (variable "child"))
      (declared-relationship contains)])])
 
-(defn- with-rooted-rules
-  [root-resource Any
-   final-rule d/Rule] (Vec d/Rule)
-  (conj (rooted-rules root-resource) final-rule))
+(defn- containing-module-rule [selected-binding Any] d/Rule
+  (d/rule
+   containing-module-relation
+   [(variable "module")]
+   [(d/relation-literal rooted-relation [(variable "module")])
+    (d/relation-literal rooted-relation [(constant selected-binding)])
+    (triple-literal
+     (variable "module")
+     (constant member-of)
+     (constant modules))
+    (triple-literal
+     (variable "module")
+     (constant contains)
+     (constant selected-binding))
+    (declared-relationship contains)
+    (declared-relationship member-of)]))
+
+(defn- affected-module-rules [selected-binding Any] (Vec d/Rule)
+  [(d/rule
+    affected-module-relation
+    [(variable "module")]
+    [(d/relation-literal
+      containing-module-relation
+      [(variable "module")])])
+   (d/rule
+    affected-module-relation
+    [(variable "module")]
+    [(d/relation-literal rooted-relation [(variable "module")])
+     (d/relation-literal rooted-relation [(variable "reference")])
+     (triple-literal
+      (variable "module")
+      (constant member-of)
+      (constant modules))
+     (triple-literal
+      (variable "module")
+      (constant contains)
+      (variable "reference"))
+     (triple-literal
+      (variable "reference")
+      (constant member-of)
+      (constant references-vocabulary))
+     (triple-literal
+      (variable "reference")
+      (constant refers-to)
+      (constant selected-binding))
+     (declared-relationship contains)
+     (declared-relationship member-of)
+     (declared-relationship refers-to)])])
+
+(defn- rules-with
+  [rules (Vec d/Rule)
+   more (Vec d/Rule)] (Vec d/Rule)
+  (into rules more))
 
 (defn- ordered-plan
   [relation String
@@ -96,19 +182,19 @@
                clauses (Vec query/OrderClause) []]
           (if (>= column columns)
             clauses
-            (recur (+ column 1) (conj clauses (query/order-clause column :asc)))))]
+            (recur (+ column 1)
+                   (conj clauses (query/order-clause column :asc)))))]
     (query/ordered-query-plan
      (query/relation-find relation)
      [rules]
      order
      nil)))
 
-(defn inspect-query
-  [root-resource Any] query/QueryPlan
+(defn- inspect-query [root-resource Any] query/QueryPlan
   (ordered-plan
    inspect-relation
-   (with-rooted-rules
-    root-resource
+   (conj
+    (rooted-rules root-resource)
     (d/rule
      inspect-relation
      [(variable "t1") (variable "t2") (variable "t3")]
@@ -123,13 +209,13 @@
        (constant relationships))]))
    3))
 
-(defn definition-query
+(defn- definition-query
   [root-resource Any
    exact-name String] query/QueryPlan
   (ordered-plan
    definition-relation
-   (with-rooted-rules
-    root-resource
+   (conj
+    (rooted-rules root-resource)
     (d/rule
      definition-relation
      [(variable "binding")]
@@ -142,16 +228,17 @@
        (variable "binding")
        (constant named)
        (constant exact-name))
+      (declared-relationship member-of)
       (declared-relationship named)]))
    1))
 
-(defn references-query
+(defn- references-query
   [root-resource Any
    target Any] query/QueryPlan
   (ordered-plan
    references-relation
-   (with-rooted-rules
-    root-resource
+   (conj
+    (rooted-rules root-resource)
     (d/rule
      references-relation
      [(variable "reference")]
@@ -159,19 +246,19 @@
       (triple-literal
        (variable "reference")
        (constant member-of)
-       (constant references))
+       (constant references-vocabulary))
       (triple-literal
        (variable "reference")
        (constant refers-to)
        (constant target))
+      (declared-relationship member-of)
       (declared-relationship refers-to)]))
    1))
 
-(defn impact-query
+(defn- impact-query
   [root-resource Any
    changed Any] query/QueryPlan
-  (let [rules (Vec d/Rule)
-        (rooted-rules root-resource)
+  (let [rules (Vec d/Rule) (rooted-rules root-resource)
         direct d/Rule
         (d/rule
          dependency-relation
@@ -205,7 +292,157 @@
      (conj (conj (conj rules direct) transitive) result)
      1)))
 
-(defn history-queries
+(defn- binding-detail-query
+  [root-resource Any
+   selected-binding Any] query/QueryPlan
+  (let [rules (Vec d/Rule)
+        (conj (rooted-rules root-resource)
+              (containing-module-rule selected-binding))]
+    (ordered-plan
+     binding-detail-relation
+     (conj
+      rules
+      (d/rule
+       binding-detail-relation
+       [(variable "module")
+        (variable "name")
+        (variable "span")]
+       [(d/relation-literal
+         containing-module-relation
+         [(variable "module")])
+        (d/relation-literal rooted-relation [(constant selected-binding)])
+        (triple-literal
+         (constant selected-binding)
+         (constant member-of)
+         (constant bindings))
+        (triple-literal
+         (constant selected-binding)
+         (constant named)
+         (variable "name"))
+        (triple-literal
+         (constant selected-binding)
+         (constant has-span)
+         (variable "span"))
+        (declared-relationship member-of)
+        (declared-relationship named)
+        (declared-relationship has-span)]))
+     3)))
+
+(defn- affected-modules-query
+  [root-resource Any
+   selected-binding Any] query/QueryPlan
+  (let [rules (Vec d/Rule)
+        (conj (rooted-rules root-resource)
+              (containing-module-rule selected-binding))
+        affected (Vec d/Rule) (affected-module-rules selected-binding)]
+    (ordered-plan
+     affected-module-relation
+     (rules-with rules affected)
+     1)))
+
+(defn- source-anchors-query
+  [root-resource Any
+   selected-binding Any] query/QueryPlan
+  (let [scoped (Vec d/Rule)
+        (conj (rooted-rules root-resource)
+              (containing-module-rule selected-binding))
+        rules (Vec d/Rule)
+        (rules-with scoped (affected-module-rules selected-binding))
+        binding-rule d/Rule
+        (d/rule
+         source-anchor-relation
+         [(variable "module")
+          (variable "anchor")
+          (constant :binding)
+          (variable "span")]
+         [(d/relation-literal
+           affected-module-relation
+           [(variable "module")])
+          (triple-literal
+           (variable "module")
+           (constant contains)
+           (variable "anchor"))
+          (triple-literal
+           (variable "anchor")
+           (constant member-of)
+           (constant bindings))
+          (triple-literal
+           (variable "anchor")
+           (constant has-span)
+           (variable "span"))
+          (declared-relationship contains)
+          (declared-relationship member-of)
+          (declared-relationship has-span)])
+        reference-rule d/Rule
+        (d/rule
+         source-anchor-relation
+         [(variable "module")
+          (variable "anchor")
+          (constant :reference)
+          (variable "target")]
+         [(d/relation-literal
+           affected-module-relation
+           [(variable "module")])
+          (triple-literal
+           (variable "module")
+           (constant contains)
+           (variable "anchor"))
+          (triple-literal
+           (variable "anchor")
+           (constant member-of)
+           (constant references-vocabulary))
+          (triple-literal
+           (variable "anchor")
+           (constant refers-to)
+           (variable "target"))
+          (declared-relationship contains)
+          (declared-relationship member-of)
+          (declared-relationship refers-to)])]
+    (ordered-plan
+     source-anchor-relation
+     (conj (conj rules binding-rule) reference-rule)
+     4)))
+
+(defn- scope-bindings-query
+  [root-resource Any
+   selected-binding Any] query/QueryPlan
+  (ordered-plan
+   scope-binding-relation
+   (let [rules (Vec d/Rule)
+         (conj (rooted-rules root-resource)
+               (containing-module-rule selected-binding))]
+    (conj
+    rules
+    (d/rule
+     scope-binding-relation
+     [(variable "module")
+      (variable "binding")
+      (variable "name")]
+     [(d/relation-literal
+       containing-module-relation
+       [(variable "module")])
+      (d/relation-literal rooted-relation [(variable "binding")])
+      (triple-literal
+       (variable "module")
+       (constant contains)
+       (variable "binding"))
+      (d/comparison-literal
+       :ne
+       [(variable "binding") (constant selected-binding)])
+      (triple-literal
+       (variable "binding")
+       (constant member-of)
+       (constant bindings))
+      (triple-literal
+       (variable "binding")
+       (constant named)
+       (variable "name"))
+      (declared-relationship contains)
+      (declared-relationship member-of)
+      (declared-relationship named)])))
+   3))
+
+(defn- history-queries
   [root-resource Any
    proposition t/Triple] ProgramHistoryQueryPlans
   (let [subject Any (t/triple-t1 proposition)
@@ -242,9 +479,304 @@
     (->ProgramHistoryQueryPlans
      (ordered-plan
       occurrences-relation
-      (with-rooted-rules root-resource occurrence-rule)
+      (conj (rooted-rules root-resource) occurrence-rule)
       3)
      (ordered-plan
       withdrawals-relation
-      (with-rooted-rules root-resource withdrawal-rule)
+      (conj (rooted-rules root-resource) withdrawal-rule)
       2))))
+
+(defn- root-propositions [root program/ProgramRoot] (Vec t/Triple)
+  (let [space-id String (program/programroot-space-id root)
+        store-version Int (program/programroot-store-version root)]
+    (if (and (pos? (count space-id))
+             (and (>= store-version 0) (program/admitted-root? root)))
+      (program/programroot-propositions root)
+      (throw (ex-info
+              "program read requires an admitted, versioned root"
+              {:type :invalid-program-root})))))
+
+(defn- root-resource [root program/ProgramRoot] Any
+  (do
+    (root-propositions root)
+    (program/programroot-root-resource root)))
+
+(defn- execution-rows
+  [root program/ProgramRoot
+   plan query/QueryPlan] (Vec d/Tuple)
+  (let [result query/QueryResult
+        (query/run! (root-propositions root) plan)]
+    (if (query/result-ok? result)
+      (query/result-rows result)
+      (throw (ex-info
+              "program read query failed"
+              {:type :program-query-failed})))))
+
+(defn- inspected-triple [row d/Tuple] t/Triple
+  (if (= 3 (count row))
+    (let [candidate t/Triple
+          (t/->Triple (nth row 0) (nth row 1) (nth row 2))]
+      (if (t/term? candidate)
+        candidate
+        (throw (ex-info
+                "program inspect produced a non-Term row"
+                {:type :invalid-query-row}))))
+    (throw (ex-info
+            "program inspect produced a non-Triple row"
+            {:type :invalid-query-row}))))
+
+(defn- one-term-row [row d/Tuple] Any
+  (if (and (= 1 (count row)) (t/term? (nth row 0)))
+    (nth row 0)
+    (throw (ex-info
+            "program read produced an invalid Term row"
+            {:type :invalid-query-row}))))
+
+(defn inspect [root program/ProgramRoot] (Vec t/Triple)
+  (let [resource Any (root-resource root)]
+    (mapv inspected-triple
+          (execution-rows root (inspect-query resource)))))
+
+(defn definition
+  [root program/ProgramRoot
+   exact-name String] (Vec Any)
+  (let [resource Any (root-resource root)]
+    (mapv one-term-row
+          (execution-rows root (definition-query resource exact-name)))))
+
+(defn references
+  [root program/ProgramRoot
+   target Any] (Vec Any)
+  (let [resource Any (root-resource root)]
+    (mapv one-term-row
+          (execution-rows root (references-query resource target)))))
+
+(defn impact
+  [root program/ProgramRoot
+   changed Any] (Vec Any)
+  (let [resource Any (root-resource root)]
+    (mapv one-term-row
+          (execution-rows root (impact-query resource changed)))))
+
+(defn- occurrence-in-root-view?
+  [root program/ProgramRoot
+   occurrence t/OperationOccurrence] Bool
+  (let [coordinate t/Triple (t/operationoccurrence-coordinate occurrence)]
+    (if (t/occurrence-coordinate? coordinate)
+      (let [transaction-value Any (t/triple-t1 coordinate)]
+        (if (t/triple? transaction-value)
+          (let [transaction t/Triple transaction-value
+                space-value Any (t/triple-t1 transaction)
+                version-value Any (t/triple-t3 transaction)]
+            (and (string? space-value)
+                 (and (integer? version-value)
+                      (and (= (program/programroot-space-id root) space-value)
+                           (<= version-value
+                               (program/programroot-store-version root))))))
+          false))
+      false)))
+
+(defn- withdrawal-in-root-view?
+  [root program/ProgramRoot
+   withdrawal t/Withdrawal] Bool
+  (and (occurrence-in-root-view? root (t/withdrawal-retraction withdrawal))
+       (occurrence-in-root-view? root (t/withdrawal-assertion withdrawal))))
+
+(defn- history-execution-rows
+  [root program/ProgramRoot
+   occurrences (Vec t/OperationOccurrence)
+   withdrawals (Vec t/Withdrawal)
+   plan query/QueryPlan] (Vec d/Tuple)
+  (let [execution query/QueryExecutionResult
+        (query/run-plan-with-history-result!
+         (root-propositions root) occurrences withdrawals plan nil)
+        result query/QueryResult? (query/execution-query-result execution)]
+    (if (some? result)
+      (let [present query/QueryResult result]
+        (if (query/result-ok? present)
+          (query/result-rows present)
+          (throw (ex-info
+                  "program history query failed"
+                  {:type :program-query-failed}))))
+      (throw (ex-info
+              "program history query produced no result"
+              {:type :program-query-failed})))))
+
+(defn history
+  [root program/ProgramRoot
+   proposition t/Triple
+   occurrences (Vec t/OperationOccurrence)
+   withdrawals (Vec t/Withdrawal)] ProgramHistory
+  (let [resource Any (root-resource root)
+        bounded-occurrences (Vec t/OperationOccurrence)
+        (filterv
+         (fn [occurrence t/OperationOccurrence] Bool
+           (occurrence-in-root-view? root occurrence))
+         occurrences)
+        bounded-withdrawals (Vec t/Withdrawal)
+        (filterv
+         (fn [withdrawal t/Withdrawal] Bool
+           (withdrawal-in-root-view? root withdrawal))
+         withdrawals)
+        plans ProgramHistoryQueryPlans
+        (history-queries resource proposition)
+        occurrence-rows (Vec d/Tuple)
+        (history-execution-rows
+         root bounded-occurrences bounded-withdrawals
+         (programhistoryqueryplans-occurrences plans))
+        withdrawal-rows (Vec d/Tuple)
+        (history-execution-rows
+         root bounded-occurrences bounded-withdrawals
+         (programhistoryqueryplans-withdrawals plans))
+        selected-occurrences (Vec t/OperationOccurrence)
+        (mapv
+         (fn [row d/Tuple] t/OperationOccurrence
+           (if (= 3 (count row))
+             (let [coordinate Any (nth row 0)
+                   action Any (nth row 1)
+                   row-proposition Any (nth row 2)]
+               (if (and (t/triple? coordinate)
+                        (and (keyword? action)
+                             (t/triple? row-proposition)))
+                 (let [coordinate-value t/Triple coordinate
+                       action-value Keyword action
+                       proposition-value t/Triple row-proposition]
+                   (t/->OperationOccurrence
+                    coordinate-value action-value proposition-value))
+                 (throw (ex-info
+                         "program history produced an invalid occurrence row"
+                         {:type :invalid-query-row}))))
+             (throw (ex-info
+                     "program history produced an invalid occurrence row"
+                     {:type :invalid-query-row}))))
+         occurrence-rows)
+        selected-withdrawals (Vec t/Withdrawal)
+        (mapv
+         (fn [row d/Tuple] t/Withdrawal
+           (if (= 2 (count row))
+             (let [retraction-coordinate Any (nth row 0)
+                   assertion-coordinate Any (nth row 1)]
+               (if (and (t/triple? retraction-coordinate)
+                        (t/triple? assertion-coordinate))
+                 (let [retraction-value t/Triple retraction-coordinate
+                       assertion-value t/Triple assertion-coordinate]
+                   (t/->Withdrawal
+                    (t/->OperationOccurrence
+                     retraction-value t/retract-action proposition)
+                    (t/->OperationOccurrence
+                     assertion-value t/assert-action proposition)))
+                 (throw (ex-info
+                         "program history produced an invalid withdrawal row"
+                         {:type :invalid-query-row}))))
+             (throw (ex-info
+                     "program history produced an invalid withdrawal row"
+                     {:type :invalid-query-row}))))
+         withdrawal-rows)]
+    (->ProgramHistory selected-occurrences selected-withdrawals)))
+
+(defn- source-anchor-from-row
+  [root program/ProgramRoot
+   row d/Tuple] ProgramSourceAnchor
+  (if (= 4 (count row))
+    (let [module Any (nth row 0)
+          anchor Any (nth row 1)
+          kind Any (nth row 2)
+          detail Any (nth row 3)]
+      (if (and (t/term? module)
+               (and (t/term? anchor)
+                    (and (keyword? kind) (t/term? detail))))
+        (let [kind-value Keyword kind]
+          (cond
+            [(= kind-value :binding)
+             (->ProgramSourceAnchor module anchor kind-value detail)]
+            [(and (= kind-value :reference)
+                  (program/source-located-reference? root anchor))
+             (->ProgramSourceAnchor module anchor kind-value detail)]
+            [:else
+             (throw (ex-info
+                     "program selection contains an invalid source anchor"
+                     {:type :invalid-source-anchor}))]))
+        (throw (ex-info
+                "program selection contains a non-Term source anchor"
+                {:type :invalid-source-anchor}))))
+    (throw (ex-info
+            "program selection contains an invalid source-anchor row"
+            {:type :invalid-query-row}))))
+
+(defn- scope-binding-from-row [row d/Tuple] ProgramScopeBinding
+  (if (= 3 (count row))
+    (let [scope Any (nth row 0)
+          binding Any (nth row 1)
+          name Any (nth row 2)]
+      (if (and (t/term? scope)
+               (and (t/term? binding) (string? name)))
+        (let [name-value String name]
+          (->ProgramScopeBinding scope binding name-value))
+        (throw (ex-info
+                "program selection contains an invalid scope binding"
+                {:type :invalid-scope-binding}))))
+    (throw (ex-info
+            "program selection contains an invalid scope-binding row"
+            {:type :invalid-query-row}))))
+
+(defn- selection-rejected
+  [code Keyword
+   detail String] ProgramRenameSelectionResult
+  (->ProgramRenameSelectionRejected code detail))
+
+(defn rename-selection
+  [root program/ProgramRoot
+   selected-binding Any] ProgramRenameSelectionResult
+  (cond
+    [(not (program/admitted-root? root))
+     (selection-rejected :invalid-root "rename selection requires an admitted ProgramRoot")]
+    [(not (t/term? selected-binding))
+     (selection-rejected :invalid-binding "rename selection requires a binding Term")]
+    [:else
+     (let [resource Any (root-resource root)
+           detail-rows (Vec d/Tuple)
+           (execution-rows
+            root (binding-detail-query resource selected-binding))]
+       (if (not= 1 (count detail-rows))
+         (selection-rejected
+          :ambiguous-binding
+          "selected binding must have one containing module, name, and span")
+         (let [detail-row d/Tuple (nth detail-rows 0)
+               module Any (nth detail-row 0)
+               name Any (nth detail-row 1)
+               span Any (nth detail-row 2)]
+           (if (not (and (t/term? module)
+                         (and (string? name) (t/term? span))))
+             (selection-rejected
+              :invalid-binding
+              "selected binding detail contains a value outside Term")
+             (let [name-value String name
+                   module-rows (Vec d/Tuple)
+                   (execution-rows
+                    root
+                    (affected-modules-query resource selected-binding))
+                   reference-values (Vec Any)
+                   (references root selected-binding)
+                   dependent-values (Vec Any)
+                   (impact root selected-binding)
+                   anchors (Vec ProgramSourceAnchor)
+                   (mapv
+                    (fn [row d/Tuple] ProgramSourceAnchor
+                      (source-anchor-from-row root row))
+                    (execution-rows
+                     root
+                     (source-anchors-query resource selected-binding)))
+                   scope-bindings (Vec ProgramScopeBinding)
+                   (mapv
+                    scope-binding-from-row
+                    (execution-rows
+                     root
+                     (scope-bindings-query resource selected-binding)))]
+               (if (empty? module-rows)
+                 (selection-rejected
+                  :invalid-binding
+                  "selected binding has no affected module")
+                 (->ProgramRenameSelected
+                  (->ProgramRenameSelection
+                   selected-binding module name-value span
+                   reference-values dependent-values anchors scope-bindings)))))))))]))
