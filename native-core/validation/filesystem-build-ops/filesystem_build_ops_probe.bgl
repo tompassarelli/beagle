@@ -1,0 +1,28 @@
+#lang beagle
+(ns native.filesystem-build-ops-probe)
+
+(defn remove-twice? [(path String)] Bool
+  (match (host.fs/remove-file path)
+    [(host.fs/RemoveFileOk)
+     (match (host.fs/remove-file path)
+       [(host.fs/RemoveFileOk) false]
+       [(host.fs/RemoveFileError errno) (= errno 2)])]
+    [(host.fs/RemoveFileError errno) false]))
+
+(defn publish? [(temporary String) (destination String)] Bool
+  (match (host.fs/rename-file temporary destination)
+    [(host.fs/RenameFileOk)
+     (match (host.fs/mtime-nanoseconds destination)
+       [(host.fs/MtimeNanosecondsOk nanoseconds)
+        (and (> nanoseconds 0) (remove-twice? destination))]
+       [(host.fs/MtimeNanosecondsError errno) false])]
+    [(host.fs/RenameFileError errno) false]))
+
+(defn exercise? [(destination String)] Bool
+  (match (host.fs/create-temporary-sibling destination)
+    [(host.fs/CreateTemporarySiblingOk temporary)
+     (publish? temporary destination)]
+    [(host.fs/CreateTemporarySiblingError errno) false]))
+
+(defn probe [(args (Vec String))] Int
+  (if (and (= (count args) 1) (exercise? (nth args 0))) 0 1))

@@ -284,6 +284,10 @@
       (= symbol "native_host_filesystem_write_text_atomic_v0")
       (= symbol "native_host_filesystem_make_parent_directories_v0")
       (= symbol "native_host_filesystem_append_text_v0")
+      (= symbol "native_host_filesystem_mtime_nanoseconds_v0")
+      (= symbol "native_host_filesystem_create_temporary_sibling_v0")
+      (= symbol "native_host_filesystem_rename_file_v0")
+      (= symbol "native_host_filesystem_remove_file_v0")
       (= symbol "native_host_filesystem_lock_exclusive_v0")
       (= symbol "native_host_filesystem_unlock_v0")))
 

@@ -105,6 +105,26 @@
     (list (p 'String) (p 'String))
     #f
     (p 'host.fs/AppendTextResult))
+   (q 'host.fs 'mtime-nanoseconds)
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'host.fs/MtimeNanosecondsResult))
+   (q 'host.fs 'create-temporary-sibling)
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'host.fs/CreateTemporarySiblingResult))
+   (q 'host.fs 'rename-file)
+   (type-fn
+    (list (p 'String) (p 'String))
+    #f
+    (p 'host.fs/RenameFileResult))
+   (q 'host.fs 'remove-file)
+   (type-fn
+    (list (p 'String))
+    #f
+    (p 'host.fs/RemoveFileResult))
    ;; lock-exclusive transfers one descriptor holding a non-blocking exclusive
    ;; lease on the path's open file description; unlock consumes it. The kernel
    ;; releases the lease on close or on process death. Contention is EAGAIN.
@@ -262,6 +282,32 @@
     (list
      (list 'host.fs/AppendTextOk '())
      (list 'host.fs/AppendTextError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/MtimeNanosecondsResult
+    (list
+     (list 'host.fs/MtimeNanosecondsOk
+           (list (cons ':nanoseconds (p 'Int))))
+     (list 'host.fs/MtimeNanosecondsError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/CreateTemporarySiblingResult
+    (list
+     (list 'host.fs/CreateTemporarySiblingOk
+           (list (cons ':path (p 'String))))
+     (list 'host.fs/CreateTemporarySiblingError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/RenameFileResult
+    (list
+     (list 'host.fs/RenameFileOk '())
+     (list 'host.fs/RenameFileError
+           (list (cons ':errno (p 'Int))))))
+   (list
+    'host.fs/RemoveFileResult
+    (list
+     (list 'host.fs/RemoveFileOk '())
+     (list 'host.fs/RemoveFileError
            (list (cons ':errno (p 'Int))))))
    (list
     'host.fs/LockExclusiveResult

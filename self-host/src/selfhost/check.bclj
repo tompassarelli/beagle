@@ -1143,11 +1143,66 @@
   (make-app "Buffer" [FLOAT-TYPE]))
 
 (def CORE-STDLIB Any
-  {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
-   "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
-   "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
-   "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
-                     nil FLOAT-TYPE)})
+  (reference-map-assoc
+    (reference-map-assoc
+      (reference-map-assoc
+        (reference-map-assoc
+          {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE)
+           "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE)
+           "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE)
+           "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE]
+                             nil FLOAT-TYPE)}
+          "host.fs/mtime-nanoseconds"
+          (make-fn [(make-prim "String")] nil
+            (make-prim "host.fs/MtimeNanosecondsResult")))
+        "host.fs/create-temporary-sibling"
+        (make-fn [(make-prim "String")] nil
+          (make-prim "host.fs/CreateTemporarySiblingResult")))
+      "host.fs/rename-file"
+      (make-fn [(make-prim "String") (make-prim "String")] nil
+        (make-prim "host.fs/RenameFileResult")))
+    "host.fs/remove-file"
+    (make-fn [(make-prim "String")] nil
+      (make-prim "host.fs/RemoveFileResult"))))
+
+(defn install-core-result-union!
+  [(union-name String) (variants (Vec Any))]
+  Nil
+  (swap! STATE assoc-in ["union-members" union-name]
+    (mapv (fn [(variant Any)] String (get variant "name")) variants))
+  (doseq [variant variants]
+    (let [name (get variant "name")
+          fields (get variant "fields")]
+      (swap! STATE assoc-in ["record-fields" name]
+        (reduce
+          (fn [(out Any) (field Any)] Any
+            (assoc out (nth field 0) (nth field 1)))
+          {}
+          fields))
+      (swap! STATE assoc-in ["record-field-order" name]
+        (mapv (fn [(field Any)] String (nth field 0)) fields))))
+  nil)
+
+(defn install-core-filesystem-result-unions! [] Nil
+  (install-core-result-union! "host.fs/MtimeNanosecondsResult"
+    [{"name" "host.fs/MtimeNanosecondsOk"
+      "fields" [[":nanoseconds" INT-TYPE]]}
+     {"name" "host.fs/MtimeNanosecondsError"
+      "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.fs/CreateTemporarySiblingResult"
+    [{"name" "host.fs/CreateTemporarySiblingOk"
+      "fields" [[":path" (make-prim "String")]]}
+     {"name" "host.fs/CreateTemporarySiblingError"
+      "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.fs/RenameFileResult"
+    [{"name" "host.fs/RenameFileOk" "fields" []}
+     {"name" "host.fs/RenameFileError"
+      "fields" [[":errno" INT-TYPE]]}])
+  (install-core-result-union! "host.fs/RemoveFileResult"
+    [{"name" "host.fs/RemoveFileOk" "fields" []}
+     {"name" "host.fs/RemoveFileError"
+      "fields" [[":errno" INT-TYPE]]}])
+  nil)
 
 (defn target-stdlib [(target String)] Any
   (cond
@@ -3787,7 +3842,9 @@
    "*source-path*" "*clojure-version*" "*agent*"])
 
 (defn build-initial-env! [(prog Any)] Any
-  (let [externs (get prog "externs")
+  (let [core-target? (= (get prog "target") "core")
+        _ (if core-target? (install-core-filesystem-result-unions!) nil)
+        externs (get prog "externs")
         forms (get prog "forms")
         base-stdlib (target-stdlib (get prog "target"))
         target-stdlib (merge base-stdlib

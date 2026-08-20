@@ -1310,6 +1310,22 @@
     (and (same-id? target-type (filesystem-nil-outcome-type-id))
       (= name "host.fs/AppendTextError")) "error"
     (and (same-id? target-type (filesystem-int-outcome-type-id))
+      (= name "host.fs/MtimeNanosecondsOk")) "ok"
+    (and (same-id? target-type (filesystem-int-outcome-type-id))
+      (= name "host.fs/MtimeNanosecondsError")) "error"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.fs/CreateTemporarySiblingOk")) "ok"
+    (and (same-id? target-type (filesystem-text-outcome-type-id))
+      (= name "host.fs/CreateTemporarySiblingError")) "error"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/RenameFileOk")) "ok"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/RenameFileError")) "error"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/RemoveFileOk")) "ok"
+    (and (same-id? target-type (filesystem-nil-outcome-type-id))
+      (= name "host.fs/RemoveFileError")) "error"
+    (and (same-id? target-type (filesystem-int-outcome-type-id))
       (= name "host.fs/LockExclusiveOk")) "ok"
     (and (same-id? target-type (filesystem-int-outcome-type-id))
       (= name "host.fs/LockExclusiveError")) "error"
@@ -1461,6 +1477,22 @@
       (filesystem-outcome-types) [] true)
 
     (= "host.fs/AppendTextResult" spelling)
+    (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/MtimeNanosecondsResult" spelling)
+    (->TypeResolutionV0 (filesystem-int-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/CreateTemporarySiblingResult" spelling)
+    (->TypeResolutionV0 (filesystem-text-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/RenameFileResult" spelling)
+    (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
+      (filesystem-outcome-types) [] true)
+
+    (= "host.fs/RemoveFileResult" spelling)
     (->TypeResolutionV0 (filesystem-nil-outcome-type-id)
       (filesystem-outcome-types) [] true)
 
@@ -2450,6 +2482,10 @@
       (= name "host.fs/write-text-atomic")
       (= name "host.fs/make-parent-directories")
       (= name "host.fs/append-text")
+      (= name "host.fs/mtime-nanoseconds")
+      (= name "host.fs/create-temporary-sibling")
+      (= name "host.fs/rename-file")
+      (= name "host.fs/remove-file")
       (= name "host.fs/lock-exclusive")
       (= name "host.fs/unlock")
       (= name "selfhost.rt/file-exists?")
@@ -2463,6 +2499,10 @@
     (= name "host.fs/write-text-atomic") "write-text-atomic"
     (= name "host.fs/make-parent-directories") "make-parent-directories"
     (= name "host.fs/append-text") "append-text"
+    (= name "host.fs/mtime-nanoseconds") "mtime-nanoseconds"
+    (= name "host.fs/create-temporary-sibling") "create-temporary-sibling"
+    (= name "host.fs/rename-file") "rename-file"
+    (= name "host.fs/remove-file") "remove-file"
     (= name "host.fs/lock-exclusive") "lock-exclusive"
     (= name "host.fs/unlock") "unlock"
     (= name "selfhost.rt/file-exists?") "file-exists"
@@ -2477,6 +2517,11 @@
       (same-id? candidate
         (host-filesystem-abi-id "make-parent-directories"))
       (same-id? candidate (host-filesystem-abi-id "append-text"))
+      (same-id? candidate (host-filesystem-abi-id "mtime-nanoseconds"))
+      (same-id? candidate
+        (host-filesystem-abi-id "create-temporary-sibling"))
+      (same-id? candidate (host-filesystem-abi-id "rename-file"))
+      (same-id? candidate (host-filesystem-abi-id "remove-file"))
       (same-id? candidate (host-filesystem-abi-id "lock-exclusive"))
       (same-id? candidate (host-filesystem-abi-id "unlock"))
       (same-id? candidate (host-filesystem-abi-id "file-exists"))
@@ -9928,6 +9973,9 @@
 
     (or (= callee "host.fs/path-kind")
         (= callee "host.fs/make-parent-directories")
+        (= callee "host.fs/mtime-nanoseconds")
+        (= callee "host.fs/create-temporary-sibling")
+        (= callee "host.fs/remove-file")
         (= callee "host.fs/lock-exclusive")
         (= callee "selfhost.rt/file-exists?")
         (= callee "selfhost.rt/abs-path"))
@@ -9935,7 +9983,8 @@
       (text-operand? (nth value-types 0)))
 
     (or (= callee "host.fs/write-text-atomic")
-        (= callee "host.fs/append-text"))
+        (= callee "host.fs/append-text")
+        (= callee "host.fs/rename-file"))
     (and (= 2 (count value-types))
       (text-operand? (nth value-types 0))
       (text-operand? (nth value-types 1)))
@@ -9952,9 +10001,12 @@
     (= callee "selfhost.rt/abs-path") (text-type-id)
     (= callee "host.fs/read-text-bounded")
     (filesystem-text-outcome-type-id)
+    (= callee "host.fs/create-temporary-sibling")
+    (filesystem-text-outcome-type-id)
     (= callee "host.fs/list-directory-bounded")
     (filesystem-paths-outcome-type-id)
     (or (= callee "host.fs/path-kind")
+        (= callee "host.fs/mtime-nanoseconds")
         (= callee "host.fs/lock-exclusive"))
     (filesystem-int-outcome-type-id)
     :else (filesystem-nil-outcome-type-id)))
@@ -9977,7 +10029,8 @@
           (arena (U core/NativeId Nil))
           (if (or (= callee "selfhost.rt/abs-path")
                 (= callee "host.fs/read-text-bounded")
-                (= callee "host.fs/list-directory-bounded"))
+                (= callee "host.fs/list-directory-bounded")
+                (= callee "host.fs/create-temporary-sibling"))
             (arena-value-id owner)
             nil)]
       (->ExprResultV0
@@ -20769,6 +20822,10 @@
               (index-has-callee? index "host.fs/write-text-atomic")
               (index-has-callee? index "host.fs/make-parent-directories")
               (index-has-callee? index "host.fs/append-text")
+              (index-has-callee? index "host.fs/mtime-nanoseconds")
+              (index-has-callee? index "host.fs/create-temporary-sibling")
+              (index-has-callee? index "host.fs/rename-file")
+              (index-has-callee? index "host.fs/remove-file")
               (index-has-callee? index "host.fs/lock-exclusive")
               (index-has-callee? index "host.fs/unlock")
               (index-has-callee? index "host.clock/format-iso8601")
@@ -21984,6 +22041,35 @@
      "native_host_filesystem_append_text_v0"
      [(borrowed-abi-value "path" (text-type-id))
       (borrowed-abi-value "text" (text-type-id))]
+     (filesystem-nil-outcome-type-id)
+     false
+     layouts-digest)
+   (host-filesystem-abi
+     "mtime-nanoseconds"
+     "native_host_filesystem_mtime_nanoseconds_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     (filesystem-int-outcome-type-id)
+     false
+     layouts-digest)
+   (host-filesystem-abi
+     "create-temporary-sibling"
+     "native_host_filesystem_create_temporary_sibling_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
+     (filesystem-text-outcome-type-id)
+     true
+     layouts-digest)
+   (host-filesystem-abi
+     "rename-file"
+     "native_host_filesystem_rename_file_v0"
+     [(borrowed-abi-value "source" (text-type-id))
+      (borrowed-abi-value "destination" (text-type-id))]
+     (filesystem-nil-outcome-type-id)
+     false
+     layouts-digest)
+   (host-filesystem-abi
+     "remove-file"
+     "native_host_filesystem_remove_file_v0"
+     [(borrowed-abi-value "path" (text-type-id))]
      (filesystem-nil-outcome-type-id)
      false
      layouts-digest)

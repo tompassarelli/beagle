@@ -703,6 +703,22 @@ int32_t native_host_filesystem_make_parent_directories_v0(
     const native_capability *capability, uint64_t path);
 int32_t native_host_filesystem_append_text_v0(
     const native_capability *capability, uint64_t path, uint64_t text);
+/* Follows the path and returns its modification time as Unix-epoch
+   nanoseconds, or EOVERFLOW when the host timestamp cannot fit Int. */
+int32_t native_host_filesystem_mtime_nanoseconds_v0(
+    const native_capability *capability, uint64_t path, int64_t *out);
+/* Creates an empty mode-0600 sibling of path and returns its owned path. The
+   caller must finish the lifecycle with rename-file or remove-file. */
+int32_t native_host_filesystem_create_temporary_sibling_v0(
+    native_arena *arena, const native_capability *capability, uint64_t path,
+    uint64_t *out);
+/* Atomically replaces destination when the two paths share a filesystem. */
+int32_t native_host_filesystem_rename_file_v0(
+    const native_capability *capability, uint64_t source,
+    uint64_t destination);
+/* Removes a non-directory filesystem entry. */
+int32_t native_host_filesystem_remove_file_v0(
+    const native_capability *capability, uint64_t path);
 /* Non-blocking exclusive lease on the path's open file description. The caller
    owns the returned descriptor: unlock consumes it, and the kernel releases the
    lease on close or on process death. A lease held elsewhere returns EAGAIN. */

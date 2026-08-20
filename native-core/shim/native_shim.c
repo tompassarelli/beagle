@@ -9922,6 +9922,40 @@ int32_t native_host_filesystem_path_kind_v0(
   return 0;
 }
 
+int32_t native_host_filesystem_mtime_nanoseconds_v0(
+    const native_capability *capability, uint64_t path_text, int64_t *out) {
+  char *path = NULL;
+  struct stat metadata;
+  int64_t seconds;
+  int64_t nanoseconds;
+  int32_t status;
+  if (!native_host_filesystem_capability_valid(capability) || (out == NULL)) {
+    return EINVAL;
+  }
+  *out = INT64_C(0);
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  if (stat(path, &metadata) != 0) {
+    status = native_host_filesystem_errno();
+    free(path);
+    return status;
+  }
+  free(path);
+  seconds = (int64_t)metadata.st_mtim.tv_sec;
+  nanoseconds = (int64_t)metadata.st_mtim.tv_nsec;
+  if (((time_t)seconds != metadata.st_mtim.tv_sec) ||
+      (nanoseconds < INT64_C(0)) ||
+      (nanoseconds >= INT64_C(1000000000)) ||
+      (seconds < (INT64_MIN / INT64_C(1000000000))) ||
+      (seconds > ((INT64_MAX - nanoseconds) / INT64_C(1000000000)))) {
+    return EOVERFLOW;
+  }
+  *out = (seconds * INT64_C(1000000000)) + nanoseconds;
+  return 0;
+}
+
 int32_t native_host_filesystem_read_text_bounded_v0(
     native_arena *arena, const native_capability *capability,
     uint64_t path_text, int64_t max_bytes, uint64_t *out) {
@@ -10255,6 +10289,18 @@ int32_t native_host_filesystem_list_directory_bounded_v0(
 }
 
 #ifdef __wasi__
+int32_t native_host_filesystem_create_temporary_sibling_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text, uint64_t *out) {
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (out == NULL)) {
+    return EINVAL;
+  }
+  *out = UINT64_C(0);
+  (void)path_text;
+  return ENOTSUP;
+}
+
 /* wasi-libc deliberately omits mkstemp ("WASI has no temp directories"), so
    the temp-then-rename atomicity contract cannot be delivered on wasm32.
    Compile-clean and fail closed by name instead of emulating a weaker write. */
@@ -10268,14 +10314,81 @@ int32_t native_host_filesystem_write_text_atomic_v0(
   return ENOTSUP;
 }
 #else
+static int32_t native_host_filesystem_temporary_sibling(
+    const char *path, char **out) {
+  const size_t suffix_length = sizeof(".tmp.XXXXXX");
+  size_t path_length;
+  char *temporary;
+  if ((path == NULL) || (out == NULL)) {
+    return EINVAL;
+  }
+  *out = NULL;
+  path_length = strlen(path);
+  if (path_length > (SIZE_MAX - suffix_length)) {
+    return EOVERFLOW;
+  }
+  temporary = (char *)malloc(path_length + suffix_length);
+  if (temporary == NULL) {
+    return ENOMEM;
+  }
+  memcpy(temporary, path, path_length);
+  memcpy(temporary + path_length, ".tmp.XXXXXX", suffix_length);
+  *out = temporary;
+  return 0;
+}
+
+int32_t native_host_filesystem_create_temporary_sibling_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text, uint64_t *out) {
+  char *path = NULL;
+  char *temporary = NULL;
+  uint8_t *destination = NULL;
+  size_t length;
+  int descriptor;
+  int32_t status;
+  uint64_t result;
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (out == NULL)) {
+    return EINVAL;
+  }
+  *out = UINT64_C(0);
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  status = native_host_filesystem_temporary_sibling(path, &temporary);
+  free(path);
+  if (status != 0) {
+    return status;
+  }
+  descriptor = mkstemp(temporary);
+  if (descriptor < 0) {
+    status = native_host_filesystem_errno();
+    free(temporary);
+    return status;
+  }
+  if (close(descriptor) != 0) {
+    status = native_host_filesystem_errno();
+    (void)unlink(temporary);
+    free(temporary);
+    return status;
+  }
+  length = strlen(temporary);
+  result = native_text_alloc(arena, (uint64_t)length, &destination);
+  if (length != (size_t)0U) {
+    memcpy(destination, temporary, length);
+  }
+  free(temporary);
+  *out = result;
+  return 0;
+}
+
 int32_t native_host_filesystem_write_text_atomic_v0(
     const native_capability *capability, uint64_t path_text, uint64_t text) {
   char *path = NULL;
   char *temporary = NULL;
   const uint8_t *bytes;
   uint64_t length;
-  size_t suffix_length = sizeof(".tmp.XXXXXX");
-  size_t path_length;
   size_t written = (size_t)0U;
   int descriptor = -1;
   int32_t status;
@@ -10288,18 +10401,11 @@ int32_t native_host_filesystem_write_text_atomic_v0(
   if (status != 0) {
     return status;
   }
-  path_length = strlen(path);
-  if (path_length > (SIZE_MAX - suffix_length)) {
+  status = native_host_filesystem_temporary_sibling(path, &temporary);
+  if (status != 0) {
     free(path);
-    return EOVERFLOW;
+    return status;
   }
-  temporary = (char *)malloc(path_length + suffix_length);
-  if (temporary == NULL) {
-    free(path);
-    return ENOMEM;
-  }
-  memcpy(temporary, path, path_length);
-  memcpy(temporary + path_length, ".tmp.XXXXXX", suffix_length);
   if ((lstat(path, &prior) == 0) && S_ISREG(prior.st_mode)) {
     mode = prior.st_mode & (mode_t)0777;
   }
@@ -10378,6 +10484,55 @@ int32_t native_host_filesystem_write_text_atomic_v0(
   return 0;
 }
 #endif /* __wasi__ */
+
+int32_t native_host_filesystem_rename_file_v0(
+    const native_capability *capability, uint64_t source_text,
+    uint64_t destination_text) {
+  char *source = NULL;
+  char *destination = NULL;
+  int32_t status;
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return EINVAL;
+  }
+  status = native_host_filesystem_path(source_text, &source);
+  if (status != 0) {
+    return status;
+  }
+  status = native_host_filesystem_path(destination_text, &destination);
+  if (status != 0) {
+    free(source);
+    return status;
+  }
+  if (rename(source, destination) != 0) {
+    status = native_host_filesystem_errno();
+    free(destination);
+    free(source);
+    return status;
+  }
+  free(destination);
+  free(source);
+  return 0;
+}
+
+int32_t native_host_filesystem_remove_file_v0(
+    const native_capability *capability, uint64_t path_text) {
+  char *path = NULL;
+  int32_t status;
+  if (!native_host_filesystem_capability_valid(capability)) {
+    return EINVAL;
+  }
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    return status;
+  }
+  if (unlink(path) != 0) {
+    status = native_host_filesystem_errno();
+    free(path);
+    return status;
+  }
+  free(path);
+  return 0;
+}
 
 static int32_t native_host_filesystem_make_directory(const char *path) {
   struct stat metadata;
