@@ -17,11 +17,11 @@
       "checked-program.clj")))
 (require '[native.checked-program :as checked-program])
 
-(def ^:dynamic counter (atom 0))
-(defn nid [] (str (swap! counter inc)))
+(def ^:dynamic counter (volatile! 0))
+(defn nid [] (str (vswap! counter inc)))
 (def ^:dynamic rows (atom (transient [])))
-(def ^:dynamic constraint-emissions (atom 0))
-(def native-ops (atom {}))
+(def ^:dynamic constraint-emissions (volatile! 0))
+(def native-ops (volatile! {}))
 
 (def source-fact-shard-kind "DevCompileUnitResultV1")
 (def source-fact-shard-stage "typed")
@@ -251,7 +251,7 @@
     ;; distinguish an explicit negative proof from a lossy projection.
     (row! owner "constraint-synchronous" "t" (str synchronous))
     (when constraint
-      (swap! constraint-emissions inc)
+      (vswap! constraint-emissions inc)
       (row! owner "constraint" "n" (emit-expr constraint))
       (let [source (get-in constraint ["provenance" "source"])]
         (when-let [source-id (get source "sourceId")]
@@ -964,9 +964,9 @@
 
 (defn emit-source-fact-shard
   [raw-ast relative-path interface-sha256 include-defs? selected-names]
-  (binding [counter (atom 0)
+  (binding [counter (volatile! 0)
             rows (atom (transient []))
-            constraint-emissions (atom 0)]
+            constraint-emissions (volatile! 0)]
     (let [ast (json/parse-string raw-ast)]
       (require-native-compatible-ast! ast relative-path)
       (let [root (emit-module ast relative-path interface-sha256
@@ -1013,7 +1013,7 @@
       annotations (option-values arguments "--native-op")]
   (when (or (empty? input-specs) (nil? out))
     (throw (ex-info "expected at least one --input and one --output" {})))
-  (reset! native-ops
+  (vreset! native-ops
           (into {} (for [a annotations
                          :let [[name op] (clojure.string/split a #"=" 2)]]
                      [name op])))
@@ -1128,7 +1128,15 @@
           (println (str "source-facts: Store shards hits="
                      (count (filter :hit? results))
                      " misses=" (count (remove :hit? results)))))
-        (spit out
-          (apply str
-            (for [[s p k o] final-rows]
-              (str s "\t" p "\t" k "\t" o "\n"))))))))
+        (let [emitted (StringBuilder.)]
+          (doseq [[s p k o] final-rows]
+            (doto emitted
+              (.append s)
+              (.append "\t")
+              (.append p)
+              (.append "\t")
+              (.append k)
+              (.append "\t")
+              (.append o)
+              (.append "\n")))
+          (spit out (str emitted)))))))
