@@ -882,7 +882,7 @@
   [args Any
    flag String
    default String] String
-  (loop [i 0]
+  (loop [i Int 0]
     (if (>= i (count args)) default
       (if (and (= (nth args i) flag) (< (+ i 1) (count args)))
         (nth args (+ i 1))
@@ -900,7 +900,7 @@
         (recur (+ i 1) acc)))))
 
 (defn- first-positional [args Any] String
-  (loop [i 1]
+  (loop [i Int 1]
     (if (>= i (count args)) ""
       (let [a (nth args i)]
         (cond
