@@ -61,6 +61,22 @@
    (query fact-profile/AdmittedQueryClosure?)
    (result fact-profile/AdmittedResultClosure?)])
 
+(defrecord CompileStoredValue
+  [(result fact-profile/AdmittedResultClosure) (payload String)])
+
+(defrecord CompileQueryResult
+  [(status Int) (found Bool) (value CompileStoredValue?) (error String?)])
+
+(defrecord CompileAppendResult
+  [(status Int)
+   (outcome Int)
+   (value CompileStoredValue?)
+   (error String?)
+   (append-bytes (Vec Int))
+   (next-store StoreResult)
+   (state-changed Bool)
+   (snapshot-bytes (Vec Int))])
+
 (defn error-or [(error String?) (fallback String)] String
   (if error error fallback))
 
@@ -137,6 +153,70 @@
                                        (error-or (log/bytesresult-error encoded)
                                                  "compiler fact log encoding failed")
                                        prior empty-bytes false query result)))))))))
+
+(defn payload-content-id [(payload String)] String
+  (str "sha256:" (sha256-bytes (utf8-encode payload))))
+
+(defn compiler-stored-facts
+  [(query fact-profile/AdmittedQueryClosure)
+   (result fact-profile/AdmittedResultClosure)
+   (payload String)] (Vec fact-profile/CompileQueryFact)
+  (conj
+   (vec
+    (concat (fact-profile/admittedqueryclosure-facts query)
+            (fact-profile/admittedresultclosure-facts result)))
+   (fact-profile/->CompileQueryFact 5 :result/payload
+                                   (fact-profile/admittedresultclosure-result-digest result)
+                                   0 payload)))
+
+(defn stored-result-text
+  [(root (Atom t/TermStore)) (result-digest String) (relation Keyword)] String?
+  (reduce
+   (fn [found String? proposition t/Triple] String?
+     (if found
+       found
+       (let [value Any (t/triple-t3 proposition)]
+         (if (and (= result-digest (t/triple-t1 proposition))
+                  (= relation (t/triple-t2 proposition))
+                  (string? value))
+           value nil))))
+   nil (term-store/live-propositions root)))
+
+(defn stored-value-for-result
+  [(root (Atom t/TermStore))
+   (query fact-profile/AdmittedQueryClosure)
+   (result-digest String)] CompileStoredValue?
+  (let [target String? (stored-result-text root result-digest :result/target)
+        materializer String? (stored-result-text root result-digest :result/materializer)
+        status String? (stored-result-text root result-digest :result/status)
+        artifact String? (stored-result-text root result-digest :result/artifact)
+        diagnostic String? (stored-result-text root result-digest :result/diagnostic)
+        payload String? (stored-result-text root result-digest :result/payload)]
+    (if (and target materializer status payload)
+      (match (fact-profile/admit-and-identify-result
+              (fact-profile/->ResultAdmissionRequest
+               query target materializer status artifact diagnostic))
+        [(fact-profile/ResultAdmitted result)
+         (if (= result-digest
+                (fact-profile/admittedresultclosure-result-digest result))
+           (->CompileStoredValue result payload)
+           nil)]
+        [(fact-profile/ResultRejected code detail) nil])
+      nil)))
+
+(defn stored-value-for-query
+  [(root (Atom t/TermStore))
+   (query fact-profile/AdmittedQueryClosure)] CompileStoredValue?
+  (let [query-digest String (fact-profile/admittedqueryclosure-query-digest query)]
+    (reduce
+     (fn [found CompileStoredValue? proposition t/Triple] CompileStoredValue?
+       (if found
+         found
+         (if (and (= :result/query (t/triple-t2 proposition))
+                  (= query-digest (t/triple-t3 proposition)))
+           (stored-value-for-result root query (t/triple-t1 proposition))
+           nil)))
+     nil (term-store/live-propositions root))))
 
 ;; The whole log is already borrowed here; slicing it into chunks would copy
 ;; every byte again.
@@ -428,62 +508,94 @@
    (source-closure-digest String)
    (compiler-context String)
    (profile String)
-   (targets (Vec String))
+   (ordered-targets (Vec String))
    (rules-content-id String)
    (schema-content-id String)
-   (expected-query-digest String?)] CompileDirectResult
+   (expected-query-digest String)] CompileQueryResult
   (match (fact-profile/admit-and-identify-query
           (fact-profile/->QueryAdmissionRequest
-           source-closure-digest compiler-context profile targets
+           source-closure-digest compiler-context profile ordered-targets
            rules-content-id schema-content-id))
     [(fact-profile/QueryRejected code detail)
-     (->CompileDirectResult status-fatal detail store-result empty-bytes false nil nil)]
+     (->CompileQueryResult status-fatal false nil detail)]
     [(fact-profile/QueryAdmitted query)
-     (if (and expected-query-digest
-              (not= expected-query-digest
-                    (fact-profile/admittedqueryclosure-query-digest query)))
-       (->CompileDirectResult status-fatal "expected query digest does not match admission"
-                              store-result empty-bytes false nil nil)
-       ;; A query is admitted before it is read.  The fact set is returned in
-       ;; the typed closure; result discovery is deliberately fact-based.
-       (->CompileDirectResult status-ok nil store-result empty-bytes false query nil))]))
+     (if (not= expected-query-digest
+                (fact-profile/admittedqueryclosure-query-digest query))
+       (->CompileQueryResult
+        status-fatal false nil "expected query digest does not match admission")
+       (let [current Store? (storeresult-store store-result)]
+         (if (or (not= status-ok (storeresult-status store-result)) (nil? current))
+           (->CompileQueryResult status-fatal false nil
+                                 (error-or (storeresult-error store-result)
+                                           "store boot failed"))
+           (let [store-value Store current
+                 value CompileStoredValue?
+                 (stored-value-for-query (schema/store-of (store-session store-value))
+                                         query)]
+             (if value
+               (->CompileQueryResult status-ok true value nil)
+               (->CompileQueryResult status-ok false nil nil))))))]))
 
 (defn server-compile-append!
   [(store-result StoreResult)
    (source-closure-digest String)
    (compiler-context String)
    (profile String)
-   (targets (Vec String))
+   (ordered-targets (Vec String))
    (rules-content-id String)
    (schema-content-id String)
-   (expected-query-digest String?)
+   (expected-query-digest String)
    (target String)
    (materializer-content-id String)
    (status String)
-   (artifact-content-id String?)
-   (diagnostic-content-id String?)] CompileDirectResult
+   (claimed-content-id String)
+   (payload String)] CompileAppendResult
   (match (fact-profile/admit-and-identify-query
           (fact-profile/->QueryAdmissionRequest
-           source-closure-digest compiler-context profile targets
+           source-closure-digest compiler-context profile ordered-targets
            rules-content-id schema-content-id))
     [(fact-profile/QueryRejected code detail)
-     (->CompileDirectResult status-fatal detail store-result empty-bytes false nil nil)]
+     (->CompileAppendResult status-fatal status-fatal nil detail empty-bytes
+                            store-result false empty-bytes)]
     [(fact-profile/QueryAdmitted query)
-     (if (and expected-query-digest
-              (not= expected-query-digest
-                    (fact-profile/admittedqueryclosure-query-digest query)))
-       (->CompileDirectResult status-fatal "expected query digest does not match admission"
-                              store-result empty-bytes false nil nil)
+     (cond
+       [(not= expected-query-digest
+               (fact-profile/admittedqueryclosure-query-digest query))
+        (->CompileAppendResult status-fatal status-fatal nil
+                               "expected query digest does not match admission"
+                               empty-bytes store-result false empty-bytes)]
+       [(not= claimed-content-id (payload-content-id payload))
+        (->CompileAppendResult status-fatal status-fatal nil
+                               "claimed content ID does not match UTF-8 payload"
+                               empty-bytes store-result false empty-bytes)]
+       [(not (or (= status "ok") (= status "rejected")))
+        (->CompileAppendResult status-fatal status-fatal nil
+                               "result status must be ok or rejected"
+                               empty-bytes store-result false empty-bytes)]
+       [:else
        (match (fact-profile/admit-and-identify-result
                (fact-profile/->ResultAdmissionRequest
-                query target materializer-content-id status artifact-content-id
-                diagnostic-content-id))
+                query target materializer-content-id status
+                (if (= status "ok") claimed-content-id nil)
+                (if (= status "rejected") claimed-content-id nil)))
          [(fact-profile/ResultRejected code detail)
-          (->CompileDirectResult status-fatal detail store-result empty-bytes false query nil)]
+          (->CompileAppendResult status-fatal status-fatal nil detail empty-bytes
+                                 store-result false empty-bytes)]
          [(fact-profile/ResultAdmitted result)
-          (compiler-commit! store-result
-                            (concat (fact-profile/admittedqueryclosure-facts query)
-                                    (fact-profile/admittedresultclosure-facts result))
-                            query result)]))]))
+          (let [stored (->CompileStoredValue result payload)
+                committed (compiler-commit!
+                           store-result (compiler-stored-facts query result payload)
+                           query result)]
+            (if (= status-ok (compiledirectresult-status committed))
+              (->CompileAppendResult status-ok
+                                     (if (compiledirectresult-state-changed committed) 0 1)
+                                     stored nil
+                                     (compiledirectresult-append-bytes committed)
+                                     (compiledirectresult-next-store committed)
+                                     (compiledirectresult-state-changed committed)
+                                     empty-bytes)
+              (->CompileAppendResult status-fatal status-fatal nil
+                                     (compiledirectresult-error committed)
+                                     empty-bytes store-result false empty-bytes)))])])]))
 
 (defn main [] Int status-fatal)
