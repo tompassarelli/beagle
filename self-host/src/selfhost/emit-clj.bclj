@@ -191,8 +191,8 @@
 
 (defn write-clj-string [(s String)] String
   (let [n (count s)]
-    (loop [i Int 0
-           acc (Vec String) ["\""]]
+    (loop [(i Int) 0
+           (acc (Vec String)) ["\""]]
       (if (>= i n)
         (str/join "" (conj acc "\""))
         (recur (+ i 1) (conj acc (escape-char (subs s i (+ i 1)))))))))
@@ -374,7 +374,7 @@
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
         predicate-bindings
-          (loop [index Int 0 acc (Vec String) []]
+          (loop [(index Int) 0 (acc (Vec String)) []]
             (if (>= index (count all))
               acc
               (let [binding (nth all index)]
@@ -433,7 +433,7 @@
 
 (defn emit-let-bindings! [(bindings Any)] String
   (str/join "\n   "
-    (loop [index Int 0 acc (Vec String) []]
+    (loop [(index Int) 0 (acc (Vec String)) []]
       (if (>= index (count bindings))
         acc
         (let [b (nth bindings index)
@@ -470,7 +470,7 @@
 
 (defn emit-dynamic-binding-chain! [(bindings Any) (body-str String)] String
   (let [capture-bindings
-          (loop [index Int 0 acc (Vec String) []]
+          (loop [(index Int) 0 (acc (Vec String)) []]
             (if (>= index (count bindings))
               acc
               (let [binding (nth bindings index)
@@ -501,7 +501,7 @@
 
 (defn emit-for-clauses! [(clauses Any)] String
   (str/join "\n   "
-    (loop [index Int 0 acc (Vec String) []]
+    (loop [(index Int) 0 (acc (Vec String)) []]
       (if (>= index (count clauses))
         acc
         (let [c (nth clauses index)
@@ -543,7 +543,7 @@
                       (str "$beagle$constraint$raw-loop$" index))
                 loop-indices)
             init-bindings
-              (loop [index Int 0 acc (Vec String) []]
+              (loop [(index Int) 0 (acc (Vec String)) []]
                 (if (>= index (count bindings))
                   acc
                   (let [binding (nth bindings index)
@@ -725,7 +725,7 @@
                           (str " " (str/join " " (field-names-of fields))))
                         ")"))
             validation-bindings
-              (loop [i Int 0 acc (Vec String) []]
+              (loop [(i Int) 0 (acc (Vec String)) []]
                 (if (>= i (count constrained))
                   acc
                   (let [entry (nth constrained i)
@@ -841,7 +841,7 @@
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
         predicate-bindings
-          (loop [index Int 0 acc (Vec String) []]
+          (loop [(index Int) 0 (acc (Vec String)) []]
             (if (>= index (count all))
               acc
               (let [param (nth all index)]
@@ -1096,8 +1096,8 @@
             (str test " " body-str)
             (let [(field-vector (Vec Any))
                   (vec fields)
-                  pairs (loop [i Int 0
-                               acc (Vec String) []]
+                  pairs (loop [(i Int) 0
+                               (acc (Vec String)) []]
                           (if (or (>= i (count bindings))
                                   (>= i (count field-vector)))
                             acc

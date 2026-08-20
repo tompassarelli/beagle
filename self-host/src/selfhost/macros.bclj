@@ -385,7 +385,7 @@
       (let [sequence (macro-sequence-pattern! pattern)
             category (get sequence "category")
             items (get sequence "items")]
-        (loop [index Int 0]
+        (loop [(index Int) 0]
           (if (= index (count items))
             nil
             (let [item (nth items index)
@@ -430,7 +430,7 @@
           (< (count values) fixed-count)
           (not= (count values) fixed-count))
       nil
-      (loop [index Int 0 captures Any {}]
+      (loop [(index Int) 0 (captures Any) {}]
         (if (= index fixed-count)
           (if tail
             (assoc
@@ -483,13 +483,13 @@
     (macro-eval-fail!
       "expected a subject and at least one [pattern body] clause")
     (let [clauses (subvec parts 1)]
-      (loop [remaining Any clauses]
+      (loop [(remaining Any) clauses]
         (when (> (count remaining) 0)
           (let [clause (macro-syntax-match-clause! (nth remaining 0))]
             (macro-validate-syntax-pattern! (get clause "pattern") false)
             (recur (subvec remaining 1)))))
       (let [subject (macro-eval! (nth parts 0) env)]
-        (loop [remaining Any clauses]
+        (loop [(remaining Any) clauses]
           (if (= (count remaining) 0)
             (macro-eval-fail!
               (str "no pattern matched: " (str (macro-datum subject))))
@@ -539,7 +539,7 @@
     MACRO-BUILTIN-NAMES))
 
 (defn macro-eval-body! [(body Any) (env Any)] Any
-  (loop [forms Any body result Any nil]
+  (loop [(forms Any) body (result Any) nil]
     (if (= (count forms) 0)
       result
       (recur (subvec forms 1) (macro-eval! (nth forms 0) env)))))
@@ -562,7 +562,7 @@
         ["unquote-splicing"
          (macro-eval-quasiquote! (nth template 1) env (- depth 1))])
     :else
-      (loop [items Any template result Any []]
+      (loop [(items Any) template (result Any) []]
         (if (= (count items) 0)
           result
           (let [item (nth items 0)]
@@ -583,7 +583,7 @@
     (let [bindings (macro-seq! (nth parts 0) "let bindings")
           body (subvec parts 1)
           bound
-          (loop [items Any bindings e Any env]
+          (loop [(items Any) bindings (e Any) env]
             (cond
               (= (count items) 0) e
               (and (>= (count items) 2)
@@ -663,7 +663,7 @@
 
 (defn macro-fn-params! [(raw Any)] Any
   (let [items (macro-seq! raw "fn params")]
-    (loop [rest-items Any items params Any []]
+    (loop [(rest-items Any) items (params Any) []]
       (cond
         (= (count rest-items) 0) params
         (= (nth rest-items 0) "&")
@@ -786,7 +786,7 @@
 
 (defn macro-format-value! [(format-value Any) (args Any)] Any
   (let [fmt (macro-string! format-value "format")]
-    (loop [i Int 0 arg-i Int 0 out String ""]
+    (loop [(i Int) 0 (arg-i Int) 0 (out String) ""]
       (if (>= i (count fmt))
         (if (= arg-i (count args))
           [STRING-TAG out]
@@ -824,7 +824,7 @@
     :else (macro-eval-fail! (str "unknown numeric function: " name)))))
 
 (defn macro-ordered? [(name String) (args Any)] Bool
-  (loop [items Any (mapv macro-datum args)]
+  (loop [(items Any) (mapv macro-datum args)]
     (if (< (count items) 2)
       true
       (let [a (nth items 0) b (nth items 1)
@@ -1047,7 +1047,7 @@
               (macro-eval-fail!
                 (str "partition: size must be a positive integer, got: "
                      (str size)))
-              (loop [rest-items Any items result Any []]
+              (loop [(rest-items Any) items (result Any) []]
                 (if (< (count rest-items) size)
                   result
                   (recur

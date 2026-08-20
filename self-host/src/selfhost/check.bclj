@@ -4127,7 +4127,7 @@
             []
             (get prog "forms"))]
     (loop [env initial-env
-           types definition-type-table prog initial-env
+           types (definition-type-table prog initial-env)
            remaining pending]
       (if (= (count remaining) 0)
         {"env" env "types" types "ok" true}
@@ -4651,7 +4651,7 @@
 (defn purity-analyze-sequence [(body Any) (state Any)] Any
   (if (= 0 (count body))
     (purity-result state {})
-    (loop [remaining Any body current Any state]
+    (loop [(remaining Any) body (current Any) state]
       (let [result (purity-analyze (first remaining) current)]
         (if (= 1 (count remaining))
           result
@@ -4727,10 +4727,10 @@
       (get summary "origins"))))
 
 (defn purity-analyze-cond-clauses [(clauses Any) (state Any)] Any
-  (loop [remaining Any clauses
-         fallthrough Any state
-         results Any []
-         origins Any {}]
+  (loop [(remaining Any) clauses
+         (fallthrough Any) state
+         (results Any) []
+         (origins Any) {}]
     (if (= 0 (count remaining))
       (purity-result
         (purity-join-states state (conj results fallthrough)) origins)
@@ -4937,9 +4937,9 @@
               (if (nil? targets)
                 (purity-analyze-unknown value state)
                 (let [analyzed
-                       (loop [remaining Any (get value "args")
-                              next Any state
-                              results Any []]
+                       (loop [(remaining Any) (get value "args")
+                              (next Any) state
+                              (results Any) []]
                          (if (= 0 (count remaining))
                            {"state" next "results" results}
                            (let [arg (first remaining)
@@ -4951,10 +4951,10 @@
                                        "origins" (get result "origins")})))))
                       after-args (get analyzed "state")
                       transferred
-                       (loop [remaining-targets Any targets
-                              remaining-results Any (get analyzed "results")
-                              next Any after-args
-                              seen Any {}]
+                       (loop [(remaining-targets Any) targets
+                              (remaining-results Any) (get analyzed "results")
+                              (next Any) after-args
+                              (seen Any) {}]
                          (if (or (= 0 (count remaining-targets))
                                  (= 0 (count remaining-results)))
                            {"state" next "seen" seen}

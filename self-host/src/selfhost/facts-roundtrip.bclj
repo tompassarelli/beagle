@@ -39,7 +39,7 @@
       (and (>= hi 55296) (<= hi 56319) (>= lo 56320) (<= lo 57343)))))
 
 (defn- build-codepoint-offsets [(src String)] Any
-  (loop [i Int 0 codepoints Int 0 out Any [0]]
+  (loop [(i Int) 0 (codepoints Int) 0 (out Any) [0]]
     (if (>= i (count src))
       out
       (let [next-count (+ codepoints 1)]
@@ -48,7 +48,7 @@
           (recur (+ i 1) next-count (conj out next-count)))))))
 
 (defn- build-line-cols [(src String)] Any
-  (loop [i Int 0 line Int 1 col Int 0 out Any [[1 0]]]
+  (loop [(i Int) 0 (line Int) 1 (col Int) 0 (out Any) [[1 0]]]
     (if (>= i (count src))
       out
       (if (= (rd/char-at src i) "\n")
@@ -113,7 +113,7 @@
   (make-node "symbol" value loc nil))
 
 (defn- child-values [(children Any)] Any
-  (loop [i Int 0 out Any []]
+  (loop [(i Int) 0 (out Any) []]
     (if (>= i (count children))
       out
       (recur (+ i 1) (conj out (get (nth children i) "value"))))))
@@ -178,7 +178,7 @@
 (declare scan-datum)
 
 (defn- scan-delimited [(src String) (pos Int) (close String)] Any
-  (loop [p Int (rd/skip-ws src pos) out Any []]
+  (loop [(p Int) (rd/skip-ws src pos) (out Any) []]
     (cond
       (>= p (count src))
       {"nodes" out "pos" p}
@@ -272,7 +272,7 @@
       rewritten)))
 
 (defn- fn-param-nodes [(max-index Int) (rest? Bool) (loc Any)] Any
-  (let [positional (loop [i Int 1 out Any []] (if (> i max-index) out (recur (+ i 1) (conj out (synthetic-leaf (str "%" i) loc)))))]
+  (let [positional (loop [(i Int) 1 (out Any) []] (if (> i max-index) out (recur (+ i 1) (conj out (synthetic-leaf (str "%" i) loc)))))]
     (if rest?
       (into positional [(synthetic-leaf "&" loc) (synthetic-leaf "%&" loc)])
       positional)))
@@ -357,7 +357,7 @@
         nil))))
 
 (defn- located-program [(src String)] Any
-  (let [lang (rd/parse-lang-line src) target (get lang "target") start (get lang "pos") forms (loop [p Any (rd/skip-ws src start) out Any []] (if (>= p (count src)) out (let [node (scan-datum src p)] (recur (rd/skip-ws src (get node "next")) (conj out (dissoc node "next")))))) target-form (if (some? target) [(list-node [(synthetic-leaf "define-target" nil) (synthetic-leaf target nil)] nil)] [])]
+  (let [lang (rd/parse-lang-line src) target (get lang "target") start (get lang "pos") forms (loop [(p Any) (rd/skip-ws src start) (out Any) []] (if (>= p (count src)) out (let [node (scan-datum src p)] (recur (rd/skip-ws src (get node "next")) (conj out (dissoc node "next")))))) target-form (if (some? target) [(list-node [(synthetic-leaf "define-target" nil) (synthetic-leaf target nil)] nil)] [])]
     (if (some? target)
       (into target-form forms)
       forms)))
@@ -428,7 +428,7 @@
     id))
 
 (defn- form-spans [(forms Any) (shift Int)] Any
-  (loop [i Int 0 out Any []]
+  (loop [(i Int) 0 (out Any) []]
     (if (>= i (count forms))
       out
       (let [loc (get (nth forms i) "loc") pos (get loc "pos") span (get loc "span") source-start (get loc "source-start") source-end (get loc "source-end")]
@@ -453,7 +453,7 @@
           (recur (+ i 1)))))))
 
 (defn- source-lines [(src String)] Any
-  (loop [i Int 0 start Int 0 out Any []]
+  (loop [(i Int) 0 (start Int) 0 (out Any) []]
     (cond
       (>= i (count src))
       (conj out [start (subs src start i)])
@@ -470,7 +470,7 @@
 (defn- line-number [(src String) (off Int)] Int (nth (line-col src off) 0))
 
 (defn- nearest-preceding [(off Int) (spans Any)] Any
-  (loop [i Int 0 best Any nil]
+  (loop [(i Int) 0 (best Any) nil]
     (if (>= i (count spans))
       best
       (let [span (nth spans i)]
@@ -480,7 +480,7 @@
             best))))))
 
 (defn- nearest-following [(off Int) (spans Any)] Any
-  (loop [i Int 0 best Any nil]
+  (loop [(i Int) 0 (best Any) nil]
     (if (>= i (count spans))
       best
       (let [span (nth spans i)]
@@ -497,7 +497,7 @@
   (some? (re-matches #"[\p{L}\p{N}_\-*+!?<>=/.&%$]" ch)))
 
 (defn- raw-comment-segments [(text String)] Any
-  (loop [i Int 0 out Any []]
+  (loop [(i Int) 0 (out Any) []]
     (if (>= i (count text))
       out
       (if (symbol-char? (rd/char-at text i))
@@ -538,7 +538,7 @@
     (add-fact! out root "kind" "list")
     (let [head-id (emit-node! head counter out)]
       (add-fact! out root (slot-predicate 0 head-id) head-id))
-    (let [form-ids (loop [i Int 0 ids Any []] (if (>= i (count forms)) ids (let [id (emit-node! (nth forms i) counter out)] (add-fact! out root (slot-predicate (+ i 1) id) id) (recur (+ i 1) (conj ids id)))))]
+    (let [form-ids (loop [(i Int) 0 (ids Any) []] (if (>= i (count forms)) ids (let [id (emit-node! (nth forms i) counter out)] (add-fact! out root (slot-predicate (+ i 1) id) id) (recur (+ i 1) (conj ids id)))))]
       (emit-comments! (classify-comments src (form-spans forms shift))
         form-ids
         root
@@ -821,7 +821,7 @@
 ;; `& rest` is one logical parameter even though the reader exposes two datums.
 (defn- logical-vector-items [(datum Any)] Any
   (let [items (bracket-items datum)]
-    (loop [i Int 0 out Any []]
+    (loop [(i Int) 0 (out Any) []]
       (cond
         (>= i (count items))
         out
@@ -1088,7 +1088,7 @@
           (str "(" (datum-source (nth (list-items parent) 0)))
           (subvec after 0 keep))
         signature-over-width? (> (+ col (count inline-signature)) 80)]
-    (loop [i 0 out str "(" (datum-source (nth (list-items parent) 0))]
+    (loop [i 0 out (str "(" (datum-source (nth (list-items parent) 0)))]
       (if (>= i keep)
         out
         (let [item (nth after i)
@@ -1166,7 +1166,7 @@
       (if (nil? sid) out (recur (+ i 1) (str out (get (get props sid) "v")))))))
 
 (defn- node-comments [(props Any) (id Int)] Any
-  (loop [i Int 0 out Any []]
+  (loop [(i Int) 0 (out Any) []]
     (let [cid (get (get props id {}) (str "comment" i))]
       (if (nil? cid)
         out

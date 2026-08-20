@@ -1299,10 +1299,10 @@
            (> (count children) 0)
            (= (scope-syntax-datum! (nth children 0)) MAP-TAG))
         (let [state
-              (loop [index Int 1
-                     rendered Any [(nth children 0)]
-                     current Any table
-                     identities Any {}]
+              (loop [(index Int) 1
+                     (rendered Any) [(nth children 0)]
+                     (current Any) table
+                     (identities Any) {}]
                 (if (>= index (count children))
                   {"children" rendered
                    "table" current
@@ -1402,10 +1402,10 @@
 (defn- scope-walk-sequential-bindings!
   [(vector-value Any) (table Any) (path Any) (ctx Any)] Any
   (let [items (scope-sequence-children vector-value)]
-    (loop [index Int 0
-           out Any []
-           current Any table
-           region-scopes Any []]
+    (loop [(index Int) 0
+           (out Any) []
+           (current Any) table
+           (region-scopes Any) []]
       (cond
         (>= index (count items))
           {"value" (rebuild-scope-sequence! vector-value out)
@@ -1476,7 +1476,7 @@
               (and (= variant "list")
                    (> (count nested) 0)
                    (= (scope-syntax-datum! (nth nested 0)) MAP-TAG))
-                (loop [index Int 1 names Any []]
+                (loop [(index Int) 1 (names Any) []]
                   (if (>= index (count nested))
                     names
                     (let [head (scope-syntax-datum! (nth nested index))]
@@ -1514,7 +1514,7 @@
             (fn [(item Any)] Bool
               (not (= (scope-syntax-datum! item) "&")))
             children)
-          (loop [index Int 0 out Any []]
+          (loop [(index Int) 0 (out Any) []]
             (cond
               (>= index (count children)) out
               (= (scope-syntax-datum! (nth children index)) "&")
@@ -1527,7 +1527,7 @@
             (into names (declaration-bound-names item)))
           [] logical-declarations)
         duplicate
-        (loop [remaining Any all-bound seen Any {}]
+        (loop [(remaining Any) all-bound (seen Any) {}]
           (if (= (count remaining) 0)
             nil
             (let [name (nth remaining 0)]
@@ -1561,8 +1561,8 @@
                        (get bound "identities"))}))))
             {"children" [] "table" table "identities" {}}
             indices)
-          (loop [index Int 0
-                 current Any
+          (loop [(index Int) 0
+                 (current Any)
                  {"children" [] "table" table "identities" {}}]
             (cond
               (>= index (count children)) current
@@ -1721,10 +1721,10 @@
         items (scope-sequence-children clauses)
         (body-indices (Vec Int)) (vec (range 2 (count children)))
         state
-        (loop [index Int 0
-               out Any []
-               current Any table
-               region-scopes Any []]
+        (loop [(index Int) 0
+               (out Any) []
+               (current Any) table
+               (region-scopes Any) []]
           (cond
             (>= index (count items))
               {"children" out "table" current "scopes" region-scopes}
@@ -1855,7 +1855,7 @@
             datum span scopes origin properties))
         values (into [init] steps)
         expansion
-        (loop [index Int (- (count values) 1) result Any name]
+        (loop [(index Int) (- (count values) 1) (result Any) name]
           (if (< index 0)
             result
             (recur (- index 1)
@@ -1920,19 +1920,19 @@
         generated (fn [(datum Any)] Any
                     (scope-thread-generated! datum span scopes origin properties))
         n (count clauses)
-        pairs (loop [i Int 0 out Any []]
+        pairs (loop [(i Int) 0 (out Any) []]
                 (if (>= (+ i 1) n)
                   out
                   (recur (+ i 2)
                     (conj out [(nth clauses i) (nth clauses (+ i 1))]))))
         position (if (= kind "cond->") "first" "last")
         k (count pairs)
-        temps (loop [i Int 0 out Any []]
+        temps (loop [(i Int) 0 (out Any) []]
                 (if (>= i (+ k 1))
                   out
                   (recur (+ i 1) (conj out (generated (fresh-lowered-sym! "cond-thread"))))))
         inner
-        (loop [i Int (- k 1) acc Any (nth temps k)]
+        (loop [(i Int) (- k 1) (acc Any) (nth temps k)]
           (if (< i 0)
             acc
             (let [test (nth (nth pairs i) 0)
@@ -1978,7 +1978,7 @@
                           (scope-thread-step-insert!
                             (nth temps i) (nth steps i) position))
                         (vec (range m)))]
-        (loop [i Int (- m 1) acc Any (nth threadeds (- m 1))]
+        (loop [(i Int) (- m 1) (acc Any) (nth threadeds (- m 1))]
           (let [previous (if (= i 0) init (nth threadeds (- i 1)))
                 conditional
                   (syntax/make-syntax-list!
@@ -2263,7 +2263,7 @@
       (err! (str "{:keys [...]} entries must be names, got: " (str key-names))))
     (doseq [name key-names]
       (validate-identifier! name "map destructuring binding"))
-    (loop [i Int 2 as-name Any nil or-defaults Any []]
+    (loop [(i Int) 2 (as-name Any) nil (or-defaults Any) []]
       (cond
         (>= i n)
         (make-map-destructure key-names as-name or-defaults)
@@ -2280,7 +2280,7 @@
               (err! (str ":or map must be name/default pairs, got: "
                       (binding-datum->src (nth body (+ i 1)))))
               (recur (+ i 2) as-name or-defaults))
-            (let [parsed (loop [j Int 0 acc Any []]
+            (let [parsed (loop [(j Int) 0 (acc Any) []]
                            (if (>= j (count entries))
                              acc
                              (let [key (nth entries j)]
@@ -2308,7 +2308,7 @@
 
 (defn parse-seq-destructure! [(item Any)] Any
   (let [body (bracket-body item) n (count body)]
-    (loop [i Int 0 names Any [] rest-name Any nil]
+    (loop [(i Int) 0 (names Any) [] (rest-name Any) nil]
       (cond
         (>= i n)
         (make-seq-destructure names rest-name)
@@ -2417,7 +2417,7 @@
     :else "inferred"))
 
 (defn- flat-structured-binder? [(items Any)] Bool
-  (loop [i Int 0]
+  (loop [(i Int) 0]
     (cond
       (>= i (count items)) false
       (structured-binding? (nth items i)) true
@@ -2461,7 +2461,7 @@
                           (parse-binding-form! item "parameter") nil nil)))
                   before)
                 (= style "legacy")
-                (loop [remaining Any before out Any []]
+                (loop [(remaining Any) before (out Any) []]
                   (if (= (count remaining) 0)
                     out
                     (let [item (nth remaining 0)]
@@ -2479,7 +2479,7 @@
                   (odd? (count before))
                   (do (missing-binding-type! "parameter" (nth before (- (count before) 1))) [])
                   :else
-                  (loop [i Int 0 out Any []]
+                  (loop [(i Int) 0 (out Any) []]
                     (if (>= i (count before))
                       out
                       (let [binder (nth before i)]
@@ -2528,7 +2528,7 @@
                     (if (nil? (get parsed "rest-param"))
                       []
                       (binding-target-bound-names (get parsed "rest-param"))))
-        duplicate (loop [remaining Any all-bound seen Any {}]
+        duplicate (loop [(remaining Any) all-bound (seen Any) {}]
                     (if (= (count remaining) 0)
                       nil
                       (let [name (nth remaining 0)]
@@ -2548,7 +2548,7 @@
 (defn parse-let-bindings! [(b Any)] Any
   (let [items (unwrap-items b)
         n (count items)
-        parsed (loop [i Int 0 acc Any []]
+        parsed (loop [(i Int) 0 (acc Any) []]
     (cond
         (>= i n)
         acc
@@ -2590,7 +2590,7 @@
 (defn- parse-flat-triple-bindings! [(b Any) (context String)] Any
   (let [items (unwrap-items b)
         n (count items)]
-    (loop [i Int 0 acc Any []]
+    (loop [(i Int) 0 (acc Any) []]
       (cond
         (>= i n)
         acc
@@ -2628,7 +2628,7 @@
   (let [items (unwrap-items f)
         style (or (binding-style items) "flat")]
     (if (= style "legacy")
-      (loop [remaining Any items out Any []]
+      (loop [(remaining Any) items (out Any) []]
         (if (= (count remaining) 0)
           out
           (let [item (nth remaining 0)]
@@ -2651,7 +2651,7 @@
         (odd? (count items))
         (do (missing-binding-type! "record field" (nth items (- (count items) 1))) [])
         :else
-        (loop [i Int 0 out Any []]
+        (loop [(i Int) 0 (out Any) []]
           (if (>= i (count items))
             out
             (let [binder (nth items i)
@@ -2684,7 +2684,7 @@
       clauses)
     :else
     (let [n (count clauses)]
-      (loop [i Int 0 acc Any []]
+      (loop [(i Int) 0 (acc Any) []]
         (cond
           (>= i n)
           acc
@@ -2701,7 +2701,7 @@
 ;; --- parse-for-clauses! ------------------------------------------------------
 (defn parse-for-clauses! [(b Any)] Any
   (let [items (unwrap-items b) n (count items)]
-    (loop [i Int 0 acc Any []]
+    (loop [(i Int) 0 (acc Any) []]
       (cond
         (>= i n)
         acc
@@ -2758,7 +2758,7 @@
 
 (defn parse-try-form! [(rest-items Any)] Any
   (let [n (count rest-items)]
-    (loop [i Int 0 body Any [] catches Any [] finally-body Any nil]
+    (loop [(i Int) 0 (body Any) [] (catches Any) [] (finally-body Any) nil]
       (if (>= i n)
         (make-try body catches finally-body)
         (let [item (nth rest-items i)]
@@ -2794,7 +2794,7 @@
 ;; --- parse-match-form! --------------------------------------------------------
 (defn parse-map-pattern! [(entries Any)] Any
   (let [n (count entries)]
-    (loop [i Int 0 acc Any []]
+    (loop [(i Int) 0 (acc Any) []]
       (cond
         (>= i n)
         (make-pat-map! acc)
@@ -2858,7 +2858,7 @@
 ;; `:as name` at the tail captures the whole attrset as at-name.
 (defn parse-nix-fn-set-formals! [(formals-form Any)] Any
   (let [items (cond (bracketed? formals-form) (bracket-body formals-form) (vector? formals-form) formals-form :else (do (err! "fn-set: expected list of formals") []))]
-    (loop [i Int 0 before Any [] at-name Any false]
+    (loop [(i Int) 0 (before Any) [] (at-name Any) false]
       (cond
         (>= i (count items))
         {"formals"
@@ -2877,7 +2877,7 @@
 
 ;; Alternating key/value -> [{"key" str "val" expr} ...]; keys are symbols.
 (defn parse-nix-rec-pairs! [(items Any)] Any
-  (loop [i Int 0 acc Any []]
+  (loop [(i Int) 0 (acc Any) []]
     (cond
       (>= i (count items))
       acc
@@ -2964,7 +2964,7 @@
 
 (defn- parse-type-impls! [(items Any)] Any
   (let [state
-        (loop [i Int 0 protocol Any nil methods Any [] impls Any []]
+        (loop [(i Int) 0 (protocol Any) nil (methods Any) [] (impls Any) []]
           (if (>= i (count items))
             {"protocol" protocol "methods" methods "impls" impls}
             (let [item (nth items i)]
@@ -2999,7 +2999,7 @@
 (defn parse-condp-form
   [(pred-datum Any) (test-datum Any) (clause-datums Any)] Any
   (let [pred-expr (parse-expr* pred-datum) test-expr (parse-expr* test-datum) n (count clause-datums)]
-    (loop [i Int 0 pairs Any [] fallback Any nil]
+    (loop [(i Int) 0 (pairs Any) [] (fallback Any) nil]
       (cond
         (>= i n)
         (make-condp pred-expr test-expr pairs fallback)
@@ -3124,15 +3124,15 @@
 (defn expand-cond-thread! [(kind String) (init Any) (clauses Any)] Any
   (when (not= (mod (count clauses) 2) 0)
     (err! (str kind ": expected pairs of (test step) after init; got " (str (mod (count clauses) 2)) " trailing form(s)")))
-  (let [n (count clauses) pairs (loop [i Int 0 acc Any []] (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))])))) pos (if (= kind "cond->") "first" "last") k (count pairs) temps (loop [i Int 0 acc Any [(fresh-lowered-sym! "cond-thread")]] (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread"))))) inner (loop [i Int (- k 1) acc Any (nth temps k)] (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
+  (let [n (count clauses) pairs (loop [(i Int) 0 (acc Any) []] (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))])))) pos (if (= kind "cond->") "first" "last") k (count pairs) temps (loop [(i Int) 0 (acc Any) [(fresh-lowered-sym! "cond-thread")]] (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread"))))) inner (loop [(i Int) (- k 1) (acc Any) (nth temps k)] (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
     ["let" [BRACKET-TAG (nth temps 0) init] inner]))
 
 (defn expand-some-thread! [(kind String) (init Any) (steps Any)] Any
   (let [pos (if (= kind "some->") "first" "last") m (count steps)]
     (if (= m 0)
       init
-      (let [temps (loop [i Int 0 acc Any []] (if (>= i m) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "some-thread"))))) threadeds (loop [i Int 0 acc Any []] (if (>= i m) acc (recur (+ i 1) (conj acc (thread-step-insert (nth temps i) (nth steps i) pos)))))]
-        (loop [i Int (- m 1) acc Any (nth threadeds (- m 1))]
+      (let [temps (loop [(i Int) 0 (acc Any) []] (if (>= i m) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "some-thread"))))) threadeds (loop [(i Int) 0 (acc Any) []] (if (>= i m) acc (recur (+ i 1) (conj acc (thread-step-insert (nth temps i) (nth steps i) pos)))))]
+        (loop [(i Int) (- m 1) (acc Any) (nth threadeds (- m 1))]
           (let [node ["let" [BRACKET-TAG (nth temps i) (if (= i 0) init (nth threadeds (- i 1)))] ["if" ["nil?" (nth temps i)] "nil" acc]]]
             (if (= i 0) node (recur (- i 1) node))))))))
 
@@ -3141,7 +3141,7 @@
 ;; the placeholder (parse.rkt expand-as-thread; NOT a value-position fold).
 (defn expand-as-thread [(init Any) (name Any) (steps Any)] Any
   (let [values (into [init] steps)]
-    (loop [i Int (- (count values) 1) acc Any name]
+    (loop [(i Int) (- (count values) 1) (acc Any) name]
       (if (< i 0)
         acc
         (recur (- i 1) ["let" [BRACKET-TAG name (nth values i)] acc])))))
@@ -3189,7 +3189,7 @@
   (reject-reserved-type-name! name "defunion")
   (validate-identifier! name "defunion")
   (let [n (count raw-members)]
-    (loop [i Int 0 mnames Any [] mf Any {} has-fields Any false]
+    (loop [(i Int) 0 (mnames Any) [] (mf Any) {} (has-fields Any) false]
       (if (>= i n)
         (make-defunion name mnames nil (if has-fields mf nil))
         (let [m (nth raw-members i)]
@@ -3228,7 +3228,7 @@
       (reject-reserved-type-name! type-var "defunion type parameter")))
   (swap! USER-PARAMETRIC-ARITIES assoc name (count type-vars))
   (let [n (count member-defs)]
-    (loop [i Int 0 mnames Any [] mf Any {}]
+    (loop [(i Int) 0 (mnames Any) [] (mf Any) {}]
       (if (>= i n)
         (make-defunion name mnames type-vars mf)
         (let [md (nth member-defs i)]
@@ -3265,7 +3265,7 @@
   (reject-reserved-type-name! name "defunion :throwable")
   (validate-identifier! name "deferror")
   (let [n (count member-defs)]
-    (loop [i Int 0 mnames Any [] mf Any {}]
+    (loop [(i Int) 0 (mnames Any) [] (mf Any) {}]
       (if (>= i n)
         (make-deferror name mnames mf)
         (let [md (nth member-defs i)]
@@ -3297,7 +3297,7 @@
 ;; --- parse-map-literal -------------------------------------------------------
 (defn parse-map-literal! [(items Any)] Any
   (let [n (count items)]
-    (loop [i Int 0 pairs Any []]
+    (loop [(i Int) 0 (pairs Any) []]
       (cond
         (>= i n)
         (make-map pairs)
@@ -3422,7 +3422,7 @@
 ;; serializes SORTED by target name, matching ast-json.rkt's deterministic
 ;; ordering of the underlying hasheq.
 (defn- parse-target-case! [(items Any)] Any
-  (let [n (count items) cases (loop [i Int 0 acc Any {}] (cond (>= i n) acc (< (+ i 1) n) (let [kw (nth items i)] (if (and (string? kw) (keyword-sym? kw)) (recur (+ i 2) (assoc acc (subs kw 1) (parse-expr* (nth items (+ i 1))))) (do (err! (str "target-case: expected target keyword, got: " (str kw))) (recur (+ i 2) acc)))) :else (do (err! (str "target-case: expected keyword-expression pairs, got trailing: " (str (subvec items i)))) acc)))]
+  (let [n (count items) cases (loop [(i Int) 0 (acc Any) {}] (cond (>= i n) acc (< (+ i 1) n) (let [kw (nth items i)] (if (and (string? kw) (keyword-sym? kw)) (recur (+ i 2) (assoc acc (subs kw 1) (parse-expr* (nth items (+ i 1))))) (do (err! (str "target-case: expected target keyword, got: " (str kw))) (recur (+ i 2) acc)))) :else (do (err! (str "target-case: expected keyword-expression pairs, got trailing: " (str (subvec items i)))) acc)))]
     (if (= (count cases) 0)
       (err! "target-case: no branches provided")
       {"node"
@@ -3575,7 +3575,7 @@
     (if (= 1 (count parsed)) (nth parsed 0) {"jsk" "block" "stmts" parsed})))
 
 (defn- pj-object-literal [(items Any)] Any
-  (let [pairs (loop [rest Any items acc (Vec Any) []] (if (< (count rest) 2) acc (recur (subvec rest 2) (conj acc {"key" (pj-expr (nth rest 0)) "val" (pj-expr (nth rest 1))}))))]
+  (let [pairs (loop [(rest Any) items (acc (Vec Any)) []] (if (< (count rest) 2) acc (recur (subvec rest 2) (conj acc {"key" (pj-expr (nth rest 0)) "val" (pj-expr (nth rest 1))}))))]
     {"jsk" "object" "pairs" pairs}))
 
 (defn- pj-call-or-member [(d Any)] Any
@@ -3820,7 +3820,7 @@
      export?}))
 
 (defn- pj-try! [(rest Any)] Any
-  (let [split (loop [forms Any rest body-acc (Vec Any) []] (if (= 0 (count forms)) [body-acc []] (let [f (nth forms 0)] (if (and (jsq-list? f) (or (= (nth f 0) "catch") (= (nth f 0) "finally"))) [body-acc forms] (recur (subvec forms 1) (conj body-acc f)))))) body-forms (nth split 0) cf (nth split 1)]
+  (let [split (loop [(forms Any) rest (body-acc (Vec Any)) []] (if (= 0 (count forms)) [body-acc []] (let [f (nth forms 0)] (if (and (jsq-list? f) (or (= (nth f 0) "catch") (= (nth f 0) "finally"))) [body-acc forms] (recur (subvec forms 1) (conj body-acc f)))))) body-forms (nth split 0) cf (nth split 1)]
     (loop [items cf catch-name false catch-body false finally-body false]
       (if (= 0 (count items))
         {"jsk"
@@ -3851,7 +3851,7 @@
               (recur (subvec items 1) catch-name catch-body finally-body))))))))
 
 (defn- pj-split-if-else [(body Any)] Any
-  (loop [rest Any body then-acc (Vec Any) []]
+  (loop [(rest Any) body (then-acc (Vec Any)) []]
     (cond
       (= 0 (count rest))
       [then-acc []]
@@ -4571,7 +4571,7 @@
       (let [items (bracket-body unq)]
         (if (and (> (count items) 0) (string? (nth items 0)))
           (let [rn (nth items 0) n (count items)]
-            (loop [i Int 1 alias Any false refer Any false]
+            (loop [(i Int) 1 (alias Any) false (refer Any) false]
               (cond
                 (>= i n)
                 {"ns" rn "alias" alias "refer" refer}
@@ -4948,7 +4948,7 @@
   (import-strip-doc (import-strip-export d)))
 
 (defn- module-namespace [(datums Any)] String
-  (loop [remaining Any datums]
+  (loop [(remaining Any) datums]
     (if (= (count remaining) 0)
       "beagle.user"
       (let [d (import-normalize (first remaining))]

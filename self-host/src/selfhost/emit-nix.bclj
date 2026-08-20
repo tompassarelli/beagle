@@ -46,7 +46,7 @@
 
 ;; --- indentation --------------------------------------------------------------
 (defn indent [(n Int)] String
-  (loop [i Int 0 acc String ""]
+  (loop [(i Int) 0 (acc String) ""]
     (if (>= i (* 2 n)) acc (recur (+ i 1) (str acc " ")))))
 
 ;; --- identifier mangling (emit-nix.rkt mangle-name) --------------------------
@@ -67,7 +67,7 @@
 
 (defn hex-encode-utf8 [(s String)] String
   (let [(size Int) (count s)]
-    (loop [index Int 0 out String ""]
+    (loop [(index Int) 0 (out String) ""]
       (if (>= index size)
         out
         (let [(unit-char Any) (subs s index (+ index 1))
@@ -505,7 +505,7 @@
 
 (defn indexed-defaults [(p Any)] Any
   (let [defaults (vec (map-defaults p))]
-    (loop [index Int 0 out Any []]
+    (loop [(index Int) 0 (out Any) []]
       (if (>= index (count defaults))
         out
         (recur (+ index 1)
@@ -513,7 +513,7 @@
 
 (defn default-index-for [(p Any) (key String)] Any
   (let [entries (indexed-defaults p)]
-    (loop [index Int 0]
+    (loop [(index Int) 0]
       (if (>= index (count entries))
         nil
         (let [indexed (nth entries index)]
@@ -542,7 +542,7 @@
         with-as (if (absent? as-name)
                   rest-str
                   (emit-projected-binding as-name raw rest-str))]
-    (loop [key-index Int (- (count keys) 1) out String with-as]
+    (loop [(key-index Int) (- (count keys) 1) (out String) with-as]
       (if (< key-index 0)
         out
         (let [key (nth keys key-index)
@@ -600,7 +600,7 @@
         (str raw ": builtins.deepSeq " raw " (" guarded-rest ")")))))
 
 (defn wrap-constraint-thunks [(indexed Any) (body String) (depth Int)] String
-  (loop [i Int (- (count indexed) 1) result String body]
+  (loop [(i Int) (- (count indexed) 1) (result String) body]
     (if (< i 0)
       result
       (let [entry (nth indexed i)
@@ -618,14 +618,14 @@
               result)))))))
 
 (defn wrap-default-thunks [(indexed Any) (body String) (depth Int)] String
-  (loop [i Int (- (count indexed) 1) result String body]
+  (loop [(i Int) (- (count indexed) 1) (result String) body]
     (if (< i 0)
       result
       (let [entry (nth indexed i)
             index (get entry "index")
             defaults (vec (indexed-defaults (get entry "param")))
             with-defaults
-            (loop [j Int (- (count defaults) 1) inner String result]
+            (loop [(j Int) (- (count defaults) 1) (inner String) result]
               (if (< j 0)
                 inner
                 (let [indexed-default (nth defaults j)
@@ -640,7 +640,7 @@
         (recur (- i 1) with-defaults)))))
 
 (defn index-params [(params Any)] Any
-  (loop [i Int 0 out Any []]
+  (loop [(i Int) 0 (out Any) []]
     (if (>= i (count params))
       out
       (recur (+ i 1)
@@ -696,7 +696,7 @@
     (emit-param-chain params body depth)
     (let [indexed (index-params params)
           bindings (emit-sequential-param-bindings indexed body depth)]
-      (loop [i Int (- (count indexed) 1) result String bindings]
+      (loop [(i Int) (- (count indexed) 1) (result String) bindings]
         (if (< i 0)
           result
           (let [index (get (nth indexed i) "index")]
@@ -757,7 +757,7 @@
       :else
       (let [stmts (subvec (vec exprs) 0 (- n 1))
             initial (emit-expr* (nth exprs (- n 1)) depth)]
-        (loop [i Int (- (count stmts) 1) result String initial]
+        (loop [(i Int) (- (count stmts) 1) (result String) initial]
           (if (< i 0)
             result
             (recur (- i 1)
@@ -809,7 +809,7 @@
 
 (defn flatten-dot-path [(prefix String) (pairs Any) (depth Int)] (Vec String)
   (let [ind (indent (+ depth 1))]
-    (loop [i Int 0 acc (Vec String) []]
+    (loop [(i Int) 0 (acc (Vec String)) []]
       (if (>= i (count pairs))
         acc
         (let [pair (nth pairs i) key (get pair "key") val (get pair "val") key-str (emit-key key depth) full-key (str prefix "." key-str)]
@@ -822,7 +822,7 @@
 (defn emit-nix-attrs [(pairs Any) (depth Int)] String
   (if (= 0 (count pairs))
     "{ }"
-    (let [ind (indent (+ depth 1)) entries (loop [i Int 0 acc (Vec String) []] (if (>= i (count pairs)) acc (let [pair (nth pairs i) key (get pair "key") val (get pair "val") key-node (get key "node") sentinel? (and (= (get val "node") "literal") (= (get val "kind") "bool") (= (get val "value") false))] (recur (+ i 1) (cond (and sentinel? (= key-node "nix-inherit")) (conj acc (str ind "inherit " (str/join " " (get key "names")) ";")) (and sentinel? (= key-node "nix-inherit-from")) (conj acc (str ind "inherit (" (emit-expr* (get key "ns-expr") (+ depth 1)) ") " (str/join " " (get key "names")) ";")) :else (let [key-str (emit-key key depth)] (if (and (map-node? val) (str/includes? key-str ".") (= 1 (count (map-pairs val)))) (into acc (flatten-dot-path key-str (map-pairs val) depth)) (conj acc (str ind key-str " = " (emit-expr* val (+ depth 1)) ";")))))))))]
+    (let [ind (indent (+ depth 1)) entries (loop [(i Int) 0 (acc (Vec String)) []] (if (>= i (count pairs)) acc (let [pair (nth pairs i) key (get pair "key") val (get pair "val") key-node (get key "node") sentinel? (and (= (get val "node") "literal") (= (get val "kind") "bool") (= (get val "value") false))] (recur (+ i 1) (cond (and sentinel? (= key-node "nix-inherit")) (conj acc (str ind "inherit " (str/join " " (get key "names")) ";")) (and sentinel? (= key-node "nix-inherit-from")) (conj acc (str ind "inherit (" (emit-expr* (get key "ns-expr") (+ depth 1)) ") " (str/join " " (get key "names")) ";")) :else (let [key-str (emit-key key depth)] (if (and (map-node? val) (str/includes? key-str ".") (= 1 (count (map-pairs val)))) (into acc (flatten-dot-path key-str (map-pairs val) depth)) (conj acc (str ind key-str " = " (emit-expr* val (+ depth 1)) ";")))))))))]
       (str "{\n" (str/join "\n" entries) "\n" (indent depth) "}"))))
 
 ;; --- nix list ----------------------------------------------------------------
@@ -1113,8 +1113,8 @@
                    (throw (ex-info "with-form has invalid record-update validator" {})))
           with-candidate (str "let " candidate-name " = " updated "; in " result)
           with-updates
-            (loop [index Int (- (count updates) 1)
-                   body String with-candidate]
+            (loop [(index Int) (- (count updates) 1)
+                   (body String) with-candidate]
               (if (< index 0)
                 body
                 (let [name (update-name index)
@@ -1628,7 +1628,7 @@
 
 (defn emit-record-guards
   [(entries Any) (value-name String) (result String)] String
-  (loop [i Int (- (count entries) 1) out String result]
+  (loop [(i Int) (- (count entries) 1) (out String) result]
     (if (< i 0)
       out
       (let [entry (nth entries i)
@@ -1653,7 +1653,7 @@
             ")"))))))
 
 (defn emit-record-predicates [(entries Any) (body String) (depth Int)] String
-  (loop [i Int (- (count entries) 1) out String body]
+  (loop [(i Int) (- (count entries) 1) (out String) body]
     (if (< i 0)
       out
       (let [entry (nth entries i)
@@ -1668,7 +1668,7 @@
             out))))))
 
 (defn constrained-field-entries [(fields Any)] Any
-  (loop [i Int 0 out Any []]
+  (loop [(i Int) 0 (out Any) []]
     (if (>= i (count fields))
       out
       (let [field (nth fields i)]
