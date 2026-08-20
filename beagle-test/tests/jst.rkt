@@ -238,7 +238,7 @@
                     (js/set! values .length 0)))) )])
          (check-exn
           exn:fail?
-          (lambda () (type-check! (jst-parse forms)))))))
+          (lambda () (type-check! (jst-parse forms))))))
 
    ) ;; end type-check suite
 
