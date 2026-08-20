@@ -1,0 +1,69 @@
+#lang beagle
+(ns native.parser-reader-fixture
+  (:require [beagle.frontend-facts :as facts]
+            [beagle.parser-reader :as parser-reader]))
+
+(def smoke-source String
+  "#lang beagle\n(ns smoke)\n(defn main [args (Vec String)] Int\n  0)\n")
+
+(defn relation-count
+  [rows (Vec facts/CompilerFact) relation Keyword] Int
+  (loop [remaining (Vec facts/CompilerFact) rows total Int 0]
+    (if (empty? remaining)
+      total
+      (let [row facts/CompilerFact (first remaining)]
+        (recur (rest remaining)
+               (if (= (facts/compilerfact-relation row) relation)
+                 (inc total)
+                 total))))))
+
+(defn text-span?
+  [rows (Vec facts/CompilerFact) text String line Int column Int] Bool
+  (loop [remaining (Vec facts/CompilerFact) rows]
+    (if (empty? remaining)
+      false
+      (let [row facts/CompilerFact (first remaining)
+            span facts/SourceSpan? (facts/compilerfact-span row)]
+        (if (and (= (facts/compilerfact-relation row) :syntax/value)
+                 (some? span)
+                 (= (facts/sourcespan-line span) line)
+                 (= (facts/sourcespan-column span) column)
+                 (match (facts/compilerfact-value row)
+                   [(FactText value) (= value text)]
+                   [(FactNodeRef node-id) false]
+                   [(FactBool value) false]
+                   [(FactInt value) false]
+                   [(FactNil) false]))
+          true
+          (recur (rest remaining)))))))
+
+(defn smoke-case [] Bool
+  (match (parser-reader/facts-from-source
+           "smoke.bgl" smoke-source "fixture-digest" "core")
+    [(FactsRead bundle)
+     (let [rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts bundle)
+           root String
+           (facts/canonical-node-subject
+             "fixture-digest" 0 (count (utf8-encode smoke-source)) :syntax/root 0)]
+       (and (facts/canonical-fact-order? rows)
+            (> (relation-count rows :syntax/node) 0)
+            (> (relation-count rows :syntax/value) 0)
+            (> (relation-count rows :syntax/edge) 0)
+            (some
+              (fn [row facts/CompilerFact] Bool
+                (and (= (facts/compilerfact-relation row) :syntax/edge)
+                     (= (facts/compilerfact-subject row) root)))
+              rows)
+            (text-span? rows "ns" 1 1)
+            (text-span? rows "defn" 2 1)
+            (text-span? rows "0" 3 2)))]
+    [(FactsRejected errors) false]))
+
+(defn malformed-case [] Bool
+  (match (parser-reader/facts-from-source
+           "bad.bgl" "{:bad]" "bad-digest" "core")
+    [(FactsRejected errors) (> (count errors) 0)]
+    [(FactsRead bundle) false]))
+
+(defn main [args (Vec String)] Int
+  (if (and (smoke-case) (malformed-case)) 0 1))

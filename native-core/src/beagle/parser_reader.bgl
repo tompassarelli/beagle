@@ -1,0 +1,400 @@
+#lang beagle
+(ns beagle.parser-reader
+  (:require [beagle.datum-reader :as reader]
+            [beagle.frontend-facts :as facts]))
+
+(defrecord ParsedDatum
+  [kind Keyword
+   value String
+   literal String
+   start Int
+   end Int
+   children (Vec Int)])
+
+(defrecord AssemblyFrame
+  [index Int
+   kind Keyword
+   remaining Int])
+
+(defrecord AssemblyState
+  [datums (Vec ParsedDatum)
+   roots (Vec Int)
+   frames (Vec AssemblyFrame)])
+
+(defunion AssemblyResult
+  (AssemblyComplete
+    [datums (Vec ParsedDatum)
+     roots (Vec Int)])
+  (AssemblyFailed
+    [offset Int
+     message String]))
+
+(defunion AssemblyStep
+  (AssemblyAdvanced [state AssemblyState])
+  (AssemblyRejected [offset Int message String]))
+
+(defn character-at [source String offset Int] String
+  (subs source offset (+ offset 1)))
+
+(defn container-open? [kind Keyword] Bool
+  (or (= kind :list/open)
+      (= kind :vector/open)
+      (= kind :map/open)
+      (= kind :set/open)))
+
+(defn prefix? [kind Keyword] Bool
+  (or (= kind :quote)
+      (= kind :quasiquote)
+      (= kind :unquote)
+      (= kind :unquote-splicing)
+      (= kind :metadata)))
+
+(defn atom? [kind Keyword] Bool
+  (or (= kind :symbol)
+      (= kind :keyword)
+      (= kind :string)
+      (= kind :boolean)
+      (= kind :nil)))
+
+(defn close? [kind Keyword] Bool
+  (or (= kind :list/close)
+      (= kind :vector/close)
+      (= kind :map/close)
+      (= kind :set/close)))
+
+(defn matching-close? [opened Keyword closed Keyword] Bool
+  (or (and (= opened :list/open) (= closed :list/close))
+      (and (= opened :vector/open) (= closed :vector/close))
+      (and (= opened :map/open) (= closed :map/close))
+      (and (= opened :set/open) (= closed :set/close))))
+
+(defn prefix-arity [kind Keyword] Int
+  (if (= kind :metadata) 2 1))
+
+(defn datum-end [event reader/ReaderEvent] Int
+  (+ (reader/readerevent-offset event)
+     (count (reader/readerevent-literal event))))
+
+(defn event-datum [event reader/ReaderEvent] ParsedDatum
+  (let [kind Keyword (reader/readerevent-kind event)
+        end Int
+        (if (or (container-open? kind) (prefix? kind))
+          -1
+          (datum-end event))]
+    (->ParsedDatum kind
+                   (reader/readerevent-value event)
+                   (reader/readerevent-literal event)
+                   (reader/readerevent-offset event)
+                   end
+                   [])))
+
+(defn consume-parent [frames (Vec AssemblyFrame)] (Vec AssemblyFrame)
+  (if (empty? frames)
+    frames
+    (let [index Int (dec (count frames))
+          frame AssemblyFrame (nth frames index)]
+      (if (< (assemblyframe-remaining frame) 0)
+        frames
+        (if (= (assemblyframe-remaining frame) 1)
+          (pop frames)
+          (assoc frames index
+            (->AssemblyFrame (assemblyframe-index frame)
+                             (assemblyframe-kind frame)
+                             (dec (assemblyframe-remaining frame)))))))))
+
+(defn append-datum [state AssemblyState datum ParsedDatum] AssemblyState
+  (let [index Int (count (assemblystate-datums state))
+        datums (Vec ParsedDatum) (conj (assemblystate-datums state) datum)
+        frames (Vec AssemblyFrame) (assemblystate-frames state)]
+    (if (empty? frames)
+      (->AssemblyState datums
+                       (conj (assemblystate-roots state) index)
+                       frames)
+      (let [parent-frame AssemblyFrame (peek frames)
+            parent-index Int (assemblyframe-index parent-frame)
+            parent ParsedDatum (nth datums parent-index)
+            parent-with-child ParsedDatum
+            (->ParsedDatum (parseddatum-kind parent)
+                           (parseddatum-value parent)
+                           (parseddatum-literal parent)
+                           (parseddatum-start parent)
+                           (parseddatum-end parent)
+                           (conj (parseddatum-children parent) index))]
+        (->AssemblyState (assoc datums parent-index parent-with-child)
+                         (assemblystate-roots state)
+                         (consume-parent frames))))))
+
+(defn push-frame
+  [state AssemblyState index Int kind Keyword remaining Int] AssemblyState
+  (->AssemblyState (assemblystate-datums state)
+                   (assemblystate-roots state)
+                   (conj (assemblystate-frames state)
+                         (->AssemblyFrame index kind remaining))))
+
+(defn close-container [state AssemblyState event reader/ReaderEvent] AssemblyStep
+  (let [frames (Vec AssemblyFrame) (assemblystate-frames state)]
+    (if (empty? frames)
+      (->AssemblyRejected (reader/readerevent-offset event)
+                          "unexpected closing reader event")
+      (let [frame AssemblyFrame (peek frames)
+            opened Keyword (assemblyframe-kind frame)]
+        (if (or (not (< (assemblyframe-remaining frame) 0))
+                (not (matching-close? opened (reader/readerevent-kind event))))
+          (->AssemblyRejected (reader/readerevent-offset event)
+                              "mismatched closing reader event")
+          (let [index Int (assemblyframe-index frame)
+                datum ParsedDatum (nth (assemblystate-datums state) index)
+                closed ParsedDatum
+                (->ParsedDatum (parseddatum-kind datum)
+                               (parseddatum-value datum)
+                               (parseddatum-literal datum)
+                               (parseddatum-start datum)
+                               (datum-end event)
+                               (parseddatum-children datum))]
+            (->AssemblyAdvanced
+              (->AssemblyState
+                (assoc (assemblystate-datums state) index closed)
+                (assemblystate-roots state)
+                (pop frames)))))))))
+
+(defn advance [state AssemblyState event reader/ReaderEvent] AssemblyStep
+  (let [kind Keyword (reader/readerevent-kind event)]
+    (cond
+      (close? kind) (close-container state event)
+
+      (or (container-open? kind) (prefix? kind) (atom? kind))
+      (let [with-datum AssemblyState (append-datum state (event-datum event))
+            index Int (dec (count (assemblystate-datums with-datum)))]
+        (if (container-open? kind)
+          (->AssemblyAdvanced (push-frame with-datum index kind -1))
+          (if (prefix? kind)
+            (->AssemblyAdvanced
+              (push-frame with-datum index kind (prefix-arity kind)))
+            (->AssemblyAdvanced with-datum)))
+
+      :else
+      (->AssemblyRejected (reader/readerevent-offset event)
+                          "unsupported reader event")))))
+
+(defn final-offset [events (Vec reader/ReaderEvent)] Int
+  (if (empty? events) 0 (reader/readerevent-offset (peek events))))
+
+(defn resolve-ends [datums (Vec ParsedDatum)] AssemblyResult
+  (loop [index Int (dec (count datums))
+         resolved (Vec ParsedDatum) datums]
+    (if (< index 0)
+      (->AssemblyComplete resolved [])
+      (let [datum ParsedDatum (nth resolved index)]
+        (if (>= (parseddatum-end datum) 0)
+          (recur (dec index) resolved)
+          (if (empty? (parseddatum-children datum))
+            (->AssemblyFailed (parseddatum-start datum)
+                              "reader prefix has no datum")
+            (let [last-child Int (peek (parseddatum-children datum))
+                  child ParsedDatum (nth resolved last-child)
+                  completed ParsedDatum
+                  (->ParsedDatum (parseddatum-kind datum)
+                                 (parseddatum-value datum)
+                                 (parseddatum-literal datum)
+                                 (parseddatum-start datum)
+                                 (parseddatum-end child)
+                                 (parseddatum-children datum))]
+              (recur (dec index) (assoc resolved index completed)))))))))
+
+(defn assemble-events [events (Vec reader/ReaderEvent)] AssemblyResult
+  (loop [remaining (Vec reader/ReaderEvent) events
+         state AssemblyState (->AssemblyState [] [] [])]
+    (if (empty? remaining)
+      (if (empty? (assemblystate-frames state))
+        (match (resolve-ends (assemblystate-datums state))
+          [(AssemblyComplete datums ignored-roots)
+           (->AssemblyComplete datums (assemblystate-roots state))]
+          [(AssemblyFailed offset message) (->AssemblyFailed offset message)])
+        (->AssemblyFailed (final-offset events) "unterminated reader event"))
+      (match (advance state (first remaining))
+        [(AssemblyAdvanced next-state) (recur (rest remaining) next-state)]
+        [(AssemblyRejected offset message) (->AssemblyFailed offset message)]))))
+
+(defn byte-offset [source String offset Int] Int
+  (count (utf8-encode (subs source 0 offset))))
+
+(defn source-location [source String offset Int] (Vec Int)
+  (loop [cursor Int 0 line Int 0 column Int 0]
+    (if (>= cursor offset)
+      [line column]
+      (if (= (character-at source cursor) "\n")
+        (recur (inc cursor) (inc line) 0)
+        (recur (inc cursor) line (inc column))))))
+
+(defn span-at [path String source String start Int end Int] facts/SourceSpan
+  (let [location (Vec Int) (source-location source start)]
+    (facts/->SourceSpan path
+                        (byte-offset source start)
+                        (byte-offset source end)
+                        (nth location 0)
+                        (nth location 1))))
+
+(defn node-subject [source-digest String start Int end Int] String
+  (facts/canonical-node-subject source-digest start end :syntax/node 0))
+
+(defn root-subject [source-digest String source String] String
+  (facts/canonical-node-subject source-digest
+                                0
+                                (count (utf8-encode source))
+                                :syntax/root
+                                0))
+
+(defn kind-text [kind Keyword] String
+  (cond
+    (= kind :list/open) "list"
+    (= kind :vector/open) "vector"
+    (= kind :map/open) "map"
+    (= kind :set/open) "set"
+    (= kind :quote) "quote"
+    (= kind :quasiquote) "quasiquote"
+    (= kind :unquote) "unquote"
+    (= kind :unquote-splicing) "unquote-splicing"
+    (= kind :metadata) "metadata"
+    (= kind :symbol) "symbol"
+    (= kind :keyword) "keyword"
+    (= kind :string) "string"
+    (= kind :boolean) "boolean"
+    :else "nil"))
+
+(defn leaf? [kind Keyword] Bool
+  (or (= kind :symbol)
+      (= kind :keyword)
+      (= kind :string)
+      (= kind :boolean)
+      (= kind :nil)))
+
+(defn leaf-value [datum ParsedDatum] facts/FactValue
+  (cond
+    (= (parseddatum-kind datum) :boolean)
+    (facts/->FactBool (= (parseddatum-value datum) "true"))
+
+    (= (parseddatum-kind datum) :nil) (facts/->FactNil)
+
+    :else (facts/->FactText (parseddatum-value datum))))
+
+(defrecord FactState [(facts (Vec facts/CompilerFact)) (next-order Int)])
+
+(defn append-fact [state FactState fact facts/CompilerFact] FactState
+  (->FactState (conj (factstate-facts state) fact)
+               (inc (factstate-next-order state))))
+
+(defn emit-node
+  [state FactState source-digest String path String source String datum ParsedDatum]
+  FactState
+  (let [span facts/SourceSpan
+        (span-at path source (parseddatum-start datum) (parseddatum-end datum))
+        subject String
+        (node-subject source-digest (facts/sourcespan-start-byte span) (facts/sourcespan-end-byte span))
+        with-node FactState
+        (append-fact state
+          (facts/syntax-node-fact (factstate-next-order state)
+                                  subject
+                                  (facts/->FactText (kind-text (parseddatum-kind datum)))
+                                  span))]
+    (if (leaf? (parseddatum-kind datum))
+      (append-fact with-node
+        (facts/syntax-value-fact (factstate-next-order with-node)
+                                 subject 0 (leaf-value datum) span))
+      with-node)))
+
+(defn emit-edges
+  [state FactState source-digest String path String source String datum ParsedDatum
+   datums (Vec ParsedDatum)] FactState
+  (let [span facts/SourceSpan
+        (span-at path source (parseddatum-start datum) (parseddatum-end datum))
+        subject String
+        (node-subject source-digest (facts/sourcespan-start-byte span) (facts/sourcespan-end-byte span))]
+    (loop [children (Vec Int) (parseddatum-children datum)
+           slot Int 0
+           emitted FactState state]
+      (if (empty? children)
+        emitted
+        (let [child ParsedDatum (nth datums (first children))
+              child-span facts/SourceSpan
+              (span-at path source (parseddatum-start child) (parseddatum-end child))
+              target String
+              (node-subject source-digest
+                            (facts/sourcespan-start-byte child-span)
+                            (facts/sourcespan-end-byte child-span))]
+          (recur (rest children)
+                 (inc slot)
+                 (append-fact emitted
+                   (facts/syntax-edge-fact (factstate-next-order emitted)
+                                           subject slot target span))))))))
+
+(defn emit-datums
+  [source-digest String path String source String datums (Vec ParsedDatum)]
+  FactState
+  (loop [index Int 0 state FactState (->FactState [] 0)]
+    (if (>= index (count datums))
+      state
+      (let [datum ParsedDatum (nth datums index)
+            with-node FactState (emit-node state source-digest path source datum)]
+        (recur (inc index)
+               (emit-edges with-node source-digest path source datum datums))))))
+
+(defn emit-root
+  [state FactState source-digest String path String source String roots (Vec Int)
+   datums (Vec ParsedDatum)] FactState
+  (let [span facts/SourceSpan (span-at path source 0 (count source))
+        subject String (root-subject source-digest source)
+        with-node FactState
+        (append-fact state
+          (facts/syntax-node-fact (factstate-next-order state)
+                                  subject (facts/->FactText "root") span))]
+    (loop [remaining (Vec Int) roots slot Int 0 emitted FactState with-node]
+      (if (empty? remaining)
+        emitted
+        (let [child ParsedDatum (nth datums (first remaining))
+              child-span facts/SourceSpan
+              (span-at path source (parseddatum-start child) (parseddatum-end child))
+              target String
+              (node-subject source-digest
+                            (facts/sourcespan-start-byte child-span)
+                            (facts/sourcespan-end-byte child-span))]
+          (recur (rest remaining)
+                 (inc slot)
+                 (append-fact emitted
+                   (facts/syntax-edge-fact (factstate-next-order emitted)
+                                           subject slot target span))))))))
+
+(defn fact-error [path String source String offset Int code Keyword message String]
+  facts/FactReadResult
+  (let [bounded Int (if (< offset 0) 0 (if (> offset (count source)) (count source) offset))
+        span facts/SourceSpan (span-at path source bounded bounded)]
+    (facts/->FactsRejected [(facts/->FactError span code message)])))
+
+(defn facts-from-events
+  [path String
+   source String
+   source-digest String
+   profile String
+   events (Vec reader/ReaderEvent)] facts/FactReadResult
+  (match (assemble-events events)
+    [(AssemblyComplete datums roots)
+     (let [datum-facts FactState (emit-datums source-digest path source datums)
+           emitted FactState
+           (emit-root datum-facts source-digest path source roots datums)
+           rows (Vec facts/CompilerFact) (factstate-facts emitted)]
+       (if (facts/canonical-fact-order? rows)
+         (facts/->FactsRead
+           (facts/->SyntaxFactBundle path nil source-digest profile rows [] []))
+         (fact-error path source 0 :syntax/fact-order
+                     "syntax facts must have strictly increasing order")))]
+    [(AssemblyFailed offset message)
+     (fact-error path source offset :syntax/reader-event message)]))
+
+(defn facts-from-source
+  [path String source String source-digest String profile String] facts/FactReadResult
+  (let [read reader/DatumRead (reader/read-events source)
+        read-error String? (reader/datumread-error read)]
+    (if (some? read-error)
+      (fact-error path source (reader/datumread-error-offset read)
+                  :syntax/read (or read-error "invalid source"))
+      (facts-from-events path source source-digest profile
+                         (reader/datumread-events read)))))
