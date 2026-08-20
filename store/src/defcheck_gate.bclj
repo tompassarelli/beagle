@@ -11,6 +11,16 @@
     [clojure.edn :as edn]
     [cheshire.core :as json]))
 
+;; The permissive form reader is clojure.core/read, not clojure.edn/read: only
+;; the former honours :read-cond and *default-data-reader-fn*, which read-forms
+;; below relies on. Its reader argument is a host java.io.PushbackReader and its
+;; result is whatever datum the source text spells, so both stay dynamic.
+(declare-extern clojure.core/read (Fn [(Map Keyword Any) Any] Any))
+
+;; Runtime reflection over the live clojure.core namespace: the interned var
+;; map exists only at the host, so its symbol and var sides stay dynamic.
+(declare-extern clojure.core/ns-publics (Fn [Any] (Map Any Any)))
+
 
 (def BEAGLE-MESSAGE-RE Any (re-pattern "^beagle:\\s*"))
 
@@ -177,7 +187,7 @@
                                                            Any
                                                            v)]
       (loop [acc []]
-        (let [f (try (read opts rdr) (catch (t Throwable) {:store.defcheck/read-error (or (.getMessage t) (str (class t)))}))]
+        (let [f (try (clojure.core/read opts rdr) (catch (t Throwable) {:store.defcheck/read-error (or (.getMessage t) (str (class t)))}))]
           (cond
             (and (map? f) (:store.defcheck/read-error f))
             {:forms acc :read-error (:store.defcheck/read-error f)}
@@ -190,7 +200,8 @@
   (set (map symbol ["def" "if" "do" "let" "let*" "fn" "fn*" "loop" "loop*" "recur" "throw" "try" "catch" "finally" "quote" "var" "monitor-enter" "monitor-exit" "new" "set!" "." "&" "deftype*" "reify*" "case*" "letfn*" "import*" "clojure.core/import*" "unquote" "unquote-splicing"])))
 
 (def core-names Any
-  (delay (set (map (comp symbol name) (keys (ns-publics (quote clojure.core)))))))
+  (delay (set (map (comp symbol name)
+                (set (keys (clojure.core/ns-publics (quote clojure.core))))))))
 
 (def def-heads (Set Any)
   (set (map symbol ["def" "defn" "defn-" "defonce" "def-" "defmacro" "definline" "defmulti" "defmethod" "deftype" "defrecord" "defprotocol" "declare" "defstruct" "extend-type" "extend-protocol" "extend"])))
@@ -258,7 +269,7 @@
                                                                                                     [(acc Any)
                                                                                                      (spec Any)]
                                                                                                     Any
-                                                                                                    (cond (symbol? spec) (update acc :imports conj (symbol (peek (str/split (name spec) DOT-RE)))) (sequential? spec) (update acc :imports into (map (fn* [%1] (symbol (name %1))) (rest spec))) :else acc)) handle-clause (fn
+                                                                                                    (cond (symbol? spec) (update acc :imports conj (symbol (peek (str/split (name spec) DOT-RE)))) (sequential? spec) (update acc :imports into (map (fn [(imported Any)] Any (symbol (name imported))) (rest spec))) :else acc)) handle-clause (fn
                                                                                                                                                                                                                                                                                                                              [(acc Any)
                                                                                                                                                                                                                                                                                                                               (clause Any)]
                                                                                                                                                                                                                                                                                                                              Any
@@ -280,7 +291,7 @@
           (recur (inc i)
             (reduce (fn [(cur (Vec Int)) (j Int)] (Vec Int) (conj cur (if (= (.charAt a (dec i)) (.charAt b (dec j))) (nth prev (dec j)) (inc (min (nth prev j) (peek cur) (nth prev (dec j)))))))
               [i]
-              (range 1 (inc n)))))))))
+              (vec (range 1 (inc n))))))))))
 
 (defn- nearest [(sym Any) (candidates Any)] (Vec String)
   (let [s (name sym) thr (max 2 (quot (count s) 3))]

@@ -853,6 +853,63 @@
                (event-after-sequence? event lower-exclusive))
       events)))
 
+;; A Tuple position holds any Term, so no host comparator totally orders two
+;; tuples. The length-prefixed encoding gives candidate-source construction a
+;; stable order before it assigns dense handles by vector position.
+(defn- length-key [(tag String) (value String)] String
+  (str tag (count value) ":" value))
+
+(defn term-key [(value Any)] String
+  (cond
+    [(string? value)
+     (let [(text String) value] (length-key "s" text))]
+    [(integer? value)
+     (let [(integer-value Int) value] (str "i" integer-value ";"))]
+    [(number? value)
+     (let [(float-value Float) (double value)] (str "f" float-value ";"))]
+    [(boolean? value)
+     (let [(bool-value Bool) value] (if bool-value "b1;" "b0;"))]
+    [(keyword? value)
+     (let [(keyword-value Keyword) value]
+       (length-key "k" (str keyword-value)))]
+    [(t/instant? value)
+     (let [(instant-value t/Instant) value]
+       (str "m" (t/instant-epoch-seconds instant-value) ":"
+            (t/instant-nanos instant-value) ";"))]
+    [(t/triple? value)
+     (let [(triple-value t/Triple) value
+           (t1 String) (term-key (t/triple-t1 triple-value))
+           (t2 String) (term-key (t/triple-t2 triple-value))
+           (t3 String) (term-key (t/triple-t3 triple-value))]
+       (str "t" (count t1) ":" t1
+            (count t2) ":" t2
+            (count t3) ":" t3))]
+    [:else "x0:"]))
+
+(defn row-key [(row Tuple)] String
+  (reduce (fn [(acc String) (value Any)] String
+            (let [key (term-key value)] (str acc (count key) ":" key)))
+          "r" row))
+
+(defn order-row-vector [(rows (Vec Tuple))] (Vec Tuple)
+  (let [(by-key (Map String Tuple))
+        (reduce (fn [(acc (Map String Tuple)) (row Tuple)] (Map String Tuple)
+                  (assoc acc (row-key row) row))
+                {} rows)
+        (keys (Vec String))
+        (reduce (fn [(acc (Vec String)) (row Tuple)] (Vec String)
+                  (conj acc (row-key row)))
+                [] rows)]
+    (mapv (fn [(key String)] Tuple
+            (let [row (get by-key key)]
+              (if (some? row)
+                (let [(present Tuple) row] present)
+                [])))
+          (vec (sort keys)))))
+
+(defn- ordered-rows [(rows (Set Tuple))] (Vec Tuple)
+  (order-row-vector (vec rows)))
+
 (defn- candidate-source-add
   [(relation String) (source CandidateSource) (tuple Tuple)] CandidateSource
   (let [(handle Int) (count (candidatesource-rows source))
@@ -870,11 +927,11 @@
 (defn- candidate-source-add-rows
   [(relation String)
    (source CandidateSource)
-   (tuples (Set Tuple))]
+   (tuples (Vec Tuple))]
   CandidateSource
   (reduce (fn [(current CandidateSource) (tuple Tuple)] CandidateSource
             (candidate-source-add relation current tuple))
-          source (vec tuples)))
+          source tuples))
 
 (defn withdrawal-candidate-source
   [(root t/TermStore)
@@ -884,8 +941,9 @@
   (candidate-source-add-rows
    withdrawal-relation
    (empty-candidate-source)
-   (set (store/withdrawal-tuples-between
-         root lower-exclusive upper-inclusive))))
+   (ordered-rows
+    (set (store/withdrawal-tuples-between
+          root lower-exclusive upper-inclusive)))))
 
 (defn- build-candidate-sources
   [(db Db) (relations (Vec String)) (seed CandidateSources)] CandidateSources
@@ -894,7 +952,8 @@
               sources
               (assoc sources relation
                      (candidate-source-add-rows
-                      relation (empty-candidate-source) (get db relation #{})))))
+                      relation (empty-candidate-source)
+                      (ordered-rows (get db relation #{}))))))
           seed relations))
 
 (defn- add-delta-sources
@@ -913,7 +972,7 @@
                 current
                 (assoc current relation
                        (candidate-source-add-rows
-                        relation base tuples)))))
+                        relation base (ordered-rows tuples))))))
           sources relations))
 
 (defn text-relation-needle-valid?! [(relation String) (needle Any)] Bool
