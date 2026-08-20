@@ -1,0 +1,44 @@
+#lang beagle
+(ns parser.fixture
+  (:require [beagle.frontend-facts :as facts]
+            [beagle.parser :as parser]))
+
+(defn span [path String] facts/SourceSpan
+  (facts/->SourceSpan path 0 1 0 0))
+
+(defn syntax-row
+  [path String
+   subject String
+   value String] facts/CompilerFact
+  (facts/->CompilerFact 0 :syntax/node subject 0
+    (facts/->FactText value) (span path)))
+
+(def dep-bundle facts/SyntaxFactBundle
+  (facts/->SyntaxFactBundle "dep.bgl" "dep" "sha256:dep"
+    "native-core" [(syntax-row "dep.bgl" "dep-root" "def")]
+    [] []))
+
+(def app-bundle facts/SyntaxFactBundle
+  (facts/->SyntaxFactBundle "app.bgl" "app" "sha256:app"
+    "native-core" [(syntax-row "app.bgl" "app-root" "call")]
+    [(facts/->ImportEdgeFact 0 "app" "dep" nil [] (span "app.bgl"))]
+    []))
+
+(defn fixture-ok? [] Bool
+  (let [request parser/ExplicitFactBundleV1 (parser/->ExplicitFactBundleV1 "app.bgl"
+          [(parser/->ExplicitFactSourceV1 app-bundle
+             (parser/package-authority))
+           (parser/->ExplicitFactSourceV1 dep-bundle
+             (parser/package-authority))])]
+    (match (parser/parse-explicit-bundle request)
+      [(parser/ExplicitBundleParsedV1 closure)
+       (let [modules (Vec facts/SyntaxFactBundle) (facts/syntaxfactclosure-modules closure)]
+         (and (= 2 (count modules))
+           (= "dep.bgl" (facts/syntaxfactbundle-path (nth modules 0)))
+           (= "app.bgl" (facts/syntaxfactbundle-path (nth modules 1)))
+           (= "app.bgl" (facts/syntaxfactclosure-entry-path closure))
+           (= 2 (count (facts/syntaxfactclosure-interface-digests closure)))))]
+      [(parser/ExplicitBundleRejectedV1 errors) false])))
+
+(defn main [args (Vec String)] Int
+  (if (fixture-ok?) 0 1))

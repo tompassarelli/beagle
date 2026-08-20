@@ -1,0 +1,356 @@
+#lang beagle
+(ns beagle.parser
+  (:require [beagle.frontend-facts :as facts]))
+
+(defunion ModuleAuthorityV1
+  PackageModuleV1
+  TrustedModuleV1)
+
+(defn package-authority [] ModuleAuthorityV1
+  (->PackageModuleV1))
+
+(defn trusted-authority [] ModuleAuthorityV1
+  (->TrustedModuleV1))
+
+(defrecord ExplicitFactSourceV1
+  [bundle facts/SyntaxFactBundle
+   authority ModuleAuthorityV1])
+
+(defrecord ExplicitFactBundleV1
+  [entry-path String
+   sources (Vec ExplicitFactSourceV1)])
+
+(defunion ParseExplicitBundleResultV1
+  (ExplicitBundleParsedV1 [closure facts/SyntaxFactClosure])
+  (ExplicitBundleRejectedV1 [errors (Vec facts/FactError)]))
+
+(defn source-bundle [source ExplicitFactSourceV1] facts/SyntaxFactBundle
+  (explicitfactsourcev1-bundle source))
+
+(defn bundle-path [source ExplicitFactSourceV1] String
+  (facts/syntaxfactbundle-path (source-bundle source)))
+
+(defn bundle-namespace [source ExplicitFactSourceV1] String?
+  (facts/syntaxfactbundle-namespace (source-bundle source)))
+
+(defn default-span [path String] facts/SourceSpan
+  (facts/->SourceSpan path 0 0 0 0))
+
+(defn fact-error
+  [path String
+   code Keyword
+   message String] facts/FactError
+  (facts/->FactError (default-span path) code message))
+
+(defn string-member?
+  [values (Vec String)
+   target String] Bool
+  (some? (some (fn [value String] String? (if (= value target) value nil)) values)))
+
+(defn source-for-path
+  [sources (Vec ExplicitFactSourceV1)
+   path String] ExplicitFactSourceV1?
+  (some
+    (fn [source ExplicitFactSourceV1] ExplicitFactSourceV1?
+      (if (= path (bundle-path source)) source nil))
+    sources))
+
+(defn source-for-namespace
+  [sources (Vec ExplicitFactSourceV1)
+   namespace String] ExplicitFactSourceV1?
+  (some
+    (fn [source ExplicitFactSourceV1] ExplicitFactSourceV1?
+      (let [candidate String? (bundle-namespace source)]
+        (if (and (some? candidate) (= namespace candidate)) source nil)))
+    sources))
+
+(defn duplicate-path [sources (Vec ExplicitFactSourceV1)] String?
+  (loop [position Int 0
+         seen (Vec String) []]
+    (if (>= position (count sources))
+      nil
+      (let [path String (bundle-path (nth sources position))]
+        (if (string-member? seen path)
+          path
+          (recur (+ position 1) (conj seen path)))))))
+
+(defn duplicate-namespace [sources (Vec ExplicitFactSourceV1)] String?
+  (loop [position Int 0
+         seen (Vec String) []]
+    (if (>= position (count sources))
+      nil
+      (let [namespace String? (bundle-namespace (nth sources position))]
+        (cond
+          (nil? namespace) nil
+          (string-member? seen namespace) namespace
+          :else (recur (+ position 1) (conj seen namespace)))))))
+
+(defn authority-trusted? [authority ModuleAuthorityV1] Bool
+  (instance? beagle.parser.TrustedModuleV1 authority))
+
+(defn span-valid? [span facts/SourceSpan path String] Bool
+  (and (= path (facts/sourcespan-path span))
+    (>= (facts/sourcespan-start-byte span) 0)
+    (>= (facts/sourcespan-end-byte span) (facts/sourcespan-start-byte span))
+    (>= (facts/sourcespan-line span) 0)
+    (>= (facts/sourcespan-column span) 0)))
+
+(defn node-defined? [rows (Vec facts/CompilerFact) node-id String] Bool
+  (some?
+    (some
+      (fn [row facts/CompilerFact] String?
+        (if (= node-id (facts/compilerfact-subject row)) node-id nil))
+      rows)))
+
+(defn fact-value-node-valid?
+  [rows (Vec facts/CompilerFact)
+   value facts/FactValue] Bool
+  (match value
+    [(facts/FactNodeRef node-id) (node-defined? rows node-id)]
+    [(facts/FactText text) true]
+    [(facts/FactBool boolean) true]
+    [(facts/FactInt integer) true]
+    [(facts/FactNil) true]))
+
+(defn facts-valid? [bundle facts/SyntaxFactBundle] Bool
+  (let [path String (facts/syntaxfactbundle-path bundle)
+        rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts bundle)]
+    (every?
+      (fn [row facts/CompilerFact] Bool
+        (let [span facts/SourceSpan? (facts/compilerfact-span row)]
+          (and (>= (facts/compilerfact-order row) 0)
+            (>= (facts/compilerfact-slot row) 0)
+            (some? span)
+            (if (nil? span) false (span-valid? span path))
+            (fact-value-node-valid? rows (facts/compilerfact-value row)))))
+      rows)))
+
+(defn imports-valid?
+  [source ExplicitFactSourceV1
+   sources (Vec ExplicitFactSourceV1)] Bool
+  (let [bundle facts/SyntaxFactBundle (source-bundle source)
+        namespace String? (facts/syntaxfactbundle-namespace bundle)
+        trusted Bool (authority-trusted? (explicitfactsourcev1-authority source))]
+    (and (some? namespace)
+      (every?
+        (fn [edge facts/ImportEdgeFact] Bool
+          (let [required ExplicitFactSourceV1? (source-for-namespace sources (facts/importedgefact-required edge))]
+            (and (= namespace (facts/importedgefact-importer edge))
+              (span-valid? (facts/importedgefact-span edge)
+                (facts/syntaxfactbundle-path bundle))
+              (some? required)
+              (or (not trusted)
+                (and (some? required)
+                  (authority-trusted?
+                    (explicitfactsourcev1-authority required)))))))
+        (facts/syntaxfactbundle-imports bundle)))))
+
+(defn suffix?
+  [value String
+   suffix String] Bool
+  (let [width Int (count suffix)]
+    (and (>= (count value) width)
+      (= suffix (subs value (- (count value) width) (count value))))))
+
+(defn profile-matches-path? [bundle facts/SyntaxFactBundle] Bool
+  (let [path String (facts/syntaxfactbundle-path bundle)
+        profile String (facts/syntaxfactbundle-profile bundle)]
+    (cond
+      (suffix? path ".bgl") (= profile "native-core")
+      (suffix? path ".bclj") (= profile "clj")
+      (suffix? path ".bjs") (= profile "js")
+      (suffix? path ".bnix") (= profile "nix")
+      :else false)))
+
+(defn source-valid?
+  [source ExplicitFactSourceV1
+   sources (Vec ExplicitFactSourceV1)] Bool
+  (let [bundle facts/SyntaxFactBundle (source-bundle source)]
+    (and (some? (facts/syntaxfactbundle-namespace bundle))
+      (profile-matches-path? bundle)
+      (facts-valid? bundle)
+      (imports-valid? source sources))))
+
+(defn reachable-paths
+  [sources (Vec ExplicitFactSourceV1)
+   entry-path String] (Vec String)
+  (loop [cursor Int 0
+         reached (Vec String) [entry-path]]
+    (if (>= cursor (count reached))
+      reached
+      (let [source ExplicitFactSourceV1? (source-for-path sources (nth reached cursor))]
+        (if (nil? source)
+          reached
+          (let [imports (Vec facts/ImportEdgeFact) (facts/syntaxfactbundle-imports (source-bundle source))]
+            (recur (+ cursor 1)
+              (reduce
+                (fn
+                  [paths (Vec String)
+                   edge facts/ImportEdgeFact] (Vec String)
+                  (let [required ExplicitFactSourceV1? (source-for-namespace sources
+                          (facts/importedgefact-required edge))]
+                    (if (nil? required)
+                      paths
+                      (let [path String (bundle-path required)]
+                        (if (string-member? paths path) paths (conj paths path))))))
+                reached
+                imports))))))))
+
+(defn source-dependencies-selected?
+  [source ExplicitFactSourceV1
+   sources (Vec ExplicitFactSourceV1)
+   selected-paths (Vec String)] Bool
+  (every?
+    (fn [edge facts/ImportEdgeFact] Bool
+      (let [required ExplicitFactSourceV1? (source-for-namespace sources (facts/importedgefact-required edge))]
+        (and (some? required)
+          (if (nil? required) false
+            (string-member? selected-paths (bundle-path required))))))
+    (facts/syntaxfactbundle-imports (source-bundle source))))
+
+(defn lexical-ready-source
+  [sources (Vec ExplicitFactSourceV1)
+   selected-paths (Vec String)] ExplicitFactSourceV1?
+  (reduce
+    (fn
+      [best ExplicitFactSourceV1?
+       source ExplicitFactSourceV1] ExplicitFactSourceV1?
+      (if (or (string-member? selected-paths (bundle-path source))
+            (not (source-dependencies-selected? source sources selected-paths)))
+        best
+        (if (or (nil? best)
+              (and (some? best)
+                (< (compare (bundle-path source) (bundle-path best)) 0)))
+          source best)))
+    nil
+    sources))
+
+(defn topological-sources [sources (Vec ExplicitFactSourceV1)] (U (Vec ExplicitFactSourceV1) Nil)
+  (loop [ordered (Vec ExplicitFactSourceV1) []
+         selected-paths (Vec String) []]
+    (if (= (count ordered) (count sources))
+      ordered
+      (let [next-source ExplicitFactSourceV1? (lexical-ready-source sources selected-paths)]
+        (if (nil? next-source)
+          nil
+          (recur (conj ordered next-source)
+            (conj selected-paths (bundle-path next-source))))))))
+
+(defn encode-span [span facts/SourceSpan] String
+  (str (facts/sourcespan-path span) ":"
+    (facts/sourcespan-start-byte span) ":"
+    (facts/sourcespan-end-byte span) ":"
+    (facts/sourcespan-line span) ":"
+    (facts/sourcespan-column span)))
+
+(defn encode-value [value facts/FactValue] String
+  (match value
+    [(facts/FactNodeRef node-id) (str "n:" node-id)]
+    [(facts/FactText text) (str "t:" (count text) ":" text)]
+    [(facts/FactBool boolean) (if boolean "b:1" "b:0")]
+    [(facts/FactInt integer) (str "i:" integer)]
+    [(facts/FactNil) "z:"]))
+
+(defn encode-optional-span [span facts/SourceSpan?] String
+  (if (nil? span) "-" (encode-span span)))
+
+(defn encode-fact [row facts/CompilerFact] String
+  (str (facts/compilerfact-order row) "|"
+    (facts/compilerfact-relation row) "|"
+    (facts/compilerfact-subject row) "|"
+    (facts/compilerfact-slot row) "|"
+    (encode-value (facts/compilerfact-value row)) "|"
+    (encode-optional-span (facts/compilerfact-span row)) "\n"))
+
+(defn encode-import [edge facts/ImportEdgeFact] String
+  (str (facts/importedgefact-order edge) "|"
+    (facts/importedgefact-importer edge) "|"
+    (facts/importedgefact-required edge) "|"
+    (or (facts/importedgefact-alias edge) "") "|"
+    (str/join "," (facts/importedgefact-referred edge)) "|"
+    (encode-span (facts/importedgefact-span edge)) "\n"))
+
+(defn encode-rewrite [rewrite facts/MacroRewriteFact] String
+  (str (facts/macrorewritefact-order rewrite) "|"
+    (facts/macrorewritefact-macro-id rewrite) "|"
+    (facts/macrorewritefact-input-node rewrite) "|"
+    (facts/macrorewritefact-result-node rewrite) "|"
+    (encode-span (facts/macrorewritefact-span rewrite)) "\n"))
+
+(defn encode-module [bundle facts/SyntaxFactBundle] String
+  (str "module|" (facts/syntaxfactbundle-path bundle) "|"
+    (or (facts/syntaxfactbundle-namespace bundle) "") "|"
+    (facts/syntaxfactbundle-source-digest bundle) "|"
+    (facts/syntaxfactbundle-profile bundle) "\n"
+    (reduce (fn
+              [text String
+               row facts/CompilerFact] String
+              (str text (encode-fact row)))
+      "" (facts/syntaxfactbundle-facts bundle))
+    (reduce (fn
+              [text String
+               edge facts/ImportEdgeFact] String
+              (str text (encode-import edge)))
+      "" (facts/syntaxfactbundle-imports bundle))
+    (reduce (fn
+              [text String
+               rewrite facts/MacroRewriteFact] String
+              (str text (encode-rewrite rewrite)))
+      "" (facts/syntaxfactbundle-rewrites bundle))))
+
+(defn digest-text [text String] String
+  (str "sha256:" (sha256-bytes (utf8-encode text))))
+
+(defn closure-from
+  [entry-path String
+   ordered (Vec ExplicitFactSourceV1)] facts/SyntaxFactClosure
+  (let [modules (Vec facts/SyntaxFactBundle) (mapv source-bundle ordered)
+        encodings (Vec String) (mapv encode-module modules)]
+    (facts/->SyntaxFactClosure entry-path modules
+      (digest-text (str/join "" encodings))
+      (mapv digest-text encodings))))
+
+(defn parse-explicit-bundle [request ExplicitFactBundleV1] ParseExplicitBundleResultV1
+  (let [sources (Vec ExplicitFactSourceV1) (explicitfactbundlev1-sources request)
+        entry-path String (explicitfactbundlev1-entry-path request)
+        duplicate-source String? (duplicate-path sources)
+        duplicate-ns String? (duplicate-namespace sources)]
+    (cond
+      (= 0 (count sources))
+      (->ExplicitBundleRejectedV1
+        [(fact-error entry-path :parser/empty-bundle "explicit source bundle is empty")])
+
+      (some? duplicate-source)
+      (->ExplicitBundleRejectedV1
+        [(fact-error duplicate-source :parser/duplicate-source
+           "explicit source path appears more than once")])
+
+      (some? duplicate-ns)
+      (->ExplicitBundleRejectedV1
+        [(fact-error entry-path :parser/duplicate-namespace
+           (str "namespace appears more than once: " duplicate-ns))])
+
+      (nil? (source-for-path sources entry-path))
+      (->ExplicitBundleRejectedV1
+        [(fact-error entry-path :parser/entry-absent
+           "entry path is absent from explicit source bundle")])
+
+      (not (every? (fn [source ExplicitFactSourceV1] Bool
+                     (source-valid? source sources))
+             sources))
+      (->ExplicitBundleRejectedV1
+        [(fact-error entry-path :parser/invalid-source-facts
+           "source facts, imports, spans, authority, or profile are invalid")])
+
+      (not= (count sources) (count (reachable-paths sources entry-path)))
+      (->ExplicitBundleRejectedV1
+        [(fact-error entry-path :parser/unreachable-source
+           "explicit bundle contains a module unreachable from its entry")])
+
+      :else
+      (let [ordered (U (Vec ExplicitFactSourceV1) Nil) (topological-sources sources)]
+        (if (nil? ordered)
+          (->ExplicitBundleRejectedV1
+            [(fact-error entry-path :parser/import-cycle
+               "explicit import graph contains a cycle")])
+          (->ExplicitBundleParsedV1 (closure-from entry-path ordered)))))))
