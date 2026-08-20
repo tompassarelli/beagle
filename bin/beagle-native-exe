@@ -152,6 +152,8 @@ published_names=(
     native_shim.c
     native_unicode15_data.h
     UNICODE-LICENSE.txt
+    native_parallel.h
+    native_parallel.c
     entry.c
     native-exe.log
     native-exe.report.txt
@@ -200,6 +202,93 @@ command -v python3 >/dev/null 2>&1 || die "required command is unavailable: pyth
 command -v bb >/dev/null 2>&1 || die "required command is unavailable: bb"
 cc_path="$(command -v -- "$cc" 2>/dev/null || true)"
 [[ -n "$cc_path" && -x "$cc_path" ]] || die "C17 compiler is unavailable: $cc"
+
+# A completed native executable is an authenticated whole result.  Cold-
+# authority builds may reuse it; mutable per-unit development facts must reach
+# beagle-build-core instead of disappearing behind an older whole result.
+dev_fact_reuse=0
+case "${BEAGLE_DEV_FACT_REUSE:-0}" in
+    0) ;;
+    1)
+        if [[ "${BEAGLE_FACT_REUSE_FORBIDDEN:-0}" == 1 ]]; then
+            echo "beagle native-exe: dev-facts FORBIDDEN cold-authority" >&2
+        else
+            dev_fact_reuse=1
+        fi
+        ;;
+    *) die "BEAGLE_DEV_FACT_REUSE must be 0 or 1" ;;
+esac
+result_cache_enabled=1
+if [[ "$dev_fact_reuse" == 1 ]]; then
+    result_cache_enabled=0
+    echo "beagle native-exe: result cache BYPASS dev-fact-reuse" >&2
+fi
+result_cache_root="${BEAGLE_NATIVE_EXE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/beagle/native-executables}"
+if [[ "$result_cache_enabled" == 1 && "$result_cache_root" != /* ]]; then
+    die "BEAGLE_NATIVE_EXE_CACHE must be an absolute path"
+fi
+
+result_cache_entry_valid() {
+    local entry_dir="$1"
+    local expected_key="$2"
+    [[ -d "$entry_dir" && -x "$entry_dir/executable" ]] || return 1
+    [[ -f "$entry_dir/READY" && "$(cat "$entry_dir/READY")" == "$expected_key" ]] ||
+        return 1
+    [[ -f "$entry_dir/MANIFEST.sha256" ]] || return 1
+    (cd "$entry_dir" && sha256sum -c MANIFEST.sha256 >/dev/null 2>&1)
+}
+
+publish_cached_result() {
+    local entry_dir="$1"
+    local cached_entry_line name cached_executable
+    echo "beagle native-exe: result cache HIT $result_cache_key" >&2
+    for name in "${published_names[@]}"; do
+        [[ -f "$entry_dir/artifacts/$name" ]] || continue
+        cp -- "$entry_dir/artifacts/$name" "$artifacts/$name"
+    done
+    cached_entry_line="$(sed -n '1p' "$entry_dir/artifacts/native-exe.report.txt")"
+    [[ "$cached_entry_line" == "native-exe-entry PASS "* ]] ||
+        die "cached native executable has malformed entry report"
+    c17_line="native-exe-c17 PASS compiler=$cc_path output=$out"
+    printf '%s\n%s\n' "$cached_entry_line" "$c17_line" \
+        >"$artifacts/native-exe.report.txt"
+    cached_executable="$work/native-executable.cache-hit"
+    cp -- "$entry_dir/executable" "$cached_executable"
+    chmod +x "$cached_executable"
+    mv -f -- "$cached_executable" "$out"
+    success=1
+    cat "$artifacts/report.txt"
+    printf '%s\n%s\n' "$cached_entry_line" "$c17_line"
+}
+
+store_cached_result() {
+    local entry_dir="$1"
+    local stage name
+    mkdir -p "$result_cache_root"
+    stage="$(mktemp -d "$result_cache_root/.publish.$result_cache_key.XXXXXX")"
+    mkdir -p "$stage/artifacts"
+    cp -- "$linked" "$stage/executable"
+    chmod +x "$stage/executable"
+    for name in "${published_names[@]}"; do
+        [[ -f "$artifacts/$name" ]] || continue
+        cp -- "$artifacts/$name" "$stage/artifacts/$name"
+    done
+    (
+        cd "$stage"
+        sha256sum executable artifacts/* >MANIFEST.sha256
+    )
+    printf '%s\n' "$result_cache_key" >"$stage/READY"
+    (
+        exec {cache_lock_fd}>"$result_cache_root/.publish.lock"
+        flock "$cache_lock_fd"
+        if result_cache_entry_valid "$entry_dir" "$result_cache_key"; then
+            rm -rf "${stage:?}"
+        else
+            rm -rf "${entry_dir:?}"
+            mv -- "$stage" "$entry_dir"
+        fi
+    )
+}
 
 normalized_sources=()
 source_ids=()
@@ -252,6 +341,58 @@ set -e
 if [[ $bundle_rc -ne 0 ]]; then
     sed -n '1,200p' "$bundle_log" >&2
     die "could not inspect exports in coherent source bundle"
+fi
+
+# The bundle is namespace-ordered and contains each checked program beside its
+# public-interface digest.  A completed-result hit here skips source-fact
+# projection, Native Core lowering, materialization, and the C17 link, while a
+# changed implementation or interface necessarily changes the key.
+result_cache_key=""
+result_cache_entry=""
+if [[ "$result_cache_enabled" == 1 ]]; then
+    result_key_input="$work/native-exe-result.key"
+    compiler_context="$(
+        {
+            printf 'head\0'
+            git -C "$BEAGLE_DIR" rev-parse HEAD
+            printf 'tracked-diff\0'
+            git -C "$BEAGLE_DIR" --no-pager diff --binary --no-ext-diff HEAD --
+        } | sha256sum | awk '{print $1}'
+    )"
+    {
+        printf 'beagle-native-exe-result-v2\0'
+        printf 'compiler-context\0%s\0' "$compiler_context"
+        printf 'entry\0%s\0static\0%s\0' "$entry" "$static_link"
+        printf 'platform\0%s\0' "$(uname -srm)"
+        for tool in "$cc_path" "$(command -v python3)" "$(command -v bb)" "$RACKET"; do
+            tool="$(realpath "$tool")"
+            printf 'tool-digest\0'
+            sha256sum "$tool" | awk '{print $1}'
+        done
+        if [[ -n "${BEAGLE_NATIVE_COMPILER_BIN:-}" ]]; then
+            native_compiler="$(realpath "$BEAGLE_NATIVE_COMPILER_BIN")"
+            printf 'native-compiler-digest\0'
+            sha256sum "$native_compiler" | awk '{print $1}'
+        fi
+        printf 'module-roots\0'
+        for ((root_index = 1; root_index < ${#module_root_args[@]}; root_index += 2)); do
+            printf '%s\0' "${module_root_args[$root_index]%%=*}"
+        done
+        printf 'sources\0'
+        for source_index in "${!closure_sources[@]}"; do
+            printf '%s\0' "${closure_source_ids[$source_index]}"
+            sha256sum "${closure_sources[$source_index]}" | awk '{print $1}'
+        done
+        printf 'ordered-checked-ast-and-interfaces\0'
+        cat "$bundle_ast"
+    } >"$result_key_input"
+    result_cache_key="$(sha256sum "$result_key_input" | awk '{print $1}')"
+    result_cache_entry="$result_cache_root/$result_cache_key"
+    if result_cache_entry_valid "$result_cache_entry" "$result_cache_key"; then
+        publish_cached_result "$result_cache_entry"
+        exit 0
+    fi
+    echo "beagle native-exe: result cache MISS $result_cache_key" >&2
 fi
 
 python3 - "$bundle_ast" "$work" "${closure_source_ids[@]}" <<'PY'
@@ -661,6 +802,9 @@ if [[ "$entry_mode" == "argv" ]]; then
 fi
 c17_line="native-exe-c17 PASS compiler=$cc_path output=$out"
 printf '%s\n%s\n' "$entry_line" "$c17_line" >"$artifacts/native-exe.report.txt"
+if [[ "$result_cache_enabled" == 1 ]]; then
+    store_cached_result "$result_cache_entry"
+fi
 mv -f -- "$linked" "$out"
 success=1
 
