@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Compute the completed native executable cache identity from a checked bundle
+# and the native phases which can change its emitted result.
+set -euo pipefail
+
+usage() {
+    echo "usage: _beagle-native-exe-result-key --bundle FILE|- --entry NS/NAME --static 0|1 --platform PLATFORM --semantic FILE... --lowering FILE... --materializer FILE... --tool FILE... [--native-compiler FILE]" >&2
+}
+
+bundle=""
+entry=""
+static_link=""
+platform=""
+native_compiler=""
+semantic=()
+lowering=()
+materializer=()
+tools=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --bundle|--entry|--static|--platform|--semantic|--lowering|--materializer|--tool|--native-compiler)
+            [[ $# -ge 2 ]] || { usage; exit 2; }
+            case "$1" in
+                --bundle) bundle="$2" ;;
+                --entry) entry="$2" ;;
+                --static) static_link="$2" ;;
+                --platform) platform="$2" ;;
+                --semantic) semantic+=("$2") ;;
+                --lowering) lowering+=("$2") ;;
+                --materializer) materializer+=("$2") ;;
+                --tool) tools+=("$2") ;;
+                --native-compiler) native_compiler="$2" ;;
+            esac
+            shift 2
+            ;;
+        *) usage; exit 2 ;;
+    esac
+done
+
+[[ -n "$bundle" && -n "$entry" && ( "$static_link" == 0 || "$static_link" == 1 ) && -n "$platform" ]] || { usage; exit 2; }
+(( ${#semantic[@]} > 0 && ${#lowering[@]} > 0 && ${#materializer[@]} > 0 && ${#tools[@]} > 0 )) || { usage; exit 2; }
+
+temporary_bundle=""
+if [[ "$bundle" == "-" ]]; then
+    temporary_bundle="$(mktemp "${TMPDIR:-/tmp}/beagle-native-result-key.XXXXXX")"
+    trap 'rm -f -- "${temporary_bundle:?}"' EXIT
+    cat >"$temporary_bundle"
+    bundle="$temporary_bundle"
+fi
+[[ -f "$bundle" ]] || { echo "native result key: checked bundle not found: $bundle" >&2; exit 2; }
+
+# Verify one whole, namespace-ordered bundle before hashing its bytes.  The
+# bundle is then one atomic identity input; individual source paths and HEAD
+# state intentionally cannot leak into this result key.
+python3 - "$bundle" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    bundle = json.load(source)
+if not isinstance(bundle, dict) or bundle.get("schemaVersion") != 2:
+    raise SystemExit("native result key: checked bundle schema is invalid")
+modules = bundle.get("modules")
+if not isinstance(modules, list) or not modules:
+    raise SystemExit("native result key: checked bundle modules are invalid")
+sources = []
+for module in modules:
+    if not isinstance(module, dict):
+        raise SystemExit("native result key: checked bundle module is invalid")
+    source = module.get("source")
+    interface = module.get("interfaceSha256")
+    if not isinstance(source, str) or not source or not isinstance(interface, str) or not interface.startswith("sha256:") or "program" not in module:
+        raise SystemExit("native result key: checked bundle module is incomplete")
+    sources.append(source)
+if sources != sorted(sources) or len(sources) != len(set(sources)):
+    raise SystemExit("native result key: checked bundle sources are not strictly ordered")
+PY
+
+digest_file() {
+    local kind="$1" path="$2"
+    [[ -f "$path" ]] || { echo "native result key: $kind input is unavailable: $path" >&2; exit 2; }
+    printf '%s\0%s\0' "$kind" "$(sha256sum "$path" | awk '{print $1}')"
+}
+
+{
+    printf 'beagle-native-exe-result-v3\0entry\0%s\0static\0%s\0platform\0%s\0' "$entry" "$static_link" "$platform"
+    for path in "${semantic[@]}"; do digest_file semantic "$path"; done
+    for path in "${lowering[@]}"; do digest_file lowering "$path"; done
+    for path in "${materializer[@]}"; do digest_file materializer "$path"; done
+    for path in "${tools[@]}"; do digest_file tool "$path"; done
+    if [[ -n "$native_compiler" ]]; then digest_file native-compiler "$native_compiler"; fi
+    printf 'ordered-checked-ast-and-interfaces\0'
+    cat "$bundle"
+} | sha256sum | awk '{print $1}'

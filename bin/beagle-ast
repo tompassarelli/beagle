@@ -117,7 +117,21 @@ if [[ "$reuse" == 1 ]]; then
     while IFS= read -r -d '' physical && IFS= read -r -d '' logical; do
         printf '%s\0%s\0' "$logical" "$(sha256sum -- "$physical" | awk '{print $1}')" >>"$source_hashes"
     done <"$closure_fields"
-    compiler_context="sha256:$(sha256sum "$0" "$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt" "$BEAGLE_ROOT/beagle-lib/private/module-interface.rkt" "$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt" "$BEAGLE_ROOT/beagle-lib/private/module-source-root.rkt" | awk '{print $1}' | sha256sum | awk '{print $1}')"
+    # A checked bundle is controlled by the parser/checker closure, not by
+    # unrelated build scripts or documentation.  Keep this list at the
+    # parse/check normalization seam: it names the Racket modules whose source
+    # can change the checked AST or its public interface.
+    compiler_context="sha256:$(sha256sum "$0" \
+        "$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/ast.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/parse.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/check.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/module-interface.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/module-source-root.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/effect-normalization-v1.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/scope-resolve.rkt" \
+        "$BEAGLE_ROOT/beagle-lib/private/types.rkt" | awk '{print $1}' | sha256sum | awk '{print $1}')"
     key_input="$tmp_dir/key-input"
     printf 'checked-ast-bundle-v2\0%s\0' "$compiler_context" >"$key_input"
     for spec in "${module_root_specs[@]}"; do
