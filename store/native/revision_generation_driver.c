@@ -13,8 +13,8 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
-#ifndef BEAGLE_STORE_BASELINE_REVISION
-#error "BEAGLE_STORE_BASELINE_REVISION must name the pinned Beagle Store revision"
+#ifndef BEAGLE_STORE_CURRENT_REVISION
+#error "BEAGLE_STORE_CURRENT_REVISION must name the current Beagle checkout revision"
 #endif
 
 typedef native_m0_type_4 revision_set;
@@ -375,7 +375,7 @@ static int churn(bool managed, int64_t iterations, size_t payload_length) {
   metrics.peak_rss = peak_rss_bytes();
   metrics.steady_state_rss = resident_bytes();
 
-  printf("mode %s baseline-revision " BEAGLE_STORE_BASELINE_REVISION " "
+  printf("mode %s checkout-revision " BEAGLE_STORE_CURRENT_REVISION " "
          "store-epoch-count %" PRIu64 " bytes-allocated %" PRIu64
          " bytes-reclaimed %" PRIu64 " promotion-count %" PRIu64
          " promotion-bytes %" PRIu64 " peak-rss %" PRIu64

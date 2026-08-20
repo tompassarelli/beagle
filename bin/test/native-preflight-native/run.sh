@@ -85,7 +85,7 @@ selector_contract() {
   }
 
   for driver in \
-    native-core/tests/source_freeze_pinned_path.sh \
+    native-core/tests/source_freeze_checkout_path.sh \
     native-core/tests/source_freeze_native.sh \
     native-core/validation/slice-types-full/drive.sh \
     native-core/validation/slice-types-full/drive-native.sh \
@@ -171,7 +171,7 @@ run_source_freeze() {
   native_validation_run_phase source-freeze-path 300 "$receipt_root" \
     env BEAGLE_NATIVE_COMPILER_BIN="$native_bin" \
       BEAGLE_NATIVE_VALIDATION_RECEIPT_DIR="$receipt_root/driver" \
-      bash "$root/native-core/tests/source_freeze_pinned_path.sh"
+      bash "$root/native-core/tests/source_freeze_checkout_path.sh"
   verify_success_receipts "$receipt_root"
   echo "$gate: source-freeze native path END"
 }

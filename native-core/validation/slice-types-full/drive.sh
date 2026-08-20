@@ -8,7 +8,7 @@
 # Re-runnable and byte-stable: every input is regenerated from the selected
 # current Beagle Store source.
 #
-# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS, BEAGLE_STORE_CHECKOUT.
+# Env: NATIVE_SLICE_REPO, NATIVE_SLICE_ARTIFACTS.
 set -euo pipefail
 
 abi="${NATIVE_SLICE_ABI:-lp64}"

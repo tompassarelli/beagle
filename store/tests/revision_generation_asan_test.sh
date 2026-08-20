@@ -7,16 +7,15 @@ trap 'rm -rf "${work:?}"' EXIT
 
 source_file="$repo/store/src/store/revision_generation.bgl"
 driver="$repo/store/native/revision_generation_driver.c"
-store_ref_file="$repo/native-core/validation/store.ref"
 generated="$work/generated"
 mkdir -p "$generated"
 
-IFS= read -r store_ref <"$store_ref_file"
-[[ "$store_ref" =~ ^[0-9a-f]{40}$ ]] || {
-  echo "revision generation: invalid Store reference: $store_ref_file" >&2
+checkout_revision="$(git -C "$repo" rev-parse HEAD)"
+[[ "$checkout_revision" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "revision generation: invalid checkout revision" >&2
   exit 2
 }
-store_revision_define="-DBEAGLE_STORE_BASELINE_REVISION=\"$store_ref\""
+store_revision_define="-DBEAGLE_STORE_CURRENT_REVISION=\"$checkout_revision\""
 
 "$repo/bin/beagle" build --materializer c17 --out "$generated" \
   "$source_file" >"$work/build.log" 2>&1 || {
@@ -81,8 +80,8 @@ managed_promotions="$(field "$work/managed.txt" promotion-count)"
 managed_reclaimed="$(field "$work/managed.txt" bytes-reclaimed)"
 baseline_steady="$(field "$work/baseline.txt" steady-arena-bytes)"
 managed_steady="$(field "$work/managed.txt" steady-arena-bytes)"
-baseline_revision="$(field "$work/baseline.txt" baseline-revision)"
-managed_revision="$(field "$work/managed.txt" baseline-revision)"
+baseline_revision="$(field "$work/baseline.txt" checkout-revision)"
+managed_revision="$(field "$work/managed.txt" checkout-revision)"
 
 [[ "$baseline_epochs" == 1 ]]
 [[ "$managed_epochs" == "$iterations" ]]
@@ -90,8 +89,8 @@ managed_revision="$(field "$work/managed.txt" baseline-revision)"
 [[ "$managed_promotions" == "$iterations" ]]
 (( managed_reclaimed > 0 ))
 (( managed_steady < baseline_steady ))
-[[ "$baseline_revision" == "$store_ref" ]]
-[[ "$managed_revision" == "$store_ref" ]]
+[[ "$baseline_revision" == "$checkout_revision" ]]
+[[ "$managed_revision" == "$checkout_revision" ]]
 
 echo "revision generation sanitizer: ASan+UBSan clean"
 echo "revision generation churn: managed reclaimed $managed_reclaimed bytes; " \
