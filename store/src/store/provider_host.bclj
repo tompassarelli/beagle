@@ -5,7 +5,7 @@
 (ns store.provider-host (:require [store.types :as t]))
 
 
-(require store.rt :as rt)
+(require [store.rt :as rt])
 
 (declare-extern store.rt/native-request-to!
   (Fn [String Int t/RpcRequest] t/RpcResponse))

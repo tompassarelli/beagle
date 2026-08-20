@@ -6,19 +6,19 @@
   store here. Query results and write/edit/error envelopes remain open maps
   because callers discriminate them by key presence.")
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require store.store :as store)
+(require [store.store :as store])
 
-(require store.schema :as schema)
+(require [store.schema :as schema])
 
-(require store.rotation :as rotation)
+(require [store.rotation :as rotation])
 
-(require store.kernel :as k)
+(require [store.kernel :as k])
 
-(require store.query :as q)
+(require [store.query :as q])
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 ;; The op of a tool — constrains dispatch (cond/:else) and missing-req. `:tell`/`:retract`
 ;; are the single-triple KB writes (assert/retract of ANY predicate); `:query` backs

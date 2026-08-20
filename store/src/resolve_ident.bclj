@@ -20,13 +20,13 @@
 (ns resolve-ident)
 
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require store.store :as c)
+(require [store.store :as c])
 
-(require store.rotation :as rot)
+(require [store.rotation :as rot])
 
-(require store.txn :as txn)
+(require [store.txn :as txn])
 
 (def no-occurrences (Vec Any) [])
 

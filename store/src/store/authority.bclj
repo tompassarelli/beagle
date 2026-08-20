@@ -3,9 +3,9 @@
 (ns store.authority)
 
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
-(require store.authority-json :as authority-json)
+(require [store.authority-json :as authority-json])
 
 (declare-extern java.text.Normalizer/isNormalized (Fn [String Any] Bool))
 

@@ -4,9 +4,9 @@
   projection groups string-valued Triples by subject, emits canonical predicate
   order, and quotes literals so importing the result reproduces the Triple set.")
 
-(require store.types :as t)
-(require clojure.string :as str)
-(require store.rt)
+(require [store.types :as t])
+(require [clojure.string :as str])
+(require [store.rt])
 
 (declare-extern store.rt/edn-quote (Fn [String] String))
 

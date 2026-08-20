@@ -5,13 +5,13 @@
 (ns pull)
 
 
-(require store.store :as c)
+(require [store.store :as c])
 
-(require store.schema :as s)
+(require [store.schema :as s])
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 (def default-max-depth Int 5)
 

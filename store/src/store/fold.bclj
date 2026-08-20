@@ -2,8 +2,8 @@
 ;; Pure projection of ordered transaction records through the authoritative
 ;; recursive TermStore history.
 (ns store.fold)
-(require store.store :as store)
-(require store.types :as t)
+(require [store.store :as store])
+(require [store.types :as t])
 
 (defrecord Fold
   [space-id String

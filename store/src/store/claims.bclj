@@ -15,17 +15,17 @@
 ;; ============================================================================
 (ns store.claims)
 
-(require store.types :as t)
+(require [store.types :as t])
 
-(require store.schema :as s)
+(require [store.schema :as s])
 
-(require store.rotation :as rot)
+(require [store.rotation :as rot])
 
-(require store.datalog :as d)
+(require [store.datalog :as d])
 
-(require store.rt)
+(require [store.rt])
 
-(require clojure.string :as str)
+(require [clojure.string :as str])
 
 (declare-extern store.rt/parse-edn (Fn [String] Any))
 

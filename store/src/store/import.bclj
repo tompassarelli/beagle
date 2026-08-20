@@ -5,11 +5,11 @@
   body. Every line is a projected Triple; host IO lives behind store.rt
   externs.")
 
-(require store.types :as t)
-(require store.store :as store)
-(require store.fold :as fold)
-(require clojure.string :as str)
-(require store.rt)
+(require [store.types :as t])
+(require [store.store :as store])
+(require [store.fold :as fold])
+(require [clojure.string :as str])
+(require [store.rt])
 
 (declare-extern store.rt/slurp (Fn [String] String))
 (declare-extern store.rt/list-md (Fn [String] (Vec String)))
