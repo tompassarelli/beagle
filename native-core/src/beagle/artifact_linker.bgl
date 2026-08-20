@@ -1,0 +1,206 @@
+#lang beagle
+(ns beagle.artifact-linker)
+
+(defrecord ArtifactFileV1
+  [name String
+   payload String
+   content-id String
+   payload-byte-count Int
+   payload-sha256 String])
+
+(defrecord TargetArtifactV1
+  [target String
+   files (Vec ArtifactFileV1)
+   encoding String
+   digest String])
+
+(defrecord ArtifactLinkConfigV1
+  [artifact-directory String
+   executable-path String
+   c-compiler String
+   qbe-compiler String])
+
+(defunion ArtifactLinkResultV1
+  (ArtifactLinkedV1 [executable-path String])
+  (ArtifactLinkErrorV1
+    [code Int
+     detail String]))
+
+(defunion ArtifactWriteResult
+  (ArtifactFilesWritten
+    [c-sources (Vec String)
+     qbe-sources (Vec String)])
+  (ArtifactFileWriteError
+    [code Int
+     detail String]))
+
+(defunion ToolInputsResult
+  (ToolInputsReady [paths (Vec String)])
+  (ToolInputsError
+    [code Int
+     detail String]))
+
+(defn content-digest [text String] String
+  (str "sha256:" (sha256-bytes (utf8-encode text))))
+
+(defn string-suffix?
+  [value String
+   suffix String] Bool
+  (and (>= (count value) (count suffix))
+       (= suffix
+          (subs value (- (count value) (count suffix)) (count value)))))
+
+(defn safe-leaf-name? [name String] Bool
+  (and (> (count name) 0)
+       (not= name ".")
+       (not= name "..")
+       (loop [index Int 0]
+         (if (>= index (count name))
+           true
+           (let [character String (subs name index (+ index 1))]
+             (if (or (= character "/") (= character "\\"))
+               false
+               (recur (+ index 1))))))))
+
+(defn artifact-path
+  [config ArtifactLinkConfigV1
+   name String] String
+  (str (artifactlinkconfigv1-artifact-directory config) "/" name))
+
+(defn artifact-file-valid? [file ArtifactFileV1] Bool
+  (let [payload String (artifactfilev1-payload file)
+        digest String (content-digest payload)]
+    (and (safe-leaf-name? (artifactfilev1-name file))
+         (= (artifactfilev1-payload-byte-count file)
+            (count (utf8-encode payload)))
+         (= digest (artifactfilev1-content-id file))
+         (= digest (artifactfilev1-payload-sha256 file)))))
+
+(defn artifact-valid? [artifact TargetArtifactV1] Bool
+  (and (or (= (targetartifactv1-target artifact) "c17")
+           (= (targetartifactv1-target artifact) "qbe"))
+       (= (targetartifactv1-digest artifact)
+          (content-digest (targetartifactv1-encoding artifact)))))
+
+(defn write-artifact-files
+  [config ArtifactLinkConfigV1
+   files (Vec ArtifactFileV1)] ArtifactWriteResult
+  (loop [index Int 0
+         c-sources (Vec String) []
+         qbe-sources (Vec String) []]
+    (if (>= index (count files))
+      (->ArtifactFilesWritten c-sources qbe-sources)
+      (let [file ArtifactFileV1 (nth files index)
+            name String (artifactfilev1-name file)]
+        (if (not (artifact-file-valid? file))
+          (->ArtifactFileWriteError
+            65
+            (str "invalid artifact file metadata: " name))
+          (let [path String (artifact-path config name)]
+            (match (host.fs/write-text-atomic
+                     path (artifactfilev1-payload file))
+              [(host.fs/WriteTextAtomicError errno)
+               (->ArtifactFileWriteError
+                 errno (str "artifact write failed: " path))]
+              [(host.fs/WriteTextAtomicOk)
+               (recur
+                 (+ index 1)
+                 (if (string-suffix? name ".c")
+                   (conj c-sources path)
+                   c-sources)
+                 (if (string-suffix? name ".ssa")
+                   (conj qbe-sources path)
+                   qbe-sources))])))))))
+
+(defn assembly-path [source-path String] String
+  (str (subs source-path 0 (- (count source-path) 4)) ".s"))
+
+(defn qbe-assembly-inputs
+  [config ArtifactLinkConfigV1
+   qbe-sources (Vec String)] ToolInputsResult
+  (loop [index Int 0
+         assembly-paths (Vec String) []]
+    (if (>= index (count qbe-sources))
+      (->ToolInputsReady assembly-paths)
+      (let [source-path String (nth qbe-sources index)
+            output-path String (assembly-path source-path)
+            status Int (host.process/run-inherit
+              [(artifactlinkconfigv1-qbe-compiler config)
+               "-o"
+               output-path
+               source-path])]
+        (if (= status 0)
+          (recur (+ index 1) (conj assembly-paths output-path))
+          (->ToolInputsError
+            status (str "QBE compiler failed for " source-path)))))))
+
+(defn compiler-argv
+  [compiler String
+   sources (Vec String)
+   executable-path String] (Vec String)
+  (loop [index Int 0
+         argv (Vec String) [compiler]]
+    (if (>= index (count sources))
+      (conj (conj argv "-o") executable-path)
+      (recur (+ index 1) (conj argv (nth sources index))))))
+
+(defn verify-executable [path String] ArtifactLinkResultV1
+  (match (host.fs/path-kind path)
+    [(host.fs/PathKindError errno)
+     (->ArtifactLinkErrorV1 errno (str "linked output is absent: " path))]
+    [(host.fs/PathKindOk kind)
+     (if (= kind 1)
+       (->ArtifactLinkedV1 path)
+       (->ArtifactLinkErrorV1 74 (str "linked output is not a file: " path)))]))
+
+(defn run-c-compiler
+  [config ArtifactLinkConfigV1
+   sources (Vec String)] ArtifactLinkResultV1
+  (if (empty? sources)
+    (->ArtifactLinkErrorV1 65 "artifact contains no compiler input")
+    (let [status Int (host.process/run-inherit
+            (compiler-argv
+              (artifactlinkconfigv1-c-compiler config)
+              sources
+              (artifactlinkconfigv1-executable-path config)))]
+      (if (= status 0)
+        (verify-executable (artifactlinkconfigv1-executable-path config))
+        (->ArtifactLinkErrorV1 status "C compiler/linker failed")))))
+
+(defn link-written-artifact
+  [config ArtifactLinkConfigV1
+   target String
+   written ArtifactWriteResult] ArtifactLinkResultV1
+  (match written
+    [(ArtifactFileWriteError code detail)
+     (->ArtifactLinkErrorV1 code detail)]
+    [(ArtifactFilesWritten c-sources qbe-sources)
+     (if (= target "c17")
+       (run-c-compiler config c-sources)
+       (match (qbe-assembly-inputs config qbe-sources)
+         [(ToolInputsError code detail)
+          (->ArtifactLinkErrorV1 code detail)]
+         [(ToolInputsReady paths)
+          (run-c-compiler config paths)]))]))
+
+(defn write-and-link
+  [config ArtifactLinkConfigV1
+   artifact TargetArtifactV1] ArtifactLinkResultV1
+  (cond
+    (or (= (artifactlinkconfigv1-artifact-directory config) "")
+        (= (artifactlinkconfigv1-executable-path config) "")
+        (= (artifactlinkconfigv1-c-compiler config) ""))
+    (->ArtifactLinkErrorV1 64 "artifact link configuration is incomplete")
+
+    (and (= (targetartifactv1-target artifact) "qbe")
+         (= (artifactlinkconfigv1-qbe-compiler config) ""))
+    (->ArtifactLinkErrorV1 64 "QBE compiler path is required")
+
+    (not (artifact-valid? artifact))
+    (->ArtifactLinkErrorV1 65 "artifact target or digest is invalid")
+
+    :else
+    (link-written-artifact
+      config
+      (targetartifactv1-target artifact)
+      (write-artifact-files config (targetartifactv1-files artifact)))))
