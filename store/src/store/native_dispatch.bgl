@@ -740,6 +740,164 @@
   (or (= :rpc/assert operation)
       (or (= :rpc/retract operation) (= :rpc/batch operation))))
 
+;; Compiler facts are one durable, content-addressed fact per complete compiler
+;; context.  Payload stays a String because Store RPC Terms are UTF-8 text; the
+;; declared count and digest are verified against the exact encoded text before
+;; the ordinary Store commit boundary makes it visible to readers.
+(def compile-fact-subject-tag Keyword :store/compile-fact-key-v1)
+(def compile-fact-value-tag Keyword :store/compile-fact-value-v1)
+(def compile-fact-kind Keyword :store/compile-fact-v1)
+
+(defrecord CompileFact
+  [(stage String)
+   (result-key String)
+   (compiler-context String)
+   (profile String)
+   (unit-id String)
+   (content-id String)
+   (payload-bytes Int)
+   (payload-digest String)
+   (payload String)])
+
+(defn compile-fact-key [(fact CompileFact)] t/Triple
+  (rpc-record compile-fact-subject-tag
+              [(compilefact-stage fact)
+               (compilefact-result-key fact)
+               (compilefact-compiler-context fact)
+               (compilefact-profile fact)
+               (compilefact-unit-id fact)]))
+
+(defn compile-fact-value [(fact CompileFact)] t/Triple
+  (rpc-record compile-fact-value-tag
+              [(compilefact-content-id fact)
+               (compilefact-payload-bytes fact)
+               (compilefact-payload-digest fact)
+               (compilefact-payload fact)]))
+
+(defn compile-fact-proposition [(fact CompileFact)] t/Triple
+  (t/triple (compile-fact-key fact) compile-fact-kind
+            (compile-fact-value fact)))
+
+(defn nonempty-text? [(value Any)] Bool
+  (and (string? value) (pos? (count value))))
+
+(defn sha256-id? [(value Any)] Bool
+  (and (string? value)
+       (some? (re-matches #"sha256:[0-9a-f]{64}" value))))
+
+(defn compile-fact-from [(payload Any)] CompileFact?
+  (let [(fields ValuesResult) (read-record payload :rpc/compile-fact 9)]
+    (if (not (valuesresult-ok fields))
+      nil
+      (let [(values (Vec Any)) (valuesresult-values fields)
+            (stage Any) (nth values 0)
+            (result-key Any) (nth values 1)
+            (compiler-context Any) (nth values 2)
+            (profile Any) (nth values 3)
+            (unit-id Any) (nth values 4)
+            (content-id Any) (nth values 5)
+            (payload-bytes Any) (nth values 6)
+            (payload-digest Any) (nth values 7)
+            (value Any) (nth values 8)]
+        (if (and (nonempty-text? stage)
+                 (and (sha256-id? result-key)
+                      (and (sha256-id? compiler-context)
+                           (and (nonempty-text? profile)
+                                (and (nonempty-text? unit-id)
+                                     (and (sha256-id? content-id)
+                                          (and (integer? payload-bytes)
+                                               (and (sha256-id? payload-digest)
+                                                    (string? value)))))))))
+          (->CompileFact stage result-key compiler-context profile unit-id
+                         content-id payload-bytes payload-digest value)
+          nil)))))
+
+(defn compile-fact-valid? [(fact CompileFact)] Bool
+  (and (= (compilefact-payload-bytes fact)
+          (count (native-wire/utf8-encode (compilefact-payload fact))))
+       (= (compilefact-payload-digest fact)
+          (native-wire/canonical-term-sha256! (compilefact-payload fact)))))
+
+(defn same-compile-fact-key? [(left CompileFact) (right CompileFact)] Bool
+  (= (compile-fact-key left) (compile-fact-key right)))
+
+(defn compile-fact-entry [(proposition t/Triple)] CompileFact?
+  (if (= compile-fact-kind (t/triple-t2 proposition))
+    (let [(subject Any) (t/triple-t1 proposition)
+          (value Any) (t/triple-t3 proposition)
+          (subject-fields ValuesResult)
+          (read-record subject compile-fact-subject-tag 5)
+          (value-fields ValuesResult)
+          (read-record value compile-fact-value-tag 4)]
+      (if (and (valuesresult-ok subject-fields) (valuesresult-ok value-fields))
+        (let [(key-values (Vec Any)) (valuesresult-values subject-fields)
+              (value-values (Vec Any)) (valuesresult-values value-fields)
+              (candidate CompileFact)
+              (->CompileFact (nth key-values 0) (nth key-values 1)
+                             (nth key-values 2) (nth key-values 3)
+                             (nth key-values 4) (nth value-values 0)
+                             (nth value-values 1) (nth value-values 2)
+                             (nth value-values 3))]
+          (if (compile-fact-valid? candidate) candidate nil))
+        nil))
+    nil))
+
+(defn matching-compile-facts
+  [(root (Atom t/TermStore)) (key CompileFact)] (Vec CompileFact)
+  (reduce
+   (fn [(matches (Vec CompileFact)) (proposition t/Triple)] (Vec CompileFact)
+     (let [(entry CompileFact?) (compile-fact-entry proposition)]
+       (if (and entry (same-compile-fact-key? entry key))
+         (conj matches entry)
+         matches)))
+   []
+   (store/live-propositions root)))
+
+(defn compile-fact-query-response!
+  [(session schema/Session) (request t/RpcRequest) (served-version Int)]
+  t/RpcResponse
+  (let [(key CompileFact?) (compile-fact-from (t/rpc-request-payload-value request))]
+    (if (nil? key)
+      (error-response request served-version :rpc-invalid-payload false
+                      "compile fact key is malformed")
+      (let [(present CompileFact) key
+            (matches (Vec CompileFact))
+            (matching-compile-facts (schema/store-of session) present)]
+        (if (= 1 (count matches))
+          (response request served-version
+                    (rpc-record :rpc/compile-fact-result
+                                [(compile-fact-value (first matches))]))
+          (if (empty? matches)
+            (response request served-version :rpc/cold)
+            (error-response request served-version :rpc/compile-fact-conflict false
+                            "compile fact key has conflicting durable values")))))))
+
+(defn compile-fact-append-response!
+  [(session schema/Session)
+   (request t/RpcRequest)
+   (now-ms Int)
+   (served-version Int)] t/RpcResponse
+  (let [(fact CompileFact?) (compile-fact-from (t/rpc-request-payload-value request))]
+    (if (or (nil? fact) (and fact (not (compile-fact-valid? fact))))
+      (error-response request served-version :rpc-invalid-payload false
+                      "compile fact payload metadata does not match exact bytes")
+      (let [(present CompileFact) fact
+            (matches (Vec CompileFact))
+            (matching-compile-facts (schema/store-of session) present)
+            (proposition t/Triple) (compile-fact-proposition present)]
+        (cond
+          [(empty? matches)
+           (execute-actions!
+            session request
+            (->ActionPlan true [ (->Action 0 :rpc/assert proposition :rpc/subject-any)] nil nil)
+            (->FenceResult true false nil nil 0 nil nil)
+            now-ms served-version)]
+          [(= proposition (compile-fact-proposition (first matches)))
+           (response request served-version :rpc/retained)]
+          [:else
+           (error-response request served-version :rpc/compile-fact-conflict false
+                           "compile fact key already has different durable content")])))))
+
 (defn dispatch!
   [(session schema/Session) (request t/RpcRequest) (now-ms Int)] t/RpcResponse
   (let [root (schema/store-of session)
@@ -787,6 +945,10 @@
                   (query-ops/result-cache-stats session))))]
              [(= :rpc/scan operation)
               (scan-response! session request served-version)]
+             [(= :rpc/compile-fact-query operation)
+              (compile-fact-query-response! session request served-version)]
+             [(= :rpc/compile-fact-append operation)
+              (compile-fact-append-response! session request now-ms served-version)]
              [(or (= :rpc/assert operation) (= :rpc/retract operation))
               (write-response! session request now-ms served-version)]
              [(= :rpc/batch operation)
