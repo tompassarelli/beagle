@@ -945,10 +945,6 @@
                   (query-ops/result-cache-stats session))))]
              [(= :rpc/scan operation)
               (scan-response! session request served-version)]
-             [(= :rpc/compile-fact-query operation)
-              (compile-fact-query-response! session request served-version)]
-             [(= :rpc/compile-fact-append operation)
-              (compile-fact-append-response! session request now-ms served-version)]
              [(or (= :rpc/assert operation) (= :rpc/retract operation))
               (write-response! session request now-ms served-version)]
              [(= :rpc/batch operation)
