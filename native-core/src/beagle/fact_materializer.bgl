@@ -60,7 +60,10 @@
                (= slot (facts/compilerfact-slot row)))
         (match (facts/compilerfact-value row)
           [(facts/FactInt value) (conj values value)]
-          [(facts/FactText value) values]
+          [(facts/FactText value)
+           (if-let [parsed (parse-long value)]
+             (conj values parsed)
+             values)]
           [(facts/FactNodeRef node-id) values]
           [(facts/FactBool value) values]
           [(facts/FactNil) values])
