@@ -498,7 +498,7 @@
               nil nil nil))]
           [(= kind snapshot-record-operation-tag)
            (let [fields WireFields_snapshot-record_operation (read-snapshot-record-operation! decoder)
-                 action (wirefields_snapshot-record_operation-action fields)]
+                 action Int (wirefields_snapshot-record_operation-action fields)]
              (cond
                [(= action action-assert)
                 (->RecordResult
