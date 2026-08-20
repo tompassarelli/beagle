@@ -1,5 +1,6 @@
 #lang beagle
-(ns beagle.artifact-linker)
+(ns beagle.artifact-linker
+  (:require [native.json :as json]))
 
 (defrecord ArtifactFileV1
   [name String
@@ -40,8 +41,182 @@
     [code Int
      detail String]))
 
+(defunion ArtifactEnvelopeResultV1
+  (ArtifactEnvelopeReadyV1
+    [content-id String
+     payload String])
+  (ArtifactEnvelopeErrorV1 [detail String]))
+
+(defunion ArtifactEnvelopeDecodeResultV1
+  (ArtifactEnvelopeDecodedV1 [artifact TargetArtifactV1])
+  (ArtifactEnvelopeDecodeErrorV1 [detail String]))
+
+(defunion ArtifactFilesDecodeResultV1
+  (ArtifactFilesDecodedV1
+    [files (Vec ArtifactFileV1)
+     next-index Int])
+  (ArtifactFilesDecodeErrorV1 [detail String]))
+
 (defn content-digest [text String] String
   (str "sha256:" (sha256-bytes (utf8-encode text))))
+
+(defn artifact-file-envelope-events
+  [file ArtifactFileV1] (Vec json/JsonEvent)
+  [(json/->JsonArrayStart 0)
+   (json/->JsonString 0 (artifactfilev1-name file))
+   (json/->JsonString 0 (artifactfilev1-payload file))
+   (json/->JsonString 0 (artifactfilev1-content-id file))
+   (json/->JsonNumber 0 (str (artifactfilev1-payload-byte-count file)))
+   (json/->JsonString 0 (artifactfilev1-payload-sha256 file))
+   (json/->JsonArrayEnd 0)])
+
+(defn artifact-envelope-events
+  [artifact TargetArtifactV1] (Vec json/JsonEvent)
+  (let [prefix (Vec json/JsonEvent)
+        [(json/->JsonArrayStart 0)
+         (json/->JsonString 0 "beagle-target-artifact-v1")
+         (json/->JsonString 0 (targetartifactv1-target artifact))
+         (json/->JsonString 0 (targetartifactv1-encoding artifact))
+         (json/->JsonString 0 (targetartifactv1-digest artifact))
+         (json/->JsonArrayStart 0)]
+        with-files (Vec json/JsonEvent)
+        (reduce
+          (fn [events (Vec json/JsonEvent)
+               file ArtifactFileV1] (Vec json/JsonEvent)
+            (reduce conj events (artifact-file-envelope-events file)))
+          prefix
+          (targetartifactv1-files artifact))]
+    (conj (conj with-files (json/->JsonArrayEnd 0))
+      (json/->JsonArrayEnd 0))))
+
+(defn encode-artifact-envelope
+  [artifact TargetArtifactV1] ArtifactEnvelopeResultV1
+  (match (json/encode (artifact-envelope-events artifact))
+    [(json/JsonEncodeError event-index message)
+     (->ArtifactEnvelopeErrorV1 message)]
+    [(json/JsonEncoded payload)
+     (->ArtifactEnvelopeReadyV1 (content-digest payload) payload)]))
+
+(defn json-array-start? [event json/JsonEvent] Bool
+  (match event
+    [(json/JsonArrayStart offset) true]
+    [(json/JsonObjectStart offset) false]
+    [(json/JsonObjectEnd offset) false]
+    [(json/JsonArrayEnd offset) false]
+    [(json/JsonKey offset value) false]
+    [(json/JsonString offset value) false]
+    [(json/JsonNumber offset lexeme) false]
+    [(json/JsonBoolean offset value) false]
+    [(json/JsonNull offset) false]))
+
+(defn json-array-end? [event json/JsonEvent] Bool
+  (match event
+    [(json/JsonArrayStart offset) false]
+    [(json/JsonObjectStart offset) false]
+    [(json/JsonObjectEnd offset) false]
+    [(json/JsonArrayEnd offset) true]
+    [(json/JsonKey offset value) false]
+    [(json/JsonString offset value) false]
+    [(json/JsonNumber offset lexeme) false]
+    [(json/JsonBoolean offset value) false]
+    [(json/JsonNull offset) false]))
+
+(defn json-string-value [event json/JsonEvent] String?
+  (match event
+    [(json/JsonArrayStart offset) nil]
+    [(json/JsonObjectStart offset) nil]
+    [(json/JsonObjectEnd offset) nil]
+    [(json/JsonArrayEnd offset) nil]
+    [(json/JsonKey offset value) nil]
+    [(json/JsonString offset value) value]
+    [(json/JsonNumber offset lexeme) nil]
+    [(json/JsonBoolean offset value) nil]
+    [(json/JsonNull offset) nil]))
+
+(defn json-integer-value [event json/JsonEvent] Int?
+  (match event
+    [(json/JsonArrayStart offset) nil]
+    [(json/JsonObjectStart offset) nil]
+    [(json/JsonObjectEnd offset) nil]
+    [(json/JsonArrayEnd offset) nil]
+    [(json/JsonKey offset value) nil]
+    [(json/JsonString offset value) nil]
+    [(json/JsonNumber offset lexeme) (parse-long lexeme)]
+    [(json/JsonBoolean offset value) nil]
+    [(json/JsonNull offset) nil]))
+
+(defn decode-artifact-files
+  [events (Vec json/JsonEvent)
+   start Int] ArtifactFilesDecodeResultV1
+  (loop [index Int start files (Vec ArtifactFileV1) []]
+    (if (>= index (count events))
+      (->ArtifactFilesDecodeErrorV1 "artifact envelope has no files terminator")
+      (if (json-array-end? (nth events index))
+        (->ArtifactFilesDecodedV1 files (+ index 1))
+        (if (or (> (+ index 6) (- (count events) 1))
+                (not (json-array-start? (nth events index)))
+                (not (json-array-end? (nth events (+ index 6)))))
+          (->ArtifactFilesDecodeErrorV1 "artifact envelope contains a malformed file")
+          (let [name String? (json-string-value (nth events (+ index 1)))
+                payload String? (json-string-value (nth events (+ index 2)))
+                content-id String? (json-string-value (nth events (+ index 3)))
+                payload-byte-count Int? (json-integer-value (nth events (+ index 4)))
+                payload-sha256 String? (json-string-value (nth events (+ index 5)))]
+            (if (or (nil? name)
+                    (or (nil? payload)
+                        (or (nil? content-id)
+                            (or (nil? payload-byte-count)
+                                (nil? payload-sha256)))))
+              (->ArtifactFilesDecodeErrorV1
+                "artifact envelope file fields have invalid types")
+              (let [file ArtifactFileV1
+                    (->ArtifactFileV1 name payload content-id
+                      payload-byte-count payload-sha256)]
+                (if (not (artifact-file-valid? file))
+                  (->ArtifactFilesDecodeErrorV1
+                    "artifact envelope file metadata is not canonical")
+                  (recur (+ index 7) (conj files file)))))))))))
+
+(defn decode-artifact-envelope-events
+  [events (Vec json/JsonEvent)] ArtifactEnvelopeDecodeResultV1
+  (if (or (< (count events) 8)
+          (or (not (json-array-start? (nth events 0)))
+              (not (json-array-start? (nth events 5)))))
+    (->ArtifactEnvelopeDecodeErrorV1 "artifact envelope shape is invalid")
+    (let [version String? (json-string-value (nth events 1))
+          target String? (json-string-value (nth events 2))
+          encoding String? (json-string-value (nth events 3))
+          digest String? (json-string-value (nth events 4))]
+      (if (or (not= version "beagle-target-artifact-v1")
+              (or (nil? target) (or (nil? encoding) (nil? digest))))
+        (->ArtifactEnvelopeDecodeErrorV1
+          "artifact envelope header is invalid")
+        (match (decode-artifact-files events 6)
+          [(ArtifactFilesDecodeErrorV1 detail)
+           (->ArtifactEnvelopeDecodeErrorV1 detail)]
+          [(ArtifactFilesDecodedV1 files next-index)
+           (if (or (not= (+ next-index 1) (count events))
+                   (not (json-array-end? (nth events next-index))))
+             (->ArtifactEnvelopeDecodeErrorV1
+               "artifact envelope contains trailing events")
+             (let [artifact TargetArtifactV1
+                   (->TargetArtifactV1 target files encoding digest)]
+               (if (artifact-valid? artifact)
+                 (->ArtifactEnvelopeDecodedV1 artifact)
+                 (->ArtifactEnvelopeDecodeErrorV1
+                   "artifact envelope target or digest is invalid"))))])))))
+
+(defn decode-artifact-envelope
+  [claimed-content-id String
+   payload String] ArtifactEnvelopeDecodeResultV1
+  (if (not= claimed-content-id (content-digest payload))
+    (->ArtifactEnvelopeDecodeErrorV1
+      "artifact envelope content ID does not match its exact bytes")
+    (match (json/decode payload)
+      [(json/JsonDecodeError offset message)
+       (->ArtifactEnvelopeDecodeErrorV1 message)]
+      [(json/JsonDecoded events)
+       (decode-artifact-envelope-events events)])))
 
 (defn string-suffix?
   [value String
