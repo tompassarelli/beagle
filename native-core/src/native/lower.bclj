@@ -22333,12 +22333,30 @@
   [(definitions (Vec core/TypeDef))
    (resolutions (Vec FunctionResolutionV0))]
   (Vec core/TypeDef)
-  (loop [index Int 0 current (Vec core/TypeDef) definitions]
-    (if (>= index (count resolutions))
+  (loop [resolution-index Int 0
+         definition-index Int 0
+         current (Vec core/TypeDef) definitions
+         seen (Map String Bool)
+         (loop [index Int 0 found (Map String Bool) {}]
+           (if (>= index (count definitions))
+             found
+             (recur (+ index 1)
+               (assoc found
+                 (id-value (core/typedef-id (nth definitions index))) true))))]
+    (if (>= resolution-index (count resolutions))
       current
-      (recur (+ index 1)
-        (append-type-defs current
-          (functionresolutionv0-definitions (nth resolutions index)))))))
+      (let [additions (Vec core/TypeDef)
+            (functionresolutionv0-definitions
+              (nth resolutions resolution-index))]
+        (if (>= definition-index (count additions))
+          (recur (+ resolution-index 1) 0 current seen)
+          (let [definition core/TypeDef (nth additions definition-index)
+                key String (id-value (core/typedef-id definition))]
+            (if (= true (get seen key))
+              (recur resolution-index (+ definition-index 1) current seen)
+              (recur resolution-index (+ definition-index 1)
+                (conj current definition)
+                (assoc seen key true)))))))))
 
 (defn collect-functions
   [(resolutions (Vec FunctionResolutionV0))] (Vec TypedFunctionV0)
