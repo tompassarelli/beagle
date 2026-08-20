@@ -1,0 +1,192 @@
+#lang beagle
+(ns native.program-transaction-fixture
+  (:require [beagle.program-transaction :as transaction]
+            [store.types :as t]))
+
+(def profile String "program-profile-v1")
+(def base-root String "root-v7")
+(def next-root String "root-v8")
+(def module String "module-a")
+(def selected-binding String "binding-top-helper")
+(def shadowed-binding String "binding-local-helper")
+(def dependent String "binding-dependent")
+(def shadowed-dependent String "binding-shadowed")
+(def source String
+  "(def helper helper)\n(def shadow helper helper)\n\"helper\" ; helper\n")
+(def projected String
+  "(def renamed renamed)\n(def shadow helper helper)\n\"helper\" ; helper\n")
+
+(def selected-span t/Triple (t/triple 5 transaction/through-byte 11))
+(def shadowed-span t/Triple (t/triple 32 transaction/through-byte 38))
+(def selected-reference t/Triple
+  (t/triple module transaction/has-span
+    (t/triple 12 transaction/through-byte 18)))
+(def shadowed-reference t/Triple
+  (t/triple module transaction/has-span
+    (t/triple 39 transaction/through-byte 45)))
+
+(def projected-selected-span t/Triple
+  (t/triple 5 transaction/through-byte 12))
+(def projected-shadowed-span t/Triple
+  (t/triple 34 transaction/through-byte 40))
+(def projected-selected-reference t/Triple
+  (t/triple module transaction/has-span
+    (t/triple 13 transaction/through-byte 20)))
+(def projected-shadowed-reference t/Triple
+  (t/triple module transaction/has-span
+    (t/triple 41 transaction/through-byte 47)))
+
+(defn rel [relation Keyword] t/Triple
+  (t/triple relation transaction/member-of transaction/relationships))
+
+(def propositions (Vec t/Triple)
+  [(rel transaction/member-of)
+   (rel transaction/contains)
+   (rel transaction/represented-by)
+   (rel transaction/refers-to)
+   (rel transaction/depends-on)
+   (rel transaction/derived-from)
+   (rel transaction/admitted-by)
+   (rel transaction/has-span)
+   (rel transaction/through-byte)
+   (rel transaction/named)
+   (t/triple profile transaction/member-of transaction/profiles)
+   (t/triple base-root transaction/member-of transaction/program-roots)
+   (t/triple base-root transaction/admitted-by profile)
+   (t/triple base-root transaction/contains module)
+   (t/triple module transaction/represented-by source)
+   (t/triple module transaction/contains selected-binding)
+   (t/triple module transaction/contains shadowed-binding)
+   (t/triple module transaction/contains dependent)
+   (t/triple module transaction/contains shadowed-dependent)
+   (t/triple module transaction/contains selected-reference)
+   (t/triple module transaction/contains shadowed-reference)
+   (t/triple selected-binding transaction/member-of transaction/bindings)
+   (t/triple shadowed-binding transaction/member-of transaction/bindings)
+   (t/triple selected-binding transaction/named "helper")
+   (t/triple shadowed-binding transaction/named "helper")
+   (t/triple selected-binding transaction/has-span selected-span)
+   (t/triple shadowed-binding transaction/has-span shadowed-span)
+   (t/triple selected-reference transaction/member-of transaction/references)
+   (t/triple shadowed-reference transaction/member-of transaction/references)
+   (t/triple selected-reference transaction/refers-to selected-binding)
+   (t/triple shadowed-reference transaction/refers-to shadowed-binding)
+   (t/triple dependent transaction/depends-on selected-binding)
+   (t/triple shadowed-dependent transaction/depends-on shadowed-binding)])
+
+(defn admitted-overlay? [overlay (Vec t/Triple)] Bool
+  (and
+    (transaction/proposition-live?
+      overlay
+      (t/triple next-root transaction/member-of transaction/program-roots))
+    (transaction/proposition-live?
+      overlay
+      (t/triple next-root transaction/admitted-by profile))
+    (transaction/proposition-live?
+      overlay
+      (t/triple next-root transaction/derived-from base-root))
+    (transaction/proposition-live?
+      overlay
+      (t/triple selected-binding transaction/named "renamed"))
+    (not
+      (transaction/proposition-live?
+        overlay
+        (t/triple selected-binding transaction/named "helper")))
+    (transaction/proposition-live?
+      overlay
+      (t/triple shadowed-binding transaction/named "helper"))
+    (transaction/proposition-live?
+      overlay
+      (t/triple module transaction/represented-by projected))
+    (transaction/proposition-live?
+      overlay
+      (t/triple selected-binding transaction/has-span
+        projected-selected-span))
+    (transaction/proposition-live?
+      overlay
+      (t/triple shadowed-binding transaction/has-span
+        projected-shadowed-span))
+    (transaction/proposition-live?
+      overlay
+      (t/triple module transaction/contains projected-selected-reference))
+    (transaction/proposition-live?
+      overlay
+      (t/triple projected-selected-reference
+        transaction/refers-to selected-binding))
+    (transaction/proposition-live?
+      overlay
+      (t/triple module transaction/contains projected-shadowed-reference))
+    (transaction/proposition-live?
+      overlay
+      (t/triple projected-shadowed-reference
+        transaction/refers-to shadowed-binding))
+    (not
+      (transaction/proposition-live?
+        overlay
+        (t/triple module transaction/contains selected-reference)))
+    (not
+      (transaction/proposition-live?
+        overlay
+        (t/triple module transaction/contains shadowed-reference)))))
+
+(defn planned-case [] Bool
+  (let [source-anchors (Vec transaction/SourceAnchor)
+        [(transaction/->SourceAnchor
+           module selected-binding transaction/binding-anchor selected-span)
+         (transaction/->SourceAnchor
+           module shadowed-binding transaction/binding-anchor shadowed-span)
+         (transaction/->SourceAnchor
+           module selected-reference transaction/reference-anchor
+           selected-binding)
+         (transaction/->SourceAnchor
+           module shadowed-reference transaction/reference-anchor
+           shadowed-binding)]
+        selection transaction/RenameSelection
+        (transaction/->RenameSelection
+          selected-binding [module] [selected-reference] [dependent]
+          source-anchors)]
+    (match
+      (transaction/plan-rename
+        base-root next-root 7 profile propositions selection
+        "renamed" admitted-overlay?)
+    [(RenameRejected code detail) false]
+    [(RenamePlanned planned preview)
+     (let [deltas (Vec transaction/SourceDelta)
+           (transaction/renamepreview-source-deltas preview)
+           references (Vec Any)
+           (transaction/renamepreview-references preview)
+           invalidated (Vec Any)
+           (transaction/renamepreview-invalidated preview)]
+       (and
+         (= 1 (count deltas))
+         (= projected
+           (transaction/sourcedelta-after (first deltas)))
+         (= [selected-reference] references)
+         (= [dependent] invalidated)
+         (= 24
+           (count
+             (transaction/programtransaction-operations planned)))
+         (match (transaction/prepare-commit planned 8)
+           [(CommitConflict expected observed)
+            (and (= 7 expected) (= 8 observed))]
+           [(CommitReady expected operations) false])
+         (match (transaction/prepare-commit planned 7)
+           [(CommitConflict expected observed) false]
+           [(CommitReady expected operations)
+            (= 24 (count operations))])
+         (match
+           (transaction/commit-receipt
+             planned (t/transaction-coordinate "program-space" 8))
+           [(CommitReceiptRejected code detail) false]
+           [(CommitReceiptAccepted receipt)
+            (and
+              (= next-root
+                (transaction/programcommitreceipt-root receipt))
+              (= 8
+                (transaction/programcommitreceipt-served-version receipt))
+              (= 24
+                (count
+                  (transaction/programcommitreceipt-occurrences receipt))))]))))])))
+
+(defn main [] Int
+  (if (planned-case) 0 1))
