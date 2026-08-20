@@ -2,4 +2,4 @@
 (ns test.nix.simple-pkg)
 
 (nix/module [pkgs]
-  {:environment.systemPackages [pkgs.framework-tool]})
+  {:environment.systemPackages [pkgs.hello]})

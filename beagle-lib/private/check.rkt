@@ -824,7 +824,7 @@
      (hasheq 'expected "compile-time String pattern"
              'actual (format "~v" pattern))))
   (define captures '())
-  ;; frame = (list capture-start-index open-offset)
+  ;; stack entry = (list capture-start-index open-offset)
   (define groups '())
   (define n (string-length pattern))
   (let loop ([i 0])
@@ -880,10 +880,10 @@
           (when (null? groups)
             (regex-contract-error node "unmatched regex closing parenthesis"
                                   (hasheq 'pattern pattern 'offset i)))
-          (define frame (car groups))
+          (define entry (car groups))
           (set! groups (cdr groups))
           (when (zero-min-quantifier? pattern (add1 i))
-            (set! captures (mark-captures-optional captures (car frame))))
+            (set! captures (mark-captures-optional captures (car entry))))
           (loop (add1 i))]
          [(char=? ch #\|)
           (set! captures (map (lambda (_) #t) captures))

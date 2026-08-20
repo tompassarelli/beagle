@@ -31,7 +31,7 @@
 (test-case "nix-simple-pkg round-trip"
   (define out (compile-bnix-file (build-path fixtures-dir "nix-simple-pkg.bnix")))
   (check-true (string-contains? out "{ pkgs, ... }:"))
-  (check-true (string-contains? out "environment.systemPackages = [ pkgs.framework-tool ];")))
+  (check-true (string-contains? out "environment.systemPackages = [ pkgs.hello ];")))
 
 ;; --- options module ----------------------------------------------------------
 

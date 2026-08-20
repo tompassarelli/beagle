@@ -2,14 +2,14 @@
 (ns test.nix.kmod)
 
 (nix/module [config lib]
-  {:options.hardware.framework.enableKmod
+  {:options.hardware.v4l2loopback.enableKmod
      (merge
-       (lib/mkEnableOption "the Framework kernel module")
+       (lib/mkEnableOption "the v4l2loopback kernel module")
        {:default (lib/versionAtLeast config.boot.kernelPackages.kernel.version "6.10")
         :defaultText "enabled by default if kernel >= 6.10"})
    :config
-     (lib/mkIf config.hardware.framework.enableKmod
+     (lib/mkIf config.hardware.v4l2loopback.enableKmod
        {:assertions [{:assertion (lib/versionAtLeast config.boot.kernelPackages.kernel.version "6.10")
                       :message "Requires Linux 6.10 or above"}]
-        :boot {:extraModulePackages (nix/with config.boot.kernelPackages [framework-laptop-kmod])
-               :kernelModules ["cros_ec" "cros_ec_lpcs"]}})})
+        :boot {:extraModulePackages (nix/with config.boot.kernelPackages [v4l2loopback])
+               :kernelModules ["v4l2loopback"]}})})

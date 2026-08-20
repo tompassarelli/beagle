@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; NUL-framed closure projection for shell-owned native drivers.
+;; NUL-delimited closure projection for shell-owned native drivers.
 
 (require racket/list
          racket/string

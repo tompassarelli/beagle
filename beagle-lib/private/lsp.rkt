@@ -2,7 +2,7 @@
 
 ;; beagle-lsp: Language Server Protocol implementation.
 ;;
-;; Speaks JSON-RPC 2.0 over stdin/stdout with Content-Length framing.
+;; Speaks JSON-RPC 2.0 messages over stdin/stdout with Content-Length headers.
 ;; Uses the daemon's AST cache + query engine for fast responses.
 ;;
 ;; Capabilities:

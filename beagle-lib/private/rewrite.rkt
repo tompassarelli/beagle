@@ -1,10 +1,10 @@
 #lang racket/base
 
-;; AST-rewrite framework for beagle codemods.
+;; AST-rewrite machinery for beagle codemods.
 ;;
 ;; Operates at the s-expression level (post-read, pre-parse). Each rewrite
 ;; rule is a pattern→replacement pair (Racket `match` semantics). The
-;; framework walks an expression tree bottom-up, applying the rule's
+;; machinery walks an expression tree bottom-up, applying the rule's
 ;; transform at each pair node.
 ;;
 ;; Rules are defined in beagle-lib/private/rewrites/*.rkt and registered
@@ -12,7 +12,7 @@
 ;; applies the requested rule to file(s) or directory, and either prints
 ;; the diff (default) or writes changes back (--apply).
 ;;
-;; Design decision (Racket-side, not Beagle-native): the framework needs
+;; Design decision (Racket-side, not Beagle-native): the machinery needs
 ;; to read beagle source via the beagle reader and walk Racket sexprs.
 ;; Bridging Racket-side sexpr operations to Beagle would add complexity
 ;; without proportionate value at this stage. Revisit when Cyclone

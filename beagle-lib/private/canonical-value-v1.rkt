@@ -43,12 +43,12 @@
     (write-byte (if (zero? rest) low (bitwise-ior low #x80)) out)
     (unless (zero? rest) (loop rest))))
 
-(define (write-framed bytes out)
+(define (write-sized-payload bytes out)
   (write-uvarint (bytes-length bytes) out)
   (write-bytes bytes out))
 
 (define (write-text text out)
-  (write-framed
+  (write-sized-payload
    (string->bytes/utf-8 (string-normalize-nfc text))
    out))
 
@@ -78,7 +78,7 @@
   (write-byte tag out)
   (write-uvarint (length values) out)
   (for ([value (in-list values)])
-    (write-framed (inner-bytes value active) out)))
+    (write-sized-payload (inner-bytes value active) out)))
 
 (define (sorted-unique who label entries)
   (define sorted (sort entries bytes<? #:key car))
@@ -105,8 +105,8 @@
      (write-byte 12 out)
      (write-uvarint (length sorted) out)
      (for ([entry (in-list sorted)])
-       (write-framed (car entry) out)
-       (write-framed (cddr entry) out)))))
+       (write-sized-payload (car entry) out)
+       (write-sized-payload (cddr entry) out)))))
 
 (define (write-set value out active)
   (with-active
@@ -120,7 +120,7 @@
      (write-byte 13 out)
      (write-uvarint (length sorted) out)
      (for ([entry (in-list sorted)])
-       (write-framed (car entry) out)))))
+       (write-sized-payload (car entry) out)))))
 
 (define (field-vector who label fields)
   (unless (and (vector? fields)
@@ -178,12 +178,16 @@
      (write-uvarint (vector-length fields) out)
      (for ([field (in-vector fields)])
        (write-text (field-name field) out)
-       (write-framed (inner-bytes (canonical-field-v1-value field) active) out))
+       (write-sized-payload
+        (inner-bytes (canonical-field-v1-value field) active)
+        out))
      ;; Unknown fields are preserved in a distinct, name-sorted partition.
      (write-uvarint (length ordered-unknown) out)
      (for ([field (in-list ordered-unknown)])
        (write-text (field-name field) out)
-       (write-framed (inner-bytes (canonical-field-v1-value field) active) out)))))
+       (write-sized-payload
+        (inner-bytes (canonical-field-v1-value field) active)
+        out)))))
 
 (define (write-union value out active)
   (with-active
@@ -207,7 +211,7 @@
       out)
      (write-uvarint (vector-length payloads) out)
      (for ([payload (in-vector payloads)])
-       (write-framed (inner-bytes payload active) out)))))
+       (write-sized-payload (inner-bytes payload active) out)))))
 
 (define (write-inner value out active)
   (cond
@@ -219,8 +223,8 @@
      (write-text (number->string value 10) out)]
     [(and (rational? value) (exact? value))
      (write-byte 4 out)
-     (write-framed (inner-bytes (numerator value) active) out)
-     (write-framed (inner-bytes (denominator value) active) out)]
+     (write-sized-payload (inner-bytes (numerator value) active) out)
+     (write-sized-payload (inner-bytes (denominator value) active) out)]
     [(and (real? value) (inexact? value))
      (write-byte 5 out)
      (write-bytes
@@ -240,7 +244,7 @@
      (write-uvarint (char->integer value) out)]
     [(bytes? value)
      (write-byte 7 out)
-     (write-framed value out)]
+     (write-sized-payload value out)]
     [(symbol? value)
      (write-byte 8 out)
      (write-text (symbol->string value) out)]
@@ -256,8 +260,8 @@
       'canonical-value-v1->bytes value active
       (lambda ()
         (write-byte 11 out)
-        (write-framed (inner-bytes (car value) active) out)
-        (write-framed (inner-bytes (cdr value) active) out)))]
+        (write-sized-payload (inner-bytes (car value) active) out)
+        (write-sized-payload (inner-bytes (cdr value) active) out)))]
     [(vector? value)
      (with-active
       'canonical-value-v1->bytes value active
@@ -275,7 +279,7 @@
                          "tag"
                          (canonical-tagged-v1-tag value))
          out)
-        (write-framed
+        (write-sized-payload
          (inner-bytes (canonical-tagged-v1-value value) active)
          out)))]
     [(identity-reference-v1? value)

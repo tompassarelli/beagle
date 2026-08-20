@@ -64,7 +64,7 @@
 ;; free-dotted-name) per @019f221f-8f10, and nix-interp-ms now let-binds its
 ;; `vendor`, so it parses standalone and is no longer skipped.)
 (define EVAL-SKIP
-  '("nix-kmod.bnix"           ; `with config.boot.kernelPackages; [ framework-laptop-kmod ]`
+  '("nix-kmod.bnix"           ; `with config.boot.kernelPackages; [ v4l2loopback ]`
     "nix-options.bnix"        ; uses `pkgs.runtimeShell`, expects ambient pkgs
     ))
 

@@ -3229,7 +3229,7 @@
   (= (count (check-program! prog)) 0)))
   (expect! "E021: builtins global root exempt" (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [] "body" {"node" "ref" "name" "builtins.length"}}]}]
   (= (count (check-program! prog)) 0)))
-  (expect! "E021: nix/with body exempts free root" (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [{"name" "config" "default" false}] "body" {"node" "nix-with" "ns-expr" {"node" "ref" "name" "config.boot"} "body" {"node" "ref" "name" "framework.foo"}}}]}]
+  (expect! "E021: nix/with body exempts free root" (let [prog {"namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [{"name" "config" "default" false}] "body" {"node" "nix-with" "ns-expr" {"node" "ref" "name" "config.boot"} "body" {"node" "ref" "name" "kernelPackages.kernel"}}}]}]
   (= (count (check-program! prog)) 0)))
   (expect! "E021: not fired on clj target" (let [prog {"namespace" "t" "target" "clj" "externs" [] "requires" [] "forms" [{"node" "def" "name" "x" "ann" ANY "dynamic" false "value" {"node" "ref" "name" "vendor.id"}}]}]
   (= (count (check-program! prog)) 0)))

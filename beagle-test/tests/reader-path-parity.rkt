@@ -47,7 +47,7 @@
      ;; forms = ((define-target clj) <user-form>)
      (unless (and (= (length forms) 2)
                   (equal? (car forms) '(define-target clj)))
-       (error 'parse-path "unexpected framing: ~v" forms))
+       (error 'parse-path "unexpected reader output: ~v" forms))
      (cadr forms))
    (lambda () (delete-file tmp))))
 

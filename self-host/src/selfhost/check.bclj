@@ -7228,7 +7228,7 @@
                           "formals" [{"name" "config" "default" false}]
                           "body" {"node" "nix-with"
                                   "ns-expr" {"node" "ref" "name" "config.boot"}
-                                  "body" {"node" "ref" "name" "framework.foo"}}}]}]
+                                  "body" {"node" "ref" "name" "kernelPackages.kernel"}}}]}]
       (= (count (check-program! prog)) 0)))
   (expect! "E021: not fired on clj target"
     (let [prog {"namespace" "t" "target" "clj" "externs" [] "requires" []

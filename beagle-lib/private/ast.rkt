@@ -908,7 +908,7 @@
 (define (store-src! node loc)
   ;; Only the FIRST write for a node wins. Parse-time rewrites
   ;; (when/->/-if-let/...) call (parse-expr synthesized-syntax) from
-  ;; inside the surface form's parse-expr frame; the inner parse-expr
+  ;; inside the surface form's parse-expr activation; the inner parse-expr
   ;; populates the table with the synthesized form's srcloc (which is
   ;; the operative blame position), and the outer parse-expr's
   ;; store-src! must NOT clobber it with the surface sugar's loc.

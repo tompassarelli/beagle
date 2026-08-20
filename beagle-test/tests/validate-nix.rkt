@@ -329,7 +329,7 @@ BNIX
 (ns freeform)
 (def config-value
   {:services.pipewire.wireplumber.extraConfig
-    {"51-framework13-mic"
+    {"50-laptop-mic"
       {"monitor.alsa.rules"
         [{:matches [{"device.name" "alsa_card.pci-0000_c1_00.6"}]
           :actions

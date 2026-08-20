@@ -2407,8 +2407,8 @@
     (= (emit-interp-string [{"type" "text" "value" "hi "} {"type" "expr" "value" {"node" "ref" "name" "x"}}] 0)
       "\"hi ${x}\""))
   (expect! "nix-with prefix-only vec collapses"
-    (= (emit-expr! {"node" "nix-with" "ns-expr" {"node" "ref" "name" "config.boot.kernelPackages"} "body" {"node" "vec" "items" [{"node" "ref" "name" "framework-laptop-kmod"}]}} 0)
-      "with config.boot.kernelPackages; [ framework-laptop-kmod ]"))
+    (= (emit-expr! {"node" "nix-with" "ns-expr" {"node" "ref" "name" "config.boot.kernelPackages"} "body" {"node" "vec" "items" [{"node" "ref" "name" "v4l2loopback"}]}} 0)
+      "with config.boot.kernelPackages; [ v4l2loopback ]"))
   (expect! "Map-shaped typed param with defaults unwraps to native attrset pattern"
     (= (nix-param-pattern
          {"type" "param"

@@ -304,7 +304,7 @@ function hamtHash(x) {
 }
 
 // A beagle map/record rep, as opposed to a DOM node / class instance / other host
-// object. Cross-realm plain objects (iframe, vm context) read as host here.
+// object. Cross-realm plain objects (embedded document, vm context) read as host here.
 function isPlainObject(x) {
   const p = Object.getPrototypeOf(x);
   return p === Object.prototype || p === null;

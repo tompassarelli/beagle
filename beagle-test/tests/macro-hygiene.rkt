@@ -302,7 +302,7 @@
   ;; sure the truncation pattern is visible — confirms we get provenance,
   ;; not just a bare "too deep".
   (check-true (regexp-match? #rx"in macro: loop-forever \\(depth 0\\)" err-msg)
-              "depth-0 frame must be in the chain (root-cause anchor)")
+              "depth-0 expansion record must be in the chain (root-cause anchor)")
   (check-true (regexp-match? #rx"\\.\\.\\. \\([0-9]+ more\\)" err-msg)
               "truncation marker must appear (proves chain is real)"))
 

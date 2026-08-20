@@ -162,7 +162,7 @@
                (unless (system* (find-executable-path "git") "rev-parse" "HEAD")
                  (error 'gate-fact-maintainer-test "git rev-parse failed")))))))
       (copy-fixtures raw)
-      (define store (path->string (build-path scratch "facts.framlog")))
+      (define store (path->string (build-path scratch "facts.log")))
       (define prepared
         (shadow-prepare store store base repository "test-policy"
                         "test-verifier" raw))
@@ -206,7 +206,7 @@
                (system* (find-executable-path "git") "rev-parse" "HEAD"))))))
       (copy-fixtures raw)
       (delete-file (build-path raw "tier-units.rktd"))
-      (define store (path->string (build-path scratch "facts.framlog")))
+      (define store (path->string (build-path scratch "facts.log")))
       (shadow-prepare store store base repository "test-policy"
                       "test-verifier" raw)
       (define finished

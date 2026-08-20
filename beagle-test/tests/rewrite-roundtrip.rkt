@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; #32 — the codemod framework reads + writes the FULL surface.
+;; #32 — the codemod machinery reads + writes the FULL surface.
 ;;
 ;; rewrite.rkt used to carry its own subset readtable (only {…} #{…} #"re") paired
 ;; with a subset writer. Modern beagle source corrupted on read (#?/#(/^/~), so a
