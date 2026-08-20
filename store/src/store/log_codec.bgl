@@ -280,7 +280,7 @@
 (defn decode-record-payload! [(payload ByteSource)] RecordDecodeResult
   (decode-record-payload-range! payload 0 (count payload)))
 
-(defn start-store-log-stream [(configured-space-id String)] BootStream
+(defn start-transaction-log-stream [(configured-space-id String)] BootStream
   (->BootStream configured-space-id nil 0 [] nil))
 
 (defn failed-boot-stream [(stream BootStream) (message String)] BootStream
@@ -433,7 +433,7 @@
                      false :invalid-transaction-record
                      "Store transaction log contains an unknown operation action")]))))])))))
 
-(defn consume-store-log-records!
+(defn consume-transaction-log-records!
   [(stream BootStream) (bytes ByteSource) (position Int)] BootStream
   ;; replay is a loop, not a self-call: one C stack entry per Store transaction
   ;; log record overflows the wasm stack a few hundred commits in.
@@ -479,7 +479,7 @@
                         (or (term-store/transactionreplayresult-message replayed)
                             "Store transaction log transaction sequence does not advance"))))]))]))]))))
 
-(defn consume-store-log-header!
+(defn consume-transaction-log-header!
   [(stream BootStream) (bytes ByteSource)] BootStream
   (let [minimum-header-bytes (+ (count store-log-magic) 8)]
     (cond
@@ -537,7 +537,7 @@
                  (failed-boot-stream
                   stream "Store transaction log belongs to a different SpaceId")]
                 [:else
-                 (consume-store-log-records!
+                 (consume-transaction-log-records!
                   (->BootStream
                    (bootstream-configured-space-id stream)
                    (term-store/open-fold!
