@@ -150,6 +150,7 @@ jobs:
         run: |
           bash store/tests/bun_release_artifact_test.sh
           bun test store/tests/bun_package_types_test.mjs
+          bash store/tests/store_capability_examples_smoke.sh
 
       - name: Prove the Cloudflare release envelopes
         run: |

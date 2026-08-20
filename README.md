@@ -2,7 +2,29 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
 
-**Beagle is an independent typed Lisp built from a Clojure-derived core.**
+**A durable programming system unifying code, state, compilation, and
+execution through semantic computation.**
+
+Semantic computation means the same typed, revisioned facts span authoring,
+storage, compilation, and runtime instead of being translated between
+independent stacks. Beagle has four public surfaces backed by one
+implementation and one semantic model:
+
+- **Beagle language** — the authoring interface: an independent typed Lisp
+  built from a Clojure-derived core.
+- **Compiler and runtime** — semantic facts, incremental compilation, target
+  materialization, and hot execution.
+- **Beagle Store** — durable transactions, history, query and indexing, and
+  cold persistence.
+- **Capability interfaces** — the Store kernel projected as an embedded native
+  or Wasm library, a Store RPC service, or a cache-shaped policy for brownfield
+  systems.
+
+These are not separate products. The capability interfaces narrow what a
+consumer adopts without creating another implementation or another set of
+transaction, identity, query, or history semantics. See the
+[system architecture](docs/architecture.md#one-semantic-substrate) and the
+[storage-only capability guide](store/docs/isolation-and-deployment.md#capability-profiles).
 
 Derived: Clojure's vocabulary and structural authoring model — its form
 library, s-expressions, data literals, `defn`/`let`/destructuring/threading
@@ -87,7 +109,7 @@ artifacts below are the authoritative answers.
 | Distilled lineage and thesis | [`docs/INFLUENCES.md`](docs/INFLUENCES.md) |
 | Stable product boundaries | [`docs/design-rationale.md`](docs/design-rationale.md) |
 | Historical dogfood findings | [`docs/dogfood-codegen-findings.md`](docs/dogfood-codegen-findings.md) |
-| Beagle Store's in-repo Native Core consumer | [`store/README.md`](store/README.md) |
+| Beagle Store and storage-only capability examples | [`store/README.md`](store/README.md) |
 | Surface policy and contribution anchor | [`CLAUDE.md`](CLAUDE.md) |
 
 The external consumer roster is intentionally not maintained here because its

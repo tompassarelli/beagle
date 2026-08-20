@@ -81,6 +81,42 @@ gates the operation and the boot route it feeds.
 
 The official zero-dependency [`clients/bun/store-rpc.mjs`](../clients/bun/store-rpc.mjs) client requires Bun 1.3.13 or newer, connects directly, and exposes all thirteen data operations with recursive Terms, batches, versions, snapshots, paging, replay, and leases.
 
+## Capability profiles
+
+Store can fill a storage-shaped responsibility inside a brownfield system
+without becoming a separate product. A profile narrows the same kernel; it
+does not acquire independent semantics:
+
+- **Embedded native or Wasm.** Link `native/store.h` or instantiate
+  `lib/libstore.wasm`, supply storage and clock capabilities, and exchange one
+  exact Store RPC packet per typed entry point. There is no listener and no
+  compiler frontend in the runtime artifact.
+- **Private sidecar or service.** Run the native server beside the application
+  and use the official Bun client over Store RPC. TLS, authentication, tenant
+  selection, and public policy remain at the application edge.
+- **Cache-shaped policy.** Store live values, expiry, and materialization
+  provenance as ordinary propositions; reject expired values at read time and
+  retract them on replacement or invalidation. The transaction log retains the
+  history, and the snapshot remains derived restart acceleration. This adds no
+  cache-specific operation, storage engine, or identity rule.
+
+[`../examples/embedded-c.c`](../examples/embedded-c.c),
+[`../examples/rpc-sidecar.mjs`](../examples/rpc-sidecar.mjs), and
+[`../examples/cache-profile.mjs`](../examples/cache-profile.mjs) are the
+minimal runnable examples. Published native/Wasm artifacts and the Bun client
+package are sufficient; rebuilding them is the only path that needs Beagle's
+compiler toolchain.
+
+The boundary is closed at the lowest deterministic layers:
+
+| Claim | Authority and gate |
+|---|---|
+| Native embedding ABI and export set | `native/store.h`; `tests/store_native_generated_adapter_smoke.sh` |
+| Wasm imports and exports | `native/wasm-embed.seams`; `tests/store_wasm_embed_smoke.sh` |
+| Store RPC data operations stay closed | `tests/native_rpc_boundary_ratchet_test.clj` |
+| Bun client stays typed and package-complete | `clients/bun/store-rpc.d.ts`; `tests/bun_package_types_test.mjs` |
+| Examples remain executable without a network service | `tests/store_capability_examples_smoke.sh` |
+
 ## Deployment shapes
 
 Three shapes serve the same engine. They differ in who owns the process, who

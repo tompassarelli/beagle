@@ -96,6 +96,29 @@ primitive or a code type. See the [naming ledger](docs/naming.md).
 - [Coming from Datomic](docs/coming-from-datomic.md) — the datom-to-occurrence bridge, the exact-difference table, and the honest not-yet list.
 - [Tool catalog](docs/tool-catalog.md) — exactly five public MCP data verbs.
 
+## Storage-only capability
+
+An existing application can adopt Store without adopting the Beagle language
+or compiler frontend. The same Store kernel is available in three
+storage-shaped profiles:
+
+- [`examples/embedded-c.c`](examples/embedded-c.c) links the native ABI and
+  exchanges exact Store RPC packets without a server or socket. The same ABI is
+  exported by the Wasm embed artifact.
+- [`examples/rpc-sidecar.mjs`](examples/rpc-sidecar.mjs) uses the official Bun
+  client directly against a private Store RPC sidecar.
+- [`examples/cache-profile.mjs`](examples/cache-profile.mjs) expresses value,
+  expiry, materialization provenance, replacement, and invalidation through
+  ordinary Store propositions and transactions. It is a policy profile, not a
+  second cache engine.
+
+These profiles share terms, transactions, occurrence history, query behavior,
+encoding, and refusals. Their runtime artifacts require neither the compiler
+frontend nor Racket. The exact boundary and its closed-surface evidence are in
+[isolation and deployment](docs/isolation-and-deployment.md#capability-profiles).
+`tests/store_capability_examples_smoke.sh` compiles and runs the C example and
+exercises both Bun examples in memory without opening a server or port.
+
 ## Quickstart
 
 The checkout runtime needs Babashka for the CLI and Clojure/JVM for the server.

@@ -1,5 +1,29 @@
 # Architecture
 
+## One semantic substrate
+
+Beagle is one durable programming system, not a language bolted to a database.
+Typed, revisioned semantic facts connect its four surfaces:
+
+- the Beagle language authors code and data through one structural model;
+- the compiler and runtime check, query, incrementally materialize, and execute
+  those semantics;
+- Beagle Store owns durable terms, transactions, occurrences, history,
+  querying, indexing, snapshots, and cold persistence;
+- capability interfaces expose only the Store-shaped part to an existing
+  application through the native/Wasm ABI, Store RPC, or a cache policy.
+
+The external boundary is a capability boundary, not an ownership boundary.
+Adapters may select transport, deployment, retention, and materialization
+policy, but may not define operations, identities, transaction behavior, query
+rules, or encoding. A brownfield application can therefore use Store without
+shipping the language frontend or Racket, while the engine remains built,
+versioned, and tested in this repository.
+
+The detailed contracts and runnable storage-only examples live in
+[`store/README.md`](../store/README.md#storage-only-capability) and
+[`store/docs/isolation-and-deployment.md`](../store/docs/isolation-and-deployment.md#capability-profiles).
+
 ## How it compiles
 
 <!-- beagle:langs pipeline -->
