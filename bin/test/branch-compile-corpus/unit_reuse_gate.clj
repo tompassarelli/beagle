@@ -2006,6 +2006,23 @@
       (println
        "branch-compile-corpus: semantic contracts PASS five forms, exact 2/5 contract bump, 0/5 implementation change"))))
 
+(defn assert-selected-closure-generalization! []
+  (let [module-id (core/->NativeId "selected-closure-test/module")
+        leaf-id (core/->NativeId "selected-closure-test/leaf")
+        reader-id (core/->NativeId "selected-closure-test/reader")
+        leaf (stages/->SourceUnitV0 leaf-id module-id "defn" "leaf"
+                                      "selected-closure-test/leaf-digest"
+                                      leaf-id [])
+        reader (stages/->SourceUnitV0 reader-id module-id "defn" "reader"
+                                        "selected-closure-test/reader-digest"
+                                        reader-id [leaf-id])]
+    (require! (unit/source-units-supported? [leaf])
+              "one-unit dependency closure was rejected")
+    (require! (not (unit/source-units-supported? [reader]))
+              "one-unit selection with a missing dependency was accepted")
+    (println
+     "branch-compile-corpus: selected closure PASS 1-unit leaf, dangling read rejected")))
+
 (defn -main [& args]
   (require! (= 2 (count args))
             "usage: unit_reuse_gate.clj BUILD_ROOT COMPILER_COMMIT")
@@ -2030,6 +2047,7 @@
         private (load-case build-root "private-implementation" compiler-commit abi)
         public (load-case build-root "public-interface" compiler-commit abi)]
     (assert-probe-mechanism!)
+    (assert-selected-closure-generalization!)
     (assert-semantic-contract-slice!)
     (assert-contract-shape! baseline)
     (assert-wire-round-trips! baseline)
@@ -2114,4 +2132,6 @@
               (probe-total :lower-ready-function)
               " lower-ready-function, deterministic repetition"))))))
 
-(apply -main *command-line-args*)
+(if (= ["--selected-closure"] (vec *command-line-args*))
+  (assert-selected-closure-generalization!)
+  (apply -main *command-line-args*))
