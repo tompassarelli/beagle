@@ -148,10 +148,10 @@
                              (error-or (storeresult-error prior) "store boot failed")
                              prior empty-bytes false query result)
       (let [store-value Store current
-            session (schema/fork-session (store-session store-value))
-            root (schema/store-of session)
-            before (term-store/current-sequence root)
-            operations (compiler-fact-operations root facts)]
+            session schema/Session (schema/fork-session (store-session store-value))
+            root (Atom t/TermStore) (schema/store-of session)
+            before Int (term-store/current-sequence root)
+            operations (Vec t/CommitOperation) (compiler-fact-operations root facts)]
         (if (empty? operations)
           (->CompileDirectResult status-ok nil prior empty-bytes false query result)
           (do
