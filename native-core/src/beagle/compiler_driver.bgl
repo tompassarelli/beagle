@@ -437,6 +437,44 @@
           nil))
       (facts/syntaxfactclosure-modules closure))))
 
+(defn write-output-metadata
+  [output-directory String
+   artifact-id String
+   result CompileBundleResult] CompileBundleResult
+  (let [layout bootstrap/NativeArtifactLayoutV1
+        (bootstrap/native-artifact-layout output-directory)
+        manifest-path String
+        (bootstrap/nativeartifactlayoutv1-manifest-path layout)
+        lineage-path String
+        (bootstrap/nativeartifactlayoutv1-lineage-path layout)
+        manifest String
+        (str (bootstrap/bootstrap-contract-payload)
+             "artifact-content-id " artifact-id "\n")
+        lineage String
+        (bootstrap/lineage-payload (bootstrap/root-lineage artifact-id))]
+    (match (host.fs/make-parent-directories manifest-path)
+      [(host.fs/MakeParentDirectoriesError errno)
+       (->CompileBundleError errno "could not create bootstrap output directory")]
+      [(host.fs/MakeParentDirectoriesOk)
+       (match (host.fs/write-text-atomic manifest-path manifest)
+         [(host.fs/WriteTextAtomicError errno)
+          (->CompileBundleError errno "could not write artifact manifest")]
+         [(host.fs/WriteTextAtomicOk)
+          (match (host.fs/write-text-atomic lineage-path lineage)
+            [(host.fs/WriteTextAtomicError errno)
+             (->CompileBundleError errno "could not write compiler lineage")]
+            [(host.fs/WriteTextAtomicOk) result])])])))
+
+(defn complete-compile-output
+  [output-directory String
+   result CompileBundleResult] CompileBundleResult
+  (match result
+    [(CompileBundleError code detail) (->CompileBundleError code detail)]
+    [(CompileBundleWarm content-id artifact-id executable-path)
+     (write-output-metadata output-directory artifact-id result)]
+    [(CompileBundleMaterialized content-id artifact-id executable-path)
+     (write-output-metadata output-directory artifact-id result)]))
+
 (defn compile-checked-source
   [config CompileSourceConfig
    syntax facts/SyntaxFactClosure
@@ -468,8 +506,10 @@
                (bootstrap/nativeartifactlayoutv1-executable-path layout)
                (compilesourceconfig-c-compiler config)
                (compilesourceconfig-qbe-compiler config))]
-         (compile-stored-query query checked namespace "main"
-           link-config store))])))
+         (complete-compile-output
+           (compilesourceconfig-output-directory config)
+           (compile-stored-query query checked namespace "main"
+             link-config store)))])))
 
 (defn compile-closed-source
   [config CompileSourceConfig
