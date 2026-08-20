@@ -2241,7 +2241,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                       definitions index definition definition-ids))])
              module-definitions)])
          module-batches))]
-    {:ordered (mapv first entries) :by-id (into {} entries)}))
+    {:ordered (vec (mapcat second module-batches)) :by-id (into {} entries)}))
 
 (defn source-node-name-index [rows]
   (reduce
