@@ -26,9 +26,7 @@
   (cond
     [(resolved-ref? ref)
      (define name (resolved-ref-name ref))
-     (if (structural-name-qualifier name)
-         name
-         (structural-name-leaf name))]
+     (and (structural-name-qualifier name) name)]
     [(qualified-ref? ref)
      (make-structural-name
       (qualified-ref-qualifier ref)

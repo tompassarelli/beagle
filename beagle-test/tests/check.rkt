@@ -1439,6 +1439,10 @@ BEAGLE
          (= tag "Err") (js/get result .message)
          :else "unreachable"))))
 
+(check-js-ok "ordinary local equality bypasses qualified-name lookup"
+  '(defn choose-column [(kind String) (col String)] String
+     (if (= kind "column") col kind)))
+
 (check-js-err/rx "js/get rejects unknown member on a nominal record union"
   #rx"js/get: \\.depth is not a member of EitherBound"
   '(defrecord LeftBound [(width Float)])
