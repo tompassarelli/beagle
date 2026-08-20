@@ -97,20 +97,25 @@
             65
             (str "invalid artifact file metadata: " name))
           (let [path String (artifact-path config name)]
-            (match (host.fs/write-text-atomic
-                     path (artifactfilev1-payload file))
-              [(host.fs/WriteTextAtomicError errno)
+            (match (host.fs/make-parent-directories path)
+              [(host.fs/MakeParentDirectoriesError errno)
                (->ArtifactFileWriteError
-                 errno (str "artifact write failed: " path))]
-              [(host.fs/WriteTextAtomicOk)
-               (recur
-                 (+ index 1)
-                 (if (string-suffix? name ".c")
-                   (conj c-sources path)
-                   c-sources)
-                 (if (string-suffix? name ".ssa")
-                   (conj qbe-sources path)
-                   qbe-sources))])))))))
+                 errno (str "artifact parent creation failed: " path))]
+              [(host.fs/MakeParentDirectoriesOk)
+               (match (host.fs/write-text-atomic
+                        path (artifactfilev1-payload file))
+                 [(host.fs/WriteTextAtomicError errno)
+                  (->ArtifactFileWriteError
+                    errno (str "artifact write failed: " path))]
+                 [(host.fs/WriteTextAtomicOk)
+                  (recur
+                    (+ index 1)
+                    (if (string-suffix? name ".c")
+                      (conj c-sources path)
+                      c-sources)
+                    (if (string-suffix? name ".ssa")
+                      (conj qbe-sources path)
+                      qbe-sources))])])))))))
 
 (defn assembly-path [source-path String] String
   (str (subs source-path 0 (- (count source-path) 4)) ".s"))
@@ -158,14 +163,20 @@
    sources (Vec String)] ArtifactLinkResultV1
   (if (empty? sources)
     (->ArtifactLinkErrorV1 65 "artifact contains no compiler input")
-    (let [status Int (host.process/run-inherit
-            (compiler-argv
-              (artifactlinkconfigv1-c-compiler config)
-              sources
-              (artifactlinkconfigv1-executable-path config)))]
-      (if (= status 0)
-        (verify-executable (artifactlinkconfigv1-executable-path config))
-        (->ArtifactLinkErrorV1 status "C compiler/linker failed")))))
+    (let [executable-path String (artifactlinkconfigv1-executable-path config)]
+      (match (host.fs/make-parent-directories executable-path)
+        [(host.fs/MakeParentDirectoriesError errno)
+         (->ArtifactLinkErrorV1
+           errno (str "output parent creation failed: " executable-path))]
+        [(host.fs/MakeParentDirectoriesOk)
+         (let [status Int (host.process/run-inherit
+                 (compiler-argv
+                   (artifactlinkconfigv1-c-compiler config)
+                   sources
+                   executable-path))]
+           (if (= status 0)
+             (verify-executable executable-path)
+             (->ArtifactLinkErrorV1 status "C compiler/linker failed")))]))))
 
 (defn link-written-artifact
   [config ArtifactLinkConfigV1
