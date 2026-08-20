@@ -10150,6 +10150,116 @@ uint64_t native_host_filesystem_read_text_bounded_or_die_v0(
   return result;
 }
 
+native_byte_source *
+native_host_filesystem_read_byte_source_bounded_or_die_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t path_text, int64_t max_bytes) {
+  char *path = NULL;
+  uint8_t *buffer = NULL;
+  uint8_t *destination = NULL;
+  size_t length = (size_t)0U;
+  size_t capacity;
+  size_t bound;
+  int descriptor = -1;
+  int32_t status;
+  if ((arena == NULL) || !native_host_filesystem_capability_valid(capability) ||
+      (max_bytes < INT64_C(0)) ||
+      ((uint64_t)max_bytes > (uint64_t)SIZE_MAX)) {
+    native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                   max_bytes);
+  }
+  bound = (size_t)max_bytes;
+  status = native_host_filesystem_path(path_text, &path);
+  if (status != 0) {
+    native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                   max_bytes);
+  }
+  descriptor = open(path, O_RDONLY | O_CLOEXEC);
+  free(path);
+  if (descriptor < 0) {
+    native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                   max_bytes);
+  }
+  capacity = (bound < (size_t)4096U) ? bound : (size_t)4096U;
+  if (capacity != (size_t)0U) {
+    buffer = (uint8_t *)malloc(capacity);
+    if (buffer == NULL) {
+      close(descriptor);
+      native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                     max_bytes);
+    }
+  }
+  for (;;) {
+    ssize_t amount;
+    if (length == capacity) {
+      size_t grown;
+      uint8_t *replacement;
+      if (capacity == bound) {
+        uint8_t extra;
+        amount = read(descriptor, &extra, (size_t)1U);
+        if ((amount < 0) && (errno == EINTR)) {
+          continue;
+        }
+        if (amount > 0) {
+          free(buffer);
+          close(descriptor);
+          native_host_input_failure_text(
+              path_text, "HOST-INPUT-BOUND-EXCEEDED",
+              (max_bytes < INT64_MAX) ? (uint64_t)(max_bytes + INT64_C(1)) :
+                                        UINT64_MAX,
+              max_bytes);
+        }
+        if (amount < 0) {
+          free(buffer);
+          close(descriptor);
+          native_host_input_failure_text(
+              path_text, "HOST-INPUT-READ-FAILED", 0, max_bytes);
+        }
+        break;
+      }
+      grown = (capacity == (size_t)0U) ? (size_t)1U : capacity * (size_t)2U;
+      if ((grown < capacity) || (grown > bound)) {
+        grown = bound;
+      }
+      replacement = (uint8_t *)realloc(buffer, grown);
+      if (replacement == NULL) {
+        free(buffer);
+        close(descriptor);
+        native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                       max_bytes);
+      }
+      buffer = replacement;
+      capacity = grown;
+    }
+    amount = read(descriptor, buffer + length, capacity - length);
+    if ((amount < 0) && (errno == EINTR)) {
+      continue;
+    }
+    if (amount < 0) {
+      free(buffer);
+      close(descriptor);
+      native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                     max_bytes);
+    }
+    if (amount == 0) {
+      break;
+    }
+    length += (size_t)amount;
+  }
+  if (close(descriptor) != 0) {
+    free(buffer);
+    native_host_input_failure_text(path_text, "HOST-INPUT-READ-FAILED", 0,
+                                   max_bytes);
+  }
+  if (length != (size_t)0U) {
+    destination = (uint8_t *)native_arena_alloc(
+        arena, length, _Alignof(uint8_t));
+    memcpy(destination, buffer, length);
+  }
+  free(buffer);
+  return native_byte_source_header(arena, destination, (int64_t)length);
+}
+
 int32_t native_host_stdin_read_text_bounded_v0(
     native_arena *arena, const native_capability *capability,
     int64_t max_bytes, uint64_t *out) {
