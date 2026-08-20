@@ -779,4 +779,4 @@
                  (->ProgramRenameSelected
                   (->ProgramRenameSelection
                    selected-binding module name-value span
-                   reference-values dependent-values anchors scope-bindings)))))))))]))
+                   reference-values dependent-values anchors scope-bindings))))))))]))
