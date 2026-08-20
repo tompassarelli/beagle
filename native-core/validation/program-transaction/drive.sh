@@ -33,4 +33,4 @@ if ldd "$scratch/program-transaction-fixture" | rg -qi \
   exit 1
 fi
 
-echo "program-transaction: canonical reprojection and conflict boundary PASS"
+echo "program-transaction: candidate admission, equality, and conflict boundary PASS"

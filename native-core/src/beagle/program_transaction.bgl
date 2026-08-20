@@ -56,7 +56,9 @@
    invalidated (Vec Any)])
 
 (defunion RenamePlan
-  (RenameRejected [code Keyword detail String])
+  (RenameRejected
+    [code Keyword
+     detail String])
   (RenamePlanned
     [transaction ProgramTransaction
      preview RenamePreview]))
@@ -81,8 +83,7 @@
   (RematerializationRejected
     [code Keyword
      detail String])
-  (RematerializationVerified
-    [verified VerifiedRematerialization]))
+  (RematerializationVerified [verified VerifiedRematerialization]))
 
 (defrecord ProgramCommitReceipt
   [root Any
@@ -90,7 +91,9 @@
    occurrences (Vec t/Triple)])
 
 (defunion CommitReceiptResult
-  (CommitReceiptRejected [code Keyword detail String])
+  (CommitReceiptRejected
+    [code Keyword
+     detail String])
   (CommitReceiptAccepted [receipt ProgramCommitReceipt]))
 
 (def empty-any (Vec Any) [])
@@ -115,7 +118,9 @@
    source Any
    relation Keyword] (Vec Any)
   (reduce
-    (fn [values (Vec Any) proposition t/Triple] (Vec Any)
+    (fn
+      [values (Vec Any)
+       proposition t/Triple] (Vec Any)
       (if (and (= source (t/triple-t1 proposition))
                (= relation (t/triple-t2 proposition)))
         (conj values (t/triple-t3 proposition))
@@ -131,14 +136,18 @@
     (first values)
     nil))
 
-(defn contains-value? [values (Vec Any) value Any] Bool
+(defn contains-value?
+  [values (Vec Any)
+   value Any] Bool
   (some?
     (some
       (fn [candidate Any] Any?
         (if (= candidate value) candidate nil))
       values)))
 
-(defn append-unique [values (Vec Any) value Any] (Vec Any)
+(defn append-unique
+  [values (Vec Any)
+   value Any] (Vec Any)
   (if (contains-value? values value) values (conj values value)))
 
 (defn root-modules
@@ -169,8 +178,7 @@
 (defn binding-span
   [propositions (Vec t/Triple)
    binding Any] Any
-  (let [spans (Vec Any)
-        (related-values propositions binding program/has-span)]
+  (let [spans (Vec Any) (related-values propositions binding program/has-span)]
     (if (and (exactly-one? spans) (span-term? (first spans)))
       (first spans)
       nil)))
@@ -211,7 +219,9 @@
 
 (defn canonical-edits [edits (Vec SourceEdit)] (Vec SourceEdit)
   (reduce
-    (fn [ordered (Vec SourceEdit) edit SourceEdit] (Vec SourceEdit)
+    (fn
+      [ordered (Vec SourceEdit)
+       edit SourceEdit] (Vec SourceEdit)
       (insert-edit ordered edit))
     empty-edits
     edits))
@@ -293,10 +303,8 @@
   (let [start Any (t/triple-t1 span)
         end Any (t/triple-t3 span)]
     (if (and (integer? start) (integer? end))
-      (let [new-start Int?
-            (remap-boundary start edits old-width new-width)
-            new-end Int?
-            (remap-boundary end edits old-width new-width)]
+      (let [new-start Int? (remap-boundary start edits old-width new-width)
+            new-end Int? (remap-boundary end edits old-width new-width)]
         (if (and (some? new-start) (some? new-end))
           (t/triple new-start program/through-byte new-end)
           nil))
@@ -384,8 +392,7 @@
           (let [module Any (read/programsourceanchor-module source-anchor)
                 kind Keyword (read/programsourceanchor-kind source-anchor)
                 before-anchor Any (read/programsourceanchor-anchor source-anchor)
-                after-anchor Any
-                (cond
+                after-anchor Any (cond
                   (= reference-anchor kind)
                   (t/triple module program/has-span after-span)
 
@@ -401,11 +408,10 @@
    old-width Int
    new-width Int] (Vec AnchorProjection)
   (reduce
-    (fn [projected (Vec AnchorProjection)
-         source-anchor read/ProgramSourceAnchor]
-      (Vec AnchorProjection)
-      (let [projection AnchorProjection?
-            (project-anchor source-anchor edits old-width new-width)]
+    (fn
+      [projected (Vec AnchorProjection)
+       source-anchor read/ProgramSourceAnchor] (Vec AnchorProjection)
+      (let [projection AnchorProjection? (project-anchor source-anchor edits old-width new-width)]
         (if (some? projection) (conj projected projection) projected)))
     empty-anchor-projections
     (anchors-for-module source-anchors module)))
@@ -432,7 +438,9 @@
    references-for-binding (Vec Any)
    module Any] (Vec Any)
   (reduce
-    (fn [targets (Vec Any) target Any] (Vec Any)
+    (fn
+      [targets (Vec Any)
+       target Any] (Vec Any)
       (if (= module
              (target-module
                propositions root binding binding-module target))
@@ -451,31 +459,26 @@
    module Any
    old-name String
    new-name String] SourceDelta?
-  (let [targets (Vec Any)
-        (targets-for-module
+  (let [targets (Vec Any) (targets-for-module
           propositions root binding binding-module
           references-for-binding module)
         source String? (module-source propositions module)]
     (if (or (empty? targets) (nil? source))
       nil
-      (let [edits (Vec SourceEdit)
-            (reduce
-              (fn [collected (Vec SourceEdit) target Any]
-                (Vec SourceEdit)
-                (let [edit SourceEdit?
-                      (source-edit propositions module binding target)]
+      (let [edits (Vec SourceEdit) (reduce
+              (fn
+                [collected (Vec SourceEdit)
+                 target Any] (Vec SourceEdit)
+                (let [edit SourceEdit? (source-edit propositions module binding target)]
                   (if (some? edit) (conj collected edit) collected)))
               empty-edits
               targets)]
         (if (not= (count edits) (count targets))
           nil
           (let [ordered (Vec SourceEdit) (canonical-edits edits)
-                projected String?
-                (apply-source-edits source old-name new-name ordered)
-                local-anchors (Vec read/ProgramSourceAnchor)
-                (anchors-for-module source-anchors module)
-                projected-anchors (Vec AnchorProjection)
-                (project-anchors
+                projected String? (apply-source-edits source old-name new-name ordered)
+                local-anchors (Vec read/ProgramSourceAnchor) (anchors-for-module source-anchors module)
+                projected-anchors (Vec AnchorProjection) (project-anchors
                   source-anchors module ordered
                   (count (utf8-encode old-name))
                   (count (utf8-encode new-name)))]
@@ -496,15 +499,15 @@
    old-name String
    new-name String] (Vec SourceDelta)
   (reduce
-    (fn [deltas (Vec SourceDelta) module Any] (Vec SourceDelta)
-      (let [targets (Vec Any)
-            (targets-for-module
+    (fn
+      [deltas (Vec SourceDelta)
+       module Any] (Vec SourceDelta)
+      (let [targets (Vec Any) (targets-for-module
               propositions root binding binding-module
               references-for-binding module)]
         (if (empty? targets)
           deltas
-          (let [delta SourceDelta?
-                (source-delta-for-module
+          (let [delta SourceDelta? (source-delta-for-module
                   propositions root binding binding-module
                   references-for-binding source-anchors module
                   old-name new-name)]
@@ -517,7 +520,9 @@
    reference-count Int] Bool
   (= (+ reference-count 1)
      (reduce
-       (fn [total Int delta SourceDelta] Int
+       (fn
+         [total Int
+          delta SourceDelta] Int
          (+ total (count (sourcedelta-edits delta))))
        0
        deltas)))
@@ -527,7 +532,9 @@
   (= (count values)
      (count
        (reduce
-         (fn [unique (Vec Any) value Any] (Vec Any)
+         (fn
+           [unique (Vec Any)
+            value Any] (Vec Any)
            (append-unique unique value))
          empty-any
          values))))
@@ -541,8 +548,9 @@
   (= (count source-anchors)
      (count
        (reduce
-         (fn [keys (Vec Any)
-              source-anchor read/ProgramSourceAnchor] (Vec Any)
+         (fn
+           [keys (Vec Any)
+            source-anchor read/ProgramSourceAnchor] (Vec Any)
            (append-unique keys (source-anchor-key source-anchor)))
          empty-any
          source-anchors))))
@@ -581,7 +589,9 @@
   [binding-module Any
    selected-references (Vec Any)] (Vec Any)
   (reduce
-    (fn [modules (Vec Any) reference Any] (Vec Any)
+    (fn
+      [modules (Vec Any)
+       reference Any] (Vec Any)
       (if (t/triple? reference)
         (append-unique modules (t/triple-t1 reference))
         modules))
@@ -591,14 +601,17 @@
 (defn source-anchor-modules
   [source-anchors (Vec read/ProgramSourceAnchor)] (Vec Any)
   (reduce
-    (fn [modules (Vec Any)
-         source-anchor read/ProgramSourceAnchor] (Vec Any)
+    (fn
+      [modules (Vec Any)
+       source-anchor read/ProgramSourceAnchor] (Vec Any)
       (append-unique
         modules (read/programsourceanchor-module source-anchor)))
     empty-any
     source-anchors))
 
-(defn same-term-set? [left (Vec Any) right (Vec Any)] Bool
+(defn same-term-set?
+  [left (Vec Any)
+   right (Vec Any)] Bool
   (and
     (= (count left) (count right))
     (every?
@@ -666,18 +679,12 @@
         module Any (read/programrenameselection-module selection)
         name String (read/programrenameselection-name selection)
         span Any (read/programrenameselection-span selection)
-        selected-references (Vec Any)
-        (read/programrenameselection-references selection)
-        invalidated (Vec Any)
-        (read/programrenameselection-dependents selection)
-        source-anchors (Vec read/ProgramSourceAnchor)
-        (read/programrenameselection-source-anchors selection)
-        scope-bindings (Vec read/ProgramScopeBinding)
-        (read/programrenameselection-scope-bindings selection)
-        binding-anchors (Vec read/ProgramSourceAnchor)
-        (selected-binding-anchors source-anchors binding)
-        modules (Vec Any)
-        (selected-target-modules module selected-references)]
+        selected-references (Vec Any) (read/programrenameselection-references selection)
+        invalidated (Vec Any) (read/programrenameselection-dependents selection)
+        source-anchors (Vec read/ProgramSourceAnchor) (read/programrenameselection-source-anchors selection)
+        scope-bindings (Vec read/ProgramScopeBinding) (read/programrenameselection-scope-bindings selection)
+        binding-anchors (Vec read/ProgramSourceAnchor) (selected-binding-anchors source-anchors binding)
+        modules (Vec Any) (selected-target-modules module selected-references)]
     (and
       (t/term? binding)
       (t/term? module)
@@ -734,8 +741,7 @@
             propositions module binding scope-binding))
         scope-bindings)
       (= 1 (count binding-anchors))
-      (let [binding-anchor-row read/ProgramSourceAnchor
-            (first binding-anchors)]
+      (let [binding-anchor-row read/ProgramSourceAnchor (first binding-anchors)]
         (and
           (= module
              (read/programsourceanchor-module binding-anchor-row))
@@ -752,8 +758,7 @@
 (defn retract-operation [proposition t/Triple] t/CommitOperation
   (t/->CommitOperation t/retract-action proposition))
 
-(defn source-delta-operations
-  [deltas (Vec SourceDelta)] (Vec t/CommitOperation)
+(defn source-delta-operations [deltas (Vec SourceDelta)] (Vec t/CommitOperation)
   (reduce
     (fn [operations (Vec t/CommitOperation) delta SourceDelta]
       (Vec t/CommitOperation)
@@ -769,20 +774,20 @@
     empty-operations
     deltas))
 
-(defn anchor-projections
-  [deltas (Vec SourceDelta)] (Vec AnchorProjection)
+(defn anchor-projections [deltas (Vec SourceDelta)] (Vec AnchorProjection)
   (reduce
-    (fn [projections (Vec AnchorProjection) delta SourceDelta]
-      (Vec AnchorProjection)
+    (fn
+      [projections (Vec AnchorProjection)
+       delta SourceDelta] (Vec AnchorProjection)
       (into projections (sourcedelta-anchors delta)))
     empty-anchor-projections
     deltas))
 
-(defn anchor-replacements
-  [projections (Vec AnchorProjection)] (Vec TermReplacement)
+(defn anchor-replacements [projections (Vec AnchorProjection)] (Vec TermReplacement)
   (reduce
-    (fn [replacements (Vec TermReplacement)
-         projection AnchorProjection] (Vec TermReplacement)
+    (fn
+      [replacements (Vec TermReplacement)
+       projection AnchorProjection] (Vec TermReplacement)
       (let [before Any (anchorprojection-before-anchor projection)
             after Any (anchorprojection-after-anchor projection)]
         (if (not= before after)
@@ -822,15 +827,12 @@
     (replace-term replacements (t/triple-t2 proposition))
     (replace-term replacements (t/triple-t3 proposition))))
 
-(defn stable-binding-span-operations
-  [projections (Vec AnchorProjection)] (Vec t/CommitOperation)
+(defn stable-binding-span-operations [projections (Vec AnchorProjection)] (Vec t/CommitOperation)
   (reduce
     (fn [operations (Vec t/CommitOperation)
          projection AnchorProjection] (Vec t/CommitOperation)
-      (let [before-span t/Triple
-            (anchorprojection-before-span projection)
-            after-span t/Triple
-            (anchorprojection-after-span projection)]
+      (let [before-span t/Triple (anchorprojection-before-span projection)
+            after-span t/Triple (anchorprojection-after-span projection)]
         (if (and
               (= binding-anchor (anchorprojection-kind projection))
               (= (anchorprojection-before-anchor projection)
@@ -858,8 +860,7 @@
     (reduce
       (fn [operations (Vec t/CommitOperation)
            proposition t/Triple] (Vec t/CommitOperation)
-        (let [rewritten t/Triple
-              (replace-proposition replacements proposition)]
+        (let [rewritten t/Triple (replace-proposition replacements proposition)]
           (if (= proposition rewritten)
             operations
             (conj
@@ -872,8 +873,7 @@
   [propositions (Vec t/Triple)
    deltas (Vec SourceDelta)] (Vec t/CommitOperation)
   (let [projections (Vec AnchorProjection) (anchor-projections deltas)
-        replacements (Vec TermReplacement)
-        (anchor-replacements projections)]
+        replacements (Vec TermReplacement) (anchor-replacements projections)]
     (into
       (stable-binding-span-operations projections)
       (anchor-rewrite-operations propositions replacements))))
@@ -881,8 +881,7 @@
 (defn root-transition-operations
   [base-root program/ProgramRoot
    next-root-resource t/Term] (Vec t/CommitOperation)
-  (let [propositions (Vec t/Triple)
-        (program/programroot-propositions base-root)
+  (let [propositions (Vec t/Triple) (program/programroot-propositions base-root)
         base-resource Any (program/root-resource-value base-root)
         next-resource Any next-root-resource
         profile Any (program/profile-value base-root)]
@@ -908,8 +907,7 @@
    old-name String
    new-name String
    deltas (Vec SourceDelta)] (Vec t/CommitOperation)
-  (let [propositions (Vec t/Triple)
-        (program/programroot-propositions base-root)]
+  (let [propositions (Vec t/Triple) (program/programroot-propositions base-root)]
     (into
       [(retract-operation (t/triple binding program/named old-name))
        (assert-operation (t/triple binding program/named new-name))]
@@ -941,8 +939,7 @@
   (reduce
     (fn [overlay (Vec t/Triple) operation t/CommitOperation]
       (Vec t/Triple)
-      (let [proposition t/Triple
-            (t/commitoperation-proposition operation)]
+      (let [proposition t/Triple (t/commitoperation-proposition operation)]
         (if (= t/assert-action (t/commitoperation-action operation))
           (if (proposition-live? overlay proposition)
             overlay
@@ -951,30 +948,27 @@
     propositions
     operations))
 
-(defn reject [code Keyword detail String] RenamePlan
+(defn reject
+  [code Keyword
+   detail String] RenamePlan
   (->RenameRejected code detail))
 
-(defn plan-rename
+(defn- plan-canonical-rename
   [base-root program/ProgramRoot
    next-root-resource t/Term
    selection read/ProgramRenameSelection
    new-name String] RenamePlan
-  (let [propositions (Vec t/Triple)
-        (program/programroot-propositions base-root)
+  (let [propositions (Vec t/Triple) (program/programroot-propositions base-root)
         base-resource Any (program/root-resource-value base-root)
         next-resource Any next-root-resource
         expected-version Int (program/programroot-store-version base-root)
         binding Any (read/programrenameselection-binding selection)
         binding-module Any (selection-binding-module selection)
-        selected-references (Vec Any)
-        (read/programrenameselection-references selection)
-        invalidated (Vec Any)
-        (read/programrenameselection-dependents selection)
-        source-anchors (Vec read/ProgramSourceAnchor)
-        (read/programrenameselection-source-anchors selection)
+        selected-references (Vec Any) (read/programrenameselection-references selection)
+        invalidated (Vec Any) (read/programrenameselection-dependents selection)
+        source-anchors (Vec read/ProgramSourceAnchor) (read/programrenameselection-source-anchors selection)
         old-name String (read/programrenameselection-name selection)
-        stored-name String?
-        (first-string
+        stored-name String? (first-string
           (related-values propositions binding program/named))]
     (cond
       (not (and (t/term? next-resource) (t/term? binding)))
@@ -1015,19 +1009,16 @@
         "new name collides with another binding in the selected module")
 
       :else
-      (let [deltas (Vec SourceDelta)
-            (source-deltas
+      (let [deltas (Vec SourceDelta) (source-deltas
               propositions base-resource binding binding-module
               selected-references source-anchors old-name new-name)]
         (if (not (source-deltas-complete?
                    deltas (count selected-references)))
           (reject :rename/source-projection
             "every selected binding/reference span must project exact source bytes")
-          (let [operations (Vec t/CommitOperation)
-                (rename-operations
+          (let [operations (Vec t/CommitOperation) (rename-operations
                   base-root next-root-resource binding old-name new-name deltas)
-                overlay (Vec t/Triple)
-                (apply-operations propositions operations)]
+                overlay (Vec t/Triple) (apply-operations propositions operations)]
             (match
               (program/next-root
                 base-root next-root-resource overlay)
@@ -1040,7 +1031,19 @@
                    new-name selected-references operations deltas invalidated)
                  (->RenamePreview
                    candidate binding old-name new-name selected-references
-                   operations deltas invalidated))]))))))))
+                   operations deltas invalidated))])))))))
+
+(defn plan-rename
+  [base-root program/ProgramRoot
+   next-root-resource t/Term
+   selected-binding t/Term
+   new-name String] RenamePlan
+  (match (read/rename-selection base-root selected-binding)
+    [(read/ProgramRenameSelectionRejected code detail)
+     (reject :rename/selection-rejected detail)]
+    [(read/ProgramRenameSelected selection)
+     (plan-canonical-rename
+       base-root next-root-resource selection new-name)]))
 
 (defn preview [transaction ProgramTransaction] RenamePreview
   (->RenamePreview
@@ -1056,12 +1059,32 @@
 (defn same-proposition-set?
   [left (Vec t/Triple)
    right (Vec t/Triple)] Bool
-  (and
-    (= (count left) (count right))
-    (every?
-      (fn [proposition t/Triple] Bool
-        (proposition-live? right proposition))
-      left)))
+  (let [unique-left (Vec t/Triple) (reduce
+          (fn [unique (Vec t/Triple)
+               proposition t/Triple] (Vec t/Triple)
+            (if (proposition-live? unique proposition)
+              unique
+              (conj unique proposition)))
+          empty-triples
+          left)
+        unique-right (Vec t/Triple) (reduce
+          (fn [unique (Vec t/Triple)
+               proposition t/Triple] (Vec t/Triple)
+            (if (proposition-live? unique proposition)
+              unique
+              (conj unique proposition)))
+          empty-triples
+          right)]
+    (and
+      (= (count unique-left) (count unique-right))
+      (every?
+        (fn [proposition t/Triple] Bool
+          (proposition-live? unique-right proposition))
+        unique-left)
+      (every?
+        (fn [proposition t/Triple] Bool
+          (proposition-live? unique-left proposition))
+        unique-right))))
 
 (defn same-root-semantics?
   [left program/ProgramRoot
@@ -1098,13 +1121,10 @@
   [verified VerifiedRematerialization
    observed-space-id String
    observed-version Int] CommitDecision
-  (let [transaction ProgramTransaction
-        (verifiedrematerialization-transaction verified)
-        expected-space-id String
-        (program/programroot-space-id
+  (let [transaction ProgramTransaction (verifiedrematerialization-transaction verified)
+        expected-space-id String (program/programroot-space-id
           (programtransaction-base-root transaction))
-        expected-version Int
-        (programtransaction-expected-version transaction)]
+        expected-version Int (programtransaction-expected-version transaction)]
     (if (and (= expected-space-id observed-space-id)
              (= expected-version observed-version))
       (->CommitReady
@@ -1124,11 +1144,9 @@
       "commit receipt requires a Store transaction coordinate")
     (let [space-value Any (t/triple-t1 transaction-coordinate)
           served-version Int (t/triple-t3 transaction-coordinate)
-          expected-space-id String
-          (program/programroot-space-id
+          expected-space-id String (program/programroot-space-id
             (programtransaction-base-root transaction))
-          expected-next Int
-          (inc (programtransaction-expected-version transaction))]
+          expected-next Int (inc (programtransaction-expected-version transaction))]
       (if (not (and
                  (= space-value expected-space-id)
                  (= served-version expected-next)))

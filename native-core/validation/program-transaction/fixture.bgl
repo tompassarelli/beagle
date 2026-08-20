@@ -1,7 +1,6 @@
 #lang beagle
 (ns native.program-transaction-fixture
-  (:require [beagle.program-read :as read]
-            [beagle.program-transaction :as transaction]
+  (:require [beagle.program-transaction :as transaction]
             [store.kernel :as kernel]
             [store.program :as program]
             [store.types :as t]))
@@ -133,34 +132,8 @@
   (program/->ProgramRoot
     space-id base-root-resource 7 profile propositions))
 
-(def source-anchors (Vec read/ProgramSourceAnchor)
-  [(read/->ProgramSourceAnchor
-     module selected-binding transaction/binding-anchor selected-span)
-   (read/->ProgramSourceAnchor
-     module shadowed-binding transaction/binding-anchor shadowed-span)
-   (read/->ProgramSourceAnchor
-     module independent-binding transaction/binding-anchor independent-span)
-   (read/->ProgramSourceAnchor
-     module selected-reference transaction/reference-anchor selected-binding)
-   (read/->ProgramSourceAnchor
-     module shadowed-reference transaction/reference-anchor shadowed-binding)
-   (read/->ProgramSourceAnchor
-     module independent-reference transaction/reference-anchor
-     independent-binding)])
-
-(def scope-bindings (Vec read/ProgramScopeBinding)
-  [(read/->ProgramScopeBinding module shadowed-binding "helper")
-   (read/->ProgramScopeBinding
-     module independent-binding "independent")])
-
-(def selection read/ProgramRenameSelection
-  (read/->ProgramRenameSelection
-    selected-binding module "helper" selected-span
-    [selected-reference] [dependent] source-anchors scope-bindings))
-
 (defn admitted-overlay? [candidate program/ProgramRoot] Bool
-  (let [overlay (Vec t/Triple)
-        (program/programroot-propositions candidate)]
+  (let [overlay (Vec t/Triple) (program/programroot-propositions candidate)]
     (and
       (program/admitted-root? candidate)
       (= space-id (program/programroot-space-id candidate))
@@ -241,18 +214,39 @@
 (defn collision-rejected? [] Bool
   (match
     (transaction/plan-rename
-      base-root collision-root-resource selection "independent")
+      base-root collision-root-resource selected-binding "independent")
     [(transaction/RenameRejected code detail)
      (= code :rename/name-collision)]
     [(transaction/RenamePlanned planned preview) false]))
 
-(defn commit-boundary-valid?
+(defn duplicate-substitution-rejected?
+  [planned transaction/ProgramTransaction
+   candidate program/ProgramRoot] Bool
+  (let [propositions (Vec t/Triple) (program/programroot-propositions candidate)
+        omitted t/Triple (t/triple
+          shadowed-dependent program/depends-on shadowed-binding)
+        duplicated t/Triple (t/triple dependent program/depends-on selected-binding)
+        adversarial-propositions (Vec t/Triple) (conj
+          (transaction/remove-proposition propositions omitted)
+          duplicated)
+        adversarial program/ProgramRoot (program/->ProgramRoot
+          space-id next-root-resource 8 profile adversarial-propositions)]
+    (and
+      (program/admitted-root? adversarial)
+      (= (count propositions) (count adversarial-propositions))
+      (match (transaction/verify-rematerialized planned adversarial)
+        [(transaction/RematerializationRejected code detail)
+         (= code :rename/rematerialization-mismatch)]
+        [(transaction/RematerializationVerified verified) false]))))
+
+(defn admission-equality-boundary-valid?
   [planned transaction/ProgramTransaction
    candidate program/ProgramRoot] Bool
   (and
     (match (transaction/verify-rematerialized planned base-root)
       [(transaction/RematerializationRejected code detail) true]
       [(transaction/RematerializationVerified verified) false])
+    (duplicate-substitution-rejected? planned candidate)
     (match (transaction/verify-rematerialized planned candidate)
       [(transaction/RematerializationRejected code detail) false]
       [(transaction/RematerializationVerified verified)
@@ -290,24 +284,20 @@
                 (transaction/programcommitreceipt-root receipt))
               (= 8
                 (transaction/programcommitreceipt-served-version receipt))
-              (= 32
-                (count
-                  (transaction/programcommitreceipt-occurrences receipt))))]))]))))
+                (= 32
+                  (count
+                    (transaction/programcommitreceipt-occurrences receipt))))]))])))
 
 (defn planned-case [] Bool
   (match
     (transaction/plan-rename
-      base-root next-root-resource selection "renamed")
+      base-root next-root-resource selected-binding "renamed")
     [(transaction/RenameRejected code detail) false]
     [(transaction/RenamePlanned planned preview)
-     (let [candidate program/ProgramRoot
-           (transaction/programtransaction-candidate-root planned)
-           deltas (Vec transaction/SourceDelta)
-           (transaction/renamepreview-source-deltas preview)
-           references (Vec Any)
-           (transaction/renamepreview-references preview)
-           invalidated (Vec Any)
-           (transaction/renamepreview-invalidated preview)]
+     (let [candidate program/ProgramRoot (transaction/programtransaction-candidate-root planned)
+           deltas (Vec transaction/SourceDelta) (transaction/renamepreview-source-deltas preview)
+           references (Vec Any) (transaction/renamepreview-references preview)
+           invalidated (Vec Any) (transaction/renamepreview-invalidated preview)]
        (and
          (= candidate (transaction/renamepreview-candidate-root preview))
          (= 1 (count deltas))
@@ -319,7 +309,7 @@
            (count
              (transaction/programtransaction-operations planned)))
          (admitted-overlay? candidate)
-         (commit-boundary-valid? planned candidate)))]))
+         (admission-equality-boundary-valid? planned candidate)))]))
 
 (defn main [] Int
   (if (and (collision-rejected?) (planned-case)) 0 1))
