@@ -1,6 +1,6 @@
 # Ontology
 
-This document is the current modeling contract: it assigns roles to the [glossary vocabulary](glossary.md), supplies the one normalized example, and governs profiles and semantic hints.
+This document is the current modeling contract: it assigns roles to the [glossary vocabulary](glossary.md), supplies the one normalized example, and governs profiles and semantic hints. Store is Beagle's shared durable identity-and-explanation substrate, not a separate application ontology or database product.
 
 ## Kernel boundary
 
@@ -40,6 +40,51 @@ world may use Store occurrences as durable evidence while retaining its own
 revision and judgment identity. Matching proposition content establishes
 structural equivalence only; it does not establish the trustworthiness of the
 writer, authorize an effect, or merge physical Store spaces.
+
+## Explanation across worlds
+
+One explanation model spans declared inputs, derived conclusions, observations,
+and effect records. They are roles carried by propositions and occurrences,
+not four incompatible storage systems. A world identifies a versioned choice of
+evidence and rules; a materialization identifies a reproducible projection of
+that world; an execution domain identifies where an interpretation or effect is
+authorized to run. These roles must retain their dependencies and provenance:
+
+```text
+declared input -> derived artifact -> desired state
+                         |                 |
+                         +-> explanation   +-> authorized effect -> receipt
+                                                               -> later observation
+```
+
+The arrows record explanation, not implication of truth. In particular,
+`Desired` is never `Observed`; an effect receipt records that an authorized
+attempt reported completion, while a later observation is separate evidence
+about the external world. Pure artifacts are reproducible projections from
+their named inputs, rules, and world version. The current kernel can preserve
+the necessary terms and occurrence provenance; scheduling, authorization, and
+effect execution belong to integrations and are direction rather than current
+kernel behavior.
+
+Treat a compiler rule like any other accountable input: give the rule and its
+revision their own identities, and record which version participated in a
+derivation. A rule's spelling, compiler implementation, and resulting artifact
+are not silently the same identity. Schema and profile evolution work the same
+way: retain the old profile or schema identity, introduce a new version, and
+state the projection or migration relation explicitly. A consumer can then
+select an old or new world deliberately instead of assuming that a global
+reinterpretation is safe.
+
+Structural identity is deliberately weaker than trust. Signatures, issuer
+identity, key policy, and authorization evidence are provenance that an
+execution domain may evaluate; they are not created by matching Terms. Tests
+should therefore be conservative: prove the recorded input, rule, signature,
+or receipt that a claim actually relies on, and leave a result unknown when
+the evidence is absent. Logical unification does not erase physical separation:
+separate processes, logs, SpaceIds, retention policies, secret stores, and
+access controls remain separate trust and security boundaries. Deletion and
+secret handling are boundary policies, not a reason to rewrite durable identity
+or expose secret payloads in a shared projection.
 
 ## Perspective and graph roles
 

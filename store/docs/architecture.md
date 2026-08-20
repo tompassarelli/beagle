@@ -2,6 +2,22 @@
 
 This document maps Beagle Store's [shared vocabulary](glossary.md) onto durable storage, immutable query roots, and process boundaries at source head.
 
+Store is Beagle's integrated durable identity, provenance, and query subsystem.
+It is not a separate database product and it does not define a second program
+model beside Beagle. One durable identity-and-explanation model can support
+many versioned worlds, materializations, execution domains, and physical
+security boundaries. A world is a selected, versioned view over durable
+occurrences; a materialization is a reproducible projection of that view; an
+execution domain is the authority that may interpret or act on it. Equal Terms
+across those places do not merge their authority, freshness, retention, or
+access policy.
+
+The **current kernel** is the log, occurrence history, liveness, immutable
+query roots, and their local process boundary described below. The broader
+integration direction is to let Beagle tools share this explanation model;
+that direction is not a claim that the kernel currently schedules worlds,
+executes effects, supplies authorization, or manages every physical boundary.
+
 ## Kernel and history
 
 The kernel accepts the recursive grammar and assigns no domain roles to the
@@ -34,12 +50,22 @@ replay order. Recorded, valid, and observation time are metadata and never
 proposition identity. See [ontology](ontology.md) for modeling rules.
 
 Store is the current durable assertion and history substrate, not the whole
-program-world protocol. A profile may represent `Declared`, `Derived`,
-`Observed`, `Desired`, `EffectAttempt`, and `EffectReceipt` as ordinary Terms,
-but the kernel does not make those modes interchangeable: desired content is
-not evidence of observed state, and a receipt is not the subsequent observation
-that can corroborate an external result. Store records what a writer supplied;
-it neither executes effects nor promotes structural identity into trust.
+program-world protocol. The integration model distinguishes declared inputs,
+derived conclusions, observations, and effect records without treating them as
+interchangeable facts. A pure artifact is a reproducible projection from named
+inputs and a versioned world; it is not hidden state. Desired state is not
+observed state. An authorized effect produces an effect receipt; a later
+observation may corroborate, contradict, or fail to find the expected result.
+The current kernel can record these as ordinary Terms and occurrences, but it
+does not execute effects, decide authorization, or promote structural identity
+into trust.
+
+That separation keeps dependency and invalidation concrete. A declaration,
+derivation, observation, receipt, or artifact can name the occurrences and
+world version it depends on. Rebuild only the projection whose named inputs
+changed; a change with no recorded dependency does not justify near-global
+invalidation. Store can preserve the evidence needed for that accounting;
+broader dependency scheduling remains integration work.
 
 ## Storage, writer, and readers
 
