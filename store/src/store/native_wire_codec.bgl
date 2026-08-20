@@ -107,8 +107,8 @@
             (capture length-kind)
             (capture checksum-kind))
       (list (literal tagged) (capture tag-kind) (tail-splice cases)))
-     (let [base-type
-           (fn [spec] Any
+     (let [base-type Any
+           (fn [spec Any] Any
              (cond
                [(= spec ':u8) 'Int]
                [(= spec ':u16le) 'Int]
@@ -120,25 +120,25 @@
                [(if (list? spec) (= (first spec) 'codec) false) (nth spec 1)]
                [:else
                 (error "defwire " name ": unsupported wire type " spec)]))
-           field-type
-           (fn [spec] Any
+           field-type Any
+           (fn [spec Any] Any
              (if (if (list? spec) (= (first spec) 'optional) false)
                (list 'U 'Nil (base-type (nth spec 1)))
                (base-type spec)))
-           base-kind
-           (fn [spec] Any
+           base-kind Any
+           (fn [spec Any] Any
              (cond
                [(if (list? spec) (= (first spec) 'bounded-text) false)
                 ':bounded-text]
                [(if (list? spec) (= (first spec) 'codec) false) (nth spec 2)]
                [:else spec]))
-           field-kind
-           (fn [spec] Any
+           field-kind Any
+           (fn [spec Any] Any
              (if (if (list? spec) (= (first spec) 'optional) false)
                (base-kind (nth spec 1))
                (base-kind spec)))
-           base-fixed
-           (fn [spec] Any
+           base-fixed Any
+           (fn [spec Any] Any
              (cond
                [(= spec ':u8) 1]
                [(= spec ':bool) 1]
@@ -150,15 +150,15 @@
                [(if (list? spec) (= (first spec) 'codec) false) (nth spec 5)]
                [:else
                 (error "defwire " name ": unsupported wire type " spec)]))
-           field-fixed
-           (fn [spec] Any
+           field-fixed Any
+           (fn [spec Any] Any
              (if (if (list? spec) (= (first spec) 'optional) false)
-               (let [fixed (base-fixed (nth spec 1))]
+               (let [fixed Any (base-fixed (nth spec 1))]
                  (if (< fixed 0) -1 (+ 1 fixed)))
                (base-fixed spec)))
-           field-bound
-           (fn [spec] Any
-             (let [base (if (if (list? spec) (= (first spec) 'optional) false)
+           field-bound Any
+           (fn [spec Any] Any
+             (let [base Any (if (if (list? spec) (= (first spec) 'optional) false)
                           (nth spec 1) spec)]
                (cond
                  [(if (list? base) (= (first base) 'bounded-text) false)
@@ -166,11 +166,11 @@
                  [(if (list? base) (= (first base) 'codec) false)
                   (if (= (count base) 7) (nth base 6) 'nil)]
                  [:else 'nil])))
-           field-optional?
-           (fn [spec] Any
+           field-optional? Any
+           (fn [spec Any] Any
              (if (list? spec) (= (first spec) 'optional) false))
-           append-base
-           (fn [spec encoder value context] Any
+           append-base Any
+           (fn [spec Any encoder Any value Any context Any] Any
              (cond
                [(= spec ':u8)
                 (list 'store.native-wire-codec/append-u8! encoder value)]
@@ -192,8 +192,8 @@
                 (list (nth spec 3) encoder value)]
                [:else
                 (error "defwire " name ": unsupported wire type " spec)]))
-           read-base
-           (fn [spec decoder context] Any
+           read-base Any
+           (fn [spec Any decoder Any context Any] Any
              (cond
                [(= spec ':u8)
                 (list 'store.native-wire-codec/read-u8! decoder context)]
@@ -214,12 +214,12 @@
                 (list (nth spec 4) decoder)]
                [:else
                 (error "defwire " name ": unsupported wire type " spec)]))
-           append-field
-           (fn [spec encoder value context] Any
+           append-field Any
+           (fn [spec Any encoder Any value Any context Any] Any
              (if (field-optional? spec)
-               (let [base (nth spec 1)
-                     present (list 'not (list 'nil? value))
-                     present-value 'wire-present-value]
+               (let [base Any (nth spec 1)
+                     present Any (list 'not (list 'nil? value))
+                     present-value Any 'wire-present-value]
                  (list 'do
                        (list 'store.native-wire-codec/append-presence!
                              encoder present)
@@ -228,8 +228,8 @@
                              (append-base base encoder present-value context)
                              'nil)))
                (append-base spec encoder value context)))
-           read-field
-           (fn [spec decoder context] Any
+           read-field Any
+           (fn [spec Any decoder Any context Any] Any
              (if (field-optional? spec)
                (list 'if
                      (list 'store.native-wire-codec/read-presence!
@@ -237,16 +237,16 @@
                      (read-base (nth spec 1) decoder context)
                      'nil)
                (read-base spec decoder context)))
-           checked-cases
+           checked-cases Any
            (map-indexed
-            (fn [case-index case] Any
+            (fn [case-index Any case Any] Any
               (if (vector? case)
                 (if (= (count case) 3)
-                  (let [fields (nth case 2)]
+                  (let [fields Any (nth case 2)]
                     (if (vector? fields)
                       (do
                         (map-indexed
-                         (fn [field-index field] Any
+                         (fn [field-index Any field Any] Any
                            (if (list? field)
                              (if (if (= (count field) 2)
                                    true (= (count field) 3))
@@ -264,67 +264,67 @@
                 (syntax-error-at cases case-index
                   "Invalid defwire case declaration: " case)))
             cases)
-           tag-bytes (cond
+           tag-bytes Any (cond
                        [(= tag-kind ':none) 0]
                        [(= tag-kind ':u8) 1]
                        [(= tag-kind ':u16le) 2]
                        [:else
                         (error "defwire " name
                                ": tag kind must be :none, :u8, or :u16le")])
-           append-tag
-           (fn [encoder tag] Any
+           append-tag Any
+           (fn [encoder Any tag Any] Any
              (cond
                [(= tag-kind ':none) 'nil]
                [(= tag-kind ':u8)
                 (list 'store.native-wire-codec/append-u8! encoder tag)]
                [:else
                 (list 'store.native-wire-codec/append-u16-le! encoder tag)]))
-           case-forms
+           case-forms Any
            (mapcat
-            (fn [case] Any
-              (let [tag (nth case 0)
-                    case-name (nth case 1)
-                    fields (nth case 2)
-                    helper-prefix (format-symbol "~a-~a" name case-name)
-                    tag-name (format-symbol "~a-tag" helper-prefix)
-                    fixed-name (format-symbol "~a-fixed-bytes" helper-prefix)
-                    append-name (format-symbol "append-~a!" helper-prefix)
-                    read-name (format-symbol "read-~a!" helper-prefix)
-                    record-name
+            (fn [case Any] Any
+              (let [tag Any (nth case 0)
+                    case-name Any (nth case 1)
+                    fields Any (nth case 2)
+                    helper-prefix Any (format-symbol "~a-~a" name case-name)
+                    tag-name Any (format-symbol "~a-tag" helper-prefix)
+                    fixed-name Any (format-symbol "~a-fixed-bytes" helper-prefix)
+                    append-name Any (format-symbol "append-~a!" helper-prefix)
+                    read-name Any (format-symbol "read-~a!" helper-prefix)
+                    record-name Any
                     (format-symbol "WireFields_~a_~a" name case-name)
-                    constructor-name (format-symbol "->~a" record-name)
-                    fixed-fields (map (fn [field] Any
+                    constructor-name Any (format-symbol "->~a" record-name)
+                    fixed-fields Any (map (fn [field Any] Any
                                         (field-fixed (nth field 1))) fields)
-                    fixed-bytes
-                    (if (every? (fn [size] Any (>= size 0)) fixed-fields)
+                    fixed-bytes Any
+                    (if (every? (fn [size Any] Any (>= size 0)) fixed-fields)
                       (+ tag-bytes (reduce + 0 fixed-fields)) -1)
-                    encoder 'wire-encoder
-                    decoder 'wire-decoder
-                    locals
+                    encoder Any 'wire-encoder
+                    decoder Any 'wire-decoder
+                    locals Any
                     (map-indexed
-                     (fn [index field] Any
+                     (fn [index Any field Any] Any
                        (format-symbol "wire-field-~a-~a" index (nth field 0)))
                      fields)
-                    writes
+                    writes Any
                     (map
-                     (fn [field local] Any
-                       (let [field-name (nth field 0)
-                             context (if (= (count field) 3)
+                     (fn [field Any local Any] Any
+                       (let [field-name Any (nth field 0)
+                             context Any (if (= (count field) 3)
                                        (nth field 2)
                                        (str name " " case-name " " field-name))]
                          (append-field (nth field 1) encoder local context)))
                      fields locals)
-                    append-parameters
+                    append-parameters Any
                     (apply vec
                            (cons (ann encoder 'store.native-wire-codec/Encoder)
                                  (map
-                                  (fn [field local] Any
+                                  (fn [field Any local Any] Any
                                     (ann local (field-type (nth field 1))))
                                   fields locals)))
-                    bindings
+                    bindings Any
                     (mapcat
-                     (fn [field local] Any
-                       (let [context (if (= (count field) 3)
+                     (fn [field Any local Any] Any
+                       (let [context Any (if (= (count field) 3)
                                        (nth field 2)
                                        (str name " " case-name " " (nth field 0)))]
                          (list (ann local (field-type (nth field 1)))
@@ -334,7 +334,7 @@
                  (list 'defrecord record-name
                        (apply vec
                               (map
-                               (fn [field] Any
+                               (fn [field Any] Any
                                  (ann (nth field 0)
                                       (field-type (nth field 1))))
                                fields)))
@@ -352,21 +352,21 @@
                                 bindings)
                          (cons constructor-name locals))))))
             checked-cases)
-           case-schemas
+           case-schemas Any
            (map
-            (fn [case] Any
-              (let [tag (nth case 0)
-                    case-name (nth case 1)
-                    fields (nth case 2)
-                    fixed-fields (map (fn [field] Any
+            (fn [case Any] Any
+              (let [tag Any (nth case 0)
+                    case-name Any (nth case 1)
+                    fields Any (nth case 2)
+                    fixed-fields Any (map (fn [field Any] Any
                                         (field-fixed (nth field 1))) fields)
-                    fixed-bytes
-                    (if (every? (fn [size] Any (>= size 0)) fixed-fields)
+                    fixed-bytes Any
+                    (if (every? (fn [size Any] Any (>= size 0)) fixed-fields)
                       (+ tag-bytes (reduce + 0 fixed-fields)) -1)
-                    field-schemas
+                    field-schemas Any
                     (map
-                     (fn [field] Any
-                       (let [spec (nth field 1)]
+                     (fn [field Any] Any
+                       (let [spec Any (nth field 1)]
                          (list 'store.native-wire-codec/->WireFieldSchema
                                (make-keyword (nth field 0))
                                (field-kind spec)
@@ -378,8 +378,8 @@
                       tag (make-keyword case-name)
                       fixed-bytes (apply vec field-schemas))))
             checked-cases)
-           schema-name (format-symbol "~a-schema" name)
-           schema
+           schema-name Any (format-symbol "~a-schema" name)
+           schema Any
            (list 'def schema-name 'store.native-wire-codec/WireSchema
                  (list 'store.native-wire-codec/->WireSchema
                        (make-keyword name) length-kind
