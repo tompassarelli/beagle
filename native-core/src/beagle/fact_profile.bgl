@@ -163,3 +163,111 @@
          (->QueryAdmitted admitted)
          (->QueryRejected :query/canonical-mismatch
            "canonical query closure does not match its admitted dimensions"))])))
+
+(defrecord ResultAdmissionRequest
+  [query AdmittedQueryClosure
+   target String
+   materializer-content-id String
+   status String
+   artifact-content-id String?
+   diagnostic-content-id String?])
+
+(defrecord AdmittedResultClosure
+  [result-digest String
+   query AdmittedQueryClosure
+   target String
+   materializer-content-id String
+   status String
+   artifact-content-id String?
+   diagnostic-content-id String?
+   facts (Vec CompileQueryFact)])
+
+(defunion ResultAdmission
+  (ResultAdmitted [closure AdmittedResultClosure])
+  (ResultRejected [code Keyword detail String]))
+
+(defn result-digest [request ResultAdmissionRequest] String
+  (let [artifact String (or (resultadmissionrequest-artifact-content-id request) "")
+        diagnostic String (or (resultadmissionrequest-diagnostic-content-id request) "")
+        encoding String
+        (str (query-part "result")
+             (query-part (admittedqueryclosure-query-digest
+                           (resultadmissionrequest-query request)))
+             (query-part (resultadmissionrequest-target request))
+             (query-part (resultadmissionrequest-materializer-content-id request))
+             (query-part (resultadmissionrequest-status request))
+             (query-part artifact)
+             (query-part diagnostic))]
+    (str "sha256:" (sha256-bytes (utf8-encode encoding)))))
+
+(defn canonical-result-facts
+  [digest String request ResultAdmissionRequest] (Vec CompileQueryFact)
+  (let [query-digest String
+        (admittedqueryclosure-query-digest (resultadmissionrequest-query request))
+        base (Vec CompileQueryFact)
+        [(->CompileQueryFact 0 :result/query digest 0 query-digest)
+         (->CompileQueryFact 1 :result/target digest 0
+           (resultadmissionrequest-target request))
+         (->CompileQueryFact 2 :result/materializer digest 0
+           (resultadmissionrequest-materializer-content-id request))
+         (->CompileQueryFact 3 :result/status digest 0
+           (resultadmissionrequest-status request))]]
+    (if (= "ok" (resultadmissionrequest-status request))
+      (conj base (->CompileQueryFact 4 :result/artifact digest 0
+                   (resultadmissionrequest-artifact-content-id request)))
+      (conj base (->CompileQueryFact 4 :result/diagnostic digest 0
+                   (resultadmissionrequest-diagnostic-content-id request))))))
+
+(defn admit-and-identify-result [request ResultAdmissionRequest] ResultAdmission
+  (match (admit-canonical-query (resultadmissionrequest-query request))
+    [(QueryRejected code detail) (->ResultRejected code detail)]
+    [(QueryAdmitted query)
+     (let [status String (resultadmissionrequest-status request)
+           artifact String? (resultadmissionrequest-artifact-content-id request)
+           diagnostic String? (resultadmissionrequest-diagnostic-content-id request)]
+       (cond
+         (not (contains-string? (admittedqueryclosure-targets query)
+                                (resultadmissionrequest-target request)))
+         (->ResultRejected :result/unknown-target "result target is not admitted by its query")
+         (not (content-id? (resultadmissionrequest-materializer-content-id request)))
+         (->ResultRejected :result/invalid-materializer "materializer must be a lower-case sha256 content ID")
+         (not (or (= status "ok") (= status "rejected")))
+         (->ResultRejected :result/invalid-status "result status must be ok or rejected")
+         (and (= status "ok")
+              (or (nil? artifact) (some? diagnostic) (not (content-id? artifact))))
+         (->ResultRejected :result/invalid-artifact "ok results require exactly one artifact content ID")
+         (and (= status "rejected")
+              (or (some? artifact) (nil? diagnostic) (not (content-id? diagnostic))))
+         (->ResultRejected :result/invalid-diagnostic "rejected results require exactly one diagnostic content ID")
+         :else
+         (let [normalized (->ResultAdmissionRequest query
+                            (resultadmissionrequest-target request)
+                            (resultadmissionrequest-materializer-content-id request)
+                            status artifact diagnostic)
+               digest String (result-digest normalized)]
+           (->ResultAdmitted
+             (->AdmittedResultClosure digest query
+               (resultadmissionrequest-target normalized)
+               (resultadmissionrequest-materializer-content-id normalized)
+               status artifact diagnostic
+               (canonical-result-facts digest normalized))))))]))
+
+(defn admit-canonical-result [closure AdmittedResultClosure] ResultAdmission
+  (let [request ResultAdmissionRequest
+        (->ResultAdmissionRequest
+          (admittedresultclosure-query closure)
+          (admittedresultclosure-target closure)
+          (admittedresultclosure-materializer-content-id closure)
+          (admittedresultclosure-status closure)
+          (admittedresultclosure-artifact-content-id closure)
+          (admittedresultclosure-diagnostic-content-id closure))]
+    (match (admit-and-identify-result request)
+      [(ResultRejected code detail) (->ResultRejected code detail)]
+      [(ResultAdmitted admitted)
+       (if (and (= (admittedresultclosure-result-digest closure)
+                   (admittedresultclosure-result-digest admitted))
+                (= (admittedresultclosure-facts closure)
+                   (admittedresultclosure-facts admitted)))
+         (->ResultAdmitted admitted)
+         (->ResultRejected :result/canonical-mismatch
+           "canonical result closure does not match its admitted dimensions"))])))
