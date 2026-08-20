@@ -118,7 +118,7 @@
         size Int (count units)
         empty-bytes (Vec Int) []]
     (loop [index Int 0
-           bytes (TransientVec Int) (transient empty-bytes)]
+           bytes Any (transient empty-bytes)]
       (if (>= index size)
         (persistent! bytes)
         (let [unit Int (int (nth units index))
