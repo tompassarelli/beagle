@@ -65,11 +65,15 @@ primitive, the retired Worlds service, or a universal identity key. Store may
 hold evidence used by a world while the world retains its own revision and
 provenance identity.
 
-**epistemic mode** — One of `Declared`, `Derived`, `Observed`, `Desired`,
-`EffectAttempt`, or `EffectReceipt`. These are system-level roles that a Store
-profile may model with ordinary Terms, not built-in Term tags. Desired state
-cannot satisfy observed state; an effect receipt still requires a subsequent
-observation before it supports a claim about external reality.
+**epistemic origin** — `Declared`, `Derived`, or `Observed`: how a fact entered
+an explanation. These are system-level roles that a Store profile may model
+with ordinary Terms, not built-in Term tags.
+
+**action protocol** — `Intent`, `Authorization`, `Attempt`, and
+`EffectReceipt`: the separate progression from a pure plan to a
+capability-controlled external attempt and its evidence. Desired state cannot
+satisfy observed state; a receipt still requires a subsequent observation
+before it supports a claim about external reality.
 
 **Turtle** — The “turtles all the way down” architecture prior: prefer the same
 recursive Term language for semantic content and structural coordinates when

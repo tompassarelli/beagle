@@ -43,12 +43,14 @@ writer, authorize an effect, or merge physical Store spaces.
 
 ## Explanation across worlds
 
-One explanation model spans declared inputs, derived conclusions, observations,
+One typed fact system spans declared inputs, derived conclusions, observations,
 and effect records. They are roles carried by propositions and occurrences,
-not four incompatible storage systems. A world identifies a versioned choice of
-evidence and rules; a materialization identifies a reproducible projection of
-that world; an execution domain identifies where an interpretation or effect is
-authorized to run. These roles must retain their dependencies and provenance:
+not incompatible storage systems or a claim that external reality is pure. A
+world is the broad semantic snapshot concept: a versioned choice of evidence,
+rules, judgments, and plans, not a Store branch. A materialization identifies a
+reproducible projection of named branches or that world; an execution domain
+identifies where an interpretation or effect is authorized to run. These roles
+must retain their dependencies and provenance:
 
 ```text
 declared input -> derived artifact -> desired state
@@ -57,11 +59,13 @@ declared input -> derived artifact -> desired state
                                                                -> later observation
 ```
 
-The arrows record explanation, not implication of truth. In particular,
-`Desired` is never `Observed`; an effect receipt records that an authorized
-attempt reported completion, while a later observation is separate evidence
-about the external world. Pure artifacts are reproducible projections from
-their named inputs, rules, and world version. The current kernel can preserve
+The arrows record explanation, not implication of truth. `Declared`, `Derived`,
+and `Observed` classify epistemic origin. The action protocol—`Intent`,
+`Authorization`, `Attempt`, and `EffectReceipt`—is separate. Desired state is
+never observed state; a receipt records that an authorized attempt reported
+completion, while a later observation is separate evidence about the external
+world. Pure artifacts are reproducible projections from their named inputs,
+rules, branches or roots, and world version. The current kernel can preserve
 the necessary terms and occurrence provenance; scheduling, authorization, and
 effect execution belong to integrations and are direction rather than current
 kernel behavior.
@@ -80,11 +84,12 @@ identity, key policy, and authorization evidence are provenance that an
 execution domain may evaluate; they are not created by matching Terms. Tests
 should therefore be conservative: prove the recorded input, rule, signature,
 or receipt that a claim actually relies on, and leave a result unknown when
-the evidence is absent. Logical unification does not erase physical separation:
-separate processes, logs, SpaceIds, retention policies, secret stores, and
-access controls remain separate trust and security boundaries. Deletion and
-secret handling are boundary policies, not a reason to rewrite durable identity
-or expose secret payloads in a shared projection.
+the evidence is absent. Logical or type unification does not erase physical
+separation: separate clusters, transactions, processes, logs, SpaceIds,
+retention policies, secret stores, access controls, trust domains, and failure
+domains remain separate. Deletion and secret handling are boundary policies,
+not a reason to rewrite durable identity or expose secret payloads in a shared
+projection.
 
 ## Perspective and graph roles
 

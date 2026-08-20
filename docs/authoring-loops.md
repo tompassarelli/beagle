@@ -54,11 +54,13 @@ revision, and artifact have distinct identities, and content identity is not
 trust. Logical relation does not merge the physical, execution, or security
 domains that hold those things.
 
-**epistemic mode** — the status of a record, not a cosmetic label.
-`Declared`, `Derived`, `Observed`, `Desired`, `EffectAttempt`, and
-`EffectReceipt` are non-interchangeable. An authoring loop may produce a pure
-plan; external execution requires an explicit capability, produces a receipt,
-and still needs a later observation before it supports a claim about reality.
+**epistemic origin** — `Declared`, `Derived`, or `Observed`: how a fact entered
+an explanation, not a cosmetic label.
+
+**action protocol** — `Intent`, `Authorization`, `Attempt`, and
+`EffectReceipt`. An authoring loop may derive a pure plan; external execution
+requires an explicit capability, produces a receipt, and still needs a later
+observation before it supports a claim about reality.
 
 ## Composition
 

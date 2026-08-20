@@ -48,8 +48,8 @@ independent typed Lisp built from a Clojure-derived core.** Clojure's vocabulary
 s-expressions, data literals, and structural authoring model are the door;
 Beagle's types, effects, execution model, and memory/data model are independent.
 The layering is Clojure vocabulary + Beagle type system + Beagle execution/data
-model. Beagle preserves Clojure where preservation has semantic value, never
-for compatibility's sake. If Clojure already has a form whose semantics are
+model. Beagle preserves Clojure where preservation has semantic value. If
+Clojure already has a form whose semantics are
 correct for Beagle, inherit it. If the semantics differ, name the difference.
 
 That boundary matters here. S-expressions let region, capability,
@@ -277,12 +277,12 @@ representation. It does not yet make durable reachability, compaction, and
 reclamation one completed product contract.
 
 Likewise, the Store's current facts are not interchangeable claims about the
-outside world. `Declared`, `Derived`, `Observed`, `Desired`, `EffectAttempt`,
-and `EffectReceipt` name distinct epistemic modes in the destination protocol.
-A plan remains pure; any effectful target requires an explicit capability,
-returns a receipt, and needs later observation before it supports an external
-claim. Materializers remain replaceable outputs with their own capabilities,
-not the authority to make an assertion true.
+outside world. `Declared`, `Derived`, and `Observed` name distinct epistemic
+origins. `Intent`, `Authorization`, `Attempt`, and `EffectReceipt` form a
+separate action protocol. A plan remains pure; any effectful target requires an
+explicit capability, returns a receipt, and needs later observation before it
+supports an external claim. Materializers remain replaceable outputs with
+their own capabilities, not the authority to make an assertion true.
 
 The intended contract is explicit: compare-and-swap selects one durable
 revision; compaction changes physical organization without changing the history

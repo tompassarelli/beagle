@@ -68,9 +68,9 @@ Design principle: "If Clojure already has a form whose semantics are correct
 for Beagle, inherit it. If the semantics differ, name the difference."
 
 Beagle preserves Clojure where preservation has semantic value. It is one
-source language whose parser, checker,
-canonicalizer, and repair tools give people and agents the same answer: what
-went wrong, where it occurred, and what a valid next edit is.
+source language whose parser, checker, canonicalizer, and repair tools give
+people and agents the same answer: what went wrong, where it occurred, and what
+a valid next edit is.
 
 Types exist to make that loop reliable. Static type information checks at
 compile time and erases before emit; an explicitly authored binding constraint

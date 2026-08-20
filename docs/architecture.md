@@ -46,10 +46,15 @@ or access-control domain.
 
 Epistemic origins and the action protocol are orthogonal. `Declared`,
 `Derived`, and `Observed` say how a fact entered an explanation. `Intent`,
-`Authorization`, `Attempt`, and `EffectReceipt` record an external action's
+`Authorization`, `Attempt`, and `EffectReceipt` define the external action
 protocol. Desired state and deployment plans may be derived purely; desired
 state cannot satisfy observed state, and a receipt does not replace a later
 observation.
+
+The current Store admission carrier serializes desired state, attempts, and
+receipts beside origins in `EpistemicProvenance`. That carrier representation
+does not make knowledge origin and action stage one conceptual taxonomy; the
+protocol split above is the architectural boundary.
 
 Pure artifacts are reproducible projections of named semantic branches or
 worlds. External reality participates in the same typed fact system through
@@ -129,6 +134,12 @@ position — not a desugared intermediate.
 - `beagle-lib/private/targets.rkt` — the canonical source-profile and
   materializer registry; every inventory in this repo is a rendered view of it
   (`bin/beagle langs`).
+- `store/src/store/epistemic_fact.bgl` — the current typed world-root and
+  provenance-admission records; Store remains the carrier, not the authority
+  that executes external actions.
+- `native-core/src/native/{unit_reuse,unit_compile}.bclj` — the reusable-result
+  receipt/key inputs and the exact semantic, dependency, profile, and
+  compiler-rule checks applied before reuse.
 <!-- beagle:langs emitters -->
 - `native-core/src/native/{stages,lower,obligations}.bclj` — the hosted implementation that lowers Core into one immutable validated Native Core program; `native-core/src/native/body_c17.bclj` implements C17 and the explicit C17/WASI Wasm bootstrap; `native-core/src/native/qbe.bclj` implements the direct QBE materializer.
 - `beagle-lib/private/emit-{clj,js,nix}.rkt` — the live target emitters (one row each in

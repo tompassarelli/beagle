@@ -71,7 +71,7 @@ the API for syntax-manipulating-syntax.
   the same binder primitive for macros and ordinary binders, and exact child
   provenance through quotation and unquotation.
 - **Refuse:** Racket's phase tower, module-scope machinery, inspectors,
-  certificates, and compatibility surface. Beagle has one explicit lexical
+  certificates, and legacy surface. Beagle has one explicit lexical
   phase and needs dependency records, not ambient expansion authority.
 - *Why it matters here:* syntax, binding, expansion, and diagnostic facts can
   become queryable store facts, so an agent can repair structure without
