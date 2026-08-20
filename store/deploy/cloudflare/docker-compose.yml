@@ -4,7 +4,7 @@
 #   SHIM_TOKEN=$(openssl rand -hex 32) docker compose up -d --build
 #
 # Topology: the Worker fetches the shim (bearer token, HTTP); the shim speaks
-# FRAMRPC v2 to the Beagle Store server over the private network.
+# Store RPC v2 to the Beagle Store server over the private network.
 # The Beagle Store server's port 7977 is NEVER published — the wire protocol is
 # unauthenticated by design and must stay behind the shim.
 services:
@@ -13,7 +13,7 @@ services:
     image: ${BEAGLE_STORE_SERVER_IMAGE:?set BEAGLE_STORE_SERVER_IMAGE from ./build-native-image.sh}
     volumes:
       - store-data:/data              # the durable fact log survives restarts
-    networks: [framnet]
+    networks: [storenet]
     restart: unless-stopped
     environment:
       BEAGLE_STORE_SPACE_ID: ${BEAGLE_STORE_SPACE_ID:-cloudflare}
@@ -31,13 +31,13 @@ services:
       BEAGLE_STORE_SPACE_ID: ${BEAGLE_STORE_SPACE_ID:-cloudflare}
     ports:
       - "8080:8787"                  # the ONE public ingress; front with TLS in prod
-    networks: [framnet]
+    networks: [storenet]
     depends_on:
       - server
     restart: unless-stopped
 
 networks:
-  framnet: {}                        # private bridge network
+  storenet: {}                        # private bridge network
 
 volumes:
   store-data: {}

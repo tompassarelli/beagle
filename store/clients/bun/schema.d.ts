@@ -7,7 +7,7 @@ import type {
 } from '@tompassarelli/beagle-store-rpc/core';
 
 export {
-  FRAMRPC_MAX_BATCH_ACTIONS as SCHEMA_MAX_BATCH_ACTIONS,
+  STORERPC_MAX_BATCH_ACTIONS as SCHEMA_MAX_BATCH_ACTIONS,
 } from '@tompassarelli/beagle-store-rpc/core';
 export const SCHEMA_MAX_CONFLICT_RETRIES: 32;
 export const SCHEMA_MAX_REQUIRE_UNIQUE: 247;

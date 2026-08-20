@@ -17,7 +17,7 @@ type = "CompiledWasm"
 globs = ["**/*.wasm"]
 fallthrough = true
 
-# One Durable Object owns one FRAMLOG and its snapshot image. Beagle Store assumes a
+# One Durable Object owns one Store transaction log and its snapshot image. Beagle Store assumes a
 # single writer for the whole open-to-close lifetime, which is exactly what a
 # Durable Object already guarantees.
 [[durable_objects.bindings]]
@@ -25,7 +25,7 @@ name = "BEAGLE_STORE"
 class_name = "StoreLog"
 
 # SQLite-backed storage is what gives the object a transactional KV; the two
-# chunked key ranges (framlog/, framimage/) are published in one transaction.
+# chunked key ranges (storelog/, storeimage/) are published in one transaction.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["StoreLog"]

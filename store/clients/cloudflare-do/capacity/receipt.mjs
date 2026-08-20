@@ -33,8 +33,8 @@ export const REQUIRED_CORPUS_PROFILE = Object.freeze({
   expectedFacts: 6912,
   spaceId: "store-wiki-capacity-v1",
   batches: 29,
-  loadFrames: 29,
-  verifyFrames: 4,
+  loadPackets: 29,
+  verifyPackets: 4,
 });
 
 export function canonicalJson(value) {
@@ -279,8 +279,8 @@ export function makeReceipt({
     bundledWasm[0].sha256 === wasm.wasmSha256;
   const fullCorpusExecutionPassed =
     functional.pass === true &&
-    functional.loadFrames === REQUIRED_CORPUS_PROFILE.loadFrames &&
-    functional.verifyFrames === REQUIRED_CORPUS_PROFILE.verifyFrames &&
+    functional.loadPackets === REQUIRED_CORPUS_PROFILE.loadPackets &&
+    functional.verifyPackets === REQUIRED_CORPUS_PROFILE.verifyPackets &&
     Number.isSafeInteger(functional.responseBytes) &&
     functional.responseBytes > 0;
   const durableRecycleReopenVerified =
@@ -289,7 +289,7 @@ export function makeReceipt({
     Number.isSafeInteger(functional.durableLogBytes) &&
     functional.durableLogBytes > 0 &&
     Number.isSafeInteger(functional.storageCommits) &&
-    functional.storageCommits >= REQUIRED_CORPUS_PROFILE.loadFrames &&
+    functional.storageCommits >= REQUIRED_CORPUS_PROFILE.loadPackets &&
     /^[0-9a-f]{64}$/.test(functional.reopenedTitleResponseSha256);
   const querySemanticsVerifiedAfterReopen =
     exactVerificationResponsesMatch(functional.reopenedVerificationResponses) &&
@@ -371,8 +371,8 @@ export function makeReceipt({
     },
     functional: {
       corpus: functional.corpus,
-      loadFrames: functional.loadFrames,
-      verifyFrames: functional.verifyFrames,
+      loadPackets: functional.loadPackets,
+      verifyPackets: functional.verifyPackets,
       responseBytes: functional.responseBytes,
       deploymentBundle: functional.deploymentBundle ?? null,
       reopenedFromDurableStorage: functional.reopenedFromDurableStorage,

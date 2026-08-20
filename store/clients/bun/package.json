@@ -1,7 +1,7 @@
 {
   "name": "@tompassarelli/beagle-store-rpc",
   "version": "0.5.0",
-  "description": "Official FRAMRPC v2 client with portable codec and Bun TCP binding",
+  "description": "Official Store RPC v2 client with portable codec and Bun TCP binding",
   "type": "module",
   "exports": {
     ".": {

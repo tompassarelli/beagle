@@ -1,5 +1,5 @@
 ;; SPDX-License-Identifier: MIT OR Apache-2.0
-;; Generate the fixed wiki-shaped FRAMRPC corpus used by the capacity gate.
+;; Generate the fixed wiki-shaped Store RPC corpus used by the capacity gate.
 (require '[clojure.java.io :as io]
          '[clojure.string :as str]
          '[cheshire.core :as json]
@@ -75,8 +75,8 @@
 (defn encode-request [operation payload]
   (let [id (swap! request-id inc)]
     [id
-     (wire/encode-rpc-frame-v2!
-      (wire/rpc-request-frame
+     (wire/encode-rpc-packet-v2!
+      (wire/rpc-request-packet
        id
        (wire/rpc-request! space operation nil nil nil payload)))]))
 
@@ -91,8 +91,8 @@
 
 (defn expect-response! [filename request-id operation served-version payload]
   (let [response
-        (wire/encode-rpc-frame-v2!
-         (wire/rpc-response-frame
+        (wire/encode-rpc-packet-v2!
+         (wire/rpc-response-packet
           request-id
           (wire/rpc-response!
            space operation served-version nil nil payload)))]
@@ -117,8 +117,8 @@
           (emit! verify-manifest "verify-title" "q" :rpc/scan
                  (wire/rpc-triple-pattern! title-subject :wiki/title nil))
           expected-title-response
-          (wire/encode-rpc-frame-v2!
-           (wire/rpc-response-frame
+          (wire/encode-rpc-packet-v2!
+           (wire/rpc-response-packet
             title-request-id
             (wire/rpc-response!
              space :rpc/scan (count batches) nil nil
@@ -192,8 +192,8 @@
                 (assoc profile
                        :spaceId space
                        :batches (count batches)
-                       :loadFrames (count batches)
-                       :verifyFrames (count @verify-manifest))
+                       :loadPackets (count batches)
+                       :verifyPackets (count @verify-manifest))
                 {:pretty true})
                "\n"))
     (println (str "generate-wiki-corpus: " (count actions) " facts in "

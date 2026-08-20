@@ -1,10 +1,10 @@
 import {
-  FRAMRPC_MAX_BATCH_ACTIONS,
+  STORERPC_MAX_BATCH_ACTIONS,
   StoreRpcError,
   term,
 } from './store-rpc-core.mjs';
 
-export const SCHEMA_MAX_BATCH_ACTIONS = FRAMRPC_MAX_BATCH_ACTIONS;
+export const SCHEMA_MAX_BATCH_ACTIONS = STORERPC_MAX_BATCH_ACTIONS;
 export const SCHEMA_MAX_CONFLICT_RETRIES = 32;
 export const SCHEMA_MAX_REQUIRE_UNIQUE = 247;
 export const SCHEMA_MAX_GUARD_CONCURRENCY = 8;
@@ -635,7 +635,7 @@ function enforceActionCount(actionCount, label = 'schema mutation') {
   if (actionCount > SCHEMA_MAX_BATCH_ACTIONS) {
     schemaError(
       SCHEMA_ERROR_CODES.ACTION_LIMIT,
-      `${label} needs ${actionCount} actions; the FRAMRPC mutation-response depth ceiling is ${SCHEMA_MAX_BATCH_ACTIONS}`,
+      `${label} needs ${actionCount} actions; the Store RPC mutation-response depth ceiling is ${SCHEMA_MAX_BATCH_ACTIONS}`,
       { label, actions: actionCount, maximum: SCHEMA_MAX_BATCH_ACTIONS },
     );
   }

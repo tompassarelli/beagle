@@ -1,7 +1,7 @@
-const MAGIC = Uint8Array.of(0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0x00);
+const MAGIC = Uint8Array.of(0x53, 0x54, 0x4f, 0x52, 0x45, 0x52, 0x50, 0x43);
 const HEADER_BYTES = 26;
 const MAX_BODY_BYTES = 1024 * 1024;
-const MAX_FRAME_BYTES = HEADER_BYTES + MAX_BODY_BYTES;
+const MAX_PACKET_BYTES = HEADER_BYTES + MAX_BODY_BYTES;
 const MAX_STRING_BYTES = 1024 * 1024;
 const MAX_SPACE_BYTES = 4096;
 const MAX_TERM_NODES = 65536;
@@ -50,13 +50,13 @@ function dataView(bytes) {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-export const FRAMRPC_VERSION = Object.freeze({ major: 2, minor: 0 });
-export const FRAMRPC_MAX_BATCH_ACTIONS = 247;
-export const FRAMRPC_MAX_FRAME_BYTES = MAX_FRAME_BYTES;
+export const STORERPC_VERSION = Object.freeze({ major: 2, minor: 0 });
+export const STORERPC_MAX_BATCH_ACTIONS = 247;
+export const STORERPC_MAX_PACKET_BYTES = MAX_PACKET_BYTES;
 
 export class StoreProtocolError extends Error {
   constructor(message, code = 'client/protocol', options) {
-    super(`FRAMRPC: ${message}`, options);
+    super(`Store RPC: ${message}`, options);
     this.name = 'StoreProtocolError';
     this.code = code;
   }
@@ -64,7 +64,7 @@ export class StoreProtocolError extends Error {
 
 export class StoreTransportError extends Error {
   constructor(message, cause) {
-    super(`FRAMRPC transport: ${message}`, cause ? { cause } : undefined);
+    super(`Store RPC transport: ${message}`, cause ? { cause } : undefined);
     this.name = 'StoreTransportError';
   }
 }
@@ -469,7 +469,7 @@ class Reader {
 
   ensure(count, context) {
     if (this.offset + count > this.bytes.length) {
-      fail(`frame ended inside ${context}`, 'client/truncated');
+      fail(`packet ended inside ${context}`, 'client/truncated');
     }
   }
 
@@ -602,7 +602,7 @@ function requestControls(operation, options) {
 function encodeRequest(requestId, space, operation, payload, options, operations = OPERATIONS) {
   if (typeof space !== 'string' || !space) fail('space must be a nonempty string', 'client/invalid-space');
   strictUtf8(space, MAX_SPACE_BYTES, 'SpaceId');
-  if (!operations.has(operation)) fail(`${operation} is outside this FRAMRPC surface`, 'client/unsupported-operation');
+  if (!operations.has(operation)) fail(`${operation} is outside this Store RPC surface`, 'client/unsupported-operation');
   const controls = requestControls(operation, options);
   const body = new Writer();
   const budget = { nodes: 0, maxDepth: 0 };
@@ -619,19 +619,19 @@ function encodeRequest(requestId, space, operation, payload, options, operations
   writePresence(body, controls.timeoutMs);
   if (controls.timeoutMs !== null) body.u32(controls.timeoutMs);
   writeTerm(body, term(payload), budget);
-  if (body.length > MAX_BODY_BYTES) fail('request body exceeds 1 MiB', 'client/frame-too-large');
+  if (body.length > MAX_BODY_BYTES) fail('request body exceeds 1 MiB', 'client/packet-too-large');
 
   const header = new Writer();
   header.push(MAGIC);
-  header.u16(FRAMRPC_VERSION.major);
-  header.u16(FRAMRPC_VERSION.minor);
+  header.u16(STORERPC_VERSION.major);
+  header.u16(STORERPC_VERSION.minor);
   header.u8(1);
   header.u8(0);
   header.u32(body.length);
   header.i64(requestId);
   header.push(body.finish());
   return {
-    frame: header.finish(),
+    packet: header.finish(),
     bodyBytes: body.length,
     termCount: budget.nodes,
     maxTermDepth: budget.maxDepth,
@@ -641,7 +641,7 @@ function encodeRequest(requestId, space, operation, payload, options, operations
 function batchPreflight(encoded, actionCount) {
   return Object.freeze({
     actionCount,
-    requestBytes: encoded.frame.length,
+    requestBytes: encoded.packet.length,
     bodyBytes: encoded.bodyBytes,
     termCount: encoded.termCount,
     maxTermDepth: encoded.maxTermDepth,
@@ -700,32 +700,32 @@ function responseError(reader) {
   return { code, retryable, message, detail };
 }
 
-function decodeResponseFrame(frame, expected) {
-  if (!(frame instanceof Uint8Array)) {
-    fail('response frame must be a Uint8Array', 'client/invalid-frame');
+function decodeResponsePacket(packet, expected) {
+  if (!(packet instanceof Uint8Array)) {
+    fail('response packet must be a Uint8Array', 'client/invalid-packet');
   }
-  if (frame.length < HEADER_BYTES) fail('response ended inside its header', 'client/truncated');
-  if (frame.length > MAX_FRAME_BYTES) fail('response exceeds the frame limit', 'client/frame-too-large');
-  if (!bytesEqual(frame.subarray(0, MAGIC.length), MAGIC)) {
+  if (packet.length < HEADER_BYTES) fail('response ended inside its header', 'client/truncated');
+  if (packet.length > MAX_PACKET_BYTES) fail('response exceeds the packet limit', 'client/packet-too-large');
+  if (!bytesEqual(packet.subarray(0, MAGIC.length), MAGIC)) {
     fail('response magic does not match', 'client/invalid-magic');
   }
-  const view = dataView(frame);
+  const view = dataView(packet);
   const major = view.getUint16(8, true);
   const minor = view.getUint16(10, true);
   const kind = view.getUint8(12);
   const flags = view.getUint8(13);
   const bodyLength = view.getUint32(14, true);
   const requestId = view.getBigInt64(18, true);
-  if (major !== FRAMRPC_VERSION.major || minor !== FRAMRPC_VERSION.minor) {
+  if (major !== STORERPC_VERSION.major || minor !== STORERPC_VERSION.minor) {
     fail('response protocol version is unsupported', 'client/unsupported-version');
   }
-  if (kind !== 2) fail('request expected a response frame', 'client/invalid-kind');
+  if (kind !== 2) fail('request expected a response packet', 'client/invalid-kind');
   if (flags !== 0) fail('response flags must be zero', 'client/invalid-flags');
-  if (bodyLength > MAX_BODY_BYTES) fail('response body exceeds 1 MiB', 'client/frame-too-large');
-  if (frame.length !== HEADER_BYTES + bodyLength) fail('response body length is inconsistent', 'client/truncated');
+  if (bodyLength > MAX_BODY_BYTES) fail('response body exceeds 1 MiB', 'client/packet-too-large');
+  if (packet.length !== HEADER_BYTES + bodyLength) fail('response body length is inconsistent', 'client/truncated');
   if (requestId !== expected.requestId) fail('response request id does not match', 'client/identity-mismatch');
 
-  const reader = new Reader(frame.subarray(HEADER_BYTES));
+  const reader = new Reader(packet.subarray(HEADER_BYTES));
   const space = stringValue(reader.term(), 'response space');
   const operation = keywordName(reader.term(), 'response operation');
   const servedVersion = reader.i64('served version');
@@ -739,16 +739,16 @@ function decodeResponseFrame(frame, expected) {
   return { space, operation, servedVersion, page, error, payload };
 }
 
-export function storeRpcDeclaredFrameBytes(bytes) {
+export function storeRpcDeclaredPacketBytes(bytes) {
   if (!(bytes instanceof Uint8Array)) {
-    fail('frame must be a Uint8Array', 'client/invalid-frame');
+    fail('packet must be a Uint8Array', 'client/invalid-packet');
   }
   if (bytes.length < HEADER_BYTES) return null;
   if (!bytesEqual(bytes.subarray(0, MAGIC.length), MAGIC)) {
     fail('response magic does not match', 'client/invalid-magic');
   }
   const bodyLength = dataView(bytes).getUint32(14, true);
-  if (bodyLength > MAX_BODY_BYTES) fail('response body exceeds 1 MiB', 'client/frame-too-large');
+  if (bodyLength > MAX_BODY_BYTES) fail('response body exceeds 1 MiB', 'client/packet-too-large');
   return HEADER_BYTES + bodyLength;
 }
 
@@ -1138,7 +1138,7 @@ function operationEntry(operation, options) {
 }
 
 async function exchangeWithTransport({
-  transport, frame, expected, entry, timeoutMs, signal,
+  transport, packet, expected, entry, timeoutMs, signal,
 }) {
   if (signal !== undefined
       && (!signal || typeof signal !== 'object'
@@ -1166,7 +1166,7 @@ async function exchangeWithTransport({
   }, timeoutMs);
 
   const request = Object.freeze({
-    frame,
+    packet,
     entry,
     operation: expected.operation,
     space: expected.space,
@@ -1179,7 +1179,7 @@ async function exchangeWithTransport({
       Promise.resolve().then(() => transport(request)),
       control,
     ]);
-    return decodeResponseFrame(response, expected);
+    return decodeResponsePacket(response, expected);
   } catch (error) {
     if (error instanceof StoreTransportError || error instanceof StoreProtocolError) {
       throw error;
@@ -1217,7 +1217,7 @@ export async function storeTransportCheckpoint({
   );
   const response = await exchangeWithTransport({
     transport,
-    frame: encoded.frame,
+    packet: encoded.packet,
     expected: { requestId, space, operation },
     entry: 'transact',
     timeoutMs: requestTimeoutMs,
@@ -1229,9 +1229,9 @@ function prepareBatch(actions, options, allowPreflight) {
   if (!Array.isArray(actions) || actions.length === 0) {
     fail('batch requires at least one action', 'client/invalid-action');
   }
-  if (actions.length > FRAMRPC_MAX_BATCH_ACTIONS) {
+  if (actions.length > STORERPC_MAX_BATCH_ACTIONS) {
     fail(
-      `batch accepts at most ${FRAMRPC_MAX_BATCH_ACTIONS} actions`,
+      `batch accepts at most ${STORERPC_MAX_BATCH_ACTIONS} actions`,
       'client/action-limit',
     );
   }
@@ -1287,7 +1287,7 @@ export function storeClient({
     const queryTimeout = own(options, 'timeoutMs') ? Number(options.timeoutMs) + 1000 : 0;
     const response = await exchangeWithTransport({
       transport,
-      frame: encoded.frame,
+      packet: encoded.packet,
       expected: { requestId, space, operation },
       entry: operationEntry(operation, options),
       timeoutMs: Math.max(requestTimeoutMs, queryTimeout),

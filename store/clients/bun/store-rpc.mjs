@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-// Bun's TCP binding around the runtime-neutral FRAMRPC codec/client.
+// Bun's TCP binding around the runtime-neutral Store RPC codec/client.
 
 import { createConnection } from 'node:net';
 import {
-  FRAMRPC_MAX_FRAME_BYTES,
+  STORERPC_MAX_PACKET_BYTES,
   StoreProtocolError,
   StoreTransportError,
   storeClient as storeTransportClient,
-  storeRpcDeclaredFrameBytes,
+  storeRpcDeclaredPacketBytes,
   storeTransportCheckpoint,
 } from './store-rpc-core.mjs';
 
@@ -30,7 +30,7 @@ export function storeTcpTransport({
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new StoreProtocolError('port must be from 1 through 65535', 'client/invalid-port');
   }
-  return ({ frame, timeoutMs, signal }) => new Promise((resolve, reject) => {
+  return ({ packet, timeoutMs, signal }) => new Promise((resolve, reject) => {
     let settled = false;
     const chunks = [];
     let received = 0;
@@ -54,22 +54,22 @@ export function storeTcpTransport({
     signal?.addEventListener('abort', abort, { once: true });
     socket.setNoDelay(true);
     socket.setTimeout(timeoutMs);
-    socket.once('connect', () => socket.write(frame));
+    socket.once('connect', () => socket.write(packet));
     socket.on('data', chunk => {
       if (settled) return;
       chunks.push(chunk);
       received += chunk.length;
-      if (received > FRAMRPC_MAX_FRAME_BYTES) {
+      if (received > STORERPC_MAX_PACKET_BYTES) {
         finish(new StoreProtocolError(
-          'response exceeds the frame limit',
-          'client/frame-too-large',
+          'response exceeds the packet limit',
+          'client/packet-too-large',
         ));
         return;
       }
       try {
         const joined = concatChunks(chunks, received);
         if (declared === null && received >= 26) {
-          declared = storeRpcDeclaredFrameBytes(joined);
+          declared = storeRpcDeclaredPacketBytes(joined);
         }
         if (declared !== null && received > declared) {
           finish(new StoreProtocolError(

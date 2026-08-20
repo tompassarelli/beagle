@@ -14,7 +14,7 @@ function json(value, status = 200) {
   });
 }
 
-export class CapacityFram extends StoreDurableObjectBase {
+export class CapacityStore extends StoreDurableObjectBase {
   constructor(state, env) {
     super(state, env, storeModule, {
       spaceId: SPACE_ID,
@@ -40,13 +40,13 @@ export class CapacityFram extends StoreDurableObjectBase {
         if (!new Set(["q", "t", "s"]).has(entry)) {
           return json({ error: "x-store-entry must be q, t, or s" }, 400);
         }
-        const frame = new Uint8Array(await request.arrayBuffer());
+        const packet = new Uint8Array(await request.arrayBuffer());
         const result =
           entry === "t"
-            ? await this.transact(frame)
+            ? await this.transact(packet)
             : entry === "s"
-              ? await this.snapshot(frame)
-              : await this.query(frame);
+              ? await this.snapshot(packet)
+              : await this.query(packet);
         return json({
           status: result.status,
           message: result.message,

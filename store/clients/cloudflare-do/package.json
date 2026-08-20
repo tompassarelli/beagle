@@ -31,8 +31,8 @@
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
     "check:seams": "bun scripts/check-seams.mjs",
-    "pack:frames": "bun test/pack-frames.mjs",
-    "test:bun": "bun test/run-node.mjs lib/libstore.wasm ../../tests/wasm_embed/frames",
+    "pack:packets": "bun test/pack-packets.mjs",
+    "test:bun": "bun test/run-node.mjs lib/libstore.wasm ../../tests/wasm_embed/packets",
     "test:workerd": "bun test/run-matrix.mjs test/out",
     "capacity": "bash capacity/run-gate.sh",
     "capacity:receipt": "bun test capacity/receipt.test.mjs"

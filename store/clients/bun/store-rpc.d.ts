@@ -254,7 +254,7 @@ export interface StoreClientOptions {
 export type StoreTransportEntry = 'query' | 'transact' | 'snapshot';
 
 export interface StoreTransportRequest {
-  readonly frame: Uint8Array;
+  readonly packet: Uint8Array;
   readonly entry: StoreTransportEntry;
   readonly operation: string;
   readonly space: string;
@@ -283,9 +283,9 @@ export interface StoreNativeCheckpointResult {
   readonly snapshotBytes: bigint;
 }
 
-export const FRAMRPC_VERSION: Readonly<{ major: 2; minor: 0 }>;
-export const FRAMRPC_MAX_BATCH_ACTIONS: 247;
-export const FRAMRPC_MAX_FRAME_BYTES: 1048602;
+export const STORERPC_VERSION: Readonly<{ major: 2; minor: 0 }>;
+export const STORERPC_MAX_BATCH_ACTIONS: 247;
+export const STORERPC_MAX_PACKET_BYTES: 1048602;
 
 export class StoreProtocolError extends Error {
   code: string;
@@ -319,8 +319,8 @@ export function lowerQueryPlan(value: StructuredQuery): TripleTerm;
 export function tripleQuery(pattern?: TriplePattern): TripleTerm;
 /** Operator-only fixed capability; deliberately absent from StoreClient. */
 export function storeNativeCheckpoint(options: StoreClientOptions): Promise<StoreNativeCheckpointResult>;
-/** Runtime-neutral operator capability over an injected exact-frame transport. */
+/** Runtime-neutral operator capability over an injected exact-packet transport. */
 export function storeTransportCheckpoint(options: StoreTransportClientOptions): Promise<StoreNativeCheckpointResult>;
 export function storeTcpTransport(options?: Pick<StoreClientOptions, 'host' | 'port'>): StoreTransport;
-export function storeRpcDeclaredFrameBytes(frame: Uint8Array): number | null;
+export function storeRpcDeclaredPacketBytes(packet: Uint8Array): number | null;
 export function storeClient(options: StoreClientOptions): StoreClient;

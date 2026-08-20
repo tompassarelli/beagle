@@ -1,5 +1,5 @@
 #!/usr/bin/env bb
-;; Authenticated JSON gateway for the private FRAMRPC server socket.
+;; Authenticated JSON gateway for the private Store RPC server socket.
 ;; JSON is an edge representation only: the server receives one closed binary
 ;; RpcRequest, and its typed RpcResponse is rendered back to strict JSON.
 (require '[org.httpkit.server :as srv]
@@ -195,7 +195,7 @@
     (fail! "shim/invalid-space" "space must be a non-empty string"))
   (when (> (alength (.getBytes ^String value StandardCharsets/UTF_8))
            rpc/rpc-v2-max-space-bytes)
-    (fail! "shim/invalid-space" "space exceeds the FRAMRPC byte limit"))
+    (fail! "shim/invalid-space" "space exceeds the Store RPC byte limit"))
   value)
 
 (defn json-request! [value]
@@ -378,5 +378,5 @@
 (when-not (= "1" (System/getenv "SHIM_LIBRARY"))
   (srv/run-server handler {:ip "0.0.0.0" :port shim-port})
   (println (str "store-shim listening on 0.0.0.0:" shim-port
-                " -> FRAMRPC " store-host ":" store-port))
+                " -> Store RPC " store-host ":" store-port))
   @(promise))

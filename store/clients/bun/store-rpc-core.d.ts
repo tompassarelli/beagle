@@ -55,9 +55,9 @@ export type {
 } from '@tompassarelli/beagle-store-rpc';
 
 export {
-  FRAMRPC_VERSION,
-  FRAMRPC_MAX_BATCH_ACTIONS,
-  FRAMRPC_MAX_FRAME_BYTES,
+  STORERPC_VERSION,
+  STORERPC_MAX_BATCH_ACTIONS,
+  STORERPC_MAX_PACKET_BYTES,
   StoreProtocolError,
   StoreTransportError,
   StoreRpcError,
@@ -77,7 +77,7 @@ export {
   lowerQueryPlan,
   tripleQuery,
   storeTransportCheckpoint,
-  storeRpcDeclaredFrameBytes,
+  storeRpcDeclaredPacketBytes,
 } from '@tompassarelli/beagle-store-rpc';
 
 import type {
@@ -85,5 +85,5 @@ import type {
   StoreTransportClientOptions,
 } from '@tompassarelli/beagle-store-rpc';
 
-/** Runtime-neutral FRAMRPC client over an injected exact-frame transport. */
+/** Runtime-neutral Store RPC client over an injected exact-packet transport. */
 export function storeClient(options: StoreTransportClientOptions): StoreClient;

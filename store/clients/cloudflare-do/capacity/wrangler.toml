@@ -11,8 +11,8 @@ fallthrough = true
 
 [[durable_objects.bindings]]
 name = "BEAGLE_STORE"
-class_name = "CapacityFram"
+class_name = "CapacityStore"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["CapacityFram"]
+new_sqlite_classes = ["CapacityStore"]

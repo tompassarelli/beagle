@@ -199,10 +199,10 @@ let progress = {
   schema: "store-cloudflare-workerd-progress/v1",
   phase: "starting",
   lastCompletedPhase: "not-started",
-  completedLoadFrames: 0,
-  totalLoadFrames: load.length,
-  completedVerifyFrames: 0,
-  totalVerifyFrames: verify.length,
+  completedLoadPackets: 0,
+  totalLoadPackets: load.length,
+  completedVerifyPackets: 0,
+  totalVerifyPackets: verify.length,
   loadedGuestLinearMemoryBytes: null,
   reopenedGuestLinearMemoryBytes: null,
   runtimeConfigurationObserved: false,
@@ -238,8 +238,8 @@ function recordProgress(update) {
   renameSync(temporary, progressOutput);
   process.stdout.write(
     `capacity-progress: phase=${progress.phase} ` +
-      `load=${progress.completedLoadFrames}/${progress.totalLoadFrames} ` +
-      `verify=${progress.completedVerifyFrames}/${progress.totalVerifyFrames}\n`,
+      `load=${progress.completedLoadPackets}/${progress.totalLoadPackets} ` +
+      `verify=${progress.completedVerifyPackets}/${progress.totalVerifyPackets}\n`,
   );
   return progress;
 }
@@ -281,7 +281,7 @@ function createRuntime() {
     scriptPath: workerPath,
     cf: false,
     compatibilityDate: "2026-08-01",
-    durableObjects: { BEAGLE_STORE: { className: "CapacityFram", useSQLite: true } },
+    durableObjects: { BEAGLE_STORE: { className: "CapacityStore", useSQLite: true } },
     resourcePersistencePath: persistence,
   }));
 }
@@ -302,7 +302,7 @@ try {
     recordProgress({
       phase: "load",
       lastCompletedPhase: "load",
-      completedLoadFrames: index + 1,
+      completedLoadPackets: index + 1,
     });
   }
   const loaded = await requestJson(mf, "/stats");
@@ -376,7 +376,7 @@ try {
     recordProgress({
       phase: "reopen-verify",
       lastCompletedPhase: "reopen-verify",
-      completedVerifyFrames: index + 1,
+      completedVerifyPackets: index + 1,
     });
   }
   const expectedTitleResponseSha256 = readFileSync(
@@ -435,8 +435,8 @@ try {
     schema: "store-cloudflare-workerd-functional/v1",
     pass: true,
     corpus: profile,
-    loadFrames: load.length,
-    verifyFrames: verify.length,
+    loadPackets: load.length,
+    verifyPackets: verify.length,
     responseBytes,
     deploymentBundle,
     runtimeConfiguration: {

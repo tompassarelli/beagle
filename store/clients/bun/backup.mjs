@@ -9,7 +9,7 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { storeNativeCheckpoint } from './store-rpc.mjs';
 
-const LOG_MAGIC = Buffer.from('FRAMLOG\0', 'ascii');
+const LOG_MAGIC = Buffer.from('STORELOG\0', 'ascii');
 const SNAPSHOT_MAGIC = Buffer.from('store-snapshot/v1', 'ascii');
 const LOG_FIXED_HEADER_BYTES = 16;
 const MAX_SPACE_BYTES = 4096;
@@ -22,7 +22,7 @@ const U32_MAX = (1n << 32n) - 1n;
 const SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const BACKUP_FORMAT = 'beagle-store-backup/v1';
-const HISTORY_FILE = 'history.framlog';
+const HISTORY_FILE = 'history.storelog';
 const ARTIFACT_FILE = 'artifact.READY';
 const MANIFEST_FILE = 'manifest.json';
 const MANIFEST_DIGEST_FILE = 'manifest.sha256';
@@ -208,7 +208,7 @@ async function copyPrefix(source, target, count) {
     while (offset < total) {
       const wanted = Math.min(buffer.length, total - offset);
       const { bytesRead } = await source.read(buffer, 0, wanted, offset);
-      if (bytesRead === 0) fail('file-changed', 'FRAMLOG ended before the checkpoint cutoff');
+      if (bytesRead === 0) fail('file-changed', 'Store transaction log ended before the checkpoint cutoff');
       let written = 0;
       while (written < bytesRead) {
         const result = await targetHandle.write(buffer, written, bytesRead - written, offset + written);
@@ -228,7 +228,7 @@ async function copyPrefix(source, target, count) {
 async function parseLogHeader(handle, size, label) {
   if (size < BigInt(LOG_FIXED_HEADER_BYTES)) fail('invalid-log', `${label} has a truncated header`);
   const fixed = await readHandleExact(handle, BigInt(LOG_FIXED_HEADER_BYTES), `${label} header`, LOG_FIXED_HEADER_BYTES);
-  if (!fixed.subarray(0, 8).equals(LOG_MAGIC)) fail('invalid-log', `${label} magic does not match FRAMLOG`);
+  if (!fixed.subarray(0, 8).equals(LOG_MAGIC)) fail('invalid-log', `${label} magic does not match STORELOG`);
   if (fixed.readUInt16LE(8) !== 1 || fixed.readUInt16LE(10) !== 0) {
     fail('invalid-log', `${label} version or flags are unsupported`);
   }
@@ -357,7 +357,7 @@ async function verifyCheckpointSnapshot(logPath, point, spaceId) {
         || declaredImageEnd !== BigInt(trailerPosition)
         || stamp !== point.createdAtUnixMs
         || BigInt(fingerprint) !== point.snapshotCrc32) {
-      fail('checkpoint-mismatch', 'checkpoint snapshot sidecar does not match its receipt or supplied FRAMLOG path');
+      fail('checkpoint-mismatch', 'checkpoint snapshot sidecar does not match its receipt or supplied STORELOG path');
     }
   } finally {
     await snapshot.handle.close();
@@ -453,12 +453,12 @@ export async function createBackup(options) {
     if (error.code !== 'ENOENT') fail('file-open', `cannot inspect backup output ${output}: ${error.message}`);
   }
 
-  const source = await openRegular(logPath, 'FRAMLOG');
+  const source = await openRegular(logPath, 'Store transaction log');
   let outputCreated = false;
   try {
-    const header = await parseLogHeader(source.handle, source.stat.size, 'FRAMLOG');
+    const header = await parseLogHeader(source.handle, source.stat.size, 'Store transaction log');
     if (header.spaceId !== spaceId) {
-      fail('space-mismatch', `FRAMLOG belongs to SpaceId ${JSON.stringify(header.spaceId)}, not ${JSON.stringify(spaceId)}`);
+      fail('space-mismatch', `Store transaction log belongs to SpaceId ${JSON.stringify(header.spaceId)}, not ${JSON.stringify(spaceId)}`);
     }
     const receiptBytes = await readRegular(receiptPath, 'artifact receipt', MAX_RECEIPT_BYTES);
     const receipt = artifactReceipt(receiptBytes);
@@ -477,7 +477,7 @@ export async function createBackup(options) {
     const afterCheckpoint = await source.handle.stat({ bigint: true });
     if (!afterCheckpoint.isFile() || point.watermarkBytes < header.headerBytes
         || point.watermarkBytes > afterCheckpoint.size) {
-      fail('checkpoint-mismatch', 'checkpoint cutoff is outside the supplied FRAMLOG');
+      fail('checkpoint-mismatch', 'checkpoint cutoff is outside the supplied Store transaction log');
     }
 
     try {
@@ -494,7 +494,7 @@ export async function createBackup(options) {
     );
     const finalSource = await source.handle.stat({ bigint: true });
     if (!finalSource.isFile() || finalSource.size < point.watermarkBytes) {
-      fail('file-changed', 'FRAMLOG changed below the checkpoint cutoff during backup');
+      fail('file-changed', 'Store transaction log changed below the checkpoint cutoff during backup');
     }
     await writeSynced(join(output, ARTIFACT_FILE), receiptBytes);
 
@@ -591,11 +591,11 @@ export async function verifyBackup(options) {
   }
 
   const historyBytes = BigInt(manifest.history.bytes);
-  const history = await hashRegular(join(backup, HISTORY_FILE), 'backup FRAMLOG', historyBytes);
+  const history = await hashRegular(join(backup, HISTORY_FILE), 'backup Store transaction log', historyBytes);
   try {
-    if (history.digest !== manifest.history.sha256) fail('verification', 'backup FRAMLOG hash does not match the manifest');
-    const header = await parseLogHeader(history.handle, history.stat.size, 'backup FRAMLOG');
-    if (header.spaceId !== manifest.spaceId) fail('space-mismatch', 'backup FRAMLOG SpaceId does not match the manifest');
+    if (history.digest !== manifest.history.sha256) fail('verification', 'backup Store transaction log hash does not match the manifest');
+    const header = await parseLogHeader(history.handle, history.stat.size, 'backup Store transaction log');
+    if (header.spaceId !== manifest.spaceId) fail('space-mismatch', 'backup Store transaction log SpaceId does not match the manifest');
   } finally {
     await history.handle.close();
   }
@@ -640,7 +640,7 @@ Create options:
   --port PORT          Beagle Store server port (default: BEAGLE_STORE_SERVER_PORT or 7977)
   --timeout-ms MS      Checkpoint timeout (default: 15000)
 
-The create command copies the exact durable FRAMLOG prefix returned by the
+The create command copies the exact durable Store transaction log prefix returned by the
 native rpc/checkpoint operator operation. manifest.json is the atomic commit
 point. The snapshot image is derived state and is intentionally not backed up.
 `;

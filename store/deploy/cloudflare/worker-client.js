@@ -1,5 +1,5 @@
 // Zero-dependency Cloudflare Worker client for the JSON edge representation of
-// FRAMRPC v2. Every data value is one exact tagged Term array; integers stay
+// Store RPC v2. Every data value is one exact tagged Term array; integers stay
 // decimal strings and float identity stays IEEE-754 bits across JSON runtimes.
 
 const MAX_JSON_BYTES = 1024 * 1024;
@@ -10,7 +10,7 @@ const KEYWORD = /^[A-Za-z0-9*+!_?<>=$%&.-]+(?:\/[A-Za-z0-9*+!_?<>=$%&.-]+)?$/;
 const I64 = /^(?:0|-[1-9][0-9]*|[1-9][0-9]*)$/;
 const FLOAT64 = /^[0-9a-f]{16}$/;
 
-function fail(message) { throw new Error(`FRAMRPC JSON: ${message}`); }
+function fail(message) { throw new Error(`Store RPC JSON: ${message}`); }
 
 function exactKeys(value, required, allowed, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
