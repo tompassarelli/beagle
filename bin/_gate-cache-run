@@ -75,6 +75,12 @@ set -uo pipefail
 vocab=3
 
 die() { echo "_gate-cache-run: $*" >&2; exit 2; }
+cache_status() {
+    [[ "${BEAGLE_GATE_CACHE_QUIET_STATUS:-0}" == "1" ]] || echo "beagle-gate-cache: $*" >&2
+}
+cache_status_stdout() {
+    [[ "${BEAGLE_GATE_CACHE_QUIET_STATUS:-0}" == "1" ]] || echo "beagle-gate-cache: $*"
+}
 
 domain=""
 id=""
@@ -451,7 +457,7 @@ if [[ -d "$domain_dir" ]]; then
         [[ -d "$e" ]] || continue
         if validate_entry "$e"; then
             proof="$(sed -n 's/^created=//p' "$e/meta" | head -1)"
-            echo "beagle-gate-cache: cached-green $domain/$id entry=${entry:0:12} proof=$proof"
+            cache_status_stdout "cached-green $domain/$id entry=${entry:0:12} proof=$proof"
             cat "$e/stdout"
             [[ -f "$e/stderr" ]] && cat "$e/stderr" >&2
             touch -c "$e" 2>/dev/null || true
@@ -644,7 +650,7 @@ if [[ "$status" -ne 0 ]] &&
    grep -q "does not work under ptrace" "$out_f" "$err_f" 2>/dev/null; then
     mkdir -p "$domain_dir" 2>/dev/null || true
     touch "$untraceable_flag" 2>/dev/null || true
-    echo "beagle-gate-cache: $domain/$id is untraceable (sanitizer refuses ptrace); rerunning direct" >&2
+    cache_status "$domain/$id is untraceable (sanitizer refuses ptrace); rerunning direct"
     rm -rf "${scratch:?}"
     trap - EXIT
     export BEAGLE_GATE_CACHE_INNER=1
@@ -660,7 +666,7 @@ fi
 # green forever, so it is refused as loudly as a crash: doubt re-runs.
 if [[ ! -s "$records" || -s "$classifier_log" ]]; then
     [[ -s "$classifier_log" ]] && sed -n '1,5p' "$classifier_log" >&2
-    echo "beagle-gate-cache: ran-green $domain/$id (not cached: trace classifier produced no closure)" >&2
+    cache_status "ran-green $domain/$id (not cached: trace classifier produced no closure)"
     exit 0
 fi
 
@@ -776,7 +782,7 @@ while IFS=$'\t' read -r cls p; do
 done < "$scratch/records"
 
 if [[ -n "$uncacheable" ]]; then
-    echo "beagle-gate-cache: ran-green $domain/$id (not cached: $uncacheable)" >&2
+    cache_status "ran-green $domain/$id (not cached: $uncacheable)"
     exit 0
 fi
 
@@ -787,7 +793,7 @@ LC_ALL=C sort -u "$scratch/hash.paths" > "$scratch/hash.uniq"
 hash_paths < "$scratch/hash.uniq" | LC_ALL=C sort | normalize > "$staging/files.sha256"
 if [[ "$(wc -l < "$staging/files.sha256")" != "$(wc -l < "$scratch/hash.uniq")" ]]; then
     rm -rf -- "${staging:?}"
-    echo "beagle-gate-cache: ran-green $domain/$id (not cached: unreadable input)" >&2
+    cache_status "ran-green $domain/$id (not cached: unreadable input)"
     exit 0
 fi
 
@@ -822,7 +828,7 @@ entry_sha="$(cat "$staging/files.sha256" "$staging/links.list" \
 
 mkdir -p "$domain_dir" 2>/dev/null || true
 if mv -T "$staging" "$domain_dir/$entry_sha" 2>/dev/null; then
-    echo "beagle-gate-cache: ran-green $domain/$id stored entry=${entry_sha:0:12}" >&2
+    cache_status "ran-green $domain/$id stored entry=${entry_sha:0:12}"
     find "$cache_root" -mindepth 3 -maxdepth 3 -type d -mtime +14 \
         -exec rm -rf -- '{}' + 2>/dev/null || true
     # cap stored states per identity: newest 8 win (alternating states keep

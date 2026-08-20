@@ -20,7 +20,18 @@
 #   BEAGLE_ERROR_FORMAT=json bin/beagle-check examples/demo.bclj
 
 set -euo pipefail
-source "$(dirname "$0")/_beagle-racket"
+BIN="$(cd "$(dirname "$0")" && pwd)"
+source "$BIN/_beagle-racket"
+
+# A semantic check is a persistent query over the exact content closure it
+# reads. The shared proof cache traces that closure on a successful miss and
+# revalidates every recorded input before replaying the same green result.
+# Keep its bookkeeping line out of this command's intentionally empty stdout.
+if [[ -z "${BEAGLE_GATE_CACHE_INNER:-}" ]]; then
+    export BEAGLE_GATE_CACHE_QUIET_STATUS=1
+    exec "$BIN/_gate-cache-run" \
+        --domain semantic-check --id single-source -- "$0" "$@"
+fi
 
 # Parse flags
 AGENT=false

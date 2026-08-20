@@ -76,6 +76,10 @@ out2="$(run_gate)"; rc2=$?
 [[ $rc2 -eq 0 && "$out2" == *cached-green* ]]
 check "byte-identical closure replays as cached-green" $?
 
+out2_quiet="$(BEAGLE_GATE_CACHE_QUIET_STATUS=1 run_gate)"
+[[ "$out2_quiet" == *"gate ok"* && "$out2_quiet" != *cached-green* ]]
+check "quiet replay preserves proof output without cache bookkeeping" $?
+
 # t2: the replay is the same proof — stdout replayed verbatim.
 body1="$(printf '%s\n' "$out1" | grep -v '^beagle-gate-cache: ')"
 body2="$(printf '%s\n' "$out2" | grep -v '^beagle-gate-cache: ')"
