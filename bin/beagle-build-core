@@ -1059,6 +1059,18 @@ core_checkpoint_root="$cache_root/checkpoints"
 core_checkpoint_wire_attestation_root=\
 "$cache_root/checkpoint-wire-attestations"
 core_checkpoint_alias="$core_checkpoint_alias_root/$core_checkpoint_early_key"
+# Writer authority is local to one physical compiler/source universe. Source
+# bytes stay out of this scope key so the Store can reuse its independently
+# authenticated per-module shards after an edit; different checkouts or source
+# sets must never inherit one process-global writer authority.
+source_fact_store_scope_key="$(
+    {
+        printf 'beagle-source-fact-store-scope/v1\0%s\0' "$BEAGLE_DIR"
+        printf '%s\0' "${normalized_sources[@]}" | LC_ALL=C sort -z
+    } | sha256sum | awk '{print $1}'
+)"
+source_fact_store_root="$cache_root/source-facts"
+source_fact_store="$source_fact_store_root/$source_fact_store_scope_key.storelog"
 core_result_early_hit=0
 core_checkpoint_early_hit=0
 if [[ "$core_result_cache_enabled" == 1 && "$wasm_selected" == false ]]; then
@@ -1261,6 +1273,7 @@ for index, (source, source_id) in enumerate(zip(sources, source_ids)):
 PY
 
 run_ast_verifier_pool
+mkdir -p "$source_fact_store_root"
 source_index=0
 for source in "${normalized_sources[@]}"; do
     ast="$work/source_${source_index}.ast.json"
@@ -1275,7 +1288,7 @@ for source in "${normalized_sources[@]}"; do
 done
 run_phase_leaf source-facts "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-60}" \
     bb "$PROJECTOR" "${projector_args[@]}" --output "$facts" --include-defs \
-    --store "$cache_root/source-facts.storelog"
+    --store "$source_fact_store"
 fi
 else
     facts="$work/artifacts/source.facts"
