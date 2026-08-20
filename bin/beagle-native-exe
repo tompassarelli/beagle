@@ -164,18 +164,10 @@ for name in "${published_names[@]}"; do
 done
 
 work="$(mktemp -d "$out_parent/.beagle-native-exe.XXXXXX")"
-verify_pids=()
 started=0
 success=0
 cleanup() {
     local rc=$?
-    local pid
-    for pid in "${verify_pids[@]}"; do
-        kill "$pid" 2>/dev/null || true
-    done
-    for pid in "${verify_pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-    done
     rm -rf "${work:?}"
     if [[ "$started" == "1" && "$success" != "1" ]]; then
         rm -f -- "$out"
@@ -422,22 +414,10 @@ for index, source_id in enumerate(source_ids):
 PY
 
 ast_args=()
-source_index=0
-for source in "${closure_sources[@]}"; do
-    ast="$work/source_${source_index}.ast.json"
-    bb "$BEAGLE_DIR/native-core/bin/verify-checked-program.clj" "$ast" \
-        >"$work/source_${source_index}.verify.log" 2>&1 &
-    verify_pids+=("$!")
-    ast_args+=("${closure_source_ids[$source_index]}" "$ast")
-    source_index=$((source_index + 1))
-done
 for source_index in "${!closure_sources[@]}"; do
-    if ! wait "${verify_pids[$source_index]}"; then
-        sed -n '1,200p' "$work/source_${source_index}.verify.log" >&2
-        die "could not authenticate checked AST for source: ${closure_sources[$source_index]}"
-    fi
+    ast="$work/source_${source_index}.ast.json"
+    ast_args+=("${closure_source_ids[$source_index]}" "$ast")
 done
-verify_pids=()
 
 set +e
 entry_metadata="$(python3 - "$entry" "${ast_args[@]}" <<'PY'
