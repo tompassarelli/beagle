@@ -1,0 +1,241 @@
+#lang beagle
+(ns beagle.fact-materializer
+  (:require [beagle.artifact-linker :as artifact]
+            [beagle.checker :as checker]
+            [beagle.frontend-facts :as facts]))
+
+(defrecord FactMaterializationRequest
+  [query-id String
+   target String
+   closure facts/SyntaxFactClosure
+   checked-modules (Vec checker/CheckedFacts)
+   entry-namespace String
+   entry-definition String])
+
+(defunion FactMaterializationResult
+  (FactMaterialized [artifact artifact/TargetArtifactV1])
+  (FactMaterializationRejected [code Int detail String]))
+
+(defn text-values
+  [rows (Vec facts/CompilerFact)
+   relation Keyword
+   subject String
+   slot Int] (Vec String)
+  (reduce
+    (fn [values (Vec String) row facts/CompilerFact] (Vec String)
+      (if (and (= relation (facts/compilerfact-relation row))
+               (= subject (facts/compilerfact-subject row))
+               (= slot (facts/compilerfact-slot row)))
+        (match (facts/compilerfact-value row)
+          [(facts/FactText value) (conj values value)]
+          [(facts/FactNodeRef node-id) values]
+          [(facts/FactBool value) values]
+          [(facts/FactInt value) values]
+          [(facts/FactNil) values])
+        values))
+    [] rows))
+
+(defn node-values
+  [rows (Vec facts/CompilerFact) subject String slot Int] (Vec String)
+  (reduce
+    (fn [values (Vec String) row facts/CompilerFact] (Vec String)
+      (if (and (= :syntax/edge (facts/compilerfact-relation row))
+               (= subject (facts/compilerfact-subject row))
+               (= slot (facts/compilerfact-slot row)))
+        (match (facts/compilerfact-value row)
+          [(facts/FactNodeRef node-id) (conj values node-id)]
+          [(facts/FactText value) values]
+          [(facts/FactBool value) values]
+          [(facts/FactInt value) values]
+          [(facts/FactNil) values])
+        values))
+    [] rows))
+
+(defn int-values
+  [rows (Vec facts/CompilerFact) subject String slot Int] (Vec Int)
+  (reduce
+    (fn [values (Vec Int) row facts/CompilerFact] (Vec Int)
+      (if (and (= :syntax/value (facts/compilerfact-relation row))
+               (= subject (facts/compilerfact-subject row))
+               (= slot (facts/compilerfact-slot row)))
+        (match (facts/compilerfact-value row)
+          [(facts/FactInt value) (conj values value)]
+          [(facts/FactText value) values]
+          [(facts/FactNodeRef node-id) values]
+          [(facts/FactBool value) values]
+          [(facts/FactNil) values])
+        values))
+    [] rows))
+
+(defn module-position
+  [modules (Vec facts/SyntaxFactBundle) namespace String] Int
+  (loop [position Int 0 found Int -1]
+    (if (>= position (count modules))
+      found
+      (let [candidate String? (facts/syntaxfactbundle-namespace
+                                (nth modules position))]
+        (if (and (some? candidate) (= namespace candidate))
+          (if (= found -1)
+            (recur (+ position 1) position)
+            -2)
+          (recur (+ position 1) found))))))
+
+(defn function-subjects
+  [rows (Vec facts/CompilerFact) definition String] (Vec String)
+  (reduce
+    (fn [subjects (Vec String) row facts/CompilerFact] (Vec String)
+      (let [subject String (facts/compilerfact-subject row)
+            kinds (Vec String) (text-values rows :syntax/node subject 0)
+            names (Vec String) (text-values rows :syntax/value subject 0)]
+        (if (and (= 1 (count kinds))
+                 (= "function" (first kinds))
+                 (= 1 (count names))
+                 (= definition (first names)))
+          (conj subjects subject)
+          subjects)))
+    [] rows))
+
+(defn accepted-proposition?
+  [checked checker/CheckedFacts subject String rule String detail String] Bool
+  (reduce
+    (fn [accepted Bool proposition facts/TypePropositionFact] Bool
+      (if accepted
+        true
+        (if (and (= subject (facts/typepropositionfact-subject proposition))
+                 (= rule (facts/typepropositionfact-rule proposition))
+                 (= detail (facts/typepropositionfact-detail proposition)))
+          (reduce
+            (fn [found Bool evidence facts/TypeEvidenceFact] Bool
+              (or found
+                  (and (= (facts/typepropositionfact-proposition-id proposition)
+                          (facts/typeevidencefact-proposition-id evidence))
+                       (facts/typeevidencefact-accepted evidence))))
+            false
+            (checker/checkedfacts-evidence checked))
+          false)))
+    false
+    (checker/checkedfacts-propositions checked)))
+
+(defn lowering-type?
+  [checked checker/CheckedFacts subject String expected String] Bool
+  (reduce
+    (fn [found Bool lowering facts/OrderedLoweringFact] Bool
+      (if found
+        true
+        (and (= subject (facts/orderedloweringfact-subject lowering))
+             (match (facts/orderedloweringfact-value lowering)
+               [(facts/FactText value) (= expected value)]
+               [(facts/FactNodeRef node-id) false]
+               [(facts/FactBool value) false]
+               [(facts/FactInt value) false]
+               [(facts/FactNil) false]))))
+    false
+    (checker/checkedfacts-lowerings checked)))
+
+(defn reject [code Int detail String] FactMaterializationResult
+  (->FactMaterializationRejected code detail))
+
+(defn emit-c17
+  [request FactMaterializationRequest
+   namespace String
+   definition String
+   value Int] FactMaterializationResult
+  (let [symbol String
+        (str "beagle_" (sha256-bytes
+                         (utf8-encode (str namespace "/" definition))))
+        payload String
+        (str "#include <stdint.h>\n"
+             "static int64_t " symbol "(int argc, char **argv) {\n"
+             "  (void)argc;\n"
+             "  (void)argv;\n"
+             "  return (int64_t)(" value ");\n"
+             "}\n"
+             "int main(int argc, char **argv) {\n"
+             "  return (int)" symbol "(argc, argv);\n"
+             "}\n")
+        digest String (artifact/content-digest payload)
+        file artifact/ArtifactFileV1
+        (artifact/->ArtifactFileV1
+          (str symbol ".c") payload digest
+          (count (utf8-encode payload)) digest)
+        encoding String
+        (str "c17:" (factmaterializationrequest-query-id request) ":" digest)]
+    (->FactMaterialized
+      (artifact/->TargetArtifactV1
+        "c17" [file] encoding (artifact/content-digest encoding)))))
+
+(defn materialize
+  [request FactMaterializationRequest] FactMaterializationResult
+  (let [target String (factmaterializationrequest-target request)
+        closure facts/SyntaxFactClosure
+        (factmaterializationrequest-closure request)
+        modules (Vec facts/SyntaxFactBundle)
+        (facts/syntaxfactclosure-modules closure)
+        checked-modules (Vec checker/CheckedFacts)
+        (factmaterializationrequest-checked-modules request)
+        namespace String (factmaterializationrequest-entry-namespace request)
+        definition String (factmaterializationrequest-entry-definition request)
+        position Int (module-position modules namespace)]
+    (cond
+      (not= target "c17")
+      (reject 64 (str "unsupported native fact materialization target: " target))
+
+      (not= (count modules) (count checked-modules))
+      (reject 65 "syntax modules and checked modules are not aligned")
+
+      (= position -1)
+      (reject 65 (str "entry namespace is missing: " namespace))
+
+      (= position -2)
+      (reject 65 (str "entry namespace is ambiguous: " namespace))
+
+      :else
+      (let [module facts/SyntaxFactBundle (nth modules position)
+            checked checker/CheckedFacts (nth checked-modules position)
+            rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts module)
+            functions (Vec String) (function-subjects rows definition)]
+        (if (not= 1 (count functions))
+          (reject 65
+            (str "entry function must resolve exactly once: " definition))
+          (let [function String (first functions)
+                parameters (Vec String) (node-values rows function 0)
+                returns (Vec String) (node-values rows function 1)
+                bodies (Vec String) (node-values rows function 2)]
+            (if (or (not= 1 (count parameters))
+                    (not= 1 (count returns))
+                    (not= 1 (count bodies)))
+              (reject 65 "entry function shape is missing or ambiguous")
+              (let [parameter String (first parameters)
+                    return-node String (first returns)
+                    body String (first bodies)
+                    parameter-kinds (Vec String)
+                    (text-values rows :syntax/node parameter 0)
+                    return-kinds (Vec String)
+                    (text-values rows :syntax/node return-node 0)
+                    return-names (Vec String)
+                    (text-values rows :syntax/value return-node 0)
+                    body-kinds (Vec String)
+                    (text-values rows :syntax/node body 0)
+                    values (Vec Int) (int-values rows body 0)]
+                (cond
+                  (or (not= 1 (count parameter-kinds))
+                      (not= "binding" (first parameter-kinds))
+                      (not (lowering-type? checked parameter "(Vec String)")))
+                  (reject 65 "bootstrap entry requires one typed (Vec String) parameter")
+
+                  (or (not= 1 (count return-kinds))
+                      (not= "type-name" (first return-kinds))
+                      (not= 1 (count return-names))
+                      (not= "Int" (first return-names))
+                      (not (accepted-proposition? checked function
+                             "function/declared-return" "Int")))
+                  (reject 65 "bootstrap entry requires an accepted declared Int return")
+
+                  (or (not= 1 (count body-kinds))
+                      (not= "integer-literal" (first body-kinds))
+                      (not= 1 (count values))
+                      (not (lowering-type? checked body "Int")))
+                  (reject 65 "bootstrap entry requires one accepted integer literal body")
+
+                  :else
+                  (emit-c17 request namespace definition (first values)))))))))))
