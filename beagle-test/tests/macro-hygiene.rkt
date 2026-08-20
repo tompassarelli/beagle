@@ -47,6 +47,23 @@
 
 (define (br . xs) (cons BRACKET-TAG xs))
 
+(test-case "typed macro rest binder registers one variadic name"
+  (define reg (make-macro-registry))
+  (register-macro!
+   reg 'collect 'defmacro '(label Any & body (Vec Any))
+   '(quasiquote (list (unquote label) (unquote-splicing body))))
+  (check-equal? (expand-fully reg '(collect first second third))
+                '(list first second third)))
+
+(test-case "typed macro rest binder rejects trailing parameters"
+  (check-exn
+   #rx"macro params: `&` must be followed by exactly one rest-parameter name or binding/type pair"
+   (lambda ()
+     (register-macro!
+      (make-macro-registry) 'bad-rest 'defmacro
+      '(label Any & body (Vec Any) stray)
+      '(quasiquote nil)))))
+
 (define CAPTURE-MATRIX-SOURCE-ID "capture-matrix.bclj")
 
 (define CAPTURE-MATRIX-SOURCE

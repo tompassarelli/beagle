@@ -116,12 +116,28 @@
     (cond
       [(null? rest) (values (reverse fixed) #f)]
       [(eq? (car rest) '&)
-       (unless (and (pair? (cdr rest))
-                    (null? (cddr rest))
-                    (symbol? (cadr rest)))
-         (error 'beagle
-                "macro params: `&` must be followed by exactly one rest-parameter name"))
-       (values (reverse fixed) (cadr rest))]
+       (cond
+         [(and (pair? (cdr rest))
+               (null? (cddr rest))
+               (symbol? (cadr rest)))
+          (values (reverse fixed) (cadr rest))]
+         [(and (pair? (cdr rest))
+               (pair? (cddr rest))
+               (null? (cdddr rest))
+               (symbol? (cadr rest))
+               (type-expression-datum? (caddr rest)))
+          ;; Macro parameter annotations are checked at the declaration
+          ;; boundary; expansion binds only the name to its syntax values.
+          (values (reverse fixed) (cadr rest))]
+         [else
+          (error 'beagle
+                 "macro params: `&` must be followed by exactly one rest-parameter name or binding/type pair")])]
+      [(and (pair? (cdr rest))
+            (symbol? (car rest))
+            (type-expression-datum? (cadr rest)))
+       ;; Macro expansion has no runtime parameter values, so annotations are
+       ;; structural declarations and are erased after retaining the binder.
+       (loop (cddr rest) (cons (car rest) fixed))]
       [(symbol? (car rest))
        (loop (cdr rest) (cons (car rest) fixed))]
       [else
