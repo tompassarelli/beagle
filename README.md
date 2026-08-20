@@ -40,9 +40,14 @@ adopting the language frontend; see the
 
 Derived: Clojure's vocabulary and structural authoring model — its form
 library, s-expressions, data literals, `defn`/`let`/destructuring/threading
-ergonomics. Independent: types, effects, execution model, and memory/data
-model — no JVM, lazy seqs, dynamic vars, or GC-backed persistence; Beagle uses
-the store and arenas instead.
+ergonomics. Beagle owns static types, effects, and checked semantic
+identity/provenance. Execution and memory semantics belong to each profile: the
+Clojure-targeted region/profile retains the Clojure runtime facilities supplied
+by its execution runtime, including lazy sequences, dynamic vars, and
+GC-backed persistent collections; Native Core lowering alone rejects JVM
+dependence and uses Store-backed durability, arenas/regions, and explicit
+native capabilities. JavaScript and Nix profiles likewise expose admitted host
+semantics, not one shared runtime.
 
 Design principle: "If Clojure already has a form whose semantics are correct
 for Beagle, inherit it. If the semantics differ, name the difference."
