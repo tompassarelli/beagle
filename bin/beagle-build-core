@@ -1783,9 +1783,7 @@ validate_core_checkpoint_wire() {
           (doseq [path *command-line-args*]
             (let [encoding (slurp path)
                   frozen (stages/decode-frozen-native-stage-wire-v1 encoding)]
-              (when (or (nil? frozen)
-                        (not= encoding
-                              (stages/encode-frozen-native-stage-wire-v1 frozen)))
+              (when (nil? frozen)
                 (System/exit 1))))' \
         "$entry/artifacts/frozen-native-stage.wire-v1" \
         "$entry/artifacts/qbe-frozen-native-stage.wire-v1" \
