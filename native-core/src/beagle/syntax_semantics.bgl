@@ -187,12 +187,14 @@
    state SemanticState subject String] SemanticStep
   (let [kind String? (node-kind rows subject)
         value String? (node-value rows subject)
+        parsed Int? (if (nil? value) nil (parse-long value))
         span facts/SourceSpan (node-span bundle rows subject)]
-    (if (and (= kind "symbol") (some? value) (integer-text? value))
+    (if (and (= kind "symbol") (some? value)
+             (integer-text? value) (some? parsed))
       (->SemanticProduced
         (->SemanticEmission
           (append-value (append-node state subject "integer-literal" span)
-            subject (facts/->FactText value) span)
+            subject (facts/->FactInt parsed) span)
           subject))
       (reject bundle rows subject :semantics/body
         "bootstrap function body must be an integer literal"))))
