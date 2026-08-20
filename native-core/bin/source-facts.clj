@@ -52,33 +52,44 @@
   (let [projector-file (.getCanonicalFile (io/file *file*))
         repository (.getParentFile
                      (.getParentFile (.getParentFile projector-file)))
-        classpath (.getPath (io/file repository "store" "out"))
+        classpath (str (.getPath (io/file (.getParentFile projector-file)))
+                       ":" (.getPath (io/file repository "store" "out")))
         result
         (shell/sh "timeout" "--foreground" "-k" "1s" "10s"
           "env" "-u" "BEAGLE_STORE_TELEMETRY_LOG"
-          "bb" "-cp" classpath "-m" "store.dev-compile-facts" command
+          "bb" "-cp" classpath "-m" "source-fact-store" command
           :in (str (pr-str request) "\n"))]
-    (when (zero? (:exit result))
-      (try
-        (edn/read-string (:out result))
-        (catch Exception _ nil)))))
+    (when-not (zero? (:exit result))
+      (throw (ex-info (str "source-fact Store " command " failed")
+                      {:exit (:exit result) :out (:out result) :err (:err result)})))
+    (try
+      (edn/read-string (:out result))
+      (catch Exception error
+        (throw (ex-info (str "source-fact Store " command " returned invalid EDN")
+                        {:out (:out result) :err (:err result)} error))))))
 
 (defn query-source-fact-store [store requests]
   (let [response
         (invoke-source-fact-store "query" store
-          ["store.dev-compile-facts/query-v1" store requests])]
-    (if (and (vector? response)
-             (= 5 (count response))
+          ["beagle.source-facts/query-v1" store requests])]
+    (if (and (vector? response) (= 5 (count response))
              (= "store.dev-compile-facts/query-response-v1" (nth response 0))
              (contains? #{"ONLINE" "COLD"} (nth response 1))
              (vector? (nth response 4)))
       (nth response 4)
-      [])))
+      (throw (ex-info "source-fact Store query returned an invalid response"
+                      {:response response})))))
 
 (defn append-source-fact-store! [store entries]
   (when (seq entries)
-    (invoke-source-fact-store "append" store
-      ["store.dev-compile-facts/append-v1" store entries])))
+    (let [response (invoke-source-fact-store "append" store
+                     ["beagle.source-facts/append-v1" store entries])]
+      (when-not (and (vector? response) (= 5 (count response))
+                     (= "store.dev-compile-facts/append-response-v1" (nth response 0))
+                     (= "ok" (nth response 1)))
+        (throw (ex-info "source-fact Store append returned an invalid response"
+                        {:response response}))))))
+
 (defn escape-text [value]
   (let [last-position (dec (count value))
         unsafe? (or (empty? value)
@@ -907,11 +918,7 @@
      "projectorContext" context}))
 
 (defn source-fact-shard-entry [key context source-id payload]
-  (let [encoding
-        (pr-str [source-fact-shard-kind source-fact-shard-stage key context
-                 source-fact-shard-profile source-id
-                 (utf8-byte-count payload) (sha256-text payload) payload])]
-    [(sha256-text encoding) encoding]))
+  [key context source-fact-shard-profile source-id payload])
 
 (defn parse-source-fact-shard
   [row key context source-id]
