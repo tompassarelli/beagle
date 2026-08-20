@@ -1,0 +1,8 @@
+#lang beagle/js
+(ns f0.callables.anonymous-multi-rest)
+
+(def choose Any
+  (fn
+    ([value Int] Int value)
+    ([first Int second Int & more (Vec Int)] Int
+     (+ first second (count more)))))
