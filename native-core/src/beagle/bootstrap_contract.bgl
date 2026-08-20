@@ -7,7 +7,7 @@
 (def seed-artifact-format String "beagle-native-seed-artifact/v1")
 (def compiler-lineage-format String "beagle-native-compiler-lineage/v1")
 
-(def default-profile String "release")
+(def default-profile String "lp64")
 (def default-target-id String "c17")
 (def compiler-artifact-relation String "compiler/artifact")
 (def default-max-rule-steps Int 128)
