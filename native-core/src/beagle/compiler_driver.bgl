@@ -3,6 +3,7 @@
   (:require [beagle.artifact-linker :as linker]
             [beagle.checker :as checker]
             [beagle.datum-reader :as reader]
+            [beagle.fact-materializer :as materializer]
             [beagle.frontend-facts :as facts]
             [beagle.parser :as parser]
             [beagle.parser-reader :as parser-reader]
@@ -186,6 +187,37 @@
        executable-path)]
     [(linker/ArtifactLinkErrorV1 code detail)
      (->CompileBundleError code detail)]))
+
+(defn checked-module-results
+  [closure CheckedFactClosure] (Vec checker/CheckedFacts)
+  (mapv
+    (fn [module CheckedModuleFacts] checker/CheckedFacts
+      (checkedmodulefacts-checked module))
+    (checkedfactclosure-modules closure)))
+
+(defn materialize-and-link
+  [query CompileQuery
+   checked CheckedFactClosure
+   entry-namespace String
+   entry-definition String
+   config linker/ArtifactLinkConfigV1] CompileBundleResult
+  (let [targets (Vec String)
+        (compilebundlerequest-targets (compilequery-request query))]
+    (if (not= 1 (count targets))
+      (->CompileBundleError 64
+        "native compile requires exactly one materialization target")
+      (match (materializer/materialize
+               (materializer/->FactMaterializationRequest
+                 (compilequery-query-id query)
+                 (first targets)
+                 (checkedfactclosure-syntax checked)
+                 (checked-module-results checked)
+                 entry-namespace
+                 entry-definition))
+        [(materializer/FactMaterializationRejected code detail)
+         (->CompileBundleError code detail)]
+        [(materializer/FactMaterialized artifact)
+         (link-query-artifact query config artifact)]))))
 
 (defn admit-source-text [path String text String] SourceAdmission
   (let [(read reader/DatumRead) (reader/read-events text)
