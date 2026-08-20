@@ -21,7 +21,7 @@
 
 (defn probe [(args (Vec String))] Int
   (if (= (count args) 1)
-    (let [(mode String) (nth args 0)]
+    (let [mode String (nth args 0)]
       (cond
         (= mode "success") (if (success-case?) 0 1)
         (= mode "overflow") (if (overflow-case?) 0 1)
