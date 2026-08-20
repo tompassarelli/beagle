@@ -103,6 +103,10 @@
 
 ;; --- type->string (matches Racket type->string) ------------------------------
 
+(defn reader-atom-type-text? [(text String)] Bool
+  (and (> (count text) 0)
+       (nil? (re-find #"[\\s\\[\\](){}\";,]" text))))
+
 (defn type->string [(t Any)] String
   (cond
     (nil? t) "?"
@@ -137,7 +141,10 @@
                        (and (prim? m) (= (get m "name") "Nil"))) members))
             (let [non-nil (first (filter (fn [(m Any)] Bool
                                             (not (and (prim? m) (= (get m "name") "Nil")))) members))]
-              (str (type->string non-nil) "?"))
+              (let [non-nil-text (type->string non-nil)]
+                (if (reader-atom-type-text? non-nil-text)
+                  (str non-nil-text "?")
+                  (str "(U " (str/join " " (mapv type->string members)) ")"))))
           :else
             (str "(U " (str/join " " (mapv type->string members)) ")")))
 

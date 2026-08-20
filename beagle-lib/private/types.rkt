@@ -956,6 +956,10 @@
 (define (register-type-delab! head renderer) (hash-set! TYPE-DELAB head renderer))
 (define (default-type-delab t recur) (~v t))
 
+(define (reader-atom-type-text? text)
+  (and (positive? (string-length text))
+       (not (regexp-match? #px"[\\s\\[\\](){}\";,]" text))))
+
 (define (type->string t)
   (cond
     [(hash-ref TYPE-ALIAS-DISPLAYS t #f)
@@ -999,7 +1003,10 @@
       [(and (= (length alts) 2)
             (ormap (lambda (a) (and (type-prim? a) (eq? (type-prim-name a) 'Nil))) alts))
        (let ([non-nil (findf (lambda (a) (not (and (type-prim? a) (eq? (type-prim-name a) 'Nil)))) alts)])
-         (format "~a?" (recur non-nil)))]
+         (define non-nil-text (recur non-nil))
+         (if (reader-atom-type-text? non-nil-text)
+             (format "~a?" non-nil-text)
+             (format "(U ~a)" (string-join (map recur alts) " "))))]
       [else
        (format "(U ~a)" (string-join (map recur alts) " "))])))
 (register-type-delab! 'var (lambda (t recur) (symbol->string (type-var-name t))))

@@ -416,6 +416,10 @@
 
 ;; --- type->string ------------------------------------------------------------
 
+(defn reader-atom-type-text? [(text String)] Bool
+  (and (> (count text) 0)
+       (nil? (re-find #"[\\s\\[\\](){}\";,]" text))))
+
 (defn type->string [(t Any)] String
   (cond
     (nil? t) "?"
@@ -446,7 +450,10 @@
           (and (= (count members) 2)
                (boolean (some nil-type? members)))
             (let [non-nil (first (filterv (fn [(m Any)] Bool (not (nil-type? m))) members))]
-              (str (type->string non-nil) "?"))
+              (let [non-nil-text (type->string non-nil)]
+                (if (reader-atom-type-text? non-nil-text)
+                  (str non-nil-text "?")
+                  (str "(U " (str/join " " (mapv (fn [(m Any)] String (type->string m)) members)) ")"))))
           :else
             (str "(U " (str/join " " (mapv (fn [(m Any)] String (type->string m)) members)) ")")))
     (var-type? t) (get t "name")

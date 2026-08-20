@@ -166,6 +166,24 @@
       (explain-type f #:name "process" #:level "inferred" #:write? #t)
       (check-equal? (file->string f) after))))
 
+(test-case "promote writes reader-safe compound and atomic optional types"
+  (define src
+    (string-append
+     "#lang beagle/clj\n"
+     "(defn process [(flag Bool)] (U (Vec Int) Nil)\n"
+     "  (let [items (if flag [1] nil)\n"
+     "        count (if flag 1 nil)]\n"
+     "    items))\n"))
+  (with-fixture src
+    (lambda (f)
+      (explain-type f #:name "process" #:level "inferred" #:write? #t)
+      (define after (file->string f))
+      (check-true (string-contains? after "(items (U (Vec Int) Nil))") after)
+      (check-true (string-contains? after "(count Int?)") after)
+      (check-not-exn (lambda () (parse-program (read-beagle-syntax f))))
+      (explain-type f #:name "process" #:level "inferred" #:write? #t)
+      (check-equal? (file->string f) after))))
+
 (test-case "promote refuses the non-round-tripping `all` level"
   (with-fixture SRC
     (lambda (f)
