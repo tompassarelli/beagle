@@ -36,14 +36,14 @@
 (require resolve :as rsv)
 
 (defn parse-corpus! [(path String)] (Vec (Map Keyword Any))
-  (let [(skips (Atom Int)) (atom 0) (lines (Vec String)) (str/split-lines (slurp path)) (acc (Map Keyword Any)) (reduce (fn
+  (let [skips (Atom Int) (atom 0) lines (Vec String) (str/split-lines (slurp path)) acc (Map Keyword Any) (reduce (fn
                                                                                                                           [(st (Map Keyword Any))
                                                                                                                            (l String)]
                                                                                                                           (Map Keyword Any)
                                                                                                                           (if (str/starts-with? l "@file ") {:cur {:file (subs l 6) :triples []} :out (if (empty? (get st :cur)) (get st :out) (conj (vec (get st :out)) (get st :cur)))} (if (str/starts-with? l "[") (let [t (try (edn/read-string l) (catch (e Exception) nil))] (if (nil? t) (let [_ (swap! skips (fn
                                                                                                                                                                                                                                                                                                                                                                                                                         [(n Int)]
                                                                                                                                                                                                                                                                                                                                                                                                                         Int
-                                                                                                                                                                                                                                                                                                                                                                                                                        (inc n)))] st) (assoc st :cur (assoc (get st :cur) :triples (conj (vec (get (get st :cur) :triples)) t))))) st))) {:cur {} :out []} lines) (blocks (Vec (Map Keyword Any))) (if (empty? (get acc :cur)) (vec (get acc :out)) (conj (vec (get acc :out)) (get acc :cur)))]
+                                                                                                                                                                                                                                                                                                                                                                                                                        (inc n)))] st) (assoc st :cur (assoc (get st :cur) :triples (conj (vec (get (get st :cur) :triples)) t))))) st))) {:cur {} :out []} lines) blocks (Vec (Map Keyword Any)) (if (empty? (get acc :cur)) (vec (get acc :out)) (conj (vec (get acc :out)) (get acc :cur)))]
     (if (pos? (deref skips))
       (binding [*out* *err*]
         (println "  (skipped" (deref skips) "EDN-unparseable leaf literals)"))
@@ -51,7 +51,7 @@
     (vec blocks)))
 
 (defn index-by [(pred String) (triples (Vec Any))] (Map Any Any)
-  (reduce (fn [(m (Map Any Any)) (t Any)] (Map Any Any) (if (= pred (nth t 1)) (assoc m (nth t 0) (nth t 2)) m))
+  (reduce (fn [m (Map Any Any) t Any] (Map Any Any) (if (= pred (nth t 1)) (assoc m (nth t 0) (nth t 2)) m))
     {}
     triples))
 
@@ -98,7 +98,7 @@
       (if (= 1 (count cands)) (get (nth cands 0) :key) nil))))
 
 (defn build-graph [(blocks (Vec (Map Keyword Any)))] (Map Keyword Any)
-  (let [derived (mapv (fn [(b (Map Keyword Any))] (Map Keyword Any) (derive-block b)) blocks) defns (vec (mapcat (fn
+  (let [derived (mapv (fn [b (Map Keyword Any)] (Map Keyword Any) (derive-block b)) blocks) defns (vec (mapcat (fn
                                                                                                                    [(d (Map Keyword Any))]
                                                                                                                    (Vec Any)
                                                                                                                    (vec (get d :defns))) derived)) by-name (group-by (fn
@@ -124,24 +124,24 @@
 ;; mapping is only sound because leaf is an integer, which makes the spelling
 ;; injective.
 (defn key-index [(edges Any)] (Map String Any)
-  (reduce (fn [(m (Map String Any)) (e Any)] (Map String Any)
+  (reduce (fn [m (Map String Any) e Any] (Map String Any)
             (assoc (assoc m (key->str (nth e 0)) (nth e 0))
               (key->str (nth e 1)) (nth e 1)))
     {}
     (vec edges)))
 
 (defn blast-radius [(edges Any)] Any
-  (let [(key-of (Map String Any)) (key-index edges)
-        (closure Any) (rsv/blast-closure
-                       (mapv (fn [(e Any)] (Vec String)
+  (let [key-of (Map String Any) (key-index edges)
+        closure Any (rsv/blast-closure
+                       (mapv (fn [e Any] (Vec String)
                                [(key->str (nth e 0)) (key->str (nth e 1))])
                          (vec edges)))]
-    {:reaches (set (mapv (fn [(r Any)] (Vec Any)
+    {:reaches (set (mapv (fn [r Any] (Vec Any)
                            [(get key-of (nth r 0)) (get key-of (nth r 1))])
                      (vec (get closure :reaches))))
-     :blast (reduce (fn [(m (Map Any Any)) (kv Any)] (Map Any Any)
+     :blast (reduce (fn [m (Map Any Any) kv Any] (Map Any Any)
                       (assoc m (get key-of (nth kv 0))
-                        (set (mapv (fn [(x Any)] Any (get key-of x)) (vec (nth kv 1))))))
+                        (set (mapv (fn [x Any] Any (get key-of x)) (vec (nth kv 1))))))
               {}
               (vec (get closure :blast)))}))
 

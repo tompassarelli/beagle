@@ -5,6 +5,6 @@
   (let [enabled true]
     (if enabled
       (do
-        (fn [(value Any)] Any
+        (fn [value Any] Any
           (reset! cell value)))
       nil)))

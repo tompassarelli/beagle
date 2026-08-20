@@ -303,7 +303,7 @@
    (functions (Vec core/FunctionDef))
    (regions (Vec core/RegionDef))
    (effects (Vec core/EffectDef))] core/NativeCoreProgram
-  (let [(types (Vec core/TypeDef)) (epoch-types)]
+  (let [types (Vec core/TypeDef) (epoch-types)]
     (core/->NativeCoreProgram
       (epoch-id label)
       nil
@@ -315,10 +315,10 @@
       (lower/collect-layouts
         (lower/resolve-layouts types (core/abi-profile-lp64)))
       functions
-      (mapv (fn [(effect core/EffectDef)] core/NativeId
+      (mapv (fn [effect core/EffectDef] core/NativeId
               (core/effectdef-id effect))
         effects)
-      (mapv (fn [(region core/RegionDef)] core/NativeId
+      (mapv (fn [region core/RegionDef] core/NativeId
               (core/regiondef-id region))
         regions)
       [(lower/allocate-capability-id)]
@@ -365,8 +365,8 @@
 (defn frozen-of
   [(label String)
    (program core/NativeCoreProgram)] stages/FrozenNativeStageV0
-  (let [(root core/NativeId) (epoch-id (str label "-terms"))
-        (stage stages/NativeStageV0)
+  (let [root core/NativeId (epoch-id (str label "-terms"))
+        stage stages/NativeStageV0
         (stages/->NativeStageV0
           (stages/->TermGraphV0 root
             [(stages/->TermNodeV0 root
@@ -374,7 +374,7 @@
           (str "sha256:" label)
           program
           [])
-        (encoding String) (stages/encode-native-stage stage)]
+        encoding String (stages/encode-native-stage stage)]
     (stages/->FrozenNativeStageV0 stage encoding
       (stages/content-digest encoding))))
 

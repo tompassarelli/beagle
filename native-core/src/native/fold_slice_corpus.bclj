@@ -74,8 +74,8 @@
    (tf (primspecv0-label spec) "name" (primspecv0-spelling spec))])
 
 (defn app-facts [(spec AppSpecV0)] (Vec FactSpecV0)
-  (let [(label String) (appspecv0-label spec)
-        (arguments-label String) (str label "-args")]
+  (let [label String (appspecv0-label spec)
+        arguments-label String (str label "-args")]
     (vec (concat
            [(tf label "form-kind" "type-app")
             (tf label "name" (appspecv0-constructor spec))
@@ -83,8 +83,8 @@
            (sequence-facts arguments-label (appspecv0-arguments spec))))))
 
 (defn union-facts [(spec UnionSpecV0)] (Vec FactSpecV0)
-  (let [(label String) (unionspecv0-label spec)
-        (arguments-label String) (str label "-args")]
+  (let [label String (unionspecv0-label spec)
+        arguments-label String (str label "-args")]
     (vec (concat
            [(tf label "form-kind" "type-union")
             (nf label "args" arguments-label)]
@@ -94,13 +94,13 @@
   (str owner "." name))
 
 (defn binding-facts [(owner String) (spec FieldSpecV0)] (Vec FactSpecV0)
-  (let [(label String) (binding-label owner (fieldspecv0-name spec))]
+  (let [label String (binding-label owner (fieldspecv0-name spec))]
     [(tf label "form-kind" "param")
      (tf label "name" (fieldspecv0-name spec))
      (nf label "ann" (fieldspecv0-annotation spec))]))
 
 (defn binding-labels [(owner String) (specs (Vec FieldSpecV0))] (Vec String)
-  (mapv (fn [(spec FieldSpecV0)] String
+  (mapv (fn [spec FieldSpecV0] String
           (binding-label owner (fieldspecv0-name spec)))
     specs))
 
@@ -112,9 +112,9 @@
         (vec (concat facts (binding-facts owner (nth specs index))))))))
 
 (defn record-facts [(spec RecordSpecV0)] (Vec FactSpecV0)
-  (let [(label String) (recordspecv0-label spec)
-        (fields-label String) (str label "-fields")
-        (fields (Vec FieldSpecV0)) (recordspecv0-fields spec)]
+  (let [label String (recordspecv0-label spec)
+        fields-label String (str label "-fields")
+        fields (Vec FieldSpecV0) (recordspecv0-fields spec)]
     (vec (concat
            [(tf label "form-kind" "record")
             (tf label "name" (recordspecv0-name spec))
@@ -123,9 +123,9 @@
            (binding-block label fields)))))
 
 (defn function-facts [(spec FunctionSpecV0)] (Vec FactSpecV0)
-  (let [(label String) (functionspecv0-label spec)
-        (parameters-label String) (str label "-params")
-        (parameters (Vec FieldSpecV0)) (functionspecv0-parameters spec)]
+  (let [label String (functionspecv0-label spec)
+        parameters-label String (str label "-params")
+        parameters (Vec FieldSpecV0) (functionspecv0-parameters spec)]
     (vec (concat
            [(tf label "form-kind" "defn")
             (tf label "name" (functionspecv0-name spec))
@@ -325,8 +325,8 @@
   (loop [index Int 0 labels (Vec String) [module-name]]
     (if (>= index (count slice-facts))
       labels
-      (let [(fact FactSpecV0) (nth slice-facts index)
-            (with-subject (Vec String)) (add-once labels (factspecv0-subject fact))]
+      (let [fact FactSpecV0 (nth slice-facts index)
+            with-subject (Vec String) (add-once labels (factspecv0-subject fact))]
         (recur (+ index 1)
           (if (factspecv0-text-object fact)
             with-subject
@@ -336,8 +336,8 @@
   (loop [index Int 0 values (Vec String) []]
     (if (>= index (count slice-facts))
       values
-      (let [(fact FactSpecV0) (nth slice-facts index)
-            (with-predicate (Vec String)) (add-once values (factspecv0-predicate fact))]
+      (let [fact FactSpecV0 (nth slice-facts index)
+            with-predicate (Vec String) (add-once values (factspecv0-predicate fact))]
         (recur (+ index 1)
           (if (factspecv0-text-object fact)
             (add-once with-predicate (factspecv0-object fact))
@@ -345,13 +345,13 @@
 
 (def marker-nodes (Vec stages/TermNodeV0)
   (mapv
-    (fn [(label String)] stages/TermNodeV0
+    (fn [label String] stages/TermNodeV0
       (stages/->TermNodeV0 (node-id label) (stages/->TextTermV0 "source-node-v0")))
     node-labels))
 
 (def text-nodes (Vec stages/TermNodeV0)
   (mapv
-    (fn [(value String)] stages/TermNodeV0
+    (fn [value String] stages/TermNodeV0
       (stages/->TermNodeV0 (text-id value) (stages/->TextTermV0 value)))
     text-values))
 
@@ -359,7 +359,7 @@
   (loop [index Int 0 nodes (Vec stages/TermNodeV0) []]
     (if (>= index (count slice-facts))
       nodes
-      (let [(fact FactSpecV0) (nth slice-facts index)]
+      (let [fact FactSpecV0 (nth slice-facts index)]
         (recur (+ index 1)
           (conj nodes
             (stages/->TermNodeV0
@@ -440,25 +440,25 @@
     (lower/nativeloweringpendingv0-receipt result)))
 
 (defn slice-state [(abi core/AbiProfileV0)] SliceStateV0
-  (let [(frozen-result lower/SourceFreezeResultV0) (freeze-result abi)
-        (frozen-accepted lower/SourceFreezeAcceptedV0) (require-freeze-accepted frozen-result)
-        (frozen-source stages/FrozenSourceStageV1)
+  (let [frozen-result lower/SourceFreezeResultV0 (freeze-result abi)
+        frozen-accepted lower/SourceFreezeAcceptedV0 (require-freeze-accepted frozen-result)
+        frozen-source stages/FrozenSourceStageV1
         (lower/sourcefreezeacceptedv0-frozen frozen-accepted)
-        (typed lower/TypingAcceptedV0)
+        typed lower/TypingAcceptedV0
         (require-typing-accepted
           (lower/lower-typed-stage frozen-source compiler-commit
             (configuration-for abi)))
-        (native lower/NativeLoweringResultV0)
+        native lower/NativeLoweringResultV0
         (lower/lower-native-stage
           (lower/typingacceptedv0-frozen typed)
           (lower/typingacceptedv0-slice typed)
           compiler-commit
           (configuration-for abi)
           abi)
-        (epoch lower/EpochLoweringResultV0)
+        epoch lower/EpochLoweringResultV0
         (lower/epoch-identity-stage (native-frozen native) compiler-commit
           (configuration-for abi) abi)
-        (frozen-native stages/FrozenNativeStageV0)
+        frozen-native stages/FrozenNativeStageV0
         (lower/epoch-result-frozen epoch)]
     (->SliceStateV0
       (lower/sourcefreezeacceptedv0-receipt frozen-accepted)
@@ -477,7 +477,7 @@
 (defn obligation-report
   [(program core/NativeCoreProgram)
    (abi core/AbiProfileV0)] String
-  (let [(verdicts (Vec obligations/ObligationVerdictV0))
+  (let [verdicts (Vec obligations/ObligationVerdictV0)
         (obligations/validate-native-core-program program abi)]
     (loop [index Int 0 lines (Vec String) []]
       (if (>= index (count verdicts))
@@ -492,7 +492,7 @@
     ": " (core/receiptobligationv0-detail obligation)))
 
 (defn receipt-report [(label String) (receipt core/PassReceiptV0)] String
-  (let [(obligations-list (Vec core/ReceiptObligationV0))
+  (let [obligations-list (Vec core/ReceiptObligationV0)
         (core/passreceiptv0-obligations receipt)]
     (loop [index Int 0 lines (Vec String) [(str label ":")]]
       (if (>= index (count obligations-list))
@@ -501,11 +501,11 @@
           (conj lines (receipt-obligation-line (nth obligations-list index))))))))
 
 (defn diagnostic-report [(label String) (receipt core/PassReceiptV0)] String
-  (let [(diagnostics (Vec core/DiagnosticV0)) (core/passreceiptv0-diagnostics receipt)]
+  (let [diagnostics (Vec core/DiagnosticV0) (core/passreceiptv0-diagnostics receipt)]
     (loop [index Int 0 lines (Vec String) [(str label ":")]]
       (if (>= index (count diagnostics))
         (c17/join-lines lines)
-        (let [(diagnostic core/DiagnosticV0) (nth diagnostics index)]
+        (let [diagnostic core/DiagnosticV0 (nth diagnostics index)]
           (recur (+ index 1)
             (conj lines
               (str "  " (core/diagnosticv0-code diagnostic) ": "
@@ -522,11 +522,11 @@
     (core/nativecoreprogram-layouts program)))
 
 (defn probe-arena-bytes [(program core/NativeCoreProgram)] Int
-  (let [(types (Vec core/TypeDef)) (emitted-types program)]
+  (let [types (Vec core/TypeDef) (emitted-types program)]
     (loop [index Int 0 total Int 64]
       (if (>= index (count types))
         total
-        (let [(layout (U core/LayoutDef Nil))
+        (let [layout (U core/LayoutDef Nil)
               (c17/layout-for-type (core/nativecoreprogram-layouts program)
                 (core/typedef-id (nth types index)))]
           (recur (+ index 1)
@@ -536,11 +536,11 @@
                           (core/layoutdef-align-bytes layout))))))))))
 
 (defn probe-call-lines [(program core/NativeCoreProgram)] String
-  (let [(types (Vec core/TypeDef)) (emitted-types program)]
+  (let [types (Vec core/TypeDef) (emitted-types program)]
     (loop [index Int 0 lines (Vec String) []]
       (if (>= index (count types))
         (c17/join-lines lines)
-        (let [(name String) (c17/type-name 0 index)]
+        (let [name String (c17/type-name 0 index)]
           (recur (+ index 1)
             (conj lines
               (str "  if (probe_type(&arena, sizeof(" name "), _Alignof(" name ")) != 0) {\n"
@@ -578,7 +578,7 @@
     "}\n"))
 
 (defn slice-report-text [(state SliceStateV0) (abi core/AbiProfileV0)] String
-  (let [(program core/NativeCoreProgram) (slicestatev0-program state)]
+  (let [program core/NativeCoreProgram (slicestatev0-program state)]
     (str "store.fold Native Core slice\n"
       "source: store:" module-path "\n"
       "types: " (count (core/nativecoreprogram-types program)) "\n"
@@ -604,9 +604,9 @@
       (diagnostic-report "typed-to-native diagnostics" (slicestatev0-native-receipt state)))))
 
 (defn emit-slice-for-abi! [(directory String) (abi core/AbiProfileV0)] Nil
-  (let [(state SliceStateV0) (slice-state abi)
-        (program core/NativeCoreProgram) (slicestatev0-program state)
-        (artifact c17/C17Artifact) (require-artifact (c17/materialize-program program 0))]
+  (let [state SliceStateV0 (slice-state abi)
+        program core/NativeCoreProgram (slicestatev0-program state)
+        artifact c17/C17Artifact (require-artifact (c17/materialize-program program 0))]
     (do
       (spit (str directory "/" (c17/c17artifact-header-name artifact))
         (c17/c17artifact-header-text artifact))
@@ -616,7 +616,7 @@
       (spit (str directory "/slice-report.txt") (slice-report-text state abi)))))
 
 (defn emit-slice! [(directory String) (abi-id String)] Nil
-  (let [(profile (U core/AbiProfileV0 Nil)) (core/abi-profile-for abi-id)]
+  (let [profile (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
     (if (nil? profile)
       (throw (ex-info (str "unknown abi profile " abi-id) {}))
       (emit-slice-for-abi! directory profile))))

@@ -100,7 +100,7 @@
      (s/lookup st node world-pred)}))
 
 (defn provenance [(co Any) (claim Any)] Any
-  (mapv (fn [(n Any)] Any (evidence co n)) (evidence-nodes co claim)))
+  (mapv (fn [n Any] Any (evidence co n)) (evidence-nodes co claim)))
 
 (defn- selections-of [(co Any) (claim Any)] Any
   (let [p (pid co select-pred)]
@@ -131,7 +131,7 @@
 
 (defn verdict ([(co Any) (claim Any)] Any (verdict co default-views claim))
   ([(co Any) (views Any) (claim Any)] Any
-   (reduce (fn [(best Any) (selection Any)] Any (let [v (verdict-of co views selection)] (cond [(nil? v) best] [(nil? best) v] [(t/occurrence-before? (get best :cid) (get v :cid)) v] [:else best])))
+   (reduce (fn [best Any selection Any] Any (let [v (verdict-of co views selection)] (cond [(nil? v) best] [(nil? best) v] [(t/occurrence-before? (get best :cid) (get v :cid)) v] [:else best])))
      nil
      (selections-of co claim))))
 
@@ -183,7 +183,7 @@
       (let [record (get versions vid)]
         (if (nil? record)
           nil
-          (let [hits (filterv (fn [(e Any)] Bool (= (get e :slot) slot))
+          (let [hits (filterv (fn [e Any] Bool (= (get e :slot) slot))
                        (vec (get record :overlay)))
                 e (if (empty? hits) nil (first hits))]
             (cond
@@ -201,24 +201,24 @@
           (vec (distinct acc))
           (recur (get record :base)
             (vec (concat acc
-                   (mapv (fn [(e Any)] Any (get e :slot))
+                   (mapv (fn [e Any] Any (get e :slot))
                      (vec (get record :overlay)))))))))))
 
 (defn- slot-blobs [(co Any) (vid Any)] Any
   (let [versions (version-chain co vid)]
-    (reduce (fn [(m Any) (s Any)] Any (let [r (resolve-slot versions vid s)] (if (nil? r) m (assoc m s (get r :blob-id)))))
+    (reduce (fn [m Any s Any] Any (let [r (resolve-slot versions vid s)] (if (nil? r) m (assoc m s (get r :blob-id)))))
       {}
       (chain-slots versions vid))))
 
 (defn- changed-slots [(co Any) (from Any) (to Any)] Any
   (let [a (slot-blobs co from) b (slot-blobs co to)]
-    (vec (filterv (fn [(k Any)] Bool (not (= (get a k) (get b k)))) (vec (sort (vec (keys a))))))))
+    (vec (filterv (fn [k Any] Bool (not (= (get a k) (get b k)))) (vec (sort (vec (keys a))))))))
 
 (defn- verdict-view-ids [(co Any) (views Any)] Any
   (let [p (pid co select-pred)]
     (if (nil? p)
       []
-      (vec (distinct (reduce (fn [(acc Any) (selection Any)] Any (let [l (t/triple-t1 (rot/proposition-of selection))] (if (family? (get views :verified) (s/name-of (sess co) l)) (conj acc l) acc))) [] (rot/by-t2 (vw co) p)))))))
+      (vec (distinct (reduce (fn [acc Any selection Any] Any (let [l (t/triple-t1 (rot/proposition-of selection))] (if (family? (get views :verified) (s/name-of (sess co) l)) (conj acc l) acc))) [] (rot/by-t2 (vw co) p)))))))
 
 ;; `occurrence` keeps the head restricted to LIVE assertions — the successor of
 ;; the retired fact-id literal, which typed ?x as a fact object.
@@ -227,7 +227,7 @@
    (let [evp (pid co evidence-pred) srp (pid co source-pred) wlp (pid co world-pred) selp (pid co select-pred) slots (if (nil? from) [] (changed-slots co from to)) vids (verdict-view-ids co views)]
      (if (or (nil? evp) (or (nil? srp) (or (nil? wlp) (or (nil? selp) (or (nil? from) (or (empty? slots) (empty? vids)))))))
        [[] []]
-       [(vec (concat (mapv (fn [(sid Any)] Any (d/rule changed-slot-relation [(d/constant sid)] [])) slots) (mapv (fn
+       [(vec (concat (mapv (fn [sid Any] Any (d/rule changed-slot-relation [(d/constant sid)] [])) slots) (mapv (fn
                                                                                                                     [(v Any)]
                                                                                                                     Any
                                                                                                                     (d/rule verdict-view-relation [(d/constant v)] [])) vids)))
@@ -253,4 +253,4 @@
 (defn needs-reverification! ([(co Any) (from Any) (to Any)] Any (needs-reverification! co default-views from to))
   ([(co Any) (views Any) (from Any) (to Any)] Any
    (let [db (d/run-strata-db! (live-db co) (reverification-rules co views from to))]
-     (set (mapv (fn [(t Any)] Any (get t 0)) (d/facts db reverification-relation))))))
+     (set (mapv (fn [t Any] Any (get t 0)) (d/facts db reverification-relation))))))

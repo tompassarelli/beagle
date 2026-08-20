@@ -42,7 +42,7 @@
   (typed-helper (->ProjectionFailure (->ProjectionValue 4))))
 
 (defn unreachable [] Int
-  ((fn [(value Int)] Int value) 0))
+  ((fn [value Int] Int value) 0))
 
 (defn bad-entry [] Int
   (unreachable))

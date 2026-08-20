@@ -2,7 +2,7 @@
 (ns selfhost.fixtures.purity.dynamic-binding-reject)
 
 (def ^:dynamic writer! Any
-  (fn [(value Any)] Any (reset! value nil)))
+  (fn [value Any] Any (reset! value nil)))
 
 (defn invoke [(replacement Any) (value Any)] Any
   (binding [writer! replacement]

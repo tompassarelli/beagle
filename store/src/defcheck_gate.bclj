@@ -143,7 +143,7 @@
 
 (defn- pick-primary "The error to surface as the single return value: prefer one on the def just\n  written, else the first. Full list travels in :errors."
   [(name Any) (errs (Vec Any))] Any
-  (or (first (filter (fn [(e Any)] Bool (= name (get-in e [:at :def]))) errs))
+  (or (first (filter (fn [e Any] Bool (= name (get-in e [:at :def]))) errs))
     (first errs)))
 
 (defn check-module-errors-with-state! "Render `module` fresh and type-check it against the primed sibling gwdir.\n  Returns a vector of ERROR-shape maps (empty when clean). Refreshes this\n  module's own sibling text so later cross-module checks see it."
@@ -158,7 +158,7 @@
         {:module module}
         :message
         (str "def-check infra error: " (:error resp))}]
-      (mapv (fn [(e Any)] Any (diag->error module e)) (:errors resp)))))
+      (mapv (fn [e Any] Any (diag->error module e)) (:errors resp)))))
 
 (defn- beagle-source? [(src String)] Bool
   (boolean (re-find BEAGLE-SOURCE-RE (str src))))
@@ -219,26 +219,26 @@
     (vector? pat)
     (set (mapcat pattern-locals pat))
     (map? pat)
-    (reduce-kv (fn [(acc (Set Any)) (k Any) (v Any)] (Set Any) (cond (= k :keys) (into acc (map (comp symbol name) v)) (= k :strs) (into acc (map (comp symbol name) v)) (= k :syms) (into acc (map (comp symbol name) v)) (= k :as) (conj acc v) (= k :or) acc (keyword? k) (into acc (pattern-locals k)) :else (into acc (pattern-locals k))))
+    (reduce-kv (fn [acc (Set Any) k Any v Any] (Set Any) (cond (= k :keys) (into acc (map (comp symbol name) v)) (= k :strs) (into acc (map (comp symbol name) v)) (= k :syms) (into acc (map (comp symbol name) v)) (= k :as) (conj acc v) (= k :or) acc (keyword? k) (into acc (pattern-locals k)) :else (into acc (pattern-locals k))))
       #{}
       pat)
     :else
     #{}))
 
 (defn- arglist-locals [(params Any)] (Set Any)
-  (set (mapcat pattern-locals (remove (fn [(x Any)] Bool (= x (quote &))) params))))
+  (set (mapcat pattern-locals (remove (fn [x Any] Bool (= x (quote &))) params))))
 
 (defn- fn-arities "Given a defn/fn tail (after the name), return {:fixed #{n…} :variadic min|nil}."
   [(tail Any)] Any
   (let [tail (if (string? (first tail)) (drop 1 tail) tail) tail (if (map? (first tail)) (drop 1 tail) tail) bodies (cond (vector? (first tail)) [(first tail)] (and (seq? (first tail)) (vector? (ffirst tail))) (map first tail) :else nil)]
     (when (seq bodies)
-      (reduce (fn [(acc Any) (params Any)] Any (let [amp (.indexOf (vec params) (quote &)) fixed (if (neg? amp) (count params) amp)] (if (neg? amp) (update acc :fixed conj fixed) (update acc :variadic (fnil min fixed) fixed))))
+      (reduce (fn [acc Any params Any] Any (let [amp (.indexOf (vec params) (quote &)) fixed (if (neg? amp) (count params) amp)] (if (neg? amp) (update acc :fixed conj fixed) (update acc :variadic (fnil min fixed) fixed))))
         {:fixed #{} :variadic nil}
         bodies))))
 
 (defn- collect-defs "Walk top-level forms → {:names #{sym…} :arities {sym {:fixed.. :variadic..}}}.\n  Names cover def/defn/deftype/defrecord (+ ->Ctor/map->Ctor/Ctor.), defprotocol\n  method names, declare, defmulti. Arities only for fn-shaped defs."
   [(forms Any)] Any
-  (reduce (fn [(acc Any) (form Any)] Any (if-not (and (seq? form) (symbol? (first form))) acc (let [h (first form) nm (when (>= (count form) 2) (first (rest form))) base (fn
+  (reduce (fn [acc Any form Any] Any (if-not (and (seq? form) (symbol? (first form))) acc (let [h (first form) nm (when (>= (count form) 2) (first (rest form))) base (fn
                                                                                                                                                                             [(a Any)
                                                                                                                                                                              (s Any)]
                                                                                                                                                                             Any
@@ -269,12 +269,12 @@
                                                                                                     [(acc Any)
                                                                                                      (spec Any)]
                                                                                                     Any
-                                                                                                    (cond (symbol? spec) (update acc :imports conj (symbol (peek (str/split (name spec) DOT-RE)))) (sequential? spec) (update acc :imports into (map (fn [(imported Any)] Any (symbol (name imported))) (rest spec))) :else acc)) handle-clause (fn
+                                                                                                    (cond (symbol? spec) (update acc :imports conj (symbol (peek (str/split (name spec) DOT-RE)))) (sequential? spec) (update acc :imports into (map (fn [imported Any] Any (symbol (name imported))) (rest spec))) :else acc)) handle-clause (fn
                                                                                                                                                                                                                                                                                                                              [(acc Any)
                                                                                                                                                                                                                                                                                                                               (clause Any)]
                                                                                                                                                                                                                                                                                                                              Any
                                                                                                                                                                                                                                                                                                                              (if-not (seq? clause) acc (let [k (first clause)] (cond (contains? #{:require :require-macros} k) (reduce parse-require-spec acc (rest clause)) (= :use k) (assoc acc :refer-all? true) (= :import k) (reduce add-import acc (rest clause)) :else acc))))]
-    (reduce (fn [(acc Any) (form Any)] Any (if-not (and (seq? form) (symbol? (first form))) acc (let [head (first form)] (cond (= head (quote ns)) (reduce handle-clause acc (drop 2 form)) (= head (quote require)) (reduce parse-require-spec acc (map (fn
+    (reduce (fn [acc Any form Any] Any (if-not (and (seq? form) (symbol? (first form))) acc (let [head (first form)] (cond (= head (quote ns)) (reduce handle-clause acc (drop 2 form)) (= head (quote require)) (reduce parse-require-spec acc (map (fn
                                                                                                                                                                                                                                                            [(x Any)]
                                                                                                                                                                                                                                                            Any
                                                                                                                                                                                                                                                            (if (and (seq? x) (= (quote quote) (first x))) (second x) x)) (rest form))) (= head (quote use)) (assoc acc :refer-all? true) (= head (quote import)) (reduce add-import acc (rest form)) :else acc))))
@@ -282,14 +282,14 @@
       forms)))
 
 (defn- lev [(a Any) (b Any)] Int
-  (let [a (str a) b (str b) (m Int) (count a) (n Int) (count b)]
+  (let [a (str a) b (str b) m Int (count a) n Int (count b)]
     (if (or (zero? m) (zero? n))
       (max m n)
       (loop [i Int 1 prev (Vec Int) (vec (range (inc n)))]
         (if (> i m)
           (peek prev)
           (recur (inc i)
-            (reduce (fn [(cur (Vec Int)) (j Int)] (Vec Int) (conj cur (if (= (.charAt a (dec i)) (.charAt b (dec j))) (nth prev (dec j)) (inc (min (nth prev j) (peek cur) (nth prev (dec j)))))))
+            (reduce (fn [cur (Vec Int) j Int] (Vec Int) (conj cur (if (= (.charAt a (dec i)) (.charAt b (dec j))) (nth prev (dec j)) (inc (min (nth prev j) (peek cur) (nth prev (dec j)))))))
               [i]
               (vec (range 1 (inc n))))))))))
 
@@ -298,8 +298,8 @@
     (mapv (comp str first)
       (take 2
         (sort-by second
-          (filter (fn [(pair Any)] Bool (<= (nth pair 1) thr))
-            (map (fn [(c Any)] Any [c (lev s (name c))]) candidates)))))))
+          (filter (fn [pair Any] Bool (<= (nth pair 1) thr))
+            (map (fn [c Any] Any [c (lev s (name c))]) candidates)))))))
 
 (defn- anon-arg? [(s Any)] Bool (boolean (re-matches ANON-ARG-RE (name s))))
 
@@ -410,7 +410,7 @@
    (form Any)
    (locals Any)]
   Any
-  (let [rec (fn [(f Any) (ls Any)] Any (walk-body-with-state! arity-check? module def-name env defs errs f ls)) rec-no-arity (fn
+  (let [rec (fn [f Any ls Any] Any (walk-body-with-state! arity-check? module def-name env defs errs f ls)) rec-no-arity (fn
                                                                                                                                [(f Any)
                                                                                                                                 (ls Any)]
                                                                                                                                Any
@@ -525,7 +525,7 @@
                 (let [n (count (rest form)) {:keys [fixed variadic]} ar]
                   (when (and arity-check? (seq fixed) (not (contains? fixed n)) (or (nil? variadic) (< n variadic)))
                     (emit (arity-error module def-name h n ar))))))
-            (let [child-locals (into locals (mapcat (fn [(x Any)] Any (when (vector? x) (arglist-locals x))) (rest form)))]
+            (let [child-locals (into locals (mapcat (fn [x Any] Any (when (vector? x) (arglist-locals x))) (rest form)))]
               (doseq [x (rest form)] (rec x child-locals))))))
       :else
       nil)))
@@ -557,7 +557,7 @@
         "read-error"
         :suggestion
         "fix the malformed form so the module parses"}]
-      (let [(env Any) (parse-ns-env forms) (defs Any) (collect-defs forms) (errs (Atom Any)) (atom [])]
+      (let [env Any (parse-ns-env forms) defs Any (collect-defs forms) errs (Atom Any) (atom [])]
         (doseq [form forms :when (and (seq? form) (symbol? (first form)) (contains? def-heads (first form)))]
           (walk-body-with-state! arity-check?
             module
@@ -607,7 +607,7 @@
           :stage
           :gate
           :errors
-          (mapv (fn [(e Any)] Any (assoc e :stage :gate)) all))))
+          (mapv (fn [e Any] Any (assoc e :stage :gate)) all))))
     (catch (e Exception)
       {:ok
        false

@@ -3,6 +3,6 @@
 (def acc Int 100)
 (defn outer [(acc Int)] Int
   (let [acc (+ acc 1)]
-    (let [f (fn [(acc Int)] Int (* acc 2))]
+    (let [f (fn [acc Int] Int (* acc 2))]
       (f acc))))
 (defn user [] Int (outer acc))

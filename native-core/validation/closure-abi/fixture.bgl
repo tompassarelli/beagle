@@ -3,7 +3,7 @@
 (ns native.closure-abi)
 
 (defn make-adder [(base Int)] (Fn [Int] Int)
-  (fn [(value Int)] Int
+  (fn [value Int] Int
     (+ base value)))
 
 (defn invoke [(callable (Fn [Int] Int)) (value Int)] Int
@@ -23,8 +23,8 @@
   (+ head (count tail)))
 
 (defn -main [] Int
-  (let [(stored (Fn [Int] Int)) (make-adder 7)
-        (arguments (Vec Int)) [4 5]]
+  (let [stored (Fn [Int] Int) (make-adder 7)
+        arguments (Vec Int) [4 5]]
     (if (and (= (stored 5) 12)
           (= (invoke stored 6) 13)
           (= (factorial 5) 120)

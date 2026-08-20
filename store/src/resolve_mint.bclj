@@ -75,7 +75,7 @@
   (let [ents (:ents m)]
     (do
       (swap! ents
-        (fn [(tbl Any)] Any (assoc tbl src (conj (get tbl src []) e))))
+        (fn [tbl Any] Any (assoc tbl src (conj (get tbl src []) e))))
       e)))
 
 (defn- mint-leaf-on!
@@ -157,7 +157,7 @@
             (number? d)
             (mint-leaf-on! m builder src "number" (str d))
             (or (list? d) (seq? d) (vector? d) (map? d))
-            (let [(ctx Any) (:ctx m) (head Any) (cond (vector? d) [(symbol "#%brackets")] (map? d) [(symbol "#%map")] :else []) (elems (Vec Any)) (vec (concat head (if (map? d) (apply concat (seq d)) (seq d)))) (e Any) (register! m src (ri/mint! ctx builder))]
+            (let [ctx Any (:ctx m) head Any (cond (vector? d) [(symbol "#%brackets")] (map? d) [(symbol "#%map")] :else []) elems (Vec Any) (vec (concat head (if (map? d) (apply concat (seq d)) (seq d)))) e Any (register! m src (ri/mint! ctx builder))]
               (do
                 (ri/assert-on! builder e (:KIND m) (ri/literal! "list"))
                 (doseq [(i Int) (range (count elems))]
@@ -181,9 +181,9 @@
 
 (defn fN-facts [(m Mint) (parent Any)] (Vec Any)
   (let [ctx (:ctx m) rows (reduce (fn
-                                    [(acc (Vec FnEdge)) (cid Any)] (Vec FnEdge) (let [(p Any) (ri/predicate-at ctx cid) (r Any) (ri/value-at ctx cid)] (if (and (string? p) (some? (re-matches FN-RE (str p)))) (let [n (parse-long (subs (str p) 1))] (if (nil? n) acc (conj acc (->FnEdge n cid r)))) acc))) [] (ri/by-subject ctx parent))]
-    (mapv (fn [(e FnEdge)] Any [(:idx e) (:cid e) (:child e)])
-      (sort-by (fn [(e FnEdge)] Int (:idx e)) rows))))
+                                    [(acc (Vec FnEdge)) (cid Any)] (Vec FnEdge) (let [p Any (ri/predicate-at ctx cid) r Any (ri/value-at ctx cid)] (if (and (string? p) (some? (re-matches FN-RE (str p)))) (let [n (parse-long (subs (str p) 1))] (if (nil? n) acc (conj acc (->FnEdge n cid r)))) acc))) [] (ri/by-subject ctx parent))]
+    (mapv (fn [e FnEdge] Any [(:idx e) (:cid e) (:child e)])
+      (sort-by (fn [e FnEdge] Int (:idx e)) rows))))
 
 ;; The supersedes edge is gone (ruling GAP 3): retiring an edge appends a
 ;; retraction occurrence, and the kernel withdrawal relation records which live
@@ -228,16 +228,16 @@
         (if (and (some? target)
               (= B (rv/ultimate ctx view BOUND REFERS target))
               (renders-as-tracked-name? m node)
-              (some? (some (fn [(context Any)] Any (get context newnm)) scope)))
+              (some? (some (fn [context Any] Any (get context newnm)) scope)))
           [node]
           []))
       (= "list" k)
       (let [kids (rr/ordered-children ctx node)
             head (str (rr/head-sym ctx view node))
-            brk? (fn [(candidate Any)] Bool (rb/brackets? ctx view candidate))
+            brk? (fn [candidate Any] Bool (rb/brackets? ctx view candidate))
             capture-all (fn
                           [(nodes (Vec Any)) (active-scope (Vec Any))] (Vec Any)
-                          (reduce (fn [(acc (Vec Any)) (child Any)] (Vec Any)
+                          (reduce (fn [acc (Vec Any) child Any] (Vec Any)
                                     (into acc
                                       (capture-refs m child active-scope B newnm)))
                             []
@@ -366,36 +366,36 @@
           (let [after-name (if (contains? #{"defn" "defn-" "defmacro"} head)
                              (vec (drop 2 kids))
                              (vec (rest kids)))]
-            (reduce (fn [(acc (Vec Any)) (signature Any)] (Vec Any)
+            (reduce (fn [acc (Vec Any) signature Any] (Vec Any)
                       (into acc
                         (cap-signature signature scope)))
               []
               (rb/executable-signatures
                 ctx view head after-name)))
           (contains? rc/LET-FORMS head)
-          (let [(bracket Any) (nth kids 1 nil)
-                (pairs (Vec Any)) (if (and (some? bracket) (brk? bracket))
+          (let [bracket Any (nth kids 1 nil)
+                pairs (Vec Any) (if (and (some? bracket) (brk? bracket))
                                     (rb/let-bind-pairs ctx view bracket)
                                     [])
-                (state (Vec Any)) (reduce (fn
+                state (Vec Any) (reduce (fn
                                             [(state (Vec Any))
                                              (pair Any)]
                                             (Vec Any)
-                                            (let [(active-scope (Vec Any)) (nth state 0)
-                                                 (captures (Vec Any)) (nth state 1)
-                                                 (binds Any) (nth pair 0)
-                                                 (value-node Any) (nth pair 1)
-                                                 (or-vals Any) (nth pair 2)
-                                                 (constraint Any) (nth pair 3 nil)
-                                                 (after-defaults (Vec Any))
+                                            (let [active-scope (Vec Any) (nth state 0)
+                                                 captures (Vec Any) (nth state 1)
+                                                 binds Any (nth pair 0)
+                                                 value-node Any (nth pair 1)
+                                                 or-vals Any (nth pair 2)
+                                                 constraint Any (nth pair 3 nil)
+                                                 after-defaults (Vec Any)
                                                  (into captures
                                                    (capture-all or-vals active-scope))
-                                                 (after-constraint (Vec Any))
+                                                 after-constraint (Vec Any)
                                                  (if (some? constraint)
                                                    (into after-defaults
                                                      (capture-refs m constraint active-scope B newnm))
                                                    after-defaults)
-                                                 (after-value (Vec Any))
+                                                 after-value (Vec Any)
                                                  (if (some? value-node)
                                                    (into after-constraint
                                                      (capture-refs m value-node active-scope B newnm))
@@ -406,21 +406,21 @@
                                               after-value]))
                                    [scope []]
                                    pairs)
-                (final-scope (Vec Any)) (nth state 0)
-                (binding-captures (Vec Any)) (nth state 1)]
+                final-scope (Vec Any) (nth state 0)
+                binding-captures (Vec Any) (nth state 1)]
             (into binding-captures
               (capture-all (vec (drop 2 kids)) final-scope)))
           (contains? rc/FOR-FORMS head)
-          (let [(bracket Any) (nth kids 1 nil)
-                (entries (Vec Any)) (if (and (some? bracket) (brk? bracket))
+          (let [bracket Any (nth kids 1 nil)
+                entries (Vec Any) (if (and (some? bracket) (brk? bracket))
                                       (rb/for-bind-pairs ctx view bracket)
                                       [])
-                (state (Vec Any)) (reduce (fn
+                state (Vec Any) (reduce (fn
                                             [(state (Vec Any))
                                              (entry Any)]
                                             (Vec Any)
-                                            (let [(active-scope (Vec Any)) (nth state 0)
-                                                 (captures (Vec Any)) (nth state 1)]
+                                            (let [active-scope (Vec Any) (nth state 0)
+                                                 captures (Vec Any) (nth state 1)]
                                              (if (= :expr (nth entry 0))
                                                [active-scope
                                                 (into captures
@@ -459,12 +459,12 @@
                                                   after-value]))))
                                    [scope []]
                                    entries)
-                (final-scope (Vec Any)) (nth state 0)
-                (binding-captures (Vec Any)) (nth state 1)]
+                final-scope (Vec Any) (nth state 0)
+                binding-captures (Vec Any) (nth state 1)]
             (into binding-captures
               (capture-all (vec (drop 2 kids)) final-scope)))
           (contains? rc/MATCH-FORMS head)
-          (reduce (fn [(acc (Vec Any)) (clause Any)] (Vec Any)
+          (reduce (fn [acc (Vec Any) clause Any] (Vec Any)
                     (if (brk? clause)
                       (let [clause-children (vec
                                              (rest
@@ -485,14 +485,14 @@
                 fnlists (if (and (some? bracket) (brk? bracket))
                           (vec
                             (filter
-                              (fn [(form Any)] Bool
+                              (fn [form Any] Bool
                                 (= "list" (rr/kind-of ctx view form)))
                               (vec (rest (rr/ordered-children ctx bracket)))))
                           [])
                 context (rb/context-of ctx view
                         (vec
                           (keep
-                            (fn [(form Any)] Any
+                            (fn [form Any] Any
                               (nth (rr/ordered-children ctx form) 0 nil))
                             fnlists)))
                 body-scope (push context scope)
@@ -512,7 +512,7 @@
             (into function-captures
               (capture-all (vec (drop 2 kids)) body-scope)))
           (contains? #{"extend-type" "extend-protocol"} head)
-          (reduce (fn [(acc (Vec Any)) (raw-item Any)] (Vec Any)
+          (reduce (fn [acc (Vec Any) raw-item Any] (Vec Any)
                     (let [item (rr/unwrap-meta ctx view raw-item)]
                       (cond
                         (some? (rr/sym-val ctx view item))
@@ -607,7 +607,7 @@
    (deleted-subtree Any)])
 
 (defn- emit-line! [(m Emit) (wrap Any) (e Any) (cid Any)] Any
-  (let [(ctx Any) (:ctx m) (view Any) (:view m) (ps Any) (ri/predicate-at ctx cid) (r Any) (ri/value-at ctx cid)]
+  (let [ctx Any (:ctx m) view Any (:view m) ps Any (ri/predicate-at ctx cid) r Any (ri/value-at ctx cid)]
     (cond
       (and (some? wrap) (= e wrap) (string? ps) (rc/ord-pos? ps) (not= ps "f0"))
       nil
@@ -632,36 +632,36 @@
       (str "[" (ri/ordinal! ctx e) " " (pr-str ps) " " (ri/ordinal! ctx r) "]"))))
 
 (defn extract-lines! [(m Emit) (src String)] (Vec Any)
-  (let [(ctx Any) (:ctx m)
-        (wrapf Any) (:wrapper-of m)
-        (desc Any) (:descendants m)
-        (dforms Any) (:deleted-forms m)
-        (dsub Any) (:deleted-subtree m)
-        (wrap Any) (wrapf src)
-        (root Any) (if (empty? dforms) (wrapf src) nil)
-        (live Any) (if (some? root) (desc root) nil)
-        (ents (Vec Any)) (vec (get (:ents m) src []))
-        (rows (Vec Any))
-        (reduce (fn [(acc (Vec Any)) (e Any)] (Vec Any)
+  (let [ctx Any (:ctx m)
+        wrapf Any (:wrapper-of m)
+        desc Any (:descendants m)
+        dforms Any (:deleted-forms m)
+        dsub Any (:deleted-subtree m)
+        wrap Any (wrapf src)
+        root Any (if (empty? dforms) (wrapf src) nil)
+        live Any (if (some? root) (desc root) nil)
+        ents (Vec Any) (vec (get (:ents m) src []))
+        rows (Vec Any)
+        (reduce (fn [acc (Vec Any) e Any] (Vec Any)
                   (if (or (contains? dsub e)
                         (and (some? live) (not (contains? live e))))
                     acc
-                    (reduce (fn [(a (Vec Any)) (cid Any)] (Vec Any)
-                              (let [(line Any) (emit-line! m wrap e cid)]
+                    (reduce (fn [a (Vec Any) cid Any] (Vec Any)
+                              (let [line Any (emit-line! m wrap e cid)]
                                 (if (nil? line) a (conj a line))))
                       acc
                       (ri/by-subject ctx e))))
           []
           ents)
-        (children (Vec Any)) (if (some? wrap) (rr/ordered-children ctx wrap) [])
-        (head Any) (first children)
-        (forms (Vec Any))
-        (vec (remove (fn [(f Any)] Bool (contains? dforms f))
+        children (Vec Any) (if (some? wrap) (rr/ordered-children ctx wrap) [])
+        head Any (first children)
+        forms (Vec Any)
+        (vec (remove (fn [f Any] Bool (contains? dforms f))
                (vec (rest children))))
-        (projected-children (Vec Any))
+        projected-children (Vec Any)
         (if (some? head) (into [head] forms) forms)
-        (structural-lines (Vec Any))
-        (mapv (fn [(i Int)] Any
+        structural-lines (Vec Any)
+        (mapv (fn [i Int] Any
                 (let [child (nth projected-children i)
                       child-ordinal (ri/ordinal! ctx child)
                       predicate (rc/ord-str [(* (+ i 1) rc/ORD-STEP)] child-ordinal)]
@@ -678,7 +678,7 @@
   [(op Any) (detail Any) (srcs (Vec String)) (outp Any)] (Vec Any)
   (let [f outp]
     (into [(str "================ authoring: " op " ================") detail]
-      (mapv (fn [(s String)] Any (str "projected -> " (f s) "   <- " s))
+      (mapv (fn [s String] Any (str "projected -> " (f s) "   <- " s))
         srcs))))
 
 ;; re-resolve! — after a mint the module context is stale (a new def, or a new body's
@@ -690,15 +690,15 @@
   [(srcs (Vec String)) (mdefs Any) (mtypes Any) (maccs Any)] (Map Keyword Any)
   (let [fd mdefs ft mtypes fa maccs]
     {:module-context
-     (reduce (fn [(acc (Map Any Any)) (s String)] (Map Any Any) (assoc acc s (fd s)))
+     (reduce (fn [acc (Map Any Any) s String] (Map Any Any) (assoc acc s (fd s)))
        {}
        srcs)
      :type-context
-     (reduce (fn [(acc (Map Any Any)) (s String)] (Map Any Any) (assoc acc s (ft s)))
+     (reduce (fn [acc (Map Any Any) s String] (Map Any Any) (assoc acc s (ft s)))
        {}
        srcs)
      :accessors
-     (reduce (fn [(acc (Map Any Any)) (s String)] (Map Any Any) (assoc acc s (fa s)))
+     (reduce (fn [acc (Map Any Any) s String] (Map Any Any) (assoc acc s (fa s)))
        {}
        srcs)}))
 
@@ -709,11 +709,11 @@
 (def PATH-SPLIT-RE Regex (re-pattern "/"))
 
 (defn wrapper-of [(ctx ri/Graph) (view Any) (ents Any) (src String)] Any
-  (some (fn [(e Any)] Any (when (= "beagle-file" (rr/head-sym ctx view e)) e))
+  (some (fn [e Any] Any (when (= "beagle-file" (rr/head-sym ctx view e)) e))
     (vec (get ents src []))))
 
 (defn structural-kids [(ctx ri/Graph) (n Any)] (Vec Any)
-  (vec (keep (fn [(cid Any)] Any (let [p (ri/predicate-at ctx cid) r (ri/target-at ctx cid)] (when (and (some? r) (string? p) (or (rc/ord-pos? p) (re-matches STRUCTURAL-SEG-RE p) (re-matches STRUCTURAL-COMMENT-RE p) (= p "tail"))) r))) (ri/by-subject ctx n))))
+  (vec (keep (fn [cid Any] Any (let [p (ri/predicate-at ctx cid) r (ri/target-at ctx cid)] (when (and (some? r) (string? p) (or (rc/ord-pos? p) (re-matches STRUCTURAL-SEG-RE p) (re-matches STRUCTURAL-COMMENT-RE p) (= p "tail"))) r))) (ri/by-subject ctx n))))
 
 (defn structural-descendants [(ctx ri/Graph) (root Any)] (Set Any)
   (loop [seen (Set Any) #{} stack (Vec Any) [root]]
@@ -732,7 +732,7 @@
    (src String)
    (victim Any)]
   Any
-  (some (fn [(f Any)] Any (let [d (unwrap-def f) children (rr/ordered-children ctx d) name-index (rc/type-name-index (rr/head-sym ctx view d) (rr/sym-val ctx view (nth children 1 nil))) outer (rr/unwrap-meta ctx view (nth children name-index nil)) leaf (if (= "list" (rr/kind-of ctx view outer)) (first (rr/ordered-children ctx outer)) outer) logical (rr/unwrap-meta ctx view leaf)] (when (= victim logical) f)))
+  (some (fn [f Any] Any (let [d (unwrap-def f) children (rr/ordered-children ctx d) name-index (rc/type-name-index (rr/head-sym ctx view d) (rr/sym-val ctx view (nth children 1 nil))) outer (rr/unwrap-meta ctx view (nth children name-index nil)) leaf (if (= "list" (rr/kind-of ctx view outer)) (first (rr/ordered-children ctx outer)) outer) logical (rr/unwrap-meta ctx view leaf)] (when (= victim logical) f)))
     (rest (rr/ordered-children ctx (wrapper-of ctx view ents src)))))
 
 (defn emit-env
@@ -750,8 +750,8 @@
     REFERS
     FIXED
     ents
-    (fn [(src String)] Any (wrapper-of ctx view ents src))
-    (fn [(root Any)] (Set Any) (structural-descendants ctx root))
+    (fn [src String] Any (wrapper-of ctx view ents src))
+    (fn [root Any] (Set Any) (structural-descendants ctx root))
     #{}
     #{}))
 
@@ -769,12 +769,12 @@
   (if (nil? DEFAULT-PROJECT-SRCS) srcs (vec DEFAULT-PROJECT-SRCS)))
 
 (defn scope-match? [(module-name Any) (src String) (scope String)] Bool
-  (let [seg? (fn [(m Any)] Bool (boolean (and m (or (= m scope) (str/ends-with? m (str "." scope))))))]
+  (let [seg? (fn [m Any] Bool (boolean (and m (or (= m scope) (str/ends-with? m (str "." scope))))))]
     (or (seg? src) (seg? (module-name src)))))
 
 (defn scope->srcs
   [(module-name Any) (srcs (Vec String)) (scope String)] (Vec String)
-  (vec (filter (fn [(src String)] Bool (scope-match? module-name src scope)) srcs)))
+  (vec (filter (fn [src String] Bool (scope-match? module-name src scope)) srcs)))
 
 (defn out-path-for [(resolve-out Any) (src String)] String
   (str (or resolve-out DEFAULT-RESOLVE-OUT (System/getenv "RESOLVE_OUT") "/tmp")

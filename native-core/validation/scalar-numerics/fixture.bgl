@@ -78,7 +78,7 @@
       (float-from-bits addend))))
 
 (defn f64-kernel [(x-bits Int) (y-bits Int) (scale-bits Int)] Float
-  (let [(x Float) (float-from-bits x-bits)
-        (y Float) (float-from-bits y-bits)
-        (scale Float) (float-from-bits scale-bits)]
+  (let [x Float (float-from-bits x-bits)
+        y Float (float-from-bits y-bits)
+        scale Float (float-from-bits scale-bits)]
     (/ (+ (* x x) (* y y)) scale)))

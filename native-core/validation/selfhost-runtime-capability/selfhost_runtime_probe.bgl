@@ -7,11 +7,11 @@
 (declare-extern selfhost.rt/abs-path (Fn [String] String))
 
 (defn -main [(args (Vec String))] Int
-  (let [(path String) (nth args 0)
-        (existing String) (nth args 1)
-        (missing String) (nth args 2)
-        (marker (U String Nil)) (selfhost.rt/getenv "BEAGLE_S8_MARKER")
-        (absolute String) (selfhost.rt/abs-path path)]
+  (let [path String (nth args 0)
+        existing String (nth args 1)
+        missing String (nth args 2)
+        marker (U String Nil) (selfhost.rt/getenv "BEAGLE_S8_MARKER")
+        absolute String (selfhost.rt/abs-path path)]
     (selfhost.rt/eprint "s8-selfhost-runtime\n")
     (if (and (= absolute path)
              (selfhost.rt/file-exists? existing)

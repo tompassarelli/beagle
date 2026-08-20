@@ -47,9 +47,9 @@
     :else [(- position 1)]))
 
 (defn corpus-instructions [(position Int)] (Vec core/Instruction)
-  (let [(targets (Vec Int)) (call-target-indices position)]
+  (let [targets (Vec Int) (call-target-indices position)]
     (mapv
-      (fn [(target-position Int)] core/Instruction
+      (fn [target-position Int] core/Instruction
         (core/->CallInstruction
           (core/->SsaValueV0
             (corpus-edge-id position target-position)
@@ -69,20 +69,20 @@
         (= position 0))
     (lower/->NativeTodoV0 "CORPUS-NOT-READY"
       "the deterministic readiness seed is not lowered")
-    (let [(block-id core/NativeId) (corpus-id "block" position)]
+    (let [block-id core/NativeId (corpus-id "block" position)]
       (lower/->NativeLoweredV0 block-id
         [(core/->BasicBlock block-id [] (corpus-instructions position)
            [(core/->ReturnTerminator nil)])]))))
 
 (defn corpus-function [(scenario String) (position Int)] lower/TypedFunctionV0
-  (let [(id core/NativeId) (corpus-id "function" position)
-        (name String) (str "worklist-function-" position)
-        (effects (Vec core/NativeId))
+  (let [id core/NativeId (corpus-id "function" position)
+        name String (str "worklist-function-" position)
+        effects (Vec core/NativeId)
         (if (and (or (= scenario "effects") (= scenario "mixed"))
               (= position 0))
           (effect-seed)
           [])
-        (readiness lower/NativeReadinessV0)
+        readiness lower/NativeReadinessV0
         (corpus-readiness scenario position)]
     (lower/->TypedFunctionV0
       id
@@ -111,18 +111,18 @@
   (loop [round Int 0 current (Vec lower/TypedFunctionV0) functions]
     (if (> round (count functions))
       current
-      (let [(ready (Vec core/NativeId))
+      (let [ready (Vec core/NativeId)
             (loop [position Int 0 ids (Vec core/NativeId) []]
               (if (>= position (count current))
                 ids
-                (let [(function lower/TypedFunctionV0) (nth current position)]
+                (let [function lower/TypedFunctionV0 (nth current position)]
                   (recur (+ position 1)
                     (if (lower/ready-function? function)
                       (conj ids (lower/typedfunctionv0-id function))
                       ids)))))
-            (next (Vec lower/TypedFunctionV0))
+            next (Vec lower/TypedFunctionV0)
             (mapv
-              (fn [(function lower/TypedFunctionV0)] lower/TypedFunctionV0
+              (fn [function lower/TypedFunctionV0] lower/TypedFunctionV0
                 (if (and (lower/ready-function? function)
                       (not (core/ids-in?
                              (lower/body-call-targets function) ready)))
@@ -134,7 +134,7 @@
                          " calls a function whose own body is not lowered"))])
                   function))
               current)
-            (settled Bool)
+            settled Bool
             (loop [position Int 0]
               (if (>= position (count current))
                 true
@@ -151,29 +151,29 @@
   (loop [round Int 0 current (Vec lower/TypedFunctionV0) functions]
     (if (> round (count functions))
       current
-      (let [(effectful (Vec core/NativeId))
+      (let [effectful (Vec core/NativeId)
             (loop [position Int 0 ids (Vec core/NativeId) []]
               (if (>= position (count current))
                 ids
-                (let [(function lower/TypedFunctionV0) (nth current position)]
+                (let [function lower/TypedFunctionV0 (nth current position)]
                   (recur (+ position 1)
                     (if (core/id-in?
                           (lower/typedfunctionv0-effects function) effect-id)
                       (conj ids (lower/typedfunctionv0-id function))
                       ids)))))
-            (next (Vec lower/TypedFunctionV0))
+            next (Vec lower/TypedFunctionV0)
             (mapv
-              (fn [(function lower/TypedFunctionV0)] lower/TypedFunctionV0
-                (let [(targets (Vec core/NativeId))
+              (fn [function lower/TypedFunctionV0] lower/TypedFunctionV0
+                (let [targets (Vec core/NativeId)
                       (lower/body-call-targets function)
-                      (prior-effects (Vec core/NativeId))
+                      prior-effects (Vec core/NativeId)
                       (lower/typedfunctionv0-effects function)
-                      (needs-effect Bool)
+                      needs-effect Bool
                       (some? (some
-                               (fn [(target core/NativeId)] Bool
+                               (fn [target core/NativeId] Bool
                                  (core/id-in? effectful target))
                                targets))
-                      (effects (Vec core/NativeId))
+                      effects (Vec core/NativeId)
                       (if needs-effect
                         (lower/with-effect prior-effects effect-id)
                         prior-effects)]
@@ -193,7 +193,7 @@
                          (lower/readiness-code
                            (lower/typedfunctionv0-readiness function)))]))))
               current)
-            (settled Bool)
+            settled Bool
             (loop [position Int 0]
               (if (>= position (count current))
                 true
@@ -209,7 +209,7 @@
 
 (defn reference-settle-effects
   [(functions (Vec lower/TypedFunctionV0))] (Vec lower/TypedFunctionV0)
-  (let [(order (Vec core/NativeId)) (lower/closure-effect-order)]
+  (let [order (Vec core/NativeId) (lower/closure-effect-order)]
     (loop [position Int 0 current (Vec lower/TypedFunctionV0) functions]
       (if (>= position (count order))
         current
@@ -222,72 +222,72 @@
 
 (defn typed-stage-artifacts
   [(label String) (functions (Vec lower/TypedFunctionV0))] StageArtifactsV0
-  (let [(types (Vec core/TypeDef)) (lower/builtin-types [])
-        (effects (Vec core/EffectDef))
+  (let [types (Vec core/TypeDef) (lower/builtin-types [])
+        effects (Vec core/EffectDef)
         (lower/slice-effects true true true true true true true true)
-        (regions (Vec core/RegionDef)) (lower/slice-regions)
-        (capabilities (Vec core/CapabilityDef))
+        regions (Vec core/RegionDef) (lower/slice-regions)
+        capabilities (Vec core/CapabilityDef)
         (lower/slice-capabilities true true true true true true true true)
-        (source-digest String)
+        source-digest String
         (stages/content-digest
           (stages/canonical-record "lowering-worklist-source-v0" [label]))
-        (typed-root core/NativeId)
+        typed-root core/NativeId
         (lower/lower-id "lowering-worklist-validation-typed" [label])
-        (typed-terms stages/TermGraphV0)
+        typed-terms stages/TermGraphV0
         (stages/->TermGraphV0 typed-root
           (conj
             (lower/typed-term-nodes types functions effects
               true true true true true true true true)
             (stages/->TermNodeV0 typed-root
               (stages/->TextTermV0 "typed-stage-v0"))))
-        (typed-stage stages/TypedStageV0)
+        typed-stage stages/TypedStageV0
         (stages/->TypedStageV0
           typed-terms
           source-digest
           (mapv
-            (fn [(definition core/TypeDef)] core/NativeId
+            (fn [definition core/TypeDef] core/NativeId
               (core/typedef-id definition))
             types)
           (mapv
-            (fn [(function lower/TypedFunctionV0)] core/NativeId
+            (fn [function lower/TypedFunctionV0] core/NativeId
               (lower/typedfunctionv0-id function))
             functions)
           (mapv
-            (fn [(effect core/EffectDef)] core/NativeId
+            (fn [effect core/EffectDef] core/NativeId
               (core/effectdef-id effect))
             effects)
           (mapv
-            (fn [(region core/RegionDef)] core/NativeId
+            (fn [region core/RegionDef] core/NativeId
               (core/regiondef-id region))
             regions)
           (mapv
-            (fn [(capability core/CapabilityDef)] core/NativeId
+            (fn [capability core/CapabilityDef] core/NativeId
               (core/capabilitydef-id capability))
             capabilities)
           [(lower/type-id "LowerFailure")])
-        (typed-encoding String) (stages/encode-typed-stage typed-stage)
-        (typed-digest String) (stages/content-digest typed-encoding)
-        (typed-receipt String)
+        typed-encoding String (stages/encode-typed-stage typed-stage)
+        typed-digest String (stages/content-digest typed-encoding)
+        typed-receipt String
         (stages/encode-pass-receipt
           (lower/make-receipt source-digest "lowering-worklist-validation-v0"
             "source-to-typed" [] [] [] typed-digest))
-        (layouts (Vec core/LayoutDef))
+        layouts (Vec core/LayoutDef)
         (lower/collect-layouts
           (lower/resolve-layouts types (core/abi-profile-lp64)))
-        (native-functions (Vec core/FunctionDef))
+        native-functions (Vec core/FunctionDef)
         (lower/lower-ready-functions functions)
-        (abis (Vec core/AbiDeclV0))
+        abis (Vec core/AbiDeclV0)
         (lower/function-abis functions native-functions layouts)
-        (native-root core/NativeId)
+        native-root core/NativeId
         (lower/lower-id "lowering-worklist-validation-native" [typed-digest])
-        (native-terms stages/TermGraphV0)
+        native-terms stages/TermGraphV0
         (stages/->TermGraphV0 native-root
           (conj
             (lower/native-term-nodes types effects capabilities layouts
               native-functions abis [])
             (stages/->TermNodeV0 native-root
               (stages/->TextTermV0 "native-stage-v0"))))
-        (program core/NativeCoreProgram)
+        program core/NativeCoreProgram
         (core/->NativeCoreProgram
           (lower/lower-id "lowering-worklist-validation-program" [typed-digest])
           (lower/lower-id "typed-stage" [typed-digest])
@@ -299,24 +299,24 @@
           layouts
           native-functions
           (mapv
-            (fn [(effect core/EffectDef)] core/NativeId
+            (fn [effect core/EffectDef] core/NativeId
               (core/effectdef-id effect))
             effects)
           (mapv
-            (fn [(region core/RegionDef)] core/NativeId
+            (fn [region core/RegionDef] core/NativeId
               (core/regiondef-id region))
             regions)
           (mapv
-            (fn [(capability core/CapabilityDef)] core/NativeId
+            (fn [capability core/CapabilityDef] core/NativeId
               (core/capabilitydef-id capability))
             capabilities)
           abis
           [])
-        (native-stage stages/NativeStageV0)
+        native-stage stages/NativeStageV0
         (stages/->NativeStageV0 native-terms typed-digest program [])
-        (native-encoding String) (stages/encode-native-stage native-stage)
-        (native-digest String) (stages/content-digest native-encoding)
-        (native-receipt String)
+        native-encoding String (stages/encode-native-stage native-stage)
+        native-digest String (stages/content-digest native-encoding)
+        native-receipt String
         (stages/encode-pass-receipt
           (lower/make-receipt typed-digest "lowering-worklist-validation-v0"
             "typed-to-native" [] [] [] native-digest))]
@@ -358,94 +358,94 @@
   (loop [position Int 0]
     (if (>= position (count functions))
       true
-      (let [(expected Bool) (>= position 224)
-            (actual Bool) (lower/ready-function? (nth functions position))]
+      (let [expected Bool (>= position 224)
+            actual Bool (lower/ready-function? (nth functions position))]
         (if (= expected actual) (recur (+ position 1)) false)))))
 
 (defn effect-closure-correct? [(functions (Vec lower/TypedFunctionV0))] Bool
-  (let [(expected (Vec core/NativeId)) (effect-seed)]
+  (let [expected (Vec core/NativeId) (effect-seed)]
     (loop [position Int 0]
       (if (>= position (count functions))
         true
-        (let [(actual (Vec core/NativeId))
+        (let [actual (Vec core/NativeId)
               (lower/typedfunctionv0-effects (nth functions position))
-              (correct Bool)
+              correct Bool
               (if (< position 224) (= expected actual) (= [] actual))]
           (if correct (recur (+ position 1)) false))))))
 
 (defn mixed-closure-correct? [(functions (Vec lower/TypedFunctionV0))] Bool
-  (let [(expected-effects (Vec core/NativeId)) (effect-seed)]
+  (let [expected-effects (Vec core/NativeId) (effect-seed)]
     (loop [position Int 0]
       (if (>= position (count functions))
         true
-        (let [(function lower/TypedFunctionV0) (nth functions position)
-              (expected-ready Bool) (>= position 224)
-              (expected-function-effects (Vec core/NativeId))
+        (let [function lower/TypedFunctionV0 (nth functions position)
+              expected-ready Bool (>= position 224)
+              expected-function-effects (Vec core/NativeId)
               (if (= position 0) expected-effects [])
-              (correct Bool)
+              correct Bool
               (and (= expected-ready (lower/ready-function? function))
                 (= expected-function-effects
                   (lower/typedfunctionv0-effects function)))]
           (if correct (recur (+ position 1)) false))))))
 
 (defn run-worklist-gate [] WorklistGateRunV0
-  (let [(effect-input (Vec lower/TypedFunctionV0))
+  (let [effect-input (Vec lower/TypedFunctionV0)
         (corpus-functions "effects")
-        (readiness-input (Vec lower/TypedFunctionV0))
+        readiness-input (Vec lower/TypedFunctionV0)
         (corpus-functions "readiness")
-        (mixed-input (Vec lower/TypedFunctionV0))
+        mixed-input (Vec lower/TypedFunctionV0)
         (corpus-functions "mixed")
-        (effect-reference (Vec lower/TypedFunctionV0))
+        effect-reference (Vec lower/TypedFunctionV0)
         (reference-settle-functions effect-input)
-        (readiness-reference (Vec lower/TypedFunctionV0))
+        readiness-reference (Vec lower/TypedFunctionV0)
         (reference-settle-functions readiness-input)
-        (mixed-reference (Vec lower/TypedFunctionV0))
+        mixed-reference (Vec lower/TypedFunctionV0)
         (reference-settle-functions mixed-input)
-        (effect-optimized lower/FunctionClosureSettlementV0)
+        effect-optimized lower/FunctionClosureSettlementV0
         (lower/settle-function-closures-with-metrics effect-input)
-        (readiness-optimized lower/FunctionClosureSettlementV0)
+        readiness-optimized lower/FunctionClosureSettlementV0
         (lower/settle-function-closures-with-metrics readiness-input)
-        (mixed-optimized lower/FunctionClosureSettlementV0)
+        mixed-optimized lower/FunctionClosureSettlementV0
         (lower/settle-function-closures-with-metrics mixed-input)
-        (effect-functions (Vec lower/TypedFunctionV0))
+        effect-functions (Vec lower/TypedFunctionV0)
         (lower/functionclosuresettlementv0-functions effect-optimized)
-        (readiness-functions (Vec lower/TypedFunctionV0))
+        readiness-functions (Vec lower/TypedFunctionV0)
         (lower/functionclosuresettlementv0-functions readiness-optimized)
-        (mixed-functions (Vec lower/TypedFunctionV0))
+        mixed-functions (Vec lower/TypedFunctionV0)
         (lower/functionclosuresettlementv0-functions mixed-optimized)
-        (effect-metrics lower/FunctionClosureMetricsV0)
+        effect-metrics lower/FunctionClosureMetricsV0
         (lower/functionclosuresettlementv0-metrics effect-optimized)
-        (readiness-metrics lower/FunctionClosureMetricsV0)
+        readiness-metrics lower/FunctionClosureMetricsV0
         (lower/functionclosuresettlementv0-metrics readiness-optimized)
-        (effect-reference-artifacts StageArtifactsV0)
+        effect-reference-artifacts StageArtifactsV0
         (typed-stage-artifacts "effects" effect-reference)
-        (effect-optimized-artifacts StageArtifactsV0)
+        effect-optimized-artifacts StageArtifactsV0
         (typed-stage-artifacts "effects" effect-functions)
-        (readiness-reference-artifacts StageArtifactsV0)
+        readiness-reference-artifacts StageArtifactsV0
         (typed-stage-artifacts "readiness" readiness-reference)
-        (readiness-optimized-artifacts StageArtifactsV0)
+        readiness-optimized-artifacts StageArtifactsV0
         (typed-stage-artifacts "readiness" readiness-functions)
-        (mixed-reference-artifacts StageArtifactsV0)
+        mixed-reference-artifacts StageArtifactsV0
         (typed-stage-artifacts "mixed" mixed-reference)
-        (mixed-optimized-artifacts StageArtifactsV0)
+        mixed-optimized-artifacts StageArtifactsV0
         (typed-stage-artifacts "mixed" mixed-functions)
-        (reference-artifacts String)
+        reference-artifacts String
         (encode-scenario-artifacts effect-reference-artifacts
           readiness-reference-artifacts mixed-reference-artifacts)
-        (optimized-artifacts String)
+        optimized-artifacts String
         (encode-scenario-artifacts effect-optimized-artifacts
           readiness-optimized-artifacts mixed-optimized-artifacts)
-        (function-count Int)
+        function-count Int
         (lower/functionclosuremetricsv0-function-count effect-metrics)
-        (call-edge-count Int)
+        call-edge-count Int
         (lower/functionclosuremetricsv0-call-edge-count effect-metrics)
-        (effect-kind-count Int)
+        effect-kind-count Int
         (lower/functionclosuremetricsv0-effect-kind-count effect-metrics)
-        (readiness-edge-visits Int)
+        readiness-edge-visits Int
         (lower/functionclosuremetricsv0-readiness-edge-visits readiness-metrics)
-        (effect-edge-visits Int)
+        effect-edge-visits Int
         (lower/functionclosuremetricsv0-effect-edge-visits effect-metrics)
-        (bounds-hold Bool)
+        bounds-hold Bool
         (and (= function-count 256)
           (and (= call-edge-count 366)
             (and (= effect-kind-count 12)

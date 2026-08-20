@@ -68,7 +68,7 @@
 
 ;; ---- stats helpers ----------------------------------------------------------
 (defn avg-ranks [(v (Vec Double))] (Vec Double)
-  (let [idx (vec (map-indexed (fn [(i Int) (x Double)] (Vec Any) [i x]) v)) sorted (vec (sort-by (fn
+  (let [idx (vec (map-indexed (fn [i Int x Double] (Vec Any) [i x]) v)) sorted (vec (sort-by (fn
                                                                                                    [(p (Vec Any))]
                                                                                                    Any
                                                                                                    (nth p 1)) idx)) groups (vec (partition-by (fn
@@ -79,22 +79,22 @@
                                                                                                                                                                                                                                                                                                                                                                                                       (p (Vec Any))]
                                                                                                                                                                                                                                                                                                                                                                                                      (Map Any Double)
                                                                                                                                                                                                                                                                                                                                                                                                      (assoc a (nth p 0) r)) acc g)))))]
-    (mapv (fn [(i Int)] Double (get acc i 0.0)) (vec (range (count v))))))
+    (mapv (fn [i Int] Double (get acc i 0.0)) (vec (range (count v))))))
 
 (defn pearson [(xs (Vec Double)) (ys (Vec Double))] Double
-  (let [(n Int) (count xs)
-        (sum-x Double) (reduce (fn [(total Double) (value Double)] Double (+ total value)) 0.0 xs)
-        (sum-y Double) (reduce (fn [(total Double) (value Double)] Double (+ total value)) 0.0 ys)
-        (mx Double) (/ sum-x (double n))
-        (my Double) (/ sum-y (double n))
-        (cov Double) (reduce (fn [(total Double) (i Int)] Double
+  (let [n Int (count xs)
+        sum-x Double (reduce (fn [total Double value Double] Double (+ total value)) 0.0 xs)
+        sum-y Double (reduce (fn [total Double value Double] Double (+ total value)) 0.0 ys)
+        mx Double (/ sum-x (double n))
+        my Double (/ sum-y (double n))
+        cov Double (reduce (fn [total Double i Int] Double
                                (+ total (* (- (nth xs i) mx) (- (nth ys i) my))))
                              0.0 (vec (range n)))
-        (sx Double) (Math/sqrt (reduce (fn [(total Double) (x Double)] Double
-                                         (let [(dd Double) (- x mx)] (+ total (* dd dd))))
+        sx Double (Math/sqrt (reduce (fn [total Double x Double] Double
+                                         (let [dd Double (- x mx)] (+ total (* dd dd))))
                                        0.0 xs))
-        (sy Double) (Math/sqrt (reduce (fn [(total Double) (y Double)] Double
-                                         (let [(dd Double) (- y my)] (+ total (* dd dd))))
+        sy Double (Math/sqrt (reduce (fn [total Double y Double] Double
+                                         (let [dd Double (- y my)] (+ total (* dd dd))))
                                        0.0 ys))]
     (if (or (zero? sx) (zero? sy)) 0.0 (/ cov (* sx sy)))))
 
@@ -107,13 +107,13 @@
   (str/replace (str (nth k 0)) (re-pattern ".*/gjoa/") ""))
 
 (defn defn-keys-of [(defns (Vec (Map Keyword Any)))] (Vec (Vec Any))
-  (mapv (fn [(dd (Map Keyword Any))] (Vec Any) (get dd :key)) defns))
+  (mapv (fn [dd (Map Keyword Any)] (Vec Any) (get dd :key)) defns))
 
 (defn count-adj
   [(defn-keys (Vec (Vec Any)))
    (adj (Map (Vec Any) (Set (Vec Any))))]
   (Map (Vec Any) Int)
-  (reduce (fn [(m (Map (Vec Any) Int)) (k (Vec Any))] (Map (Vec Any) Int) (assoc m k (count (get adj k #{}))))
+  (reduce (fn [m (Map (Vec Any) Int) k (Vec Any)] (Map (Vec Any) Int) (assoc m k (count (get adj k #{}))))
     {}
     defn-keys))
 
@@ -121,17 +121,17 @@
   [(defn-keys (Vec (Vec Any)))
    (adj (Map (Vec Any) (Set (Vec Any))))]
   (Map (Vec Any) Int)
-  (reduce (fn [(m (Map (Vec Any) Int)) (k (Vec Any))] (Map (Vec Any) Int) (assoc m k (count (transitive adj k))))
+  (reduce (fn [m (Map (Vec Any) Int) k (Vec Any)] (Map (Vec Any) Int) (assoc m k (count (transitive adj k))))
     {}
     defn-keys))
 
 (defn name-of [(defns (Vec (Map Keyword Any))) (k (Vec Any))] String
-  (let [hits (filterv (fn [(dd (Map Keyword Any))] Boolean (= (get dd :key) k)) defns)]
+  (let [hits (filterv (fn [dd (Map Keyword Any)] Boolean (= (get dd :key) k)) defns)]
     (if (empty? hits) "" (str (get (nth hits 0) :name)))))
 
 (defn collision-names
   [(by-name (Map String (Vec (Map Keyword Any))))] (Vec String)
-  (vec (filterv (fn [(nm String)] Boolean (> (count (distinct (mapv (fn
+  (vec (filterv (fn [nm String] Boolean (> (count (distinct (mapv (fn
                                                                       [(dd (Map Keyword Any))]
                                                                       Any
                                                                       (nth (get dd :key) 0)) (get by-name nm)))) 1)) (vec (sort (set (keys by-name)))))))
@@ -143,8 +143,8 @@
    (collisions (Vec String))
    (radj (Map (Vec Any) (Set (Vec Any))))]
   (Vec Row)
-  (filterv (fn [(r Row)] Boolean (pos? (:gn r)))
-    (vec (mapcat (fn [(nm String)] (Vec Row) (let [ds (get by-name nm) incumbent (reduce (fn
+  (filterv (fn [r Row] Boolean (pos? (:gn r)))
+    (vec (mapcat (fn [nm String] (Vec Row) (let [ds (get by-name nm) incumbent (reduce (fn
                                                                                            [(acc (Set (Vec Any)))
                                                                                             (dd (Map Keyword Any))]
                                                                                            (Set (Vec Any))
@@ -165,7 +165,7 @@
   Nil
   (let [ctx (c/new-term-store "codegraph")
         edge-pred "calls-defn"
-        operations (mapv (fn [(e (Vec (Vec Any)))] Any
+        operations (mapv (fn [e (Vec (Vec Any))] Any
                            (c/assert-operation
                              (t/triple (node-term (nth e 0)) edge-pred (node-term (nth e 1)))))
                      edges)
@@ -189,7 +189,7 @@
                    [(d/variable "y") (d/variable "z")])])])
         dl-reaches (set (d/facts db "reaches"))
         t1 (System/currentTimeMillis)
-        truth (reduce + (mapv (fn [(k (Vec Any))] Int (count (transitive fadj k))) defn-keys))]
+        truth (reduce + (mapv (fn [k (Vec Any)] Int (count (transitive fadj k))) defn-keys))]
     (println (str "\nBeagle Store Datalog transitive closure: " (count dl-reaches) " reaches-pairs in " (- t1 t0) " ms" "  (in-process closure: " truth " pairs — " (if (= (count dl-reaches) truth) "MATCH" "DIVERGE") ")"))))
 
 ;; MACRO delta = mean of per-target precision deltas (each collision target weighted
@@ -205,15 +205,15 @@
   (println "\n================ BENCHMARK A — caller precision on collisions ================")
   (println "(oracle = module-local scope: a call binds the defn in its own file)")
   (let [collisions (collision-names by-name)
-        (rows (Vec Row)) (scored-rows by-name collisions radj)
-        (delta-sum Double) (reduce (fn [(total Double) (r Row)] Double
+        rows (Vec Row) (scored-rows by-name collisions radj)
+        delta-sum Double (reduce (fn [total Double r Row] Double
                                      (+ total (- (:graph-p r) (:incumbent-p r))))
                                    0.0 rows)
-        (mean-delta Double) (if (empty? rows) 0.0 (/ delta-sum (double (count rows))))
-        (tot-g Int) (reduce (fn [(total Int) (r Row)] Int (+ total (:gn r))) 0 rows)
-        (tot-in Int) (reduce (fn [(total Int) (r Row)] Int (+ total (:in r))) 0 rows)
-        (micro-incumbent-p Double) (if (pos? tot-in) (/ (double tot-g) (double tot-in)) 1.0)
-        (micro-delta Double) (- 1.0 micro-incumbent-p)
+        mean-delta Double (if (empty? rows) 0.0 (/ delta-sum (double (count rows))))
+        tot-g Int (reduce (fn [total Int r Row] Int (+ total (:gn r))) 0 rows)
+        tot-in Int (reduce (fn [total Int r Row] Int (+ total (:in r))) 0 rows)
+        micro-incumbent-p Double (if (pos? tot-in) (/ (double tot-g) (double tot-in)) 1.0)
+        micro-delta Double (- 1.0 micro-incumbent-p)
         wrong (count (filterv (fn
                                                                                                                                                                                                                                                                                                                                                                                                                          [(r Row)]
                                                                                                                                                                                                                                                                                                                                                                                                                          Boolean
@@ -222,7 +222,7 @@
       (count collisions)
       " scored targets:"
       (count rows))
-    (doseq [r (vec (take 12 (sort-by (fn [(r Row)] Double (:incumbent-p r)) rows)))]
+    (doseq [r (vec (take 12 (sort-by (fn [r Row] Double (:incumbent-p r)) rows)))]
       (println (format "  %-18s %-22s graph P=%.2f  incumbent P=%.2f  (%d of %d callers are in-scope)" (:name r) (:file r) (:graph-p r) (:incumbent-p r) (:gn r) (:in r))))
     (println (format "graph is PERFECT on %d/%d targets; the bare-symbol incumbent is WRONG (P<1) on %d (%.0f%%)" (count rows) (count rows) wrong (* 100.0 (/ (double wrong) (double (max 1 (count rows)))))))
     (println "MACRO mean precision delta (graph - incumbent):"
@@ -239,7 +239,7 @@
    (blast (Map (Vec Any) Int))]
   Nil
   (println "\n================ BENCHMARK B — transitive leverage (keystones) ================")
-  (let [called (filterv (fn [(k (Vec Any))] Boolean (pos? (get blast k 0))) defn-keys) xs (mapv (fn
+  (let [called (filterv (fn [k (Vec Any)] Boolean (pos? (get blast k 0))) defn-keys) xs (mapv (fn
                                                                                                   [(k (Vec Any))]
                                                                                                   Double
                                                                                                   (double (get direct k 0))) called) ys (mapv (fn
@@ -257,12 +257,12 @@
                                                                                                                                                                                                                                                                                                                                                                       (not (contains? top-direct k))) top-blast) ratio-3x (filterv (fn
                                                                                                                                                                                                                                                                                                                                                                                                                                      [(k (Vec Any))]
                                                                                                                                                                                                                                                                                                                                                                                                                                      Boolean
-                                                                                                                                                                                                                                                                                                                                                                                                                                     (let [(direct-count Int) (int (get direct k 0))
-                                                                                                                                                                                                                                                                                                                                                                                                                                           (blast-count Int) (int (get blast k 0))]
+                                                                                                                                                                                                                                                                                                                                                                                                                                     (let [direct-count Int (int (get direct k 0))
+                                                                                                                                                                                                                                                                                                                                                                                                                                           blast-count Int (int (get blast k 0))]
                                                                                                                                                                                                                                                                                                                                                                                                                                        (and (pos? direct-count) (>= (/ (double blast-count) (double direct-count)) 3.0)))) defn-keys)]
     (println "called defns:" (count called) " (ranked)")
     (println "\nTOP 8 by transitive blast radius (transitive callers):")
-    (doseq [k (vec (take 8 (sort-by (fn [(k (Vec Any))] Int (get blast k 0)) > defn-keys)))]
+    (doseq [k (vec (take 8 (sort-by (fn [k (Vec Any)] Int (get blast k 0)) > defn-keys)))]
       (println (format "  blast=%-4d direct=%-3d  %s   %s" (get blast k 0) (get direct k 0) (name-of defns k) (short-file k))))
     (println "\nSpearman rho (direct-rank vs blast-rank):"
       (fmt3 rho)

@@ -2,7 +2,7 @@
 (ns native.driver)
 
 (defn main [] Int
-  (let [(signals (Vec native.kernel/Signal))
+  (let [signals (Vec native.kernel/Signal)
         (native.bridge/append-signals [])]
     (if (and (= (native.kernel/scale 21 2) 42)
              (= (native.bridge/doubled 21) 42)

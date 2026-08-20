@@ -14,7 +14,7 @@
    (segment-byte-count Int)
    (tail-bytes ByteSource)]
   Int
-  (let [(segments (Vec log/ChainPiece))
+  (let [segments (Vec log/ChainPiece)
         (if has-segment
           [(log/->ChainPiece segment-bytes segment-start segment-end
                              segment-byte-count)]

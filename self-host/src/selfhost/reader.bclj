@@ -111,9 +111,9 @@
   (cond
     (and (>= (compare c "0") 0) (<= (compare c "9") 0)) (compare c "0")
     (and (>= (compare c "a") 0) (<= (compare c "f") 0))
-      (let [(offset Int) (compare c "a")] (+ 10 offset))
+      (let [offset Int (compare c "a")] (+ 10 offset))
     (and (>= (compare c "A") 0) (<= (compare c "F") 0))
-      (let [(offset Int) (compare c "A")] (+ 10 offset))
+      (let [offset Int (compare c "A")] (+ 10 offset))
     :else 0))
 
 ;; \uXXXX -> the char. i points at the first hex digit.
@@ -140,7 +140,7 @@
     (and (= (count suffix) 5) (= (char-at suffix 0) "u"))
       (decode-u4 suffix 1)
     (= (count suffix) 1)
-      (let [(ch Any) (char-at suffix 0)]
+      (let [ch Any (char-at suffix 0)]
         (int (first ch)))
     :else 65533))
 

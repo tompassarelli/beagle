@@ -71,16 +71,16 @@
   [(descriptors (Vec ProviderDescriptor))
    (capability-value t/Triple)]
   (Vec ProviderDescriptor)
-  (filterv (fn [(value ProviderDescriptor)] Bool (= capability-value (providerdescriptor-capability value)))
+  (filterv (fn [value ProviderDescriptor] Bool (= capability-value (providerdescriptor-capability value)))
     descriptors))
 
 (defn identity-count
   [(descriptors (Vec ProviderDescriptor)) (identity t/Triple)] Int
-  (count (filterv (fn [(value ProviderDescriptor)] Bool (= identity (providerdescriptor-identity value))) descriptors)))
+  (count (filterv (fn [value ProviderDescriptor] Bool (= identity (providerdescriptor-identity value))) descriptors)))
 
 (defn capability-enabled?
   [(enabled (Vec t/Triple)) (capability-value t/Triple)] Bool
-  (boolean (some (fn [(value t/Triple)] Bool (= capability-value value)) enabled)))
+  (boolean (some (fn [value t/Triple] Bool (= capability-value value)) enabled)))
 
 (defn violation
   [(code Keyword)
@@ -93,7 +93,7 @@
     detail))
 
 (defn contract-valid? [(descriptor-value ProviderDescriptor)] Bool
-  (let [(contract t/Triple) (providerdescriptor-contract descriptor-value)]
+  (let [contract t/Triple (providerdescriptor-contract descriptor-value)]
     (and (= (providerdescriptor-capability descriptor-value) (t/triple-t1 contract))
       (and (= :provider/contract (t/triple-t2 contract))
         (and (integer? (t/triple-t3 contract))
@@ -115,7 +115,7 @@
   [(descriptor-value ProviderDescriptor)
    (selected (Vec ProviderDescriptor))]
   (Vec ProviderViolation)
-  (let [(v0 (Vec ProviderViolation)) [] (v1 (Vec ProviderViolation)) (if (= 1 (identity-count selected (providerdescriptor-identity descriptor-value))) v0 (conj v0 (violation :provider/duplicate-identity descriptor-value (t/triple (providerdescriptor-identity descriptor-value) :provider/count (identity-count selected (providerdescriptor-identity descriptor-value)))))) (v2 (Vec ProviderViolation)) (if (contract-valid? descriptor-value) v1 (conj v1 (violation :provider/invalid-contract descriptor-value (providerdescriptor-contract descriptor-value)))) (v3 (Vec ProviderViolation)) (if (= :provider/ready (providerdescriptor-boot-result descriptor-value)) v2 (conj v2 (violation :provider/boot-rejected descriptor-value (t/triple (providerdescriptor-identity descriptor-value) :provider/boot-result (providerdescriptor-boot-result descriptor-value)))))]
+  (let [v0 (Vec ProviderViolation) [] v1 (Vec ProviderViolation) (if (= 1 (identity-count selected (providerdescriptor-identity descriptor-value))) v0 (conj v0 (violation :provider/duplicate-identity descriptor-value (t/triple (providerdescriptor-identity descriptor-value) :provider/count (identity-count selected (providerdescriptor-identity descriptor-value)))))) v2 (Vec ProviderViolation) (if (contract-valid? descriptor-value) v1 (conj v1 (violation :provider/invalid-contract descriptor-value (providerdescriptor-contract descriptor-value)))) v3 (Vec ProviderViolation) (if (= :provider/ready (providerdescriptor-boot-result descriptor-value)) v2 (conj v2 (violation :provider/boot-rejected descriptor-value (t/triple (providerdescriptor-identity descriptor-value) :provider/boot-result (providerdescriptor-boot-result descriptor-value)))))]
     (into v3 (import-violations descriptor-value selected))))
 
 (defn selection-violations
@@ -126,7 +126,7 @@
             [(violations (Vec ProviderViolation))
              (capability-value t/Triple)]
             (Vec ProviderViolation)
-            (let [(matches (Vec ProviderDescriptor)) (providers-for descriptors capability-value)] (if (= 1 (count matches)) violations (conj violations (->ProviderViolation :provider/capability-cardinality capability-value (provider-identity capability-value "selection") (t/triple capability-value :provider/count (count matches)))))))
+            (let [matches (Vec ProviderDescriptor) (providers-for descriptors capability-value)] (if (= 1 (count matches)) violations (conj violations (->ProviderViolation :provider/capability-cardinality capability-value (provider-identity capability-value "selection") (t/triple capability-value :provider/count (count matches)))))))
     []
     enabled))
 
@@ -138,17 +138,17 @@
             [(selected (Vec ProviderDescriptor))
              (capability-value t/Triple)]
             (Vec ProviderDescriptor)
-            (let [(matches (Vec ProviderDescriptor)) (providers-for descriptors capability-value)] (if (= 1 (count matches)) (conj selected (first matches)) selected)))
+            (let [matches (Vec ProviderDescriptor) (providers-for descriptors capability-value)] (if (= 1 (count matches)) (conj selected (first matches)) selected)))
     []
     enabled))
 
 (defn boot-providers
   [(descriptors (Vec ProviderDescriptor)) (enabled (Vec t/Triple))] ProviderBoot
-  (let [(selected (Vec ProviderDescriptor)) (selected-providers descriptors enabled) (initial (Vec ProviderViolation)) (selection-violations descriptors enabled) (violations (Vec ProviderViolation)) (reduce (fn
+  (let [selected (Vec ProviderDescriptor) (selected-providers descriptors enabled) initial (Vec ProviderViolation) (selection-violations descriptors enabled) violations (Vec ProviderViolation) (reduce (fn
                                                                                                                                                                                                                  [(current (Vec ProviderViolation))
                                                                                                                                                                                                                   (descriptor-value ProviderDescriptor)]
                                                                                                                                                                                                                  (Vec ProviderViolation)
-                                                                                                                                                                                                                 (into current (descriptor-violations descriptor-value selected))) initial selected) (stages (Vec ProviderStage)) (mapv (fn
+                                                                                                                                                                                                                 (into current (descriptor-violations descriptor-value selected))) initial selected) stages (Vec ProviderStage) (mapv (fn
                                                                                                                                                                                                                                                                                                                                           [(capability-value t/Triple)]
                                                                                                                                                                                                                                                                                                                                           ProviderStage
                                                                                                                                                                                                                                                                                                                                           (->ProviderStage capability-value :provider/boot (if (empty? violations) :provider/ready :provider/rejected))) enabled)]
@@ -159,7 +159,7 @@
 
 (defn provider-for
   [(boot ProviderBoot) (capability-value t/Triple)] ProviderDescriptor
-  (let [(matches (Vec ProviderDescriptor)) (providers-for (providerboot-providers boot) capability-value)]
+  (let [matches (Vec ProviderDescriptor) (providers-for (providerboot-providers boot) capability-value)]
     (if (and (boot-ok? boot) (= 1 (count matches)))
       (first matches)
       (throw (ex-info "provider capability was not selected at boot" {:type :provider/not-selected})))))
@@ -207,7 +207,7 @@
     (throw (ex-info "provider batch requires space, expected version, and actions" {:type :provider/invalid-batch}))))
 
 (defn rpc-list-term [(values (Vec Any))] Any
-  (reduce (fn [(tail Any) (value Any)] Any (if (t/term? value) (t/triple :rpc/list value tail) (throw (ex-info "provider RPC list contains a value outside Term" {:type :provider/invalid-rpc-term}))))
+  (reduce (fn [tail Any value Any] Any (if (t/term? value) (t/triple :rpc/list value tail) (throw (ex-info "provider RPC list contains a value outside Term" {:type :provider/invalid-rpc-term}))))
     :rpc/list-end
     (reverse values)))
 
@@ -221,7 +221,7 @@
      (provideraction-policy action)]))
 
 (defn batch-payload [(batch ProviderBatch)] t/Triple
-  (let [(actions (Vec Any)) (mapv (fn [(action ProviderAction)] Any (action-term action)) (providerbatch-actions batch))]
+  (let [actions (Vec Any) (mapv (fn [action ProviderAction] Any (action-term action)) (providerbatch-actions batch))]
     (rpc-record-term :rpc/batch [(rpc-list-term actions) :rpc/none])))
 
 (defn batch-request [(batch ProviderBatch)] t/RpcRequest
@@ -248,9 +248,9 @@
    (response t/RpcResponse)])
 
 (defn plan-capability? [(plan ProviderPlan) (capability-value t/Triple)] Bool
-  (let [(stages (Vec ProviderStage)) (providerplan-stages plan)]
+  (let [stages (Vec ProviderStage) (providerplan-stages plan)]
     (and (pos? (count stages))
-      (every? (fn [(stage ProviderStage)] Bool (= capability-value (providerstage-capability stage)))
+      (every? (fn [stage ProviderStage] Bool (= capability-value (providerstage-capability stage)))
         stages))))
 
 (defn response-matches-request?
@@ -266,7 +266,7 @@
    (plan ProviderPlan)
    (executor (Fn [t/RpcRequest] t/RpcResponse))]
   ProviderInvocation
-  (let [(boot ProviderBoot) (boot-providers descriptors enabled) (descriptor-value ProviderDescriptor) (provider-for boot capability-value)]
+  (let [boot ProviderBoot (boot-providers descriptors enabled) descriptor-value ProviderDescriptor (provider-for boot capability-value)]
     (cond
       [(not (providerplan-accepted plan))
        (throw (ex-info "provider invocation refuses a rejected plan" {:type :provider/plan-rejected}))]
@@ -275,7 +275,7 @@
       [:else
        (let [request (plan-request space plan)]
          (if request
-           (let [(response t/RpcResponse) (executor request)]
+           (let [response t/RpcResponse (executor request)]
              (if (and (t/rpc-response? response) (response-matches-request? request response))
                (->ProviderInvocation descriptor-value request response)
                (throw (ex-info "provider executor returned a mismatched Store RPC response" {:type :provider/response-mismatch}))))
@@ -295,5 +295,5 @@
     capability-value
     space
     plan
-    (fn [(request t/RpcRequest)] t/RpcResponse
+    (fn [request t/RpcRequest] t/RpcResponse
       (rt/native-request-to! address port request))))

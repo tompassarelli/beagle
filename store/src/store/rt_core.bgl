@@ -33,8 +33,8 @@
 (defn split-kv [(line String)] (Vec String)
   (let [t (str/trim line) m (re-find SPLIT-KV-RE t)]
     (if (some? m)
-      (let [(parts (Vec String)) [(nth m 1) (nth m 2)]] parts)
-      (let [(parts (Vec String)) [t ""]] parts))))
+      (let [parts (Vec String) [(nth m 1) (nth m 2)]] parts)
+      (let [parts (Vec String) [t ""]] parts))))
 
 (defn fmt-id [(n String)] String
   (let [s (str n)]

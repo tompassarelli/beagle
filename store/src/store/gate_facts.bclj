@@ -28,11 +28,11 @@
 ;; The hosted database owns Store transaction log creation, append/fsync, replay, and recovery.
 ;; Loading it here keeps the command runnable with only store/out on classpath.
 (clojure.core/require 'store.rt)
-(let [(raw-emitted-file Any) (File. (str *file*))
-      (emitted-file Any) (.getCanonicalFile raw-emitted-file)
-      (emitted-namespace-directory Any) (.getParentFile emitted-file)
-      (out-directory Any) (.getParentFile emitted-namespace-directory)
-      (store-directory Any) (.getParentFile out-directory)]
+(let [raw-emitted-file Any (File. (str *file*))
+      emitted-file Any (.getCanonicalFile raw-emitted-file)
+      emitted-namespace-directory Any (.getParentFile emitted-file)
+      out-directory Any (.getParentFile emitted-namespace-directory)
+      store-directory Any (.getParentFile out-directory)]
   (clojure.core/load-file
    (str (.getPath store-directory) "/database.clj")))
 
@@ -74,7 +74,7 @@
    (apply
     str
     (mapv
-     (fn [(value Any)] String
+     (fn [value Any] String
        (format "%02x" (bit-and (int value) 255)))
      (vec
       (.digest (MessageDigest/getInstance "SHA-256")
@@ -100,7 +100,7 @@
                   (str space-prefix base-commit))]))
 
 (defn fact-entry [(id String) (kind String) (envelope String)] FactEntry
-  (let [(payload Any) (store.rt/parse-edn envelope)]
+  (let [payload Any (store.rt/parse-edn envelope)]
     (cond
       [(not (nonempty-string? id))
        (fail "gate fact id must be nonempty" :gate-facts/invalid-fact-id)]
@@ -139,9 +139,9 @@
        (string? (store.types/triple-t3 value))))
 
 (defn- proposition-entry [(proposition Any) (candidate-root String)] FactEntry?
-  (let [(subject Any) (store.types/triple-t1 proposition)
-        (kind Any) (store.types/triple-t2 proposition)
-        (envelope Any) (store.types/triple-t3 proposition)]
+  (let [subject Any (store.types/triple-t1 proposition)
+        kind Any (store.types/triple-t2 proposition)
+        envelope Any (store.types/triple-t3 proposition)]
     (if (and (candidate-subject? subject candidate-root)
              (string? kind)
              (contains? allowed-kinds kind)
@@ -151,9 +151,9 @@
 
 (defn- proposition-link
   [(proposition Any) (candidate-root String)] FallbackLink?
-  (let [(subject Any) (store.types/triple-t1 proposition)
-        (kind Any) (store.types/triple-t2 proposition)
-        (observation-id Any) (store.types/triple-t3 proposition)]
+  (let [subject Any (store.types/triple-t1 proposition)
+        kind Any (store.types/triple-t2 proposition)
+        observation-id Any (store.types/triple-t3 proposition)]
     (if (and (candidate-subject? subject candidate-root)
              (= fallback-link-kind kind)
              (string? observation-id))
@@ -162,8 +162,8 @@
 
 (defn- facts-for [(database Any) (selected FactRoute)] (Vec FactEntry)
   (reduce
-   (fn [(entries (Vec FactEntry)) (proposition Any)] (Vec FactEntry)
-     (let [(entry FactEntry?)
+   (fn [entries (Vec FactEntry) proposition Any] (Vec FactEntry)
+     (let [entry FactEntry?
            (proposition-entry proposition
                               (factroute-candidate-root selected))]
        (if (some? entry) (conj entries entry) entries)))
@@ -172,8 +172,8 @@
 
 (defn- links-for [(database Any) (selected FactRoute)] (Vec FallbackLink)
   (reduce
-   (fn [(links (Vec FallbackLink)) (proposition Any)] (Vec FallbackLink)
-     (let [(link FallbackLink?)
+   (fn [links (Vec FallbackLink) proposition Any] (Vec FallbackLink)
+     (let [link FallbackLink?
            (proposition-link proposition
                              (factroute-candidate-root selected))]
        (if (some? link) (conj links link) links)))
@@ -182,7 +182,7 @@
 
 (defn- entry-with-id [(entries (Vec FactEntry)) (fact-id String)] FactEntry?
   (reduce
-   (fn [(found FactEntry?) (entry FactEntry)] FactEntry?
+   (fn [found FactEntry? entry FactEntry] FactEntry?
      (if (= fact-id (factentry-id entry)) entry found))
    nil
    entries))
@@ -195,7 +195,7 @@
 (defn- link-with-miss-id
   [(links (Vec FallbackLink)) (miss-id String)] FallbackLink?
   (reduce
-   (fn [(found FallbackLink?) (link FallbackLink)] FallbackLink?
+   (fn [found FallbackLink? link FallbackLink] FallbackLink?
      (if (= miss-id (fallbacklink-miss-id link)) link found))
    nil
    links))
@@ -206,8 +206,8 @@
     (fail "fallback link is absent" :gate-facts/fallback-link-absent)))
 
 (defn- create-or-open! [(selected FactRoute)] Any
-  (let [(path String) (factroute-path selected)
-        (file Any) (File. path)]
+  (let [path String (factroute-path selected)
+        file Any (File. path)]
     (if (.exists file)
       nil
       (database/create-triple-log! path (factroute-space-id selected)))
@@ -215,15 +215,15 @@
 
 (defn- with-writer!
   [(selected FactRoute) (operation (Fn [Any] (Vec Any)))] (Vec Any)
-  (let [(authority Any)
+  (let [authority Any
         (writer-authority/acquire! (factroute-path selected))]
     (try
       (operation (create-or-open! selected))
       (finally (writer-authority/release! authority)))))
 
 (defn- cold-open! [(selected FactRoute)] Any
-  (let [(path String) (factroute-path selected)
-        (file Any) (File. path)]
+  (let [path String (factroute-path selected)
+        file Any (File. path)]
     (if (.isFile file)
       (database/open-database! path (factroute-space-id selected))
       (fail "gate fact Store route is unopened"
@@ -246,18 +246,18 @@
           :attestation "store/canonical-validator-v1"}}
         :operations
         (mapv
-         (fn [(proposition Any)] Any
+         (fn [proposition Any] Any
            {:action :assert :proposition proposition})
          propositions)})
       nil)))
 
 (defn- append-entries!
   [(database Any) (selected FactRoute) (entries (Vec FactEntry))] AppendCounts
-  (let [(known (Vec FactEntry)) (facts-for database selected)
-        (new-entries (Vec FactEntry))
+  (let [known (Vec FactEntry) (facts-for database selected)
+        new-entries (Vec FactEntry)
         (reduce
-         (fn [(pending (Vec FactEntry)) (entry FactEntry)] (Vec FactEntry)
-           (let [(prior FactEntry?)
+         (fn [pending (Vec FactEntry) entry FactEntry] (Vec FactEntry)
+           (let [prior FactEntry?
                  (entry-with-id (vec (concat known pending))
                                 (factentry-id entry))]
              (cond
@@ -272,27 +272,27 @@
     (append-propositions!
      database
      (mapv
-      (fn [(entry FactEntry)] Any
+      (fn [entry FactEntry] Any
         (fact-proposition (factroute-candidate-root selected) entry))
       new-entries))
     (->AppendCounts (count new-entries)
                     (- (count entries) (count new-entries)))))
 
 (defn- revision-identity [(selected FactRoute)] String
-  (let [(revision Any)
+  (let [revision Any
         (database/branch-revision! (factroute-path selected))
-        (identity Any) (get revision :identity)]
+        identity Any (get revision :identity)]
     (if (string? identity)
       identity
       (fail "Store returned no durable branch revision identity"
             :gate-facts/revision-unresolved))))
 
 (defn- response-for [(database Any) (selected FactRoute)] (Vec Any)
-  (let [(entries (Vec FactEntry)) (facts-for database selected)
-        (links (Vec FallbackLink)) (links-for database selected)
-        (receipts (Vec FactEntry))
+  (let [entries (Vec FactEntry) (facts-for database selected)
+        links (Vec FallbackLink) (links-for database selected)
+        receipts (Vec FactEntry)
         (filterv
-         (fn [(entry FactEntry)] Bool
+         (fn [entry FactEntry] Bool
            (= "GateMaintenanceReceiptV1" (factentry-kind entry)))
          entries)]
     ["store.gate-facts/response-v1"
@@ -300,13 +300,13 @@
      (factroute-candidate-root selected)
      (revision-identity selected)
      (mapv
-      (fn [(entry FactEntry)] (Vec String)
+      (fn [entry FactEntry] (Vec String)
         [(factentry-id entry)
          (factentry-kind entry)
          (factentry-envelope entry)])
       entries)
      (mapv
-      (fn [(link FallbackLink)] (Vec String)
+      (fn [link FallbackLink] (Vec String)
         [(fallbacklink-miss-id link)
          (fallbacklink-observation-id link)])
       links)
@@ -315,8 +315,8 @@
 (defn import-facts! [(selected FactRoute) (entries (Vec FactEntry))] (Vec Any)
   (with-writer!
    selected
-   (fn [(database Any)] (Vec Any)
-     (let [(counts AppendCounts)
+   (fn [database Any] (Vec Any)
+     (let [counts AppendCounts
            (append-entries! database selected entries)]
        (response-for database selected)))))
 
@@ -326,8 +326,8 @@
           :gate-facts/not-a-miss)
     (with-writer!
      selected
-     (fn [(database Any)] (Vec Any)
-       (let [(counts AppendCounts)
+     (fn [database Any] (Vec Any)
+       (let [counts AppendCounts
              (append-entries! database selected [entry])]
          (response-for database selected))))))
 
@@ -338,18 +338,18 @@
           :gate-facts/not-an-observation)
     (with-writer!
      selected
-     (fn [(database Any)] (Vec Any)
-       (let [(known (Vec FactEntry)) (facts-for database selected)
-             (known-links (Vec FallbackLink)) (links-for database selected)
-             (prior-entry FactEntry?)
+     (fn [database Any] (Vec Any)
+       (let [known (Vec FactEntry) (facts-for database selected)
+             known-links (Vec FallbackLink) (links-for database selected)
+             prior-entry FactEntry?
              (entry-with-id known (factentry-id entry))
-             (prior-miss FactEntry?)
+             prior-miss FactEntry?
              (if (some? miss-id) (entry-with-id known miss-id) nil)
-             (prior-link FallbackLink?)
+             prior-link FallbackLink?
              (if (some? miss-id)
                (link-with-miss-id known-links miss-id)
                nil)
-             (link FallbackLink?)
+             link FallbackLink?
              (if (some? miss-id)
                (->FallbackLink miss-id (factentry-id entry))
                nil)]
@@ -372,7 +372,7 @@
            nil)
          (cond
            [(nil? miss-id)
-            (let [(counts AppendCounts)
+            (let [counts AppendCounts
                   (append-entries! database selected [entry])]
               nil)]
            [(and (nil? prior-entry) (nil? prior-link))
@@ -400,7 +400,7 @@
   [(links (Vec FallbackLink)) (wanted FallbackLink)] Bool
   (some?
    (some
-    (fn [(link FallbackLink)] Bool
+    (fn [link FallbackLink] Bool
       (and (= (fallbacklink-miss-id wanted)
               (fallbacklink-miss-id link))
            (= (fallbacklink-observation-id wanted)
@@ -423,18 +423,18 @@
     nil)
   (with-writer!
    selected
-   (fn [(database Any)] (Vec Any)
-     (let [(known (Vec FactEntry)) (facts-for database selected)
-           (durable-links (Vec FallbackLink)) (links-for database selected)
-           (candidate-present Bool)
+   (fn [database Any] (Vec Any)
+     (let [known (Vec FactEntry) (facts-for database selected)
+           durable-links (Vec FallbackLink) (links-for database selected)
+           candidate-present Bool
            (some?
             (some
-             (fn [(entry FactEntry)] Bool
+             (fn [entry FactEntry] Bool
                (= "GateCandidateV1" (factentry-kind entry)))
              known))
-           (misses (Vec FactEntry))
+           misses (Vec FactEntry)
            (filterv
-            (fn [(entry FactEntry)] Bool
+            (fn [entry FactEntry] Bool
               (= "FactMissEventV1" (factentry-kind entry)))
             known)]
        (if candidate-present
@@ -451,9 +451,9 @@
                  :gate-facts/unaccounted-miss)
            nil))
        (doseq [link requested-links]
-         (let [(miss FactEntry?)
+         (let [miss FactEntry?
                (entry-with-id known (fallbacklink-miss-id link))
-               (observation FactEntry?)
+               observation FactEntry?
                (entry-with-id known (fallbacklink-observation-id link))]
            (if (or (nil? miss)
                    (not= "FactMissEventV1" (factentry-kind miss))
@@ -464,17 +464,17 @@
              (fail "maintenance receipt names an unproved miss fallback link"
                    :gate-facts/unproved-fallback-link)
              nil)))
-       (let [(counts AppendCounts)
+       (let [counts AppendCounts
              (append-entries! database selected [verdict receipt])]
          (response-for database selected))))))
 
 (defn cold-query! [(selected FactRoute) (expected-ids (Vec String))] (Vec Any)
-  (let [(database Any) (cold-open! selected)
-        (entries (Vec FactEntry)) (facts-for database selected)
-        (candidate-present Bool)
+  (let [database Any (cold-open! selected)
+        entries (Vec FactEntry) (facts-for database selected)
+        candidate-present Bool
         (some?
          (some
-          (fn [(entry FactEntry)] Bool
+          (fn [entry FactEntry] Bool
             (= "GateCandidateV1" (factentry-kind entry)))
           entries))]
     (if candidate-present
@@ -483,8 +483,8 @@
             :gate-facts/candidate-root-unresolved))))
 
 (defn- request-vector [(expected-tag String) (expected-count Int)] (Vec Any)
-  (let [(line Any) (read-line)
-        (value Any)
+  (let [line Any (read-line)
+        value Any
         (if (string? line) (store.rt/parse-edn line) nil)]
     (if (and (vector? value)
              (= expected-count (count value))
@@ -527,19 +527,19 @@
 (defn dispatch! [(command String)] (Vec Any)
   (cond
     [(= command "import")
-     (let [(request (Vec Any))
+     (let [request (Vec Any)
            (request-vector "store.gate-facts/import-v1" 5)]
        (import-facts! (route-from-request request)
                       (entries-from-value (nth request 4))))]
     [(= command "record-miss")
-     (let [(request (Vec Any))
+     (let [request (Vec Any)
            (request-vector "store.gate-facts/record-miss-v1" 5)]
        (record-miss! (route-from-request request)
                      (entry-from-value (nth request 4))))]
     [(= command "record-observation")
-     (let [(request (Vec Any))
+     (let [request (Vec Any)
            (request-vector "store.gate-facts/record-observation-v1" 6)
-           (miss-id Any) (nth request 5)]
+           miss-id Any (nth request 5)]
        (if (or (nil? miss-id) (string? miss-id))
          (record-observation! (route-from-request request)
                               (entry-from-value (nth request 4))
@@ -547,9 +547,9 @@
          (fail "record-observation miss id must be a string or nil"
                :gate-facts/invalid-request)))]
     [(= command "finalize")
-     (let [(request (Vec Any))
+     (let [request (Vec Any)
            (request-vector "store.gate-facts/finalize-v1" 7)
-           (links Any) (nth request 6)]
+           links Any (nth request 6)]
        (if (vector? links)
          (finalize! (route-from-request request)
                     (entry-from-value (nth request 4))
@@ -558,7 +558,7 @@
          (fail "finalize links must be a vector"
                :gate-facts/invalid-request)))]
     [(= command "cold-query")
-     (let [(request (Vec Any))
+     (let [request (Vec Any)
            (request-vector "store.gate-facts/cold-query-v1" 5)]
        (cold-query! (route-from-request request)
                     (strings-from-value (nth request 4))))]
@@ -567,8 +567,8 @@
            :gate-facts/unknown-command)]))
 
 (defn- error-code [(error Any)] String
-  (let [(data Any) (ex-data error)
-        (code Any) (or (get data :store/code) (get data :type))]
+  (let [data Any (ex-data error)
+        code Any (or (get data :store/code) (get data :type))]
     (if (keyword? code) (subs (str code) 1) "unclassified")))
 
 (defn -main [& args] Nil

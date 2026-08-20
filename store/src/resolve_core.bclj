@@ -158,7 +158,7 @@
 
 (defn extend-target-lint [(form Any)] Any
   (when (and (seq? form) (contains? #{"extend-protocol" "extend-type"} (str (first form))))
-    (let [bad (vec (filter (fn [(x Any)] Bool (and (seq? x) (not (extend-method-form? x)))) (vec (rest form))))]
+    (let [bad (vec (filter (fn [x Any] Bool (and (seq? x) (not (extend-method-form? x)))) (vec (rest form))))]
       (when (seq bad)
         {:message
          (str "extend-protocol targets must be class SYMBOLS resolvable at "
@@ -282,7 +282,7 @@
     (let [items (vec datum) head (str (first items)) name-index (type-name-index head (second items)) top-name (logical-datum-name (nth items name-index nil)) base (if (and (named-def-head? head) (some? top-name)) {[:top top-name] top-name} {}) member-start (cond (= "defunion" head) (inc name-index) (contains? #{"definterface" "defprotocol"} head) 2 :else -1) role (if (= "defunion" head) :variant :member)]
       (if (< member-start 0)
         base
-        (reduce (fn [(acc (Map Any String)) (i Int)] (Map Any String) (let [raw (nth items i nil) nm (if (= :variant role) (union-member-datum-name raw) (protocol-member-datum-name raw))] (if (nil? nm) acc (assoc acc [role nm] nm))))
+        (reduce (fn [acc (Map Any String) i Int] (Map Any String) (let [raw (nth items i nil) nm (if (= :variant role) (union-member-datum-name raw) (protocol-member-datum-name raw))] (if (nil? nm) acc (assoc acc [role nm] nm))))
           base
           (vec (range member-start (count items))))))))
 

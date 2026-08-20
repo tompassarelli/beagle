@@ -233,7 +233,7 @@
 (defn transient-any-map! [(key Any) (equal-key Any)] (Map Any Int)
   (persistent!
     (reduce
-      (fn [(entries Any) (stage Any)] Any
+      (fn [entries Any stage Any] Any
         (assoc! entries
           (if (= stage 0) key equal-key)
           (if (= stage 0) 1 2)))
@@ -243,7 +243,7 @@
 (defn transient-any-set! [(value Any) (equal-value Any)] (Set Any)
   (persistent!
     (reduce
-      (fn [(entries Any) (entry Any)] Any
+      (fn [entries Any entry Any] Any
         (conj! entries entry))
       (transient #{})
       [value equal-value])))

@@ -123,8 +123,8 @@
 
 (defn query-control [(max-steps Int) (timeout-ms Int)] QueryControl
   (if (and (> max-steps 0) (>= timeout-ms 0))
-    (let [(steps (Atom Int)) (atom 0)
-          (cancelled (Atom (U Keyword Nil))) (query-cancellation-cell nil)]
+    (let [steps (Atom Int) (atom 0)
+          cancelled (Atom (U Keyword Nil)) (query-cancellation-cell nil)]
       (->QueryControl steps cancelled max-steps
                       (+ (monotonic-nanoseconds) (* timeout-ms 1000000))
                       timeout-ms))
@@ -314,7 +314,7 @@
   [(t/triple-t1 value) (t/triple-t2 value) (t/triple-t3 value)])
 
 (defn- rows [(triples (Vec t/Triple))] (Set Tuple)
-  (reduce (fn [(acc (Set Tuple)) (value t/Triple)] (Set Tuple)
+  (reduce (fn [acc (Set Tuple) value t/Triple] (Set Tuple)
             (conj acc (triple-row value)))
           #{} triples))
 
@@ -325,7 +325,7 @@
 
 (defn- occurrence-rows [(occurrences (Vec t/OperationOccurrence))] (Set Tuple)
   (reduce
-   (fn [(acc (Set Tuple)) (value t/OperationOccurrence)] (Set Tuple)
+   (fn [acc (Set Tuple) value t/OperationOccurrence] (Set Tuple)
      (conj acc (occurrence-row value)))
    #{} occurrences))
 
@@ -335,7 +335,7 @@
 
 (defn- withdrawal-rows [(withdrawals (Vec t/Withdrawal))] (Set Tuple)
   (reduce
-   (fn [(acc (Set Tuple)) (value t/Withdrawal)] (Set Tuple)
+   (fn [acc (Set Tuple) value t/Withdrawal] (Set Tuple)
      (conj acc (withdrawal-row value)))
    #{} withdrawals))
 
@@ -393,7 +393,7 @@
   (unify-arguments-controlled! arguments tuple subst context))
 
 (defn- ground [(arguments (Vec QueryTerm)) (subst Substitution)] Tuple
-  (mapv (fn [(term QueryTerm)] Any
+  (mapv (fn [term QueryTerm] Any
           (let [value (term-value term subst)]
             (if (some? value)
               value
@@ -457,11 +457,11 @@
 
 (defn- builtin-value
   [(operator Keyword) (left Any) (right Any)] BuiltinValueResult
-  (let [(left-int (U Int Nil)) (integer-value left)
-        (right-int (U Int Nil)) (integer-value right)
-        (left-number (U Double Nil)) (numeric-value left)
-        (right-number (U Double Nil)) (numeric-value right)
-        (invalid BuiltinValueResult) (->BuiltinValueResult nil nil)]
+  (let [left-int (U Int Nil) (integer-value left)
+        right-int (U Int Nil) (integer-value right)
+        left-number (U Double Nil) (numeric-value left)
+        right-number (U Double Nil) (numeric-value right)
+        invalid BuiltinValueResult (->BuiltinValueResult nil nil)]
     (cond
       [(= operator :mod)
        (if (nil? left-int)
@@ -723,19 +723,19 @@
   (let [substitutions
         (body-results! db sources (rule-body value) {} context)]
     (if (query-evaluation-context-open? context)
-      (reduce (fn [(acc (Set Tuple)) (subst Substitution)] (Set Tuple)
+      (reduce (fn [acc (Set Tuple) subst Substitution] (Set Tuple)
                 (conj acc (ground (rule-head-arguments value) subst)))
               #{} substitutions)
       #{})))
 
 (defn- rule-head-relations [(rules (Vec Rule))] (Vec String)
-  (vec (reduce (fn [(acc (Set String)) (value Rule)] (Set String)
+  (vec (reduce (fn [acc (Set String) value Rule] (Set String)
                  (conj acc (rule-head-relation value)))
                #{} rules)))
 
 (defn- append-handle [(index HandleBucket) (key Any) (handle Int)] HandleBucket
   (update index key
-          (fn [(current (U (Vec Int) Nil))] (Vec Int)
+          (fn [current (U (Vec Int) Nil)] (Vec Int)
             (if (nil? current)
               [handle]
               (conj current handle)))))
@@ -752,18 +752,18 @@
 
 (defn- trie-add
   [(trie HandleTrie) (tuple Tuple) (order (Vec Int)) (handle Int)] HandleTrie
-  (let [(first-key Any) (nth tuple (nth order 0))
-        (second-key Any) (nth tuple (nth order 1))
-        (third-key Any) (nth tuple (nth order 2))
-        (first-node HandleTrieBranch) (get trie first-key {})
-        (second-node HandleTrieLeaf) (get first-node second-key {})
-        (leaf (Vec Int)) (get second-node third-key [])]
+  (let [first-key Any (nth tuple (nth order 0))
+        second-key Any (nth tuple (nth order 1))
+        third-key Any (nth tuple (nth order 2))
+        first-node HandleTrieBranch (get trie first-key {})
+        second-node HandleTrieLeaf (get first-node second-key {})
+        leaf (Vec Int) (get second-node third-key [])]
     (assoc trie first-key
            (assoc first-node second-key
                   (assoc second-node third-key (conj leaf handle))))))
 
 (defn- add-handle-values [(handles (Set Int)) (values (Vec Int))] (Set Int)
-  (reduce (fn [(current (Set Int)) (handle Int)] (Set Int)
+  (reduce (fn [current (Set Int) handle Int] (Set Int)
             (conj current handle))
           handles values))
 
@@ -772,7 +772,7 @@
 
 (defn- trie-leaf-handles [(node HandleTrieLeaf)] (Vec Int)
   (ordered-handles
-   (reduce-kv (fn [(handles (Set Int)) (key Any) (child (Vec Int))] (Set Int)
+   (reduce-kv (fn [handles (Set Int) key Any child (Vec Int)] (Set Int)
                 (add-handle-values handles child))
               #{} node)))
 
@@ -799,13 +799,13 @@
       [(= 0 depth) (trie-node-handles trie)]
       [(> depth 3) []]
       [:else
-       (let [(first-node (U HandleTrieBranch Nil))
+       (let [first-node (U HandleTrieBranch Nil)
              (get trie (nth prefix 0))]
          (if (nil? first-node)
            []
            (if (= 1 depth)
              (trie-branch-handles first-node)
-             (let [(second-node (U HandleTrieLeaf Nil))
+             (let [second-node (U HandleTrieLeaf Nil)
                    (get first-node (nth prefix 1))]
                (if (nil? second-node)
                  []
@@ -836,10 +836,10 @@
   [(event t/OperationOccurrence) (lower-exclusive Int)] Bool
   (if (< lower-exclusive 0)
     true
-    (let [(occurrence t/Triple) (t/operationoccurrence-coordinate event)]
+    (let [occurrence t/Triple (t/operationoccurrence-coordinate event)]
       (if (t/occurrence-coordinate? occurrence)
-        (let [(transaction t/Triple) (t/triple-t1 occurrence)
-              (sequence Int) (t/triple-t3 transaction)]
+        (let [transaction t/Triple (t/triple-t1 occurrence)
+              sequence Int (t/triple-t3 transaction)]
           (> sequence lower-exclusive))
         false))))
 
@@ -851,7 +851,7 @@
   (Vec t/OperationOccurrence)
   (if (< lower-exclusive 0)
     events
-    (filterv (fn [(event t/OperationOccurrence)] Bool
+    (filterv (fn [event t/OperationOccurrence] Bool
                (event-after-sequence? event lower-exclusive))
       events)))
 
@@ -864,48 +864,48 @@
 (defn term-key [(value Any)] String
   (cond
     [(string? value)
-     (let [(text String) value] (length-key "s" text))]
+     (let [text String value] (length-key "s" text))]
     [(integer? value)
-     (let [(integer-value Int) value] (str "i" integer-value ";"))]
+     (let [integer-value Int value] (str "i" integer-value ";"))]
     [(number? value)
-     (let [(float-value Float) (double value)] (str "f" float-value ";"))]
+     (let [float-value Float (double value)] (str "f" float-value ";"))]
     [(boolean? value)
-     (let [(bool-value Bool) value] (if bool-value "b1;" "b0;"))]
+     (let [bool-value Bool value] (if bool-value "b1;" "b0;"))]
     [(keyword? value)
-     (let [(keyword-value Keyword) value]
+     (let [keyword-value Keyword value]
        (length-key "k" (str keyword-value)))]
     [(t/instant? value)
-     (let [(instant-value t/Instant) value]
+     (let [instant-value t/Instant value]
        (str "m" (t/instant-epoch-seconds instant-value) ":"
             (t/instant-nanos instant-value) ";"))]
     [(t/triple? value)
-     (let [(triple-value t/Triple) value
-           (t1 String) (term-key (t/triple-t1 triple-value))
-           (t2 String) (term-key (t/triple-t2 triple-value))
-           (t3 String) (term-key (t/triple-t3 triple-value))]
+     (let [triple-value t/Triple value
+           t1 String (term-key (t/triple-t1 triple-value))
+           t2 String (term-key (t/triple-t2 triple-value))
+           t3 String (term-key (t/triple-t3 triple-value))]
        (str "t" (count t1) ":" t1
             (count t2) ":" t2
             (count t3) ":" t3))]
     [:else "x0:"]))
 
 (defn row-key [(row Tuple)] String
-  (reduce (fn [(acc String) (value Any)] String
+  (reduce (fn [acc String value Any] String
             (let [key (term-key value)] (str acc (count key) ":" key)))
           "r" row))
 
 (defn order-row-vector [(rows (Vec Tuple))] (Vec Tuple)
-  (let [(by-key (Map String Tuple))
-        (reduce (fn [(acc (Map String Tuple)) (row Tuple)] (Map String Tuple)
+  (let [by-key (Map String Tuple)
+        (reduce (fn [acc (Map String Tuple) row Tuple] (Map String Tuple)
                   (assoc acc (row-key row) row))
                 {} rows)
-        (keys (Vec String))
-        (reduce (fn [(acc (Vec String)) (row Tuple)] (Vec String)
+        keys (Vec String)
+        (reduce (fn [acc (Vec String) row Tuple] (Vec String)
                   (conj acc (row-key row)))
                 [] rows)]
-    (mapv (fn [(key String)] Tuple
+    (mapv (fn [key String] Tuple
             (let [row (get by-key key)]
               (if (some? row)
-                (let [(present Tuple) row] present)
+                (let [present Tuple row] present)
                 [])))
           (vec (sort keys)))))
 
@@ -914,8 +914,8 @@
 
 (defn- candidate-source-add
   [(relation String) (source CandidateSource) (tuple Tuple)] CandidateSource
-  (let [(handle Int) (count (candidatesource-rows source))
-        (with-row CandidateSource)
+  (let [handle Int (count (candidatesource-rows source))
+        with-row CandidateSource
         (assoc source :rows (conj (candidatesource-rows source) tuple))]
     (if (and (= relation triple-relation) (= 3 (count tuple)))
       (assoc with-row
@@ -931,7 +931,7 @@
    (source CandidateSource)
    (tuples (Vec Tuple))]
   CandidateSource
-  (reduce (fn [(current CandidateSource) (tuple Tuple)] CandidateSource
+  (reduce (fn [current CandidateSource tuple Tuple] CandidateSource
             (candidate-source-add relation current tuple))
           source tuples))
 
@@ -949,7 +949,7 @@
 
 (defn- build-candidate-sources
   [(db Db) (relations (Vec String)) (seed CandidateSources)] CandidateSources
-  (reduce (fn [(sources CandidateSources) (relation String)] CandidateSources
+  (reduce (fn [sources CandidateSources relation String] CandidateSources
             (if (contains? sources relation)
               sources
               (assoc sources relation
@@ -963,10 +963,10 @@
    (delta Db)
    (relations (Vec String))]
   CandidateSources
-  (reduce (fn [(current CandidateSources) (relation String)] CandidateSources
-            (let [(tuples (Set Tuple)) (get delta relation #{})
-                  (existing Any) (get current relation)
-                  (base CandidateSource)
+  (reduce (fn [current CandidateSources relation String] CandidateSources
+            (let [tuples (Set Tuple) (get delta relation #{})
+                  existing Any (get current relation)
+                  base CandidateSource
                   (if (instance? CandidateSource existing)
                     existing
                     (empty-candidate-source))]
@@ -1006,10 +1006,10 @@
 
 (defn build-text-candidates-result!
   [(propositions (Vec t/Triple))] CandidateSourcesResult
-  (let [(result text-search/TextSearchSourceResult)
+  (let [result text-search/TextSearchSourceResult
         (text-search/build-source-result!
          propositions text-index/text-index-max-bytes)
-        (source text-search/TextSearchSource?) (text-search/source-result-source result)]
+        source text-search/TextSearchSource? (text-search/source-result-source result)]
     (if (some? source)
       (->CandidateSourcesResult (text-candidate-sources source) nil)
       (->CandidateSourcesResult
@@ -1019,10 +1019,10 @@
 
 (defn build-text-candidates-for-attributes-result!
   [(propositions (Vec t/Triple)) (attributes (Set Any))] CandidateSourcesResult
-  (let [(result text-search/TextSearchSourceResult)
+  (let [result text-search/TextSearchSourceResult
         (text-search/build-source-for-attributes-result!
          propositions attributes text-index/text-index-max-bytes)
-        (source text-search/TextSearchSource?)
+        source text-search/TextSearchSource?
         (text-search/source-result-source result)]
     (if (some? source)
       (->CandidateSourcesResult (text-candidate-sources source) nil)
@@ -1075,9 +1075,9 @@
       (let [value (bound-term-value (nth arguments position) subst)]
         (if (nil? value)
           (recur (inc position) best found)
-          (let [(bucket HandleBucket)
+          (let [bucket HandleBucket
                 (get (candidatesource-positions source) position {})
-                (candidate (Vec Int)) (get bucket value [])]
+                candidate (Vec Int) (get bucket value [])]
             (recur (inc position)
                    (if (or (not found) (< (count candidate) (count best)))
                      candidate best)
@@ -1117,7 +1117,7 @@
   Bool
   (let [rotation (candidatesource-rotation source)]
     (if (some? rotation)
-      (let [(wanted Tuple) (ground arguments subst)]
+      (let [wanted Tuple (ground arguments subst)]
         (not
          (empty?
           (events-after-sequence
@@ -1128,7 +1128,7 @@
            (rotationcandidatesource-lower-exclusive rotation)))))
       (let [wanted (ground arguments subst)
             handles (source-handles source relation arguments subst)]
-        (some? (some (fn [(handle Int)] Any
+        (some? (some (fn [handle Int] Any
                        (when (= wanted (source-row source handle)) handle))
                      (or handles [])))))))
 
@@ -1138,7 +1138,7 @@
    (subst Substitution)
    (context QueryEvaluationContext)]
   (Vec Substitution)
-  (let [(events (Vec t/OperationOccurrence))
+  (let [events (Vec t/OperationOccurrence)
         (events-after-sequence
          (rot/matching (rotationcandidatesource-rotation rotation)
                        (bound-term-value (nth arguments 0) subst)
@@ -1151,7 +1151,7 @@
       (if (or (empty? remaining)
               (not (query-evaluation-context-open? context)))
         results
-        (let [(proposition t/Triple)
+        (let [proposition t/Triple
               (t/operationoccurrence-proposition (first remaining))]
           (if (contains? seen proposition)
             (recur (rest remaining) seen results)
@@ -1171,9 +1171,9 @@
    (subst Substitution)
    (context QueryEvaluationContext)]
   (Vec Substitution)
-  (let [(relation String) (literal-relation literal)
-        (arguments (Vec QueryTerm)) (literal-arguments literal)
-        (source (U CandidateSourceValue Nil))
+  (let [relation String (literal-relation literal)
+        arguments (Vec QueryTerm) (literal-arguments literal)
+        source (U CandidateSourceValue Nil)
         (get sources relation)]
     (if (literal-negated literal)
       (cond
@@ -1215,7 +1215,7 @@
            (do
              (text-rows-or-record!
               (missing-candidate-source-result relation) context)
-             (let [(missing (Vec Substitution)) []] missing))
+             (let [missing (Vec Substitution) []] missing))
            (unify-tuples-controlled!
             arguments (vec (get db relation #{})) subst context))]))))
 
@@ -1283,7 +1283,7 @@
   (let [substitutions
         (body-results-indexed! db sources (rule-body value) {} context)]
     (if (query-evaluation-context-open? context)
-      (reduce (fn [(acc (Set Tuple)) (subst Substitution)] (Set Tuple)
+      (reduce (fn [acc (Set Tuple) subst Substitution] (Set Tuple)
                 (conj acc (ground (rule-head-arguments value) subst)))
               #{} substitutions)
       #{})))
@@ -1307,8 +1307,8 @@
    (sort
     (vec
      (reduce
-      (fn [(relations (Set String)) (value Rule)] (Set String)
-        (reduce (fn [(current (Set String)) (literal Literal)] (Set String)
+      (fn [relations (Set String) value Rule] (Set String)
+        (reduce (fn [current (Set String) literal Literal] (Set String)
                   (if (and (= :relation (literal-kind literal))
                            (not (literal-negated literal)))
                     (conj current (literal-relation literal))
@@ -1371,9 +1371,9 @@
 
 (defn- db-new-only [(candidate Db) (db Db) (relations (Vec String))] Db
   (reduce
-   (fn [(delta Db) (relation String)] Db
+   (fn [delta Db relation String] Db
      (let [new-tuples
-           (reduce (fn [(rows-value (Set Tuple)) (tuple Tuple)] (Set Tuple)
+           (reduce (fn [rows-value (Set Tuple) tuple Tuple] (Set Tuple)
                      (if (contains? (get db relation #{}) tuple)
                        rows-value
                        (conj rows-value tuple)))
@@ -1383,12 +1383,12 @@
 
 (defn- db-merge-delta [(db Db) (delta Db) (relations (Vec String))] Db
   (reduce
-   (fn [(current Db) (relation String)] Db
+   (fn [current Db relation String] Db
      (let [new-tuples (get delta relation #{})]
        (if (empty? new-tuples)
          current
          (update current relation
-                 (fn [(known (U (Set Tuple) Nil))] (Set Tuple)
+                 (fn [known (U (Set Tuple) Nil)] (Set Tuple)
                    (reduce (fn
                              [(rows-value (Set Tuple))
                               (tuple Tuple)]
@@ -1430,7 +1430,7 @@
                 (recur
                  (rest remaining)
                  (update current relation
-                         (fn [(known (U (Set Tuple) Nil))] (Set Tuple)
+                         (fn [known (U (Set Tuple) Nil)] (Set Tuple)
                            (reduce (fn
                                      [(rows-value (Set Tuple))
                                       (tuple Tuple)]
@@ -1452,7 +1452,7 @@
         read-relations (positive-relation-names rules)
         head-set (set relations)
         delta-relations
-        (vec (filter (fn [(relation String)] Bool
+        (vec (filter (fn [relation String] Bool
                        (contains? head-set relation))
                      read-relations))
         initial-sources (build-candidate-sources db0 read-relations candidates)
@@ -1469,7 +1469,7 @@
                 (recur
                  (rest remaining)
                  (update current relation
-                         (fn [(known (U (Set Tuple) Nil))] (Set Tuple)
+                         (fn [known (U (Set Tuple) Nil)] (Set Tuple)
                            (reduce (fn
                                      [(rows-value (Set Tuple))
                                       (tuple Tuple)]
@@ -1576,8 +1576,8 @@
 
 (defn- negated-relations [(stratum (Vec Rule))] (Vec String)
   (reduce
-   (fn [(acc (Vec String)) (value Rule)] (Vec String)
-     (reduce (fn [(relations (Vec String)) (literal Literal)] (Vec String)
+   (fn [acc (Vec String) value Rule] (Vec String)
+     (reduce (fn [relations (Vec String) literal Literal] (Vec String)
                (if (and (= :relation (literal-kind literal))
                         (literal-negated literal))
                  (conj relations (literal-relation literal))
@@ -1592,12 +1592,12 @@
       problems
       (let [stratum (nth strata index)
             heads
-            (reduce (fn [(acc (Set String)) (value Rule)] (Set String)
+            (reduce (fn [acc (Set String) value Rule] (Set String)
                       (conj acc (rule-head-relation value)))
                     #{} stratum)
             problems2
             (reduce
-             (fn [(acc (Vec String)) (relation String)] (Vec String)
+             (fn [acc (Vec String) relation String] (Vec String)
                (cond
                  [(contains? heads relation)
                   (conj acc (str "stratum " index ": negated '" relation
@@ -1608,7 +1608,7 @@
                  [:else acc]))
              problems (negated-relations stratum))]
         (recur (+ index 1)
-               (reduce (fn [(acc (Set String)) (relation String)] (Set String)
+               (reduce (fn [acc (Set String) relation String] (Set String)
                          (conj acc relation))
                        lower (vec heads))
                problems2)))))

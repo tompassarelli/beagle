@@ -121,19 +121,19 @@
 (defn- text-or-empty [(value String?)] String (if value value ""))
 
 (defn- atom-row-of [(decoded RecordResult)] t/AtomRow
-  (let [(row t/AtomRow?) (recordresult-atom-row decoded)]
+  (let [row t/AtomRow? (recordresult-atom-row decoded)]
     (if row row (t/->AtomRow :int nil 0 nil nil nil nil))))
 
 (defn- triple-row-of [(decoded RecordResult)] t/TripleRow
-  (let [(row t/TripleRow?) (recordresult-triple-row decoded)]
+  (let [row t/TripleRow? (recordresult-triple-row decoded)]
     (if row row (t/->TripleRow -1 -1 -1))))
 
 (defn- transaction-row-of [(decoded RecordResult)] t/TransactionRow
-  (let [(row t/TransactionRow?) (recordresult-transaction-row decoded)]
+  (let [row t/TransactionRow? (recordresult-transaction-row decoded)]
     (if row row (t/->TransactionRow -1 -1 -1))))
 
 (defn- operation-row-of [(decoded RecordResult)] t/OperationRow
-  (let [(row t/OperationRow?) (recordresult-operation-row decoded)]
+  (let [row t/OperationRow? (recordresult-operation-row decoded)]
     (if row row (t/->OperationRow -1 -1 t/assert-action -1))))
 
 (defn- error-or-snapshot [(error String?)] String
@@ -150,8 +150,8 @@
 ;; Every record is length-prefixed and CRC-checked on its own, so one damaged
 ;; row is detected without trusting any other byte of the image.
 (defn- append-record! [(out wire/Encoder) (payload wire/Encoder)] Nil
-  (let [(error String?) (deref (wire/encoder-error payload))
-        (bytes (Vec Int)) (deref (wire/encoder-bytes payload))]
+  (let [error String? (deref (wire/encoder-error payload))
+        bytes (Vec Int) (deref (wire/encoder-bytes payload))]
     (if error
       (wire/encoder-error! out error)
       (do
@@ -166,8 +166,8 @@
     (count (deref (wire/encoder-bytes out)))))
 
 (defn- finish-record! [(out wire/Encoder) (start Int) (payload-bytes Int)] Nil
-  (let [(bytes (Vec Int)) (deref (wire/encoder-bytes out))
-        (end Int) (count bytes)]
+  (let [bytes (Vec Int) (deref (wire/encoder-bytes out))
+        end Int (count bytes)]
     (if (not= payload-bytes (- end start))
       (wire/encoder-error!
        out "snapshot record wrote a payload of an undeclared length")
@@ -189,10 +189,10 @@
          (wire/append-u8! out atom-int)
          (wire/append-i64-le! out (int-or-zero (t/atomrow-int-value row))))]
       [(= :float kind)
-       (let [(value Float?) (t/atomrow-float-value row)]
+       (let [value Float? (t/atomrow-float-value row)]
          (if (nil? value)
            (wire/encoder-error! out "snapshot float atom has no value")
-           (let [(present Float) value]
+           (let [present Float value]
              (do
                (wire/append-u8! out atom-float)
                (wire/append-i64-le! out (float-to-bits present))
@@ -203,20 +203,20 @@
          (wire/append-u8!
           out (if (bool-or-false (t/atomrow-bool-value row)) 1 0)))]
       [(= :keyword kind)
-       (let [(value Keyword?) (t/atomrow-keyword-value row)]
+       (let [value Keyword? (t/atomrow-keyword-value row)]
          (if (nil? value)
            (wire/encoder-error! out "snapshot keyword atom has no value")
-           (let [(present Keyword) value]
+           (let [present Keyword value]
              (do
                (wire/append-u8! out atom-keyword)
                (wire/append-sized-text!
                 out (subs (str present) 1) snapshot-max-text-bytes
                 "snapshot keyword atom")))))]
       [(= :instant kind)
-       (let [(value t/Instant?) (t/atomrow-instant-value row)]
+       (let [value t/Instant? (t/atomrow-instant-value row)]
          (if (nil? value)
            (wire/encoder-error! out "snapshot instant atom has no value")
-           (let [(present t/Instant) value]
+           (let [present t/Instant value]
              (do
                (wire/append-u8! out atom-instant)
                (wire/append-i64-le! out (t/instant-epoch-seconds present))
@@ -226,13 +226,13 @@
        (wire/encoder-error! out "snapshot atom row has an unknown kind")])))
 
 (defn- append-atom-record! [(out wire/Encoder) (row t/AtomRow)] Nil
-  (let [(payload wire/Encoder) (new-encoder)]
+  (let [payload wire/Encoder (new-encoder)]
     (do
       (append-snapshot-record-atom! payload row)
       (append-record! out payload))))
 
 (defn- append-triple-record! [(out wire/Encoder) (row t/TripleRow)] Nil
-  (let [(start Int)
+  (let [start Int
         (start-record! out snapshot-record-triple-fixed-bytes)]
     (do
       (append-snapshot-record-triple!
@@ -241,7 +241,7 @@
 
 (defn- append-transaction-record!
   [(out wire/Encoder) (row t/TransactionRow)] Nil
-  (let [(start Int)
+  (let [start Int
         (start-record! out snapshot-record-transaction-fixed-bytes)]
     (do
       (append-snapshot-record-transaction!
@@ -255,7 +255,7 @@
     (if (and (not= t/assert-action action) (not= t/retract-action action))
       (wire/encoder-error!
        out "snapshot operation action must be assert or retract")
-      (let [(start Int)
+      (let [start Int
             (start-record! out snapshot-record-operation-fixed-bytes)]
         (do
           (append-snapshot-record-operation!
@@ -278,8 +278,8 @@
           (recur (+ position 1)))))))
 
 (defn- append-trailer-record! [(out wire/Encoder) (sidecar Sidecar)] Nil
-  (let [(payload wire/Encoder) (new-encoder)
-        (labels (Vec String)) (sidecar-log-set sidecar)]
+  (let [payload wire/Encoder (new-encoder)
+        labels (Vec String) (sidecar-log-set sidecar)]
     (do
       (append-snapshot-record-trailer!
        payload (sidecar-sequence sidecar) (sidecar-watermark sidecar) labels
@@ -329,8 +329,8 @@
    (watermark Int)
    (stamp Int)]
   BytesResult
-  (let [(dump t/TermStoreDump) (term-store/dump-term-store root)
-        (space String) (t/termstoredump-space-id dump)]
+  (let [dump t/TermStoreDump (term-store/dump-term-store root)
+        space String (t/termstoredump-space-id dump)]
     (cond
       [(= 0 (count space))
        (failed-bytes "snapshot SpaceId must be nonempty")]
@@ -348,16 +348,16 @@
            (wire/append-u32-le! out (count space-bytes))
            (swap! (wire/encoder-bytes out) into space-bytes)
            (wire/append-i64-le! out (t/termstoredump-next-sequence dump))
-           (let [(image-start Int) (count (deref (wire/encoder-bytes out)))]
+           (let [image-start Int (count (deref (wire/encoder-bytes out)))]
              (do
                (append-atom-records! out (t/termstoredump-atoms dump))
                (append-triple-records! out (t/termstoredump-triples dump))
                (append-transaction-records!
                 out (t/termstoredump-transactions dump))
                (append-operation-records! out (t/termstoredump-operations dump))
-               (let [(image-bytes (Vec Int)) (deref (wire/encoder-bytes out))
-                     (image-end Int) (count image-bytes)
-                     (fingerprint Int)
+               (let [image-bytes (Vec Int) (deref (wire/encoder-bytes out))
+                     image-end Int (count image-bytes)
+                     fingerprint Int
                      (log/crc32-range image-bytes image-start image-end)]
                  (do
                    (append-trailer-record!
@@ -438,13 +438,13 @@
         decoded
         (cond
           [(= kind snapshot-record-atom-tag)
-           (let [(fields WireFields_snapshot-record_atom)
+           (let [fields WireFields_snapshot-record_atom
                  (read-snapshot-record-atom! decoder)]
              (->RecordResult
               kind (wirefields_snapshot-record_atom-row fields)
               nil nil nil nil nil))]
           [(= kind snapshot-record-triple-tag)
-           (let [(fields WireFields_snapshot-record_triple)
+           (let [fields WireFields_snapshot-record_triple
                  (read-snapshot-record-triple! decoder)]
              (->RecordResult
               kind nil
@@ -454,7 +454,7 @@
                (wirefields_snapshot-record_triple-t3 fields))
               nil nil nil nil))]
           [(= kind snapshot-record-transaction-tag)
-           (let [(fields WireFields_snapshot-record_transaction)
+           (let [fields WireFields_snapshot-record_transaction
                  (read-snapshot-record-transaction! decoder)]
              (->RecordResult
               kind nil nil
@@ -464,7 +464,7 @@
                (wirefields_snapshot-record_transaction-operation-count fields))
               nil nil nil))]
           [(= kind snapshot-record-operation-tag)
-           (let [(fields WireFields_snapshot-record_operation)
+           (let [fields WireFields_snapshot-record_operation
                  (read-snapshot-record-operation! decoder)
                  action (wirefields_snapshot-record_operation-action fields)]
              (cond
@@ -489,7 +489,7 @@
                [:else
                 (failed-record "snapshot operation action is unknown")]))]
           [(= kind snapshot-record-trailer-tag)
-           (let [(fields WireFields_snapshot-record_trailer)
+           (let [fields WireFields_snapshot-record_trailer
                  (read-snapshot-record-trailer! decoder)]
              (->RecordResult
               kind nil nil nil nil
@@ -637,22 +637,22 @@
    (configured-space-id String)
    (image Image)]
   Keyword?
-  (let [(sidecar Sidecar?) (image-sidecar image)]
+  (let [sidecar Sidecar? (image-sidecar image)]
     (if (nil? sidecar)
       (plan/sidecarvalidation-reason
        (plan/sidecar-validation-decision
         false false false false false false false false false nil nil))
-      (let [(present Sidecar) sidecar
-            (watermark Int) (sidecar-watermark present)
-            (image-start Int) (sidecar-image-start present)
-            (image-end Int) (sidecar-image-end present)
-            (past-eof Bool) (> watermark (count log-bytes))
-            (tail-sequence Int) (tail-first-sequence! log-bytes watermark)
-            (offsets-valid Bool)
+      (let [present Sidecar sidecar
+            watermark Int (sidecar-watermark present)
+            image-start Int (sidecar-image-start present)
+            image-end Int (sidecar-image-end present)
+            past-eof Bool (> watermark (count log-bytes))
+            tail-sequence Int (tail-first-sequence! log-bytes watermark)
+            offsets-valid Bool
             (and (>= image-start 0)
                  (and (>= image-end image-start)
                       (<= image-end (count snapshot-bytes))))
-            (decision plan/SidecarValidation)
+            decision plan/SidecarValidation
             (plan/sidecar-validation-decision
              true
              (>= (sidecar-sequence present) 0)
@@ -680,7 +680,7 @@
   (if (nil? reason)
     "store: snapshot boot degraded to full fold; reason none"
     (str "store: snapshot boot degraded to full fold; reason "
-         (subs (str (let [(named Keyword) reason] named)) 1))))
+         (subs (str (let [named Keyword reason] named)) 1))))
 
 ;; The three declared boot predicates, given their callers: an image is
 ;; installed only when it is present, verifies, and its sidecar agrees with
@@ -691,16 +691,16 @@
    (log-bytes ByteSource)
    (configured-space-id String)]
   BootPlan
-  (let [(candidate-present Bool) (pos? (count snapshot-bytes))
-        (read ReadResult)
+  (let [candidate-present Bool (pos? (count snapshot-bytes))
+        read ReadResult
         (if candidate-present
           (read-snapshot! snapshot-bytes configured-space-id)
           (failed-read "snapshot object is empty"))
-        (verification-ok Bool) (readresult-ok read)
-        (install Keyword) (plan/boot-install-decision candidate-present true
+        verification-ok Bool (readresult-ok read)
+        install Keyword (plan/boot-install-decision candidate-present true
                                                      verification-ok)
-        (image Image?) (readresult-image read)
-        (reason Keyword?)
+        image Image? (readresult-image read)
+        reason Keyword?
         (cond
           [(not candidate-present) :no-image]
           [(not verification-ok) :image-unverified]
@@ -708,8 +708,8 @@
           [(nil? image) :image-unverified]
           [:else
            (sidecar-reason! snapshot-bytes log-bytes configured-space-id
-                           (let [(present Image) image] present))])
-        (route Keyword) (plan/snapshot-replay-decision
+                           (let [present Image image] present))])
+        route Keyword (plan/snapshot-replay-decision
                         (and enabled (= :snapshot install)) reason)]
     (if (= :replay route)
       (->BootPlan

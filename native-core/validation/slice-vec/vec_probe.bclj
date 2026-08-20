@@ -26,7 +26,7 @@
 (defn position-pair [(low Int) (high Int)] (Vec Int) [low high])
 
 (defn empty-positions [] (Vec Int)
-  (let [(seed (Vec Int)) []] seed))
+  (let [seed (Vec Int) []] seed))
 
 (defn record-operation-count [(record t/TransactionRecord)] Int
   (count (t/transactionrecord-operations record)))

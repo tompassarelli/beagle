@@ -39,11 +39,11 @@
   (loop [index Int 0 decoded String ""]
     (if (>= index (count value))
       decoded
-      (let [(character String) (char-at value index)]
+      (let [character String (char-at value index)]
         (if (= character "\\")
           (if (>= (+ index 1) (count value))
             (str decoded "\\")
-            (let [(escape String) (char-at value (+ index 1))]
+            (let [escape String (char-at value (+ index 1))]
               (recur (+ index 2)
                 (str decoded
                   (cond
@@ -65,17 +65,17 @@
     (slicefactv0-object row)))
 
 (defn parse-row [(line String)] (Vec SliceFactV0)
-  (let [(cells (Vec String)) (split-on line "\t")]
+  (let [cells (Vec String) (split-on line "\t")]
     (if (= 4 (count cells))
       [(->SliceFactV0 (nth cells 0) (nth cells 1) (nth cells 2) (nth cells 3))]
       [])))
 
 (defn parse-facts [(text String)] (Vec SliceFactV0)
-  (let [(lines (Vec String)) (split-on text "\n")]
+  (let [lines (Vec String) (split-on text "\n")]
     (loop [index Int 0 rows (Vec SliceFactV0) []]
       (if (>= index (count lines))
         rows
-        (let [(parsed (Vec SliceFactV0)) (parse-row (nth lines index))]
+        (let [parsed (Vec SliceFactV0) (parse-row (nth lines index))]
           (recur (+ index 1)
             (if (= 0 (count parsed)) rows (conj rows (nth parsed 0)))))))))
 
@@ -92,8 +92,8 @@
   (loop [index Int 0 unique UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
       (uniquestringsv0-values unique)
-      (let [(row SliceFactV0) (nth rows index)
-            (with-subject UniqueStringsV0)
+      (let [row SliceFactV0 (nth rows index)
+            with-subject UniqueStringsV0
             (add-unique-string unique (slicefactv0-subject row))]
         (recur (+ index 1)
           (if (text-row? row)
@@ -104,8 +104,8 @@
   (loop [index Int 0 unique UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
       (uniquestringsv0-values unique)
-      (let [(row SliceFactV0) (nth rows index)
-            (with-predicate UniqueStringsV0)
+      (let [row SliceFactV0 (nth rows index)
+            with-predicate UniqueStringsV0
             (add-unique-string unique (slicefactv0-predicate row))]
         (recur (+ index 1)
           (if (text-row? row)
@@ -121,13 +121,13 @@
 
 (defn marker-nodes [(names (Vec String))] (Vec stages/TermNodeV0)
   (mapv
-    (fn [(name String)] stages/TermNodeV0
+    (fn [name String] stages/TermNodeV0
       (stages/->TermNodeV0 (node-id name) (stages/->TextTermV0 "source-node-v0")))
     names))
 
 (defn text-nodes [(values (Vec String))] (Vec stages/TermNodeV0)
   (mapv
-    (fn [(value String)] stages/TermNodeV0
+    (fn [value String] stages/TermNodeV0
       (stages/->TermNodeV0 (text-id value) (stages/->TextTermV0 value)))
     values))
 
@@ -135,8 +135,8 @@
   (loop [index Int 0 nodes (Vec stages/TermNodeV0) []]
     (if (>= index (count rows))
       nodes
-      (let [(row SliceFactV0) (nth rows index)
-            (object core/NativeId)
+      (let [row SliceFactV0 (nth rows index)
+            object core/NativeId
             (if (text-row? row)
               (text-id (row-text row))
               (node-id (slicefactv0-object row)))]
@@ -156,7 +156,7 @@
   (loop [position Int 0]
     (if (>= position (count rows))
       nil
-      (let [(row SliceFactV0) (nth rows position)]
+      (let [row SliceFactV0 (nth rows position)]
         (if (and (= subject (slicefactv0-subject row))
                  (= predicate (slicefactv0-predicate row))
                  (text-row? row))
@@ -170,7 +170,7 @@
   (loop [position Int 0 objects (Vec String) []]
     (if (>= position (count rows))
       objects
-      (let [(row SliceFactV0) (nth rows position)]
+      (let [row SliceFactV0 (nth rows position)]
         (recur (+ position 1)
           (if (and (= subject (slicefactv0-subject row))
                    (= predicate (slicefactv0-predicate row))
@@ -182,7 +182,7 @@
   (loop [position Int 0 selected (Vec String) []]
     (if (>= position (count rows))
       selected
-      (let [(row SliceFactV0) (nth rows position)]
+      (let [row SliceFactV0 (nth rows position)]
         (recur (+ position 1)
           (if (and (= "form-kind" (slicefactv0-predicate row))
                    (text-row? row)
@@ -195,17 +195,17 @@
    (root-name String)
    (fallback-name String)
    (fallback-path String)] stages/SourceModuleV1
-  (let [(declared-name (U String Nil)) (row-first-text rows root-name "namespace")
-        (declared-path (U String Nil)) (row-first-text rows root-name "relative-path")
-        (source-digest (U String Nil))
+  (let [declared-name (U String Nil) (row-first-text rows root-name "namespace")
+        declared-path (U String Nil) (row-first-text rows root-name "relative-path")
+        source-digest (U String Nil)
         (row-first-text rows root-name "source-sha256")
-        (projection-digest (U String Nil))
+        projection-digest (U String Nil)
         (row-first-text rows root-name "checked-projection-sha256")
-        (interface-digest (U String Nil))
+        interface-digest (U String Nil)
         (row-first-text rows root-name "interface-sha256")
-        (module-name String)
+        module-name String
         (if (or (nil? declared-name) (= "" declared-name)) fallback-name declared-name)
-        (relative-path String)
+        relative-path String
         (if (or (nil? declared-path) (= "" declared-path)) fallback-path declared-path)]
     (stages/->SourceModuleV1
       (slice-id "module" [module-name relative-path])
@@ -220,11 +220,11 @@
   [(rows (Vec SliceFactV0))
    (fallback-name String)
    (fallback-path String)] (Vec stages/SourceModuleV1)
-  (let [(roots (Vec String)) (form-node-names rows "module-root")]
+  (let [roots (Vec String) (form-node-names rows "module-root")]
     (if (= 0 (count roots))
       [(source-module rows "0" fallback-name fallback-path)]
       (mapv
-        (fn [(root-name String)] stages/SourceModuleV1
+        (fn [root-name String] stages/SourceModuleV1
           (source-module rows root-name fallback-name fallback-path))
         roots))))
 
@@ -234,7 +234,7 @@
   (loop [position Int 0]
     (if (>= position (count modules))
       (slice-id "missing-module" [module-name])
-      (let [(module stages/SourceModuleV1) (nth modules position)]
+      (let [module stages/SourceModuleV1 (nth modules position)]
         (if (= module-name (stages/sourcemodulev1-name module))
           (stages/sourcemodulev1-id module)
           (recur (+ position 1)))))))
@@ -243,7 +243,7 @@
   (loop [position Int 0 unique UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= position (count rows))
       (uniquestringsv0-values unique)
-      (let [(row SliceFactV0) (nth rows position)]
+      (let [row SliceFactV0 (nth rows position)]
         (recur (+ position 1)
           (if (and (= "semantic-unit-sha256" (slicefactv0-predicate row))
                    (text-row? row))
@@ -252,10 +252,10 @@
 
 (defn sorted-node-ids [(node-names (Vec String))] (Vec core/NativeId)
   (mapv
-    (fn [(identity String)] core/NativeId (core/->NativeId identity))
+    (fn [identity String] core/NativeId (core/->NativeId identity))
     (sort
       (mapv
-        (fn [(node-name String)] String
+        (fn [node-name String] String
           (core/nativeid-value (node-id node-name)))
         node-names))))
 
@@ -263,16 +263,16 @@
   [(rows (Vec SliceFactV0))
    (modules (Vec stages/SourceModuleV1))
    (root-name String)] stages/SourceUnitV0
-  (let [(kind (U String Nil))
+  (let [kind (U String Nil)
         (row-first-text rows root-name "semantic-unit-kind")
-        (name (U String Nil))
+        name (U String Nil)
         (row-first-text rows root-name "semantic-unit-name")
-        (module-name (U String Nil))
+        module-name (U String Nil)
         (row-first-text rows root-name "semantic-unit-module")
-        (semantic-digest (U String Nil))
+        semantic-digest (U String Nil)
         (row-first-text rows root-name "semantic-unit-sha256")
-        (root core/NativeId) (node-id root-name)
-        (read-names (Vec String))
+        root core/NativeId (node-id root-name)
+        read-names (Vec String)
         (sort (row-node-objects rows root-name "semantic-read"))]
     (stages/->SourceUnitV0
       root
@@ -287,13 +287,13 @@
   [(rows (Vec SliceFactV0))
    (modules (Vec stages/SourceModuleV1))] (Vec stages/SourceUnitV0)
   (mapv
-    (fn [(root-name String)] stages/SourceUnitV0
+    (fn [root-name String] stages/SourceUnitV0
       (source-unit rows modules root-name))
     (semantic-unit-node-names rows)))
 
 (defn source-imports [(rows (Vec SliceFactV0))] (Vec core/NativeId)
   (mapv
-    (fn [(node-name String)] core/NativeId (node-id node-name))
+    (fn [node-name String] core/NativeId (node-id node-name))
     (form-node-names rows "import")))
 
 ;; Node "0" is the program root. New projections carry one module root per AST;
@@ -302,12 +302,12 @@
   [(rows (Vec SliceFactV0))
    (module-name String)
    (relative-path String)] stages/SourceStageV1
-  (let [(root core/NativeId) (node-id "0")
-        (nodes (Vec stages/TermNodeV0))
+  (let [root core/NativeId (node-id "0")
+        nodes (Vec stages/TermNodeV0)
         (vec (concat (marker-nodes (node-names rows))
                (text-nodes (text-values rows))
                (fact-nodes rows)))
-        (modules (Vec stages/SourceModuleV1))
+        modules (Vec stages/SourceModuleV1)
         (source-modules rows module-name relative-path)]
     (stages/->SourceStageV1
       (stages/->TermGraphV0 root nodes)
@@ -317,10 +317,10 @@
       [])))
 
 (defn type-field-refs [(definition core/TypeDef)] (Vec core/NativeId)
-  (let [(shape core/TypeShape) (core/typedef-shape definition)]
+  (let [shape core/TypeShape (core/typedef-shape definition)]
     (if (instance? native.core.RecordType shape)
       (mapv
-        (fn [(field core/TypeField)] core/NativeId (core/typefield-type-id field))
+        (fn [field core/TypeField] core/NativeId (core/typefield-type-id field))
         (core/recordtype-fields shape))
       [])))
 
@@ -333,7 +333,7 @@
   (loop [index Int 0]
     (if (>= index (count types))
       nil
-      (let [(definition core/TypeDef) (nth types index)]
+      (let [definition core/TypeDef (nth types index)]
         (if (core/native-id= (core/typedef-id definition) target)
           definition
           (recur (+ index 1)))))))
@@ -347,7 +347,7 @@
   (loop [index Int 0 ids (Vec core/NativeId) []]
     (if (>= index (count types))
       ids
-      (let [(definition core/TypeDef) (nth types index)]
+      (let [definition core/TypeDef (nth types index)]
         (recur (+ index 1)
           (if (and (record-type? definition)
                    (c11/type-supported? definition layouts))
@@ -360,15 +360,15 @@
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
    (candidates (Vec core/NativeId))] (Vec core/NativeId)
-  (let [(next (Vec core/NativeId))
+  (let [next (Vec core/NativeId)
         (filterv
-          (fn [(candidate core/NativeId)] Bool
-            (let [(definition (U core/TypeDef Nil)) (find-type types candidate)]
+          (fn [candidate core/NativeId] Bool
+            (let [definition (U core/TypeDef Nil) (find-type types candidate)]
               (if (nil? definition)
                 false
                 (every?
-                  (fn [(reference core/NativeId)] Bool
-                    (let [(referenced (U core/TypeDef Nil)) (find-type types reference)]
+                  (fn [reference core/NativeId] Bool
+                    (let [referenced (U core/TypeDef Nil) (find-type types reference)]
                       (if (nil? referenced)
                         false
                         (if (record-type? referenced)
@@ -386,14 +386,14 @@
   (loop [index Int 0 ids (Vec core/NativeId) []]
     (if (>= index (count records))
       ids
-      (let [(definition (U core/TypeDef Nil)) (find-type types (nth records index))
-            (references (Vec core/NativeId))
+      (let [definition (U core/TypeDef Nil) (find-type types (nth records index))
+            references (Vec core/NativeId)
             (if (nil? definition) [] (type-field-refs definition))]
         (recur (+ index 1)
           (loop [inner Int 0 collected (Vec core/NativeId) ids]
             (if (>= inner (count references))
               collected
-              (let [(reference core/NativeId) (nth references inner)]
+              (let [reference core/NativeId (nth references inner)]
                 (recur (+ inner 1)
                   (if (or (type-id-in? records reference)
                           (type-id-in? collected reference))
@@ -406,18 +406,18 @@
 (defn c17-projection
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))] SliceProjectionV0
-  (let [(records (Vec core/NativeId))
+  (let [records (Vec core/NativeId)
         (closed-record-ids types layouts (supported-record-ids types layouts))
-        (scalars (Vec core/NativeId)) (scalar-ids-for types records)
-        (kept (Vec core/NativeId)) (vec (concat records scalars))
-        (kept-types (Vec core/TypeDef))
+        scalars (Vec core/NativeId) (scalar-ids-for types records)
+        kept (Vec core/NativeId) (vec (concat records scalars))
+        kept-types (Vec core/TypeDef)
         (filterv
-          (fn [(definition core/TypeDef)] Bool
+          (fn [definition core/TypeDef] Bool
             (type-id-in? kept (core/typedef-id definition)))
           types)
-        (kept-layouts (Vec core/LayoutDef))
+        kept-layouts (Vec core/LayoutDef)
         (filterv
-          (fn [(layout core/LayoutDef)] Bool
+          (fn [layout core/LayoutDef] Bool
             (type-id-in? kept (core/layoutdef-type-id layout)))
           layouts)]
     (->SliceProjectionV0 kept-types kept-layouts)))
@@ -448,7 +448,7 @@
 (defn materialize
   [(program core/NativeCoreProgram)
    (module-index Int)] SliceMaterializationV0
-  (let [(validation core/ValidationReport) (core/validate-program program)]
+  (let [validation core/ValidationReport (core/validate-program program)]
     (cond
       (not (core/validationreport-passed validation))
       (->SliceRefusedV0 "projected program failed Native Core validation")
@@ -457,13 +457,13 @@
       (->SliceRefusedV0 "projected program leaves the restricted C17 reference slice")
 
       :else
-      (let [(types (Vec core/TypeDef))
+      (let [types (Vec core/TypeDef)
             (c11/ordered-types (core/nativecoreprogram-types program))
-            (layouts (Vec core/LayoutDef))
+            layouts (Vec core/LayoutDef)
             (c11/ordered-layouts (core/nativecoreprogram-layouts program))
-            (functions (Vec core/FunctionDef))
+            functions (Vec core/FunctionDef)
             (c11/ordered-functions (core/nativecoreprogram-functions program))
-            (header-name String) (str "module_" module-index ".h")]
+            header-name String (str "module_" module-index ".h")]
         (->SliceMaterializedV0
           (c11/->C11Artifact
             header-name
@@ -480,9 +480,9 @@
   [(label String)
    (program core/NativeCoreProgram)
    (abi core/AbiProfileV0)] String
-  (let [(verdicts (Vec obligations/ObligationVerdictV0))
+  (let [verdicts (Vec obligations/ObligationVerdictV0)
         (obligations/validate-native-core-program program abi)
-        (names (Vec String)) (obligation-names)]
+        names (Vec String) (obligation-names)]
     (loop [index Int 0 report String ""]
       (if (>= index (count verdicts))
         report
@@ -528,41 +528,41 @@
    (artifacts-dir String)
    (compiler-commit String)
    (abi core/AbiProfileV0)] String
-  (let [(rows (Vec SliceFactV0)) (parse-facts (slurp facts-path))
-        (configuration (Vec String))
+  (let [rows (Vec SliceFactV0) (parse-facts (slurp facts-path))
+        configuration (Vec String)
         ["profile=3" (str "abi=" (core/abiprofilev0-id abi))]
-        (program stages/SourceStageV1)
+        program stages/SourceStageV1
         (source-program rows module-name relative-path)
-        (freeze-result lower/SourceFreezeResultV0)
+        freeze-result lower/SourceFreezeResultV0
         (lower/freeze-source-stage program compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [(frozen-source stages/FrozenSourceStageV1)
+      (let [frozen-source stages/FrozenSourceStageV1
             (lower/sourcefreezeacceptedv0-frozen freeze-result)
-            (typing-result lower/TypingResultV0)
+            typing-result lower/TypingResultV0
             (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"
-          (let [(frozen-typed stages/FrozenTypedStageV0)
+          (let [frozen-typed stages/FrozenTypedStageV0
                 (lower/typingacceptedv0-frozen typing-result)
-                (slice lower/TypedSliceV0) (lower/typingacceptedv0-slice typing-result)
-                (native-result lower/NativeLoweringResultV0)
+                slice lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
+                native-result lower/NativeLoweringResultV0
                 (lower/lower-native-stage frozen-typed slice compiler-commit
                   configuration abi)
-                (epoch-result lower/EpochLoweringResultV0)
+                epoch-result lower/EpochLoweringResultV0
                 (lower/epoch-identity-stage (native-frozen native-result)
                   compiler-commit configuration abi)
-                (frozen-native stages/FrozenNativeStageV0)
+                frozen-native stages/FrozenNativeStageV0
                 (lower/epoch-result-frozen epoch-result)
-                (program core/NativeCoreProgram)
+                program core/NativeCoreProgram
                 (stages/nativestagev0-program
                   (stages/frozennativestagev0-stage frozen-native))
-                (projection SliceProjectionV0)
+                projection SliceProjectionV0
                 (c17-projection (core/nativecoreprogram-types program)
                   (core/nativecoreprogram-layouts program))
-                (projected core/NativeCoreProgram) (projected-program program projection)
-                (result SliceMaterializationV0) (materialize projected 0)
-                (head String)
+                projected core/NativeCoreProgram (projected-program program projection)
+                result SliceMaterializationV0 (materialize projected 0)
+                head String
                 (str "stage source-freeze ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
                   "stage typed-to-native "
@@ -601,7 +601,7 @@
    (artifacts-dir String)
    (compiler-commit String)
    (abi-id String)] String
-  (let [(profile (U core/AbiProfileV0 Nil)) (core/abi-profile-for abi-id)]
+  (let [profile (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
     (if (nil? profile)
       (str "stage abi REJECTED unknown abi profile " abi-id "\n")
       (emit-slice-for-abi! facts-path module-name relative-path artifacts-dir

@@ -94,7 +94,7 @@
   [(ctx (U ri/Graph Nil)) (view Any) (clauses (Vec Any))] (Vec Any)
   (if (empty? clauses)
     []
-    (let [signatures (mapv (fn [(clause Any)] Any
+    (let [signatures (mapv (fn [clause Any] Any
                              (when (= "list" (rr/kind-of ctx view clause))
                                (complete-signature
                                  ctx view
@@ -135,7 +135,7 @@
 (defn param-type-nodes
   [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
   (vec
-    (keep (fn [(node Any)] Any
+    (keep (fn [node Any] Any
             (let [parts (typed-binding-parts ctx view node)]
               (when (some? parts) (get parts :type))))
       (tail ctx bracket))))
@@ -143,7 +143,7 @@
 (defn param-constraint-nodes
   [(ctx (U ri/Graph Nil)) (view Any) (bracket Any)] (Vec Any)
   (vec
-    (keep (fn [(node Any)] Any
+    (keep (fn [node Any] Any
             (let [parts (typed-binding-parts ctx view node)]
               (when (some? parts) (get parts :constraint))))
       (tail ctx bracket))))
@@ -183,7 +183,7 @@
         (some? v)
         (if (contains? #{"_" "&"} (str v)) [] [n])
         (brackets? ctx view n)
-        (reduce (fn [(acc (Vec Any)) (k Any)] (Vec Any) (into acc (collect-bind-syms ctx view k)))
+        (reduce (fn [acc (Vec Any) k Any] (Vec Any) (into acc (collect-bind-syms ctx view k)))
           []
           (tail ctx n))
         (map-node? ctx view n)
@@ -196,7 +196,7 @@
                 (recur ks2
                   (into acc
                     (if (and (some? v2) (brackets? ctx view v2))
-                      (vec (keep (fn [(c Any)] Any (let [leaf (rr/unwrap-meta ctx view c)] (when (some? (sv ctx view leaf)) leaf))) (tail ctx v2)))
+                      (vec (keep (fn [c Any] Any (let [leaf (rr/unwrap-meta ctx view c)] (when (some? (sv ctx view leaf)) leaf))) (tail ctx v2)))
                       [])))
                 (= ":as" (str kv))
                 (recur ks2 (into acc (collect-bind-syms ctx view v2)))
@@ -229,7 +229,7 @@
               (recur ks2
                 (into acc
                   (if (and (some? v2) (map-node? ctx view v2))
-                    (vec (keep-indexed (fn [(i Int) (cc Any)] Any (if (odd? i) cc nil)) (tail ctx v2)))
+                    (vec (keep-indexed (fn [i Int cc Any] Any (if (odd? i) cc nil)) (tail ctx v2)))
                     [])))
               (contains? #{":as" ":keys" ":strs" ":syms"} (str kv))
               (recur ks2 acc)
@@ -238,7 +238,7 @@
               :else
               (recur ks2 (into acc (collect-or-vals ctx view k)))))))
       (brackets? ctx view binding)
-      (reduce (fn [(acc (Vec Any)) (k Any)] (Vec Any) (into acc (collect-or-vals ctx view k)))
+      (reduce (fn [acc (Vec Any) k Any] (Vec Any) (into acc (collect-or-vals ctx view k)))
         []
         (tail ctx binding))
       :else
@@ -276,7 +276,7 @@
           (recur ks2
             (into acc
               (if (and (some? v) (brackets? ctx view v))
-                (mapv (fn [(p Any)] Any [:bind (nth p 0 nil) (nth p 1 nil) (nth p 2 nil) (nth p 3 nil)])
+                (mapv (fn [p Any] Any [:bind (nth p 0 nil) (nth p 1 nil) (nth p 2 nil) (nth p 3 nil)])
                   (let-bind-pairs ctx view v))
                 [])))
           :else
@@ -291,7 +291,7 @@
 
 (defn context-of
   [(ctx (U ri/Graph Nil)) (view Any) (bsyms (Vec Any))] (Map Any Any)
-  (reduce (fn [(acc (Map Any Any)) (b Any)] (Map Any Any) (assoc acc (sv ctx view b) b))
+  (reduce (fn [acc (Map Any Any) b Any] (Map Any Any) (assoc acc (sv ctx view b) b))
     {}
     bsyms))
 
@@ -303,7 +303,7 @@
         (some? v)
         (if (= "_" (str v)) [] [n])
         (or (= "list" (rr/kind-of ctx view n)) (brackets? ctx view n))
-        (reduce (fn [(acc (Vec Any)) (k Any)] (Vec Any) (into acc (match-pat-binds ctx view k)))
+        (reduce (fn [acc (Vec Any) k Any] (Vec Any) (into acc (match-pat-binds ctx view k)))
           []
           (tail ctx n))
         :else

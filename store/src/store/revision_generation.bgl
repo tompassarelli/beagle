@@ -24,7 +24,7 @@
    (actual RevisionSet)
    (state-bytes String)]
   RevisionGeneration?
-  (let [(candidate RevisionGeneration)
+  (let [candidate RevisionGeneration
         (->RevisionGeneration actual (str state-bytes ""))]
     (if (revisions-match? expected actual)
       (bgl/promote candidate)

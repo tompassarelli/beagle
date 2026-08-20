@@ -4,4 +4,4 @@
 (defrecord Counter [(value Int)])
 
 (defn dynamic-updater-refused! [(cell (Atom Counter))] Counter
-  (swap! cell (fn [(current Counter)] Counter current)))
+  (swap! cell (fn [current Counter] Counter current)))

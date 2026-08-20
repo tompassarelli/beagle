@@ -134,7 +134,7 @@
     [(EdnDecodeError offset message) (str offset ":" message)]))
 
 (defn invalid-map-encode [] String
-  (let [(events (Vec edn/EdnEvent))
+  (let [events (Vec edn/EdnEvent)
         [(edn/->EdnMapStart 0)
          (edn/->EdnKeyword 1 :missing)
          (edn/->EdnMapEnd 2)]]

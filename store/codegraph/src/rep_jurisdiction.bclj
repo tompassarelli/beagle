@@ -63,68 +63,68 @@
       (conj (vec (get acc :out)) (get acc :cur)))))
 
 (defn block->defs [(block (Map Keyword Any))] (Vec (Map Keyword Any))
-  (let [ts (vec (get block :triples)) by-subj (group-by (fn [(t Any)] Any (nth t 0)) ts) ms (mapv (fn
+  (let [ts (vec (get block :triples)) by-subj (group-by (fn [t Any] Any (nth t 0)) ts) ms (mapv (fn
                                                                                                     [(s Any)]
                                                                                                     (Map Any Any)
                                                                                                     (into {} (mapv (fn
                                                                                                                      [(t Any)]
                                                                                                                      (Vec Any)
                                                                                                                      [(nth t 1) (nth t 2)]) (vec (get by-subj s))))) (vec (keys by-subj)))]
-    (mapv (fn [(m (Map Any Any))] (Map Keyword Any) {:name (get m "name") :regime (get m "rep-regime") :native (get m "native-sites") :hamt (get m "hamt-sites") :module (get m "module")})
-      (filterv (fn [(m (Map Any Any))] Bool (= "rep-def" (get m "form-kind")))
+    (mapv (fn [m (Map Any Any)] (Map Keyword Any) {:name (get m "name") :regime (get m "rep-regime") :native (get m "native-sites") :hamt (get m "hamt-sites") :module (get m "module")})
+      (filterv (fn [m (Map Any Any)] Bool (= "rep-def" (get m "form-kind")))
         ms))))
 
 ;; A def's NAME is its node term: the kernel takes any Atom, so the identity a
 ;; query answers with is the identity the corpus already names.
 (defn regime-operations [(rep-defs (Vec (Map Keyword Any)))] (Vec Any)
-  (mapv (fn [(dd (Map Keyword Any))] Any
+  (mapv (fn [dd (Map Keyword Any)] Any
           (c/assert-operation (t/triple (get dd :name) regime-pred (get dd :regime))))
-    (filterv (fn [(dd (Map Keyword Any))] Bool
+    (filterv (fn [dd (Map Keyword Any)] Bool
                (and (not (nil? (get dd :name))) (not (nil? (get dd :regime)))))
       rep-defs)))
 
 (defn defs-with-regime [(ctx Any) (reg String)] (Vec Any)
-  (vec (sort (mapv (fn [(p Any)] Any (t/triple-t1 p))
-               (filterv (fn [(p Any)] Bool
+  (vec (sort (mapv (fn [p Any] Any (t/triple-t1 p))
+               (filterv (fn [p Any] Bool
                           (and (= regime-pred (t/triple-t2 p)) (= reg (t/triple-t3 p))))
                  (c/live-propositions ctx))))))
 
 (defn q4! [(rep-defs (Vec (Map Keyword Any))) (cg-path String)] Nil
-  (let [(cg-blocks (Vec Any)) (cg/parse-corpus! cg-path)
-        (graph (Map Keyword Any)) (cg/build-graph cg-blocks)
-        (defns (Vec Any)) (vec (get graph :defns))
-        (edges (Vec Any)) (vec (get graph :edges))
-        (key->name (Map Any Any)) (into {} (mapv (fn [(dd Any)] (Vec Any)
+  (let [cg-blocks (Vec Any) (cg/parse-corpus! cg-path)
+        graph (Map Keyword Any) (cg/build-graph cg-blocks)
+        defns (Vec Any) (vec (get graph :defns))
+        edges (Vec Any) (vec (get graph :edges))
+        key->name (Map Any Any) (into {} (mapv (fn [dd Any] (Vec Any)
                                                   [(get dd :key) (get dd :name)]) defns))
-        (name-edges (Vec Any)) (vec (distinct (filterv (fn [(x Any)] Bool (not (nil? x)))
-                                               (mapv (fn [(e Any)] Any
+        name-edges (Vec Any) (vec (distinct (filterv (fn [x Any] Bool (not (nil? x)))
+                                               (mapv (fn [e Any] Any
                                                        (let [an (get key->name (nth e 0))
                                                              bn (get key->name (nth e 1))]
                                                          (if (and (not (nil? an)) (not (nil? bn)))
                                                            [an bn]
                                                            nil)))
                                                  edges))))
-        (hamt-names (Set Any)) (set (mapv (fn [(dd Any)] Any (get dd :name))
-                                    (filterv (fn [(dd Any)] Bool
+        hamt-names (Set Any) (set (mapv (fn [dd Any] Any (get dd :name))
+                                    (filterv (fn [dd Any] Bool
                                                (and (not (nil? (get dd :name)))
                                                  (contains? #{"mixed" "hamt"} (get dd :regime))))
                                       rep-defs)))
-        (gctx Any) (c/new-term-store space-id)
-        (operations (Vec Any)) (vec (concat (mapv (fn [(e Any)] Any
+        gctx Any (c/new-term-store space-id)
+        operations (Vec Any) (vec (concat (mapv (fn [e Any] Any
                                                    (c/assert-operation
                                                      (t/triple (nth e 0) calls-pred (nth e 1))))
                                              name-edges)
-                                     (mapv (fn [(nm Any)] Any
+                                     (mapv (fn [nm Any] Any
                                              (c/assert-operation
                                                (t/triple nm hamt-pred hamt-mark)))
                                        (vec hamt-names))))
-        (_load Any) (when (pos? (count operations))
+        _load Any (when (pos? (count operations))
                       (c/commit-boundary!
                        gctx operations
                        (c/commit-metadata "store.codegraph/jurisdiction-load-v1"
                                           "store/CommitOperationV1"
                                           "codegraph-v1")))
-        (db Any) (d/run-rules! (c/live-propositions gctx)
+        db Any (d/run-rules! (c/live-propositions gctx)
                   [(d/rule "forces"
                      [(d/variable "x")]
                      [(d/relation-literal d/triple-relation
@@ -136,8 +136,8 @@
                      [(d/relation-literal d/triple-relation
                         [(d/variable "x") (d/constant calls-pred) (d/variable "y")])
                       (d/relation-literal "forces" [(d/variable "y")])])])
-        (forced (Vec Any)) (vec (distinct (vec (sort (filterv (fn [(x Any)] Bool (not (nil? x)))
-                                                      (mapv (fn [(row Any)] Any (nth row 0))
+        forced (Vec Any) (vec (distinct (vec (sort (filterv (fn [x Any] Bool (not (nil? x)))
+                                                      (mapv (fn [row Any] Any (nth row 0))
                                                         (d/facts db "forces")))))))]
     (if (pos? (count forced))
       (doseq [nm forced] (println "  forces-HAMT" nm))
@@ -158,11 +158,11 @@
     (println "rep-def facts:"
       (count rep-defs)
       " across"
-      (count (distinct (mapv (fn [(dd Any)] Any (get dd :module)) rep-defs)))
+      (count (distinct (mapv (fn [dd Any] Any (get dd :module)) rep-defs)))
       "module(s)")
-    (let [(ctx Any) (c/new-term-store space-id)
-          (operations (Vec Any)) (regime-operations rep-defs)
-          (_load Any) (when (pos? (count operations))
+    (let [ctx Any (c/new-term-store space-id)
+          operations (Vec Any) (regime-operations rep-defs)
+          _load Any (when (pos? (count operations))
                         (c/commit-boundary!
                          ctx operations
                          (c/commit-metadata "store.codegraph/jurisdiction-load-v1"

@@ -498,8 +498,8 @@
       [:else (rpc-fail! :rpc-invalid-kind "Store RPC packet kind is unknown")])))
 
 (defn- rpc-add-measured-term! [(term Any) (nodes Any)] Int
-  (let [(used Int) (int (deref nodes))
-        (remaining Int) (- rpc-v2-max-term-nodes used)]
+  (let [used Int (int (deref nodes))
+        remaining Int (- rpc-v2-max-term-nodes used)]
     (if (<= remaining 0)
       (rpc-fail! :rpc-term-node-limit
                  "Store RPC body exceeds the aggregate Term node limit")
@@ -696,8 +696,8 @@
                   (str context " must be the strict byte 0 or 1"))])))
 
 (defn- rpc-read-term! [(buffer Any) (nodes Any)] Any
-  (let [(used Int) (int (deref nodes))
-        (remaining Int) (- rpc-v2-max-term-nodes used)]
+  (let [used Int (int (deref nodes))
+        remaining Int (- rpc-v2-max-term-nodes used)]
     (if (<= remaining 0)
       (rpc-fail! :rpc-term-node-limit
                  "Store RPC body exceeds the aggregate Term node limit")
@@ -870,7 +870,7 @@
   (when (> (count values) rpc-v2-max-list-values)
     (rpc-fail! :term-depth-exceeded
                "RPC list length exceeds the TermCodecV1 depth bound"))
-  (reduce (fn [(tail Any) (value Any)] Any
+  (reduce (fn [tail Any value Any] Any
             (require-rpc-term! value "RPC list value")
             (t/triple :rpc/list value tail))
           rpc-list-end (reverse values)))

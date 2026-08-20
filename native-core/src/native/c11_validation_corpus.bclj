@@ -174,10 +174,10 @@
 
 (def fold-layouts (Vec core/LayoutDef)
   (filterv
-    (fn [(layout core/LayoutDef)] Bool
+    (fn [layout core/LayoutDef] Bool
       (some?
         (some
-          (fn [(definition core/TypeDef)] Bool
+          (fn [definition core/TypeDef] Bool
             (core/native-id=
               (core/layoutdef-type-id layout)
               (core/typedef-id definition)))
@@ -189,7 +189,7 @@
 
 (def fold-effects (Vec core/EffectDef)
   (filterv
-    (fn [(effect core/EffectDef)] Bool
+    (fn [effect core/EffectDef] Bool
       (core/id-in? (core/functiondef-effects fold-function)
         (core/effectdef-id effect)))
     (core/nativecoreprogram-effects fold-lowered-program)))

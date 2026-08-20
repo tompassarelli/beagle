@@ -71,7 +71,7 @@
          value String ""]
     (if (= offset (count source))
       (->TokenScan offset value "" "unterminated string literal")
-      (let [(character String) (character-at source offset)]
+      (let [character String (character-at source offset)]
         (cond
           (= character "\"")
           (->TokenScan (inc offset)
@@ -82,8 +82,8 @@
           (= character "\\")
           (if (= (inc offset) (count source))
             (->TokenScan (inc offset) value "" "unterminated string escape")
-            (let [(escaped String) (character-at source (inc offset))
-                  (decoded String?) (escape-character escaped)]
+            (let [escaped String (character-at source (inc offset))
+                  decoded String? (escape-character escaped)]
               (if (nil? decoded)
                 (->TokenScan (+ offset 2)
                              value
@@ -98,7 +98,7 @@
   (loop [offset Int start]
     (if (or (= offset (count source))
             (delimiter? (character-at source offset)))
-      (let [(value String) (subs source start offset)]
+      (let [value String (subs source start offset)]
         (->TokenScan offset value value nil))
       (recur (inc offset)))))
 
@@ -140,7 +140,7 @@
       (= character "}")))
 
 (defn prefix-kind [(source String) (offset Int)] Keyword?
-  (let [(character String) (character-at source offset)]
+  (let [character String (character-at source offset)]
     (cond
       (= character "'") :quote
       (= character "`") :quasiquote
@@ -170,14 +170,14 @@
       (if (empty? stack)
         (success events)
         (failure events "unterminated data container" offset))
-      (let [(character String) (character-at source offset)
-            (prefix Keyword?) (prefix-kind source offset)]
+      (let [character String (character-at source offset)
+            prefix Keyword? (prefix-kind source offset)]
         (cond
           (whitespace? character)
           (recur (inc offset) stack events)
 
           (= character ";")
-          (let [(next-offset Int)
+          (let [next-offset Int
                 (loop [cursor Int (inc offset)]
                   (if (or (= cursor (count source))
                           (= (character-at source cursor) "\n"))
@@ -188,14 +188,14 @@
           (and (= character "#")
                (< (inc offset) (count source))
                (= (character-at source (inc offset)) "{"))
-          (let [(kind Keyword) :set/open]
+          (let [kind Keyword :set/open]
             (recur (+ offset 2)
                    (conj stack kind)
                    (conj events
                          (->ReaderEvent kind "" "#{" offset (count stack)))))
 
           (opening? character)
-          (let [(kind Keyword) (open-kind character)]
+          (let [kind Keyword (open-kind character)]
             (recur (inc offset)
                    (conj stack kind)
                    (conj events
@@ -208,7 +208,7 @@
           (closing? character)
           (if (empty? stack)
             (failure events "unexpected closing delimiter" offset)
-            (let [(opened Keyword) (peek stack)]
+            (let [opened Keyword (peek stack)]
               (if (matching-close? opened character)
                 (recur (inc offset)
                        (pop stack)
@@ -221,8 +221,8 @@
                 (failure events "mismatched closing delimiter" offset))))
 
           (= character "\"")
-          (let [(scan TokenScan) (scan-string source offset)
-                (error String?) (tokenscan-error scan)]
+          (let [scan TokenScan (scan-string source offset)
+                error String? (tokenscan-error scan)]
             (if (some? error)
               (failure events error offset)
               (recur (tokenscan-next-offset scan)
@@ -235,15 +235,15 @@
                                           (count stack))))))
 
           (some? prefix)
-          (let [(width Int) (prefix-width prefix)
-                (literal String) (subs source offset (+ offset width))]
+          (let [width Int (prefix-width prefix)
+                literal String (subs source offset (+ offset width))]
             (recur (+ offset width)
                    stack
                    (conj events
                          (->ReaderEvent prefix "" literal offset (count stack)))))
 
           :else
-          (let [(scan TokenScan) (scan-atom source offset)]
+          (let [scan TokenScan (scan-atom source offset)]
             (if (= (tokenscan-next-offset scan) offset)
               (failure events "unsupported reader character" offset)
               (recur (tokenscan-next-offset scan)

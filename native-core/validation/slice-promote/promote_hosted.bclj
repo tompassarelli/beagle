@@ -20,7 +20,7 @@
 ;; The claim in one expression: promotion in a hosted dialect does not copy,
 ;; because there is nothing for the copy to outlive.
 (defn same-object? [] Bool
-  (let [(value (Vec Int)) [1 2 3]]
+  (let [value (Vec Int) [1 2 3]]
     (identical? value (bgl/promote value))))
 
 (defn report [] String

@@ -4,14 +4,14 @@
   (:require [native.vector-named-callback-provider :as provider]))
 
 (defn -main [(args (Vec String))] Int
-  (let [(values (Vec provider/Item))
+  (let [values (Vec provider/Item)
         [(provider/->Item 4) (provider/->Item 9)]
-        (mapped (Vec Int)) (mapv provider/item-to-int values)
-        (filtered (Vec provider/Item))
+        mapped (Vec Int) (mapv provider/item-to-int values)
+        filtered (Vec provider/Item)
         (filterv provider/item-positive? values)
-        (all-positive Bool) (every? provider/item-positive? values)
-        (found (U Int Nil)) (some provider/item-present values)
-        (total Int) (reduce provider/item-add 0 values)]
+        all-positive Bool (every? provider/item-positive? values)
+        found (U Int Nil) (some provider/item-present values)
+        total Int (reduce provider/item-add 0 values)]
     (if (and (= (count mapped) 2)
              (= (nth mapped 1) 9)
              (= (count filtered) 2)

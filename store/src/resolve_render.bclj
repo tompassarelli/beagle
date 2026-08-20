@@ -69,8 +69,8 @@
 (defn ord-edges [(ctx (U ri/Graph Nil)) (n Any)] (Vec Any)
   (if (or (nil? ctx) (nil? n))
     []
-    (let [rows (reduce (fn [(acc (Vec Any)) (cid Any)] (Vec Any) (let [(p Any) (ri/predicate-at ctx cid) (r Any) (ri/target-at ctx cid)] (if (and (string? p) (rc/ord-pos? p) (some? r)) (conj acc [(rc/ord-parse p) p cid r]) acc))) [] (ri/by-subject ctx n))]
-      (vec (sort-by (fn [(row Any)] Any (nth row 0)) rc/ord-cmp rows)))))
+    (let [rows (reduce (fn [acc (Vec Any) cid Any] (Vec Any) (let [p Any (ri/predicate-at ctx cid) r Any (ri/target-at ctx cid)] (if (and (string? p) (rc/ord-pos? p) (some? r)) (conj acc [(rc/ord-parse p) p cid r]) acc))) [] (ri/by-subject ctx n))]
+      (vec (sort-by (fn [row Any] Any (nth row 0)) rc/ord-cmp rows)))))
 
 (defn node->str
   [(ctx (U ri/Graph Nil))
@@ -125,7 +125,7 @@
   Any
   (if (= "list" (rr/kind-of ctx view n))
     (into [:list]
-      (mapv (fn [(c Any)] Any (node->canon ctx view BOUND REFERS FIXED c))
+      (mapv (fn [c Any] Any (node->canon ctx view BOUND REFERS FIXED c))
         (rr/ordered-children ctx n)))
     (if (= "symbol" (rr/kind-of ctx view n))
       [:leaf "symbol" (render-sym ctx view BOUND REFERS FIXED n)]
@@ -173,7 +173,7 @@
    (root Any)
    (target Any)]
   (Vec Any)
-  (mapv (fn [(s Any)] Any [(get s :parent) (get s :pos) (get s :cid) (get s :child)])
+  (mapv (fn [s Any] Any [(get s :parent) (get s :pos) (get s :cid) (get s :child)])
     (anchor-match-sites ctx view BOUND REFERS FIXED root target)))
 
 (defn crumb-label [(ctx (U ri/Graph Nil)) (view Any) (n Any)] Any

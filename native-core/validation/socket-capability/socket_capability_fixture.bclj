@@ -61,17 +61,17 @@
     layouts-digest))
 
 (defn fixture-function [] core/FunctionDef
-  (let [(function-id core/NativeId) (fixture-id "function")
-        (block-id core/NativeId) (fixture-id "entry")
-        (fd core/NativeId) (fixture-id "fd")
-        (bound core/NativeId) (fixture-id "bound")
-        (bytes core/NativeId) (fixture-id "bytes")
-        (arena core/NativeId) (fixture-id "arena")
-        (inherited core/NativeId) (fixture-id "inherited")
-        (accepted core/NativeId) (fixture-id "accepted")
-        (read core/NativeId) (fixture-id "read")
-        (written core/NativeId) (fixture-id "written")
-        (closed core/NativeId) (fixture-id "closed")]
+  (let [function-id core/NativeId (fixture-id "function")
+        block-id core/NativeId (fixture-id "entry")
+        fd core/NativeId (fixture-id "fd")
+        bound core/NativeId (fixture-id "bound")
+        bytes core/NativeId (fixture-id "bytes")
+        arena core/NativeId (fixture-id "arena")
+        inherited core/NativeId (fixture-id "inherited")
+        accepted core/NativeId (fixture-id "accepted")
+        read core/NativeId (fixture-id "read")
+        written core/NativeId (fixture-id "written")
+        closed core/NativeId (fixture-id "closed")]
     (core/->FunctionDef
       function-id
       "socket-capability-fixture"
@@ -120,14 +120,14 @@
       [(lower/allocate-capability-id) (lower/host-socket-capability-id)])))
 
 (defn fixture-program [] core/NativeCoreProgram
-  (let [(types (Vec core/TypeDef)) (fixture-types)
-        (layouts (Vec core/LayoutDef))
+  (let [types (Vec core/TypeDef) (fixture-types)
+        layouts (Vec core/LayoutDef)
         (lower/collect-layouts
           (lower/resolve-layouts types (core/abi-profile-lp64)))
-        (effects (Vec core/EffectDef)) (fixture-effects)
-        (regions (Vec core/RegionDef)) (fixture-regions)
-        (capabilities (Vec core/CapabilityDef)) (fixture-capabilities)
-        (digest String) (lower/layout-digest layouts)]
+        effects (Vec core/EffectDef) (fixture-effects)
+        regions (Vec core/RegionDef) (fixture-regions)
+        capabilities (Vec core/CapabilityDef) (fixture-capabilities)
+        digest String (lower/layout-digest layouts)]
     (core/->NativeCoreProgram
       (fixture-id "program") nil "socket-capability-fixture-v0"
       types effects regions capabilities layouts
@@ -148,9 +148,9 @@
     "unexpected success"))
 
 (defn emit-fixture! [(artifacts-dir String)] String
-  (let [(program core/NativeCoreProgram) (fixture-program)
-        (c-result body/BodyMaterializationV0) (body/materialize-program program 0)
-        (qbe-result qbe/QbeMaterialization) (qbe/materialize-program program 0 "lp64")]
+  (let [program core/NativeCoreProgram (fixture-program)
+        c-result body/BodyMaterializationV0 (body/materialize-program program 0)
+        qbe-result qbe/QbeMaterialization (qbe/materialize-program program 0 "lp64")]
     (if (or (not (obligations-pass? program))
             (not (body/materialization-ok? c-result)))
       (str "fixture REFUSED " (body/materialization-detail c-result) "\n"
@@ -173,7 +173,7 @@
         "effects "
         (str (obligations/obligation-passed?
           (obligations/bounded-effects program))) "\n")
-      (let [(artifact body/BodyArtifactV0)
+      (let [artifact body/BodyArtifactV0
             (body/materialization-artifact c-result)]
         (do
           (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))

@@ -7,7 +7,7 @@
   (Rect [(width Int) (height String)]))
 
 (defn area! [(s0 Shape)] Int
-  (let [(s Shape) s0]
+  (let [s Shape s0]
     (do
       (set! s s0)
       (match s

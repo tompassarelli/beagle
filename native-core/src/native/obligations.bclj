@@ -90,7 +90,7 @@
   (core/nativeid-value id))
 
 (defn avoiding-path-key [(avoided core/NativeId) (target core/NativeId)] String
-  (let [(avoided-value String) (native-id-key avoided)]
+  (let [avoided-value String (native-id-key avoided)]
     (str (count avoided-value) ":" avoided-value (native-id-key target))))
 
 (defn index-parameter-sites
@@ -101,7 +101,7 @@
   (loop [index Int 0 current (Map String DefSiteV0) definitions]
     (if (>= index (count parameters))
       current
-      (let [(parameter core/Parameter) (nth parameters index)]
+      (let [parameter core/Parameter (nth parameters index)]
         (recur (+ index 1)
           (assoc current
             (native-id-key (core/parameter-id parameter))
@@ -111,11 +111,11 @@
 (defn index-instruction-sites
   [(definitions (Map String DefSiteV0))
    (block core/BasicBlock)] (Map String DefSiteV0)
-  (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
+  (let [instructions (Vec core/Instruction) (core/basicblock-instructions block)]
     (loop [index Int 0 current (Map String DefSiteV0) definitions]
       (if (>= index (count instructions))
         current
-        (let [(result core/SsaValueV0) (get (nth instructions index) :result)]
+        (let [result core/SsaValueV0 (get (nth instructions index) :result)]
           (recur (+ index 1)
             (assoc current
               (native-id-key (core/ssavaluev0-id result))
@@ -123,17 +123,17 @@
                 (core/ssavaluev0-type-id result)))))))))
 
 (defn definition-index [(function core/FunctionDef)] (Map String DefSiteV0)
-  (let [(with-function-parameters (Map String DefSiteV0))
+  (let [with-function-parameters (Map String DefSiteV0)
         (index-parameter-sites {}
           (core/functiondef-parameters function)
           true
           (obligation-id "function-parameter"))
-        (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+        blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [index Int 0 current (Map String DefSiteV0) with-function-parameters]
       (if (>= index (count blocks))
         current
-        (let [(block core/BasicBlock) (nth blocks index)
-              (with-block-parameters (Map String DefSiteV0))
+        (let [block core/BasicBlock (nth blocks index)
+              with-block-parameters (Map String DefSiteV0)
               (index-parameter-sites current
                 (core/basicblock-parameters block)
                 false
@@ -146,9 +146,9 @@
   (loop [index Int 0 current (Map String core/BasicBlock) {}]
     (if (>= index (count blocks))
       current
-      (let [(block core/BasicBlock) (nth blocks index)]
+      (let [block core/BasicBlock (nth blocks index)]
         (recur (+ index 1)
-          (let [(key String) (native-id-key (core/basicblock-id block))]
+          (let [key String (native-id-key (core/basicblock-id block))]
             (if (nil? (get current key))
               (assoc current key block)
               current)))))))
@@ -160,7 +160,7 @@
     (if (>= index (count parameters))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
-      (let [(parameter core/Parameter) (nth parameters index)]
+      (let [parameter core/Parameter (nth parameters index)]
         (if (core/native-id= (core/parameter-id parameter) value-id)
           (->DefSiteV0 true true (obligation-id "function-parameter") -1
             (core/parameter-type-id parameter))
@@ -173,7 +173,7 @@
     (if (>= index (count parameters))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
-      (let [(parameter core/Parameter) (nth parameters index)]
+      (let [parameter core/Parameter (nth parameters index)]
         (if (core/native-id= (core/parameter-id parameter) value-id)
           (->DefSiteV0 true false (core/basicblock-id block) -1
             (core/parameter-type-id parameter))
@@ -186,8 +186,8 @@
     (if (>= index (count instructions))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
-      (let [(instruction core/Instruction) (nth instructions index)
-            (result core/SsaValueV0) (get instruction :result)]
+      (let [instruction core/Instruction (nth instructions index)
+            result core/SsaValueV0 (get instruction :result)]
         (if (core/native-id= (core/ssavaluev0-id result) value-id)
           (->DefSiteV0 true false (core/basicblock-id block) index
             (core/ssavaluev0-type-id result))
@@ -196,7 +196,7 @@
 (defn block-site
   [(block core/BasicBlock)
    (value-id core/NativeId)] DefSiteV0
-  (let [(parameter-site-result DefSiteV0) (block-parameter-site block value-id)]
+  (let [parameter-site-result DefSiteV0 (block-parameter-site block value-id)]
     (if (defsitev0-found parameter-site-result)
       parameter-site-result
       (block-instruction-site block value-id))))
@@ -204,7 +204,7 @@
 (defn find-def-site
   [(function core/FunctionDef)
    (value-id core/NativeId)] DefSiteV0
-  (let [(function-site DefSiteV0)
+  (let [function-site DefSiteV0
         (parameter-site (core/functiondef-parameters function) value-id)]
     (if (defsitev0-found function-site)
       function-site
@@ -212,21 +212,21 @@
         (if (>= index (count blocks))
           (->DefSiteV0 false false (obligation-id "missing-block") -1
             (obligation-id "missing-type"))
-          (let [(site DefSiteV0) (block-site (nth blocks index) value-id)]
+          (let [site DefSiteV0 (block-site (nth blocks index) value-id)]
             (if (defsitev0-found site) site (recur (+ index 1) blocks))))))))
 
 (defn terminator-successors
   [(terminator core/Terminator)] (Vec core/NativeId)
-  (let [(jump-block Any) (get terminator :block-id nil)
-        (true-block Any) (get terminator :true-block nil)
-        (false-block Any) (get terminator :false-block nil)
-        (cases Any) (get terminator :cases nil)]
+  (let [jump-block Any (get terminator :block-id nil)
+        true-block Any (get terminator :true-block nil)
+        false-block Any (get terminator :false-block nil)
+        cases Any (get terminator :cases nil)]
     (cond
       (not (nil? jump-block)) [jump-block]
       (and (not (nil? true-block)) (not (nil? false-block)))
       [true-block false-block]
       (not (nil? cases))
-      (mapv (fn [(switch-case core/SwitchCaseV0)] core/NativeId
+      (mapv (fn [switch-case core/SwitchCaseV0] core/NativeId
               (core/switchcasev0-block-id switch-case))
         cases)
       :else [])))
@@ -245,8 +245,8 @@
          seen (Map String Bool) {}]
     (if (>= position (count pending))
       seen
-      (let [(current core/NativeId) (nth pending position)
-            (current-key String) (native-id-key current)]
+      (let [current core/NativeId (nth pending position)
+            current-key String (native-id-key current)]
         (cond
           (core/native-id= current avoided)
           (recur (+ position 1) pending seen)
@@ -255,31 +255,31 @@
           (recur (+ position 1) pending seen)
 
           :else
-          (let [(block (U core/BasicBlock Nil)) (get blocks current-key)
-                (next-pending (Vec core/NativeId))
+          (let [block (U core/BasicBlock Nil) (get blocks current-key)
+                next-pending (Vec core/NativeId)
                 (if (nil? block)
                   pending
                   (core/append-ids pending (block-successors block)))]
             (recur (+ position 1) next-pending (assoc seen current-key true))))))))
 
 (defn paths-avoiding-index [(function core/FunctionDef)] (Map String Bool)
-  (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-        (blocks-by-id (Map String core/BasicBlock)) (block-index blocks)
-        (entry core/NativeId) (core/functiondef-entry-block function)]
+  (let [blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+        blocks-by-id (Map String core/BasicBlock) (block-index blocks)
+        entry core/NativeId (core/functiondef-entry-block function)]
     (loop [avoided-position Int 0 paths (Map String Bool) {}]
       (if (>= avoided-position (count blocks))
         paths
-        (let [(avoided core/NativeId)
+        (let [avoided core/NativeId
               (core/basicblock-id (nth blocks avoided-position))]
           (if (core/native-id= avoided entry)
             (recur (+ avoided-position 1) paths)
-            (let [(reachable (Map String Bool))
+            (let [reachable (Map String Bool)
                   (reachable-blocks-avoiding blocks-by-id entry avoided)
-                  (next-paths (Map String Bool))
+                  next-paths (Map String Bool)
                   (loop [target-position Int 0 current (Map String Bool) paths]
                     (if (>= target-position (count blocks))
                       current
-                      (let [(target core/NativeId)
+                      (let [target core/NativeId
                             (core/basicblock-id (nth blocks target-position))]
                         (recur (+ target-position 1)
                           (if (= true (get reachable (native-id-key target)))
@@ -295,7 +295,7 @@
 (defn indexed-def-site
   [(index SsaValidationIndexV0)
    (value-id core/NativeId)] DefSiteV0
-  (let [(site (U DefSiteV0 Nil))
+  (let [site (U DefSiteV0 Nil)
         (get (ssavalidationindexv0-definitions index) (native-id-key value-id))]
     (if (nil? site) (missing-def-site) site)))
 
@@ -305,7 +305,7 @@
    (use-block core/NativeId)
    (use-position Int)
    (value-id core/NativeId)] Bool
-  (let [(site DefSiteV0) (indexed-def-site index value-id)]
+  (let [site DefSiteV0 (indexed-def-site index value-id)]
     (cond
       (not (defsitev0-found site)) false
       (defsitev0-function-parameter site) true
@@ -336,8 +336,8 @@
   [(validation-index SsaValidationIndexV0)
    (function core/FunctionDef)
    (block core/BasicBlock)] Bool
-  (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)
-        (block-id core/NativeId) (core/basicblock-id block)]
+  (let [instructions (Vec core/Instruction) (core/basicblock-instructions block)
+        block-id core/NativeId (core/basicblock-id block)]
     (and
       (loop [instruction-position Int 0]
         (if (>= instruction-position (count instructions))
@@ -346,7 +346,7 @@
                 (core/instruction-ssa-refs (nth instructions instruction-position)))
             (recur (+ instruction-position 1))
             false)))
-      (every? (fn [(terminator core/Terminator)] Bool
+      (every? (fn [terminator core/Terminator] Bool
                 (refs-dominate? validation-index function block-id (count instructions)
                   (core/terminator-ssa-refs terminator)))
         (core/basicblock-terminators block)))))
@@ -356,16 +356,16 @@
    (function core/FunctionDef)
    (target-id core/NativeId)
    (arguments (Vec core/NativeId))] Bool
-  (let [(target (U core/BasicBlock Nil))
+  (let [target (U core/BasicBlock Nil)
         (find-block (core/functiondef-blocks function) target-id)]
     (if (nil? target)
       false
-      (let [(parameters (Vec core/Parameter)) (core/basicblock-parameters target)]
+      (let [parameters (Vec core/Parameter) (core/basicblock-parameters target)]
         (and (= (count parameters) (count arguments))
           (loop [argument-position Int 0]
             (if (>= argument-position (count arguments))
               true
-              (let [(site DefSiteV0)
+              (let [site DefSiteV0
                     (indexed-def-site validation-index
                       (nth arguments argument-position))]
                 (if (and (defsitev0-found site)
@@ -392,7 +392,7 @@
       (arguments-match-parameters? index function
         (core/branchterminator-false-block terminator) []))
     (instance? native.core.SwitchTerminator terminator)
-    (every? (fn [(switch-case core/SwitchCaseV0)] Bool
+    (every? (fn [switch-case core/SwitchCaseV0] Bool
               (arguments-match-parameters? index function
                 (core/switchcasev0-block-id switch-case)
                 (core/switchcasev0-arguments switch-case)))
@@ -402,27 +402,27 @@
 (defn function-valid-ssa? [(function core/FunctionDef)] Bool
   (if (not (core/unique-ids? (core/function-value-ids function)))
     false
-    (let [(index SsaValidationIndexV0) (ssa-validation-index function)]
-      (every? (fn [(block core/BasicBlock)] Bool
+    (let [index SsaValidationIndexV0 (ssa-validation-index function)]
+      (every? (fn [block core/BasicBlock] Bool
                 (and (block-uses-dominated? index function block)
-                  (every? (fn [(terminator core/Terminator)] Bool
+                  (every? (fn [terminator core/Terminator] Bool
                             (terminator-arguments-valid? index function terminator))
                     (core/basicblock-terminators block))))
         (core/functiondef-blocks function)))))
 
 (defn valid-ssa [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (let [(functions (Vec core/FunctionDef))
+  (let [functions (Vec core/FunctionDef)
         (core/nativecoreprogram-functions program)
-        (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
-        (regions (Vec core/RegionDef)) (core/nativecoreprogram-regions program)
-        (capabilities (Vec core/CapabilityDef))
+        types (Vec core/TypeDef) (core/nativecoreprogram-types program)
+        regions (Vec core/RegionDef) (core/nativecoreprogram-regions program)
+        capabilities (Vec core/CapabilityDef)
         (core/nativecoreprogram-capabilities program)]
     (loop [index Int 0]
       (if (>= index (count functions))
         (if (core/program-buffer-root-coherent? program)
           (->ObligationPassV0 (core/->ValidSsaObligation true))
           (->ValidSsaDiagnosticV0 (core/nativecoreprogram-id program)))
-        (let [(function core/FunctionDef) (nth functions index)]
+        (let [function core/FunctionDef (nth functions index)]
           (if (and (function-valid-ssa? function)
                 (core/function-buffer-instructions-valid? types regions
                   capabilities function))
@@ -440,13 +440,13 @@
       :else (recur (+ index 1)))))
 
 (defn unit-type? [(types (Vec core/TypeDef)) (type-id core/NativeId)] Bool
-  (let [(type-def (U core/TypeDef Nil)) (find-type types type-id)]
+  (let [type-def (U core/TypeDef Nil) (find-type types type-id)]
     (if (nil? type-def)
       false
-      (let [(shape core/TypeShape) (core/typedef-shape type-def)]
+      (let [shape core/TypeShape (core/typedef-shape type-def)]
         (if (not (instance? native.core.UnionType shape))
           false
-          (let [(variants (Vec core/TypeVariant))
+          (let [variants (Vec core/TypeVariant)
                 (core/uniontype-variants shape)]
             (and (= 1 (count variants))
               (nil? (core/typevariant-payload-type (nth variants 0))))))))))
@@ -454,22 +454,22 @@
 (defn variant-ids-for-type
   [(types (Vec core/TypeDef))
    (type-id core/NativeId)] (Vec core/NativeId)
-  (let [(type-def (U core/TypeDef Nil)) (find-type types type-id)]
+  (let [type-def (U core/TypeDef Nil) (find-type types type-id)]
     (if (nil? type-def)
       []
-      (let [(shape Any) (core/typedef-shape type-def)
-            (variants Any) (get shape :variants nil)
-            (failure-type Any) (get shape :failure-type nil)]
+      (let [shape Any (core/typedef-shape type-def)
+            variants Any (get shape :variants nil)
+            failure-type Any (get shape :failure-type nil)]
         (cond
           (not (nil? variants))
-          (mapv (fn [(variant core/TypeVariant)] core/NativeId
+          (mapv (fn [variant core/TypeVariant] core/NativeId
                   (core/typevariant-id variant)) variants)
           (not (nil? failure-type))
           (variant-ids-for-type types failure-type)
           :else [])))))
 
 (defn switch-case-ids [(cases (Vec core/SwitchCaseV0))] (Vec core/NativeId)
-  (mapv (fn [(switch-case core/SwitchCaseV0)] core/NativeId
+  (mapv (fn [switch-case core/SwitchCaseV0] core/NativeId
           (core/switchcasev0-variant-id switch-case))
     cases))
 
@@ -478,12 +478,12 @@
    (function core/FunctionDef)
    (value-id core/NativeId)
    (cases (Vec core/SwitchCaseV0))] Bool
-  (let [(site DefSiteV0) (find-def-site function value-id)
-        (variant-ids (Vec core/NativeId))
+  (let [site DefSiteV0 (find-def-site function value-id)
+        variant-ids (Vec core/NativeId)
         (variant-ids-for-type types (defsitev0-type-id site))]
     (if (or (not (defsitev0-found site)) (= 0 (count variant-ids)))
       false
-      (let [(case-ids (Vec core/NativeId)) (switch-case-ids cases)]
+      (let [case-ids (Vec core/NativeId) (switch-case-ids cases)]
         (and (= (count variant-ids) (count case-ids))
           (core/unique-ids? case-ids)
           (core/ids-in? variant-ids case-ids))))))
@@ -501,8 +501,8 @@
 (defn function-exhaustive?
   [(types (Vec core/TypeDef))
    (function core/FunctionDef)] Bool
-  (every? (fn [(block core/BasicBlock)] Bool
-            (every? (fn [(terminator core/Terminator)] Bool
+  (every? (fn [block core/BasicBlock] Bool
+            (every? (fn [terminator core/Terminator] Bool
                       (terminator-exhaustive? types function terminator))
               (core/basicblock-terminators block)))
     (core/functiondef-blocks function)))
@@ -513,7 +513,7 @@
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->ExhaustiveMatchesObligation true))
-      (let [(function core/FunctionDef) (nth functions index)]
+      (let [function core/FunctionDef (nth functions index)]
         (if (function-exhaustive? (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
           (->ExhaustiveMatchesDiagnosticV0
@@ -547,10 +547,10 @@
   [(layouts (Vec core/LayoutDef))
    (parent-size Int)
    (field core/FieldLayoutV0)] Bool
-  (let [(field-type core/NativeId) (get field :type-id)
-        (child (U core/LayoutDef Nil)) (find-layout layouts field-type)
-        (offset Int) (get field :offset-bytes)
-        (alignment Int) (get field :align-bytes)]
+  (let [field-type core/NativeId (get field :type-id)
+        child (U core/LayoutDef Nil) (find-layout layouts field-type)
+        offset Int (get field :offset-bytes)
+        alignment Int (get field :align-bytes)]
     (and (not (nil? child))
       (aligned? offset alignment)
       (= alignment (core/layoutdef-align-bytes child))
@@ -562,24 +562,24 @@
   (loop [left-index Int 0]
     (if (>= left-index (count fields))
       true
-      (let [(left core/FieldLayoutV0) (nth fields left-index)
-            (left-layout (U core/LayoutDef Nil))
+      (let [left core/FieldLayoutV0 (nth fields left-index)
+            left-layout (U core/LayoutDef Nil)
             (find-layout layouts (get left :type-id))]
         (if (nil? left-layout)
           false
-          (let [(left-start Int) (get left :offset-bytes)
-                (left-end Int) (+ left-start (core/layoutdef-size-bytes left-layout))]
+          (let [left-start Int (get left :offset-bytes)
+                left-end Int (+ left-start (core/layoutdef-size-bytes left-layout))]
             (if
               (loop [right-index Int (+ left-index 1)]
                 (if (>= right-index (count fields))
                   true
-                  (let [(right core/FieldLayoutV0) (nth fields right-index)
-                        (right-layout (U core/LayoutDef Nil))
+                  (let [right core/FieldLayoutV0 (nth fields right-index)
+                        right-layout (U core/LayoutDef Nil)
                         (find-layout layouts (get right :type-id))]
                     (if (nil? right-layout)
                       false
-                      (let [(right-start Int) (get right :offset-bytes)
-                            (right-end Int)
+                      (let [right-start Int (get right :offset-bytes)
+                            right-end Int
                             (+ right-start (core/layoutdef-size-bytes right-layout))]
                         (if (or (<= left-end right-start) (<= right-end left-start))
                           (recur (+ right-index 1))
@@ -591,8 +591,8 @@
   (loop [index Int 0 seen (Vec Int) []]
     (if (>= index (count values))
       true
-      (let [(value Int) (nth values index)]
-        (if (some? (some (fn [(prior Int)] Bool (= prior value)) seen))
+      (let [value Int (nth values index)]
+        (if (some? (some (fn [prior Int] Bool (= prior value)) seen))
           false
           (recur (+ index 1) (conj seen value)))))))
 
@@ -601,18 +601,18 @@
    (layout-shape Any)
    (layouts (Vec core/LayoutDef))
    (parent-size Int)] Bool
-  (let [(type-fields (Vec core/TypeField)) (get type-shape :fields [])
-        (fields (Vec core/FieldLayoutV0)) (get layout-shape :fields [])
-        (expected-ids (Vec core/NativeId))
-        (mapv (fn [(field core/TypeField)] core/NativeId
+  (let [type-fields (Vec core/TypeField) (get type-shape :fields [])
+        fields (Vec core/FieldLayoutV0) (get layout-shape :fields [])
+        expected-ids (Vec core/NativeId)
+        (mapv (fn [field core/TypeField] core/NativeId
                 (core/typefield-id field)) type-fields)
-        (field-ids (Vec core/NativeId))
-        (mapv (fn [(field core/FieldLayoutV0)] core/NativeId
+        field-ids (Vec core/NativeId)
+        (mapv (fn [field core/FieldLayoutV0] core/NativeId
                 (get field :field-id)) fields)]
     (and (= (count expected-ids) (count field-ids))
       (core/unique-ids? field-ids)
       (core/ids-in? expected-ids field-ids)
-      (every? (fn [(field core/FieldLayoutV0)] Bool
+      (every? (fn [field core/FieldLayoutV0] Bool
                 (field-layout-valid? layouts parent-size field)) fields)
       (fields-nonoverlapping? layouts fields))))
 
@@ -620,11 +620,11 @@
   [(layouts (Vec core/LayoutDef))
    (parent-size Int)
    (variant core/UnionVariantLayoutV0)] Bool
-  (let [(payload-type (U core/NativeId Nil)) (get variant :payload-type)
-        (offset Int) (get variant :payload-offset-bytes)]
+  (let [payload-type (U core/NativeId Nil) (get variant :payload-type)
+        offset Int (get variant :payload-offset-bytes)]
     (if (nil? payload-type)
       (>= offset 0)
-      (let [(payload-layout (U core/LayoutDef Nil))
+      (let [payload-layout (U core/LayoutDef Nil)
             (find-layout layouts payload-type)]
         (and (not (nil? payload-layout))
           (aligned? offset (core/layoutdef-align-bytes payload-layout))
@@ -636,21 +636,21 @@
    (layout-shape Any)
    (layouts (Vec core/LayoutDef))
    (parent-size Int)] Bool
-  (let [(type-variants (Vec core/TypeVariant)) (get type-shape :variants [])
-        (variants (Vec core/UnionVariantLayoutV0))
+  (let [type-variants (Vec core/TypeVariant) (get type-shape :variants [])
+        variants (Vec core/UnionVariantLayoutV0)
         (get layout-shape :variants [])
-        (expected-ids (Vec core/NativeId))
-        (mapv (fn [(variant core/TypeVariant)] core/NativeId
+        expected-ids (Vec core/NativeId)
+        (mapv (fn [variant core/TypeVariant] core/NativeId
                 (core/typevariant-id variant)) type-variants)
-        (variant-ids (Vec core/NativeId))
-        (mapv (fn [(variant core/UnionVariantLayoutV0)] core/NativeId
+        variant-ids (Vec core/NativeId)
+        (mapv (fn [variant core/UnionVariantLayoutV0] core/NativeId
                 (get variant :variant-id)) variants)
-        (tags (Vec Int))
-        (mapv (fn [(variant core/UnionVariantLayoutV0)] Int
+        tags (Vec Int)
+        (mapv (fn [variant core/UnionVariantLayoutV0] Int
                 (get variant :tag)) variants)
-        (tag-type core/NativeId) (get layout-shape :tag-type)
-        (tag-layout (U core/LayoutDef Nil)) (find-layout layouts tag-type)
-        (tag-offset Int) (get layout-shape :tag-offset-bytes)]
+        tag-type core/NativeId (get layout-shape :tag-type)
+        tag-layout (U core/LayoutDef Nil) (find-layout layouts tag-type)
+        tag-offset Int (get layout-shape :tag-offset-bytes)]
     (and (not (nil? tag-layout))
       (aligned? tag-offset (core/layoutdef-align-bytes tag-layout))
       (<= (+ tag-offset (core/layoutdef-size-bytes tag-layout)) parent-size)
@@ -658,7 +658,7 @@
       (core/unique-ids? variant-ids)
       (core/ids-in? expected-ids variant-ids)
       (unique-ints? tags)
-      (every? (fn [(variant core/UnionVariantLayoutV0)] Bool
+      (every? (fn [variant core/UnionVariantLayoutV0] Bool
                 (union-payload-valid? layouts parent-size variant))
         variants))))
 
@@ -672,10 +672,10 @@
    (layout-shape Any)
    (layouts (Vec core/LayoutDef))
    (parent-size Int)] Bool
-  (let [(key-type core/NativeId) (get type-shape :key-type)
-        (value-type core/NativeId) (get type-shape :value-type)
-        (key-layout (U core/LayoutDef Nil)) (find-layout layouts key-type)
-        (value-layout (U core/LayoutDef Nil)) (find-layout layouts value-type)]
+  (let [key-type core/NativeId (get type-shape :key-type)
+        value-type core/NativeId (get type-shape :value-type)
+        key-layout (U core/LayoutDef Nil) (find-layout layouts key-type)
+        value-layout (U core/LayoutDef Nil) (find-layout layouts value-type)]
     (and (not (nil? key-layout))
       (not (nil? value-layout))
       (dynamic-id= key-type (get layout-shape :key-type nil))
@@ -697,8 +697,8 @@
    (layout-shape Any)
    (layouts (Vec core/LayoutDef))
    (parent-size Int)] Bool
-  (let [(element-type core/NativeId) (get type-shape :element-type)
-        (element-layout (U core/LayoutDef Nil))
+  (let [element-type core/NativeId (get type-shape :element-type)
+        element-layout (U core/LayoutDef Nil)
         (find-layout layouts element-type)]
     (and (not (nil? element-layout))
       (dynamic-id= element-type (get layout-shape :element-type nil))
@@ -722,12 +722,12 @@
     (and (instance? native.core.ClosureShapeV0 layout-shape)
       (= parent-size (* 2 (core/abiprofilev0-pointer-bytes abi))))
     (some? (get type-shape :kind nil))
-    (let [(kind Any) (get type-shape :kind nil)]
+    (let [kind Any (get type-shape :kind nil)]
       (if (instance? native.core.BytesKind kind)
         (and (instance? native.core.BytesShapeV0 layout-shape)
           (= parent-size (core/abi-bytes-span-size abi)))
-        (let [(representation Any) (get layout-shape :representation nil)
-              (bit-width Int) (get representation :bit-width 0)]
+        (let [representation Any (get layout-shape :representation nil)
+              bit-width Int (get representation :bit-width 0)]
           (and (not (nil? representation))
             (> bit-width 0)
             (= 0 (mod bit-width 8))
@@ -744,8 +744,8 @@
       (some? (get type-shape :iteration-order nil)))
     (set-layout-valid? type-shape layout-shape layouts parent-size)
     (instance? native.core.BufferTypeV0 type-shape)
-    (let [(element-type core/NativeId) (get type-shape :element-type)
-          (element-layout (U core/LayoutDef Nil))
+    (let [element-type core/NativeId (get type-shape :element-type)
+          element-layout (U core/LayoutDef Nil)
           (find-layout layouts element-type)]
       (and (instance? native.core.BufferShapeV0 layout-shape)
         (not (nil? element-layout))
@@ -756,10 +756,10 @@
           (core/layoutdef-align-bytes element-layout))
         (> parent-size 0)))
     (some? (get type-shape :element-type nil))
-    (let [(stride Int) (get layout-shape :stride-bytes 0)
-          (element-type core/NativeId) (get type-shape :element-type)
-          (layout-element Any) (get layout-shape :element-type nil)
-          (element-layout (U core/LayoutDef Nil))
+    (let [stride Int (get layout-shape :stride-bytes 0)
+          element-type core/NativeId (get type-shape :element-type)
+          layout-element Any (get layout-shape :element-type nil)
+          element-layout (U core/LayoutDef Nil)
           (find-layout layouts element-type)]
       (and (not (nil? element-layout))
         (dynamic-id= element-type layout-element)
@@ -767,20 +767,20 @@
         (aligned? stride (core/layoutdef-align-bytes element-layout))
         (<= (core/layoutdef-size-bytes element-layout) stride)))
     (some? (get type-shape :target-type nil))
-    (let [(target-type core/NativeId) (get type-shape :target-type)
-          (layout-target Any) (get layout-shape :target-type nil)]
+    (let [target-type core/NativeId (get type-shape :target-type)
+          layout-target Any (get layout-shape :target-type nil)]
       (and (dynamic-id= target-type layout-target)
         (not (nil? (find-layout layouts target-type)))
         (> parent-size 0)))
     (some? (get type-shape :content-type nil))
-    (let [(content-type core/NativeId) (get type-shape :content-type)
-          (layout-content Any) (get layout-shape :content-type nil)]
+    (let [content-type core/NativeId (get type-shape :content-type)
+          layout-content Any (get layout-shape :content-type nil)]
       (and (dynamic-id= content-type layout-content)
         (not (nil? (find-layout layouts content-type)))
         (> parent-size 0)))
     (some? (get type-shape :value-type nil))
-    (let [(failure-type core/NativeId) (get type-shape :failure-type)
-          (failure-def (U core/TypeDef Nil)) (find-type types failure-type)]
+    (let [failure-type core/NativeId (get type-shape :failure-type)
+          failure-def (U core/TypeDef Nil) (find-type types failure-type)]
       (and (not (nil? failure-def))
         (some? (get layout-shape :variants nil))
         (union-layout-valid? (core/typedef-shape failure-def)
@@ -793,9 +793,9 @@
 (defn abi-widths-declared?
   [(abi core/AbiProfileV0)
    (layout core/LayoutDef)] Bool
-  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)
-        (size Int) (core/layoutdef-size-bytes layout)
-        (alignment Int) (core/layoutdef-align-bytes layout)]
+  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)
+        size Int (core/layoutdef-size-bytes layout)
+        alignment Int (core/layoutdef-align-bytes layout)]
     (cond
       (or (instance? native.core.ReferenceShapeV0 shape)
         (instance? native.core.AtomCellShapeV0 shape)
@@ -821,8 +821,8 @@
    (layouts (Vec core/LayoutDef))
    (type-def core/TypeDef)
    (abi core/AbiProfileV0)] Bool
-  (let [(type-id core/NativeId) (core/typedef-id type-def)
-        (layout (U core/LayoutDef Nil)) (find-layout layouts type-id)]
+  (let [type-id core/NativeId (core/typedef-id type-def)
+        layout (U core/LayoutDef Nil) (find-layout layouts type-id)]
     (and (= 1 (layout-count layouts type-id))
       (not (nil? layout))
       (> (core/layoutdef-size-bytes layout) 0)
@@ -842,7 +842,7 @@
   (loop [index Int 0 types (Vec core/TypeDef) (core/nativecoreprogram-types program)]
     (if (>= index (count types))
       (->ObligationPassV0 (core/->ClosedLayoutsObligation true))
-      (let [(type-def core/TypeDef) (nth types index)]
+      (let [type-def core/TypeDef (nth types index)]
         (if (type-layout-closed? types (core/nativecoreprogram-layouts program) type-def
               abi)
           (recur (+ index 1) types)
@@ -851,7 +851,7 @@
 (defn outcome-type?
   [(types (Vec core/TypeDef))
    (type-id core/NativeId)] Bool
-  (let [(type-def (U core/TypeDef Nil)) (find-type types type-id)]
+  (let [type-def (U core/TypeDef Nil) (find-type types type-id)]
     (and (not (nil? type-def))
       (some? (get (core/typedef-shape type-def) :value-type nil))
       (some? (get (core/typedef-shape type-def) :failure-type nil)))))
@@ -861,9 +861,9 @@
    (result-id core/NativeId)
    (result-type core/NativeId)
    (terminator core/Terminator)] CheckedUseScanV0
-  (let [(switch-value Any) (get terminator :value-id nil)
-        (return-value Any) (get terminator :value nil)
-        (refs (Vec core/NativeId)) (core/terminator-ssa-refs terminator)]
+  (let [switch-value Any (get terminator :value-id nil)
+        return-value Any (get terminator :value nil)
+        refs (Vec core/NativeId) (core/terminator-ssa-refs terminator)]
     (cond
       (dynamic-id= switch-value result-id) (->CheckedUseScanV0 true true)
       (dynamic-id= return-value result-id)
@@ -879,7 +879,7 @@
    (result-type core/NativeId)
    (block core/BasicBlock)] CheckedUseScanV0
   (if
-    (some? (some (fn [(instruction core/Instruction)] Bool
+    (some? (some (fn [instruction core/Instruction] Bool
                    (core/id-in? (core/instruction-ssa-refs instruction)
                      result-id))
              (core/basicblock-instructions block)))
@@ -889,7 +889,7 @@
            (core/basicblock-terminators block)]
       (if (>= term-index (count terminators))
         (->CheckedUseScanV0 handled true)
-        (let [(scan CheckedUseScanV0)
+        (let [scan CheckedUseScanV0
               (checked-terminator-use function result-id result-type
                 (nth terminators term-index))]
           (if (checkedusescanv0-legal scan)
@@ -906,7 +906,7 @@
          blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (if (>= block-index (count blocks))
       handled
-      (let [(scan CheckedUseScanV0)
+      (let [scan CheckedUseScanV0
             (checked-block-use-scan function result-id result-type
               (nth blocks block-index))]
         (if (checkedusescanv0-legal scan)
@@ -921,17 +921,17 @@
    (instruction core/Instruction)] Bool
   (if (not (instance? native.core.CheckedInstruction instruction))
     true
-    (let [(result core/SsaValueV0) (core/checkedinstruction-result instruction)
-          (result-id core/NativeId) (core/ssavaluev0-id result)
-          (result-type core/NativeId) (core/ssavaluev0-type-id result)]
+    (let [result core/SsaValueV0 (core/checkedinstruction-result instruction)
+          result-id core/NativeId (core/ssavaluev0-id result)
+          result-type core/NativeId (core/ssavaluev0-type-id result)]
       (and (outcome-type? types result-type)
         (checked-result-handled? function result-id result-type)))))
 
 (defn function-checked-arithmetic?
   [(types (Vec core/TypeDef))
    (function core/FunctionDef)] Bool
-  (every? (fn [(block core/BasicBlock)] Bool
-            (every? (fn [(instruction core/Instruction)] Bool
+  (every? (fn [block core/BasicBlock] Bool
+            (every? (fn [instruction core/Instruction] Bool
                       (checked-instruction-valid? types function instruction))
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
@@ -942,7 +942,7 @@
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->CheckedOperationsObligation true))
-      (let [(function core/FunctionDef) (nth functions index)]
+      (let [function core/FunctionDef (nth functions index)]
         (if (function-checked-arithmetic? (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
           (->CheckedArithmeticDiagnosticV0
@@ -980,10 +980,10 @@
    (layouts (Vec core/LayoutDef))
    (function core/FunctionDef)
    (value core/AbiValueV0)] Bool
-  (let [(type-id core/NativeId) (get value :type-id)
-        (ownership Any) (get value :ownership)
-        (arena-region Any) (get ownership :region nil)
-        (lifetime Any) (get value :lifetime-region nil)]
+  (let [type-id core/NativeId (get value :type-id)
+        ownership Any (get value :ownership)
+        arena-region Any (get ownership :region nil)
+        lifetime Any (get value :lifetime-region nil)]
     (and (> (count (get value :name "")) 0)
       (abi-type-legal? types layouts type-id)
       (or (nil? arena-region)
@@ -996,12 +996,12 @@
    (layouts (Vec core/LayoutDef))
    (function core/FunctionDef)
    (values (Vec core/AbiValueV0))] Bool
-  (let [(parameters (Vec core/Parameter)) (core/functiondef-parameters function)]
+  (let [parameters (Vec core/Parameter) (core/functiondef-parameters function)]
     (and (= (count parameters) (count values))
       (loop [index Int 0]
         (if (>= index (count values))
           true
-          (let [(value core/AbiValueV0) (nth values index)]
+          (let [value core/AbiValueV0 (nth values index)]
             (if (and (abi-value-legal? types layouts function value)
                   (core/native-id= (core/parameter-type-id (nth parameters index))
                     (get value :type-id)))
@@ -1013,7 +1013,7 @@
    (layouts (Vec core/LayoutDef))
    (function core/FunctionDef)
    (result (U core/AbiValueV0 Nil))] Bool
-  (let [(return-type Any) (get function :return-type nil)]
+  (let [return-type Any (get function :return-type nil)]
     (cond
       (and (nil? result) (nil? return-type)) true
       (or (nil? result) (nil? return-type)) false
@@ -1033,9 +1033,9 @@
    (types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
    (value core/AbiValueV0)] Bool
-  (let [(ownership core/OwnershipRuleV0) (core/abivaluev0-ownership value)
-        (arena-region Any) (get ownership :region nil)
-        (lifetime (U core/NativeId Nil))
+  (let [ownership core/OwnershipRuleV0 (core/abivaluev0-ownership value)
+        arena-region Any (get ownership :region nil)
+        lifetime (U core/NativeId Nil)
         (core/abivaluev0-lifetime-region value)]
     (and (> (count (core/abivaluev0-name value)) 0)
       (abi-type-legal? types layouts (core/abivaluev0-type-id value))
@@ -1055,10 +1055,10 @@
       :else (recur (+ index 1)))))
 
 (defn i64-type? [(types (Vec core/TypeDef)) (type-id core/NativeId)] Bool
-  (let [(definition (U core/TypeDef Nil)) (find-type types type-id)]
+  (let [definition (U core/TypeDef Nil) (find-type types type-id)]
     (if (nil? definition)
       false
-      (let [(shape core/TypeShape) (core/typedef-shape definition)]
+      (let [shape core/TypeShape (core/typedef-shape definition)]
         (and (instance? native.core.AtomType shape)
           (instance? native.core.I64Kind (core/atomtype-kind shape)))))))
 
@@ -1070,28 +1070,28 @@
 (defn host-outcome-result-legal?
   [(types (Vec core/TypeDef))
    (result core/AbiValueV0)] Bool
-  (let [(outcome (U core/TypeDef Nil))
+  (let [outcome (U core/TypeDef Nil)
         (find-type types (core/abivaluev0-type-id result))]
     (if (nil? outcome)
       false
-      (let [(shape core/TypeShape) (core/typedef-shape outcome)]
+      (let [shape core/TypeShape (core/typedef-shape outcome)]
         (if (not (instance? native.core.OutcomeType shape))
           false
-          (let [(value-type core/NativeId) (core/outcometype-value-type shape)
-                (failure (U core/TypeDef Nil))
+          (let [value-type core/NativeId (core/outcometype-value-type shape)
+                failure (U core/TypeDef Nil)
                 (find-type types (core/outcometype-failure-type shape))]
             (if (nil? failure)
               false
-              (let [(failure-shape core/TypeShape) (core/typedef-shape failure)]
+              (let [failure-shape core/TypeShape (core/typedef-shape failure)]
                 (if (not (instance? native.core.UnionType failure-shape))
                   false
-                  (let [(variants (Vec core/TypeVariant))
+                  (let [variants (Vec core/TypeVariant)
                         (core/uniontype-variants failure-shape)
-                        (ok (U core/TypeVariant Nil))
+                        ok (U core/TypeVariant Nil)
                         (named-variant variants "ok")
-                        (peer (U core/TypeVariant Nil))
+                        peer (U core/TypeVariant Nil)
                         (named-variant variants "peer-closed")
-                        (error (U core/TypeVariant Nil))
+                        error (U core/TypeVariant Nil)
                         (named-variant variants "error")]
                     (and (or (= 2 (count variants)) (= 3 (count variants)))
                       (not (nil? ok)) (not (nil? error))
@@ -1109,10 +1109,10 @@
 (defn abi-decl-legal?
   [(program core/NativeCoreProgram)
    (abi core/AbiDeclV0)] Bool
-  (let [(function (U core/FunctionDef Nil))
+  (let [function (U core/FunctionDef Nil)
         (find-function (core/nativecoreprogram-functions program) (get abi :function-id))
-        (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
-        (layouts (Vec core/LayoutDef)) (core/nativecoreprogram-layouts program)]
+        types (Vec core/TypeDef) (core/nativecoreprogram-types program)
+        layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)]
     (and (> (count (get abi :symbol "")) 0)
       (> (count (get abi :version "")) 0)
       (> (count (get abi :layout-digest "")) 0)
@@ -1120,7 +1120,7 @@
       (some? (get abi :convention nil))
       (failure-type-legal? types layouts (get abi :failure-type))
       (if (instance? native.core.AbiImportV0 (core/abideclv0-direction abi))
-        (let [(result (U core/AbiValueV0 Nil)) (core/abideclv0-result abi)]
+        (let [result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
           (and
           (or (instance? native.core.RestrictedCAbiV0
                 (core/abideclv0-convention abi))
@@ -1128,7 +1128,7 @@
               (core/abideclv0-convention abi))
             (instance? native.core.RestrictedCOutcomeOutAbiV0
               (core/abideclv0-convention abi)))
-          (every? (fn [(value core/AbiValueV0)] Bool
+          (every? (fn [value core/AbiValueV0] Bool
                     (import-abi-value-legal? program types layouts value))
             (core/abideclv0-parameters abi))
           (cond
@@ -1167,18 +1167,18 @@
    (instruction core/Instruction)] Bool
   (if (not (instance? native.core.ExternCallInstruction instruction))
     true
-    (let [(abi (U core/AbiDeclV0 Nil))
+    (let [abi (U core/AbiDeclV0 Nil)
           (find-abi (core/nativecoreprogram-abis program)
             (core/externcallinstruction-abi-id instruction))]
       (if (nil? abi)
         false
-        (let [(arguments (Vec core/NativeId))
+        (let [arguments (Vec core/NativeId)
               (core/externcallinstruction-arguments instruction)
-              (parameters (Vec core/AbiValueV0))
+              parameters (Vec core/AbiValueV0)
               (core/abideclv0-parameters abi)
-              (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
-              (result (U core/AbiValueV0 Nil)) (core/abideclv0-result abi)
-              (arena (U core/NativeId Nil))
+              types (Vec core/TypeDef) (core/nativecoreprogram-types program)
+              result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
+              arena (U core/NativeId Nil)
               (core/externcallinstruction-arena-id instruction)]
           (and
             (instance? native.core.AbiImportV0
@@ -1187,7 +1187,7 @@
             (loop [index Int 0]
               (if (>= index (count arguments))
                 true
-                (let [(site DefSiteV0)
+                (let [site DefSiteV0
                       (find-def-site function (nth arguments index))]
                   (if (and (defsitev0-found site)
                         (core/native-id= (defsitev0-type-id site)
@@ -1206,7 +1206,7 @@
               (nil? arena)
               (if (instance? native.core.ArenaOwnedV0
                     (core/abivaluev0-ownership result))
-                (let [(region (U core/NativeId Nil))
+                (let [region (U core/NativeId Nil)
                       (get (core/abivaluev0-ownership result) :region nil)]
                   (and (not (nil? region))
                     (core/id-in? (core/functiondef-regions function) region)
@@ -1219,9 +1219,9 @@
               (core/functiondef-capabilities function))))))))
 
 (defn extern-calls-legal? [(program core/NativeCoreProgram)] Bool
-  (every? (fn [(function core/FunctionDef)] Bool
-            (every? (fn [(block core/BasicBlock)] Bool
-                      (every? (fn [(instruction core/Instruction)] Bool
+  (every? (fn [function core/FunctionDef] Bool
+            (every? (fn [block core/BasicBlock] Bool
+                      (every? (fn [instruction core/Instruction] Bool
                                 (extern-call-legal? program function instruction))
                         (core/basicblock-instructions block)))
               (core/functiondef-blocks function)))
@@ -1234,7 +1234,7 @@
       (if (extern-calls-legal? program)
         (->ObligationPassV0 (core/->LegalAbiObligation true))
         (->LegalAbiDiagnosticV0 (obligation-id "extern-call")))
-      (let [(abi core/AbiDeclV0) (nth abis index)]
+      (let [abi core/AbiDeclV0 (nth abis index)]
         (if (abi-decl-legal? program abi)
           (recur (+ index 1) abis)
           (->LegalAbiDiagnosticV0 (get abi :id)))))))
@@ -1242,7 +1242,7 @@
 (defn remove-id
   [(ids (Vec core/NativeId))
    (target core/NativeId)] (Vec core/NativeId)
-  (filterv (fn [(candidate core/NativeId)] Bool
+  (filterv (fn [candidate core/NativeId] Bool
              (not (core/native-id= candidate target))) ids))
 
 (defn token-state-consume
@@ -1259,16 +1259,16 @@
 
 (defn produced-token-ids
   [(produced (Vec core/ResourceTokenV0))] (Vec core/NativeId)
-  (mapv (fn [(token core/ResourceTokenV0)] core/NativeId
+  (mapv (fn [token core/ResourceTokenV0] core/NativeId
           (get token :id)) produced))
 
 (defn token-state-produce
   [(state TokenStateV0)
    (produced (Vec core/ResourceTokenV0))] TokenStateV0
-  (let [(produced-ids (Vec core/NativeId)) (produced-token-ids produced)]
+  (let [produced-ids (Vec core/NativeId) (produced-token-ids produced)]
     (if (or (not (tokenstatev0-valid state))
           (not (core/unique-ids? produced-ids))
-          (some? (some (fn [(token-id core/NativeId)] Bool
+          (some? (some (fn [token-id core/NativeId] Bool
                          (core/id-in? (tokenstatev0-seen state) token-id))
                    produced-ids)))
       (->TokenStateV0 (tokenstatev0-live state) (tokenstatev0-seen state) false)
@@ -1287,7 +1287,7 @@
 (defn instruction-token-state
   [(state TokenStateV0)
    (instruction core/Instruction)] TokenStateV0
-  (let [(flow Any) (get instruction :tokens nil)]
+  (let [flow Any (get instruction :tokens nil)]
     (if (nil? flow) state (apply-token-flow state flow))))
 
 (defn block-token-state
@@ -1352,11 +1352,11 @@
          memo (Vec TokenVisitV0) []]
     (if (>= position (count work))
       true
-      (let [(item TokenWorkV0) (nth work position)
-            (current-id core/NativeId) (tokenworkv0-block-id item)
-            (current-state TokenStateV0) (tokenworkv0-state item)
-            (path (Vec TokenVisitV0)) (tokenworkv0-path item)
-            (entered (U TokenVisitV0 Nil)) (token-visit path current-id)]
+      (let [item TokenWorkV0 (nth work position)
+            current-id core/NativeId (tokenworkv0-block-id item)
+            current-state TokenStateV0 (tokenworkv0-state item)
+            path (Vec TokenVisitV0) (tokenworkv0-path item)
+            entered (U TokenVisitV0 Nil) (token-visit path current-id)]
         (if (some? entered)
           (if (token-sets-equal? (tokenvisitv0-live entered)
                 (tokenstatev0-live current-state))
@@ -1364,19 +1364,19 @@
             false)
           (if (token-state-visited? memo current-id current-state)
             (recur (+ position 1) work memo)
-            (let [(block (U core/BasicBlock Nil))
+            (let [block (U core/BasicBlock Nil)
                   (find-block (core/functiondef-blocks function) current-id)]
               (if (nil? block)
                 false
-                (let [(next-state TokenStateV0)
+                (let [next-state TokenStateV0
                       (block-token-state current-state block)
-                      (successors (Vec core/NativeId)) (block-successors block)
-                      (visit TokenVisitV0)
+                      successors (Vec core/NativeId) (block-successors block)
+                      visit TokenVisitV0
                       (->TokenVisitV0 current-id
                         (tokenstatev0-live current-state)
                         (tokenstatev0-seen current-state))
-                      (next-path (Vec TokenVisitV0)) (conj path visit)
-                      (next-memo (Vec TokenVisitV0)) (conj memo visit)]
+                      next-path (Vec TokenVisitV0) (conj path visit)
+                      next-memo (Vec TokenVisitV0) (conj memo visit)]
                   (cond
                     (not (tokenstatev0-valid next-state)) false
                     (= 0 (count successors))
@@ -1384,9 +1384,9 @@
                       (recur (+ position 1) work next-memo)
                       false)
                     :else
-                    (let [(next-work (Vec TokenWorkV0))
+                    (let [next-work (Vec TokenWorkV0)
                           (mapv
-                            (fn [(successor core/NativeId)] TokenWorkV0
+                            (fn [successor core/NativeId] TokenWorkV0
                               (->TokenWorkV0 successor next-state next-path))
                             successors)]
                       (recur (+ position 1) (vec (concat work next-work))
@@ -1406,8 +1406,8 @@
 (defn affine-function-capabilities
   [(program core/NativeCoreProgram)
    (function core/FunctionDef)] (Vec core/NativeId)
-  (filterv (fn [(capability-id core/NativeId)] Bool
-             (let [(capability (U core/CapabilityDef Nil))
+  (filterv (fn [capability-id core/NativeId] Bool
+             (let [capability (U core/CapabilityDef Nil)
                    (find-capability (core/nativecoreprogram-capabilities program)
                      capability-id)]
                (and (not (nil? capability))
@@ -1417,7 +1417,7 @@
 (defn function-tokens-discharged?
   [(program core/NativeCoreProgram)
    (function core/FunctionDef)] Bool
-  (let [(initial (Vec core/NativeId))
+  (let [initial (Vec core/NativeId)
         (core/append-ids (core/functiondef-regions function)
           (affine-function-capabilities program function))]
     (and (core/unique-ids? initial)
@@ -1430,7 +1430,7 @@
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->DischargedTokensObligation true))
-      (let [(function core/FunctionDef) (nth functions index)]
+      (let [function core/FunctionDef (nth functions index)]
         (if (function-tokens-discharged? program function)
           (recur (+ index 1) functions)
           (->DischargedTokensDiagnosticV0
@@ -1471,8 +1471,8 @@
    (region core/NativeId)
    (capability core/NativeId)
    (allocation Bool)] Bool
-  (some? (some (fn [(effect-id core/NativeId)] Bool
-                 (let [(effect (U core/EffectDef Nil))
+  (some? (some (fn [effect-id core/NativeId] Bool
+                 (let [effect (U core/EffectDef Nil)
                        (find-effect (core/nativecoreprogram-effects program) effect-id)]
                    (and (not (nil? effect))
                      (if allocation
@@ -1488,8 +1488,8 @@
   Bool
   (some?
     (some
-      (fn [(effect-id core/NativeId)] Bool
-        (let [(effect (U core/EffectDef Nil))
+      (fn [effect-id core/NativeId] Bool
+        (let [effect (U core/EffectDef Nil)
               (find-effect (core/nativecoreprogram-effects program) effect-id)]
           (and (not (nil? effect))
             (effect-covers-read? (core/effectdef-kind effect) region))))
@@ -1501,13 +1501,13 @@
    (region core/NativeId)
    (mode String)]
   Bool
-  (let [(capability (U core/CapabilityDef Nil))
+  (let [capability (U core/CapabilityDef Nil)
         (find-capability (core/nativecoreprogram-capabilities program)
           capability-id)]
     (and (not (nil? capability))
       (some? (core/capabilitydef-region capability))
       (dynamic-id= region (core/capabilitydef-region capability))
-      (let [(kind core/CapabilityKind) (core/capabilitydef-kind capability)]
+      (let [kind core/CapabilityKind (core/capabilitydef-kind capability)]
         (cond
           (= mode "read") (instance? native.core.ReadCapability kind)
           (= mode "write") (instance? native.core.WriteCapability kind)
@@ -1518,7 +1518,7 @@
   [(program core/NativeCoreProgram) (region-id core/NativeId)] Bool
   (some?
     (some
-      (fn [(region core/RegionDef)] Bool
+      (fn [region core/RegionDef] Bool
         (and (core/native-id= (core/regiondef-id region) region-id)
           (nil? (core/regiondef-parent region))
           (instance? native.core.ArenaRegion (core/regiondef-kind region))))
@@ -1537,7 +1537,7 @@
   (and (some? region-id)
     (some?
       (some
-        (fn [(region core/RegionDef)] Bool
+        (fn [region core/RegionDef] Bool
           (and (= (get region-id :value "")
                  (get (core/regiondef-id region) :value ""))
             (instance? native.core.ArenaRegion (core/regiondef-kind region))
@@ -1548,8 +1548,8 @@
   [(program core/NativeCoreProgram)
    (callee core/FunctionDef)] (Vec core/NativeId)
   (filterv
-    (fn [(effect-id core/NativeId)] Bool
-      (let [(effect (U core/EffectDef Nil))
+    (fn [effect-id core/NativeId] Bool
+      (let [effect (U core/EffectDef Nil)
             (find-effect (core/nativecoreprogram-effects program) effect-id)]
         (or (nil? effect)
           (not (epoch-local-region? (core/nativecoreprogram-regions program)
@@ -1560,11 +1560,11 @@
   [(program core/NativeCoreProgram)
    (function core/FunctionDef)
    (instruction core/Instruction)] Bool
-  (let [(store Any) (get instruction :store nil)
-        (allocation-region Any) (get instruction :region nil)
-        (allocation-capability Any) (get instruction :capability nil)
-        (abi-id Any) (get instruction :abi-id nil)
-        (callee-id Any) (get instruction :function-id nil)]
+  (let [store Any (get instruction :store nil)
+        allocation-region Any (get instruction :region nil)
+        allocation-capability Any (get instruction :capability nil)
+        abi-id Any (get instruction :abi-id nil)
+        callee-id Any (get instruction :function-id nil)]
     (cond
       (instance? native.core.BufferAllocateInstructionV0 instruction)
       (and
@@ -1597,48 +1597,48 @@
         (declared-effect-covers? program function allocation-region
           allocation-capability false))
       (instance? native.core.AtomStateInstruction instruction)
-      (let [(region core/NativeId)
+      (let [region core/NativeId
             (core/atomstateinstruction-region instruction)
-            (capability core/NativeId)
+            capability core/NativeId
             (core/atomstateinstruction-capability instruction)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
           (some?
             (some
-              (fn [(effect-id core/NativeId)] Bool
-                (let [(effect (U core/EffectDef Nil))
+              (fn [effect-id core/NativeId] Bool
+                (let [effect (U core/EffectDef Nil)
                       (find-effect (core/nativecoreprogram-effects program) effect-id)]
                   (and (not (nil? effect))
                     (effect-covers-atom-state? (core/effectdef-kind effect)
                       region capability))))
               (core/functiondef-effects function)))))
       (instance? native.core.AtomSwapInstruction instruction)
-      (let [(updater (U core/FunctionDef Nil))
+      (let [updater (U core/FunctionDef Nil)
             (find-function (core/nativecoreprogram-functions program)
               (core/atomswapinstruction-updater-id instruction))]
         (and (not (nil? updater))
           (= 0 (count (core/functiondef-regions updater)))
           (= 0 (count (core/functiondef-capabilities updater)))
           (every?
-            (fn [(effect-id core/NativeId)] Bool
-              (let [(effect (U core/EffectDef Nil))
+            (fn [effect-id core/NativeId] Bool
+              (let [effect (U core/EffectDef Nil)
                     (find-effect (core/nativecoreprogram-effects program) effect-id)]
                 (and (not (nil? effect))
                   (instance? native.core.PureEffect
                     (core/effectdef-kind effect)))))
             (core/functiondef-effects updater))))
       (not (nil? store))
-      (let [(resources (Vec core/NativeId)) (store-resources store)
-            (region core/NativeId) (nth resources 0)
-            (capability core/NativeId) (nth resources 1)]
+      (let [resources (Vec core/NativeId) (store-resources store)
+            region core/NativeId (nth resources 0)
+            capability core/NativeId (nth resources 1)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
           (declared-effect-covers? program function region capability false)))
       ;; A non-allocating writer acquires the arena under the write capability,
       ;; so the acquire is covered by a write effect as well as an allocate one.
       (instance? native.core.ArenaInstruction instruction)
-      (let [(region core/NativeId) (core/arenainstruction-region instruction)
-            (capability core/NativeId)
+      (let [region core/NativeId (core/arenainstruction-region instruction)
+            capability core/NativeId
             (core/arenainstruction-capability instruction)]
         (and (core/id-in? (core/functiondef-regions function) region)
           (core/id-in? (core/functiondef-capabilities function) capability)
@@ -1652,7 +1652,7 @@
         (declared-effect-covers? program function allocation-region
           allocation-capability true))
       (not (nil? abi-id))
-      (let [(abi (U core/AbiDeclV0 Nil))
+      (let [abi (U core/AbiDeclV0 Nil)
             (find-abi (core/nativecoreprogram-abis program) abi-id)]
         (and (not (nil? abi))
           (instance? native.core.AbiImportV0
@@ -1662,7 +1662,7 @@
           (core/ids-in? (core/abideclv0-required-capabilities abi)
             (core/functiondef-capabilities function))))
       (not (nil? callee-id))
-      (let [(callee (U core/FunctionDef Nil))
+      (let [callee (U core/FunctionDef Nil)
             (find-function (core/nativecoreprogram-functions program) callee-id)]
         (and (not (nil? callee))
           (core/ids-in? (callee-exported-effects program callee)
@@ -1674,8 +1674,8 @@
 (defn function-effects-bounded?
   [(program core/NativeCoreProgram)
    (function core/FunctionDef)] Bool
-  (every? (fn [(block core/BasicBlock)] Bool
-            (every? (fn [(instruction core/Instruction)] Bool
+  (every? (fn [block core/BasicBlock] Bool
+            (every? (fn [instruction core/Instruction] Bool
                       (instruction-effects-bounded? program function instruction))
               (core/basicblock-instructions block)))
     (core/functiondef-blocks function)))
@@ -1685,7 +1685,7 @@
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->BoundedEffectsObligation true))
-      (let [(function core/FunctionDef) (nth functions index)]
+      (let [function core/FunctionDef (nth functions index)]
         (if (function-effects-bounded? program function)
           (recur (+ index 1) functions)
           (->BoundedEffectsDiagnosticV0
@@ -1715,13 +1715,13 @@
 (defn root-region?
   [(regions (Vec core/RegionDef))
    (region-id core/NativeId)] Bool
-  (let [(region (U core/RegionDef Nil)) (find-region regions region-id)]
+  (let [region (U core/RegionDef Nil) (find-region regions region-id)]
     (and (some? region) (nil? (core/regiondef-parent region)))))
 
 (defn epoch-region?
   [(regions (Vec core/RegionDef))
    (region-id core/NativeId)] Bool
-  (let [(region (U core/RegionDef Nil)) (find-region regions region-id)]
+  (let [region (U core/RegionDef Nil) (find-region regions region-id)]
     (and (some? region)
       (instance? native.core.ArenaRegion (core/regiondef-kind region))
       (some? (core/regiondef-parent region)))))
@@ -1734,10 +1734,10 @@
          budget Int (+ 1 (count regions))]
     (if (core/native-id= current target)
       true
-      (let [(region (U core/RegionDef Nil)) (find-region regions current)]
+      (let [region (U core/RegionDef Nil) (find-region regions current)]
         (if (nil? region)
           false
-          (let [(parent (U core/NativeId Nil)) (core/regiondef-parent region)]
+          (let [parent (U core/NativeId Nil) (core/regiondef-parent region)]
             (if (or (nil? parent) (<= budget 0))
               false
               (recur parent (- budget 1)))))))))
@@ -1770,13 +1770,13 @@
    (budget Int)] Bool
   (if (<= budget 0)
     true
-    (let [(definition (U core/TypeDef Nil)) (find-type types type-id)]
+    (let [definition (U core/TypeDef Nil) (find-type types type-id)]
       (if (nil? definition)
         true
-        (let [(shape core/TypeShape) (core/typedef-shape definition)]
+        (let [shape core/TypeShape (core/typedef-shape definition)]
           (cond
             (instance? native.core.AtomType shape)
-            (let [(kind core/AtomKind) (core/atomtype-kind shape)]
+            (let [kind core/AtomKind (core/atomtype-kind shape)]
               (or (instance? native.core.TextKind kind)
                 (instance? native.core.BytesKind kind)
                 (instance? native.core.KeywordKind kind)
@@ -1785,7 +1785,7 @@
             (instance? native.core.RecordType shape)
             (some?
               (some
-                (fn [(field core/TypeField)] Bool
+                (fn [field core/TypeField] Bool
                   (type-carries-handles-with-budget? types
                     (core/typefield-type-id field) (- budget 1)))
                 (core/recordtype-fields shape)))
@@ -1793,8 +1793,8 @@
             (instance? native.core.UnionType shape)
             (some?
               (some
-                (fn [(variant core/TypeVariant)] Bool
-                  (let [(payload (U core/NativeId Nil))
+                (fn [variant core/TypeVariant] Bool
+                  (let [payload (U core/NativeId Nil)
                         (core/typevariant-payload-type variant)]
                     (and (some? payload)
                       (type-carries-handles-with-budget? types payload
@@ -1812,9 +1812,9 @@
 ;; instruction family keeps it (top level, text builtin, codec operation).
 (defn instruction-arena-operand
   [(instruction core/Instruction)] (U core/NativeId Nil)
-  (let [(top Any) (get instruction :arena-id nil)
-        (operation Any) (get instruction :operation nil)
-        (builtin Any) (get instruction :builtin nil)]
+  (let [top Any (get instruction :arena-id nil)
+        operation Any (get instruction :operation nil)
+        builtin Any (get instruction :builtin nil)]
     (cond
       (some? top) top
       (some? operation) (get operation :arena-id nil)
@@ -1828,13 +1828,13 @@
          blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (if (>= block-position (count blocks))
       nil
-      (let [(instructions (Vec core/Instruction))
+      (let [instructions (Vec core/Instruction)
             (core/basicblock-instructions (nth blocks block-position))
-            (found (U core/NativeId Nil))
+            found (U core/NativeId Nil)
             (loop [position Int 0]
               (if (>= position (count instructions))
                 nil
-                (let [(instruction core/Instruction) (nth instructions position)]
+                (let [instruction core/Instruction (nth instructions position)]
                   (if (and (instance? native.core.ArenaInstruction instruction)
                         (core/native-id= arena-value-id
                           (core/instruction-result-id instruction)))
@@ -1855,14 +1855,14 @@
          handles (Map String core/NativeId) {}]
     (if (>= block-position (count blocks))
       handles
-      (let [(instructions (Vec core/Instruction))
+      (let [instructions (Vec core/Instruction)
             (core/basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
           (loop [position Int 0
                  inner (Map String core/NativeId) handles]
             (if (>= position (count instructions))
               inner
-              (let [(instruction core/Instruction) (nth instructions position)]
+              (let [instruction core/Instruction (nth instructions position)]
                 (recur (+ position 1)
                   (cond
                     (instance? native.core.ArenaInstruction instruction)
@@ -1922,8 +1922,8 @@
    (epoch (U core/NativeId Nil))] (Map String core/NativeId)
   (if (nil? epoch)
     epochs
-    (let [(key String) (native-id-key value-id)
-          (merged (U core/NativeId Nil))
+    (let [key String (native-id-key value-id)
+          merged (U core/NativeId Nil)
           (merge-epochs regions (get epochs key) epoch)]
       (if (nil? merged) epochs (assoc epochs key merged)))))
 
@@ -1947,12 +1947,12 @@
     (core/allocateinstruction-region instruction)
 
     (some? (instruction-arena-operand instruction))
-    (let [(arena Any) (instruction-arena-operand instruction)
-          (region (U core/NativeId Nil)) (handle-region handles arena)]
+    (let [arena Any (instruction-arena-operand instruction)
+          region (U core/NativeId Nil) (handle-region handles arena)]
       (if (nil? region) (epoch-incomparable-id) region))
 
     :else
-    (let [(result core/SsaValueV0) (get instruction :result)]
+    (let [result core/SsaValueV0 (get instruction :result)]
       (if (not (type-carries-handles? types (core/ssavaluev0-type-id result)))
         nil
         (loop [position Int 0
@@ -1973,11 +1973,11 @@
    (epochs (Map String core/NativeId))
    (target-id core/NativeId)
    (arguments (Vec core/NativeId))] (Map String core/NativeId)
-  (let [(target (U core/BasicBlock Nil))
+  (let [target (U core/BasicBlock Nil)
         (find-block (core/functiondef-blocks function) target-id)]
     (if (nil? target)
       epochs
-      (let [(parameters (Vec core/Parameter))
+      (let [parameters (Vec core/Parameter)
             (core/basicblock-parameters target)]
         (loop [position Int 0 current (Map String core/NativeId) epochs]
           (if (or (>= position (count parameters))
@@ -2006,7 +2006,7 @@
            current (Map String core/NativeId) epochs]
       (if (>= position (count cases))
         current
-        (let [(switch-case core/SwitchCaseV0) (nth cases position)]
+        (let [switch-case core/SwitchCaseV0 (nth cases position)]
           (recur (+ position 1) cases
             (block-parameter-epochs regions function current
               (core/switchcasev0-block-id switch-case)
@@ -2025,22 +2025,22 @@
          current (Map String core/NativeId) epochs]
     (if (>= block-position (count blocks))
       current
-      (let [(block core/BasicBlock) (nth blocks block-position)
-            (instructions (Vec core/Instruction))
+      (let [block core/BasicBlock (nth blocks block-position)
+            instructions (Vec core/Instruction)
             (core/basicblock-instructions block)
-            (with-instructions (Map String core/NativeId))
+            with-instructions (Map String core/NativeId)
             (loop [position Int 0
                    inner (Map String core/NativeId) current]
               (if (>= position (count instructions))
                 inner
-                (let [(instruction core/Instruction) (nth instructions position)
-                      (result core/SsaValueV0) (get instruction :result)]
+                (let [instruction core/Instruction (nth instructions position)
+                      result core/SsaValueV0 (get instruction :result)]
                   (recur (+ position 1)
                     (merge-epoch-into regions inner
                       (core/ssavaluev0-id result)
                       (instruction-epoch regions types handles inner
                         instruction))))))
-            (with-terminators (Map String core/NativeId))
+            with-terminators (Map String core/NativeId)
             (loop [position Int 0
                    terminators (Vec core/Terminator)
                    (core/basicblock-terminators block)
@@ -2063,10 +2063,10 @@
   [(regions (Vec core/RegionDef))
    (types (Vec core/TypeDef))
    (function core/FunctionDef)] EpochMapResultV0
-  (let [(cap Int) (+ 4 (* 3 (count (core/function-value-ids function))))
-        (handles (Map String core/NativeId)) (function-region-handles function)]
+  (let [cap Int (+ 4 (* 3 (count (core/function-value-ids function))))
+        handles (Map String core/NativeId) (function-region-handles function)]
     (loop [round Int 0 epochs (Map String core/NativeId) {}]
-      (let [(next (Map String core/NativeId))
+      (let [next (Map String core/NativeId)
             (function-epoch-map-pass regions types handles function epochs)]
         (cond
           (= next epochs) (->EpochMapResultV0 next true)
@@ -2080,16 +2080,16 @@
          closed (Vec core/NativeId) []]
     (if (>= block-position (count blocks))
       closed
-      (let [(instructions (Vec core/Instruction))
+      (let [instructions (Vec core/Instruction)
             (core/basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
           (loop [position Int 0 inner (Vec core/NativeId) closed]
             (if (>= position (count instructions))
               inner
-              (let [(instruction core/Instruction) (nth instructions position)]
+              (let [instruction core/Instruction (nth instructions position)]
                 (recur (+ position 1)
                   (if (instance? native.core.ArenaCloseInstructionV0 instruction)
-                    (let [(region (U core/NativeId Nil))
+                    (let [region (U core/NativeId Nil)
                           (function-arena-region function
                             (core/arenacloseinstructionv0-source-id instruction))]
                       (if (nil? region) inner (conj inner region)))
@@ -2102,11 +2102,11 @@
    (closed (Vec core/NativeId))
    (epochs (Map String core/NativeId))
    (value-id core/NativeId)] Bool
-  (let [(epoch (U core/NativeId Nil)) (epoch-of epochs value-id)]
+  (let [epoch (U core/NativeId Nil) (epoch-of epochs value-id)]
     (if (nil? epoch)
       true
       (every?
-        (fn [(closed-region core/NativeId)] Bool
+        (fn [closed-region core/NativeId] Bool
           (not (region-on-ancestor-chain? regions closed-region epoch)))
         closed))))
 
@@ -2114,7 +2114,7 @@
   [(regions (Vec core/RegionDef))
    (epochs (Map String core/NativeId))
    (value-id core/NativeId)] Bool
-  (let [(epoch (U core/NativeId Nil)) (epoch-of epochs value-id)]
+  (let [epoch (U core/NativeId Nil) (epoch-of epochs value-id)]
     (or (nil? epoch) (root-region? regions epoch))))
 
 ;; The epochs a call would hand a summary-less callee: every argument the
@@ -2130,7 +2130,7 @@
       (recur (+ position 1)
         (if (root-or-free-epoch? regions epochs (nth arguments position))
           retained
-          (let [(epoch (U core/NativeId Nil))
+          (let [epoch (U core/NativeId Nil)
                 (epoch-of epochs (nth arguments position))]
             (if (nil? epoch) retained (conj retained epoch))))))))
 
@@ -2147,12 +2147,12 @@
   (and (instance? native.core.PromoteInstructionV0 instruction)
     (core/native-id= (core/promoteinstructionv0-source-id instruction)
       result-id)
-    (let [(destination (U core/NativeId Nil))
+    (let [destination (U core/NativeId Nil)
           (handle-region handles
             (core/promoteinstructionv0-arena-id instruction))]
       (and (some? destination)
         (every?
-          (fn [(epoch core/NativeId)] Bool
+          (fn [epoch core/NativeId] Bool
             (region-on-ancestor-chain? regions destination epoch))
           retained)))))
 
@@ -2163,17 +2163,17 @@
    (retained (Vec core/NativeId))
    (result-id core/NativeId)] Bool
   (every?
-    (fn [(block core/BasicBlock)] Bool
+    (fn [block core/BasicBlock] Bool
       (and
         (every?
-          (fn [(instruction core/Instruction)] Bool
+          (fn [instruction core/Instruction] Bool
             (or (not (core/id-in? (core/instruction-ssa-refs instruction)
                        result-id))
               (promote-out-of-epochs? regions handles retained result-id
                 instruction)))
           (core/basicblock-instructions block))
         (every?
-          (fn [(terminator core/Terminator)] Bool
+          (fn [terminator core/Terminator] Bool
             (not (core/id-in? (core/terminator-ssa-refs terminator)
                    result-id)))
           (core/basicblock-terminators block))))
@@ -2186,13 +2186,13 @@
          blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (if (>= block-position (count blocks))
       false
-      (let [(instructions (Vec core/Instruction))
+      (let [instructions (Vec core/Instruction)
             (core/basicblock-instructions (nth blocks block-position))
-            (found Bool)
+            found Bool
             (loop [position Int 0]
               (if (>= position (count instructions))
                 false
-                (let [(instruction core/Instruction)
+                (let [instruction core/Instruction
                       (nth instructions position)]
                   (if (and
                         (instance? native.core.PromoteInstructionV0
@@ -2217,7 +2217,7 @@
    (function core/FunctionDef)
    (arguments (Vec core/NativeId))
    (result-id core/NativeId)] Bool
-  (let [(retained (Vec core/NativeId))
+  (let [retained (Vec core/NativeId)
         (call-retained-epochs regions epochs arguments)]
     (or (= 0 (count retained))
       (and (call-result-only-promoted? regions handles function retained
@@ -2230,7 +2230,7 @@
    (epochs (Map String core/NativeId))
    (function core/FunctionDef)
    (instruction core/Instruction)] Bool
-  (let [(store Any) (get instruction :store nil)]
+  (let [store Any (get instruction :store nil)]
     (cond
       (some? store)
       (epoch-write-legal? regions
@@ -2249,7 +2249,7 @@
       ;; as a scalar. Cells stay root-pinned in v0, which is the separate
       ;; conjunct below.
       (instance? native.core.AtomCreateInstruction instruction)
-      (let [(cell-region (U core/NativeId Nil))
+      (let [cell-region (U core/NativeId Nil)
             (handle-region handles
               (core/atomcreateinstruction-arena-id instruction))]
         (and (epoch-write-legal? regions
@@ -2271,10 +2271,10 @@
           (core/atomcompareexchangeinstruction-cell-id instruction)))
 
       (instance? native.core.AtomSwapInstruction instruction)
-      (let [(cell-epoch (U core/NativeId Nil))
+      (let [cell-epoch (U core/NativeId Nil)
             (epoch-of epochs (core/atomswapinstruction-cell-id instruction))]
         (every?
-          (fn [(argument core/NativeId)] Bool
+          (fn [argument core/NativeId] Bool
             (epoch-write-legal? regions (epoch-of epochs argument) cell-epoch))
           (core/atomswapinstruction-arguments instruction)))
 
@@ -2295,10 +2295,10 @@
       ;; Arena-destination operations copy or reference every non-handle
       ;; operand from storage in the destination region.
       (some? (instruction-arena-operand instruction))
-      (let [(arena Any) (instruction-arena-operand instruction)
-            (destination (U core/NativeId Nil)) (handle-region handles arena)]
+      (let [arena Any (instruction-arena-operand instruction)
+            destination (U core/NativeId Nil) (handle-region handles arena)]
         (every?
-          (fn [(operand core/NativeId)] Bool
+          (fn [operand core/NativeId] Bool
             (or (region-handle? handles operand)
               (epoch-write-legal? regions
                 (epoch-of epochs operand) destination)))
@@ -2313,7 +2313,7 @@
    (terminator core/Terminator)] Bool
   (cond
     (instance? native.core.ReturnTerminator terminator)
-    (let [(value (U core/NativeId Nil))
+    (let [value (U core/NativeId Nil)
           (core/returnterminator-value terminator)]
       (or (nil? value)
         (value-outlives-closed-regions? regions closed epochs value)))
@@ -2328,24 +2328,24 @@
   [(regions (Vec core/RegionDef))
    (types (Vec core/TypeDef))
    (function core/FunctionDef)] Bool
-  (let [(result EpochMapResultV0) (function-epoch-map regions types function)]
+  (let [result EpochMapResultV0 (function-epoch-map regions types function)]
     (if (not (epochmapresultv0-converged result))
       false
-      (let [(epochs (Map String core/NativeId))
+      (let [epochs (Map String core/NativeId)
             (epochmapresultv0-epochs result)
-            (handles (Map String core/NativeId))
+            handles (Map String core/NativeId)
             (function-region-handles function)
-            (closed (Vec core/NativeId)) (function-closed-regions function)]
+            closed (Vec core/NativeId) (function-closed-regions function)]
         (every?
-          (fn [(block core/BasicBlock)] Bool
+          (fn [block core/BasicBlock] Bool
             (and
               (every?
-                (fn [(instruction core/Instruction)] Bool
+                (fn [instruction core/Instruction] Bool
                   (instruction-epoch-writes-legal? regions handles epochs
                     function instruction))
                 (core/basicblock-instructions block))
               (every?
-                (fn [(terminator core/Terminator)] Bool
+                (fn [terminator core/Terminator] Bool
                   (terminator-epoch-legal? regions closed epochs terminator))
                 (core/basicblock-terminators block))))
           (core/functiondef-blocks function))))))
@@ -2355,7 +2355,7 @@
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->EpochSoundnessObligation true))
-      (let [(function core/FunctionDef) (nth functions index)]
+      (let [function core/FunctionDef (nth functions index)]
         (if (function-epoch-sound? (core/nativecoreprogram-regions program)
               (core/nativecoreprogram-types program) function)
           (recur (+ index 1) functions)
@@ -2434,16 +2434,16 @@
          current (Vec core/NativeId) stack]
     (if (>= position (count instructions))
       (->EpochBlockStepV0 current nil)
-      (let [(instruction core/Instruction) (nth instructions position)]
+      (let [instruction core/Instruction (nth instructions position)]
         (cond
           (and (instance? native.core.ArenaInstruction instruction)
             (epoch-region? regions
               (core/arenainstruction-region instruction)))
-          (let [(region core/NativeId)
+          (let [region core/NativeId
                 (core/arenainstruction-region instruction)
-                (definition (U core/RegionDef Nil))
+                definition (U core/RegionDef Nil)
                 (find-region regions region)
-                (parent Any)
+                parent Any
                 (if (nil? definition) nil (core/regiondef-parent definition))]
             (cond
               (core/id-in? current region)
@@ -2456,7 +2456,7 @@
               :else (recur (+ position 1) instructions (conj current region))))
 
           (instance? native.core.ArenaCloseInstructionV0 instruction)
-          (let [(region (U core/NativeId Nil))
+          (let [region (U core/NativeId Nil)
                 (function-arena-region function
                   (core/arenacloseinstructionv0-source-id instruction))]
             (cond
@@ -2482,45 +2482,45 @@
          memo (Vec EpochStackVisitV0) []]
     (if (>= position (count work))
       nil
-      (let [(item EpochStackWorkV0) (nth work position)
-            (current-id core/NativeId) (epochstackworkv0-block-id item)
-            (current-stack (Vec core/NativeId)) (epochstackworkv0-stack item)
-            (path (Vec EpochStackVisitV0)) (epochstackworkv0-path item)
-            (entered (U EpochStackVisitV0 Nil))
+      (let [item EpochStackWorkV0 (nth work position)
+            current-id core/NativeId (epochstackworkv0-block-id item)
+            current-stack (Vec core/NativeId) (epochstackworkv0-stack item)
+            path (Vec EpochStackVisitV0) (epochstackworkv0-path item)
+            entered (U EpochStackVisitV0 Nil)
             (epoch-stack-visit path current-id)]
         (if (some? entered)
           (if (epoch-stacks-equal? (epochstackvisitv0-stack entered)
                 current-stack)
             (recur (+ position 1) work memo)
-            (let [(top (U core/NativeId Nil)) (epoch-stack-top current-stack)]
+            (let [top (U core/NativeId Nil) (epoch-stack-top current-stack)]
               (if (nil? top)
                 (epoch-stack-top (epochstackvisitv0-stack entered))
                 top)))
           (if (epoch-stack-visited? memo current-id current-stack)
             (recur (+ position 1) work memo)
-            (let [(block (U core/BasicBlock Nil))
+            (let [block (U core/BasicBlock Nil)
                   (find-block (core/functiondef-blocks function) current-id)]
               (if (nil? block)
                 (obligation-id "epoch-missing-block")
-                (let [(step EpochBlockStepV0)
+                (let [step EpochBlockStepV0
                       (epoch-block-step regions function block current-stack)
-                      (violation (U core/NativeId Nil))
+                      violation (U core/NativeId Nil)
                       (epochblockstepv0-violation step)]
                   (if (some? violation)
                     violation
-                    (let [(next-stack (Vec core/NativeId))
+                    (let [next-stack (Vec core/NativeId)
                           (epochblockstepv0-stack step)
-                          (successors (Vec core/NativeId))
+                          successors (Vec core/NativeId)
                           (block-successors block)
-                          (visit EpochStackVisitV0)
+                          visit EpochStackVisitV0
                           (->EpochStackVisitV0 current-id current-stack)
-                          (next-path (Vec EpochStackVisitV0)) (conj path visit)
-                          (next-memo (Vec EpochStackVisitV0)) (conj memo visit)]
+                          next-path (Vec EpochStackVisitV0) (conj path visit)
+                          next-memo (Vec EpochStackVisitV0) (conj memo visit)]
                       (if (= 0 (count successors))
                         (if (= 0 (count next-stack))
                           (recur (+ position 1) work next-memo)
                           (epoch-stack-top next-stack))
-                        (let [(next-work (Vec EpochStackWorkV0))
+                        (let [next-work (Vec EpochStackWorkV0)
                               (mapv
                                 (fn
                                   [(successor core/NativeId)] EpochStackWorkV0
@@ -2536,7 +2536,7 @@
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->LeakFreedomObligation true))
-      (let [(violation (U core/NativeId Nil))
+      (let [violation (U core/NativeId Nil)
             (function-leak-violation (core/nativecoreprogram-regions program)
               (nth functions index))]
         (if (nil? violation)
@@ -2550,22 +2550,22 @@
   (loop [position Int 0]
     (if (>= position (count functions))
       nil
-      (let [(function core/FunctionDef) (nth functions position)]
+      (let [function core/FunctionDef (nth functions position)]
         (if (core/native-id= (core/functiondef-id function) target)
           function
           (recur (+ position 1)))))))
 
 (defn f64-buffer-type-id?
   [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
-  (let [(element (U core/NativeId Nil))
+  (let [element (U core/NativeId Nil)
         (core/buffer-element-type types target)]
     (and (some? element) (core/type-id-is-f64? types element))))
 
 (defn tile-kernel-signature-valid?
   [(types (Vec core/TypeDef)) (kernel core/FunctionDef)] Bool
-  (let [(parameters (Vec core/Parameter))
+  (let [parameters (Vec core/Parameter)
         (core/functiondef-parameters kernel)
-        (result (U core/NativeId Nil)) (core/functiondef-return-type kernel)]
+        result (U core/NativeId Nil) (core/functiondef-return-type kernel)]
     (and (= 5 (count parameters))
       (f64-buffer-type-id? types
         (core/parameter-type-id (nth parameters 0)))
@@ -2580,7 +2580,7 @@
       (some? result)
       (if (nil? result)
         false
-        (let [(definition (U core/TypeDef Nil))
+        (let [definition (U core/TypeDef Nil)
               (core/type-definition-with-id types result)]
           (and (some? definition)
             (= "Unit" (core/typedef-name definition))))))))
@@ -2590,10 +2590,10 @@
    (kernel core/FunctionDef)
    (instruction core/Instruction)]
   Bool
-  (let [(parameters (Vec core/Parameter))
+  (let [parameters (Vec core/Parameter)
         (core/functiondef-parameters kernel)
-        (current core/NativeId) (core/parameter-id (nth parameters 0))
-        (next core/NativeId) (core/parameter-id (nth parameters 1))]
+        current core/NativeId (core/parameter-id (nth parameters 0))
+        next core/NativeId (core/parameter-id (nth parameters 1))]
     (cond
       (instance? native.core.AtomInstruction instruction)
       (not (instance? native.core.RefAtom
@@ -2615,7 +2615,7 @@
       (instance? native.core.VariantValueInstruction instruction) true
       ;; Nil is represented by the payload-free Unit variant.
       (instance? native.core.UnionConstructInstruction instruction)
-      (let [(definition (U core/TypeDef Nil))
+      (let [definition (U core/TypeDef Nil)
             (core/type-definition-with-id types
               (core/ssavaluev0-type-id
                 (core/unionconstructinstruction-result instruction)))]
@@ -2625,7 +2625,7 @@
             false
             (= "Unit" (core/typedef-name definition)))))
       (instance? native.core.BufferLengthInstructionV0 instruction)
-      (let [(source core/NativeId)
+      (let [source core/NativeId
             (core/bufferlengthinstructionv0-source-id instruction)]
         (or (core/native-id= source current) (core/native-id= source next)))
       (instance? native.core.BufferGetCheckedInstructionV0 instruction)
@@ -2639,9 +2639,9 @@
 (defn tile-kernel-leaf-valid?
   [(types (Vec core/TypeDef)) (kernel core/FunctionDef)] Bool
   (every?
-    (fn [(block core/BasicBlock)] Bool
+    (fn [block core/BasicBlock] Bool
       (every?
-        (fn [(instruction core/Instruction)] Bool
+        (fn [instruction core/Instruction] Bool
           (tile-kernel-instruction-valid? types kernel instruction))
         (core/basicblock-instructions block)))
     (core/functiondef-blocks kernel)))
@@ -2650,7 +2650,7 @@
   [(abis (Vec core/AbiDeclV0)) (target core/NativeId)] Bool
   (some?
     (some
-      (fn [(abi core/AbiDeclV0)] Bool
+      (fn [abi core/AbiDeclV0] Bool
         (core/native-id= (core/abideclv0-function-id abi) target))
       abis)))
 
@@ -2658,13 +2658,13 @@
   [(functions (Vec core/FunctionDef)) (target core/NativeId)] Bool
   (some?
     (some
-      (fn [(function core/FunctionDef)] Bool
+      (fn [function core/FunctionDef] Bool
         (some?
           (some
-            (fn [(block core/BasicBlock)] Bool
+            (fn [block core/BasicBlock] Bool
               (some?
                 (some
-                  (fn [(instruction core/Instruction)] Bool
+                  (fn [instruction core/Instruction] Bool
                     (or
                       (and (instance? native.core.CallInstruction instruction)
                         (core/native-id=
@@ -2685,7 +2685,7 @@
   Bool
   (cond
     (instance? native.core.TiledStepF64InstructionV0 instruction)
-    (let [(kernel (U core/FunctionDef Nil))
+    (let [kernel (U core/FunctionDef Nil)
           (find-function-by-id (core/nativecoreprogram-functions program)
             (core/tiledstepf64instructionv0-kernel-id instruction))]
       (and (core/buffer-instruction-valid?
@@ -2727,12 +2727,12 @@
     (if (>= position (count functions))
       (->ObligationPassV0
         (core/->DeterministicParallelismObligationV0 true))
-      (let [(function core/FunctionDef) (nth functions position)
-            (valid Bool)
+      (let [function core/FunctionDef (nth functions position)
+            valid Bool
             (every?
-              (fn [(block core/BasicBlock)] Bool
+              (fn [block core/BasicBlock] Bool
                 (every?
-                  (fn [(instruction core/Instruction)] Bool
+                  (fn [instruction core/Instruction] Bool
                     (parallel-instruction-valid? program function instruction))
                   (core/basicblock-instructions block)))
               (core/functiondef-blocks function))]
@@ -3882,7 +3882,7 @@
    leak-freedom-negative-double-close])
 
 (def twenty-two-rejection-depth-fixtures-named? Bool
-  (every? (fn [(passed Bool)] Bool passed) rejection-depth-results))
+  (every? (fn [passed Bool] Bool passed) rejection-depth-results))
 
 (defn validate-native-core-program
   [(program core/NativeCoreProgram)
@@ -3899,7 +3899,7 @@
    (deterministic-parallelism program)])
 
 (def valid-fixture-results (Vec Bool)
-  (mapv (fn [(verdict ObligationVerdictV0)] Bool
+  (mapv (fn [verdict ObligationVerdictV0] Bool
           (obligation-passed? verdict))
     (validate-native-core-program valid-program (core/abi-profile-lp64))))
 
@@ -3916,7 +3916,7 @@
    true])
 
 (def nine-valid-passes? Bool
-  (and (every? (fn [(passed Bool)] Bool passed) valid-fixture-results)
+  (and (every? (fn [passed Bool] Bool passed) valid-fixture-results)
     epoch-soundness-positive
     epoch-soundness-positive-atom-root-store
     epoch-soundness-positive-atom-promoted-store
@@ -3925,4 +3925,4 @@
     leak-freedom-positive))
 
 (def nine-negatives-named? Bool
-  (every? (fn [(passed Bool)] Bool passed) negative-fixture-results))
+  (every? (fn [passed Bool] Bool passed) negative-fixture-results))

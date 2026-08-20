@@ -66,7 +66,7 @@
      "call-syntax" call-syntax}))
 
 (defn push-ctx! [(parent Any) (name String) (call-syntax Any)] Any
-  (let [(parent-depth Int) (get parent "depth")
+  (let [parent-depth Int (get parent "depth")
         call-span
         (if (ast/beagle-syntax? call-syntax)
           (ast/beagle-syntax-span call-syntax)
@@ -113,7 +113,7 @@
   nil)
 
 (defn fresh-lowered-sym! [(base String)] String
-  (let [(n Int) (deref LOWERING-COUNTER)]
+  (let [n Int (deref LOWERING-COUNTER)]
     (swap! LOWERING-COUNTER inc)
     (str base "__" n)))
 
@@ -197,7 +197,7 @@
           (str "beagle: macro " name
                ": kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)\n"))
         nil)
-      (let [(amp-pos Int)
+      (let [amp-pos Int
               (or (clojure.core/first (keep-indexed (fn
                                                      [(i Int)
                                                       (x String)]
@@ -238,7 +238,7 @@
    (rest-name Any)
    (rest-args (Vec Any))]
   Any
-  (let [base (reduce (fn [(acc Any) (i Int)] Any
+  (let [base (reduce (fn [acc Any i Int] Any
                         (assoc acc (nth fixed-params i) (nth fixed-args i)))
                       {} (vec (range (count fixed-params))))]
     (if (not (nil? rest-name))
@@ -533,7 +533,7 @@
 
 (defn make-macro-env [] Any
   (reduce
-    (fn [(env Any) (name String)] Any
+    (fn [env Any name String] Any
       (assoc env name (macro-builtin name)))
     {"true" true "false" false "nil" []}
     MACRO-BUILTIN-NAMES))
@@ -649,7 +649,7 @@
   (let [bracket-count
         (count
           (filterv
-            (fn [(clause Any)] Bool
+            (fn [clause Any] Bool
               (and (datum-pair? clause)
                    (= (datum-car clause) BRACKET-TAG)))
             clauses))]
@@ -715,13 +715,13 @@
               (macro-eval-fail! "quasiquote needs exactly one template"))
           (= head BRACKET-TAG)
             (into [BRACKET-TAG]
-              (mapv (fn [(item Any)] Any (macro-eval! item env)) parts))
+              (mapv (fn [item Any] Any (macro-eval! item env)) parts))
           (= head MAP-TAG)
             (into [MAP-TAG]
-              (mapv (fn [(item Any)] Any (macro-eval! item env)) parts))
+              (mapv (fn [item Any] Any (macro-eval! item env)) parts))
           (= head SET-TAG)
             (into [SET-TAG]
-              (mapv (fn [(item Any)] Any (macro-eval! item env)) parts))
+              (mapv (fn [item Any] Any (macro-eval! item env)) parts))
           (= head "unquote")
             (macro-eval-fail! "unquote (`~`) outside a quasiquote template")
           (= head "unquote-splicing")
@@ -730,7 +730,7 @@
           :else
             (let [fn-value (macro-eval! head env)
                   arg-values
-                  (mapv (fn [(arg Any)] Any (macro-eval! arg env)) parts)]
+                  (mapv (fn [arg Any] Any (macro-eval! arg env)) parts)]
               (macro-apply-fn! fn-value arg-values))))))
 
 (defn macro-require-arity! [(name String) (args Any) (expected Int)] Nil
@@ -747,33 +747,33 @@
         (str "fn expected " (str (count params)) " argument(s), got "
              (str (count args)))))
     (let [env
-          (let [(indices (Vec Int)) (vec (range (count params)))]
+          (let [indices (Vec Int) (vec (range (count params)))]
             (reduce
-              (fn [(e Any) (i Int)] Any
+              (fn [e Any i Int] Any
                 (assoc e (nth params i) (nth args i)))
               (get closure "env")
               indices))]
       (macro-eval-body! (get closure "body") env))))
 
 (defn macro-map-values! [(fn-value Any) (colls Any)] Any
-  (let [seqs (mapv (fn [(xs Any)] Any (macro-seq! xs "map")) colls)
+  (let [seqs (mapv (fn [xs Any] Any (macro-seq! xs "map")) colls)
         width (if (= (count seqs) 0)
                 0
                 (reduce min (mapv count seqs)))
-        (indices (Vec Int)) (vec (range width))]
+        indices (Vec Int) (vec (range width))]
     (mapv
-      (fn [(i Int)] Any
+      (fn [i Int] Any
         (macro-apply-fn!
           fn-value
-          (mapv (fn [(xs Any)] Any (nth xs i)) seqs)))
+          (mapv (fn [xs Any] Any (nth xs i)) seqs)))
       indices)))
 
 (defn macro-distinct-values [(items Any)] Any
   (reduce
-    (fn [(result Any) (item Any)] Any
+    (fn [result Any item Any] Any
       (if (some?
             (some
-              (fn [(seen Any)] Any
+              (fn [seen Any] Any
                 (if (= (macro-datum seen) (macro-datum item)) true nil))
               result))
         result
@@ -818,7 +818,7 @@
         (= (count numbers) 0)
           (macro-eval-fail! "- expected at least one argument")
         (= (count numbers) 1)
-          (let [(arg Number) (nth numbers 0)]
+          (let [arg Number (nth numbers 0)]
             (- 0 arg))
         :else (reduce - (nth numbers 0) (subvec numbers 1)))
     :else (macro-eval-fail! (str "unknown numeric function: " name)))))
@@ -924,7 +924,7 @@
       (into [BRACKET-TAG] args)
     (or (= name "append") (= name "concat"))
       (reduce
-        (fn [(items Any) (value Any)] Any
+        (fn [items Any value Any] Any
           (into items (macro-seq! value name)))
         [] args)
     (or (= name "first") (= name "second") (= name "third"))
@@ -965,16 +965,16 @@
     (= name "map-indexed")
       (do (macro-require-arity! name args 2)
           (let [items (macro-seq! (nth args 1) name)
-                (indices (Vec Int)) (vec (range (count items)))]
+                indices (Vec Int) (vec (range (count items)))]
             (mapv
-              (fn [(i Int)] Any
+              (fn [i Int] Any
                 (macro-apply-fn! (nth args 0) [i (nth items i)]))
               indices)))
     (= name "mapcat")
       (if (< (count args) 2)
         (macro-eval-fail! "mapcat expected a function and collection")
         (reduce
-          (fn [(items Any) (part Any)] Any
+          (fn [items Any part Any] Any
             (if (macro-seq? part)
               (into items (macro-seq! part "mapcat: function result"))
               (macro-eval-fail!
@@ -990,13 +990,13 @@
               (macro-eval-fail!
                 "reduce without an initial value needs a non-empty collection")
               (reduce
-                (fn [(acc Any) (item Any)] Any
+                (fn [acc Any item Any] Any
                   (macro-apply-fn! (nth args 0) [acc item]))
                 (nth items 0)
                 (subvec items 1))))
         (= (count args) 3)
           (reduce
-            (fn [(acc Any) (item Any)] Any
+            (fn [acc Any item Any] Any
               (macro-apply-fn! (nth args 0) [acc item]))
             (nth args 1)
             (macro-seq! (nth args 2) name))
@@ -1013,7 +1013,7 @@
     (= name "filter")
       (do (macro-require-arity! name args 2)
           (reduce
-            (fn [(items Any) (item Any)] Any
+            (fn [items Any item Any] Any
               (if (macro-apply-fn! (nth args 0) [item])
                 (conj items item)
                 items))
@@ -1022,7 +1022,7 @@
     (= name "every?")
       (do (macro-require-arity! name args 2)
           (every?
-            (fn [(item Any)] Bool
+            (fn [item Any] Bool
               (if (macro-apply-fn! (nth args 0) [item]) true false))
             (macro-seq! (nth args 1) name)))
     (= name "apply")
@@ -1169,7 +1169,7 @@
          (not (nil? (get bindings (nth template 1)))))
       (let [list-val (get bindings (nth template 1))]
         (datum-cons "splice-marker"
-          (mapv (fn [(e Any)] Any (substitute e bindings rest-name)) list-val)))
+          (mapv (fn [e Any] Any (substitute e bindings rest-name)) list-val)))
 
     ;; Bound parameter symbol
     (and (string? template) (not (nil? (get bindings template))))
@@ -1199,7 +1199,7 @@
         restorations (atom [])
         scoped-args
         (mapv
-          (fn [(arg Any)] Any
+          (fn [arg Any] Any
             (ast/beagle-syntax-flip-scope!
               arg introduction-scope restorations true))
           args)
@@ -1222,9 +1222,9 @@
               rest-args (subvec scoped-args (count fixed))]
           (if (= kind "defmacro")
             (let [env0 (make-macro-env)
-                  (indices (Vec Int)) (vec (range (count fixed)))
+                  indices (Vec Int) (vec (range (count fixed)))
                   env (reduce
-                        (fn [(e Any) (i Int)] Any
+                        (fn [e Any i Int] Any
                           (assoc e (nth fixed i) (nth fixed-args i)))
                         env0
                         indices)
@@ -1273,7 +1273,7 @@
         (if syntax-input
           args
           (mapv
-            (fn [(arg Any)] Any
+            (fn [arg Any] Any
               (ast/datum->beagle-syntax!
                 arg nil ast/EMPTY-SCOPE-SET nil {}))
             args))
@@ -1312,7 +1312,7 @@
 (defn- syntax-children-identical? [(before Any) (after Any)] Bool
   (and (= (count before) (count after))
        (every?
-         (fn [(i Int)] Bool (identical? (nth before i) (nth after i)))
+         (fn [i Int] Bool (identical? (nth before i) (nth after i)))
          (range (count before)))))
 
 (defn- expand-syntax-children!
@@ -1320,7 +1320,7 @@
   (let [children (get value "payload")
         expanded
         (mapv
-          (fn [(child Any)] Any
+          (fn [child Any] Any
             (expand-fully-syntax! reg child depth ctx))
           children)]
     (if (syntax-children-identical? children expanded)
@@ -1356,7 +1356,7 @@
             (if (syntax-list? value)
               (subvec (get value "payload") 1)
               (mapv
-                (fn [(arg Any)] Any
+                (fn [arg Any] Any
                   (ast/datum->beagle-syntax!
                     arg (ast/beagle-syntax-span value)
                     ast/EMPTY-SCOPE-SET nil {}))

@@ -38,11 +38,11 @@
       (println (str "[" l " " (pr-str p) " " (pr-str r) "]")))))
 
 (defn -main [& args] Nil
-  (let [(edn-path String) (str (nth (vec args) 0))
-        (ctx Any) (c/new-term-store space-id)
-        (lines (Vec String)) (str/split-lines (slurp edn-path))
-        (operations (Vec Any)) (mapv (fn [(line String)] Any (line->operation line))
-                                (filterv (fn [(line String)] Bool (str/starts-with? line "["))
+  (let [edn-path String (str (nth (vec args) 0))
+        ctx Any (c/new-term-store space-id)
+        lines (Vec String) (str/split-lines (slurp edn-path))
+        operations (Vec Any) (mapv (fn [line String] Any (line->operation line))
+                                (filterv (fn [line String] Bool (str/starts-with? line "["))
                                   lines))]
     (when (pos? (count operations))
       (c/commit-boundary!

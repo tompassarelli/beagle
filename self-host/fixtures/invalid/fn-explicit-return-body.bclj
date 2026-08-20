@@ -2,5 +2,5 @@
 (ns fixtures.invalid.fn-explicit-return-body)
 
 (def invalid (Fn [String] Int)
-  (fn [(value String)] Int
+  (fn [value String] Int
     value))

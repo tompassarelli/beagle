@@ -109,18 +109,18 @@
    (log-bytes ByteSource)
    (plan snapshot/BootPlan)]
   StoreResult
-  (let [(image snapshot/Image?) (snapshot/bootplan-image plan)]
+  (let [image snapshot/Image? (snapshot/bootplan-image plan)]
     (if (nil? image)
       (fold-store! canonical-log-path space-id log-bytes
                    "store: snapshot boot degraded to full fold; reason :no-image")
-      (let [(present snapshot/Image) image
-            (sidecar snapshot/Sidecar?) (snapshot/image-sidecar present)]
+      (let [present snapshot/Image image
+            sidecar snapshot/Sidecar? (snapshot/image-sidecar present)]
         (if (nil? sidecar)
           (fold-store!
            canonical-log-path space-id log-bytes
            "store: snapshot boot degraded to full fold; reason :no-sidecar")
           (let [watermark (snapshot/sidecar-watermark
-                           (let [(known snapshot/Sidecar) sidecar] known))
+                           (let [known snapshot/Sidecar sidecar] known))
                 root (term-store/new-term-store
                       (snapshot/image-space-id present))
                 loaded (snapshot/install-image! present root)]
@@ -249,7 +249,7 @@
   (let [packet (request-packet request-value)
         request (t/storerpcpacketv2-request packet)]
     (if request
-      (let [(present t/RpcRequest) request]
+      (let [present t/RpcRequest request]
         (if (= :rpc/checkpoint (t/rpcrequest-op present))
           (checkpoint-response! store-result store packet present now-ms)
           (let [session (store-session store)
