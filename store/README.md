@@ -34,6 +34,15 @@ Proposition identity  recursive structural Triple equality
 Assertion identity    occurrence coordinate
 ```
 
+These identities are Store's current contribution to Beagle's broader identity
+and provenance protocol; they are not one universal key. A program world is a
+versioned semantic explanation above this kernel, not a Store primitive or the
+retired Worlds service. Store can durably record proposition content,
+assertions, judgments, observations, materialization provenance, and execution
+receipts when a profile models them as ordinary Terms and occurrences. It does
+not decide truth, grant trust from matching content, execute effects, or erase
+the physical and security boundaries between Store spaces and deployments.
+
 A Triple takes the role of proposition content when an occurrence carries it
 as an assertion or retraction. A profile may constrain which Triple structures
 it admits and how it interprets their positions. store records that a

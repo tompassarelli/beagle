@@ -6,6 +6,12 @@ This document specifies the source-head database trust domain, the server bind a
 
 Beagle Store has no engine accounts, authorization, or tenant policy. One [SpaceId](glossary.md#storage-and-query), one Store transaction log, one writer, and one private network boundary form a trust domain. Separate personal, client, and public-tooling data across all four; ontology fields are not tenant isolation. What makes the writer sole is regime-specific and is stated under [deployment shapes](#deployment-shapes).
 
+Logical identity never supplies that isolation. Two trust domains may contain
+structurally equal Terms or receipts without sharing writer authority, secrets,
+or permission to execute. Content identity is not trust, and semantic
+unification across Beagle does not collapse Store spaces, processes,
+deployments, or security boundaries.
+
 `bin/beagle-store-server` launches native by default and fails closed unless `BEAGLE_STORE_NATIVE_ARTIFACT_DIR` names a READY artifact containing `bin/beagle-store-server-native`. `BEAGLE_STORE_SERVER_RUNTIME=graal` selects the transitional self-contained server at the absolute `BEAGLE_STORE_GRAAL_ARTIFACT` path without presenting it as a native program artifact. `jvm-oracle` selects the sealed packaged JVM differential oracle; `jvm-dev` selects the checkout-only Clojure development route. None is an automatic fallback. The server binds `127.0.0.1` by default. `BEAGLE_STORE_BIND` changes the listener intentionally, `BEAGLE_STORE_SERVER_PORT` selects its port, and `BEAGLE_STORE_SERVER_CONNECT` selects the client host. New databases require `BEAGLE_STORE_SPACE_ID`; every request carries the same identity or is rejected. `BEAGLE_STORE_LISTEN_FD` may pass an operator-owned INET listener without changing codec, operations, or writer authority.
 
 The native host admits a bounded number of concurrent clients, each served by one worker thread. `BEAGLE_STORE_MAX_ACTIVE_CLIENTS` sets that bound and `BEAGLE_STORE_CONNECTION_WORKERS` is honored as its deployment-facing name; the default is 64. The bound must stay below every task limit the supervisor imposes — systemd `TasksMax`, cgroup `pids.max`, `RLIMIT_NPROC` — or the cgroup refuses the worker thread before the host's graceful over-cap refusal can engage. Over-cap connections are closed without a response; transient thread or memory pressure refuses the connection and keeps accepting rather than abandoning the listener. `BEAGLE_STORE_CLIENT_IO_TIMEOUT_MS` bounds how long a worker may block on a peer socket (default 15000; 0 removes the bound), so a client that connects and never sends, or vanishes mid-packet, releases its slot instead of holding it open. A connection that reaches the front of the accept queue already at end-of-file is closed without spending a worker at all. A request that arrives complete is always dispatched: Store RPC clients may half-close after sending, and a half-close is indistinguishable from a disconnect, so the host never abandons a request it has finished reading. Worker threads can read their sockets concurrently, but native production holds one `dispatch_mutex` across the dispatch of each fully read request; the client admission count is not a non-convoying-read guarantee.
@@ -106,6 +112,13 @@ does not acquire independent semantics:
 minimal runnable examples. Published native/Wasm artifacts and the Bun client
 package are sufficient; rebuilding them is the only path that needs Beagle's
 compiler toolchain.
+
+Store records data supplied through these capabilities; it does not execute an
+external plan merely because the plan or its content is present. In Beagle's
+system direction, planning stays pure, an external host checks an explicit
+target capability before execution, and the resulting receipt returns as a new
+record. A subsequent observation, with its own provenance, is what can support
+a claim about external reality.
 
 The boundary is closed at the lowest deterministic layers:
 

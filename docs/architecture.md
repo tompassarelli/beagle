@@ -3,15 +3,46 @@
 ## One semantic substrate
 
 Beagle is one durable programming system, not a language bolted to a database.
-Typed, revisioned semantic facts connect its four surfaces:
+Its architectural spine is:
+
+> Pure software artifacts are reproducible projections of durable semantic
+> worlds; external reality is connected through explicit observations and
+> capability-controlled effects.
+
+A program world (`WORLD`) is a versioned semantic explanation, not a process,
+database row, deployment, or universal identity. The destination protocol
+relates content, assertion occurrences, world revisions, judgments,
+materializations, executions, and receipts through named equivalence and
+provenance relations. Those layers do not share one key: content identity is
+not assertion identity, artifact identity, or authority, and content identity
+is not trust.
+
+The repository currently ships four surfaces:
 
 - the Beagle language authors code and data through one structural model;
 - the compiler and runtime check, query, incrementally materialize, and execute
-  those semantics;
+  language programs;
 - Beagle Store owns durable terms, transactions, occurrences, history,
   querying, indexing, snapshots, and cold persistence;
 - capability interfaces expose only the Store-shaped part to an existing
   application through the native/Wasm ABI, Store RPC, or a cache policy.
+
+The compiler's AST and fact projections and Store's Term and occurrence model
+are separate current surfaces. Connecting them through the world protocol is
+the direction, not a claim that every layer already shares one representation.
+Within that direction, facts are view-admitted propositions, judgments select
+or derive conclusions, and target outputs are replaceable materializations.
+The durable world distinguishes `Declared`, `Derived`, `Observed`, `Desired`,
+`EffectAttempt`, and `EffectReceipt`; desired state cannot satisfy observed
+state, and a receipt does not replace a subsequent observation. Hashes identify
+records while authority, evidence, freshness, and policy determine what they
+justify.
+
+Pure planning describes effects. A host executes an external effect only when
+it holds the target's declared capability, then returns a receipt as a new
+semantic record. Planning, scheduling, reconciliation, and effect semantics
+remain part of the system even when native execution removes steady-state host
+scripts.
 
 The external boundary is a capability boundary, not an ownership boundary.
 Adapters may select transport, deployment, retention, and materialization
@@ -19,6 +50,11 @@ policy, but may not define operations, identities, transaction behavior, query
 rules, or encoding. A brownfield application can therefore use Store without
 shipping the language frontend or Racket, while the engine remains built,
 versioned, and tested in this repository.
+
+Semantic agreement does not collapse physical or security domains. Separate
+worlds, Store spaces, processes, deployments, and trust domains can agree on
+content while retaining different authority, retention, availability, and
+execution policy.
 
 The detailed contracts and runnable storage-only examples live in
 [`store/README.md`](../store/README.md#storage-only-capability) and

@@ -14,20 +14,27 @@ The June ruling named a stored `(subject predicate object)` record **fact**. The
 
 The deciding prior is Datalog: a fact is a proposition present in the evaluated relation. The rejected primitive use is **fact-as-stored-row** — it falsely merges structure, assertion act, and view status.
 
-## world — chosen 2026-07-26; retired 2026-08-07
+## world — system term chosen 2026-07-26; service retired 2026-08-07; reconciled 2026-08-20
 
-**Retired 2026-08-07:** the Worlds service is deleted from the tree. `world`
-and the bare historical name `version` name no current module or primitive and
-are spent for new naming. The live closed-wire operation `:rpc/version` is
-unrelated and remains current. Durable Store transaction-log data that service wrote
-(`evidence.world`, `world.record`, `world.version:`) keeps its spelling:
-respelling stored predicates is a data migration, not a rename.
+The old Worlds service is deleted from the tree. `world` and bare `version`
+name no current Store module, wire operation, or kernel primitive. The live
+closed-wire operation `:rpc/version` is unrelated and remains current. Durable
+Store transaction-log data written by the retired service (`evidence.world`,
+`world.record`, `world.version:`) keeps its spelling: respelling stored
+predicates is a data migration, not a rename.
 
-The former ruling read: historical Worlds-service vocabulary; the service left
-the public recursive-kernel runtime, so `world` and bare `version` are not
-kernel primitives. This retirement does not name or remove `:rpc/version`.
+The service retirement did not retire the system-level term **program world**.
+A program world is a durable, versioned semantic explanation: the facts,
+judgments, provenance, and pure plans from which materializations may be
+derived. It may select which propositions a query sees without promising
+consistency or truth. It is above Store's recursive kernel and does not restore
+the deleted service.
 
-The thing was a named, forkable lineage of immutable versions that fixed which facts a query saw without promising consistency. The possible-worlds prior decided it: propositions are evaluated at a way things could stand.
+Worlds participate in one identity and provenance protocol with named layered
+equivalence relations. They do not impose one universal key: Atom, proposition,
+assertion occurrence, world revision, materialization, and receipt identities
+remain distinct. The possible-worlds prior still decides the term:
+propositions are evaluated at a way things could stand.
 
 Rejected bench:
 
@@ -189,7 +196,8 @@ stays t1/t2/t3.
 
 Rejected bench:
 
-- **world** — retired to the historical Worlds service; reuse reopens a settled verdict.
+- **world** — names a versioned semantic explanation, not a stored admission
+  contract over one Store space.
 - **schema** — implies stored enforcement types the kernel refuses to own.
 - **dialect** — implies a different language rather than a convention over one.
 - **layer / mode** — generic altitude words, and mode reads as a runtime switch.
@@ -229,8 +237,9 @@ a gate.
   ACCEPTED` and the QBE frontier refusal `native program is not frozen:
   validation obligations failed`, whose ledger class key is
   `program-not-frozen`.
-- **program** and **module-overlay** replaced the retired Worlds vocabulary,
-  both in that refusal and at the authoring checker:
+- **program** and **module-overlay** replaced identifiers belonging to the
+  retired Worlds service, both in that refusal and at the authoring checker;
+  this does not retire the system-level program-world concept:
   `facts-check-overlay.rkt`, receipt key `overlayDigest`, rejection code
   `beagle-overlay-rejected`.
 

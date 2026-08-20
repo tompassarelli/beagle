@@ -35,6 +35,12 @@ different provenance. Withdrawing one assertion does not mutate either the
 Triple or its Atoms, and Beagle Store records the assertion without certifying its
 truth.
 
+This is a layered identity protocol, not a universal identity key. A program
+world may use Store occurrences as durable evidence while retaining its own
+revision and judgment identity. Matching proposition content establishes
+structural equivalence only; it does not establish the trustworthiness of the
+writer, authorize an effect, or merge physical Store spaces.
+
 ## Perspective and graph roles
 
 An occurrence intrinsically records its action and logical order. Asserter and
