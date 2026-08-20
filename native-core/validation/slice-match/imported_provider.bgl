@@ -1,0 +1,12 @@
+#lang beagle
+(ns native.imported-union-provider)
+
+(defunion ImportedResult
+  (ImportedOk [value Int])
+  (ImportedError [errno Int]))
+
+(defn path-kind [path String] host.fs/PathKindResult
+  (host.fs/path-kind path))
+
+(defn capture [argv (Vec String)] host.process/CaptureResult
+  (host.process/run-capture argv "" 4096))

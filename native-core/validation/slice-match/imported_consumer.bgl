@@ -1,0 +1,23 @@
+#lang beagle
+(ns native.imported-union-consumer
+  (:require [native.imported-union-provider :as provider]))
+
+(defn qualified-result [result provider/ImportedResult] Int
+  (match result
+    [(provider/ImportedOk value) value]
+    [(provider/ImportedError errno) (- 0 errno)]))
+
+(defn unqualified-result [result provider/ImportedResult] Int
+  (match result
+    [(ImportedOk value) value]
+    [(ImportedError errno) (- 0 errno)]))
+
+(defn filesystem-result [path String] Int
+  (match (provider/path-kind path)
+    [(host.fs/PathKindOk kind) kind]
+    [(host.fs/PathKindError errno) (- 0 errno)]))
+
+(defn process-result [argv (Vec String)] Int
+  (match (provider/capture argv)
+    [(host.process/CaptureOk status stdout stderr) status]
+    [(host.process/CaptureError errno) (- 0 errno)]))

@@ -76,6 +76,40 @@ if rg -q 'TODO-NATIVE-FORM-unsupported-match' "$refused/report.txt"; then
   exit 1
 fi
 
+imported="$scratch/imported"
+"$repo/bin/beagle" build --materializer c17 --out "$imported" \
+  "$here/imported_provider.bgl" "$here/imported_consumer.bgl"
+for expected in \
+  'stage typed-to-native COMPLETE' \
+  'source-modules 2' \
+  'lowered fn_[0-9]+ qualified-result ' \
+  'lowered fn_[0-9]+ unqualified-result ' \
+  'lowered fn_[0-9]+ filesystem-result ' \
+  'lowered fn_[0-9]+ process-result ' \
+  'result PASS'; do
+  rg -q "$expected" "$imported/report.txt" || {
+    echo "drive.sh: imported-union report omitted evidence: $expected" >&2
+    exit 1
+  }
+done
+if rg -q 'TODO-NATIVE-MATCH' "$imported/report.txt"; then
+  echo "drive.sh: exhaustive imported union remained pending" >&2
+  exit 1
+fi
+
+if "$repo/bin/beagle" check --agent \
+    "$here/imported_provider.bgl" "$here/imported_nonexhaustive.bgl" \
+    >"$scratch/imported-nonexhaustive.log" 2>&1; then
+  echo "drive.sh: missing imported variant unexpectedly checked" >&2
+  exit 1
+fi
+if ! rg -q 'not exhaustive; missing cases: .*ImportedError' \
+    "$scratch/imported-nonexhaustive.log"; then
+  echo "drive.sh: missing imported variant lacked the exhaustiveness error" >&2
+  exit 1
+fi
+
 cat "$report"
 cat "$refused/report.txt"
-echo "slice-match: closed-union literals/records, strict C runtime, and named refusals PASS"
+cat "$imported/report.txt"
+echo "slice-match: local and imported closed unions, strict C runtime, and named refusals PASS"

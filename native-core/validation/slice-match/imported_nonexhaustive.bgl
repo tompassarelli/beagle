@@ -1,0 +1,7 @@
+#lang beagle
+(ns native.imported-union-nonexhaustive
+  (:require [native.imported-union-provider :as provider]))
+
+(defn missing-result [result provider/ImportedResult] Int
+  (match result
+    [(provider/ImportedOk value) value]))

@@ -12402,13 +12402,21 @@
       (= "var" kind) (> (count (fact-text index pattern "name")) 0)
       :else false)))
 
+(defn match-record-spelling
+  [(index SourceIndexV0) (pattern core/NativeId)] String
+  (let [(name String) (fact-text index pattern "name")
+        (qualifier String) (fact-text index pattern "qualifier")]
+    (if (or (= "" name) (= "" qualifier))
+      name
+      (str qualifier "/" name))))
+
 (defn match-record-type-id
   [(env BodyEnvV0)
    (owner core/NativeId)
    (pattern core/NativeId)]
   (U core/NativeId Nil)
   (let [(index SourceIndexV0) (bodyenvv0-index env)
-        (spelling String) (fact-text index pattern "name")
+        (spelling String) (match-record-spelling index pattern)
         (resolved ResolvedSourceNameV0)
         (resolve-source-name index (source-module-name index pattern) spelling)
         (candidate core/NativeId) (source-type-id (resolved-source-key resolved))
@@ -12461,7 +12469,7 @@
       (let [(index SourceIndexV0) (bodyenvv0-index env)
             (variant (U core/TypeVariant Nil))
             (union-variant-named (bodyenvv0-types env) target-type
-              (fact-text index pattern "name"))]
+              (match-record-spelling index pattern))]
         (if (nil? variant)
           nil
           (variant-record-type-id (bodyenvv0-types env) variant))))))
@@ -12475,7 +12483,7 @@
   (let [(index SourceIndexV0) (bodyenvv0-index env)
         (named (U core/TypeVariant Nil))
         (union-variant-named (bodyenvv0-types env) target-type
-          (fact-text index pattern "name"))]
+          (match-record-spelling index pattern))]
     (if (some? named)
       (core/typevariant-id named)
       (let [(record-type (U core/NativeId Nil))
