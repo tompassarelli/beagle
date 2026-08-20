@@ -1,0 +1,264 @@
+#lang beagle
+(ns beagle.rule-scheduler)
+
+(defrecord RuleSourceSpanV1
+  [source-id String
+   start Int
+   end Int
+   line Int
+   column Int])
+
+(defrecord RuleFactV1
+  [relation String
+   key String
+   payload String])
+
+(defrecord RuleSpecV1
+  [id String
+   input-relations (Vec String)
+   output-relations (Vec String)
+   source-span RuleSourceSpanV1])
+
+(defrecord RuleErrorV1
+  [rule-id String
+   source-span RuleSourceSpanV1
+   code Keyword
+   message String])
+
+(defrecord RuleEvidenceV1
+  [step Int
+   rule-id String
+   input-identities (Vec String)
+   added-identities (Vec String)])
+
+(defunion RuleEvaluationV1
+  (RuleProducedV1 [facts (Vec RuleFactV1)])
+  (RuleRejectedV1 [error RuleErrorV1]))
+
+(defunion FixedPointResultV1
+  (FixedPointReachedV1
+    [facts (Vec RuleFactV1)
+     evidence (Vec RuleEvidenceV1)
+     steps Int])
+  (FixedPointBoundReachedV1
+    [facts (Vec RuleFactV1)
+     evidence (Vec RuleEvidenceV1)
+     steps Int
+     bound Int])
+  (FixedPointFailedV1
+    [facts (Vec RuleFactV1)
+     evidence (Vec RuleEvidenceV1)
+     steps Int
+     error RuleErrorV1]))
+
+(defrecord FactMergeV1
+  [facts (Vec RuleFactV1)
+   added-identities (Vec String)
+   invalid-fact RuleFactV1?])
+
+(defalias RuleEvaluatorV1
+  (Fn [RuleSpecV1 (Vec RuleFactV1)] RuleEvaluationV1))
+
+(defn fact-identity [fact RuleFactV1] String
+  (let [relation String (rulefactv1-relation fact)
+        key String (rulefactv1-key fact)
+        payload String (rulefactv1-payload fact)]
+    (str (count relation) ":" relation
+         (count key) ":" key
+         (count payload) ":" payload)))
+
+(defn string-member?
+  [values (Vec String)
+   value String] Bool
+  (loop [index Int 0]
+    (if (>= index (count values))
+      false
+      (if (= value (nth values index))
+        true
+        (recur (+ index 1))))))
+
+(defn fact-known?
+  [facts (Vec RuleFactV1)
+   fact RuleFactV1] Bool
+  (let [identity String (fact-identity fact)]
+    (loop [index Int 0]
+      (if (>= index (count facts))
+        false
+        (if (= identity (fact-identity (nth facts index)))
+          true
+          (recur (+ index 1)))))))
+
+(defn dedupe-facts [facts (Vec RuleFactV1)] (Vec RuleFactV1)
+  (loop [index Int 0
+         unique (Vec RuleFactV1) []]
+    (if (>= index (count facts))
+      unique
+      (let [fact RuleFactV1 (nth facts index)]
+        (recur (+ index 1)
+               (if (fact-known? unique fact) unique (conj unique fact)))))))
+
+(defn rule-input-facts
+  [rule RuleSpecV1
+   facts (Vec RuleFactV1)] (Vec RuleFactV1)
+  (loop [index Int 0
+         inputs (Vec RuleFactV1) []]
+    (if (>= index (count facts))
+      inputs
+      (let [fact RuleFactV1 (nth facts index)]
+        (recur
+          (+ index 1)
+          (if (string-member? (rulespecv1-input-relations rule)
+                              (rulefactv1-relation fact))
+            (conj inputs fact)
+            inputs))))))
+
+(defn fact-identities [facts (Vec RuleFactV1)] (Vec String)
+  (loop [index Int 0
+         identities (Vec String) []]
+    (if (>= index (count facts))
+      identities
+      (recur (+ index 1)
+             (conj identities (fact-identity (nth facts index)))))))
+
+(defn merge-rule-facts
+  [known (Vec RuleFactV1)
+   produced (Vec RuleFactV1)
+   allowed-relations (Vec String)] FactMergeV1
+  (loop [index Int 0
+         facts (Vec RuleFactV1) known
+         added-identities (Vec String) []]
+    (if (>= index (count produced))
+      (->FactMergeV1 facts added-identities nil)
+      (let [fact RuleFactV1 (nth produced index)]
+        (if (not (string-member? allowed-relations
+                                 (rulefactv1-relation fact)))
+          (->FactMergeV1 facts added-identities fact)
+          (if (fact-known? facts fact)
+            (recur (+ index 1) facts added-identities)
+            (recur (+ index 1)
+                   (conj facts fact)
+                   (conj added-identities (fact-identity fact)))))))))
+
+(defn index-member?
+  [indices (Vec Int)
+   value Int] Bool
+  (loop [index Int 0]
+    (if (>= index (count indices))
+      false
+      (if (= value (nth indices index))
+        true
+        (recur (+ index 1))))))
+
+(defn enqueue-all-rules
+  [worklist (Vec Int)
+   rule-count Int] (Vec Int)
+  (loop [index Int 0
+         queued (Vec Int) worklist]
+    (if (>= index rule-count)
+      queued
+      (recur (+ index 1)
+             (if (index-member? queued index)
+               queued
+               (conj queued index))))))
+
+(defn rule-id-before?
+  [rules (Vec RuleSpecV1)
+   index Int
+   rule-id String] Bool
+  (loop [prior Int 0]
+    (if (>= prior index)
+      false
+      (if (= rule-id (rulespecv1-id (nth rules prior)))
+        true
+        (recur (+ prior 1))))))
+
+(defn duplicate-rule-index [rules (Vec RuleSpecV1)] Int
+  (loop [index Int 0]
+    (if (>= index (count rules))
+      -1
+      (let [rule-id String (rulespecv1-id (nth rules index))]
+        (if (rule-id-before? rules index rule-id)
+          index
+          (recur (+ index 1)))))))
+
+(defn run-to-fixed-point
+  [initial-facts (Vec RuleFactV1)
+   rules (Vec RuleSpecV1)
+   max-steps Int
+   evaluate RuleEvaluatorV1] FixedPointResultV1
+  (let [facts (Vec RuleFactV1) (dedupe-facts initial-facts)
+        duplicate-index Int (duplicate-rule-index rules)]
+    (cond
+      (< max-steps 0)
+      (->FixedPointFailedV1
+        facts
+        []
+        0
+        (->RuleErrorV1
+          ""
+          (->RuleSourceSpanV1 "" 0 0 1 0)
+          :invalid-bound
+          "fixed-point step bound must be nonnegative"))
+
+      (>= duplicate-index 0)
+      (let [rule RuleSpecV1 (nth rules duplicate-index)]
+        (->FixedPointFailedV1
+          facts
+          []
+          0
+          (->RuleErrorV1
+            (rulespecv1-id rule)
+            (rulespecv1-source-span rule)
+            :duplicate-rule-id
+            "rule identifiers must be unique")))
+
+      :else
+      (loop [known (Vec RuleFactV1) facts
+             worklist (Vec Int) (enqueue-all-rules [] (count rules))
+             evidence (Vec RuleEvidenceV1) []
+             steps Int 0]
+        (cond
+          (empty? worklist)
+          (->FixedPointReachedV1 known evidence steps)
+
+          (>= steps max-steps)
+          (->FixedPointBoundReachedV1 known evidence steps max-steps)
+
+          :else
+          (let [rule-index Int (first worklist)
+                remaining (Vec Int) (subvec worklist 1)
+                rule RuleSpecV1 (nth rules rule-index)
+                inputs (Vec RuleFactV1) (rule-input-facts rule known)]
+            (match (evaluate rule inputs)
+              [(RuleRejectedV1 error)
+               (->FixedPointFailedV1
+                 known evidence (+ steps 1) error)]
+              [(RuleProducedV1 produced)
+               (let [merged FactMergeV1 (merge-rule-facts
+                       known produced (rulespecv1-output-relations rule))
+                     invalid RuleFactV1? (factmergev1-invalid-fact merged)
+                     added (Vec String) (factmergev1-added-identities merged)
+                     next-evidence (Vec RuleEvidenceV1) (conj evidence
+                       (->RuleEvidenceV1
+                         steps
+                         (rulespecv1-id rule)
+                         (fact-identities inputs)
+                         added))]
+                 (if (some? invalid)
+                   (->FixedPointFailedV1
+                     (factmergev1-facts merged)
+                     next-evidence
+                     (+ steps 1)
+                     (->RuleErrorV1
+                       (rulespecv1-id rule)
+                       (rulespecv1-source-span rule)
+                       :undeclared-output
+                       (str "rule produced undeclared relation "
+                            (rulefactv1-relation invalid))))
+                   (recur
+                     (factmergev1-facts merged)
+                     (if (empty? added)
+                       remaining
+                       (enqueue-all-rules remaining (count rules)))
+                     next-evidence
+                     (+ steps 1))))])))))))
