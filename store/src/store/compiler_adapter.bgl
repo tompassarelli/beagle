@@ -16,7 +16,7 @@
 (defn failed-store [detail String] server/StoreResult
   (server/->StoreResult server/status-fatal nil detail 0 [] ""))
 
-(defn open-store [path String space-id String] server/StoreResult
+(defn open-store! [path String space-id String] server/StoreResult
   (match (host.fs/append-text path "")
     [(host.fs/AppendTextError errno)
      (failed-store (str "could not create Store log: " path))]
@@ -36,7 +36,7 @@
 (defn persist-boot! [path String store-result server/StoreResult] String?
   (append-log! path (server/storeresult-boot-append store-result)))
 
-(defn query-store
+(defn query-store!
   [store-result server/StoreResult
    query profile/AdmittedQueryClosure] driver/CompileStoreResponse
   (let [result server/CompileQueryResult
@@ -71,7 +71,7 @@
                    [(linker/ArtifactEnvelopeDecodeErrorV1 detail)
                     (driver/->CompileStoreWarmRejected admitted detail)])))))))))
 
-(defn append-store
+(defn append-store!
   [path String store-result server/StoreResult
    result profile/AdmittedResultClosure artifact linker/TargetArtifactV1]
   driver/CompileStoreResponse
@@ -104,20 +104,20 @@
              (driver/->CompileStoreFailure 74 write-error)
              (driver/->CompileStorePersisted)))))]))
 
-(defn compile-store [request driver/CompileStoreRequest] driver/CompileStoreResponse
+(defn compile-store! [request driver/CompileStoreRequest] driver/CompileStoreResponse
   (match request
     [(driver/CompileStoreLookup path space-id query)
-     (let [store-result server/StoreResult (open-store path space-id)
+     (let [store-result server/StoreResult (open-store! path space-id)
            boot-error String? (persist-boot! path store-result)]
        (if boot-error
          (driver/->CompileStoreFailure 74 boot-error)
-         (query-store store-result query)))]
+         (query-store! store-result query)))]
     [(driver/CompileStoreAppend path space-id result artifact)
-     (let [store-result server/StoreResult (open-store path space-id)
+     (let [store-result server/StoreResult (open-store! path space-id)
            boot-error String? (persist-boot! path store-result)]
        (if boot-error
          (driver/->CompileStoreFailure 74 boot-error)
-         (append-store path store-result result artifact)))]))
+         (append-store! path store-result result artifact)))]))
 
 (defn -main [args (Vec String)] Int
-  (cli/main-with-store args compile-store))
+  (cli/main-with-store args compile-store!))
