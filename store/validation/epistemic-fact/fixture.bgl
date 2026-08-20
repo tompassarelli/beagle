@@ -1,0 +1,105 @@
+#lang beagle
+
+(ns store.epistemic-fact-fixture
+  (:require [store.epistemic-fact :as epistemic]
+            [store.types :as t]))
+
+(def world epistemic/WorldRoot
+  (epistemic/->WorldRoot "world-a" "schema-a" "rules-a" "normalizer-a" []))
+
+(def context epistemic/AdmissionContext
+  (epistemic/->AdmissionContext
+   world ["premise-a"] ["cap-build"]
+   [(epistemic/->AttemptReference "attempt-a" "cap-build")]
+   100))
+
+(def invalid-world-context epistemic/AdmissionContext
+  (epistemic/->AdmissionContext
+   (epistemic/->WorldRoot "world-a" "schema-a" "rules-a" "" [])
+   ["premise-a"] ["cap-build"]
+   [(epistemic/->AttemptReference "attempt-a" "cap-build")]
+   100))
+
+(def proposition t/Triple
+  (t/->Triple "program" :state "ready"))
+
+(defn fact
+  [identity String
+   provenance epistemic/EpistemicProvenance] epistemic/EpistemicFact
+  (epistemic/->EpistemicFact identity "world-a" proposition provenance))
+
+(defn admitted? [result epistemic/FactAdmission] Bool
+  (match result
+    [(epistemic/FactAdmitted admitted) true]
+    [(epistemic/FactRejected code detail) false]))
+
+(defn rejected-as?
+  [result epistemic/FactAdmission code Keyword] Bool
+  (match result
+    [(epistemic/FactAdmitted admitted) false]
+    [(epistemic/FactRejected observed detail) (= code observed)]))
+
+(def desired epistemic/EpistemicFact
+  (fact "fact-desired"
+        (epistemic/->Desired "operator" "plan-a" "evidence-desired")))
+
+(def declared epistemic/EpistemicFact
+  (fact "fact-declared"
+        (epistemic/->Declared "operator" "evidence-declared")))
+
+(def observed epistemic/EpistemicFact
+  (fact "fact-observed"
+        (epistemic/->Observed "observer" "evidence-observed" 90 110)))
+
+(def derived epistemic/EpistemicFact
+  (fact "fact-derived"
+        (epistemic/->Derived "rule-a" ["premise-a"] "evidence-derived")))
+
+(def receipt epistemic/EpistemicFact
+  (fact "fact-receipt"
+        (epistemic/->EffectReceipt
+         "receipt-a" "attempt-a" "cap-build" "runner" "evidence-receipt")))
+
+(def attempt epistemic/EpistemicFact
+  (fact "fact-attempt"
+        (epistemic/->EffectAttempt
+         "attempt-a" "plan-a" "cap-build" "evidence-attempt")))
+
+(defn main [] Int
+  (if (and
+       (admitted? (epistemic/admit-fact context declared))
+       (admitted? (epistemic/admit-fact context desired))
+       (rejected-as?
+        (epistemic/admit-fact invalid-world-context desired)
+        :epistemic/invalid-world-root)
+       (not (epistemic/satisfies? desired (epistemic/require-observed)))
+       (epistemic/satisfies? observed (epistemic/require-observed))
+       (admitted? (epistemic/admit-fact context observed))
+       (admitted? (epistemic/admit-fact context derived))
+       (admitted? (epistemic/admit-fact context attempt))
+       (rejected-as?
+        (epistemic/admit-fact
+         context
+         (fact "fact-unknown-premise"
+               (epistemic/->Derived
+                "rule-a" ["premise-missing"] "evidence-derived")))
+        :epistemic/invalid-derived)
+       (admitted? (epistemic/admit-fact context receipt))
+       (epistemic/satisfies? receipt (epistemic/require-effect-receipt))
+       (rejected-as?
+        (epistemic/admit-fact
+         context
+         (fact "fact-wrong-capability"
+               (epistemic/->EffectReceipt
+                "receipt-b" "attempt-a" "cap-deploy" "runner"
+                "evidence-receipt")))
+        :epistemic/invalid-effect-receipt)
+       (rejected-as?
+        (epistemic/admit-fact
+         context
+         (fact "fact-expired"
+               (epistemic/->Observed
+                "observer" "evidence-observed" 70 90)))
+        :epistemic/invalid-observed))
+    0
+    1))

@@ -1,0 +1,242 @@
+#lang beagle
+
+(ns store.epistemic-fact
+  (:require [store.types :as t]))
+
+;; A world is an immutable explanation root.  Physical placement and trust are
+;; referenced facts elsewhere; they are deliberately not folded into identity.
+(defrecord WorldRoot
+  [world-id String
+   schema-id String
+   rules-id String
+   normalizer-id String
+   parent-world-ids (Vec String)])
+
+(defrecord AttemptReference
+  [attempt-id String
+   capability-id String])
+
+;; Every mode carries the evidence appropriate to its epistemic claim.  The
+;; union tag is structural: equal propositions in different modes are not the
+;; same evidence and cannot be admitted through the same reasoning gate.
+(defunion EpistemicProvenance
+  (Declared
+    [authority-id String
+     evidence-id String])
+  (Derived
+    [rule-id String
+     premise-ids (Vec String)
+     evidence-id String])
+  (Observed
+    [observer-id String
+     evidence-id String
+     observed-at-ms Int
+     valid-until-ms Int])
+  (Desired
+    [authority-id String
+     plan-id String
+     evidence-id String])
+  (EffectAttempt
+    [attempt-id String
+     plan-id String
+     capability-id String
+     evidence-id String])
+  (EffectReceipt
+    [receipt-id String
+     attempt-id String
+     capability-id String
+     issuer-id String
+     evidence-id String]))
+
+(defrecord EpistemicFact
+  [fact-id String
+   world-id String
+   proposition t/Triple
+   provenance EpistemicProvenance])
+
+(defrecord AdmissionContext
+  [world WorldRoot
+   known-premise-ids (Vec String)
+   capability-ids (Vec String)
+   attempts (Vec AttemptReference)
+   now-ms Int])
+
+(defunion FactAdmission
+  (FactAdmitted [fact EpistemicFact])
+  (FactRejected
+    [code Keyword
+     detail String]))
+
+(defunion ProvenanceAdmission
+  ProvenanceAccepted
+  (ProvenanceRejected
+    [code Keyword
+     detail String]))
+
+(defunion EvidenceRequirement
+  RequireDeclared
+  RequireDerived
+  RequireObserved
+  RequireDesired
+  RequireEffectAttempt
+  RequireEffectReceipt)
+
+(defn require-declared [] EvidenceRequirement
+  (->RequireDeclared))
+
+(defn require-derived [] EvidenceRequirement
+  (->RequireDerived))
+
+(defn require-observed [] EvidenceRequirement
+  (->RequireObserved))
+
+(defn require-desired [] EvidenceRequirement
+  (->RequireDesired))
+
+(defn require-effect-attempt [] EvidenceRequirement
+  (->RequireEffectAttempt))
+
+(defn require-effect-receipt [] EvidenceRequirement
+  (->RequireEffectReceipt))
+
+(defn nonempty-id? [value String] Bool
+  (> (count value) 0))
+
+(defn contains-id?
+  [values (Vec String)
+   candidate String] Bool
+  (loop [position Int 0]
+    (if (>= position (count values))
+      false
+      (if (= candidate (nth values position))
+        true
+        (recur (+ position 1))))))
+
+(defn all-nonempty? [values (Vec String)] Bool
+  (loop [position Int 0]
+    (if (>= position (count values))
+      true
+      (if (nonempty-id? (nth values position))
+        (recur (+ position 1))
+        false))))
+
+(defn world-root-valid? [world WorldRoot] Bool
+  (and (nonempty-id? (worldroot-world-id world))
+       (and (nonempty-id? (worldroot-schema-id world))
+            (and (nonempty-id? (worldroot-rules-id world))
+                 (and (nonempty-id? (worldroot-normalizer-id world))
+                      (all-nonempty?
+                       (worldroot-parent-world-ids world)))))))
+
+(defn all-known-premises?
+  [known (Vec String)
+   premises (Vec String)] Bool
+  (if (= 0 (count premises))
+    false
+    (loop [position Int 0]
+      (if (>= position (count premises))
+        true
+        (let [premise String (nth premises position)]
+          (if (and (nonempty-id? premise) (contains-id? known premise))
+            (recur (+ position 1))
+            false))))))
+
+(defn matching-attempt?
+  [attempts (Vec AttemptReference)
+   attempt-id String
+   capability-id String] Bool
+  (loop [position Int 0]
+    (if (>= position (count attempts))
+      false
+      (let [attempt AttemptReference (nth attempts position)]
+        (if (and (= attempt-id (attemptreference-attempt-id attempt))
+                 (= capability-id
+                    (attemptreference-capability-id attempt)))
+          true
+          (recur (+ position 1)))))))
+
+(defn provenance-admission
+  [context AdmissionContext
+   provenance EpistemicProvenance] ProvenanceAdmission
+  (match provenance
+    [(Declared authority-id evidence-id)
+     (if (and (nonempty-id? authority-id) (nonempty-id? evidence-id))
+       (->ProvenanceAccepted)
+       (->ProvenanceRejected :epistemic/invalid-declared
+         "declared provenance requires authority and evidence identities"))]
+    [(Derived rule-id premise-ids evidence-id)
+     (if (and (nonempty-id? rule-id)
+              (and (nonempty-id? evidence-id)
+                   (all-known-premises?
+                    (admissioncontext-known-premise-ids context)
+                    premise-ids)))
+       (->ProvenanceAccepted)
+       (->ProvenanceRejected :epistemic/invalid-derived
+         "derived provenance requires a rule, evidence, and known premises"))]
+    [(Observed observer-id evidence-id observed-at-ms valid-until-ms)
+     (if (and (nonempty-id? observer-id)
+              (and (nonempty-id? evidence-id)
+                   (and (<= observed-at-ms (admissioncontext-now-ms context))
+                        (< (admissioncontext-now-ms context)
+                           valid-until-ms))))
+       (->ProvenanceAccepted)
+       (->ProvenanceRejected :epistemic/invalid-observed
+         "observed provenance requires an observer and a current validity window"))]
+    [(Desired authority-id plan-id evidence-id)
+     (if (and (nonempty-id? authority-id)
+              (and (nonempty-id? plan-id) (nonempty-id? evidence-id)))
+       (->ProvenanceAccepted)
+       (->ProvenanceRejected :epistemic/invalid-desired
+         "desired provenance requires authority, plan, and evidence identities"))]
+    [(EffectAttempt attempt-id plan-id capability-id evidence-id)
+     (if (and (nonempty-id? attempt-id)
+              (and (nonempty-id? plan-id)
+                   (and (nonempty-id? evidence-id)
+                        (contains-id?
+                         (admissioncontext-capability-ids context)
+                         capability-id))))
+       (->ProvenanceAccepted)
+       (->ProvenanceRejected :epistemic/invalid-effect-attempt
+         "effect attempt requires a plan and an admitted capability"))]
+    [(EffectReceipt receipt-id attempt-id capability-id issuer-id evidence-id)
+     (if (and (nonempty-id? receipt-id)
+              (and (nonempty-id? issuer-id)
+                   (and (nonempty-id? evidence-id)
+                        (matching-attempt?
+                         (admissioncontext-attempts context)
+                         attempt-id capability-id))))
+       (->ProvenanceAccepted)
+       (->ProvenanceRejected :epistemic/invalid-effect-receipt
+         "effect receipt must reference a known attempt and its capability"))]))
+
+(defn admit-fact
+  [context AdmissionContext
+   fact EpistemicFact] FactAdmission
+  (cond
+    [(not (world-root-valid? (admissioncontext-world context)))
+     (->FactRejected :epistemic/invalid-world-root
+       "world root requires schema, rules, normalizer, and valid parent identities")]
+    [(not= (worldroot-world-id (admissioncontext-world context))
+           (epistemicfact-world-id fact))
+     (->FactRejected :epistemic/world-mismatch
+       "fact world does not match the admission world")]
+    [(or (not (nonempty-id? (epistemicfact-fact-id fact)))
+         (not (t/triple? (epistemicfact-proposition fact))))
+     (->FactRejected :epistemic/invalid-envelope
+       "fact identity and proposition are required")]
+    [:else
+     (match (provenance-admission context (epistemicfact-provenance fact))
+       [(ProvenanceAccepted) (->FactAdmitted fact)]
+       [(ProvenanceRejected code detail) (->FactRejected code detail)])]))
+
+(defn satisfies?
+  [fact EpistemicFact
+   requirement EvidenceRequirement] Bool
+  (let [provenance EpistemicProvenance (epistemicfact-provenance fact)]
+    (match requirement
+      [(RequireDeclared) (instance? Declared provenance)]
+      [(RequireDerived) (instance? Derived provenance)]
+      [(RequireObserved) (instance? Observed provenance)]
+      [(RequireDesired) (instance? Desired provenance)]
+      [(RequireEffectAttempt) (instance? EffectAttempt provenance)]
+      [(RequireEffectReceipt) (instance? EffectReceipt provenance)])))
