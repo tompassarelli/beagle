@@ -102,12 +102,15 @@ done
 
 for function in \
   direct-map short-map direct-vector short-vector direct-set short-set \
-  direct-text short-text cond-projection main; do
+  direct-text short-text cond-projection unguarded-map nullable-map \
+  unguarded-vector unguarded-text unguarded-str unguarded-map-tail \
+  unguarded-vector-tail unguarded-set-tail unguarded-text-tail \
+  unguarded-regex main; do
   rg -q "^lowered fn_[0-9]+ ${function} " "$report" \
     || die "lowered function is missing: $function"
 done
 
-if rg -q 'TODO-NATIVE-(COLLECTION|GET|NTH|SUBVEC|ASSOC|MAP-KEYS|CONTAINS|DOSEQ|REDUCE|VEC|INTO|TEXT)' \
+if rg -q 'TODO-NATIVE-(COLLECTION|GET|NTH|SUBVEC|ASSOC|MAP-KEYS|MAP-VALUES|CONTAINS|DOSEQ|REDUCE|VEC|INTO|TEXT|REST|POP|REVERSE|CONCAT|DISJ|SUBS|REGEX)' \
   "$report"; then
   cat "$report" >&2
   die "a C2 rejection shape remains"

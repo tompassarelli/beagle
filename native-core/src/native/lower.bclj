@@ -6326,6 +6326,124 @@
   [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
   (value-to-text-type-inner? types target []))
 
+(defn value-to-text-compatible?
+  [(types (Vec core/TypeDef)) (target core/NativeId)] Bool
+  (if (value-to-text-type? types target)
+    true
+    (let [definition (U core/TypeDef Nil) (lookup-type types target)
+          variants (Vec core/TypeVariant) (union-variants-of types target)]
+      (if (nil? definition)
+        false
+        (loop [position Int 0]
+          (if (>= position (count variants))
+            false
+            (let [variant core/TypeVariant (nth variants position)
+                  payload (U core/NativeId Nil)
+                  (core/typevariant-payload-type variant)]
+              (if (or (and (nil? payload)
+                        (nil-value-variant? definition variant))
+                      (and (some? payload)
+                        (value-to-text-type? types payload)))
+                true
+                (recur (+ position 1))))))))))
+
+;; A dynamic source union may contain values outside `str`'s native domain.
+;; Dispatch first so printable alternatives use their exact descriptor and an
+;; unsupported runtime alternative traps without rejecting the whole function.
+(defn lower-value-to-text
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (value-id core/NativeId)
+   (value-type core/NativeId)]
+  ExprResultV0
+  (if (value-to-text-type? types value-type)
+    (let [result-id core/NativeId (state-id state owner "str-value")]
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->ValueToTextInstructionV0
+            (core/->SsaValueV0 result-id (type-id "String"))
+            (core/->ValueStrV0 true) value-type value-id
+            (arena-value-id owner)))
+        result-id (type-id "String") false))
+    (let [definition (U core/TypeDef Nil) (lookup-type types value-type)
+          variants (Vec core/TypeVariant) (union-variants-of types value-type)]
+      (if (or (nil? definition) (= 0 (count variants)))
+        (fail-result state
+          "TODO-NATIVE-STR-OPERANDS: str operand has no printable native alternative")
+        (let [join-id core/NativeId (state-id state owner "str-value-join")
+              join-value core/NativeId
+              (state-id state owner "str-value-result")
+              cases (Vec core/SwitchCaseV0)
+              (loop [position Int 0
+                     collected (Vec core/SwitchCaseV0) []]
+                (if (>= position (count variants))
+                  collected
+                  (recur (+ position 1)
+                    (conj collected
+                      (core/->SwitchCaseV0
+                        (core/typevariant-id (nth variants position))
+                        (state-id state owner
+                          (str "str-value-arm-" position))
+                        [])))))
+              switched BodyStateV0
+              (state-close (state-bump state)
+                (core/->SwitchTerminator value-id cases))
+              armed BodyStateV0
+              (loop [position Int 0 current BodyStateV0 switched]
+                (if (or (>= position (count variants))
+                        (state-blocked? current))
+                  current
+                  (let [variant core/TypeVariant (nth variants position)
+                        payload (U core/NativeId Nil)
+                        (core/typevariant-payload-type variant)
+                        opened BodyStateV0
+                        (state-open-block current
+                          (state-id state owner
+                            (str "str-value-arm-" position))
+                          [])]
+                    (cond
+                      (and (nil? payload)
+                        (nil-value-variant? definition variant))
+                      (let [empty-id core/NativeId
+                            (state-id opened owner "str-value-empty")]
+                        (recur (+ position 1)
+                          (state-close
+                            (state-emit (state-bump opened)
+                              (core/->AtomInstruction
+                                (core/->SsaValueV0 empty-id (type-id "String"))
+                                (core/->TextAtom "")))
+                            (core/->JumpTerminator join-id [empty-id]))))
+
+                      (and (some? payload)
+                        (value-to-text-type? types payload))
+                      (let [extracted-id core/NativeId
+                            (state-id opened owner "str-value-extract")
+                            rendered-id core/NativeId
+                            (state-id (state-bump opened) owner
+                              "str-value-render")]
+                        (recur (+ position 1)
+                          (state-close
+                            (state-emit
+                              (state-emit (state-bump (state-bump opened))
+                                (core/->UnionExtractInstruction
+                                  (core/->SsaValueV0 extracted-id payload)
+                                  value-id (core/typevariant-id variant)))
+                              (core/->ValueToTextInstructionV0
+                                (core/->SsaValueV0 rendered-id
+                                  (type-id "String"))
+                                (core/->ValueStrV0 true) payload extracted-id
+                                (arena-value-id owner)))
+                            (core/->JumpTerminator join-id [rendered-id]))))
+
+                      :else
+                      (recur (+ position 1)
+                        (narrow-mismatch-arm owner opened position))))))]
+          (->ExprResultV0
+            (state-open-block armed join-id
+              [(core/->Parameter join-value (type-id "String"))])
+            join-value (type-id "String") false))))))
+
 ;; Sort order is derived only from a sealed, acyclic descriptor graph. Maps,
 ;; sets, cells, callables, and outcomes have no implicit collection order.
 (defn comparable-type-inner?
@@ -7637,23 +7755,64 @@
                     [] (arena-value-id owner) equality))
                 result-id expected false))))))))
 
-(defn expected-collection-argument-type
+;; A receiver entry names the carrier kind, not the exact type:
+;; `builtin-boundary-target` resolves it against the operand's own
+;; alternatives. Only a builtin with one intended dynamic carrier belongs
+;; here; an omitted receiver keeps its source type and lets normal lowering
+;; report any unsupported ambiguity.
+(defn expected-builtin-argument-type
   [(types (Vec core/TypeDef))
    (callee String)
    (position Int)
    (prior-types (Vec core/NativeId))]
   (U core/NativeId Nil)
-  (if (= 0 (count prior-types))
-    nil
+  (if (= position 0)
+    (cond
+      (or (= "get" callee) (= "assoc" callee)
+        (= "dissoc" callee) (= "contains?" callee)
+        (= "keys" callee) (= "vals" callee))
+      (slice-value-map-type-id)
+
+      (or (= "conj" callee) (= "vec" callee)
+        (= "first" callee) (= "last" callee) (= "peek" callee)
+        (= "subvec" callee) (= "into" callee) (= "set" callee)
+        (= "rest" callee) (= "pop" callee) (= "reverse" callee)
+        (= "concat" callee))
+      (slice-value-vector-type-id)
+
+      (= "disj" callee)
+      (slice-value-set-type-id)
+
+      (or (= "str/lower-case" callee) (= "str/replace" callee)
+        (= "str/split" callee) (= "str/join" callee)
+        (= "str/starts-with?" callee) (= "str/includes?" callee)
+        (= "str/ends-with?" callee) (= "str/trim" callee)
+        (= "str/blank?" callee) (= "str/index-of" callee)
+        (= "str/last-index-of" callee) (= "subs" callee)
+        (= "re-matches" callee) (= "re-find" callee)
+        (= "re-seq" callee) (= "re-pattern" callee))
+      (type-id "String")
+
+      :else nil)
+    (if (= 0 (count prior-types))
+      nil
     (let [receiver core/NativeId (nth prior-types 0)]
       (cond
+        (and (>= position 1) (map-type? types receiver)
+          (= "assoc" callee) (= 1 (mod position 2)))
+        (map-key-of types receiver)
+
+        (and (>= position 2) (map-type? types receiver)
+          (= "assoc" callee) (= 0 (mod position 2)))
+        (map-value-of types receiver)
+
         (and (= position 1) (map-type? types receiver)
-          (or (= "get" callee) (= "assoc" callee) (= "dissoc" callee)
+          (or (= "get" callee) (= "dissoc" callee)
             (= "contains?" callee)))
         (map-key-of types receiver)
 
         (and (= position 2) (map-type? types receiver)
-          (or (= "get" callee) (= "assoc" callee)))
+          (= "get" callee))
         (map-value-of types receiver)
 
         (and (>= position 1) (set-type? types receiver)
@@ -7669,10 +7828,66 @@
         (and (>= position 1) (vector-type? types receiver) (= "conj" callee))
         (vector-element-of types receiver)
 
-        (and (= position 1) (vector-type? types receiver) (= "into" callee))
+        (and (= position 1) (vector-type? types receiver)
+          (or (= "into" callee) (= "concat" callee)))
         receiver
 
-        :else nil))))
+        (and (= "str/replace" callee) (< position 3))
+        (type-id "String")
+
+        (and (or (= "str/index-of" callee)
+               (= "str/last-index-of" callee)
+               (= "re-matches" callee) (= "re-find" callee)
+               (= "re-seq" callee))
+          (= position 1))
+        (type-id "String")
+
+        (and (= "str/split" callee) (= position 1))
+        (type-id "String")
+
+        (and (= "str/split" callee) (= position 2))
+        (int-type-id)
+
+        (and (= "str/join" callee) (= position 1))
+        (text-vector-type-of types)
+
+        (and (or (= "str/starts-with?" callee)
+               (= "str/includes?" callee)
+               (= "str/ends-with?" callee))
+          (= position 1))
+        (type-id "String")
+
+        :else nil)))))
+
+(defn same-builtin-carrier?
+  [(types (Vec core/TypeDef))
+   (left core/NativeId)
+   (right core/NativeId)]
+  Bool
+  (or (and (map-type? types left) (map-type? types right))
+    (and (vector-type? types left) (vector-type? types right))
+    (and (set-type? types left) (set-type? types right))
+    (and (same-id? left (type-id "String"))
+      (same-id? right (type-id "String")))))
+
+(defn builtin-boundary-target
+  [(types (Vec core/TypeDef))
+   (from core/NativeId)
+   (canonical core/NativeId)]
+  (U core/NativeId Nil)
+  (if (same-builtin-carrier? types from canonical)
+    from
+    (let [alternatives (Vec core/NativeId)
+          (possible-value-types types from)]
+      (loop [position Int 0 found (U core/NativeId Nil) nil]
+        (if (>= position (count alternatives))
+          found
+          (let [candidate core/NativeId (nth alternatives position)]
+            (if (same-builtin-carrier? types candidate canonical)
+              (if (some? found)
+                nil
+                (recur (+ position 1) candidate))
+              (recur (+ position 1) found))))))))
 
 (defn preserved-collection-argument-type
   [(types (Vec core/TypeDef))
@@ -8287,7 +8502,7 @@
       (let [operand core/NativeId (nth value-types position)]
         (if (or (text-operand? operand)
               (same-id? operand (int-type-id))
-              (value-to-text-type? types operand))
+              (value-to-text-compatible? types operand))
           (recur (+ position 1))
           false)))))
 
@@ -8311,19 +8526,11 @@
           (recur (+ position 1) current
             (conj rendered-values value-id)
             (conj rendered-types value-type))
-          (let [result-id core/NativeId
-                (state-id current owner (str "str-value-" position))
-                rendered BodyStateV0
-                (state-emit (state-bump current)
-                  (core/->ValueToTextInstructionV0
-                    (core/->SsaValueV0 result-id (text-type-id))
-                    (core/->ValueStrV0 true)
-                    value-type
-                    value-id
-                    (arena-value-id owner)))]
-            (recur (+ position 1) rendered
-              (conj rendered-values result-id)
-              (conj rendered-types (text-type-id)))))))))
+          (let [rendered ExprResultV0
+                (lower-value-to-text types owner current value-id value-type)]
+            (recur (+ position 1) (exprresultv0-state rendered)
+              (conj rendered-values (exprresultv0-value-id rendered))
+              (conj rendered-types (exprresultv0-type-id rendered)))))))))
 
 (defn scalar-predicate? [(callee String)] Bool
   (or (= "string?" callee)
@@ -15274,6 +15481,60 @@
                     (recur (+ position 1) loaded (conj values value-id)
                       (conj value-types element-type))))))))))))))
 
+(defn lower-map-assoc-pairs
+  [(types (Vec core/TypeDef))
+   (owner core/NativeId)
+   (state BodyStateV0)
+   (values (Vec core/NativeId))
+   (value-types (Vec core/NativeId))]
+  ExprResultV0
+  (let [map-type core/NativeId (nth value-types 0)
+        key-type core/NativeId (map-key-of types map-type)
+        value-type core/NativeId (map-value-of types map-type)
+        equality (U core/ConcreteEqualityV0 Nil)
+        (map-key-equality-for types key-type)]
+    (if (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-MAP-KEY-EQUALITY: assoc needs closed concrete key equality")
+      (loop [position Int 1
+             current BodyStateV0 state
+             current-map core/NativeId (nth values 0)]
+        (if (or (>= position (count values)) (state-blocked? current))
+          (if (state-blocked? current)
+            (dead-result current)
+            (->ExprResultV0 current current-map map-type false))
+          (cond
+            (not (same-id? key-type (nth value-types position)))
+            (fail-result current
+              "TODO-NATIVE-ASSOC-KEY: the key does not match the map key type")
+
+            :else
+            (let [coerced ExprResultV0
+                  (lower-boundary-coerce types owner current
+                    (nth values (+ position 1))
+                    (nth value-types (+ position 1)) value-type)
+                  settled BodyStateV0 (exprresultv0-state coerced)]
+              (cond
+                (state-blocked? settled)
+                (fail-result settled
+                  "TODO-NATIVE-ASSOC-VALUE: the value does not widen to the map value type")
+
+                (not (same-id? value-type (exprresultv0-type-id coerced)))
+                (fail-result settled
+                  "TODO-NATIVE-ASSOC-VALUE: a borrowed record reference cannot populate a direct-record map")
+
+                :else
+                (let [result-id core/NativeId
+                      (state-id settled owner "map-assoc")
+                      updated BodyStateV0
+                      (state-emit (state-bump settled)
+                        (core/->MapAssocInstructionV0
+                          (core/->SsaValueV0 result-id map-type)
+                          current-map (nth values position)
+                          (exprresultv0-value-id coerced)
+                          (arena-value-id owner) equality))]
+                  (recur (+ position 2) updated result-id))))))))))
+
 (defn lower-expr-raw
   [(env BodyEnvV0)
    (owner core/NativeId)
@@ -16714,7 +16975,8 @@
             (fail-result state
               "TODO-NATIVE-METHOD-CALL: v0 lowers only String.toLowerCase(Locale.ROOT)")
             (let [target ExprResultV0
-                  (lower-expr env owner state target-node)
+                  (lower-contextual-boundary env owner state target-node
+                    (text-type-id) (text-type-id))
                   current BodyStateV0 (exprresultv0-state target)]
               (cond
                 (exprresultv0-terminated target) target
@@ -17675,7 +17937,7 @@
                             (contextual-argument-type constructor signature
                               (count args) position)
                             receiver-expected (U core/NativeId Nil)
-                            (expected-collection-argument-type
+                            (expected-builtin-argument-type
                               types callee position value-types)
                             preserved-expected (U core/NativeId Nil)
                             (preserved-collection-argument-type types bare-callee
@@ -17693,8 +17955,15 @@
                             raw-argument ExprResultV0
                             (lower-expr-expected env owner current argument-node
                               argument-expected)
-                            argument ExprResultV0
+                            receiver-target (U core/NativeId Nil)
                             (if (or (nil? receiver-expected)
+                                  (not (= position 0)))
+                              receiver-expected
+                              (builtin-boundary-target types
+                                (exprresultv0-type-id raw-argument)
+                                receiver-expected))
+                            argument ExprResultV0
+                            (if (or (nil? receiver-target)
                                   (exprresultv0-terminated raw-argument)
                                   (state-blocked?
                                     (exprresultv0-state raw-argument)))
@@ -17703,7 +17972,7 @@
                                 (exprresultv0-state raw-argument)
                                 (exprresultv0-value-id raw-argument)
                                 (exprresultv0-type-id raw-argument)
-                                receiver-expected))]
+                                receiver-target))]
                         (if (exprresultv0-terminated argument)
                           (->ArgsResultV0 (exprresultv0-state argument) values
                             value-types true)
@@ -18089,7 +18358,11 @@
                 (fail-result current
                   "TODO-NATIVE-REGEX-SEQ-PATTERN: re-seq only supports the exact [\\p{L}\\p{Nd}]+ Unicode token pattern")
 
-                (and (= "str/split" callee) (= 2 (count values))
+                (and (= "str/split" callee)
+                  (or (= 2 (count values))
+                    (and (= 3 (count values))
+                      (= -1 (source-int-literal-value index (nth args 2)))
+                      (same-id? (int-type-id) (nth value-types 2))))
                   (text-operand? (nth value-types 0))
                   (text-operand? (nth value-types 1)))
                 (let [vector-type (U core/NativeId Nil)
@@ -18109,7 +18382,7 @@
 
                 (= "str/split" callee)
                 (fail-result current
-                  "TODO-NATIVE-TEXT-SPLIT-OPERANDS: str/split takes Text and Regex")
+                  "TODO-NATIVE-TEXT-SPLIT-OPERANDS: str/split takes Text and Regex, with optional literal -1 preserve-trailing limit")
 
                 (and (= "str/join" callee) (= 2 (count values))
                   (text-operand? (nth value-types 0))
@@ -18937,52 +19210,14 @@
                                 (arena-value-id owner)))
                             result-id vector-type false))))))
 
-                (and (= "assoc" callee) (= 3 (count values))
+                (and (= "assoc" callee) (>= (count values) 3)
+                  (= 1 (mod (count values) 2))
                   (map-type? types (nth value-types 0)))
-                (let [map-type core/NativeId (nth value-types 0)
-                      key-type core/NativeId (map-key-of types map-type)
-                      value-type core/NativeId (map-value-of types map-type)
-                      equality (U core/ConcreteEqualityV0 Nil)
-                      (map-key-equality-for types key-type)]
-                  (cond
-                    (not (same-id? key-type (nth value-types 1)))
-                    (fail-result current
-                      "TODO-NATIVE-ASSOC-KEY: the key does not match the map key type")
-                    (nil? equality)
-                    (fail-result current
-                      "TODO-NATIVE-MAP-KEY-EQUALITY: assoc needs closed concrete key equality")
-                    :else
-                    (let [coerced ExprResultV0
-                          (lower-boundary-coerce types owner current
-                            (nth values 2) (nth value-types 2) value-type)
-                          settled BodyStateV0 (exprresultv0-state coerced)]
-                      (cond
-                        (state-blocked? settled)
-                        (fail-result settled
-                          "TODO-NATIVE-ASSOC-VALUE: the value does not widen to the map value type")
-
-                        ;; A record extracted from a union is a borrowed
-                        ;; reference, never a direct record value for storage.
-                        (not (same-id? value-type
-                               (exprresultv0-type-id coerced)))
-                        (fail-result settled
-                          "TODO-NATIVE-ASSOC-VALUE: a borrowed record reference cannot populate a direct-record map")
-
-                        :else
-                        (let [result-id core/NativeId
-                              (state-id settled owner "map-assoc")]
-                          (->ExprResultV0
-                            (state-emit (state-bump settled)
-                              (core/->MapAssocInstructionV0
-                                (core/->SsaValueV0 result-id map-type)
-                                (nth values 0) (nth values 1)
-                                (exprresultv0-value-id coerced)
-                                (arena-value-id owner) equality))
-                            result-id map-type false))))))
+                (lower-map-assoc-pairs types owner current values value-types)
 
                 (= "assoc" callee)
                 (fail-result current
-                  "TODO-NATIVE-ASSOC-OPERANDS: assoc lowers one key/value pair on a closed map")
+                  "TODO-NATIVE-ASSOC-OPERANDS: assoc lowers one or more key/value pairs on a closed map")
 
                 (and (= "dissoc" callee) (= 2 (count values))
                   (map-type? types (nth value-types 0)))

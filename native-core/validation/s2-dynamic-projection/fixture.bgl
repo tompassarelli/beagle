@@ -1,6 +1,8 @@
 #lang beagle
 (ns native.s2-dynamic-projection)
 
+(def TEXTS (Vec String) ["A" "B"])
+
 (defn direct-map [(value Any)] Int
   (if (map? value)
     (let [item (get value :number 0)
@@ -59,6 +61,85 @@
     (string? value) (count (str/trim value))
     :else 0))
 
+(defn unguarded-map [(value Any)] Int
+  (let [updated (assoc value :extra 9 :other 10)
+        cleaned (dissoc updated :number)]
+    (if (and (contains? updated :extra)
+             (= (get updated :extra 0) 9)
+             (= (get updated :other 0) 10)
+             (= (count (keys cleaned)) 2))
+      9
+      0)))
+
+(defn nullable-map
+  [(value (U (Map Keyword Int) Nil)) (key Keyword)]
+  Int
+  (get value key 0))
+
+(defn unguarded-vector [(value Any)] Int
+  (let [pushed (conj value 4)
+        sliced (subvec value 1 3)
+        joined (into value value)
+        distinct (set value)
+        copied (vec value)]
+    (if (and (= (first value) 1)
+             (= (last value) 3)
+             (= (peek value) 3)
+             (= (count pushed) 4)
+             (= (count sliced) 2)
+             (= (count joined) 6)
+             (= (count distinct) 3)
+             (= (count copied) 3))
+      8
+      0)))
+
+(defn unguarded-text [(value Any) (declared (Vec String))] String
+  (let [lowered (str/lower-case value)
+        replaced (str/replace value #"A" "a")
+        pieces (str/split value #"-" -1)]
+    (if (and (str/starts-with? lowered "a")
+             (str/includes? replaced "a-")
+             (str/ends-with? value "-")
+             (= (count declared) 2))
+      (str/join ":" pieces)
+      "")))
+
+(defn unguarded-str [(value Any)] String
+  (str "value=" value))
+
+(defn unguarded-map-tail [(value Any)] Int
+  (count (vals value)))
+
+(defn unguarded-vector-tail [(value Any)] Int
+  (let [tail (rest value)
+        popped (pop value)
+        flipped (reverse value)
+        doubled (concat value value)]
+    (if (and (= (count tail) 2)
+             (= (count popped) 2)
+             (= (count flipped) 3)
+             (= (count doubled) 6))
+      7
+      0)))
+
+(defn unguarded-set-tail [(value Any) (member Any)] Int
+  (count (disj value member)))
+
+(defn unguarded-text-tail [(value Any) (needle Any)] Int
+  (let [sliced (subs value 1)
+        trimmed (str/trim value)
+        found (str/index-of value needle)
+        last-found (str/last-index-of value needle)]
+    (if (and (= (count sliced) 3)
+             (= (count trimmed) 4)
+             (some? found)
+             (some? last-found))
+      6
+      0)))
+
+(defn unguarded-regex [(value Any)] Int
+  (if (re-matches #"A.*" value) 5 0))
+
 (defn main [] Int
   (if (and (= (direct-map {:number 7}) 7)
            (= (short-map {:number 7}) 1)
@@ -71,6 +152,16 @@
            (= (cond-projection {:left 1 :right 2}) 2)
            (= (cond-projection [8]) 1)
            (= (cond-projection #{8}) 1)
-           (= (cond-projection " ok ") 2))
+           (= (cond-projection " ok ") 2)
+           (= (unguarded-map {:number 7}) 9)
+           (= (nullable-map {:number 7} :number) 7)
+           (= (unguarded-vector [1 2 3]) 8)
+           (= (unguarded-text "A-B-" TEXTS) "A:B:")
+           (= (unguarded-str 7) "value=7")
+           (= (unguarded-map-tail {:number 7}) 1)
+           (= (unguarded-vector-tail [1 2 3]) 7)
+           (= (unguarded-set-tail #{1 2 3} 2) 2)
+           (= (unguarded-text-tail "A-B-" "-") 6)
+           (= (unguarded-regex "A-B-") 5))
     0
     1))
