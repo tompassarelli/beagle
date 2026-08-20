@@ -1,10 +1,10 @@
 ;; The binding is the FIELD, so applying the variant's own accessor to it is
 ;; a type error. Before the fix this checked clean and emitted broken code.
 (defunion Shape
-  (Circle [(radius Int)])
-  (Square [(side Int)]))
+  (Circle [radius Int])
+  (Square [side Int]))
 
-(defn shape-size [(s Shape)] Int
+(defn shape-size [s Shape] Int
   (match s
     [(Circle c) (circle-radius c)]
     [(Square q) (square-side q)]))

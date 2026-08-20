@@ -5,11 +5,11 @@
 ;; construct one but not read it has half a type.
 (js/export
   (defrecord Pos
-    [(x Float)
-     (z Float)]))
+    [x Float
+     z Float]))
 
 (js/export
   (defn origin [] Pos (->Pos 0.0 0.0)))
 
 (js/export
-  (defn sum [(p Pos)] Float (+ (pos-x p) (pos-z p))))
+  (defn sum [p Pos] Float (+ (pos-x p) (pos-z p))))

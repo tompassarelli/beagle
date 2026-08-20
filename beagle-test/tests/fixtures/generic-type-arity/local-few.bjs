@@ -1,6 +1,8 @@
 #lang beagle/js
 
 (defunion (Pair A B)
-  (PairValue [(left A) (right B)]))
+  (PairValue
+    [left A
+     right B]))
 
-(defn keep [(value (Pair String))] String "bad")
+(defn keep [value (Pair String)] String "bad")

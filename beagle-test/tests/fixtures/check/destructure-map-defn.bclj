@@ -1,1 +1,1 @@
-(defn process [({:keys [name age]} (Map Keyword Any))] Any (println name))
+(defn process [{:keys [name age]} (Map Keyword Any)] Any (println name))

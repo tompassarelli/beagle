@@ -4,8 +4,10 @@
 
 (js/export
   (defunion (Box T)
-    (BoxValue [(value T)])))
+    (BoxValue [value T])))
 
 (js/export
   (defunion (Pair A B)
-    (PairValue [(left A) (right B)])))
+    (PairValue
+      [left A
+       right B])))

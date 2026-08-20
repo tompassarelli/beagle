@@ -7,7 +7,7 @@
 (ns xmod.unhanded-field-type)
 (require xmod.shape-kinds :as p)
 
-(defn wrong [(s p/Shape)] Int
+(defn wrong [s p/Shape] Int
   (match s
     [(Circle radius) radius]
     [(Rect width height) height]))

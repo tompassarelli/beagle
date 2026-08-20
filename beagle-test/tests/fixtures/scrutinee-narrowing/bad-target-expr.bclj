@@ -3,12 +3,14 @@
 ;; An arbitrary match target proves nothing about `s` — only the evaluated
 ;; value is proven, and there is no name for it.
 (defunion Shape
-  (Circle [(radius Int)])
-  (Rect [(width Int) (height String)]))
+  (Circle [radius Int])
+  (Rect
+    [width Int
+     height String]))
 
-(defn identity-shape [(s Shape)] Shape s)
+(defn identity-shape [s Shape] Shape s)
 
-(defn area [(s Shape)] Int
+(defn area [s Shape] Int
   (match (identity-shape s)
     [(Circle r) (circle-radius s)]
     [(Rect w h) w]))

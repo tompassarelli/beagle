@@ -2,4 +2,4 @@
 (ns export-xmodule.ok (:require [export-xmodule.provider :refer [scale]]))
 
 (js/export
-  (defn go [(x Float)] Float (scale x 2.0)))
+  (defn go [x Float] Float (scale x 2.0)))

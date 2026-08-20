@@ -7,6 +7,6 @@
 (ns xmod.unhanded-nonexhaustive)
 (require xmod.shape-kinds :as p)
 
-(defn area [(s p/Shape)] Int
+(defn area [s p/Shape] Int
   (match s
     [(Circle radius) radius]))

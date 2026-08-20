@@ -6,4 +6,4 @@
 ;; must keep behaving the way it does today.
 (ns modres.enumerated-provider)
 
-(defn scale [(n Int)] Int n)
+(defn scale [n Int] Int n)

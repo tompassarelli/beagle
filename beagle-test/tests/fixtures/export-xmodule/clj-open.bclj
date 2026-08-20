@@ -2,4 +2,4 @@
 (ns export-xmodule.clj-open
   (:require [export-xmodule.clj-prov :as prov]))
 
-(defn go [(x Float)] Float (prov/open-scale x 2.0))
+(defn go [x Float] Float (prov/open-scale x 2.0))

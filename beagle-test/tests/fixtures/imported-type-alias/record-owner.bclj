@@ -2,5 +2,5 @@
 
 (ns record-owner)
 
-(defrecord Item [(value Int)])
+(defrecord Item [value Int])
 (defalias Term (Dyn String Item))

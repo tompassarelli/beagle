@@ -7,4 +7,4 @@
 (ns modres.solo)
 (require modres.nowhere :as gone)
 
-(defn use-it [(n Int)] Int (gone/absolutely-not-a-function n))
+(defn use-it [n Int] Int (gone/absolutely-not-a-function n))

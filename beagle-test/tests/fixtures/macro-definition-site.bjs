@@ -7,8 +7,8 @@
 
 ;; The exported macro expands to these references in the consumer, so they
 ;; must cross the js module boundary with it.
-(js/export (defrecord Box [(value String)]))
+(js/export (defrecord Box [value String]))
 
 (js/export
-  (defn normalize [(value String)] String
+  (defn normalize [value String] String
     value))

@@ -4,5 +4,5 @@
 
 (require alias-owner :as t)
 
-(defn accepts? [(value t/StoreValue)] Bool
+(defn accepts? [value t/StoreValue] Bool
   (string? value))

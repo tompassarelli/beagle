@@ -2,9 +2,11 @@
 
 (require provider :as p)
 
-(defn keep-local [(value (Box String Int))] (Box String Int) value)
+(defn keep-local [value (Box String Int)] (Box String Int) value)
 
 (defunion (Box A B)
-  (BoxValue [(left A) (right B)]))
+  (BoxValue
+    [left A
+     right B]))
 
-(defn keep-imported [(value (p/Box String))] (p/Box String) value)
+(defn keep-imported [value (p/Box String)] (p/Box String) value)

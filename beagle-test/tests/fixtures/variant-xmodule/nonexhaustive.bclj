@@ -4,6 +4,6 @@
 ;; `p/Shape`, the provider declares it `Shape`.
 (require prov :as p)
 
-(defn area [(s p/Shape)] Int
+(defn area [s p/Shape] Int
   (match s
     [(Circle r) r]))

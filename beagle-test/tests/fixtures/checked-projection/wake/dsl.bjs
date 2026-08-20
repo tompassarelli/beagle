@@ -4,12 +4,14 @@
 ;; The exported entity macro expands to these constructors in the consumer,
 ;; so the records must cross the js module boundary with it.
 (js/export
-  (defrecord FieldDeclaration [(name String) (type-name String)]))
+  (defrecord FieldDeclaration
+    [name String
+     type-name String]))
 
 (js/export
   (defrecord EntityDeclaration
-    [(name String)
-     (fields (Vec FieldDeclaration))]))
+    [name String
+     fields (Vec FieldDeclaration)]))
 
 (defmacro entity [name fields]
   (let [field-declarations

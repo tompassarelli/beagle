@@ -5,4 +5,4 @@
 ;; reaches this interface only if resolution searches the munged spelling.
 (ns modres.wire-format)
 
-(defn encode [(n Int)] String "wire")
+(defn encode [n Int] String "wire")

@@ -2,29 +2,37 @@
 
 (ns js-array-methods)
 
-(defn push-one [(xs (Vec Int)) (x Int)] Int
+(defn push-one
+  [xs (Vec Int)
+   x Int] Int
   (js/call xs .push x))
 
-(defn pop-last [(xs (Vec Int))] Int
+(defn pop-last [xs (Vec Int)] Int
   (js/call xs .pop))
 
-(defn first-idx [(xs (Vec Int)) (target Int)] Int
+(defn first-idx
+  [xs (Vec Int)
+   target Int] Int
   (js/call xs .indexOf target))
 
-(defn includes? [(xs (Vec Int)) (target Int)] Bool
+(defn includes?
+  [xs (Vec Int)
+   target Int] Bool
   (js/call xs .includes target))
 
-(defn joined [(xs (Vec String))] String
+(defn joined [xs (Vec String)] String
   (js/call xs .join ", "))
 
 (defn sliced
-  [(xs (Vec Int))
-   (start Int)
-   (end Int)] (Vec Int)
+  [xs (Vec Int)
+   start Int
+   end Int] (Vec Int)
   (js/call xs .slice start end))
 
-(defn reversed [(xs (Vec Int))] (Vec Int)
+(defn reversed [xs (Vec Int)] (Vec Int)
   (js/call xs .reverse))
 
-(defn concatenated [(a (Vec Int)) (b (Vec Int))] (Vec Int)
+(defn concatenated
+  [a (Vec Int)
+   b (Vec Int)] (Vec Int)
   (js/call a .concat b))

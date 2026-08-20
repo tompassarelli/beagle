@@ -6,9 +6,11 @@
 ;; an IMPORTED member exactly as it reaches a same-module one.
 
 (defunion Shape
-  (Circle [(radius Int)])
-  (Rect [(width Int) (height String)]))
+  (Circle [radius Int])
+  (Rect
+    [width Int
+     height String]))
 
 (defunion (Result T E)
-  (Ok [(value T)])
-  (Err [(error E)]))
+  (Ok [value T])
+  (Err [error E]))

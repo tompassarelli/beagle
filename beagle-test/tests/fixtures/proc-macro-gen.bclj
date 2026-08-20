@@ -6,7 +6,9 @@
      [(obj ~rec)] Any
      (get obj ~(make-keyword field))))
 
-(defrecord Point [(x Int) (y Int)])
+(defrecord Point
+  [x Int
+   y Int])
 
 (gen-getter Point x)
 (gen-getter Point y)

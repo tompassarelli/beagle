@@ -1,9 +1,11 @@
-(defrecord Product [(id Int) (name String)])
+(defrecord Product
+  [id Int
+   name String])
 
 (declare-extern lookup-product (Fn [Int] Product))
 
 ;; should fail: if returns (U Product Nil), not Product
-(defn find-product [(id Int)] Product
+(defn find-product [id Int] Product
   (if (> id 0)
     (lookup-product id)
     nil))

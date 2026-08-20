@@ -1,3 +1,5 @@
-(defrecord Employee [(name String) (rate Int)])
+(defrecord Employee
+  [name String
+   rate Int])
 (def e (->Employee "Alice" 95))
 (def n String (employee-name e))

@@ -1,19 +1,21 @@
 #lang beagle/js
 (ns query.fixture)
 
-(defrecord Point [(x Float) (y Float)])
+(defrecord Point
+  [x Float
+   y Float])
 
 (js/export
   (defrecord TerrainInterest
-    [(position (Vec Float))
-     (anchor (Vec Int))]))
+    [position (Vec Float)
+     anchor (Vec Int)]))
 
 (js/export
   (defrecord World
-    [(players (Vec String))
-     (elapsed Float)]))
+    [players (Vec String)
+     elapsed Float]))
 
-(defn point-x [({:keys [x y]} Point)] Float x)
+(defn point-x [{:keys [x y]} Point] Float x)
 
 (js/export
   (defn player-collision-radius [] Float 0.5))

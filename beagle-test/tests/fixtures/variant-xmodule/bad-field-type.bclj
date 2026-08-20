@@ -5,7 +5,7 @@
 ;; the whole arm typed as the variant instance.
 (require prov :as p)
 
-(defn wrong [(s p/Shape)] Int
+(defn wrong [s p/Shape] Int
   (match s
     [(Circle r) r]
     [(Rect w h) h]))

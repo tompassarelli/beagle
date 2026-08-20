@@ -2,11 +2,13 @@
 
 (ns shapes)
 
-(defrecord Circle [(radius Int)])
-(defrecord Rect [(width Int) (height Int)])
+(defrecord Circle [radius Int])
+(defrecord Rect
+  [width Int
+   height Int])
 
-(defn circle-area [(c Circle)] Int
+(defn circle-area [c Circle] Int
   (* (circle-radius c) (circle-radius c)))
 
-(defn rect-area [(r Rect)] Int
+(defn rect-area [r Rect] Int
   (* (rect-width r) (rect-height r)))

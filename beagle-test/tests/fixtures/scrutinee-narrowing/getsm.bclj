@@ -4,15 +4,17 @@
 ;; ONE member, so on the union it reads (U String Nil) — on the narrowed
 ;; scrutinee it is the member's own non-nullable String.
 (defunion Shape
-  (Circle [(radius Int)])
-  (Rect [(width Int) (height String)]))
+  (Circle [radius Int])
+  (Rect
+    [width Int
+     height String]))
 
-(defn height-of [(s Shape)] String
+(defn height-of [s Shape] String
   (match s
     [(Circle r) "none"]
     [(Rect w h) (:height s)]))
 
-(defn width-of [(s Shape)] Int
+(defn width-of [s Shape] Int
   (match s
     [(Circle r) 0]
     [(Rect w h) (get s :width)]))

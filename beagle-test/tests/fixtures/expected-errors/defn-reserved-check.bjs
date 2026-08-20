@@ -1,4 +1,4 @@
 #lang beagle/js
 ;; @error[bad-form] (defn check ...) — `check` is a reserved built-in form name and cannot be redefined; calls to it would resolve to the built-in, not your function. Rename the function.
 (ns app.checkbug)
-(defn check [(x Int)] Int (+ x 100))
+(defn check [x Int] Int (+ x 100))

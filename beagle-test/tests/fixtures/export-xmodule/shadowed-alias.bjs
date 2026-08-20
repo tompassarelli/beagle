@@ -3,5 +3,5 @@
   (:require [export-xmodule.provider :as p]))
 
 (js/export
-  (defn go [(p Float)] Float
+  (defn go [p Float] Float
     (p/scale p 2.0)))

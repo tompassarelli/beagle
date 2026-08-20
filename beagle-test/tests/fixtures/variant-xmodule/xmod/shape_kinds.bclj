@@ -7,5 +7,7 @@
 (ns xmod.shape-kinds)
 
 (defunion Shape
-  (Circle [(radius Int)])
-  (Rect [(width Int) (height String)]))
+  (Circle [radius Int])
+  (Rect
+    [width Int
+     height String]))

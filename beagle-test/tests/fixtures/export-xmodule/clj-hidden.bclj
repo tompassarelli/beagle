@@ -2,4 +2,4 @@
 (ns export-xmodule.clj-hidden
   (:require [export-xmodule.clj-prov :as prov]))
 
-(defn go [(x Float)] Float (prov/hidden-scale x 2.0))
+(defn go [x Float] Float (prov/hidden-scale x 2.0))

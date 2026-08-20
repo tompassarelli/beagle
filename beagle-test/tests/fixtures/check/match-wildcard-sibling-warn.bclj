@@ -1,8 +1,16 @@
-(defrecord Alpha [(id Int) (x String)])
-(defrecord Beta [(id Int) (y String)])
-(defrecord Gamma [(id Int) (z String)])
-(defrecord Delta [(id Int) (w String)])
-(defn handle [(e Any)] Int
+(defrecord Alpha
+  [id Int
+   x String])
+(defrecord Beta
+  [id Int
+   y String])
+(defrecord Gamma
+  [id Int
+   z String])
+(defrecord Delta
+  [id Int
+   w String])
+(defn handle [e Any] Int
   (match e
     [(Alpha id x) id]
     [(Beta id y) id]

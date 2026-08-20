@@ -3,4 +3,4 @@
   (:require [export-xmodule.provider :refer [internal]]))
 
 (js/export
-  (defn go [(x Float)] Float (internal x)))
+  (defn go [x Float] Float (internal x)))

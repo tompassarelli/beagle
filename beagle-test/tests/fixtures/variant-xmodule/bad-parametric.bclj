@@ -5,7 +5,7 @@
 ;; structured `[(value T)]` field list into three Any params.
 (require prov :as p)
 
-(defn get-it [(r (p/Result Int String))] String
+(defn get-it [r (p/Result Int String)] String
   (match r
     [(Ok v) v]
     [(Err e) e]))

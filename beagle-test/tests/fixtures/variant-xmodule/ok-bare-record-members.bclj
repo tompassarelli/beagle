@@ -11,7 +11,7 @@
 (defn build-late [] p/Stmt
   (p/->Emit "hi"))
 
-(defn tag [(n p/Node)] String
+(defn tag [n p/Node] String
   (match n
     [(Elem t k) t]
     [(Guard pr k) pr]))

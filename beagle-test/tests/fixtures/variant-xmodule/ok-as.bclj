@@ -4,12 +4,12 @@
 ;; pattern binds the FIELD positionally — same as a same-module defunion.
 (require prov :as p)
 
-(defn area [(s p/Shape)] Int
+(defn area [s p/Shape] Int
   (match s
     [(Circle r) r]
     [(Rect w h) w]))
 
-(defn second-field [(s p/Shape)] String
+(defn second-field [s p/Shape] String
   (match s
     [(Circle r) "circle"]
     [(Rect w h) h]))
@@ -17,7 +17,7 @@
 (defn build [] Int
   (p/circle-radius (p/->Circle 3)))
 
-(defn flagged [(f p/Flag)] Int
+(defn flagged [f p/Flag] Int
   (match f
     [(On) 1]
     [(Off) 0]))

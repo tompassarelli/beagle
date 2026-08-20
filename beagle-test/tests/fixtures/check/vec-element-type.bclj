@@ -1,6 +1,8 @@
-(defrecord Product [(id Int) (name String)])
+(defrecord Product
+  [id Int
+   name String])
 
-(defn process-products [(products (Vec Product))] Int
+(defn process-products [products (Vec Product)] Int
   (count products))
 
 ;; should pass: homogeneous vec of Products

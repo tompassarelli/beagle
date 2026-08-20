@@ -1,1 +1,1 @@
-(defn process [([a b c] (Vec Any))] Any (println a))
+(defn process [[a b c] (Vec Any)] Any (println a))

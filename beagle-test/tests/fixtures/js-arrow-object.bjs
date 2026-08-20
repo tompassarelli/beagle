@@ -5,10 +5,10 @@
 ;; Regression: an INLINE arrow fn whose body is a single object/map literal must
 ;; emit `(x) => ({…})` (an object return), not `(x) => {…}` (a JS block). See the
 ;; arrow-objlit fix in emit-js.rkt.
-(defn pairs [(xs Any)] Any
+(defn pairs [xs Any] Any
   (js/call xs .map
-    (fn [(g Any)] Any
+    (fn [g Any] Any
       {:k (js/get g .name) :v (js/get g .v)})))
 
-(defn empties [(xs Any)] Any
-  (js/call xs .map (fn [(_x Any)] Any {})))
+(defn empties [xs Any] Any
+  (js/call xs .map (fn [_x Any] Any {})))
