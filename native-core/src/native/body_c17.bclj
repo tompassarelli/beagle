@@ -290,6 +290,7 @@
       (= symbol "native_host_filesystem_create_temporary_sibling_v0")
       (= symbol "native_host_filesystem_rename_file_v0")
       (= symbol "native_host_filesystem_remove_file_v0")
+      (= symbol "native_host_filesystem_wait_for_change_v0")
       (= symbol "native_host_filesystem_lock_exclusive_v0")
       (= symbol "native_host_filesystem_unlock_v0")))
 

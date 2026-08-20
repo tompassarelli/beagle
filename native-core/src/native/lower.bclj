@@ -1135,7 +1135,7 @@
          (variant-id "HostFilesystemWaitResult" "ok") "ok" (type-id "String"))
        (core/->TypeVariant
          (variant-id "HostFilesystemWaitResult" "error") "error"
-         (type-id "String"))])))
+         (type-id "Int"))])))
 
 (defn filesystem-wait-outcome-type [] core/TypeDef
   (core/->TypeDef

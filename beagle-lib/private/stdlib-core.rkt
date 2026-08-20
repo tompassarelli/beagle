@@ -345,7 +345,7 @@
      (list 'host.fs/WaitForChangeOk
            (list (cons ':path (p 'String))))
      (list 'host.fs/WaitForChangeError
-           (list (cons ':message (p 'String))))))
+           (list (cons ':errno (p 'Int))))))
    (list
     'host.fs/LockExclusiveResult
     (list
