@@ -526,6 +526,7 @@ cache_key_material() {
     local -a key_inputs present_inputs present_flags digests
     key_inputs=("${core_modules[@]}"
                 bin/beagle-build-core
+                bin/_beagle-dev-unit-rule-identity
                 bin/beagle-core-compiler-projection
                 bin/beagle-build-all
                 bin/beagle-build
@@ -1856,6 +1857,19 @@ export BEAGLE_CORE_DEV_FACT_REUSE="$dev_fact_reuse"
 export BEAGLE_CORE_DEV_FACT_STORE="$dev_fact_store"
 export BEAGLE_CORE_REPO_ROOT="$BEAGLE_DIR"
 export BEAGLE_CORE_COMPILER_SOURCE_DIGEST="$compiler_source_digest"
+export BEAGLE_CORE_UNIT_RULE_EPOCH=""
+if [[ "$dev_fact_reuse" == 1 ]]; then
+    BEAGLE_CORE_UNIT_RULE_EPOCH="$(
+        "$BEAGLE_DIR/bin/_beagle-dev-unit-rule-identity" \
+            --compiled "$compiled" \
+            --driver "$BEAGLE_DIR/bin/beagle-build-core" \
+            --store-adapter "$BEAGLE_DIR/store/out/store/dev_compile_facts.clj" \
+            --profile "profile=3" \
+            --abi "$abi"
+    )"
+    [[ "$BEAGLE_CORE_UNIT_RULE_EPOCH" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        die "development unit rule identity is malformed"
+fi
 export BEAGLE_CORE_COMPILER_PROJECTION_ID="sha256:$projection_cache_key"
 export BEAGLE_CORE_SEMANTIC_READ_RULES_ID="sha256:$compiler_source_digest"
 export BEAGLE_CORE_SEMANTIC_READ_STORE="$cache_root/semantic-read.storelog"
@@ -3484,20 +3498,10 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
   (let [source
         (stages/frozensourcestagev1-stage frozen-source)
         source-units (stages/sourcestagev1-units source)
-        compiler-source
-        (or (System/getenv "BEAGLE_CORE_COMPILER_SOURCE_DIGEST")
-            "unresolved")
-        compiler-context
-        (stages/content-digest
-         (stages/canonical-record
-          "beagle-dev-unit-context-v1"
-          [compiler-commit
-           compiler-source
-           dev-fact-profile
-           (str "abi=" (System/getenv "BEAGLE_CORE_ABI"))
-           "unit-contract-v0"
-           "typed-unit-wire-v1"
-           "native-unit-wire-v1"]))
+        compiler-rule-epoch
+        (or (System/getenv "BEAGLE_CORE_UNIT_RULE_EPOCH")
+            (throw
+             (ex-info "development unit rule identity is unavailable" {})))
         profile-identity (unit/core-profile-identity-v1)
         semantic-contracts
         (unit/five-form-semantic-contracts profile-identity)
@@ -3509,7 +3513,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
            (str "abi=" (System/getenv "BEAGLE_CORE_ABI"))]))
         preparation
         (singleton/prepare-unit-compilation
-         frozen-source compiler-context semantic-contracts configuration)]
+         frozen-source compiler-rule-epoch semantic-contracts configuration)]
     (if-not
      (instance?
       native.unit_compile.UnitPreparationAcceptedV0 preparation)
@@ -3520,18 +3524,18 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
             (singleton/unitpreparationacceptedv0-prepared preparation)
             receipts
             (dev-unit-receipts
-             source-units prepared profile-identity compiler-context
+             source-units prepared profile-identity compiler-rule-epoch
              materialization-receipt-id)
             store (System/getenv "BEAGLE_CORE_DEV_FACT_STORE")
             typed-query
             (query-dev-facts
              store
              (dev-typed-requests
-              source-units receipts compiler-context dev-fact-profile))
+              source-units receipts compiler-rule-epoch dev-fact-profile))
             typed-pass
             (compile-dev-typed-units
              source-units receipts prepared (:rows typed-query)
-             compiler-context dev-fact-profile)]
+             compiler-rule-epoch dev-fact-profile)]
         (if-not (:ok? typed-pass)
           {:ok? false
            :reason (:reason typed-pass)
@@ -3542,11 +3546,11 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                  store
                  (dev-native-requests
                   source-units receipts typed-units
-                  compiler-context dev-fact-profile))
+                  compiler-rule-epoch dev-fact-profile))
                 native-pass
                 (compile-dev-native-units
                  source-units receipts prepared typed-units (:rows native-query)
-                 compiler-context dev-fact-profile abi)
+                 compiler-rule-epoch dev-fact-profile abi)
                 counters
                 (merge-dev-counters
                  (:counters typed-pass)

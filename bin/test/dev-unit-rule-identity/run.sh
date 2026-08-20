@@ -23,6 +23,20 @@ done
 cp "$repo/bin/beagle-build-core" "$scratch/beagle-build-core"
 cp "$store_adapter" "$scratch/store/out/store/dev_compile_facts.clj"
 
+dev_attempt="$(awk '
+    /^\(defn dev-compile-attempt/ { emitting = 1 }
+    /^\(defn dev-fact-report/ { emitting = 0 }
+    emitting { print }
+' "$scratch/beagle-build-core")"
+rg -q -F 'BEAGLE_CORE_UNIT_RULE_EPOCH' <<<"$dev_attempt" || {
+    echo "dev-unit-rule-identity: dev receipts do not consume the unit rule epoch" >&2
+    exit 1
+}
+if rg -q -F 'BEAGLE_CORE_COMPILER_SOURCE_DIGEST' <<<"$dev_attempt"; then
+    echo "dev-unit-rule-identity: whole compiler identity remains in the unit receipt path" >&2
+    exit 1
+fi
+
 identity_args=(
     --compiled "$scratch/compiled"
     --driver "$scratch/beagle-build-core"
