@@ -35,6 +35,18 @@
    (kernel/lint-declared-profile
     (into vocabulary-profile-triples propositions) space-id)))
 
+(def fact-profile-id "fact-v1")
+(def fact-profile-triples
+  (into [(kernel/relational-profile-declaration space-id fact-profile-id)]
+        (mapv #(kernel/profile-rule fact-profile-id %)
+              (conj kernel/relational-profile-rules
+                    kernel/fact-normal-form-profile-rule))))
+
+(defn lint-facts [propositions]
+  (violation-rules
+   (kernel/lint-declared-profile
+    (into fact-profile-triples propositions) space-id)))
+
 (def namespaced-predicate (keyword "contact" "email"))
 (def namespaced-write
   (t/triple "Alice" namespaced-predicate "alice@example.com"))
@@ -42,6 +54,22 @@
   (t/triple namespaced-predicate kernel/vocabulary-membership
             :contact_relations))
 (def kernel-write (t/triple "north-corpus" :kernel/tx-sequence 1842))
+
+(def fact-relationships
+  [(t/triple :contains kernel/vocabulary-membership :relationships)
+   (t/triple "parser" :contains "node-1")
+   (t/triple "node-1" kernel/vocabulary-membership :nodes)])
+(def reified-field-memberships
+  (mapv #(t/triple % kernel/vocabulary-membership :relationships)
+        [:relation :subject :slot :value]))
+(def opaque-row-id "program-fact-01")
+(def reified-program-fact
+  [(t/triple opaque-row-id :relation :program/node)
+   (t/triple opaque-row-id :subject "parser")
+   (t/triple opaque-row-id :slot "node")
+   (t/triple opaque-row-id :value "node-1")])
+(def implicit-program-node
+  (t/triple "parser" :program/node "node-1"))
 
 (def negative-corpus
   [(t/triple (t/triple "nested" "subject" 1) "predicate" "value")
@@ -87,7 +115,20 @@
    ["a space that omits R5 keeps its namespaced spellings"
     (empty? (lint-one namespaced-write))]
    ["R5 exempts the engine's primitive :kernel/ vocabulary"
-    (empty? (lint-vocabulary [kernel-write]))]])
+    (empty? (lint-vocabulary [kernel-write]))]
+   ["FNF admits ordinary triples with explicit relationship membership"
+    (empty? (lint-facts fact-relationships))]
+   ["FNF rejects an opaque relation/subject/slot/value fact row"
+    (= ["FNF" "FNF" "FNF" "FNF"]
+       (lint-facts (into reified-field-memberships
+                         reified-program-fact)))]
+   ["FNF rejects :program/node as a noun relation with implicit membership"
+    (= ["FNF"] (lint-facts [implicit-program-node]))]
+   ["non-FNF profiles leave fact-oriented admission out of scope"
+    (empty? (lint-one implicit-program-node))]
+   ["FNF leaves closed kernel and RPC vocabulary out of scope"
+    (empty? (lint-facts [kernel-write
+                         (t/triple "north-corpus" :rpc/request "open")]))]])
 
 (defn read-corpus [path]
   (with-open [reader (io/reader path)]
