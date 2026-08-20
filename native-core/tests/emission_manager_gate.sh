@@ -8,8 +8,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 manager="$root/native-core/bin/emit-workers"
-supervisor="$root/native-core/bin/run-bounded.rkt"
-source "$root/bin/_beagle-racket"
+BEAGLE_DIR="$root"
+source "$root/bin/_beagle-rust-supervisor"
+supervisor="$(beagle_resolve_rust_supervisor 'emission manager test')" || {
+  echo "emission manager test: native bounded supervisor is unavailable" >&2
+  exit 2
+}
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-emission-manager.XXXXXX")"
 cleanup() {
@@ -44,7 +48,7 @@ run_case() {
   local case_root="$scratch/$label"
   mkdir "$case_root"
   BEAGLE_FAKE_WORKER_MODE="$mode" \
-    "$manager" "$RACKET" "$supervisor" "$deadline" 1 \
+    "$manager" "$supervisor" "$deadline" 1 \
     "$fake_worker" "$scratch/compiled" c17 "$scratch/program.wire" \
     "$case_root" 8 4 lp64 ignored
   grep -Fqx 'emission-manager-v0 reaped workers=4' \

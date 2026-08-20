@@ -27,21 +27,20 @@ die() {
   exit 2
 }
 
-[[ $# -eq 13 ]] || die "expected 13 arguments"
+[[ $# -eq 12 ]] || die "expected 12 arguments"
 
-racket="$1"
-supervisor="$2"
-worker_timeout="$3"
-kill_grace="$4"
-bb="$5"
-compiled="$6"
-backend="$7"
-wire_path="$8"
-root="$9"
-function_count="${10}"
-worker_count="${11}"
-abi_id="${12}"
-worker_code="${13}"
+supervisor="$1"
+worker_timeout="$2"
+kill_grace="$3"
+bb="$4"
+compiled="$5"
+backend="$6"
+wire_path="$7"
+root="$8"
+function_count="$9"
+worker_count="${10}"
+abi_id="${11}"
+worker_code="${12}"
 
 [[ "$function_count" =~ ^[1-9][0-9]*$ ]] ||
   die "function count must be positive"
@@ -86,7 +85,7 @@ for ((worker_index = 0; worker_index < worker_count; worker_index++)); do
   done
   trace worker-start "$worker_index"
   BEAGLE_BOUNDED_COMPLETION_RECEIPT="$worker_dir/supervisor.receipt" \
-    "$racket" "$supervisor" "$worker_timeout" "$kill_grace" -- \
+    "$supervisor" "$worker_timeout" "$kill_grace" -- \
     "$bb" -cp "$compiled" -e "$worker_code" \
     "$backend" "$wire_path" "$worker_dir" "$indexes" "$abi_id" \
     "$worker_index" \

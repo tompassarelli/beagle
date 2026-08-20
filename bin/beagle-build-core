@@ -22,13 +22,9 @@ SEMANTIC_READ_STORE="$BEAGLE_DIR/native-core/bin/semantic_read_store.clj"
 AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
 CORE_COMPILER_PROJECTION="$BIN/beagle-core-compiler-projection"
-SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded.rkt"
 EMIT_MANAGER="$BEAGLE_DIR/native-core/bin/emit-workers"
-PLATFORM_SUPERVISOR="$BEAGLE_DIR/native-core/bin/run-bounded"
 MODULE_SOURCE_ROOT_CLI="$BEAGLE_DIR/beagle-lib/private/module-source-root-cli.rkt"
 original_args=("$@")
-native_route_selected=0
-[[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]] && native_route_selected=1
 source "$BIN/_beagle-racket"
 source "$BIN/_beagle-source-id"
 
@@ -37,26 +33,18 @@ core_kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
     echo "beagle build: BEAGLE_CORE_KILL_GRACE_SECONDS must be a positive integer" >&2
     exit 2
 }
-[[ -f "$SUPERVISOR" ]] || {
-    echo "beagle build: bounded supervisor is unavailable: $SUPERVISOR" >&2
-    exit 2
-}
 [[ -x "$EMIT_MANAGER" ]] || {
     echo "beagle build: emission manager is unavailable: $EMIT_MANAGER" >&2
     exit 2
 }
-if [[ "$native_route_selected" == 1 && ! -x "$PLATFORM_SUPERVISOR" ]]; then
-    echo "beagle build: platform supervisor is unavailable: $PLATFORM_SUPERVISOR" >&2
-    exit 2
-fi
 
-# The Rust supervisor is cached outside launch-critical checkouts; absence is
-# a fallback to the incumbent supervisors below.
+# The native supervisor is cached outside launch-critical checkouts.
 source "$BIN/_beagle-rust-supervisor"
-RUST_SUPERVISOR="$(beagle_resolve_rust_supervisor 'beagle build' || true)"
-if [[ -n "$RUST_SUPERVISOR" ]]; then
-    export BEAGLE_RUST_SUPERVISOR="$RUST_SUPERVISOR"
-fi
+NATIVE_SUPERVISOR="$(beagle_resolve_rust_supervisor 'beagle build')" || {
+    echo "beagle build: native bounded supervisor is unavailable" >&2
+    exit 2
+}
+export BEAGLE_RUST_SUPERVISOR="$NATIVE_SUPERVISOR"
 # One bounded supervisor owns the entire build tree. It prefers a private PID
 # namespace and falls back to a scoped process group when the host forbids
 # unprivileged user namespaces. Individual phases use the same supervisor with
@@ -67,19 +55,9 @@ if [[ "${BEAGLE_CORE_SUPERVISED:-0}" != "1" ]]; then
         echo "beagle build: BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS must be a positive integer" >&2
         exit 2
     }
-    if [[ -n "$RUST_SUPERVISOR" ]]; then
-        exec "$RUST_SUPERVISOR" \
-            "$overall_timeout" "$core_kill_grace" -- \
-            env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
-    elif [[ "$native_route_selected" == 1 ]]; then
-        exec "$PLATFORM_SUPERVISOR" \
-            "$overall_timeout" "$core_kill_grace" -- \
-            env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
-    else
-        exec "$RACKET" "$SUPERVISOR" \
-            "$overall_timeout" "$core_kill_grace" -- \
-            env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
-    fi
+    exec "$NATIVE_SUPERVISOR" \
+        "$overall_timeout" "$core_kill_grace" -- \
+        env BEAGLE_CORE_SUPERVISED=1 "$0" "$@"
 fi
 
 source "$BEAGLE_DIR/share/targets.sh"
@@ -114,13 +92,7 @@ run_bounded() {
     local seconds="$1"
     local kill_grace="$2"
     shift 2
-    if [[ -n "$RUST_SUPERVISOR" ]]; then
-        "$RUST_SUPERVISOR" "$seconds" "$kill_grace" -- "$@"
-    elif [[ "$native_route_selected" == 1 ]]; then
-        "$PLATFORM_SUPERVISOR" "$seconds" "$kill_grace" -- "$@"
-    else
-        "$RACKET" "$SUPERVISOR" "$seconds" "$kill_grace" -- "$@"
-    fi
+    "$NATIVE_SUPERVISOR" "$seconds" "$kill_grace" -- "$@"
 }
 
 run_phase_with_grace() {
@@ -559,9 +531,8 @@ cache_key_material() {
                 bin/beagle-build
                 bin/_beagle-racket
                 bin/_beagle-source-id
+                bin/_beagle-rust-supervisor
                 native-core/bin/emit-workers
-                native-core/bin/run-bounded
-                native-core/bin/run-bounded.rkt
                 native-core/bin/semantic_read_store.clj
                 native-core/validation/build-finalize.clj
                 share/targets.sh
@@ -601,10 +572,10 @@ cache_key_material() {
         LC_ALL=C sort -z |
         xargs -0 sha256sum |
         awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+    printf 'native-supervisor %s\n' \
+        "$(sha256sum "$NATIVE_SUPERVISOR" | awk '{print $1}')"
     if [[ -n "$native_compiler_digest" ]]; then
         printf 'compiler-artifact-sha256 %s\n' "$native_compiler_digest"
-        printf 'platform-supervisor %s\n' \
-            "$(sha256sum "$PLATFORM_SUPERVISOR" | awk '{print $1}')"
     fi
 }
 
@@ -1862,8 +1833,7 @@ export BEAGLE_CORE_EMIT_WORKERS="$emit_workers"
 export BEAGLE_CORE_EMIT_WORKERS_EXPLICIT="$emit_workers_explicit"
 export BEAGLE_CORE_EMIT_MANAGER="$EMIT_MANAGER"
 export BEAGLE_CORE_EMIT_COMPILED="$compiled"
-export BEAGLE_CORE_EMIT_SUPERVISOR="$SUPERVISOR"
-export BEAGLE_CORE_EMIT_RACKET="$RACKET"
+export BEAGLE_CORE_EMIT_SUPERVISOR="$NATIVE_SUPERVISOR"
 export BEAGLE_CORE_EMIT_BB="$(command -v bb)"
 export BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS=\
 "${BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS:-${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}}"
@@ -2658,7 +2628,6 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
         stdout-path (str root "/manager.stdout")
         stderr-path (str root "/manager.stderr")
         command [(System/getenv "BEAGLE_CORE_EMIT_MANAGER")
-                 (System/getenv "BEAGLE_CORE_EMIT_RACKET")
                  (System/getenv "BEAGLE_CORE_EMIT_SUPERVISOR")
                  (System/getenv "BEAGLE_CORE_EMIT_WORKER_TIMEOUT_SECONDS")
                  (System/getenv "BEAGLE_CORE_EMIT_KILL_GRACE_SECONDS")
