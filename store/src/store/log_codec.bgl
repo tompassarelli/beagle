@@ -24,39 +24,51 @@
 (def store-log-magic (Vec Int) [83 84 79 82 69 76 79 71])
 
 (defrecord BootResult
-  [(status Int)
-   (store (U Nil (Atom t/TermStore)))
-   (valid-log-bytes Int)
-   (boot-append (Vec Int))
-   (error String?)])
+  [status Int
+   store (U Nil (Atom t/TermStore))
+   valid-log-bytes Int
+   boot-append (Vec Int)
+   error String?])
 
 (defrecord BootStream
-  [(configured-space-id String)
-   (store (U Nil (Atom t/TermStore)))
-   (valid-log-bytes Int)
-   (boot-append (Vec Int))
-   (error String?)])
+  [configured-space-id String
+   store (U Nil (Atom t/TermStore))
+   valid-log-bytes Int
+   boot-append (Vec Int)
+   error String?])
 
-(defrecord BytesResult [(status Int) (bytes (Vec Int)) (error String?)])
+(defrecord BytesResult
+  [status Int
+   bytes (Vec Int)
+   error String?])
 
-(defrecord RecordDecodeResult [(record t/TransactionRecord?) (error String?)])
+(defrecord RecordDecodeResult
+  [record t/TransactionRecord?
+   error String?])
 
 ;; One member of a branch's fold order: a sealed segment's bytes, or the tail's.
 ;; start-sequence and end-sequence are the ref's record of the member's span,
 ;; 0 when it records none; the tail is named by no ref and carries 0 for both.
 (defrecord ChainPiece
-  [(bytes ByteSource) (start-sequence Int) (end-sequence Int) (byte-count Int)])
+  [bytes ByteSource
+   start-sequence Int
+   end-sequence Int
+   byte-count Int])
 
 (defrecord ChainFold
-  [(ok Bool)
-   (valid-bytes Int)
-   (start-sequence Int)
-   (end-sequence Int)
-   (torn Bool)
-   (error String?)])
+  [ok Bool
+   valid-bytes Int
+   start-sequence Int
+   end-sequence Int
+   torn Bool
+   error String?])
 
 (defrecord HeaderFields
-  [(ok Bool) (space-id String) (flags Int) (header-bytes Int) (error String?)])
+  [ok Bool
+   space-id String
+   flags Int
+   header-bytes Int
+   error String?])
 
 (wire/defwire store-log-header
   (packet-encoded :none :none)
@@ -82,23 +94,26 @@
       (proposition (codec t/Triple :term append-store-log-term!
                           read-store-log-term! -1))]]))
 
-(defn failed-boot [(message String)] BootResult
+(defn failed-boot [message String] BootResult
   (->BootResult status-fatal nil 0 [] message))
 
-(defn failed-bytes [(message String)] BytesResult
+(defn failed-bytes [message String] BytesResult
   (->BytesResult status-fatal [] message))
 
-(defn error-or [(error String?) (fallback String)] String
+(defn error-or
+  [error String?
+   fallback String] String
   (if error error fallback))
 
-(defn crc32 [(bytes (Vec Int))] Int
-  (loop [position Int 0 crc Int crc32-mask]
+(defn crc32 [bytes (Vec Int)] Int
+  (loop [position Int 0
+         crc Int crc32-mask]
     (if (>= position (count bytes))
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
-            next-crc
-            (loop [bit Int 0 value Int mixed]
-              (if (>= bit 8)
+            next-crc (loop [bit Int 0
+                            value Int mixed]
+                       (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
                   (recur (+ bit 1)
@@ -107,14 +122,15 @@
                            shifted)))))]
         (recur (+ position 1) (bit-and crc32-mask next-crc))))))
 
-(defn crc32-source [(bytes ByteSource)] Int
-  (loop [position Int 0 crc Int crc32-mask]
+(defn crc32-source [bytes ByteSource] Int
+  (loop [position Int 0
+         crc Int crc32-mask]
     (if (>= position (count bytes))
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
-            next-crc
-            (loop [bit Int 0 value Int mixed]
-              (if (>= bit 8)
+            next-crc (loop [bit Int 0
+                            value Int mixed]
+                       (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
                   (recur (+ bit 1)
@@ -123,14 +139,18 @@
                            shifted)))))]
         (recur (+ position 1) (bit-and crc32-mask next-crc))))))
 
-(defn crc32-range-source [(bytes ByteSource) (start Int) (end Int)] Int
-  (loop [position Int start crc Int crc32-mask]
+(defn crc32-range-source
+  [bytes ByteSource
+   start Int
+   end Int] Int
+  (loop [position Int start
+         crc Int crc32-mask]
     (if (>= position end)
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
-            next-crc
-            (loop [bit Int 0 value Int mixed]
-              (if (>= bit 8)
+            next-crc (loop [bit Int 0
+                            value Int mixed]
+                       (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
                   (recur (+ bit 1)
@@ -139,14 +159,18 @@
                            shifted)))))]
         (recur (+ position 1) (bit-and crc32-mask next-crc))))))
 
-(defn crc32-range [(bytes (Vec Int)) (start Int) (end Int)] Int
-  (loop [position Int start crc Int crc32-mask]
+(defn crc32-range
+  [bytes (Vec Int)
+   start Int
+   end Int] Int
+  (loop [position Int start
+         crc Int crc32-mask]
     (if (>= position end)
       (bit-and crc32-mask (bit-xor crc crc32-mask))
       (let [mixed (bit-xor crc (nth bytes position))
-            next-crc
-            (loop [bit Int 0 value Int mixed]
-              (if (>= bit 8)
+            next-crc (loop [bit Int 0
+                            value Int mixed]
+                       (if (>= bit 8)
                 value
                 (let [shifted (unsigned-bit-shift-right value 1)]
                   (recur (+ bit 1)
@@ -155,12 +179,17 @@
                            shifted)))))]
         (recur (+ position 1) (bit-and crc32-mask next-crc))))))
 
-(defn u16-le-at [(bytes ByteSource) (position Int)] Int
+(defn u16-le-at
+  [bytes ByteSource
+   position Int] Int
   (+ (nth bytes position)
      (bit-shift-left (nth bytes (+ position 1)) 8)))
 
-(defn u32-le-at [(bytes ByteSource) (position Int)] Int
-  (loop [offset Int 0 value Int 0]
+(defn u32-le-at
+  [bytes ByteSource
+   position Int] Int
+  (loop [offset Int 0
+         value Int 0]
     (if (>= offset 4)
       value
       (recur
@@ -169,7 +198,7 @@
                (bit-shift-left
                 (nth bytes (+ position offset)) (* offset 8)))))))
 
-(defn magic-at-start? [(bytes ByteSource)] Bool
+(defn magic-at-start? [bytes ByteSource] Bool
   (if (< (count bytes) (count store-log-magic))
     false
     (loop [position Int 0]
@@ -179,16 +208,17 @@
           (recur (+ position 1))
           false)))))
 
-(defn- append-store-log-term! [(encoder wire/Encoder) (term t/Triple)] Nil
+(defn- append-store-log-term!
+  [encoder wire/Encoder
+   term t/Triple] Nil
   (do
     (reset! (wire/encoder-nodes encoder) 0)
     (wire/append-term-limited!
      encoder term 0 max-codec-count max-codec-count max-term-depth)))
 
-(defn- read-store-log-term! [(decoder wire/Decoder)] t/Triple
+(defn- read-store-log-term! [decoder wire/Decoder] t/Triple
   (let [_ (reset! (wire/decoder-nodes decoder) 0)
-        proposition
-        (wire/read-term-limited!
+        proposition (wire/read-term-limited!
          decoder 0 max-codec-count max-codec-count max-term-depth)
         triple (t/term-as-triple proposition)]
     (if triple
@@ -198,7 +228,7 @@
          decoder "Store transaction log operation proposition is not a Triple")
         (t/triple "" "" "")))))
 
-(defn encode-header! [(space-id String)] BytesResult
+(defn encode-header! [space-id String] BytesResult
   (if (= 0 (count space-id))
     (failed-bytes "Store transaction log SpaceId must be nonempty")
     (let [encoder (wire/->Encoder (wire/empty-byte-cell) (atom 0)
@@ -214,18 +244,17 @@
                            (deref (wire/encoder-bytes encoder)) nil)))))))
 
 (defn decode-record-payload-range!
-  [(bytes ByteSource) (start Int) (end Int)] RecordDecodeResult
+  [bytes ByteSource
+   start Int
+   end Int] RecordDecodeResult
   (let [decoder (wire/->Decoder bytes (atom start) end (atom 0)
                                 (wire/empty-error-cell))]
     (if (< (- end start) 12)
       (->RecordDecodeResult nil "Store transaction log record header is truncated")
-      (let [(transaction-fields WireFields_store-log-transaction_payload)
-            (read-store-log-transaction-payload! decoder)
-            sequence
-            (wirefields_store-log-transaction_payload-sequence
+      (let [transaction-fields WireFields_store-log-transaction_payload (read-store-log-transaction-payload! decoder)
+            sequence (wirefields_store-log-transaction_payload-sequence
              transaction-fields)
-            operation-count
-            (wirefields_store-log-transaction_payload-operation-count
+            operation-count (wirefields_store-log-transaction_payload-operation-count
              transaction-fields)]
         (cond
           [(deref (wire/decoder-error decoder))
@@ -237,7 +266,8 @@
            (->RecordDecodeResult
             nil "Store transaction log record operation count is invalid")]
           [:else
-           (loop [ordinal Int 0 operations (Vec t/CommitOperation) []]
+           (loop [ordinal Int 0
+                  operations (Vec t/CommitOperation) []]
              (if (>= ordinal operation-count)
                (let [error (deref (wire/decoder-error decoder))]
                  (cond
@@ -248,16 +278,12 @@
                    [:else
                     (->RecordDecodeResult
                      (term-store/transaction-record sequence operations) nil)]))
-               (let [(operation-fields WireFields_store-log-operation_payload)
-                     (read-store-log-operation-payload! decoder)
-                     actual
-                     (wirefields_store-log-operation_payload-ordinal
+               (let [operation-fields WireFields_store-log-operation_payload (read-store-log-operation-payload! decoder)
+                     actual (wirefields_store-log-operation_payload-ordinal
                       operation-fields)
-                     action
-                     (wirefields_store-log-operation_payload-action
+                     action (wirefields_store-log-operation_payload-action
                       operation-fields)
-                     triple
-                     (wirefields_store-log-operation_payload-proposition
+                     triple (wirefields_store-log-operation_payload-proposition
                       operation-fields)
                      error (deref (wire/decoder-error decoder))]
                  (cond
@@ -277,13 +303,15 @@
                     (->RecordDecodeResult
                      nil "Store transaction log contains an unknown operation action")]))))])))))
 
-(defn decode-record-payload! [(payload ByteSource)] RecordDecodeResult
+(defn decode-record-payload! [payload ByteSource] RecordDecodeResult
   (decode-record-payload-range! payload 0 (count payload)))
 
-(defn start-transaction-log-stream [(configured-space-id String)] BootStream
+(defn start-transaction-log-stream [configured-space-id String] BootStream
   (->BootStream configured-space-id nil 0 [] nil))
 
-(defn failed-boot-stream [(stream BootStream) (message String)] BootStream
+(defn failed-boot-stream
+  [stream BootStream
+   message String] BootStream
   (->BootStream
    (bootstream-configured-space-id stream)
    (bootstream-store stream)
@@ -299,7 +327,9 @@
 ;; replayed record allocates its rows and nothing shaped like a term tree.
 ;; Mirrors decode-record-payload-range!'s validation, spelling for spelling.
 (defn- intern-wire-term!
-  [(decoder wire/Decoder) (root (Atom t/TermStore)) (depth Int)] Int
+  [decoder wire/Decoder
+   root (Atom t/TermStore)
+   depth Int] Int
   (if (not (wire/decoder-node-limited! decoder depth max-codec-count
                                        max-term-depth))
     -1
@@ -364,11 +394,10 @@
            -1)]))))
 
 (defn- replay-record-fused!
-  [(root (Atom t/TermStore))
-   (bytes ByteSource)
-   (start Int)
-   (end Int)]
-  term-store/TransactionReplayResult
+  [root (Atom t/TermStore)
+   bytes ByteSource
+   start Int
+   end Int] term-store/TransactionReplayResult
   (let [decoder (wire/->Decoder bytes (atom start) end (atom 0)
                                 (wire/empty-error-cell))]
     (if (< (- end start) 12)
@@ -376,8 +405,7 @@
        false :invalid-transaction-record
        "Store transaction log record header is truncated")
       (let [sequence (wire/read-i64-le! decoder "Store transaction log transaction sequence")
-            operation-count
-            (wire/read-u32-le! decoder "Store transaction log operation count")]
+            operation-count (wire/read-u32-le! decoder "Store transaction log operation count")]
         (cond
           [(deref (wire/decoder-error decoder))
            (term-store/->TransactionReplayResult
@@ -403,8 +431,7 @@
                   "Store transaction log record has trailing payload bytes")
                  (term-store/append-replayed-transaction! root sequence
                                                           actions handles))
-               (let [actual
-                     (wire/read-u32-le! decoder "Store transaction log operation ordinal")
+               (let [actual (wire/read-u32-le! decoder "Store transaction log operation ordinal")
                      action (wire/read-u8! decoder "Store transaction log operation action")
                      _ (reset! (wire/decoder-nodes decoder) 0)
                      handle (intern-wire-term! decoder root 0)
@@ -433,11 +460,14 @@
                      false :invalid-transaction-record
                      "Store transaction log contains an unknown operation action")]))))])))))
 
+;; Replay is a loop, not a self-call: one C stack entry per Store transaction
+;; log record overflows the wasm stack a few hundred commits in.
 (defn consume-transaction-log-records!
-  [(stream BootStream) (bytes ByteSource) (position Int)] BootStream
-  ;; replay is a loop, not a self-call: one C stack entry per Store transaction
-  ;; log record overflows the wasm stack a few hundred commits in.
-  (loop [stream BootStream stream position Int position]
+  [stream BootStream
+   bytes ByteSource
+   position Int] BootStream
+  (loop [stream BootStream stream
+         position Int position]
     (let [remaining (- (count bytes) position)]
       (cond
         [(< remaining 4) stream]
@@ -453,8 +483,7 @@
               (let [payload-start (+ position 4)
                     payload-end (+ payload-start payload-length)
                     stored-crc (u32-le-at bytes payload-end)
-                    actual-crc
-                    (crc32-range-source bytes payload-start payload-end)
+                    actual-crc (crc32-range-source bytes payload-start payload-end)
                     root (bootstream-store stream)]
                 (cond
                   [(not= stored-crc actual-crc)
@@ -462,8 +491,7 @@
                   [(nil? root)
                    (failed-boot-stream stream "Store transaction log header was not decoded")]
                   [:else
-                   (let [replayed
-                         (replay-record-fused! root bytes payload-start
+                   (let [replayed (replay-record-fused! root bytes payload-start
                                               payload-end)]
                      (if (term-store/transactionreplayresult-ok replayed)
                        (recur
@@ -480,12 +508,12 @@
                             "Store transaction log transaction sequence does not advance"))))]))]))]))))
 
 (defn consume-transaction-log-header!
-  [(stream BootStream) (bytes ByteSource)] BootStream
+  [stream BootStream
+   bytes ByteSource] BootStream
   (let [minimum-header-bytes (+ (count store-log-magic) 8)]
     (cond
       [(= 0 (count bytes))
-       (let [header
-             (encode-header! (bootstream-configured-space-id stream))]
+       (let [header (encode-header! (bootstream-configured-space-id stream))]
          (if (= status-ok (bytesresult-status header))
            (->BootStream
             (bootstream-configured-space-id stream)
@@ -517,12 +545,10 @@
             (failed-boot-stream
              stream "Store transaction log header is truncated inside SpaceId")]
            [:else
-            (let [decoder
-                  (wire/->Decoder bytes (atom minimum-header-bytes)
+            (let [decoder (wire/->Decoder bytes (atom minimum-header-bytes)
                                   header-bytes (atom 0)
                                   (wire/empty-error-cell))
-                  space-id
-                  (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
+                  space-id (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
                   error (deref (wire/decoder-error decoder))]
               (cond
                 [error
@@ -545,22 +571,20 @@
                    header-bytes [] nil)
                   bytes header-bytes)]))]))])))
 
-(defn canonical-store-copy! [(root (Atom t/TermStore))] (Atom t/TermStore)
+(defn canonical-store-copy! [root (Atom t/TermStore)] (Atom t/TermStore)
   (term-store/validated-store! root))
 
 (defn successful-boot!
-  [(root (Atom t/TermStore))
-   (valid-log-bytes Int)
-   (boot-append (Vec Int))]
-  BootResult
+  [root (Atom t/TermStore)
+   valid-log-bytes Int
+   boot-append (Vec Int)] BootResult
   (->BootResult status-ok (canonical-store-copy! (term-store/close-fold! root))
                 valid-log-bytes boot-append nil))
 
 (defn replay-complete-records!
-  [(decoder wire/Decoder)
-   (root (Atom t/TermStore))
-   (header-bytes Int)]
-  BootResult
+  [decoder wire/Decoder
+   root (Atom t/TermStore)
+   header-bytes Int] BootResult
   (loop [valid-log-bytes Int header-bytes]
     (let [remaining (wire/decoder-remaining decoder)]
       (cond
@@ -570,8 +594,7 @@
          (successful-boot! root valid-log-bytes [])]
         [:else
          (let [record-start (deref (wire/decoder-position decoder))
-               payload-length
-               (wire/read-u32-le! decoder "Store transaction log record payload length")]
+               payload-length (wire/read-u32-le! decoder "Store transaction log record payload length")]
            (cond
              [(deref (wire/decoder-error decoder))
               (failed-boot
@@ -586,8 +609,7 @@
              [:else
               (let [payload-start (deref (wire/decoder-position decoder))
                     payload-end (+ payload-start payload-length)
-                    payload
-                    (subvec (wire/decoder-bytes decoder)
+                    payload (subvec (wire/decoder-bytes decoder)
                             payload-start payload-end)
                     _ (reset! (wire/decoder-position decoder) payload-end)
                     stored-crc (wire/read-u32-le! decoder "Store transaction log record CRC")
@@ -612,7 +634,9 @@
                      (term-store/replay-transaction! root record)
                      (recur (deref (wire/decoder-position decoder))))]))]))]))))
 
-(defn boot-store-log! [(configured-space-id String) (bytes ByteSource)] BootResult
+(defn boot-store-log!
+  [configured-space-id String
+   bytes ByteSource] BootResult
   (cond
     [(= 0 (count bytes))
      (let [header (encode-header! configured-space-id)]
@@ -633,8 +657,7 @@
          (failed-boot "Store transaction log header is truncated")
          (let [version (wire/read-u16-le! decoder "Store transaction log version")
                flags (wire/read-u16-le! decoder "Store transaction log flags")
-               space-length
-               (wire/read-u32-le! decoder "Store transaction log SpaceId length")]
+               space-length (wire/read-u32-le! decoder "Store transaction log SpaceId length")]
            (cond
              [(or (not= version store-log-version) (not= flags store-log-flags))
               (failed-boot "Store transaction log version or flags are unsupported")]
@@ -643,8 +666,7 @@
              [(< (wire/decoder-remaining decoder) space-length)
               (failed-boot "Store transaction log header is truncated inside SpaceId")]
              [:else
-              (let [space-id
-                    (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
+              (let [space-id (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
                     error (deref (wire/decoder-error decoder))]
                 (cond
                   [error
@@ -662,10 +684,10 @@
                      (term-store/new-term-store-for-log space-id (count bytes)))
                     (deref (wire/decoder-position decoder)))]))]))))]))
 
-(defn- failed-header [(message String)] HeaderFields
+(defn- failed-header [message String] HeaderFields
   (->HeaderFields false "" 0 0 message))
 
-(defn decode-store-log-header! [(bytes ByteSource)] HeaderFields
+(defn decode-store-log-header! [bytes ByteSource] HeaderFields
   (let [minimum-header-bytes (+ (count store-log-magic) 8)]
     (cond
       [(< (count bytes) minimum-header-bytes)
@@ -688,12 +710,10 @@
            [(< (count bytes) header-bytes)
             (failed-header "Store transaction log header is truncated inside SpaceId")]
            [:else
-            (let [decoder
-                  (wire/->Decoder bytes (atom minimum-header-bytes)
+            (let [decoder (wire/->Decoder bytes (atom minimum-header-bytes)
                                   header-bytes (atom 0)
                                   (wire/empty-error-cell))
-                  space-id
-                  (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
+                  space-id (wire/read-utf8! decoder space-length "Store transaction log SpaceId")
                   error (deref (wire/decoder-error decoder))]
               (cond
                 [error
@@ -705,20 +725,18 @@
                  (->HeaderFields true space-id flags header-bytes nil)]))]))])))
 
 (defn- fold-chain-piece!
-  [(root (Atom t/TermStore))
-   (bytes ByteSource)
-   (header-bytes Int)
-   (start-sequence Int)
-   (end-sequence Int)
-   (sealed Bool)]
-  ChainFold
+  [root (Atom t/TermStore)
+   bytes ByteSource
+   header-bytes Int
+   start-sequence Int
+   end-sequence Int
+   sealed Bool] ChainFold
   (loop [position Int header-bytes
          first-record Bool true
          first-sequence Int 0
          last-sequence Int 0]
     (let [remaining (- (count bytes) position)
-          short-piece
-          (if sealed
+          short-piece (if sealed
             (->ChainFold
              false position first-sequence last-sequence true
              "Store transaction log segment ends inside a transaction record")
@@ -740,10 +758,8 @@
               (let [payload-start (+ position 4)
                     payload-end (+ payload-start payload-length)
                     stored-crc (u32-le-at bytes payload-end)
-                    actual-crc
-                    (crc32-range-source bytes payload-start payload-end)
-                    decoded
-                    (decode-record-payload-range! bytes payload-start payload-end)
+                    actual-crc (crc32-range-source bytes payload-start payload-end)
+                    decoded (decode-record-payload-range! bytes payload-start payload-end)
                     record (recorddecoderesult-record decoded)]
                 (cond
                   [(not= stored-crc actual-crc)
@@ -760,8 +776,7 @@
                     false position first-sequence last-sequence false
                     "Store transaction log decoder returned no record")]
                   [:else
-                   (let [replayed
-                         (term-store/replay-transaction-result! root record)]
+                   (let [replayed (term-store/replay-transaction-result! root record)]
                      (if (term-store/transactionreplayresult-ok replayed)
                        (recur (+ position record-length) false
                               (if first-record
@@ -774,17 +789,18 @@
                             "Store transaction log transaction sequence does not advance"))))]))]))]))))
 
 (defn- chain-piece-at
-  [(segments (Vec ChainPiece)) (tail ChainPiece) (index Int)] ChainPiece
+  [segments (Vec ChainPiece)
+   tail ChainPiece
+   index Int] ChainPiece
   (if (< index (count segments)) (nth segments index) tail))
 
 ;; Fold a branch: every sealed segment in ref order, then its tail. A sealed
 ;; segment must consume exactly; only the tail may end inside a record.
 ;; Hosted ref folding and this native path share store.chain-rules.
 (defn boot-store-log-chain!
-  [(configured-space-id String)
-   (segments (Vec ChainPiece))
-   (tail ChainPiece)]
-  BootResult
+  [configured-space-id String
+   segments (Vec ChainPiece)
+   tail ChainPiece] BootResult
   (let [first-header (decode-store-log-header! (chainpiece-bytes (chain-piece-at segments tail 0)))]
     (cond
       [(not (headerfields-ok first-header))
@@ -795,17 +811,16 @@
             (not= configured-space-id (headerfields-space-id first-header)))
        (failed-boot "Store transaction log belongs to a different SpaceId")]
       [:else
-       (let [(total Int) (+ (count segments) 1)
-             (chain-bytes Int)
-             (loop [index Int 0 counted Int 0]
-               (if (>= index total)
+       (let [total Int (+ (count segments) 1)
+             chain-bytes Int (loop [index Int 0
+                                    counted Int 0]
+                               (if (>= index total)
                  counted
                  (recur (inc index)
                         (+ counted
                            (count (chainpiece-bytes
                                    (chain-piece-at segments tail index)))))))
-             (root (Atom t/TermStore))
-             (term-store/open-fold!
+             root (Atom t/TermStore) (term-store/open-fold!
               (term-store/new-term-store-for-log
                (headerfields-space-id first-header) chain-bytes))]
          (loop [index Int 0
@@ -822,18 +837,15 @@
                    (error-or (headerfields-error header)
                              "Store transaction log header is unreadable"))]
                  [:else
-                  (let [folded
-                        (fold-chain-piece!
+                  (let [folded (fold-chain-piece!
                          root (chainpiece-bytes piece)
                          (headerfields-header-bytes header)
                          (chainpiece-start-sequence piece)
                          (chainpiece-end-sequence piece) sealed)]
                     (if (chainfold-ok folded)
-                      (let [continuation
-                            (= store-log-continuation-flag
+                      (let [continuation (= store-log-continuation-flag
                                (headerfields-flags header))
-                            fault
-                            (if sealed
+                            fault (if sealed
                               (chain-rules/sealed-member-fault
                                index
                                (term-store/space-id root)
@@ -866,7 +878,7 @@
                        (error-or (chainfold-error folded)
                                  "Store transaction log chain fold failed"))))])))))])))
 
-(defn append-record-bytes! [(record t/TransactionRecord)] BytesResult
+(defn append-record-bytes! [record t/TransactionRecord] BytesResult
   (let [payload (wire/->Encoder (wire/empty-byte-cell) (atom 0)
                                 (wire/empty-error-cell))
         operations (t/transactionrecord-operations record)
@@ -880,8 +892,7 @@
           (if (< ordinal (count operations))
             (let [operation (nth operations ordinal)
                   action (t/commitoperation-action operation)
-                  action-tag
-                  (cond
+                  action-tag (cond
                     [(= action t/assert-action) 1]
                     [(= action t/retract-action) 2]
                     [:else 0])]
@@ -910,7 +921,8 @@
                                  (deref (wire/encoder-bytes out)) nil))))))))))
 
 (defn encode-store-append!
-  [(root (Atom t/TermStore)) (lower-exclusive Int)] BytesResult
+  [root (Atom t/TermStore)
+   lower-exclusive Int] BytesResult
   (let [current (term-store/current-sequence root)]
     (cond
       [(or (< lower-exclusive 0) (> lower-exclusive current))
@@ -920,8 +932,7 @@
       [(not= current (+ lower-exclusive 1))
        (failed-bytes "Store transaction log dispatch produced more than one transaction")]
       [:else
-       (let [records
-             (term-store/transaction-records-between
+       (let [records (term-store/transaction-records-between
               (deref root) lower-exclusive current)]
          (if (= 1 (count records))
            (append-record-bytes! (nth records 0))

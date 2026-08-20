@@ -59,41 +59,57 @@
       (payload (optional (codec Any :term append-schema-term!
                                 read-schema-term! -1)))]]))
 
-(defrecord DecodeResult [(packet t/StoreRpcPacketV2?) (error String?)])
+(defrecord DecodeResult
+  [packet t/StoreRpcPacketV2?
+   error String?])
 
-(defrecord EncodeResult [(bytes (U Nil (Vec Int))) (error String?)])
+(defrecord EncodeResult
+  [bytes (U Nil (Vec Int))
+   error String?])
 
-(defn response-encode-error-code [(error String?)] Keyword
+(defn response-encode-error-code [error String?] Keyword
   (cond
     [(= error recursive-term-depth-error) :term-depth-exceeded]
     [(= error term-node-count-error) :term-codec-node-limit]
     [:else :rpc-packet-too-large]))
 
 (defrecord TermDigestResult
-  [(ok Bool) (digest String) (code Keyword) (message String)])
+  [ok Bool
+   digest String
+   code Keyword
+   message String])
 
 (defrecord Decoder
-  [(bytes ByteSource)
-   (position (Atom Int))
-   (limit Int)
-   (nodes (Atom Int))
-   (error (Atom String?))])
+  [bytes ByteSource
+   position (Atom Int)
+   limit Int
+   nodes (Atom Int)
+   error (Atom String?)])
 
 (defrecord Encoder
-  [(bytes (Atom (Vec Int))) (nodes (Atom Int)) (error (Atom String?))])
+  [bytes (Atom (Vec Int))
+   nodes (Atom Int)
+   error (Atom String?)])
 
 (defrecord WireFieldSchema
-  [(name Keyword) (kind Keyword) (fixed-bytes Int) (bound Int?) (optional Bool)])
+  [name Keyword
+   kind Keyword
+   fixed-bytes Int
+   bound Int?
+   optional Bool])
 
 (defrecord WireCaseSchema
-  [(tag Int) (name Keyword) (fixed-bytes Int) (fields (Vec WireFieldSchema))])
+  [tag Int
+   name Keyword
+   fixed-bytes Int
+   fields (Vec WireFieldSchema)])
 
 (defrecord WireSchema
-  [(name Keyword)
-   (length-kind Keyword)
-   (checksum-kind Keyword)
-   (tag-kind Keyword)
-   (cases (Vec WireCaseSchema))])
+  [name Keyword
+   length-kind Keyword
+   checksum-kind Keyword
+   tag-kind Keyword
+   cases (Vec WireCaseSchema)])
 
 ;; A field is `(name wire-type)` or `(name wire-type context)`. Wire types are
 ;; primitive keywords, `(bounded-text maximum)`, `(optional wire-type)`, or a
@@ -389,7 +405,7 @@
 (def empty-byte-vector (Vec Int) [])
 (def no-error String? nil)
 
-(defn increment-int [(value Int)] Int (+ value 1))
+(defn increment-int [value Int] Int (+ value 1))
 
 (defn empty-byte-cell [] (Atom (Vec Int))
   (atom empty-byte-vector))
@@ -399,28 +415,37 @@
 
 ;; Preserve-first is the nil compare-and-set, not a swap: a swap updater is
 ;; handed no arena, so one returning String? cannot build its own union.
-(defn decoder-error! [(decoder Decoder) (message String)] Nil
+(defn decoder-error!
+  [decoder Decoder
+   message String] Nil
   (compare-and-set! (decoder-error decoder) no-error message)
   nil)
 
-(defn encoder-error! [(encoder Encoder) (message String)] Nil
+(defn encoder-error!
+  [encoder Encoder
+   message String] Nil
   (compare-and-set! (encoder-error encoder) no-error message)
   nil)
 
-(defn byte-value? [(value Int)] Bool
+(defn byte-value? [value Int] Bool
   (and (>= value 0) (<= value 255)))
 
-(defn decoder-remaining [(decoder Decoder)] Int
+(defn decoder-remaining [decoder Decoder] Int
   (- (decoder-limit decoder) (deref (decoder-position decoder))))
 
-(defn ensure-bytes! [(decoder Decoder) (amount Int) (context String)] Bool
+(defn ensure-bytes!
+  [decoder Decoder
+   amount Int
+   context String] Bool
   (if (and (>= amount 0) (>= (decoder-remaining decoder) amount))
     true
     (do
       (decoder-error! decoder (str "Store RPC ended inside " context))
       false)))
 
-(defn read-u8! [(decoder Decoder) (context String)] Int
+(defn read-u8!
+  [decoder Decoder
+   context String] Int
   (if (ensure-bytes! decoder 1 context)
     (let [position (deref (decoder-position decoder))
           value (nth (decoder-bytes decoder) position)]
@@ -432,28 +457,38 @@
           0)))
     0))
 
-(defn read-u16-le! [(decoder Decoder) (context String)] Int
+(defn read-u16-le!
+  [decoder Decoder
+   context String] Int
   (let [b0 (read-u8! decoder context)
         b1 (read-u8! decoder context)]
     (+ b0 (bit-shift-left b1 8))))
 
-(defn read-u32-le! [(decoder Decoder) (context String)] Int
-  (loop [offset Int 0 value Int 0]
+(defn read-u32-le!
+  [decoder Decoder
+   context String] Int
+  (loop [offset Int 0
+         value Int 0]
     (if (< offset 4)
       (recur (+ offset 1)
              (bit-or value
                      (bit-shift-left (read-u8! decoder context) (* offset 8))))
       value)))
 
-(defn read-i64-le! [(decoder Decoder) (context String)] Int
-  (loop [offset Int 0 value Int 0]
+(defn read-i64-le!
+  [decoder Decoder
+   context String] Int
+  (loop [offset Int 0
+         value Int 0]
     (if (< offset 8)
       (recur (+ offset 1)
              (bit-or value
                      (bit-shift-left (read-u8! decoder context) (* offset 8))))
       value)))
 
-(defn read-presence! [(decoder Decoder) (context String)] Bool
+(defn read-presence!
+  [decoder Decoder
+   context String] Bool
   (let [value (read-u8! decoder context)]
     (cond
       [(= value 0) false]
@@ -463,18 +498,24 @@
          (decoder-error! decoder (str context " must be the strict byte 0 or 1"))
          false)])))
 
-(defn read-bool! [(decoder Decoder) (context String)] Bool
+(defn read-bool!
+  [decoder Decoder
+   context String] Bool
   (read-presence! decoder context))
 
-(defn append-u8! [(encoder Encoder) (value Int)] Nil
-  ;; Both arms end in nil so the native join has one declared alternative.
+;; Both arms end in nil so the native join has one declared alternative.
+(defn append-u8!
+  [encoder Encoder
+   value Int] Nil
   (if (byte-value? value)
     (do (swap! (encoder-bytes encoder) conj value) nil)
     (do (encoder-error! encoder
                         "Store RPC encoder produced a value outside u8")
         nil)))
 
-(defn append-u16-le! [(encoder Encoder) (value Int)] Nil
+(defn append-u16-le!
+  [encoder Encoder
+   value Int] Nil
   (loop [offset Int 0]
     (if (< offset 2)
       (do
@@ -483,7 +524,9 @@
         (recur (+ offset 1)))
       nil)))
 
-(defn append-u32-le! [(encoder Encoder) (value Int)] Nil
+(defn append-u32-le!
+  [encoder Encoder
+   value Int] Nil
   (if (and (>= value 0) (<= value 4294967295))
     (loop [offset Int 0]
       (if (< offset 4)
@@ -494,7 +537,9 @@
         nil))
     (encoder-error! encoder "Store RPC u32 value is out of range")))
 
-(defn append-i64-le! [(encoder Encoder) (value Int)] Nil
+(defn append-i64-le!
+  [encoder Encoder
+   value Int] Nil
   (loop [offset Int 0]
     (if (< offset 8)
       (do
@@ -503,12 +548,16 @@
         (recur (+ offset 1)))
       nil)))
 
-(defn append-presence! [(encoder Encoder) (present Bool)] Nil
+(defn append-presence!
+  [encoder Encoder
+   present Bool] Nil
   (append-u8! encoder (if present 1 0)))
 
 ;; Push, never `into`: the native arena is bump-only, so rebuilding the byte
 ;; cell costs one arena copy of everything appended so far.
-(defn append-bytes! [(encoder Encoder) (bytes (Vec Int))] Nil
+(defn append-bytes!
+  [encoder Encoder
+   bytes (Vec Int)] Nil
   (loop [position Int 0]
     (if (>= position (count bytes))
       nil
@@ -517,18 +566,24 @@
         (recur (+ position 1))))))
 
 (defn utf8-bytes!
-  [(encoder Encoder) (value String) (maximum Int) (label String)] (Vec Int)
-  (let [(bytes (Vec Int)) (utf8-encode value)]
+  [encoder Encoder
+   value String
+   maximum Int
+   label String] (Vec Int)
+  (let [bytes (Vec Int) (utf8-encode value)]
     (if (> (count bytes) maximum)
       (do
         (encoder-error! encoder (str label " exceeds the UTF-8 byte limit"))
         [])
       bytes)))
 
-(defn continuation? [(value Int)] Bool
+(defn continuation? [value Int] Bool
   (= 128 (bit-and value 192)))
 
-(defn read-utf8! [(decoder Decoder) (length Int) (label String)] String
+(defn read-utf8!
+  [decoder Decoder
+   length Int
+   label String] String
   (if (ensure-bytes! decoder length label)
     (let [start (deref (decoder-position decoder))
           end (+ start length)]
@@ -550,12 +605,10 @@
                 (let [b1 (if (> width 1) (read-u8! decoder label) 0)
                       b2 (if (> width 2) (read-u8! decoder label) 0)
                       b3 (if (> width 3) (read-u8! decoder label) 0)
-                      continuation-valid
-                      (and (or (= width 1) (continuation? b1))
+                      continuation-valid (and (or (= width 1) (continuation? b1))
                            (and (or (< width 3) (continuation? b2))
                                 (or (< width 4) (continuation? b3))))
-                      code-point
-                      (cond
+                      code-point (cond
                         [(= width 1) b0]
                         [(= width 2)
                          (+ (bit-shift-left (bit-and b0 31) 6)
@@ -569,8 +622,7 @@
                             (+ (bit-shift-left (bit-and b1 63) 12)
                                (+ (bit-shift-left (bit-and b2 63) 6)
                                   (bit-and b3 63))))])
-                      scalar-valid
-                      (and continuation-valid
+                      scalar-valid (and continuation-valid
                            (and (or (not= width 3)
                                     (and (or (not= b0 224) (>= b1 160))
                                          (or (not= b0 237) (<= b1 159))))
@@ -587,7 +639,10 @@
                       "")))))))))
     ""))
 
-(defn read-sized-text! [(decoder Decoder) (maximum Int) (label String)] String
+(defn read-sized-text!
+  [decoder Decoder
+   maximum Int
+   label String] String
   (let [length (read-u32-le! decoder label)]
     (if (> length maximum)
       (do
@@ -596,7 +651,10 @@
       (read-utf8! decoder length label))))
 
 (defn append-sized-text!
-  [(encoder Encoder) (value String) (maximum Int) (label String)] Nil
+  [encoder Encoder
+   value String
+   maximum Int
+   label String] Nil
   (let [bytes (utf8-bytes! encoder value maximum label)]
     (if (nil? (deref (encoder-error encoder)))
       (do
@@ -606,7 +664,10 @@
       nil)))
 
 (defn decoder-node-limited!
-  [(decoder Decoder) (depth Int) (max-nodes Int) (max-depth Int)] Bool
+  [decoder Decoder
+   depth Int
+   max-nodes Int
+   max-depth Int] Bool
   (if (> depth max-depth)
     (do
       (decoder-error! decoder recursive-term-depth-error)
@@ -619,7 +680,10 @@
         true))))
 
 (defn encoder-node-limited!
-  [(encoder Encoder) (depth Int) (max-nodes Int) (max-depth Int)] Bool
+  [encoder Encoder
+   depth Int
+   max-nodes Int
+   max-depth Int] Bool
   (if (> depth max-depth)
     (do
       (encoder-error! encoder recursive-term-depth-error)
@@ -631,21 +695,24 @@
           false)
         true))))
 
-(defn decoder-node! [(decoder Decoder) (depth Int)] Bool
+(defn decoder-node!
+  [decoder Decoder
+   depth Int] Bool
   (decoder-node-limited! decoder depth rpc-v2-max-term-nodes
                          limits/term-codec-v1-max-depth))
 
-(defn encoder-node! [(encoder Encoder) (depth Int)] Bool
+(defn encoder-node!
+  [encoder Encoder
+   depth Int] Bool
   (encoder-node-limited! encoder depth rpc-v2-max-term-nodes
                          limits/term-codec-v1-max-depth))
 
 (defn read-term-limited!
-  [(decoder Decoder)
-   (depth Int)
-   (max-string-bytes Int)
-   (max-nodes Int)
-   (max-depth Int)]
-  t/Term
+  [decoder Decoder
+   depth Int
+   max-string-bytes Int
+   max-nodes Int
+   max-depth Int] t/Term
   (if (decoder-node-limited! decoder depth max-nodes max-depth)
     (let [tag (read-u8! decoder "Term tag")]
       (cond
@@ -657,8 +724,7 @@
         [(= tag 4) false]
         [(= tag 5) true]
         [(= tag 6)
-         (let [spelling
-               (read-sized-text! decoder max-string-bytes "Keyword atom")]
+         (let [spelling (read-sized-text! decoder max-string-bytes "Keyword atom")]
            (if (empty? spelling)
              (do
                (decoder-error! decoder "Keyword atom spelling must be nonempty")
@@ -687,18 +753,19 @@
            :rpc/invalid)]))
     :rpc/invalid))
 
-(defn read-term! [(decoder Decoder) (depth Int)] t/Term
+(defn read-term!
+  [decoder Decoder
+   depth Int] t/Term
   (read-term-limited! decoder depth rpc-v2-max-string-bytes
                       rpc-v2-max-term-nodes limits/term-codec-v1-max-depth))
 
 (defn append-term-limited!
-  [(encoder Encoder)
-   (term Any)
-   (depth Int)
-   (max-string-bytes Int)
-   (max-nodes Int)
-   (max-depth Int)]
-  Nil
+  [encoder Encoder
+   term Any
+   depth Int
+   max-string-bytes Int
+   max-nodes Int
+   max-depth Int] Nil
   (if (encoder-node-limited! encoder depth max-nodes max-depth)
     (cond
       [(t/triple? term)
@@ -717,7 +784,7 @@
       [(integer? term)
        (do (append-u8! encoder 2) (append-i64-le! encoder term))]
       [(and (number? term) (not (integer? term)))
-       (let [(float-term Float) (double term)]
+       (let [float-term Float (double term)]
          (do
            (append-u8! encoder 3)
            (append-i64-le! encoder (float-to-bits float-term))))]
@@ -740,11 +807,14 @@
        (encoder-error! encoder "TermCodecV1 encountered a value outside Term")])
     nil))
 
-(defn append-term! [(encoder Encoder) (term Any) (depth Int)] Nil
+(defn append-term!
+  [encoder Encoder
+   term Any
+   depth Int] Nil
   (append-term-limited! encoder term depth rpc-v2-max-string-bytes
                         rpc-v2-max-term-nodes limits/term-codec-v1-max-depth))
 
-(defn canonical-term-sha256-result! [(term Any)] TermDigestResult
+(defn canonical-term-sha256-result! [term Any] TermDigestResult
   (let [encoder (->Encoder (empty-byte-cell) (atom 0) (empty-error-cell))]
     (append-term! encoder term 0)
     (let [error (deref (encoder-error encoder))]
@@ -754,15 +824,15 @@
                             (sha256-bytes (deref (encoder-bytes encoder)))
                             :rpc/none "")))))
 
-(defn canonical-term-byte-count! [(term Any)] Int
+(defn canonical-term-byte-count! [term Any] Int
   (let [encoder (->Encoder (empty-byte-cell) (atom 0) (empty-error-cell))]
     (append-term! encoder term 0)
     (if (deref (encoder-error encoder))
       0
       (count (deref (encoder-bytes encoder))))))
 
-(defn canonical-term-sha256! [(term Any)] String
-  (let [(result TermDigestResult) (canonical-term-sha256-result! term)]
+(defn canonical-term-sha256! [term Any] String
+  (let [result TermDigestResult (canonical-term-sha256-result! term)]
     (if (termdigestresult-ok result)
       (termdigestresult-digest result)
       (let [message (termdigestresult-message result)]
@@ -770,7 +840,9 @@
                                  :store-rpc/code (termdigestresult-code result)
                                  :message message}))))))
 
-(defn read-keyword-term! [(decoder Decoder) (label String)] Keyword
+(defn read-keyword-term!
+  [decoder Decoder
+   label String] Keyword
   (let [value (read-term! decoder 0)]
     (if (keyword? value)
       value
@@ -778,7 +850,7 @@
         (decoder-error! decoder (str label " must be a Keyword Term"))
         :rpc/invalid))))
 
-(defn read-space-term! [(decoder Decoder)] String
+(defn read-space-term! [decoder Decoder] String
   (if (decoder-node! decoder 0)
     (let [tag (read-u8! decoder "SpaceId Term tag")]
       (if (= tag 1)
@@ -788,10 +860,11 @@
           "")))
     ""))
 
-(defn append-space-term! [(encoder Encoder) (space String)] Nil
+(defn append-space-term!
+  [encoder Encoder
+   space String] Nil
   (let [space-node (encoder-node! encoder 0)
-        space-bytes
-        (if space-node
+        space-bytes (if space-node
           (utf8-bytes! encoder space rpc-v2-max-space-bytes "SpaceId")
           [])]
     (if (nil? (deref (encoder-error encoder)))
@@ -802,46 +875,51 @@
         nil)
       nil)))
 
-(defn append-keyword-term! [(encoder Encoder) (value Keyword)] Nil
+(defn append-keyword-term!
+  [encoder Encoder
+   value Keyword] Nil
   (append-term! encoder value 0))
 
-(defn read-request-keyword-term! [(decoder Decoder)] Keyword
+(defn read-request-keyword-term! [decoder Decoder] Keyword
   (read-keyword-term! decoder "request op"))
 
-(defn read-response-keyword-term! [(decoder Decoder)] Keyword
+(defn read-response-keyword-term! [decoder Decoder] Keyword
   (read-keyword-term! decoder "response op"))
 
-(defn append-schema-term! [(encoder Encoder) (term Any)] Nil
+(defn append-schema-term!
+  [encoder Encoder
+   term Any] Nil
   (append-term! encoder term 0))
 
-(defn read-schema-term! [(decoder Decoder)] Any
+(defn read-schema-term! [decoder Decoder] Any
   (read-term! decoder 0))
 
-(defn read-page-request! [(decoder Decoder)] t/RpcPageRequest
-  (let [(limit Int) (read-u32-le! decoder "page limit")
-        (cursor-present Bool) (read-presence! decoder "page cursor presence")
-        (cursor t/Term?) (if cursor-present (read-term! decoder 0) nil)]
+(defn read-page-request! [decoder Decoder] t/RpcPageRequest
+  (let [limit Int (read-u32-le! decoder "page limit")
+        cursor-present Bool (read-presence! decoder "page cursor presence")
+        cursor t/Term? (if cursor-present (read-term! decoder 0) nil)]
     (t/->RpcPageRequest limit cursor)))
 
-(defn append-page-request! [(encoder Encoder) (page t/RpcPageRequest)] Nil
+(defn append-page-request!
+  [encoder Encoder
+   page t/RpcPageRequest] Nil
   (append-u32-le! encoder (t/rpcpagerequest-limit page))
   (let [cursor (t/rpc-page-request-cursor-value page)]
     (append-presence! encoder (not (nil? cursor)))
     (if (nil? cursor) nil (append-term! encoder cursor 0))))
 
-(defn read-page-response! [(decoder Decoder)] t/RpcPageResponse
+(defn read-page-response! [decoder Decoder] t/RpcPageResponse
   (let [ordinal (read-u32-le! decoder "page ordinal")
         cursor-present (read-presence! decoder "page cursor presence")
         cursor (if cursor-present (read-term! decoder 0) nil)
         done (read-bool! decoder "page done")]
     (t/->RpcPageResponse ordinal cursor done)))
 
-(defn read-error! [(decoder Decoder)] t/RpcError
+(defn read-error! [decoder Decoder] t/RpcError
   (let [code (read-keyword-term! decoder "response error code")
         retryable (read-bool! decoder "response error retryable")
         message-term (read-term! decoder 0)
-        message
-        (if (string? message-term)
+        message (if (string? message-term)
           message-term
           (do
             (decoder-error! decoder
@@ -851,9 +929,8 @@
         detail (if detail-present (read-term! decoder 0) nil)]
     (t/->RpcError code retryable message detail)))
 
-(defn read-request-body! [(decoder Decoder)] t/RpcRequest
-  (let [(fields WireFields_rpc-v2-request-body_request)
-        (read-rpc-v2-request-body-request! decoder)]
+(defn read-request-body! [decoder Decoder] t/RpcRequest
+  (let [fields WireFields_rpc-v2-request-body_request (read-rpc-v2-request-body-request! decoder)]
     (t/->RpcRequest
      (wirefields_rpc-v2-request-body_request-space fields)
      (wirefields_rpc-v2-request-body_request-op fields)
@@ -862,8 +939,9 @@
      (wirefields_rpc-v2-request-body_request-timeout-ms fields)
      (wirefields_rpc-v2-request-body_request-payload fields))))
 
-(defn magic-valid! [(decoder Decoder)] Bool
-  (loop [index Int 0 valid Bool true]
+(defn magic-valid! [decoder Decoder] Bool
+  (loop [index Int 0
+         valid Bool true]
     (if (< index (count store-rpc-v2-magic))
       (recur (+ index 1)
              (and valid
@@ -871,7 +949,7 @@
                      (read-u8! decoder "magic"))))
       valid)))
 
-(defn decode-request-bytes! [(bytes ByteSource)] DecodeResult
+(defn decode-request-bytes! [bytes ByteSource] DecodeResult
   (let [decoder (->Decoder bytes (atom 0) (count bytes)
                            (atom 0) (empty-error-cell))
         byte-count (count bytes)]
@@ -887,13 +965,10 @@
        (let [major (read-u16-le! decoder "major version")
              minor (read-u16-le! decoder "minor version")
              kind (read-u8! decoder "packet kind")
-             (header WireFields_store-rpc-v2-packet-header_request)
-             (read-store-rpc-v2-packet-header-request! decoder)
+             header WireFields_store-rpc-v2-packet-header_request (read-store-rpc-v2-packet-header-request! decoder)
              flags (wirefields_store-rpc-v2-packet-header_request-flags header)
-             body-length
-             (wirefields_store-rpc-v2-packet-header_request-body-length header)
-             request-id
-             (wirefields_store-rpc-v2-packet-header_request-request-id header)]
+             body-length (wirefields_store-rpc-v2-packet-header_request-body-length header)
+             request-id (wirefields_store-rpc-v2-packet-header_request-request-id header)]
          (cond
            [(or (not= major 2) (not= minor 0))
             (->DecodeResult nil "Store RPC major/minor version is unsupported")]
@@ -912,8 +987,7 @@
                             "Store RPC packet has bytes beyond its declared body")]
            [:else
             (let [request (read-request-body! decoder)
-                  packet
-                  (t/->StoreRpcPacketV2 :request 0 request-id request nil)
+                  packet (t/->StoreRpcPacketV2 :request 0 request-id request nil)
                   error (deref (decoder-error decoder))]
               (cond
                 [error (->DecodeResult nil error)]
@@ -922,14 +996,18 @@
                                  "Store RPC body decoder left trailing bytes")]
                 [:else (->DecodeResult packet nil)]))]))])))
 
-(defn append-page-response! [(encoder Encoder) (page t/RpcPageResponse)] Nil
+(defn append-page-response!
+  [encoder Encoder
+   page t/RpcPageResponse] Nil
   (append-u32-le! encoder (t/rpcpageresponse-ordinal page))
   (let [cursor (t/rpc-page-response-cursor-value page)]
     (append-presence! encoder (not (nil? cursor)))
     (if (nil? cursor) nil (append-term! encoder cursor 0)))
   (append-u8! encoder (if (t/rpcpageresponse-done page) 1 0)))
 
-(defn append-error! [(encoder Encoder) (error t/RpcError)] Nil
+(defn append-error!
+  [encoder Encoder
+   error t/RpcError] Nil
   (append-term! encoder (t/rpcerror-code error) 0)
   (append-u8! encoder (if (t/rpcerror-retryable error) 1 0))
   (append-term! encoder (t/rpcerror-message error) 0)
@@ -937,7 +1015,9 @@
     (append-presence! encoder (not (nil? detail)))
     (if (nil? detail) nil (append-term! encoder detail 0))))
 
-(defn append-response-body! [(encoder Encoder) (response t/RpcResponse)] Nil
+(defn append-response-body!
+  [encoder Encoder
+   response t/RpcResponse] Nil
   (append-rpc-v2-response-body-response!
    encoder (t/rpcresponse-space response)
    (t/rpcresponse-op response)
@@ -947,7 +1027,8 @@
    (t/rpc-response-payload-value response)))
 
 (defn finish-response-packet!
-  [(packet t/StoreRpcPacketV2) (body-bytes (Vec Int))] EncodeResult
+  [packet t/StoreRpcPacketV2
+   body-bytes (Vec Int)] EncodeResult
   (let [out (->Encoder (empty-byte-cell) (atom 0) (empty-error-cell))]
     (swap! (encoder-bytes out) into store-rpc-v2-magic)
     (append-u16-le! out 2)
@@ -960,7 +1041,7 @@
         (->EncodeResult nil error)
         (->EncodeResult (deref (encoder-bytes out)) nil)))))
 
-(defn encode-response-bytes! [(packet t/StoreRpcPacketV2)] EncodeResult
+(defn encode-response-bytes! [packet t/StoreRpcPacketV2] EncodeResult
   (let [response (t/storerpcpacketv2-response packet)]
     (cond
       [(not= :response (t/storerpcpacketv2-kind packet))

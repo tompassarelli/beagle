@@ -269,7 +269,9 @@
 (def effect-attempt-mode Keyword :effect-attempt)
 (def effect-receipt-mode Keyword :effect-receipt)
 
-(defrecord DerivedPremise [(ordinal Int) (value String)])
+(defrecord DerivedPremise
+  [ordinal Int
+   value String])
 (defalias DerivedPremises (U (Vec String) Nil))
 
 (defunion FactPersistence
@@ -283,7 +285,9 @@
   (FactMalformed [detail String])
   (FactReconstructed [fact EpistemicFact]))
 
-(defn premise-subject [fact-id String ordinal Int] t/Triple
+(defn premise-subject
+  [fact-id String
+   ordinal Int] t/Triple
   (t/triple fact-id fact-premise ordinal))
 
 (defn derived-premise-triples
@@ -304,8 +308,7 @@
 
 (defn fact-triples [fact EpistemicFact] (Vec t/Triple)
   (let [fact-id String (epistemicfact-fact-id fact)
-        base (Vec t/Triple)
-        [(t/triple fact-id fact-world (epistemicfact-world-id fact))
+        base (Vec t/Triple) [(t/triple fact-id fact-world (epistemicfact-world-id fact))
          (t/triple fact-id fact-proposition (epistemicfact-proposition fact))]]
     (match (epistemicfact-provenance fact)
       [(Declared authority-id evidence-id)
@@ -416,10 +419,8 @@
    subject Any] DerivedPremise?
   (if (not (t/triple? subject))
     nil
-    (let [ordinal Int?
-          (only-int (property-values view subject fact-premise-ordinal))
-          value String?
-          (nonempty-only-string view subject fact-premise-value)]
+    (let [ordinal Int? (only-int (property-values view subject fact-premise-ordinal))
+          value String? (nonempty-only-string view subject fact-premise-value)]
       (if (and (some? ordinal)
                (and (some? value)
                     (and (>= ordinal 0)
@@ -457,8 +458,7 @@
                 (if (some? value)
                   (recur (inc ordinal) (conj values value))
                   nil))))
-          (let [premise DerivedPremise?
-                (parsed-derived-premise view fact-id (nth references position))]
+          (let [premise DerivedPremise? (parsed-derived-premise view fact-id (nth references position))]
             (if (some? premise)
               (recur (inc position) (conj parsed premise))
               nil)))))))
@@ -532,8 +532,7 @@
             mode Keyword? (only-keyword (property-values view fact-id fact-mode))]
         (if (and (nonempty-id? fact-id)
                  (and (some? world) (and (some? proposition) (some? mode))))
-          (let [provenance EpistemicProvenance?
-                (reconstructed-provenance view fact-id mode)]
+          (let [provenance EpistemicProvenance? (reconstructed-provenance view fact-id mode)]
             (if (some? provenance)
               (->FactReconstructed
                (->EpistemicFact fact-id world proposition provenance))
