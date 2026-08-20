@@ -61,9 +61,9 @@ Run a form through these and one answer falls out. **Do not surface decisions th
 
 **Default mode is apply-and-report, not present-and-ratify.** No "your call" sentences or option-A/B/C menus — that is the failure mode this rule prevents. Escalate only a genuine conflict between two clauses; the ordering pre-resolves most: **types > idiom-matching > aesthetic preference**. On a real conflict, name it "real conflict: X vs Y", propose the resolution, ask one specific question — don't reopen the board.
 
-## Surface lock — typed Clojure + inference, structural bindings
+## Surface lock — typed Clojure, authored flat bindings
 
-Typed Clojure plus inference. No type-fact form, no `claim`, no spec registry,
+Typed Clojure with authored declaration types. No type-fact form, no `claim`, no spec registry,
 and no `s/` namespace. Type annotations are compile-time information, not
 Schema/Spec. The optional constraint in a binding declaration is an explicitly
 authored predicate value and emits one local runtime guard; it is not permission
@@ -71,61 +71,51 @@ to build `s/def`, conform/explain, or a general validation runtime behind it.
 
 ### Canonical spelling
 
-The outer `[...]` is only a collection of bindings. Each entry has exactly one
-of these shapes:
+The outer `[...]` is a collection of flat binding/type pairs. Every binding has
+an authored type:
 
 ```text
-binding := symbol
-         | (binding-form Type)
-         | (binding-form Type constraint)
+parameters / fields := binding-form Type
+let / loop          := binding-form Type initializer
+def / defonce       := name Type initializer
 ```
 
-A symbol is the only bare binding and requests inference. Inside a typed
-declaration, `binding-form` may be a symbol or an ordinary Clojure sequential or
+A `binding-form` may be a symbol or an ordinary Clojure sequential or
 associative destructuring form:
 
 ```clojure
-(x Int)
-(x Int positive?)
-([x y] (HVec Float Float))
-([x y] (HVec Float Float) valid-point?)
-({:keys [host port]} Config)
+x Int
+x (Int where positive?)
+[x y] (HVec Float Float)
+{:keys [host port]} Config
 ```
 
-The type and optional constraint annotate the complete binding operation, not
-merely an identifier:
+The type annotates the complete binding operation, not merely an identifier:
 
 ```clojure
-[a]                                    ; one inferred binding
-[(a Point)]                            ; one typed binding
-[a b]                                  ; two inferred bindings
-[(a Point) (b Point)]                  ; two typed bindings
-[a (b Point)]                          ; mixed: a inferred, b typed
-[([x y] (HVec Float Float)) options]   ; typed destructure + inferred symbol
+[a Point]                              ; one typed binding
+[a Point b Point]                      ; two typed bindings
+[[x y] (HVec Float Float)]             ; one typed destructure
+[{:keys [host port]} Config]           ; one typed map destructure
 ```
 
-Bare symbols request real inference; they do not insert `Any`. A bare
-destructuring form in a strict typed signature is rejected because no aggregate
-type is available to project; wrap the pattern and aggregate type in one
-declaration. Explicit `(value Any)` is retained for a deliberate dynamic or
-unchecked boundary, and typed and bare bindings may mix. The nesting is
-semantic structure, not typography. The same declaration spelling is used in
+Omitted types are illegal and mixed legacy/flat vectors are rejected. Explicit
+`Any` is retained only for a deliberate dynamic or unchecked boundary. The same
+pair spelling is used in
 parameter and binding vectors: `fn`/`defn`/`defn-`, multi-arity clauses,
 `letfn`, protocol and implementation methods, `let`, `loop`, and
-record/union/error fields. Fields remain required to carry types. A typed rest
-parameter is `& (more (Vec Int))`; a constrained rest parameter is
-`& (more (Vec Int) nonempty?)`. Top-level `def` and `defonce` are already
+record/union/error fields. A typed rest parameter is `& more (Vec Int)`; a
+constrained rest parameter is `& more ((Vec Int) where nonempty?)`. Top-level `def` and `defonce` are already
 structural owner forms, so their type is the positional slot after the name.
 
-Each outer parameter-vector entry is an independent binding. `[a (b Point)]`
-contains a bare binding and a typed binding; `([x y] Point)` is one typed
-destructuring binding. Never reinterpret an adjacent outer entry as the type,
-constraint, or metadata of the preceding binding.
+Each binding/type pair is independent. A destructuring form is one binder, so
+`[[x y] Point2]` is one typed binding. Never reinterpret another pair as
+constraint or metadata for the preceding binding.
 
 ### Binding constraints
 
-The optional third element is a statically known synchronous unary predicate
-`[T -> Bool]`, where `T` is the declared binding type. Its signature must not
+The type slot may contain a refinement expression `(T where predicate)`, where
+the predicate is statically known, synchronous, and unary. Its signature must not
 contain `Any`; it may not take extra/rest arguments, return a non-`Bool`, or
 perform asynchronous work. Call-produced predicates are accepted only when the
 callee publishes an explicit positive returned-callable synchronization proof;
@@ -134,13 +124,14 @@ executing the factory synchronously is not sufficient.
 Emitters apply the predicate to the complete raw incoming value before the
 binding target is installed or a destructuring pattern projects names. A false
 result raises a target-idiomatic runtime error and the binding body does not
-run. Thus `([x y] Point2 valid-point?)` calls `valid-point?` with the `Point2`,
+run. Thus `[[x y] (Point2 where valid-point?)]` calls `valid-point?` with the `Point2`,
 not with `x` or `y`. Never move the guard after projection or let the predicate
 refer implicitly to names introduced by its own binding.
 
 ```clojure
-(defn positive? [(value Int)] Bool (> value 0))
-(defn add-positive [(left Int positive?) (right Int positive?)] Int
+(defn positive? [value Int] Bool (> value 0))
+(defn add-positive [left (Int where positive?)
+                    right (Int where positive?)] Int
   (+ left right))
 ```
 
@@ -148,35 +139,30 @@ Fields use the same standard optional constraint:
 
 ```clojure
 (defrecord Character
-  [(id String character-id-wire?)
-   (name String character-name-wire?)])
+  [id (String where character-id-wire?)
+   name (String where character-name-wire?)])
 ```
 
 Macro-owned declaration DSLs may give one declaration additional validators,
 encoders, decoders, or other local metadata. Every outer entry must still
-contain one complete declaration, such as
-`(name Type value-validator wire-validator encoder decoder)` or
-`(name encoder-expression validator)`. Iterate entries directly, reject
+contain one complete declaration. Iterate entries directly, reject
 anything that is not a declaration form, validate the exact arity, and only
 then destructure it locally. Never `partition`, pair, or reconstruct
-declarations from adjacent tokens. Reject a flattened field form such as
-`[(id String) character-id-wire?]` with a targeted diagnostic. This rejection
-is contextual: in a parameter vector the same two entries are independently a
-typed `id` and a bare `character-id-wire?` binding.
+declarations from adjacent tokens.
 
 Top-level typed definitions use noun then type:
 
 ```clojure
 (def port Int 7978)
-(let [(acc Int nonnegative?) 0] ...)
-(defrecord User [(name String nonblank?) (age Int nonnegative?)])
+(let [acc (Int where nonnegative?) 0] ...)
+(defrecord User [name (String where nonblank?) age (Int where nonnegative?)])
 ```
 
 Executable signatures have one mandatory positional return slot after the
 parameter vector. No arrow decorates that slot:
 
 ```clojure
-(defn add [(x Int) (y Int)] Int
+(defn add [x Int y Int] Int
   (+ x y))
 ```
 
@@ -192,16 +178,16 @@ destructuring:
 
 ```clojure
 (defalias Point2 (HVec Float Float))
-(defrecord Config [(host String) (port Int)])
-(defrecord Point [(x Float) (y Float)])
+(defrecord Config [host String port Int])
+(defrecord Point [x Float y Float])
 
-(defn distance [([x1 y1] Point2) ([x2 y2] Point2)] Float
+(defn distance [[x1 y1] Point2 [x2 y2] Point2] Float
   ...)
 
-(defn endpoint [({:keys [host port]} Config)] String
+(defn endpoint [{:keys [host port]} Config] String
   ...)
 
-(defn point-x [({:keys [x y]} Point)] Float
+(defn point-x [{:keys [x y]} Point] Float
   x)
 ```
 
@@ -211,56 +197,45 @@ the spelling alone.
 
 ### Canonical physical layout
 
-Width alone chooses among three shapes; parameter count never does:
+Layout is structural and never width-driven. Zero or one binding stays inline;
+two or more bindings break one complete pair or triple per line:
 
 ```clojure
-;; complete owner + signature fits
-(defn distance [(a Point) (b Point)] Float
+;; one binding stays inline
+(defn distance [point Point] Float
   ...)
 
-;; owner causes overflow; move [params] Return as one unit
-(defn horizontal-ring-distance
-  [(anchor WorldCoordinate) (coord WorldCoordinate)] Float
+;; a declaration with multiple bindings keeps its header as a scan anchor
+(defn ring-distance
+  [anchor WorldCoordinate
+   coord WorldCoordinate] Float
   ...)
 
-;; the indented unit also overflows; expand bindings, then return
-(defn complicated-distance
-  [(anchor Coordinate)
-   (coord Coordinate)
-   (world WorldState)
-   (options DistanceOptions)]
-  Float
-  ...)
-
-;; a single declaration that still exceeds the width expands internally
-(defn validated-coordinate
-  [(coordinate
-    InternationalCoordinateReferenceSystem
-    coordinate-inside-supported-world-boundaries?)]
-  Float
+;; a cross-parameter qualification always owns the next line
+(defn bounded-distance
+  [anchor Coordinate
+   coord Coordinate] Float
+  (where (same-world? anchor coord))
   ...)
 ```
 
-The boundary is inclusive at 80 columns. Expanded vectors contain one logical
-binding form per line and are never partially packed. The mandatory return
-owns the next line. A declaration that is itself too wide expands its binding
-form, type, and constraint internally; alignment whitespace never simulates
-grouping. `beagle fmt --check` owns canonical style and `beagle fmt --write`
-applies the token-aware source-range rewrite. Comment-bearing ranges that cannot
-move safely are reported without a lossy rewrite; source-less macro-produced
-datums have no physical-layout obligation.
+Declaration headers remain on their own line when their vector breaks;
+expression heads keep `[` attached. The mandatory return type stays on the line
+containing `]`. A cross-parameter `(where ...)` clause always occupies its own
+line immediately afterward. Delimiters collect on the last content line.
+`beagle fmt --check` checks canonical style and `beagle fmt --write` applies it.
 
 ### Structural declarations are the only type surface
 
-Bindings carry type and optional constraint in one structural form. Executable
+Bindings carry an authored type in a flat pair. Executable
 returns occupy the mandatory positional slot after the parameter vector. Do not
 add a second declaration surface.
 
-A bare capitalized binding still raises the `capitalized-binding-name` warning:
+A capitalized token in a binding position raises the
+`capitalized-binding-name` warning:
 
 ```clojure
 (defn f [x Int] Any ...)
-;; `Int` is a second bare parameter; did you mean `(x Int)`?
 ```
 
 **Locked decisions — do not reopen:**
@@ -268,9 +243,8 @@ A bare capitalized binding still raises the `capitalized-binding-name` warning:
   binding site.
 - Removed forms `unless` / `fmt` / `has` are rejected pointing at `when-not` /
   `str`,`format` / `contains?`.
-- Typed destructuring is not a special second annotation syntax:
-  `(binding-form Type [constraint])` is the declaration, and a destructure is a
-  binding form.
+- Typed destructuring is not a special annotation syntax: a destructure is one
+  `binding-form` followed by its aggregate type.
 
 For exact grammar, nil-narrowing, qualified-call resolution, and stdlib
 nullability: ask the compiler (`parse.rkt`/`check.rkt`), which reports
@@ -340,8 +314,8 @@ No `unsafe-*` (nix/js/clj), no `nix-ident`, no raw verbatim-string-to-target for
 
 ### Beagle is Clojure plus types, nothing else
 
-Two sanctioned divergences from Clojure: the type layer (structural
-`(binding-form Type [constraint])` declarations plus the mandatory positional
+Two sanctioned divergences from Clojure: the type layer (flat
+`binding-form Type` declarations, refinement types, plus the mandatory positional
 return slot and checker — see "Surface lock") and multi-backend targeting
 (`target-case` + per-language prefixes — see below). Every other surface
 form is plain Clojure. (Why this matters → README "What it isn't" /
@@ -457,9 +431,10 @@ surface change breaks them you **must** migrate them, not leave them alone.
 
 ### Type-system gating policies
 
-The canonical binding grammar is `symbol | (binding-form Type [constraint])`.
-Bare symbols request inference, explicit `Any` marks a dynamic boundary, and a
-constraint must check as a synchronous unary `[Type -> Bool]` predicate.
+The canonical binding grammar is the flat pair `binding-form Type`; local
+binding forms add an initializer as a third slot. Every binding has an authored
+type, explicit `Any` marks a dynamic boundary, and a refinement predicate must
+check as a synchronous unary `[Type -> Bool]` predicate.
 Executable signatures use `[params] RET` with a mandatory positional return.
 Function-type arrows remain inside type vectors. See the "Surface lock" anchor
 for the complete grammar.

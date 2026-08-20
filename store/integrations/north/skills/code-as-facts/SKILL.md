@@ -65,7 +65,7 @@ does not recompile, writes no tree.
 | Delete a def | _(engine verb `delete` exists; MCP tool not yet exposed)_ | fail-closed on orphaned references |
 
 The new form/body is **structured data you emit** (an EDN datum, the structured
-edit spec — e.g. `(defn add-two [(x Int)] Int (base (+ x 2)))`), not a text
+edit spec — e.g. `(defn add-two [x Int] Int (base (+ x 2)))`), not a text
 splice. It is minted into the same Beagle Store store as `kind`/`v`/`fN` facts, and any
 reference in it resolves via the same lexical walk — so it is scope-correct for
 free (a later rename of a callee propagates into the code you just authored).

@@ -41,7 +41,7 @@ $ cat src/main.bclj
 #lang beagle/clj
 (ns main)
 
-(defn greet [(name String)] String
+(defn greet [name String] String
   (str "hello " name))
 
 (println (greet "from Beagle"))

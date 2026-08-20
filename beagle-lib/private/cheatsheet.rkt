@@ -59,15 +59,14 @@
           "(defenum Color Red Green Blue)")
 
    (cheat "typed binding pairs" "Types" 'clj
-          "A typed binding vector alternates `binding-form Type` — strict pairs all the way through. Every binder carries a type; an omitted one is a rejection naming that binder, because without the retired `(name Type)` parens nothing marks where an entry starts. Sequential and associative destructures may occupy `binding-form`; the whole pattern is ONE binder, and its complete incoming aggregate is what the type describes, so the projected names need no annotations of their own. More than one binding in a vector always breaks one binding per line, at every binding site and with no width threshold; a lone unrefined binding may stay inline. Record fields take the same pair law, and metadata flattened out of its declaration is rejected. Executable signatures place their mandatory return directly after the parameter vector; a type-level function signature is written `(Fn [ParamType ...] ReturnType)`. A per-binding constraint is a refinement type expression, `(Int where positive?)` — the syntax is reserved and its semantics land in a later seam. The legacy grouped spelling is still read while the corpus migrates, but canonical writers emit only the pair form."
+          "A typed binding vector alternates `binding-form Type` — strict pairs all the way through. Every binder carries an authored type; an omitted one is a rejection naming that binder. Sequential and associative destructures may occupy `binding-form`; the whole pattern is ONE binder, and its complete incoming aggregate is what the type describes, so projected names need no annotations of their own. More than one binding in a vector always breaks one complete binding per line, at every binding site and with no width threshold; any single binding stays inline, including a refinement. Record fields take the same pair law, and metadata flattened out of its declaration is rejected. Executable signatures place their mandatory return on the same line as the parameter vector's closing `]`; a type-level function signature is `(Fn [ParamType ...] ReturnType)`. A per-binding constraint is a refinement type expression, `(Int where positive?)`; a cross-parameter `(where ...)` clause always occupies its own line after the return type. The legacy grouped spelling is still read while the corpus migrates, but canonical writers emit only the pair form."
           (string-append
            "(defrecord Size\n"
            "  [w Int\n"
            "   h Int])\n"
            "(defn scaled-area\n"
            "  [{:keys [w h]} Size\n"
-           "   factor Int]\n"
-           "  Int\n"
+           "   factor Int] Int\n"
            "  (* factor (* w h)))"))
 
    (cheat "forall type variables" "Types" 'clj
@@ -86,15 +85,15 @@
           (string-append
            "(defn add\n"
            "  [x Int\n"
-           "   y Int]\n"
-           "  Int\n"
+           "   y Int] Int\n"
            "  (+ x y))"))
 
    (cheat "let / loop / recur / cond" "Control flow" 'clj
           "Standard control flow; bindings use bracket vectors."
           (string-append
            "(defn sum-to [n Int] Int\n"
-           "  (loop [i 0 acc 0]\n"
+           "  (loop [i Int 0\n"
+           "         acc Int 0]\n"
            "    (cond [(> i n) acc]\n"
            "          [:else (recur (+ i 1) (+ acc i))])))"))
 

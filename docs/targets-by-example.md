@@ -18,10 +18,10 @@ paths below.
 The same source body, saved as `.bclj`, `.bjs`, and `.bnix`:
 
 ```clojure
-(defn even-doubles [(xs (List Int))] (List Int)
+(defn even-doubles [xs (List Int)] (List Int)
   (->> xs
        (filter even?)
-       (map (fn [(n Int)] Int (* n 2)))))
+       (map (fn [n Int] Int (* n 2)))))
 ```
 
 Each target renders it idiomatically — not transliterated:
