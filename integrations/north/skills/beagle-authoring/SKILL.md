@@ -5,8 +5,9 @@ description: >-
   files with a current Beagle extension (`beagle langs --view extensions`),
   files beginning with `#lang beagle`, or anything under ~/code/beagle.
   Establishes the authoring loop, source authority, compiler-first repair,
-  canonical typed syntax, and pinned Racket route. For tasks primarily about
-  relational code analysis, use codegraph instead.
+  canonical typed syntax, and the pinned Racket route for cold bootstrap or
+  direct `.rkt` maintenance—never the normal warm compiler route. For tasks
+  primarily about relational code analysis, use codegraph instead.
 ---
 
 # Beagle authoring
@@ -18,7 +19,6 @@ are editing. `README.md`, `docs/cli.md`, and the compiler are current; generated
 tables and this skill are routing aids, not language inventories:
 
 ```text
-beagle doctor --deep
 beagle langs --json
 beagle help
 ```
@@ -65,10 +65,23 @@ Beagle source is strictly checked.
 `beagle check --profile 0` is parser-only diagnostics; it does not select a
 dynamic language mode or produce a checked program.
 
+## Keep the native typed triple pipeline authoritative
+
+Keep normal and warm compiler semantics in typed Beagle over normalized Store
+triples. Do not newly implement closure discovery, semantic identity,
+invalidation, admission, dependency reasoning, or materialization decisions in
+shell, Racket, Python, Babashka, or hosted Clojure. Limit host code to cold
+bootstrap verification and irreducible process, OS, or foreign-tool edges. Make
+it execute typed plans; never let it become a second semantic authority. Reject
+hosted projectors, daemons, or wrappers for warm semantics. Use whole-root facts
+for audit or indexing only; do not let them poison entry-local keys unless the
+fact is semantically required.
+
 ## Repair compiler defects upstream
 
 A confirmed parser, checker, lowering, emitter, runtime, or authoring-tool
-defect stops the consuming change. Repair it in a `~/code/beagle/wt-*`
+defect stops the consuming change. Repair it in a
+`~/code/beagle/worktrees/<slug>`
 worktree, run the nearest existing relevant check, land it, then regenerate the
 consumer from canonical Beagle source.
 
@@ -221,10 +234,11 @@ gains safety; a rejection may mean bad source or a bad type choice. Only an
 inability to express the real shape is a language gap. Record each such gap;
 the gap list is part of the deliverable, not permission to add more `Any`.
 
-## Route Racket through the pinned toolchain
+## Route cold-bootstrap and direct Racket work through the pin
 
-Before any `.rkt` edit, Racket command, worktree build, or investigation where
-a fix “didn't take,” read
+Use pinned Racket only for cold-bootstrap verification or direct `.rkt`
+maintenance, never for the normal warm compiler route. Before any such edit,
+command, build, or investigation where a fix “didn't take,” read
 `beagle:integrations/north/docs/racket-beagle-bytecode.md` completely. Never
 invoke bare `racket` or `raco`. Source `bin/_beagle-racket`, use its `$RACKET`
 and `$RACO`, rebuild edited modules with that same pin, and suspect stale `.zo`
