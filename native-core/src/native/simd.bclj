@@ -57,7 +57,7 @@
 (defn find-block
   [(function core/FunctionDef) (target core/NativeId)] (U core/BasicBlock Nil)
   (let [blocks (core/functiondef-blocks function)]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count blocks))
         nil
         (let [block (nth blocks index)]
@@ -70,7 +70,7 @@
   (let [instructions
         (vec (mapcat core/basicblock-instructions
                (core/functiondef-blocks function)))]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count instructions))
         nil
         (let [instruction (nth instructions index)]
@@ -83,7 +83,7 @@
 (defn instruction-in-block?
   [(block core/BasicBlock) (target core/NativeId)] Bool
   (let [instructions (core/basicblock-instructions block)]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count instructions))
         false
         (if (core/native-id=
@@ -118,8 +118,8 @@
                (packbuildcompletev0-instructions left)
                (packbuildcompletev0-instructions right)
                [instruction]))
-        (loop [(index Int) 0
-               (sources (Vec core/NativeId))
+        (loop [index Int 0
+               sources (Vec core/NativeId)
                (packbuildcompletev0-source-buffer-ids left)]
           (let [right-sources
                 (packbuildcompletev0-source-buffer-ids right)]
@@ -327,7 +327,7 @@
    (parameter-id core/NativeId)]
   (U core/BasicBlock Nil)
   (let [blocks (core/functiondef-blocks function)]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count blocks))
         nil
         (let [block (nth blocks index)
@@ -338,7 +338,7 @@
 
 (defn parameter-position
   [(parameters (Vec core/Parameter)) (parameter-id core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count parameters))
       -1
       (if (core/native-id= (core/parameter-id (nth parameters index)) parameter-id)
@@ -370,7 +370,7 @@
 (defn jump-arguments-to
   [(function core/FunctionDef) (target core/NativeId)] (Vec core/NativeId)
   (let [blocks (core/functiondef-blocks function)]
-    (loop [(index Int) 0 (arguments (Vec core/NativeId)) []]
+    (loop [index Int 0 arguments (Vec core/NativeId) []]
       (if (>= index (count blocks))
         arguments
         (let [terminators (core/basicblock-terminators (nth blocks index))]
@@ -521,7 +521,7 @@
 
 (defn function-loop-plans [(function core/FunctionDef)] (Vec SimdLoopPlanV0)
   (let [blocks (core/functiondef-blocks function)]
-    (loop [(index Int) 0 (plans (Vec SimdLoopPlanV0)) []]
+    (loop [index Int 0 plans (Vec SimdLoopPlanV0) []]
       (if (>= index (count blocks))
         plans
         (let [block (nth blocks index)
@@ -533,7 +533,7 @@
 
 (defn program-loop-plans [(program core/NativeCoreProgram)] (Vec SimdLoopPlanV0)
   (let [functions (core/nativecoreprogram-functions program)]
-    (loop [(index Int) 0 (plans (Vec SimdLoopPlanV0)) []]
+    (loop [index Int 0 plans (Vec SimdLoopPlanV0) []]
       (if (>= index (count functions))
         plans
         (recur (+ index 1)

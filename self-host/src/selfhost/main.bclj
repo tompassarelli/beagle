@@ -68,7 +68,7 @@
 (def MODULE-RESOLUTION Any (atom {"providers" {} "roots" []}))
 
 (defn- split-dots [(s String)] Any
-  (loop [(i Int) 0 (start Int) 0 (acc Any) []]
+  (loop [i Int 0 start Int 0 acc Any []]
     (cond
       (>= i (count s)) (conj acc (subs s start i))
       (= (subs s i (+ i 1)) ".") (recur (+ i 1) (+ i 1) (conj acc (subs s start i)))
@@ -76,7 +76,7 @@
 
 ;; module-source-root.rkt namespace-relative-source-id: `-` -> `_`, `.` -> `/`.
 (defn- ns-relative-source-path [(ns String) (extension String)] String
-  (loop [(i Int) 0 (acc String) ""]
+  (loop [i Int 0 acc String ""]
     (if (>= i (count ns))
       (str acc extension)
       (let [c (subs ns i (+ i 1))]
@@ -84,7 +84,7 @@
           (str acc (cond (= c ".") "/" (= c "-") "_" :else c)))))))
 
 (defn- source-extension [(path String)] String
-  (loop [(i Int) (- (count path) 1)]
+  (loop [i Int (- (count path) 1)]
     (cond
       (< i 0) ""
       (= (subs path i (+ i 1)) "/") ""
@@ -92,7 +92,7 @@
       :else (recur (- i 1)))))
 
 (defn- ns-token-end [(text String) (start Int)] Int
-  (loop [(i Int) start]
+  (loop [i Int start]
     (if (>= i (count text))
       i
       (let [c (subs text i (+ i 1))]
@@ -106,7 +106,7 @@
 (defn- declared-ns-of-source [(path String)] Any
   (let [text (selfhost.rt/slurp-file path)
         n (count text)]
-    (loop [(i Int) 0 (bol Bool) true]
+    (loop [i Int 0 bol Bool true]
       (cond
         (>= i n) nil
         (and bol (<= (+ i 4) n) (= (subs text i (+ i 4)) "(ns "))
@@ -116,7 +116,7 @@
         :else (recur (+ i 1) (= (subs text i (+ i 1)) "\n"))))))
 
 (defn- module-declared-ns [(datums Any)] Any
-  (loop [(i Int) 0]
+  (loop [i Int 0]
     (if (>= i (count datums))
       nil
       (let [d (nth datums i)]
@@ -141,7 +141,7 @@
     datums))
 
 (defn- parse-module-root-spec! [(spec String)] Any
-  (let [eq (loop [(i Int) 0]
+  (let [eq (loop [i Int 0]
              (cond
                (>= i (count spec)) -1
                (= (subs spec i (+ i 1)) "=") i
@@ -225,7 +225,7 @@
           :else nil)))))
 
 (defn- contains-dot? [(s String)] Bool
-  (loop [(i Int) 0]
+  (loop [i Int 0]
     (cond
       (>= i (count s)) false
       (= (subs s i (+ i 1)) ".") true
@@ -262,7 +262,7 @@
        0)))
 
 (defn- dedup-externs [(xs Any)] Any
-  (loop [(i Int) 0 (seen Any) {} (acc Any) []]
+  (loop [i Int 0 seen Any {} acc Any []]
     (if (>= i (count xs))
       acc
       (let [e (nth xs i) nm (get e "name")]
@@ -829,7 +829,7 @@
         (recur (+ i 1))))))
 
 (defn- flag-values [(args Any) (flag String)] Any
-  (loop [(i Int) 0 (acc Any) []]
+  (loop [i Int 0 acc Any []]
     (if (>= i (count args))
       acc
       (if (and (= (nth args i) flag) (< (+ i 1) (count args)))

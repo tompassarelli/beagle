@@ -23,7 +23,7 @@
 
 (defn index-of2 [(xs (Vec Any)) (v Any)] Int
   (let [n (count xs)]
-    (loop [(i Int) 0]
+    (loop [i Int 0]
       (if (>= i n) -1
         (if (= (nth xs i) v) i (recur (+ i 1)))))))
 

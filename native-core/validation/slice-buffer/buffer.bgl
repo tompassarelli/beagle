@@ -6,7 +6,7 @@
 (defn fill! [(buffer (Buffer Float))] Float
   (if (zero? (alength buffer))
     0.0
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (< index (alength buffer))
         (do
           (aset-double! buffer index 3.0)
@@ -20,7 +20,7 @@
       (let [last-index (- length 1)]
         (aset-double! destination 0 (aget source 0))
         (aset-double! destination last-index (aget source last-index))
-        (loop [(index Int) 1]
+        (loop [index Int 1]
           (if (< index last-index)
             (do
               (aset-double! destination index
@@ -45,9 +45,9 @@
     (let [left (double-array 8)
           right (double-array 8)]
       (fill! left)
-      (loop [(source (Buffer Float)) left
-             (destination (Buffer Float)) right
-             (remaining Int) steps]
+      (loop [source (Buffer Float) left
+             destination (Buffer Float) right
+             remaining Int steps]
         (if (zero? remaining)
           (aget source 3)
           (do

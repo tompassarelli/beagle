@@ -18,7 +18,7 @@
     local))
 
 (defn constrained-loop [(value Int)] Int
-  (loop [(local Int positive?) value]
+  (loop [local Int positive? value]
     local))
 
 (defn constrained-for [(values (Vec Int))] (Vec (U Int Nil))

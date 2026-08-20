@@ -75,7 +75,7 @@
 (defn find-block
   [(blocks (Vec core/BasicBlock))
    (block-id core/NativeId)] (U core/BasicBlock Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count blocks)) nil
       (core/native-id= (core/basicblock-id (nth blocks index)) block-id)
@@ -98,7 +98,7 @@
    (parameters (Vec core/Parameter))
    (function-parameter Bool)
    (block-id core/NativeId)] (Map String DefSiteV0)
-  (loop [(index Int) 0 (current (Map String DefSiteV0)) definitions]
+  (loop [index Int 0 current (Map String DefSiteV0) definitions]
     (if (>= index (count parameters))
       current
       (let [(parameter core/Parameter) (nth parameters index)]
@@ -112,7 +112,7 @@
   [(definitions (Map String DefSiteV0))
    (block core/BasicBlock)] (Map String DefSiteV0)
   (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
-    (loop [(index Int) 0 (current (Map String DefSiteV0)) definitions]
+    (loop [index Int 0 current (Map String DefSiteV0) definitions]
       (if (>= index (count instructions))
         current
         (let [(result core/SsaValueV0) (get (nth instructions index) :result)]
@@ -129,7 +129,7 @@
           true
           (obligation-id "function-parameter"))
         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(index Int) 0 (current (Map String DefSiteV0)) with-function-parameters]
+    (loop [index Int 0 current (Map String DefSiteV0) with-function-parameters]
       (if (>= index (count blocks))
         current
         (let [(block core/BasicBlock) (nth blocks index)
@@ -143,7 +143,7 @@
 
 (defn block-index
   [(blocks (Vec core/BasicBlock))] (Map String core/BasicBlock)
-  (loop [(index Int) 0 (current (Map String core/BasicBlock)) {}]
+  (loop [index Int 0 current (Map String core/BasicBlock) {}]
     (if (>= index (count blocks))
       current
       (let [(block core/BasicBlock) (nth blocks index)]
@@ -156,7 +156,7 @@
 (defn parameter-site
   [(parameters (Vec core/Parameter))
    (value-id core/NativeId)] DefSiteV0
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count parameters))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
@@ -169,7 +169,7 @@
 (defn block-parameter-site
   [(block core/BasicBlock)
    (value-id core/NativeId)] DefSiteV0
-  (loop [(index Int) 0 (parameters (Vec core/Parameter)) (core/basicblock-parameters block)]
+  (loop [index Int 0 parameters (Vec core/Parameter) (core/basicblock-parameters block)]
     (if (>= index (count parameters))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
@@ -182,7 +182,7 @@
 (defn block-instruction-site
   [(block core/BasicBlock)
    (value-id core/NativeId)] DefSiteV0
-  (loop [(index Int) 0 (instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
+  (loop [index Int 0 instructions (Vec core/Instruction) (core/basicblock-instructions block)]
     (if (>= index (count instructions))
       (->DefSiteV0 false false (obligation-id "missing-block") -1
         (obligation-id "missing-type"))
@@ -208,7 +208,7 @@
         (parameter-site (core/functiondef-parameters function) value-id)]
     (if (defsitev0-found function-site)
       function-site
-      (loop [(index Int) 0 (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+      (loop [index Int 0 blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
         (if (>= index (count blocks))
           (->DefSiteV0 false false (obligation-id "missing-block") -1
             (obligation-id "missing-type"))
@@ -240,9 +240,9 @@
   [(blocks (Map String core/BasicBlock))
    (entry core/NativeId)
    (avoided core/NativeId)] (Map String Bool)
-  (loop [(position Int) 0
-         (pending (Vec core/NativeId)) [entry]
-         (seen (Map String Bool)) {}]
+  (loop [position Int 0
+         pending (Vec core/NativeId) [entry]
+         seen (Map String Bool) {}]
     (if (>= position (count pending))
       seen
       (let [(current core/NativeId) (nth pending position)
@@ -266,7 +266,7 @@
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
         (blocks-by-id (Map String core/BasicBlock)) (block-index blocks)
         (entry core/NativeId) (core/functiondef-entry-block function)]
-    (loop [(avoided-position Int) 0 (paths (Map String Bool)) {}]
+    (loop [avoided-position Int 0 paths (Map String Bool) {}]
       (if (>= avoided-position (count blocks))
         paths
         (let [(avoided core/NativeId)
@@ -276,7 +276,7 @@
             (let [(reachable (Map String Bool))
                   (reachable-blocks-avoiding blocks-by-id entry avoided)
                   (next-paths (Map String Bool))
-                  (loop [(target-position Int) 0 (current (Map String Bool)) paths]
+                  (loop [target-position Int 0 current (Map String Bool) paths]
                     (if (>= target-position (count blocks))
                       current
                       (let [(target core/NativeId)
@@ -324,7 +324,7 @@
    (block-id core/NativeId)
    (position Int)
    (refs (Vec core/NativeId))] Bool
-  (loop [(ref-position Int) 0]
+  (loop [ref-position Int 0]
     (if (>= ref-position (count refs))
       true
       (if (value-dominates-use? validation-index function block-id position
@@ -339,7 +339,7 @@
   (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)
         (block-id core/NativeId) (core/basicblock-id block)]
     (and
-      (loop [(instruction-position Int) 0]
+      (loop [instruction-position Int 0]
         (if (>= instruction-position (count instructions))
           true
           (if (refs-dominate? validation-index function block-id instruction-position
@@ -362,7 +362,7 @@
       false
       (let [(parameters (Vec core/Parameter)) (core/basicblock-parameters target)]
         (and (= (count parameters) (count arguments))
-          (loop [(argument-position Int) 0]
+          (loop [argument-position Int 0]
             (if (>= argument-position (count arguments))
               true
               (let [(site DefSiteV0)
@@ -417,7 +417,7 @@
         (regions (Vec core/RegionDef)) (core/nativecoreprogram-regions program)
         (capabilities (Vec core/CapabilityDef))
         (core/nativecoreprogram-capabilities program)]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count functions))
         (if (core/program-buffer-root-coherent? program)
           (->ObligationPassV0 (core/->ValidSsaObligation true))
@@ -432,7 +432,7 @@
 (defn find-type
   [(types (Vec core/TypeDef))
    (type-id core/NativeId)] (U core/TypeDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count types)) nil
       (core/native-id= (core/typedef-id (nth types index)) type-id)
@@ -509,7 +509,7 @@
 
 (defn exhaustive-matches
   [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
+  (loop [index Int 0 functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->ExhaustiveMatchesObligation true))
@@ -522,7 +522,7 @@
 (defn find-layout
   [(layouts (Vec core/LayoutDef))
    (type-id core/NativeId)] (U core/LayoutDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count layouts)) nil
       (core/native-id= (core/layoutdef-type-id (nth layouts index)) type-id)
@@ -532,7 +532,7 @@
 (defn layout-count
   [(layouts (Vec core/LayoutDef))
    (type-id core/NativeId)] Int
-  (loop [(index Int) 0 (found Int) 0]
+  (loop [index Int 0 found Int 0]
     (if (>= index (count layouts))
       found
       (recur (+ index 1)
@@ -559,7 +559,7 @@
 (defn fields-nonoverlapping?
   [(layouts (Vec core/LayoutDef))
    (fields (Vec core/FieldLayoutV0))] Bool
-  (loop [(left-index Int) 0]
+  (loop [left-index Int 0]
     (if (>= left-index (count fields))
       true
       (let [(left core/FieldLayoutV0) (nth fields left-index)
@@ -570,7 +570,7 @@
           (let [(left-start Int) (get left :offset-bytes)
                 (left-end Int) (+ left-start (core/layoutdef-size-bytes left-layout))]
             (if
-              (loop [(right-index Int) (+ left-index 1)]
+              (loop [right-index Int (+ left-index 1)]
                 (if (>= right-index (count fields))
                   true
                   (let [(right core/FieldLayoutV0) (nth fields right-index)
@@ -588,7 +588,7 @@
               false)))))))
 
 (defn unique-ints? [(values (Vec Int))] Bool
-  (loop [(index Int) 0 (seen (Vec Int)) []]
+  (loop [index Int 0 seen (Vec Int) []]
     (if (>= index (count values))
       true
       (let [(value Int) (nth values index)]
@@ -839,7 +839,7 @@
 (defn closed-layouts
   [(program core/NativeCoreProgram)
    (abi core/AbiProfileV0)] ObligationVerdictV0
-  (loop [(index Int) 0 (types (Vec core/TypeDef)) (core/nativecoreprogram-types program)]
+  (loop [index Int 0 types (Vec core/TypeDef) (core/nativecoreprogram-types program)]
     (if (>= index (count types))
       (->ObligationPassV0 (core/->ClosedLayoutsObligation true))
       (let [(type-def core/TypeDef) (nth types index)]
@@ -884,8 +884,8 @@
                      result-id))
              (core/basicblock-instructions block)))
     (->CheckedUseScanV0 false false)
-    (loop [(term-index Int) 0 (handled Bool) false
-           (terminators (Vec core/Terminator))
+    (loop [term-index Int 0 handled Bool false
+           terminators (Vec core/Terminator)
            (core/basicblock-terminators block)]
       (if (>= term-index (count terminators))
         (->CheckedUseScanV0 handled true)
@@ -902,8 +902,8 @@
   [(function core/FunctionDef)
    (result-id core/NativeId)
    (result-type core/NativeId)] Bool
-  (loop [(block-index Int) 0 (handled Bool) false
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+  (loop [block-index Int 0 handled Bool false
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (if (>= block-index (count blocks))
       handled
       (let [(scan CheckedUseScanV0)
@@ -938,7 +938,7 @@
 
 (defn checked-arithmetic
   [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
+  (loop [index Int 0 functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->CheckedOperationsObligation true))
@@ -951,7 +951,7 @@
 (defn find-function
   [(functions (Vec core/FunctionDef))
    (function-id core/NativeId)] (U core/FunctionDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count functions)) nil
       (core/native-id= (core/functiondef-id (nth functions index)) function-id)
@@ -961,7 +961,7 @@
 (defn find-abi
   [(abis (Vec core/AbiDeclV0))
    (abi-id core/NativeId)] (U core/AbiDeclV0 Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count abis)) nil
       (core/native-id= (core/abideclv0-id (nth abis index)) abi-id)
@@ -998,7 +998,7 @@
    (values (Vec core/AbiValueV0))] Bool
   (let [(parameters (Vec core/Parameter)) (core/functiondef-parameters function)]
     (and (= (count parameters) (count values))
-      (loop [(index Int) 0]
+      (loop [index Int 0]
         (if (>= index (count values))
           true
           (let [(value core/AbiValueV0) (nth values index)]
@@ -1047,7 +1047,7 @@
 (defn named-variant
   [(variants (Vec core/TypeVariant))
    (name String)] (U core/TypeVariant Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count variants)) nil
       (= name (core/typevariant-name (nth variants index)))
@@ -1184,7 +1184,7 @@
             (instance? native.core.AbiImportV0
               (core/abideclv0-direction abi))
             (= (count arguments) (count parameters))
-            (loop [(index Int) 0]
+            (loop [index Int 0]
               (if (>= index (count arguments))
                 true
                 (let [(site DefSiteV0)
@@ -1228,7 +1228,7 @@
     (core/nativecoreprogram-functions program)))
 
 (defn legal-abi [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (abis (Vec core/AbiDeclV0))
+  (loop [index Int 0 abis (Vec core/AbiDeclV0)
          (core/nativecoreprogram-abis program)]
     (if (>= index (count abis))
       (if (extern-calls-legal? program)
@@ -1252,7 +1252,7 @@
         (not (core/unique-ids? consumed))
         (not (core/ids-in? consumed (tokenstatev0-live state))))
     (->TokenStateV0 (tokenstatev0-live state) (tokenstatev0-seen state) false)
-    (loop [(index Int) 0 (live (Vec core/NativeId)) (tokenstatev0-live state)]
+    (loop [index Int 0 live (Vec core/NativeId) (tokenstatev0-live state)]
       (if (>= index (count consumed))
         (->TokenStateV0 live (tokenstatev0-seen state) true)
         (recur (+ index 1) (remove-id live (nth consumed index)))))))
@@ -1293,8 +1293,8 @@
 (defn block-token-state
   [(state TokenStateV0)
    (block core/BasicBlock)] TokenStateV0
-  (loop [(index Int) 0 (current TokenStateV0) state
-         (instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
+  (loop [index Int 0 current TokenStateV0 state
+         instructions (Vec core/Instruction) (core/basicblock-instructions block)]
     (if (or (>= index (count instructions)) (not (tokenstatev0-valid current)))
       current
       (recur (+ index 1)
@@ -1314,7 +1314,7 @@
 (defn token-visit
   [(visited (Vec TokenVisitV0))
    (block-id core/NativeId)] (U TokenVisitV0 Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count visited)) nil
       (core/native-id= (tokenvisitv0-block-id (nth visited index)) block-id)
@@ -1334,7 +1334,7 @@
   [(visited (Vec TokenVisitV0))
    (block-id core/NativeId)
    (state TokenStateV0)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count visited)) false
       (and (core/native-id= (tokenvisitv0-block-id (nth visited index)) block-id)
@@ -1347,9 +1347,9 @@
    (state TokenStateV0)
    (visited (Vec TokenVisitV0))] Bool
   ;; Memoized block states collapse diamonds; each work item retains the back-edge path.
-  (loop [(position Int) 0
-         (work (Vec TokenWorkV0)) [(->TokenWorkV0 block-id state visited)]
-         (memo (Vec TokenVisitV0)) []]
+  (loop [position Int 0
+         work (Vec TokenWorkV0) [(->TokenWorkV0 block-id state visited)]
+         memo (Vec TokenVisitV0) []]
     (if (>= position (count work))
       true
       (let [(item TokenWorkV0) (nth work position)
@@ -1395,7 +1395,7 @@
 (defn find-capability
   [(capabilities (Vec core/CapabilityDef))
    (capability-id core/NativeId)] (U core/CapabilityDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count capabilities)) nil
       (core/native-id= (core/capabilitydef-id (nth capabilities index))
@@ -1426,7 +1426,7 @@
 
 (defn discharged-tokens
   [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
+  (loop [index Int 0 functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->DischargedTokensObligation true))
@@ -1439,7 +1439,7 @@
 (defn find-effect
   [(effects (Vec core/EffectDef))
    (effect-id core/NativeId)] (U core/EffectDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count effects)) nil
       (core/native-id= (core/effectdef-id (nth effects index)) effect-id)
@@ -1681,7 +1681,7 @@
     (core/functiondef-blocks function)))
 
 (defn bounded-effects [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
+  (loop [index Int 0 functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->BoundedEffectsObligation true))
@@ -1705,7 +1705,7 @@
 (defn find-region
   [(regions (Vec core/RegionDef))
    (region-id core/NativeId)] (U core/RegionDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count regions)) nil
       (core/native-id= (core/regiondef-id (nth regions index)) region-id)
@@ -1730,8 +1730,8 @@
   [(regions (Vec core/RegionDef))
    (target core/NativeId)
    (chain-start core/NativeId)] Bool
-  (loop [(current core/NativeId) chain-start
-         (budget Int) (+ 1 (count regions))]
+  (loop [current core/NativeId chain-start
+         budget Int (+ 1 (count regions))]
     (if (core/native-id= current target)
       true
       (let [(region (U core/RegionDef Nil)) (find-region regions current)]
@@ -1824,14 +1824,14 @@
 (defn function-arena-region
   [(function core/FunctionDef)
    (arena-value-id core/NativeId)] (U core/NativeId Nil)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (if (>= block-position (count blocks))
       nil
       (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))
             (found (U core/NativeId Nil))
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count instructions))
                 nil
                 (let [(instruction core/Instruction) (nth instructions position)]
@@ -1850,16 +1850,16 @@
 ;; resolves a destination by lookup instead of rescanning the blocks.
 (defn function-region-handles
   [(function core/FunctionDef)] (Map String core/NativeId)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (handles (Map String core/NativeId)) {}]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         handles (Map String core/NativeId) {}]
     (if (>= block-position (count blocks))
       handles
       (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
-          (loop [(position Int) 0
-                 (inner (Map String core/NativeId)) handles]
+          (loop [position Int 0
+                 inner (Map String core/NativeId) handles]
             (if (>= position (count instructions))
               inner
               (let [(instruction core/Instruction) (nth instructions position)]
@@ -1955,10 +1955,10 @@
     (let [(result core/SsaValueV0) (get instruction :result)]
       (if (not (type-carries-handles? types (core/ssavaluev0-type-id result)))
         nil
-        (loop [(position Int) 0
-               (refs (Vec core/NativeId))
+        (loop [position Int 0
+               refs (Vec core/NativeId)
                (core/instruction-ssa-refs instruction)
-               (merged (U core/NativeId Nil)) nil]
+               merged (U core/NativeId Nil) nil]
           (if (>= position (count refs))
             merged
             (recur (+ position 1) refs
@@ -1979,7 +1979,7 @@
       epochs
       (let [(parameters (Vec core/Parameter))
             (core/basicblock-parameters target)]
-        (loop [(position Int) 0 (current (Map String core/NativeId)) epochs]
+        (loop [position Int 0 current (Map String core/NativeId) epochs]
           (if (or (>= position (count parameters))
                 (>= position (count arguments)))
             current
@@ -2000,10 +2000,10 @@
       (core/jumpterminator-arguments terminator))
 
     (instance? native.core.SwitchTerminator terminator)
-    (loop [(position Int) 0
-           (cases (Vec core/SwitchCaseV0))
+    (loop [position Int 0
+           cases (Vec core/SwitchCaseV0)
            (core/switchterminator-cases terminator)
-           (current (Map String core/NativeId)) epochs]
+           current (Map String core/NativeId) epochs]
       (if (>= position (count cases))
         current
         (let [(switch-case core/SwitchCaseV0) (nth cases position)]
@@ -2020,17 +2020,17 @@
    (handles (Map String core/NativeId))
    (function core/FunctionDef)
    (epochs (Map String core/NativeId))] (Map String core/NativeId)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (current (Map String core/NativeId)) epochs]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         current (Map String core/NativeId) epochs]
     (if (>= block-position (count blocks))
       current
       (let [(block core/BasicBlock) (nth blocks block-position)
             (instructions (Vec core/Instruction))
             (core/basicblock-instructions block)
             (with-instructions (Map String core/NativeId))
-            (loop [(position Int) 0
-                   (inner (Map String core/NativeId)) current]
+            (loop [position Int 0
+                   inner (Map String core/NativeId) current]
               (if (>= position (count instructions))
                 inner
                 (let [(instruction core/Instruction) (nth instructions position)
@@ -2041,10 +2041,10 @@
                       (instruction-epoch regions types handles inner
                         instruction))))))
             (with-terminators (Map String core/NativeId))
-            (loop [(position Int) 0
-                   (terminators (Vec core/Terminator))
+            (loop [position Int 0
+                   terminators (Vec core/Terminator)
                    (core/basicblock-terminators block)
-                   (inner (Map String core/NativeId)) with-instructions]
+                   inner (Map String core/NativeId) with-instructions]
               (if (>= position (count terminators))
                 inner
                 (recur (+ position 1) terminators
@@ -2065,7 +2065,7 @@
    (function core/FunctionDef)] EpochMapResultV0
   (let [(cap Int) (+ 4 (* 3 (count (core/function-value-ids function))))
         (handles (Map String core/NativeId)) (function-region-handles function)]
-    (loop [(round Int) 0 (epochs (Map String core/NativeId)) {}]
+    (loop [round Int 0 epochs (Map String core/NativeId) {}]
       (let [(next (Map String core/NativeId))
             (function-epoch-map-pass regions types handles function epochs)]
         (cond
@@ -2075,15 +2075,15 @@
 
 (defn function-closed-regions
   [(function core/FunctionDef)] (Vec core/NativeId)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (closed (Vec core/NativeId)) []]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         closed (Vec core/NativeId) []]
     (if (>= block-position (count blocks))
       closed
       (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
-          (loop [(position Int) 0 (inner (Vec core/NativeId)) closed]
+          (loop [position Int 0 inner (Vec core/NativeId) closed]
             (if (>= position (count instructions))
               inner
               (let [(instruction core/Instruction) (nth instructions position)]
@@ -2124,7 +2124,7 @@
   [(regions (Vec core/RegionDef))
    (epochs (Map String core/NativeId))
    (arguments (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(position Int) 0 (retained (Vec core/NativeId)) []]
+  (loop [position Int 0 retained (Vec core/NativeId) []]
     (if (>= position (count arguments))
       retained
       (recur (+ position 1)
@@ -2182,14 +2182,14 @@
 (defn call-result-promoted-somewhere?
   [(function core/FunctionDef)
    (result-id core/NativeId)] Bool
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (if (>= block-position (count blocks))
       false
       (let [(instructions (Vec core/Instruction))
             (core/basicblock-instructions (nth blocks block-position))
             (found Bool)
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count instructions))
                 false
                 (let [(instruction core/Instruction)
@@ -2351,7 +2351,7 @@
           (core/functiondef-blocks function))))))
 
 (defn epoch-soundness [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
+  (loop [index Int 0 functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->EpochSoundnessObligation true))
@@ -2384,7 +2384,7 @@
   [(left (Vec core/NativeId))
    (right (Vec core/NativeId))] Bool
   (and (= (count left) (count right))
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count left))
         true
         (if (core/native-id= (nth left index) (nth right index))
@@ -2395,7 +2395,7 @@
   (if (= 0 (count stack)) nil (nth stack (- (count stack) 1))))
 
 (defn epoch-stack-pop [(stack (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(index Int) 0 (popped (Vec core/NativeId)) []]
+  (loop [index Int 0 popped (Vec core/NativeId) []]
     (if (>= index (- (count stack) 1))
       popped
       (recur (+ index 1) (conj popped (nth stack index))))))
@@ -2403,7 +2403,7 @@
 (defn epoch-stack-visit
   [(visited (Vec EpochStackVisitV0))
    (block-id core/NativeId)] (U EpochStackVisitV0 Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count visited)) nil
       (core/native-id= (epochstackvisitv0-block-id (nth visited index)) block-id)
@@ -2414,7 +2414,7 @@
   [(memo (Vec EpochStackVisitV0))
    (block-id core/NativeId)
    (stack (Vec core/NativeId))] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count memo)) false
       (and (core/native-id= (epochstackvisitv0-block-id (nth memo index))
@@ -2428,10 +2428,10 @@
    (function core/FunctionDef)
    (block core/BasicBlock)
    (stack (Vec core/NativeId))] EpochBlockStepV0
-  (loop [(position Int) 0
-         (instructions (Vec core/Instruction))
+  (loop [position Int 0
+         instructions (Vec core/Instruction)
          (core/basicblock-instructions block)
-         (current (Vec core/NativeId)) stack]
+         current (Vec core/NativeId) stack]
     (if (>= position (count instructions))
       (->EpochBlockStepV0 current nil)
       (let [(instruction core/Instruction) (nth instructions position)]
@@ -2476,10 +2476,10 @@
 (defn function-leak-violation
   [(regions (Vec core/RegionDef))
    (function core/FunctionDef)] (U core/NativeId Nil)
-  (loop [(position Int) 0
-         (work (Vec EpochStackWorkV0))
+  (loop [position Int 0
+         work (Vec EpochStackWorkV0)
          [(->EpochStackWorkV0 (core/functiondef-entry-block function) [] [])]
-         (memo (Vec EpochStackVisitV0)) []]
+         memo (Vec EpochStackVisitV0) []]
     (if (>= position (count work))
       nil
       (let [(item EpochStackWorkV0) (nth work position)
@@ -2532,7 +2532,7 @@
                             next-memo))))))))))))))
 
 (defn leak-freedom [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(index Int) 0 (functions (Vec core/FunctionDef))
+  (loop [index Int 0 functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= index (count functions))
       (->ObligationPassV0 (core/->LeakFreedomObligation true))
@@ -2547,7 +2547,7 @@
   [(functions (Vec core/FunctionDef))
    (target core/NativeId)]
   (U core/FunctionDef Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count functions))
       nil
       (let [(function core/FunctionDef) (nth functions position)]
@@ -2721,8 +2721,8 @@
 
 (defn deterministic-parallelism
   [(program core/NativeCoreProgram)] ObligationVerdictV0
-  (loop [(position Int) 0
-         (functions (Vec core/FunctionDef))
+  (loop [position Int 0
+         functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= position (count functions))
       (->ObligationPassV0

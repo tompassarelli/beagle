@@ -54,7 +54,7 @@
    (texts (Vec String))])
 
 (defn join-lines [(lines (Vec String))] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count lines))
       result
       (recur (+ index 1) (str result (nth lines index) "\n")))))
@@ -65,7 +65,7 @@
 (defn insert-type
   [(item core/TypeDef)
    (sorted (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/TypeDef)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/TypeDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/TypeDef) (nth sorted index)]
@@ -74,7 +74,7 @@
           (recur (+ index 1) inserted (conj result current)))))))
 
 (defn ordered-types [(types (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(index Int) 0 (result (Vec core/TypeDef)) []]
+  (loop [index Int 0 result (Vec core/TypeDef) []]
     (if (>= index (count types))
       result
       (recur (+ index 1) (insert-type (nth types index) result)))))
@@ -82,7 +82,7 @@
 (defn insert-layout
   [(item core/LayoutDef)
    (sorted (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/LayoutDef)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/LayoutDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/LayoutDef) (nth sorted index)]
@@ -91,7 +91,7 @@
           (recur (+ index 1) inserted (conj result current)))))))
 
 (defn ordered-layouts [(layouts (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [(index Int) 0 (result (Vec core/LayoutDef)) []]
+  (loop [index Int 0 result (Vec core/LayoutDef) []]
     (if (>= index (count layouts))
       result
       (recur (+ index 1) (insert-layout (nth layouts index) result)))))
@@ -99,7 +99,7 @@
 (defn insert-function
   [(item core/FunctionDef)
    (sorted (Vec core/FunctionDef))] (Vec core/FunctionDef)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/FunctionDef)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/FunctionDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/FunctionDef) (nth sorted index)]
@@ -109,7 +109,7 @@
 
 (defn ordered-functions
   [(functions (Vec core/FunctionDef))] (Vec core/FunctionDef)
-  (loop [(index Int) 0 (result (Vec core/FunctionDef)) []]
+  (loop [index Int 0 result (Vec core/FunctionDef) []]
     (if (>= index (count functions))
       result
       (recur (+ index 1) (insert-function (nth functions index) result)))))
@@ -117,7 +117,7 @@
 (defn insert-field-layout
   [(item core/FieldLayoutV0)
    (sorted (Vec core/FieldLayoutV0))] (Vec core/FieldLayoutV0)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/FieldLayoutV0)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/FieldLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/FieldLayoutV0) (nth sorted index)]
@@ -127,7 +127,7 @@
 
 (defn ordered-field-layouts
   [(fields (Vec core/FieldLayoutV0))] (Vec core/FieldLayoutV0)
-  (loop [(index Int) 0 (result (Vec core/FieldLayoutV0)) []]
+  (loop [index Int 0 result (Vec core/FieldLayoutV0) []]
     (if (>= index (count fields))
       result
       (recur (+ index 1) (insert-field-layout (nth fields index) result)))))
@@ -135,7 +135,7 @@
 (defn insert-block
   [(item core/BasicBlock)
    (sorted (Vec core/BasicBlock))] (Vec core/BasicBlock)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/BasicBlock)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/BasicBlock) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/BasicBlock) (nth sorted index)]
@@ -149,7 +149,7 @@
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
         (entry-id core/NativeId) (core/functiondef-entry-block function)
         (tail (Vec core/BasicBlock))
-        (loop [(index Int) 0 (result (Vec core/BasicBlock)) []]
+        (loop [index Int 0 result (Vec core/BasicBlock) []]
           (if (>= index (count blocks))
             result
             (let [(block core/BasicBlock) (nth blocks index)]
@@ -157,7 +157,7 @@
                 (recur (+ index 1) result)
                 (recur (+ index 1) (insert-block block result))))))
         (entry (U core/BasicBlock Nil))
-        (loop [(index Int) 0 (found (U core/BasicBlock Nil)) nil]
+        (loop [index Int 0 found (U core/BasicBlock Nil) nil]
           (if (>= index (count blocks))
             found
             (let [(block core/BasicBlock) (nth blocks index)]
@@ -172,14 +172,14 @@
     "abcdefghijklmnopqrstuvwxyz{|}~"))
 
 (defn character-position [(alphabet String) (character String)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count alphabet)) -1
       (= character (subs alphabet position (+ position 1))) position
       :else (recur (+ position 1)))))
 
 (defn text-emittable? [(value String)] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count value))
       true
       (let [(character String) (subs value position (+ position 1))]
@@ -191,7 +191,7 @@
           false)))))
 
 (defn text-position [(texts (Vec String)) (target String)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count texts)) -1
       (= target (nth texts position)) position
@@ -201,19 +201,19 @@
   (if (>= (text-position texts candidate) 0) texts (conj texts candidate)))
 
 (defn collect-texts [(functions (Vec core/FunctionDef))] (Vec String)
-  (loop [(function-position Int) 0 (collected (Vec String)) []]
+  (loop [function-position Int 0 collected (Vec String) []]
     (if (>= function-position (count functions))
       collected
       (let [(blocks (Vec core/BasicBlock))
             (ordered-blocks (nth functions function-position))]
         (recur (+ function-position 1)
-          (loop [(block-position Int) 0 (current (Vec String)) collected]
+          (loop [block-position Int 0 current (Vec String) collected]
             (if (>= block-position (count blocks))
               current
               (let [(instructions (Vec core/Instruction))
                     (core/basicblock-instructions (nth blocks block-position))]
                 (recur (+ block-position 1)
-                  (loop [(instruction-position Int) 0 (kept (Vec String)) current]
+                  (loop [instruction-position Int 0 kept (Vec String) current]
                     (if (>= instruction-position (count instructions))
                       kept
                       (let [(instruction core/Instruction)
@@ -231,7 +231,7 @@
                             kept))))))))))))))
 
 (defn block-index [(blocks (Vec core/BasicBlock)) (target core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count blocks))
       -1
       (if (core/native-id= (core/basicblock-id (nth blocks index)) target)
@@ -382,8 +382,8 @@
 (defn qbe-value-ids
   [(function core/FunctionDef)
    (blocks (Vec core/BasicBlock))] (Vec core/NativeId)
-  (loop [(block-position Int) 0
-         (result (Vec core/NativeId)) (core/parameter-ids (core/functiondef-parameters function))]
+  (loop [block-position Int 0
+         result (Vec core/NativeId) (core/parameter-ids (core/functiondef-parameters function))]
     (if (>= block-position (count blocks))
       result
       (let [(block core/BasicBlock) (nth blocks block-position)
@@ -407,8 +407,8 @@
 (defn qbe-value-types
   [(function core/FunctionDef)
    (blocks (Vec core/BasicBlock))] (Vec core/NativeId)
-  (loop [(block-position Int) 0
-         (result (Vec core/NativeId)) (parameter-type-ids (core/functiondef-parameters function))]
+  (loop [block-position Int 0
+         result (Vec core/NativeId) (parameter-type-ids (core/functiondef-parameters function))]
     (if (>= block-position (count blocks))
       result
       (let [(block core/BasicBlock) (nth blocks block-position)
@@ -419,7 +419,7 @@
             (instruction-result-type-ids (core/basicblock-instructions block))))))))
 
 (defn value-index [(ids (Vec core/NativeId)) (target core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count ids))
       -1
       (if (core/native-id= (nth ids index) target)
@@ -430,7 +430,7 @@
   (str "%v" (value-index (qbefn-value-ids context) target)))
 
 (defn type-index [(types (Vec core/TypeDef)) (type-id core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count types))
       -1
       (if (core/native-id= (core/typedef-id (nth types index)) type-id)
@@ -440,7 +440,7 @@
 (defn typedef-for-id
   [(types (Vec core/TypeDef))
    (type-id core/NativeId)] (U core/TypeDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count types))
       nil
       (let [(definition core/TypeDef) (nth types index)]
@@ -451,7 +451,7 @@
 (defn layout-for-type
   [(layouts (Vec core/LayoutDef))
    (type-id core/NativeId)] (U core/LayoutDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count layouts))
       nil
       (let [(layout core/LayoutDef) (nth layouts index)]
@@ -479,7 +479,7 @@
     :else (+ 32 (character-position (printable-ascii) character))))
 
 (defn emit-text-bytes [(value String)] String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count value))
       result
       (recur (+ position 1)
@@ -487,7 +487,7 @@
           (text-byte (subs value position (+ position 1))))))))
 
 (defn emit-text-data [(texts (Vec String)) (module-index Int)] String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count texts))
       result
       (let [(value String) (nth texts position)]
@@ -769,7 +769,7 @@
   (let [(fields (Vec core/FieldLayoutV0)) (record-fields layout)]
     (if (= (count fields) 0)
       false
-      (loop [(index Int) 0 (offset Int) 0 (alignment Int) 1 (ok Bool) true]
+      (loop [index Int 0 offset Int 0 alignment Int 1 ok Bool true]
         (if (>= index (count fields))
           (and ok
             (= alignment (core/layoutdef-align-bytes layout))
@@ -836,7 +836,7 @@
       false
       (if (not (member-representable? types layouts tag-type))
         false
-        (loop [(index Int) 0 (alignment Int) 1 (size Int) 0 (ok Bool) true]
+        (loop [index Int 0 alignment Int 1 size Int 0 ok Bool true]
           (if (>= index (count variants))
             (and ok
               (= alignment (core/layoutdef-align-bytes layout))
@@ -859,7 +859,7 @@
        (fn [(field core/TypeField)] core/NativeId (core/typefield-type-id field))
        (core/recordtype-fields shape))]
     [(UnionType value)
-     (loop [(index Int) 0 (references (Vec core/NativeId)) []]
+     (loop [index Int 0 references (Vec core/NativeId) []]
        (let [(variants (Vec core/TypeVariant)) (core/uniontype-variants shape)]
          (if (>= index (count variants))
            references
@@ -880,7 +880,7 @@
 (defn type-definition-in?
   [(definitions (Vec core/TypeDef))
    (target core/NativeId)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count definitions))
       false
       (if (core/native-id= (core/typedef-id (nth definitions index)) target)
@@ -913,7 +913,7 @@
         emitted
         (let [(dependencies (Vec core/TypeDef)) (aggregate-dependencies types definition)
               (with-dependencies (Vec core/TypeDef))
-              (loop [(index Int) 0 (result (Vec core/TypeDef)) emitted]
+              (loop [index Int 0 result (Vec core/TypeDef) emitted]
                 (if (>= index (count dependencies))
                   result
                   (recur (+ index 1)
@@ -930,12 +930,12 @@
   [(types (Vec core/TypeDef))
    (functions (Vec core/FunctionDef))] (Vec core/TypeDef)
   (let [(roots (Vec core/NativeId))
-        (loop [(index Int) 0 (result (Vec core/NativeId)) []]
+        (loop [index Int 0 result (Vec core/NativeId) []]
           (if (>= index (count functions))
             result
             (recur (+ index 1)
               (core/append-ids result (function-type-ids (nth functions index))))))]
-    (loop [(index Int) 0 (result (Vec core/TypeDef)) []]
+    (loop [index Int 0 result (Vec core/TypeDef) []]
       (if (>= index (count types))
         result
         (let [(definition core/TypeDef) (nth types index)
@@ -951,7 +951,7 @@
    (module-index Int)
    (layout core/LayoutDef)] String
   (let [(fields (Vec core/FieldLayoutV0)) (record-fields layout)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count fields))
         result
         (recur (+ index 1)
@@ -977,7 +977,7 @@
    (module-index Int)
    (tag-type core/NativeId)
    (variants (Vec core/UnionVariantLayoutV0))] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count variants))
       result
       (recur (+ index 1)
@@ -1008,7 +1008,7 @@
    (functions (Vec core/FunctionDef))
    (module-index Int)] String
   (let [(emitted (Vec core/TypeDef)) (reachable-aggregate-types types functions)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count emitted))
         result
         (let [(definition core/TypeDef) (nth emitted index)
@@ -1156,7 +1156,7 @@
 ;; end in a different QBE label than it started in.
 (defn block-exit-label [(index Int) (block core/BasicBlock)] String
   (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
-    (loop [(position Int) 0 (label String) (block-label index)]
+    (loop [position Int 0 label String (block-label index)]
       (if (>= position (count instructions))
         label
         (if (instruction-splits? (nth instructions position))
@@ -1529,7 +1529,7 @@
 (defn function-index
   [(functions (Vec core/FunctionDef))
    (target core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count functions))
       -1
       (if (core/native-id= (core/functiondef-id (nth functions index)) target)
@@ -1546,7 +1546,7 @@
           (if (> (count (core/functiondef-capabilities callee)) 0)
             (if (> (count (core/functiondef-regions callee)) 0) ", l %capability" "l %capability")
             ""))]
-    (loop [(index Int) 0 (result String) prefix]
+    (loop [index Int 0 result String prefix]
       (if (>= index (count arguments))
         result
         (let [(argument-type String)
@@ -1828,7 +1828,7 @@
    (block-index-value Int)
    (block core/BasicBlock)] String
   (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
-    (loop [(position Int) 0 (result String) ""]
+    (loop [position Int 0 result String ""]
       (if (>= position (count instructions))
         result
         (recur (+ position 1)
@@ -1875,7 +1875,7 @@
    (target core/NativeId)
    (parameter-position Int)] String
   (let [(blocks (Vec core/BasicBlock)) (qbefn-blocks context)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count blocks))
         result
         (let [(source core/BasicBlock) (nth blocks index)
@@ -1893,7 +1893,7 @@
                         (nth jump-arguments parameter-position))))
                   (cases (Vec core/SwitchCaseV0)) (terminator-cases terminator)]
               (recur (+ index 1)
-                (loop [(case-index Int) 0 (accumulated String) with-jump]
+                (loop [case-index Int 0 accumulated String with-jump]
                   (if (>= case-index (count cases))
                     accumulated
                     (let [(switch-case core/SwitchCaseV0) (nth cases case-index)
@@ -1909,7 +1909,7 @@
 
 (defn emit-phis [(context QbeFn) (block core/BasicBlock)] String
   (let [(parameters (Vec core/Parameter)) (core/basicblock-parameters block)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count parameters))
         result
         (let [(parameter core/Parameter) (nth parameters index)
@@ -1963,7 +1963,7 @@
 (defn variant-tag-value
   [(variants (Vec core/UnionVariantLayoutV0))
    (variant-id core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count variants))
       -1
       (let [(variant core/UnionVariantLayoutV0) (nth variants index)]
@@ -1990,7 +1990,7 @@
         (tag-name String) (switch-tag-name context block-index-value value-id)
         (compare String) (switch-compare context value-id)
         (variants (Vec core/UnionVariantLayoutV0)) (switch-variants context value-id)]
-    (loop [(index Int) 0 (result String) tag-load]
+    (loop [index Int 0 result String tag-load]
       (if (>= index (count cases))
         (str result (block-label block-index-value) "_s" (count cases) "\n"
           "  call $native_trap(w " trap-invalid-argument ")\n  hlt\n")
@@ -2039,7 +2039,7 @@
 
 (defn emit-blocks [(context QbeFn)] String
   (let [(blocks (Vec core/BasicBlock)) (qbefn-blocks context)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count blocks))
         result
         (recur (+ index 1) (str result (emit-block context index (nth blocks index))))))))
@@ -2057,7 +2057,7 @@
         (prefix String)
         (str (if arena "l %arena" "")
           (if capability (if arena ", l %capability" "l %capability") ""))]
-    (loop [(index Int) 0 (result String) prefix]
+    (loop [index Int 0 result String prefix]
       (if (>= index (count parameters))
         result
         (let [(parameter core/Parameter) (nth parameters index)]
@@ -2094,7 +2094,7 @@
    (functions (Vec core/FunctionDef))
    (texts (Vec String))
    (module-index Int)] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count functions))
       result
       (recur (+ index 1)
@@ -2285,7 +2285,7 @@
   [(block core/BasicBlock)] (U String Nil)
   (let [(instructions (Vec core/Instruction))
         (core/basicblock-instructions block)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count instructions))
         nil
         (let [(instruction core/Instruction) (nth instructions position)]
@@ -2306,7 +2306,7 @@
 (defn unsupported-function-checked-division
   [(function core/FunctionDef)] (U String Nil)
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count blocks))
         nil
         (let [(name (U String Nil))
@@ -2316,7 +2316,7 @@
 (defn unsupported-checked-division
   [(program core/NativeCoreProgram)] (U String Nil)
   (let [(functions (Vec core/FunctionDef)) (core/nativecoreprogram-functions program)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count functions))
         nil
         (let [(name (U String Nil))
@@ -2341,7 +2341,7 @@
   [(block core/BasicBlock)] (U String Nil)
   (let [(instructions (Vec core/Instruction))
         (core/basicblock-instructions block)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count instructions))
         nil
         (let [(instruction core/Instruction) (nth instructions position)]
@@ -2353,7 +2353,7 @@
 (defn unsupported-function-codec-primitive
   [(function core/FunctionDef)] (U String Nil)
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count blocks))
         nil
         (let [(operation (U String Nil))
@@ -2365,7 +2365,7 @@
 (defn unsupported-codec-primitive
   [(program core/NativeCoreProgram)] (U String Nil)
   (let [(functions (Vec core/FunctionDef)) (core/nativecoreprogram-functions program)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count functions))
         nil
         (let [(operation (U String Nil))
@@ -2388,7 +2388,7 @@
   [(block core/BasicBlock)] (U String Nil)
   (let [(instructions (Vec core/Instruction))
         (core/basicblock-instructions block)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count instructions))
         nil
         (let [(instruction core/Instruction) (nth instructions position)]
@@ -2403,7 +2403,7 @@
 (defn unsupported-function-value-semantics
   [(function core/FunctionDef)] (U String Nil)
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count blocks))
         nil
         (let [(operation (U String Nil))
@@ -2415,7 +2415,7 @@
 (defn unsupported-value-semantics
   [(program core/NativeCoreProgram)] (U String Nil)
   (let [(functions (Vec core/FunctionDef)) (core/nativecoreprogram-functions program)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count functions))
         nil
         (let [(operation (U String Nil))
@@ -2435,7 +2435,7 @@
 (defn unsupported-block-unicode-text [(block core/BasicBlock)] (U String Nil)
   (let [(instructions (Vec core/Instruction))
         (core/basicblock-instructions block)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count instructions))
         nil
         (let [(instruction core/Instruction) (nth instructions position)]
@@ -2449,7 +2449,7 @@
 (defn unsupported-function-unicode-text
   [(function core/FunctionDef)] (U String Nil)
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count blocks))
         nil
         (let [(operation (U String Nil))
@@ -2459,7 +2459,7 @@
 (defn unsupported-unicode-text
   [(program core/NativeCoreProgram)] (U String Nil)
   (let [(functions (Vec core/FunctionDef)) (core/nativecoreprogram-functions program)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count functions))
         nil
         (let [(operation (U String Nil))
@@ -2928,7 +2928,7 @@
 
 (defn canonical-function-indexes?
   [(indexes (Vec Int)) (function-count Int)] Bool
-  (loop [(position Int) 0 (previous Int) -1]
+  (loop [position Int 0 previous Int -1]
     (if (>= position (count indexes))
       true
       (let [(current Int) (nth indexes position)]
@@ -2976,8 +2976,8 @@
           (->QbeFunctionBatchFailureV0
             "function indexes must be strictly increasing, unique, and in canonical range")
           (->QbeFunctionBatchSuccessV0
-            (loop [(position Int) 0
-                   (fragments (Vec QbeFunctionFragmentV0)) []]
+            (loop [position Int 0
+                   fragments (Vec QbeFunctionFragmentV0) []]
               (if (>= position (count function-indexes))
                 fragments
                 (let [(function-index Int)

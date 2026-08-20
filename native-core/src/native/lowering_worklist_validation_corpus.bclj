@@ -98,7 +98,7 @@
         (lower/readiness-code readiness)))))
 
 (defn corpus-functions [(scenario String)] (Vec lower/TypedFunctionV0)
-  (loop [(position Int) 0 (functions (Vec lower/TypedFunctionV0)) []]
+  (loop [position Int 0 functions (Vec lower/TypedFunctionV0) []]
     (if (>= position 256)
       functions
       (recur (+ position 1)
@@ -108,11 +108,11 @@
 ;; then one whole-set fixed point for each serialized effect in exact order.
 (defn reference-settle-readiness
   [(functions (Vec lower/TypedFunctionV0))] (Vec lower/TypedFunctionV0)
-  (loop [(round Int) 0 (current (Vec lower/TypedFunctionV0)) functions]
+  (loop [round Int 0 current (Vec lower/TypedFunctionV0) functions]
     (if (> round (count functions))
       current
       (let [(ready (Vec core/NativeId))
-            (loop [(position Int) 0 (ids (Vec core/NativeId)) []]
+            (loop [position Int 0 ids (Vec core/NativeId) []]
               (if (>= position (count current))
                 ids
                 (let [(function lower/TypedFunctionV0) (nth current position)]
@@ -135,7 +135,7 @@
                   function))
               current)
             (settled Bool)
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count current))
                 true
                 (if (= (lower/ready-function? (nth current position))
@@ -148,11 +148,11 @@
   [(functions (Vec lower/TypedFunctionV0))
    (effect-id core/NativeId)]
   (Vec lower/TypedFunctionV0)
-  (loop [(round Int) 0 (current (Vec lower/TypedFunctionV0)) functions]
+  (loop [round Int 0 current (Vec lower/TypedFunctionV0) functions]
     (if (> round (count functions))
       current
       (let [(effectful (Vec core/NativeId))
-            (loop [(position Int) 0 (ids (Vec core/NativeId)) []]
+            (loop [position Int 0 ids (Vec core/NativeId) []]
               (if (>= position (count current))
                 ids
                 (let [(function lower/TypedFunctionV0) (nth current position)]
@@ -194,7 +194,7 @@
                            (lower/typedfunctionv0-readiness function)))]))))
               current)
             (settled Bool)
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count current))
                 true
                 (if (=
@@ -210,7 +210,7 @@
 (defn reference-settle-effects
   [(functions (Vec lower/TypedFunctionV0))] (Vec lower/TypedFunctionV0)
   (let [(order (Vec core/NativeId)) (lower/closure-effect-order)]
-    (loop [(position Int) 0 (current (Vec lower/TypedFunctionV0)) functions]
+    (loop [position Int 0 current (Vec lower/TypedFunctionV0) functions]
       (if (>= position (count order))
         current
         (recur (+ position 1)
@@ -347,7 +347,7 @@
    (after (Vec lower/TypedFunctionV0))
    (start Int)]
   Bool
-  (loop [(position Int) start]
+  (loop [position Int start]
     (if (>= position (count before))
       true
       (if (= (nth before position) (nth after position))
@@ -355,7 +355,7 @@
         false))))
 
 (defn readiness-closure-correct? [(functions (Vec lower/TypedFunctionV0))] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count functions))
       true
       (let [(expected Bool) (>= position 224)
@@ -364,7 +364,7 @@
 
 (defn effect-closure-correct? [(functions (Vec lower/TypedFunctionV0))] Bool
   (let [(expected (Vec core/NativeId)) (effect-seed)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count functions))
         true
         (let [(actual (Vec core/NativeId))
@@ -375,7 +375,7 @@
 
 (defn mixed-closure-correct? [(functions (Vec lower/TypedFunctionV0))] Bool
   (let [(expected-effects (Vec core/NativeId)) (effect-seed)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count functions))
         true
         (let [(function lower/TypedFunctionV0) (nth functions position)

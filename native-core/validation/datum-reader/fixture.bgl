@@ -7,7 +7,7 @@
 
 (defn contains-event?
   [(events (Vec reader/ReaderEvent)) (kind Keyword) (value String)] Bool
-  (loop [(remaining (Vec reader/ReaderEvent)) events]
+  (loop [remaining (Vec reader/ReaderEvent) events]
     (if (empty? remaining)
       false
       (let [(event reader/ReaderEvent) (first remaining)]
@@ -22,7 +22,7 @@
    (value String)
    (depth Int)]
   Bool
-  (loop [(remaining (Vec reader/ReaderEvent)) events]
+  (loop [remaining (Vec reader/ReaderEvent) events]
     (if (empty? remaining)
       false
       (let [(event reader/ReaderEvent) (first remaining)]
@@ -34,8 +34,8 @@
 
 (defn event-count
   [(events (Vec reader/ReaderEvent)) (kind Keyword) (value String)] Int
-  (loop [(remaining (Vec reader/ReaderEvent)) events
-         (total Int) 0]
+  (loop [remaining (Vec reader/ReaderEvent) events
+         total Int 0]
     (if (empty? remaining)
       total
       (let [(event reader/ReaderEvent) (first remaining)]

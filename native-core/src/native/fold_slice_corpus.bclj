@@ -64,7 +64,7 @@
    (result String)])
 
 (defn sequence-facts [(label String) (items (Vec String))] (Vec FactSpecV0)
-  (loop [(index Int) 0 (facts (Vec FactSpecV0)) [(tf label "form-kind" "seq")]]
+  (loop [index Int 0 facts (Vec FactSpecV0) [(tf label "form-kind" "seq")]]
     (if (>= index (count items))
       facts
       (recur (+ index 1) (conj facts (nf label (str "a" index) (nth items index)))))))
@@ -105,7 +105,7 @@
     specs))
 
 (defn binding-block [(owner String) (specs (Vec FieldSpecV0))] (Vec FactSpecV0)
-  (loop [(index Int) 0 (facts (Vec FactSpecV0)) []]
+  (loop [index Int 0 facts (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
       (recur (+ index 1)
@@ -275,31 +275,31 @@
      "ty-Fold")])
 
 (defn primitive-block [(specs (Vec PrimSpecV0))] (Vec FactSpecV0)
-  (loop [(index Int) 0 (facts (Vec FactSpecV0)) []]
+  (loop [index Int 0 facts (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
       (recur (+ index 1) (vec (concat facts (prim-facts (nth specs index))))))))
 
 (defn application-block [(specs (Vec AppSpecV0))] (Vec FactSpecV0)
-  (loop [(index Int) 0 (facts (Vec FactSpecV0)) []]
+  (loop [index Int 0 facts (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
       (recur (+ index 1) (vec (concat facts (app-facts (nth specs index))))))))
 
 (defn optional-block [(specs (Vec UnionSpecV0))] (Vec FactSpecV0)
-  (loop [(index Int) 0 (facts (Vec FactSpecV0)) []]
+  (loop [index Int 0 facts (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
       (recur (+ index 1) (vec (concat facts (union-facts (nth specs index))))))))
 
 (defn record-block [(specs (Vec RecordSpecV0))] (Vec FactSpecV0)
-  (loop [(index Int) 0 (facts (Vec FactSpecV0)) []]
+  (loop [index Int 0 facts (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
       (recur (+ index 1) (vec (concat facts (record-facts (nth specs index))))))))
 
 (defn function-block [(specs (Vec FunctionSpecV0))] (Vec FactSpecV0)
-  (loop [(index Int) 0 (facts (Vec FactSpecV0)) []]
+  (loop [index Int 0 facts (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
       (recur (+ index 1) (vec (concat facts (function-facts (nth specs index))))))))
@@ -313,7 +313,7 @@
          (function-block function-specs))))
 
 (defn string-in? [(items (Vec String)) (value String)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count items))
       false
       (if (= value (nth items index)) true (recur (+ index 1))))))
@@ -322,7 +322,7 @@
   (if (string-in? items value) items (conj items value)))
 
 (def node-labels (Vec String)
-  (loop [(index Int) 0 (labels (Vec String)) [module-name]]
+  (loop [index Int 0 labels (Vec String) [module-name]]
     (if (>= index (count slice-facts))
       labels
       (let [(fact FactSpecV0) (nth slice-facts index)
@@ -333,7 +333,7 @@
             (add-once with-subject (factspecv0-object fact))))))))
 
 (def text-values (Vec String)
-  (loop [(index Int) 0 (values (Vec String)) []]
+  (loop [index Int 0 values (Vec String) []]
     (if (>= index (count slice-facts))
       values
       (let [(fact FactSpecV0) (nth slice-facts index)
@@ -356,7 +356,7 @@
     text-values))
 
 (def fact-nodes (Vec stages/TermNodeV0)
-  (loop [(index Int) 0 (nodes (Vec stages/TermNodeV0)) []]
+  (loop [index Int 0 nodes (Vec stages/TermNodeV0) []]
     (if (>= index (count slice-facts))
       nodes
       (let [(fact FactSpecV0) (nth slice-facts index)]
@@ -479,7 +479,7 @@
    (abi core/AbiProfileV0)] String
   (let [(verdicts (Vec obligations/ObligationVerdictV0))
         (obligations/validate-native-core-program program abi)]
-    (loop [(index Int) 0 (lines (Vec String)) []]
+    (loop [index Int 0 lines (Vec String) []]
       (if (>= index (count verdicts))
         (c17/join-lines lines)
         (recur (+ index 1)
@@ -494,7 +494,7 @@
 (defn receipt-report [(label String) (receipt core/PassReceiptV0)] String
   (let [(obligations-list (Vec core/ReceiptObligationV0))
         (core/passreceiptv0-obligations receipt)]
-    (loop [(index Int) 0 (lines (Vec String)) [(str label ":")]]
+    (loop [index Int 0 lines (Vec String) [(str label ":")]]
       (if (>= index (count obligations-list))
         (c17/join-lines lines)
         (recur (+ index 1)
@@ -502,7 +502,7 @@
 
 (defn diagnostic-report [(label String) (receipt core/PassReceiptV0)] String
   (let [(diagnostics (Vec core/DiagnosticV0)) (core/passreceiptv0-diagnostics receipt)]
-    (loop [(index Int) 0 (lines (Vec String)) [(str label ":")]]
+    (loop [index Int 0 lines (Vec String) [(str label ":")]]
       (if (>= index (count diagnostics))
         (c17/join-lines lines)
         (let [(diagnostic core/DiagnosticV0) (nth diagnostics index)]
@@ -523,7 +523,7 @@
 
 (defn probe-arena-bytes [(program core/NativeCoreProgram)] Int
   (let [(types (Vec core/TypeDef)) (emitted-types program)]
-    (loop [(index Int) 0 (total Int) 64]
+    (loop [index Int 0 total Int 64]
       (if (>= index (count types))
         total
         (let [(layout (U core/LayoutDef Nil))
@@ -537,7 +537,7 @@
 
 (defn probe-call-lines [(program core/NativeCoreProgram)] String
   (let [(types (Vec core/TypeDef)) (emitted-types program)]
-    (loop [(index Int) 0 (lines (Vec String)) []]
+    (loop [index Int 0 lines (Vec String) []]
       (if (>= index (count types))
         (c17/join-lines lines)
         (let [(name String) (c17/type-name 0 index)]

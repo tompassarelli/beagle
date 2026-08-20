@@ -18,7 +18,7 @@
   (C17Failure [(detail String)]))
 
 (defn join-lines [(lines (Vec String))] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count lines))
       result
       (recur (+ index 1) (str result (nth lines index) "\n")))))
@@ -29,7 +29,7 @@
 (defn insert-type
   [(item core/TypeDef)
    (sorted (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/TypeDef)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/TypeDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/TypeDef) (nth sorted index)]
@@ -38,7 +38,7 @@
           (recur (+ index 1) inserted (conj result current)))))))
 
 (defn id-ordered-types [(types (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(index Int) 0 (result (Vec core/TypeDef)) []]
+  (loop [index Int 0 result (Vec core/TypeDef) []]
     (if (>= index (count types))
       result
       (recur (+ index 1) (insert-type (nth types index) result)))))
@@ -46,7 +46,7 @@
 (defn insert-function
   [(item core/FunctionDef)
    (sorted (Vec core/FunctionDef))] (Vec core/FunctionDef)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/FunctionDef)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/FunctionDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/FunctionDef) (nth sorted index)]
@@ -56,7 +56,7 @@
 
 (defn ordered-functions
   [(functions (Vec core/FunctionDef))] (Vec core/FunctionDef)
-  (loop [(index Int) 0 (result (Vec core/FunctionDef)) []]
+  (loop [index Int 0 result (Vec core/FunctionDef) []]
     (if (>= index (count functions))
       result
       (recur (+ index 1) (insert-function (nth functions index) result)))))
@@ -64,7 +64,7 @@
 (defn insert-field-layout
   [(item core/FieldLayoutV0)
    (sorted (Vec core/FieldLayoutV0))] (Vec core/FieldLayoutV0)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/FieldLayoutV0)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/FieldLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/FieldLayoutV0) (nth sorted index)]
@@ -76,7 +76,7 @@
 
 (defn ordered-field-layouts
   [(fields (Vec core/FieldLayoutV0))] (Vec core/FieldLayoutV0)
-  (loop [(index Int) 0 (result (Vec core/FieldLayoutV0)) []]
+  (loop [index Int 0 result (Vec core/FieldLayoutV0) []]
     (if (>= index (count fields))
       result
       (recur (+ index 1) (insert-field-layout (nth fields index) result)))))
@@ -84,7 +84,7 @@
 (defn insert-variant
   [(item core/UnionVariantLayoutV0)
    (sorted (Vec core/UnionVariantLayoutV0))] (Vec core/UnionVariantLayoutV0)
-  (loop [(index Int) 0 (inserted Bool) false (result (Vec core/UnionVariantLayoutV0)) []]
+  (loop [index Int 0 inserted Bool false result (Vec core/UnionVariantLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
       (let [(current core/UnionVariantLayoutV0) (nth sorted index)]
@@ -96,13 +96,13 @@
 
 (defn ordered-variants
   [(variants (Vec core/UnionVariantLayoutV0))] (Vec core/UnionVariantLayoutV0)
-  (loop [(index Int) 0 (result (Vec core/UnionVariantLayoutV0)) []]
+  (loop [index Int 0 result (Vec core/UnionVariantLayoutV0) []]
     (if (>= index (count variants))
       result
       (recur (+ index 1) (insert-variant (nth variants index) result)))))
 
 (defn type-index [(types (Vec core/TypeDef)) (target core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count types))
       -1
       (if (core/native-id= (core/typedef-id (nth types index)) target)
@@ -126,7 +126,7 @@
 (defn layout-for-type
   [(layouts (Vec core/LayoutDef))
    (target core/NativeId)] (U core/LayoutDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count layouts))
       nil
       (let [(layout core/LayoutDef) (nth layouts index)]
@@ -184,7 +184,7 @@
 
 (defn variant-payloads
   [(variants (Vec core/UnionVariantLayoutV0))] (Vec core/NativeId)
-  (loop [(index Int) 0 (payloads (Vec core/NativeId)) []]
+  (loop [index Int 0 payloads (Vec core/NativeId) []]
     (if (>= index (count variants))
       payloads
       (let [(payload (U core/NativeId Nil))
@@ -265,7 +265,7 @@
    (layouts (Vec core/LayoutDef))
    (placed (Vec core/NativeId))
    (remaining (Vec core/TypeDef))] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count remaining))
       -1
       (if (dependencies-ready? types layouts placed (nth remaining index))
@@ -273,7 +273,7 @@
         (recur (+ index 1))))))
 
 (defn drop-index [(items (Vec core/TypeDef)) (position Int)] (Vec core/TypeDef)
-  (loop [(index Int) 0 (result (Vec core/TypeDef)) []]
+  (loop [index Int 0 result (Vec core/TypeDef) []]
     (if (>= index (count items))
       result
       (recur (+ index 1)
@@ -286,9 +286,9 @@
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))] (Vec core/TypeDef)
   (let [(identity-order (Vec core/TypeDef)) (id-ordered-types types)]
-    (loop [(remaining (Vec core/TypeDef)) identity-order
-           (placed (Vec core/NativeId)) []
-           (result (Vec core/TypeDef)) []]
+    (loop [remaining (Vec core/TypeDef) identity-order
+           placed (Vec core/NativeId) []
+           result (Vec core/TypeDef) []]
       (if (= 0 (count remaining))
         result
         (let [(position Int) (ready-index types layouts placed remaining)]
@@ -303,8 +303,8 @@
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))] Bool
   (let [(identity-order (Vec core/TypeDef)) (id-ordered-types types)]
-    (loop [(remaining (Vec core/TypeDef)) identity-order
-           (placed (Vec core/NativeId)) []]
+    (loop [remaining (Vec core/TypeDef) identity-order
+           placed (Vec core/NativeId) []]
       (if (= 0 (count remaining))
         true
         (let [(position Int) (ready-index types layouts placed remaining)]
@@ -457,7 +457,7 @@
   [(type-name-value String)
    (layout core/LayoutDef)
    (fields (Vec core/FieldLayoutV0))] String
-  (loop [(index Int) 0 (lines (Vec String)) (size-align-assertions type-name-value layout)]
+  (loop [index Int 0 lines (Vec String) (size-align-assertions type-name-value layout)]
     (if (>= index (count fields))
       (join-lines lines)
       (let [(field core/FieldLayoutV0) (nth fields index)]
@@ -559,7 +559,7 @@
   [(types (Vec core/TypeDef))
    (module-index Int)
    (fields (Vec core/FieldLayoutV0))] String
-  (loop [(index Int) 0 (lines (Vec String)) []]
+  (loop [index Int 0 lines (Vec String) []]
     (if (>= index (count fields))
       (join-lines lines)
       (let [(field core/FieldLayoutV0) (nth fields index)]
@@ -583,7 +583,7 @@
   [(types (Vec core/TypeDef))
    (module-index Int)
    (variants (Vec core/UnionVariantLayoutV0))] String
-  (loop [(index Int) 0 (lines (Vec String)) []]
+  (loop [index Int 0 lines (Vec String) []]
     (if (>= index (count variants))
       (join-lines lines)
       (let [(variant core/UnionVariantLayoutV0) (nth variants index)
@@ -596,7 +596,7 @@
                 " variant_" (core/unionvariantlayoutv0-tag variant) ";"))))))))
 
 (defn max-payload-offset [(variants (Vec core/UnionVariantLayoutV0))] Int
-  (loop [(index Int) 0 (offset Int) 0]
+  (loop [index Int 0 offset Int 0]
     (if (>= index (count variants))
       offset
       (let [(variant core/UnionVariantLayoutV0) (nth variants index)
@@ -639,7 +639,7 @@
    (module-index Int)
    (parameters (Vec core/NativeId))]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count parameters))
       result
       (recur (+ position 1)
@@ -702,7 +702,7 @@
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))
    (module-index Int)] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count types))
       result
       (recur (+ index 1)
@@ -711,7 +711,7 @@
 (defn parameter-index
   [(parameters (Vec core/Parameter))
    (target core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count parameters))
       -1
       (if (core/native-id= (core/parameter-id (nth parameters index)) target)
@@ -721,7 +721,7 @@
 (defn instruction-index
   [(instructions (Vec core/Instruction))
    (target core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count instructions))
       -1
       (if (core/native-id= (core/instruction-result-id (nth instructions index)) target)
@@ -757,11 +757,11 @@
         (initial (Vec String)) (if arena ["native_arena *arena"] [])
         (with-capability (Vec String))
         (if capability (conj initial "const native_capability *capability") initial)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count parameters))
         (if (and (= (count with-capability) 0) (= (count result) 0))
           "void"
-          (loop [(extra-index Int) 0 (text String) ""]
+          (loop [extra-index Int 0 text String ""]
             (if (>= extra-index (count with-capability))
               (if (= (count result) 0) text (str text (if (= (count text) 0) "" ", ") result))
               (recur (+ extra-index 1)
@@ -785,7 +785,7 @@
   [(types (Vec core/TypeDef))
    (module-index Int)
    (functions (Vec core/FunctionDef))] String
-  (loop [(index Int) 0 (lines (Vec String)) []]
+  (loop [index Int 0 lines (Vec String) []]
     (if (>= index (count functions))
       (join-lines lines)
       (recur (+ index 1)
@@ -883,7 +883,7 @@
   [(function core/FunctionDef)
    (block core/BasicBlock)] String
   (let [(instructions (Vec core/Instruction)) (core/basicblock-instructions block)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count instructions))
         result
         (recur (+ index 1)
@@ -923,7 +923,7 @@
   [(types (Vec core/TypeDef))
    (module-index Int)
    (functions (Vec core/FunctionDef))] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count functions))
       result
       (recur (+ index 1)

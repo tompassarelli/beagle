@@ -72,7 +72,7 @@
           0)]
     (if (>= start length)
       false
-      (loop [(offset Int) start]
+      (loop [offset Int start]
         (if (>= offset length)
           true
           (if (decimal-digit? (subs value offset (inc offset)))
@@ -86,11 +86,11 @@
       (->EdnDecodeError
         (reader/datumread-error-offset read)
         (or read-error "invalid EDN"))
-      (loop [(remaining (Vec reader/ReaderEvent))
+      (loop [remaining (Vec reader/ReaderEvent)
              (reader/datumread-events read)
-             (events (Vec EdnEvent)) []
-             (stack (Vec DecodeStackEntry)) []
-             (roots Int) 0]
+             events (Vec EdnEvent) []
+             stack (Vec DecodeStackEntry) []
+             roots Int 0]
         (if (empty? remaining)
           (if (= roots 1)
             (->EdnDecoded events)
@@ -238,10 +238,10 @@
      (->ValueEncodeRejected "unexpected vector end event")]))
 
 (defn encode [(events (Vec EdnEvent))] EdnEncodeResult
-  (loop [(index Int) 0
-         (result String) ""
-         (expectation EncodeExpectation) (->EncodeValue true)
-         (continuations (Vec EncodeExpectation)) [(->EncodeDone true)]]
+  (loop [index Int 0
+         result String ""
+         expectation EncodeExpectation (->EncodeValue true)
+         continuations (Vec EncodeExpectation) [(->EncodeDone true)]]
     (match expectation
       [(EncodeValue token)
        (if (>= index (count events))

@@ -21,7 +21,7 @@
   (core/native-id= left right))
 
 (defn int-in? [(values (Vec Int)) (target Int)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count values))
       false
       (if (= (nth values index) target)
@@ -57,7 +57,7 @@
   [(facts (Vec Any))
    (subject Int)
    (predicate String)] (U Any Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count facts))
       nil
       (let [(fact Any) (nth facts index)]
@@ -70,7 +70,7 @@
    (subject Int)
    (object Any)] Bool
   (and (integer? object)
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count facts))
         false
         (let [(fact Any) (nth facts index)]
@@ -81,7 +81,7 @@
             (recur (+ index 1))))))))
 
 (defn instant-root [(facts (Vec Any))] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count facts))
       -1
       (let [(fact Any) (nth facts index)
@@ -95,7 +95,7 @@
           (recur (+ index 1)))))))
 
 (defn child-ids [(facts (Vec Any)) (subjects (Vec Int))] (Vec Int)
-  (loop [(index Int) 0 (children (Vec Int)) []]
+  (loop [index Int 0 children (Vec Int) []]
     (if (>= index (count facts))
       children
       (let [(fact Any) (nth facts index)
@@ -111,14 +111,14 @@
           (recur (+ index 1) children))))))
 
 (defn descendant-ids [(facts (Vec Any)) (root Int)] (Vec Int)
-  (loop [(subjects (Vec Int)) [root]]
+  (loop [subjects (Vec Int) [root]]
     (let [(children (Vec Int)) (child-ids facts subjects)]
       (if (= 0 (count children))
         subjects
         (recur (vec (concat subjects children)))))))
 
 (defn select-facts [(facts (Vec Any)) (subjects (Vec Int))] (Vec FactV0)
-  (loop [(index Int) 0 (selected (Vec FactV0)) []]
+  (loop [index Int 0 selected (Vec FactV0) []]
     (if (>= index (count facts))
       selected
       (let [(fact Any) (nth facts index)
@@ -133,7 +133,7 @@
           (recur (+ index 1) selected))))))
 
 (defn node-in? [(nodes (Vec stages/TermNodeV0)) (identity core/NativeId)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count nodes))
       false
       (if (same-id? identity
@@ -168,7 +168,7 @@
       (fact-object-id fact))))
 
 (defn source-nodes [(facts (Vec FactV0))] (Vec stages/TermNodeV0)
-  (loop [(index Int) 0 (nodes (Vec stages/TermNodeV0)) []]
+  (loop [index Int 0 nodes (Vec stages/TermNodeV0) []]
     (if (>= index (count facts))
       nodes
       (let [(fact FactV0) (nth facts index)
@@ -230,7 +230,7 @@
 (defn id-selected?
   [(definitions (Vec core/TypeDef))
    (target core/NativeId)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count definitions))
       false
       (if (same-id? target (core/typedef-id (nth definitions index)))
@@ -278,7 +278,7 @@
 (defn obligation-lines [(program core/NativeCoreProgram)] (Vec String)
   (let [(verdicts (Vec obligations/ObligationVerdictV0))
         (obligations/validate-native-core-program program (core/abi-profile-lp64))]
-    (loop [(index Int) 0 (lines (Vec String)) []]
+    (loop [index Int 0 lines (Vec String) []]
       (if (>= index (count verdicts))
         lines
         (let [(verdict obligations/ObligationVerdictV0) (nth verdicts index)]
@@ -289,7 +289,7 @@
               (str (nth obligation-names index) " failed") {}))))))))
 
 (defn join-lines [(lines (Vec String))] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count lines))
       result
       (recur (+ index 1) (str result (nth lines index) "\n")))))

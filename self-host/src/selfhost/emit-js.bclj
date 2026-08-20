@@ -307,7 +307,7 @@
 
 (defn js-string-lit [(s String)] String
   (let [n (count s)]
-    (loop [(i Int) 0 (acc (Vec String)) ["\""]]
+    (loop [i Int 0 acc (Vec String) ["\""]]
       (if (>= i n)
         (str/join "" (conj acc "\""))
         (recur (+ i 1) (conj acc (js-escape-char (subs s i (+ i 1)))))))))
@@ -1292,7 +1292,7 @@
               test (str tmp "._tag === " (js-string-lit rec-name))]
           (if (or (= 0 (count bindings)) (nil? fields))
             (str "if (" test ") { " (emit-match-body! body []) " } else")
-            (let [let-strs (loop [(i Int) 0 (acc (Vec String)) []]
+            (let [let-strs (loop [i Int 0 acc (Vec String) []]
                              (if (or (>= i (count bindings)) (>= i (count fields))) acc
                                (recur (+ i 1)
                                       (conj acc (str "const " (mangle-name (get (nth bindings i) "name"))
@@ -1479,8 +1479,8 @@
            i 0
            strings []
            bound (deref bound-vars)
-           types (deref type-env)
-           renames (deref rename-env)]
+           types deref type-env
+           renames deref rename-env]
       (if (= 0 (count remaining))
         {"strs" strings "bound" bound "types" types "renames" renames}
         (let [binding (nth remaining 0)
@@ -1879,10 +1879,10 @@
 
 (defn emit-recur-stmts! [(e Any) (bind-names Any)] String
   (let [args (get e "args")
-        temps (loop [(i Int) 0 (acc (Vec String)) []]
+        temps (loop [i Int 0 acc (Vec String) []]
                 (if (>= i (count args)) acc
                   (recur (+ i 1) (conj acc (str "const _recur_" i " = " (emit-expr*! (nth args i)) ";")))))
-        assigns (loop [(i Int) 0 (acc (Vec String)) []]
+        assigns (loop [i Int 0 acc (Vec String) []]
                   (if (>= i (count bind-names)) acc
                     (recur (+ i 1) (conj acc (str (nth bind-names i) " = _recur_" i ";")))))
         contexts (deref loop-binding-contexts)]
@@ -2173,7 +2173,7 @@
   (let [n (count args)
         rendered (mapv emit-expr*! args)]
     (str/join " && "
-      (loop [(i Int) 0 (acc (Vec String)) []]
+      (loop [i Int 0 acc (Vec String) []]
         (if (>= i (- n 1)) acc
           (let [left (nth args i)
                 right (nth args (+ i 1))

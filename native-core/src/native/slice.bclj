@@ -28,7 +28,7 @@
   (subs text index (+ index 1)))
 
 (defn split-on [(text String) (separator String)] (Vec String)
-  (loop [(index Int) 0 (start Int) 0 (parts (Vec String)) []]
+  (loop [index Int 0 start Int 0 parts (Vec String) []]
     (if (>= index (count text))
       (conj parts (subs text start index))
       (if (= separator (char-at text index))
@@ -36,7 +36,7 @@
         (recur (+ index 1) start parts)))))
 
 (defn escaped-text [(value String)] String
-  (loop [(index Int) 0 (decoded String) ""]
+  (loop [index Int 0 decoded String ""]
     (if (>= index (count value))
       decoded
       (let [(character String) (char-at value index)]
@@ -72,7 +72,7 @@
 
 (defn parse-facts [(text String)] (Vec SliceFactV0)
   (let [(lines (Vec String)) (split-on text "\n")]
-    (loop [(index Int) 0 (rows (Vec SliceFactV0)) []]
+    (loop [index Int 0 rows (Vec SliceFactV0) []]
       (if (>= index (count lines))
         rows
         (let [(parsed (Vec SliceFactV0)) (parse-row (nth lines index))]
@@ -89,7 +89,7 @@
       (assoc (uniquestringsv0-seen unique) candidate true))))
 
 (defn node-names [(rows (Vec SliceFactV0))] (Vec String)
-  (loop [(index Int) 0 (unique UniqueStringsV0) (->UniqueStringsV0 [] {})]
+  (loop [index Int 0 unique UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
       (uniquestringsv0-values unique)
       (let [(row SliceFactV0) (nth rows index)
@@ -101,7 +101,7 @@
             (add-unique-string with-subject (slicefactv0-object row))))))))
 
 (defn text-values [(rows (Vec SliceFactV0))] (Vec String)
-  (loop [(index Int) 0 (unique UniqueStringsV0) (->UniqueStringsV0 [] {})]
+  (loop [index Int 0 unique UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
       (uniquestringsv0-values unique)
       (let [(row SliceFactV0) (nth rows index)
@@ -132,7 +132,7 @@
     values))
 
 (defn fact-nodes [(rows (Vec SliceFactV0))] (Vec stages/TermNodeV0)
-  (loop [(index Int) 0 (nodes (Vec stages/TermNodeV0)) []]
+  (loop [index Int 0 nodes (Vec stages/TermNodeV0) []]
     (if (>= index (count rows))
       nodes
       (let [(row SliceFactV0) (nth rows index)
@@ -153,7 +153,7 @@
   [(rows (Vec SliceFactV0))
    (subject String)
    (predicate String)] (U String Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count rows))
       nil
       (let [(row SliceFactV0) (nth rows position)]
@@ -167,7 +167,7 @@
   [(rows (Vec SliceFactV0))
    (subject String)
    (predicate String)] (Vec String)
-  (loop [(position Int) 0 (objects (Vec String)) []]
+  (loop [position Int 0 objects (Vec String) []]
     (if (>= position (count rows))
       objects
       (let [(row SliceFactV0) (nth rows position)]
@@ -179,7 +179,7 @@
             objects))))))
 
 (defn form-node-names [(rows (Vec SliceFactV0)) (kind String)] (Vec String)
-  (loop [(position Int) 0 (selected (Vec String)) []]
+  (loop [position Int 0 selected (Vec String) []]
     (if (>= position (count rows))
       selected
       (let [(row SliceFactV0) (nth rows position)]
@@ -231,7 +231,7 @@
 (defn source-module-id
   [(modules (Vec stages/SourceModuleV1))
    (module-name String)] core/NativeId
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count modules))
       (slice-id "missing-module" [module-name])
       (let [(module stages/SourceModuleV1) (nth modules position)]
@@ -240,7 +240,7 @@
           (recur (+ position 1)))))))
 
 (defn semantic-unit-node-names [(rows (Vec SliceFactV0))] (Vec String)
-  (loop [(position Int) 0 (unique UniqueStringsV0) (->UniqueStringsV0 [] {})]
+  (loop [position Int 0 unique UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= position (count rows))
       (uniquestringsv0-values unique)
       (let [(row SliceFactV0) (nth rows position)]
@@ -330,7 +330,7 @@
 (defn find-type
   [(types (Vec core/TypeDef))
    (target core/NativeId)] (U core/TypeDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count types))
       nil
       (let [(definition core/TypeDef) (nth types index)]
@@ -344,7 +344,7 @@
 (defn supported-record-ids
   [(types (Vec core/TypeDef))
    (layouts (Vec core/LayoutDef))] (Vec core/NativeId)
-  (loop [(index Int) 0 (ids (Vec core/NativeId)) []]
+  (loop [index Int 0 ids (Vec core/NativeId) []]
     (if (>= index (count types))
       ids
       (let [(definition core/TypeDef) (nth types index)]
@@ -383,14 +383,14 @@
 (defn scalar-ids-for
   [(types (Vec core/TypeDef))
    (records (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(index Int) 0 (ids (Vec core/NativeId)) []]
+  (loop [index Int 0 ids (Vec core/NativeId) []]
     (if (>= index (count records))
       ids
       (let [(definition (U core/TypeDef Nil)) (find-type types (nth records index))
             (references (Vec core/NativeId))
             (if (nil? definition) [] (type-field-refs definition))]
         (recur (+ index 1)
-          (loop [(inner Int) 0 (collected (Vec core/NativeId)) ids]
+          (loop [inner Int 0 collected (Vec core/NativeId) ids]
             (if (>= inner (count references))
               collected
               (let [(reference core/NativeId) (nth references inner)]
@@ -483,7 +483,7 @@
   (let [(verdicts (Vec obligations/ObligationVerdictV0))
         (obligations/validate-native-core-program program abi)
         (names (Vec String)) (obligation-names)]
-    (loop [(index Int) 0 (report String) ""]
+    (loop [index Int 0 report String ""]
       (if (>= index (count verdicts))
         report
         (recur (+ index 1)
@@ -492,7 +492,7 @@
             " " (nth names index) "\n"))))))
 
 (defn type-names [(types (Vec core/TypeDef))] String
-  (loop [(index Int) 0 (report String) ""]
+  (loop [index Int 0 report String ""]
     (if (>= index (count types))
       report
       (recur (+ index 1)
@@ -502,7 +502,7 @@
   (str "pending " (core/receiptobligationv0-detail obligation) "\n"))
 
 (defn pending-reports [(items (Vec core/ReceiptObligationV0))] String
-  (loop [(index Int) 0 (report String) ""]
+  (loop [index Int 0 report String ""]
     (if (>= index (count items))
       report
       (recur (+ index 1) (str report (pending-report (nth items index)))))))

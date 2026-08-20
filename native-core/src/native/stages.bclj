@@ -112,7 +112,7 @@
 (defn utf8-bytes [(text String)] (Vec Int)
   (let [(units (Vec Any)) (vec text)
         (size Int) (count units)]
-    (loop [(index Int) 0 (bytes (Vec Int)) []]
+    (loop [index Int 0 bytes (Vec Int) []]
       (if (>= index size)
         bytes
         (let [(unit Int) (int (nth units index))
@@ -428,7 +428,7 @@
     (native-wire-unsigned-decimal? value)))
 
 (defn native-wire-colon-offset [(text String) (offset Int)] Int
-  (loop [(position Int) offset]
+  (loop [position Int offset]
     (cond
       (>= position (count text)) -1
       (= ":" (subs text position (+ position 1))) position
@@ -457,8 +457,8 @@
         (if (or (>= separator (count text))
               (not= ":" (subs text separator (+ separator 1))))
           nil
-          (loop [(offset Int) (+ separator 1)
-                 (fields (Vec String)) []]
+          (loop [offset Int (+ separator 1)
+                 fields (Vec String) []]
             (cond
               (= offset (count text))
               (->NativeWireRecordV1
@@ -493,7 +493,7 @@
 (defn native-wire-edn-safe? [(text String)] Bool
   (let [(units (Vec Any)) (vec text)
         (size Int) (count units)]
-    (loop [(index Int) 0 (in-string Bool) false (escaped Bool) false]
+    (loop [index Int 0 in-string Bool false escaped Bool false]
       (if (>= index size)
         (and (not in-string) (not escaped))
         (let [(character String) (str (nth units index))]
@@ -547,7 +547,7 @@
 
 (defn block-f64-atom-bit-rows
   [(function-id core/NativeId) (block core/BasicBlock)] (Vec String)
-  (loop [(position Int) 0 (rows (Vec String)) []]
+  (loop [position Int 0 rows (Vec String) []]
     (if (>= position (count (core/basicblock-instructions block)))
       rows
       (let [(instruction core/Instruction)
@@ -569,7 +569,7 @@
           (recur (+ position 1) rows))))))
 
 (defn function-f64-atom-bit-rows [(function core/FunctionDef)] (Vec String)
-  (loop [(position Int) 0 (rows (Vec String)) []]
+  (loop [position Int 0 rows (Vec String) []]
     (if (>= position (count (core/functiondef-blocks function)))
       rows
       (recur (+ position 1)
@@ -579,7 +579,7 @@
 
 (defn native-program-f64-atom-bit-rows
   [(program core/NativeCoreProgram)] (Vec String)
-  (loop [(position Int) 0 (rows (Vec String)) []]
+  (loop [position Int 0 rows (Vec String) []]
     (if (>= position (count (core/nativecoreprogram-functions program)))
       rows
       (recur (+ position 1)
@@ -618,9 +618,9 @@
           (not= "native-program-f64-atoms-v1"
             (nativewirerecordv1-tag record)))
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (nativewirerecordv1-fields record)
-             (bits (Map String Int)) {}]
+      (loop [position Int 0
+             fields (Vec String) (nativewirerecordv1-fields record)
+             bits (Map String Int) {}]
         (if (>= position (count fields))
           bits
           (let [(entry (U F64AtomBitsWireV1 Nil))

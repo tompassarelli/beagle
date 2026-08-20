@@ -2,9 +2,9 @@
 (ns selfhost.fixtures.purity.transient-recur-accept)
 
 (defn build-both [(xs Any) (ys Any)] Any
-  (loop [(index Int) 0
-         (left Any) (transient xs)
-         (right Any) (transient ys)]
+  (loop [index Int 0
+         left Any (transient xs)
+         right Any (transient ys)]
     (if (= index 3)
       [(persistent! left) (persistent! right)]
       (recur (+ index 1)

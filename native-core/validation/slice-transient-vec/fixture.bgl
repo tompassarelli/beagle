@@ -8,8 +8,8 @@
 (defn build-ordered! [] (Vec Int)
   (let [(seed (Vec Int)) []]
     (persistent!
-      (loop [(index Int) 0
-             (builder (TransientVec Int)) (transient seed)]
+      (loop [index Int 0
+             builder (TransientVec Int) (transient seed)]
         (if (< index append-count)
           (recur (inc index) (conj! builder index))
           builder)))))
@@ -21,9 +21,9 @@
 (defn build-paired! [] PairedBuild
   (let [(empty-left (Vec Int)) []
         (empty-right (Vec Bool)) []]
-    (loop [(index Int) 0
-           (left (TransientVec Int)) (transient empty-left)
-           (right (TransientVec Bool)) (transient empty-right)]
+    (loop [index Int 0
+           left (TransientVec Int) (transient empty-left)
+           right (TransientVec Bool) (transient empty-right)]
       (if (= index 4)
         (->PairedBuild (persistent! left) (persistent! right))
         (recur (+ index 1)

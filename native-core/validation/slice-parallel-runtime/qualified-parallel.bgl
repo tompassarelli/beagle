@@ -11,7 +11,7 @@
   Nil
   (do
     partition-id
-    (loop [(index Int) write-lo]
+    (loop [index Int write-lo]
       (if (< index write-hi)
         (do
           (aset-double! next index (+ (aget current index) 1.0))

@@ -2,21 +2,21 @@
 (ns selfhost.fixtures.purity.transient-recur-reject)
 
 (defn borrowed-loop [(work Any)] Any
-  (loop [(index Int) 0
-         (owner Any) work]
+  (loop [index Int 0
+         owner Any work]
     (if (= index 1)
       (persistent! owner)
       (recur (+ index 1) (conj! owner index)))))
 
 (defn escaping-loop [(xs Any)] Any
-  (loop [(index Int) 0
-         (owner Any) (transient xs)]
+  (loop [index Int 0
+         owner Any (transient xs)]
     (if (= index 1)
       owner
       (recur (+ index 1) (conj! owner index)))))
 
 (defn aliased-loop [(xs Any) (ys Any)] Any
-  (loop [(index Int) 0
-         (left Any) (transient xs)
-         (right Any) (transient ys)]
+  (loop [index Int 0
+         left Any (transient xs)
+         right Any (transient ys)]
     (recur (+ index 1) (conj! left index) left)))

@@ -443,7 +443,7 @@
 (defn- restored-syntax [(restorations Any) (value Any)] Any
   (if (nil? restorations)
     nil
-    (loop [(entries Any) (deref restorations)]
+    (loop [entries Any (deref restorations)]
       (if (= (count entries) 0)
         nil
         (let [entry (nth entries 0)]

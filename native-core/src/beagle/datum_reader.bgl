@@ -58,8 +58,8 @@
     :else character))
 
 (defn render-string-literal [(value String)] String
-  (loop [(offset Int) 0
-         (rendered String) "\""]
+  (loop [offset Int 0
+         rendered String "\""]
     (if (= offset (count value))
       (str rendered "\"")
       (recur (inc offset)
@@ -67,8 +67,8 @@
                   (render-string-character (character-at value offset)))))))
 
 (defn scan-string [(source String) (start Int)] TokenScan
-  (loop [(offset Int) (inc start)
-         (value String) ""]
+  (loop [offset Int (inc start)
+         value String ""]
     (if (= offset (count source))
       (->TokenScan offset value "" "unterminated string literal")
       (let [(character String) (character-at source offset)]
@@ -95,7 +95,7 @@
           (recur (inc offset) (str value character)))))))
 
 (defn scan-atom [(source String) (start Int)] TokenScan
-  (loop [(offset Int) start]
+  (loop [offset Int start]
     (if (or (= offset (count source))
             (delimiter? (character-at source offset)))
       (let [(value String) (subs source start offset)]
@@ -163,9 +163,9 @@
   (->DatumRead events message offset))
 
 (defn read-events [(source String)] DatumRead
-  (loop [(offset Int) 0
-         (stack (Vec Keyword)) []
-         (events (Vec ReaderEvent)) []]
+  (loop [offset Int 0
+         stack (Vec Keyword) []
+         events (Vec ReaderEvent) []]
     (if (= offset (count source))
       (if (empty? stack)
         (success events)
@@ -178,7 +178,7 @@
 
           (= character ";")
           (let [(next-offset Int)
-                (loop [(cursor Int) (inc offset)]
+                (loop [cursor Int (inc offset)]
                   (if (or (= cursor (count source))
                           (= (character-at source cursor) "\n"))
                     cursor

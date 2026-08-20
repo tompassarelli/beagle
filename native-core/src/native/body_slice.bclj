@@ -20,8 +20,8 @@
     (let [(diagnostics (Vec core/DiagnosticV0))
           (core/passreceiptv0-diagnostics
             (lower/typingrejectedv0-receipt result))]
-      (loop [(position Int) 0
-             (report String)
+      (loop [position Int 0
+             report String
              "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"]
         (if (>= position (count diagnostics))
           report
@@ -43,9 +43,9 @@
         (core/recordtype-fields shape))
 
       (instance? native.core.UnionType shape)
-      (loop [(position Int) 0
-             (variants (Vec core/TypeVariant)) (core/uniontype-variants shape)
-             (collected (Vec core/NativeId)) [(union-tag-type-id)]]
+      (loop [position Int 0
+             variants (Vec core/TypeVariant) (core/uniontype-variants shape)
+             collected (Vec core/NativeId) [(union-tag-type-id)]]
         (if (>= position (count variants))
           collected
           (let [(payload (U core/NativeId Nil))
@@ -98,7 +98,7 @@
             (core/functiondef-parameters function))
           (if (nil? return-type) [] [return-type]))
         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0 (collected (Vec core/NativeId)) seeds]
+    (loop [position Int 0 collected (Vec core/NativeId) seeds]
       (if (>= position (count blocks))
         collected
         (let [(block core/BasicBlock) (nth blocks position)
@@ -119,9 +119,9 @@
   (if (core/id-in? ids candidate) ids (conj ids candidate)))
 
 (defn abi-type-seeds [(program core/NativeCoreProgram)] (Vec core/NativeId)
-  (loop [(position Int) 0
-         (abis (Vec core/AbiDeclV0)) (core/nativecoreprogram-abis program)
-         (collected (Vec core/NativeId)) []]
+  (loop [position Int 0
+         abis (Vec core/AbiDeclV0) (core/nativecoreprogram-abis program)
+         collected (Vec core/NativeId) []]
     (if (>= position (count abis))
       collected
       (let [(abi core/AbiDeclV0) (nth abis position)
@@ -139,23 +139,23 @@
   [(program core/NativeCoreProgram)] (Vec core/NativeId)
   (let [(types (Vec core/TypeDef)) (core/nativecoreprogram-types program)
         (seeds (Vec core/NativeId))
-        (loop [(position Int) 0
-               (functions (Vec core/FunctionDef)) (core/nativecoreprogram-functions program)
-               (collected (Vec core/NativeId)) (abi-type-seeds program)]
+        (loop [position Int 0
+               functions (Vec core/FunctionDef) (core/nativecoreprogram-functions program)
+               collected (Vec core/NativeId) (abi-type-seeds program)]
           (if (>= position (count functions))
             collected
             (recur (+ position 1) functions
-              (loop [(inner Int) 0
-                     (candidates (Vec core/NativeId))
+              (loop [inner Int 0
+                     candidates (Vec core/NativeId)
                      (function-type-seeds (nth functions position))
-                     (kept (Vec core/NativeId)) collected]
+                     kept (Vec core/NativeId) collected]
                 (if (>= inner (count candidates))
                   kept
                   (recur (+ inner 1) candidates
                     (conj-id kept (nth candidates inner))))))))]
-    (loop [(round Int) 0 (current (Vec core/NativeId)) seeds]
+    (loop [round Int 0 current (Vec core/NativeId) seeds]
       (let [(grown (Vec core/NativeId))
-            (loop [(position Int) 0 (collected (Vec core/NativeId)) current]
+            (loop [position Int 0 collected (Vec core/NativeId) current]
               (if (>= position (count current))
                 collected
                 (let [(definition (U core/TypeDef Nil))
@@ -163,7 +163,7 @@
                       (references (Vec core/NativeId))
                       (if (nil? definition) [] (type-references definition))]
                   (recur (+ position 1)
-                    (loop [(inner Int) 0 (kept (Vec core/NativeId)) collected]
+                    (loop [inner Int 0 kept (Vec core/NativeId) collected]
                       (if (>= inner (count references))
                         kept
                         (recur (+ inner 1) (conj-id kept (nth references inner)))))))))]
@@ -206,7 +206,7 @@
   [(label String)
    (verdicts (Vec obligations/ObligationVerdictV0))] String
   (let [(names (Vec String)) (slice/obligation-names)]
-    (loop [(position Int) 0 (report String) ""]
+    (loop [position Int 0 report String ""]
       (if (>= position (count verdicts))
         report
         (recur (+ position 1)
@@ -219,7 +219,7 @@
 (defn failing-obligation-verdicts
   [(verdicts (Vec obligations/ObligationVerdictV0))] String
   (let [(names (Vec String)) (slice/obligation-names)]
-    (loop [(position Int) 0 (report String) ""]
+    (loop [position Int 0 report String ""]
       (if (>= position (count verdicts))
         report
         (recur (+ position 1)
@@ -236,7 +236,7 @@
 
 (defn function-report [(functions (Vec core/FunctionDef))] String
   (let [(ordered (Vec core/FunctionDef)) (c17/ordered-functions functions)]
-    (loop [(position Int) 0 (report String) ""]
+    (loop [position Int 0 report String ""]
       (if (>= position (count ordered))
         report
         (recur (+ position 1)

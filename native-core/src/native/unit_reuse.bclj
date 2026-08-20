@@ -556,7 +556,7 @@
   (if (canonical-signed-decimal? value) (parse-long value) nil))
 
 (defn colon-offset [(text String) (offset Int)] Int
-  (loop [(position Int) offset]
+  (loop [position Int offset]
     (cond
       (>= position (count text)) -1
       (= ":" (subs text position (+ position 1))) position
@@ -583,8 +583,8 @@
         (if (or (>= separator (count text))
               (not= ":" (subs text separator (+ separator 1))))
           nil
-          (loop [(offset Int) (+ separator 1)
-                 (fields (Vec String)) []]
+          (loop [offset Int (+ separator 1)
+                 fields (Vec String) []]
             (cond
               (= offset (count text))
               (->WireRecordV1 (wirepartv1-value tag-part) fields)
@@ -674,9 +674,9 @@
   (let [(record (U WireRecordV1 Nil)) (wire-record-with-tag encoding tag)]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/NativeId)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/NativeId) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/NativeId Nil))
@@ -1095,9 +1095,9 @@
         (wire-record-with-tag encoding "parameters-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/Parameter)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/Parameter) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/Parameter Nil))
@@ -1165,9 +1165,9 @@
         (wire-record-with-tag encoding "produced-tokens-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/ResourceTokenV0)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/ResourceTokenV0) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/ResourceTokenV0 Nil))
@@ -1207,9 +1207,9 @@
         (wire-record-with-tag encoding "switch-cases-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/SwitchCaseV0)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/SwitchCaseV0) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/SwitchCaseV0 Nil))
@@ -1317,9 +1317,9 @@
         (wire-record-with-tag encoding "instructions-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/Instruction)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/Instruction) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/Instruction Nil))
@@ -1333,9 +1333,9 @@
         (wire-record-with-tag encoding "terminators-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/Terminator)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/Terminator) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/Terminator Nil))
@@ -1365,9 +1365,9 @@
         (wire-record-with-tag encoding "blocks-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/BasicBlock)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/BasicBlock) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/BasicBlock Nil))
@@ -1441,7 +1441,7 @@
 
 (defn decode-type-variants-wire-v1
   [(fields (Vec String))] (U (Vec core/TypeVariant) Nil)
-  (loop [(position Int) 0 (values (Vec core/TypeVariant)) []]
+  (loop [position Int 0 values (Vec core/TypeVariant) []]
     (if (>= position (count fields))
       values
       (let [(value (U core/TypeVariant Nil))
@@ -1494,9 +1494,9 @@
         (canonical-set-wire-record encoding "typed-unit-types-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/TypeDef)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/TypeDef) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/TypeDef Nil))
@@ -1520,9 +1520,9 @@
         (canonical-set-wire-record encoding "typed-unit-effects-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/EffectDef)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/EffectDef) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/EffectDef Nil))
@@ -1581,9 +1581,9 @@
         (wire-record-with-tag encoding "union-variant-layouts-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/UnionVariantLayoutV0)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/UnionVariantLayoutV0) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/UnionVariantLayoutV0 Nil))
@@ -1638,9 +1638,9 @@
         (canonical-set-wire-record encoding "native-unit-layouts-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/LayoutDef)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/LayoutDef) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/LayoutDef Nil))
@@ -1687,9 +1687,9 @@
         (wire-record-with-tag encoding "abi-parameters-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/AbiValueV0)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/AbiValueV0) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/AbiValueV0 Nil))
@@ -1775,9 +1775,9 @@
         (canonical-set-wire-record encoding "native-unit-abis-wire-v1")]
     (if (nil? record)
       nil
-      (loop [(position Int) 0
-             (fields (Vec String)) (wirerecordv1-fields record)
-             (values (Vec core/AbiDeclV0)) []]
+      (loop [position Int 0
+             fields (Vec String) (wirerecordv1-fields record)
+             values (Vec core/AbiDeclV0) []]
         (if (>= position (count fields))
           values
           (let [(value (U core/AbiDeclV0 Nil))
@@ -1841,8 +1841,8 @@
 
 (defn insert-type-by-wire
   [(item core/TypeDef) (sorted (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/TypeDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/TypeDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/TypeDef) (nth sorted position)]
@@ -1853,15 +1853,15 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn types-by-wire [(values (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(position Int) 0 (result (Vec core/TypeDef)) []]
+  (loop [position Int 0 result (Vec core/TypeDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-type-by-wire (nth values position) result)))))
 
 (defn insert-effect-by-wire
   [(item core/EffectDef) (sorted (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/EffectDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/EffectDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/EffectDef) (nth sorted position)]
@@ -1872,7 +1872,7 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn effects-by-wire [(values (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [(position Int) 0 (result (Vec core/EffectDef)) []]
+  (loop [position Int 0 result (Vec core/EffectDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-effect-by-wire (nth values position) result)))))
@@ -1913,8 +1913,8 @@
 
 (defn insert-layout-by-wire
   [(item core/LayoutDef) (sorted (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/LayoutDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/LayoutDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/LayoutDef) (nth sorted position)]
@@ -1925,15 +1925,15 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn layouts-by-wire [(values (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [(position Int) 0 (result (Vec core/LayoutDef)) []]
+  (loop [position Int 0 result (Vec core/LayoutDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-layout-by-wire (nth values position) result)))))
 
 (defn insert-abi-by-wire
   [(item core/AbiDeclV0) (sorted (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/AbiDeclV0)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/AbiDeclV0) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/AbiDeclV0) (nth sorted position)]
@@ -1944,7 +1944,7 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn abis-by-wire [(values (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [(position Int) 0 (result (Vec core/AbiDeclV0)) []]
+  (loop [position Int 0 result (Vec core/AbiDeclV0) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-abi-by-wire (nth values position) result)))))
@@ -2150,9 +2150,9 @@
         (core/recordtype-fields shape))
 
       (instance? native.core.UnionType shape)
-      (loop [(position Int) 0
-             (variants (Vec core/TypeVariant)) (core/uniontype-variants shape)
-             (collected (Vec core/NativeId)) [(lower/type-id "UnionTag")]]
+      (loop [position Int 0
+             variants (Vec core/TypeVariant) (core/uniontype-variants shape)
+             collected (Vec core/NativeId) [(lower/type-id "UnionTag")]]
         (if (>= position (count variants))
           collected
           (let [(payload (U core/NativeId Nil))
@@ -2208,12 +2208,12 @@
           (lower/typedfunctionv0-failure-type function))
         (blocks (Vec core/BasicBlock))
         (lower/readiness-blocks (lower/typedfunctionv0-readiness function))]
-    (loop [(position Int) 0 (collected (Vec core/NativeId)) initial]
+    (loop [position Int 0 collected (Vec core/NativeId) initial]
       (if (>= position (count blocks))
         collected
         (let [(block core/BasicBlock) (nth blocks position)
               (with-block-parameters (Vec core/NativeId))
-              (loop [(inner Int) 0 (current (Vec core/NativeId)) collected]
+              (loop [inner Int 0 current (Vec core/NativeId) collected]
                 (if (>= inner (count (core/basicblock-parameters block)))
                   current
                   (recur (+ inner 1)
@@ -2221,8 +2221,8 @@
                       (core/parameter-type-id
                         (nth (core/basicblock-parameters block) inner))))))]
           (recur (+ position 1)
-            (loop [(inner Int) 0
-                   (current (Vec core/NativeId)) with-block-parameters]
+            (loop [inner Int 0
+                   current (Vec core/NativeId) with-block-parameters]
               (if (>= inner (count (core/basicblock-instructions block)))
                 current
                 (recur (+ inner 1)
@@ -2240,9 +2240,9 @@
 
 (defn reachable-type-ids
   [(types (Vec core/TypeDef)) (seeds (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(round Int) 0 (current (Vec core/NativeId)) seeds]
+  (loop [round Int 0 current (Vec core/NativeId) seeds]
     (let [(grown (Vec core/NativeId))
-          (loop [(position Int) 0 (collected (Vec core/NativeId)) current]
+          (loop [position Int 0 collected (Vec core/NativeId) current]
             (if (>= position (count current))
               collected
               (let [(definition (U core/TypeDef Nil))
@@ -2250,7 +2250,7 @@
                     (references (Vec core/NativeId))
                     (if (nil? definition) [] (type-references definition))]
                 (recur (+ position 1)
-                  (loop [(inner Int) 0 (next (Vec core/NativeId)) collected]
+                  (loop [inner Int 0 next (Vec core/NativeId) collected]
                     (if (>= inner (count references))
                       next
                       (recur (+ inner 1)
@@ -2385,10 +2385,10 @@
     (if (not= 9 (count units))
       (->UnitExtractionRejectedV0 "UNIT-CORPUS-SIZE"
         (str "expected exactly nine source units, found " (count units)))
-      (loop [(position Int) 0
-             (contracts (Vec UnitContractV0)) []
-             (typed-units (Vec TypedUnitV0)) []
-             (native-units (Vec NativeUnitV0)) []]
+      (loop [position Int 0
+             contracts (Vec UnitContractV0) []
+             typed-units (Vec TypedUnitV0) []
+             native-units (Vec NativeUnitV0) []]
         (if (>= position (count units))
           (->UnitExtractionAcceptedV0 contracts typed-units native-units)
           (let [(unit stages/SourceUnitV0) (nth units position)
@@ -2477,10 +2477,10 @@
      (id-value (payloadclaimv0-identity claim))]))
 
 (defn check-payload-claims [(claims (Vec PayloadClaimV0))] ClaimCheckV0
-  (loop [(position Int) 0
-         (encodings (Map String String)) {}
-         (valid Bool) true
-         (detail String) ""]
+  (loop [position Int 0
+         encodings (Map String String) {}
+         valid Bool true
+         detail String ""]
     (if (or (>= position (count claims)) (not valid))
       (->ClaimCheckV0 encodings valid detail)
       (let [(claim PayloadClaimV0) (nth claims position)
@@ -2502,7 +2502,7 @@
     contracts))
 
 (defn typed-unit-claims [(units (Vec TypedUnitV0))] (Vec PayloadClaimV0)
-  (loop [(position Int) 0 (claims (Vec PayloadClaimV0)) []]
+  (loop [position Int 0 claims (Vec PayloadClaimV0) []]
     (if (>= position (count units))
       claims
       (let [(unit TypedUnitV0) (nth units position)
@@ -2529,7 +2529,7 @@
               (typedunitv0-capabilities unit)))))))))
 
 (defn native-unit-claims [(units (Vec NativeUnitV0))] (Vec PayloadClaimV0)
-  (loop [(position Int) 0 (claims (Vec PayloadClaimV0)) []]
+  (loop [position Int 0 claims (Vec PayloadClaimV0) []]
     (if (>= position (count units))
       claims
       (let [(unit NativeUnitV0) (nth units position)
@@ -2589,8 +2589,8 @@
 
 (defn insert-type
   [(item core/TypeDef) (sorted (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/TypeDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/TypeDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/TypeDef) (nth sorted position)]
@@ -2600,7 +2600,7 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn ordered-types [(values (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [(position Int) 0 (result (Vec core/TypeDef)) []]
+  (loop [position Int 0 result (Vec core/TypeDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-type (nth values position) result)))))
 
@@ -2608,8 +2608,8 @@
   [(item lower/TypedFunctionV0)
    (sorted (Vec lower/TypedFunctionV0))]
   (Vec lower/TypedFunctionV0)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec lower/TypedFunctionV0)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec lower/TypedFunctionV0) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current lower/TypedFunctionV0) (nth sorted position)]
@@ -2621,7 +2621,7 @@
 
 (defn ordered-typed-functions
   [(values (Vec lower/TypedFunctionV0))] (Vec lower/TypedFunctionV0)
-  (loop [(position Int) 0 (result (Vec lower/TypedFunctionV0)) []]
+  (loop [position Int 0 result (Vec lower/TypedFunctionV0) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-typed-function (nth values position) result)))))
@@ -2630,8 +2630,8 @@
   [(item core/FunctionDef)
    (sorted (Vec core/FunctionDef))]
   (Vec core/FunctionDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/FunctionDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/FunctionDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/FunctionDef) (nth sorted position)]
@@ -2643,15 +2643,15 @@
 
 (defn ordered-native-functions
   [(values (Vec core/FunctionDef))] (Vec core/FunctionDef)
-  (loop [(position Int) 0 (result (Vec core/FunctionDef)) []]
+  (loop [position Int 0 result (Vec core/FunctionDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-native-function (nth values position) result)))))
 
 (defn insert-effect
   [(item core/EffectDef) (sorted (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/EffectDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/EffectDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/EffectDef) (nth sorted position)]
@@ -2661,7 +2661,7 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn ordered-effects [(values (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [(position Int) 0 (result (Vec core/EffectDef)) []]
+  (loop [position Int 0 result (Vec core/EffectDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-effect (nth values position) result)))))
 
@@ -2669,8 +2669,8 @@
   [(item core/CapabilityDef)
    (sorted (Vec core/CapabilityDef))]
   (Vec core/CapabilityDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/CapabilityDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/CapabilityDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/CapabilityDef) (nth sorted position)]
@@ -2682,14 +2682,14 @@
 
 (defn ordered-capabilities
   [(values (Vec core/CapabilityDef))] (Vec core/CapabilityDef)
-  (loop [(position Int) 0 (result (Vec core/CapabilityDef)) []]
+  (loop [position Int 0 result (Vec core/CapabilityDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-capability (nth values position) result)))))
 
 (defn insert-region
   [(item core/RegionDef) (sorted (Vec core/RegionDef))] (Vec core/RegionDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/RegionDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/RegionDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/RegionDef) (nth sorted position)]
@@ -2699,14 +2699,14 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn ordered-regions [(values (Vec core/RegionDef))] (Vec core/RegionDef)
-  (loop [(position Int) 0 (result (Vec core/RegionDef)) []]
+  (loop [position Int 0 result (Vec core/RegionDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-region (nth values position) result)))))
 
 (defn insert-layout
   [(item core/LayoutDef) (sorted (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/LayoutDef)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/LayoutDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/LayoutDef) (nth sorted position)]
@@ -2716,14 +2716,14 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn ordered-layouts [(values (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [(position Int) 0 (result (Vec core/LayoutDef)) []]
+  (loop [position Int 0 result (Vec core/LayoutDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-layout (nth values position) result)))))
 
 (defn insert-abi
   [(item core/AbiDeclV0) (sorted (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [(position Int) 0 (inserted Bool) false
-         (result (Vec core/AbiDeclV0)) []]
+  (loop [position Int 0 inserted Bool false
+         result (Vec core/AbiDeclV0) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
       (let [(current core/AbiDeclV0) (nth sorted position)]
@@ -2733,7 +2733,7 @@
           (recur (+ position 1) inserted (conj result current)))))))
 
 (defn ordered-abis [(values (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [(position Int) 0 (result (Vec core/AbiDeclV0)) []]
+  (loop [position Int 0 result (Vec core/AbiDeclV0) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-abi (nth values position) result)))))
 
@@ -2880,7 +2880,7 @@
   (instance? native.core.PureEffect (core/effectdef-kind effect)))
 
 (defn distinct-native-ids [(values (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(position Int) 0 (result (Vec core/NativeId)) []]
+  (loop [position Int 0 result (Vec core/NativeId) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (conj-id result (nth values position))))))
 
@@ -2954,7 +2954,7 @@
 (defn id-vectors-equal?
   [(left (Vec core/NativeId)) (right (Vec core/NativeId))] Bool
   (and (= (count left) (count right))
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count left)) true
         (if (core/native-id= (nth left position) (nth right position))
           (recur (+ position 1)) false)))))
@@ -2964,7 +2964,7 @@
   (let [(parameters (Vec core/Parameter))
         (core/functiondef-parameters function)]
     (and (= (count parameters) (count values))
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (>= position (count parameters)) true
           (let [(parameter core/Parameter) (nth parameters position)
                 (value core/AbiValueV0) (nth values position)]
@@ -3361,79 +3361,79 @@
     values (conj values item)))
 
 (defn collect-types [(units (Vec TypedUnitV0))] (Vec core/TypeDef)
-  (loop [(position Int) 0 (values (Vec core/TypeDef)) (lower/builtin-types [])]
+  (loop [position Int 0 values (Vec core/TypeDef) (lower/builtin-types [])]
     (if (>= position (count units)) values
       (recur (+ position 1)
         (lower/append-type-defs values (typedunitv0-types (nth units position)))))))
 
 (defn collect-effects [(units (Vec TypedUnitV0))] (Vec core/EffectDef)
-  (loop [(position Int) 0
-         (values (Vec core/EffectDef))
+  (loop [position Int 0
+         values (Vec core/EffectDef)
          (lower/slice-effects false false false false false false false false)]
     (if (>= position (count units)) values
       (let [(additions (Vec core/EffectDef))
             (typedunitv0-effects (nth units position))]
         (recur (+ position 1)
-          (loop [(inner Int) 0 (current (Vec core/EffectDef)) values]
+          (loop [inner Int 0 current (Vec core/EffectDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-effect current (nth additions inner))))))))))
 
 (defn collect-capabilities [(units (Vec TypedUnitV0))] (Vec core/CapabilityDef)
-  (loop [(position Int) 0
-         (values (Vec core/CapabilityDef))
+  (loop [position Int 0
+         values (Vec core/CapabilityDef)
          (lower/slice-capabilities false false false false false false false false)]
     (if (>= position (count units)) values
       (let [(additions (Vec core/CapabilityDef))
             (typedunitv0-capabilities (nth units position))]
         (recur (+ position 1)
-          (loop [(inner Int) 0 (current (Vec core/CapabilityDef)) values]
+          (loop [inner Int 0 current (Vec core/CapabilityDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1)
                 (append-capability current (nth additions inner))))))))))
 
 (defn collect-regions [(units (Vec NativeUnitV0))] (Vec core/RegionDef)
-  (loop [(position Int) 0
-         (values (Vec core/RegionDef)) (lower/slice-regions)]
+  (loop [position Int 0
+         values (Vec core/RegionDef) (lower/slice-regions)]
     (if (>= position (count units)) values
       (let [(additions (Vec core/RegionDef))
             (nativeunitv0-regions (nth units position))]
         (recur (+ position 1)
-          (loop [(inner Int) 0 (current (Vec core/RegionDef)) values]
+          (loop [inner Int 0 current (Vec core/RegionDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-region current (nth additions inner))))))))))
 
 (defn collect-typed-functions
   [(units (Vec TypedUnitV0))] (Vec lower/TypedFunctionV0)
-  (loop [(position Int) 0 (values (Vec lower/TypedFunctionV0)) []]
+  (loop [position Int 0 values (Vec lower/TypedFunctionV0) []]
     (if (>= position (count units)) values
       (recur (+ position 1)
         (append-typed-function values (typedunitv0-function (nth units position)))))))
 
 (defn collect-native-functions
   [(units (Vec NativeUnitV0))] (Vec core/FunctionDef)
-  (loop [(position Int) 0 (values (Vec core/FunctionDef)) []]
+  (loop [position Int 0 values (Vec core/FunctionDef) []]
     (if (>= position (count units)) values
       (recur (+ position 1)
         (append-native-function values
           (nativeunitv0-function (nth units position)))))))
 
 (defn collect-layouts [(units (Vec NativeUnitV0))] (Vec core/LayoutDef)
-  (loop [(position Int) 0 (values (Vec core/LayoutDef)) []]
+  (loop [position Int 0 values (Vec core/LayoutDef) []]
     (if (>= position (count units)) values
       (let [(additions (Vec core/LayoutDef))
             (nativeunitv0-layouts (nth units position))]
         (recur (+ position 1)
-          (loop [(inner Int) 0 (current (Vec core/LayoutDef)) values]
+          (loop [inner Int 0 current (Vec core/LayoutDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-layout current (nth additions inner))))))))))
 
 (defn collect-abis [(units (Vec NativeUnitV0))] (Vec core/AbiDeclV0)
-  (loop [(position Int) 0 (values (Vec core/AbiDeclV0)) []]
+  (loop [position Int 0 values (Vec core/AbiDeclV0) []]
     (if (>= position (count units)) values
       (let [(additions (Vec core/AbiDeclV0))
             (nativeunitv0-abis (nth units position))]
         (recur (+ position 1)
-          (loop [(inner Int) 0 (current (Vec core/AbiDeclV0)) values]
+          (loop [inner Int 0 current (Vec core/AbiDeclV0) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-abi current (nth additions inner))))))))))
 
@@ -3448,7 +3448,7 @@
    (provided (Vec core/LayoutDef))
    (abi core/AbiProfileV0)]
   (Vec core/LayoutDef)
-  (loop [(position Int) 0 (layouts (Vec core/LayoutDef)) provided]
+  (loop [position Int 0 layouts (Vec core/LayoutDef) provided]
     (if (>= position (count types)) layouts
       (let [(definition core/TypeDef) (nth types position)]
         (if (layout-for-type? layouts (core/typedef-id definition))

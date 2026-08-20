@@ -68,16 +68,16 @@
 ;; stands where it was.
 
 (defn instruction-census [(function core/FunctionDef) (promotes Bool)] Int
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (total Int) 0]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         total Int 0]
     (if (>= block-position (count blocks))
       total
       (recur (+ block-position 1) blocks
-        (loop [(position Int) 0
-               (instructions (Vec core/Instruction))
+        (loop [position Int 0
+               instructions (Vec core/Instruction)
                (core/basicblock-instructions (nth blocks block-position))
-               (inner Int) total]
+               inner Int total]
           (if (>= position (count instructions))
             inner
             (let [(instruction core/Instruction) (nth instructions position)
@@ -91,8 +91,8 @@
 (defn function-named
   [(program core/NativeCoreProgram)
    (name String)] (U core/FunctionDef Nil)
-  (loop [(position Int) 0
-         (functions (Vec core/FunctionDef))
+  (loop [position Int 0
+         functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)]
     (if (>= position (count functions))
       nil
@@ -108,10 +108,10 @@
     (if (nil? function) -1 (instruction-census function promotes))))
 
 (defn program-promotes [(program core/NativeCoreProgram)] Int
-  (loop [(position Int) 0
-         (functions (Vec core/FunctionDef))
+  (loop [position Int 0
+         functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)
-         (total Int) 0]
+         total Int 0]
     (if (>= position (count functions))
       total
       (recur (+ position 1) functions
@@ -132,7 +132,7 @@
 (defn function-symbols [(program core/NativeCoreProgram)] String
   (let [(ordered (Vec core/FunctionDef))
         (c17/ordered-functions (core/nativecoreprogram-functions program))]
-    (loop [(position Int) 0 (report String) ""]
+    (loop [position Int 0 report String ""]
       (if (>= position (count ordered))
         report
         (recur (+ position 1)

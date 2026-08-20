@@ -5,7 +5,7 @@
   (let [length (alength source)]
     (if (not= length (alength destination))
       0.0
-      (loop [(index Int) 0]
+      (loop [index Int 0]
         (if (< index length)
           (do
             (aset-double! destination index (aget source index))
@@ -21,7 +21,7 @@
     (if (or (not= length (alength right))
           (not= length (alength destination)))
       0.0
-      (loop [(index Int) 0]
+      (loop [index Int 0]
         (if (< index length)
           (do
             (aset-double! destination index
@@ -38,7 +38,7 @@
     (if (or (not= length (alength right))
           (not= length (alength destination)))
       0.0
-      (loop [(index Int) 0]
+      (loop [index Int 0]
         (if (< index length)
           (do
             (aset-double! destination index
@@ -55,7 +55,7 @@
     (if (or (not= length (alength right))
           (not= length (alength destination)))
       0.0
-      (loop [(index Int) 0]
+      (loop [index Int 0]
         (if (< index length)
           (do
             (aset-double! destination index
@@ -74,7 +74,7 @@
           (not= length (alength addend))
           (not= length (alength destination)))
       0.0
-      (loop [(index Int) 0]
+      (loop [index Int 0]
         (if (< index length)
           (do
             (aset-double! destination index
@@ -89,7 +89,7 @@
   (let [length (alength source)]
     (if (not= length (alength destination))
       0.0
-      (loop [(index Int) 0]
+      (loop [index Int 0]
         (if (< index length)
           (do
             (aset-double! destination index

@@ -948,7 +948,7 @@
   (= (nativeid-value left) (nativeid-value right)))
 
 (defn id-in? [(ids (Vec NativeId)) (target NativeId)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (cond
       (>= index (count ids))
       false
@@ -958,7 +958,7 @@
       (recur (+ index 1)))))
 
 (defn ids-in? [(ids (Vec NativeId)) (allowed (Vec NativeId))] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count ids))
       true
       (if (id-in? allowed (nth ids index)) (recur (+ index 1)) false))))
@@ -969,7 +969,7 @@
 ;; every parallel worker, so a linear-scan seen set made validation quadratic
 ;; in program size and set the floor that parallel emission could not cross.
 (defn unique-ids? [(ids (Vec NativeId))] Bool
-  (loop [(index Int) 0 (seen (Map String Int)) {}]
+  (loop [index Int 0 seen (Map String Int) {}]
     (if (>= index (count ids))
       true
       (let [(value String) (nativeid-value (nth ids index))]
@@ -978,7 +978,7 @@
           (recur (+ index 1) (assoc seen value 1)))))))
 
 (defn canonical-parts [(parts (Vec String))] String
-  (loop [(index Int) 0 (encoded-parts (Vec String)) []]
+  (loop [index Int 0 encoded-parts (Vec String) []]
     (if (>= index (count parts))
       (str/join "" encoded-parts)
       (let [(part String) (nth parts index)]
@@ -1176,7 +1176,7 @@
 (defn type-definition-with-id
   [(types (Vec TypeDef))
    (target NativeId)] (U TypeDef Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition TypeDef) (nth types position)]
@@ -1194,7 +1194,7 @@
       (let [(shape TypeShape) (typedef-shape definition)]
         (if (not (instance? native.core.RecordType shape))
           nil
-          (loop [(position Int) 0 (fields (Vec TypeField)) (recordtype-fields shape)]
+          (loop [position Int 0 fields (Vec TypeField) (recordtype-fields shape)]
             (if (>= position (count fields))
               nil
               (let [(field TypeField) (nth fields position)]
@@ -1205,7 +1205,7 @@
 (defn parameters-value-type
   [(parameters (Vec Parameter))
    (target NativeId)] (U NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count parameters))
       nil
       (let [(parameter Parameter) (nth parameters position)]
@@ -1216,7 +1216,7 @@
 (defn instructions-value-type
   [(instructions (Vec Instruction))
    (target NativeId)] (U NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count instructions))
       nil
       (let [(result SsaValueV0) (get (nth instructions position) :result)]
@@ -1238,7 +1238,7 @@
         (parameters-value-type (functiondef-parameters function) target)]
     (if (some? parameter-type)
       parameter-type
-      (loop [(position Int) 0 (blocks (Vec BasicBlock)) (functiondef-blocks function)]
+      (loop [position Int 0 blocks (Vec BasicBlock) (functiondef-blocks function)]
         (if (>= position (count blocks))
           nil
           (let [(value-type (U NativeId Nil))
@@ -1248,7 +1248,7 @@
               value-type)))))))
 
 (defn block-produces-arena? [(block BasicBlock) (target NativeId)] Bool
-  (loop [(position Int) 0 (instructions (Vec Instruction))
+  (loop [position Int 0 instructions (Vec Instruction)
          (basicblock-instructions block)]
     (if (>= position (count instructions))
       false
@@ -1259,7 +1259,7 @@
           (recur (+ position 1) instructions))))))
 
 (defn function-produces-arena? [(function FunctionDef) (target NativeId)] Bool
-  (loop [(position Int) 0 (blocks (Vec BasicBlock)) (functiondef-blocks function)]
+  (loop [position Int 0 blocks (Vec BasicBlock) (functiondef-blocks function)]
     (if (>= position (count blocks))
       false
       (if (block-produces-arena? (nth blocks position) target)
@@ -1268,7 +1268,7 @@
 
 (defn block-arena-producer
   [(block BasicBlock) (target NativeId)] (U Instruction Nil)
-  (loop [(position Int) 0 (instructions (Vec Instruction))
+  (loop [position Int 0 instructions (Vec Instruction)
          (basicblock-instructions block)]
     (if (>= position (count instructions))
       nil
@@ -1280,7 +1280,7 @@
 
 (defn function-arena-producer
   [(function FunctionDef) (target NativeId)] (U Instruction Nil)
-  (loop [(position Int) 0 (blocks (Vec BasicBlock)) (functiondef-blocks function)]
+  (loop [position Int 0 blocks (Vec BasicBlock) (functiondef-blocks function)]
     (if (>= position (count blocks))
       nil
       (let [(producer (U Instruction Nil))
@@ -1397,7 +1397,7 @@
 
 (defn region-definition-with-id
   [(regions (Vec RegionDef)) (target NativeId)] (U RegionDef Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count regions))
       nil
       (let [(definition RegionDef) (nth regions position)]
@@ -1407,7 +1407,7 @@
 
 (defn capability-definition-with-id
   [(capabilities (Vec CapabilityDef)) (target NativeId)] (U CapabilityDef Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count capabilities))
       nil
       (let [(definition CapabilityDef) (nth capabilities position)]
@@ -1664,15 +1664,15 @@
     :else nil))
 
 (defn function-buffer-regions [(function FunctionDef)] (Vec NativeId)
-  (loop [(block-position Int) 0
-         (blocks (Vec BasicBlock)) (functiondef-blocks function)
-         (found (Vec NativeId)) []]
+  (loop [block-position Int 0
+         blocks (Vec BasicBlock) (functiondef-blocks function)
+         found (Vec NativeId) []]
     (if (>= block-position (count blocks))
       found
       (let [(instructions (Vec Instruction))
             (basicblock-instructions (nth blocks block-position))]
         (recur (+ block-position 1) blocks
-          (loop [(instruction-position Int) 0 (regions (Vec NativeId)) found]
+          (loop [instruction-position Int 0 regions (Vec NativeId) found]
             (if (>= instruction-position (count instructions))
               regions
               (let [(region (U NativeId Nil))
@@ -1682,9 +1682,9 @@
                   (if (nil? region) regions (conj regions region)))))))))))
 
 (defn program-buffer-regions [(program NativeCoreProgram)] (Vec NativeId)
-  (loop [(position Int) 0
-         (functions (Vec FunctionDef)) (nativecoreprogram-functions program)
-         (found (Vec NativeId)) []]
+  (loop [position Int 0
+         functions (Vec FunctionDef) (nativecoreprogram-functions program)
+         found (Vec NativeId) []]
     (if (>= position (count functions))
       found
       (recur (+ position 1) functions
@@ -1730,7 +1730,7 @@
   (into [(typedef-id type-def)] (type-shape-owned-ids (typedef-shape type-def))))
 
 (defn all-type-owned-ids [(types (Vec TypeDef))] (Vec NativeId)
-  (loop [(index Int) 0 (ids (Vec NativeId)) []]
+  (loop [index Int 0 ids (Vec NativeId) []]
     (if (>= index (count types))
       ids
       (recur (+ index 1) (append-ids ids (type-owned-ids (nth types index)))))))
@@ -1741,7 +1741,7 @@
       (instruction-result-ids (basicblock-instructions block)))))
 
 (defn all-block-owned-ids [(blocks (Vec BasicBlock))] (Vec NativeId)
-  (loop [(index Int) 0 (ids (Vec NativeId)) []]
+  (loop [index Int 0 ids (Vec NativeId) []]
     (if (>= index (count blocks))
       ids
       (recur (+ index 1) (append-ids ids (block-owned-ids (nth blocks index)))))))
@@ -1752,7 +1752,7 @@
       (all-block-owned-ids (functiondef-blocks function)))))
 
 (defn all-function-owned-ids [(functions (Vec FunctionDef))] (Vec NativeId)
-  (loop [(index Int) 0 (ids (Vec NativeId)) []]
+  (loop [index Int 0 ids (Vec NativeId) []]
     (if (>= index (count functions))
       ids
       (recur (+ index 1)
@@ -1788,7 +1788,7 @@
       (abi-ids (nativecoreprogram-abis program)))))
 
 (defn type-member-ids [(types (Vec TypeDef))] (Vec NativeId)
-  (loop [(index Int) 0 (ids (Vec NativeId)) []]
+  (loop [index Int 0 ids (Vec NativeId) []]
     (if (>= index (count types))
       ids
       (recur (+ index 1)
@@ -2254,7 +2254,7 @@
      [value-id distance-id]]))
 
 (defn switch-case-ssa-refs [(cases (Vec SwitchCaseV0))] (Vec NativeId)
-  (loop [(index Int) 0 (ids (Vec NativeId)) []]
+  (loop [index Int 0 ids (Vec NativeId) []]
     (if (>= index (count cases))
       ids
       (recur (+ index 1)
@@ -2454,7 +2454,7 @@
     (instruction-result-ids (basicblock-instructions block))))
 
 (defn all-block-value-ids [(blocks (Vec BasicBlock))] (Vec NativeId)
-  (loop [(index Int) 0 (ids (Vec NativeId)) []]
+  (loop [index Int 0 ids (Vec NativeId) []]
     (if (>= index (count blocks))
       ids
       (recur (+ index 1) (append-ids ids (block-value-ids (nth blocks index)))))))

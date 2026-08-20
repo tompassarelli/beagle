@@ -61,7 +61,7 @@
 (defn ignored-path?
   [(path String) (ignored-roots (Vec String))]
   Bool
-  (loop [(remaining (Vec String)) ignored-roots]
+  (loop [remaining (Vec String) ignored-roots]
     (if (empty? remaining)
       false
       (if (path-at-or-under? path (first remaining))
@@ -165,9 +165,9 @@
    (ignored-roots (Vec String))
    (events (Vec reader/ReaderEvent))]
   OptionPathExtraction
-  (loop [(remaining (Vec reader/ReaderEvent)) events
-         (stack (Vec SourceStackEntry)) []
-         (occurrences (Vec OptionPathOccurrence)) []]
+  (loop [remaining (Vec reader/ReaderEvent) events
+         stack (Vec SourceStackEntry) []
+         occurrences (Vec OptionPathOccurrence) []]
     (if (empty? remaining)
       (if (empty? stack)
         (->OptionPaths occurrences)
@@ -266,8 +266,8 @@
 (defn occurrences-for-path
   [(path String) (occurrences (Vec OptionPathOccurrence))]
   (Vec OptionPathOccurrence)
-  (loop [(remaining (Vec OptionPathOccurrence)) occurrences
-         (matches (Vec OptionPathOccurrence)) []]
+  (loop [remaining (Vec OptionPathOccurrence) occurrences
+         matches (Vec OptionPathOccurrence) []]
     (if (empty? remaining)
       matches
       (let [(occurrence OptionPathOccurrence) (first remaining)]
@@ -281,8 +281,8 @@
   [(removed-paths (Vec String))
    (occurrences (Vec OptionPathOccurrence))]
   (Vec RemovedPathUse)
-  (loop [(remaining (Vec String)) removed-paths
-         (uses (Vec RemovedPathUse)) []]
+  (loop [remaining (Vec String) removed-paths
+         uses (Vec RemovedPathUse) []]
     (if (empty? remaining)
       uses
       (let [(path String) (first remaining)
@@ -295,8 +295,8 @@
             (conj uses (->RemovedPathUse path matches))))))))
 
 (defn integer-row [(last-value Int)] (Vec Int)
-  (loop [(value Int) 0
-         (row (Vec Int)) []]
+  (loop [value Int 0
+         row (Vec Int) []]
     (if (> value last-value)
       row
       (recur (inc value) (conj row value)))))
@@ -308,13 +308,13 @@
       (= left-length 0) right-length
       (= right-length 0) left-length
       :else
-      (loop [(left-index Int) 1
-             (previous (Vec Int)) (integer-row right-length)]
+      (loop [left-index Int 1
+             previous (Vec Int) (integer-row right-length)]
         (if (> left-index left-length)
           (nth previous right-length)
           (let [(current (Vec Int))
-                (loop [(right-index Int) 1
-                       (row (Vec Int)) [left-index]]
+                (loop [right-index Int 1
+                       row (Vec Int) [left-index]]
                   (if (> right-index right-length)
                     row
                     (let [(cost Int)
@@ -343,9 +343,9 @@
 (defn insert-suggestion
   [(ranked (Vec PathSuggestion)) (suggestion PathSuggestion)]
   (Vec PathSuggestion)
-  (loop [(remaining (Vec PathSuggestion)) ranked
-         (result (Vec PathSuggestion)) []
-         (inserted Bool) false]
+  (loop [remaining (Vec PathSuggestion) ranked
+         result (Vec PathSuggestion) []
+         inserted Bool false]
     (if (empty? remaining)
       (if inserted result (conj result suggestion))
       (let [(current PathSuggestion) (first remaining)]
@@ -356,8 +356,8 @@
 (defn first-suggestions
   [(ranked (Vec PathSuggestion)) (limit Int)]
   (Vec PathSuggestion)
-  (loop [(remaining (Vec PathSuggestion)) ranked
-         (result (Vec PathSuggestion)) []]
+  (loop [remaining (Vec PathSuggestion) ranked
+         result (Vec PathSuggestion) []]
     (if (or (empty? remaining) (>= (count result) limit))
       result
       (recur (rest remaining) (conj result (first remaining))))))
@@ -368,8 +368,8 @@
   (if (<= limit 0)
     []
     (let [(ranked (Vec PathSuggestion))
-          (loop [(remaining (Vec String)) candidates
-                 (result (Vec PathSuggestion)) []]
+          (loop [remaining (Vec String) candidates
+                 result (Vec PathSuggestion) []]
             (if (empty? remaining)
               result
               (let [(candidate String) (first remaining)]

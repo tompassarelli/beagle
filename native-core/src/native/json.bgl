@@ -59,7 +59,7 @@
   (or (= byte 32) (= byte 9) (= byte 10) (= byte 13)))
 
 (defn skip-whitespace [(bytes (Vec Int)) (start Int)] Int
-  (loop [(offset Int) start]
+  (loop [offset Int start]
     (if (and (< offset (count bytes))
              (ascii-whitespace? (nth bytes offset)))
       (recur (+ offset 1))
@@ -110,7 +110,7 @@
       (+ 128 (mod point 64)))))
 
 (defn scan-string [(bytes (Vec Int)) (start Int)] StringScan
-  (loop [(offset Int) start (result (Vec Int)) []]
+  (loop [offset Int start result (Vec Int) []]
     (if (>= offset (count bytes))
       (->StringRejected offset "unterminated string")
       (let [(byte Int) (nth bytes offset)]
@@ -171,7 +171,7 @@
               (->StringRejected (+ offset 1) "invalid string escape"))))))))
 
 (defn scan-digits [(bytes (Vec Int)) (start Int)] Int
-  (loop [(offset Int) start]
+  (loop [offset Int start]
     (if (and (< offset (count bytes))
              (decimal-digit? (nth bytes offset)))
       (recur (+ offset 1))
@@ -193,7 +193,7 @@
         (->NumberRejected (+ integer-start 1)
           "leading zero is not allowed in a number")
         (let [(fraction-mark Int) (+ integer-start 1)]
-          (loop [(offset Int) fraction-mark]
+          (loop [offset Int fraction-mark]
             (let [(fraction-end Int)
                   (if (and (< offset length) (= 46 (nth bytes offset)))
                     (scan-digits bytes (+ offset 1))
@@ -260,7 +260,7 @@
 (defn bytes-match? [(bytes (Vec Int)) (start Int) (expected (Vec Int))] Bool
   (if (> (+ start (count expected)) (count bytes))
     false
-    (loop [(offset Int) 0]
+    (loop [offset Int 0]
       (if (>= offset (count expected))
         true
         (if (= (nth bytes (+ start offset)) (nth expected offset))
@@ -275,10 +275,10 @@
 
 (defn decode [(text String)] JsonDecodeResult
   (let [(bytes (Vec Int)) (utf8-encode text)]
-    (loop [(offset Int) 0
-           (events (Vec JsonEvent)) []
-           (expectation ParseExpectation) (->ParseValue true)
-           (continuations (Vec ParseExpectation)) [(->ParseEnd true)]]
+    (loop [offset Int 0
+           events (Vec JsonEvent) []
+           expectation ParseExpectation (->ParseValue true)
+           continuations (Vec ParseExpectation) [(->ParseEnd true)]]
       (let [(at Int) (skip-whitespace bytes offset)]
         (match expectation
           [(ParseValue token)
@@ -431,7 +431,7 @@
 
 (defn encode-string [(value String)] String
   (let [(source (Vec Int)) (utf8-encode value)]
-    (loop [(offset Int) 0 (result (Vec Int)) [34]]
+    (loop [offset Int 0 result (Vec Int) [34]]
       (if (>= offset (count source))
         (utf8-decode (conj result 34))
         (let [(byte Int) (nth source offset)]
@@ -491,10 +491,10 @@
      (->ValueEncodeRejected "unexpected object key event")]))
 
 (defn encode [(events (Vec JsonEvent))] JsonEncodeResult
-  (loop [(index Int) 0
-         (result String) ""
-         (expectation EncodeExpectation) (->EncodeValue true)
-         (continuations (Vec EncodeExpectation)) [(->EncodeDone true)]]
+  (loop [index Int 0
+         result String ""
+         expectation EncodeExpectation (->EncodeValue true)
+         continuations (Vec EncodeExpectation) [(->EncodeDone true)]]
     (match expectation
       [(EncodeValue token)
        (if (>= index (count events))

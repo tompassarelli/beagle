@@ -41,7 +41,7 @@
     "abcdefghijklmnopqrstuvwxyz{|}~"))
 
 (defn character-in? [(alphabet String) (character String)] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count alphabet)) false
       (= character (subs alphabet position (+ position 1))) true
@@ -64,7 +64,7 @@
     :else character))
 
 (defn escape-c-text [(value String)] String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count value))
       result
       (recur (+ position 1)
@@ -72,7 +72,7 @@
           (escape-c-character (subs value position (+ position 1))))))))
 
 (defn value-position [(values (Vec String)) (target String)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count values)) -1
       (= target (nth values position)) position
@@ -103,21 +103,21 @@
 ;; Deterministic: first appearance in the already-ordered function, block and
 ;; instruction sequence, so the table is a pure function of the frozen native program.
 (defn collect-pool [(functions (Vec core/FunctionDef))] ConstantPoolV0
-  (loop [(position Int) 0 (pool ConstantPoolV0) (->ConstantPoolV0 [] [])]
+  (loop [position Int 0 pool ConstantPoolV0 (->ConstantPoolV0 [] [])]
     (if (>= position (count functions))
       pool
       (recur (+ position 1)
-        (loop [(block-position Int) 0
-               (blocks (Vec core/BasicBlock))
+        (loop [block-position Int 0
+               blocks (Vec core/BasicBlock)
                (core/functiondef-blocks (nth functions position))
-               (current ConstantPoolV0) pool]
+               current ConstantPoolV0 pool]
           (if (>= block-position (count blocks))
             current
             (recur (+ block-position 1) blocks
-              (loop [(inner Int) 0
-                     (instructions (Vec core/Instruction))
+              (loop [inner Int 0
+                     instructions (Vec core/Instruction)
                      (core/basicblock-instructions (nth blocks block-position))
-                     (collected ConstantPoolV0) current]
+                     collected ConstantPoolV0 current]
                 (if (>= inner (count instructions))
                   collected
                   (recur (+ inner 1) instructions
@@ -371,7 +371,7 @@
       (every? function-supported? (core/nativecoreprogram-functions program)))))
 
 (defn block-index [(blocks (Vec core/BasicBlock)) (target core/NativeId)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count blocks))
       -1
       (if (core/native-id= (core/basicblock-id (nth blocks position)) target)
@@ -398,14 +398,14 @@
 ;; top of the function: a goto target may not jump over a declaration.
 (defn function-value-slots [(function core/FunctionDef)] (Vec ValueSlotV0)
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0 (slots (Vec ValueSlotV0)) []]
+    (loop [position Int 0 slots (Vec ValueSlotV0) []]
       (if (>= position (count blocks))
         slots
         (let [(block core/BasicBlock) (nth blocks position)
               (with-parameters (Vec ValueSlotV0))
-              (loop [(inner Int) 0
-                     (collected (Vec ValueSlotV0)) slots
-                     (parameters (Vec core/Parameter)) (core/basicblock-parameters block)]
+              (loop [inner Int 0
+                     collected (Vec ValueSlotV0) slots
+                     parameters (Vec core/Parameter) (core/basicblock-parameters block)]
                 (if (>= inner (count parameters))
                   collected
                   (recur (+ inner 1)
@@ -414,9 +414,9 @@
                         (core/parameter-type-id (nth parameters inner))))
                     parameters)))
               (with-results (Vec ValueSlotV0))
-              (loop [(inner Int) 0
-                     (collected (Vec ValueSlotV0)) with-parameters
-                     (instructions (Vec core/Instruction))
+              (loop [inner Int 0
+                     collected (Vec ValueSlotV0) with-parameters
+                     instructions (Vec core/Instruction)
                      (core/basicblock-instructions block)]
                 (if (>= inner (count instructions))
                   collected
@@ -430,7 +430,7 @@
           (recur (+ position 1) with-results))))))
 
 (defn slot-index [(slots (Vec ValueSlotV0)) (target core/NativeId)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count slots))
       -1
       (if (core/native-id= (valueslotv0-id (nth slots position)) target)
@@ -439,7 +439,7 @@
 
 (defn parameter-index
   [(parameters (Vec core/Parameter)) (target core/NativeId)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count parameters))
       -1
       (if (core/native-id= (core/parameter-id (nth parameters position)) target)
@@ -462,7 +462,7 @@
    (module-index Int)
    (slots (Vec ValueSlotV0))]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count slots))
       result
       (recur (+ position 1)
@@ -476,7 +476,7 @@
 ;; variable's name depends on nothing outside the function.
 (defn epoch-region?
   [(regions (Vec core/RegionDef)) (region-id core/NativeId)] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count regions)) false
       (core/native-id= (core/regiondef-id (nth regions position)) region-id)
@@ -487,16 +487,16 @@
   [(regions (Vec core/RegionDef))
    (function core/FunctionDef)]
   (Vec core/NativeId)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (collected (Vec core/NativeId)) []]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         collected (Vec core/NativeId) []]
     (if (>= block-position (count blocks))
       collected
       (recur (+ block-position 1) blocks
-        (loop [(position Int) 0
-               (instructions (Vec core/Instruction))
+        (loop [position Int 0
+               instructions (Vec core/Instruction)
                (core/basicblock-instructions (nth blocks block-position))
-               (inner (Vec core/NativeId)) collected]
+               inner (Vec core/NativeId) collected]
           (if (>= position (count instructions))
             inner
             (let [(instruction core/Instruction) (nth instructions position)]
@@ -509,7 +509,7 @@
 
 (defn epoch-arena-index
   [(epochs (Vec core/NativeId)) (value-id core/NativeId)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count epochs)) -1
       (core/native-id= (nth epochs position) value-id) position
@@ -519,7 +519,7 @@
   (str "native_epoch_" index))
 
 (defn emit-epoch-arena-declarations [(epochs (Vec core/NativeId))] String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count epochs))
       result
       (recur (+ position 1)
@@ -575,7 +575,7 @@
 (defn emit-keyword-pool [(module-index Int) (keywords (Vec String))] String
   (if (= 0 (count keywords))
     ""
-    (loop [(position Int) 0 (result String) ""]
+    (loop [position Int 0 result String ""]
       (if (>= position (count keywords))
         result
         (let [(symbol String) (keyword-symbol module-index position)
@@ -594,7 +594,7 @@
   (let [(texts (Vec String)) (constantpoolv0-texts pool)
         (keywords (Vec String)) (constantpoolv0-keywords pool)]
     (str
-      (loop [(position Int) 0 (result String) ""]
+      (loop [position Int 0 result String ""]
         (if (>= position (count texts))
           result
           (recur (+ position 1)
@@ -656,7 +656,7 @@
       (str "static const native_value_field_descriptor "
         (field-descriptor-symbol types module-index (core/layoutdef-type-id layout))
         "[] = {\n"
-        (loop [(position Int) 0 (result String) ""]
+        (loop [position Int 0 result String ""]
           (if (>= position (count fields))
             result
             (let [(field core/FieldLayoutV0) (nth fields position)]
@@ -683,7 +683,7 @@
         (variant-descriptor-symbol types module-index
           (core/layoutdef-type-id layout))
         "[] = {\n"
-        (loop [(position Int) 0 (result String) ""]
+        (loop [position Int 0 result String ""]
           (if (>= position (count variants))
             result
             (let [(variant core/UnionVariantLayoutV0) (nth variants position)
@@ -847,7 +847,7 @@
   (if (not (value-descriptors-used? functions))
     ""
     (str
-      (loop [(position Int) 0 (result String) ""]
+      (loop [position Int 0 result String ""]
         (if (>= position (count types))
           result
           (recur (+ position 1)
@@ -856,7 +856,7 @@
                 (core/typedef-id (nth types position)))
               ";\n"))))
       "\n"
-      (loop [(position Int) 0 (result String) ""]
+      (loop [position Int 0 result String ""]
         (if (>= position (count types))
           result
           (let [(definition core/TypeDef) (nth types position)
@@ -868,7 +868,7 @@
                 (str result
                   (emit-field-descriptors types layouts module-index layout)
                   (emit-variant-descriptors types layouts module-index layout)))))))
-      (loop [(position Int) 0 (result String) ""]
+      (loop [position Int 0 result String ""]
         (if (>= position (count types))
           result
           (recur (+ position 1)
@@ -886,7 +886,7 @@
     (if (nil? layout)
       -1
       (let [(fields (Vec core/FieldLayoutV0)) (c17/record-layout-fields layout)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count fields))
             -1
             (if (core/native-id= (core/fieldlayoutv0-field-id (nth fields position))
@@ -910,7 +910,7 @@
 
 (defn function-index-of
   [(functions (Vec core/FunctionDef)) (target core/NativeId)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count functions))
       -1
       (if (core/native-id= (core/functiondef-id (nth functions position)) target)
@@ -927,7 +927,7 @@
       -1
       (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count variants))
             -1
             (if (core/native-id=
@@ -938,7 +938,7 @@
 
 (defn type-with-id
   [(types (Vec core/TypeDef)) (target core/NativeId)] (U core/TypeDef Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (if (core/native-id= (core/typedef-id (nth types position)) target)
@@ -955,7 +955,7 @@
       -1
       (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count variants))
             -1
             (let [(variant core/UnionVariantLayoutV0) (nth variants position)
@@ -987,7 +987,7 @@
       -1
       (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count variants))
             -1
             (let [(variant core/UnionVariantLayoutV0) (nth variants position)
@@ -1006,8 +1006,8 @@
       (let [(shape core/TypeShape) (core/typedef-shape definition)]
         (if (not (instance? native.core.UnionType shape))
           nil
-          (loop [(position Int) 0
-                 (variants (Vec core/TypeVariant))
+          (loop [position Int 0
+                 variants (Vec core/TypeVariant)
                  (core/uniontype-variants shape)]
             (if (>= position (count variants))
               nil
@@ -1040,7 +1040,7 @@
    (name String)]
   (U core/TypeVariant Nil)
   (let [(variants (Vec core/TypeVariant)) (outcome-variants types owner)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (cond
         (>= position (count variants)) nil
         (= name (core/typevariant-name (nth variants position)))
@@ -1068,7 +1068,7 @@
 
 (defn find-abi
   [(abis (Vec core/AbiDeclV0)) (target core/NativeId)] (U core/AbiDeclV0 Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count abis))
       nil
       (if (core/native-id= (core/abideclv0-id (nth abis position)) target)
@@ -1076,7 +1076,7 @@
         (recur (+ position 1))))))
 
 (defn join-c-arguments [(arguments (Vec String))] String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count arguments))
       result
       (recur (+ position 1)
@@ -1084,7 +1084,7 @@
           (nth arguments position))))))
 
 (defn i64-type-id [(types (Vec core/TypeDef))] core/NativeId
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       (core/->NativeId "native-body-c17-missing-i64")
       (let [(definition core/TypeDef) (nth types position)
@@ -1095,7 +1095,7 @@
           (recur (+ position 1)))))))
 
 (defn f64-type-id [(types (Vec core/TypeDef))] core/NativeId
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       (core/->NativeId "native-body-c17-missing-f64")
       (let [(definition core/TypeDef) (nth types position)
@@ -1200,7 +1200,7 @@
    (slots (Vec ValueSlotV0))
    (arguments (Vec core/NativeId))]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count arguments))
       result
       (recur (+ position 1)
@@ -1508,7 +1508,7 @@
    (slots (Vec ValueSlotV0))
    (values (Vec core/NativeId))]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count values))
       result
       (recur (+ position 1)
@@ -1574,9 +1574,9 @@
                   (conj hidden "capability")
                   hidden)
                 (arguments (Vec String))
-                (loop [(position Int) 0
-                       (collected (Vec String)) with-capability
-                       (values (Vec core/NativeId))
+                (loop [position Int 0
+                       collected (Vec String) with-capability
+                       values (Vec core/NativeId)
                        (core/externcallinstruction-arguments instruction)]
                   (if (>= position (count values))
                     collected
@@ -1772,9 +1772,9 @@
               (conj hidden "capability")
               hidden)
             (arguments (Vec String))
-            (loop [(position Int) 0
-                   (collected (Vec String)) with-capability
-                   (values (Vec core/NativeId))
+            (loop [position Int 0
+                   collected (Vec String) with-capability
+                   values (Vec core/NativeId)
                    (core/externcallinstruction-arguments instruction)]
               (if (>= position (count values))
                 collected
@@ -1838,9 +1838,9 @@
                   (conj hidden "capability")
                   hidden)
                 (arguments (Vec String))
-                (loop [(position Int) 0
-                       (collected (Vec String)) with-capability
-                       (values (Vec core/NativeId))
+                (loop [position Int 0
+                       collected (Vec String) with-capability
+                       values (Vec core/NativeId)
                        (core/externcallinstruction-arguments instruction)]
                   (if (>= position (count values))
                     collected
@@ -1905,7 +1905,7 @@
 (defn value-referenced?
   [(function core/FunctionDef) (target core/NativeId)] Bool
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count blocks))
         false
         (let [(block core/BasicBlock) (nth blocks position)
@@ -1914,7 +1914,7 @@
               (terminators (Vec core/Terminator))
               (core/basicblock-terminators block)
               (instruction-use Bool)
-              (loop [(inner Int) 0]
+              (loop [inner Int 0]
                 (if (>= inner (count instructions))
                   false
                   (if (core/id-in?
@@ -1922,7 +1922,7 @@
                     true
                     (recur (+ inner 1)))))
               (terminator-use Bool)
-              (loop [(inner Int) 0]
+              (loop [inner Int 0]
                 (if (>= inner (count terminators))
                   false
                   (if (core/id-in?
@@ -1939,7 +1939,7 @@
    (block core/BasicBlock)]
   String
   (let [(parameters (Vec core/Parameter)) (core/basicblock-parameters block)]
-    (loop [(position Int) 0 (emitted String) ""]
+    (loop [position Int 0 emitted String ""]
       (if (>= position (count parameters))
         emitted
         (let [(parameter core/Parameter) (nth parameters position)]
@@ -2085,7 +2085,7 @@
         (str "  native_atom_lock(" cell ", " state ", &" target
           ", sizeof(" target "));\n"
           "  " target " = " updater "(" target
-          (loop [(position Int) 0 (fragment String) ""]
+          (loop [position Int 0 fragment String ""]
             (if (>= position (count arguments))
               fragment
               (recur (+ position 1)
@@ -2162,7 +2162,7 @@
             (core/textconcatinstruction-operand-ids instruction)
             (parts String) (parts-symbol slots (core/ssavaluev0-id result))]
         (str "  {\n    const uint64_t " parts "[" (count operands) "] = {"
-          (loop [(position Int) 0 (fragment String) ""]
+          (loop [position Int 0 fragment String ""]
             (if (>= position (count operands))
               fragment
               (recur (+ position 1)
@@ -2488,7 +2488,7 @@
       (let [(values (Vec core/NativeId)) (core/recordinstruction-field-ids instruction)]
         (str "  " target " = ("
           (c17/c-type types module-index (core/ssavaluev0-type-id result)) "){"
-          (loop [(position Int) 0 (fragment String) ""]
+          (loop [position Int 0 fragment String ""]
             (if (>= position (count values))
               fragment
               (recur (+ position 1)
@@ -3146,7 +3146,7 @@
           (value-name function slots
             (core/closurecallinstructionv0-arena-id instruction))
           ", capability, " closure ".environment"
-          (loop [(position Int) 0 (emitted String) ""]
+          (loop [position Int 0 emitted String ""]
             (if (>= position (count arguments))
               emitted
               (recur (+ position 1)
@@ -3178,7 +3178,7 @@
       -1
       (let [(variants (Vec core/UnionVariantLayoutV0))
             (c17/union-layout-variants layout)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count variants))
             -1
             (if (core/native-id=
@@ -3199,7 +3199,7 @@
         (target-block core/BasicBlock) (nth blocks position)
         (parameters (Vec core/Parameter)) (core/basicblock-parameters target-block)]
     (str
-      (loop [(inner Int) 0 (result String) ""]
+      (loop [inner Int 0 result String ""]
         (if (>= inner (count arguments))
           result
           (let [(parameter-id core/NativeId)
@@ -3248,7 +3248,7 @@
             (cases (Vec core/SwitchCaseV0))
             (core/switchterminator-cases terminator)]
         (str "  switch (" (value-name function slots value) ".tag) {\n"
-          (loop [(position Int) 0 (result String) ""]
+          (loop [position Int 0 result String ""]
             (if (>= position (count cases))
               result
               (let [(switch-case core/SwitchCaseV0) (nth cases position)]
@@ -3283,13 +3283,13 @@
 
 (defn block-targeted? [(function core/FunctionDef) (target core/NativeId)] Bool
   (let [(blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count blocks))
         false
         (let [(terminators (Vec core/Terminator))
               (core/basicblock-terminators (nth blocks position))
               (hit Bool)
-              (loop [(inner Int) 0]
+              (loop [inner Int 0]
                 (if (>= inner (count terminators))
                   false
                   (if (core/id-in?
@@ -3304,7 +3304,7 @@
    (function core/FunctionDef)
    (block core/BasicBlock)]
   (U simd/SimdLoopPlanV0 Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count plans))
       nil
       (let [plan (nth plans index)]
@@ -3321,7 +3321,7 @@
 
 (defn simd-source-position
   [(sources (Vec core/NativeId)) (target core/NativeId)] Int
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count sources))
       -1
       (if (core/native-id= (nth sources index) target)
@@ -3350,7 +3350,7 @@
    (function core/FunctionDef)
    (slots (Vec ValueSlotV0))]
   String
-  (loop [(index Int) 0 (found Int) -1]
+  (loop [index Int 0 found Int -1]
     (if (>= index before)
       (if (< found 0)
         (value-name function slots target)
@@ -3369,7 +3369,7 @@
   String
   (let [instructions (simd/simdloopplanv0-pack-instructions plan)
         sources (simd/simdloopplanv0-source-buffer-ids plan)]
-    (loop [(index Int) 0 (result String) ""]
+    (loop [index Int 0 result String ""]
       (if (>= index (count instructions))
         result
         (let [instruction (nth instructions index)
@@ -3423,7 +3423,7 @@
           (recur (+ index 1) (str result emitted)))))))
 
 (defn emit-simd-source-declarations [(sources (Vec core/NativeId))] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count sources))
       result
       (recur (+ index 1)
@@ -3436,7 +3436,7 @@
    (sources (Vec core/NativeId))
    (arithmetic Bool)]
   String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count sources))
       result
       (recur (+ index 1)
@@ -3449,7 +3449,7 @@
           index ")")))))
 
 (defn emit-simd-alias-preflight [(sources (Vec core/NativeId))] String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count sources))
       result
       (recur (+ index 1)
@@ -3463,7 +3463,7 @@
    (slots (Vec ValueSlotV0))
    (instructions (Vec simd/SimdPackInstructionV0))]
   String
-  (loop [(index Int) 0 (result String) ""]
+  (loop [index Int 0 result String ""]
     (if (>= index (count instructions))
       result
       (let [instruction (nth instructions index)]
@@ -3553,7 +3553,7 @@
     (str label
       (if targeted (emit-unused-block-parameters function slots block) "")
       (if (nil? simd-plan) "" (emit-simd-loop function slots simd-plan))
-      (loop [(inner Int) 0 (result String) ""]
+      (loop [inner Int 0 result String ""]
         (if (>= inner (count instructions))
           result
           (recur (+ inner 1)
@@ -3588,8 +3588,8 @@
         "  (void)arena;\n" "")
       (if (> (count (core/functiondef-capabilities function)) 0)
         "  (void)capability;\n" "")
-      (loop [(position Int) 0 (fragment String) ""
-             (parameters (Vec core/Parameter))
+      (loop [position Int 0 fragment String ""
+             parameters (Vec core/Parameter)
              (core/functiondef-parameters function)]
         (if (>= position (count parameters))
           fragment
@@ -3598,7 +3598,7 @@
             parameters)))
       (emit-epoch-arena-declarations epochs)
       (emit-declarations types module-index slots)
-      (loop [(position Int) 0 (result String) ""]
+      (loop [position Int 0 result String ""]
         (if (>= position (count blocks))
           result
           (recur (+ position 1)
@@ -3617,7 +3617,7 @@
    (pool ConstantPoolV0)
    (plans (Vec simd/SimdLoopPlanV0))]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count functions))
       result
       (recur (+ position 1)
@@ -3671,7 +3671,7 @@
    (abis (Vec core/AbiDeclV0))
    (module-index Int)]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count functions))
       result
       (let [(function core/FunctionDef) (nth functions position)]
@@ -3688,7 +3688,7 @@
    (abis (Vec core/AbiDeclV0))
    (module-index Int)]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count functions))
       result
       (let [(function core/FunctionDef) (nth functions position)]
@@ -3719,7 +3719,7 @@
    (functions (Vec core/FunctionDef))
    (module-index Int)]
   String
-  (loop [(position Int) 0 (result String) ""]
+  (loop [position Int 0 result String ""]
     (if (>= position (count functions))
       result
       (let [(kernel core/FunctionDef) (nth functions position)]
@@ -3916,7 +3916,7 @@
 ;; generated names and cross-function calls use the whole-program position.
 (defn canonical-function-indexes?
   [(indexes (Vec Int)) (function-count Int)] Bool
-  (loop [(position Int) 0 (previous Int) -1]
+  (loop [position Int 0 previous Int -1]
     (if (>= position (count indexes))
       true
       (let [(current Int) (nth indexes position)]
@@ -3987,8 +3987,8 @@
           (->BodyFunctionBatchFailureV0
             "function indexes must be strictly increasing, unique, and in canonical range")
           (->BodyFunctionBatchSuccessV0
-            (loop [(position Int) 0
-                   (fragments (Vec BodyFunctionFragmentV0)) []]
+            (loop [position Int 0
+                   fragments (Vec BodyFunctionFragmentV0) []]
               (if (>= position (count function-indexes))
                 fragments
                 (let [(function-index Int)

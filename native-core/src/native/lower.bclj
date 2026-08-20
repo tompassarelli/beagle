@@ -44,9 +44,9 @@
   [(item core/NativeId) (ordered (Vec core/NativeId))] (Vec core/NativeId)
   (if (core/id-in? ordered item)
     ordered
-    (loop [(position Int) 0
-           (inserted Bool) false
-           (result (Vec core/NativeId)) []]
+    (loop [position Int 0
+           inserted Bool false
+           result (Vec core/NativeId) []]
       (if (>= position (count ordered))
         (if inserted result (conj result item))
         (let [(current core/NativeId) (nth ordered position)]
@@ -56,7 +56,7 @@
             (recur (+ position 1) inserted (conj result current))))))))
 
 (defn canonical-type-ids [(ids (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(position Int) 0 (ordered (Vec core/NativeId)) []]
+  (loop [position Int 0 ordered (Vec core/NativeId) []]
     (if (>= position (count ids))
       ordered
       (recur (+ position 1)
@@ -65,7 +65,7 @@
 (defn find-node
   [(graph stages/TermGraphV0) (target core/NativeId)] (U stages/TermNodeV0 Nil)
   (let [(nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count nodes))
         nil
         (let [(node stages/TermNodeV0) (nth nodes index)]
@@ -104,7 +104,7 @@
 
 (defn graph-identity-index [(graph stages/TermGraphV0)] (Map String Bool)
   (let [(nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)]
-    (loop [(index Int) 0 (identities (Map String Bool)) {}]
+    (loop [index Int 0 identities (Map String Bool) {}]
       (if (>= index (count nodes))
         identities
         (recur (+ index 1)
@@ -113,7 +113,7 @@
 
 (defn refs-resolve-in?
   [(identities (Map String Bool)) (refs (Vec core/NativeId))] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count refs))
       true
       (if (not (= true (get identities (id-value (nth refs index)))))
@@ -123,7 +123,7 @@
 (defn graph-reference-closed-in?
   [(graph stages/TermGraphV0) (identities (Map String Bool))] Bool
   (let [(nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)]
-    (loop [(index Int) 0]
+    (loop [index Int 0]
       (if (>= index (count nodes))
         true
         (let [(node stages/TermNodeV0) (nth nodes index)]
@@ -137,7 +137,7 @@
 
 (defn source-facts [(graph stages/TermGraphV0)] (Vec SourceFactV0)
   (let [(nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)]
-    (loop [(index Int) 0 (facts (Vec SourceFactV0)) []]
+    (loop [index Int 0 facts (Vec SourceFactV0) []]
       (if (>= index (count nodes))
         facts
         (let [(node stages/TermNodeV0) (nth nodes index)
@@ -167,7 +167,7 @@
 
 (defn graph-text-index [(graph stages/TermGraphV0)] (Map String String)
   (let [(nodes (Vec stages/TermNodeV0)) (stages/termgraphv0-nodes graph)]
-    (loop [(position Int) 0 (texts (Map String String)) {}]
+    (loop [position Int 0 texts (Map String String) {}]
       (if (>= position (count nodes))
         texts
         (let [(node stages/TermNodeV0) (nth nodes position)
@@ -222,7 +222,7 @@
    (sequence-id core/NativeId)
    (prefix String)]
   (Vec core/NativeId)
-  (loop [(position Int) 0 (items (Vec core/NativeId)) []]
+  (loop [position Int 0 items (Vec core/NativeId) []]
     (let [(item (U core/NativeId Nil))
           (index-first-object index sequence-id (str prefix position))]
       (if (nil? item)
@@ -318,7 +318,7 @@
   (let [(root (U core/NativeId Nil)) (module-root-named index module-name)
         (imports (Vec core/NativeId))
         (if (nil? root) [] (module-sequence index root "imports"))]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count imports))
         nil
         (let [(import-node core/NativeId) (nth imports position)
@@ -332,9 +332,9 @@
 
 (defn add-module-indexes [(index SourceIndexV0)] SourceIndexV0
   (let [(roots (Vec core/NativeId)) (index-form-ids index "module-root")]
-    (loop [(position Int) 0
-           (definition-roots (Map String core/NativeId)) {}
-           (module-roots (Map String core/NativeId)) {}]
+    (loop [position Int 0
+           definition-roots (Map String core/NativeId) {}
+           module-roots (Map String core/NativeId) {}]
       (if (>= position (count roots))
         (with (with index [:definition-roots definition-roots])
           [:module-roots module-roots])
@@ -343,7 +343,7 @@
               (definitions (Vec core/NativeId))
               (module-sequence index root "definitions")
               (next-definitions (Map String core/NativeId))
-              (loop [(inner Int) 0 (current (Map String core/NativeId)) definition-roots]
+              (loop [inner Int 0 current (Map String core/NativeId) definition-roots]
                 (if (>= inner (count definitions))
                   current
                   (let [(key String) (id-value (nth definitions inner))]
@@ -361,7 +361,7 @@
 ;; and name; a projection that spells neither is still a named module.
 (defn seed-module-table
   [(index SourceIndexV0) (modules (Vec stages/SourceModuleV1))] SourceIndexV0
-  (loop [(position Int) 0 (seeded SourceIndexV0) index]
+  (loop [position Int 0 seeded SourceIndexV0 index]
     (if (>= position (count modules))
       seeded
       (let [(module stages/SourceModuleV1) (nth modules position)
@@ -387,13 +387,13 @@
   (let [(facts (Vec SourceFactV0)) (source-facts graph)
         (graph-texts (Map String String)) (graph-text-index graph)
         (partial SourceIndexV0)
-        (loop [(position Int) 0
-               (first-objects (Map String core/NativeId)) {}
-               (first-texts (Map String String)) {}
-               (form-ids (Map String (Vec core/NativeId))) {}
-               (callee-names (Map String Bool)) {}
-               (child-nodes (Map String (Vec core/NativeId))) {}
-               (parent-nodes (Map String core/NativeId)) {}]
+        (loop [position Int 0
+               first-objects (Map String core/NativeId) {}
+               first-texts (Map String String) {}
+               form-ids (Map String (Vec core/NativeId)) {}
+               callee-names (Map String Bool) {}
+               child-nodes (Map String (Vec core/NativeId)) {}
+               parent-nodes (Map String core/NativeId) {}]
           (if (>= position (count facts))
             (->SourceIndexV0 (count facts) first-objects first-texts form-ids
               callee-names child-nodes parent-nodes {} {} [])
@@ -441,7 +441,7 @@
                    (= "true" (index-first-text indexed group "inline")))
                  (index-form-ids indexed "member-field-group"))))
         (keys (Vec String))
-        (loop [(position Int) 0 (collected (Vec String)) []]
+        (loop [position Int 0 collected (Vec String) []]
           (if (>= position (count records))
             collected
             (let [(record core/NativeId) (nth records position)
@@ -682,7 +682,7 @@
          (= suffix (subs value (- value-count suffix-count) value-count)))))
 
 (defn unqualified-name [(spelling String)] String
-  (loop [(index Int) 0 (start Int) 0]
+  (loop [index Int 0 start Int 0]
     (if (>= index (count spelling))
       (subs spelling start (count spelling))
       (if (= "/" (subs spelling index (+ index 1)))
@@ -693,7 +693,7 @@
   [(module-name String) (local-name String) (visible Bool)])
 
 (defn first-slash [(spelling String)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count spelling))
       -1
       (if (= "/" (subs spelling position (+ position 1)))
@@ -901,8 +901,8 @@
 ;; carriers: their storage points at SliceValue elements, so the union remains a
 ;; finite value while nested dynamic data retains its complete shape.
 (defn slice-value-variants [(record-keys (Vec String))] (Vec core/TypeVariant)
-  (loop [(position Int) 0
-         (variants (Vec core/TypeVariant))
+  (loop [position Int 0
+         variants (Vec core/TypeVariant)
          [(core/->TypeVariant (variant-id "SliceValue" "bool") "bool" (type-id "Bool"))
           (core/->TypeVariant (variant-id "SliceValue" "i64") "i64" (type-id "Int"))
           (core/->TypeVariant (variant-id "SliceValue" "f64") "f64" (type-id "Float"))
@@ -929,8 +929,8 @@
     (core/->UnionType (slice-value-variants record-keys))))
 
 (defn slice-value-definitions [(record-keys (Vec String))] (Vec core/TypeDef)
-  (loop [(position Int) 0
-         (definitions (Vec core/TypeDef))
+  (loop [position Int 0
+         definitions (Vec core/TypeDef)
          [(slice-value-type record-keys) (bool-type) (i64-type) (f64-type)
           (text-type) (keyword-type) (nil-type)
           (slice-value-vector-type) (slice-value-map-type)
@@ -944,7 +944,7 @@
 ;; alternative has no address to hand a tag-inject coercion.
 (defn union-member-id
   [(record-keys (Vec String)) (member core/NativeId)] core/NativeId
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count record-keys))
       member
       (let [(key String) (nth record-keys position)]
@@ -1356,7 +1356,7 @@
     :else name))
 
 (defn type-def-in? [(definitions (Vec core/TypeDef)) (id core/NativeId)] Bool
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count definitions))
       false
       (if (same-id? id (core/typedef-id (nth definitions index)))
@@ -1375,7 +1375,7 @@
   [(definitions (Vec core/TypeDef))
    (additions (Vec core/TypeDef))]
   (Vec core/TypeDef)
-  (loop [(index Int) 0 (current (Vec core/TypeDef)) definitions]
+  (loop [index Int 0 current (Vec core/TypeDef) definitions]
     (if (>= index (count additions))
       current
       (recur (+ index 1) (append-type-def current (nth additions index))))))
@@ -1385,7 +1385,7 @@
    (ids (Vec core/NativeId))
    (definitions (Vec core/TypeDef))]
   (Vec core/TypeDef)
-  (loop [(position Int) 0 (current (Vec core/TypeDef)) definitions]
+  (loop [position Int 0 current (Vec core/TypeDef) definitions]
     (if (>= position (count record-keys))
       current
       (let [(key String) (nth record-keys position)]
@@ -1562,7 +1562,7 @@
 
 (defn resolution-definitions
   [(resolutions (Vec TypeResolutionV0))] (Vec core/TypeDef)
-  (loop [(index Int) 0 (definitions (Vec core/TypeDef)) []]
+  (loop [index Int 0 definitions (Vec core/TypeDef) []]
     (if (>= index (count resolutions))
       definitions
       (recur (+ index 1)
@@ -1571,7 +1571,7 @@
 
 (defn resolution-diagnostics
   [(resolutions (Vec TypeResolutionV0))] (Vec core/DiagnosticV0)
-  (loop [(index Int) 0 (diagnostics (Vec core/DiagnosticV0)) []]
+  (loop [index Int 0 diagnostics (Vec core/DiagnosticV0) []]
     (if (>= index (count resolutions))
       diagnostics
       (recur (+ index 1)
@@ -1580,7 +1580,7 @@
 
 (defn union-variants
   [(owner String) (type-ids (Vec core/NativeId))] (Vec core/TypeVariant)
-  (loop [(index Int) 0 (variants (Vec core/TypeVariant)) []]
+  (loop [index Int 0 variants (Vec core/TypeVariant) []]
     (if (>= index (count type-ids))
       variants
       (recur (+ index 1)
@@ -1622,7 +1622,7 @@
 (defn homogeneous-type-ids? [(ids (Vec core/NativeId))] Bool
   (if (= 0 (count ids))
     false
-    (loop [(position Int) 1]
+    (loop [position Int 1]
       (if (>= position (count ids))
         true
         (if (same-id? (nth ids 0) (nth ids position))
@@ -1839,7 +1839,7 @@
               component-sources)
             (parameter-count Int) (count parameter-sources)
             (parameter-types (Vec core/NativeId))
-            (loop [(position Int) 0 (collected (Vec core/NativeId)) []]
+            (loop [position Int 0 collected (Vec core/NativeId) []]
               (if (>= position parameter-count)
                 collected
                 (recur (+ position 1)
@@ -1954,11 +1954,11 @@
         false)
       (let [(record-key String) (str module-name "/" record-name)
             (source-fields (Vec core/NativeId)) (record-field-items index source-record)]
-        (loop [(position Int) 0
-               (fields (Vec core/TypeField)) []
-               (definitions (Vec core/TypeDef)) []
-               (diagnostics (Vec core/DiagnosticV0)) []
-               (valid Bool) true]
+        (loop [position Int 0
+               fields (Vec core/TypeField) []
+               definitions (Vec core/TypeDef) []
+               diagnostics (Vec core/DiagnosticV0) []
+               valid Bool true]
           (if (>= position (count source-fields))
             (->RecordResolutionV0
               (core/->TypeDef (source-type-id record-key) record-name
@@ -1996,7 +1996,7 @@
 (defn record-fields-same?
   [(left (Vec core/TypeField)) (right (Vec core/TypeField))] Bool
   (and (= (count left) (count right))
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count left))
         true
         (let [(left-field core/TypeField) (nth left position)
@@ -2022,7 +2022,7 @@
 
 (defn record-definition-conflicts?
   [(definitions (Vec core/TypeDef)) (candidate core/TypeDef)] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count definitions))
       false
       (let [(prior core/TypeDef) (nth definitions position)]
@@ -2037,9 +2037,9 @@
                  (fn [(group core/NativeId)] Bool
                    (= "true" (fact-text index group "inline")))
                  (index-form-ids index "member-field-group"))))]
-    (loop [(position Int) 0
-           (definitions (Vec core/TypeDef)) []
-           (resolutions (Vec RecordResolutionV0)) []]
+    (loop [position Int 0
+           definitions (Vec core/TypeDef) []
+           resolutions (Vec RecordResolutionV0) []]
       (if (>= position (count source-records))
         resolutions
         (let [(resolution RecordResolutionV0)
@@ -2076,7 +2076,7 @@
         (groups (Vec core/NativeId))
         (union-member-group-items index source-union)
         (variants (Vec core/TypeVariant))
-        (loop [(position Int) 0 (collected (Vec core/TypeVariant)) []]
+        (loop [position Int 0 collected (Vec core/TypeVariant) []]
           (if (>= position (count groups))
             collected
             (let [(group core/NativeId) (nth groups position)
@@ -2253,12 +2253,12 @@
     (if (and effective (not signature-valid))
       (->ParameterResolutionV0 [] [(lower-failure-type)]
         (effectivefunctionsignaturev0-diagnostics signature) false)
-      (loop [(position Int) 0
-             (parameters (Vec core/Parameter)) []
-             (definitions (Vec core/TypeDef)) []
-             (diagnostics (Vec core/DiagnosticV0))
+      (loop [position Int 0
+             parameters (Vec core/Parameter) []
+             definitions (Vec core/TypeDef) []
+             diagnostics (Vec core/DiagnosticV0)
              (effectivefunctionsignaturev0-diagnostics signature)
-             (valid Bool) signature-valid]
+             valid Bool signature-valid]
         (if (>= position (count source-parameters))
           (->ParameterResolutionV0 parameters definitions diagnostics valid)
           (let [(source-parameter core/NativeId) (nth source-parameters position)
@@ -2735,12 +2735,12 @@
 (defn ascii-lower [(value String)] String
   (let [(upper String) "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         (lower String) "abcdefghijklmnopqrstuvwxyz"]
-    (loop [(position Int) 0 (result String) ""]
+    (loop [position Int 0 result String ""]
       (if (>= position (count value))
         result
         (let [(character String) (subs value position (+ position 1))
               (hit Int)
-              (loop [(scan Int) 0]
+              (loop [scan Int 0]
                 (cond
                   (>= scan 26) -1
                   (= character (subs upper scan (+ scan 1))) scan
@@ -2750,7 +2750,7 @@
 
 (defn digit-value [(character String)] Int
   (let [(digits String) "0123456789"]
-    (loop [(scan Int) 0]
+    (loop [scan Int 0]
       (cond
         (>= scan 10) -1
         (= character (subs digits scan (+ scan 1))) scan
@@ -2766,7 +2766,7 @@
     (if (>= start (count value))
       nil
       ;; Keep the accumulator negative so Int's asymmetric range needs no +2^63.
-      (loop [(position Int) start (result Int) 0]
+      (loop [position Int start result Int 0]
         (if (>= position (count value))
           (if negative result (- 0 result))
           (let [(digit Int) (digit-value (subs value position (+ position 1)))]
@@ -2787,7 +2787,7 @@
 
 (defn whole-input-limit-from-configuration
   [(configuration (Vec String))] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count configuration))
       WHOLE-INPUT-DEFAULT-LIMIT
       (let [(entry String) (nth configuration position)]
@@ -2810,7 +2810,7 @@
 
 (defn source-globals [(index SourceIndexV0)] (Vec GlobalBindingV0)
   (let [(forms (Vec core/NativeId)) (index-form-ids index "def")]
-    (loop [(position Int) 0 (globals (Vec GlobalBindingV0)) []]
+    (loop [position Int 0 globals (Vec GlobalBindingV0) []]
       (if (>= position (count forms))
         globals
         (let [(form core/NativeId) (nth forms position)
@@ -2828,7 +2828,7 @@
 
 (defn global-type-definitions
   [(index SourceIndexV0) (globals (Vec GlobalBindingV0))] (Vec core/TypeDef)
-  (loop [(position Int) 0 (definitions (Vec core/TypeDef)) []]
+  (loop [position Int 0 definitions (Vec core/TypeDef) []]
     (if (>= position (count globals))
       definitions
       (let [(global GlobalBindingV0) (nth globals position)
@@ -2868,7 +2868,7 @@
 ;; names a closed program type instead of minting one after the fact.
 (defn binding-type-definitions [(index SourceIndexV0)] (Vec core/TypeDef)
   (let [(bindings (Vec core/NativeId)) (index-form-ids index "binding")]
-    (loop [(position Int) 0 (definitions (Vec core/TypeDef)) []]
+    (loop [position Int 0 definitions (Vec core/TypeDef) []]
       (if (>= position (count bindings))
         definitions
         (let [(annotation (U core/NativeId Nil))
@@ -2901,7 +2901,7 @@
         (if (nil? items-node) [] (index-sequence-items index items-node))]
     (if (= 0 (count items))
       nil
-      (loop [(position Int) 0 (agreed (U core/NativeId Nil)) nil]
+      (loop [position Int 0 agreed (U core/NativeId Nil) nil]
         (if (>= position (count items))
           agreed
           (let [(item core/NativeId) (nth items position)
@@ -2916,7 +2916,7 @@
 
 (defn literal-vector-type-definitions [(index SourceIndexV0)] (Vec core/TypeDef)
   (let [(literals (Vec core/NativeId)) (index-form-ids index "vec")]
-    (loop [(position Int) 0 (definitions (Vec core/TypeDef)) []]
+    (loop [position Int 0 definitions (Vec core/TypeDef) []]
       (if (>= position (count literals))
         definitions
         (let [(element (U core/NativeId Nil))
@@ -2928,7 +2928,7 @@
 
 (defn lookup-type
   [(types (Vec core/TypeDef)) (target core/NativeId)] (U core/TypeDef Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)]
@@ -2962,10 +2962,10 @@
                   (core/recordtype-fields shape))
 
                 (instance? native.core.UnionType shape)
-                (loop [(position Int) 0
-                       (variants (Vec core/TypeVariant))
+                (loop [position Int 0
+                       variants (Vec core/TypeVariant)
                        (core/uniontype-variants shape)
-                       (collected (Vec core/NativeId)) []]
+                       collected (Vec core/NativeId) []]
                   (if (>= position (count variants))
                     collected
                     (let [(payload (U core/NativeId Nil))
@@ -3210,7 +3210,7 @@
    (to core/NativeId)]
   BodyStateV0
   (let [(blocks (Vec core/BasicBlock)) (bodystatev0-blocks state)]
-    (loop [(position Int) 0 (collected (Vec core/BasicBlock)) []]
+    (loop [position Int 0 collected (Vec core/BasicBlock) []]
       (if (>= position (count blocks))
         (with state [:blocks collected])
         (recur (+ position 1)
@@ -3299,7 +3299,7 @@
 
 (defn find-local
   [(locals (Vec LocalBindingV0)) (name String)] (U LocalBindingV0 Nil)
-  (loop [(position Int) (- (count locals) 1)]
+  (loop [position Int (- (count locals) 1)]
     (if (< position 0)
       nil
       (let [(binding LocalBindingV0) (nth locals position)]
@@ -3316,7 +3316,7 @@
   (U KeywordFlowRefinementV0 Nil)
   (let [(refinements (Vec KeywordFlowRefinementV0))
         (bodystatev0-keyword-refinements state)]
-    (loop [(position Int) (- (count refinements) 1)]
+    (loop [position Int (- (count refinements) 1)]
       (if (< position 0)
         nil
         (let [(refinement KeywordFlowRefinementV0)
@@ -3339,7 +3339,7 @@
   (U ValueFlowRefinementV0 Nil)
   (let [(refinements (Vec ValueFlowRefinementV0))
         (bodystatev0-value-refinements state)]
-    (loop [(position Int) (- (count refinements) 1)]
+    (loop [position Int (- (count refinements) 1)]
       (if (< position 0)
         nil
         (let [(refinement ValueFlowRefinementV0) (nth refinements position)]
@@ -3371,7 +3371,7 @@
 
 (defn transient-loop-owner-position-in
   [(owners (Vec TransientLoopOwnerV0)) (name String)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count owners))
       -1
       (if (= name (transientloopownerv0-name (nth owners position)))
@@ -3448,7 +3448,7 @@
 (defn transient-loop-states-compatible?
   [(left (Vec LoopStateV0)) (right (Vec LoopStateV0))] Bool
   (and (= (count left) (count right))
-    (loop [(state-position Int) 0]
+    (loop [state-position Int 0]
       (if (>= state-position (count left))
         true
         (let [(left-state LoopStateV0) (nth left state-position)
@@ -3461,7 +3461,7 @@
                 (same-id? (loopstatev0-header-id left-state)
                   (loopstatev0-header-id right-state))
                 (= (count left-owners) (count right-owners))
-                (loop [(owner-position Int) 0]
+                (loop [owner-position Int 0]
                   (if (>= owner-position (count left-owners))
                     true
                     (if (transient-loop-owner-compatible?
@@ -3478,7 +3478,7 @@
       true
       (let [(owners (Vec TransientLoopOwnerV0))
             (loopstatev0-transient-owners loop-state)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count owners))
             true
             (if (transientloopownerv0-live (nth owners position))
@@ -3492,7 +3492,7 @@
         (sources (Vec core/NativeId)) (bodyenvv0-signature-sources env)]
     (if (not (resolvedsourcenamev0-visible resolved))
       nil
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (or (>= position (count signatures)) (>= position (count sources)))
           nil
           (let [(signature TypedFunctionV0) (nth signatures position)
@@ -3510,7 +3510,7 @@
   (let [(globals (Vec GlobalBindingV0)) (bodyenvv0-globals env)]
     (if (not (resolvedsourcenamev0-visible resolved))
       nil
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (>= position (count globals))
           nil
           (let [(global GlobalBindingV0) (nth globals position)]
@@ -3530,7 +3530,7 @@
         (sources (Vec core/NativeId)) (bodyenvv0-signature-sources env)]
     (if (= "" binding-id)
       nil
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (>= position (count sources))
           nil
           (if (= binding-id (fact-text index (nth sources position) "binding-id"))
@@ -3551,8 +3551,8 @@
         (resolve-source-name index (source-module-name index source) spelling)]
     (if (some? bound-position)
       bound-position
-      (loop [(resolved ResolvedSourceNameV0) initial
-             (fuel Int) (+ 1 (count globals))]
+      (loop [resolved ResolvedSourceNameV0 initial
+             fuel Int (+ 1 (count globals))]
         (let [(position (U Int Nil)) (signature-position-at env resolved)]
           (cond
             (some? position) position
@@ -3597,7 +3597,7 @@
   (let [(signatures (Vec TypedFunctionV0)) (bodyenvv0-signatures env)
         (sources (Vec core/NativeId)) (bodyenvv0-signature-sources env)
         (index SourceIndexV0) (bodyenvv0-index env)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (or (>= position (count signatures)) (>= position (count sources)))
         false
         (if (not (same-id? (typedfunctionv0-id signature)
@@ -3610,7 +3610,7 @@
               (= "throw" (source-callee-name index body)))))))))
 
 (defn tail-parameters [(parameters (Vec core/Parameter))] (Vec core/Parameter)
-  (loop [(position Int) 1 (collected (Vec core/Parameter)) []]
+  (loop [position Int 1 collected (Vec core/Parameter) []]
     (if (>= position (count parameters))
       collected
       (recur (+ position 1) (conj collected (nth parameters position))))))
@@ -3646,7 +3646,7 @@
   [(types (Vec core/TypeDef)) (resolved ResolvedSourceNameV0)] AccessorHitV0
   (let [(callee String) (resolvedsourcenamev0-local-name resolved)
         (module-name String) (resolvedsourcenamev0-module-name resolved)]
-   (loop [(position Int) 0]
+   (loop [position Int 0]
     (if (>= position (count types))
       (accessor-miss)
       (let [(definition core/TypeDef) (nth types position)
@@ -3661,7 +3661,7 @@
           (let [(prefix String) (str (ascii-lower (core/typedef-name definition)) "-")
                 (fields (Vec core/TypeField)) (core/recordtype-fields shape)
                 (hit AccessorHitV0)
-                (loop [(field-position Int) 0]
+                (loop [field-position Int 0]
                   (if (>= field-position (count fields))
                     (accessor-miss)
                     (let [(field core/TypeField) (nth fields field-position)]
@@ -3693,7 +3693,7 @@
   (let [(unions (Vec core/NativeId))
         (vec (concat (index-form-ids index "defunion")
                (index-form-ids index "deferror")))]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count unions))
         nil
         (let [(source-union core/NativeId) (nth unions position)
@@ -3748,8 +3748,8 @@
           (let [(shape core/TypeShape) (core/typedef-shape definition)]
             (if (not (instance? native.core.RecordType shape))
               (accessor-miss)
-              (loop [(position Int) 0
-                     (fields (Vec core/TypeField)) (core/recordtype-fields shape)]
+              (loop [position Int 0
+                     fields (Vec core/TypeField) (core/recordtype-fields shape)]
                 (if (>= position (count fields))
                   (accessor-miss)
                   (let [(field core/TypeField) (nth fields position)]
@@ -3775,7 +3775,7 @@
 
 (defn variant-named
   [(variants (Vec core/TypeVariant)) (name String)] (U core/TypeVariant Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count variants))
       nil
       (let [(variant core/TypeVariant) (nth variants position)]
@@ -3981,9 +3981,9 @@
     (->ExprResultV0 state (nth values 0) (int-type-id) false)
 
     :else
-    (loop [(position Int) 1
-           (current BodyStateV0) state
-           (left core/NativeId) (nth values 0)]
+    (loop [position Int 1
+           current BodyStateV0 state
+           left core/NativeId (nth values 0)]
       (let [(step ExprResultV0)
             (lower-checked-arith current owner callee left
               (nth values position))
@@ -4061,7 +4061,7 @@
 
 (defn append-unique-strings
   [(values (Vec String)) (additions (Vec String))] (Vec String)
-  (loop [(position Int) 0 (current (Vec String)) values]
+  (loop [position Int 0 current (Vec String) values]
     (if (>= position (count additions))
       current
       (let [(addition String) (nth additions position)]
@@ -4091,7 +4091,7 @@
       (let [(keys (Vec core/NativeId)) (binding-name-items index target "keys")
             (as-name String) (fact-text index target "as")
             (names (Vec String))
-            (loop [(position Int) 0 (collected (Vec String)) []]
+            (loop [position Int 0 collected (Vec String) []]
               (if (>= position (count keys))
                 collected
                 (let [(name String) (fact-text index (nth keys position) "name")]
@@ -4104,7 +4104,7 @@
             (binding-name-items index target "names")
             (rest-name String) (fact-text index target "rest")
             (names (Vec String))
-            (loop [(position Int) 0 (collected (Vec String)) []]
+            (loop [position Int 0 collected (Vec String) []]
               (if (>= position (count items))
                 collected
                 (recur (+ position 1)
@@ -4126,7 +4126,7 @@
 
 (defn source-parameters-bound-names
   [(index SourceIndexV0) (source-parameters (Vec core/NativeId))] (Vec String)
-  (loop [(position Int) 0 (collected (Vec String)) []]
+  (loop [position Int 0 collected (Vec String) []]
     (if (>= position (count source-parameters))
       collected
       (recur (+ position 1)
@@ -4155,10 +4155,10 @@
         (if (or (= "" name) (= "_" name)) [] [name]))
 
       (= "record" kind)
-      (loop [(position Int) 0
-             (bindings (Vec core/NativeId))
+      (loop [position Int 0
+             bindings (Vec core/NativeId)
              (match-pattern-binding-items index pattern)
-             (names (Vec String)) []]
+             names (Vec String) []]
         (if (>= position (count bindings))
           names
           (let [(name String)
@@ -4193,7 +4193,7 @@
                       (string-member? bound callee))
                 [] [callee])
               (children (Vec core/NativeId)) (index-child-nodes index node)]
-          (loop [(position Int) 0 (names (Vec String)) own]
+          (loop [position Int 0 names (Vec String) own]
             (if (>= position (count children))
               names
               (recur (+ position 1)
@@ -4207,7 +4207,7 @@
         (let [(parameters (Vec core/NativeId))
               (function-parameter-items index node)
               (constraint-refs (Vec String))
-              (loop [(position Int) 0 (names (Vec String)) []]
+              (loop [position Int 0 names (Vec String) []]
                 (if (>= position (count parameters))
                   names
                   (let [(constraint (U core/NativeId Nil))
@@ -4236,9 +4236,9 @@
               (items (Vec core/NativeId))
               (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
               (binding-refs (Vec String))
-              (loop [(position Int) 0
-                     (current-bound (Vec String)) bound
-                     (names (Vec String)) []]
+              (loop [position Int 0
+                     current-bound (Vec String) bound
+                     names (Vec String) []]
                 (if (>= position (count items))
                   names
                   (let [(binding core/NativeId) (nth items position)
@@ -4260,7 +4260,7 @@
                       (append-unique-strings current-bound binding-names)
                       (append-unique-strings names found)))))
               (body-bound (Vec String))
-              (loop [(position Int) 0 (current (Vec String)) bound]
+              (loop [position Int 0 current (Vec String) bound]
                 (if (>= position (count items))
                   current
                   (let [(binding-names (Vec String))
@@ -4287,7 +4287,7 @@
                 (source-parameter-bound-names index (nth clauses 0))
                 [])
               (clause-refs (Vec String))
-              (loop [(position Int) 0 (names (Vec String)) []]
+              (loop [position Int 0 names (Vec String) []]
                 (if (>= position (count clauses))
                   names
                   (let [(value (U core/NativeId Nil))
@@ -4310,7 +4310,7 @@
               (if (nil? body-node) [] (index-sequence-items index body-node))
               (body-bound (Vec String))
               (append-unique-strings bound binding-names)]
-          (loop [(position Int) 0 (names (Vec String)) clause-refs]
+          (loop [position Int 0 names (Vec String) clause-refs]
             (if (>= position (count bodies))
               names
               (recur (+ position 1)
@@ -4326,7 +4326,7 @@
               (if (nil? target) []
                 (source-free-names index target bound include-callees
                   (- fuel 1)))]
-          (loop [(position Int) 0 (names (Vec String)) target-refs]
+          (loop [position Int 0 names (Vec String) target-refs]
             (if (>= position (count clauses))
               names
               (let [(clause core/NativeId) (nth clauses position)
@@ -4347,7 +4347,7 @@
 
         :else
         (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
-          (loop [(position Int) 0 (names (Vec String)) []]
+          (loop [position Int 0 names (Vec String) []]
             (if (>= position (count children))
               names
               (recur (+ position 1)
@@ -4379,7 +4379,7 @@
    (fuel Int)]
   (Vec String)
   (let [(names (Vec String)) (source-free-ref-names index node bound fuel)]
-    (loop [(position Int) 0 (keys (Vec String)) []]
+    (loop [position Int 0 keys (Vec String) []]
       (if (>= position (count names))
         keys
         (let [(key String)
@@ -4393,11 +4393,11 @@
    (globals (Vec GlobalBindingV0))
    (seeds (Vec String))]
   (Vec String)
-  (loop [(round Int) 0 (keys (Vec String)) seeds]
+  (loop [round Int 0 keys (Vec String) seeds]
     (if (>= round (count globals))
       keys
       (let [(expanded (Vec String))
-            (loop [(position Int) 0 (current (Vec String)) keys]
+            (loop [position Int 0 current (Vec String) keys]
               (if (>= position (count globals))
                 current
                 (let [(global GlobalBindingV0) (nth globals position)]
@@ -4413,7 +4413,7 @@
           (recur (+ round 1) expanded))))))
 
 (defn global-key-in? [(globals (Vec GlobalBindingV0)) (key String)] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count globals))
       false
       (if (= key (global-key (nth globals position)))
@@ -4428,7 +4428,7 @@
   (let [(dependencies (Vec String))
         (source-ref-keys index (globalbindingv0-module-name global)
           (globalbindingv0-value global) [] (+ 1 (index-facts index)))]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count dependencies))
         false
         (if (global-key-in? remaining (nth dependencies position))
@@ -4437,7 +4437,7 @@
 
 (defn first-ready-global-position
   [(index SourceIndexV0) (remaining (Vec GlobalBindingV0))] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count remaining)) -1
       (global-dependency-pending? index remaining (nth remaining position))
@@ -4446,7 +4446,7 @@
 
 (defn remove-global-position
   [(globals (Vec GlobalBindingV0)) (target Int)] (Vec GlobalBindingV0)
-  (loop [(position Int) 0 (collected (Vec GlobalBindingV0)) []]
+  (loop [position Int 0 collected (Vec GlobalBindingV0) []]
     (if (>= position (count globals))
       collected
       (recur (+ position 1)
@@ -4458,8 +4458,8 @@
 ;; into each function entry, so every acyclic dependency must be bound first.
 (defn order-global-bindings
   [(index SourceIndexV0) (globals (Vec GlobalBindingV0))] (Vec GlobalBindingV0)
-  (loop [(remaining (Vec GlobalBindingV0)) globals
-         (ordered (Vec GlobalBindingV0)) []]
+  (loop [remaining (Vec GlobalBindingV0) globals
+         ordered (Vec GlobalBindingV0) []]
     (if (= 0 (count remaining))
       ordered
       (let [(ready Int) (first-ready-global-position index remaining)]
@@ -4480,7 +4480,7 @@
           (source-ref-keys index (source-module-name index body) body bound
             (+ 1 (index-facts index))))]
     (let [(selected (Vec GlobalBindingV0))
-          (loop [(position Int) 0 (found (Vec GlobalBindingV0)) []]
+          (loop [position Int 0 found (Vec GlobalBindingV0) []]
             (if (>= position (count globals))
               found
               (let [(global GlobalBindingV0) (nth globals position)]
@@ -4502,7 +4502,7 @@
           (= name (source-reference-spelling index node)))
       (index-first-object index node "inferred-type")
       (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count children))
             nil
             (let [(found (U core/NativeId Nil))
@@ -4536,7 +4536,7 @@
   (Vec ClosureCaptureV0)
   (let [(names (Vec String))
         (source-free-ref-names index source [] (+ 1 (index-facts index)))]
-    (loop [(position Int) 0 (captures (Vec ClosureCaptureV0)) []]
+    (loop [position Int 0 captures (Vec ClosureCaptureV0) []]
       (if (>= position (count names))
         captures
         (let [(name String) (nth names position)
@@ -4712,7 +4712,7 @@
 (defn closure-spec-for-source
   [(env BodyEnvV0) (source core/NativeId)] (U ClosureSpecV0 Nil)
   (let [(closures (Vec ClosureSpecV0)) (bodyenvv0-closures env)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count closures))
         nil
         (let [(closure ClosureSpecV0) (nth closures position)]
@@ -4734,7 +4734,7 @@
               (args (Vec core/NativeId))
               (if (nil? args-node) [] (index-sequence-items index args-node))]
           (and tail
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count args))
                 true
                 (if (recur-tail-only? index (nth args position) false (- fuel 1))
@@ -4746,7 +4746,7 @@
               (index-first-object index node "bindings")
               (items (Vec core/NativeId))
               (if (nil? bindings-node) [] (index-sequence-items index bindings-node))]
-          (loop [(position Int) 0]
+          (loop [position Int 0]
             (if (>= position (count items))
               true
               (let [(value-node (U core/NativeId Nil))
@@ -4775,7 +4775,7 @@
               (clauses (Vec core/NativeId))
               (if (nil? clauses-node) []
                 (index-sequence-items index clauses-node))]
-          (loop [(position Int) 0]
+          (loop [position Int 0]
             (if (>= position (count clauses))
               true
               (let [(clause core/NativeId) (nth clauses position)
@@ -4798,7 +4798,7 @@
           (and
             (or (nil? target)
               (recur-tail-only? index target false (- fuel 1)))
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count clauses))
                 true
                 (let [(body (U core/NativeId Nil))
@@ -4813,7 +4813,7 @@
               (index-first-object index node "body")
               (forms (Vec core/NativeId))
               (if (nil? body-node) [] (index-sequence-items index body-node))]
-          (loop [(position Int) 0]
+          (loop [position Int 0]
             (if (>= position (count forms))
               true
               (if (recur-tail-only? index (nth forms position)
@@ -4828,7 +4828,7 @@
               (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
               (body-node (U core/NativeId Nil)) (index-first-object index node "body")]
           (and
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count items))
                 true
                 (let [(value-node (U core/NativeId Nil))
@@ -4842,7 +4842,7 @@
 
         :else
         (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
-          (loop [(position Int) 0]
+          (loop [position Int 0]
             (if (>= position (count children))
               true
               (if (recur-tail-only? index (nth children position) false (- fuel 1))
@@ -4851,7 +4851,7 @@
 
 (defn recur-type-mismatch
   [(parameters (Vec core/Parameter)) (value-types (Vec core/NativeId))] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count parameters)) -1
       (same-id? (core/parameter-type-id (nth parameters position))
@@ -4861,7 +4861,7 @@
 
 (defn header-parameter?
   [(parameters (Vec core/Parameter)) (value core/NativeId)] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count parameters))
       false
       (if (same-id? (core/parameter-id (nth parameters position)) value)
@@ -4873,7 +4873,7 @@
 ;; recur arm routes every argument through a fresh value when one aliases.
 (defn recur-aliases-header?
   [(parameters (Vec core/Parameter)) (values (Vec core/NativeId))] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count values))
       false
       (if (header-parameter? parameters (nth values position))
@@ -4887,7 +4887,7 @@
   [(variants (Vec core/TypeVariant))
    (payload core/NativeId)]
   (U core/TypeVariant Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count variants))
       nil
       (let [(variant core/TypeVariant) (nth variants position)
@@ -4901,7 +4901,7 @@
    (variants (Vec core/TypeVariant))
    (record-type core/NativeId)]
   (U core/TypeVariant Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count variants))
       nil
       (let [(variant core/TypeVariant) (nth variants position)
@@ -4918,7 +4918,7 @@
 
 (defn payloadless-variants
   [(variants (Vec core/TypeVariant))] (Vec core/TypeVariant)
-  (loop [(position Int) 0 (collected (Vec core/TypeVariant)) []]
+  (loop [position Int 0 collected (Vec core/TypeVariant) []]
     (if (>= position (count variants))
       collected
       (let [(variant core/TypeVariant) (nth variants position)]
@@ -4941,9 +4941,9 @@
     (< budget 0) (->VariantPathV0 0 [])
     :else
     (let [(variants (Vec core/TypeVariant)) (union-variants-of types current)]
-      (loop [(position Int) 0
-             (matches Int) 0
-             (chosen (Vec core/TypeVariant)) []]
+      (loop [position Int 0
+             matches Int 0
+             chosen (Vec core/TypeVariant) []]
         (if (>= position (count variants))
           (->VariantPathV0 matches chosen)
           (let [(variant core/TypeVariant) (nth variants position)
@@ -4975,10 +4975,10 @@
    (label String)
    (path (Vec core/TypeVariant))]
   ExprResultV0
-  (loop [(position Int) 0
-         (current BodyStateV0) state
-         (current-id core/NativeId) value-id
-         (current-type core/NativeId) value-type]
+  (loop [position Int 0
+         current BodyStateV0 state
+         current-id core/NativeId value-id
+         current-type core/NativeId value-type]
     (if (>= position (count path))
       (->ExprResultV0 current current-id current-type false)
       (let [(variant core/TypeVariant) (nth path position)
@@ -5039,7 +5039,7 @@
   ExprResultV0
   (let [(variants (Vec core/TypeVariant)) (union-variants-of types target)
         (nil-variants (Vec core/TypeVariant))
-        (loop [(position Int) 0 (collected (Vec core/TypeVariant)) []]
+        (loop [position Int 0 collected (Vec core/TypeVariant) []]
           (if (>= position (count variants))
             collected
             (recur (+ position 1)
@@ -5104,9 +5104,9 @@
    (target core/NativeId)
    (path (Vec core/TypeVariant))]
   ExprResultV0
-  (loop [(position Int) (- (count path) 1)
-         (current BodyStateV0) state
-         (current-id core/NativeId) value-id]
+  (loop [position Int (- (count path) 1)
+         current BodyStateV0 state
+         current-id core/NativeId value-id]
     (if (< position 0)
       (->ExprResultV0 current current-id target false)
       (let [(variant core/TypeVariant) (nth path position)
@@ -5206,7 +5206,7 @@
         (let [(join-id core/NativeId) (state-id state owner "widen-join")
               (join-parameter core/NativeId) (state-id state owner "widen-value")
               (cases (Vec core/SwitchCaseV0))
-              (loop [(position Int) 0 (collected (Vec core/SwitchCaseV0)) []]
+              (loop [position Int 0 collected (Vec core/SwitchCaseV0) []]
                 (if (>= position (count source-variants))
                   collected
                   (recur (+ position 1)
@@ -5219,7 +5219,7 @@
               (state-close (state-bump state)
                 (core/->SwitchTerminator value-id cases))
               (armed BodyStateV0)
-              (loop [(position Int) 0 (current BodyStateV0) switched]
+              (loop [position Int 0 current BodyStateV0 switched]
                 (if (or (>= position (count source-variants))
                         (state-blocked? current))
                   current
@@ -5270,7 +5270,7 @@
    (target core/NativeId)]
   NarrowHitV0
   (let [(variants (Vec core/TypeVariant)) (union-variants-of types union-id)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count variants))
         (narrow-miss)
         (let [(variant core/TypeVariant) (nth variants position)
@@ -5331,7 +5331,7 @@
         (some? reference-target) [reference-target]
         (= 0 (count variants)) [target]
         :else
-        (loop [(position Int) 0 (collected (Vec core/NativeId)) []]
+        (loop [position Int 0 collected (Vec core/NativeId) []]
           (if (>= position (count variants))
             collected
             (let [(variant core/TypeVariant) (nth variants position)
@@ -5352,8 +5352,8 @@
                       (possible-value-types-with-budget types payload
                         (- budget 1))]
                   (recur (+ position 1)
-                    (loop [(nested-position Int) 0
-                           (current (Vec core/NativeId)) collected]
+                    (loop [nested-position Int 0
+                           current (Vec core/NativeId) collected]
                       (if (>= nested-position (count nested))
                         current
                         (recur (+ nested-position 1)
@@ -5381,9 +5381,9 @@
     (< budget 0) (->VariantPathV0 0 [])
     :else
     (let [(variants (Vec core/TypeVariant)) (union-variants-of types current)]
-      (loop [(position Int) 0
-             (matches Int) 0
-             (chosen (Vec core/TypeVariant)) []]
+      (loop [position Int 0
+             matches Int 0
+             chosen (Vec core/TypeVariant) []]
         (if (>= position (count variants))
           (->VariantPathV0 matches chosen)
           (let [(variant core/TypeVariant) (nth variants position)
@@ -5460,7 +5460,7 @@
         (join-id core/NativeId) (state-id state owner "narrow-join")
         (join-parameter core/NativeId) (state-id state owner "narrow-value")
         (cases (Vec core/SwitchCaseV0))
-        (loop [(position Int) 0 (collected (Vec core/SwitchCaseV0)) []]
+        (loop [position Int 0 collected (Vec core/SwitchCaseV0) []]
           (if (>= position (count source-variants))
             collected
             (recur (+ position 1)
@@ -5473,9 +5473,9 @@
         (state-close (state-bump state)
           (core/->SwitchTerminator value-id cases))
         (narrowed NarrowArmsV0)
-        (loop [(position Int) 0
-               (current BodyStateV0) switched
-               (crossed Int) 0]
+        (loop [position Int 0
+               current BodyStateV0 switched
+               crossed Int 0]
           (if (or (>= position (count source-variants))
                   (state-blocked? current))
             (->NarrowArmsV0 current crossed)
@@ -5603,10 +5603,10 @@
    (value-types (Vec core/NativeId))
    (parameters (Vec core/Parameter))]
   ArgsResultV0
-  (loop [(position Int) 0
-         (current BodyStateV0) state
-         (coerced-values (Vec core/NativeId)) []
-         (coerced-types (Vec core/NativeId)) []]
+  (loop [position Int 0
+         current BodyStateV0 state
+         coerced-values (Vec core/NativeId) []
+         coerced-types (Vec core/NativeId) []]
     (if (or (>= position (count values)) (state-blocked? current))
       (->ArgsResultV0 current coerced-values coerced-types false)
       (let [(coerced ExprResultV0)
@@ -5627,10 +5627,10 @@
    (value-types (Vec core/NativeId))
    (target core/NativeId)]
   ArgsResultV0
-  (loop [(position Int) 0
-         (current BodyStateV0) state
-         (coerced-values (Vec core/NativeId)) []
-         (coerced-types (Vec core/NativeId)) []]
+  (loop [position Int 0
+         current BodyStateV0 state
+         coerced-values (Vec core/NativeId) []
+         coerced-types (Vec core/NativeId) []]
     (if (or (>= position (count values)) (state-blocked? current))
       (->ArgsResultV0 current coerced-values coerced-types false)
       (let [(coerced ExprResultV0)
@@ -5659,9 +5659,9 @@
           (core/->VecEmptyInstruction
             (core/->SsaValueV0 empty-id vector-type)
             capacity-id (arena-value-id owner)))]
-    (loop [(position Int) 0
-           (built BodyStateV0) seeded
-           (holder core/NativeId) empty-id]
+    (loop [position Int 0
+           built BodyStateV0 seeded
+           holder core/NativeId empty-id]
       (if (>= position (count values))
         (->ExprResultV0 built holder vector-type false)
         (let [(push-id core/NativeId)
@@ -5675,21 +5675,21 @@
             push-id))))))
 
 (defn vector-prefix [(values (Vec core/NativeId)) (limit Int)] (Vec core/NativeId)
-  (loop [(position Int) 0 (result (Vec core/NativeId)) []]
+  (loop [position Int 0 result (Vec core/NativeId) []]
     (if (or (>= position limit) (>= position (count values)))
       result
       (recur (+ position 1) (conj result (nth values position))))))
 
 (defn vector-tail-from
   [(values (Vec core/NativeId)) (start Int)] (Vec core/NativeId)
-  (loop [(position Int) start (result (Vec core/NativeId)) []]
+  (loop [position Int start result (Vec core/NativeId) []]
     (if (>= position (count values))
       result
       (recur (+ position 1) (conj result (nth values position))))))
 
 (defn parameter-prefix
   [(parameters (Vec core/Parameter)) (limit Int)] (Vec core/Parameter)
-  (loop [(position Int) 0 (result (Vec core/Parameter)) []]
+  (loop [position Int 0 result (Vec core/Parameter) []]
     (if (or (>= position limit) (>= position (count parameters)))
       result
       (recur (+ position 1) (conj result (nth parameters position))))))
@@ -5981,8 +5981,8 @@
 
             (instance? native.core.RecordType shape)
             (let [(fields (Vec core/TypeField)) (core/recordtype-fields shape)]
-              (loop [(index Int) 0
-                     (status ValueSemanticsStatusV0) (value-semantics-pass)]
+              (loop [index Int 0
+                     status ValueSemanticsStatusV0 (value-semantics-pass)]
                 (if (>= index (count fields))
                   status
                   (recur (+ index 1)
@@ -5994,8 +5994,8 @@
             (instance? native.core.UnionType shape)
             (let [(variants (Vec core/TypeVariant))
                   (core/uniontype-variants shape)]
-              (loop [(index Int) 0
-                     (status ValueSemanticsStatusV0) (value-semantics-pass)]
+              (loop [index Int 0
+                     status ValueSemanticsStatusV0 (value-semantics-pass)]
                 (if (>= index (count variants))
                   status
                   (let [(payload (U core/NativeId Nil))
@@ -6266,7 +6266,7 @@
 ;; definitions); body lowering cannot mint one, so it looks one up.
 (defn vector-type-of
   [(types (Vec core/TypeDef)) (element core/NativeId)] (U core/NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)
@@ -6279,7 +6279,7 @@
 
 (defn buffer-type-of
   [(types (Vec core/TypeDef)) (element core/NativeId)] (U core/NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)
@@ -6290,7 +6290,7 @@
           (recur (+ position 1)))))))
 
 (defn text-vector-type-of [(types (Vec core/TypeDef))] (U core/NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)
@@ -6317,7 +6317,7 @@
    (key-type core/NativeId)
    (value-type core/NativeId)]
   (U core/NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)
@@ -6332,7 +6332,7 @@
   [(types (Vec core/TypeDef))
    (element-type core/NativeId)]
   (U core/NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)
@@ -6386,7 +6386,7 @@
 
 (defn atom-cell-type-of
   [(types (Vec core/TypeDef)) (content core/NativeId)] (U core/NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)
@@ -6418,7 +6418,7 @@
    (source-id core/NativeId)
    (collection-kind String)]
   Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count instructions))
       false
       (if (instruction-defines-empty-collection?
@@ -6432,7 +6432,7 @@
         (bodystatev0-instructions state) source-id collection-kind)
     true
     (let [(blocks (Vec core/BasicBlock)) (bodystatev0-blocks state)]
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (>= position (count blocks))
           false
           (if (instructions-define-empty-collection?
@@ -6574,7 +6574,7 @@
     (if (source-ref-named? index node name)
       true
       (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count children))
             false
             (if (source-contains-ref-named? index (nth children position)
@@ -6599,7 +6599,7 @@
       (if operator
         true
         (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
-          (loop [(position Int) 0]
+          (loop [position Int 0]
             (if (>= position (count children))
               false
               (if (source-contains-transient-operator? index
@@ -6640,8 +6640,8 @@
   [(index SourceIndexV0)
    (bindings (Vec core/NativeId))]
   (Vec TransientLoopOwnerSpecV0)
-  (loop [(position Int) 0
-         (owners (Vec TransientLoopOwnerSpecV0)) []]
+  (loop [position Int 0
+         owners (Vec TransientLoopOwnerSpecV0) []]
     (if (>= position (count bindings))
       owners
       (let [(binding core/NativeId) (nth bindings position)
@@ -6661,7 +6661,7 @@
 
 (defn direct-transient-loop-init-count
   [(index SourceIndexV0) (bindings (Vec core/NativeId))] Int
-  (loop [(position Int) 0 (found Int) 0]
+  (loop [position Int 0 found Int 0]
     (if (>= position (count bindings))
       found
       (let [(value (U core/NativeId Nil))
@@ -6673,7 +6673,7 @@
 
 (defn transient-owner-spec-position
   [(owners (Vec TransientLoopOwnerSpecV0)) (name String)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count owners))
       -1
       (if (= name
@@ -6698,7 +6698,7 @@
   (and
     (not (source-contains-transient-operator? index node
       (+ 1 (index-facts index))))
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count owners))
         true
         (if (source-excludes-ref-named? index node
@@ -6728,13 +6728,13 @@
 
 (defn transient-bool-vector
   [(count-value Int) (value Bool)] (Vec Bool)
-  (loop [(position Int) 0 (values (Vec Bool)) []]
+  (loop [position Int 0 values (Vec Bool) []]
     (if (>= position count-value)
       values
       (recur (+ position 1) (conj values value)))))
 
 (defn transient-all-closed? [(closed (Vec Bool))] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count closed))
       true
       (if (nth closed position) (recur (+ position 1)) false))))
@@ -6772,8 +6772,8 @@
 
         :else
         (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
-          (loop [(position Int) 0
-                 (proof TransientExitProofV0)
+          (loop [position Int 0
+                 proof TransientExitProofV0
                  (->TransientExitProofV0 closed true)]
             (if (or (>= position (count children))
                   (not (transientexitproofv0-valid proof)))
@@ -6811,7 +6811,7 @@
     (and (some? body)
       (or
         (and
-          (loop [(position Int) 0]
+          (loop [position Int 0]
             (if (>= position (count bindings))
               true
               (let [(binding core/NativeId) (nth bindings position)
@@ -6826,8 +6826,8 @@
           (transient-loop-tail-owned? index body owners binding-count
             (- fuel 1)))
         (let [(binding-proof TransientExitProofV0)
-              (loop [(position Int) 0
-                     (proof TransientExitProofV0)
+              (loop [position Int 0
+                     proof TransientExitProofV0
                      (->TransientExitProofV0
                        (transient-bool-vector (count owners) false) true)]
                 (if (or (>= position (count bindings))
@@ -6864,7 +6864,7 @@
         (forms (Vec core/NativeId))
         (if (nil? body-node) [] (index-sequence-items index body-node))]
     (and (> (count forms) 0)
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (= (+ position 1) (count forms))
           (transient-loop-tail-owned? index (nth forms position) owners
             binding-count (- fuel 1))
@@ -6883,11 +6883,11 @@
         (args (Vec core/NativeId))
         (if (nil? args-node) [] (index-sequence-items index args-node))]
     (and (= binding-count (count args))
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (>= position (count args))
           true
           (let [(owner-position Int)
-                (loop [(candidate Int) 0]
+                (loop [candidate Int 0]
                   (if (>= candidate (count owners))
                     -1
                     (if (= position
@@ -6960,7 +6960,7 @@
       (let [(args (Vec core/NativeId)) (source-call-arguments index node)]
         (and (or (= 2 (count args)) (= 3 (count args)))
           (source-ref-named? index (nth args 0) accumulator)
-          (loop [(position Int) 1]
+          (loop [position Int 1]
             (if (>= position (count args))
               true
               (if (closed-transient-neutral-expression? index
@@ -6977,7 +6977,7 @@
 
       :else
       (let [(children (Vec core/NativeId)) (index-child-nodes index node)]
-        (loop [(position Int) 0]
+        (loop [position Int 0]
           (if (>= position (count children))
             true
             (if (closed-transient-read-expression? index
@@ -7116,7 +7116,7 @@
         (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
         (body (U core/NativeId Nil)) (index-first-object index node "body")]
     (and (some? body)
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (>= position (count bindings))
           true
           (let [(binding core/NativeId) (nth bindings position)
@@ -7166,7 +7166,7 @@
             (args (Vec core/NativeId))
             (if (nil? args-node) [] (index-sequence-items index args-node))]
         (and (= binding-count (count args))
-          (loop [(position Int) 0]
+          (loop [position Int 0]
             (if (>= position (count args))
               true
               (let [(argument core/NativeId) (nth args position)]
@@ -7182,7 +7182,7 @@
 
 (defn transient-loop-binding-position
   [(index SourceIndexV0) (bindings (Vec core/NativeId))] Int
-  (loop [(position Int) 0 (found Int) -1]
+  (loop [position Int 0 found Int -1]
     (if (>= position (count bindings))
       found
       (let [(value (U core/NativeId Nil))
@@ -7214,7 +7214,7 @@
               collection-kind)
             (some? initial)
             (= 1 (count (source-call-arguments index initial)))
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count bindings))
                 true
                 (if (= position owner-position)
@@ -7580,10 +7580,10 @@
       nil
       (let [(element-type core/NativeId) (vector-element-of types expected)
             (lowered ArgsResultV0)
-                (loop [(position Int) 0
-                       (current BodyStateV0) state
-                       (values (Vec core/NativeId)) []
-                       (value-types (Vec core/NativeId)) []]
+                (loop [position Int 0
+                       current BodyStateV0 state
+                       values (Vec core/NativeId) []
+                       value-types (Vec core/NativeId) []]
                   (if (or (>= position (count items))
                           (state-blocked? current))
                     (->ArgsResultV0 current values value-types false)
@@ -7657,10 +7657,10 @@
       nil
       (let [(element-type core/NativeId) (set-element-of types expected)
             (lowered ArgsResultV0)
-            (loop [(position Int) 0
-                   (current BodyStateV0) state
-                   (values (Vec core/NativeId)) []
-                   (value-types (Vec core/NativeId)) []]
+            (loop [position Int 0
+                   current BodyStateV0 state
+                   values (Vec core/NativeId) []
+                   value-types (Vec core/NativeId) []]
               (if (or (>= position (count items)) (state-blocked? current))
                 (->ArgsResultV0 current values value-types false)
                 (let [(item ExprResultV0)
@@ -7735,12 +7735,12 @@
       (let [(key-type core/NativeId) (map-key-of types expected)
             (value-type core/NativeId) (map-value-of types expected)
             (lowered MapItemsResultV0)
-            (loop [(position Int) 0
-                   (current BodyStateV0) state
-                   (key-ids (Vec core/NativeId)) []
-                   (key-types (Vec core/NativeId)) []
-                   (value-ids (Vec core/NativeId)) []
-                   (value-types (Vec core/NativeId)) []]
+            (loop [position Int 0
+                   current BodyStateV0 state
+                   key-ids (Vec core/NativeId) []
+                   key-types (Vec core/NativeId) []
+                   value-ids (Vec core/NativeId) []
+                   value-types (Vec core/NativeId) []]
               (if (or (>= position (count pairs)) (state-blocked? current))
                 (->MapItemsResultV0 current key-ids key-types value-ids
                   value-types false)
@@ -7911,7 +7911,7 @@
         (if (instance? native.core.UnionType shape)
           (core/uniontype-variants shape)
           [])]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (cond
         (>= position (count variants)) (trap-failure-code)
         (= name (core/typevariant-name (nth variants position))) position
@@ -8016,7 +8016,7 @@
                  (fn [(group core/NativeId)] Bool
                    (= "true" (fact-text index group "inline")))
                  (index-form-ids index "member-field-group"))))]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count records))
         nil
         (let [(record core/NativeId) (nth records position)
@@ -8034,7 +8034,7 @@
   (U core/NativeId Nil)
   (let [(fields (Vec core/NativeId))
         (record-field-items index source-record)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count fields))
         nil
         (let [(field core/NativeId) (nth fields position)
@@ -8071,7 +8071,7 @@
    (fields (Vec core/TypeField))
    (values (Vec core/NativeId))]
   BodyStateV0
-  (loop [(position Int) 0 (current BodyStateV0) state]
+  (loop [position Int 0 current BodyStateV0 state]
     (if (or (>= position (count fields))
           (>= position (count values))
           (state-blocked? current))
@@ -8086,7 +8086,7 @@
   (same-id? type-id-value (text-type-id)))
 
 (defn concat-operands-native? [(value-types (Vec core/NativeId))] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count value-types))
       true
       (let [(operand core/NativeId) (nth value-types position)]
@@ -8096,7 +8096,7 @@
 
 (defn str-operands-compatible?
   [(types (Vec core/TypeDef)) (value-types (Vec core/NativeId))] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count value-types))
       true
       (let [(operand core/NativeId) (nth value-types position)]
@@ -8113,10 +8113,10 @@
    (values (Vec core/NativeId))
    (value-types (Vec core/NativeId))]
   ArgsResultV0
-  (loop [(position Int) 0
-         (current BodyStateV0) state
-         (rendered-values (Vec core/NativeId)) []
-         (rendered-types (Vec core/NativeId)) []]
+  (loop [position Int 0
+         current BodyStateV0 state
+         rendered-values (Vec core/NativeId) []
+         rendered-types (Vec core/NativeId) []]
     (if (or (>= position (count values)) (state-blocked? current))
       (->ArgsResultV0 current rendered-values rendered-types false)
       (let [(value-id core/NativeId) (nth values position)
@@ -8227,7 +8227,7 @@
 
 (defn drop-static-predicate-result [(state BodyStateV0)] BodyStateV0
   (let [(instructions (Vec core/Instruction)) (bodystatev0-instructions state)]
-    (loop [(position Int) 0 (kept (Vec core/Instruction)) []]
+    (loop [position Int 0 kept (Vec core/Instruction) []]
       (if (>= (+ position 1) (count instructions))
         (with state [:instructions kept])
         (recur (+ position 1) (conj kept (nth instructions position)))))))
@@ -8261,7 +8261,7 @@
             (true-value core/NativeId) (state-id state owner "predicate-yes")
             (false-value core/NativeId) (state-id state owner "predicate-no")
             (cases (Vec core/SwitchCaseV0))
-            (loop [(position Int) 0 (collected (Vec core/SwitchCaseV0)) []]
+            (loop [position Int 0 collected (Vec core/SwitchCaseV0) []]
               (if (>= position (count variants))
                 collected
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -8282,7 +8282,7 @@
             (state-close (state-bump state)
               (core/->SwitchTerminator value-id cases))
             (armed BodyStateV0)
-            (loop [(position Int) 0 (current BodyStateV0) switched]
+            (loop [position Int 0 current BodyStateV0 switched]
               (if (or (>= position (count variants)) (state-blocked? current))
                 current
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -8369,7 +8369,7 @@
             (true-value core/NativeId) (state-id state owner "record-yes")
             (false-value core/NativeId) (state-id state owner "record-no")
             (cases (Vec core/SwitchCaseV0))
-            (loop [(position Int) 0 (collected (Vec core/SwitchCaseV0)) []]
+            (loop [position Int 0 collected (Vec core/SwitchCaseV0) []]
               (if (>= position (count variants))
                 collected
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -8390,7 +8390,7 @@
             (state-close (state-bump state)
               (core/->SwitchTerminator value-id cases))
             (armed BodyStateV0)
-            (loop [(position Int) 0 (current BodyStateV0) switched]
+            (loop [position Int 0 current BodyStateV0 switched]
               (if (or (>= position (count variants)) (state-blocked? current))
                 current
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -8515,7 +8515,7 @@
           join-parameter (bool-type-id) false)))))
 
 (defn nil-variant-count [(variants (Vec core/TypeVariant))] Int
-  (loop [(position Int) 0 (found Int) 0]
+  (loop [position Int 0 found Int 0]
     (if (>= position (count variants))
       found
       (recur (+ position 1)
@@ -8523,7 +8523,7 @@
 
 (defn optional-scalar-type-of
   [(types (Vec core/TypeDef)) (scalar core/NativeId)] (U core/NativeId Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count types))
       nil
       (let [(definition core/TypeDef) (nth types position)
@@ -8661,7 +8661,7 @@
             (join-parameter core/NativeId)
             (state-id state owner "truthy-result")
             (cases (Vec core/SwitchCaseV0))
-            (loop [(position Int) 0 (collected (Vec core/SwitchCaseV0)) []]
+            (loop [position Int 0 collected (Vec core/SwitchCaseV0) []]
               (if (>= position (count variants))
                 collected
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -8685,7 +8685,7 @@
             (state-close (state-bump state)
               (core/->SwitchTerminator value-id cases))
             (armed BodyStateV0)
-            (loop [(position Int) 0 (current BodyStateV0) switched]
+            (loop [position Int 0 current BodyStateV0 switched]
               (if (or (>= position (count variants)) (state-blocked? current))
                 current
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -8930,7 +8930,7 @@
     (double-payload-id? payload)))
 
 (defn double-union-has-numeric? [(variants (Vec core/TypeVariant))] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count variants))
       false
       (if (double-payload? (core/typevariant-payload-type (nth variants position)))
@@ -8938,7 +8938,7 @@
         (recur (+ position 1))))))
 
 (defn double-union-has-invalid? [(variants (Vec core/TypeVariant))] Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count variants))
       false
       (if (double-payload? (core/typevariant-payload-type (nth variants position)))
@@ -8962,7 +8962,7 @@
             (join-id core/NativeId) (state-id state owner "double-join")
             (join-value core/NativeId) (state-id state owner "double-value")
             (cases (Vec core/SwitchCaseV0))
-            (loop [(position Int) 0 (collected (Vec core/SwitchCaseV0)) []]
+            (loop [position Int 0 collected (Vec core/SwitchCaseV0) []]
               (if (>= position (count variants))
                 collected
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -8979,7 +8979,7 @@
             (state-close (state-bump state)
               (core/->SwitchTerminator value-id cases))
             (converted BodyStateV0)
-            (loop [(position Int) 0 (current BodyStateV0) switched]
+            (loop [position Int 0 current BodyStateV0 switched]
               (if (or (>= position (count variants)) (state-blocked? current))
                 current
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -9102,9 +9102,9 @@
    (callee String)
    (values (Vec core/NativeId))]
   ExprResultV0
-  (loop [(position Int) 1
-         (current BodyStateV0) state
-         (selected core/NativeId) (nth values 0)]
+  (loop [position Int 1
+         current BodyStateV0 state
+         selected core/NativeId (nth values 0)]
     (if (>= position (count values))
       (->ExprResultV0 current selected (int-type-id) false)
       (let [(pair ExprResultV0)
@@ -9158,7 +9158,7 @@
             (join-parameter core/NativeId) (state-id state owner "equality-value")
             (false-id core/NativeId) (state-id state owner "equality-false")
             (cases (Vec core/SwitchCaseV0))
-            (loop [(position Int) 0 (collected (Vec core/SwitchCaseV0)) []]
+            (loop [position Int 0 collected (Vec core/SwitchCaseV0) []]
               (if (>= position (count variants))
                 collected
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -9181,7 +9181,7 @@
             (state-close (state-bump state)
               (core/->SwitchTerminator union-id cases))
             (armed BodyStateV0)
-            (loop [(position Int) 0 (current BodyStateV0) switched]
+            (loop [position Int 0 current BodyStateV0 switched]
               (if (or (>= position (count variants)) (state-blocked? current))
                 current
                 (let [(variant core/TypeVariant) (nth variants position)
@@ -9394,7 +9394,7 @@
    (value-types (Vec core/NativeId))
    (target core/NativeId)]
   Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count value-types))
       true
       (if (type-widens-to? types (nth value-types position) target
@@ -9409,10 +9409,10 @@
    (key-type core/NativeId)
    (value-types (Vec core/NativeId))]
   (U core/NativeId Nil)
-  (loop [(position Int) 0
-         (chosen (U core/NativeId Nil)) nil
-         (chosen-width Int) 2147483647
-         (ambiguous Bool) false]
+  (loop [position Int 0
+         chosen (U core/NativeId Nil) nil
+         chosen-width Int 2147483647
+         ambiguous Bool false]
     (if (>= position (count types))
       (if ambiguous nil chosen)
       (let [(definition core/TypeDef) (nth types position)
@@ -9714,7 +9714,7 @@
    (candidate core/NativeId)
    (minima (Vec core/NativeId))]
   Bool
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count minima))
       false
       (if (strict-widen-subtype? types (nth minima position) candidate)
@@ -9726,7 +9726,7 @@
    (candidate core/NativeId)
    (minima (Vec core/NativeId))]
   (Vec core/NativeId)
-  (loop [(position Int) 0 (collected (Vec core/NativeId)) []]
+  (loop [position Int 0 collected (Vec core/NativeId) []]
     (if (>= position (count minima))
       collected
       (let [(current core/NativeId) (nth minima position)]
@@ -9742,8 +9742,8 @@
   (U core/NativeId Nil)
   (if (same-id? left right)
     left
-    (loop [(position Int) 0
-           (minima (Vec core/NativeId)) []]
+    (loop [position Int 0
+           minima (Vec core/NativeId) []]
       (if (>= position (count types))
         (if (= 1 (count minima)) (nth minima 0) nil)
         (let [(candidate core/NativeId) (core/typedef-id (nth types position))
@@ -9823,8 +9823,8 @@
 
 (defn logic-result-type
   [(types (Vec core/TypeDef)) (arms (Vec LogicArmV0))] (U core/NativeId Nil)
-  (loop [(position Int) 0
-         (chosen (U core/NativeId Nil)) nil]
+  (loop [position Int 0
+         chosen (U core/NativeId Nil) nil]
     (if (>= position (count arms))
       chosen
       (let [(arm-type core/NativeId)
@@ -9851,7 +9851,7 @@
     (if (nil? target)
       (fail-result state
         "TODO-NATIVE-JOIN-TYPE: live arms have no declared native union")
-      (loop [(position Int) 0 (current BodyStateV0) state]
+      (loop [position Int 0 current BodyStateV0 state]
         (if (>= position (count arms))
           (->ExprResultV0
             (state-open-block current join-id
@@ -10336,9 +10336,9 @@
           (fail-result settled
             (str "TODO-NATIVE-BITWISE-OPERANDS: " callee
               " needs values safely narrowable to Int"))
-          (loop [(position Int) 1
-                 (current BodyStateV0) settled
-                 (left core/NativeId) (nth operands 0)]
+          (loop [position Int 1
+                 current BodyStateV0 settled
+                 left core/NativeId (nth operands 0)]
             (if (>= position (count operands))
               (->ExprResultV0 current left (int-type-id) false)
               (let [(result-id core/NativeId)
@@ -11105,7 +11105,7 @@
 
 (defn intersect-id-vectors
   [(left (Vec core/NativeId)) (right (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(position Int) 0 (collected (Vec core/NativeId)) []]
+  (loop [position Int 0 collected (Vec core/NativeId) []]
     (if (>= position (count left))
       collected
       (let [(value core/NativeId) (nth left position)]
@@ -11116,7 +11116,7 @@
 
 (defn subtract-id-vectors
   [(left (Vec core/NativeId)) (right (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [(position Int) 0 (collected (Vec core/NativeId)) []]
+  (loop [position Int 0 collected (Vec core/NativeId) []]
     (if (>= position (count left))
       collected
       (let [(value core/NativeId) (nth left position)]
@@ -11303,7 +11303,7 @@
             (args (Vec core/NativeId)) (source-call-arguments index condition)]
         (cond
           (and (= "and" callee) truth)
-          (loop [(position Int) 0 (current BodyStateV0) state]
+          (loop [position Int 0 current BodyStateV0 state]
             (if (or (>= position (count args)) (state-blocked? current))
               current
               (recur (+ position 1)
@@ -11311,7 +11311,7 @@
                   (nth args position) true))))
 
           (and (= "or" callee) (not truth))
-          (loop [(position Int) 0 (current BodyStateV0) state]
+          (loop [position Int 0 current BodyStateV0 state]
             (if (or (>= position (count args)) (state-blocked? current))
               current
               (recur (+ position 1)
@@ -11376,7 +11376,7 @@
                 ;; an operand. A nested and/or otherwise sees the same counter
                 ;; and mints the same condition join and parameter identities.
                 (operand-state BodyStateV0) (state-bump state)]
-            (loop [(position Int) 0 (current BodyStateV0) operand-state]
+            (loop [position Int 0 current BodyStateV0 operand-state]
               (let [(operand-node core/NativeId) (nth args position)
                     (operand ExprResultV0)
                     (lower-condition env owner current operand-node)
@@ -12437,7 +12437,7 @@
   (let [(wanted String) (source-host-variant-role target-type name)
         (variants (Vec core/TypeVariant))
         (union-variants-of types target-type)]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count variants))
         nil
         (if (= wanted (core/typevariant-name (nth variants position)))
@@ -12498,7 +12498,7 @@
               nil)))))))
 
 (defn native-id-count [(ids (Vec core/NativeId)) (target core/NativeId)] Int
-  (loop [(position Int) 0 (found Int) 0]
+  (loop [position Int 0 found Int 0]
     (if (>= position (count ids))
       found
       (recur (+ position 1)
@@ -12529,7 +12529,7 @@
       (if (= 0 (count variants))
         false
         (let [(pattern-variants (Vec core/NativeId))
-              (loop [(position Int) 0 (collected (Vec core/NativeId)) []]
+              (loop [position Int 0 collected (Vec core/NativeId) []]
                 (if (>= position (count clauses))
                   collected
                   (let [(pattern (U core/NativeId Nil))
@@ -12543,7 +12543,7 @@
                           []
                           (recur (+ position 1) (conj collected variant))))))))]
           (and (= (count pattern-variants) (count variants))
-            (loop [(position Int) 0]
+            (loop [position Int 0]
               (if (>= position (count variants))
                 true
                 (if (= 1 (native-id-count pattern-variants
@@ -12560,7 +12560,7 @@
   (let [(index SourceIndexV0) (bodyenvv0-index env)]
     (if (= 0 (count clauses))
       "TODO-NATIVE-MATCH-CLAUSES: match needs at least one clause"
-      (loop [(position Int) 0]
+      (loop [position Int 0]
         (if (>= position (count clauses))
           (let [(last-pattern (U core/NativeId Nil))
                 (match-clause-pattern index (nth clauses (- (count clauses) 1)))]
@@ -12757,7 +12757,7 @@
 
 (defn record-field-named
   [(fields (Vec core/TypeField)) (name String)] (U core/TypeField Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (if (>= position (count fields))
       nil
       (if (= name (core/typefield-name (nth fields position)))
@@ -12794,7 +12794,7 @@
           (fields (Vec core/TypeField)) (record-fields-of types record-type)]
       (if (state-blocked? current)
         current
-        (loop [(position Int) 0 (bound BodyStateV0) current]
+        (loop [position Int 0 bound BodyStateV0 current]
           (if (or (>= position (count bindings)) (state-blocked? bound))
             bound
             (let [(binding core/NativeId) (nth bindings position)
@@ -13196,11 +13196,11 @@
                     (bodystatev0-keyword-refinements target-state)
                     (outer-values (Vec ValueFlowRefinementV0))
                     (bodystatev0-value-refinements target-state)]
-                (loop [(position Int) 0
-                       (current BodyStateV0) target-state
-                       (result-type (U core/NativeId Nil)) nil
-                       (arms (Vec LogicArmV0)) []
-                       (uniform Bool) true]
+                (loop [position Int 0
+                       current BodyStateV0 target-state
+                       result-type (U core/NativeId Nil) nil
+                       arms (Vec LogicArmV0) []
+                       uniform Bool true]
                   (if (>= position (count clauses))
                     (cond
                       (state-blocked? current) (dead-result current)
@@ -14051,7 +14051,7 @@
       (fail-result state "LOWER-CLOSURE-SIGNATURE: closure has no closed callable signature")
       (let [(captures (Vec ClosureCaptureV0)) (closurespecv0-captures spec)
             (capture-values (Vec core/NativeId))
-            (loop [(position Int) 0 (values (Vec core/NativeId)) []]
+            (loop [position Int 0 values (Vec core/NativeId) []]
               (if (>= position (count captures))
                 values
                 (let [(capture ClosureCaptureV0) (nth captures position)
@@ -14121,10 +14121,10 @@
    (state BodyStateV0)
    (arguments (Vec core/NativeId))]
   ArgsResultV0
-  (loop [(position Int) 0
-         (current BodyStateV0) state
-         (values (Vec core/NativeId)) []
-         (types (Vec core/NativeId)) []]
+  (loop [position Int 0
+         current BodyStateV0 state
+         values (Vec core/NativeId) []
+         types (Vec core/NativeId) []]
     (if (or (>= position (count arguments)) (state-blocked? current))
       (->ArgsResultV0 current values types false)
       (let [(argument ExprResultV0)
@@ -14232,10 +14232,10 @@
               (fail-result (exprresultv0-state packed)
                 "LOWER-APPLY-VARIADIC: variadic apply target is not closed in this ABI")
               :else
-              (loop [(position Int) 0
-                     (current BodyStateV0) (exprresultv0-state packed)
-                     (values (Vec core/NativeId)) []
-                     (value-types (Vec core/NativeId)) []]
+              (loop [position Int 0
+                     current BodyStateV0 (exprresultv0-state packed)
+                     values (Vec core/NativeId) []
+                     value-types (Vec core/NativeId) []]
                 (if (or (>= position (count parameters))
                       (state-blocked? current))
                   (lower-static-call-values env owner current signature
@@ -14379,7 +14379,7 @@
             (fail-result state "TODO-NATIVE-DO-EMPTY: empty do is outside the native slice")
 
             :else
-            (loop [(position Int) 0 (current BodyStateV0) state]
+            (loop [position Int 0 current BodyStateV0 state]
               (let [(form-expected (U core/NativeId Nil))
                     (if (= (+ position 1) (count forms)) expected nil)
                     (result ExprResultV0)
@@ -14401,7 +14401,7 @@
               (items (Vec core/NativeId))
               (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
               (bound ExprResultV0)
-              (loop [(position Int) 0 (current BodyStateV0) state]
+              (loop [position Int 0 current BodyStateV0 state]
                 (if (or (>= position (count items)) (state-blocked? current))
                   (->ExprResultV0 current (lower-id "body" ["let"])
                     (type-id "LowerFailure") false)
@@ -14621,9 +14621,9 @@
               (bodystatev0-keyword-refinements state)
               (outer-values (Vec ValueFlowRefinementV0))
               (bodystatev0-value-refinements state)]
-          (loop [(position Int) 0
-                 (current BodyStateV0) state
-                 (arms (Vec LogicArmV0)) []]
+          (loop [position Int 0
+                 current BodyStateV0 state
+                 arms (Vec LogicArmV0) []]
             (if (>= position (count clauses))
               (let [(arm-start Int) (count (bodystatev0-blocks current))
                     (implicit ExprResultV0)
@@ -14790,8 +14790,8 @@
 
             :else
             (let [(inits LoopInitsV0)
-                  (loop [(position Int) 0
-                         (accumulated LoopInitsV0)
+                  (loop [position Int 0
+                         accumulated LoopInitsV0
                          (->LoopInitsV0 state [] [] [] false)]
                     (if (or (>= position (count items))
                             (state-blocked? (loopinitsv0-state accumulated))
@@ -14821,7 +14821,7 @@
                                   (source-call-named? index value-node
                                     "transient"))
                                 (local-owner-position Int)
-                                (loop [(candidate Int) 0]
+                                (loop [candidate Int 0]
                                   (if (>= candidate (count owner-specs))
                                     -1
                                     (if (= position
@@ -14908,7 +14908,7 @@
                 :else
                 (let [(header-id core/NativeId) (state-id base owner "loop-header")
                       (parameters (Vec core/Parameter))
-                      (loop [(position Int) 0 (collected (Vec core/Parameter)) []]
+                      (loop [position Int 0 collected (Vec core/Parameter) []]
                         (if (>= position (count (loopinitsv0-bindings inits)))
                           collected
                           (recur (+ position 1)
@@ -14923,7 +14923,7 @@
                             (loopinitsv0-values inits)))
                         header-id parameters)
                       (bound BodyStateV0)
-                      (loop [(position Int) 0 (current BodyStateV0) entered]
+                      (loop [position Int 0 current BodyStateV0 entered]
                         (if (>= position (count parameters))
                           current
                           (recur (+ position 1)
@@ -14948,8 +14948,8 @@
                                       (core/parameter-type-id parameter)))))))))
                       (transient-owners (Vec TransientLoopOwnerV0))
                       (if local-transient-loop
-                        (loop [(position Int) 0
-                               (collected (Vec TransientLoopOwnerV0)) []]
+                        (loop [position Int 0
+                               collected (Vec TransientLoopOwnerV0) []]
                           (if (>= position (count owner-specs))
                             collected
                             (let [(spec TransientLoopOwnerSpecV0)
@@ -14998,10 +14998,10 @@
                   (parameters (Vec core/Parameter))
                   (loopstatev0-parameters loop-state)
                   (lowered ArgsResultV0)
-                  (loop [(position Int) 0
-                         (current BodyStateV0) state
-                         (values (Vec core/NativeId)) []
-                         (value-types (Vec core/NativeId)) []]
+                  (loop [position Int 0
+                         current BodyStateV0 state
+                         values (Vec core/NativeId) []
+                         value-types (Vec core/NativeId) []]
                     (if (or (>= position (count args)) (state-blocked? current))
                       (->ArgsResultV0 current values value-types false)
                       (let [(argument ExprResultV0)
@@ -15021,7 +15021,7 @@
                   (if (nil? current-loop-state) []
                     (loopstatev0-transient-owners current-loop-state))
                   (owner-transfer-valid Bool)
-                  (loop [(owner-position Int) 0]
+                  (loop [owner-position Int 0]
                     (if (>= owner-position (count current-owners))
                       true
                       (let [(loop-owner TransientLoopOwnerV0)
@@ -15031,7 +15031,7 @@
                               (< slot (count values))
                               (same-id? (nth values slot)
                                 (transientloopownerv0-current-id loop-owner))
-                              (loop [(position Int) 0]
+                              (loop [position Int 0]
                                 (if (>= position (count values))
                                   true
                                   (if (and (not (= position slot))
@@ -15068,8 +15068,8 @@
                 (let [(copied ArgsResultV0)
                       (if (not (recur-aliases-header? parameters values))
                         (->ArgsResultV0 current values value-types false)
-                        (loop [(position Int) 0
-                               (accumulated ArgsResultV0)
+                        (loop [position Int 0
+                               accumulated ArgsResultV0
                                (->ArgsResultV0 (state-bump current) []
                                  value-types false)]
                           (if (>= position (count values))
@@ -15087,8 +15087,8 @@
                                   (conj (argsresultv0-values accumulated) copy-id)
                                   value-types false))))))]
                   (let [(guarded BodyStateV0)
-                        (loop [(position Int) 0
-                               (guard-state BodyStateV0)
+                        (loop [position Int 0
+                               guard-state BodyStateV0
                                (argsresultv0-state copied)]
                           (if (or (>= position (count (argsresultv0-values copied)))
                                 (state-blocked? guard-state))
@@ -15101,8 +15101,8 @@
                     (if (state-blocked? guarded)
                       (dead-result guarded)
                       (let [(transferred BodyStateV0)
-                            (loop [(owner-position Int) 0
-                                   (transferred-state BodyStateV0) guarded]
+                            (loop [owner-position Int 0
+                                   transferred-state BodyStateV0 guarded]
                               (if (>= owner-position (count current-owners))
                                 transferred-state
                                 (let [(loop-owner TransientLoopOwnerV0)
@@ -15133,7 +15133,7 @@
               (bodies (Vec core/NativeId))
               (if (nil? body-node) [] (index-sequence-items index body-node))
               (modifier-position Int)
-              (loop [(position Int) 0]
+              (loop [position Int 0]
                 (cond
                   (>= position (count clauses)) -1
                   (= "binding"
@@ -15320,10 +15320,10 @@
               (items (Vec core/NativeId))
               (if (nil? items-node) [] (index-sequence-items index items-node))
               (lowered ArgsResultV0)
-              (loop [(position Int) 0
-                     (current BodyStateV0) state
-                     (values (Vec core/NativeId)) []
-                     (value-types (Vec core/NativeId)) []]
+              (loop [position Int 0
+                     current BodyStateV0 state
+                     values (Vec core/NativeId) []
+                     value-types (Vec core/NativeId) []]
                 (if (or (>= position (count items)) (state-blocked? current))
                   (->ArgsResultV0 current values value-types false)
                   (let [(item ExprResultV0)
@@ -15351,7 +15351,7 @@
             :else
             (let [(element core/NativeId) (nth value-types 0)
                   (uniform Bool)
-                  (loop [(position Int) 1]
+                  (loop [position Int 1]
                     (cond
                       (>= position (count value-types)) true
                       (same-id? (nth value-types position) element)
@@ -15375,10 +15375,10 @@
               (items (Vec core/NativeId))
               (if (nil? items-node) [] (index-sequence-items index items-node))
               (lowered ArgsResultV0)
-              (loop [(position Int) 0
-                     (current BodyStateV0) state
-                     (values (Vec core/NativeId)) []
-                     (value-types (Vec core/NativeId)) []]
+              (loop [position Int 0
+                     current BodyStateV0 state
+                     values (Vec core/NativeId) []
+                     value-types (Vec core/NativeId) []]
                 (if (or (>= position (count items)) (state-blocked? current))
                   (->ArgsResultV0 current values value-types false)
                   (let [(item ExprResultV0)
@@ -15405,7 +15405,7 @@
             :else
             (let [(element-type core/NativeId) (nth value-types 0)
                   (uniform Bool)
-                  (loop [(position Int) 1]
+                  (loop [position Int 1]
                     (cond
                       (>= position (count value-types)) true
                       (same-id? (nth value-types position) element-type)
@@ -15441,12 +15441,12 @@
               (pairs (Vec core/NativeId))
               (if (nil? pairs-node) [] (index-sequence-items index pairs-node))
               (lowered MapItemsResultV0)
-              (loop [(position Int) 0
-                     (current BodyStateV0) state
-                     (key-ids (Vec core/NativeId)) []
-                     (key-types (Vec core/NativeId)) []
-                     (value-ids (Vec core/NativeId)) []
-                     (value-types (Vec core/NativeId)) []]
+              (loop [position Int 0
+                     current BodyStateV0 state
+                     key-ids (Vec core/NativeId) []
+                     key-types (Vec core/NativeId) []
+                     value-ids (Vec core/NativeId) []
+                     value-types (Vec core/NativeId) []]
                 (if (or (>= position (count pairs)) (state-blocked? current))
                   (->MapItemsResultV0 current key-ids key-types value-ids value-types false)
                   (let [(pair core/NativeId) (nth pairs position)
@@ -15494,13 +15494,13 @@
             (let [(key-type core/NativeId) (nth key-types 0)
                   (value-type core/NativeId) (nth value-types 0)
                   (uniform-keys Bool)
-                  (loop [(position Int) 1]
+                  (loop [position Int 1]
                     (cond
                       (>= position (count key-types)) true
                       (same-id? (nth key-types position) key-type) (recur (+ position 1))
                       :else false))
                   (uniform-values Bool)
-                  (loop [(position Int) 1]
+                  (loop [position Int 1]
                     (cond
                       (>= position (count value-types)) true
                       (same-id? (nth value-types position) value-type) (recur (+ position 1))
@@ -15764,10 +15764,10 @@
                   (fail-result (exprresultv0-state source)
                     "TODO-NATIVE-RECORD-ASSOC-SOURCE: assoc lowers only for a closed record source")
                   :else
-                  (loop [(position Int) 1
-                         (current BodyStateV0) (exprresultv0-state source)
-                         (current-id core/NativeId) (exprresultv0-value-id source)
-                         (record-type core/NativeId) (exprresultv0-type-id source)]
+                  (loop [position Int 1
+                         current BodyStateV0 (exprresultv0-state source)
+                         current-id core/NativeId (exprresultv0-value-id source)
+                         record-type core/NativeId (exprresultv0-type-id source)]
                     (if (or (>= position (count args)) (state-blocked? current))
                       (if (state-blocked? current)
                         (dead-result current)
@@ -16289,9 +16289,9 @@
                   (let [(join-id core/NativeId) (state-id state owner "logic-join")
                         (join-parameter core/NativeId)
                         (state-id state owner "logic-value")]
-                    (loop [(position Int) 0
-                           (current BodyStateV0) (state-bump state)
-                           (arms (Vec LogicArmV0)) []]
+                    (loop [position Int 0
+                           current BodyStateV0 (state-bump state)
+                           arms (Vec LogicArmV0) []]
                       (let [(operand-expected (U core/NativeId Nil))
                             (if (= (+ position 1) arity) expected nil)
                             (operand ExprResultV0)
@@ -16569,10 +16569,10 @@
                           " must be pure, take the Atom value first, and return that same type"))
                       :else
                       (let [(lowered ArgsResultV0)
-                            (loop [(position Int) 2
-                                   (current BodyStateV0) cell-state
-                                   (values (Vec core/NativeId)) []
-                                   (value-types (Vec core/NativeId)) []]
+                            (loop [position Int 2
+                                   current BodyStateV0 cell-state
+                                   values (Vec core/NativeId) []
+                                   value-types (Vec core/NativeId) []]
                               (if (or (>= position (count args))
                                     (state-blocked? current))
                                 (->ArgsResultV0 current values value-types false)
@@ -16639,10 +16639,10 @@
                   (signature-source (U core/NativeId Nil))
                   (find-signature-source env expr callee)
                   (lowered ArgsResultV0)
-                  (loop [(position Int) 0
-                         (current BodyStateV0) state
-                         (values (Vec core/NativeId)) []
-                         (value-types (Vec core/NativeId)) []]
+                  (loop [position Int 0
+                         current BodyStateV0 state
+                         values (Vec core/NativeId) []
+                         value-types (Vec core/NativeId) []]
                     (if (or (>= position (count args)) (state-blocked? current))
                       (->ArgsResultV0 current values value-types false)
                       (let [(argument-node core/NativeId) (nth args position)
@@ -18026,9 +18026,9 @@
                   (vector-type? types (nth value-types 0)))
                 (let [(vector-type core/NativeId) (nth value-types 0)
                       (element core/NativeId) (vector-element-of types vector-type)]
-                  (loop [(position Int) 1
-                         (settled BodyStateV0) current
-                         (holder core/NativeId) (nth values 0)]
+                  (loop [position Int 1
+                         settled BodyStateV0 current
+                         holder core/NativeId (nth values 0)]
                     (if (>= position (count values))
                       (->ExprResultV0 settled holder vector-type false)
                       (let [(coerced ExprResultV0)
@@ -18063,9 +18063,9 @@
                     (if (nil? equality)
                       (fail-result current
                         "TODO-NATIVE-SET-ELEMENT-EQUALITY: conj needs closed concrete element equality")
-                      (loop [(position Int) 1
-                             (settled BodyStateV0) current
-                             (holder core/NativeId) (nth values 0)]
+                      (loop [position Int 1
+                             settled BodyStateV0 current
+                             holder core/NativeId (nth values 0)]
                         (if (>= position (count values))
                           (->ExprResultV0 settled holder set-type false)
                           (if (not (same-id? element-type
@@ -18643,7 +18643,7 @@
                       (argsresultv0-value-types coerced)
                       (types-ok Bool)
                         (and arity-ok
-                          (loop [(position Int) 0]
+                          (loop [position Int 0]
                             (if (>= position (count fields))
                               true
                               (if (same-id? (core/typefield-type-id (nth fields position))
@@ -18739,7 +18739,7 @@
    (state BodyStateV0)
    (globals (Vec GlobalBindingV0))]
   BodyStateV0
-  (loop [(position Int) 0 (current BodyStateV0) state]
+  (loop [position Int 0 current BodyStateV0 state]
     (if (or (>= position (count globals)) (state-blocked? current))
       current
       (let [(global GlobalBindingV0) (nth globals position)
@@ -18789,7 +18789,7 @@
   (U core/NativeId Nil)
   (let [(defaults (Vec core/NativeId))
         (binding-name-items index target "defaults")]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count defaults))
         nil
         (let [(entry core/NativeId) (nth defaults position)]
@@ -18813,7 +18813,7 @@
         (if (= "" as-name)
           state
           (state-bind state as-name aggregate-id aggregate-type))]
-    (loop [(position Int) 0 (current BodyStateV0) initial]
+    (loop [position Int 0 current BodyStateV0 initial]
       (if (or (>= position (count keys)) (state-blocked? current))
         current
         (let [(key-target core/NativeId) (nth keys position)
@@ -18952,7 +18952,7 @@
         "TODO-NATIVE-DESTRUCTURE-SEQUENCE-SHAPE: HVec parameter has no native vector carrier")
 
       :else
-      (loop [(position Int) 0 (current BodyStateV0) state]
+      (loop [position Int 0 current BodyStateV0 state]
         (if (or (>= position (count targets)) (state-blocked? current))
           current
           (let [(component-source core/NativeId) (nth components position)
@@ -19028,7 +19028,7 @@
           (effectivefunctionsignaturev0-valid signature))
         (effective-types (Vec core/NativeId))
         (effectivefunctionsignaturev0-parameter-types signature)]
-    (loop [(position Int) 0 (current BodyStateV0) state]
+    (loop [position Int 0 current BodyStateV0 state]
       (if (or (>= position (count source-parameters))
             (>= position (count parameters))
             (state-blocked? current))
@@ -19055,7 +19055,7 @@
    (source-parameters (Vec core/NativeId))
    (parameters (Vec core/Parameter))]
   BodyStateV0
-  (loop [(position Int) 0 (current BodyStateV0) state]
+  (loop [position Int 0 current BodyStateV0 state]
     (if (or (>= position (count source-parameters))
           (>= position (count parameters))
           (state-blocked? current))
@@ -19212,7 +19212,7 @@
     (let [(environment-id core/NativeId)
           (core/parameter-id (nth parameters 0))
           (captures (Vec ClosureCaptureV0)) (closurespecv0-captures spec)]
-      (loop [(position Int) 0 (current BodyStateV0) state]
+      (loop [position Int 0 current BodyStateV0 state]
         (if (>= position (count captures))
           current
           (let [(capture ClosureCaptureV0) (nth captures position)
@@ -19253,7 +19253,7 @@
         (source-parameters (Vec core/NativeId))
         (function-parameter-items index source-function)
         (fixed-parameter-locals (Vec LocalBindingV0))
-        (loop [(position Int) 0 (collected (Vec LocalBindingV0)) []]
+        (loop [position Int 0 collected (Vec LocalBindingV0) []]
           (if (or (>= position (count user-parameters))
                   (>= position (count source-parameters)))
             collected
@@ -19307,7 +19307,7 @@
                   (core/parameter-id rest-parameter)
                   (core/parameter-type-id rest-parameter))))
             (initialized BodyStateV0)
-            (loop [(position Int) 0 (current BodyStateV0) rest-guarded]
+            (loop [position Int 0 current BodyStateV0 rest-guarded]
               (if (>= position (count parameter-locals))
                 current
                 (let [(binding LocalBindingV0) (nth parameter-locals position)]
@@ -19775,7 +19775,7 @@
    (resolutions (Vec FunctionResolutionV0))
    (sources (Vec core/NativeId))]
   (Vec FunctionResolutionV0)
-  (loop [(position Int) 0 (attached (Vec FunctionResolutionV0)) []]
+  (loop [position Int 0 attached (Vec FunctionResolutionV0) []]
     (if (>= position (count resolutions))
       attached
       (recur (+ position 1)
@@ -19797,13 +19797,13 @@
 
 (defn body-call-targets [(function TypedFunctionV0)] (Vec core/NativeId)
   (let [(blocks (Vec core/BasicBlock)) (function-body-blocks function)]
-    (loop [(position Int) 0 (targets (Vec core/NativeId)) []]
+    (loop [position Int 0 targets (Vec core/NativeId) []]
       (if (>= position (count blocks))
         targets
         (let [(instructions (Vec core/Instruction))
               (core/basicblock-instructions (nth blocks position))]
           (recur (+ position 1)
-            (loop [(inner Int) 0 (collected (Vec core/NativeId)) targets]
+            (loop [inner Int 0 collected (Vec core/NativeId) targets]
               (if (>= inner (count instructions))
                 collected
                 (let [(callee (U core/NativeId Nil))
@@ -19863,7 +19863,7 @@
   [(functions (Vec TypedFunctionV0)) (metrics FunctionClosureMetricsV0)])
 
 (defn function-id-index [(functions (Vec TypedFunctionV0))] (Map String Bool)
-  (loop [(position Int) 0 (ids (Map String Bool)) {}]
+  (loop [position Int 0 ids (Map String Bool) {}]
     (if (>= position (count functions))
       ids
       (recur (+ position 1)
@@ -19880,10 +19880,10 @@
   [(functions (Vec TypedFunctionV0))] FunctionCallGraphV0
   (let [(known (Map String Bool)) (function-id-index functions)
         (built CallGraphBuildV0)
-        (loop [(position Int) 0
-               (reverse-callers (Map String (Vec core/NativeId))) {}
-               (unresolved-callers (Map String Bool)) {}
-               (call-edge-count Int) 0]
+        (loop [position Int 0
+               reverse-callers (Map String (Vec core/NativeId)) {}
+               unresolved-callers (Map String Bool) {}
+               call-edge-count Int 0]
           (if (>= position (count functions))
             (->CallGraphBuildV0 reverse-callers unresolved-callers
               call-edge-count)
@@ -19891,12 +19891,12 @@
                   (caller-id core/NativeId) (typedfunctionv0-id caller)
                   (targets (Vec core/NativeId)) (body-call-targets caller)
                   (next CallGraphBuildV0)
-                  (loop [(target-position Int) 0
-                         (current-reverse (Map String (Vec core/NativeId)))
+                  (loop [target-position Int 0
+                         current-reverse (Map String (Vec core/NativeId))
                          reverse-callers
-                         (current-unresolved (Map String Bool))
+                         current-unresolved (Map String Bool)
                          unresolved-callers
-                         (current-count Int) call-edge-count]
+                         current-count Int call-edge-count]
                     (if (>= target-position (count targets))
                       (->CallGraphBuildV0 current-reverse current-unresolved
                         current-count)
@@ -19929,9 +19929,9 @@
   [(functions (Vec TypedFunctionV0))
    (graph FunctionCallGraphV0)]
   ReadinessSeedV0
-  (loop [(position Int) 0
-         (not-ready (Map String Bool)) {}
-         (queue (Vec core/NativeId)) []]
+  (loop [position Int 0
+         not-ready (Map String Bool) {}
+         queue (Vec core/NativeId) []]
     (if (>= position (count functions))
       (->ReadinessSeedV0 not-ready queue)
       (let [(function TypedFunctionV0) (nth functions position)
@@ -19947,19 +19947,19 @@
 
 (defn propagate-not-ready
   [(graph FunctionCallGraphV0) (seed ReadinessSeedV0)] ReadinessPropagationV0
-  (loop [(cursor Int) 0
-         (not-ready (Map String Bool)) (readinessseedv0-not-ready seed)
-         (queue (Vec core/NativeId)) (readinessseedv0-queue seed)
-         (edge-visits Int) 0]
+  (loop [cursor Int 0
+         not-ready (Map String Bool) (readinessseedv0-not-ready seed)
+         queue (Vec core/NativeId) (readinessseedv0-queue seed)
+         edge-visits Int 0]
     (if (>= cursor (count queue))
       (->ReadinessPropagationV0 not-ready queue edge-visits)
       (let [(callers (Vec core/NativeId))
             (reverse-callers-at graph (nth queue cursor))
             (next ReadinessPropagationV0)
-            (loop [(position Int) 0
-                   (current-not-ready (Map String Bool)) not-ready
-                   (current-queue (Vec core/NativeId)) queue
-                   (current-visits Int) edge-visits]
+            (loop [position Int 0
+                   current-not-ready (Map String Bool) not-ready
+                   current-queue (Vec core/NativeId) queue
+                   current-visits Int edge-visits]
               (if (>= position (count callers))
                 (->ReadinessPropagationV0 current-not-ready current-queue
                   current-visits)
@@ -20026,7 +20026,7 @@
 
 (defn function-effect-mask [(function TypedFunctionV0)] (Map String Bool)
   (let [(order (Vec core/NativeId)) (closure-effect-order)]
-    (loop [(position Int) 0 (mask (Map String Bool)) {}]
+    (loop [position Int 0 mask (Map String Bool) {}]
       (if (>= position (count order))
         mask
         (let [(effect core/NativeId) (nth order position)]
@@ -20045,10 +20045,10 @@
 (defn merge-effect-mask
   [(mask (Map String Bool)) (incoming (Map String Bool))] EffectMaskMergeV0
   (let [(order (Vec core/NativeId)) (closure-effect-order)]
-    (loop [(position Int) 0
-           (current (Map String Bool)) mask
-           (added (Map String Bool)) {}
-           (changed Bool) false]
+    (loop [position Int 0
+           current (Map String Bool) mask
+           added (Map String Bool) {}
+           changed Bool false]
       (if (>= position (count order))
         (->EffectMaskMergeV0 current added changed)
         (let [(key String) (id-value (nth order position))
@@ -20061,11 +20061,11 @@
             (or changed new)))))))
 
 (defn seed-effects [(functions (Vec TypedFunctionV0))] EffectSeedV0
-  (loop [(position Int) 0
-         (masks (Map String (Map String Bool))) {}
-         (pending (Map String (Map String Bool))) {}
-         (queued (Map String Bool)) {}
-         (queue (Vec core/NativeId)) []]
+  (loop [position Int 0
+         masks (Map String (Map String Bool)) {}
+         pending (Map String (Map String Bool)) {}
+         queued (Map String Bool) {}
+         queue (Vec core/NativeId) []]
     (if (>= position (count functions))
       (->EffectSeedV0 masks pending queued queue)
       (let [(function TypedFunctionV0) (nth functions position)
@@ -20080,7 +20080,7 @@
           (if seed (conj queue function-id) queue))))))
 
 (defn ready-function-index [(functions (Vec TypedFunctionV0))] (Map String Bool)
-  (loop [(position Int) 0 (ready (Map String Bool)) {}]
+  (loop [position Int 0 ready (Map String Bool) {}]
     (if (>= position (count functions))
       ready
       (let [(function TypedFunctionV0) (nth functions position)]
@@ -20094,12 +20094,12 @@
   EffectPropagationV0
   (let [(ready (Map String Bool)) (ready-function-index functions)
         (seed EffectSeedV0) (seed-effects functions)]
-    (loop [(cursor Int) 0
-           (masks (Map String (Map String Bool))) (effectseedv0-masks seed)
-           (pending (Map String (Map String Bool))) (effectseedv0-pending seed)
-           (queued (Map String Bool)) (effectseedv0-queued seed)
-           (queue (Vec core/NativeId)) (effectseedv0-queue seed)
-           (edge-visits Int) 0]
+    (loop [cursor Int 0
+           masks (Map String (Map String Bool)) (effectseedv0-masks seed)
+           pending (Map String (Map String Bool)) (effectseedv0-pending seed)
+           queued (Map String Bool) (effectseedv0-queued seed)
+           queue (Vec core/NativeId) (effectseedv0-queue seed)
+           edge-visits Int 0]
       (if (>= cursor (count queue))
         (->EffectPropagationV0 masks pending queued queue edge-visits)
         (let [(callee core/NativeId) (nth queue cursor)
@@ -20110,12 +20110,12 @@
               (assoc pending callee-key {})
               (base-queued (Map String Bool)) (assoc queued callee-key false)
               (next EffectPropagationV0)
-              (loop [(position Int) 0
-                     (current-masks (Map String (Map String Bool))) masks
-                     (current-pending (Map String (Map String Bool))) base-pending
-                     (current-queued (Map String Bool)) base-queued
-                     (current-queue (Vec core/NativeId)) queue
-                     (current-visits Int) edge-visits]
+              (loop [position Int 0
+                     current-masks (Map String (Map String Bool)) masks
+                     current-pending (Map String (Map String Bool)) base-pending
+                     current-queued (Map String Bool) base-queued
+                     current-queue (Vec core/NativeId) queue
+                     current-visits Int edge-visits]
                 (if (>= position (count callers))
                   (->EffectPropagationV0 current-masks current-pending
                     current-queued current-queue current-visits)
@@ -20164,7 +20164,7 @@
   (let [(order (Vec core/NativeId)) (closure-effect-order)
         (prior-effects (Vec core/NativeId)) (typedfunctionv0-effects function)
         (effects (Vec core/NativeId))
-        (loop [(position Int) 0 (current (Vec core/NativeId)) prior-effects]
+        (loop [position Int 0 current (Vec core/NativeId) prior-effects]
           (if (>= position (count order))
             current
             (let [(effect core/NativeId) (nth order position)]
@@ -20379,7 +20379,7 @@
   [(record-keys (Vec String))
    (resolutions (Vec RecordResolutionV0))]
   (Vec core/TypeDef)
-  (loop [(index Int) 0 (definitions (Vec core/TypeDef)) (builtin-types record-keys)]
+  (loop [index Int 0 definitions (Vec core/TypeDef) (builtin-types record-keys)]
     (if (>= index (count resolutions))
       definitions
       (let [(resolution RecordResolutionV0) (nth resolutions index)]
@@ -20393,7 +20393,7 @@
   [(definitions (Vec core/TypeDef))
    (resolutions (Vec FunctionResolutionV0))]
   (Vec core/TypeDef)
-  (loop [(index Int) 0 (current (Vec core/TypeDef)) definitions]
+  (loop [index Int 0 current (Vec core/TypeDef) definitions]
     (if (>= index (count resolutions))
       current
       (recur (+ index 1)
@@ -20412,13 +20412,13 @@
    (functions (Vec FunctionResolutionV0))]
   (Vec core/DiagnosticV0)
   (let [(record-diagnostics (Vec core/DiagnosticV0))
-        (loop [(index Int) 0 (diagnostics (Vec core/DiagnosticV0)) []]
+        (loop [index Int 0 diagnostics (Vec core/DiagnosticV0) []]
           (if (>= index (count records))
             diagnostics
             (recur (+ index 1)
               (append-diagnostics diagnostics
                 (recordresolutionv0-diagnostics (nth records index))))))]
-    (loop [(index Int) 0 (diagnostics (Vec core/DiagnosticV0)) record-diagnostics]
+    (loop [index Int 0 diagnostics (Vec core/DiagnosticV0) record-diagnostics]
       (if (>= index (count functions))
         diagnostics
         (recur (+ index 1)
@@ -20722,7 +20722,7 @@
   [(functions (Vec TypedFunctionV0))
    (subject-digest String)]
   (Vec core/ReceiptObligationV0)
-  (loop [(index Int) 0 (obligations (Vec core/ReceiptObligationV0)) []]
+  (loop [index Int 0 obligations (Vec core/ReceiptObligationV0) []]
     (if (>= index (count functions))
       obligations
       (let [(function TypedFunctionV0) (nth functions index)
@@ -20979,7 +20979,7 @@
 
 (defn find-type-def
   [(types (Vec core/TypeDef)) (target core/NativeId)] (U core/TypeDef Nil)
-  (loop [(index Int) 0]
+  (loop [index Int 0]
     (if (>= index (count types))
       nil
       (let [(definition core/TypeDef) (nth types index)]
@@ -21079,7 +21079,7 @@
 
               (instance? native.core.RecordType shape)
               (let [(fields (Vec core/TypeField)) (core/recordtype-fields shape)]
-                (loop [(index Int) 0 (offset Int) 0 (alignment Int) 1 (closed Bool) true]
+                (loop [index Int 0 offset Int 0 alignment Int 1 closed Bool true]
                   (if (>= index (count fields))
                     (->LayoutMeasureV0 (align-up offset alignment) alignment closed
                       (if closed "record" "record contains an unclosed field layout"))
@@ -21096,7 +21096,7 @@
 
               (instance? native.core.UnionType shape)
               (let [(variants (Vec core/TypeVariant)) (core/uniontype-variants shape)]
-                (loop [(index Int) 0 (payload-size Int) 0 (payload-align Int) 1 (closed Bool) true]
+                (loop [index Int 0 payload-size Int 0 payload-align Int 1 closed Bool true]
                   (if (>= index (count variants))
                     (let [(alignment Int) (max-int 8 payload-align)
                           (payload-offset Int) (align-up 8 payload-align)]
@@ -21126,7 +21126,7 @@
                     (variants (Vec core/TypeVariant))
                     (outcome-variants types (core/outcometype-failure-type shape))
                     (payloads LayoutMeasureV0)
-                    (loop [(index Int) 0 (size Int) 0 (alignment Int) 1 (closed Bool) true]
+                    (loop [index Int 0 size Int 0 alignment Int 1 closed Bool true]
                       (if (>= index (count variants))
                         (->LayoutMeasureV0 size alignment closed "outcome payloads")
                         (let [(payload (U core/NativeId Nil))
@@ -21164,7 +21164,7 @@
    (fields (Vec core/TypeField))
    (abi core/AbiProfileV0)]
   (Vec core/FieldLayoutV0)
-  (loop [(index Int) 0 (offset Int) 0 (layouts (Vec core/FieldLayoutV0)) []]
+  (loop [index Int 0 offset Int 0 layouts (Vec core/FieldLayoutV0) []]
     (if (>= index (count fields))
       layouts
       (let [(field core/TypeField) (nth fields index)
@@ -21185,7 +21185,7 @@
    (variants (Vec core/TypeVariant))
    (abi core/AbiProfileV0)]
   (Vec core/UnionVariantLayoutV0)
-  (loop [(index Int) 0 (layouts (Vec core/UnionVariantLayoutV0)) []]
+  (loop [index Int 0 layouts (Vec core/UnionVariantLayoutV0) []]
     (if (>= index (count variants))
       layouts
       (let [(variant core/TypeVariant) (nth variants index)
@@ -21583,16 +21583,16 @@
     (if (nil? flow) [] (core/tokenflowv0-consumed flow))))
 
 (defn function-consumed-tokens [(function core/FunctionDef)] (Vec core/NativeId)
-  (loop [(position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (consumed (Vec core/NativeId)) []]
+  (loop [position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         consumed (Vec core/NativeId) []]
     (if (>= position (count blocks))
       consumed
       (recur (+ position 1) blocks
-        (loop [(inner Int) 0
-               (instructions (Vec core/Instruction))
+        (loop [inner Int 0
+               instructions (Vec core/Instruction)
                (core/basicblock-instructions (nth blocks position))
-               (collected (Vec core/NativeId)) consumed]
+               collected (Vec core/NativeId) consumed]
           (if (>= inner (count instructions))
             collected
             (recur (+ inner 1) instructions
@@ -23716,7 +23716,7 @@
   [(resolutions (Vec LayoutResolutionV0))
    (digest String)]
   (Vec core/ReceiptObligationV0)
-  (loop [(index Int) 0 (obligations (Vec core/ReceiptObligationV0)) []]
+  (loop [index Int 0 obligations (Vec core/ReceiptObligationV0) []]
     (if (>= index (count resolutions))
       obligations
       (let [(resolution LayoutResolutionV0) (nth resolutions index)]
@@ -24008,7 +24008,7 @@
   [(blocks (Vec core/BasicBlock))
    (block-id core/NativeId)]
   (U core/BasicBlock Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count blocks)) nil
       (same-id? (core/basicblock-id (nth blocks position)) block-id)
@@ -24017,7 +24017,7 @@
 
 (defn epoch-mark-ids
   [(marks (Map String Bool)) (ids (Vec core/NativeId))] (Map String Bool)
-  (loop [(position Int) 0 (current (Map String Bool)) marks]
+  (loop [position Int 0 current (Map String Bool) marks]
     (if (>= position (count ids))
       current
       (recur (+ position 1)
@@ -24030,17 +24030,17 @@
 ;; operands, atom-cell traffic, call and extern arguments (a missing callee summary
 ;; means retained — the v2 lesson), returns, and trap payloads.
 (defn epoch-escape-seeds [(function core/FunctionDef)] (Map String Bool)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (marks (Map String Bool)) {}]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         marks (Map String Bool) {}]
     (if (>= block-position (count blocks))
       marks
       (let [(block core/BasicBlock) (nth blocks block-position)
             (with-instructions (Map String Bool))
-            (loop [(position Int) 0
-                   (instructions (Vec core/Instruction))
+            (loop [position Int 0
+                   instructions (Vec core/Instruction)
                    (core/basicblock-instructions block)
-                   (current (Map String Bool)) marks]
+                   current (Map String Bool) marks]
               (if (>= position (count instructions))
                 current
                 (let [(instruction core/Instruction) (nth instructions position)]
@@ -24079,10 +24079,10 @@
 
                       :else current)))))
             (with-terminators (Map String Bool))
-            (loop [(position Int) 0
-                   (terminators (Vec core/Terminator))
+            (loop [position Int 0
+                   terminators (Vec core/Terminator)
                    (core/basicblock-terminators block)
-                   (current (Map String Bool)) with-instructions]
+                   current (Map String Bool) with-instructions]
               (if (>= position (count terminators))
                 current
                 (let [(terminator core/Terminator) (nth terminators position)]
@@ -24112,7 +24112,7 @@
       marks
       (let [(parameters (Vec core/Parameter))
             (core/basicblock-parameters target)]
-        (loop [(position Int) 0 (current (Map String Bool)) marks]
+        (loop [position Int 0 current (Map String Bool) marks]
           (if (or (>= position (count parameters))
                 (>= position (count arguments)))
             current
@@ -24124,17 +24124,17 @@
 
 (defn epoch-escape-pass
   [(function core/FunctionDef) (marks (Map String Bool))] (Map String Bool)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (current (Map String Bool)) marks]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         current (Map String Bool) marks]
     (if (>= block-position (count blocks))
       current
       (let [(block core/BasicBlock) (nth blocks block-position)
             (with-instructions (Map String Bool))
-            (loop [(position Int) 0
-                   (instructions (Vec core/Instruction))
+            (loop [position Int 0
+                   instructions (Vec core/Instruction)
                    (core/basicblock-instructions block)
-                   (inner (Map String Bool)) current]
+                   inner (Map String Bool) current]
               (if (>= position (count instructions))
                 inner
                 (let [(instruction core/Instruction) (nth instructions position)]
@@ -24150,10 +24150,10 @@
                         (core/instruction-ssa-refs instruction))
                       inner)))))
             (with-terminators (Map String Bool))
-            (loop [(position Int) 0
-                   (terminators (Vec core/Terminator))
+            (loop [position Int 0
+                   terminators (Vec core/Terminator)
                    (core/basicblock-terminators block)
-                   (inner (Map String Bool)) with-instructions]
+                   inner (Map String Bool) with-instructions]
               (if (>= position (count terminators))
                 inner
                 (let [(terminator core/Terminator) (nth terminators position)]
@@ -24164,10 +24164,10 @@
                         (core/jumpterminator-block-id terminator)
                         (core/jumpterminator-arguments terminator))
                       (instance? native.core.SwitchTerminator terminator)
-                      (loop [(case-position Int) 0
-                             (cases (Vec core/SwitchCaseV0))
+                      (loop [case-position Int 0
+                             cases (Vec core/SwitchCaseV0)
                              (core/switchterminator-cases terminator)
-                             (case-marks (Map String Bool)) inner]
+                             case-marks (Map String Bool) inner]
                         (if (>= case-position (count cases))
                           case-marks
                           (let [(switch-case core/SwitchCaseV0)
@@ -24181,7 +24181,7 @@
 
 ;; Marks only grow, so the closure is a monotone fixpoint over a finite set.
 (defn function-escape-set [(function core/FunctionDef)] (Map String Bool)
-  (loop [(marks (Map String Bool)) (epoch-escape-seeds function)]
+  (loop [marks (Map String Bool) (epoch-escape-seeds function)]
     (let [(next (Map String Bool)) (epoch-escape-pass function marks)]
       (if (= (count next) (count marks))
         next
@@ -24202,16 +24202,16 @@
 ;; because a missing callee (an id no FunctionDef in the program owns) is
 ;; simply not safe.
 (defn function-callee-ids [(function core/FunctionDef)] (Vec core/NativeId)
-  (loop [(block-position Int) 0
-         (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-         (collected (Vec core/NativeId)) []]
+  (loop [block-position Int 0
+         blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+         collected (Vec core/NativeId) []]
     (if (>= block-position (count blocks))
       collected
       (recur (+ block-position 1) blocks
-        (loop [(position Int) 0
-               (instructions (Vec core/Instruction))
+        (loop [position Int 0
+               instructions (Vec core/Instruction)
                (core/basicblock-instructions (nth blocks block-position))
-               (inner (Vec core/NativeId)) collected]
+               inner (Vec core/NativeId) collected]
           (if (>= position (count instructions))
             inner
             (let [(instruction core/Instruction) (nth instructions position)]
@@ -24239,7 +24239,7 @@
   [(functions (Vec core/FunctionDef))
    (target core/NativeId)]
   (U core/FunctionDef Nil)
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count functions)) nil
       (same-id? (core/functiondef-id (nth functions position)) target)
@@ -24250,7 +24250,7 @@
   [(functions (Vec core/FunctionDef))
    (safe (Map String Bool))]
   (Map String Bool)
-  (loop [(position Int) 0 (current (Map String Bool)) safe]
+  (loop [position Int 0 current (Map String Bool) safe]
     (if (>= position (count functions))
       current
       (let [(function core/FunctionDef) (nth functions position)
@@ -24272,15 +24272,15 @@
 
 (defn epoch-safe-functions
   [(functions (Vec core/FunctionDef))] (Map String Bool)
-  (loop [(safe (Map String Bool))
-         (loop [(position Int) 0 (seeded (Map String Bool)) {}]
+  (loop [safe (Map String Bool)
+         (loop [position Int 0 seeded (Map String Bool) {}]
            (if (>= position (count functions))
              seeded
              (recur (+ position 1)
                (assoc seeded
                  (id-value (core/functiondef-id (nth functions position)))
                  (epoch-safe-locally? (nth functions position))))))
-         (budget Int) (+ 1 (count functions))]
+         budget Int (+ 1 (count functions))]
     (let [(next (Map String Bool)) (epoch-safe-pass functions safe)]
       (if (or (= next safe) (<= budget 0))
         next
@@ -24573,8 +24573,8 @@
           (core/functiondef-entry-block function))]
     (if (nil? entry)
       nil
-      (loop [(position Int) 0
-             (instructions (Vec core/Instruction))
+      (loop [position Int 0
+             instructions (Vec core/Instruction)
              (core/basicblock-instructions entry)]
         (if (>= position (count instructions))
           nil
@@ -24642,7 +24642,7 @@
   [(functions (Vec core/FunctionDef))
    (required (Map String Bool))]
   (Map String Bool)
-  (loop [(position Int) 0 (current (Map String Bool)) required]
+  (loop [position Int 0 current (Map String Bool) required]
     (if (>= position (count functions))
       current
       (let [(function core/FunctionDef) (nth functions position)
@@ -24660,8 +24660,8 @@
 
 (defn root-arena-required-functions
   [(functions (Vec core/FunctionDef))] (Map String Bool)
-  (loop [(required (Map String Bool))
-         (loop [(position Int) 0 (seeded (Map String Bool)) {}]
+  (loop [required (Map String Bool)
+         (loop [position Int 0 seeded (Map String Bool) {}]
            (if (>= position (count functions))
              seeded
              (let [(function core/FunctionDef) (nth functions position)]
@@ -24715,16 +24715,16 @@
             (escaped (Map String Bool)) (function-escape-set function)
             (function-id core/NativeId) (core/functiondef-id function)
             (interior (Vec core/Instruction))
-            (loop [(block-position Int) 0
-                   (blocks (Vec core/BasicBlock)) (core/functiondef-blocks function)
-                   (collected (Vec core/Instruction)) []]
+            (loop [block-position Int 0
+                   blocks (Vec core/BasicBlock) (core/functiondef-blocks function)
+                   collected (Vec core/Instruction) []]
               (if (>= block-position (count blocks))
                 collected
                 (recur (+ block-position 1) blocks
-                  (loop [(position Int) 0
-                         (instructions (Vec core/Instruction))
+                  (loop [position Int 0
+                         instructions (Vec core/Instruction)
                          (core/basicblock-instructions (nth blocks block-position))
-                         (inner (Vec core/Instruction)) collected]
+                         inner (Vec core/Instruction) collected]
                     (if (>= position (count instructions))
                       inner
                       (let [(instruction core/Instruction) (nth instructions position)]
@@ -24742,7 +24742,7 @@
                             (conj inner instruction)
                             inner))))))))
             (pendings (Vec String))
-            (loop [(position Int) 0 (collected (Vec String)) []]
+            (loop [position Int 0 collected (Vec String) []]
               (if (>= position (count interior))
                 collected
                 (let [(instruction core/Instruction) (nth interior position)]
@@ -24764,7 +24764,7 @@
                           function instruction))
                       :else collected)))))
             (retarget (Map String Bool))
-            (loop [(position Int) 0 (marked (Map String Bool)) {}]
+            (loop [position Int 0 marked (Map String Bool) {}]
               (if (>= position (count interior))
                 marked
                 (let [(instruction core/Instruction) (nth interior position)]
@@ -24814,8 +24814,8 @@
                             (core/basicblock-instructions block))
                           (with-open (Vec core/Instruction))
                           (if (same-id? (core/basicblock-id block) entry-id)
-                            (loop [(position Int) 0
-                                   (rebuilt (Vec core/Instruction)) []]
+                            (loop [position Int 0
+                                   rebuilt (Vec core/Instruction) []]
                               (if (>= position (count retargeted))
                                 rebuilt
                                 (let [(instruction core/Instruction)
@@ -24915,7 +24915,7 @@
          (core/->EpochSoundnessObligation true)
          (core/->LeakFreedomObligation true)
          (core/->DeterministicParallelismObligationV0 true)]]
-    (loop [(position Int) 0 (rows (Vec core/ReceiptObligationV0)) []]
+    (loop [position Int 0 rows (Vec core/ReceiptObligationV0) []]
       (if (or (>= position (count verdicts)) (>= position (count codes)))
         rows
         (recur (+ position 1)
@@ -24974,7 +24974,7 @@
             (epochrewritev0-function rewrite))
           rewrites)
         (minted-regions (Vec core/RegionDef))
-        (loop [(position Int) 0 (collected (Vec core/RegionDef)) []]
+        (loop [position Int 0 collected (Vec core/RegionDef) []]
           (if (>= position (count rewrites))
             collected
             (recur (+ position 1)
@@ -24989,14 +24989,14 @@
               (core/nativecoreprogram-types program) function))
           functions)
         (minted-effects (Vec core/EffectDef))
-        (loop [(position Int) 0 (collected (Vec core/EffectDef)) []]
+        (loop [position Int 0 collected (Vec core/EffectDef) []]
           (if (>= position (count rewrites))
             collected
             (recur (+ position 1)
               (vec (concat collected
                      (epochrewritev0-effects (nth rewrites position)))))))
         (pendings (Vec String))
-        (loop [(position Int) 0 (collected (Vec String)) []]
+        (loop [position Int 0 collected (Vec String) []]
           (if (>= position (count rewrites))
             collected
             (recur (+ position 1)
@@ -25120,10 +25120,10 @@
              (fn [(block core/BasicBlock)] core/BasicBlock
                (with block
                  [:instructions
-                  (loop [(position Int) 0
-                         (instructions (Vec core/Instruction))
+                  (loop [position Int 0
+                         instructions (Vec core/Instruction)
                          (core/basicblock-instructions block)
-                         (rebuilt (Vec core/Instruction)) []]
+                         rebuilt (Vec core/Instruction) []]
                     (if (>= position (count instructions))
                       rebuilt
                       (let [(instruction core/Instruction)
@@ -25168,7 +25168,7 @@
 
 (defn epoch-generated-region-ids
   [(functions (Vec core/FunctionDef))] (Map String Bool)
-  (loop [(position Int) 0 (generated (Map String Bool)) {}]
+  (loop [position Int 0 generated (Map String Bool) {}]
     (if (>= position (count functions))
       generated
       (let [(function-id core/NativeId)
@@ -25181,7 +25181,7 @@
 
 (defn epoch-generated-effect-ids
   [(functions (Vec core/FunctionDef))] (Map String Bool)
-  (loop [(position Int) 0 (generated (Map String Bool)) {}]
+  (loop [position Int 0 generated (Map String Bool) {}]
     (if (>= position (count functions))
       generated
       (let [(function-id core/NativeId)
@@ -25397,7 +25397,7 @@
   [(constructor (U core/TypeDef Nil)) (signature (U TypedFunctionV0 Nil))] Bool
   (let [(expected (Vec core/NativeId))
         [empty-context-vector-id empty-context-map-id empty-context-set-id]]
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count expected))
         true
         (let [(actual (U core/NativeId Nil))
@@ -25802,24 +25802,24 @@
       (stages/content-digest encoding))))
 
 (defn program-close-count [(program core/NativeCoreProgram)] Int
-  (loop [(function-position Int) 0
-         (functions (Vec core/FunctionDef))
+  (loop [function-position Int 0
+         functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)
-         (total Int) 0]
+         total Int 0]
     (if (>= function-position (count functions))
       total
       (recur (+ function-position 1) functions
-        (loop [(block-position Int) 0
-               (blocks (Vec core/BasicBlock))
+        (loop [block-position Int 0
+               blocks (Vec core/BasicBlock)
                (core/functiondef-blocks (nth functions function-position))
-               (inner Int) total]
+               inner Int total]
           (if (>= block-position (count blocks))
             inner
             (recur (+ block-position 1) blocks
-              (loop [(position Int) 0
-                     (instructions (Vec core/Instruction))
+              (loop [position Int 0
+                     instructions (Vec core/Instruction)
                      (core/basicblock-instructions (nth blocks block-position))
-                     (closes Int) inner]
+                     closes Int inner]
                 (if (>= position (count instructions))
                   closes
                   (recur (+ position 1) instructions
@@ -25829,9 +25829,9 @@
                       closes)))))))))))
 
 (defn program-minted-epoch-count [(program core/NativeCoreProgram)] Int
-  (loop [(position Int) 0
-         (regions (Vec core/RegionDef)) (core/nativecoreprogram-regions program)
-         (minted Int) 0]
+  (loop [position Int 0
+         regions (Vec core/RegionDef) (core/nativecoreprogram-regions program)
+         minted Int 0]
     (if (>= position (count regions))
       minted
       (recur (+ position 1) regions
@@ -25933,25 +25933,25 @@
 
 (defn program-allocating-arena-operands
   [(program core/NativeCoreProgram)] (Vec core/NativeId)
-  (loop [(function-position Int) 0
-         (functions (Vec core/FunctionDef))
+  (loop [function-position Int 0
+         functions (Vec core/FunctionDef)
          (core/nativecoreprogram-functions program)
-         (collected (Vec core/NativeId)) []]
+         collected (Vec core/NativeId) []]
     (if (>= function-position (count functions))
       collected
       (recur (+ function-position 1) functions
-        (loop [(block-position Int) 0
-               (blocks (Vec core/BasicBlock))
+        (loop [block-position Int 0
+               blocks (Vec core/BasicBlock)
                (core/functiondef-blocks (nth functions function-position))
-               (inner (Vec core/NativeId)) collected]
+               inner (Vec core/NativeId) collected]
           (if (>= block-position (count blocks))
             inner
             (recur (+ block-position 1) blocks
-              (loop [(position Int) 0
-                     (instructions (Vec core/Instruction))
+              (loop [position Int 0
+                     instructions (Vec core/Instruction)
                      (core/basicblock-instructions
                        (nth blocks block-position))
-                     (arenas (Vec core/NativeId)) inner]
+                     arenas (Vec core/NativeId) inner]
                 (if (>= position (count instructions))
                   arenas
                   (recur (+ position 1) instructions

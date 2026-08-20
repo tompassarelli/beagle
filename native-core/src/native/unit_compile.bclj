@@ -43,7 +43,7 @@
 ;; are never assumed to share the source-unit ordering.
 (defn signature-index-for
   [(resolutions (Vec lower/FunctionResolutionV0)) (target core/NativeId)] Int
-  (loop [(position Int) 0]
+  (loop [position Int 0]
     (cond
       (>= position (count resolutions)) -1
 
@@ -94,7 +94,7 @@
   [(units (Vec stages/SourceUnitV0))
    (read-set (Vec core/NativeId))]
   (Vec core/NativeId)
-  (loop [(position Int) 0 (collected (Vec core/NativeId)) []]
+  (loop [position Int 0 collected (Vec core/NativeId) []]
     (if (>= position (count read-set))
       collected
       (let [(read-unit (U stages/SourceUnitV0 Nil))
@@ -114,7 +114,7 @@
   String
   (if (not (unit/exact-id-set? read-set (unit/contract-ids read-contracts)))
     "supplied contract rows are not exactly the direct read set"
-    (loop [(position Int) 0]
+    (loop [position Int 0]
       (if (>= position (count read-set))
         ""
         (let [(read-id core/NativeId) (nth read-set position)
@@ -156,7 +156,7 @@
             (index lower/SourceIndexV0) (lower/bodyenvv0-index env)
             (resolutions (Vec lower/FunctionResolutionV0))
             (lower/typingpreludev0-signature-resolutions prelude)]
-        (loop [(position Int) 0 (contracts (Vec unit/UnitContractV0)) []]
+        (loop [position Int 0 contracts (Vec unit/UnitContractV0) []]
           (if (>= position (count units))
             (->UnitPreparationAcceptedV0
               (->PreparedCandidateV0 frozen-source prelude contracts
