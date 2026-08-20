@@ -164,6 +164,27 @@
       (artifact/->TargetArtifactV1
         "c17" [file] encoding (artifact/content-digest encoding)))))
 
+(defn emit-nix
+  [request FactMaterializationRequest
+   namespace String
+   definition String
+   value Int] FactMaterializationResult
+  (let [symbol String
+        (str "beagle_" (sha256-bytes
+                         (utf8-encode (str namespace "/" definition))))
+        payload String
+        (str "args: " value "\n")
+        digest String (artifact/content-digest payload)
+        file artifact/ArtifactFileV1
+        (artifact/->ArtifactFileV1
+          (str symbol ".nix") payload digest
+          (count (utf8-encode payload)) digest)
+        encoding String
+        (str "nix:" (factmaterializationrequest-query-id request) ":" digest)]
+    (->FactMaterialized
+      (artifact/->TargetArtifactV1
+        "nix" [file] encoding (artifact/content-digest encoding)))))
+
 (defn materialize
   [request FactMaterializationRequest] FactMaterializationResult
   (let [target String (factmaterializationrequest-target request)
@@ -177,7 +198,7 @@
         definition String (factmaterializationrequest-entry-definition request)
         position Int (module-position modules namespace)]
     (cond
-      (not= target "c17")
+      (and (not= target "c17") (not= target "nix"))
       (reject 64 (str "unsupported native fact materialization target: " target))
 
       (not= (count modules) (count checked-modules))
@@ -238,4 +259,6 @@
                   (reject 65 "bootstrap entry requires one accepted integer literal body")
 
                   :else
-                  (emit-c17 request namespace definition (first values)))))))))))
+                  (if (= target "c17")
+                    (emit-c17 request namespace definition (first values))
+                    (emit-nix request namespace definition (first values)))))))))))
