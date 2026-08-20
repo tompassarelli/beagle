@@ -3553,26 +3553,28 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
                        next-pending
                        next-counters)))))))))
 
-(defn dev-typed-set-digest [typed-units]
-  (stages/content-digest
-   (stages/canonical-set
-    "dev-typed-unit-set-v1"
-    (mapv unit/typedunitv0-digest typed-units))))
+(defn dev-materialization-closure-digest [typed-units abi]
+  (let [types (lower/append-type-def
+               (unit/collect-types typed-units)
+               (lower/union-tag-type))
+        resolutions (lower/resolve-layouts types abi)
+        layouts (lower/collect-layouts resolutions)]
+    (lower/layout-digest layouts)))
 
 (defn dev-native-result-key
-  [receipt typed-units]
+  [receipt materialization-closure-digest]
   (stages/content-digest
    (stages/canonical-record
     "beagle-dev-native-result-v1"
     [(unit/unit-result-key receipt)
-     (dev-typed-set-digest typed-units)])))
+     materialization-closure-digest])))
 
 (defn dev-native-requests
-  [source-units receipts typed-units compiler-context profile]
+  [source-units receipts materialization-closure-digest compiler-context profile]
   (mapv
    (fn [source-unit receipt]
      ["native"
-      (dev-native-result-key receipt typed-units)
+      (dev-native-result-key receipt materialization-closure-digest)
       compiler-context
       profile
       (dev-unit-id-text (stages/sourceunitv0-id source-unit))])
@@ -3588,7 +3590,8 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
    typed-units))
 
 (defn compile-dev-native-units
-  [source-units receipts prepared typed-units rows compiler-context profile abi]
+  [source-units receipts prepared typed-units materialization-closure-digest
+   rows compiler-context profile abi]
   (loop [position 0
          compiled []
          pending []
@@ -3602,7 +3605,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
             unit-id (stages/sourceunitv0-id source-unit)
             receipt (nth receipts position)
             fact-key
-            (dev-native-result-key receipt typed-units)
+            (dev-native-result-key receipt materialization-closure-digest)
             selection
             (select-native-dev-fact
              rows fact-key compiler-context profile unit-id)
@@ -3742,15 +3745,18 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
            :reason (:reason typed-pass)
            :counters (:counters typed-pass)}
           (let [typed-units (:units typed-pass)
+                materialization-closure-digest
+                (dev-materialization-closure-digest typed-units abi)
                 native-query
                 (query-dev-facts
                  store
                  (dev-native-requests
-                  source-units receipts typed-units
+                  source-units receipts materialization-closure-digest
                   compiler-rule-epoch dev-fact-profile))
                 native-pass
                 (compile-dev-native-units
-                 source-units receipts prepared typed-units (:rows native-query)
+                 source-units receipts prepared typed-units
+                 materialization-closure-digest (:rows native-query)
                  compiler-rule-epoch dev-fact-profile abi)
                 counters
                 (merge-dev-counters
