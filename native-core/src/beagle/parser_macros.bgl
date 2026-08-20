@@ -1,0 +1,50 @@
+#lang beagle
+(ns beagle.parser-macros)
+
+(require beagle.frontend-facts :as facts)
+
+(def WHEN-MACRO-ID String "macro/when")
+
+(defrecord MacroExpansionResult
+  [facts (Vec facts/CompilerFact)
+   rewrites (Vec facts/MacroRewriteFact)
+   errors (Vec facts/FactError)])
+
+(defn- rewrite-node-id [node-id String role Keyword] String
+  (str "sha256:" (sha256-bytes (utf8-encode (str node-id ":" role)))))
+
+(defn- when-node? [fact facts/CompilerFact] Bool
+  (and (= :syntax/node (facts/compilerfact-relation fact))
+       (match (facts/compilerfact-value fact)
+         [(facts/FactText value) (= "when" value)]
+         [(facts/FactNodeRef _) false]
+         [(facts/FactBool _) false]
+         [(facts/FactInt _) false]
+         [(facts/FactNil) false]
+         [_ false])))
+
+(defn expand-closed-macros
+  [input (Vec facts/CompilerFact)
+   max-steps Int]
+  MacroExpansionResult
+  (loop [index Int 0
+         next-order Int (count input)
+         output (Vec facts/CompilerFact) input
+         rewrites (Vec facts/MacroRewriteFact) []]
+    (if (or (>= index (count input)) (>= (count rewrites) max-steps))
+      (->MacroExpansionResult output rewrites [])
+      (let [fact facts/CompilerFact (nth input index)]
+        (if (when-node? fact)
+          (let [source String (facts/compilerfact-subject fact)
+                span facts/SourceSpan? (facts/compilerfact-span fact)
+                result String (rewrite-node-id source :macro/when-if)
+                rewritten facts/CompilerFact
+                (facts/syntax-node-fact next-order result (facts/->FactText "if") span)]
+            (recur (+ index 1)
+                   (+ next-order 1)
+                   (conj output rewritten)
+                   (conj rewrites
+                         (facts/->MacroRewriteFact
+                           next-order WHEN-MACRO-ID source result
+                           (if (some? span) span (facts/->SourceSpan "" 0 0 1 0))))))
+          (recur (+ index 1) next-order output rewrites))))))

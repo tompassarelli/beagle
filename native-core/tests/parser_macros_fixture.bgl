@@ -1,0 +1,5 @@
+#lang beagle
+(ns parser-macros-fixture)
+
+;; The native reader turns this closed macro head into canonical syntax facts.
+(when true 0)
