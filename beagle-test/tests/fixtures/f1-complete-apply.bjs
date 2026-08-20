@@ -1,0 +1,41 @@
+#lang beagle/js
+(ns f1.complete-apply)
+
+(defn fixed-target
+  [left Int
+   middle Int
+   right Int] Int
+  (+ (+ left middle) right))
+
+(defn multi-target
+  ([value Int] Int value)
+  ([left Int right Int] Int (+ left right)))
+
+(defn rest-target [head Int & more (List Int)] Int
+  (+ head (count more)))
+
+(defn apply-fixed [tail (Vec Int)] Any
+  (apply fixed-target tail))
+
+(defn apply-multi [head Int tail (Vec Int)] Any
+  (apply multi-target head tail))
+
+(defn apply-rest-direct [tail (Vec Int)] Any
+  (apply rest-target tail))
+
+(defn apply-rest-one [tail (Vec Int)] Any
+  (apply rest-target 1 tail))
+
+(defn apply-rest-two [tail (Vec Int)] Any
+  (apply rest-target 1 2 tail))
+
+(defn apply-rest-three [tail (Vec Int)] Any
+  (apply rest-target 1 2 3 tail))
+
+(defn apply-rest-many [tail (Vec Int)] Any
+  (apply rest-target 1 2 3 4 tail))
+
+(defn apply-standard-callable
+  [target (Fn [Int Int] Int)
+   tail (Vec Int)] Any
+  (apply target tail))

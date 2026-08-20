@@ -119,6 +119,24 @@
 (define (emit-property-key key)
   (runtime-call "property_key" (list key)))
 
+(define (emit-apply-call args)
+  (define call-args (cdr args))
+  (define fixed-args (drop-right call-args 1))
+  (define fixed-names
+    (for/list ([arg (in-list fixed-args)] [i (in-naturals)])
+      (format "$beagle$apply$arg$~a" i)))
+  (define parameters
+    (append (list "$beagle$apply$fn")
+            fixed-names
+            (list "$beagle$apply$tail")))
+  (define forwarded
+    (append fixed-names
+            (list "...($beagle$apply$tail ?? [])")))
+  (format "((~a) => $beagle$apply$fn.call($beagle$apply$fn, ~a))(~a)"
+          (string-join parameters ", ")
+          (string-join forwarded ", ")
+          (string-join (map emit-expr args) ", ")))
+
 (define (emit-core-call fn-sym args)
   (define n (length args))
   (case fn-sym
@@ -267,7 +285,7 @@
                (format "new Set([...~a, ...~a])" (emit-expr (car args)) (emit-expr (cadr args)))]
               [else (format "[...~a, ...~a]" (emit-expr (car args)) (emit-expr (cadr args)))])]
     [(concat) (format "[].concat(~a)" (string-join (map emit-expr args) ", "))]
-    [(apply) (if (= n 2) (format "~a(...~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
+    [(apply) (if (>= n 2) (emit-apply-call args) #f)]
     [(identity) (if (= n 1) (emit-expr (car args)) #f)]
     [(boolean) (if (= n 1) (emit-truthy-expr (car args)) #f)]
     [(string?) (if (= n 1) (format "(typeof ~a === 'string')" (emit-expr (car args))) #f)]
