@@ -19,6 +19,9 @@ BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 PROJECTOR="$BEAGLE_DIR/native-core/bin/source-facts.clj"
 SEMANTIC_READ_STORE="$BEAGLE_DIR/native-core/bin/semantic_read_store.clj"
+SEMANTIC_READ_BLOB_STORE="$BEAGLE_DIR/native-core/bin/source_fact_store.clj"
+SEMANTIC_READ_DATABASE="$BEAGLE_DIR/store/database.clj"
+SEMANTIC_READ_WRITER_AUTHORITY="$BEAGLE_DIR/store/writer_authority.clj"
 AST_VERIFIER="$BEAGLE_DIR/native-core/bin/verify-checked-ast.rkt"
 FINALIZER="$BEAGLE_DIR/native-core/validation/build-finalize.clj"
 CORE_COMPILER_PROJECTION="$BIN/beagle-core-compiler-projection"
@@ -572,6 +575,14 @@ done
 [[ -f "$PROJECTOR" ]] || die "source-fact projector is unavailable: $PROJECTOR"
 [[ -f "$SEMANTIC_READ_STORE" ]] ||
     die "semantic-read Store adapter is unavailable: $SEMANTIC_READ_STORE"
+[[ -f "$SEMANTIC_READ_BLOB_STORE" ]] ||
+    die "semantic-read blob Store adapter is unavailable: $SEMANTIC_READ_BLOB_STORE"
+[[ -d "$BEAGLE_DIR/store/out" && ! -L "$BEAGLE_DIR/store/out" ]] ||
+    die "semantic-read Store projection is unavailable: $BEAGLE_DIR/store/out"
+[[ -f "$SEMANTIC_READ_DATABASE" ]] ||
+    die "semantic-read Store database is unavailable: $SEMANTIC_READ_DATABASE"
+[[ -f "$SEMANTIC_READ_WRITER_AUTHORITY" ]] ||
+    die "semantic-read Store writer authority is unavailable: $SEMANTIC_READ_WRITER_AUTHORITY"
 [[ -f "$AST_VERIFIER" ]] || die "checked-AST verifier is unavailable: $AST_VERIFIER"
 [[ -f "$FINALIZER" ]] || die "build finalizer is unavailable: $FINALIZER"
 [[ -x "$CORE_COMPILER_PROJECTION" ]] ||
@@ -668,6 +679,21 @@ trap cleanup EXIT
 trap interrupted HUP INT TERM
 mkdir -p "$work/artifacts"
 
+# Core lowering can reuse a content-addressed compiler projection after the
+# checkout that selected it is gone. Snapshot the hosted semantic-read closure
+# before the long checked-AST phases so that reuse does not retain a physical
+# checkout dependency. Its bytes join compiler_source_digest below; absolute
+# snapshot and worktree paths never enter the semantic identity.
+semantic_read_classpath_root="$work/semantic-read-classpath"
+mkdir -p "$semantic_read_classpath_root/native-core/bin" \
+    "$semantic_read_classpath_root/store"
+cp -- "$SEMANTIC_READ_STORE" "$SEMANTIC_READ_BLOB_STORE" \
+    "$semantic_read_classpath_root/native-core/bin/"
+cp -- "$SEMANTIC_READ_DATABASE" "$SEMANTIC_READ_WRITER_AUTHORITY" \
+    "$semantic_read_classpath_root/store/"
+cp -a -- "$BEAGLE_DIR/store/out" "$semantic_read_classpath_root/store/out"
+semantic_read_classpath="$semantic_read_classpath_root/store/out:$semantic_read_classpath_root/native-core/bin"
+
 facts="$work/source-facts.manifest"
 projector_args=()
 wasm_checked_sources=()
@@ -751,7 +777,6 @@ cache_key_material() {
                 bin/_beagle-source-id
                 bin/_beagle-rust-supervisor
                 native-core/bin/emit-workers
-                native-core/bin/semantic_read_store.clj
                 native-core/validation/build-finalize.clj
                 share/targets.sh
                 flake.nix
@@ -790,6 +815,11 @@ cache_key_material() {
         LC_ALL=C sort -z |
         xargs -0 sha256sum |
         awk -v prefix="${#BEAGLE_DIR}" '{ print substr($0, 67 + prefix + 1), substr($0, 1, 64) }'
+    find "$semantic_read_classpath_root" -type f -print0 |
+        LC_ALL=C sort -z |
+        xargs -0 sha256sum |
+        awk -v prefix="${#semantic_read_classpath_root}" \
+            '{ print "semantic-read-classpath" substr($0, 67 + prefix), substr($0, 1, 64) }'
     printf 'native-supervisor %s\n' \
         "$(sha256sum "$NATIVE_SUPERVISOR" | awk '{print $1}')"
     if [[ -n "$native_compiler_digest" ]]; then
@@ -2107,7 +2137,7 @@ fi
 
 set +e
 run_phase core-lowering "${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}" \
-bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
+bb -cp "$compiled:$semantic_read_classpath" -e '
 (require (quote [native.core :as core])
          (quote [native.stages :as stages])
          (quote [native.simd :as simd])
