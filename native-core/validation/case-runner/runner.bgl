@@ -1,0 +1,661 @@
+#lang beagle
+(ns native.case-runner
+  (:require [native.edn :as edn]))
+
+(def max-case-file-bytes Int 16777216)
+
+(defrecord OutputExpectation
+  [mode Keyword
+   value String])
+
+(defrecord FileExpectation
+  [path String
+   max-bytes Int
+   output OutputExpectation])
+
+(defrecord CaseStep
+  [argv (Vec String)
+   stdin String
+   max-bytes Int
+   expected-status Int
+   stdout OutputExpectation
+   stderr OutputExpectation
+   file-text (Vec FileExpectation)])
+
+(defrecord RunnerCase
+  [case-id String
+   steps (Vec CaseStep)])
+
+(defrecord ParsedUnit
+  [next Int
+   error String?])
+
+(defrecord ParsedString
+  [value String
+   next Int
+   error String?])
+
+(defrecord ParsedInt
+  [value Int
+   next Int
+   error String?])
+
+(defrecord ParsedMode
+  [value Keyword
+   next Int
+   error String?])
+
+(defrecord ParsedStrings
+  [values (Vec String)
+   next Int
+   error String?])
+
+(defrecord ParsedOutput
+  [value OutputExpectation
+   next Int
+   error String?])
+
+(defrecord ParsedFile
+  [value FileExpectation
+   next Int
+   error String?])
+
+(defrecord ParsedFiles
+  [values (Vec FileExpectation)
+   next Int
+   error String?])
+
+(defrecord ParsedStep
+  [value CaseStep
+   next Int
+   error String?])
+
+(defrecord ParsedSteps
+  [values (Vec CaseStep)
+   next Int
+   error String?])
+
+(defrecord ParsedCase
+  [value RunnerCase
+   next Int
+   error String?])
+
+(defrecord ParsedCases
+  [values (Vec RunnerCase)
+   next Int
+   error String?])
+
+(defunion CaseFileResult
+  (CaseFileLoaded [cases (Vec RunnerCase)])
+  (CaseFileRejected [message String]))
+
+(def empty-output OutputExpectation
+  (->OutputExpectation :exact ""))
+
+(def empty-file FileExpectation
+  (->FileExpectation "" 0 empty-output))
+
+(def empty-step CaseStep
+  (->CaseStep [] "" 0 0 empty-output empty-output []))
+
+(def empty-case RunnerCase
+  (->RunnerCase "" []))
+
+(defn event-kind [event edn/EdnEvent] Keyword
+  (match event
+    [(EdnMapStart offset) :map-start]
+    [(EdnMapEnd offset) :map-end]
+    [(EdnVectorStart offset) :vector-start]
+    [(EdnVectorEnd offset) :vector-end]
+    [(EdnKeyword offset value) :keyword]
+    [(EdnString offset value) :string]
+    [(EdnInteger offset value) :integer]
+    [(EdnBoolean offset value) :boolean]
+    [(EdnNil offset) :nil]))
+
+(defn event-keyword-value [event edn/EdnEvent] Keyword?
+  (match event
+    [(EdnKeyword offset value) value]
+    [(EdnMapStart offset) nil]
+    [(EdnMapEnd offset) nil]
+    [(EdnVectorStart offset) nil]
+    [(EdnVectorEnd offset) nil]
+    [(EdnString offset value) nil]
+    [(EdnInteger offset value) nil]
+    [(EdnBoolean offset value) nil]
+    [(EdnNil offset) nil]))
+
+(defn event-string-value [event edn/EdnEvent] String?
+  (match event
+    [(EdnString offset value) value]
+    [(EdnMapStart offset) nil]
+    [(EdnMapEnd offset) nil]
+    [(EdnVectorStart offset) nil]
+    [(EdnVectorEnd offset) nil]
+    [(EdnKeyword offset value) nil]
+    [(EdnInteger offset value) nil]
+    [(EdnBoolean offset value) nil]
+    [(EdnNil offset) nil]))
+
+(defn event-int-value [event edn/EdnEvent] Int?
+  (match event
+    [(EdnInteger offset value) value]
+    [(EdnMapStart offset) nil]
+    [(EdnMapEnd offset) nil]
+    [(EdnVectorStart offset) nil]
+    [(EdnVectorEnd offset) nil]
+    [(EdnKeyword offset value) nil]
+    [(EdnString offset value) nil]
+    [(EdnBoolean offset value) nil]
+    [(EdnNil offset) nil]))
+
+(defn expect-kind
+  [events (Vec edn/EdnEvent)
+   index Int
+   expected Keyword
+   label String] ParsedUnit
+  (if (>= index (count events))
+    (->ParsedUnit index (str label ": unexpected end of data"))
+    (let [actual Keyword (event-kind (nth events index))]
+      (if (= actual expected)
+        (->ParsedUnit (inc index) nil)
+        (->ParsedUnit index
+          (str label ": expected " expected ", found " actual))))))
+
+(defn expect-keyword
+  [events (Vec edn/EdnEvent)
+   index Int
+   expected Keyword
+   label String] ParsedUnit
+  (if (>= index (count events))
+    (->ParsedUnit index (str label ": unexpected end of data"))
+    (let [value Keyword? (event-keyword-value (nth events index))]
+      (if (nil? value)
+        (->ParsedUnit index (str label ": expected key " expected))
+        (if (= value expected)
+          (->ParsedUnit (inc index) nil)
+          (->ParsedUnit index
+            (str label ": expected key " expected ", found " value)))))))
+
+(defn parse-string
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedString
+  (if (>= index (count events))
+    (->ParsedString "" index (str label ": unexpected end of data"))
+    (let [value String? (event-string-value (nth events index))]
+      (if (nil? value)
+        (->ParsedString "" index (str label ": expected string"))
+        (->ParsedString value (inc index) nil)))))
+
+(defn parse-int
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedInt
+  (if (>= index (count events))
+    (->ParsedInt 0 index (str label ": unexpected end of data"))
+    (let [value Int? (event-int-value (nth events index))]
+      (if (nil? value)
+        (->ParsedInt 0 index (str label ": expected integer"))
+        (->ParsedInt value (inc index) nil)))))
+
+(defn parse-mode
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedMode
+  (if (>= index (count events))
+    (->ParsedMode :exact index (str label ": unexpected end of data"))
+    (let [event edn/EdnEvent (nth events index)
+          string-value String? (event-string-value event)
+          keyword-value Keyword? (event-keyword-value event)]
+      (cond
+        (some? string-value)
+        (cond
+          (= string-value "exact") (->ParsedMode :exact (inc index) nil)
+          (= string-value "contains")
+          (->ParsedMode :contains (inc index) nil)
+          :else (->ParsedMode :exact index
+                  (str label ": mode must be exact or contains")))
+
+        (some? keyword-value)
+        (if (or (= keyword-value :exact) (= keyword-value :contains))
+          (->ParsedMode keyword-value (inc index) nil)
+          (->ParsedMode :exact index
+            (str label ": mode must be :exact or :contains")))
+
+        :else
+        (->ParsedMode :exact index
+          (str label ": expected string or keyword mode"))))))
+
+(defn parse-string-vector
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedStrings
+  (let [open ParsedUnit (expect-kind events index :vector-start label)
+        open-error String? (parsedunit-error open)]
+    (if (some? open-error)
+      (->ParsedStrings [] index open-error)
+      (loop [cursor Int (parsedunit-next open)
+             values (Vec String) []]
+        (if (>= cursor (count events))
+          (->ParsedStrings values cursor
+            (str label ": unterminated vector"))
+          (if (= (event-kind (nth events cursor)) :vector-end)
+            (->ParsedStrings values (inc cursor) nil)
+            (let [item ParsedString (parse-string events cursor label)
+                  item-error String? (parsedstring-error item)]
+              (if (some? item-error)
+                (->ParsedStrings values cursor item-error)
+                (recur (parsedstring-next item)
+                  (conj values (parsedstring-value item)))))))))))
+
+(defn parse-output
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedOutput
+  (let [open ParsedUnit (expect-kind events index :map-start label)
+        mode-key ParsedUnit (expect-keyword events (parsedunit-next open) :mode label)
+        mode ParsedMode (parse-mode events (parsedunit-next mode-key) label)
+        value-key ParsedUnit (expect-keyword events (parsedmode-next mode) :value label)
+        value ParsedString (parse-string events (parsedunit-next value-key) label)
+        close ParsedUnit (expect-kind events (parsedstring-next value) :map-end label)]
+    (cond
+      (some? (parsedunit-error open))
+      (->ParsedOutput empty-output index (parsedunit-error open))
+
+      (some? (parsedunit-error mode-key))
+      (->ParsedOutput empty-output index (parsedunit-error mode-key))
+
+      (some? (parsedmode-error mode))
+      (->ParsedOutput empty-output index (parsedmode-error mode))
+
+      (some? (parsedunit-error value-key))
+      (->ParsedOutput empty-output index (parsedunit-error value-key))
+
+      (some? (parsedstring-error value))
+      (->ParsedOutput empty-output index (parsedstring-error value))
+
+      (some? (parsedunit-error close))
+      (->ParsedOutput empty-output index (parsedunit-error close))
+
+      :else
+      (->ParsedOutput
+        (->OutputExpectation
+          (parsedmode-value mode)
+          (parsedstring-value value))
+        (parsedunit-next close)
+        nil))))
+
+(defn parse-file
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedFile
+  (let [open ParsedUnit (expect-kind events index :map-start label)
+        path-key ParsedUnit (expect-keyword events (parsedunit-next open) :path label)
+        path ParsedString (parse-string events (parsedunit-next path-key) label)
+        max-key ParsedUnit (expect-keyword events (parsedstring-next path) :max-bytes label)
+        max-bytes ParsedInt (parse-int events (parsedunit-next max-key) label)
+        mode-key ParsedUnit (expect-keyword events (parsedint-next max-bytes) :mode label)
+        mode ParsedMode (parse-mode events (parsedunit-next mode-key) label)
+        value-key ParsedUnit (expect-keyword events (parsedmode-next mode) :value label)
+        value ParsedString (parse-string events (parsedunit-next value-key) label)
+        close ParsedUnit (expect-kind events (parsedstring-next value) :map-end label)]
+    (cond
+      (some? (parsedunit-error open))
+      (->ParsedFile empty-file index (parsedunit-error open))
+      (some? (parsedunit-error path-key))
+      (->ParsedFile empty-file index (parsedunit-error path-key))
+      (some? (parsedstring-error path))
+      (->ParsedFile empty-file index (parsedstring-error path))
+      (some? (parsedunit-error max-key))
+      (->ParsedFile empty-file index (parsedunit-error max-key))
+      (some? (parsedint-error max-bytes))
+      (->ParsedFile empty-file index (parsedint-error max-bytes))
+      (< (parsedint-value max-bytes) 0)
+      (->ParsedFile empty-file index (str label ": max-bytes must be nonnegative"))
+      (some? (parsedunit-error mode-key))
+      (->ParsedFile empty-file index (parsedunit-error mode-key))
+      (some? (parsedmode-error mode))
+      (->ParsedFile empty-file index (parsedmode-error mode))
+      (some? (parsedunit-error value-key))
+      (->ParsedFile empty-file index (parsedunit-error value-key))
+      (some? (parsedstring-error value))
+      (->ParsedFile empty-file index (parsedstring-error value))
+      (some? (parsedunit-error close))
+      (->ParsedFile empty-file index (parsedunit-error close))
+      :else
+      (->ParsedFile
+        (->FileExpectation
+          (parsedstring-value path)
+          (parsedint-value max-bytes)
+          (->OutputExpectation
+            (parsedmode-value mode)
+            (parsedstring-value value)))
+        (parsedunit-next close)
+        nil))))
+
+(defn parse-files
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedFiles
+  (let [open ParsedUnit (expect-kind events index :vector-start label)
+        open-error String? (parsedunit-error open)]
+    (if (some? open-error)
+      (->ParsedFiles [] index open-error)
+      (loop [cursor Int (parsedunit-next open)
+             values (Vec FileExpectation) []]
+        (if (>= cursor (count events))
+          (->ParsedFiles values cursor (str label ": unterminated vector"))
+          (if (= (event-kind (nth events cursor)) :vector-end)
+            (->ParsedFiles values (inc cursor) nil)
+            (let [item ParsedFile (parse-file events cursor label)
+                  item-error String? (parsedfile-error item)]
+              (if (some? item-error)
+                (->ParsedFiles values cursor item-error)
+                (recur (parsedfile-next item)
+                  (conj values (parsedfile-value item)))))))))))
+
+(defn parse-step
+  [events (Vec edn/EdnEvent)
+   index Int
+   label String] ParsedStep
+  (let [open ParsedUnit (expect-kind events index :map-start label)
+        argv-key ParsedUnit (expect-keyword events (parsedunit-next open) :argv label)
+        argv ParsedStrings (parse-string-vector events (parsedunit-next argv-key) label)
+        stdin-key ParsedUnit (expect-keyword events (parsedstrings-next argv) :stdin label)
+        stdin ParsedString (parse-string events (parsedunit-next stdin-key) label)
+        max-key ParsedUnit (expect-keyword events (parsedstring-next stdin) :max-bytes label)
+        max-bytes ParsedInt (parse-int events (parsedunit-next max-key) label)
+        status-key ParsedUnit (expect-keyword events (parsedint-next max-bytes)
+          :expected-status label)
+        status ParsedInt (parse-int events (parsedunit-next status-key) label)
+        stdout-key ParsedUnit (expect-keyword events (parsedint-next status) :stdout label)
+        stdout ParsedOutput (parse-output events (parsedunit-next stdout-key) label)
+        stderr-key ParsedUnit (expect-keyword events (parsedoutput-next stdout) :stderr label)
+        stderr ParsedOutput (parse-output events (parsedunit-next stderr-key) label)
+        files-key ParsedUnit (expect-keyword events (parsedoutput-next stderr) :file-text label)
+        files ParsedFiles (parse-files events (parsedunit-next files-key) label)
+        close ParsedUnit (expect-kind events (parsedfiles-next files) :map-end label)]
+    (cond
+      (some? (parsedunit-error open))
+      (->ParsedStep empty-step index (parsedunit-error open))
+      (some? (parsedunit-error argv-key))
+      (->ParsedStep empty-step index (parsedunit-error argv-key))
+      (some? (parsedstrings-error argv))
+      (->ParsedStep empty-step index (parsedstrings-error argv))
+      (= (count (parsedstrings-values argv)) 0)
+      (->ParsedStep empty-step index (str label ": argv must not be empty"))
+      (some? (parsedunit-error stdin-key))
+      (->ParsedStep empty-step index (parsedunit-error stdin-key))
+      (some? (parsedstring-error stdin))
+      (->ParsedStep empty-step index (parsedstring-error stdin))
+      (some? (parsedunit-error max-key))
+      (->ParsedStep empty-step index (parsedunit-error max-key))
+      (some? (parsedint-error max-bytes))
+      (->ParsedStep empty-step index (parsedint-error max-bytes))
+      (< (parsedint-value max-bytes) 0)
+      (->ParsedStep empty-step index (str label ": max-bytes must be nonnegative"))
+      (some? (parsedunit-error status-key))
+      (->ParsedStep empty-step index (parsedunit-error status-key))
+      (some? (parsedint-error status))
+      (->ParsedStep empty-step index (parsedint-error status))
+      (some? (parsedunit-error stdout-key))
+      (->ParsedStep empty-step index (parsedunit-error stdout-key))
+      (some? (parsedoutput-error stdout))
+      (->ParsedStep empty-step index (parsedoutput-error stdout))
+      (some? (parsedunit-error stderr-key))
+      (->ParsedStep empty-step index (parsedunit-error stderr-key))
+      (some? (parsedoutput-error stderr))
+      (->ParsedStep empty-step index (parsedoutput-error stderr))
+      (some? (parsedunit-error files-key))
+      (->ParsedStep empty-step index (parsedunit-error files-key))
+      (some? (parsedfiles-error files))
+      (->ParsedStep empty-step index (parsedfiles-error files))
+      (some? (parsedunit-error close))
+      (->ParsedStep empty-step index (parsedunit-error close))
+      :else
+      (->ParsedStep
+        (->CaseStep
+          (parsedstrings-values argv)
+          (parsedstring-value stdin)
+          (parsedint-value max-bytes)
+          (parsedint-value status)
+          (parsedoutput-value stdout)
+          (parsedoutput-value stderr)
+          (parsedfiles-values files))
+        (parsedunit-next close)
+        nil))))
+
+(defn parse-steps
+  [events (Vec edn/EdnEvent)
+   index Int
+   case-id String] ParsedSteps
+  (let [label String (str "case " case-id " steps")
+        open ParsedUnit (expect-kind events index :vector-start label)
+        open-error String? (parsedunit-error open)]
+    (if (some? open-error)
+      (->ParsedSteps [] index open-error)
+      (loop [cursor Int (parsedunit-next open)
+             step-index Int 0
+             values (Vec CaseStep) []]
+        (if (>= cursor (count events))
+          (->ParsedSteps values cursor (str label ": unterminated vector"))
+          (if (= (event-kind (nth events cursor)) :vector-end)
+            (->ParsedSteps values (inc cursor) nil)
+            (let [step-label String (str "case " case-id " step " step-index)
+                  item ParsedStep (parse-step events cursor step-label)
+                  item-error String? (parsedstep-error item)]
+              (if (some? item-error)
+                (->ParsedSteps values cursor item-error)
+                (recur (parsedstep-next item) (inc step-index)
+                  (conj values (parsedstep-value item)))))))))))
+
+(defn parse-case
+  [events (Vec edn/EdnEvent)
+   index Int] ParsedCase
+  (let [open ParsedUnit (expect-kind events index :map-start "case")
+        id-key ParsedUnit (expect-keyword events (parsedunit-next open) :case-id "case")
+        id ParsedString (parse-string events (parsedunit-next id-key) "case-id")
+        steps-key ParsedUnit (expect-keyword events (parsedstring-next id) :steps "case")
+        steps ParsedSteps (parse-steps events (parsedunit-next steps-key) (parsedstring-value id))
+        close ParsedUnit (expect-kind events (parsedsteps-next steps) :map-end "case")]
+    (cond
+      (some? (parsedunit-error open))
+      (->ParsedCase empty-case index (parsedunit-error open))
+      (some? (parsedunit-error id-key))
+      (->ParsedCase empty-case index (parsedunit-error id-key))
+      (some? (parsedstring-error id))
+      (->ParsedCase empty-case index (parsedstring-error id))
+      (= (parsedstring-value id) "")
+      (->ParsedCase empty-case index "case-id must not be empty")
+      (some? (parsedunit-error steps-key))
+      (->ParsedCase empty-case index (parsedunit-error steps-key))
+      (some? (parsedsteps-error steps))
+      (->ParsedCase empty-case index (parsedsteps-error steps))
+      (some? (parsedunit-error close))
+      (->ParsedCase empty-case index (parsedunit-error close))
+      :else
+      (->ParsedCase
+        (->RunnerCase
+          (parsedstring-value id)
+          (parsedsteps-values steps))
+        (parsedunit-next close)
+        nil))))
+
+(defn parse-cases [events (Vec edn/EdnEvent)] ParsedCases
+  (let [open ParsedUnit (expect-kind events 0 :vector-start "case file")
+        open-error String? (parsedunit-error open)]
+    (if (some? open-error)
+      (->ParsedCases [] 0 open-error)
+      (loop [cursor Int (parsedunit-next open)
+             values (Vec RunnerCase) []]
+        (if (>= cursor (count events))
+          (->ParsedCases values cursor "case file: unterminated vector")
+          (if (= (event-kind (nth events cursor)) :vector-end)
+            (let [next Int (inc cursor)]
+              (if (= next (count events))
+                (->ParsedCases values next nil)
+                (->ParsedCases values next
+                  "case file: unexpected data after case vector")))
+            (let [item ParsedCase (parse-case events cursor)
+                  item-error String? (parsedcase-error item)]
+              (if (some? item-error)
+                (->ParsedCases values cursor item-error)
+                (recur (parsedcase-next item)
+                  (conj values (parsedcase-value item)))))))))))
+
+(defn load-case-file [path String] CaseFileResult
+  (match (host.fs/read-text-bounded path max-case-file-bytes)
+    [(host.fs/ReadTextBoundedError errno)
+     (->CaseFileRejected (str path ": read failed with errno " errno))]
+    [(host.fs/ReadTextBoundedOk text)
+     (match (edn/decode text)
+       [(EdnDecodeError offset message)
+        (->CaseFileRejected
+          (str path ": EDN decode error at byte " offset ": " message))]
+       [(EdnDecoded events)
+        (let [parsed ParsedCases (parse-cases events)
+              parse-error String? (parsedcases-error parsed)]
+          (if (some? parse-error)
+            (->CaseFileRejected (str path ": " parse-error))
+            (->CaseFileLoaded (parsedcases-values parsed))))])]))
+
+(defn ordered-contains?
+  [actual String
+   pattern String] Bool
+  (let [separator Int? (str/index-of pattern ".*")]
+    (if (nil? separator)
+      (str/includes? actual pattern)
+      (let [prefix String (subs pattern 0 separator)
+            prefix-at Int? (str/index-of actual prefix)]
+        (if (nil? prefix-at)
+          false
+          (ordered-contains?
+            (subs actual (+ prefix-at (count prefix)) (count actual))
+            (subs pattern (+ separator 2) (count pattern))))))))
+
+(defn expectation-matches?
+  [expectation OutputExpectation
+   actual String] Bool
+  (let [mode Keyword (outputexpectation-mode expectation)
+        value String (outputexpectation-value expectation)]
+    (if (= mode :exact)
+      (= actual value)
+      (ordered-contains? actual value))))
+
+(defn report-mismatch
+  [case-id String
+   step-index Int
+   subject String
+   expected String
+   actual String] Bool
+  (do
+    (host.stderr/write-line
+      (str "case-runner: FAIL case=" case-id
+        " step=" step-index " subject=" subject))
+    (host.stderr/write-line (str "case-runner: expected=" expected))
+    (host.stderr/write-line (str "case-runner: actual=" actual))
+    false))
+
+(defn check-output
+  [case-id String
+   step-index Int
+   subject String
+   expectation OutputExpectation
+   actual String] Bool
+  (if (expectation-matches? expectation actual)
+    true
+    (report-mismatch case-id step-index subject
+      (str (outputexpectation-mode expectation) ":"
+        (outputexpectation-value expectation))
+      actual)))
+
+(defn check-file
+  [case-id String
+   step-index Int
+   expectation FileExpectation] Bool
+  (let [path String (fileexpectation-path expectation)]
+    (match (host.fs/read-text-bounded path
+             (fileexpectation-max-bytes expectation))
+      [(host.fs/ReadTextBoundedError errno)
+       (report-mismatch case-id step-index (str "file " path)
+         "readable bounded text" (str "errno " errno))]
+      [(host.fs/ReadTextBoundedOk text)
+       (check-output case-id step-index (str "file " path)
+         (fileexpectation-output expectation) text)])))
+
+(defn check-files
+  [case-id String
+   step-index Int
+   expectations (Vec FileExpectation)] Bool
+  (loop [index Int 0]
+    (if (>= index (count expectations))
+      true
+      (if (check-file case-id step-index (nth expectations index))
+        (recur (inc index))
+        false))))
+
+(defn run-step
+  [case-id String
+   step-index Int
+   step CaseStep] Bool
+  (match (host.process/run-capture
+           (casestep-argv step)
+           (casestep-stdin step)
+           (casestep-max-bytes step))
+    [(host.process/CaptureError errno)
+     (report-mismatch case-id step-index "process capture"
+       "successful capture" (str "errno " errno))]
+    [(host.process/CaptureOk status stdout stderr)
+     (if (not= status (casestep-expected-status step))
+       (report-mismatch case-id step-index "status"
+         (str (casestep-expected-status step)) (str status))
+       (if (not (check-output case-id step-index "stdout"
+                  (casestep-stdout step) stdout))
+         false
+         (if (not (check-output case-id step-index "stderr"
+                    (casestep-stderr step) stderr))
+           false
+           (check-files case-id step-index (casestep-file-text step)))))]))
+
+(defn run-case [case RunnerCase] Bool
+  (let [case-id String (runnercase-case-id case)
+        steps (Vec CaseStep) (runnercase-steps case)]
+    (loop [step-index Int 0]
+      (if (>= step-index (count steps))
+        (do
+          (println (str "case-runner: PASS " case-id))
+          true)
+        (if (run-step case-id step-index (nth steps step-index))
+          (recur (inc step-index))
+          false)))))
+
+(defn run-cases [cases (Vec RunnerCase)] Bool
+  (loop [index Int 0]
+    (if (>= index (count cases))
+      true
+      (if (run-case (nth cases index))
+        (recur (inc index))
+        false))))
+
+(defn run-case-files [paths (Vec String)] Bool
+  (loop [index Int 0]
+    (if (>= index (count paths))
+      true
+      (let [path String (nth paths index)]
+        (match (load-case-file path)
+          [(CaseFileRejected message)
+           (do
+             (host.stderr/write-line (str "case-runner: " message))
+             false)]
+          [(CaseFileLoaded cases)
+           (if (run-cases cases)
+             (recur (inc index))
+             false)])))))
+
+(defn -main [args (Vec String)] Int
+  (if (= (count args) 0)
+    (do
+      (host.stderr/write-line "usage: case-runner CASE.edn...")
+      64)
+    (if (run-case-files args) 0 1)))

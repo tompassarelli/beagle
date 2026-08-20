@@ -22,7 +22,7 @@ self="$here/$(basename "${BASH_SOURCE[0]}")"
 driver_names() {
     local d
     for d in "$validation"/*/; do
-        if [[ -f "$d/drive.sh" || -f "$d/run.sh" ]]; then
+        if [[ -f "$d/drive.sh" || -f "$d/run.sh" || -f "$d/runner.bgl" ]]; then
             basename "$d"
         fi
     done | LC_ALL=C sort
@@ -30,10 +30,13 @@ driver_names() {
 
 run_one() {
     local name="$1" dir="$validation/$1" driver var work dest
+    local -a case_files
     if [[ -f "$dir/drive.sh" ]]; then
         driver="$dir/drive.sh"
     elif [[ -f "$dir/run.sh" ]]; then
         driver="$dir/run.sh"
+    elif [[ -f "$dir/runner.bgl" ]]; then
+        driver="$dir/runner.bgl"
     else
         echo "driver_sweep.sh: no driver in $dir" >&2
         return 2
@@ -42,6 +45,25 @@ run_one() {
     work="$(mktemp -d "${TMPDIR:-/tmp}/sweep-$name.XXXXXX")"
     # shellcheck disable=SC2064
     trap "rm -rf '${work:?}'" RETURN
+    if [[ "$driver" == *.bgl ]]; then
+        mapfile -d '' -t case_files < <(
+            find "$dir/cases" -maxdepth 1 -type f -name '*.edn' -print0 |
+                LC_ALL=C sort -z
+        )
+        [[ ${#case_files[@]} -gt 0 ]] || {
+            echo "driver_sweep.sh: no case data in $dir/cases" >&2
+            return 2
+        }
+        "$repo/bin/beagle" native-exe \
+            --module-root "native-core/src=$repo/native-core/src" \
+            --out "$work/case-runner" \
+            --artifacts "$work/artifacts" \
+            --entry native.case-runner/-main \
+            "$driver" || return $?
+        (cd "$repo" && "$work/case-runner" "${case_files[@]}")
+        return $?
+    fi
+
     while IFS= read -r var; do
         dest="$work/${var,,}"
         mkdir -p "$dest"

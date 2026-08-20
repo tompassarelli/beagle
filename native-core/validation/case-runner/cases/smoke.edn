@@ -1,0 +1,8 @@
+[{:case-id "case-runner-smoke"
+  :steps [{:argv ["printf" "case-runner-smoke\n"]
+           :stdin ""
+           :max-bytes 4096
+           :expected-status 0
+           :stdout {:mode "exact" :value "case-runner-smoke\n"}
+           :stderr {:mode "exact" :value ""}
+           :file-text []}]}]
