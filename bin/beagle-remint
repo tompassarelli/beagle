@@ -38,6 +38,7 @@ cd "$root"
 SRC=self-host/src/selfhost
 SEED=self-host/seed/selfhost
 BUILD=.lab/remint            # scratch, gitignored, re-mintable
+RECEIPT=$SEED/.remint-receipt
 
 ORACLE=0; PROMOTE=0
 for arg in "$@"; do
@@ -50,9 +51,6 @@ done
 
 command -v bb >/dev/null || { echo "beagle-remint: babashka (bb) not on PATH" >&2; exit 1; }
 
-rm -rf "$BUILD"
-mkdir -p "$BUILD/gen1/selfhost"
-
 # Module set = every .bclj source. ns selfhost.emit-clj -> file emit_clj.clj.
 MODULES=()
 BUNDLE_ARGS=()
@@ -61,6 +59,53 @@ for f in "$SRC"/*.bclj; do
     BUNDLE_ARGS+=(--source "$f")
 done
 clj_name() { echo "$1" | tr '-' '_'; }
+
+digest_lines() {
+    sha256sum | cut -d' ' -f1
+}
+
+content_lines() { # content_lines <kind> <root> <files...>
+    local kind="$1" base="$2" f relative digest
+    shift 2
+    for f in "$@"; do
+        relative="${f#"$base"/}"
+        digest="$(sha256sum "$f" | cut -d' ' -f1)"
+        printf '%s\t%s\t%s\n' "$kind" "$relative" "$digest"
+    done
+}
+
+render_receipt() { # render_receipt <seed-selfhost-dir>
+    local seed_dir="$1" source_facts seed_facts source_digest seed_digest runtime compiler_digest
+    local source_files=("$SRC"/*.bclj "$SRC/rt.clj")
+    local seed_files=("$seed_dir"/*.clj)
+
+    source_facts="$(content_lines source "$SRC" "${source_files[@]}")"
+    seed_facts="$(content_lines output "$seed_dir" "${seed_files[@]}")"
+    source_digest="$(printf '%s\n' "$source_facts" | digest_lines)"
+    seed_digest="$(printf '%s\n' "$seed_facts" | digest_lines)"
+    runtime="$(bb --version 2>/dev/null | tr -d '\r\n')"
+    compiler_digest="$({ printf 'runtime\t%s\n' "$runtime"; printf '%s\n' "$seed_facts"; } | digest_lines)"
+
+    printf '%s\n' 'beagle-remint-fixpoint-v1'
+    printf 'runtime\t%s\n' "$runtime"
+    printf 'source-set-sha256\t%s\n' "$source_digest"
+    printf 'seed-set-sha256\t%s\n' "$seed_digest"
+    printf 'compiler-closure-sha256\t%s\n' "$compiler_digest"
+    printf '%s\n' "$source_facts" "$seed_facts"
+}
+
+# The tracked receipt is a content proof, not an mtime shortcut. It names every
+# compiler source and seed output by digest, plus the exact compiler runtime.
+# Matching it proves the current checkout is already the promoted fixpoint.
+if [ "$ORACLE" -eq 0 ] && [ -f "$RECEIPT" ] &&
+   cmp -s "$RECEIPT" <(render_receipt "$SEED"); then
+    echo "beagle-remint: proven fixpoint — source, compiler closure, and seed are unchanged"
+    [ "$PROMOTE" -eq 1 ] && echo "beagle-remint: seed already promoted (no file changed)"
+    exit 0
+fi
+
+rm -rf "$BUILD"
+mkdir -p "$BUILD/gen1/selfhost"
 
 PASS=0; FAIL=0
 ok()  { echo "  PASS: $1"; PASS=$((PASS+1)); }
@@ -181,6 +226,9 @@ if [ "$PROMOTE" -eq 1 ]; then
         fi
         cp "$f" "$SEED/$base"
     done
+    receipt_tmp="$BUILD/.remint-receipt"
+    render_receipt "$SEED" > "$receipt_tmp"
+    mv "$receipt_tmp" "$RECEIPT"
     [ "$changed" -eq 0 ] && echo "  promote: seed already at fixpoint (no file changed)"
     echo "beagle-remint: seed promoted — commit self-host/seed/ to bless it"
 fi
