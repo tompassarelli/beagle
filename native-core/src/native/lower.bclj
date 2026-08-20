@@ -3187,6 +3187,10 @@
    (value core/NativeId)
    (effective-type (U core/NativeId Nil))])
 
+(defrecord GlobalPlanV0
+  [(dependencies (Map String (Vec String)))
+   (ordered-bindings (Vec GlobalBindingV0))])
+
 (defn source-globals [(index SourceIndexV0)] (Vec GlobalBindingV0)
   (let [forms (Vec core/NativeId) (index-form-ids index "def")]
     (loop [position Int 0 globals (Vec GlobalBindingV0) []]
@@ -3571,6 +3575,7 @@
    (signatures (Vec TypedFunctionV0))
    (signature-sources (Vec core/NativeId))
    (globals (Vec GlobalBindingV0))
+   (global-plan GlobalPlanV0)
    (closures (Vec ClosureSpecV0))
    (whole-input-limit Int)])
 
@@ -4853,29 +4858,76 @@
           (recur (+ position 1)
             (if (or (= "" key) (string-member? keys key)) keys (conj keys key))))))))
 
-(defn close-global-keys
+(defn global-dependency-index
   [(index SourceIndexV0)
-   (globals (Vec GlobalBindingV0))
+   (globals (Vec GlobalBindingV0))]
+  (Map String (Vec String))
+  (loop [position Int 0
+         dependencies (Map String (Vec String)) {}]
+    (if (>= position (count globals))
+      dependencies
+      (let [global GlobalBindingV0 (nth globals position)]
+        (recur (+ position 1)
+          (assoc dependencies (global-key global)
+            (source-ref-keys index (globalbindingv0-module-name global)
+              (globalbindingv0-value global) []
+              (+ 1 (index-facts index)))))))))
+
+(defn global-dependencies-at
+  [(dependencies (Map String (Vec String)))
+   (key String)]
+  (Vec String)
+  (let [found (U (Vec String) Nil) (get dependencies key)]
+    (if (nil? found) [] found)))
+
+(defrecord GlobalClosureV0
+  [(keys (Vec String))
+   (seen (Map String Bool))])
+
+(defn seed-global-closure [(seeds (Vec String))] GlobalClosureV0
+  (loop [position Int 0
+         keys (Vec String) []
+         seen (Map String Bool) {}]
+    (if (>= position (count seeds))
+      (->GlobalClosureV0 keys seen)
+      (let [key String (nth seeds position)]
+        (recur (+ position 1)
+          (if (= true (get seen key)) keys (conj keys key))
+          (assoc seen key true))))))
+
+(defn close-global-dependencies
+  [(dependencies (Map String (Vec String)))
+   (seeds (Vec String))]
+  GlobalClosureV0
+  (let [seeded GlobalClosureV0 (seed-global-closure seeds)]
+    (loop [position Int 0
+           keys (Vec String) (globalclosurev0-keys seeded)
+           seen (Map String Bool) (globalclosurev0-seen seeded)]
+      (if (>= position (count keys))
+        (->GlobalClosureV0 keys seen)
+        (let [additions (Vec String)
+              (global-dependencies-at dependencies (nth keys position))
+              expanded GlobalClosureV0
+              (loop [addition-position Int 0
+                     current-keys (Vec String) keys
+                     current-seen (Map String Bool) seen]
+                (if (>= addition-position (count additions))
+                  (->GlobalClosureV0 current-keys current-seen)
+                  (let [addition String (nth additions addition-position)]
+                    (recur (+ addition-position 1)
+                      (if (= true (get current-seen addition))
+                        current-keys
+                        (conj current-keys addition))
+                      (assoc current-seen addition true)))))]
+          (recur (+ position 1)
+            (globalclosurev0-keys expanded)
+            (globalclosurev0-seen expanded)))))))
+
+(defn close-global-keys
+  [(dependencies (Map String (Vec String)))
    (seeds (Vec String))]
   (Vec String)
-  (loop [round Int 0 keys (Vec String) seeds]
-    (if (>= round (count globals))
-      keys
-      (let [expanded (Vec String)
-            (loop [position Int 0 current (Vec String) keys]
-              (if (>= position (count globals))
-                current
-                (let [global GlobalBindingV0 (nth globals position)]
-                  (recur (+ position 1)
-                    (if (string-member? current (global-key global))
-                      (append-unique-strings current
-                        (source-ref-keys index (globalbindingv0-module-name global)
-                          (globalbindingv0-value global) []
-                          (+ 1 (index-facts index))))
-                      current)))))]
-        (if (= (count expanded) (count keys))
-          keys
-          (recur (+ round 1) expanded))))))
+  (globalclosurev0-keys (close-global-dependencies dependencies seeds)))
 
 (defn global-key-in? [(globals (Vec GlobalBindingV0)) (key String)] Bool
   (loop [position Int 0]
@@ -4886,26 +4938,28 @@
         (recur (+ position 1))))))
 
 (defn global-dependency-pending?
-  [(index SourceIndexV0)
+  [(dependencies (Map String (Vec String)))
    (remaining (Vec GlobalBindingV0))
    (global GlobalBindingV0)]
   Bool
-  (let [dependencies (Vec String)
-        (source-ref-keys index (globalbindingv0-module-name global)
-          (globalbindingv0-value global) [] (+ 1 (index-facts index)))]
+  (let [direct-dependencies (Vec String)
+        (global-dependencies-at dependencies (global-key global))]
     (loop [position Int 0]
-      (if (>= position (count dependencies))
+      (if (>= position (count direct-dependencies))
         false
-        (if (global-key-in? remaining (nth dependencies position))
+        (if (global-key-in? remaining (nth direct-dependencies position))
           true
           (recur (+ position 1)))))))
 
 (defn first-ready-global-position
-  [(index SourceIndexV0) (remaining (Vec GlobalBindingV0))] Int
+  [(dependencies (Map String (Vec String)))
+   (remaining (Vec GlobalBindingV0))]
+  Int
   (loop [position Int 0]
     (cond
       (>= position (count remaining)) -1
-      (global-dependency-pending? index remaining (nth remaining position))
+      (global-dependency-pending? dependencies remaining
+        (nth remaining position))
       (recur (+ position 1))
       :else position)))
 
@@ -4922,16 +4976,31 @@
 ;; Source order is not initialization order. Native v0 hoists immutable globals
 ;; into each function entry, so every acyclic dependency must be bound first.
 (defn order-global-bindings
-  [(index SourceIndexV0) (globals (Vec GlobalBindingV0))] (Vec GlobalBindingV0)
+  [(dependencies (Map String (Vec String)))
+   (globals (Vec GlobalBindingV0))]
+  (Vec GlobalBindingV0)
   (loop [remaining (Vec GlobalBindingV0) globals
          ordered (Vec GlobalBindingV0) []]
     (if (= 0 (count remaining))
       ordered
-      (let [ready Int (first-ready-global-position index remaining)]
+      (let [ready Int
+            (first-ready-global-position dependencies remaining)]
         (if (< ready 0)
           (vec (concat ordered remaining))
           (recur (remove-global-position remaining ready)
             (conj ordered (nth remaining ready))))))))
+
+(defn prepare-global-plan
+  [(index SourceIndexV0)
+   (globals (Vec GlobalBindingV0))]
+  GlobalPlanV0
+  ;; Every body reads the same frozen global graph. Extracting initializer refs
+  ;; or peeling initialization order after this prelude would repeat global
+  ;; source work once per function body.
+  (let [dependencies (Map String (Vec String))
+        (global-dependency-index index globals)]
+    (->GlobalPlanV0 dependencies
+      (order-global-bindings dependencies globals))))
 
 (defn needed-globals
   [(env BodyEnvV0)
@@ -4939,21 +5008,21 @@
    (bound (Vec String))]
   (Vec GlobalBindingV0)
   (let [index SourceIndexV0 (bodyenvv0-index env)
-        globals (Vec GlobalBindingV0) (bodyenvv0-globals env)
-        keys (Vec String)
-        (close-global-keys index globals
+        plan GlobalPlanV0 (bodyenvv0-global-plan env)
+        globals (Vec GlobalBindingV0) (globalplanv0-ordered-bindings plan)
+        closure GlobalClosureV0
+        (close-global-dependencies (globalplanv0-dependencies plan)
           (source-ref-keys index (source-module-name index body) body bound
-            (+ 1 (index-facts index))))]
-    (let [selected (Vec GlobalBindingV0)
-          (loop [position Int 0 found (Vec GlobalBindingV0) []]
-            (if (>= position (count globals))
-              found
-              (let [global GlobalBindingV0 (nth globals position)]
-                (recur (+ position 1)
-                  (if (string-member? keys (global-key global))
-                    (conj found global)
-                    found)))))]
-      (order-global-bindings index selected))))
+            (+ 1 (index-facts index))))
+        selected-keys (Map String Bool) (globalclosurev0-seen closure)]
+    (loop [position Int 0 selected (Vec GlobalBindingV0) []]
+      (if (>= position (count globals))
+        selected
+        (let [global GlobalBindingV0 (nth globals position)]
+          (recur (+ position 1)
+            (if (= true (get selected-keys (global-key global)))
+              (conj selected global)
+              selected)))))))
 
 (defn source-ref-type-source
   [(index SourceIndexV0)
@@ -22641,6 +22710,7 @@
         record-keys (Vec String) (sourceindexv0-record-keys index)
         record-resolutions (Vec RecordResolutionV0) (resolve-records index)
         globals (Vec GlobalBindingV0) (source-globals index)
+        global-plan GlobalPlanV0 (prepare-global-plan index globals)
         top-function-sources (Vec core/NativeId)
         (index-form-ids index "defn")
         top-signature-resolutions (Vec FunctionResolutionV0)
@@ -22748,7 +22818,8 @@
         signatures (Vec TypedFunctionV0) (collect-functions signature-resolutions)]
     (->TypingPreludeV0
       (->BodyEnvV0 index process-source-types signatures function-sources
-        globals closures (whole-input-limit-from-configuration configuration))
+        globals global-plan closures
+        (whole-input-limit-from-configuration configuration))
       record-resolutions signature-resolutions record-keys source-digest)))
 
 (defn lower-typed-stage
@@ -27218,6 +27289,57 @@
 (defn fixture-marker-id [(value String)] core/NativeId
   (fixture-id "marker" value))
 
+(defn global-plan-fixture-binding [(name String)] GlobalBindingV0
+  (->GlobalBindingV0 "native.lower.global-plan-fixture" name
+    (fixture-marker-id (str "global-" name)) nil))
+
+(def global-plan-fixture-globals (Vec GlobalBindingV0)
+  [(global-plan-fixture-binding "root")
+   (global-plan-fixture-binding "independent")
+   (global-plan-fixture-binding "middle")
+   (global-plan-fixture-binding "leaf")
+   (global-plan-fixture-binding "cycle-a")
+   (global-plan-fixture-binding "cycle-b")])
+
+(def global-plan-fixture-dependencies (Map String (Vec String))
+  {"native.lower.global-plan-fixture/root"
+   ["native.lower.global-plan-fixture/middle"]
+   "native.lower.global-plan-fixture/independent" []
+   "native.lower.global-plan-fixture/middle"
+   ["native.lower.global-plan-fixture/leaf"]
+   "native.lower.global-plan-fixture/leaf" []
+   "native.lower.global-plan-fixture/cycle-a"
+   ["native.lower.global-plan-fixture/cycle-b"]
+   "native.lower.global-plan-fixture/cycle-b"
+   ["native.lower.global-plan-fixture/cycle-a"]})
+
+(defn global-binding-keys
+  [(globals (Vec GlobalBindingV0))]
+  (Vec String)
+  (mapv (fn [global GlobalBindingV0] String (global-key global)) globals))
+
+(def global-plan-fixture-passes? Bool
+  (let [ordered (Vec GlobalBindingV0)
+        (order-global-bindings global-plan-fixture-dependencies
+          global-plan-fixture-globals)]
+    (and
+      (= ["native.lower.global-plan-fixture/independent"
+          "native.lower.global-plan-fixture/leaf"
+          "native.lower.global-plan-fixture/middle"
+          "native.lower.global-plan-fixture/root"
+          "native.lower.global-plan-fixture/cycle-a"
+          "native.lower.global-plan-fixture/cycle-b"]
+        (global-binding-keys ordered))
+      (= ["native.lower.global-plan-fixture/root"
+          "native.lower.global-plan-fixture/middle"
+          "native.lower.global-plan-fixture/leaf"]
+        (close-global-keys global-plan-fixture-dependencies
+          ["native.lower.global-plan-fixture/root"]))
+      (= ["native.lower.global-plan-fixture/cycle-a"
+          "native.lower.global-plan-fixture/cycle-b"]
+        (close-global-keys global-plan-fixture-dependencies
+          ["native.lower.global-plan-fixture/cycle-a"])))))
+
 (defn fixture-text-node [(value String)] stages/TermNodeV0
   (stages/->TermNodeV0 (fixture-text-id value) (stages/->TextTermV0 value)))
 
@@ -27335,7 +27457,8 @@
 
 (def empty-context-env BodyEnvV0
   (->BodyEnvV0 empty-context-index empty-context-types
-    [empty-context-signature] [] [] [] WHOLE-INPUT-DEFAULT-LIMIT))
+    [empty-context-signature] [] [] (->GlobalPlanV0 {} []) []
+    WHOLE-INPUT-DEFAULT-LIMIT))
 
 (def empty-context-owner core/NativeId
   (empty-context-id "owner"))

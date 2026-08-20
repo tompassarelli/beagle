@@ -55,13 +55,18 @@ run_corpus() {
   timeout --foreground 120s bb -cp "$work/out" -e "
 (require 'native.lowering-worklist-validation-corpus)
 (def corpus-ns (find-ns 'native.lowering-worklist-validation-corpus))
+(def lower-ns (find-ns 'native.lower))
 (def run ((deref (ns-resolve corpus-ns 'run-worklist-gate))))
 (spit \"$destination/metrics.txt\"
-  ((deref (ns-resolve corpus-ns 'gate-metrics)) run))
+  (str ((deref (ns-resolve corpus-ns 'gate-metrics)) run)
+    \"global-plan-fixture-passes \"
+    (deref (ns-resolve lower-ns 'global-plan-fixture-passes?)) \"\\n\"))
 (spit \"$destination/reference.bin\" (get run :reference-artifacts))
 (spit \"$destination/optimized.bin\" (get run :optimized-artifacts))
 (when-not ((deref (ns-resolve corpus-ns 'gate-passes?)) run)
   (throw (ex-info \"lowering worklist corpus failed\" {})))
+(when-not (deref (ns-resolve lower-ns 'global-plan-fixture-passes?))
+  (throw (ex-info \"global dependency plan fixture failed\" {})))
 "
 }
 
@@ -88,6 +93,7 @@ grep -Fxq "effect-closure-correct true" "$report"
 grep -Fxq "mixed-closure-correct true" "$report"
 grep -Fxq "bounds-hold true" "$report"
 grep -Fxq "gate-passes true" "$report"
+grep -Fxq "global-plan-fixture-passes true" "$report"
 
 readiness_visits="$(awk '$1 == "readiness-edge-visits" { print $2 }' "$report")"
 effect_visits="$(awk '$1 == "effect-edge-visits" { print $2 }' "$report")"
