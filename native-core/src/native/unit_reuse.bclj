@@ -10,189 +10,210 @@
 
 
 (defrecord ProfileIdentityV1
-  [(source-profile-id String)
-   (profile-schema-version Int)
-   (semantic-environment-id String)
-   (target-abi-profile String)
-   (encoding String)
-   (digest String)])
+  [source-profile-id String
+   profile-schema-version Int
+   semantic-environment-id String
+   target-abi-profile String
+   encoding String
+   digest String])
 
 (defrecord SemanticEvaluationOrderV1
-  [(operator-order String)
-   (argument-order String)
-   (element-traversal-order String)
-   (callback-invocation-order String)])
+  [operator-order String
+   argument-order String
+   element-traversal-order String
+   callback-invocation-order String])
 
 (defrecord SemanticStrictnessV1
-  [(input-demand String)
-   (element-demand String)
-   (result-demand String)
-   (realization-boundary String)])
+  [input-demand String
+   element-demand String
+   result-demand String
+   realization-boundary String])
 
 (defrecord SemanticAllocationBehaviorV1
-  [(result-representation String)
-   (allocation-destination String)
-   (freshness String)
-   (aliasing String)
-   (allocation-bound String)])
+  [result-representation String
+   allocation-destination String
+   freshness String
+   aliasing String
+   allocation-bound String])
 
 (defrecord SemanticValueIdentityV1
-  [(identity-bearing Bool)
-   (equality-rule String)
-   (hashing-rule String)
-   (identity-preservation String)])
+  [identity-bearing Bool
+   equality-rule String
+   hashing-rule String
+   identity-preservation String])
 
 (defrecord SemanticMutationPersistenceV1
-  [(input-mutation String)
-   (result-mutability String)
-   (persistence-rule String)
-   (update-visibility String)])
+  [input-mutation String
+   result-mutability String
+   persistence-rule String
+   update-visibility String])
 
 (defrecord SemanticEffectsV1
-  [(effect-set (Vec String))
-   (effect-order String)
-   (required-capabilities (Vec String))
-   (atomicity String)])
+  [effect-set (Vec String)
+   effect-order String
+   required-capabilities (Vec String)
+   atomicity String])
 
 (defrecord SemanticFailureBehaviorV1
-  [(static-rejections String)
-   (runtime-failure-mode String)
-   (failure-type String)
-   (partial-result-rule String)])
+  [static-rejections String
+   runtime-failure-mode String
+   failure-type String
+   partial-result-rule String])
 
 (defrecord SemanticOwnershipLifetimeV1
-  [(input-ownership String)
-   (result-ownership String)
-   (borrow-rule String)
-   (escape-rule String)
-   (lifetime-region String)])
+  [input-ownership String
+   result-ownership String
+   borrow-rule String
+   escape-rule String
+   lifetime-region String])
 
 (defrecord SemanticProfileAvailabilityV1
-  [(availability String) (required-profile-features (Vec String))])
+  [availability String
+   required-profile-features (Vec String)])
 
 (defrecord SemanticPortabilityConditionsV1
-  [(compatible-profile-ids (Vec String))
-   (required-obligations (Vec String))
-   (discharge-evidence-kinds (Vec String))
-   (portability-diagnostic-id String)])
+  [compatible-profile-ids (Vec String)
+   required-obligations (Vec String)
+   discharge-evidence-kinds (Vec String)
+   portability-diagnostic-id String])
 
 (defrecord SemanticComplexityV1
-  [(time-class String) (space-class String) (order-sensitivity String)])
+  [time-class String
+   space-class String
+   order-sensitivity String])
 
 (defrecord SemanticFormContractV1
-  [(contract-id String)
-   (contract-schema-id String)
-   (form-id String)
-   (profile-identity ProfileIdentityV1)
-   (contract-version Int)
-   (classification String)
-   (evaluation-order SemanticEvaluationOrderV1)
-   (strictness SemanticStrictnessV1)
-   (allocation-behavior SemanticAllocationBehaviorV1)
-   (value-identity SemanticValueIdentityV1)
-   (mutation-and-persistence SemanticMutationPersistenceV1)
-   (effects SemanticEffectsV1)
-   (failure-behavior SemanticFailureBehaviorV1)
-   (ownership-and-lifetime SemanticOwnershipLifetimeV1)
-   (profile-availability SemanticProfileAvailabilityV1)
-   (portability-conditions SemanticPortabilityConditionsV1)
-   (contractual-complexity SemanticComplexityV1)
-   (decision-evidence-ids (Vec String))
-   (encoding String)])
+  [contract-id String
+   contract-schema-id String
+   form-id String
+   profile-identity ProfileIdentityV1
+   contract-version Int
+   classification String
+   evaluation-order SemanticEvaluationOrderV1
+   strictness SemanticStrictnessV1
+   allocation-behavior SemanticAllocationBehaviorV1
+   value-identity SemanticValueIdentityV1
+   mutation-and-persistence SemanticMutationPersistenceV1
+   effects SemanticEffectsV1
+   failure-behavior SemanticFailureBehaviorV1
+   ownership-and-lifetime SemanticOwnershipLifetimeV1
+   profile-availability SemanticProfileAvailabilityV1
+   portability-conditions SemanticPortabilityConditionsV1
+   contractual-complexity SemanticComplexityV1
+   decision-evidence-ids (Vec String)
+   encoding String])
 
 (defrecord UnitDerivationReceiptV1
-  [(receipt-id String)
-   (profile-identity ProfileIdentityV1)
-   (unit-id core/NativeId)
-   (unit-semantic-digest String)
-   (dependency-context-digest String)
-   (typing-environment-hash String)
-   (form-contract-hashes (Vec String))
-   (form-contract-set-digest String)
-   (compiler-rule-epoch String)
-   (materialization-receipt-id String)
-   (result-fact-hashes (Vec String))
-   (encoding String)])
+  [receipt-id String
+   profile-identity ProfileIdentityV1
+   unit-id core/NativeId
+   unit-semantic-digest String
+   dependency-context-digest String
+   typing-environment-hash String
+   form-contract-hashes (Vec String)
+   form-contract-set-digest String
+   compiler-rule-epoch String
+   materialization-receipt-id String
+   result-fact-hashes (Vec String)
+   encoding String])
 
 (defrecord UnitContractV0
-  [(unit-id core/NativeId)
-   (qualified-name String)
-   (visibility String)
-   (parameter-types (Vec core/NativeId))
-   (return-type core/NativeId)
-   (failure-type core/NativeId)
-   (generated-bindings (Vec String))
-   (encoding String)
-   (digest String)])
+  [unit-id core/NativeId
+   qualified-name String
+   visibility String
+   parameter-types (Vec core/NativeId)
+   return-type core/NativeId
+   failure-type core/NativeId
+   generated-bindings (Vec String)
+   encoding String
+   digest String])
 
 (defrecord TypedUnitV0
-  [(unit-id core/NativeId)
-   (function lower/TypedFunctionV0)
-   (types (Vec core/TypeDef))
-   (effects (Vec core/EffectDef))
-   (capabilities (Vec core/CapabilityDef))
-   (encoding String)
-   (digest String)])
+  [unit-id core/NativeId
+   function lower/TypedFunctionV0
+   types (Vec core/TypeDef)
+   effects (Vec core/EffectDef)
+   capabilities (Vec core/CapabilityDef)
+   encoding String
+   digest String])
 
 (defrecord NativeUnitV0
-  [(unit-id core/NativeId)
-   (function core/FunctionDef)
-   (layouts (Vec core/LayoutDef))
-   (abis (Vec core/AbiDeclV0))
-   (regions (Vec core/RegionDef))
-   (encoding String)
-   (digest String)])
+  [unit-id core/NativeId
+   function core/FunctionDef
+   layouts (Vec core/LayoutDef)
+   abis (Vec core/AbiDeclV0)
+   regions (Vec core/RegionDef)
+   encoding String
+   digest String])
 
 (defunion UnitExtractionResultV0
   (UnitExtractionAcceptedV0
-    [(contracts (Vec UnitContractV0))
-     (typed-units (Vec TypedUnitV0))
-     (native-units (Vec NativeUnitV0))])
-  (UnitExtractionRejectedV0 [(code String) (detail String)]))
+    [contracts (Vec UnitContractV0)
+     typed-units (Vec TypedUnitV0)
+     native-units (Vec NativeUnitV0)])
+  (UnitExtractionRejectedV0
+    [code String
+     detail String]))
 
 (defrecord UnitAssemblyV0
-  [(typed stages/FrozenTypedStageV0)
-   (typed-slice lower/TypedSliceV0)
-   (native stages/FrozenNativeStageV0)
-   (epoch stages/FrozenNativeStageV0)
-   (verdicts (Vec obligations/ObligationVerdictV0))])
+  [typed stages/FrozenTypedStageV0
+   typed-slice lower/TypedSliceV0
+   native stages/FrozenNativeStageV0
+   epoch stages/FrozenNativeStageV0
+   verdicts (Vec obligations/ObligationVerdictV0)])
 
 (defunion UnitAssemblyResultV0
-  (UnitAssemblyAcceptedV0 [(assembly UnitAssemblyV0)])
-  (UnitAssemblyRejectedV0 [(code String) (detail String)]))
+  (UnitAssemblyAcceptedV0 [assembly UnitAssemblyV0])
+  (UnitAssemblyRejectedV0
+    [code String
+     detail String]))
 
 (defrecord PayloadClaimV0
-  [(category String) (identity core/NativeId) (encoding String)])
+  [category String
+   identity core/NativeId
+   encoding String])
 
 (defrecord ClaimCheckV0
-  [(encodings (Map String String)) (valid Bool) (detail String)])
+  [encodings (Map String String)
+   valid Bool
+   detail String])
 
-(defrecord WirePartV1 [(value String) (next-offset Int)])
+(defrecord WirePartV1
+  [value String
+   next-offset Int])
 
-(defrecord WireRecordV1 [(tag String) (fields (Vec String))])
+(defrecord WireRecordV1
+  [tag String
+   fields (Vec String)])
 
 (defunion TypedUnitWireDecodeResultV1
-  (TypedUnitWireDecodedV1 [(unit TypedUnitV0)])
-  (TypedUnitWireRejectedV1 [(code String) (detail String) (offset Int)]))
+  (TypedUnitWireDecodedV1 [unit TypedUnitV0])
+  (TypedUnitWireRejectedV1
+    [code String
+     detail String
+     offset Int]))
 
 (defunion NativeUnitWireDecodeResultV1
-  (NativeUnitWireDecodedV1 [(unit NativeUnitV0)])
-  (NativeUnitWireRejectedV1 [(code String) (detail String) (offset Int)]))
+  (NativeUnitWireDecodedV1 [unit NativeUnitV0])
+  (NativeUnitWireRejectedV1
+    [code String
+     detail String
+     offset Int]))
 
-(defn id-value [(identity core/NativeId)] String
+(defn id-value [identity core/NativeId] String
   (core/nativeid-value identity))
 
-(defn encode-string-set [(tag String) (values (Vec String))] String
+(defn encode-string-set
+  [tag String
+   values (Vec String)] String
   (stages/canonical-set tag values))
 
 (defn make-profile-identity-v1
-  [(source-profile-id String)
-   (profile-schema-version Int)
-   (semantic-environment-id String)
-   (target-abi-profile String)]
-  ProfileIdentityV1
-  (let [(encoding String)
-        (stages/canonical-record "profile-identity-v1"
+  [source-profile-id String
+   profile-schema-version Int
+   semantic-environment-id String
+   target-abi-profile String] ProfileIdentityV1
+  (let [encoding String (stages/canonical-record "profile-identity-v1"
           [source-profile-id
            (str profile-schema-version)
            semantic-environment-id
@@ -209,22 +230,21 @@
         ["semantic-contract-slice-v1"]))
     "NONE"))
 
-(defn encode-semantic-evaluation-order
-  [(value SemanticEvaluationOrderV1)] String
+(defn encode-semantic-evaluation-order [value SemanticEvaluationOrderV1] String
   (stages/canonical-record "semantic-evaluation-order-v1"
     [(semanticevaluationorderv1-operator-order value)
      (semanticevaluationorderv1-argument-order value)
      (semanticevaluationorderv1-element-traversal-order value)
      (semanticevaluationorderv1-callback-invocation-order value)]))
 
-(defn encode-semantic-strictness [(value SemanticStrictnessV1)] String
+(defn encode-semantic-strictness [value SemanticStrictnessV1] String
   (stages/canonical-record "semantic-strictness-v1"
     [(semanticstrictnessv1-input-demand value)
      (semanticstrictnessv1-element-demand value)
      (semanticstrictnessv1-result-demand value)
      (semanticstrictnessv1-realization-boundary value)]))
 
-(defn encode-semantic-allocation [(value SemanticAllocationBehaviorV1)] String
+(defn encode-semantic-allocation [value SemanticAllocationBehaviorV1] String
   (stages/canonical-record "semantic-allocation-behavior-v1"
     [(semanticallocationbehaviorv1-result-representation value)
      (semanticallocationbehaviorv1-allocation-destination value)
@@ -232,7 +252,7 @@
      (semanticallocationbehaviorv1-aliasing value)
      (semanticallocationbehaviorv1-allocation-bound value)]))
 
-(defn encode-semantic-value-identity [(value SemanticValueIdentityV1)] String
+(defn encode-semantic-value-identity [value SemanticValueIdentityV1] String
   (stages/canonical-record "semantic-value-identity-v1"
     [(stages/encode-bool
        (semanticvalueidentityv1-identity-bearing value))
@@ -240,15 +260,14 @@
      (semanticvalueidentityv1-hashing-rule value)
      (semanticvalueidentityv1-identity-preservation value)]))
 
-(defn encode-semantic-mutation-persistence
-  [(value SemanticMutationPersistenceV1)] String
+(defn encode-semantic-mutation-persistence [value SemanticMutationPersistenceV1] String
   (stages/canonical-record "semantic-mutation-persistence-v1"
     [(semanticmutationpersistencev1-input-mutation value)
      (semanticmutationpersistencev1-result-mutability value)
      (semanticmutationpersistencev1-persistence-rule value)
      (semanticmutationpersistencev1-update-visibility value)]))
 
-(defn encode-semantic-effects [(value SemanticEffectsV1)] String
+(defn encode-semantic-effects [value SemanticEffectsV1] String
   (stages/canonical-record "semantic-effects-v1"
     [(encode-string-set "effect-set"
        (semanticeffectsv1-effect-set value))
@@ -257,14 +276,14 @@
        (semanticeffectsv1-required-capabilities value))
      (semanticeffectsv1-atomicity value)]))
 
-(defn encode-semantic-failure [(value SemanticFailureBehaviorV1)] String
+(defn encode-semantic-failure [value SemanticFailureBehaviorV1] String
   (stages/canonical-record "semantic-failure-behavior-v1"
     [(semanticfailurebehaviorv1-static-rejections value)
      (semanticfailurebehaviorv1-runtime-failure-mode value)
      (semanticfailurebehaviorv1-failure-type value)
      (semanticfailurebehaviorv1-partial-result-rule value)]))
 
-(defn encode-semantic-ownership [(value SemanticOwnershipLifetimeV1)] String
+(defn encode-semantic-ownership [value SemanticOwnershipLifetimeV1] String
   (stages/canonical-record "semantic-ownership-lifetime-v1"
     [(semanticownershiplifetimev1-input-ownership value)
      (semanticownershiplifetimev1-result-ownership value)
@@ -272,15 +291,13 @@
      (semanticownershiplifetimev1-escape-rule value)
      (semanticownershiplifetimev1-lifetime-region value)]))
 
-(defn encode-semantic-profile-availability
-  [(value SemanticProfileAvailabilityV1)] String
+(defn encode-semantic-profile-availability [value SemanticProfileAvailabilityV1] String
   (stages/canonical-record "semantic-profile-availability-v1"
     [(semanticprofileavailabilityv1-availability value)
      (encode-string-set "required-profile-features"
        (semanticprofileavailabilityv1-required-profile-features value))]))
 
-(defn encode-semantic-portability
-  [(value SemanticPortabilityConditionsV1)] String
+(defn encode-semantic-portability [value SemanticPortabilityConditionsV1] String
   (stages/canonical-record "semantic-portability-conditions-v1"
     [(encode-string-set "compatible-profile-ids"
        (semanticportabilityconditionsv1-compatible-profile-ids value))
@@ -290,33 +307,31 @@
        (semanticportabilityconditionsv1-discharge-evidence-kinds value))
      (semanticportabilityconditionsv1-portability-diagnostic-id value)]))
 
-(defn encode-semantic-complexity [(value SemanticComplexityV1)] String
+(defn encode-semantic-complexity [value SemanticComplexityV1] String
   (stages/canonical-record "semantic-complexity-v1"
     [(semanticcomplexityv1-time-class value)
      (semanticcomplexityv1-space-class value)
      (semanticcomplexityv1-order-sensitivity value)]))
 
 (defn make-semantic-form-contract-v1
-  [(contract-schema-id String)
-   (form-id String)
-   (profile-identity ProfileIdentityV1)
-   (contract-version Int)
-   (classification String)
-   (evaluation-order SemanticEvaluationOrderV1)
-   (strictness SemanticStrictnessV1)
-   (allocation-behavior SemanticAllocationBehaviorV1)
-   (value-identity SemanticValueIdentityV1)
-   (mutation-and-persistence SemanticMutationPersistenceV1)
-   (effects SemanticEffectsV1)
-   (failure-behavior SemanticFailureBehaviorV1)
-   (ownership-and-lifetime SemanticOwnershipLifetimeV1)
-   (profile-availability SemanticProfileAvailabilityV1)
-   (portability-conditions SemanticPortabilityConditionsV1)
-   (contractual-complexity SemanticComplexityV1)
-   (decision-evidence-ids (Vec String))]
-  SemanticFormContractV1
-  (let [(encoding String)
-        (stages/canonical-record "semantic-form-contract-v1"
+  [contract-schema-id String
+   form-id String
+   profile-identity ProfileIdentityV1
+   contract-version Int
+   classification String
+   evaluation-order SemanticEvaluationOrderV1
+   strictness SemanticStrictnessV1
+   allocation-behavior SemanticAllocationBehaviorV1
+   value-identity SemanticValueIdentityV1
+   mutation-and-persistence SemanticMutationPersistenceV1
+   effects SemanticEffectsV1
+   failure-behavior SemanticFailureBehaviorV1
+   ownership-and-lifetime SemanticOwnershipLifetimeV1
+   profile-availability SemanticProfileAvailabilityV1
+   portability-conditions SemanticPortabilityConditionsV1
+   contractual-complexity SemanticComplexityV1
+   decision-evidence-ids (Vec String)] SemanticFormContractV1
+  (let [encoding String (stages/canonical-record "semantic-form-contract-v1"
           [contract-schema-id
            form-id
            (profileidentityv1-encoding profile-identity)
@@ -344,10 +359,9 @@
       contractual-complexity decision-evidence-ids encoding)))
 
 (defn rebuild-semantic-form-contract
-  [(contract SemanticFormContractV1)
-   (profile-identity ProfileIdentityV1)
-   (contract-version Int)]
-  SemanticFormContractV1
+  [contract SemanticFormContractV1
+   profile-identity ProfileIdentityV1
+   contract-version Int] SemanticFormContractV1
   (make-semantic-form-contract-v1
     (semanticformcontractv1-contract-schema-id contract)
     (semanticformcontractv1-form-id contract)
@@ -367,24 +381,20 @@
     (semanticformcontractv1-decision-evidence-ids contract)))
 
 (defn semantic-form-contract-with-version
-  [(contract SemanticFormContractV1)
-   (contract-version Int)]
-  SemanticFormContractV1
+  [contract SemanticFormContractV1
+   contract-version Int] SemanticFormContractV1
   (rebuild-semantic-form-contract contract
     (semanticformcontractv1-profile-identity contract) contract-version))
 
 (defn semantic-form-contract-with-profile
-  [(contract SemanticFormContractV1)
-   (profile-identity ProfileIdentityV1)]
-  SemanticFormContractV1
+  [contract SemanticFormContractV1
+   profile-identity ProfileIdentityV1] SemanticFormContractV1
   (rebuild-semantic-form-contract contract profile-identity
     (semanticformcontractv1-contract-version contract)))
 
-(defn five-form-semantic-contracts
-  [(profile-identity ProfileIdentityV1)] (Vec SemanticFormContractV1)
-  (let [(schema String) "beagle.semantic-form-contract/v1"
-        (evidence (Vec String))
-        ["SEMANTIC-CONTRACTS-DESIGN#narrow-post-flip-migration-slice"]]
+(defn five-form-semantic-contracts [profile-identity ProfileIdentityV1] (Vec SemanticFormContractV1)
+  (let [schema String "beagle.semantic-form-contract/v1"
+        evidence (Vec String) ["SEMANTIC-CONTRACTS-DESIGN#narrow-post-flip-migration-slice"]]
     [(make-semantic-form-contract-v1
        schema "let" profile-identity 1 "common"
        (->SemanticEvaluationOrderV1
@@ -532,54 +542,57 @@
          "order-sensitive")
        evidence)]))
 
-(defn decimal-digit? [(character String)] Bool
+(defn decimal-digit? [character String] Bool
   (or (= character "0") (= character "1") (= character "2")
     (= character "3") (= character "4") (= character "5")
     (= character "6") (= character "7") (= character "8")
     (= character "9")))
 
-(defn canonical-unsigned-decimal? [(value String)] Bool
+(defn canonical-unsigned-decimal? [value String] Bool
   (and (> (count value) 0)
     (or (= (count value) 1) (not= "0" (subs value 0 1)))
     (every?
-      (fn [(character Any)] Bool (decimal-digit? (str character)))
+      (fn [character Any] Bool (decimal-digit? (str character)))
       (vec value))))
 
-(defn canonical-signed-decimal? [(value String)] Bool
+(defn canonical-signed-decimal? [value String] Bool
   (if (and (> (count value) 0) (= "-" (subs value 0 1)))
     (and (> (count value) 1)
       (not= "0" (subs value 1 (count value)))
       (canonical-unsigned-decimal? (subs value 1 (count value))))
     (canonical-unsigned-decimal? value)))
 
-(defn decimal-value [(value String)] (U Int Nil)
+(defn decimal-value [value String] (U Int Nil)
   (if (canonical-signed-decimal? value) (parse-long value) nil))
 
-(defn colon-offset [(text String) (offset Int)] Int
+(defn colon-offset
+  [text String
+   offset Int] Int
   (loop [position Int offset]
     (cond
       (>= position (count text)) -1
       (= ":" (subs text position (+ position 1))) position
       :else (recur (+ position 1)))))
 
-(defn read-wire-part [(text String) (offset Int)] (U WirePartV1 Nil)
-  (let [(colon Int) (colon-offset text offset)]
+(defn read-wire-part
+  [text String
+   offset Int] (U WirePartV1 Nil)
+  (let [colon Int (colon-offset text offset)]
     (if (< colon offset)
       nil
-      (let [(length-text String) (subs text offset colon)
-            (size (U Int Nil))
-            (if (canonical-unsigned-decimal? length-text)
+      (let [length-text String (subs text offset colon)
+            size (U Int Nil) (if (canonical-unsigned-decimal? length-text)
               (parse-long length-text) nil)
-            (start Int) (+ colon 1)]
+            start Int (+ colon 1)]
         (if (or (nil? size) (> size (- (count text) start)))
           nil
           (->WirePartV1 (subs text start (+ start size)) (+ start size)))))))
 
-(defn parse-wire-record [(text String)] (U WireRecordV1 Nil)
-  (let [(tag-part (U WirePartV1 Nil)) (read-wire-part text 0)]
+(defn parse-wire-record [text String] (U WireRecordV1 Nil)
+  (let [tag-part (U WirePartV1 Nil) (read-wire-part text 0)]
     (if (nil? tag-part)
       nil
-      (let [(separator Int) (wirepartv1-next-offset tag-part)]
+      (let [separator Int (wirepartv1-next-offset tag-part)]
         (if (or (>= separator (count text))
               (not= ":" (subs text separator (+ separator 1))))
           nil
@@ -592,86 +605,89 @@
               (> offset (count text)) nil
 
               :else
-              (let [(field (U WirePartV1 Nil)) (read-wire-part text offset)]
+              (let [field (U WirePartV1 Nil) (read-wire-part text offset)]
                 (if (nil? field)
                   nil
                   (recur (wirepartv1-next-offset field)
                     (conj fields (wirepartv1-value field))))))))))))
 
 (defn required-wire-record
-  [(text String) (tag String) (field-count Int)] (U WireRecordV1 Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record text)]
+  [text String
+   tag String
+   field-count Int] (U WireRecordV1 Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record text)]
     (if (and (some? record)
           (= tag (wirerecordv1-tag record))
           (= field-count (count (wirerecordv1-fields record))))
       record nil)))
 
-(defn wire-record-with-tag [(text String) (tag String)] (U WireRecordV1 Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record text)]
+(defn wire-record-with-tag
+  [text String
+   tag String] (U WireRecordV1 Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record text)]
     (if (and (some? record) (= tag (wirerecordv1-tag record))) record nil)))
 
-(defn sorted-distinct-fields? [(fields (Vec String))] Bool
+(defn sorted-distinct-fields? [fields (Vec String)] Bool
   (and (= fields (vec (sort fields)))
     (= (count fields) (count (vec (distinct fields))))))
 
-(defn encode-wire-bool [(value Bool)] String
+(defn encode-wire-bool [value Bool] String
   (stages/canonical-record "bool-wire-v1" [(stages/encode-bool value)]))
 
-(defn decode-wire-bool [(encoding String)] (U Bool Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "bool-wire-v1" 1)]
+(defn decode-wire-bool [encoding String] (U Bool Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "bool-wire-v1" 1)]
     (if (nil? record)
       nil
-      (let [(value String) (nth (wirerecordv1-fields record) 0)]
+      (let [value String (nth (wirerecordv1-fields record) 0)]
         (cond (= value "1") true (= value "0") false :else nil)))))
 
-(defn decode-wire-id [(encoding String)] (U core/NativeId Nil)
-  (let [(record (U WireRecordV1 Nil)) (required-wire-record encoding "id" 1)]
+(defn decode-wire-id [encoding String] (U core/NativeId Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "id" 1)]
     (if (nil? record)
       nil
-      (let [(value String) (nth (wirerecordv1-fields record) 0)]
+      (let [value String (nth (wirerecordv1-fields record) 0)]
         (if (> (count value) 0) (core/->NativeId value) nil)))))
 
-(defn decode-wire-string [(encoding String)] (U String Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "string" 1)]
+(defn decode-wire-string [encoding String] (U String Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "string" 1)]
     (if (nil? record) nil (nth (wirerecordv1-fields record) 0))))
 
-(defn decode-wire-int [(encoding String)] (U Int Nil)
-  (let [(record (U WireRecordV1 Nil)) (required-wire-record encoding "int" 1)]
+(defn decode-wire-int [encoding String] (U Int Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "int" 1)]
     (if (nil? record)
       nil
       (decimal-value (nth (wirerecordv1-fields record) 0)))))
 
-(defn encode-wire-optional-id [(value (U core/NativeId Nil))] String
+(defn encode-wire-optional-id [value (U core/NativeId Nil)] String
   (if (nil? value)
     (stages/canonical-record "none" [])
     (stages/canonical-record "some" [(stages/encode-id value)])))
 
-(defn decode-wire-optional-id [(encoding String)] (U (Vec core/NativeId) Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-wire-optional-id [encoding String] (U (Vec core/NativeId) Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (cond
       (nil? record) nil
       (and (= "none" (wirerecordv1-tag record))
         (= 0 (count (wirerecordv1-fields record)))) []
       (and (= "some" (wirerecordv1-tag record))
         (= 1 (count (wirerecordv1-fields record))))
-      (let [(value (U core/NativeId Nil))
-            (decode-wire-id (nth (wirerecordv1-fields record) 0))]
+      (let [value (U core/NativeId Nil) (decode-wire-id (nth (wirerecordv1-fields record) 0))]
         (if (nil? value) nil [value]))
       :else nil)))
 
-(defn optional-wire-id-value
-  [(decoded (Vec core/NativeId))] (U core/NativeId Nil)
+(defn optional-wire-id-value [decoded (Vec core/NativeId)] (U core/NativeId Nil)
   (if (= 0 (count decoded)) nil (nth decoded 0)))
 
-(defn encode-wire-id-vector [(tag String) (values (Vec core/NativeId))] String
+(defn encode-wire-id-vector
+  [tag String
+   values (Vec core/NativeId)] String
   (stages/canonical-record tag
-    (mapv (fn [(value core/NativeId)] String (stages/encode-id value)) values)))
+    (mapv (fn [value core/NativeId] String (stages/encode-id value)) values)))
 
 (defn decode-wire-id-vector
-  [(encoding String) (tag String)] (U (Vec core/NativeId) Nil)
-  (let [(record (U WireRecordV1 Nil)) (wire-record-with-tag encoding tag)]
+  [encoding String
+   tag String] (U (Vec core/NativeId) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding tag)]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -679,33 +695,34 @@
              values (Vec core/NativeId) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/NativeId Nil))
-                (decode-wire-id (nth fields position))]
+          (let [value (U core/NativeId Nil) (decode-wire-id (nth fields position))]
             (if (nil? value)
               nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn encode-id-vector [(tag String) (identities (Vec core/NativeId))] String
+(defn encode-id-vector
+  [tag String
+   identities (Vec core/NativeId)] String
   (stages/canonical-record tag
-    (mapv (fn [(identity core/NativeId)] String (id-value identity))
+    (mapv (fn [identity core/NativeId] String (id-value identity))
       identities)))
 
-(defn encode-capability-kind [(kind core/CapabilityKind)] String
+(defn encode-capability-kind [kind core/CapabilityKind] String
   (cond
     (instance? native.core.ReadCapability kind) "read"
     (instance? native.core.WriteCapability kind) "write"
     (instance? native.core.AllocateCapability kind) "allocate"
     :else "host"))
 
-(defn encode-capability [(capability core/CapabilityDef)] String
-  (let [(region (U core/NativeId Nil)) (core/capabilitydef-region capability)]
+(defn encode-capability [capability core/CapabilityDef] String
+  (let [region (U core/NativeId Nil) (core/capabilitydef-region capability)]
     (stages/canonical-record "capability-def-v0"
       [(id-value (core/capabilitydef-id capability))
        (encode-capability-kind (core/capabilitydef-kind capability))
        (if (nil? region) "no-region" (id-value region))
        (if (core/capabilitydef-affine capability) "affine" "shared")])))
 
-(defn encode-readiness [(readiness lower/NativeReadinessV0)] String
+(defn encode-readiness [readiness lower/NativeReadinessV0] String
   (match readiness
     [(lower/NativeReadyV0 operation)
      (stages/canonical-record "typed-ready-v0" [operation])]
@@ -713,13 +730,13 @@
      (stages/canonical-record "typed-lowered-v0"
        [(id-value entry-block)
         (stages/canonical-record "blocks"
-          (mapv (fn [(block core/BasicBlock)] String
+          (mapv (fn [block core/BasicBlock] String
                   (lower/encode-basic-block block))
             blocks))])]
     [(lower/NativeTodoV0 code detail)
      (stages/canonical-record "typed-pending-v0" [code detail])]))
 
-(defn encode-typed-function-payload [(function lower/TypedFunctionV0)] String
+(defn encode-typed-function-payload [function lower/TypedFunctionV0] String
   (stages/canonical-record "typed-unit-function-v0"
     [(lower/encode-typed-function
        (lower/typedfunctionv0-id function)
@@ -733,14 +750,13 @@
      (encode-readiness (lower/typedfunctionv0-readiness function))]))
 
 (defn encode-unit-contract-value
-  [(unit-id core/NativeId)
-   (qualified-name String)
-   (visibility String)
-   (parameter-types (Vec core/NativeId))
-   (return-type core/NativeId)
-   (failure-type core/NativeId)
-   (generated-bindings (Vec String))]
-  String
+  [unit-id core/NativeId
+   qualified-name String
+   visibility String
+   parameter-types (Vec core/NativeId)
+   return-type core/NativeId
+   failure-type core/NativeId
+   generated-bindings (Vec String)] String
   (stages/canonical-record "unit-contract-v0"
     [(id-value unit-id)
      qualified-name
@@ -751,18 +767,15 @@
      (stages/canonical-set "generated-bindings" generated-bindings)]))
 
 (defn make-unit-contract
-  [(unit-id core/NativeId)
-   (qualified-name String)
-   (visibility String)
-   (function lower/TypedFunctionV0)]
-  UnitContractV0
-  (let [(parameter-types (Vec core/NativeId))
-        (mapv (fn [(parameter core/Parameter)] core/NativeId
+  [unit-id core/NativeId
+   qualified-name String
+   visibility String
+   function lower/TypedFunctionV0] UnitContractV0
+  (let [parameter-types (Vec core/NativeId) (mapv (fn [parameter core/Parameter] core/NativeId
                 (core/parameter-type-id parameter))
           (lower/typedfunctionv0-parameters function))
-        (generated-bindings (Vec String)) []
-        (encoding String)
-        (encode-unit-contract-value unit-id qualified-name visibility
+        generated-bindings (Vec String) []
+        encoding String (encode-unit-contract-value unit-id qualified-name visibility
           parameter-types
           (lower/typedfunctionv0-return-type function)
           (lower/typedfunctionv0-failure-type function)
@@ -772,28 +785,27 @@
       (lower/typedfunctionv0-failure-type function)
       generated-bindings encoding (stages/content-digest encoding))))
 
-(defn encode-parameter-wire-v1 [(parameter core/Parameter)] String
+(defn encode-parameter-wire-v1 [parameter core/Parameter] String
   (stages/canonical-record "parameter-wire-v1"
     [(stages/encode-id (core/parameter-id parameter))
      (stages/encode-id (core/parameter-type-id parameter))]))
 
-(defn encode-parameters-wire-v1 [(parameters (Vec core/Parameter))] String
+(defn encode-parameters-wire-v1 [parameters (Vec core/Parameter)] String
   (stages/canonical-record "parameters-wire-v1"
     (mapv encode-parameter-wire-v1 parameters)))
 
-(defn encode-ssa-value-wire-v1 [(value core/SsaValueV0)] String
+(defn encode-ssa-value-wire-v1 [value core/SsaValueV0] String
   (stages/canonical-record "ssa-value-wire-v1"
     [(stages/encode-id (core/ssavaluev0-id value))
      (stages/encode-id (core/ssavaluev0-type-id value))]))
 
-(defn encode-native-atom-wire-v1 [(atom core/NativeAtom)] String
+(defn encode-native-atom-wire-v1 [atom core/NativeAtom] String
   (if (instance? native.core.I64Atom atom)
     (stages/canonical-record "i64-atom-wire-v1"
       [(stages/encode-int (core/i64atom-value atom))])
     (stages/canonical-record "unsupported-atom-wire-v1" [])))
 
-(defn encode-resource-token-kind-wire-v1
-  [(kind core/ResourceTokenKindV0)] String
+(defn encode-resource-token-kind-wire-v1 [kind core/ResourceTokenKindV0] String
   (cond
     (instance? native.core.RegionTokenV0 kind)
     (stages/canonical-record "region-token-kind-wire-v1"
@@ -805,13 +817,13 @@
 
     :else (stages/canonical-record "unsupported-token-kind-wire-v1" [])))
 
-(defn encode-resource-token-wire-v1 [(token core/ResourceTokenV0)] String
+(defn encode-resource-token-wire-v1 [token core/ResourceTokenV0] String
   (stages/canonical-record "resource-token-wire-v1"
     [(stages/encode-id (core/resourcetokenv0-id token))
      (encode-resource-token-kind-wire-v1
        (core/resourcetokenv0-kind token))]))
 
-(defn encode-token-flow-wire-v1 [(flow core/TokenFlowV0)] String
+(defn encode-token-flow-wire-v1 [flow core/TokenFlowV0] String
   (stages/canonical-record "token-flow-wire-v1"
     [(encode-wire-id-vector "consumed-token-ids-wire-v1"
        (core/tokenflowv0-consumed flow))
@@ -819,14 +831,14 @@
        (mapv encode-resource-token-wire-v1
          (core/tokenflowv0-produced flow)))]))
 
-(defn encode-switch-case-wire-v1 [(switch-case core/SwitchCaseV0)] String
+(defn encode-switch-case-wire-v1 [switch-case core/SwitchCaseV0] String
   (stages/canonical-record "switch-case-wire-v1"
     [(stages/encode-id (core/switchcasev0-variant-id switch-case))
      (stages/encode-id (core/switchcasev0-block-id switch-case))
      (encode-wire-id-vector "switch-arguments-wire-v1"
        (core/switchcasev0-arguments switch-case))]))
 
-(defn encode-instruction-wire-v1 [(instruction core/Instruction)] String
+(defn encode-instruction-wire-v1 [instruction core/Instruction] String
   (cond
     (instance? native.core.AtomInstruction instruction)
     (stages/canonical-record "atom-instruction-wire-v1"
@@ -843,10 +855,8 @@
        (encode-token-flow-wire-v1 (core/callinstruction-tokens instruction))])
 
     (instance? native.core.CheckedInstruction instruction)
-    (let [(operation core/CheckedOperationV0)
-          (core/checkedinstruction-operation instruction)
-          (result String)
-          (encode-ssa-value-wire-v1 (core/checkedinstruction-result instruction))]
+    (let [operation core/CheckedOperationV0 (core/checkedinstruction-operation instruction)
+          result String (encode-ssa-value-wire-v1 (core/checkedinstruction-result instruction))]
       (cond
         (instance? native.core.CheckedAddI64V0 operation)
         (stages/canonical-record "checked-add-i64-instruction-wire-v1"
@@ -872,7 +882,7 @@
 
     :else (stages/canonical-record "unsupported-instruction-wire-v1" [])))
 
-(defn encode-terminator-wire-v1 [(terminator core/Terminator)] String
+(defn encode-terminator-wire-v1 [terminator core/Terminator] String
   (cond
     (instance? native.core.ReturnTerminator terminator)
     (stages/canonical-record "return-terminator-wire-v1"
@@ -891,7 +901,7 @@
 
     :else (stages/canonical-record "unsupported-terminator-wire-v1" [])))
 
-(defn encode-basic-block-wire-v1 [(block core/BasicBlock)] String
+(defn encode-basic-block-wire-v1 [block core/BasicBlock] String
   (stages/canonical-record "basic-block-wire-v1"
     [(stages/encode-id (core/basicblock-id block))
      (encode-parameters-wire-v1 (core/basicblock-parameters block))
@@ -902,7 +912,7 @@
        (mapv encode-terminator-wire-v1
          (core/basicblock-terminators block)))]))
 
-(defn encode-readiness-wire-v1 [(readiness lower/NativeReadinessV0)] String
+(defn encode-readiness-wire-v1 [readiness lower/NativeReadinessV0] String
   (if (instance? native.lower.NativeLoweredV0 readiness)
     (stages/canonical-record "lowered-readiness-wire-v1"
       [(stages/encode-id (lower/nativeloweredv0-entry-block readiness))
@@ -911,7 +921,7 @@
            (lower/nativeloweredv0-blocks readiness)))])
     (stages/canonical-record "unsupported-readiness-wire-v1" [])))
 
-(defn encode-typed-function-wire-v1 [(function lower/TypedFunctionV0)] String
+(defn encode-typed-function-wire-v1 [function lower/TypedFunctionV0] String
   (stages/canonical-record "typed-function-wire-v1"
     [(stages/encode-id (lower/typedfunctionv0-id function))
      (stages/encode-string (lower/typedfunctionv0-name function))
@@ -923,16 +933,16 @@
        (lower/typedfunctionv0-effects function))
      (encode-readiness-wire-v1 (lower/typedfunctionv0-readiness function))]))
 
-(defn encode-type-variant-wire-v1 [(variant core/TypeVariant)] String
+(defn encode-type-variant-wire-v1 [variant core/TypeVariant] String
   (stages/canonical-record "type-variant-wire-v1"
     [(stages/encode-id (core/typevariant-id variant))
      (stages/encode-string (core/typevariant-name variant))
      (encode-wire-optional-id (core/typevariant-payload-type variant))]))
 
-(defn encode-type-shape-wire-v1 [(shape core/TypeShape)] String
+(defn encode-type-shape-wire-v1 [shape core/TypeShape] String
   (cond
     (instance? native.core.AtomType shape)
-    (let [(kind core/AtomKind) (core/atomtype-kind shape)]
+    (let [kind core/AtomKind (core/atomtype-kind shape)]
       (if (instance? native.core.I64Kind kind)
         (stages/canonical-record "i64-atom-type-wire-v1"
           [(encode-wire-bool (core/i64kind-token kind))])
@@ -949,22 +959,21 @@
 
     :else (stages/canonical-record "unsupported-type-shape-wire-v1" [])))
 
-(defn encode-type-def-wire-v1 [(definition core/TypeDef)] String
+(defn encode-type-def-wire-v1 [definition core/TypeDef] String
   (stages/canonical-record "type-def-wire-v1"
     [(stages/encode-id (core/typedef-id definition))
      (stages/encode-string (core/typedef-name definition))
      (encode-type-shape-wire-v1 (core/typedef-shape definition))]))
 
-(defn encode-effect-wire-v1 [(effect core/EffectDef)] String
-  (let [(kind core/EffectKind) (core/effectdef-kind effect)]
+(defn encode-effect-wire-v1 [effect core/EffectDef] String
+  (let [kind core/EffectKind (core/effectdef-kind effect)]
     (if (instance? native.core.PureEffect kind)
       (stages/canonical-record "pure-effect-wire-v1"
         [(stages/encode-id (core/effectdef-id effect))
          (encode-wire-bool (core/pureeffect-token kind))])
       (stages/canonical-record "unsupported-effect-wire-v1" []))))
 
-(defn encode-scalar-representation-wire-v1
-  [(representation core/ScalarReprV0)] String
+(defn encode-scalar-representation-wire-v1 [representation core/ScalarReprV0] String
   (cond
     (instance? native.core.SignedIntReprV0 representation)
     (stages/canonical-record "signed-int-representation-wire-v1"
@@ -978,8 +987,7 @@
 
     :else (stages/canonical-record "unsupported-scalar-wire-v1" [])))
 
-(defn encode-union-variant-layout-wire-v1
-  [(variant core/UnionVariantLayoutV0)] String
+(defn encode-union-variant-layout-wire-v1 [variant core/UnionVariantLayoutV0] String
   (stages/canonical-record "union-variant-layout-wire-v1"
     [(stages/encode-id (core/unionvariantlayoutv0-variant-id variant))
      (stages/encode-int (core/unionvariantlayoutv0-tag variant))
@@ -988,7 +996,7 @@
      (stages/encode-int
        (core/unionvariantlayoutv0-payload-offset-bytes variant))]))
 
-(defn encode-layout-shape-wire-v1 [(shape core/LayoutShapeV0)] String
+(defn encode-layout-shape-wire-v1 [shape core/LayoutShapeV0] String
   (cond
     (instance? native.core.ScalarShapeV0 shape)
     (stages/canonical-record "scalar-layout-shape-wire-v1"
@@ -1005,7 +1013,7 @@
 
     :else (stages/canonical-record "unsupported-layout-shape-wire-v1" [])))
 
-(defn encode-layout-def-wire-v1 [(layout core/LayoutDef)] String
+(defn encode-layout-def-wire-v1 [layout core/LayoutDef] String
   (stages/canonical-record "layout-def-wire-v1"
     [(stages/encode-id (core/layoutdef-id layout))
      (stages/encode-id (core/layoutdef-type-id layout))
@@ -1013,7 +1021,7 @@
      (stages/encode-int (core/layoutdef-align-bytes layout))
      (encode-layout-shape-wire-v1 (core/layoutdef-shape layout))]))
 
-(defn encode-ownership-wire-v1 [(ownership core/OwnershipRuleV0)] String
+(defn encode-ownership-wire-v1 [ownership core/OwnershipRuleV0] String
   (cond
     (instance? native.core.BorrowedV0 ownership)
     (stages/canonical-record "borrowed-ownership-wire-v1"
@@ -1025,21 +1033,21 @@
 
     :else (stages/canonical-record "unsupported-ownership-wire-v1" [])))
 
-(defn encode-abi-value-wire-v1 [(value core/AbiValueV0)] String
+(defn encode-abi-value-wire-v1 [value core/AbiValueV0] String
   (stages/canonical-record "abi-value-wire-v1"
     [(stages/encode-string (core/abivaluev0-name value))
      (stages/encode-id (core/abivaluev0-type-id value))
      (encode-ownership-wire-v1 (core/abivaluev0-ownership value))
      (encode-wire-optional-id (core/abivaluev0-lifetime-region value))]))
 
-(defn encode-optional-abi-value-wire-v1 [(value (U core/AbiValueV0 Nil))] String
+(defn encode-optional-abi-value-wire-v1 [value (U core/AbiValueV0 Nil)] String
   (if (nil? value)
     (stages/canonical-record "none" [])
     (stages/canonical-record "some" [(encode-abi-value-wire-v1 value)])))
 
-(defn encode-abi-wire-v1 [(abi core/AbiDeclV0)] String
-  (let [(direction core/AbiDirectionV0) (core/abideclv0-direction abi)
-        (convention core/AbiConventionV0) (core/abideclv0-convention abi)]
+(defn encode-abi-wire-v1 [abi core/AbiDeclV0] String
+  (let [direction core/AbiDirectionV0 (core/abideclv0-direction abi)
+        convention core/AbiConventionV0 (core/abideclv0-convention abi)]
     (stages/canonical-record "abi-declaration-wire-v1"
       [(stages/encode-id (core/abideclv0-id abi))
        (stages/encode-id (core/abideclv0-function-id abi))
@@ -1063,7 +1071,7 @@
        (stages/encode-string (core/abideclv0-version abi))
        (stages/encode-string (core/abideclv0-layout-digest abi))])))
 
-(defn encode-native-function-wire-v1 [(function core/FunctionDef)] String
+(defn encode-native-function-wire-v1 [function core/FunctionDef] String
   (stages/canonical-record "native-function-wire-v1"
     [(stages/encode-id (core/functiondef-id function))
      (stages/encode-string (core/functiondef-name function))
@@ -1079,20 +1087,18 @@
      (encode-wire-id-vector "native-function-capabilities-wire-v1"
        (core/functiondef-capabilities function))]))
 
-(defn decode-parameter-wire-v1 [(encoding String)] (U core/Parameter Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "parameter-wire-v1" 2)]
+(defn decode-parameter-wire-v1 [encoding String] (U core/Parameter Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "parameter-wire-v1" 2)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (type-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            type-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))]
         (if (and (some? identity) (some? type-id))
           (core/->Parameter identity type-id) nil)))))
 
-(defn decode-parameters-wire-v1 [(encoding String)] (U (Vec core/Parameter) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "parameters-wire-v1")]
+(defn decode-parameters-wire-v1 [encoding String] (U (Vec core/Parameter) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "parameters-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1100,69 +1106,57 @@
              values (Vec core/Parameter) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/Parameter Nil))
-                (decode-parameter-wire-v1 (nth fields position))]
+          (let [value (U core/Parameter Nil) (decode-parameter-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-ssa-value-wire-v1 [(encoding String)] (U core/SsaValueV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "ssa-value-wire-v1" 2)]
+(defn decode-ssa-value-wire-v1 [encoding String] (U core/SsaValueV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "ssa-value-wire-v1" 2)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (type-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            type-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))]
         (if (and (some? identity) (some? type-id))
           (core/->SsaValueV0 identity type-id) nil)))))
 
-(defn decode-native-atom-wire-v1 [(encoding String)] (U core/NativeAtom Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "i64-atom-wire-v1" 1)]
+(defn decode-native-atom-wire-v1 [encoding String] (U core/NativeAtom Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "i64-atom-wire-v1" 1)]
     (if (nil? record)
       nil
-      (let [(value (U Int Nil))
-            (decode-wire-int (nth (wirerecordv1-fields record) 0))]
+      (let [value (U Int Nil) (decode-wire-int (nth (wirerecordv1-fields record) 0))]
         (if (some? value) (core/->I64Atom value) nil)))))
 
-(defn decode-resource-token-kind-wire-v1
-  [(encoding String)] (U core/ResourceTokenKindV0 Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-resource-token-kind-wire-v1 [encoding String] (U core/ResourceTokenKindV0 Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)]
+      (let [fields (Vec String) (wirerecordv1-fields record)]
         (cond
           (and (= "region-token-kind-wire-v1" (wirerecordv1-tag record))
             (= 1 (count fields)))
-          (let [(identity (U core/NativeId Nil))
-                (decode-wire-id (nth fields 0))]
+          (let [identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))]
             (if (some? identity) (core/->RegionTokenV0 identity) nil))
 
           (and (= "capability-token-kind-wire-v1" (wirerecordv1-tag record))
             (= 1 (count fields)))
-          (let [(identity (U core/NativeId Nil))
-                (decode-wire-id (nth fields 0))]
+          (let [identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))]
             (if (some? identity) (core/->CapabilityTokenV0 identity) nil))
 
           :else nil)))))
 
-(defn decode-resource-token-wire-v1
-  [(encoding String)] (U core/ResourceTokenV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "resource-token-wire-v1" 2)]
+(defn decode-resource-token-wire-v1 [encoding String] (U core/ResourceTokenV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "resource-token-wire-v1" 2)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (kind (U core/ResourceTokenKindV0 Nil))
-            (decode-resource-token-kind-wire-v1 (nth fields 1))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            kind (U core/ResourceTokenKindV0 Nil) (decode-resource-token-kind-wire-v1 (nth fields 1))]
         (if (and (some? identity) (some? kind))
           (core/->ResourceTokenV0 identity kind) nil)))))
 
-(defn decode-resource-tokens-wire-v1
-  [(encoding String)] (U (Vec core/ResourceTokenV0) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "produced-tokens-wire-v1")]
+(defn decode-resource-tokens-wire-v1 [encoding String] (U (Vec core/ResourceTokenV0) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "produced-tokens-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1170,41 +1164,33 @@
              values (Vec core/ResourceTokenV0) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/ResourceTokenV0 Nil))
-                (decode-resource-token-wire-v1 (nth fields position))]
+          (let [value (U core/ResourceTokenV0 Nil) (decode-resource-token-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-token-flow-wire-v1 [(encoding String)] (U core/TokenFlowV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "token-flow-wire-v1" 2)]
+(defn decode-token-flow-wire-v1 [encoding String] (U core/TokenFlowV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "token-flow-wire-v1" 2)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (consumed (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector (nth fields 0) "consumed-token-ids-wire-v1")
-            (produced (U (Vec core/ResourceTokenV0) Nil))
-            (decode-resource-tokens-wire-v1 (nth fields 1))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            consumed (U (Vec core/NativeId) Nil) (decode-wire-id-vector (nth fields 0) "consumed-token-ids-wire-v1")
+            produced (U (Vec core/ResourceTokenV0) Nil) (decode-resource-tokens-wire-v1 (nth fields 1))]
         (if (and (some? consumed) (some? produced))
           (core/->TokenFlowV0 consumed produced) nil)))))
 
-(defn decode-switch-case-wire-v1 [(encoding String)] (U core/SwitchCaseV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "switch-case-wire-v1" 3)]
+(defn decode-switch-case-wire-v1 [encoding String] (U core/SwitchCaseV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "switch-case-wire-v1" 3)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (variant-id (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (block-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))
-            (arguments (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector (nth fields 2) "switch-arguments-wire-v1")]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            variant-id (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            block-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+            arguments (U (Vec core/NativeId) Nil) (decode-wire-id-vector (nth fields 2) "switch-arguments-wire-v1")]
         (if (and (some? variant-id) (some? block-id) (some? arguments))
           (core/->SwitchCaseV0 variant-id block-id arguments) nil)))))
 
-(defn decode-switch-cases-wire-v1
-  [(encoding String)] (U (Vec core/SwitchCaseV0) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "switch-cases-wire-v1")]
+(defn decode-switch-cases-wire-v1 [encoding String] (U (Vec core/SwitchCaseV0) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "switch-cases-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1212,67 +1198,55 @@
              values (Vec core/SwitchCaseV0) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/SwitchCaseV0 Nil))
-                (decode-switch-case-wire-v1 (nth fields position))]
+          (let [value (U core/SwitchCaseV0 Nil) (decode-switch-case-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-terminator-wire-v1 [(encoding String)] (U core/Terminator Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-terminator-wire-v1 [encoding String] (U core/Terminator Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)]
+      (let [fields (Vec String) (wirerecordv1-fields record)]
         (cond
           (and (= "return-terminator-wire-v1" (wirerecordv1-tag record))
             (= 1 (count fields)))
-          (let [(value (U (Vec core/NativeId) Nil))
-                (decode-wire-optional-id (nth fields 0))]
+          (let [value (U (Vec core/NativeId) Nil) (decode-wire-optional-id (nth fields 0))]
             (if (nil? value) nil
               (core/->ReturnTerminator (optional-wire-id-value value))))
 
           (and (= "switch-terminator-wire-v1" (wirerecordv1-tag record))
             (= 2 (count fields)))
-          (let [(value-id (U core/NativeId Nil))
-                (decode-wire-id (nth fields 0))
-                (cases (U (Vec core/SwitchCaseV0) Nil))
-                (decode-switch-cases-wire-v1 (nth fields 1))]
+          (let [value-id (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+                cases (U (Vec core/SwitchCaseV0) Nil) (decode-switch-cases-wire-v1 (nth fields 1))]
             (if (and (some? value-id) (some? cases))
               (core/->SwitchTerminator value-id cases) nil))
 
           (and (= "trap-terminator-wire-v1" (wirerecordv1-tag record))
             (= 1 (count fields)))
-          (let [(failure-id (U core/NativeId Nil))
-                (decode-wire-id (nth fields 0))]
+          (let [failure-id (U core/NativeId Nil) (decode-wire-id (nth fields 0))]
             (if (some? failure-id) (core/->TrapTerminator failure-id) nil))
 
           :else nil)))))
 
-(defn decode-instruction-wire-v1 [(encoding String)] (U core/Instruction Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-instruction-wire-v1 [encoding String] (U core/Instruction Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (tag String) (wirerecordv1-tag record)]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            tag String (wirerecordv1-tag record)]
         (cond
           (and (= tag "atom-instruction-wire-v1") (= 2 (count fields)))
-          (let [(result (U core/SsaValueV0 Nil))
-                (decode-ssa-value-wire-v1 (nth fields 0))
-                (atom (U core/NativeAtom Nil))
-                (decode-native-atom-wire-v1 (nth fields 1))]
+          (let [result (U core/SsaValueV0 Nil) (decode-ssa-value-wire-v1 (nth fields 0))
+                atom (U core/NativeAtom Nil) (decode-native-atom-wire-v1 (nth fields 1))]
             (if (and (some? result) (some? atom))
               (core/->AtomInstruction result atom) nil))
 
           (and (= tag "call-instruction-wire-v1") (= 5 (count fields)))
-          (let [(result (U core/SsaValueV0 Nil))
-                (decode-ssa-value-wire-v1 (nth fields 0))
-                (function-id (U core/NativeId Nil))
-                (decode-wire-id (nth fields 1))
-                (arguments (U (Vec core/NativeId) Nil))
-                (decode-wire-id-vector (nth fields 2) "call-arguments-wire-v1")
-                (arena (U (Vec core/NativeId) Nil))
-                (decode-wire-optional-id (nth fields 3))
-                (tokens (U core/TokenFlowV0 Nil))
-                (decode-token-flow-wire-v1 (nth fields 4))]
+          (let [result (U core/SsaValueV0 Nil) (decode-ssa-value-wire-v1 (nth fields 0))
+                function-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+                arguments (U (Vec core/NativeId) Nil) (decode-wire-id-vector (nth fields 2) "call-arguments-wire-v1")
+                arena (U (Vec core/NativeId) Nil) (decode-wire-optional-id (nth fields 3))
+                tokens (U core/TokenFlowV0 Nil) (decode-token-flow-wire-v1 (nth fields 4))]
             (if (and (some? result) (some? function-id) (some? arguments)
                   (some? arena) (some? tokens))
               (core/->CallInstruction result function-id arguments
@@ -1281,40 +1255,34 @@
 
           (and (= tag "checked-add-i64-instruction-wire-v1")
             (= 3 (count fields)))
-          (let [(result (U core/SsaValueV0 Nil))
-                (decode-ssa-value-wire-v1 (nth fields 0))
-                (left-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))
-                (right-id (U core/NativeId Nil)) (decode-wire-id (nth fields 2))]
+          (let [result (U core/SsaValueV0 Nil) (decode-ssa-value-wire-v1 (nth fields 0))
+                left-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+                right-id (U core/NativeId Nil) (decode-wire-id (nth fields 2))]
             (if (and (some? result) (some? left-id) (some? right-id))
               (core/->CheckedInstruction result
                 (core/->CheckedAddI64V0 left-id right-id)) nil))
 
           (and (= tag "checked-mul-i64-instruction-wire-v1")
             (= 3 (count fields)))
-          (let [(result (U core/SsaValueV0 Nil))
-                (decode-ssa-value-wire-v1 (nth fields 0))
-                (left-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))
-                (right-id (U core/NativeId Nil)) (decode-wire-id (nth fields 2))]
+          (let [result (U core/SsaValueV0 Nil) (decode-ssa-value-wire-v1 (nth fields 0))
+                left-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+                right-id (U core/NativeId Nil) (decode-wire-id (nth fields 2))]
             (if (and (some? result) (some? left-id) (some? right-id))
               (core/->CheckedInstruction result
                 (core/->CheckedMulI64V0 left-id right-id)) nil))
 
           (and (= tag "variant-value-instruction-wire-v1")
             (= 3 (count fields)))
-          (let [(result (U core/SsaValueV0 Nil))
-                (decode-ssa-value-wire-v1 (nth fields 0))
-                (source-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))
-                (variant-id (U core/NativeId Nil))
-                (decode-wire-id (nth fields 2))]
+          (let [result (U core/SsaValueV0 Nil) (decode-ssa-value-wire-v1 (nth fields 0))
+                source-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+                variant-id (U core/NativeId Nil) (decode-wire-id (nth fields 2))]
             (if (and (some? result) (some? source-id) (some? variant-id))
               (core/->VariantValueInstruction result source-id variant-id) nil))
 
           :else nil)))))
 
-(defn decode-instructions-wire-v1
-  [(encoding String)] (U (Vec core/Instruction) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "instructions-wire-v1")]
+(defn decode-instructions-wire-v1 [encoding String] (U (Vec core/Instruction) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "instructions-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1322,15 +1290,12 @@
              values (Vec core/Instruction) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/Instruction Nil))
-                (decode-instruction-wire-v1 (nth fields position))]
+          (let [value (U core/Instruction Nil) (decode-instruction-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-terminators-wire-v1
-  [(encoding String)] (U (Vec core/Terminator) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "terminators-wire-v1")]
+(defn decode-terminators-wire-v1 [encoding String] (U (Vec core/Terminator) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "terminators-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1338,31 +1303,25 @@
              values (Vec core/Terminator) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/Terminator Nil))
-                (decode-terminator-wire-v1 (nth fields position))]
+          (let [value (U core/Terminator Nil) (decode-terminator-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-basic-block-wire-v1 [(encoding String)] (U core/BasicBlock Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "basic-block-wire-v1" 4)]
+(defn decode-basic-block-wire-v1 [encoding String] (U core/BasicBlock Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "basic-block-wire-v1" 4)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (parameters (U (Vec core/Parameter) Nil))
-            (decode-parameters-wire-v1 (nth fields 1))
-            (instructions (U (Vec core/Instruction) Nil))
-            (decode-instructions-wire-v1 (nth fields 2))
-            (terminators (U (Vec core/Terminator) Nil))
-            (decode-terminators-wire-v1 (nth fields 3))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            parameters (U (Vec core/Parameter) Nil) (decode-parameters-wire-v1 (nth fields 1))
+            instructions (U (Vec core/Instruction) Nil) (decode-instructions-wire-v1 (nth fields 2))
+            terminators (U (Vec core/Terminator) Nil) (decode-terminators-wire-v1 (nth fields 3))]
         (if (and (some? identity) (some? parameters)
               (some? instructions) (some? terminators))
           (core/->BasicBlock identity parameters instructions terminators) nil)))))
 
-(defn decode-blocks-wire-v1 [(encoding String)] (U (Vec core/BasicBlock) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "blocks-wire-v1")]
+(defn decode-blocks-wire-v1 [encoding String] (U (Vec core/BasicBlock) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "blocks-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1370,44 +1329,34 @@
              values (Vec core/BasicBlock) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/BasicBlock Nil))
-                (decode-basic-block-wire-v1 (nth fields position))]
+          (let [value (U core/BasicBlock Nil) (decode-basic-block-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-readiness-wire-v1
-  [(encoding String)] (U lower/NativeReadinessV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "lowered-readiness-wire-v1" 2)]
+(defn decode-readiness-wire-v1 [encoding String] (U lower/NativeReadinessV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "lowered-readiness-wire-v1" 2)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (entry-block (U core/NativeId Nil))
-            (decode-wire-id (nth fields 0))
-            (blocks (U (Vec core/BasicBlock) Nil))
-            (decode-blocks-wire-v1 (nth fields 1))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            entry-block (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            blocks (U (Vec core/BasicBlock) Nil) (decode-blocks-wire-v1 (nth fields 1))]
         (if (and (some? entry-block) (some? blocks))
           (lower/->NativeLoweredV0 entry-block blocks) nil)))))
 
-(defn decode-typed-function-wire-v1
-  [(encoding String)] (U lower/TypedFunctionV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "typed-function-wire-v1" 8)]
+(defn decode-typed-function-wire-v1 [encoding String] (U lower/TypedFunctionV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "typed-function-wire-v1" 8)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (name (U String Nil)) (decode-wire-string (nth fields 1))
-            (abi-symbol (U String Nil)) (decode-wire-string (nth fields 2))
-            (parameters (U (Vec core/Parameter) Nil))
-            (decode-parameters-wire-v1 (nth fields 3))
-            (return-type (U core/NativeId Nil)) (decode-wire-id (nth fields 4))
-            (failure-type (U core/NativeId Nil)) (decode-wire-id (nth fields 5))
-            (effects (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            name (U String Nil) (decode-wire-string (nth fields 1))
+            abi-symbol (U String Nil) (decode-wire-string (nth fields 2))
+            parameters (U (Vec core/Parameter) Nil) (decode-parameters-wire-v1 (nth fields 3))
+            return-type (U core/NativeId Nil) (decode-wire-id (nth fields 4))
+            failure-type (U core/NativeId Nil) (decode-wire-id (nth fields 5))
+            effects (U (Vec core/NativeId) Nil) (decode-wire-id-vector
               (nth fields 6) "typed-function-effects-wire-v1")
-            (readiness (U lower/NativeReadinessV0 Nil))
-            (decode-readiness-wire-v1 (nth fields 7))]
+            readiness (U lower/NativeReadinessV0 Nil) (decode-readiness-wire-v1 (nth fields 7))]
         (if (and (some? identity) (some? name) (some? abi-symbol)
               (some? parameters) (some? return-type) (some? failure-type)
               (some? effects) (some? readiness))
@@ -1419,79 +1368,71 @@
           nil)))))
 
 (defn canonical-set-wire-record
-  [(encoding String) (tag String)] (U WireRecordV1 Nil)
-  (let [(record (U WireRecordV1 Nil)) (wire-record-with-tag encoding tag)]
+  [encoding String
+   tag String] (U WireRecordV1 Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding tag)]
     (if (and (some? record)
           (sorted-distinct-fields? (wirerecordv1-fields record)))
       record nil)))
 
-(defn decode-type-variant-wire-v1 [(encoding String)] (U core/TypeVariant Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "type-variant-wire-v1" 3)]
+(defn decode-type-variant-wire-v1 [encoding String] (U core/TypeVariant Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "type-variant-wire-v1" 3)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (name (U String Nil)) (decode-wire-string (nth fields 1))
-            (payload (U (Vec core/NativeId) Nil))
-            (decode-wire-optional-id (nth fields 2))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            name (U String Nil) (decode-wire-string (nth fields 1))
+            payload (U (Vec core/NativeId) Nil) (decode-wire-optional-id (nth fields 2))]
         (if (and (some? identity) (some? name) (some? payload))
           (core/->TypeVariant identity name (optional-wire-id-value payload))
           nil)))))
 
-(defn decode-type-variants-wire-v1
-  [(fields (Vec String))] (U (Vec core/TypeVariant) Nil)
-  (loop [position Int 0 values (Vec core/TypeVariant) []]
+(defn decode-type-variants-wire-v1 [fields (Vec String)] (U (Vec core/TypeVariant) Nil)
+  (loop [position Int 0
+         values (Vec core/TypeVariant) []]
     (if (>= position (count fields))
       values
-      (let [(value (U core/TypeVariant Nil))
-            (decode-type-variant-wire-v1 (nth fields position))]
+      (let [value (U core/TypeVariant Nil) (decode-type-variant-wire-v1 (nth fields position))]
         (if (nil? value) nil
           (recur (+ position 1) (conj values value)))))))
 
-(defn decode-type-shape-wire-v1 [(encoding String)] (U core/TypeShape Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-type-shape-wire-v1 [encoding String] (U core/TypeShape Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (tag String) (wirerecordv1-tag record)]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            tag String (wirerecordv1-tag record)]
         (cond
           (and (= tag "i64-atom-type-wire-v1") (= 1 (count fields)))
-          (let [(token (U Bool Nil)) (decode-wire-bool (nth fields 0))]
+          (let [token (U Bool Nil) (decode-wire-bool (nth fields 0))]
             (if (some? token)
               (core/->AtomType (core/->I64Kind token)) nil))
 
           (= tag "closed-union-type-wire-v1")
-          (let [(variants (U (Vec core/TypeVariant) Nil))
-                (decode-type-variants-wire-v1 fields)]
+          (let [variants (U (Vec core/TypeVariant) Nil) (decode-type-variants-wire-v1 fields)]
             (if (some? variants) (core/->UnionType variants) nil))
 
           (and (= tag "outcome-type-wire-v1") (= 2 (count fields)))
-          (let [(value-type (U core/NativeId Nil))
-                (decode-wire-id (nth fields 0))
-                (failure-type (U core/NativeId Nil))
-                (decode-wire-id (nth fields 1))]
+          (let [value-type (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+                failure-type (U core/NativeId Nil) (decode-wire-id (nth fields 1))]
             (if (and (some? value-type) (some? failure-type))
               (core/->OutcomeType value-type failure-type) nil))
 
           :else nil)))))
 
-(defn decode-type-def-wire-v1 [(encoding String)] (U core/TypeDef Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "type-def-wire-v1" 3)]
+(defn decode-type-def-wire-v1 [encoding String] (U core/TypeDef Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "type-def-wire-v1" 3)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (name (U String Nil)) (decode-wire-string (nth fields 1))
-            (shape (U core/TypeShape Nil))
-            (decode-type-shape-wire-v1 (nth fields 2))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            name (U String Nil) (decode-wire-string (nth fields 1))
+            shape (U core/TypeShape Nil) (decode-type-shape-wire-v1 (nth fields 2))]
         (if (and (some? identity) (some? name) (some? shape))
           (core/->TypeDef identity name shape) nil)))))
 
-(defn decode-type-defs-wire-v1 [(encoding String)] (U (Vec core/TypeDef) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (canonical-set-wire-record encoding "typed-unit-types-wire-v1")]
+(defn decode-type-defs-wire-v1 [encoding String] (U (Vec core/TypeDef) Nil)
+  (let [record (U WireRecordV1 Nil) (canonical-set-wire-record encoding "typed-unit-types-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1499,25 +1440,22 @@
              values (Vec core/TypeDef) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/TypeDef Nil))
-                (decode-type-def-wire-v1 (nth fields position))]
+          (let [value (U core/TypeDef Nil) (decode-type-def-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-effect-wire-v1 [(encoding String)] (U core/EffectDef Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "pure-effect-wire-v1" 2)]
+(defn decode-effect-wire-v1 [encoding String] (U core/EffectDef Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "pure-effect-wire-v1" 2)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (token (U Bool Nil)) (decode-wire-bool (nth fields 1))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            token (U Bool Nil) (decode-wire-bool (nth fields 1))]
         (if (and (some? identity) (some? token))
           (core/->EffectDef identity (core/->PureEffect token)) nil)))))
 
-(defn decode-effects-wire-v1 [(encoding String)] (U (Vec core/EffectDef) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (canonical-set-wire-record encoding "typed-unit-effects-wire-v1")]
+(defn decode-effects-wire-v1 [encoding String] (U (Vec core/EffectDef) Nil)
+  (let [record (U WireRecordV1 Nil) (canonical-set-wire-record encoding "typed-unit-effects-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1525,25 +1463,22 @@
              values (Vec core/EffectDef) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/EffectDef Nil))
-                (decode-effect-wire-v1 (nth fields position))]
+          (let [value (U core/EffectDef Nil) (decode-effect-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-empty-capabilities-wire-v1 [(encoding String)] Bool
-  (let [(record (U WireRecordV1 Nil))
-        (canonical-set-wire-record encoding "typed-unit-capabilities-wire-v1")]
+(defn decode-empty-capabilities-wire-v1 [encoding String] Bool
+  (let [record (U WireRecordV1 Nil) (canonical-set-wire-record encoding "typed-unit-capabilities-wire-v1")]
     (and (some? record) (= 0 (count (wirerecordv1-fields record))))))
 
-(defn decode-scalar-representation-wire-v1
-  [(encoding String)] (U core/ScalarReprV0 Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-scalar-representation-wire-v1 [encoding String] (U core/ScalarReprV0 Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)]
+      (let [fields (Vec String) (wirerecordv1-fields record)]
         (if (not= 1 (count fields))
           nil
-          (let [(bit-width (U Int Nil)) (decode-wire-int (nth fields 0))]
+          (let [bit-width (U Int Nil) (decode-wire-int (nth fields 0))]
             (if (or (nil? bit-width) (<= bit-width 0))
               nil
               (cond
@@ -1557,28 +1492,23 @@
 
                 :else nil))))))))
 
-(defn decode-union-variant-layout-wire-v1
-  [(encoding String)] (U core/UnionVariantLayoutV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "union-variant-layout-wire-v1" 4)]
+(defn decode-union-variant-layout-wire-v1 [encoding String] (U core/UnionVariantLayoutV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "union-variant-layout-wire-v1" 4)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (variant-id (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (tag (U Int Nil)) (decode-wire-int (nth fields 1))
-            (payload (U (Vec core/NativeId) Nil))
-            (decode-wire-optional-id (nth fields 2))
-            (offset (U Int Nil)) (decode-wire-int (nth fields 3))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            variant-id (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            tag (U Int Nil) (decode-wire-int (nth fields 1))
+            payload (U (Vec core/NativeId) Nil) (decode-wire-optional-id (nth fields 2))
+            offset (U Int Nil) (decode-wire-int (nth fields 3))]
         (if (and (some? variant-id) (some? tag) (some? payload)
               (some? offset) (>= tag 0) (>= offset 0))
           (core/->UnionVariantLayoutV0 variant-id tag
             (optional-wire-id-value payload) offset)
           nil)))))
 
-(defn decode-union-variant-layouts-wire-v1
-  [(encoding String)] (U (Vec core/UnionVariantLayoutV0) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "union-variant-layouts-wire-v1")]
+(defn decode-union-variant-layouts-wire-v1 [encoding String] (U (Vec core/UnionVariantLayoutV0) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "union-variant-layouts-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1586,56 +1516,48 @@
              values (Vec core/UnionVariantLayoutV0) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/UnionVariantLayoutV0 Nil))
-                (decode-union-variant-layout-wire-v1 (nth fields position))]
+          (let [value (U core/UnionVariantLayoutV0 Nil) (decode-union-variant-layout-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-layout-shape-wire-v1 [(encoding String)] (U core/LayoutShapeV0 Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-layout-shape-wire-v1 [encoding String] (U core/LayoutShapeV0 Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (tag String) (wirerecordv1-tag record)]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            tag String (wirerecordv1-tag record)]
         (cond
           (and (= tag "scalar-layout-shape-wire-v1") (= 1 (count fields)))
-          (let [(representation (U core/ScalarReprV0 Nil))
-                (decode-scalar-representation-wire-v1 (nth fields 0))]
+          (let [representation (U core/ScalarReprV0 Nil) (decode-scalar-representation-wire-v1 (nth fields 0))]
             (if (some? representation)
               (core/->ScalarShapeV0 representation) nil))
 
           (and (= tag "union-layout-shape-wire-v1") (= 3 (count fields)))
-          (let [(tag-type (U core/NativeId Nil))
-                (decode-wire-id (nth fields 0))
-                (tag-offset (U Int Nil)) (decode-wire-int (nth fields 1))
-                (variants (U (Vec core/UnionVariantLayoutV0) Nil))
-                (decode-union-variant-layouts-wire-v1 (nth fields 2))]
+          (let [tag-type (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+                tag-offset (U Int Nil) (decode-wire-int (nth fields 1))
+                variants (U (Vec core/UnionVariantLayoutV0) Nil) (decode-union-variant-layouts-wire-v1 (nth fields 2))]
             (if (and (some? tag-type) (some? tag-offset)
                   (some? variants) (>= tag-offset 0))
               (core/->UnionShapeV0 tag-type tag-offset variants) nil))
 
           :else nil)))))
 
-(defn decode-layout-def-wire-v1 [(encoding String)] (U core/LayoutDef Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "layout-def-wire-v1" 5)]
+(defn decode-layout-def-wire-v1 [encoding String] (U core/LayoutDef Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "layout-def-wire-v1" 5)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (type-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))
-            (size (U Int Nil)) (decode-wire-int (nth fields 2))
-            (alignment (U Int Nil)) (decode-wire-int (nth fields 3))
-            (shape (U core/LayoutShapeV0 Nil))
-            (decode-layout-shape-wire-v1 (nth fields 4))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            type-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+            size (U Int Nil) (decode-wire-int (nth fields 2))
+            alignment (U Int Nil) (decode-wire-int (nth fields 3))
+            shape (U core/LayoutShapeV0 Nil) (decode-layout-shape-wire-v1 (nth fields 4))]
         (if (and (some? identity) (some? type-id) (some? size)
               (some? alignment) (some? shape) (>= size 0) (> alignment 0))
           (core/->LayoutDef identity type-id size alignment shape) nil)))))
 
-(defn decode-layout-defs-wire-v1
-  [(encoding String)] (U (Vec core/LayoutDef) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (canonical-set-wire-record encoding "native-unit-layouts-wire-v1")]
+(defn decode-layout-defs-wire-v1 [encoding String] (U (Vec core/LayoutDef) Nil)
+  (let [record (U WireRecordV1 Nil) (canonical-set-wire-record encoding "native-unit-layouts-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1643,17 +1565,15 @@
              values (Vec core/LayoutDef) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/LayoutDef Nil))
-                (decode-layout-def-wire-v1 (nth fields position))]
+          (let [value (U core/LayoutDef Nil) (decode-layout-def-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-ownership-wire-v1 [(encoding String)] (U core/OwnershipRuleV0 Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-ownership-wire-v1 [encoding String] (U core/OwnershipRuleV0 Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (if (or (nil? record) (not= 1 (count (wirerecordv1-fields record))))
       nil
-      (let [(token (U Bool Nil))
-            (decode-wire-bool (nth (wirerecordv1-fields record) 0))]
+      (let [token (U Bool Nil) (decode-wire-bool (nth (wirerecordv1-fields record) 0))]
         (if (nil? token)
           nil
           (cond
@@ -1663,28 +1583,23 @@
             (core/->OwnedV0 token)
             :else nil))))))
 
-(defn decode-abi-value-wire-v1 [(encoding String)] (U core/AbiValueV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "abi-value-wire-v1" 4)]
+(defn decode-abi-value-wire-v1 [encoding String] (U core/AbiValueV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "abi-value-wire-v1" 4)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (name (U String Nil)) (decode-wire-string (nth fields 0))
-            (type-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))
-            (ownership (U core/OwnershipRuleV0 Nil))
-            (decode-ownership-wire-v1 (nth fields 2))
-            (lifetime (U (Vec core/NativeId) Nil))
-            (decode-wire-optional-id (nth fields 3))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            name (U String Nil) (decode-wire-string (nth fields 0))
+            type-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+            ownership (U core/OwnershipRuleV0 Nil) (decode-ownership-wire-v1 (nth fields 2))
+            lifetime (U (Vec core/NativeId) Nil) (decode-wire-optional-id (nth fields 3))]
         (if (and (some? name) (some? type-id) (some? ownership)
               (some? lifetime))
           (core/->AbiValueV0 name type-id ownership
             (optional-wire-id-value lifetime))
           nil)))))
 
-(defn decode-abi-values-wire-v1
-  [(encoding String)] (U (Vec core/AbiValueV0) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (wire-record-with-tag encoding "abi-parameters-wire-v1")]
+(defn decode-abi-values-wire-v1 [encoding String] (U (Vec core/AbiValueV0) Nil)
+  (let [record (U WireRecordV1 Nil) (wire-record-with-tag encoding "abi-parameters-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1692,74 +1607,56 @@
              values (Vec core/AbiValueV0) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/AbiValueV0 Nil))
-                (decode-abi-value-wire-v1 (nth fields position))]
+          (let [value (U core/AbiValueV0 Nil) (decode-abi-value-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-optional-abi-value-wire-v1
-  [(encoding String)] (U (Vec core/AbiValueV0) Nil)
-  (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+(defn decode-optional-abi-value-wire-v1 [encoding String] (U (Vec core/AbiValueV0) Nil)
+  (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
     (cond
       (nil? record) nil
       (and (= "none" (wirerecordv1-tag record))
         (= 0 (count (wirerecordv1-fields record)))) []
       (and (= "some" (wirerecordv1-tag record))
         (= 1 (count (wirerecordv1-fields record))))
-      (let [(value (U core/AbiValueV0 Nil))
-            (decode-abi-value-wire-v1 (nth (wirerecordv1-fields record) 0))]
+      (let [value (U core/AbiValueV0 Nil) (decode-abi-value-wire-v1 (nth (wirerecordv1-fields record) 0))]
         (if (nil? value) nil [value]))
       :else nil)))
 
-(defn optional-abi-value
-  [(decoded (Vec core/AbiValueV0))] (U core/AbiValueV0 Nil)
+(defn optional-abi-value [decoded (Vec core/AbiValueV0)] (U core/AbiValueV0 Nil)
   (if (= 0 (count decoded)) nil (nth decoded 0)))
 
-(defn decode-abi-direction-wire-v1
-  [(encoding String)] (U core/AbiDirectionV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "abi-export-wire-v1" 1)]
+(defn decode-abi-direction-wire-v1 [encoding String] (U core/AbiDirectionV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "abi-export-wire-v1" 1)]
     (if (nil? record)
       nil
-      (let [(token (U Bool Nil))
-            (decode-wire-bool (nth (wirerecordv1-fields record) 0))]
+      (let [token (U Bool Nil) (decode-wire-bool (nth (wirerecordv1-fields record) 0))]
         (if (some? token) (core/->AbiExportV0 token) nil)))))
 
-(defn decode-abi-convention-wire-v1
-  [(encoding String)] (U core/AbiConventionV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "restricted-c-abi-wire-v1" 1)]
+(defn decode-abi-convention-wire-v1 [encoding String] (U core/AbiConventionV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "restricted-c-abi-wire-v1" 1)]
     (if (nil? record)
       nil
-      (let [(token (U Bool Nil))
-            (decode-wire-bool (nth (wirerecordv1-fields record) 0))]
+      (let [token (U Bool Nil) (decode-wire-bool (nth (wirerecordv1-fields record) 0))]
         (if (some? token) (core/->RestrictedCAbiV0 token) nil)))))
 
-(defn decode-abi-wire-v1 [(encoding String)] (U core/AbiDeclV0 Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "abi-declaration-wire-v1" 12)]
+(defn decode-abi-wire-v1 [encoding String] (U core/AbiDeclV0 Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "abi-declaration-wire-v1" 12)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (function-id (U core/NativeId Nil)) (decode-wire-id (nth fields 1))
-            (symbol (U String Nil)) (decode-wire-string (nth fields 2))
-            (direction (U core/AbiDirectionV0 Nil))
-            (decode-abi-direction-wire-v1 (nth fields 3))
-            (convention (U core/AbiConventionV0 Nil))
-            (decode-abi-convention-wire-v1 (nth fields 4))
-            (parameters (U (Vec core/AbiValueV0) Nil))
-            (decode-abi-values-wire-v1 (nth fields 5))
-            (result (U (Vec core/AbiValueV0) Nil))
-            (decode-optional-abi-value-wire-v1 (nth fields 6))
-            (failure-type (U core/NativeId Nil)) (decode-wire-id (nth fields 7))
-            (effects (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector (nth fields 8) "abi-effects-wire-v1")
-            (capabilities (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector (nth fields 9) "abi-capabilities-wire-v1")
-            (version (U String Nil)) (decode-wire-string (nth fields 10))
-            (layout-digest (U String Nil))
-            (decode-wire-string (nth fields 11))]
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            function-id (U core/NativeId Nil) (decode-wire-id (nth fields 1))
+            symbol (U String Nil) (decode-wire-string (nth fields 2))
+            direction (U core/AbiDirectionV0 Nil) (decode-abi-direction-wire-v1 (nth fields 3))
+            convention (U core/AbiConventionV0 Nil) (decode-abi-convention-wire-v1 (nth fields 4))
+            parameters (U (Vec core/AbiValueV0) Nil) (decode-abi-values-wire-v1 (nth fields 5))
+            result (U (Vec core/AbiValueV0) Nil) (decode-optional-abi-value-wire-v1 (nth fields 6))
+            failure-type (U core/NativeId Nil) (decode-wire-id (nth fields 7))
+            effects (U (Vec core/NativeId) Nil) (decode-wire-id-vector (nth fields 8) "abi-effects-wire-v1")
+            capabilities (U (Vec core/NativeId) Nil) (decode-wire-id-vector (nth fields 9) "abi-capabilities-wire-v1")
+            version (U String Nil) (decode-wire-string (nth fields 10))
+            layout-digest (U String Nil) (decode-wire-string (nth fields 11))]
         (if (and (some? identity) (some? function-id) (some? symbol)
               (some? direction) (some? convention) (some? parameters)
               (some? result) (some? failure-type) (some? effects)
@@ -1770,9 +1667,8 @@
             capabilities version layout-digest)
           nil)))))
 
-(defn decode-abis-wire-v1 [(encoding String)] (U (Vec core/AbiDeclV0) Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (canonical-set-wire-record encoding "native-unit-abis-wire-v1")]
+(defn decode-abis-wire-v1 [encoding String] (U (Vec core/AbiDeclV0) Nil)
+  (let [record (U WireRecordV1 Nil) (canonical-set-wire-record encoding "native-unit-abis-wire-v1")]
     (if (nil? record)
       nil
       (loop [position Int 0
@@ -1780,35 +1676,26 @@
              values (Vec core/AbiDeclV0) []]
         (if (>= position (count fields))
           values
-          (let [(value (U core/AbiDeclV0 Nil))
-                (decode-abi-wire-v1 (nth fields position))]
+          (let [value (U core/AbiDeclV0 Nil) (decode-abi-wire-v1 (nth fields position))]
             (if (nil? value) nil
               (recur (+ position 1) fields (conj values value)))))))))
 
-(defn decode-native-function-wire-v1
-  [(encoding String)] (U core/FunctionDef Nil)
-  (let [(record (U WireRecordV1 Nil))
-        (required-wire-record encoding "native-function-wire-v1" 9)]
+(defn decode-native-function-wire-v1 [encoding String] (U core/FunctionDef Nil)
+  (let [record (U WireRecordV1 Nil) (required-wire-record encoding "native-function-wire-v1" 9)]
     (if (nil? record)
       nil
-      (let [(fields (Vec String)) (wirerecordv1-fields record)
-            (identity (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-            (name (U String Nil)) (decode-wire-string (nth fields 1))
-            (parameters (U (Vec core/Parameter) Nil))
-            (decode-parameters-wire-v1 (nth fields 2))
-            (blocks (U (Vec core/BasicBlock) Nil))
-            (decode-blocks-wire-v1 (nth fields 3))
-            (entry-block (U core/NativeId Nil)) (decode-wire-id (nth fields 4))
-            (return-type (U (Vec core/NativeId) Nil))
-            (decode-wire-optional-id (nth fields 5))
-            (effects (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector
+      (let [fields (Vec String) (wirerecordv1-fields record)
+            identity (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+            name (U String Nil) (decode-wire-string (nth fields 1))
+            parameters (U (Vec core/Parameter) Nil) (decode-parameters-wire-v1 (nth fields 2))
+            blocks (U (Vec core/BasicBlock) Nil) (decode-blocks-wire-v1 (nth fields 3))
+            entry-block (U core/NativeId Nil) (decode-wire-id (nth fields 4))
+            return-type (U (Vec core/NativeId) Nil) (decode-wire-optional-id (nth fields 5))
+            effects (U (Vec core/NativeId) Nil) (decode-wire-id-vector
               (nth fields 6) "native-function-effects-wire-v1")
-            (regions (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector
+            regions (U (Vec core/NativeId) Nil) (decode-wire-id-vector
               (nth fields 7) "native-function-regions-wire-v1")
-            (capabilities (U (Vec core/NativeId) Nil))
-            (decode-wire-id-vector
+            capabilities (U (Vec core/NativeId) Nil) (decode-wire-id-vector
               (nth fields 8) "native-function-capabilities-wire-v1")]
         (if (and (some? identity) (some? name) (some? parameters)
               (some? blocks) (some? entry-block) (some? return-type)
@@ -1817,18 +1704,16 @@
             (optional-wire-id-value return-type) effects regions capabilities)
           nil)))))
 
-(defn decode-empty-regions-wire-v1 [(encoding String)] Bool
-  (let [(record (U WireRecordV1 Nil))
-        (canonical-set-wire-record encoding "native-unit-regions-wire-v1")]
+(defn decode-empty-regions-wire-v1 [encoding String] Bool
+  (let [record (U WireRecordV1 Nil) (canonical-set-wire-record encoding "native-unit-regions-wire-v1")]
     (and (some? record) (= 0 (count (wirerecordv1-fields record))))))
 
 (defn encode-typed-unit-wire-v1
-  [(unit-id core/NativeId)
-   (function lower/TypedFunctionV0)
-   (types (Vec core/TypeDef))
-   (effects (Vec core/EffectDef))
-   (capabilities (Vec core/CapabilityDef))]
-  String
+  [unit-id core/NativeId
+   function lower/TypedFunctionV0
+   types (Vec core/TypeDef)
+   effects (Vec core/EffectDef)
+   capabilities (Vec core/CapabilityDef)] String
   (stages/canonical-record "typed-unit-wire-v1"
     [(stages/encode-id unit-id)
      (encode-typed-function-wire-v1 function)
@@ -1840,65 +1725,68 @@
        (mapv encode-capability capabilities))]))
 
 (defn insert-type-by-wire
-  [(item core/TypeDef) (sorted (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/TypeDef
+   sorted (Vec core/TypeDef)] (Vec core/TypeDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/TypeDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/TypeDef) (nth sorted position)]
+      (let [current core/TypeDef (nth sorted position)]
         (if (and (not inserted)
               (< (compare (encode-type-def-wire-v1 item)
                    (encode-type-def-wire-v1 current)) 0))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn types-by-wire [(values (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [position Int 0 result (Vec core/TypeDef) []]
+(defn types-by-wire [values (Vec core/TypeDef)] (Vec core/TypeDef)
+  (loop [position Int 0
+         result (Vec core/TypeDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-type-by-wire (nth values position) result)))))
 
 (defn insert-effect-by-wire
-  [(item core/EffectDef) (sorted (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/EffectDef
+   sorted (Vec core/EffectDef)] (Vec core/EffectDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/EffectDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/EffectDef) (nth sorted position)]
+      (let [current core/EffectDef (nth sorted position)]
         (if (and (not inserted)
               (< (compare (encode-effect-wire-v1 item)
                    (encode-effect-wire-v1 current)) 0))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn effects-by-wire [(values (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [position Int 0 result (Vec core/EffectDef) []]
+(defn effects-by-wire [values (Vec core/EffectDef)] (Vec core/EffectDef)
+  (loop [position Int 0
+         result (Vec core/EffectDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-effect-by-wire (nth values position) result)))))
 
 (defn make-typed-unit
-  [(unit-id core/NativeId)
-   (function lower/TypedFunctionV0)
-   (types (Vec core/TypeDef))
-   (effects (Vec core/EffectDef))
-   (capabilities (Vec core/CapabilityDef))]
-  TypedUnitV0
-  (let [(ordered-types (Vec core/TypeDef)) (types-by-wire types)
-        (ordered-effects (Vec core/EffectDef)) (effects-by-wire effects)
-        (encoding String)
-        (encode-typed-unit-wire-v1 unit-id function ordered-types
+  [unit-id core/NativeId
+   function lower/TypedFunctionV0
+   types (Vec core/TypeDef)
+   effects (Vec core/EffectDef)
+   capabilities (Vec core/CapabilityDef)] TypedUnitV0
+  (let [ordered-types (Vec core/TypeDef) (types-by-wire types)
+        ordered-effects (Vec core/EffectDef) (effects-by-wire effects)
+        encoding String (encode-typed-unit-wire-v1 unit-id function ordered-types
           ordered-effects capabilities)]
     (->TypedUnitV0 unit-id function ordered-types ordered-effects capabilities encoding
       (stages/content-digest encoding))))
 
 (defn encode-native-unit-wire-v1
-  [(unit-id core/NativeId)
-   (function core/FunctionDef)
-   (layouts (Vec core/LayoutDef))
-   (abis (Vec core/AbiDeclV0))
-   (regions (Vec core/RegionDef))]
-  String
+  [unit-id core/NativeId
+   function core/FunctionDef
+   layouts (Vec core/LayoutDef)
+   abis (Vec core/AbiDeclV0)
+   regions (Vec core/RegionDef)] String
   (stages/canonical-record "native-unit-wire-v1"
     [(stages/encode-id unit-id)
      (encode-native-function-wire-v1 function)
@@ -1907,71 +1795,74 @@
      (stages/canonical-set "native-unit-abis-wire-v1"
        (mapv encode-abi-wire-v1 abis))
      (stages/canonical-set "native-unit-regions-wire-v1"
-       (mapv (fn [(region core/RegionDef)] String
+       (mapv (fn [region core/RegionDef] String
                (stages/encode-region region))
          regions))]))
 
 (defn insert-layout-by-wire
-  [(item core/LayoutDef) (sorted (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/LayoutDef
+   sorted (Vec core/LayoutDef)] (Vec core/LayoutDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/LayoutDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/LayoutDef) (nth sorted position)]
+      (let [current core/LayoutDef (nth sorted position)]
         (if (and (not inserted)
               (< (compare (encode-layout-def-wire-v1 item)
                    (encode-layout-def-wire-v1 current)) 0))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn layouts-by-wire [(values (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [position Int 0 result (Vec core/LayoutDef) []]
+(defn layouts-by-wire [values (Vec core/LayoutDef)] (Vec core/LayoutDef)
+  (loop [position Int 0
+         result (Vec core/LayoutDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-layout-by-wire (nth values position) result)))))
 
 (defn insert-abi-by-wire
-  [(item core/AbiDeclV0) (sorted (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [position Int 0 inserted Bool false
+  [item core/AbiDeclV0
+   sorted (Vec core/AbiDeclV0)] (Vec core/AbiDeclV0)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/AbiDeclV0) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/AbiDeclV0) (nth sorted position)]
+      (let [current core/AbiDeclV0 (nth sorted position)]
         (if (and (not inserted)
               (< (compare (encode-abi-wire-v1 item)
                    (encode-abi-wire-v1 current)) 0))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn abis-by-wire [(values (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [position Int 0 result (Vec core/AbiDeclV0) []]
+(defn abis-by-wire [values (Vec core/AbiDeclV0)] (Vec core/AbiDeclV0)
+  (loop [position Int 0
+         result (Vec core/AbiDeclV0) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-abi-by-wire (nth values position) result)))))
 
 (defn make-native-unit
-  [(unit-id core/NativeId)
-   (function core/FunctionDef)
-   (layouts (Vec core/LayoutDef))
-   (abis (Vec core/AbiDeclV0))
-   (regions (Vec core/RegionDef))]
-  NativeUnitV0
-  (let [(ordered-layouts (Vec core/LayoutDef)) (layouts-by-wire layouts)
-        (ordered-abis (Vec core/AbiDeclV0)) (abis-by-wire abis)
-        (encoding String)
-        (encode-native-unit-wire-v1 unit-id function ordered-layouts
+  [unit-id core/NativeId
+   function core/FunctionDef
+   layouts (Vec core/LayoutDef)
+   abis (Vec core/AbiDeclV0)
+   regions (Vec core/RegionDef)] NativeUnitV0
+  (let [ordered-layouts (Vec core/LayoutDef) (layouts-by-wire layouts)
+        ordered-abis (Vec core/AbiDeclV0) (abis-by-wire abis)
+        encoding String (encode-native-unit-wire-v1 unit-id function ordered-layouts
           ordered-abis regions)]
     (->NativeUnitV0 unit-id function ordered-layouts ordered-abis regions encoding
       (stages/content-digest encoding))))
 
 (defn dependency-context-digest
-  [(unit stages/SourceUnitV0) (contracts (Vec UnitContractV0))] String
-  (let [(rows (Vec String))
-        (mapv
-          (fn [(read-id core/NativeId)] String
-            (let [(contract (U UnitContractV0 Nil))
-                  (some
-                    (fn [(candidate UnitContractV0)] (U UnitContractV0 Nil)
+  [unit stages/SourceUnitV0
+   contracts (Vec UnitContractV0)] String
+  (let [rows (Vec String) (mapv
+          (fn [read-id core/NativeId] String
+            (let [contract (U UnitContractV0 Nil) (some
+                    (fn [candidate UnitContractV0] (U UnitContractV0 Nil)
                       (if (core/native-id= read-id
                             (unitcontractv0-unit-id candidate))
                         candidate nil))
@@ -1985,32 +1876,30 @@
     (stages/content-digest
       (stages/canonical-set "dependency-context-v0" rows))))
 
-(defn canonical-contract-hashes
-  [(contracts (Vec SemanticFormContractV1))] (Vec String)
+(defn canonical-contract-hashes [contracts (Vec SemanticFormContractV1)] (Vec String)
   (vec
     (sort
       (distinct
         (mapv
-          (fn [(contract SemanticFormContractV1)] String
+          (fn [contract SemanticFormContractV1] String
             (semanticformcontractv1-contract-id contract))
           contracts)))))
 
-(defn form-contract-set-digest [(hashes (Vec String))] String
+(defn form-contract-set-digest [hashes (Vec String)] String
   (stages/content-digest
     (stages/canonical-set "semantic-form-contract-set-v1" hashes)))
 
 (defn encode-unit-derivation-receipt
-  [(profile-identity ProfileIdentityV1)
-   (unit-id core/NativeId)
-   (unit-semantic-digest String)
-   (dependency-digest String)
-   (typing-environment-hash String)
-   (form-contract-hashes (Vec String))
-   (form-contract-set-digest-value String)
-   (compiler-rule-epoch String)
-   (materialization-receipt-id String)
-   (result-fact-hashes (Vec String))]
-  String
+  [profile-identity ProfileIdentityV1
+   unit-id core/NativeId
+   unit-semantic-digest String
+   dependency-digest String
+   typing-environment-hash String
+   form-contract-hashes (Vec String)
+   form-contract-set-digest-value String
+   compiler-rule-epoch String
+   materialization-receipt-id String
+   result-fact-hashes (Vec String)] String
   (stages/canonical-record "unit-derivation-receipt-v1"
     [(profileidentityv1-encoding profile-identity)
      (stages/encode-id unit-id)
@@ -2024,23 +1913,18 @@
      (stages/canonical-set "result-fact-hashes" result-fact-hashes)]))
 
 (defn make-unit-derivation-receipt
-  [(profile-identity ProfileIdentityV1)
-   (unit stages/SourceUnitV0)
-   (unit-contracts (Vec UnitContractV0))
-   (form-contracts (Vec SemanticFormContractV1))
-   (typing-environment-hash String)
-   (compiler-rule-epoch String)
-   (materialization-receipt-id String)
-   (result-fact-hashes (Vec String))]
-  UnitDerivationReceiptV1
-  (let [(contract-hashes (Vec String))
-        (canonical-contract-hashes form-contracts)
-        (contract-set-digest String)
-        (form-contract-set-digest contract-hashes)
-        (dependency-digest String)
-        (dependency-context-digest unit unit-contracts)
-        (encoding String)
-        (encode-unit-derivation-receipt
+  [profile-identity ProfileIdentityV1
+   unit stages/SourceUnitV0
+   unit-contracts (Vec UnitContractV0)
+   form-contracts (Vec SemanticFormContractV1)
+   typing-environment-hash String
+   compiler-rule-epoch String
+   materialization-receipt-id String
+   result-fact-hashes (Vec String)] UnitDerivationReceiptV1
+  (let [contract-hashes (Vec String) (canonical-contract-hashes form-contracts)
+        contract-set-digest String (form-contract-set-digest contract-hashes)
+        dependency-digest String (dependency-context-digest unit unit-contracts)
+        encoding String (encode-unit-derivation-receipt
           profile-identity
           (stages/sourceunitv0-id unit)
           (stages/sourceunitv0-semantic-digest unit)
@@ -2066,24 +1950,21 @@
       encoding)))
 
 (defn semantic-contract-for-hash
-  [(contracts (Vec SemanticFormContractV1))
-   (contract-hash String)]
-  (U SemanticFormContractV1 Nil)
+  [contracts (Vec SemanticFormContractV1)
+   contract-hash String] (U SemanticFormContractV1 Nil)
   (some
-    (fn [(contract SemanticFormContractV1)] (U SemanticFormContractV1 Nil)
+    (fn [contract SemanticFormContractV1] (U SemanticFormContractV1 Nil)
       (if (= contract-hash (semanticformcontractv1-contract-id contract))
         contract nil))
     contracts))
 
 (defn receipt-contract-hashes-valid?
-  [(profile-identity ProfileIdentityV1)
-   (contract-hashes (Vec String))
-   (contracts (Vec SemanticFormContractV1))]
-  Bool
+  [profile-identity ProfileIdentityV1
+   contract-hashes (Vec String)
+   contracts (Vec SemanticFormContractV1)] Bool
   (every?
-    (fn [(contract-hash String)] Bool
-      (let [(contract (U SemanticFormContractV1 Nil))
-            (semantic-contract-for-hash contracts contract-hash)]
+    (fn [contract-hash String] Bool
+      (let [contract (U SemanticFormContractV1 Nil) (semantic-contract-for-hash contracts contract-hash)]
         (and (some? contract)
           (= (profileidentityv1-digest profile-identity)
             (profileidentityv1-digest
@@ -2094,13 +1975,11 @@
     contract-hashes))
 
 (defn unit-derivation-receipt-valid-for?
-  [(receipt UnitDerivationReceiptV1)
-   (unit stages/SourceUnitV0)
-   (unit-contracts (Vec UnitContractV0))
-   (form-contracts (Vec SemanticFormContractV1))]
-  Bool
-  (let [(contract-hashes (Vec String))
-        (unitderivationreceiptv1-form-contract-hashes receipt)]
+  [receipt UnitDerivationReceiptV1
+   unit stages/SourceUnitV0
+   unit-contracts (Vec UnitContractV0)
+   form-contracts (Vec SemanticFormContractV1)] Bool
+  (let [contract-hashes (Vec String) (unitderivationreceiptv1-form-contract-hashes receipt)]
     (and
       (= (unitderivationreceiptv1-receipt-id receipt)
         (stages/content-digest
@@ -2123,7 +2002,7 @@
         (unitderivationreceiptv1-profile-identity receipt)
         contract-hashes form-contracts))))
 
-(defn unit-result-key [(receipt UnitDerivationReceiptV1)] String
+(defn unit-result-key [receipt UnitDerivationReceiptV1] String
   (stages/content-digest
     (stages/canonical-record "beagle-unit-result-v1"
       [(profileidentityv1-digest
@@ -2136,16 +2015,15 @@
        (unitderivationreceiptv1-compiler-rule-epoch receipt)])))
 
 (defn conj-id
-  [(identities (Vec core/NativeId))
-   (candidate core/NativeId)]
-  (Vec core/NativeId)
+  [identities (Vec core/NativeId)
+   candidate core/NativeId] (Vec core/NativeId)
   (if (core/id-in? identities candidate) identities (conj identities candidate)))
 
-(defn type-references [(definition core/TypeDef)] (Vec core/NativeId)
-  (let [(shape core/TypeShape) (core/typedef-shape definition)]
+(defn type-references [definition core/TypeDef] (Vec core/NativeId)
+  (let [shape core/TypeShape (core/typedef-shape definition)]
     (cond
       (instance? native.core.RecordType shape)
-      (mapv (fn [(field core/TypeField)] core/NativeId
+      (mapv (fn [field core/TypeField] core/NativeId
               (core/typefield-type-id field))
         (core/recordtype-fields shape))
 
@@ -2155,8 +2033,7 @@
              collected (Vec core/NativeId) [(lower/type-id "UnionTag")]]
         (if (>= position (count variants))
           collected
-          (let [(payload (U core/NativeId Nil))
-                (core/typevariant-payload-type (nth variants position))]
+          (let [payload (U core/NativeId Nil) (core/typevariant-payload-type (nth variants position))]
             (recur (+ position 1) variants
               (if (nil? payload) collected (conj-id collected payload))))))
 
@@ -2179,8 +2056,7 @@
       [(core/atomcelltypev0-content-type shape)]
 
       (instance? native.core.FunctionType shape)
-      (let [(rest-type (U core/NativeId Nil))
-            (core/functiontype-rest-type shape)]
+      (let [rest-type (U core/NativeId Nil) (core/functiontype-rest-type shape)]
         (vec (concat
                (core/functiontype-parameter-types shape)
                (if (nil? rest-type) [] [rest-type])
@@ -2193,28 +2069,25 @@
 
       :else [])))
 
-(defn instruction-type [(instruction core/Instruction)] core/NativeId
+(defn instruction-type [instruction core/Instruction] core/NativeId
   (core/ssavaluev0-type-id (get instruction :result)))
 
-(defn typed-function-type-seeds
-  [(function lower/TypedFunctionV0)] (Vec core/NativeId)
-  (let [(with-parameters (Vec core/NativeId))
-        (mapv (fn [(parameter core/Parameter)] core/NativeId
+(defn typed-function-type-seeds [function lower/TypedFunctionV0] (Vec core/NativeId)
+  (let [with-parameters (Vec core/NativeId) (mapv (fn [parameter core/Parameter] core/NativeId
                 (core/parameter-type-id parameter))
           (lower/typedfunctionv0-parameters function))
-        (initial (Vec core/NativeId))
-        (conj-id
+        initial (Vec core/NativeId) (conj-id
           (conj-id with-parameters (lower/typedfunctionv0-return-type function))
           (lower/typedfunctionv0-failure-type function))
-        (blocks (Vec core/BasicBlock))
-        (lower/readiness-blocks (lower/typedfunctionv0-readiness function))]
-    (loop [position Int 0 collected (Vec core/NativeId) initial]
+        blocks (Vec core/BasicBlock) (lower/readiness-blocks (lower/typedfunctionv0-readiness function))]
+    (loop [position Int 0
+           collected (Vec core/NativeId) initial]
       (if (>= position (count blocks))
         collected
-        (let [(block core/BasicBlock) (nth blocks position)
-              (with-block-parameters (Vec core/NativeId))
-              (loop [inner Int 0 current (Vec core/NativeId) collected]
-                (if (>= inner (count (core/basicblock-parameters block)))
+        (let [block core/BasicBlock (nth blocks position)
+              with-block-parameters (Vec core/NativeId) (loop [inner Int 0
+                                                               current (Vec core/NativeId) collected]
+                                                          (if (>= inner (count (core/basicblock-parameters block)))
                   current
                   (recur (+ inner 1)
                     (conj-id current
@@ -2231,26 +2104,28 @@
                       (nth (core/basicblock-instructions block) inner))))))))))))
 
 (defn find-type
-  [(types (Vec core/TypeDef)) (target core/NativeId)] (U core/TypeDef Nil)
+  [types (Vec core/TypeDef)
+   target core/NativeId] (U core/TypeDef Nil)
   (some
-    (fn [(definition core/TypeDef)] (U core/TypeDef Nil)
+    (fn [definition core/TypeDef] (U core/TypeDef Nil)
       (if (core/native-id= target (core/typedef-id definition))
         definition nil))
     types))
 
 (defn reachable-type-ids
-  [(types (Vec core/TypeDef)) (seeds (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [round Int 0 current (Vec core/NativeId) seeds]
-    (let [(grown (Vec core/NativeId))
-          (loop [position Int 0 collected (Vec core/NativeId) current]
-            (if (>= position (count current))
+  [types (Vec core/TypeDef)
+   seeds (Vec core/NativeId)] (Vec core/NativeId)
+  (loop [round Int 0
+         current (Vec core/NativeId) seeds]
+    (let [grown (Vec core/NativeId) (loop [position Int 0
+                                           collected (Vec core/NativeId) current]
+                                      (if (>= position (count current))
               collected
-              (let [(definition (U core/TypeDef Nil))
-                    (find-type types (nth current position))
-                    (references (Vec core/NativeId))
-                    (if (nil? definition) [] (type-references definition))]
+              (let [definition (U core/TypeDef Nil) (find-type types (nth current position))
+                    references (Vec core/NativeId) (if (nil? definition) [] (type-references definition))]
                 (recur (+ position 1)
-                  (loop [inner Int 0 next (Vec core/NativeId) collected]
+                  (loop [inner Int 0
+                         next (Vec core/NativeId) collected]
                     (if (>= inner (count references))
                       next
                       (recur (+ inner 1)
@@ -2259,97 +2134,85 @@
         grown
         (recur (+ round 1) grown)))))
 
+;; The ordinary body pass publishes the checked arithmetic family as
+;; one generated support root whenever any checked operation appears.
+;; Keep that compiler-owned family with the unit that requested it so
+;; dense assembly reproduces the authoritative typed stage exactly.
 (defn selected-types
-  [(types (Vec core/TypeDef))
-   (function lower/TypedFunctionV0)]
-  (Vec core/TypeDef)
-  (let [(function-seeds (Vec core/NativeId))
-        (typed-function-type-seeds function)
-        ;; The ordinary body pass publishes the checked arithmetic family as
-        ;; one generated support root whenever any checked operation appears.
-        ;; Keep that compiler-owned family with the unit that requested it so
-        ;; dense assembly reproduces the authoritative typed stage exactly.
-        (seeds (Vec core/NativeId))
-        (if (lower/readiness-uses-checked?
+  [types (Vec core/TypeDef)
+   function lower/TypedFunctionV0] (Vec core/TypeDef)
+  (let [function-seeds (Vec core/NativeId) (typed-function-type-seeds function)
+        seeds (Vec core/NativeId) (if (lower/readiness-uses-checked?
               (lower/typedfunctionv0-readiness function))
           (vec (concat function-seeds
-                 (mapv (fn [(definition core/TypeDef)] core/NativeId
+                 (mapv (fn [definition core/TypeDef] core/NativeId
                          (core/typedef-id definition))
                    (lower/checked-arithmetic-types))))
           function-seeds)
-        (reachable (Vec core/NativeId))
-        (reachable-type-ids types seeds)]
-    (filterv (fn [(definition core/TypeDef)] Bool
+        reachable (Vec core/NativeId) (reachable-type-ids types seeds)]
+    (filterv (fn [definition core/TypeDef] Bool
                (core/id-in? reachable (core/typedef-id definition)))
       types)))
 
 (defn selected-effects
-  [(effects (Vec core/EffectDef))
-   (function lower/TypedFunctionV0)]
-  (Vec core/EffectDef)
-  (filterv (fn [(effect core/EffectDef)] Bool
+  [effects (Vec core/EffectDef)
+   function lower/TypedFunctionV0] (Vec core/EffectDef)
+  (filterv (fn [effect core/EffectDef] Bool
              (core/id-in? (lower/typedfunctionv0-effects function)
                (core/effectdef-id effect)))
     effects))
 
 (defn selected-capabilities
-  [(capabilities (Vec core/CapabilityDef))
-   (function lower/TypedFunctionV0)]
-  (Vec core/CapabilityDef)
-  (let [(required (Vec core/NativeId)) (lower/function-capabilities function)]
-    (filterv (fn [(capability core/CapabilityDef)] Bool
+  [capabilities (Vec core/CapabilityDef)
+   function lower/TypedFunctionV0] (Vec core/CapabilityDef)
+  (let [required (Vec core/NativeId) (lower/function-capabilities function)]
+    (filterv (fn [capability core/CapabilityDef] Bool
                (core/id-in? required (core/capabilitydef-id capability)))
       capabilities)))
 
 (defn source-module-for
-  [(modules (Vec stages/SourceModuleV1))
-   (target core/NativeId)]
-  (U stages/SourceModuleV1 Nil)
+  [modules (Vec stages/SourceModuleV1)
+   target core/NativeId] (U stages/SourceModuleV1 Nil)
   (some
-    (fn [(module stages/SourceModuleV1)] (U stages/SourceModuleV1 Nil)
+    (fn [module stages/SourceModuleV1] (U stages/SourceModuleV1 Nil)
       (if (core/native-id= target (stages/sourcemodulev1-id module))
         module nil))
     modules))
 
 (defn typed-function-for
-  [(functions (Vec lower/TypedFunctionV0))
-   (target core/NativeId)]
-  (U lower/TypedFunctionV0 Nil)
+  [functions (Vec lower/TypedFunctionV0)
+   target core/NativeId] (U lower/TypedFunctionV0 Nil)
   (some
-    (fn [(function lower/TypedFunctionV0)] (U lower/TypedFunctionV0 Nil)
+    (fn [function lower/TypedFunctionV0] (U lower/TypedFunctionV0 Nil)
       (if (core/native-id= target (lower/typedfunctionv0-id function))
         function nil))
     functions))
 
 (defn native-function-for
-  [(functions (Vec core/FunctionDef))
-   (target core/NativeId)]
-  (U core/FunctionDef Nil)
+  [functions (Vec core/FunctionDef)
+   target core/NativeId] (U core/FunctionDef Nil)
   (some
-    (fn [(function core/FunctionDef)] (U core/FunctionDef Nil)
+    (fn [function core/FunctionDef] (U core/FunctionDef Nil)
       (if (core/native-id= target (core/functiondef-id function))
         function nil))
     functions))
 
 (defn selected-layouts
-  [(layouts (Vec core/LayoutDef))
-   (types (Vec core/TypeDef))]
-  (Vec core/LayoutDef)
-  (let [(type-ids (Vec core/NativeId))
-        (mapv (fn [(definition core/TypeDef)] core/NativeId
+  [layouts (Vec core/LayoutDef)
+   types (Vec core/TypeDef)] (Vec core/LayoutDef)
+  (let [type-ids (Vec core/NativeId) (mapv (fn [definition core/TypeDef] core/NativeId
                 (core/typedef-id definition))
           types)]
-    (filterv (fn [(layout core/LayoutDef)] Bool
+    (filterv (fn [layout core/LayoutDef] Bool
                (core/id-in? type-ids (core/layoutdef-type-id layout)))
       layouts)))
 
 (defn selected-abis
-  [(abis (Vec core/AbiDeclV0))
-   (typed-function lower/TypedFunctionV0)
-   (native-function core/FunctionDef)]
-  (Vec core/AbiDeclV0)
+  [abis (Vec core/AbiDeclV0)
+   typed-function lower/TypedFunctionV0
+   native-function core/FunctionDef] (Vec core/AbiDeclV0)
   (filterv
-    (fn [(abi core/AbiDeclV0)] Bool
+    (fn [abi core/AbiDeclV0] Bool
       (or (core/native-id= (core/functiondef-id native-function)
             (core/abideclv0-function-id abi))
           (lower/function-calls-abi? typed-function
@@ -2357,10 +2220,9 @@
     abis))
 
 (defn selected-regions
-  [(regions (Vec core/RegionDef))
-   (function core/FunctionDef)]
-  (Vec core/RegionDef)
-  (filterv (fn [(region core/RegionDef)] Bool
+  [regions (Vec core/RegionDef)
+   function core/FunctionDef] (Vec core/RegionDef)
+  (filterv (fn [region core/RegionDef] Bool
              (core/id-in? (core/functiondef-regions function)
                (core/regiondef-id region)))
     regions))
@@ -2368,19 +2230,14 @@
 (declare typed-unit-record-valid? native-unit-record-valid?)
 
 (defn extract-unit-payloads
-  [(source stages/SourceStageV1)
-   (typed-slice lower/TypedSliceV0)
-   (native-frozen stages/FrozenNativeStageV0)]
-  UnitExtractionResultV0
-  (let [(units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
-        (modules (Vec stages/SourceModuleV1))
-        (stages/sourcestagev1-modules source)
-        (index lower/SourceIndexV0)
-        (lower/build-source-index (stages/sourcestagev1-terms source) modules)
-        (typed-functions (Vec lower/TypedFunctionV0))
-        (lower/typedslicev0-functions typed-slice)
-        (native-program core/NativeCoreProgram)
-        (stages/nativestagev0-program
+  [source stages/SourceStageV1
+   typed-slice lower/TypedSliceV0
+   native-frozen stages/FrozenNativeStageV0] UnitExtractionResultV0
+  (let [units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)
+        modules (Vec stages/SourceModuleV1) (stages/sourcestagev1-modules source)
+        index lower/SourceIndexV0 (lower/build-source-index (stages/sourcestagev1-terms source) modules)
+        typed-functions (Vec lower/TypedFunctionV0) (lower/typedslicev0-functions typed-slice)
+        native-program core/NativeCoreProgram (stages/nativestagev0-program
           (stages/frozennativestagev0-stage native-frozen))]
     (if (not= 9 (count units))
       (->UnitExtractionRejectedV0 "UNIT-CORPUS-SIZE"
@@ -2391,18 +2248,14 @@
              native-units (Vec NativeUnitV0) []]
         (if (>= position (count units))
           (->UnitExtractionAcceptedV0 contracts typed-units native-units)
-          (let [(unit stages/SourceUnitV0) (nth units position)
-                (unit-id core/NativeId) (stages/sourceunitv0-id unit)
-                (function-id core/NativeId)
-                (lower/function-id unit-id (stages/sourceunitv0-name unit))
-                (module (U stages/SourceModuleV1 Nil))
-                (source-module-for modules (stages/sourceunitv0-module-id unit))
-                (typed-function (U lower/TypedFunctionV0 Nil))
-                (typed-function-for typed-functions function-id)
-                (native-function (U core/FunctionDef Nil))
-                (native-function-for
+          (let [unit stages/SourceUnitV0 (nth units position)
+                unit-id core/NativeId (stages/sourceunitv0-id unit)
+                function-id core/NativeId (lower/function-id unit-id (stages/sourceunitv0-name unit))
+                module (U stages/SourceModuleV1 Nil) (source-module-for modules (stages/sourceunitv0-module-id unit))
+                typed-function (U lower/TypedFunctionV0 Nil) (typed-function-for typed-functions function-id)
+                native-function (U core/FunctionDef Nil) (native-function-for
                   (core/nativecoreprogram-functions native-program) function-id)
-                (private-text String) (lower/fact-text index unit-id "private")]
+                private-text String (lower/fact-text index unit-id "private")]
             (cond
               (not= "defn" (stages/sourceunitv0-kind unit))
               (->UnitExtractionRejectedV0 "UNIT-CORPUS-KIND"
@@ -2427,26 +2280,20 @@
                 (id-value unit-id))
 
               :else
-              (let [(qualified-name String)
-                    (str (stages/sourcemodulev1-name module) "/"
+              (let [qualified-name String (str (stages/sourcemodulev1-name module) "/"
                       (stages/sourceunitv0-name unit))
-                    (visibility String)
-                    (if (= "true" private-text) "private" "public")
-                    (types (Vec core/TypeDef))
-                    (selected-types (lower/typedslicev0-types typed-slice)
+                    visibility String (if (= "true" private-text) "private" "public")
+                    types (Vec core/TypeDef) (selected-types (lower/typedslicev0-types typed-slice)
                       typed-function)
-                    (contract UnitContractV0)
-                    (make-unit-contract unit-id qualified-name visibility
+                    contract UnitContractV0 (make-unit-contract unit-id qualified-name visibility
                       typed-function)
-                    (typed-unit TypedUnitV0)
-                    (make-typed-unit unit-id typed-function types
+                    typed-unit TypedUnitV0 (make-typed-unit unit-id typed-function types
                       (selected-effects (lower/typedslicev0-effects typed-slice)
                         typed-function)
                       (selected-capabilities
                         (lower/typedslicev0-capabilities typed-slice)
                         typed-function))
-                    (native-unit NativeUnitV0)
-                    (make-native-unit unit-id native-function
+                    native-unit NativeUnitV0 (make-native-unit unit-id native-function
                       (selected-layouts
                         (core/nativecoreprogram-layouts native-program) types)
                       (selected-abis (core/nativecoreprogram-abis native-program)
@@ -2471,22 +2318,22 @@
                     (conj typed-units typed-unit)
                     (conj native-units native-unit)))))))))))
 
-(defn claim-key [(claim PayloadClaimV0)] String
+(defn claim-key [claim PayloadClaimV0] String
   (stages/canonical-record "unit-payload-claim-v0"
     [(payloadclaimv0-category claim)
      (id-value (payloadclaimv0-identity claim))]))
 
-(defn check-payload-claims [(claims (Vec PayloadClaimV0))] ClaimCheckV0
+(defn check-payload-claims [claims (Vec PayloadClaimV0)] ClaimCheckV0
   (loop [position Int 0
          encodings (Map String String) {}
          valid Bool true
          detail String ""]
     (if (or (>= position (count claims)) (not valid))
       (->ClaimCheckV0 encodings valid detail)
-      (let [(claim PayloadClaimV0) (nth claims position)
-            (key String) (claim-key claim)
-            (prior (U String Nil)) (get encodings key)
-            (encoding String) (payloadclaimv0-encoding claim)]
+      (let [claim PayloadClaimV0 (nth claims position)
+            key String (claim-key claim)
+            prior (U String Nil) (get encodings key)
+            encoding String (payloadclaimv0-encoding claim)]
         (if (or (nil? prior) (= prior encoding))
           (recur (+ position 1) (assoc encodings key encoding) true "")
           (recur (+ position 1) encodings false
@@ -2494,19 +2341,20 @@
               (id-value (payloadclaimv0-identity claim))
               " has unequal canonical payloads")))))))
 
-(defn contract-claims [(contracts (Vec UnitContractV0))] (Vec PayloadClaimV0)
-  (mapv (fn [(contract UnitContractV0)] PayloadClaimV0
+(defn contract-claims [contracts (Vec UnitContractV0)] (Vec PayloadClaimV0)
+  (mapv (fn [contract UnitContractV0] PayloadClaimV0
           (->PayloadClaimV0 "unit-contract"
             (unitcontractv0-unit-id contract)
             (unitcontractv0-encoding contract)))
     contracts))
 
-(defn typed-unit-claims [(units (Vec TypedUnitV0))] (Vec PayloadClaimV0)
-  (loop [position Int 0 claims (Vec PayloadClaimV0) []]
+(defn typed-unit-claims [units (Vec TypedUnitV0)] (Vec PayloadClaimV0)
+  (loop [position Int 0
+         claims (Vec PayloadClaimV0) []]
     (if (>= position (count units))
       claims
-      (let [(unit TypedUnitV0) (nth units position)
-            (function lower/TypedFunctionV0) (typedunitv0-function unit)]
+      (let [unit TypedUnitV0 (nth units position)
+            function lower/TypedFunctionV0 (typedunitv0-function unit)]
         (recur (+ position 1)
           (vec (concat claims
             [(->PayloadClaimV0 "typed-unit" (typedunitv0-unit-id unit)
@@ -2514,26 +2362,27 @@
              (->PayloadClaimV0 "typed-function"
                (lower/typedfunctionv0-id function)
                (encode-typed-function-wire-v1 function))]
-            (mapv (fn [(definition core/TypeDef)] PayloadClaimV0
+            (mapv (fn [definition core/TypeDef] PayloadClaimV0
                     (->PayloadClaimV0 "type" (core/typedef-id definition)
                       (encode-type-def-wire-v1 definition)))
               (typedunitv0-types unit))
-            (mapv (fn [(effect core/EffectDef)] PayloadClaimV0
+            (mapv (fn [effect core/EffectDef] PayloadClaimV0
                     (->PayloadClaimV0 "effect" (core/effectdef-id effect)
                       (encode-effect-wire-v1 effect)))
               (typedunitv0-effects unit))
-            (mapv (fn [(capability core/CapabilityDef)] PayloadClaimV0
+            (mapv (fn [capability core/CapabilityDef] PayloadClaimV0
                     (->PayloadClaimV0 "capability"
                       (core/capabilitydef-id capability)
                       (encode-capability capability)))
               (typedunitv0-capabilities unit)))))))))
 
-(defn native-unit-claims [(units (Vec NativeUnitV0))] (Vec PayloadClaimV0)
-  (loop [position Int 0 claims (Vec PayloadClaimV0) []]
+(defn native-unit-claims [units (Vec NativeUnitV0)] (Vec PayloadClaimV0)
+  (loop [position Int 0
+         claims (Vec PayloadClaimV0) []]
     (if (>= position (count units))
       claims
-      (let [(unit NativeUnitV0) (nth units position)
-            (function core/FunctionDef) (nativeunitv0-function unit)]
+      (let [unit NativeUnitV0 (nth units position)
+            function core/FunctionDef (nativeunitv0-function unit)]
         (recur (+ position 1)
           (vec (concat claims
             [(->PayloadClaimV0 "native-unit" (nativeunitv0-unit-id unit)
@@ -2541,252 +2390,268 @@
              (->PayloadClaimV0 "native-function"
                (core/functiondef-id function)
                (encode-native-function-wire-v1 function))]
-            (mapv (fn [(layout core/LayoutDef)] PayloadClaimV0
+            (mapv (fn [layout core/LayoutDef] PayloadClaimV0
                     (->PayloadClaimV0 "layout" (core/layoutdef-id layout)
                       (encode-layout-def-wire-v1 layout)))
               (nativeunitv0-layouts unit))
-            (mapv (fn [(abi core/AbiDeclV0)] PayloadClaimV0
+            (mapv (fn [abi core/AbiDeclV0] PayloadClaimV0
                     (->PayloadClaimV0 "abi" (core/abideclv0-id abi)
                       (encode-abi-wire-v1 abi)))
               (nativeunitv0-abis unit))
-            (mapv (fn [(region core/RegionDef)] PayloadClaimV0
+            (mapv (fn [region core/RegionDef] PayloadClaimV0
                     (->PayloadClaimV0 "region" (core/regiondef-id region)
                       (stages/encode-region region)))
               (nativeunitv0-regions unit)))))))))
 
 (defn support-claims
-  [(types (Vec core/TypeDef))
-   (effects (Vec core/EffectDef))
-   (capabilities (Vec core/CapabilityDef))
-   (regions (Vec core/RegionDef))
-   (layouts (Vec core/LayoutDef))]
-  (Vec PayloadClaimV0)
+  [types (Vec core/TypeDef)
+   effects (Vec core/EffectDef)
+   capabilities (Vec core/CapabilityDef)
+   regions (Vec core/RegionDef)
+   layouts (Vec core/LayoutDef)] (Vec PayloadClaimV0)
   (vec (concat
-    (mapv (fn [(definition core/TypeDef)] PayloadClaimV0
+    (mapv (fn [definition core/TypeDef] PayloadClaimV0
             (->PayloadClaimV0 "type" (core/typedef-id definition)
               (encode-type-def-wire-v1 definition)))
       types)
-    (mapv (fn [(effect core/EffectDef)] PayloadClaimV0
+    (mapv (fn [effect core/EffectDef] PayloadClaimV0
             (->PayloadClaimV0 "effect" (core/effectdef-id effect)
               (encode-effect-wire-v1 effect)))
       effects)
-    (mapv (fn [(capability core/CapabilityDef)] PayloadClaimV0
+    (mapv (fn [capability core/CapabilityDef] PayloadClaimV0
             (->PayloadClaimV0 "capability"
               (core/capabilitydef-id capability)
               (encode-capability capability)))
       capabilities)
-    (mapv (fn [(region core/RegionDef)] PayloadClaimV0
+    (mapv (fn [region core/RegionDef] PayloadClaimV0
             (->PayloadClaimV0 "region" (core/regiondef-id region)
               (stages/encode-region region)))
       regions)
-    (mapv (fn [(layout core/LayoutDef)] PayloadClaimV0
+    (mapv (fn [layout core/LayoutDef] PayloadClaimV0
             (->PayloadClaimV0 "layout" (core/layoutdef-id layout)
               (encode-layout-def-wire-v1 layout)))
       layouts))))
 
-(defn id-before? [(left core/NativeId) (right core/NativeId)] Bool
+(defn id-before?
+  [left core/NativeId
+   right core/NativeId] Bool
   (< (compare (id-value left) (id-value right)) 0))
 
 (defn insert-type
-  [(item core/TypeDef) (sorted (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/TypeDef
+   sorted (Vec core/TypeDef)] (Vec core/TypeDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/TypeDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/TypeDef) (nth sorted position)]
+      (let [current core/TypeDef (nth sorted position)]
         (if (and (not inserted)
               (id-before? (core/typedef-id item) (core/typedef-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-types [(values (Vec core/TypeDef))] (Vec core/TypeDef)
-  (loop [position Int 0 result (Vec core/TypeDef) []]
+(defn ordered-types [values (Vec core/TypeDef)] (Vec core/TypeDef)
+  (loop [position Int 0
+         result (Vec core/TypeDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-type (nth values position) result)))))
 
 (defn insert-typed-function
-  [(item lower/TypedFunctionV0)
-   (sorted (Vec lower/TypedFunctionV0))]
-  (Vec lower/TypedFunctionV0)
-  (loop [position Int 0 inserted Bool false
+  [item lower/TypedFunctionV0
+   sorted (Vec lower/TypedFunctionV0)] (Vec lower/TypedFunctionV0)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec lower/TypedFunctionV0) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current lower/TypedFunctionV0) (nth sorted position)]
+      (let [current lower/TypedFunctionV0 (nth sorted position)]
         (if (and (not inserted)
               (id-before? (lower/typedfunctionv0-id item)
                 (lower/typedfunctionv0-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-typed-functions
-  [(values (Vec lower/TypedFunctionV0))] (Vec lower/TypedFunctionV0)
-  (loop [position Int 0 result (Vec lower/TypedFunctionV0) []]
+(defn ordered-typed-functions [values (Vec lower/TypedFunctionV0)] (Vec lower/TypedFunctionV0)
+  (loop [position Int 0
+         result (Vec lower/TypedFunctionV0) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-typed-function (nth values position) result)))))
 
 (defn insert-native-function
-  [(item core/FunctionDef)
-   (sorted (Vec core/FunctionDef))]
-  (Vec core/FunctionDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/FunctionDef
+   sorted (Vec core/FunctionDef)] (Vec core/FunctionDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/FunctionDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/FunctionDef) (nth sorted position)]
+      (let [current core/FunctionDef (nth sorted position)]
         (if (and (not inserted)
               (id-before? (core/functiondef-id item)
                 (core/functiondef-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-native-functions
-  [(values (Vec core/FunctionDef))] (Vec core/FunctionDef)
-  (loop [position Int 0 result (Vec core/FunctionDef) []]
+(defn ordered-native-functions [values (Vec core/FunctionDef)] (Vec core/FunctionDef)
+  (loop [position Int 0
+         result (Vec core/FunctionDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1)
         (insert-native-function (nth values position) result)))))
 
 (defn insert-effect
-  [(item core/EffectDef) (sorted (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/EffectDef
+   sorted (Vec core/EffectDef)] (Vec core/EffectDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/EffectDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/EffectDef) (nth sorted position)]
+      (let [current core/EffectDef (nth sorted position)]
         (if (and (not inserted)
               (id-before? (core/effectdef-id item) (core/effectdef-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-effects [(values (Vec core/EffectDef))] (Vec core/EffectDef)
-  (loop [position Int 0 result (Vec core/EffectDef) []]
+(defn ordered-effects [values (Vec core/EffectDef)] (Vec core/EffectDef)
+  (loop [position Int 0
+         result (Vec core/EffectDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-effect (nth values position) result)))))
 
 (defn insert-capability
-  [(item core/CapabilityDef)
-   (sorted (Vec core/CapabilityDef))]
-  (Vec core/CapabilityDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/CapabilityDef
+   sorted (Vec core/CapabilityDef)] (Vec core/CapabilityDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/CapabilityDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/CapabilityDef) (nth sorted position)]
+      (let [current core/CapabilityDef (nth sorted position)]
         (if (and (not inserted)
               (id-before? (core/capabilitydef-id item)
                 (core/capabilitydef-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-capabilities
-  [(values (Vec core/CapabilityDef))] (Vec core/CapabilityDef)
-  (loop [position Int 0 result (Vec core/CapabilityDef) []]
+(defn ordered-capabilities [values (Vec core/CapabilityDef)] (Vec core/CapabilityDef)
+  (loop [position Int 0
+         result (Vec core/CapabilityDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-capability (nth values position) result)))))
 
 (defn insert-region
-  [(item core/RegionDef) (sorted (Vec core/RegionDef))] (Vec core/RegionDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/RegionDef
+   sorted (Vec core/RegionDef)] (Vec core/RegionDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/RegionDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/RegionDef) (nth sorted position)]
+      (let [current core/RegionDef (nth sorted position)]
         (if (and (not inserted)
               (id-before? (core/regiondef-id item) (core/regiondef-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-regions [(values (Vec core/RegionDef))] (Vec core/RegionDef)
-  (loop [position Int 0 result (Vec core/RegionDef) []]
+(defn ordered-regions [values (Vec core/RegionDef)] (Vec core/RegionDef)
+  (loop [position Int 0
+         result (Vec core/RegionDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-region (nth values position) result)))))
 
 (defn insert-layout
-  [(item core/LayoutDef) (sorted (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [position Int 0 inserted Bool false
+  [item core/LayoutDef
+   sorted (Vec core/LayoutDef)] (Vec core/LayoutDef)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/LayoutDef) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/LayoutDef) (nth sorted position)]
+      (let [current core/LayoutDef (nth sorted position)]
         (if (and (not inserted)
               (id-before? (core/layoutdef-id item) (core/layoutdef-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-layouts [(values (Vec core/LayoutDef))] (Vec core/LayoutDef)
-  (loop [position Int 0 result (Vec core/LayoutDef) []]
+(defn ordered-layouts [values (Vec core/LayoutDef)] (Vec core/LayoutDef)
+  (loop [position Int 0
+         result (Vec core/LayoutDef) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-layout (nth values position) result)))))
 
 (defn insert-abi
-  [(item core/AbiDeclV0) (sorted (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [position Int 0 inserted Bool false
+  [item core/AbiDeclV0
+   sorted (Vec core/AbiDeclV0)] (Vec core/AbiDeclV0)
+  (loop [position Int 0
+         inserted Bool false
          result (Vec core/AbiDeclV0) []]
     (if (>= position (count sorted))
       (if inserted result (conj result item))
-      (let [(current core/AbiDeclV0) (nth sorted position)]
+      (let [current core/AbiDeclV0 (nth sorted position)]
         (if (and (not inserted)
               (id-before? (core/abideclv0-id item) (core/abideclv0-id current)))
           (recur (+ position 1) true (conj (conj result item) current))
           (recur (+ position 1) inserted (conj result current)))))))
 
-(defn ordered-abis [(values (Vec core/AbiDeclV0))] (Vec core/AbiDeclV0)
-  (loop [position Int 0 result (Vec core/AbiDeclV0) []]
+(defn ordered-abis [values (Vec core/AbiDeclV0)] (Vec core/AbiDeclV0)
+  (loop [position Int 0
+         result (Vec core/AbiDeclV0) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (insert-abi (nth values position) result)))))
 
-(defn source-unit-ids [(units (Vec stages/SourceUnitV0))] (Vec core/NativeId)
-  (mapv (fn [(unit stages/SourceUnitV0)] core/NativeId
+(defn source-unit-ids [units (Vec stages/SourceUnitV0)] (Vec core/NativeId)
+  (mapv (fn [unit stages/SourceUnitV0] core/NativeId
           (stages/sourceunitv0-id unit))
     units))
 
-(defn contract-ids [(contracts (Vec UnitContractV0))] (Vec core/NativeId)
-  (mapv (fn [(contract UnitContractV0)] core/NativeId
+(defn contract-ids [contracts (Vec UnitContractV0)] (Vec core/NativeId)
+  (mapv (fn [contract UnitContractV0] core/NativeId
           (unitcontractv0-unit-id contract))
     contracts))
 
-(defn typed-unit-ids [(units (Vec TypedUnitV0))] (Vec core/NativeId)
-  (mapv (fn [(unit TypedUnitV0)] core/NativeId (typedunitv0-unit-id unit))
+(defn typed-unit-ids [units (Vec TypedUnitV0)] (Vec core/NativeId)
+  (mapv (fn [unit TypedUnitV0] core/NativeId (typedunitv0-unit-id unit))
     units))
 
-(defn native-unit-ids [(units (Vec NativeUnitV0))] (Vec core/NativeId)
-  (mapv (fn [(unit NativeUnitV0)] core/NativeId (nativeunitv0-unit-id unit))
+(defn native-unit-ids [units (Vec NativeUnitV0)] (Vec core/NativeId)
+  (mapv (fn [unit NativeUnitV0] core/NativeId (nativeunitv0-unit-id unit))
     units))
 
 (defn exact-id-set?
-  [(expected (Vec core/NativeId)) (actual (Vec core/NativeId))] Bool
+  [expected (Vec core/NativeId)
+   actual (Vec core/NativeId)] Bool
   (and (= (count expected) (count actual))
     (core/unique-ids? actual)
     (core/ids-in? expected actual)
     (core/ids-in? actual expected)))
 
-(defn unique-parameter-ids? [(parameters (Vec core/Parameter))] Bool
+(defn unique-parameter-ids? [parameters (Vec core/Parameter)] Bool
   (core/unique-ids?
-    (mapv (fn [(parameter core/Parameter)] core/NativeId
+    (mapv (fn [parameter core/Parameter] core/NativeId
             (core/parameter-id parameter))
       parameters)))
 
-(defn resource-token-kind-wire-v1-supported?
-  [(kind core/ResourceTokenKindV0)] Bool
+(defn resource-token-kind-wire-v1-supported? [kind core/ResourceTokenKindV0] Bool
   (or (instance? native.core.RegionTokenV0 kind)
     (instance? native.core.CapabilityTokenV0 kind)))
 
-(defn token-flow-wire-v1-supported? [(flow core/TokenFlowV0)] Bool
-  (let [(produced (Vec core/ResourceTokenV0)) (core/tokenflowv0-produced flow)]
+(defn token-flow-wire-v1-supported? [flow core/TokenFlowV0] Bool
+  (let [produced (Vec core/ResourceTokenV0) (core/tokenflowv0-produced flow)]
     (and (core/unique-ids? (core/tokenflowv0-consumed flow))
       (core/unique-ids?
-        (mapv (fn [(token core/ResourceTokenV0)] core/NativeId
+        (mapv (fn [token core/ResourceTokenV0] core/NativeId
                 (core/resourcetokenv0-id token))
           produced))
       (every?
-        (fn [(token core/ResourceTokenV0)] Bool
+        (fn [token core/ResourceTokenV0] Bool
           (resource-token-kind-wire-v1-supported?
             (core/resourcetokenv0-kind token)))
         produced))))
 
-(defn instruction-wire-v1-supported? [(instruction core/Instruction)] Bool
+(defn instruction-wire-v1-supported? [instruction core/Instruction] Bool
   (cond
     (instance? native.core.AtomInstruction instruction)
     (instance? native.core.I64Atom (core/atominstruction-atom instruction))
@@ -2795,22 +2660,21 @@
     (token-flow-wire-v1-supported? (core/callinstruction-tokens instruction))
 
     (instance? native.core.CheckedInstruction instruction)
-    (let [(operation core/CheckedOperationV0)
-          (core/checkedinstruction-operation instruction)]
+    (let [operation core/CheckedOperationV0 (core/checkedinstruction-operation instruction)]
       (or (instance? native.core.CheckedAddI64V0 operation)
         (instance? native.core.CheckedMulI64V0 operation)))
 
     (instance? native.core.VariantValueInstruction instruction) true
     :else false))
 
-(defn switch-cases-wire-v1-supported? [(cases (Vec core/SwitchCaseV0))] Bool
+(defn switch-cases-wire-v1-supported? [cases (Vec core/SwitchCaseV0)] Bool
   (and (> (count cases) 0)
     (core/unique-ids?
-      (mapv (fn [(switch-case core/SwitchCaseV0)] core/NativeId
+      (mapv (fn [switch-case core/SwitchCaseV0] core/NativeId
               (core/switchcasev0-variant-id switch-case))
         cases))))
 
-(defn terminator-wire-v1-supported? [(terminator core/Terminator)] Bool
+(defn terminator-wire-v1-supported? [terminator core/Terminator] Bool
   (cond
     (instance? native.core.ReturnTerminator terminator) true
     (instance? native.core.SwitchTerminator terminator)
@@ -2818,7 +2682,7 @@
     (instance? native.core.TrapTerminator terminator) true
     :else false))
 
-(defn block-wire-v1-supported? [(block core/BasicBlock)] Bool
+(defn block-wire-v1-supported? [block core/BasicBlock] Bool
   (and (unique-parameter-ids? (core/basicblock-parameters block))
     (every? instruction-wire-v1-supported?
       (core/basicblock-instructions block))
@@ -2826,9 +2690,9 @@
       (core/basicblock-terminators block))))
 
 (defn blocks-wire-v1-supported?
-  [(entry-block core/NativeId) (blocks (Vec core/BasicBlock))] Bool
-  (let [(block-ids (Vec core/NativeId))
-        (mapv (fn [(block core/BasicBlock)] core/NativeId
+  [entry-block core/NativeId
+   blocks (Vec core/BasicBlock)] Bool
+  (let [block-ids (Vec core/NativeId) (mapv (fn [block core/BasicBlock] core/NativeId
                 (core/basicblock-id block))
           blocks)]
     (and (> (count blocks) 0)
@@ -2836,16 +2700,15 @@
       (core/id-in? block-ids entry-block)
       (every? block-wire-v1-supported? blocks))))
 
-(defn readiness-wire-v1-supported? [(readiness lower/NativeReadinessV0)] Bool
+(defn readiness-wire-v1-supported? [readiness lower/NativeReadinessV0] Bool
   (and (instance? native.lower.NativeLoweredV0 readiness)
     (blocks-wire-v1-supported?
       (lower/nativeloweredv0-entry-block readiness)
       (lower/nativeloweredv0-blocks readiness))))
 
-(defn typed-function-wire-v1-supported? [(function lower/TypedFunctionV0)] Bool
-  (let [(effects (Vec core/NativeId)) (lower/typedfunctionv0-effects function)
-        (readiness lower/NativeReadinessV0)
-        (lower/typedfunctionv0-readiness function)]
+(defn typed-function-wire-v1-supported? [function lower/TypedFunctionV0] Bool
+  (let [effects (Vec core/NativeId) (lower/typedfunctionv0-effects function)
+        readiness lower/NativeReadinessV0 (lower/typedfunctionv0-readiness function)]
     (and (unique-parameter-ids? (lower/typedfunctionv0-parameters function))
       (= 1 (count effects))
       (core/native-id= (lower/pure-effect-id) (nth effects 0))
@@ -2860,14 +2723,14 @@
           (lower/typedfunctionv0-failure-type function)
           effects (lower/readiness-code readiness))))))
 
-(defn type-variant-ids-unique? [(variants (Vec core/TypeVariant))] Bool
+(defn type-variant-ids-unique? [variants (Vec core/TypeVariant)] Bool
   (core/unique-ids?
-    (mapv (fn [(variant core/TypeVariant)] core/NativeId
+    (mapv (fn [variant core/TypeVariant] core/NativeId
             (core/typevariant-id variant))
       variants)))
 
-(defn type-wire-v1-supported? [(definition core/TypeDef)] Bool
-  (let [(shape core/TypeShape) (core/typedef-shape definition)]
+(defn type-wire-v1-supported? [definition core/TypeDef] Bool
+  (let [shape core/TypeShape (core/typedef-shape definition)]
     (cond
       (instance? native.core.AtomType shape)
       (instance? native.core.I64Kind (core/atomtype-kind shape))
@@ -2876,38 +2739,35 @@
       (instance? native.core.OutcomeType shape) true
       :else false)))
 
-(defn effect-wire-v1-supported? [(effect core/EffectDef)] Bool
+(defn effect-wire-v1-supported? [effect core/EffectDef] Bool
   (instance? native.core.PureEffect (core/effectdef-kind effect)))
 
-(defn distinct-native-ids [(values (Vec core/NativeId))] (Vec core/NativeId)
-  (loop [position Int 0 result (Vec core/NativeId) []]
+(defn distinct-native-ids [values (Vec core/NativeId)] (Vec core/NativeId)
+  (loop [position Int 0
+         result (Vec core/NativeId) []]
     (if (>= position (count values)) result
       (recur (+ position 1) (conj-id result (nth values position))))))
 
 (defn required-typed-unit-type-ids
-  [(function lower/TypedFunctionV0)
-   (types (Vec core/TypeDef))]
-  (Vec core/NativeId)
-  (let [(function-seeds (Vec core/NativeId))
-        (typed-function-type-seeds function)
-        (checked-seeds (Vec core/NativeId))
-        (if (lower/readiness-uses-checked?
+  [function lower/TypedFunctionV0
+   types (Vec core/TypeDef)] (Vec core/NativeId)
+  (let [function-seeds (Vec core/NativeId) (typed-function-type-seeds function)
+        checked-seeds (Vec core/NativeId) (if (lower/readiness-uses-checked?
               (lower/typedfunctionv0-readiness function))
-          (mapv (fn [(definition core/TypeDef)] core/NativeId
+          (mapv (fn [definition core/TypeDef] core/NativeId
                   (core/typedef-id definition))
             (lower/checked-arithmetic-types))
           [])
-        (seeds (Vec core/NativeId))
-        (distinct-native-ids (vec (concat function-seeds checked-seeds)))]
+        seeds (Vec core/NativeId) (distinct-native-ids (vec (concat function-seeds checked-seeds)))]
     (filterv
-      (fn [(identity core/NativeId)] Bool
+      (fn [identity core/NativeId] Bool
         (not (core/native-id= identity (lower/type-id "UnionTag"))))
       (distinct-native-ids (reachable-type-ids types seeds)))))
 
-(defn typed-unit-wire-v1-supported? [(unit TypedUnitV0)] Bool
-  (let [(function lower/TypedFunctionV0) (typedunitv0-function unit)
-        (types (Vec core/TypeDef)) (typedunitv0-types unit)
-        (effects (Vec core/EffectDef)) (typedunitv0-effects unit)]
+(defn typed-unit-wire-v1-supported? [unit TypedUnitV0] Bool
+  (let [function lower/TypedFunctionV0 (typedunitv0-function unit)
+        types (Vec core/TypeDef) (typedunitv0-types unit)
+        effects (Vec core/EffectDef) (typedunitv0-effects unit)]
     (and (core/native-id= (lower/typedfunctionv0-id function)
            (lower/function-id (typedunitv0-unit-id unit)
              (lower/typedfunctionv0-name function)))
@@ -2923,12 +2783,12 @@
         (core/effect-ids effects))
       (= 0 (count (typedunitv0-capabilities unit))))))
 
-(defn scalar-wire-v1-supported? [(representation core/ScalarReprV0)] Bool
+(defn scalar-wire-v1-supported? [representation core/ScalarReprV0] Bool
   (or (instance? native.core.SignedIntReprV0 representation)
     (instance? native.core.UnsignedIntReprV0 representation)))
 
-(defn layout-wire-v1-supported? [(layout core/LayoutDef)] Bool
-  (let [(shape core/LayoutShapeV0) (core/layoutdef-shape layout)]
+(defn layout-wire-v1-supported? [layout core/LayoutDef] Bool
+  (let [shape core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (and (core/native-id= (core/layoutdef-id layout)
            (lower/lower-id "layout" [(id-value (core/layoutdef-type-id layout))]))
       (cond
@@ -2937,22 +2797,23 @@
         (instance? native.core.UnionShapeV0 shape)
         (core/unique-ids?
           (mapv
-            (fn [(variant core/UnionVariantLayoutV0)] core/NativeId
+            (fn [variant core/UnionVariantLayoutV0] core/NativeId
               (core/unionvariantlayoutv0-variant-id variant))
             (core/unionshapev0-variants shape)))
         :else false))))
 
-(defn ownership-wire-v1-supported? [(ownership core/OwnershipRuleV0)] Bool
+(defn ownership-wire-v1-supported? [ownership core/OwnershipRuleV0] Bool
   (or (instance? native.core.BorrowedV0 ownership)
     (instance? native.core.OwnedV0 ownership)))
 
-(defn abi-value-wire-v1-supported? [(value core/AbiValueV0)] Bool
+(defn abi-value-wire-v1-supported? [value core/AbiValueV0] Bool
   (and (> (count (core/abivaluev0-name value)) 0)
     (ownership-wire-v1-supported? (core/abivaluev0-ownership value))
     (nil? (core/abivaluev0-lifetime-region value))))
 
 (defn id-vectors-equal?
-  [(left (Vec core/NativeId)) (right (Vec core/NativeId))] Bool
+  [left (Vec core/NativeId)
+   right (Vec core/NativeId)] Bool
   (and (= (count left) (count right))
     (loop [position Int 0]
       (if (>= position (count left)) true
@@ -2960,14 +2821,14 @@
           (recur (+ position 1)) false)))))
 
 (defn abi-parameters-match-function?
-  [(function core/FunctionDef) (values (Vec core/AbiValueV0))] Bool
-  (let [(parameters (Vec core/Parameter))
-        (core/functiondef-parameters function)]
+  [function core/FunctionDef
+   values (Vec core/AbiValueV0)] Bool
+  (let [parameters (Vec core/Parameter) (core/functiondef-parameters function)]
     (and (= (count parameters) (count values))
       (loop [position Int 0]
         (if (>= position (count parameters)) true
-          (let [(parameter core/Parameter) (nth parameters position)
-                (value core/AbiValueV0) (nth values position)]
+          (let [parameter core/Parameter (nth parameters position)
+                value core/AbiValueV0 (nth values position)]
             (if (and
                   (core/native-id= (core/parameter-type-id parameter)
                     (core/abivaluev0-type-id value))
@@ -2976,9 +2837,9 @@
               (recur (+ position 1)) false)))))))
 
 (defn abi-result-matches-function?
-  [(function core/FunctionDef) (result (U core/AbiValueV0 Nil))] Bool
-  (let [(return-type (U core/NativeId Nil))
-        (core/functiondef-return-type function)]
+  [function core/FunctionDef
+   result (U core/AbiValueV0 Nil)] Bool
+  (let [return-type (U core/NativeId Nil) (core/functiondef-return-type function)]
     (cond
       (and (nil? return-type) (nil? result)) true
       (or (nil? return-type) (nil? result)) false
@@ -2988,8 +2849,9 @@
           (core/abivaluev0-ownership result))))))
 
 (defn abi-wire-v1-supported?
-  [(function core/FunctionDef) (abi core/AbiDeclV0)] Bool
-  (let [(result (U core/AbiValueV0 Nil)) (core/abideclv0-result abi)]
+  [function core/FunctionDef
+   abi core/AbiDeclV0] Bool
+  (let [result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
     (and (core/native-id= (core/functiondef-id function)
            (core/abideclv0-function-id abi))
       (core/native-id= (core/abideclv0-id abi)
@@ -3009,8 +2871,8 @@
         (core/abideclv0-required-capabilities abi))
       (stages/sha256-digest? (core/abideclv0-layout-digest abi)))))
 
-(defn native-function-wire-v1-supported? [(function core/FunctionDef)] Bool
-  (let [(effects (Vec core/NativeId)) (core/functiondef-effects function)]
+(defn native-function-wire-v1-supported? [function core/FunctionDef] Bool
+  (let [effects (Vec core/NativeId) (core/functiondef-effects function)]
     (and (unique-parameter-ids? (core/functiondef-parameters function))
       (= 1 (count effects))
       (core/native-id= (lower/pure-effect-id) (nth effects 0))
@@ -3020,28 +2882,28 @@
         (core/functiondef-entry-block function)
         (core/functiondef-blocks function)))))
 
-(defn native-unit-wire-v1-supported? [(unit NativeUnitV0)] Bool
-  (let [(function core/FunctionDef) (nativeunitv0-function unit)
-        (layouts (Vec core/LayoutDef)) (nativeunitv0-layouts unit)
-        (abis (Vec core/AbiDeclV0)) (nativeunitv0-abis unit)]
+(defn native-unit-wire-v1-supported? [unit NativeUnitV0] Bool
+  (let [function core/FunctionDef (nativeunitv0-function unit)
+        layouts (Vec core/LayoutDef) (nativeunitv0-layouts unit)
+        abis (Vec core/AbiDeclV0) (nativeunitv0-abis unit)]
     (and (core/native-id= (core/functiondef-id function)
            (lower/function-id (nativeunitv0-unit-id unit)
              (core/functiondef-name function)))
       (native-function-wire-v1-supported? function)
       (core/unique-ids? (core/layout-ids layouts))
       (core/unique-ids?
-        (mapv (fn [(layout core/LayoutDef)] core/NativeId
+        (mapv (fn [layout core/LayoutDef] core/NativeId
                 (core/layoutdef-type-id layout))
           layouts))
       (every? layout-wire-v1-supported? layouts)
       (= 1 (count abis))
       (core/unique-ids? (core/abi-ids abis))
-      (every? (fn [(abi core/AbiDeclV0)] Bool
+      (every? (fn [abi core/AbiDeclV0] Bool
                 (abi-wire-v1-supported? function abi))
         abis)
       (= 0 (count (nativeunitv0-regions unit))))))
 
-(defn contract-record-valid? [(contract UnitContractV0)] Bool
+(defn contract-record-valid? [contract UnitContractV0] Bool
   (and (= (unitcontractv0-digest contract)
          (stages/content-digest (unitcontractv0-encoding contract)))
     (= (unitcontractv0-encoding contract)
@@ -3054,7 +2916,7 @@
         (unitcontractv0-failure-type contract)
         (unitcontractv0-generated-bindings contract)))))
 
-(defn typed-unit-record-valid? [(unit TypedUnitV0)] Bool
+(defn typed-unit-record-valid? [unit TypedUnitV0] Bool
   (and (typed-unit-wire-v1-supported? unit)
     (= (typedunitv0-digest unit)
          (stages/content-digest (typedunitv0-encoding unit)))
@@ -3066,7 +2928,7 @@
         (typedunitv0-effects unit)
         (typedunitv0-capabilities unit)))))
 
-(defn native-unit-record-valid? [(unit NativeUnitV0)] Bool
+(defn native-unit-record-valid? [unit NativeUnitV0] Bool
   (and (native-unit-wire-v1-supported? unit)
     (= (nativeunitv0-digest unit)
          (stages/content-digest (nativeunitv0-encoding unit)))
@@ -3078,26 +2940,29 @@
         (nativeunitv0-abis unit)
         (nativeunitv0-regions unit)))))
 
-(defn unit-wire-byte-count [(encoding String)] Int
+(defn unit-wire-byte-count [encoding String] Int
   (count (stages/utf8-bytes encoding)))
 
-(defn old-unit-wire-tag? [(tag String)] Bool
+(defn old-unit-wire-tag? [tag String] Bool
   (or (= tag "typed-unit-v0") (= tag "native-unit-v0")))
 
 (defn typed-unit-wire-rejection
-  [(code String) (detail String) (offset Int)] TypedUnitWireDecodeResultV1
+  [code String
+   detail String
+   offset Int] TypedUnitWireDecodeResultV1
   (->TypedUnitWireRejectedV1 code detail offset))
 
 (defn native-unit-wire-rejection
-  [(code String) (detail String) (offset Int)] NativeUnitWireDecodeResultV1
+  [code String
+   detail String
+   offset Int] NativeUnitWireDecodeResultV1
   (->NativeUnitWireRejectedV1 code detail offset))
 
 (defn decode-typed-unit-wire-v1
-  [(encoding String)
-   (expected-byte-count Int)
-   (expected-digest String)
-   (expected-unit-id core/NativeId)]
-  TypedUnitWireDecodeResultV1
+  [encoding String
+   expected-byte-count Int
+   expected-digest String
+   expected-unit-id core/NativeId] TypedUnitWireDecodeResultV1
   (cond
     (or (< expected-byte-count 0)
       (not= expected-byte-count (unit-wire-byte-count encoding)))
@@ -3110,7 +2975,7 @@
       "typed unit SHA-256 differs from projection metadata" -1)
 
     :else
-    (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+    (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
       (cond
         (nil? record)
         (typed-unit-wire-rejection "UNIT-WIRE-MALFORMED"
@@ -3126,16 +2991,12 @@
           "typed unit has an unknown outer tag or field count" 0)
 
         :else
-        (let [(fields (Vec String)) (wirerecordv1-fields record)
-              (unit-id (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-              (function (U lower/TypedFunctionV0 Nil))
-              (decode-typed-function-wire-v1 (nth fields 1))
-              (types (U (Vec core/TypeDef) Nil))
-              (decode-type-defs-wire-v1 (nth fields 2))
-              (effects (U (Vec core/EffectDef) Nil))
-              (decode-effects-wire-v1 (nth fields 3))
-              (capabilities-valid Bool)
-              (decode-empty-capabilities-wire-v1 (nth fields 4))]
+        (let [fields (Vec String) (wirerecordv1-fields record)
+              unit-id (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+              function (U lower/TypedFunctionV0 Nil) (decode-typed-function-wire-v1 (nth fields 1))
+              types (U (Vec core/TypeDef) Nil) (decode-type-defs-wire-v1 (nth fields 2))
+              effects (U (Vec core/EffectDef) Nil) (decode-effects-wire-v1 (nth fields 3))
+              capabilities-valid Bool (decode-empty-capabilities-wire-v1 (nth fields 4))]
           (if (or (nil? unit-id) (nil? function) (nil? types)
                 (nil? effects) (not capabilities-valid))
             (typed-unit-wire-rejection "UNIT-WIRE-SCHEMA"
@@ -3143,8 +3004,7 @@
             (if (not (core/native-id= unit-id expected-unit-id))
               (typed-unit-wire-rejection "UNIT-WIRE-ID-MISMATCH"
                 "typed unit identity differs from the requested source unit" -1)
-              (let [(unit TypedUnitV0)
-                    (->TypedUnitV0 unit-id function types effects [] encoding
+              (let [unit TypedUnitV0 (->TypedUnitV0 unit-id function types effects [] encoding
                       expected-digest)]
                 (if (typed-unit-record-valid? unit)
                   (->TypedUnitWireDecodedV1 unit)
@@ -3153,11 +3013,10 @@
                     -1))))))))))
 
 (defn decode-native-unit-wire-v1
-  [(encoding String)
-   (expected-byte-count Int)
-   (expected-digest String)
-   (expected-unit-id core/NativeId)]
-  NativeUnitWireDecodeResultV1
+  [encoding String
+   expected-byte-count Int
+   expected-digest String
+   expected-unit-id core/NativeId] NativeUnitWireDecodeResultV1
   (cond
     (or (< expected-byte-count 0)
       (not= expected-byte-count (unit-wire-byte-count encoding)))
@@ -3170,7 +3029,7 @@
       "native unit SHA-256 differs from projection metadata" -1)
 
     :else
-    (let [(record (U WireRecordV1 Nil)) (parse-wire-record encoding)]
+    (let [record (U WireRecordV1 Nil) (parse-wire-record encoding)]
       (cond
         (nil? record)
         (native-unit-wire-rejection "UNIT-WIRE-MALFORMED"
@@ -3186,16 +3045,12 @@
           "native unit has an unknown outer tag or field count" 0)
 
         :else
-        (let [(fields (Vec String)) (wirerecordv1-fields record)
-              (unit-id (U core/NativeId Nil)) (decode-wire-id (nth fields 0))
-              (function (U core/FunctionDef Nil))
-              (decode-native-function-wire-v1 (nth fields 1))
-              (layouts (U (Vec core/LayoutDef) Nil))
-              (decode-layout-defs-wire-v1 (nth fields 2))
-              (abis (U (Vec core/AbiDeclV0) Nil))
-              (decode-abis-wire-v1 (nth fields 3))
-              (regions-valid Bool)
-              (decode-empty-regions-wire-v1 (nth fields 4))]
+        (let [fields (Vec String) (wirerecordv1-fields record)
+              unit-id (U core/NativeId Nil) (decode-wire-id (nth fields 0))
+              function (U core/FunctionDef Nil) (decode-native-function-wire-v1 (nth fields 1))
+              layouts (U (Vec core/LayoutDef) Nil) (decode-layout-defs-wire-v1 (nth fields 2))
+              abis (U (Vec core/AbiDeclV0) Nil) (decode-abis-wire-v1 (nth fields 3))
+              regions-valid Bool (decode-empty-regions-wire-v1 (nth fields 4))]
           (if (or (nil? unit-id) (nil? function) (nil? layouts)
                 (nil? abis) (not regions-valid))
             (native-unit-wire-rejection "UNIT-WIRE-SCHEMA"
@@ -3203,8 +3058,7 @@
             (if (not (core/native-id= unit-id expected-unit-id))
               (native-unit-wire-rejection "UNIT-WIRE-ID-MISMATCH"
                 "native unit identity differs from the requested source unit" -1)
-              (let [(unit NativeUnitV0)
-                    (->NativeUnitV0 unit-id function layouts abis [] encoding
+              (let [unit NativeUnitV0 (->NativeUnitV0 unit-id function layouts abis [] encoding
                       expected-digest)]
                 (if (native-unit-record-valid? unit)
                   (->NativeUnitWireDecodedV1 unit)
@@ -3213,18 +3067,17 @@
                     -1))))))))))
 
 (defn source-unit-for
-  [(units (Vec stages/SourceUnitV0))
-   (target core/NativeId)]
-  (U stages/SourceUnitV0 Nil)
+  [units (Vec stages/SourceUnitV0)
+   target core/NativeId] (U stages/SourceUnitV0 Nil)
   (some
-    (fn [(unit stages/SourceUnitV0)] (U stages/SourceUnitV0 Nil)
+    (fn [unit stages/SourceUnitV0] (U stages/SourceUnitV0 Nil)
       (if (core/native-id= target (stages/sourceunitv0-id unit)) unit nil))
     units))
 
 (defn typed-unit-function-valid?
-  [(source-units (Vec stages/SourceUnitV0)) (unit TypedUnitV0)] Bool
-  (let [(source (U stages/SourceUnitV0 Nil))
-        (source-unit-for source-units (typedunitv0-unit-id unit))]
+  [source-units (Vec stages/SourceUnitV0)
+   unit TypedUnitV0] Bool
+  (let [source (U stages/SourceUnitV0 Nil) (source-unit-for source-units (typedunitv0-unit-id unit))]
     (and (some? source)
       (core/native-id=
         (lower/typedfunctionv0-id (typedunitv0-function unit))
@@ -3232,9 +3085,9 @@
           (stages/sourceunitv0-name source))))))
 
 (defn native-unit-function-valid?
-  [(source-units (Vec stages/SourceUnitV0)) (unit NativeUnitV0)] Bool
-  (let [(source (U stages/SourceUnitV0 Nil))
-        (source-unit-for source-units (nativeunitv0-unit-id unit))]
+  [source-units (Vec stages/SourceUnitV0)
+   unit NativeUnitV0] Bool
+  (let [source (U stages/SourceUnitV0 Nil) (source-unit-for source-units (nativeunitv0-unit-id unit))]
     (and (some? source)
       (core/native-id=
         (core/functiondef-id (nativeunitv0-function unit))
@@ -3242,21 +3095,20 @@
           (stages/sourceunitv0-name source))))))
 
 (defn native-unit-for-id
-  [(units (Vec NativeUnitV0)) (target core/NativeId)] (U NativeUnitV0 Nil)
+  [units (Vec NativeUnitV0)
+   target core/NativeId] (U NativeUnitV0 Nil)
   (some
-    (fn [(unit NativeUnitV0)] (U NativeUnitV0 Nil)
+    (fn [unit NativeUnitV0] (U NativeUnitV0 Nil)
       (if (core/native-id= target (nativeunitv0-unit-id unit)) unit nil))
     units))
 
 (defn typed-native-unit-pair-valid?
-  [(typed-unit TypedUnitV0) (native-unit NativeUnitV0)] Bool
-  (let [(typed-function lower/TypedFunctionV0)
-        (typedunitv0-function typed-unit)
-        (readiness lower/NativeReadinessV0)
-        (lower/typedfunctionv0-readiness typed-function)
-        (native-function core/FunctionDef)
-        (nativeunitv0-function native-unit)
-        (abis (Vec core/AbiDeclV0)) (nativeunitv0-abis native-unit)]
+  [typed-unit TypedUnitV0
+   native-unit NativeUnitV0] Bool
+  (let [typed-function lower/TypedFunctionV0 (typedunitv0-function typed-unit)
+        readiness lower/NativeReadinessV0 (lower/typedfunctionv0-readiness typed-function)
+        native-function core/FunctionDef (nativeunitv0-function native-unit)
+        abis (Vec core/AbiDeclV0) (nativeunitv0-abis native-unit)]
     (and (core/native-id= (typedunitv0-unit-id typed-unit)
            (nativeunitv0-unit-id native-unit))
       (instance? native.lower.NativeLoweredV0 readiness)
@@ -3270,8 +3122,7 @@
         (core/functiondef-blocks native-function))
       (core/native-id= (lower/nativeloweredv0-entry-block readiness)
         (core/functiondef-entry-block native-function))
-      (let [(return-type (U core/NativeId Nil))
-            (core/functiondef-return-type native-function)]
+      (let [return-type (U core/NativeId Nil) (core/functiondef-return-type native-function)]
         (and (some? return-type)
           (core/native-id= (lower/typedfunctionv0-return-type typed-function)
             return-type)))
@@ -3280,7 +3131,7 @@
       (= 0 (count (core/functiondef-regions native-function)))
       (= 0 (count (core/functiondef-capabilities native-function)))
       (exact-id-set? (core/type-ids (typedunitv0-types typed-unit))
-        (mapv (fn [(layout core/LayoutDef)] core/NativeId
+        (mapv (fn [layout core/LayoutDef] core/NativeId
                 (core/layoutdef-type-id layout))
           (nativeunitv0-layouts native-unit)))
       (= 1 (count abis))
@@ -3289,168 +3140,170 @@
           (core/abideclv0-layout-digest (nth abis 0)))))))
 
 (defn unit-pairs-valid?
-  [(typed-units (Vec TypedUnitV0)) (native-units (Vec NativeUnitV0))] Bool
+  [typed-units (Vec TypedUnitV0)
+   native-units (Vec NativeUnitV0)] Bool
   (every?
-    (fn [(typed-unit TypedUnitV0)] Bool
-      (let [(native-unit (U NativeUnitV0 Nil))
-            (native-unit-for-id native-units (typedunitv0-unit-id typed-unit))]
+    (fn [typed-unit TypedUnitV0] Bool
+      (let [native-unit (U NativeUnitV0 Nil) (native-unit-for-id native-units (typedunitv0-unit-id typed-unit))]
         (and (some? native-unit)
           (typed-native-unit-pair-valid? typed-unit native-unit))))
     typed-units))
 
 (defn unit-records-valid?
-  [(source-units (Vec stages/SourceUnitV0))
-   (contracts (Vec UnitContractV0))
-   (typed-units (Vec TypedUnitV0))
-   (native-units (Vec NativeUnitV0))]
-  Bool
+  [source-units (Vec stages/SourceUnitV0)
+   contracts (Vec UnitContractV0)
+   typed-units (Vec TypedUnitV0)
+   native-units (Vec NativeUnitV0)] Bool
   (and (every? contract-record-valid? contracts)
-    (every? (fn [(unit TypedUnitV0)] Bool
+    (every? (fn [unit TypedUnitV0] Bool
               (and (typed-unit-record-valid? unit)
                 (typed-unit-function-valid? source-units unit)))
       typed-units)
-    (every? (fn [(unit NativeUnitV0)] Bool
+    (every? (fn [unit NativeUnitV0] Bool
               (and (native-unit-record-valid? unit)
                 (native-unit-function-valid? source-units unit)))
       native-units)
     (unit-pairs-valid? typed-units native-units)))
 
 (defn append-effect
-  [(values (Vec core/EffectDef)) (item core/EffectDef)] (Vec core/EffectDef)
+  [values (Vec core/EffectDef)
+   item core/EffectDef] (Vec core/EffectDef)
   (if (core/id-in? (core/effect-ids values) (core/effectdef-id item))
     values (conj values item)))
 
 (defn append-capability
-  [(values (Vec core/CapabilityDef))
-   (item core/CapabilityDef)]
-  (Vec core/CapabilityDef)
+  [values (Vec core/CapabilityDef)
+   item core/CapabilityDef] (Vec core/CapabilityDef)
   (if (core/id-in? (core/capability-ids values) (core/capabilitydef-id item))
     values (conj values item)))
 
 (defn append-region
-  [(values (Vec core/RegionDef)) (item core/RegionDef)] (Vec core/RegionDef)
+  [values (Vec core/RegionDef)
+   item core/RegionDef] (Vec core/RegionDef)
   (if (core/id-in? (core/region-ids values) (core/regiondef-id item))
     values (conj values item)))
 
 (defn append-layout
-  [(values (Vec core/LayoutDef)) (item core/LayoutDef)] (Vec core/LayoutDef)
+  [values (Vec core/LayoutDef)
+   item core/LayoutDef] (Vec core/LayoutDef)
   (if (core/id-in? (core/layout-ids values) (core/layoutdef-id item))
     values (conj values item)))
 
 (defn append-abi
-  [(values (Vec core/AbiDeclV0)) (item core/AbiDeclV0)] (Vec core/AbiDeclV0)
+  [values (Vec core/AbiDeclV0)
+   item core/AbiDeclV0] (Vec core/AbiDeclV0)
   (if (core/id-in? (core/abi-ids values) (core/abideclv0-id item))
     values (conj values item)))
 
 (defn append-typed-function
-  [(values (Vec lower/TypedFunctionV0))
-   (item lower/TypedFunctionV0)]
-  (Vec lower/TypedFunctionV0)
+  [values (Vec lower/TypedFunctionV0)
+   item lower/TypedFunctionV0] (Vec lower/TypedFunctionV0)
   (if (some?
-        (some (fn [(current lower/TypedFunctionV0)] Bool
+        (some (fn [current lower/TypedFunctionV0] Bool
                 (core/native-id= (lower/typedfunctionv0-id current)
                   (lower/typedfunctionv0-id item)))
           values))
     values (conj values item)))
 
 (defn append-native-function
-  [(values (Vec core/FunctionDef))
-   (item core/FunctionDef)]
-  (Vec core/FunctionDef)
+  [values (Vec core/FunctionDef)
+   item core/FunctionDef] (Vec core/FunctionDef)
   (if (core/id-in? (core/function-ids values) (core/functiondef-id item))
     values (conj values item)))
 
-(defn collect-types [(units (Vec TypedUnitV0))] (Vec core/TypeDef)
-  (loop [position Int 0 values (Vec core/TypeDef) (lower/builtin-types [])]
+(defn collect-types [units (Vec TypedUnitV0)] (Vec core/TypeDef)
+  (loop [position Int 0
+         values (Vec core/TypeDef) (lower/builtin-types [])]
     (if (>= position (count units)) values
       (recur (+ position 1)
         (lower/append-type-defs values (typedunitv0-types (nth units position)))))))
 
-(defn collect-effects [(units (Vec TypedUnitV0))] (Vec core/EffectDef)
+(defn collect-effects [units (Vec TypedUnitV0)] (Vec core/EffectDef)
   (loop [position Int 0
-         values (Vec core/EffectDef)
-         (lower/slice-effects false false false false false false false false)]
+         values (Vec core/EffectDef) (lower/slice-effects false false false false false false false false)]
     (if (>= position (count units)) values
-      (let [(additions (Vec core/EffectDef))
-            (typedunitv0-effects (nth units position))]
+      (let [additions (Vec core/EffectDef) (typedunitv0-effects (nth units position))]
         (recur (+ position 1)
-          (loop [inner Int 0 current (Vec core/EffectDef) values]
+          (loop [inner Int 0
+                 current (Vec core/EffectDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-effect current (nth additions inner))))))))))
 
-(defn collect-capabilities [(units (Vec TypedUnitV0))] (Vec core/CapabilityDef)
+(defn collect-capabilities [units (Vec TypedUnitV0)] (Vec core/CapabilityDef)
   (loop [position Int 0
-         values (Vec core/CapabilityDef)
-         (lower/slice-capabilities false false false false false false false false)]
+         values (Vec core/CapabilityDef) (lower/slice-capabilities false false false false false false false false)]
     (if (>= position (count units)) values
-      (let [(additions (Vec core/CapabilityDef))
-            (typedunitv0-capabilities (nth units position))]
+      (let [additions (Vec core/CapabilityDef) (typedunitv0-capabilities (nth units position))]
         (recur (+ position 1)
-          (loop [inner Int 0 current (Vec core/CapabilityDef) values]
+          (loop [inner Int 0
+                 current (Vec core/CapabilityDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1)
                 (append-capability current (nth additions inner))))))))))
 
-(defn collect-regions [(units (Vec NativeUnitV0))] (Vec core/RegionDef)
+(defn collect-regions [units (Vec NativeUnitV0)] (Vec core/RegionDef)
   (loop [position Int 0
          values (Vec core/RegionDef) (lower/slice-regions)]
     (if (>= position (count units)) values
-      (let [(additions (Vec core/RegionDef))
-            (nativeunitv0-regions (nth units position))]
+      (let [additions (Vec core/RegionDef) (nativeunitv0-regions (nth units position))]
         (recur (+ position 1)
-          (loop [inner Int 0 current (Vec core/RegionDef) values]
+          (loop [inner Int 0
+                 current (Vec core/RegionDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-region current (nth additions inner))))))))))
 
-(defn collect-typed-functions
-  [(units (Vec TypedUnitV0))] (Vec lower/TypedFunctionV0)
-  (loop [position Int 0 values (Vec lower/TypedFunctionV0) []]
+(defn collect-typed-functions [units (Vec TypedUnitV0)] (Vec lower/TypedFunctionV0)
+  (loop [position Int 0
+         values (Vec lower/TypedFunctionV0) []]
     (if (>= position (count units)) values
       (recur (+ position 1)
         (append-typed-function values (typedunitv0-function (nth units position)))))))
 
-(defn collect-native-functions
-  [(units (Vec NativeUnitV0))] (Vec core/FunctionDef)
-  (loop [position Int 0 values (Vec core/FunctionDef) []]
+(defn collect-native-functions [units (Vec NativeUnitV0)] (Vec core/FunctionDef)
+  (loop [position Int 0
+         values (Vec core/FunctionDef) []]
     (if (>= position (count units)) values
       (recur (+ position 1)
         (append-native-function values
           (nativeunitv0-function (nth units position)))))))
 
-(defn collect-layouts [(units (Vec NativeUnitV0))] (Vec core/LayoutDef)
-  (loop [position Int 0 values (Vec core/LayoutDef) []]
+(defn collect-layouts [units (Vec NativeUnitV0)] (Vec core/LayoutDef)
+  (loop [position Int 0
+         values (Vec core/LayoutDef) []]
     (if (>= position (count units)) values
-      (let [(additions (Vec core/LayoutDef))
-            (nativeunitv0-layouts (nth units position))]
+      (let [additions (Vec core/LayoutDef) (nativeunitv0-layouts (nth units position))]
         (recur (+ position 1)
-          (loop [inner Int 0 current (Vec core/LayoutDef) values]
+          (loop [inner Int 0
+                 current (Vec core/LayoutDef) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-layout current (nth additions inner))))))))))
 
-(defn collect-abis [(units (Vec NativeUnitV0))] (Vec core/AbiDeclV0)
-  (loop [position Int 0 values (Vec core/AbiDeclV0) []]
+(defn collect-abis [units (Vec NativeUnitV0)] (Vec core/AbiDeclV0)
+  (loop [position Int 0
+         values (Vec core/AbiDeclV0) []]
     (if (>= position (count units)) values
-      (let [(additions (Vec core/AbiDeclV0))
-            (nativeunitv0-abis (nth units position))]
+      (let [additions (Vec core/AbiDeclV0) (nativeunitv0-abis (nth units position))]
         (recur (+ position 1)
-          (loop [inner Int 0 current (Vec core/AbiDeclV0) values]
+          (loop [inner Int 0
+                 current (Vec core/AbiDeclV0) values]
             (if (>= inner (count additions)) current
               (recur (+ inner 1) (append-abi current (nth additions inner))))))))))
 
 (defn layout-for-type?
-  [(layouts (Vec core/LayoutDef)) (type-id core/NativeId)] Bool
-  (some? (some (fn [(layout core/LayoutDef)] Bool
+  [layouts (Vec core/LayoutDef)
+   type-id core/NativeId] Bool
+  (some? (some (fn [layout core/LayoutDef] Bool
                  (core/native-id= type-id (core/layoutdef-type-id layout)))
            layouts)))
 
 (defn complete-layouts
-  [(types (Vec core/TypeDef))
-   (provided (Vec core/LayoutDef))
-   (abi core/AbiProfileV0)]
-  (Vec core/LayoutDef)
-  (loop [position Int 0 layouts (Vec core/LayoutDef) provided]
+  [types (Vec core/TypeDef)
+   provided (Vec core/LayoutDef)
+   abi core/AbiProfileV0] (Vec core/LayoutDef)
+  (loop [position Int 0
+         layouts (Vec core/LayoutDef) provided]
     (if (>= position (count types)) layouts
-      (let [(definition core/TypeDef) (nth types position)]
+      (let [definition core/TypeDef (nth types position)]
         (if (layout-for-type? layouts (core/typedef-id definition))
           (recur (+ position 1) layouts)
           (recur (+ position 1)
@@ -3459,15 +3312,14 @@
                 (lower/resolve-layout types definition abi)))))))))
 
 (defn bounded-functions?
-  [(typed-functions (Vec lower/TypedFunctionV0))
-   (native-functions (Vec core/FunctionDef))
-   (abis (Vec core/AbiDeclV0))]
-  Bool
+  [typed-functions (Vec lower/TypedFunctionV0)
+   native-functions (Vec core/FunctionDef)
+   abis (Vec core/AbiDeclV0)] Bool
   (and (= 9 (count typed-functions))
     (= 9 (count native-functions))
     (= 9 (count abis))
     (every?
-      (fn [(function lower/TypedFunctionV0)] Bool
+      (fn [function lower/TypedFunctionV0] Bool
         (and (= 1 (count (lower/typedfunctionv0-effects function)))
           (core/native-id= (lower/pure-effect-id)
             (nth (lower/typedfunctionv0-effects function) 0))
@@ -3475,67 +3327,63 @@
           (= 0 (count (lower/function-regions function)))))
       typed-functions)
     (every?
-      (fn [(abi core/AbiDeclV0)] Bool
+      (fn [abi core/AbiDeclV0] Bool
         (instance? native.core.AbiExportV0 (core/abideclv0-direction abi)))
       abis)))
 
 (defn abi-layout-digests-match?
-  [(abis (Vec core/AbiDeclV0)) (layouts (Vec core/LayoutDef))] Bool
-  (let [(expected String) (lower/layout-digest layouts)]
-    (every? (fn [(abi core/AbiDeclV0)] Bool
+  [abis (Vec core/AbiDeclV0)
+   layouts (Vec core/LayoutDef)] Bool
+  (let [expected String (lower/layout-digest layouts)]
+    (every? (fn [abi core/AbiDeclV0] Bool
               (= expected (core/abideclv0-layout-digest abi)))
       abis)))
 
-(defn source-units-supported? [(units (Vec stages/SourceUnitV0))] Bool
+(defn source-units-supported? [units (Vec stages/SourceUnitV0)] Bool
   (and (= 9 (count units))
     (core/unique-ids? (source-unit-ids units))
-    (every? (fn [(unit stages/SourceUnitV0)] Bool
+    (every? (fn [unit stages/SourceUnitV0] Bool
               (= "defn" (stages/sourceunitv0-kind unit)))
       units)))
 
 (defn make-frozen-typed
-  [(source-digest String)
-   (types (Vec core/TypeDef))
-   (functions (Vec lower/TypedFunctionV0))
-   (effects (Vec core/EffectDef))
-   (regions (Vec core/RegionDef))
-   (capabilities (Vec core/CapabilityDef))]
-  stages/FrozenTypedStageV0
-  (let [(root core/NativeId) (lower/lower-id "typed-stage" [source-digest])
-        (nodes (Vec stages/TermNodeV0))
-        (lower/typed-term-nodes types functions effects
+  [source-digest String
+   types (Vec core/TypeDef)
+   functions (Vec lower/TypedFunctionV0)
+   effects (Vec core/EffectDef)
+   regions (Vec core/RegionDef)
+   capabilities (Vec core/CapabilityDef)] stages/FrozenTypedStageV0
+  (let [root core/NativeId (lower/lower-id "typed-stage" [source-digest])
+        nodes (Vec stages/TermNodeV0) (lower/typed-term-nodes types functions effects
           false false false false false false false false)
-        (terms stages/TermGraphV0)
-        (stages/->TermGraphV0 root
+        terms stages/TermGraphV0 (stages/->TermGraphV0 root
           (conj nodes
             (stages/->TermNodeV0 root
               (stages/->TextTermV0 "typed-stage-v0"))))
-        (stage stages/TypedStageV0)
-        (stages/->TypedStageV0
+        stage stages/TypedStageV0 (stages/->TypedStageV0
           terms
           source-digest
           (core/type-ids types)
-          (mapv (fn [(function lower/TypedFunctionV0)] core/NativeId
+          (mapv (fn [function lower/TypedFunctionV0] core/NativeId
                   (lower/typedfunctionv0-id function))
             functions)
           (core/effect-ids effects)
           (core/region-ids regions)
           (core/capability-ids capabilities)
           [(lower/type-id "LowerFailure")])
-        (encoding String) (stages/encode-typed-stage stage)]
+        encoding String (stages/encode-typed-stage stage)]
     (stages/->FrozenTypedStageV0 stage encoding
       (stages/content-digest encoding))))
 
 (defn make-native-program
-  [(typed-digest String)
-   (types (Vec core/TypeDef))
-   (effects (Vec core/EffectDef))
-   (regions (Vec core/RegionDef))
-   (capabilities (Vec core/CapabilityDef))
-   (layouts (Vec core/LayoutDef))
-   (functions (Vec core/FunctionDef))
-   (abis (Vec core/AbiDeclV0))]
-  core/NativeCoreProgram
+  [typed-digest String
+   types (Vec core/TypeDef)
+   effects (Vec core/EffectDef)
+   regions (Vec core/RegionDef)
+   capabilities (Vec core/CapabilityDef)
+   layouts (Vec core/LayoutDef)
+   functions (Vec core/FunctionDef)
+   abis (Vec core/AbiDeclV0)] core/NativeCoreProgram
   (core/->NativeCoreProgram
     (lower/lower-id "native-program" [typed-digest])
     (lower/lower-id "typed-stage" [typed-digest])
@@ -3552,8 +3400,7 @@
     abis
     []))
 
-(defn verdict-results
-  [(verdicts (Vec obligations/ObligationVerdictV0))] (Vec core/ObligationResult)
+(defn verdict-results [verdicts (Vec obligations/ObligationVerdictV0)] (Vec core/ObligationResult)
   (lower/native-obligation-results
     (obligations/obligation-passed? (nth verdicts 0))
     (obligations/obligation-passed? (nth verdicts 1))
@@ -3567,21 +3414,17 @@
     (obligations/obligation-passed? (nth verdicts 9))))
 
 (defn make-frozen-native
-  [(typed-digest String)
-   (program core/NativeCoreProgram)
-   (verdicts (Vec obligations/ObligationVerdictV0))]
-  stages/FrozenNativeStageV0
-  (let [(obligation-results (Vec core/ObligationResult))
-        (verdict-results verdicts)
-        (root core/NativeId) (lower/lower-id "native-terms" [typed-digest])
-        (obligation-roots (Vec core/NativeId))
-        (mapv
-          (fn [(result core/ObligationResult)] core/NativeId
+  [typed-digest String
+   program core/NativeCoreProgram
+   verdicts (Vec obligations/ObligationVerdictV0)] stages/FrozenNativeStageV0
+  (let [obligation-results (Vec core/ObligationResult) (verdict-results verdicts)
+        root core/NativeId (lower/lower-id "native-terms" [typed-digest])
+        obligation-roots (Vec core/NativeId) (mapv
+          (fn [result core/ObligationResult] core/NativeId
             (lower/lower-id "obligation"
               [(core/obligationresult-detail result)]))
           obligation-results)
-        (nodes (Vec stages/TermNodeV0))
-        (lower/native-term-nodes
+        nodes (Vec stages/TermNodeV0) (lower/native-term-nodes
           (core/nativecoreprogram-types program)
           (core/nativecoreprogram-effects program)
           (core/nativecoreprogram-capabilities program)
@@ -3589,41 +3432,35 @@
           (core/nativecoreprogram-functions program)
           (core/nativecoreprogram-abis program)
           obligation-results)
-        (terms stages/TermGraphV0)
-        (stages/->TermGraphV0 root
+        terms stages/TermGraphV0 (stages/->TermGraphV0 root
           (conj nodes
             (stages/->TermNodeV0 root
               (stages/->TextTermV0 "native-stage-v0"))))
-        (stage stages/NativeStageV0)
-        (stages/->NativeStageV0 terms typed-digest program obligation-roots)
-        (encoding String) (stages/encode-native-stage stage)]
+        stage stages/NativeStageV0 (stages/->NativeStageV0 terms typed-digest program obligation-roots)
+        encoding String (stages/encode-native-stage stage)]
     (stages/->FrozenNativeStageV0 stage encoding
       (stages/content-digest encoding))))
 
 (defn unit-sets-exact?
-  [(source-units (Vec stages/SourceUnitV0))
-   (contracts (Vec UnitContractV0))
-   (typed-units (Vec TypedUnitV0))
-   (native-units (Vec NativeUnitV0))]
-  Bool
-  (let [(expected (Vec core/NativeId)) (source-unit-ids source-units)]
+  [source-units (Vec stages/SourceUnitV0)
+   contracts (Vec UnitContractV0)
+   typed-units (Vec TypedUnitV0)
+   native-units (Vec NativeUnitV0)] Bool
+  (let [expected (Vec core/NativeId) (source-unit-ids source-units)]
     (and (exact-id-set? expected (contract-ids contracts))
       (exact-id-set? expected (typed-unit-ids typed-units))
       (exact-id-set? expected (native-unit-ids native-units)))))
 
 (defn assemble-unit-payloads
-  [(frozen-source stages/FrozenSourceStageV1)
-   (contracts (Vec UnitContractV0))
-   (typed-units (Vec TypedUnitV0))
-   (native-units (Vec NativeUnitV0))
-   (compiler-commit String)
-   (configuration (Vec String))
-   (abi core/AbiProfileV0)]
-  UnitAssemblyResultV0
-  (let [(source stages/SourceStageV1)
-        (stages/frozensourcestagev1-stage frozen-source)
-        (source-units (Vec stages/SourceUnitV0))
-        (stages/sourcestagev1-units source)]
+  [frozen-source stages/FrozenSourceStageV1
+   contracts (Vec UnitContractV0)
+   typed-units (Vec TypedUnitV0)
+   native-units (Vec NativeUnitV0)
+   compiler-commit String
+   configuration (Vec String)
+   abi core/AbiProfileV0] UnitAssemblyResultV0
+  (let [source stages/SourceStageV1 (stages/frozensourcestagev1-stage frozen-source)
+        source-units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)]
     (cond
       (not (source-units-supported? source-units))
       (->UnitAssemblyRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
@@ -3638,32 +3475,22 @@
         "a unit encoding, digest, or function identity is inconsistent")
 
       :else
-      (let [(types (Vec core/TypeDef))
-            (ordered-types (collect-types typed-units))
-            (typed-functions (Vec lower/TypedFunctionV0))
-            (ordered-typed-functions (collect-typed-functions typed-units))
-            (effects (Vec core/EffectDef))
-            (ordered-effects (collect-effects typed-units))
-            (capabilities (Vec core/CapabilityDef))
-            (ordered-capabilities (collect-capabilities typed-units))
-            (regions (Vec core/RegionDef))
-            (ordered-regions (collect-regions native-units))
-            (native-types (Vec core/TypeDef))
-            (ordered-types (lower/append-type-def types (lower/union-tag-type)))
-            (native-functions (Vec core/FunctionDef))
-            (ordered-native-functions (collect-native-functions native-units))
-            (layouts (Vec core/LayoutDef))
-            (ordered-layouts
+      (let [types (Vec core/TypeDef) (ordered-types (collect-types typed-units))
+            typed-functions (Vec lower/TypedFunctionV0) (ordered-typed-functions (collect-typed-functions typed-units))
+            effects (Vec core/EffectDef) (ordered-effects (collect-effects typed-units))
+            capabilities (Vec core/CapabilityDef) (ordered-capabilities (collect-capabilities typed-units))
+            regions (Vec core/RegionDef) (ordered-regions (collect-regions native-units))
+            native-types (Vec core/TypeDef) (ordered-types (lower/append-type-def types (lower/union-tag-type)))
+            native-functions (Vec core/FunctionDef) (ordered-native-functions (collect-native-functions native-units))
+            layouts (Vec core/LayoutDef) (ordered-layouts
               (complete-layouts native-types (collect-layouts native-units) abi))
-            (abis (Vec core/AbiDeclV0))
-            (ordered-abis (collect-abis native-units))
-            (claims (Vec PayloadClaimV0))
-            (vec (concat
+            abis (Vec core/AbiDeclV0) (ordered-abis (collect-abis native-units))
+            claims (Vec PayloadClaimV0) (vec (concat
               (contract-claims contracts)
               (typed-unit-claims typed-units)
               (native-unit-claims native-units)
               (support-claims native-types effects capabilities regions layouts)))
-            (claim-check ClaimCheckV0) (check-payload-claims claims)]
+            claim-check ClaimCheckV0 (check-payload-claims claims)]
         (cond
           (not (claimcheckv0-valid claim-check))
           (->UnitAssemblyRejectedV0 "UNIT-PAYLOAD-COLLISION"
@@ -3678,32 +3505,25 @@
             "an export ABI does not bind the complete candidate layout set")
 
           :else
-          (let [(frozen-typed stages/FrozenTypedStageV0)
-                (make-frozen-typed
+          (let [frozen-typed stages/FrozenTypedStageV0 (make-frozen-typed
                   (stages/frozensourcestagev1-digest frozen-source)
                   types typed-functions effects regions capabilities)
-                (typed-slice lower/TypedSliceV0)
-                (lower/->TypedSliceV0 types typed-functions effects regions
+                typed-slice lower/TypedSliceV0 (lower/->TypedSliceV0 types typed-functions effects regions
                   capabilities [(lower/type-id "LowerFailure")])
-                (program core/NativeCoreProgram)
-                (make-native-program
+                program core/NativeCoreProgram (make-native-program
                   (stages/frozentypedstagev0-digest frozen-typed)
                   native-types effects regions capabilities layouts
                   native-functions abis)
-                (verdicts (Vec obligations/ObligationVerdictV0))
-                (obligations/validate-native-core-program program abi)
-                (obligations-pass Bool)
-                (and (= 10 (count verdicts))
+                verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program program abi)
+                obligations-pass Bool (and (= 10 (count verdicts))
                   (every? obligations/obligation-passed? verdicts))]
             (if (not obligations-pass)
               (->UnitAssemblyRejectedV0 "UNIT-OBLIGATION-FAILED"
                 "the assembled Native Core program failed an obligation")
-              (let [(frozen-native stages/FrozenNativeStageV0)
-                    (make-frozen-native
+              (let [frozen-native stages/FrozenNativeStageV0 (make-frozen-native
                       (stages/frozentypedstagev0-digest frozen-typed)
                       program verdicts)
-                    (epoch-result lower/EpochLoweringResultV0)
-                    (lower/epoch-derived-stage frozen-native compiler-commit
+                    epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage frozen-native compiler-commit
                       configuration abi)]
                 (if (not (lower/epoch-result-complete? epoch-result))
                   (->UnitAssemblyRejectedV0 "UNIT-EPOCH-PENDING"

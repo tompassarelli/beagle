@@ -13,28 +13,38 @@
 
 
 (defrecord PreparedCandidateV0
-  [(frozen-source stages/FrozenSourceStageV1)
-   (prelude lower/TypingPreludeV0)
-   (contracts (Vec unit/UnitContractV0))
-   (semantic-contracts (Vec unit/SemanticFormContractV1))
-   (compiler-rule-epoch String)
-   (configuration (Vec String))])
+  [frozen-source stages/FrozenSourceStageV1
+   prelude lower/TypingPreludeV0
+   contracts (Vec unit/UnitContractV0)
+   semantic-contracts (Vec unit/SemanticFormContractV1)
+   compiler-rule-epoch String
+   configuration (Vec String)])
 
 (defunion UnitPreparationResultV0
-  (UnitPreparationAcceptedV0 [(prepared PreparedCandidateV0)])
-  (UnitPreparationRejectedV0 [(code String) (detail String)]))
+  (UnitPreparationAcceptedV0 [prepared PreparedCandidateV0])
+  (UnitPreparationRejectedV0
+    [code String
+     detail String]))
 
 (defunion TypedUnitCompileResultV0
   (TypedUnitCompiledV0
-    [(unit unit/TypedUnitV0) (result-key String) (trace (Vec core/NativeId))])
+    [unit unit/TypedUnitV0
+     result-key String
+     trace (Vec core/NativeId)])
   (TypedUnitCompileRejectedV0
-    [(code String) (detail String) (unit-id core/NativeId)]))
+    [code String
+     detail String
+     unit-id core/NativeId]))
 
 (defunion NativeUnitCompileResultV0
   (NativeUnitCompiledV0
-    [(unit unit/NativeUnitV0) (result-key String) (trace (Vec core/NativeId))])
+    [unit unit/NativeUnitV0
+     result-key String
+     trace (Vec core/NativeId)])
   (NativeUnitCompileRejectedV0
-    [(code String) (detail String) (unit-id core/NativeId)]))
+    [code String
+     detail String
+     unit-id core/NativeId]))
 
 ;; Body attachment pairs signature resolutions with source roots BY INDEX, and
 ;; the prelude hands both vectors over in that order.  The unit being compiled
@@ -42,7 +52,8 @@
 ;; selection is by identity, only the pairing is positional.  The two vectors
 ;; are never assumed to share the source-unit ordering.
 (defn signature-index-for
-  [(resolutions (Vec lower/FunctionResolutionV0)) (target core/NativeId)] Int
+  [resolutions (Vec lower/FunctionResolutionV0)
+   target core/NativeId] Int
   (loop [position Int 0]
     (cond
       (>= position (count resolutions)) -1
@@ -55,21 +66,19 @@
       :else (recur (+ position 1)))))
 
 (defn contract-for
-  [(contracts (Vec unit/UnitContractV0))
-   (target core/NativeId)]
-  (U unit/UnitContractV0 Nil)
+  [contracts (Vec unit/UnitContractV0)
+   target core/NativeId] (U unit/UnitContractV0 Nil)
   (some
-    (fn [(candidate unit/UnitContractV0)] (U unit/UnitContractV0 Nil)
+    (fn [candidate unit/UnitContractV0] (U unit/UnitContractV0 Nil)
       (if (core/native-id= target (unit/unitcontractv0-unit-id candidate))
         candidate nil))
     contracts))
 
 (defn typed-unit-for
-  [(units (Vec unit/TypedUnitV0))
-   (target core/NativeId)]
-  (U unit/TypedUnitV0 Nil)
+  [units (Vec unit/TypedUnitV0)
+   target core/NativeId] (U unit/TypedUnitV0 Nil)
   (some
-    (fn [(candidate unit/TypedUnitV0)] (U unit/TypedUnitV0 Nil)
+    (fn [candidate unit/TypedUnitV0] (U unit/TypedUnitV0 Nil)
       (if (core/native-id= target (unit/typedunitv0-unit-id candidate))
         candidate nil))
     units))
@@ -81,7 +90,7 @@
 ;; the whole-program fold is the identity on it.  A singleton compiler cannot
 ;; run that fold, and UnitContractV0 does not bind a callee's inferred effects,
 ;; so anything not already at the fixpoint is refused rather than compiled.
-(defn at-settlement-fixpoint? [(function lower/TypedFunctionV0)] Bool
+(defn at-settlement-fixpoint? [function lower/TypedFunctionV0] Bool
   (and (lower/ready-function? function)
     (= 1 (count (lower/typedfunctionv0-effects function)))
     (core/native-id= (lower/pure-effect-id)
@@ -91,14 +100,13 @@
 
 ;; A read set names source units; a body names the function each one defines.
 (defn read-function-ids
-  [(units (Vec stages/SourceUnitV0))
-   (read-set (Vec core/NativeId))]
-  (Vec core/NativeId)
-  (loop [position Int 0 collected (Vec core/NativeId) []]
+  [units (Vec stages/SourceUnitV0)
+   read-set (Vec core/NativeId)] (Vec core/NativeId)
+  (loop [position Int 0
+         collected (Vec core/NativeId) []]
     (if (>= position (count read-set))
       collected
-      (let [(read-unit (U stages/SourceUnitV0 Nil))
-            (unit/source-unit-for units (nth read-set position))]
+      (let [read-unit (U stages/SourceUnitV0 Nil) (unit/source-unit-for units (nth read-set position))]
         (recur (+ position 1)
           (if (nil? read-unit)
             collected
@@ -108,20 +116,17 @@
 
 ;; Empty means the supplied dependency context matches the prepared candidate.
 (defn dependency-context-mismatch
-  [(prepared PreparedCandidateV0)
-   (read-set (Vec core/NativeId))
-   (read-contracts (Vec unit/UnitContractV0))]
-  String
+  [prepared PreparedCandidateV0
+   read-set (Vec core/NativeId)
+   read-contracts (Vec unit/UnitContractV0)] String
   (if (not (unit/exact-id-set? read-set (unit/contract-ids read-contracts)))
     "supplied contract rows are not exactly the direct read set"
     (loop [position Int 0]
       (if (>= position (count read-set))
         ""
-        (let [(read-id core/NativeId) (nth read-set position)
-              (supplied (U unit/UnitContractV0 Nil))
-              (contract-for read-contracts read-id)
-              (candidate (U unit/UnitContractV0 Nil))
-              (contract-for (preparedcandidatev0-contracts prepared) read-id)]
+        (let [read-id core/NativeId (nth read-set position)
+              supplied (U unit/UnitContractV0 Nil) (contract-for read-contracts read-id)
+              candidate (U unit/UnitContractV0 Nil) (contract-for (preparedcandidatev0-contracts prepared) read-id)]
           (cond
             (nil? candidate)
             (str "no candidate contract for " (core/nativeid-value read-id))
@@ -137,42 +142,34 @@
             :else (recur (+ position 1))))))))
 
 (defn prepare-unit-compilation
-  [(frozen-source stages/FrozenSourceStageV1)
-   (compiler-rule-epoch String)
-   (semantic-contracts (Vec unit/SemanticFormContractV1))
-   (configuration (Vec String))]
-  UnitPreparationResultV0
-  (let [(source stages/SourceStageV1)
-        (stages/frozensourcestagev1-stage frozen-source)
-        (units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
-        (modules (Vec stages/SourceModuleV1))
-        (stages/sourcestagev1-modules source)]
+  [frozen-source stages/FrozenSourceStageV1
+   compiler-rule-epoch String
+   semantic-contracts (Vec unit/SemanticFormContractV1)
+   configuration (Vec String)] UnitPreparationResultV0
+  (let [source stages/SourceStageV1 (stages/frozensourcestagev1-stage frozen-source)
+        units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)
+        modules (Vec stages/SourceModuleV1) (stages/sourcestagev1-modules source)]
     (if (not (unit/source-units-supported? units))
       (->UnitPreparationRejectedV0 "UNIT-CORPUS-UNSUPPORTED"
         "preparation accepts exactly the nine defn branch corpus units")
-      (let [(prelude lower/TypingPreludeV0)
-            (lower/prepare-typing-prelude frozen-source configuration)
-            (env lower/BodyEnvV0) (lower/typingpreludev0-env prelude)
-            (index lower/SourceIndexV0) (lower/bodyenvv0-index env)
-            (resolutions (Vec lower/FunctionResolutionV0))
-            (lower/typingpreludev0-signature-resolutions prelude)]
-        (loop [position Int 0 contracts (Vec unit/UnitContractV0) []]
+      (let [prelude lower/TypingPreludeV0 (lower/prepare-typing-prelude frozen-source configuration)
+            env lower/BodyEnvV0 (lower/typingpreludev0-env prelude)
+            index lower/SourceIndexV0 (lower/bodyenvv0-index env)
+            resolutions (Vec lower/FunctionResolutionV0) (lower/typingpreludev0-signature-resolutions prelude)]
+        (loop [position Int 0
+               contracts (Vec unit/UnitContractV0) []]
           (if (>= position (count units))
             (->UnitPreparationAcceptedV0
               (->PreparedCandidateV0 frozen-source prelude contracts
                 semantic-contracts compiler-rule-epoch configuration))
-            (let [(source-unit stages/SourceUnitV0) (nth units position)
-                  (unit-id core/NativeId) (stages/sourceunitv0-id source-unit)
-                  (target-function core/NativeId)
-                  (lower/function-id unit-id
+            (let [source-unit stages/SourceUnitV0 (nth units position)
+                  unit-id core/NativeId (stages/sourceunitv0-id source-unit)
+                  target-function core/NativeId (lower/function-id unit-id
                     (stages/sourceunitv0-name source-unit))
-                  (signature-position Int)
-                  (signature-index-for resolutions target-function)
-                  (module (U stages/SourceModuleV1 Nil))
-                  (unit/source-module-for modules
+                  signature-position Int (signature-index-for resolutions target-function)
+                  module (U stages/SourceModuleV1 Nil) (unit/source-module-for modules
                     (stages/sourceunitv0-module-id source-unit))
-                  (private-text String)
-                  (lower/fact-text index unit-id "private")]
+                  private-text String (lower/fact-text index unit-id "private")]
               (cond
                 (< signature-position 0)
                 (->UnitPreparationRejectedV0 "UNIT-SIGNATURE-MISSING"
@@ -198,41 +195,31 @@
                         (nth resolutions signature-position)))))))))))))
 
 (defn compile-typed-unit
-  [(prepared PreparedCandidateV0)
-   (target-unit-id core/NativeId)
-   (target-semantic-digest String)
-   (target-read-set (Vec core/NativeId))
-   (read-contracts (Vec unit/UnitContractV0))
-   (derivation-receipt unit/UnitDerivationReceiptV1)
-   (expected-result-key String)]
-  TypedUnitCompileResultV0
-  (let [(source stages/SourceStageV1)
-        (stages/frozensourcestagev1-stage
+  [prepared PreparedCandidateV0
+   target-unit-id core/NativeId
+   target-semantic-digest String
+   target-read-set (Vec core/NativeId)
+   read-contracts (Vec unit/UnitContractV0)
+   derivation-receipt unit/UnitDerivationReceiptV1
+   expected-result-key String] TypedUnitCompileResultV0
+  (let [source stages/SourceStageV1 (stages/frozensourcestagev1-stage
           (preparedcandidatev0-frozen-source prepared))
-        (units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
-        (target (U stages/SourceUnitV0 Nil))
-        (unit/source-unit-for units target-unit-id)]
+        units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)
+        target (U stages/SourceUnitV0 Nil) (unit/source-unit-for units target-unit-id)]
     (if (nil? target)
       (->TypedUnitCompileRejectedV0 "UNIT-TARGET-MISSING"
         "the requested unit is not in the frozen candidate source"
         target-unit-id)
-      (let [(prelude lower/TypingPreludeV0)
-            (preparedcandidatev0-prelude prepared)
-            (env lower/BodyEnvV0) (lower/typingpreludev0-env prelude)
-            (resolutions (Vec lower/FunctionResolutionV0))
-            (lower/typingpreludev0-signature-resolutions prelude)
-            (sources (Vec core/NativeId))
-            (lower/bodyenvv0-signature-sources env)
-            (target-function core/NativeId)
-            (lower/function-id target-unit-id
+      (let [prelude lower/TypingPreludeV0 (preparedcandidatev0-prelude prepared)
+            env lower/BodyEnvV0 (lower/typingpreludev0-env prelude)
+            resolutions (Vec lower/FunctionResolutionV0) (lower/typingpreludev0-signature-resolutions prelude)
+            sources (Vec core/NativeId) (lower/bodyenvv0-signature-sources env)
+            target-function core/NativeId (lower/function-id target-unit-id
               (stages/sourceunitv0-name target))
-            (signature-position Int)
-            (signature-index-for resolutions target-function)
-            (context-detail String)
-            (dependency-context-mismatch prepared target-read-set
+            signature-position Int (signature-index-for resolutions target-function)
+            context-detail String (dependency-context-mismatch prepared target-read-set
               read-contracts)
-            (result-key String)
-            (unit/unit-result-key derivation-receipt)]
+            result-key String (unit/unit-result-key derivation-receipt)]
         (cond
           (not= target-semantic-digest
             (stages/sourceunitv0-semantic-digest target))
@@ -279,40 +266,32 @@
             "no source root is paired with the target signature"
             target-unit-id)
 
+          ;; The prelude's types are a BASE, never the closed set: a body
+          ;; contributes types of its own, such as the checked-arithmetic
+          ;; outcome family.  The merge is the same fold the whole path
+          ;; runs over all nine resolutions, applied to this one, and it
+          ;; must precede selection because reachability only follows
+          ;; references through types present in the vector it is given.
+          ;; A target at the settlement fixpoint carries only the pure
+          ;; effect and no capability, so the whole-program effect and
+          ;; capability seeds select exactly what the clean path selects.
           :else
-          (let [(resolution lower/FunctionResolutionV0)
-                (lower/attach-body env (nth resolutions signature-position)
+          (let [resolution lower/FunctionResolutionV0 (lower/attach-body env (nth resolutions signature-position)
                   (nth sources signature-position))
-                (function lower/TypedFunctionV0)
-                (lower/functionresolutionv0-function resolution)
-                ;; The prelude's types are a BASE, never the closed set: a body
-                ;; contributes types of its own, such as the checked-arithmetic
-                ;; outcome family.  The merge is the same fold the whole path
-                ;; runs over all nine resolutions, applied to this one, and it
-                ;; must precede selection because reachability only follows
-                ;; references through types present in the vector it is given.
-                (merged-types (Vec core/TypeDef))
-                (lower/collect-function-types (lower/bodyenvv0-types env)
+                function lower/TypedFunctionV0 (lower/functionresolutionv0-function resolution)
+                merged-types (Vec core/TypeDef) (lower/collect-function-types (lower/bodyenvv0-types env)
                   [resolution])
-                (unit-types (Vec core/TypeDef))
-                (unit/selected-types merged-types function)
-                ;; A target at the settlement fixpoint carries only the pure
-                ;; effect and no capability, so the whole-program effect and
-                ;; capability seeds select exactly what the clean path selects.
-                (unit-effects (Vec core/EffectDef))
-                (unit/selected-effects
+                unit-types (Vec core/TypeDef) (unit/selected-types merged-types function)
+                unit-effects (Vec core/EffectDef) (unit/selected-effects
                   (lower/slice-effects false false false false false false
                     false false)
                   function)
-                (unit-capabilities (Vec core/CapabilityDef))
-                (unit/selected-capabilities
+                unit-capabilities (Vec core/CapabilityDef) (unit/selected-capabilities
                   (lower/slice-capabilities false false false false false false
                     false false)
                   function)
-                (allowed (Vec core/NativeId))
-                (read-function-ids units target-read-set)
-                (typed-unit unit/TypedUnitV0)
-                (unit/make-typed-unit target-unit-id function unit-types
+                allowed (Vec core/NativeId) (read-function-ids units target-read-set)
+                typed-unit unit/TypedUnitV0 (unit/make-typed-unit target-unit-id function unit-types
                   unit-effects unit-capabilities)]
             (cond
               (not (at-settlement-fixpoint? function))
@@ -342,32 +321,24 @@
 ;; collision-free nine-unit typed set exists.  Resolving layouts for types is
 ;; allowed here; lowering another function body is not.
 (defn compile-native-unit
-  [(prepared PreparedCandidateV0)
-   (target-unit-id core/NativeId)
-   (target-typed unit/TypedUnitV0)
-   (candidate-typed-units (Vec unit/TypedUnitV0))
-   (derivation-receipt unit/UnitDerivationReceiptV1)
-   (expected-result-key String)
-   (abi core/AbiProfileV0)]
-  NativeUnitCompileResultV0
-  (let [(source stages/SourceStageV1)
-        (stages/frozensourcestagev1-stage
+  [prepared PreparedCandidateV0
+   target-unit-id core/NativeId
+   target-typed unit/TypedUnitV0
+   candidate-typed-units (Vec unit/TypedUnitV0)
+   derivation-receipt unit/UnitDerivationReceiptV1
+   expected-result-key String
+   abi core/AbiProfileV0] NativeUnitCompileResultV0
+  (let [source stages/SourceStageV1 (stages/frozensourcestagev1-stage
           (preparedcandidatev0-frozen-source prepared))
-        (units (Vec stages/SourceUnitV0)) (stages/sourcestagev1-units source)
-        (target (U stages/SourceUnitV0 Nil))
-        (unit/source-unit-for units target-unit-id)
-        (found (U unit/TypedUnitV0 Nil))
-        (typed-unit-for candidate-typed-units target-unit-id)
-        (function lower/TypedFunctionV0)
-        (unit/typedunitv0-function target-typed)
-        (candidate-types (Vec core/TypeDef))
-        (unit/collect-types candidate-typed-units)
-        (native-types (Vec core/TypeDef))
-        (lower/append-type-def candidate-types (lower/union-tag-type))
-        (layout-resolutions (Vec lower/LayoutResolutionV0))
-        (lower/resolve-layouts native-types abi)
-        (layouts (Vec core/LayoutDef)) (lower/collect-layouts layout-resolutions)
-        (layouts-digest String) (lower/layout-digest layouts)]
+        units (Vec stages/SourceUnitV0) (stages/sourcestagev1-units source)
+        target (U stages/SourceUnitV0 Nil) (unit/source-unit-for units target-unit-id)
+        found (U unit/TypedUnitV0 Nil) (typed-unit-for candidate-typed-units target-unit-id)
+        function lower/TypedFunctionV0 (unit/typedunitv0-function target-typed)
+        candidate-types (Vec core/TypeDef) (unit/collect-types candidate-typed-units)
+        native-types (Vec core/TypeDef) (lower/append-type-def candidate-types (lower/union-tag-type))
+        layout-resolutions (Vec lower/LayoutResolutionV0) (lower/resolve-layouts native-types abi)
+        layouts (Vec core/LayoutDef) (lower/collect-layouts layout-resolutions)
+        layouts-digest String (lower/layout-digest layouts)]
     (cond
       (nil? target)
       (->NativeUnitCompileRejectedV0 "UNIT-TARGET-MISSING"
@@ -422,18 +393,13 @@
         target-unit-id)
 
       :else
-      (let [(native-function core/FunctionDef)
-            (lower/lower-ready-function function)
-            (export core/AbiDeclV0) (lower/function-abi function layouts-digest)
-            (unit-layouts (Vec core/LayoutDef))
-            (unit/selected-layouts layouts
+      (let [native-function core/FunctionDef (lower/lower-ready-function function)
+            export core/AbiDeclV0 (lower/function-abi function layouts-digest)
+            unit-layouts (Vec core/LayoutDef) (unit/selected-layouts layouts
               (unit/typedunitv0-types target-typed))
-            (unit-abis (Vec core/AbiDeclV0))
-            (unit/selected-abis [export] function native-function)
-            (unit-regions (Vec core/RegionDef))
-            (unit/selected-regions (lower/slice-regions) native-function)
-            (native-unit unit/NativeUnitV0)
-            (unit/make-native-unit target-unit-id native-function unit-layouts
+            unit-abis (Vec core/AbiDeclV0) (unit/selected-abis [export] function native-function)
+            unit-regions (Vec core/RegionDef) (unit/selected-regions (lower/slice-regions) native-function)
+            native-unit unit/NativeUnitV0 (unit/make-native-unit target-unit-id native-function unit-layouts
               unit-abis unit-regions)]
         (if (not (unit/native-unit-record-valid? native-unit))
           (->NativeUnitCompileRejectedV0 "UNIT-WIRE-CORPUS-UNSUPPORTED"
