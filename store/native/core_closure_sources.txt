@@ -1,3 +1,4 @@
+../native-core/src/beagle/fact_profile.bgl
 src/store/slots.bgl
 src/store/types.bgl
 src/store/rpc_limits.bgl
