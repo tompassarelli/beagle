@@ -15,7 +15,7 @@ build_native() {
   local source="$2"
   local executable="$3"
   local artifacts="$4"
-  "$repo/bin/beagle-native-exe" \
+  timeout --foreground 120s "$repo/bin/beagle-native-exe" \
     --out "$executable" \
     --artifacts "$artifacts" \
     --entry "$entry" \
