@@ -2207,17 +2207,41 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
           (finally
             (.shutdownNow pool)))))))
 
+(defn module-definition-batches [index definitions]
+  (->> definitions
+       (group-by #(lower/source-module-name index %))
+       (map (fn [[module-name module-definitions]]
+              [module-name (vec (sort-by id-value module-definitions))]))
+       (sort-by first)
+       vec))
+
+(defn flatten-module-entries [module-results]
+  (vec
+   (mapcat #(sort-by first (second %))
+           (sort-by first module-results))))
+
 (defn dependency-projection [definitions index]
-  (let [ordered (vec (sort-by id-value (definition-nodes index)))
-        definition-ids (set (map id-value ordered))
+  (let [all-definitions (vec (definition-nodes index))
+        module-batches (module-definition-batches index all-definitions)
+        definition-ids (set (map id-value all-definitions))
+        _worker-evidence
+        (binding [*out* *err*]
+          (println (str "beagle build: source-projection workers="
+                        (min projection-parallelism (count module-batches))
+                        " modules=" (count module-batches))))
         entries
+        (flatten-module-entries
         (ordered-parallel-mapv
-         (fn [definition]
-           [(id-value definition)
-            (vec (dependency-nodes
-                  definitions index definition definition-ids))])
-         ordered)]
-    {:ordered ordered :by-id (into {} entries)}))
+         (fn [[module-name module-definitions]]
+           [module-name
+            (mapv
+             (fn [definition]
+               [(id-value definition)
+                (vec (dependency-nodes
+                      definitions index definition definition-ids))])
+             module-definitions)])
+         module-batches))]
+    {:ordered (mapv first entries) :by-id (into {} entries)}))
 
 (defn source-node-name-index [rows]
   (reduce
@@ -2235,36 +2259,49 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
    rows))
 
 (defn semantic-read-set-rows
-  [rows selected ordered-definitions dependencies-by-id]
+  [rows index selected ordered-definitions dependencies-by-id]
   (let [node-names (source-node-name-index rows)
-        selected-definitions
-        (filterv #(contains? selected (id-value %)) ordered-definitions)
+        selected-module-batches
+        (->> (module-definition-batches index ordered-definitions)
+             (map (fn [[module-name module-definitions]]
+                    [module-name
+                     (filterv #(contains? selected (id-value %))
+                              module-definitions)]))
+             (remove #(empty? (second %)))
+             vec)
         reads
         (vec
          (mapcat
           identity
-          (ordered-parallel-mapv
-           (fn [definition]
-             (let [definition-id (id-value definition)
-                   subject (get node-names definition-id)
-                   dependencies
-                   (sort-by id-value
-                            (remove #(= definition-id (id-value %))
-                                    (get dependencies-by-id definition-id [])))]
-               (when-not subject
-                 (throw (ex-info "semantic unit has no source-fact node name"
-                                 {:definition definition-id})))
-               (mapv
-                (fn [dependency]
-                  (let [object (get node-names (id-value dependency))]
-                    (when-not object
-                      (throw
-                       (ex-info "semantic read has no source-fact node name"
-                                {:definition definition-id
-                                 :dependency (id-value dependency)})))
-                    (slice/->SliceFactV0 subject "semantic-read" "n" object)))
-                dependencies)))
-           selected-definitions)))]
+          (map second
+               (flatten-module-entries
+                (ordered-parallel-mapv
+                 (fn [[module-name module-definitions]]
+                   [module-name
+                    (mapv
+                     (fn [definition]
+                       (let [definition-id (id-value definition)
+                             subject (get node-names definition-id)
+                             dependencies
+                             (sort-by id-value
+                                      (remove #(= definition-id (id-value %))
+                                              (get dependencies-by-id definition-id [])))]
+                         (when-not subject
+                           (throw (ex-info "semantic unit has no source-fact node name"
+                                           {:definition definition-id})))
+                         [definition-id
+                          (mapv
+                           (fn [dependency]
+                             (let [object (get node-names (id-value dependency))]
+                               (when-not object
+                                 (throw
+                                  (ex-info "semantic read has no source-fact node name"
+                                           {:definition definition-id
+                                            :dependency (id-value dependency)})))
+                               (slice/->SliceFactV0 subject "semantic-read" "n" object)))
+                           dependencies)]))
+                     module-definitions)])
+                 selected-module-batches)))))]
     (vec (concat rows reads))))
 
 (defn reachable-definition-ids [dependencies-by-id seeds]
@@ -2409,6 +2446,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
             (reachable-definition-ids (:by-id dependencies) (:seeds seeds))]
         {:ok? true
          :rows (if (empty? entries) rows (projected-rows rows selected))
+         :index index
          :selected selected
          :ordered-definitions (:ordered dependencies)
          :dependencies-by-id (:by-id dependencies)}))))
@@ -3685,7 +3723,7 @@ bb -cp "$compiled:$BEAGLE_DIR/store/out:$BEAGLE_DIR/native-core/bin" -e '
             (or cached-projected-facts
                 (rows-text
                  (semantic-read-set-rows
-                  (:rows projection) (:selected projection)
+                  (:rows projection) (:index projection) (:selected projection)
                   (:ordered-definitions projection)
                   (:dependencies-by-id projection))))
             _cache-publish
