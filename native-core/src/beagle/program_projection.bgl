@@ -1,0 +1,445 @@
+#lang beagle
+
+;; This is a transient compiler view. Store ProgramRoot admission owns durable
+;; root, version, profile, and occurrence authority.
+(ns beagle.program-projection
+  (:require [beagle.frontend-facts :as facts]
+            [clojure.string :as str]
+            [store.types :as t]))
+
+(def member-of Keyword :member_of)
+(def contains Keyword :contains)
+(def represented-by Keyword :represented_by)
+(def refers-to Keyword :refers_to)
+(def depends-on Keyword :depends_on)
+(def derived-from Keyword :derived_from)
+(def admitted-by Keyword :admitted_by)
+(def includes Keyword :includes)
+(def has-span Keyword :has_span)
+(def named Keyword :named)
+(def through-byte Keyword :through_byte)
+(def declares-at Keyword :declares_at)
+
+(def relationships Keyword :relationships)
+(def modules Keyword :modules)
+(def bindings Keyword :bindings)
+(def references Keyword :references)
+
+(defrecord ProgramModuleProjection
+  [logical-module t/Term
+   propositions (Vec t/Triple)])
+
+(defunion ProgramProjectionResult
+  (ProgramProjected [projection ProgramModuleProjection])
+  (ProgramProjectionRejected [code Keyword detail String]))
+
+;; Beagle cannot pass a recursive Dyn alias directly to an Any consumer.
+(defn term-value [value t/Term] Any value)
+
+(defn logical-module-value [projection ProgramModuleProjection] Any
+  (programmoduleprojection-logical-module projection))
+
+;; Recursive Term values use Any inside transient helper records because the
+;; portable ABI cannot spell that recursive union through every accessor.
+(defrecord ProjectionBinding
+  [name String
+   resource Any
+   span facts/SourceSpan])
+
+(defrecord ProjectionFunction
+  [binding ProjectionBinding
+   parameters (Vec ProjectionBinding)
+   bodies (Vec String)])
+
+(defrecord ProjectionState
+  [propositions (Vec t/Triple)])
+
+(defalias MaybeProjectionBindings (U (Vec ProjectionBinding) Nil))
+(defalias MaybeProjectionFunctions (U (Vec ProjectionFunction) Nil))
+
+(def empty-bindings (Vec ProjectionBinding) [])
+(def empty-functions (Vec ProjectionFunction) [])
+(def empty-triples (Vec t/Triple) [])
+(def empty-subjects (Vec String) [])
+
+(defn fact-text [fact facts/CompilerFact] String?
+  (match (facts/compilerfact-value fact)
+    [(facts/FactText value) value]
+    [(facts/FactNodeRef node-id) nil]
+    [(facts/FactBool value) nil]
+    [(facts/FactInt value) nil]
+    [(facts/FactNil) nil]))
+
+(defn fact-node [fact facts/CompilerFact] String?
+  (match (facts/compilerfact-value fact)
+    [(facts/FactNodeRef node-id) node-id]
+    [(facts/FactText value) nil]
+    [(facts/FactBool value) nil]
+    [(facts/FactInt value) nil]
+    [(facts/FactNil) nil]))
+
+(defn find-fact
+  [rows (Vec facts/CompilerFact)
+   relation Keyword
+   subject String
+   slot Int] facts/CompilerFact?
+  (loop [remaining (Vec facts/CompilerFact) rows]
+    (if (empty? remaining)
+      nil
+      (let [fact facts/CompilerFact (first remaining)]
+        (if (and (= relation (facts/compilerfact-relation fact))
+                 (and (= subject (facts/compilerfact-subject fact))
+                      (= slot (facts/compilerfact-slot fact))))
+          fact
+          (recur (vec (rest remaining))))))))
+
+(defn node-kind
+  [rows (Vec facts/CompilerFact) subject String] String?
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/node subject 0)]
+    (if (nil? fact) nil (fact-text fact))))
+
+(defn node-value
+  [rows (Vec facts/CompilerFact) subject String] String?
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/value subject 0)]
+    (if (nil? fact) nil (fact-text fact))))
+
+(defn node-span
+  [rows (Vec facts/CompilerFact) subject String] facts/SourceSpan?
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/node subject 0)]
+    (if (nil? fact) nil (facts/compilerfact-span fact))))
+
+(defn edge-target
+  [rows (Vec facts/CompilerFact) subject String slot Int] String?
+  (let [fact facts/CompilerFact? (find-fact rows :syntax/edge subject slot)]
+    (if (nil? fact) nil (fact-node fact))))
+
+(defn node-index
+  [rows (Vec facts/CompilerFact) subject String] Int?
+  (loop [remaining (Vec facts/CompilerFact) rows
+         index Int 0]
+    (if (empty? remaining)
+      nil
+      (let [fact facts/CompilerFact (first remaining)]
+        (if (= :syntax/node (facts/compilerfact-relation fact))
+          (if (= subject (facts/compilerfact-subject fact))
+            index
+            (recur (vec (rest remaining)) (inc index)))
+          (recur (vec (rest remaining)) index))))))
+
+(defn node-children
+  [rows (Vec facts/CompilerFact) subject String] (Vec String)
+  (loop [slot Int 0
+         children (Vec String) empty-subjects]
+    (let [child String? (edge-target rows subject slot)]
+      (if (nil? child)
+        children
+        (recur (inc slot) (conj children child))))))
+
+(defn root-subject [rows (Vec facts/CompilerFact)] String?
+  (some
+    (fn [fact facts/CompilerFact] String?
+      (if (and (= :syntax/node (facts/compilerfact-relation fact))
+               (= "root" (fact-text fact)))
+        (facts/compilerfact-subject fact)
+        nil))
+    rows))
+
+(defn form-head
+  [rows (Vec facts/CompilerFact) subject String] String?
+  (let [head String? (edge-target rows subject 0)]
+    (if (nil? head) nil (node-value rows head))))
+
+(defn span-term [span facts/SourceSpan] t/Triple
+  (t/triple (facts/sourcespan-start-byte span)
+            through-byte
+            (facts/sourcespan-end-byte span)))
+
+(defn binding-resource
+  [logical-module t/Term index Int] t/Triple
+  (t/triple logical-module declares-at index))
+
+(defn projection-binding
+  [rows (Vec facts/CompilerFact)
+   logical-module t/Term
+   subject String] ProjectionBinding?
+  (let [kind String? (node-kind rows subject)
+        name String? (node-value rows subject)
+        index Int? (node-index rows subject)
+        span facts/SourceSpan? (node-span rows subject)]
+    (if (and (= "symbol" kind)
+             (and (some? name) (and (some? index) (some? span))))
+      (->ProjectionBinding name
+                           (binding-resource logical-module index)
+                           span)
+      nil)))
+
+(defn parameter-bindings
+  [rows (Vec facts/CompilerFact)
+   logical-module t/Term
+   parameters-subject String] MaybeProjectionBindings
+  (if (not= "vector" (node-kind rows parameters-subject))
+    nil
+    (loop [slot Int 0
+           collected (Vec ProjectionBinding) empty-bindings]
+      (let [name-subject String?
+            (edge-target rows parameters-subject slot)]
+        (if (nil? name-subject)
+          collected
+          (let [type-subject String?
+                (edge-target rows parameters-subject (inc slot))
+                binding ProjectionBinding?
+                (projection-binding rows logical-module name-subject)]
+            (if (or (nil? type-subject) (nil? binding))
+              nil
+              (recur (+ slot 2) (conj collected binding)))))))))
+
+(defn body-subjects
+  [rows (Vec facts/CompilerFact) function-subject String] (Vec String)
+  (loop [slot Int 4
+         bodies (Vec String) empty-subjects]
+    (let [body String? (edge-target rows function-subject slot)]
+      (if (nil? body)
+        bodies
+        (recur (inc slot) (conj bodies body))))))
+
+(defn projection-function
+  [rows (Vec facts/CompilerFact)
+   logical-module t/Term
+   subject String] ProjectionFunction?
+  (let [name-subject String? (edge-target rows subject 1)
+        parameters-subject String? (edge-target rows subject 2)]
+    (if (or (nil? name-subject) (nil? parameters-subject))
+      nil
+      (let [binding ProjectionBinding?
+            (projection-binding rows logical-module name-subject)
+            parameters MaybeProjectionBindings
+            (parameter-bindings rows logical-module parameters-subject)
+            bodies (Vec String) (body-subjects rows subject)]
+        (if (or (nil? binding) (nil? parameters) (empty? bodies))
+          nil
+          (->ProjectionFunction binding parameters bodies))))))
+
+(defn top-level-functions
+  [rows (Vec facts/CompilerFact)
+   logical-module t/Term] MaybeProjectionFunctions
+  (let [root String? (root-subject rows)]
+    (if (nil? root)
+      nil
+      (loop [remaining (Vec String) (node-children rows root)
+             functions (Vec ProjectionFunction) empty-functions]
+        (if (empty? remaining)
+          functions
+          (let [subject String (first remaining)]
+            (if (= "defn" (form-head rows subject))
+              (let [function ProjectionFunction?
+                    (projection-function rows logical-module subject)]
+                (if (nil? function)
+                  nil
+                  (recur (vec (rest remaining)) (conj functions function))))
+              (recur (vec (rest remaining)) functions))))))))
+
+(defn relationship-declarations [] (Vec t/Triple)
+  [(t/triple member-of member-of relationships)
+   (t/triple contains member-of relationships)
+   (t/triple represented-by member-of relationships)
+   (t/triple refers-to member-of relationships)
+   (t/triple depends-on member-of relationships)
+   (t/triple derived-from member-of relationships)
+   (t/triple admitted-by member-of relationships)
+   (t/triple includes member-of relationships)
+   (t/triple has-span member-of relationships)
+   (t/triple named member-of relationships)
+   (t/triple through-byte member-of relationships)
+   (t/triple declares-at member-of relationships)])
+
+(defn append-unique-triple
+  [propositions (Vec t/Triple) proposition t/Triple] (Vec t/Triple)
+  (if (some?
+        (some
+          (fn [candidate t/Triple] t/Triple?
+            (if (= candidate proposition) candidate nil))
+          propositions))
+    propositions
+    (conj propositions proposition)))
+
+(defn append-binding
+  [propositions (Vec t/Triple)
+   logical-module t/Term
+   binding ProjectionBinding] (Vec t/Triple)
+  (let [resource Any (projectionbinding-resource binding)
+        span t/Triple (span-term (projectionbinding-span binding))]
+    (conj
+      (conj
+        (conj
+          (conj propositions
+                (t/triple resource member-of bindings))
+          (t/triple logical-module contains resource))
+        (t/triple resource named (projectionbinding-name binding)))
+      (t/triple resource has-span span))))
+
+(defn append-function-bindings
+  [propositions (Vec t/Triple)
+   logical-module t/Term
+   functions (Vec ProjectionFunction)] (Vec t/Triple)
+  (reduce
+    (fn [current (Vec t/Triple) function ProjectionFunction] (Vec t/Triple)
+      (reduce
+        (fn [with-parameter (Vec t/Triple)
+             parameter ProjectionBinding] (Vec t/Triple)
+          (append-binding with-parameter logical-module parameter))
+        (append-binding current logical-module
+                        (projectionfunction-binding function))
+        (projectionfunction-parameters function)))
+    propositions
+    functions))
+
+(defn function-bindings
+  [functions (Vec ProjectionFunction)] (Vec ProjectionBinding)
+  (mapv
+    (fn [function ProjectionFunction] ProjectionBinding
+      (projectionfunction-binding function))
+    functions))
+
+(defn binding-named
+  [candidates (Vec ProjectionBinding) wanted String] ProjectionBinding?
+  (some
+    (fn [candidate ProjectionBinding] ProjectionBinding?
+      (if (= wanted (projectionbinding-name candidate)) candidate nil))
+    candidates))
+
+(defn resolve-binding
+  [locals (Vec ProjectionBinding)
+   globals (Vec ProjectionBinding)
+   wanted String] ProjectionBinding?
+  (let [local ProjectionBinding? (binding-named locals wanted)]
+    (if (some? local) local (binding-named globals wanted))))
+
+(defn append-reference
+  [state ProjectionState
+   logical-module t/Term
+   owner ProjectionBinding
+   target ProjectionBinding
+   span facts/SourceSpan] ProjectionState
+  (let [source-span t/Triple (span-term span)
+        reference t/Triple (t/triple logical-module has-span source-span)
+        target-resource Any (projectionbinding-resource target)
+        owner-resource Any (projectionbinding-resource owner)
+        with-reference (Vec t/Triple)
+        (conj
+          (conj
+            (conj (projectionstate-propositions state)
+                  (t/triple logical-module contains reference))
+            (t/triple reference member-of references))
+          (t/triple reference refers-to target-resource))]
+    (->ProjectionState
+      (append-unique-triple
+        with-reference
+        (t/triple owner-resource depends-on target-resource)))))
+
+(defn project-function-references
+  [rows (Vec facts/CompilerFact)
+   logical-module t/Term
+   globals (Vec ProjectionBinding)
+   function ProjectionFunction
+   state ProjectionState] ProjectionState
+  (loop [pending (Vec String) (projectionfunction-bodies function)
+         current ProjectionState state]
+    (if (empty? pending)
+      current
+      (let [subject String (first pending)
+            remaining (Vec String) (vec (rest pending))
+            kind String? (node-kind rows subject)]
+        (cond
+          (= "symbol" kind)
+          (let [name String? (node-value rows subject)
+                span facts/SourceSpan? (node-span rows subject)
+                target ProjectionBinding?
+                (if (nil? name)
+                  nil
+                  (resolve-binding
+                    (projectionfunction-parameters function)
+                    globals
+                    name))]
+            (if (and (some? target) (some? span))
+              (recur remaining
+                     (append-reference
+                       current logical-module
+                       (projectionfunction-binding function)
+                       target span))
+              (recur remaining current)))
+
+          (or (= "quote" kind) (= "quasiquote" kind))
+          (recur remaining current)
+
+          :else
+          (recur
+            (into (node-children rows subject) remaining)
+            current))))))
+
+(defn project-references
+  [rows (Vec facts/CompilerFact)
+   logical-module t/Term
+   functions (Vec ProjectionFunction)
+   propositions (Vec t/Triple)] (Vec t/Triple)
+  (let [globals (Vec ProjectionBinding) (function-bindings functions)]
+    (projectionstate-propositions
+      (reduce
+        (fn [state ProjectionState function ProjectionFunction] ProjectionState
+          (project-function-references
+            rows logical-module globals function state))
+        (->ProjectionState propositions)
+        functions))))
+
+(defn module-separator? [character String] Bool
+  (or (= "/" character) (= "\\" character)))
+
+(defn parent-traversal? [value String] Bool
+  (loop [index Int 0
+         component-start Int 0]
+    (if (>= index (count value))
+      (= ".." (subs value component-start index))
+      (if (module-separator? (subs value index (inc index)))
+        (if (= ".." (subs value component-start index))
+          true
+          (recur (inc index) (inc index)))
+        (recur (inc index) component-start)))))
+
+(defn logical-module-valid? [logical-module Any] Bool
+  (and (t/atom? logical-module)
+       (cond
+         (string? logical-module)
+         (and (pos? (count logical-module))
+              (and (not (module-separator? (subs logical-module 0 1)))
+                   (and (nil? (str/index-of logical-module ":"))
+                        (not (parent-traversal? logical-module)))))
+
+         (keyword? logical-module) true
+         :else false)))
+
+(defn project-module
+  [logical-module t/Term
+   bundle facts/SyntaxFactBundle] ProgramProjectionResult
+  (if (not (logical-module-valid? (term-value logical-module)))
+    (->ProgramProjectionRejected
+      :program-projection/module
+      "logical module identity must be a caller-admitted relative String without parent traversal, or a Keyword")
+    (let [rows (Vec facts/CompilerFact) (facts/syntaxfactbundle-facts bundle)
+          functions MaybeProjectionFunctions
+          (top-level-functions rows logical-module)]
+      (if (nil? functions)
+        (->ProgramProjectionRejected
+          :program-projection/syntax
+          "raw syntax facts do not contain a complete top-level function projection")
+        (let [base (Vec t/Triple)
+              (conj
+                (conj (relationship-declarations)
+                      (t/triple logical-module member-of modules))
+                (t/triple logical-module represented-by
+                          (facts/syntaxfactbundle-source-text bundle)))
+              declared (Vec t/Triple)
+              (append-function-bindings base logical-module functions)]
+          (->ProgramProjected
+            (->ProgramModuleProjection
+              logical-module
+              (project-references
+                rows logical-module functions declared))))))))

@@ -1,0 +1,256 @@
+#lang beagle
+
+(ns native.program-projection-fixture
+  (:require [beagle.frontend-facts :as facts]
+            [beagle.parser-reader :as parser-reader]
+            [beagle.program-projection :as projection]
+            [store.types :as t]))
+
+(def logical-module String "fixture/shadowing-rename.bgl")
+
+(def before-source String
+  (str
+    "#lang beagle\n\n"
+    ";; helper is the selected top-level binding.\n"
+    "(defn helper [value Int] Int\n"
+    "  (+ value 1))\n\n"
+    ";; This local helper shadows the top-level binding.\n"
+    "(defn shadowed [helper Int] Int\n"
+    "  (+ helper 10))\n\n"
+    "(defn dependent [value Int] Int\n"
+    "  (helper value))\n\n"
+    ";; helper in this string and comment is not a reference.\n"
+    "(defn literal [] String\n"
+    "  \"helper\")\n\n"
+    "(defn independent [value Int] Int\n"
+    "  (* value 2))\n"))
+
+(def after-source String
+  (str
+    "#lang beagle\n\n"
+    ";; helper is the selected top-level binding.\n"
+    "(defn assistant [value Int] Int\n"
+    "  (+ value 1))\n\n"
+    ";; This local helper shadows the top-level binding.\n"
+    "(defn shadowed [helper Int] Int\n"
+    "  (+ helper 10))\n\n"
+    "(defn dependent [value Int] Int\n"
+    "  (assistant value))\n\n"
+    ";; helper in this string and comment is not a reference.\n"
+    "(defn literal [] String\n"
+    "  \"helper\")\n\n"
+    "(defn independent [value Int] Int\n"
+    "  (* value 2))\n"))
+
+(def empty-any (Vec Any) [])
+
+(defn project-source-as
+  [module t/Term source String] projection/ProgramProjectionResult
+  (let [digest String (str "sha256:" (sha256-bytes (utf8-encode source)))]
+    (match (parser-reader/facts-from-source
+             "reader-input.bgl" source digest "native-core")
+      [(facts/FactsRejected errors)
+       (projection/->ProgramProjectionRejected
+         :fixture/read "fixture source did not parse")]
+      [(facts/FactsRead bundle)
+       (projection/project-module module bundle)])))
+
+(defn project-source [source String] projection/ProgramProjectionResult
+  (project-source-as logical-module source))
+
+(defn module-rejected? [module t/Term] Bool
+  (match (project-source-as module before-source)
+    [(projection/ProgramProjectionRejected code detail)
+     (= :program-projection/module code)]
+    [(projection/ProgramProjected projected) false]))
+
+(defn related-values
+  [propositions (Vec t/Triple)
+   source Any
+   relation Keyword] (Vec Any)
+  (reduce
+    (fn [values (Vec Any) proposition t/Triple] (Vec Any)
+      (if (and (= source (t/triple-t1 proposition))
+               (= relation (t/triple-t2 proposition)))
+        (conj values (t/triple-t3 proposition))
+        values))
+    empty-any
+    propositions))
+
+(defn named-resources
+  [propositions (Vec t/Triple) wanted String] (Vec Any)
+  (reduce
+    (fn [resources (Vec Any) proposition t/Triple] (Vec Any)
+      (if (and (= projection/named (t/triple-t2 proposition))
+               (= wanted (t/triple-t3 proposition)))
+        (conj resources (t/triple-t1 proposition))
+        resources))
+    empty-any
+    propositions))
+
+(defn uniquely-named
+  [propositions (Vec t/Triple) wanted String] Any
+  (let [resources (Vec Any) (named-resources propositions wanted)]
+    (if (= 1 (count resources)) (first resources) nil)))
+
+(defn resource-named?
+  [propositions (Vec t/Triple) resource Any wanted String] Bool
+  (some?
+    (some
+      (fn [candidate Any] Any?
+        (if (= candidate resource) candidate nil))
+      (named-resources propositions wanted))))
+
+(defn dependency-target-named
+  [propositions (Vec t/Triple)
+   owner Any
+   wanted String] Any
+  (let [matches (Vec Any)
+        (filterv
+          (fn [target Any] Bool
+            (resource-named? propositions target wanted))
+          (related-values propositions owner projection/depends-on))]
+    (if (= 1 (count matches)) (first matches) nil)))
+
+(defn references-to
+  [propositions (Vec t/Triple) target Any] (Vec Any)
+  (reduce
+    (fn [found (Vec Any) proposition t/Triple] (Vec Any)
+      (if (and (= projection/refers-to (t/triple-t2 proposition))
+               (= target (t/triple-t3 proposition)))
+        (conj found (t/triple-t1 proposition))
+        found))
+    empty-any
+    propositions))
+
+(defn dependents-of
+  [propositions (Vec t/Triple) target Any] (Vec Any)
+  (reduce
+    (fn [found (Vec Any) proposition t/Triple] (Vec Any)
+      (if (and (= projection/depends-on (t/triple-t2 proposition))
+               (= target (t/triple-t3 proposition)))
+        (conj found (t/triple-t1 proposition))
+        found))
+    empty-any
+    propositions))
+
+(defn proposition-present?
+  [propositions (Vec t/Triple)
+   t1 Any
+   t2 Any
+   t3 Any] Bool
+  (some?
+    (some
+      (fn [proposition t/Triple] t/Triple?
+        (if (and (= t1 (t/triple-t1 proposition))
+                 (and (= t2 (t/triple-t2 proposition))
+                      (= t3 (t/triple-t3 proposition))))
+          proposition
+          nil))
+      propositions)))
+
+(defn represented-source
+  [propositions (Vec t/Triple)] String?
+  (let [values (Vec Any)
+        (related-values propositions logical-module projection/represented-by)]
+    (if (and (= 1 (count values)) (string? (first values)))
+      (first values)
+      nil)))
+
+(defn transparent-binding? [binding Any] Bool
+  (and (t/triple? binding)
+       (and (= logical-module (t/triple-t1 binding))
+            (and (= projection/declares-at (t/triple-t2 binding))
+                 (integer? (t/triple-t3 binding))))))
+
+(defn structural-reference?
+  [reference Any] Bool
+  (and (t/triple? reference)
+       (and (= logical-module (t/triple-t1 reference))
+            (and (= projection/has-span (t/triple-t2 reference))
+                 (let [span Any (t/triple-t3 reference)]
+                   (and (t/triple? span)
+                        (= projection/through-byte
+                           (t/triple-t2 span))))))))
+
+(defn exact-one? [values (Vec Any) wanted Any] Bool
+  (and (= 1 (count values)) (= wanted (first values))))
+
+(defn vertical-slice?
+  [before projection/ProgramModuleProjection
+   after projection/ProgramModuleProjection
+   clean-after projection/ProgramModuleProjection] Bool
+  (let [before-propositions (Vec t/Triple)
+        (projection/programmoduleprojection-propositions before)
+        after-propositions (Vec t/Triple)
+        (projection/programmoduleprojection-propositions after)
+        clean-propositions (Vec t/Triple)
+        (projection/programmoduleprojection-propositions clean-after)
+        before-dependent Any
+        (uniquely-named before-propositions "dependent")
+        after-dependent Any
+        (uniquely-named after-propositions "dependent")
+        before-shadowed Any
+        (uniquely-named before-propositions "shadowed")
+        after-shadowed Any
+        (uniquely-named after-propositions "shadowed")
+        after-independent Any
+        (uniquely-named after-propositions "independent")
+        before-top Any
+        (dependency-target-named
+          before-propositions before-dependent "helper")
+        after-top Any
+        (dependency-target-named
+          after-propositions after-dependent "assistant")
+        before-shadow Any
+        (dependency-target-named
+          before-propositions before-shadowed "helper")
+        after-shadow Any
+        (dependency-target-named
+          after-propositions after-shadowed "helper")
+        top-references (Vec Any) (references-to after-propositions after-top)
+        shadow-references (Vec Any)
+        (references-to after-propositions after-shadow)
+        invalidated (Vec Any) (dependents-of after-propositions after-top)]
+    (and
+      (= logical-module
+         (projection/logical-module-value before))
+      (= logical-module
+         (projection/logical-module-value after))
+      (= before-top after-top)
+      (= before-shadow after-shadow)
+      (= before-dependent after-dependent)
+      (= before-shadowed after-shadowed)
+      (transparent-binding? after-top)
+      (transparent-binding? after-shadow)
+      (= 2 (count (named-resources before-propositions "helper")))
+      (= 1 (count (named-resources after-propositions "helper")))
+      (= 1 (count (named-resources after-propositions "assistant")))
+      (exact-one? invalidated after-dependent)
+      (not= after-shadowed after-dependent)
+      (not= after-independent after-dependent)
+      (= 1 (count top-references))
+      (= 1 (count shadow-references))
+      (structural-reference? (first top-references))
+      (structural-reference? (first shadow-references))
+      (= after-source (represented-source after-propositions))
+      (= after-propositions clean-propositions)
+      (proposition-present?
+        after-propositions projection/declares-at
+        projection/member-of projection/relationships))))
+
+(defn main [args (Vec String)] Int
+  (match (project-source before-source)
+    [(projection/ProgramProjectionRejected code detail) 1]
+    [(projection/ProgramProjected before)
+     (match (project-source after-source)
+       [(projection/ProgramProjectionRejected code detail) 1]
+       [(projection/ProgramProjected after)
+        (match (project-source after-source)
+          [(projection/ProgramProjectionRejected code detail) 1]
+          [(projection/ProgramProjected clean-after)
+           (if (and (vertical-slice? before after clean-after)
+                    (and (module-rejected? "/absolute/module.bgl")
+                         (module-rejected? "safe/../escape.bgl")))
+             0
+             1)])])]))

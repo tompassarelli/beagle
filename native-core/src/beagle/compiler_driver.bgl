@@ -51,7 +51,9 @@
   (CompileBundleError [code Int detail String]))
 
 (defunion ReadSourceFactsResult
-  (SourceFactsRead [bundle facts/SyntaxFactBundle])
+  (SourceFactsRead
+    [raw facts/SyntaxFactBundle
+     normalized facts/SyntaxFactBundle])
   (SourceFactsRejected [code Int detail String]))
 
 (defunion CloseSourceFactsResult
@@ -148,9 +150,9 @@
            (str "sha256:" (sha256-bytes (utf8-encode text)))]
        (match (parser-reader/facts-from-source
                 path text source-digest profile)
-         [(facts/FactsRead bundle)
-          (match (semantics/normalize bundle)
-            [(facts/FactsRead normalized) (->SourceFactsRead normalized)]
+         [(facts/FactsRead raw)
+          (match (semantics/normalize raw)
+            [(facts/FactsRead normalized) (->SourceFactsRead raw normalized)]
             [(facts/FactsRejected errors)
              (->SourceFactsRejected 65 (fact-errors-detail errors))])]
          [(facts/FactsRejected errors)
@@ -540,10 +542,10 @@
   (let [path String (compilesourceconfig-source-path config)]
     (match (read-source-facts path "native-core")
       [(SourceFactsRejected code detail) (->CompileBundleError code detail)]
-      [(SourceFactsRead bundle)
+      [(SourceFactsRead raw normalized)
        (match (close-source-facts path
                 [(parser/->ExplicitFactSourceV1
-                   bundle (parser/package-authority))])
+                   normalized (parser/package-authority))])
          [(SourceFactsClosureRejected code detail)
           (->CompileBundleError code detail)]
          [(SourceFactsClosed syntax)
