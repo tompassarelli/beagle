@@ -11,52 +11,32 @@ The system thesis is:
 > worlds; external reality is connected through explicit observations and
 > capability-controlled effects.
 
-A program world (`WORLD`) is a durable semantic explanation: versioned facts,
-judgments, provenance, and plans from which replaceable materializations can be
-derived. The durable semantic world contains what we declared, what we derived,
-what we intended, what we attempted, what we did, and what we observed.
-`Declared`, `Derived`, `Observed`, `Desired`, `EffectAttempt`, and
-`EffectReceipt` are non-interchangeable epistemic modes: desired state cannot
-satisfy observed state, and an effect receipt requires a subsequent observation
-before it justifies a claim about external reality.
+Beagle has one durable identity and explanation model. A program world
+(`WORLD`) is a versioned semantic explanation: facts, judgments, provenance,
+and plans from which pure, reproducible artifacts are projected. It distinguishes
+what was declared, derived, observed, and effect-recorded. Desired state is not
+observed state; an authorized effect returns a receipt and new observations,
+which can then support claims about external reality.
 
-This is one identity and provenance protocol with named, layered equivalence
-relations, not one universal key. Content, an assertion occurrence, a world
-revision, and a produced artifact therefore keep distinct identities. Hashes
-identify records; authority, evidence, freshness, and policy determine what
-those records justify. Content identity is not trust.
+Content, an assertion occurrence, a world revision, and a produced artifact
+have distinct identities. Hashes identify records, while authority, evidence,
+freshness, and policy determine what a record justifies. Content identity is
+not trust.
 
-Beagle currently ships four public surfaces in one repository:
+The language is a typed Lisp with a Clojure-derived core. Its compiler and
+runtime operate through this semantic model. **Beagle Store** is the integrated
+durable identity, provenance, transaction-history, and query subsystem—not a
+separate database product. One model can support many versioned worlds,
+materializations, and execution domains without merging their physical or
+security boundaries.
 
-- **Beagle language** — the authoring interface: an independent typed Lisp
-  built from a Clojure-derived core.
-- **Compiler and runtime** — analysis facts, incremental compilation, target
-  materialization, and execution.
-- **Beagle Store** — durable transactions, history, query and indexing, and
-  cold persistence.
-- **Capability interfaces** — the Store kernel projected as an embedded native
-  or Wasm library, a Store RPC service, or a cache-shaped policy for brownfield
-  systems.
-
-Today the compiler's AST and fact projections and Store's Term and occurrence
-model are separate shipped surfaces. Beagle's direction is to connect them
-through the protocol above without pretending that the unification has already
-shipped. Facts are propositions admitted by a view; judgments select among
-them; materializations are disposable outputs. Pure plans may describe
-effects, but external execution requires an explicit target capability and
-returns a receipt that a later observation can corroborate.
-
-Logical unification does not erase physical or security separation. Different
-worlds, materializations, executions, trust domains, and deployment domains may
-share semantic content while retaining independent authority and lifecycle.
-Each target states the capabilities it requires; no digest or shared content
-identity grants permission to execute it.
-
-The capability interfaces narrow what a consumer adopts without creating
-another Store implementation or another set of transaction, identity, query,
-or history semantics. See the
-[system architecture](docs/architecture.md#one-semantic-substrate) and the
-[storage-only capability guide](store/docs/isolation-and-deployment.md#capability-profiles).
+External execution is capability-controlled. JavaScript, Clojure, Nix, C17,
+and Wasm are replaceable materializations with explicit target capabilities;
+shared content identity never grants permission to execute. See the
+[system architecture](docs/architecture.md#one-semantic-substrate). An existing
+system can also adopt Store through a bounded capability interface without
+adopting the language frontend; see the
+[brownfield capability guide](store/docs/isolation-and-deployment.md#capability-profiles).
 
 Derived: Clojure's vocabulary and structural authoring model — its form
 library, s-expressions, data literals, `defn`/`let`/destructuring/threading
@@ -141,12 +121,8 @@ artifacts below are the authoritative answers.
 | Distilled lineage and thesis | [`docs/INFLUENCES.md`](docs/INFLUENCES.md) |
 | Stable product boundaries | [`docs/design-rationale.md`](docs/design-rationale.md) |
 | Historical dogfood findings | [`docs/dogfood-codegen-findings.md`](docs/dogfood-codegen-findings.md) |
-| Beagle Store and storage-only capability examples | [`store/README.md`](store/README.md) |
+| Beagle Store and brownfield capability examples | [`store/README.md`](store/README.md) |
 | Surface policy and contribution anchor | [`CLAUDE.md`](CLAUDE.md) |
-
-The external consumer roster is intentionally not maintained here because its
-status changes independently. [`store/README.md`](store/README.md) is the
-in-repo Beagle Store reference.
 
 ## Status and license
 
