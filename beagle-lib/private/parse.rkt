@@ -5809,14 +5809,19 @@
                    acc))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
+       (define binder-stx (and stxs (car stxs)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (note-capitalized-binding! (car rest) "let binding")
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (register-syntax-binder!
-                    (let-binding (car rest) #f #f
-                                 (parse-expr (or val-stx (cadr rest))))
-                    (and stxs (car stxs)))
+                    (store-src!
+                     (let-binding (car rest) #f #f
+                                  (parse-expr (or val-stx (cadr rest))))
+                     (or (and binder-stx (stx->src-loc binder-stx))
+                         (and (current-form-stx)
+                              (stx->src-loc (current-form-stx)))))
+                    binder-stx)
                    acc))]
       [else (error 'beagle "bad let bindings: ~v" rest)])))
   parsed)
