@@ -1,0 +1,118 @@
+#lang beagle
+(ns beagle.source-fact-core)
+
+(defrecord SourceFactRow
+  [subject String
+   predicate String
+   kind String
+   object String])
+
+(defrecord FactState
+  [next-node Int
+   rows (Vec SourceFactRow)])
+
+(defrecord FactEmission
+  [state FactState
+   root String])
+
+(defrecord SourceFactProjection
+  [rows (Vec SourceFactRow)
+   payload String
+   payload-byte-count Int
+   payload-digest String])
+
+(defn empty-state [] FactState
+  (->FactState 1 []))
+
+(defn allocate-node [state FactState] FactEmission
+  (->FactEmission
+    (->FactState
+      (+ (factstate-next-node state) 1)
+      (factstate-rows state))
+    (str (factstate-next-node state))))
+
+(defn append-row
+  [state FactState
+   subject String
+   predicate String
+   kind String
+   object String]
+  FactState
+  (->FactState
+    (factstate-next-node state)
+    (conj (factstate-rows state)
+      (->SourceFactRow subject predicate kind object))))
+
+(defn unsafe-text? [value String] Bool
+  (or (= 0 (count value))
+      (str/includes? value "\t")
+      (str/includes? value "\n")
+      (str/includes? value "\r")
+      (= " " (subs value 0 1))
+      (= " " (subs value (- (count value) 1) (count value)))))
+
+(defn escape-character [character String position Int final-position Int] String
+  (cond
+    (= character "\\") "\\\\"
+    (= character "\t") "\\t"
+    (= character "\n") "\\n"
+    (= character "\r") "\\r"
+    (and (= character " ")
+         (or (= position 0) (= position final-position))) "\\s"
+    :else character))
+
+(defn escape-text [value String] String
+  (if (= 0 (count value))
+    "\\z"
+    (loop [position Int 0 rendered String ""]
+      (if (>= position (count value))
+        rendered
+        (recur (+ position 1)
+          (str rendered
+            (escape-character
+              (subs value position (+ position 1))
+              position
+              (- (count value) 1))))))))
+
+(defn append-text-row
+  [state FactState subject String predicate String value String] FactState
+  (if (unsafe-text? value)
+    (append-row state subject predicate "e" (escape-text value))
+    (append-row state subject predicate "t" value)))
+
+(defn append-node-row
+  [state FactState subject String predicate String target String] FactState
+  (append-row state subject predicate "n" target))
+
+(defn row-text [row SourceFactRow] String
+  (str (sourcefactrow-subject row) "\t"
+       (sourcefactrow-predicate row) "\t"
+       (sourcefactrow-kind row) "\t"
+       (sourcefactrow-object row) "\n"))
+
+(defn rows-text [rows (Vec SourceFactRow)] String
+  (reduce
+    (fn [result String row SourceFactRow] String
+      (str result (row-text row)))
+    ""
+    rows))
+
+(defn finish-projection [state FactState] SourceFactProjection
+  (let [rows (Vec SourceFactRow) (factstate-rows state)
+        payload String (rows-text rows)]
+    (->SourceFactProjection
+      rows payload (count (utf8-encode payload))
+      (str "sha256:" (sha256-bytes (utf8-encode payload))))))
+
+(defn emit-sequence
+  [state FactState targets (Vec Int)] FactEmission
+  (let [allocated FactEmission (allocate-node state)
+        root String (factemission-root allocated)
+        with-kind FactState
+        (append-text-row (factemission-state allocated) root "form-kind" "seq")]
+    (loop [position Int 0 current FactState with-kind]
+      (if (>= position (count targets))
+        (->FactEmission current root)
+        (recur (+ position 1)
+          (append-node-row current root (str "f" position)
+            (str (nth targets position))))))))
