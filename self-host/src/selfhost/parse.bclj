@@ -3531,10 +3531,10 @@
                 test (binding-cond-test head g)]
             (if if-form?
               ["let"
-               [BRACKET-TAG g value]
+               [BRACKET-TAG g "Any" value]
                ["if" test ["let" inner (nth rest-items 0)] (nth rest-items 1)]]
               ["let"
-               [BRACKET-TAG g value]
+               [BRACKET-TAG g "Any" value]
                ["if" test ["let" inner (vec (concat ["do"] rest-items))]]])))))))
 
 ;; --- defunion / deferror helpers ----------------------------------------------
