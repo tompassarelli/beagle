@@ -1908,11 +1908,596 @@
      (->PreferredNameV1 blast-closure-id "blast closure")
      (->PreferredNameV1 calls-output-id "participant")]))
 
+;; These unit Atoms are the exact baseline semantic-unit identities recorded by
+;; beagle:bin/test/branch-compile-corpus/oracle/identities.tsv. Qualified names
+;; remain projection labels and do not participate in unification.
+(def corpus-run-independent-id String
+  "semantic-unit-v0:23743942f9958b61e259668a560d20b57584c5c89395c4f4286b05227447b2a4")
+(def corpus-run-score-id String
+  "semantic-unit-v0:877cc77ab35d5d5a1c37cbc854bd0a8ea9dca950d098b0747db983f3d3244fc3")
+(def corpus-run-stable-id String
+  "semantic-unit-v0:4bd7fc2638b33d27e4f5ae1467aa03752fcb817da709ac99c7214b289e035ba9")
+(def corpus-score-value-id String
+  "semantic-unit-v0:84cfab428161fa9bc6ed586c8d5f6d2c971b05dce0f7122686fe1c9daff2269e")
+(def corpus-stable-score-id String
+  "semantic-unit-v0:a4830baf63af99ecf7785bb8f9c897b6542180b16f077916e2a5fd1c1bad1d5d")
+(def corpus-adjust-id String
+  "semantic-unit-v0:b2ee1895ea0fd0c2d1ba0642b2759ce3eb2ee81809b44e4bc7a503a23291b2a1")
+(def corpus-double-value-id String
+  "semantic-unit-v0:ec0edfdfaf2cb13fa0c6c58f16eca72595ceba9d992c273b2f8c52850c76dbfe")
+(def corpus-private-offset-id String
+  "semantic-unit-v0:4bb8ec95c34249bebfbe18ae8b3f23d5ff3166d2f4ecd50beb3c0ae86de335e3")
+(def corpus-independent-value-id String
+  "semantic-unit-v0:1e001fa3950eb59ebae440de83300386aeb808cc7458ded15c837355a9a68b24")
+
+(def corpus-foundation-source-baseline-id String
+  "sha256:37eec2b4928d3c5eb38ac82cec70a5bf80236e8ed61b56c7a0c0a9abc5b6740d")
+(def corpus-foundation-source-comment-id String
+  "sha256:7dbfbfc14966738237855ae2c2e8245c3f0b9716b788e9ab4961877bb70b3456")
+(def corpus-foundation-source-private-id String
+  "sha256:4667e755c8a16d3642890727ea6274a53cb1914b20d3ad2b22e37bf6f5925d9b")
+(def corpus-foundation-source-public-id String
+  "sha256:38e12488503011887efb086cab33be4b852b5eb4a6deab3344e8249bb4a8828f")
+(def corpus-feature-source-baseline-id String
+  "sha256:c31e9cf458bb1d3699100b45826e7ae2d6deab98b443d9dc241b2f460678c1cc")
+(def corpus-feature-source-public-id String
+  "sha256:e951edd8739eb7ab5a5ac6eadd0cb1bee397d92b8fb193b7e7e83175cefd7de0")
+
+(def corpus-private-offset-content-baseline-id String
+  "sha256:d18c3fabeda5114db3008d41d3b00186f92c00af217a3173040446fb3d919c72")
+(def corpus-private-offset-content-private-id String
+  "sha256:5e7b2f70e0cbb4d7debd0464ec0d9071c228b9007f3b7e34375dc3e41d5e1f97")
+(def corpus-adjust-content-baseline-id String
+  "sha256:b2a9844fe0d89526c27cc4dd34edeed52ab651d60f19556bc03888e7a34287e6")
+(def corpus-adjust-content-public-id String
+  "sha256:2f3b62d8d9ec7e3e14ba06814507479972662b115c60cf225c2a090365276f3b")
+(def corpus-score-value-content-baseline-id String
+  "sha256:2e489287b1cafab7b83224707213e27445d98132a16ba8c24ec04557df3a4fc8")
+(def corpus-score-value-content-public-id String
+  "sha256:c9bd2c2d3ffea79505b78b42bea8c866a051656d458c47b8d810c23cbba0d411")
+(def corpus-foundation-interface-baseline-id String
+  "sha256:ab43e99cb2244eb2547362ce35a2d01f3c6f2cef2f24fd6b6f93247e17eecb40")
+(def corpus-foundation-interface-public-id String
+  "sha256:0547d6db6d6426f876f2b9ea6d6a78af302a96f804a8e1ba502e2a5ef2f8a30a")
+
+(defn compiler-invalidation-id
+  [domain String
+   name String] String
+  (semantic-id-v1 domain ["branch-compile-corpus-v1" name]))
+
+(def corpus-comment-mutation-id String
+  (semantic-id-v1
+    "branch-compile-mutation"
+    [corpus-foundation-source-baseline-id
+     corpus-foundation-source-comment-id]))
+(def corpus-private-mutation-id String
+  (semantic-id-v1
+    "branch-compile-mutation"
+    [corpus-foundation-source-baseline-id
+     corpus-foundation-source-private-id]))
+(def corpus-public-mutation-id String
+  (semantic-id-v1
+    "branch-compile-mutation"
+    [corpus-foundation-source-baseline-id
+     corpus-foundation-source-public-id
+     corpus-feature-source-baseline-id
+     corpus-feature-source-public-id]))
+
+(def reads-semantic-unit-relation-id String
+  (compiler-invalidation-id "relation" "reads-semantic-unit"))
+(def changes-semantic-content-of-relation-id String
+  (compiler-invalidation-id "relation" "changes-semantic-content-of"))
+(def changes-contract-of-relation-id String
+  (compiler-invalidation-id "relation" "changes-contract-of"))
+(def observed-unit-churn-of-relation-id String
+  (compiler-invalidation-id "relation" "observed-unit-churn-of"))
+
+(def compiler-reads-forward-mode-id String
+  (compiler-invalidation-id "mode" "reads/ground-logic"))
+(def compiler-reads-reverse-mode-id String
+  (compiler-invalidation-id "mode" "reads/logic-ground"))
+(def compiler-reads-enumerate-mode-id String
+  (compiler-invalidation-id "mode" "reads/logic-logic"))
+(def compiler-content-change-mode-id String
+  (compiler-invalidation-id "mode" "content-change/ground-logic"))
+(def compiler-contract-change-mode-id String
+  (compiler-invalidation-id "mode" "contract-change/ground-logic"))
+(def compiler-churn-mode-id String
+  (compiler-invalidation-id "mode" "observed-churn/ground-logic"))
+
+(def compiler-reads-forward-strategy-id String
+  (compiler-invalidation-id "strategy" "reads/fact-forward"))
+(def compiler-reads-reverse-strategy-id String
+  (compiler-invalidation-id "strategy" "reads/fact-reverse"))
+(def compiler-reads-enumerate-strategy-id String
+  (compiler-invalidation-id "strategy" "reads/fifo-enumerate"))
+(def compiler-content-change-strategy-id String
+  (compiler-invalidation-id "strategy" "content-change/fact-forward"))
+(def compiler-contract-change-strategy-id String
+  (compiler-invalidation-id "strategy" "contract-change/fact-forward"))
+(def compiler-churn-strategy-id String
+  (compiler-invalidation-id "strategy" "observed-churn/fifo"))
+
+(def compiler-unit-output-id String
+  (compiler-invalidation-id "query-output" "semantic-unit"))
+(def compiler-dependency-output-id String
+  (compiler-invalidation-id "query-output" "dependency"))
+(def compiler-reader-output-id String
+  (compiler-invalidation-id "query-output" "reader"))
+
+(def compiler-mutation-variable-node Int 0)
+(def compiler-unit-variable-node Int 1)
+(def compiler-dependency-variable-node Int 2)
+(def compiler-private-offset-node Int 3)
+(def compiler-adjust-node Int 4)
+(def compiler-double-value-node Int 5)
+(def compiler-score-value-node Int 6)
+(def compiler-stable-score-node Int 7)
+(def compiler-independent-value-node Int 8)
+(def compiler-run-score-node Int 9)
+(def compiler-run-stable-node Int 10)
+(def compiler-run-independent-node Int 11)
+(def compiler-comment-mutation-node Int 12)
+(def compiler-private-mutation-node Int 13)
+(def compiler-public-mutation-node Int 14)
+
+(def compiler-sorts (Vec SortSpecV1)
+  [(->SortSpecV1 symbol-sort-id :symbol)])
+
+(def compiler-arena TermArenaV1
+  (->TermArenaV1
+    [(->VariableNodeV1 symbol-sort-id 0)
+     (->VariableNodeV1 symbol-sort-id 1)
+     (->VariableNodeV1 symbol-sort-id 2)
+     (->AtomNodeV1 symbol-sort-id corpus-private-offset-id)
+     (->AtomNodeV1 symbol-sort-id corpus-adjust-id)
+     (->AtomNodeV1 symbol-sort-id corpus-double-value-id)
+     (->AtomNodeV1 symbol-sort-id corpus-score-value-id)
+     (->AtomNodeV1 symbol-sort-id corpus-stable-score-id)
+     (->AtomNodeV1 symbol-sort-id corpus-independent-value-id)
+     (->AtomNodeV1 symbol-sort-id corpus-run-score-id)
+     (->AtomNodeV1 symbol-sort-id corpus-run-stable-id)
+     (->AtomNodeV1 symbol-sort-id corpus-run-independent-id)
+     (->AtomNodeV1 symbol-sort-id corpus-comment-mutation-id)
+     (->AtomNodeV1 symbol-sort-id corpus-private-mutation-id)
+     (->AtomNodeV1 symbol-sort-id corpus-public-mutation-id)]
+    32))
+
+(def compiler-reads-relation RelationV1
+  (->RelationV1
+    reads-semantic-unit-relation-id
+    [symbol-sort-id symbol-sort-id]
+    [(->ModeV1 compiler-reads-forward-mode-id [:ground :logic] :nondet)
+     (->ModeV1 compiler-reads-reverse-mode-id [:logic :ground] :nondet)
+     (->ModeV1 compiler-reads-enumerate-mode-id [:logic :logic] :multi)]
+    [(->StrategyV1
+       compiler-reads-forward-strategy-id
+       compiler-reads-forward-mode-id
+       :fact-forward
+       "ordered direct-read scan from reader identity"
+       "finite compiler-emitted semantic read extent")
+     (->StrategyV1
+       compiler-reads-reverse-strategy-id
+       compiler-reads-reverse-mode-id
+       :fact-reverse
+       "ordered direct-reader scan from dependency identity"
+       "finite compiler-emitted semantic read extent")
+     (->StrategyV1
+       compiler-reads-enumerate-strategy-id
+       compiler-reads-enumerate-mode-id
+       :fifo-clauses
+       "ordered complete direct-read enumeration"
+       "finite compiler-emitted semantic read extent")]))
+
+(def compiler-content-change-relation RelationV1
+  (->RelationV1
+    changes-semantic-content-of-relation-id
+    [symbol-sort-id symbol-sort-id]
+    [(->ModeV1 compiler-content-change-mode-id [:ground :logic] :nondet)]
+    [(->StrategyV1
+       compiler-content-change-strategy-id
+       compiler-content-change-mode-id
+       :fact-forward
+       "ordered changed-content scan from mutation identity"
+       "finite tracked mutation extent")]))
+
+(def compiler-contract-change-relation RelationV1
+  (->RelationV1
+    changes-contract-of-relation-id
+    [symbol-sort-id symbol-sort-id]
+    [(->ModeV1 compiler-contract-change-mode-id [:ground :logic] :nondet)]
+    [(->StrategyV1
+       compiler-contract-change-strategy-id
+       compiler-contract-change-mode-id
+       :fact-forward
+       "ordered changed-contract scan from mutation identity"
+       "finite tracked mutation extent")]))
+
+(def compiler-churn-relation RelationV1
+  (->RelationV1
+    observed-unit-churn-of-relation-id
+    [symbol-sort-id symbol-sort-id]
+    [(->ModeV1 compiler-churn-mode-id [:ground :logic] :nondet)]
+    [(->StrategyV1
+       compiler-churn-strategy-id
+       compiler-churn-mode-id
+       :fifo-clauses
+       "bounded explanation from observed content and direct contract evidence"
+       "finite observed mutation and direct-read extents")]))
+
+(def compiler-relations (Vec RelationV1)
+  [compiler-reads-relation
+   compiler-content-change-relation
+   compiler-contract-change-relation
+   compiler-churn-relation])
+
+(defn compiler-read-evidence-id
+  [reader-id String
+   dependency-id String] String
+  (semantic-id-v1
+    "branch-compile-read-edge"
+    [reader-id dependency-id]))
+
+(defn compiler-change-evidence-id
+  [change-kind String
+   unit-id String
+   before-id String
+   after-id String] String
+  (semantic-id-v1
+    "branch-compile-change"
+    [change-kind unit-id before-id after-id]))
+
+(def compiler-read-adjust-private-clause ClauseV1
+  (->ClauseV1
+    reads-semantic-unit-relation-id
+    [compiler-adjust-node compiler-private-offset-node]
+    []
+    [(compiler-read-evidence-id corpus-adjust-id corpus-private-offset-id)]))
+(def compiler-read-score-adjust-clause ClauseV1
+  (->ClauseV1
+    reads-semantic-unit-relation-id
+    [compiler-score-value-node compiler-adjust-node]
+    []
+    [(compiler-read-evidence-id corpus-score-value-id corpus-adjust-id)]))
+(def compiler-read-stable-double-clause ClauseV1
+  (->ClauseV1
+    reads-semantic-unit-relation-id
+    [compiler-stable-score-node compiler-double-value-node]
+    []
+    [(compiler-read-evidence-id corpus-stable-score-id corpus-double-value-id)]))
+(def compiler-read-run-score-clause ClauseV1
+  (->ClauseV1
+    reads-semantic-unit-relation-id
+    [compiler-run-score-node compiler-score-value-node]
+    []
+    [(compiler-read-evidence-id corpus-run-score-id corpus-score-value-id)]))
+(def compiler-read-run-stable-clause ClauseV1
+  (->ClauseV1
+    reads-semantic-unit-relation-id
+    [compiler-run-stable-node compiler-stable-score-node]
+    []
+    [(compiler-read-evidence-id corpus-run-stable-id corpus-stable-score-id)]))
+(def compiler-read-run-independent-clause ClauseV1
+  (->ClauseV1
+    reads-semantic-unit-relation-id
+    [compiler-run-independent-node compiler-independent-value-node]
+    []
+    [(compiler-read-evidence-id
+       corpus-run-independent-id corpus-independent-value-id)]))
+
+(def compiler-private-content-change-clause ClauseV1
+  (->ClauseV1
+    changes-semantic-content-of-relation-id
+    [compiler-private-mutation-node compiler-private-offset-node]
+    []
+    [(compiler-change-evidence-id
+       "semantic-unit-content"
+       corpus-private-offset-id
+       corpus-private-offset-content-baseline-id
+       corpus-private-offset-content-private-id)]))
+(def compiler-public-adjust-content-change-clause ClauseV1
+  (->ClauseV1
+    changes-semantic-content-of-relation-id
+    [compiler-public-mutation-node compiler-adjust-node]
+    []
+    [(compiler-change-evidence-id
+       "semantic-unit-content"
+       corpus-adjust-id
+       corpus-adjust-content-baseline-id
+       corpus-adjust-content-public-id)]))
+(def compiler-public-score-content-change-clause ClauseV1
+  (->ClauseV1
+    changes-semantic-content-of-relation-id
+    [compiler-public-mutation-node compiler-score-value-node]
+    []
+    [(compiler-change-evidence-id
+       "semantic-unit-content"
+       corpus-score-value-id
+       corpus-score-value-content-baseline-id
+       corpus-score-value-content-public-id)]))
+(def compiler-public-contract-change-clause ClauseV1
+  (->ClauseV1
+    changes-contract-of-relation-id
+    [compiler-public-mutation-node compiler-adjust-node]
+    []
+    [(compiler-change-evidence-id
+       "module-interface"
+       corpus-adjust-id
+       corpus-foundation-interface-baseline-id
+       corpus-foundation-interface-public-id)]))
+
+(def compiler-churn-content-clause ClauseV1
+  (->ClauseV1
+    observed-unit-churn-of-relation-id
+    [compiler-mutation-variable-node compiler-unit-variable-node]
+    [(->RelationGoalV1
+       changes-semantic-content-of-relation-id
+       [compiler-mutation-variable-node compiler-unit-variable-node])]
+    [(compiler-invalidation-id
+       "derivation-rule" "observed-content-identifies-unit-churn")]))
+(def compiler-churn-reader-clause ClauseV1
+  (->ClauseV1
+    observed-unit-churn-of-relation-id
+    [compiler-mutation-variable-node compiler-unit-variable-node]
+    [(->RelationGoalV1
+       changes-contract-of-relation-id
+       [compiler-mutation-variable-node compiler-dependency-variable-node])
+     (->RelationGoalV1
+       reads-semantic-unit-relation-id
+       [compiler-unit-variable-node compiler-dependency-variable-node])]
+    [(compiler-invalidation-id
+       "derivation-rule" "changed-contract-explains-direct-reader-churn")]))
+
+(def compiler-clauses (Vec ClauseV1)
+  [compiler-read-adjust-private-clause
+   compiler-read-score-adjust-clause
+   compiler-read-stable-double-clause
+   compiler-read-run-score-clause
+   compiler-read-run-stable-clause
+   compiler-read-run-independent-clause
+   compiler-private-content-change-clause
+   compiler-public-adjust-content-change-clause
+   compiler-public-score-content-change-clause
+   compiler-public-contract-change-clause
+   compiler-churn-content-clause
+   compiler-churn-reader-clause])
+
+(def compiler-world TheoryWorldV1
+  (->TheoryWorldV1
+    profile-id profile-rule-epoch compiler-sorts [] compiler-arena
+    compiler-relations compiler-clauses))
+
+(def compiler-relevant-content-change-clause ClauseV1
+  (->ClauseV1
+    changes-semantic-content-of-relation-id
+    [compiler-comment-mutation-node compiler-independent-value-node]
+    []
+    [(compiler-invalidation-id
+       "canary-evidence" "relevant-content-change")]))
+
+(def compiler-unrelated-clause ClauseV1
+  (->ClauseV1
+    tagged-relation-id
+    [compiler-comment-mutation-node compiler-independent-value-node]
+    []
+    [(compiler-invalidation-id "canary-evidence" "unrelated-tag")]))
+
+(def compiler-relevant-world TheoryWorldV1
+  (->TheoryWorldV1
+    profile-id profile-rule-epoch compiler-sorts [] compiler-arena
+    compiler-relations
+    (conj compiler-clauses compiler-relevant-content-change-clause)))
+
+(def compiler-unrelated-world TheoryWorldV1
+  (->TheoryWorldV1
+    profile-id profile-rule-epoch compiler-sorts [] compiler-arena
+    (conj compiler-relations tagged-relation)
+    (conj compiler-clauses compiler-unrelated-clause)))
+
+(def compiler-reads-forward-query QueryV1
+  (->QueryV1
+    reads-semantic-unit-relation-id compiler-reads-forward-mode-id
+    [compiler-adjust-node compiler-dependency-variable-node]
+    [(->QueryOutputV1
+       compiler-dependency-output-id compiler-dependency-variable-node)]
+    16 8 8))
+(def compiler-reads-reverse-query QueryV1
+  (->QueryV1
+    reads-semantic-unit-relation-id compiler-reads-reverse-mode-id
+    [compiler-unit-variable-node compiler-adjust-node]
+    [(->QueryOutputV1 compiler-reader-output-id compiler-unit-variable-node)]
+    16 8 8))
+(def compiler-reads-enumerate-query QueryV1
+  (->QueryV1
+    reads-semantic-unit-relation-id compiler-reads-enumerate-mode-id
+    [compiler-unit-variable-node compiler-dependency-variable-node]
+    [(->QueryOutputV1 compiler-reader-output-id compiler-unit-variable-node)
+     (->QueryOutputV1
+       compiler-dependency-output-id compiler-dependency-variable-node)]
+    32 16 8))
+(def compiler-comment-query QueryV1
+  (->QueryV1
+    observed-unit-churn-of-relation-id compiler-churn-mode-id
+    [compiler-comment-mutation-node compiler-unit-variable-node]
+    [(->QueryOutputV1 compiler-unit-output-id compiler-unit-variable-node)]
+    128 32 9))
+(def compiler-private-query QueryV1
+  (->QueryV1
+    observed-unit-churn-of-relation-id compiler-churn-mode-id
+    [compiler-private-mutation-node compiler-unit-variable-node]
+    [(->QueryOutputV1 compiler-unit-output-id compiler-unit-variable-node)]
+    128 32 9))
+(def compiler-public-query QueryV1
+  (->QueryV1
+    observed-unit-churn-of-relation-id compiler-churn-mode-id
+    [compiler-public-mutation-node compiler-unit-variable-node]
+    [(->QueryOutputV1 compiler-unit-output-id compiler-unit-variable-node)]
+    128 32 9))
+(def compiler-public-bounded-query QueryV1
+  (->QueryV1
+    observed-unit-churn-of-relation-id compiler-churn-mode-id
+    [compiler-public-mutation-node compiler-unit-variable-node]
+    [(->QueryOutputV1 compiler-unit-output-id compiler-unit-variable-node)]
+    1 32 9))
+(def compiler-underconstrained-query QueryV1
+  (->QueryV1
+    observed-unit-churn-of-relation-id compiler-churn-mode-id
+    [compiler-mutation-variable-node compiler-unit-variable-node]
+    [(->QueryOutputV1 compiler-unit-output-id compiler-unit-variable-node)]
+    128 32 9))
+
+(def compiler-source-projection SourceProjectionV1
+  (->SourceProjectionV1
+    "sha256:8f159d54b5ac7169e1041f74d5b2a26e679fa43978161ac31e04b12ada38b0e7"
+    "bin/test/branch-compile-corpus/oracle/identities.tsv"
+    (compiler-invalidation-id "layout" "tracked-tsv")
+    [(->PreferredNameV1 corpus-private-offset-id "corpus.foundation/private-offset")
+     (->PreferredNameV1 corpus-adjust-id "corpus.foundation/adjust")
+     (->PreferredNameV1 corpus-double-value-id "corpus.foundation/double-value")
+     (->PreferredNameV1 corpus-score-value-id "corpus.feature/score-value")
+     (->PreferredNameV1 corpus-stable-score-id "corpus.feature/stable-score")
+     (->PreferredNameV1 corpus-independent-value-id
+       "corpus.independent/independent-value")
+     (->PreferredNameV1 corpus-run-score-id "corpus.app/run-score")
+     (->PreferredNameV1 corpus-run-stable-id "corpus.app/run-stable")
+     (->PreferredNameV1 corpus-run-independent-id "corpus.app/run-independent")
+     (->PreferredNameV1 compiler-unit-output-id "?unit")
+     (->PreferredNameV1 compiler-dependency-output-id "?dependency")
+     (->PreferredNameV1 compiler-reader-output-id "?reader")]))
+
 (defn answer-canonical-terms [answer AnswerV1] (Vec String)
   (mapv
     (fn [binding AnswerBindingV1] String
       (answerbindingv1-canonical-term binding))
     (answerv1-bindings answer)))
+
+(defn single-output-answer-terms [answers (Vec AnswerV1)] (Vec String)
+  (mapv
+    (fn [answer AnswerV1] String
+      (answerbindingv1-canonical-term (first (answerv1-bindings answer))))
+    answers))
+
+(defn same-string-set?
+  [left (Vec String)
+   right (Vec String)] Bool
+  (and
+    (= (count left) (count right))
+    (loop [index Int 0]
+      (if (>= index (count left))
+        true
+        (and
+          (string-member? right (nth left index))
+          (recur (+ index 1)))))))
+
+(defn answer-output-rendering
+  [world TheoryWorldV1
+   projection SourceProjectionV1
+   answer AnswerV1
+   output-index Int] String
+  (let [binding AnswerBindingV1 (nth (answerv1-bindings answer) output-index)]
+    (render-runtime-term
+      world
+      projection
+      (answerv1-resolution answer)
+      (answerbindingv1-term binding))))
+
+(defn result-member-lines
+  [world TheoryWorldV1
+   projection SourceProjectionV1
+   case-name String
+   result QueryResultV1] (Vec String)
+  (match result
+    [(QueryInvalidV1 problem)
+     [(str case-name "\tinvalid:" (problemv1-code problem))]]
+    [(QueryFinishedV1 status answers proofs counters selection result-id)
+     (mapv
+       (fn [answer AnswerV1] String
+         (str case-name
+              "\t"
+              (answer-output-rendering world projection answer 0)))
+       answers)]))
+
+(defn compiler-read-lines [] (Vec String)
+  (match (execute-query compiler-world compiler-reads-enumerate-query)
+    [(QueryInvalidV1 problem)
+     [(str "invalid:" (problemv1-code problem))]]
+    [(QueryFinishedV1 status answers proofs counters selection result-id)
+     (mapv
+       (fn [answer AnswerV1] String
+         (str (answer-output-rendering
+                compiler-world compiler-source-projection answer 0)
+              "\t"
+              (answer-output-rendering
+                compiler-world compiler-source-projection answer 1)))
+       answers)]))
+
+(defn compiler-cone-member-lines [] (Vec String)
+  (append-strings
+    (result-member-lines
+      compiler-world
+      compiler-source-projection
+      "comment-layout"
+      (execute-query compiler-world compiler-comment-query))
+    (append-strings
+      (result-member-lines
+        compiler-world
+        compiler-source-projection
+        "private-implementation"
+        (execute-query compiler-world compiler-private-query))
+      (result-member-lines
+        compiler-world
+        compiler-source-projection
+        "public-interface"
+        (execute-query compiler-world compiler-public-query)))))
+
+(defn compiler-oracle-identity-lines [] (Vec String)
+  [(str "baseline\tsemantic-unit-id\tcorpus.app/run-independent\t"
+        corpus-run-independent-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.app/run-score\t"
+        corpus-run-score-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.app/run-stable\t"
+        corpus-run-stable-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.feature/score-value\t"
+        corpus-score-value-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.feature/stable-score\t"
+        corpus-stable-score-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.foundation/adjust\t"
+        corpus-adjust-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.foundation/double-value\t"
+        corpus-double-value-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.foundation/private-offset\t"
+        corpus-private-offset-id)
+   (str "baseline\tsemantic-unit-id\tcorpus.independent/independent-value\t"
+        corpus-independent-value-id)
+   (str "baseline\tmodule-source\tcorpus/foundation.bgl\t"
+        corpus-foundation-source-baseline-id)
+   (str "comment-layout\tmodule-source\tcorpus/foundation.bgl\t"
+        corpus-foundation-source-comment-id)
+   (str "private-implementation\tmodule-source\tcorpus/foundation.bgl\t"
+        corpus-foundation-source-private-id)
+   (str "public-interface\tmodule-source\tcorpus/foundation.bgl\t"
+        corpus-foundation-source-public-id)
+   (str "baseline\tmodule-source\tcorpus/feature.bgl\t"
+        corpus-feature-source-baseline-id)
+   (str "public-interface\tmodule-source\tcorpus/feature.bgl\t"
+        corpus-feature-source-public-id)
+   (str "baseline\tsemantic-unit-content\tcorpus.foundation/private-offset\t"
+        corpus-private-offset-content-baseline-id)
+   (str
+     "private-implementation\tsemantic-unit-content\tcorpus.foundation/private-offset\t"
+     corpus-private-offset-content-private-id)
+   (str "baseline\tsemantic-unit-content\tcorpus.foundation/adjust\t"
+        corpus-adjust-content-baseline-id)
+   (str "public-interface\tsemantic-unit-content\tcorpus.foundation/adjust\t"
+        corpus-adjust-content-public-id)
+   (str "baseline\tsemantic-unit-content\tcorpus.feature/score-value\t"
+        corpus-score-value-content-baseline-id)
+   (str "public-interface\tsemantic-unit-content\tcorpus.feature/score-value\t"
+        corpus-score-value-content-public-id)
+   (str "baseline\tmodule-interface\tcorpus/foundation.bgl\t"
+        corpus-foundation-interface-baseline-id)
+   (str "public-interface\tmodule-interface\tcorpus/foundation.bgl\t"
+        corpus-foundation-interface-public-id)])
 
 (defn append-forward-case [] Bool
   (match (execute-query base-world append-forward-query)
@@ -2051,6 +2636,158 @@
              (= base-answers unrelated-answers)
              (= base-proofs unrelated-proofs))])])]))
 
+(defn compiler-dependency-orientations-case [] Bool
+  (match (execute-query compiler-world compiler-reads-forward-query)
+    [(QueryInvalidV1 problem) false]
+    [(QueryFinishedV1
+       forward-status forward-answers forward-proofs forward-counters
+       forward-selection forward-result-id)
+     (match (execute-query compiler-world compiler-reads-reverse-query)
+       [(QueryInvalidV1 problem) false]
+       [(QueryFinishedV1
+          reverse-status reverse-answers reverse-proofs reverse-counters
+          reverse-selection reverse-result-id)
+        (and
+          (= :complete forward-status)
+          (= :complete reverse-status)
+          (= [(canonical-node-term
+                compiler-arena compiler-private-offset-node)]
+             (single-output-answer-terms forward-answers))
+          (= [(canonical-node-term
+                compiler-arena compiler-score-value-node)]
+             (single-output-answer-terms reverse-answers))
+          (= 1 (count forward-proofs))
+          (= 1 (count reverse-proofs))
+          (= reads-semantic-unit-relation-id
+             (strategyselectionreceiptv1-relation-id forward-selection))
+          (= reads-semantic-unit-relation-id
+             (strategyselectionreceiptv1-relation-id reverse-selection))
+          (= :fact-forward
+             (strategyselectionreceiptv1-strategy-kind forward-selection))
+          (= :fact-reverse
+             (strategyselectionreceiptv1-strategy-kind reverse-selection))
+          (not= (strategyselectionreceiptv1-strategy-id forward-selection)
+                (strategyselectionreceiptv1-strategy-id reverse-selection)))])]))
+
+(defn compiler-invalidation-case [] Bool
+  (match (execute-query compiler-world compiler-comment-query)
+    [(QueryInvalidV1 problem) false]
+    [(QueryFinishedV1
+       comment-status comment-answers comment-proofs comment-counters
+       comment-selection comment-result-id)
+     (match (execute-query compiler-world compiler-private-query)
+       [(QueryInvalidV1 problem) false]
+       [(QueryFinishedV1
+          private-status private-answers private-proofs private-counters
+          private-selection private-result-id)
+        (match (execute-query compiler-world compiler-public-query)
+          [(QueryInvalidV1 problem) false]
+          [(QueryFinishedV1
+             public-status public-answers public-proofs public-counters
+             public-selection public-result-id)
+           (let [private-expected (Vec String) [(canonical-node-term
+                     compiler-arena compiler-private-offset-node)]
+                 public-expected (Vec String) [(canonical-node-term compiler-arena compiler-adjust-node)
+                   (canonical-node-term compiler-arena compiler-score-value-node)]]
+             (and
+               (= :complete comment-status)
+               (= :complete private-status)
+               (= :complete public-status)
+               (= 0 (count comment-answers))
+               (= 0 (count comment-proofs))
+               (same-string-set?
+                 private-expected
+                 (single-output-answer-terms private-answers))
+               (same-string-set?
+                 public-expected
+                 (single-output-answer-terms public-answers))
+               (= 1 (count private-proofs))
+               (= 3 (count public-proofs))
+               (= :fifo-clauses
+                  (strategyselectionreceiptv1-strategy-kind comment-selection))
+               (= :fifo-clauses
+                  (strategyselectionreceiptv1-strategy-kind private-selection))
+               (= :fifo-clauses
+                  (strategyselectionreceiptv1-strategy-kind public-selection))
+               (= observed-unit-churn-of-relation-id
+                  (strategyselectionreceiptv1-relation-id comment-selection))
+               (= observed-unit-churn-of-relation-id
+                  (strategyselectionreceiptv1-relation-id private-selection))
+               (= observed-unit-churn-of-relation-id
+                  (strategyselectionreceiptv1-relation-id public-selection))))])])]))
+
+(defn compiler-read-enumeration-case [] Bool
+  (match (execute-query compiler-world compiler-reads-enumerate-query)
+    [(QueryInvalidV1 problem) false]
+    [(QueryFinishedV1 status answers proofs counters selection result-id)
+     (and
+       (= :complete status)
+       (= 6 (count answers))
+       (= 6 (count proofs))
+       (= compiler-reads-enumerate-strategy-id
+          (strategyselectionreceiptv1-strategy-id selection))
+       (same-string-set?
+         ["corpus.foundation/adjust\tcorpus.foundation/private-offset"
+          "corpus.feature/score-value\tcorpus.foundation/adjust"
+          "corpus.feature/stable-score\tcorpus.foundation/double-value"
+          "corpus.app/run-score\tcorpus.feature/score-value"
+          "corpus.app/run-stable\tcorpus.feature/stable-score"
+          "corpus.app/run-independent\tcorpus.independent/independent-value"]
+         (compiler-read-lines)))]))
+
+(defn compiler-query-boundaries-case [] Bool
+  (match (execute-query compiler-world compiler-underconstrained-query)
+    [(QueryFinishedV1 status answers proofs counters selection result-id) false]
+    [(QueryInvalidV1 problem)
+     (and
+       (= :mode-groundness (problemv1-code problem))
+       (= [compiler-churn-mode-id] (problemv1-evidence problem))
+       (match (execute-query compiler-world compiler-public-bounded-query)
+         [(QueryInvalidV1 bounded-problem) false]
+         [(QueryFinishedV1
+            status answers proofs counters selection result-id)
+          (and
+            (= :truncated-reductions status)
+            (= 0 (count answers))
+            (= 1 (searchcountersv1-reductions counters)))]))]))
+
+(defn compiler-dependency-invalidation-case [] Bool
+  (match (execute-query compiler-world compiler-comment-query)
+    [(QueryInvalidV1 problem) false]
+    [(QueryFinishedV1
+       base-status base-answers base-proofs base-counters
+       base-selection base-result-id)
+     (match (execute-query compiler-relevant-world compiler-comment-query)
+       [(QueryInvalidV1 problem) false]
+       [(QueryFinishedV1
+          relevant-status relevant-answers relevant-proofs relevant-counters
+          relevant-selection relevant-result-id)
+        (match (execute-query compiler-unrelated-world compiler-comment-query)
+          [(QueryInvalidV1 problem) false]
+          [(QueryFinishedV1
+             unrelated-status unrelated-answers unrelated-proofs
+             unrelated-counters unrelated-selection unrelated-result-id)
+           (and
+             (= :complete base-status)
+             (= :complete relevant-status)
+             (= :complete unrelated-status)
+             (= 0 (count base-answers))
+             (= [(canonical-node-term
+                   compiler-arena compiler-independent-value-node)]
+                (single-output-answer-terms relevant-answers))
+             (= base-answers unrelated-answers)
+             (= base-proofs unrelated-proofs)
+             (not= (world-audit-id compiler-world)
+                   (world-audit-id compiler-relevant-world))
+             (not= (world-audit-id compiler-world)
+                   (world-audit-id compiler-unrelated-world))
+             (not= (strategyselectionreceiptv1-identity base-selection)
+                   (strategyselectionreceiptv1-identity relevant-selection))
+             (= (strategyselectionreceiptv1-identity base-selection)
+                (strategyselectionreceiptv1-identity unrelated-selection))
+             (not= base-result-id relevant-result-id)
+             (= base-result-id unrelated-result-id))])])]))
+
 (defn occurs-check-case [] Bool
   (match (unify-terms
            fixture-arena []
@@ -2119,6 +2856,14 @@
 (defn repeat-determinism-case [] Bool
   (let [first-run QueryResultV1 (execute-query base-world append-splits-query)
         second-run QueryResultV1 (execute-query base-world append-splits-query)]
+    (and
+      (= first-run second-run)
+      (= (utf8-encode (canonical-result-encoding first-run))
+         (utf8-encode (canonical-result-encoding second-run))))))
+
+(defn compiler-repeat-determinism-case [] Bool
+  (let [first-run QueryResultV1 (execute-query compiler-world compiler-public-query)
+        second-run QueryResultV1 (execute-query compiler-world compiler-public-query)]
     (and
       (= first-run second-run)
       (= (utf8-encode (canonical-result-encoding first-run))
@@ -2202,6 +2947,11 @@
         calls-reverse QueryResultV1 (execute-query base-world calls-reverse-query)
         calls-relevant QueryResultV1 (execute-query relevant-change-world calls-forward-query)
         calls-unrelated QueryResultV1 (execute-query unrelated-change-world calls-forward-query)
+        compiler-reads-forward QueryResultV1 (execute-query compiler-world compiler-reads-forward-query)
+        compiler-reads-reverse QueryResultV1 (execute-query compiler-world compiler-reads-reverse-query)
+        compiler-comment QueryResultV1 (execute-query compiler-world compiler-comment-query)
+        compiler-private QueryResultV1 (execute-query compiler-world compiler-private-query)
+        compiler-public QueryResultV1 (execute-query compiler-world compiler-public-query)
         loop-result QueryResultV1 (execute-query base-world loop-query)
         fair-result QueryResultV1 (execute-query base-world fair-query)
         receipt-a ProjectionReceiptV1 (projection-receipt base-world source-projection-a)
@@ -2249,6 +2999,25 @@
      (str "relevant calls edit remints result ID: "
           (not= (result-semantic-id calls-forward-a)
                 (result-semantic-id calls-relevant)))
+     (str "reads(adjust, ?dependency) / reads(?reader, adjust) via "
+          (result-strategy compiler-reads-forward)
+          " / "
+          (result-strategy compiler-reads-reverse)
+          " => "
+          (readable-result
+            compiler-world compiler-source-projection compiler-reads-forward)
+          " / "
+          (readable-result
+            compiler-world compiler-source-projection compiler-reads-reverse))
+     (str "observed compiler unit churn comment/private/public: "
+          (readable-result
+            compiler-world compiler-source-projection compiler-comment)
+          " / "
+          (readable-result
+            compiler-world compiler-source-projection compiler-private)
+          " / "
+          (readable-result
+            compiler-world compiler-source-projection compiler-public))
      (str "recursive loop status: " (result-status loop-result)
           "; ready sibling status/result: " (result-status fair-result)
           " / " (readable-result base-world source-projection-a fair-result))]))
@@ -2259,16 +3028,25 @@
       (world-valid? base-world)
       (world-valid? relevant-change-world)
       (world-valid? unrelated-change-world)
+      (world-valid? compiler-world)
+      (world-valid? compiler-relevant-world)
+      (world-valid? compiler-unrelated-world)
       (append-forward-case)
       (append-splits-case)
       (calls-orientations-case)
       (source-projections-case)
       (dependency-invalidation-case)
+      (compiler-dependency-orientations-case)
+      (compiler-invalidation-case)
+      (compiler-read-enumeration-case)
+      (compiler-query-boundaries-case)
+      (compiler-dependency-invalidation-case)
       (occurs-check-case)
       (duplicate-variable-ordinal-rejected-case)
       (unsupported-mode-case)
       (loop-truncation-case)
       (fair-sibling-case)
-      (repeat-determinism-case))
+      (repeat-determinism-case)
+      (compiler-repeat-determinism-case))
     0
     1))

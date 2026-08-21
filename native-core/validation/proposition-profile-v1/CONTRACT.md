@@ -123,6 +123,104 @@ unnoticed earlier answer.
    deduplication with separate proofs, and exact repeated-run determinism are
    observed canaries. Repeat determinism compares both the complete typed result
    value and its canonical UTF-8 result-receipt bytes.
+7. Beagle's tracked branch-compilation corpus supplies a non-toy retrospective
+   explanation workload. Given the corpus's observed semantic changes and
+   direct-read graph, comment/layout, private-body, and public-interface cases
+   reproduce its exact zero-, one-, and two-unit typed/native cones.
+
+## Compiler-oracle explanation workload
+
+The workload copies the exact nine baseline `semantic-unit-v0` identities and
+selected before/after source, semantic-content, and module-interface digests
+from `beagle:bin/test/branch-compile-corpus/oracle/identities.tsv`. Its six
+direct-read facts are the complete non-empty dependency cells in
+`beagle:bin/test/branch-compile-corpus/units.tsv`. The driver reconciles both
+sets independently against those tracked files before accepting the fixture.
+Qualified names such as `corpus.foundation/adjust` are only preferred source
+renderings. A join never parses their spelling.
+
+Its fact clauses correspond to these canonical propositions, where each `-id`
+is the exact semantic-unit Atom rather than the displayed qualified name:
+
+```text
+(adjust-id, :reads_semantic_unit, private-offset-id)
+(score-value-id, :reads_semantic_unit, adjust-id)
+(stable-score-id, :reads_semantic_unit, double-value-id)
+(run-score-id, :reads_semantic_unit, score-value-id)
+(run-stable-id, :reads_semantic_unit, stable-score-id)
+(run-independent-id, :reads_semantic_unit, independent-value-id)
+
+(private-mutation-id, :changes_semantic_content_of, private-offset-id)
+
+(public-mutation-id, :changes_semantic_content_of, adjust-id)
+(public-mutation-id, :changes_semantic_content_of, score-value-id)
+(public-mutation-id, :changes_contract_of, adjust-id)
+```
+
+The comment/layout mutation has source-provenance identity but no observed
+semantic-content or contract-change proposition. Two clauses derive an
+explanation of observed unit churn:
+
+```text
+(mutation, :observed_unit_churn_of, unit)
+  :- (mutation, :changes_semantic_content_of, unit).
+
+(mutation, :observed_unit_churn_of, reader)
+  :- (mutation, :changes_contract_of, dependency),
+     (reader, :reads_semantic_unit, dependency).
+```
+
+One `reads_semantic_unit` relation retains both `[ground logic]` forward and
+`[logic ground]` reverse modes. The observed-churn relation has a
+`[ground logic]`, `nondet` mode because a comment/layout mutation legitimately
+has no answer. The exact required results are:
+
+```text
+comment-layout          -> {}
+private-implementation  -> {private-offset-id}
+public-interface        -> {adjust-id, score-value-id}
+```
+
+The public case retains three proof occurrences for two unique answers:
+`score-value` has both an observed content-change proof and a direct-reader
+proof from the changed `adjust` contract. `run-score` remains excluded because
+the fixture records no changed public contract for `score-value`, so the rule
+stops at the direct reader. The stable and independent arms remain excluded by
+the same exact-set canary.
+
+This is an oracle explanation, not a predictive compiler work plan.
+`semantic-unit-content` churn is post-build evidence; using it to decide which
+units must be built would be circular. The tracked oracle also records the
+changed `corpus/foundation.bgl` module interface, but it does not expose a
+first-class binding-level fact that `adjust` changed contract. The fixture's
+`changes_contract_of(public-mutation, adjust)` proposition is therefore a
+controlled-corpus assumption supported by the public mutation, not a fact read
+directly from the oracle.
+
+The workload is stage-blind. Its relation derives one semantic-unit set. The
+driver separately checks every member against the tracked typed-unit cone,
+checks that typed-unit and native-unit cones are currently equal, and therefore
+does not prove that one unqualified relation would remain correct if those
+stages diverged.
+
+Mode and strategy selection is also only demonstrated at top-level queries.
+The forward and reverse dependency queries select distinct strategies over one
+relation, but relation goals nested in the observed-churn clauses expand
+left-to-right under the generic FIFO engine; they do not select their own
+mode-specific procedures.
+
+Finally, the reachable-closure identity covers complete reachable relation
+extents. The canaries prove that an unrelated relation can preserve reuse while
+a relevant reachable fact remints it. A query-irrelevant addition inside any
+reachable relation still over-invalidates, so row-local dependency reuse is not
+claimed.
+
+A predictive version needs pre-lowering, per-definition facts for body identity
+and public contract identity, stage-qualified dependency and result facts, and
+honest oriented planning over those inputs. The existing corpus unit-reuse gate
+remains authoritative for reuse, stale dependency-context rejection, mixed
+assembly, and clean-build byte equality; this focused profile does not replace
+or contact that executor.
 
 ## Validation execution boundary
 
