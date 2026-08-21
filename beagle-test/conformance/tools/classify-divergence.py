@@ -20,7 +20,7 @@ QUESTIONS = (
 ALL_QUESTIONS = frozenset(QUESTIONS)
 
 RULE_DOCUMENT = (
-    "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md"
+    "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md"
 )
 
 

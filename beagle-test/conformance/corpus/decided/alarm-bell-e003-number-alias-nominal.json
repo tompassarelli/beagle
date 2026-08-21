@@ -36,7 +36,7 @@
   "decision": {
     "owner": "language-contract-authority",
     "reviewer": "syntax-semantics-doctrine",
-    "reference": "todo:beagle-program-handoff/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS",
+    "reference": "beagle:beagle-test/conformance/authority/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS",
     "date": "2026-08-18"
   },
   "observations": {

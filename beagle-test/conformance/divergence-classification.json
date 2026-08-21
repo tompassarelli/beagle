@@ -4,7 +4,7 @@
   "sources": {
     "coverage": "beagle-test/conformance/divergence-coverage.json",
     "manifest": "beagle-test/conformance/manifest.json",
-    "decidedRules": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md"
+    "decidedRules": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md"
   },
   "classificationPolicy": {
     "principle": "Allowlist only: a rule governs a dimension only when its text fixes that builtin (or the explicitly named family containing it) and that question. Loose keyword similarity and requirements for a future contract do not count.",
@@ -14,7 +14,7 @@
       {
         "mappingId": "number-checked-arithmetic",
         "ruleId": "HL-NUMBER-SEMANTICS",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
         "clauses": [
           "DECIDED rule 1",
           "DECIDED rule 2",
@@ -45,7 +45,7 @@
       {
         "mappingId": "number-float-order",
         "ruleId": "HL-NUMBER-SEMANTICS",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
         "clauses": [
           "DECIDED rule 3",
           "Contract closure"
@@ -70,7 +70,7 @@
       {
         "mappingId": "number-explicit-conversions",
         "ruleId": "HL-NUMBER-SEMANTICS",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
         "clauses": [
           "DECIDED rule 3",
           "DECIDED rule 4",
@@ -96,7 +96,7 @@
       {
         "mappingId": "number-parser",
         "ruleId": "HL-NUMBER-SEMANTICS",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
         "clauses": [
           "DECIDED rule 7",
           "Contract closure"
@@ -118,7 +118,7 @@
       {
         "mappingId": "equality-operations",
         "ruleId": "HL-EQUALITY-HASHING",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
         "clauses": [
           "DECIDED rules 1-6"
         ],
@@ -141,7 +141,7 @@
       {
         "mappingId": "equality-collection-admission",
         "ruleId": "HL-EQUALITY-HASHING",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
         "clauses": [
           "DECIDED rule 3"
         ],
@@ -161,7 +161,7 @@
       {
         "mappingId": "symbol-constructor",
         "ruleId": "HL-SYMBOL-BEHAVIOR",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
         "clauses": [
           "DECIDED rules 1-3",
           "DECIDED rule 5"
@@ -183,7 +183,7 @@
       {
         "mappingId": "symbol-generated",
         "ruleId": "HL-SYMBOL-BEHAVIOR",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
         "clauses": [
           "DECIDED rules 4-5"
         ],
@@ -203,7 +203,7 @@
       {
         "mappingId": "symbol-observers",
         "ruleId": "HL-SYMBOL-BEHAVIOR",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
         "clauses": [
           "DECIDED rules 1-2"
         ],
@@ -221,7 +221,7 @@
       {
         "mappingId": "truthiness-forms",
         "ruleId": "HL-TRUTHINESS",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
         "clauses": [
           "DECIDED rules 1-4"
         ],
@@ -248,7 +248,7 @@
       {
         "mappingId": "collection-traversal",
         "ruleId": "HL-COLLECTION-ORDERING",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
         "clauses": [
           "DECIDED rules 1-2",
           "DECIDED rule 5"
@@ -273,7 +273,7 @@
       {
         "mappingId": "collection-callback-effects",
         "ruleId": "HL-COLLECTION-ORDERING",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
         "clauses": [
           "DECIDED rule 2"
         ],
@@ -292,7 +292,7 @@
       {
         "mappingId": "collection-persistent-updates",
         "ruleId": "HL-COLLECTION-ORDERING",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
         "clauses": [
           "DECIDED rules 1-2",
           "DECIDED rule 5"
@@ -314,7 +314,7 @@
       {
         "mappingId": "collection-constructors",
         "ruleId": "HL-COLLECTION-ORDERING",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
         "clauses": [
           "DECIDED rule 1",
           "DECIDED rule 5"
@@ -338,7 +338,7 @@
       {
         "mappingId": "collection-stable-sort",
         "ruleId": "HL-COLLECTION-ORDERING",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
         "clauses": [
           "DECIDED rules 4-5"
         ],
@@ -358,7 +358,7 @@
       {
         "mappingId": "ownership-promotion",
         "ruleId": "HL-NATIVE-CORE-GC-OWNERSHIP",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
         "clauses": [
           "DECIDED rules 2-4",
           "DECIDED rule 6"
@@ -380,7 +380,7 @@
       {
         "mappingId": "macro-sequential-evaluation",
         "ruleId": "HL-HOST-MACRO-EXPANSION",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
         "clauses": [
           "DECIDED rule 1",
           "DECIDED rule 5",
@@ -402,7 +402,7 @@
       {
         "mappingId": "explicit-nondeterminism",
         "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-        "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+        "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
         "clauses": [
           "Status and authority",
           "DECIDED rule 3"
@@ -451,7 +451,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -478,7 +478,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -505,7 +505,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -532,7 +532,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -559,7 +559,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -586,7 +586,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -613,7 +613,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -640,7 +640,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -667,7 +667,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -694,7 +694,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -721,7 +721,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -748,7 +748,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -775,7 +775,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -802,7 +802,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -829,7 +829,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -856,7 +856,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -883,7 +883,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -910,7 +910,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -937,7 +937,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -964,7 +964,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -991,7 +991,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -1018,7 +1018,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -1045,7 +1045,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -1072,7 +1072,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -1099,7 +1099,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1125,7 +1125,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1151,7 +1151,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1177,7 +1177,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1203,7 +1203,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1229,7 +1229,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1255,7 +1255,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1281,7 +1281,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1307,7 +1307,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1333,7 +1333,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1359,7 +1359,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1385,7 +1385,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1411,7 +1411,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -1436,7 +1436,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -1461,7 +1461,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -1560,7 +1560,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1586,7 +1586,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1612,7 +1612,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1638,7 +1638,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1664,7 +1664,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1690,7 +1690,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1716,7 +1716,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1742,7 +1742,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1768,7 +1768,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1794,7 +1794,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1820,7 +1820,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -1846,7 +1846,7 @@
         {
           "mappingId": "number-float-order",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "Contract closure"
@@ -2062,7 +2062,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -2090,7 +2090,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -2118,7 +2118,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -2143,7 +2143,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -2171,7 +2171,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -2199,7 +2199,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -2368,7 +2368,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -2394,7 +2394,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -2420,7 +2420,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -2650,7 +2650,7 @@
         {
           "mappingId": "equality-collection-admission",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rule 3"
           ]
@@ -2761,7 +2761,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -2787,7 +2787,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -2825,7 +2825,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -2863,7 +2863,7 @@
         {
           "mappingId": "ownership-promotion",
           "ruleId": "HL-NATIVE-CORE-GC-OWNERSHIP",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
           "clauses": [
             "DECIDED rules 2-4",
             "DECIDED rule 6"
@@ -2889,7 +2889,7 @@
         {
           "mappingId": "ownership-promotion",
           "ruleId": "HL-NATIVE-CORE-GC-OWNERSHIP",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
           "clauses": [
             "DECIDED rules 2-4",
             "DECIDED rule 6"
@@ -2915,7 +2915,7 @@
         {
           "mappingId": "ownership-promotion",
           "ruleId": "HL-NATIVE-CORE-GC-OWNERSHIP",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
           "clauses": [
             "DECIDED rules 2-4",
             "DECIDED rule 6"
@@ -2943,7 +2943,7 @@
         {
           "mappingId": "ownership-promotion",
           "ruleId": "HL-NATIVE-CORE-GC-OWNERSHIP",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
           "clauses": [
             "DECIDED rules 2-4",
             "DECIDED rule 6"
@@ -2969,7 +2969,7 @@
         {
           "mappingId": "ownership-promotion",
           "ruleId": "HL-NATIVE-CORE-GC-OWNERSHIP",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
           "clauses": [
             "DECIDED rules 2-4",
             "DECIDED rule 6"
@@ -2997,7 +2997,7 @@
         {
           "mappingId": "ownership-promotion",
           "ruleId": "HL-NATIVE-CORE-GC-OWNERSHIP",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#6-hl-native-core-gc-ownership",
           "clauses": [
             "DECIDED rules 2-4",
             "DECIDED rule 6"
@@ -3889,7 +3889,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -3914,7 +3914,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -3939,7 +3939,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -3967,7 +3967,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -3995,7 +3995,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -4023,7 +4023,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -4744,7 +4744,7 @@
         {
           "mappingId": "symbol-observers",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-2"
           ]
@@ -5072,7 +5072,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -5100,7 +5100,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -5128,7 +5128,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -5153,7 +5153,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -5181,7 +5181,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -5206,7 +5206,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -5471,7 +5471,7 @@
         {
           "mappingId": "equality-collection-admission",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rule 3"
           ]
@@ -5894,7 +5894,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -5921,7 +5921,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -5948,7 +5948,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -5975,7 +5975,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -6002,7 +6002,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -6029,7 +6029,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -7064,7 +7064,7 @@
         {
           "mappingId": "collection-persistent-updates",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -7090,7 +7090,7 @@
         {
           "mappingId": "collection-persistent-updates",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -7118,7 +7118,7 @@
         {
           "mappingId": "collection-persistent-updates",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -7326,7 +7326,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -7353,7 +7353,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -7380,7 +7380,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -7407,7 +7407,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -7746,7 +7746,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -7773,7 +7773,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -7800,7 +7800,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -7827,7 +7827,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -7854,7 +7854,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -7881,7 +7881,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9034,7 +9034,7 @@
         {
           "mappingId": "collection-callback-effects",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 2"
           ]
@@ -9457,7 +9457,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9484,7 +9484,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9511,7 +9511,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9538,7 +9538,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9565,7 +9565,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9592,7 +9592,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9619,7 +9619,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9646,7 +9646,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9673,7 +9673,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9700,7 +9700,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9727,7 +9727,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -9754,7 +9754,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -10417,7 +10417,7 @@
         {
           "mappingId": "symbol-generated",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 4-5"
           ]
@@ -10442,7 +10442,7 @@
         {
           "mappingId": "symbol-generated",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 4-5"
           ]
@@ -10467,7 +10467,7 @@
         {
           "mappingId": "symbol-generated",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 4-5"
           ]
@@ -10495,7 +10495,7 @@
         {
           "mappingId": "symbol-generated",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 4-5"
           ]
@@ -10523,7 +10523,7 @@
         {
           "mappingId": "symbol-generated",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 4-5"
           ]
@@ -10863,7 +10863,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -10888,7 +10888,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -10913,7 +10913,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -10938,7 +10938,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -10963,7 +10963,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -10990,7 +10990,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -11017,7 +11017,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -11045,7 +11045,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -11073,7 +11073,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -11125,7 +11125,7 @@
         {
           "mappingId": "equality-collection-admission",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rule 3"
           ]
@@ -11154,7 +11154,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -11182,7 +11182,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -11210,7 +11210,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -11262,7 +11262,7 @@
         {
           "mappingId": "equality-collection-admission",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rule 3"
           ]
@@ -11291,7 +11291,7 @@
         {
           "mappingId": "equality-operations",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rules 1-6"
           ]
@@ -11390,7 +11390,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -11418,7 +11418,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -11446,7 +11446,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -11471,7 +11471,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -11499,7 +11499,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -11524,7 +11524,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -11765,7 +11765,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -11792,7 +11792,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -11819,7 +11819,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -11846,7 +11846,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -11873,7 +11873,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -11900,7 +11900,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -13595,7 +13595,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -13622,7 +13622,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -13649,7 +13649,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -13676,7 +13676,7 @@
         {
           "mappingId": "macro-sequential-evaluation",
           "ruleId": "HL-HOST-MACRO-EXPANSION",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#7-hl-host-macro-expansion",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5",
@@ -13799,7 +13799,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -13825,7 +13825,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -13851,7 +13851,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -14057,7 +14057,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -14084,7 +14084,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -14111,7 +14111,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -14138,7 +14138,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -14165,7 +14165,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -14192,7 +14192,7 @@
         {
           "mappingId": "number-explicit-conversions",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 3",
             "DECIDED rule 4",
@@ -14291,7 +14291,7 @@
         {
           "mappingId": "collection-callback-effects",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 2"
           ]
@@ -15422,7 +15422,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -15449,7 +15449,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -15476,7 +15476,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -15503,7 +15503,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -15530,7 +15530,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -15557,7 +15557,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -15644,7 +15644,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -15670,7 +15670,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -15708,7 +15708,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -15866,7 +15866,7 @@
         {
           "mappingId": "symbol-observers",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-2"
           ]
@@ -15954,7 +15954,7 @@
         {
           "mappingId": "symbol-observers",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-2"
           ]
@@ -16966,7 +16966,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -16991,7 +16991,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17016,7 +17016,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17044,7 +17044,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17072,7 +17072,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17100,7 +17100,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17809,7 +17809,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17837,7 +17837,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17865,7 +17865,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17890,7 +17890,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17918,7 +17918,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -17946,7 +17946,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -18103,7 +18103,7 @@
         {
           "mappingId": "number-parser",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 7",
             "Contract closure"
@@ -18129,7 +18129,7 @@
         {
           "mappingId": "number-parser",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 7",
             "Contract closure"
@@ -18155,7 +18155,7 @@
         {
           "mappingId": "number-parser",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 7",
             "Contract closure"
@@ -18181,7 +18181,7 @@
         {
           "mappingId": "number-parser",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 7",
             "Contract closure"
@@ -18207,7 +18207,7 @@
         {
           "mappingId": "number-parser",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 7",
             "Contract closure"
@@ -18233,7 +18233,7 @@
         {
           "mappingId": "number-parser",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 7",
             "Contract closure"
@@ -19519,7 +19519,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -19546,7 +19546,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -19573,7 +19573,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -19600,7 +19600,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -19627,7 +19627,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -19654,7 +19654,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -19681,7 +19681,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19707,7 +19707,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19745,7 +19745,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19795,7 +19795,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19821,7 +19821,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19859,7 +19859,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19909,7 +19909,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19935,7 +19935,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -19973,7 +19973,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -20023,7 +20023,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -20049,7 +20049,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -20087,7 +20087,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -20137,7 +20137,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -20163,7 +20163,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -20201,7 +20201,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -20851,7 +20851,7 @@
         {
           "mappingId": "collection-callback-effects",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 2"
           ]
@@ -20902,7 +20902,7 @@
         {
           "mappingId": "collection-traversal",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -20930,7 +20930,7 @@
         {
           "mappingId": "collection-traversal",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -20958,7 +20958,7 @@
         {
           "mappingId": "collection-traversal",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -20986,7 +20986,7 @@
         {
           "mappingId": "collection-callback-effects",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 2"
           ]
@@ -21253,7 +21253,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -21280,7 +21280,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -21307,7 +21307,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -21334,7 +21334,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -21361,7 +21361,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -21388,7 +21388,7 @@
         {
           "mappingId": "number-checked-arithmetic",
           "ruleId": "HL-NUMBER-SEMANTICS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 2",
@@ -22495,7 +22495,7 @@
         {
           "mappingId": "collection-traversal",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -22523,7 +22523,7 @@
         {
           "mappingId": "collection-traversal",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -22551,7 +22551,7 @@
         {
           "mappingId": "collection-traversal",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 1-2",
             "DECIDED rule 5"
@@ -22831,7 +22831,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -22869,7 +22869,7 @@
         {
           "mappingId": "equality-collection-admission",
           "ruleId": "HL-EQUALITY-HASHING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#2-hl-equality-hashing",
           "clauses": [
             "DECIDED rule 3"
           ]
@@ -23110,7 +23110,7 @@
         {
           "mappingId": "explicit-nondeterminism",
           "ruleId": "HL-UNSPECIFIED-BEHAVIOR-AS-SPEC",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#8-hl-unspecified-behavior-as-spec",
           "clauses": [
             "Status and authority",
             "DECIDED rule 3"
@@ -23520,7 +23520,7 @@
         {
           "mappingId": "collection-stable-sort",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 4-5"
           ]
@@ -23559,7 +23559,7 @@
         {
           "mappingId": "collection-stable-sort",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rules 4-5"
           ]
@@ -24462,7 +24462,7 @@
         {
           "mappingId": "symbol-constructor",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-3",
             "DECIDED rule 5"
@@ -24488,7 +24488,7 @@
         {
           "mappingId": "symbol-constructor",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-3",
             "DECIDED rule 5"
@@ -24514,7 +24514,7 @@
         {
           "mappingId": "symbol-constructor",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-3",
             "DECIDED rule 5"
@@ -24543,7 +24543,7 @@
         {
           "mappingId": "symbol-constructor",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-3",
             "DECIDED rule 5"
@@ -24569,7 +24569,7 @@
         {
           "mappingId": "symbol-constructor",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-3",
             "DECIDED rule 5"
@@ -24598,7 +24598,7 @@
         {
           "mappingId": "symbol-constructor",
           "ruleId": "HL-SYMBOL-BEHAVIOR",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#3-hl-symbol-behavior",
           "clauses": [
             "DECIDED rules 1-3",
             "DECIDED rule 5"
@@ -26931,7 +26931,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -26957,7 +26957,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -26983,7 +26983,7 @@
         {
           "mappingId": "collection-constructors",
           "ruleId": "HL-COLLECTION-ORDERING",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#5-hl-collection-ordering",
           "clauses": [
             "DECIDED rule 1",
             "DECIDED rule 5"
@@ -27117,7 +27117,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -27145,7 +27145,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -27173,7 +27173,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -27198,7 +27198,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -27226,7 +27226,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]
@@ -27251,7 +27251,7 @@
         {
           "mappingId": "truthiness-forms",
           "ruleId": "HL-TRUTHINESS",
-          "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
+          "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#4-hl-truthiness",
           "clauses": [
             "DECIDED rules 1-4"
           ]

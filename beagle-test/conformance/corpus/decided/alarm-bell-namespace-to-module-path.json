@@ -26,7 +26,7 @@
   "rule": {
     "id": "ALARM-BELL-NAMESPACE-NOT-PATH",
     "text": "A namespace is a logical identity; emitted module paths are derived from its segments. The compiler must preserve segment boundaries and hyphens, and must never treat the namespace string itself as a filesystem path.",
-    "reference": "todo:beagle-program-handoff/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS"
+    "reference": "beagle:beagle-test/conformance/authority/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS"
   },
   "expected": {
     "kind": "canonical-output",
@@ -53,7 +53,7 @@
   "decision": {
     "owner": "language-contract-authority",
     "reviewer": "syntax-semantics-doctrine",
-    "reference": "todo:beagle-program-handoff/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS",
+    "reference": "beagle:beagle-test/conformance/authority/positioning/SYNTAX-SEMANTICS-DOCTRINE.md#ALARM-BELL-LENS",
     "date": "2026-08-18"
   },
   "observations": {

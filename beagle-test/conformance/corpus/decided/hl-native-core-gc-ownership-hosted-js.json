@@ -23,7 +23,7 @@
   "rule": {
     "id": "HL-NATIVE-CORE-GC-OWNERSHIP",
     "text": "A GC-hosted profile must discharge the same ownership and escape obligations. bgl/promote is an explicit deep semantic copy; host reachability cannot discharge ownership, and Store admits only canonical durable semantic data.",
-    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#HL-NATIVE-CORE-GC-OWNERSHIP"
+    "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#HL-NATIVE-CORE-GC-OWNERSHIP"
   },
   "expected": {
     "kind": "named-diagnostic-assertion",
@@ -56,7 +56,7 @@
   "decision": {
     "owner": "language-contract-authority",
     "reviewer": "leakage-rules-decided",
-    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#HL-NATIVE-CORE-GC-OWNERSHIP",
+    "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#HL-NATIVE-CORE-GC-OWNERSHIP",
     "date": "2026-08-18"
   }
 }

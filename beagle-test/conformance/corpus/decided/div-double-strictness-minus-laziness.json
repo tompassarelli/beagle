@@ -24,7 +24,7 @@
   "rule": {
     "id": "HL-NUMBER-SEMANTICS",
     "text": "Authority is the cited DECIDED HL-NUMBER-SEMANTICS rule.",
-    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics"
+    "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics"
   },
   "expected": {
     "kind": "named-diagnostic-assertion",
@@ -48,7 +48,7 @@
   "decision": {
     "owner": "language-contract-authority",
     "reviewer": "leakage-rules-decided",
-    "reference": "todo:beagle-program-handoff/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
+    "reference": "beagle:beagle-test/conformance/authority/positioning/LEAKAGE-RULES-DECIDED.md#1-hl-number-semantics",
     "date": "2026-08-18"
   }
 }

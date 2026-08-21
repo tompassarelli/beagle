@@ -35,7 +35,7 @@ satisfy the opt-in requirement.
 Landing therefore needs one commander decision: either accept the default
 behavior change and update the existing obligations, or redefine this slice
 against the generics foundation that has already landed. The positioning note
-at `todo:beagle-program-handoff/positioning/types-design/surface.md` contained
+at `beagle:beagle-test/conformance/authority/positioning/types-design/surface.md` contained
 no type-variable syntax, so this analysis had no surface spelling to adopt or
 choose.
 
