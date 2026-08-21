@@ -1396,6 +1396,10 @@
        (list (list 'prn (list 'mapv 'str (br 1 2))))
        "" "[\"1\" \"2\"]")
 
+     (check-clj-output "portable utf8-encode has a checked Clojure runtime"
+       (list (list 'prn (list 'utf8-encode "Aé😀")))
+       "" "[65 195 169 240 159 152 128]")
+
      ;; Defrecord fields use the same structural typed-binding grammar.
      (check-clj-output "defrecord structural field annotations"
        (list (list 'defrecord 'Pt (br (list 'x 'Int) (list 'y 'Int)))

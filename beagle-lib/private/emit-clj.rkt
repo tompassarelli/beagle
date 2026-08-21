@@ -123,8 +123,15 @@
 ;; callable boundary.
 (define CLJ-HOST-REST "$beagle$rest$host")
 
-(define clj-sha256-runtime
+(define clj-codec-runtime
   #<<CLJ
+(defn- beagle$utf8_encode_v0 [text]
+  (when-not (string? text)
+    (throw (ex-info "utf8-encode requires a String"
+                    {:value text})))
+  (mapv (fn [value] (bit-and (int value) 255))
+        (.getBytes ^String text java.nio.charset.StandardCharsets/UTF_8)))
+
 (defn- beagle$sha256_bytes_v0 [values]
   (when-not (vector? values)
     (throw (ex-info "sha256-bytes requires a Vec Int"
@@ -441,14 +448,15 @@ CLJ
        "\n\n"))
     (define needs-clj-string?
       (regexp-match? #rx"[( \t\n]str/" body))
-    (define needs-sha256-runtime?
+    (define needs-codec-runtime?
       (or (string-contains? body "beagle$sha256_bytes_v0")
-          (string-contains? body "beagle$sha256_utf8_v0")))
+          (string-contains? body "beagle$sha256_utf8_v0")
+          (string-contains? body "beagle$utf8_encode_v0")))
     (string-append
      (emit-ns prog #:needs-clj-string? needs-clj-string?)
      "\n\n"
-     (if needs-sha256-runtime?
-         (string-append clj-sha256-runtime "\n")
+     (if needs-codec-runtime?
+         (string-append clj-codec-runtime "\n")
          "")
      body
      "\n")))
@@ -1081,6 +1089,11 @@ CLJ
              (= 1 (length (call-form-args e)))
              (not (set-member? (current-emit-local-names) fn-ref)))
         (format "(beagle$sha256_bytes_v0 ~a)"
+                (emit-expr (car (call-form-args e))))]
+       [(and (eq? fn-ref 'utf8-encode)
+             (= 1 (length (call-form-args e)))
+             (not (set-member? (current-emit-local-names) fn-ref)))
+        (format "(beagle$utf8_encode_v0 ~a)"
                 (emit-expr (car (call-form-args e))))]
        [(and (qualified-reference=? fn-ref 'bgl 'sha256-utf8)
              (= 1 (length (call-form-args e))))
