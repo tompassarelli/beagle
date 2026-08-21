@@ -17,6 +17,8 @@ copy_checkout() {
     cp -R "$ROOT/beagle-lib" "$ROOT/beagle-test" "$ROOT/beagle" \
         "$ROOT/bin" "$ROOT/contrib" "$ROOT/docs" "$ROOT/native-core" \
         "$ROOT/self-host" "$ROOT/share" "$destination/"
+    mkdir -p "$destination/store"
+    cp -R "$ROOT/store/." "$destination/store/"
     find "${destination:?}" -type d -name compiled -prune -exec rm -rf -- {} +
 }
 
@@ -25,6 +27,7 @@ copy_checkout "$sibling"
 
 (
     export PLTUSERHOME="$scratch/racket-home"
+    export XDG_CACHE_HOME="$scratch/cache"
     unset PLTCOLLECTS _BEAGLE_SCOPE_ROOT _BEAGLE_ZO_GATE_PID
 
     "$RACO" pkg install --auto --link \
@@ -72,9 +75,21 @@ copy_checkout "$sibling"
 
     unset PLTCOLLECTS _BEAGLE_SCOPE_ROOT _BEAGLE_ZO_GATE_PID BEAGLE_ROOT
     source "$sibling/bin/_beagle-racket"
+    "$RACO" test "$sibling/beagle-test/tests/checked-bundle.rkt" >/dev/null
+    rm -rf "$sibling/.beagle"
 
-    expected_collects="$sibling/.beagle/scope/lib:$sibling/.beagle/scope/test:"
+    # A copied checkout can be immutable (as a Nix store checkout is).  Its
+    # scope verdict and links must still land in the writable identity cache.
+    chmod -R a-w "$sibling"
+    unset PLTCOLLECTS _BEAGLE_SCOPE_ROOT _BEAGLE_ZO_GATE_PID BEAGLE_ROOT
+    source "$sibling/bin/_beagle-racket"
+
+    scope_entry="$(find "$XDG_CACHE_HOME/beagle/racket-scope" \
+        -path '*/scope/lib/beagle' -type l -print -quit | sed 's:/scope/lib/beagle$::')"
+    test -n "$scope_entry"
+    expected_collects="$scope_entry/scope/lib:$scope_entry/scope/test:"
     [[ "$PLTCOLLECTS" == "$expected_collects" ]]
+    [[ ! -e "$sibling/.beagle" ]]
     [[ "$_BEAGLE_SCOPE_ROOT" == "$sibling" ]]
     [[ "$(realpath "$("$RACKET" -e \
         '(display (path->string (collection-file-path "parse.rkt" "beagle" "private")))')")" \
@@ -86,6 +101,8 @@ copy_checkout "$sibling"
     first_collects="$PLTCOLLECTS"
     source "$sibling/bin/_beagle-racket"
     [[ "$PLTCOLLECTS" == "$first_collects" ]]
+
+    chmod -R u+w "$sibling"
 )
 
 printf 'racket-scope: exact package identity preserved; sibling checkout isolated\n'

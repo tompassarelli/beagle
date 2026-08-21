@@ -70,7 +70,15 @@ fi
 # `require` at the wrong checkout, because any verdict that is not exactly
 # `native` takes the scoping branch, which pins this root explicitly.
 if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT" ]]; then
-    _bscope_stamp="$BEAGLE_ROOT/.beagle/scope-stamp"
+    # Scope state must survive immutable checkout roots (notably /nix/store),
+    # while remaining isolated per checkout and per resolved Racket.
+    _beagle_scope_identity_root="$(realpath "$BEAGLE_ROOT" 2>/dev/null || printf '%s' "$BEAGLE_ROOT")"
+    _beagle_scope_identity_racket="$(realpath "$RACKET" 2>/dev/null || command -v "$RACKET" 2>/dev/null || printf '%s' "$RACKET")"
+    _beagle_scope_cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/beagle/racket-scope"
+    _beagle_scope_key="$(printf '%s\0%s' "$_beagle_scope_identity_root" \
+        "$_beagle_scope_identity_racket" | sha256sum | cut -d' ' -f1)"
+    _bscope_entry="$_beagle_scope_cache_root/$_beagle_scope_key"
+    _bscope_stamp="$_bscope_entry/scope-stamp"
     _bscope_verdict=""
     if [[ -f "$_bscope_stamp" ]]; then
         _bscope_racket=""
@@ -120,7 +128,7 @@ if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT
         fi
         # Published by rename so a concurrent reader sees one whole verdict or
         # the previous one, never a half-written line.
-        if mkdir -p "$BEAGLE_ROOT/.beagle" 2>/dev/null &&
+        if mkdir -p "$_bscope_entry" 2>/dev/null &&
            printf '%s\t%s\n' "$RACKET" "$_bscope_verdict" \
                > "$_bscope_stamp.$$" 2>/dev/null; then
             mv -f "$_bscope_stamp.$$" "$_bscope_stamp" 2>/dev/null ||
@@ -133,19 +141,26 @@ if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT
     if [[ "$_bscope_verdict" == "native" ]]; then
         export _BEAGLE_SCOPE_ROOT="$BEAGLE_ROOT"
     else
-        _bscope="$BEAGLE_ROOT/.beagle/scope"
-        if mkdir -p "$_bscope/lib" "$_bscope/test" 2>/dev/null; then
-            ln -sfn "$BEAGLE_ROOT/beagle-lib" "$_bscope/lib/beagle" 2>/dev/null || true
-            [[ -d "$BEAGLE_ROOT/beagle-test" ]] && ln -sfn "$BEAGLE_ROOT/beagle-test" "$_bscope/test/beagle" 2>/dev/null || true
-            if [[ -n "${PLTCOLLECTS:-}" ]]; then
-                export PLTCOLLECTS="$_bscope/lib:$_bscope/test:$PLTCOLLECTS"
-            else
-                export PLTCOLLECTS="$_bscope/lib:$_bscope/test:"   # trailing : => append the default search
-            fi
-            export _BEAGLE_SCOPE_ROOT="$BEAGLE_ROOT"
+        _bscope="$_bscope_entry/scope"
+        if ! mkdir -p "$_bscope/lib" "$_bscope/test" 2>/dev/null; then
+            echo "beagle: cannot create writable Racket scope cache: $_bscope_entry" >&2
+            case "$-" in
+                *i*) return 1 ;;
+                *)   exit 1 ;;
+            esac
         fi
+        ln -sfn "$BEAGLE_ROOT/beagle-lib" "$_bscope/lib/beagle" 2>/dev/null || true
+        [[ -d "$BEAGLE_ROOT/beagle-test" ]] && ln -sfn "$BEAGLE_ROOT/beagle-test" "$_bscope/test/beagle" 2>/dev/null || true
+        if [[ -n "${PLTCOLLECTS:-}" ]]; then
+            export PLTCOLLECTS="$_bscope/lib:$_bscope/test:$PLTCOLLECTS"
+        else
+            export PLTCOLLECTS="$_bscope/lib:$_bscope/test:"   # trailing : => append the default search
+        fi
+        export _BEAGLE_SCOPE_ROOT="$BEAGLE_ROOT"
         unset _bscope
     fi
+    unset _beagle_scope_identity_root _beagle_scope_identity_racket
+    unset _beagle_scope_cache_root _beagle_scope_key _bscope_entry
     unset _bscope_stamp _bscope_verdict
 fi
 
