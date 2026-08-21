@@ -48,6 +48,22 @@ if [[ "$command" == "build" ]]; then
   if [[ -n "${FAKE_MODULE_ROOT_OBSERVATIONS:-}" ]]; then
     printf '%s\n' "${module_roots[@]}" >>"$FAKE_MODULE_ROOT_OBSERVATIONS"
   fi
+  if [[ -n "${FAKE_TIMEOUT_OBSERVATIONS:-}" ]]; then
+    printf 'ast=%s facts=%s compiler=%s lowering=%s validation=%s lock=%s grace=%s overall=%s\n' \
+      "${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-}" \
+      "${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-}" \
+      "${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-}" \
+      "${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-}" \
+      "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-}" \
+      "${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-}" \
+      "${BEAGLE_CORE_KILL_GRACE_SECONDS:-}" \
+      "${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-}" \
+      >>"$FAKE_TIMEOUT_OBSERVATIONS"
+  fi
+  if [[ "${FAKE_CORE_LOWERING_TIMEOUT:-0}" == 1 ]]; then
+    echo 'beagle build: phase core-lowering TIMEOUT (124)' >&2
+    exit 124
+  fi
   printf '%s\n' "build-$(IFS=+; printf '%s' "${materializers[*]}")" \
     >>"$FAKE_NATIVE_CALLS"
   if [[ -n "${FAKE_SOURCE_OBSERVATIONS:-}" ]]; then
@@ -486,6 +502,42 @@ build_env=(
   BEAGLE_STORE_QBE_FRONTIER_LEDGER="$ledger"
   FAKE_NATIVE_CALLS="$calls"
 )
+
+# The wrapper's outer deadline is a containment backstop: it reserves the
+# entire lowerer budget after every named prerequisite, plus Core's named TERM
+# grace. Observe the exported values through the fake compiler rather than run
+# a Store product build.
+timeout_observations="$scratch/timeout-observations"
+: >"$timeout_observations"
+timeout_contract_artifact="$("${build_env[@]}" \
+  BEAGLE_STORE_NATIVE_CACHE="$scratch/cache-timeout-contract" \
+  FAKE_TIMEOUT_OBSERVATIONS="$timeout_observations" \
+  "$builder" --host program --entry demo.main/start \
+  "$scratch/sources/good.bgl")" ||
+  fail "timeout contract observation build failed"
+[[ -f "$timeout_contract_artifact/READY" ]] ||
+  fail "timeout contract observation build produced no ready artifact"
+grep -Fqx \
+  'ast=120 facts=120 compiler=900 lowering=720 validation=360 lock=30 grace=5 overall=2405' \
+  "$timeout_observations" ||
+  fail "Store defaults did not derive the outer timeout from named phase budgets"
+
+# A lowerer-owned timeout must still reach the caller's captured diagnostics;
+# the wrapper may not replace it with a silent outer-supervisor expiration.
+if "${build_env[@]}" \
+  BEAGLE_STORE_NATIVE_CACHE="$scratch/cache-timeout-report" \
+  FAKE_CORE_LOWERING_TIMEOUT=1 \
+  "$builder" --host program --entry demo.main/start \
+  "$scratch/sources/good.bgl" \
+  >"$scratch/lower-timeout.out" 2>"$scratch/lower-timeout.err"; then
+  fail "lowerer timeout unexpectedly succeeded"
+fi
+grep -Fq 'beagle build: phase core-lowering TIMEOUT (124)' \
+  "$scratch/lower-timeout.err" ||
+  fail "lowerer timeout was not reported by the Store wrapper"
+grep -Fq 'beagle-store-native-build: Beagle native program materialization' \
+  "$scratch/lower-timeout.err" ||
+  fail "Store wrapper did not preserve its materialization failure report"
 
 printf '%s\n' '1111111111111111111111111111111111111111' \
   >"$scratch/tool/BEAGLE_REVISION"

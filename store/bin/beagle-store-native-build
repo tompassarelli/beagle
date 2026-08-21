@@ -4,9 +4,42 @@ export LC_ALL=C
 umask 022
 export BEAGLE_CORE_AST_TIMEOUT_SECONDS="${BEAGLE_CORE_AST_TIMEOUT_SECONDS:-120}"
 export BEAGLE_CORE_FACTS_TIMEOUT_SECONDS="${BEAGLE_CORE_FACTS_TIMEOUT_SECONDS:-120}"
+export BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS="${BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS:-900}"
 export BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS="${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-720}"
-export BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-780}"
 export BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS="${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-360}"
+export BEAGLE_CORE_LOCK_TIMEOUT_SECONDS="${BEAGLE_CORE_LOCK_TIMEOUT_SECONDS:-30}"
+export BEAGLE_CORE_KILL_GRACE_SECONDS="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
+
+for timeout_name in \
+  BEAGLE_CORE_AST_TIMEOUT_SECONDS \
+  BEAGLE_CORE_FACTS_TIMEOUT_SECONDS \
+  BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS \
+  BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS \
+  BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS \
+  BEAGLE_CORE_LOCK_TIMEOUT_SECONDS \
+  BEAGLE_CORE_KILL_GRACE_SECONDS; do
+  timeout_value="${!timeout_name}"
+  [[ "$timeout_value" =~ ^[1-9][0-9]*$ ]] || {
+    echo "beagle-store-native-build: $timeout_name must be a positive integer" >&2
+    exit 2
+  }
+done
+
+# Core runs source closure, AST bundle, checked-AST validation, source facts,
+# two result/checkpoint locks, and compiler projection before lowering. Its
+# outer supervisor must leave the lowerer its entire declared budget; the named
+# TERM grace makes that boundary noncompetitive even when every prerequisite
+# reaches its bound.
+store_core_overall_default=$((
+  2 * BEAGLE_CORE_AST_TIMEOUT_SECONDS +
+  BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS +
+  BEAGLE_CORE_FACTS_TIMEOUT_SECONDS +
+  2 * BEAGLE_CORE_LOCK_TIMEOUT_SECONDS +
+  BEAGLE_CORE_COMPILER_TIMEOUT_SECONDS +
+  BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS +
+  BEAGLE_CORE_KILL_GRACE_SECONDS
+))
+export BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS="${BEAGLE_CORE_OVERALL_TIMEOUT_SECONDS:-$store_core_overall_default}"
 
 die() {
   echo "beagle-store-native-build: $*" >&2
