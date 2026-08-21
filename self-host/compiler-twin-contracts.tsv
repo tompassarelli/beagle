@@ -1,0 +1,15 @@
+# id	self-host implementation	Racket oracle implementation(s)	basis
+#
+# These are source-contract pairs, not filename-derived matches.  Each row is
+# named by a self-host source comment and is exercised by the self-host oracle
+# ladder.  The changed-path check is only an early drift signal: parity remains
+# the proof that the implementations agree.
+ast	self-host/src/selfhost/ast.bclj	beagle-lib/private/ast.rkt	selfhost.ast declares that it matches the oracle AST definitions
+types	self-host/src/selfhost/types.bclj	beagle-lib/private/types.rkt	selfhost.types declares that it matches the oracle type system
+macros	self-host/src/selfhost/macros.bclj	beagle-lib/private/macros.rkt	selfhost.macros declares that it matches the oracle macro engine
+parse	self-host/src/selfhost/parse.bclj	beagle-lib/private/parse.rkt,beagle-lib/private/scope-resolve.rkt	selfhost.parse declares parser parity and its scope-resolve mirror
+check	self-host/src/selfhost/check.bclj	beagle-lib/private/check.rkt	selfhost.check declares checker semantic parity
+emit-clj	self-host/src/selfhost/emit-clj.bclj	beagle-lib/private/emit-clj.rkt	selfhost.emit-clj declares byte-exact oracle emission
+emit-js	self-host/src/selfhost/emit-js.bclj	beagle-lib/private/emit-js.rkt,beagle-lib/private/js-emit-utils.rkt,beagle-lib/private/js-capabilities.rkt	selfhost.emit-js declares its oracle emitter and helper inputs
+emit-nix	self-host/src/selfhost/emit-nix.bclj	beagle-lib/private/emit-nix.rkt,beagle-lib/private/emit-nix-strings.rkt	selfhost.emit-nix declares its oracle emitter and string helper input
+reader	self-host/src/selfhost/reader.bclj	beagle-lib/lang/reader-impl.rkt,beagle-lib/private/targets.rkt	selfhost.reader declares its reader replacement and target-table mirror

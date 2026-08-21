@@ -1,0 +1,5 @@
+# id	side	path	reason
+#
+# One-sided changes to a declared twin need a narrow, reviewable entry here.
+# Keep this empty unless the changed path is deliberately outside the pair's
+# stated contract.  Unpaired infrastructure paths need no exception.

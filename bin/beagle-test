@@ -696,6 +696,11 @@ fi
 # --changed narrows the run to what the change can affect. The selection can
 # still come back "full", and then this path runs exactly the sweep below.
 if [[ "$BEAGLE_TEST_SELECT_CHANGED" == 1 ]]; then
+    # This is deliberately before any selected phase: it names a declared
+    # self-host/Racket twin that changed on one side, while parity is still
+    # cheap to schedule rather than expensive to diagnose.  The checker only
+    # knows explicit contracts; unpaired infrastructure remains admissible.
+    "$BEAGLE_ROOT/bin/beagle-compiler-twin-drift" --strict || exit $?
     source "$BEAGLE_ROOT/bin/_beagle-test-selection"
     beagle_selection_compute "$BEAGLE_ROOT"
     beagle_selection_report "$BEAGLE_ROOT"
