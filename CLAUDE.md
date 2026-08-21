@@ -13,7 +13,7 @@ target, form, type, standard-library, health, or test inventories here: use
 - Checks and proof claims use `verification`; `AGENTS.md` owns Beagle's local
   gate commands and verdict meanings.
 - Facts, Triples, relations, vocabularies, and persisted semantic models use
-  `fact-normal-form`.
+  `fact-modeling`.
 
 ## Compiler laws
 

@@ -71,9 +71,13 @@ Roles remain ontology conventions, not kernel positions. Membership implied by s
 
 Atoms terminate recursion honestly. When components need queries or descriptions, use more Triples instead of opaque compounds. Tagged handles, tables, and rows remain private representations; `TurtleRow`, `turtle-id`, and “turtle log” remain category errors.
 
-## agent skill names — store-modeling, code-as-facts — chosen 2026-08-02
+## agent skill names — store-modeling, fact-modeling, code-as-facts
 
-The thing was an unambiguous routing vocabulary for agent skills. The layer split decided it: Triple names kernel structure, while fact is the coordination projection's word. Therefore `fact-modeling` became **`store-modeling`**, named for the stable tool, and the read-side `codegraph` skill merged into **`code-as-facts`**, one write/read faculty over one projected AST.
+The routing vocabulary separates semantic fact modeling from Store operations:
+`fact-modeling` names the ontology, vocabulary, identity, normalization, and
+admission faculty; **`store-modeling`** is named for the stable operational
+tool. The read-side `codegraph` skill merged into **`code-as-facts`**, one
+write/read faculty over one projected AST.
 
 Rejected bench:
 

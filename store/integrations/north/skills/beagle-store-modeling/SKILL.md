@@ -6,7 +6,7 @@ description: >-
   Store RPC, and handle append-only occurrence history, immutable snapshots,
   paging, and Datalog derivation. NOT for designing or reviewing facts,
   relations, vocabularies, schemas, ontologies, or persisted semantic models;
-  use fact-normal-form for those. NOT for one-off store reads or graph-authoring
+  use fact-modeling for those. NOT for one-off store reads or graph-authoring
   edits.
 ---
 
@@ -21,7 +21,7 @@ Bool | Keyword | Instant`, `Term := Atom | Triple`, and `Triple := (Term, Term,
 Term)`. Positions are neutral; domain roles come from asserted vocabulary, not
 a privileged subject/predicate/object schema.
 
-Before operating on fact-oriented data, require `$fact-normal-form` to settle
+Before operating on fact-oriented data, require `$fact-modeling` to settle
 and validate its semantic model.
 
 ## 0. Re-ground before operating
