@@ -2174,6 +2174,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
 (def stage-progress (atom []))
 (def stage-progress-prefix (atom ""))
 (def active-stage (atom nil))
+(def stage-work (atom nil))
 
 (defn durable-write! [path text]
   (let [destination (Paths/get path (make-array String 0))
@@ -2215,9 +2216,42 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
               (for [{:keys [name status elapsed-ms]} @stage-progress]
                 (str "stage-progress " name " " status "\n")))))
 
+(defn stage-elapsed-ms [name elapsed-ms]
+  (let [active @active-stage]
+    (if (and (some? active) (= name (:name active)))
+      (quot (- (System/nanoTime) (:started active)) 1000000)
+      elapsed-ms)))
+
+(defn progress-snapshot-text []
+  (str @stage-progress-prefix
+       (apply str
+              (for [{:keys [name status elapsed-ms]} @stage-progress]
+                (str "stage-progress " name " " status "\n"
+                     "stage-elapsed " name " "
+                     (stage-elapsed-ms name elapsed-ms) "\n")))
+       (when-let [{:keys [stage work status completed total]} @stage-work]
+         (str "stage-work " stage " " work " " status " "
+              completed " " total "\n"))))
+
 (defn publish-progress! []
   (durable-write! report-path
-                  (str (stage-progress-text) "result RUNNING\n")))
+                  (str (progress-snapshot-text) "result RUNNING\n")))
+
+(defn publish-stage-work! [stage work status completed total]
+  (let [active @active-stage]
+    (when-not (= stage (:name active))
+      (throw (ex-info "Core build work does not match active stage"
+                      {:active active :stage stage :work work})))
+    (when (or (< completed 0) (< total completed))
+      (throw (ex-info "Core build work count is invalid"
+                      {:stage stage :work work
+                       :completed completed :total total})))
+    (reset! stage-work {:stage stage
+                        :work work
+                        :status status
+                        :completed completed
+                        :total total})
+    (publish-progress!)))
 
 (defn start-stage! [name]
   (when (some? @active-stage)
@@ -2227,6 +2261,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
     (swap! stage-progress conj {:name name
                                 :status "RUNNING"
                                 :elapsed-ms 0})
+    (reset! stage-work nil)
     (reset! active-stage {:name name :started started})
     (publish-progress!)))
 
@@ -2243,7 +2278,10 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                             :status status
                             :elapsed-ms elapsed))))
       (reset! active-stage nil)
-      (publish-progress!))))
+      (publish-progress!)
+      (binding [*out* *err*]
+        (println (str "beagle build: core-stage " name " " status
+                      " elapsed-ms=" elapsed))))))
 
 (defn fail-active-stage! []
   (when-let [active @active-stage]
@@ -2257,6 +2295,90 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
     (str (str/join "\n" (butlast lines)) "\n"
          (stage-progress-text)
          result "\n")))
+
+;; core-lowering-progress-fixture-begin
+(def body-progress-cadence 32)
+
+(defn observed-call [operation accepted]
+  (let [result (operation)]
+    (accepted)
+    result))
+
+(defn body-progress-boundary? [completed total]
+  (or (= completed 1)
+      (= completed total)
+      (= 0 (mod completed body-progress-cadence))))
+
+(defn observed-source-program [rows module-name relative-path]
+  (publish-stage-work!
+   "source-freeze" "source-reconstruction" "RUNNING" 0 1)
+  (observed-call
+   #(slice/source-program rows module-name relative-path)
+   #(publish-stage-work!
+     "source-freeze" "source-reconstruction" "ACCEPTED" 1 1)))
+
+(defn observed-freeze-source-stage [source compiler-commit configuration]
+  (let [original-encode stages/encode-source-stage
+        original-valid? lower/source-stage-valid?]
+    (publish-stage-work!
+     "source-freeze" "source-encoding" "RUNNING" 0 1)
+    (with-redefs
+      [stages/encode-source-stage
+       (fn [stage]
+         (observed-call
+          #(original-encode stage)
+          #(publish-stage-work!
+            "source-freeze" "source-encoding" "ACCEPTED" 1 1)))
+       lower/source-stage-valid?
+       (fn [stage]
+         (observed-call
+          #(original-valid? stage)
+          #(publish-stage-work!
+            "source-freeze" "source-validation" "ACCEPTED" 1 1)))]
+      (lower/freeze-source-stage source compiler-commit configuration))))
+
+(defn observed-lower-typed-stage [frozen-source compiler-commit configuration]
+  (let [original-prelude lower/prepare-typing-prelude
+        original-attach-bodies lower/attach-bodies
+        original-attach-body lower/attach-body
+        completed (atom 0)
+        body-total (atom 0)]
+    (publish-stage-work!
+     "source-to-typed" "typing-prelude" "RUNNING" 0 1)
+    (let [result
+          (with-redefs
+            [lower/prepare-typing-prelude
+             (fn [source config]
+               (observed-call
+                #(original-prelude source config)
+                #(publish-stage-work!
+                  "source-to-typed" "typing-prelude" "ACCEPTED" 1 1)))
+             lower/attach-bodies
+             (fn [env resolutions sources]
+               (let [total (min (count resolutions) (count sources))]
+                 (reset! body-total total)
+                 (publish-stage-work!
+                  "source-to-typed" "function-bodies" "RUNNING" 0 total)
+                 (observed-call
+                  #(original-attach-bodies env resolutions sources)
+                  #(publish-stage-work!
+                    "source-to-typed" "typing-finalization" "RUNNING" 0 1))))
+             lower/attach-body
+             (fn [env resolution source]
+               (observed-call
+                #(original-attach-body env resolution source)
+                #(let [done (swap! completed inc)
+                       total @body-total]
+                   (when (body-progress-boundary? done total)
+                     (publish-stage-work!
+                      "source-to-typed" "function-bodies" "RUNNING"
+                      done total)))))]
+            (lower/lower-typed-stage
+             frozen-source compiler-commit configuration))]
+      (publish-stage-work!
+       "source-to-typed" "typing-finalization" "ACCEPTED" 1 1)
+      result)))
+;; core-lowering-progress-fixture-end
 
 (defn id-value [id]
   (core/nativeid-value id))
@@ -3983,8 +4105,10 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                                     (subs (stages/content-digest projected-facts) 7))]
             _finish-projection (finish-stage! "source-projection" "ACCEPTED")
             _start-freeze (start-stage! "source-freeze")
-            source (slice/source-program rows "beagle.core" "source.facts")
-            freeze-result (lower/freeze-source-stage source compiler-commit configuration)]
+            source (observed-source-program
+                    rows "beagle.core" "source.facts")
+            freeze-result (observed-freeze-source-stage
+                           source compiler-commit configuration)]
         (if-not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result)
           (do
             (finish-stage! "source-freeze" "REJECTED")
@@ -4006,8 +4130,11 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                 _start-typing (start-stage! "source-to-typed")
                 typing-result
                 (if (and (some? dev-attempt) (:ok? dev-attempt))
-                  (:typing-result dev-attempt)
-                  (lower/lower-typed-stage
+                  (do
+                    (publish-stage-work!
+                     "source-to-typed" "dev-fact-reuse" "ACCEPTED" 1 1)
+                    (:typing-result dev-attempt))
+                  (observed-lower-typed-stage
                    frozen-source compiler-commit configuration))]
             (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
               (do
@@ -4199,6 +4326,10 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
 ' >"$work/run.log" 2>&1
 runner_rc=$?
 set -e
+
+if [[ -f "$work/run.log" ]]; then
+    rg '^beagle build: core-stage ' "$work/run.log" >&2 || true
+fi
 
 if [[ "$dev_fact_reuse" == 1 && -f "$work/run.log" ]]; then
     # The hosted Core runner is captured for deterministic artifact handling;
