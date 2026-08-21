@@ -34,9 +34,9 @@ Do not create a lane, edit a file, or begin F2 while any of these is true:
    and package metadata listed below. Re-run:
 
    ```sh
-   git -C /home/tom/code/greywrought/main worktree list --porcelain
-   base=$(git -C /home/tom/code/greywrought/main rev-parse HEAD)
-   for wt in /home/tom/code/greywrought/worktrees/*; do
+   git -C greywrought: worktree list --porcelain
+   base=$(git -C greywrought: rev-parse HEAD)
+   for wt in greywrought:worktrees/*; do
      test -d "$wt/.git" || continue
      git -C "$wt" diff --name-only "$base" --
      git -C "$wt" diff --name-only --

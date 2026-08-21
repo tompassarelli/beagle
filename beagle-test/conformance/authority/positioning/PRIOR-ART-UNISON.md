@@ -1,6 +1,6 @@
 # Prior-art steal sheet: Unison
 
-> License: the inspected source tree at `/home/tom/code/resources/unison`
+> License: the inspected source tree at `resources:unison`
 > (`db60ce2faa4649f97746873f7d186a6d3ebd3bb8`) is MIT-licensed under the
 > copyright notice in `resources/unison:LICENSE`. The tree also bundles
 > `Data.Relation`, which has a separate 3-clause BSD notice. This note

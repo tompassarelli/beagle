@@ -846,7 +846,7 @@ The old Beagle pin
 `4c05adc3315888e913b8b34a7cdf799ca808357c` currently names nixos-config and
 Gjoa in its sidecar, so both must move before `pin-retire`. The old pin
 `b4f3081420a3be73d730802d2f4608d78d0c6cf4` names Greywrought **and** the
-standalone `/home/tom/code/fram/main` mirror. Moving Greywrought alone does not
+standalone `fram:` mirror. Moving Greywrought alone does not
 make that pin retireable; keep it until the mirror's consumer record is
 separately resolved.
 

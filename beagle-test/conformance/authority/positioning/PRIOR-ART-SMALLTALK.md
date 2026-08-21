@@ -15,7 +15,7 @@ coordination = []
 ## License and source boundary
 
 This is original analysis for Beagle. It does not copy source expressions.
-The checked Pharo image source is `/home/tom/code/resources/pharo` at
+The checked Pharo image source is `resources:pharo` at
 `4f3de66285c017105f469b32cc5a2de7ac79183c`; its `LICENSE` says MIT with
 parts under Apache, plus separately licensed assets. Iceberg was checked at
 `pharo-vcs/iceberg` commit `15397097a2b9043dac879ff1b8311343c5b685af`; its
@@ -366,8 +366,8 @@ making the image the repository.
 
 ## Evidence ledger
 
-- Pharo license and source format: `/home/tom/code/resources/pharo/LICENSE`,
-  `/home/tom/code/resources/pharo/README.md`.
+- Pharo license and source format: `resources:pharo/LICENSE`,
+  `resources:pharo/README.md`.
 - Image snapshot contract: `pharo:src/System-SessionManager/SnapshotOperation.class.st:172-203`,
   `pharo:src/System-SessionManager/SessionManager.class.st:84-90,387-409`.
 - Identity rewriting: `pharo:src/Kernel/ProtoObject.class.st:41-66`.

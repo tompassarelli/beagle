@@ -26,8 +26,8 @@ rows. A `success-*blocked` row is counted as blocked when the requested gate or
 integration was not green; a closer that completed the source work is a
 separate completed row.
 
-The assignment source is `/home/tom/code/todo/model-assignment-ledger.md`;
-the execution source is `/home/tom/code/todo/agent-coord.md`. The latter is
+The assignment source is `todo:model-assignment-ledger.md`;
+the execution source is `todo:agent-coord.md`. The latter is
 authoritative where a dispatch row was still marked pending in the assignment
 ledger but the execution ledger recorded a terminal result.
 
@@ -43,9 +43,9 @@ Store, DSL, and gate rows; the Beagle/Nix capability probe rows; the two
 Firn-native closer pairs; the store-train source preparation; the
 `syntax-atom` bisect; `rpc-lowering`; and the C131 hosted-Beagle projection.
 Their exact assignment rows are visible at
-`/home/tom/code/todo/model-assignment-ledger.md:279-321`,
-`/home/tom/code/todo/model-assignment-ledger.md:328-385`, and
-`/home/tom/code/todo/model-assignment-ledger.md:450-508`.
+`todo:model-assignment-ledger.md:279-321`,
+`todo:model-assignment-ledger.md:328-385`, and
+`todo:model-assignment-ledger.md:450-508`.
 
 The Beagle outcome breakdown is therefore 13/28 complete, 13/28 blocked, and
 2/28 killed. The killed rows were the W5b hygiene wave at its fixed oracle
@@ -90,12 +90,12 @@ transcript hits came from the sanctioned `convo` search:
   -x 'delimiter error'`).
 
 The execution ledger corroborates the first item at
-`/home/tom/code/todo/agent-coord.md:5362` and the semantic/compiler incidents
-at `/home/tom/code/todo/agent-coord.md:20698-20704` and
-`/home/tom/code/todo/agent-coord.md:20801-20824`. It also records the important
+`todo:agent-coord.md:5362` and the semantic/compiler incidents
+at `todo:agent-coord.md:20698-20704` and
+`todo:agent-coord.md:20801-20824`. It also records the important
 correction that the reported five Firn parse failures were a stale-pin artifact,
 not a current-main parser failure, at
-`/home/tom/code/todo/agent-coord.md:10780-10985`.
+`todo:agent-coord.md:10780-10985`.
 
 ## 3. Retries to green
 
@@ -111,10 +111,10 @@ not treated as a retry or as a failure.
 | W5b full gate | 3 named rounds | 0 recorded | the final rounds remained blocked by latency/base failures; focused repairs were green but no full-gate green is recorded in the source set. |
 
 The C131 retry evidence is explicit in
-`/home/tom/code/todo/agent-coord.md:5362-5377`. The Beagle-side closer and
-kill evidence is at `/home/tom/code/todo/model-assignment-ledger.md:313-385`;
+`todo:agent-coord.md:5362-5377`. The Beagle-side closer and
+kill evidence is at `todo:model-assignment-ledger.md:313-385`;
 the control-side re-point evidence is at
-`/home/tom/code/todo/model-assignment-ledger.md:33-38`.
+`todo:model-assignment-ledger.md:33-38`.
 
 ## What the numbers support
 

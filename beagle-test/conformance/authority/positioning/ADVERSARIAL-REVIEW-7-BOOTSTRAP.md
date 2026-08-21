@@ -28,11 +28,11 @@ directory object ID. The sidecars, including their declared consumers, are:
 
 | Pin object | Sidecar and consumers |
 | --- | --- |
-| `487191b25f2493a5e8b50df0bc9421b12c7843bc` | `beagle:pins/487191b25f2493a5e8b50df0bc9421b12c7843bc.pin`; release `v0.23.0`; `/home/tom/code/fram/main`. |
-| `4aaf833c1edd27f155fbb744dfbbfa8ba9f1b55d` | `beagle:pins/4aaf833c1edd27f155fbb744dfbbfa8ba9f1b55d.pin`; `/home/tom/code/greywrought/main`, `/home/tom/code/gjoa/main`, `/home/tom/code/nixos-config/main`, `/home/tom/code/wake/main`, `/home/tom/code/fram/main`. The prose identifies this as the Beagle v0.22.0 compiler/runtime pin. |
-| `4c05adc3315888e913b8b34a7cdf799ca808357c` | `beagle:pins/4c05adc3315888e913b8b34a7cdf799ca808357c.pin`; `/home/tom/code/nixos-config/main`, `/home/tom/code/gjoa/main`. The prose identifies this as the FINAL compiler/runtime pin used for Firn tooling and packaged executables. |
-| `4f9c6f874157e3e7746e7e5f47c8748260511f25` | `beagle:pins/4f9c6f874157e3e7746e7e5f47c8748260511f25.pin`; `/home/tom/code/greywrought/main`. Native Core cache and qualified-global repair pin. |
-| `a39e2b7fff8543c91d6fd6ecd50e6ba8c641b8ec` | `beagle:pins/a39e2b7fff8543c91d6fd6ecd50e6ba8c641b8ec.pin`; `/home/tom/code/greywrought/worktrees/playable`. Incident compiler/runtime pin. |
+| `487191b25f2493a5e8b50df0bc9421b12c7843bc` | `beagle:pins/487191b25f2493a5e8b50df0bc9421b12c7843bc.pin`; release `v0.23.0`; `fram:`. |
+| `4aaf833c1edd27f155fbb744dfbbfa8ba9f1b55d` | `beagle:pins/4aaf833c1edd27f155fbb744dfbbfa8ba9f1b55d.pin`; `greywrought:`, `gjoa:`, `nixos-config:`, `wake:`, `fram:`. The prose identifies this as the Beagle v0.22.0 compiler/runtime pin. |
+| `4c05adc3315888e913b8b34a7cdf799ca808357c` | `beagle:pins/4c05adc3315888e913b8b34a7cdf799ca808357c.pin`; `nixos-config:`, `gjoa:`. The prose identifies this as the FINAL compiler/runtime pin used for Firn tooling and packaged executables. |
+| `4f9c6f874157e3e7746e7e5f47c8748260511f25` | `beagle:pins/4f9c6f874157e3e7746e7e5f47c8748260511f25.pin`; `greywrought:`. Native Core cache and qualified-global repair pin. |
+| `a39e2b7fff8543c91d6fd6ecd50e6ba8c641b8ec` | `beagle:pins/a39e2b7fff8543c91d6fd6ecd50e6ba8c641b8ec.pin`; `greywrought:worktrees/playable`. Incident compiler/runtime pin. |
 
 The pins are immutable source checkouts, not a managed archive of proven
 bootstrap artifacts. They contain the self-host source and checked-in seed,
@@ -134,8 +134,8 @@ prove that any older pin can compile today's HEAD.
 The drill created the requested detached checkout at current main HEAD:
 
 ```text
-git -C /home/tom/code/beagle/main worktree add --detach \
-  /home/tom/code/beagle/worktrees/adv-bootstrap
+git -C beagle: worktree add --detach \
+  beagle:worktrees/adv-bootstrap
 HEAD 96e5d08bfe35d186a137d962d960648b21aba45f
 ```
 
@@ -161,9 +161,9 @@ an existing retained pin and create a fresh recovery worktree from the broken
 HEAD (or use the operator's already detached incident checkout):
 
 ```sh
-PIN=/home/tom/code/beagle/pins/4c05adc3315888e913b8b34a7cdf799ca808357c
-REC=/home/tom/code/beagle/worktrees/bootstrap-recovery
-git -C /home/tom/code/beagle/main worktree add --detach "$REC"
+PIN=beagle:pins/4c05adc3315888e913b8b34a7cdf799ca808357c
+REC=beagle:worktrees/bootstrap-recovery
+git -C beagle: worktree add --detach "$REC"
 OUT=/tmp/beagle-bootstrap-recovery
 mkdir -p "$OUT/seed/selfhost"
 

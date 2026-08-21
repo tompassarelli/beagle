@@ -71,7 +71,7 @@ The revisions read were:
 | Wake compiler consumer | current tree read-only | Its Beagle pin is a compiler consumer. Its FramAuthority and fram plan vocabulary are Wake contracts, not evidence of a Beagle Store runtime dependency. Do not lexical-sweep them in this wave. |
 
 The current Beagle pin sidecar at
-/home/tom/code/beagle/pins/4aaf833c1edd27f155fbb744dfbbfa8ba9f1b55d.pin
+beagle:pins/4aaf833c1edd27f155fbb744dfbbfa8ba9f1b55d.pin
 names Greywrought, Gjoa, nixos-config, Wake, and the legacy Fram checkout.
 The old plan's 4c05adc3... and b4f30814... pin statements are stale. A new
 hash-named pin is required after the producer lands; never repoint a live pin.
@@ -415,7 +415,7 @@ its component environment becomes BEAGLE_STORE_*.
 Gjoa has no Store runtime cutover: advance its Beagle pin and re-vendor only
 when the new producer is the selected compiler/runtime object.
 
-The current Beagle pin sidecar also names Wake and /home/tom/code/fram/main.
+The current Beagle pin sidecar also names Wake and fram:.
 Wake only consumes Beagle compiler/runtime artifacts; do not rename Wake's
 domain-level FramAuthority, framPlan, or .fram.json contracts here. The
 standalone Fram checkout is retained as a rollback/archive asset. Do not edit
@@ -434,7 +434,7 @@ These are explicit corrections to the old plan, not optional improvements.
 | North step 2: point build/CI at branch-core | Already landed, but pinned to old Beagle db33... | Replace with store/ and the new producer object; retain the migration's test coverage. |
 | North test inventory from the old plan | Current North has the expanded list above, including JSON, reconnect, lifecycle, top-level, and SDK fixtures. | Use the current list, not the old subset. |
 | Old pin rollback paragraph naming 4c05adc3 and b4f30814 | Current sidecar is 4aaf833c... and names Wake plus legacy Fram. | Recompute pin consumers after all landings; never apply old pin IDs mechanically. |
-| “No standalone Fram consumers post-adoption” | Current 4aaf...pin still names /home/tom/code/fram/main; live legacy assets exist. | Keep the old pin until that record is explicitly resolved. This is a retirement prerequisite, not a rename alias. |
+| “No standalone Fram consumers post-adoption” | Current 4aaf...pin still names fram:; live legacy assets exist. | Keep the old pin until that record is explicitly resolved. This is a retirement prerequisite, not a rename alias. |
 | Beagle step “rename every fram test” | Protocol fixture names and bytes intentionally remain FRAMRPC, FRAMLOG, framref, and framlog. | Rename product/API assertions; retain protocol identities under the allowlist. |
 | Old final acceptance “no old name anywhere” | Wake domain contracts and retained durable formats are legitimate non-Store names. | Apply the scoped denylist, not a blind global fram grep. |
 | “One heavy build/suite at a time” | Not a plan correctness issue, but it conflicts with current fleet rules for independent seams. | Use one producer gate and parallel independent consumer gates; serialize shared live cutover and resource-bound gates. |
@@ -576,7 +576,7 @@ component paths, commands, selector names, and env bindings are.
 
 ~~~sh
 for repo in north nixos-config greywrought gjoa; do
-  root="/home/tom/code/$repo/main"
+  root=":"
   ! rg -n -I --hidden --glob '!.git/**' --glob '!node_modules/**' \
     'branch-core|fram-mcp|fram-server|north-fram|greywrought-fram|mcp_servers\.fram|@tompassarelli/framrpc|FRAM_HOME|FRAM_BIN|FRAM_OUT|FRAM_LOG|FRAM_THREADS|FRAM_TELEMETRY_LOG|FRAM_SPACE_ID|NORTH_FRAM_SELECTION|NORTH_FRAMRPC_OUT' "$root"
 done
@@ -611,7 +611,7 @@ nixos-config with new commits, restore the old selector and MCP declaration,
 and leave Beagle main advanced. FRAMRPC and FRAMLOG require no translation.
 
 Do not delete the old 4aaf... pin while its sidecar still names Wake or the
-legacy Fram checkout. Do not edit /home/tom/code/fram/main as part of this
+legacy Fram checkout. Do not edit fram: as part of this
 wave. After every real consumer has moved or been explicitly retired, add the
 required exact consumer-main records and use pin-retire only after its proof
 passes.

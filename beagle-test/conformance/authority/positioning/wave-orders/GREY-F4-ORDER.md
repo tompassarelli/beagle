@@ -36,7 +36,7 @@ Current journal consumers that are conditional on the W0/W2 decision are `greywr
 Baseline inventory command:
 
 ```sh
-cd /home/tom/code/greywrought/main
+cd greywrought:
 git status --short --branch
 git rev-parse HEAD
 wc -l tools/content-addressed-store.mjs tools/terrain-radix-store.mjs tools/authority-journal.mjs tools/authority-checkpoint.mjs tools/authority-terrain.mjs tools/authority-terrain-service.mjs tools/fram-authority-runtime.mjs tools/authority-host.mjs tools/world-checkpoint-v1-v2-migration.mjs tests/content-addressed-store.test.mjs tests/terrain-radix-store.test.mjs tests/authority-journal.test.mjs tests/authority-checkpoint.test.mjs tests/authority-terrain.test.mjs tests/authority-terrain-service.test.mjs tests/fram-authority-runtime.test.mjs tests/native-fram-restart.test.mjs tests/world-checkpoint-v1-v2-migration.test.mjs
@@ -80,7 +80,7 @@ The refactor is accepted only when codecs work against an in-memory store interf
 
 ## Lowest-layer verification
 
-Run from `/home/tom/code/greywrought/main` or the implementation lane; stop on first failure and preserve output.
+Run from `greywrought:` or the implementation lane; stop on first failure and preserve output.
 
 | Step | Command |
 |---|---|

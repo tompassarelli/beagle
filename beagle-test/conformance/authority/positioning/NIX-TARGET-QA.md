@@ -77,11 +77,11 @@ Temporary source used, outside the Beagle checkout:
 It was syntax-checked and emitted with the repository tooling at nice 19:
 
 ```text
-nice -n 19 /home/tom/code/beagle/main/bin/beagle syntax /tmp/beagle-nix-qa/refinement.bnix
+nice -n 19 beagle:bin/beagle syntax /tmp/beagle-nix-qa/refinement.bnix
 /tmp/beagle-nix-qa/refinement.bnix: ok
 1 file(s) ok
 
-BEAGLE_NIX_EVAL_CHECK=1 nice -n 19 /home/tom/code/beagle/main/bin/beagle build \
+BEAGLE_NIX_EVAL_CHECK=1 nice -n 19 beagle:bin/beagle build \
   /tmp/beagle-nix-qa/refinement.bnix /tmp/beagle-nix-qa/refinement.nix
 /tmp/beagle-nix-qa/refinement.bnix -> /tmp/beagle-nix-qa/refinement.nix
 ```
@@ -195,14 +195,14 @@ an unforced top-level field remains unvalidated until Nix evaluates it.
 
 ## Verification
 
-- `nice -n 19 /home/tom/code/beagle/main/bin/beagle doctor --deep`: authoring
+- `nice -n 19 beagle:bin/beagle doctor --deep`: authoring
   loop healthy; Nix emitter live.
 - `nice -n 19 .../bin/beagle syntax` on the temporary module: passed.
 - `BEAGLE_NIX_EVAL_CHECK=1 nice -n 19 .../bin/beagle build`: passed and
   `nix-instantiate --parse` accepted the emitted Nix.
 - Pinned Racket command
-  `source /home/tom/code/beagle/main/bin/_beagle-racket; nice -n 19 "$RACO" test
-  /home/tom/code/beagle/main/beagle-test/tests/emit-nix.rkt`: **102 tests
+  `source beagle:bin/_beagle-racket; nice -n 19 "$RACO" test
+  beagle:beagle-test/tests/emit-nix.rkt`: **102 tests
   passed**.
 - A standalone `beagle check --agent` from `/tmp/beagle-nix-qa` was also
   attempted; it stopped before type checking because that temporary directory
