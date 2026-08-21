@@ -18742,7 +18742,8 @@
                   "TODO-NATIVE-UTF8-DECODE-OPERAND: utf8-decode takes one native Vec Int or ByteSource value")
 
                 (and (= "sha256-bytes" callee) (= 1 (count values))
-                  (int-vector-value? types (nth value-types 0)))
+                  (or (int-vector-value? types (nth value-types 0))
+                    (same-id? (nth value-types 0) (byte-source-type-id))))
                 (let [result-id core/NativeId
                       (state-id current owner "sha256-bytes")]
                   (->ExprResultV0
@@ -18755,7 +18756,7 @@
 
                 (= "sha256-bytes" callee)
                 (fail-result current
-                  "TODO-NATIVE-SHA256-BYTES-OPERAND: sha256-bytes takes one native Vec Int value")
+                  "TODO-NATIVE-SHA256-BYTES-OPERAND: sha256-bytes takes one native Vec Int or ByteSource value")
 
                 (and (= "float-to-bits" callee) (= 1 (count values))
                   (same-id? (nth value-types 0) (type-id "Float")))

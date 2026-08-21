@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle
 (ns native.codec-primitives)
 
 (defn encode-utf8 [(value String)] (Vec Int)
@@ -14,4 +14,7 @@
   (float-from-bits value))
 
 (defn digest-bytes [(value (Vec Int))] String
+  (sha256-bytes value))
+
+(defn digest-byte-source [(value ByteSource)] String
   (sha256-bytes value))

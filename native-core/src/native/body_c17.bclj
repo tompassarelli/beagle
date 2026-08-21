@@ -392,13 +392,16 @@
               (= "response" (core/abivaluev0-name result))
               (core/native-id= (store-compile-response-type-id)
                 (core/abivaluev0-type-id result))
-              (instance? native.core.ArenaOwnedV0
-                (core/abivaluev0-ownership result))
-              (some? (core/abivaluev0-lifetime-region result))
-              (core/native-id=
-                (core/arenaownedv0-region
-                  (core/abivaluev0-ownership result))
-                (core/abivaluev0-lifetime-region result))
+              (let [ownership core/OwnershipRuleV0
+                    (core/abivaluev0-ownership result)
+                    region (U core/NativeId Nil) (get ownership :region nil)
+                    lifetime (U core/NativeId Nil)
+                    (core/abivaluev0-lifetime-region result)]
+                (and
+                  (instance? native.core.ArenaOwnedV0 ownership)
+                  (some? region)
+                  (some? lifetime)
+                  (core/native-id= region lifetime)))
               (= 2 (count (core/abideclv0-required-effects abi)))
               (= 2 (count (core/abideclv0-required-capabilities abi)))
               (= "v0" (core/abideclv0-version abi)))
@@ -1042,6 +1045,14 @@
       (if (core/native-id= (core/typedef-id (nth types position)) target)
         (nth types position)
           (recur (+ position 1))))))
+
+(defn byte-source-type?
+  [types (Vec core/TypeDef)
+   target core/NativeId] Bool
+  (let [definition (U core/TypeDef Nil) (type-with-id types target)]
+    (if (nil? definition)
+      false
+      (= "ByteSource" (core/typedef-name definition)))))
 
 (defn variant-tag-for-payload
   [layouts (Vec core/LayoutDef)
@@ -2388,11 +2399,18 @@
               (core/nativebytesfromintsboundedv0-max-bytes-id operation))
             ");\n")
           (instance? native.core.Sha256BytesV0 operation)
-          (str "  " target " = native_sha256_bytes((native_arena *)"
-            (value-name function slots (core/sha256bytesv0-arena-id operation))
-            ", "
-            (value-name function slots (core/sha256bytesv0-source-id operation))
-            ");\n")
+          (let [source-id core/NativeId
+                (core/sha256bytesv0-source-id operation)
+                source String (value-name function slots source-id)]
+            (if (byte-source-type? types (slot-type function slots source-id))
+              (str "  " target " = native_sha256_byte_source((native_arena *)"
+                (value-name function slots
+                  (core/sha256bytesv0-arena-id operation))
+                ", (const native_byte_source *)" source ");\n")
+              (str "  " target " = native_sha256_bytes((native_arena *)"
+                (value-name function slots
+                  (core/sha256bytesv0-arena-id operation))
+                ", " source ");\n")))
           (instance? native.core.FloatToBitsV0 operation)
           (str "  " target " = native_float_to_bits("
             (value-name function slots (core/floattobitsv0-source-id operation))

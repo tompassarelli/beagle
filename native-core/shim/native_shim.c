@@ -9421,7 +9421,10 @@ static void native_sha256_transform(uint32_t state[8],
   state[7] += h;
 }
 
-uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source) {
+static uint64_t native_sha256_octets(native_arena *arena,
+                                     const uint8_t *dense_source,
+                                     const native_vec *vector_source,
+                                     int64_t source_length) {
   static const uint8_t hex[] = "0123456789abcdef";
   uint32_t state[8] = {UINT32_C(0x6a09e667), UINT32_C(0xbb67ae85),
                        UINT32_C(0x3c6ef372), UINT32_C(0xa54ff53a),
@@ -9435,26 +9438,33 @@ uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source) {
   int64_t remaining;
   int64_t index;
 
-  native_byte_vector_check(source);
-  while ((source->length - offset) >= INT64_C(64)) {
-    for (index = INT64_C(0); index < INT64_C(64); index++) {
-      block[index] = native_vector_byte(source, offset + index);
+  while ((source_length - offset) >= INT64_C(64)) {
+    if (vector_source == NULL) {
+      native_sha256_transform(state, dense_source + (size_t)offset);
+    } else {
+      for (index = INT64_C(0); index < INT64_C(64); index++) {
+        block[index] = native_vector_byte(vector_source, offset + index);
+      }
+      native_sha256_transform(state, block);
     }
-    native_sha256_transform(state, block);
     offset += INT64_C(64);
   }
 
-  remaining = source->length - offset;
+  remaining = source_length - offset;
   memset(block, 0, sizeof block);
-  for (index = INT64_C(0); index < remaining; index++) {
-    block[index] = native_vector_byte(source, offset + index);
+  if ((vector_source == NULL) && (remaining > INT64_C(0))) {
+    memcpy(block, dense_source + (size_t)offset, (size_t)remaining);
+  } else {
+    for (index = INT64_C(0); index < remaining; index++) {
+      block[index] = native_vector_byte(vector_source, offset + index);
+    }
   }
   block[remaining] = UINT8_C(0x80);
   if (remaining >= INT64_C(56)) {
     native_sha256_transform(state, block);
     memset(block, 0, sizeof block);
   }
-  bit_length = (uint64_t)source->length * UINT64_C(8);
+  bit_length = (uint64_t)source_length * UINT64_C(8);
   for (index = INT64_C(0); index < INT64_C(8); index++) {
     block[INT64_C(63) - index] =
         (uint8_t)(bit_length >> ((uint32_t)index * UINT32_C(8)));
@@ -9472,6 +9482,20 @@ uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source) {
     }
   }
   return result;
+}
+
+uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source) {
+  native_byte_vector_check(source);
+  return native_sha256_octets(arena, NULL, source, source->length);
+}
+
+uint64_t native_sha256_byte_source(native_arena *arena,
+                                   const native_byte_source *source) {
+  if ((source == NULL) || (source->length < INT64_C(0)) ||
+      ((source->length > INT64_C(0)) && (source->data == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return native_sha256_octets(arena, source->data, NULL, source->length);
 }
 
 int64_t native_float_to_bits(double source) {

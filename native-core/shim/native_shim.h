@@ -643,6 +643,8 @@ native_bytes native_bytes_from_ints_bounded(native_arena *arena,
                                             const native_vec *source,
                                             int64_t max_bytes);
 uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source);
+uint64_t native_sha256_byte_source(native_arena *arena,
+                                   const native_byte_source *source);
 int64_t native_float_to_bits(double source);
 double native_float_from_bits(int64_t source);
 

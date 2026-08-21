@@ -116,7 +116,12 @@
    'utf8-decode
    (type-fn (list (type-app 'Vec (list (p 'Int)))) #f (p 'String))
    'sha256-bytes
-   (type-fn (list (type-app 'Vec (list (p 'Int)))) #f (p 'String))
+   (type-fn
+    (list
+     (type-union
+      (list (type-app 'Vec (list (p 'Int))) (p 'ByteSource))))
+    #f
+    (p 'String))
    'float-to-bits (fn-of '(Float) 'Int)
    'float-from-bits (fn-of '(Int) 'Float)
    ;; The epoch is unspecified; readings support elapsed time, never wall time.

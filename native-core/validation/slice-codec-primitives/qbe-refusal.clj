@@ -6,9 +6,9 @@
          '[native.slice :as slice]
          '[native.stages :as stages])
 
-(let [[facts-path module-name relative-path compiler-commit] *command-line-args*
+(let [[facts-manifest-path module-name relative-path compiler-commit] *command-line-args*
       configuration ["profile=3"]
-      rows (slice/parse-facts (slurp facts-path))
+      rows (slice/read-fact-manifest facts-manifest-path)
       source (slice/source-program rows module-name relative-path)
       frozen-source (lower/sourcefreezeacceptedv0-frozen
                       (lower/freeze-source-stage source compiler-commit configuration))
