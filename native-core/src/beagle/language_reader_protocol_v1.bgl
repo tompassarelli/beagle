@@ -283,10 +283,11 @@
           false)))))
 
 (defn contains-error-diagnostic-v1? [diagnostics (Vec ReaderDiagnosticV1)] Bool
-  (some
-    (fn [diagnostic ReaderDiagnosticV1] Bool
-      (= :error (readerdiagnosticv1-severity diagnostic)))
-    diagnostics))
+  (some?
+    (some
+      (fn [diagnostic ReaderDiagnosticV1] Bool
+        (= :error (readerdiagnosticv1-severity diagnostic)))
+      diagnostics)))
 
 (defn reader-product-candidate-valid-v1?
   [request ReaderRequestV1
