@@ -95,12 +95,20 @@
 (defn canonical-record
   [tag String
    fields (Vec String)] String
-  (str (count tag) ":" tag ":" (core/canonical-parts fields)))
+  (let [size Int (count fields)
+        initial-pieces (Vec String) [(str (count tag) ":" tag ":")]]
+    (loop [index Int 0
+           pieces (Vec String) initial-pieces]
+      (if (>= index size)
+        (str/join "" pieces)
+        (let [field String (nth fields index)]
+          (recur (+ index 1)
+            (conj (conj (conj pieces (str (count field))) ":") field)))))))
 
 (defn canonical-set
   [tag String
    items (Vec String)] String
-  (canonical-record tag (sort items)))
+  (canonical-record tag (vec (sort items))))
 
 (defn encode-bool [value Bool] String
   (if value "1" "0"))
