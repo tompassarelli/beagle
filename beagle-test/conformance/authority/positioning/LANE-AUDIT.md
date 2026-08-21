@@ -99,7 +99,7 @@ than an omission — see the gate section below. One lane was fully prepared:
 |---:|---|---|---|
 | 1 | `demo-driver-v2` `c324f0c8` | **READY TO LAND** | Converts the Stage 5 demo from a no-op `comment-layout` edit to a real `private-implementation` semantic edit and adds behavioural proof (builds native executables for baseline and candidate and compares their run output). Premise re-verified against current main: the `private-implementation/foundation.bgl` fixture, `corpus/app.bgl`'s `run-score` entry, the `private-offset` definition and the `native-exe` command all exist. Already rebased onto `5ec85e82`; merges clean; no test tier invokes the file, so landing risk is low. Blocked only by the contended gate.  |
 | 2 | `dsl-wire` `0430b134` | VALUABLE | 711 insertions of private wire-codec schema DSL across three Store `.bgl` codecs. All three files still exist in main and main has barely touched them since the lane's base (one file, +4/-5), so the premise holds. Merges clean. |
-| 3 | `w1.5-migration` `4c791522` | VALUABLE, needs an owner decision | Premise still holds — main still defines and exports `qualified-ref->structural-name`. This is the **complete** removal: it drops both bridge directions and rewires `check.rkt` (`reference-structural-name`, `reference-hash-qualified-ref`) so nothing needs them, leaving no dangling callers. It collides with `scaffold-guard`, which does a partial version of the same removal — see below. |
+| 3 | `w1.5-migration` `4c791522` | VALUABLE, needs an owner decision | Premise still holds — main still defines and exports the forward structural-name bridge. This is the **complete** removal: it drops both bridge directions and rewires `check.rkt` (`reference-structural-name`, `reference-hash-qualified-ref`) so nothing needs them, leaving no dangling callers. It collides with `scaffold-guard`, which does a partial version of the same removal — see below. |
 | 4 | `w12-migration` `68f4c384` | VALUABLE but risky | Retires legacy compiler dispatch: -470 lines in `parse.rkt` plus shape-sensitive definition names. Merges clean textually, but main has added +157/-31 to the same file since the lane's base, so a clean textual merge is NOT evidence of correctness here. Do not land without the full gate green. |
 | 5 | `store-gate2` `83abe046` | **BLOCKED — real dependency** | Advances `native-core/validation/store.ref` from `24309a05` to `711c02c1`. That Store commit is **not on Store main** (`f8fd6301` at time of check); it exists only on the Store lane `store-layout-rename` and a protected Store pin. Landing it would point Beagle's validation at an unpublished commit. The Store layout rename must land first. |
 | 6 | `rpc-lowering` `13e21ac0` | VALUABLE, **owner-blocked** | Native global dependency lowering fix, merges clean. It edits `native-core/src/native/lower.bclj`, which the live sibling lanes own and which was explicitly out of bounds for this pass. Hand to whoever owns the native lowering seam. |
@@ -123,12 +123,12 @@ reported and not resolved. **During this pass another actor committed them** as
 `bee9d25b "wip: preserve found uncommitted state in scaffold-guard lane"`. The
 lane is now clean and 1 commit ahead. Exactly what it contains:
 
-- `beagle-lib/private/ast.rkt` — deletes `qualified-ref->structural-name` (the
-  definition and its export). It leaves `structural-name->qualified-ref` in
+- `beagle-lib/private/ast.rkt` — deletes the forward structural-name bridge (the
+  definition and its export). It leaves the reverse structural-name bridge in
   place, which still has 3 uses in `ast.rkt` and 1 in `check.rkt`.
 - `bin/test/qualified-ref-scaffold/run.sh` — turns the single forbidden-string
-  check into a loop over both `qualified-ref->symbol` and
-  `qualified-ref->structural-name`.
+  check into a loop over both the retired symbol accessor and the forward
+  structural-name bridge.
 
 It is self-consistent (no dangling callers) but it is a **half** of what
 `w1.5-migration` does completely. The two conflict. The decision the commander
