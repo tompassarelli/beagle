@@ -160,7 +160,7 @@
 ;; Every encoding handed here is already tagged by its own canonical record, so
 ;; the digest needs no separate domain prefix.
 (defn content-digest [encoding String] String
-  (str "sha256:" (clj/sha256-utf8 encoding)))
+  (str "sha256:" (bgl/sha256-utf8 encoding)))
 
 (defn lowercase-hex-digit? [character Any] Bool
   (some? (some (fn [allowed Any] Bool (= allowed character))

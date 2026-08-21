@@ -30,13 +30,66 @@ cat >"$scratch/digest_platform_gate.bclj" <<'BGL'
   (sha256-bytes value))
 BGL
 
-timeout 180s nice -n 19 "$repo/bin/beagle-build-all" \
+cat >"$scratch/digest_platform_native.bgl" <<'BGL'
+#lang beagle
+(ns native.digest-platform-native)
+
+(defn digest-text [value String] String
+  (bgl/sha256-utf8 value))
+
+(defn -main [] Int
+  (if (and
+        (= (digest-text "")
+           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        (= (digest-text "abc")
+           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        (= (digest-text "λ💥")
+           "18e1a20921b5309071b878eae9361c5f90451591068d0919af4edd6c5200b8ac"))
+    0
+    41))
+BGL
+
+cat >"$scratch/digest_platform_emitter.bclj" <<'BGL'
+#lang beagle/clj
+(ns native.digest-platform-emitter)
+
+(defn digest-text [value String] String
+  (bgl/sha256-utf8 value))
+BGL
+
+timeout 180s nice -n 19 env BEAGLE_EMIT_SRCLOC=0 \
+  "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
   "$repo/native-core/src/native/stages.bclj" \
   "$repo/native-core/src/native/obligations.bclj" \
   "$repo/native-core/src/native/lower.bclj" \
   "$scratch/digest_platform_gate.bclj" \
+  "$scratch/digest_platform_emitter.bclj" \
   --out "$scratch/out"
+
+timeout 60s nice -n 19 bb -cp "$repo/self-host/seed" \
+  -m selfhost.main emit "$scratch/digest_platform_emitter.bclj" \
+  >"$scratch/digest_platform_emitter.selfhost.clj"
+cmp "$scratch/out/native/digest_platform_emitter.clj" \
+  "$scratch/digest_platform_emitter.selfhost.clj"
+grep -F 'beagle$sha256_utf8_v0' \
+  "$scratch/digest_platform_emitter.selfhost.clj" >/dev/null
+
+# This crosses the same Core compiler projection that compiles native.stages,
+# lowers the target-neutral intrinsic through UTF-8 and native SHA-256, links
+# the focused executable, and checks the result without a hosted runtime.
+timeout 180s nice -n 19 env \
+  BEAGLE_CORE_BUILD_CACHE="$scratch/core-cache" \
+  BEAGLE_NATIVE_EXE_CACHE="$scratch/native-exe-cache" \
+  "$repo/bin/beagle" native-exe \
+  --out "$scratch/native-digest" \
+  --artifacts "$scratch/native-out" \
+  --entry native.digest-platform-native/-main \
+  "$scratch/digest_platform_native.bgl"
+grep -Fx 'stage typed-to-native COMPLETE' "$scratch/native-out/report.txt"
+grep -F 'native_utf8_encode' "$scratch/native-out/module_0.c" >/dev/null
+grep -F 'native_sha256_bytes' "$scratch/native-out/module_0.c" >/dev/null
+env -i "$scratch/native-digest"
 
 timeout 30s nice -n 19 bb -cp "$scratch/out" -e '
   (require (quote [native.core :as core])

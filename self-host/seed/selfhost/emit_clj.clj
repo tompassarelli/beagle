@@ -20,9 +20,11 @@
 
 (def ^String CLJ-HOST-REST "$beagle$rest$host")
 
-(def ^String CLJ-SHA256-CALL (str "beagle$sha256" "_bytes_v0"))
+(def ^String CLJ-SHA256-BYTES-CALL (str "beagle$sha256" "_bytes_v0"))
 
-(def ^String CLJ-SHA256-RUNTIME (str "(defn- " CLJ-SHA256-CALL " [values]\n" "  (when-not (vector? values)\n" "    (throw (ex-info \"sha256-bytes requires a Vec Int\"\n" "                    {:value values})))\n" "  (let [raw (byte-array\n" "             (map-indexed\n" "              (fn [index value]\n" "                (if (and (integer? value) (<= 0 value 255))\n" "                  (unchecked-byte value)\n" "                  (throw\n" "                   (ex-info \"sha256-bytes requires byte values from 0 through 255\"\n" "                            {:index index :value value}))))\n" "              values))\n" "        digest (.digest (java.security.MessageDigest/getInstance \"SHA-256\") raw)]\n" "    (apply str\n" "           (map (fn [value]\n" "                  (format \"%02x\" (bit-and (int value) 255)))\n" "                digest))))"))
+(def ^String CLJ-SHA256-UTF8-CALL (str "beagle$sha256" "_utf8_v0"))
+
+(def ^String CLJ-SHA256-RUNTIME (str "(defn- " CLJ-SHA256-BYTES-CALL " [values]\n" "  (when-not (vector? values)\n" "    (throw (ex-info \"sha256-bytes requires a Vec Int\"\n" "                    {:value values})))\n" "  (let [raw (byte-array\n" "             (map-indexed\n" "              (fn [index value]\n" "                (if (and (integer? value) (<= 0 value 255))\n" "                  (unchecked-byte value)\n" "                  (throw\n" "                   (ex-info \"sha256-bytes requires byte values from 0 through 255\"\n" "                            {:index index :value value}))))\n" "              values))\n" "        digest (.digest (java.security.MessageDigest/getInstance \"SHA-256\") raw)]\n" "    (apply str\n" "           (map (fn [value]\n" "                  (format \"%02x\" (bit-and (int value) 255)))\n" "                digest))))\n\n" "(defn- " CLJ-SHA256-UTF8-CALL " [text]\n" "  (when-not (string? text)\n" "    (throw (ex-info \"bgl/sha256-utf8 requires a String\"\n" "                    {:value text})))\n" "  (let [raw\n" "        (if (.canEncode\n" "             (.newEncoder java.nio.charset.StandardCharsets/UTF_8)\n" "             ^CharSequence text)\n" "          (.getBytes ^String text java.nio.charset.StandardCharsets/UTF_8)\n" "          (let [units (vec text)\n" "                size (count units)]\n" "            (byte-array\n" "             (persistent!\n" "              (loop [index 0\n" "                     bytes (transient [])]\n" "                (if (>= index size)\n" "                  bytes\n" "                  (let [unit (int (nth units index))\n" "                        paired (and (>= unit 55296) (< unit 56320)\n" "                                    (< (+ index 1) size))\n" "                        point (if paired\n" "                                (+ 65536\n" "                                   (+ (* (- unit 55296) 1024)\n" "                                      (- (int (nth units (+ index 1))) 56320)))\n" "                                unit)\n" "                        next-index (+ index (if paired 2 1))]\n" "                    (cond\n" "                      (< point 128)\n" "                      (recur next-index (conj! bytes (unchecked-byte point)))\n" "                      (< point 2048)\n" "                      (recur next-index\n" "                             (conj! (conj! bytes\n" "                                          (unchecked-byte (+ 192 (quot point 64))))\n" "                                    (unchecked-byte (+ 128 (mod point 64)))))\n" "                      (< point 65536)\n" "                      (recur next-index\n" "                             (conj! (conj! (conj! bytes\n" "                                                 (unchecked-byte (+ 224 (quot point 4096))))\n" "                                          (unchecked-byte (+ 128 (mod (quot point 64) 64))))\n" "                                    (unchecked-byte (+ 128 (mod point 64)))))\n" "                      :else\n" "                      (recur next-index\n" "                             (conj! (conj! (conj! (conj! bytes\n" "                                                        (unchecked-byte (+ 240 (quot point 262144))))\n" "                                                 (unchecked-byte (+ 128 (mod (quot point 4096) 64))))\n" "                                          (unchecked-byte (+ 128 (mod (quot point 64) 64))))\n" "                                    (unchecked-byte (+ 128 (mod point 64)))))))))))))\n" "        digest (.digest (java.security.MessageDigest/getInstance \"SHA-256\") raw)]\n" "    (apply str\n" "           (map (fn [value]\n" "                  (format \"%02x\" (bit-and (int value) 255)))\n" "                digest))))"))
 
 (def loop-constraint-arity (atom nil))
 
@@ -693,7 +695,8 @@
   (if (= (get fn-expr "node") "ref") (let [fn-key (reference-key fn-expr)]
   (cond
   (and (= 1 (count args)) (or (contains? (deref scalar-fns) fn-key) (qualified-reference=? fn-expr "bgl" "promote"))) (emit-expr* (nth args 0))
-  (and (= fn-key "sha256-bytes") (= 1 (count args)) (not (contains? (deref local-names) fn-key))) (str "(" CLJ-SHA256-CALL " " (emit-expr* (nth args 0)) ")")
+  (and (= fn-key "sha256-bytes") (= 1 (count args)) (not (contains? (deref local-names) fn-key))) (str "(" CLJ-SHA256-BYTES-CALL " " (emit-expr* (nth args 0)) ")")
+  (and (qualified-reference=? fn-expr "bgl" "sha256-utf8") (= 1 (count args))) (str "(" CLJ-SHA256-UTF8-CALL " " (emit-expr* (nth args 0)) ")")
   :else (str "(" (reference->clj fn-expr) (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
   (= node "vec") (str "[" (str/join " " (mapv emit-expr* (get e "items"))) "]")
   (= node "map") (let [strs (mapv (fn [p] (str (emit-expr* (get p "key")) " " (emit-expr* (get p "val")))) (get e "pairs"))]
@@ -799,7 +802,7 @@
   (register-tables! (get prog "forms"))
   (register-refer-output-names! (get prog "requires"))
   (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
-  (str (emit-ns-form prog body) "\n\n" (if (str/includes? body CLJ-SHA256-CALL) (str CLJ-SHA256-RUNTIME "\n") "") body "\n"))))
+  (str (emit-ns-form prog body) "\n\n" (if (or (str/includes? body CLJ-SHA256-BYTES-CALL) (str/includes? body CLJ-SHA256-UTF8-CALL)) (str CLJ-SHA256-RUNTIME "\n") "") body "\n"))))
 
 (def passes (atom []))
 
@@ -856,13 +859,15 @@
   (expect! "reference: qualified call keeps structural callee identity" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "(str/upper-case value)"))
   (expect! "reference: qualified static call renders class and method" (= (emit-expr! {"node" "static-call" "qualifier" "Math" "name" "abs" "providerId" nil "args" [{"node" "literal" "kind" "number" "value" -1}]}) "(Math/abs -1)"))
   (expect! "reference: structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "value"))
-  (expect! "intrinsic: sha256-bytes injects its Clojure runtime call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "ref" "name" "values"}]}) (str "(" CLJ-SHA256-CALL " values)")))
+  (expect! "intrinsic: sha256-bytes injects its Clojure runtime call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "ref" "name" "values"}]}) (str "(" CLJ-SHA256-BYTES-CALL " values)")))
+  (expect! "intrinsic: structural bgl/sha256-utf8 injects its Clojure runtime call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "sha256-utf8" "providerId" nil} "args" [{"node" "ref" "name" "text"}]}) (str "(" CLJ-SHA256-UTF8-CALL " text)")))
   (expect! "intrinsic: local sha256-bytes shadows the portable intrinsic" (do
   (reset! local-names {"sha256-bytes" true})
   (let [output (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "ref" "name" "values"}]})]
   (reset! local-names {})
   (= output "(sha256-bytes values)"))))
   (expect! "intrinsic: program includes the sha256 runtime helper" (str/includes? (emit-program! {"namespace" "fixture.sha256" "target" "clj" "gen-class" false "requires" [] "imports" [] "externs" [] "forms" [{"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "vec" "items" []}]}]}) CLJ-SHA256-RUNTIME))
+  (expect! "intrinsic: bgl/sha256-utf8 program includes the sha256 runtime helper" (str/includes? (emit-program! {"namespace" "fixture.sha256-utf8" "target" "clj" "gen-class" false "requires" [] "imports" [] "externs" [] "forms" [{"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "sha256-utf8" "providerId" nil} "args" [{"node" "literal" "kind" "string" "value" "abc"}]}]}) CLJ-SHA256-RUNTIME))
   (expect! "reference: imported record tables lower once at metadata boundary" (= (get (structuralize-reference-table {"models/Account" ["id"]}) ["qualified-ref" "models" "Account"]) ["id"]))
   (expect! "reference: qualified record pattern uses provider identity" (do
   (reset! record-fields {["qualified-ref" "models" "Account"] ["id"]})

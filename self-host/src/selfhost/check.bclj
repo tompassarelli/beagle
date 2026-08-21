@@ -1083,6 +1083,8 @@
    "bigint"   (make-fn [ANY] nil (make-prim "Int"))
    "double"   (make-fn [ANY] nil (make-prim "Float"))
    "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int"))
+   ["qualified-ref" "bgl" "sha256-utf8" nil]
+               (make-fn [(make-prim "String")] nil (make-prim "String"))
    "str"      (make-fn [] ANY (make-prim "String"))
    "get"      (make-fn [ANY ANY] ANY ANY)
    "get-in"   (make-fn [ANY ANY] ANY ANY)
@@ -7760,6 +7762,15 @@
            (= (get identity-result "count") 0)
            (fn-type? identity-type)
            (= (get (nth (get identity-type "params") 0) "name") "Int"))))
+
+  (expect! "stdlib: bgl/sha256-utf8 has one typed String boundary"
+    (let [signature (reference-map-ref
+                      (target-stdlib "core")
+                      (make-qualified-ref "bgl" "sha256-utf8" nil)
+                      nil)]
+      (and (fn-type? signature)
+           (= [(make-prim "String")] (get signature "params"))
+           (= (make-prim "String") (get signature "ret")))))
 
   ;; --- E021 free dotted-name (nix target) ---
   (expect! "nix-only operator contracts check without extern declarations"

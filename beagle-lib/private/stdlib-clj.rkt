@@ -69,7 +69,6 @@
    'extends?   (fn-of '(Any Any) 'Bool)
    ;; --- string: CLJ-specific -----------------------------------------------
    'char-escape-string (fn-of '(Any) 'Any)
-   (q 'clj 'sha256-utf8) (fn-of '(String) 'String)
    ;; --- clojure.string -----------------------------------------------------
    (q 'clojure.string 'join)     (fn-of '(Any) 'String #:rest 'Any)
    ;; (split s re) and (split s re limit) — Clojure's 3-arg form takes an Int

@@ -122,6 +122,8 @@
       (list (type-app 'Vec (list (p 'Int))) (p 'ByteSource))))
     #f
     (p 'String))
+   (q 'bgl 'sha256-utf8)
+   (type-fn (list (p 'String)) #f (p 'String))
    'float-to-bits (fn-of '(Float) 'Int)
    'float-from-bits (fn-of '(Int) 'Float)
    ;; The epoch is unspecified; readings support elapsed time, never wall time.

@@ -11383,10 +11383,9 @@
             (core/->TokenFlowV0 [] [])))
         result-id (byte-source-type-id) false))))
 
-;; The runtime's digest identity is the "sha256:" prefixed lowercase hex text.
-;; The native primitive answers the bare hex, so the prefix is applied here and
-;; every caller of a selfhost digest shares this one spelling.
-(defn lower-prefixed-sha256
+;; The target-neutral intrinsic answers the native primitive's bare lowercase
+;; hexadecimal text after encoding the input as UTF-8.
+(defn lower-sha256-utf8
   [(owner core/NativeId)
    (state BodyStateV0)
    (bytes-type core/NativeId)
@@ -11403,7 +11402,21 @@
         (state-emit (state-bump with-bytes)
           (core/->CodecPrimitiveInstructionV0
             (core/->SsaValueV0 hex-id (text-type-id))
-            (core/->Sha256BytesV0 (arena-value-id owner) bytes-id)))
+            (core/->Sha256BytesV0 (arena-value-id owner) bytes-id)))]
+    (->ExprResultV0 with-hex hex-id (text-type-id) false)))
+
+;; The runtime's digest identity is the "sha256:" prefixed lowercase hex text.
+;; The native primitive answers the bare hex, so the prefix is applied here and
+;; every caller of a selfhost digest shares this one spelling.
+(defn lower-prefixed-sha256
+  [(owner core/NativeId)
+   (state BodyStateV0)
+   (bytes-type core/NativeId)
+   (text-id core/NativeId)]
+  ExprResultV0
+  (let [hex ExprResultV0 (lower-sha256-utf8 owner state bytes-type text-id)
+        hex-id core/NativeId (exprresultv0-value-id hex)
+        with-hex BodyStateV0 (exprresultv0-state hex)
         prefix-id core/NativeId (state-id with-hex owner "digest-prefix")
         with-prefix BodyStateV0
         (state-emit (state-bump with-hex)
@@ -18828,6 +18841,19 @@
                 (fail-result current
                   "TODO-NATIVE-SHA256-BYTES-OPERAND: sha256-bytes takes one native Vec Int or ByteSource value")
 
+                (and (= "bgl/sha256-utf8" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [result-type (U core/NativeId Nil)
+                      (vector-type-of types (int-type-id))]
+                  (if (nil? result-type)
+                    (fail-result current
+                      "TODO-NATIVE-SHA256-UTF8-TYPE: bgl/sha256-utf8 needs a closed (Vec Int) carrier")
+                    (lower-sha256-utf8 owner current result-type (nth values 0))))
+
+                (= "bgl/sha256-utf8" callee)
+                (fail-result current
+                  "TODO-NATIVE-SHA256-UTF8-OPERAND: bgl/sha256-utf8 takes one native Text value")
+
                 (and (= "float-to-bits" callee) (= 1 (count values))
                   (same-id? (nth value-types 0) (type-id "Float")))
                 (let [result-id core/NativeId
@@ -22870,6 +22896,13 @@
           (append-type-def text-index-source-types
             (nullable-map-value-type (float-type-id)))
           text-index-source-types)
+        digest-source-types (Vec core/TypeDef)
+        (if (or
+              (index-has-callee? index "source-sha256")
+              (index-has-callee? index "bgl/sha256-utf8"))
+          (append-type-def parse-source-types
+            (closed-vector-type (int-type-id)))
+          parse-source-types)
         ;; Host environment lookup is lowering-owned and checked as Any, so its
         ;; optional String family must exist before body lowering.
         environment-source-types (Vec core/TypeDef)
@@ -22877,9 +22910,9 @@
               (index-has-callee? index "System/getenv")
               (index-has-callee? index "java.lang.System/getenv")
               (index-has-callee? index "selfhost.rt/getenv"))
-          (append-type-def parse-source-types
+          (append-type-def digest-source-types
             (nullable-map-value-type (text-type-id)))
-          parse-source-types)
+          digest-source-types)
         source-types (Vec core/TypeDef)
         (if (or
               (index-has-callee? index "host.fs/path-kind")

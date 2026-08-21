@@ -146,7 +146,7 @@
 
 (defn- beagle$sha256_utf8_v0 [text]
   (when-not (string? text)
-    (throw (ex-info "clj/sha256-utf8 requires a String"
+    (throw (ex-info "bgl/sha256-utf8 requires a String"
                     {:value text})))
   (let [raw
         (if (.canEncode
@@ -1082,7 +1082,7 @@ CLJ
              (not (set-member? (current-emit-local-names) fn-ref)))
         (format "(beagle$sha256_bytes_v0 ~a)"
                 (emit-expr (car (call-form-args e))))]
-       [(and (qualified-reference=? fn-ref 'clj 'sha256-utf8)
+       [(and (qualified-reference=? fn-ref 'bgl 'sha256-utf8)
              (= 1 (length (call-form-args e))))
         (format "(beagle$sha256_utf8_v0 ~a)"
                 (emit-expr (car (call-form-args e))))]
