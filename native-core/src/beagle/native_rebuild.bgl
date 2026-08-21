@@ -12,7 +12,7 @@
 (defrecord NativeRebuildBundleV1
   [semantic-content-id String
    materialization-content-id String
-   artifact linker/TargetArtifactV1])
+   artifact linker/ValidatedTargetArtifactV1])
 
 (defrecord NativeManifestLineV1
   [value String
@@ -94,8 +94,10 @@
              materialization-content-id envelope)
       [(linker/ArtifactEnvelopeDecodeErrorV1 detail)
        (->NativeRebuildBundleRejectedV1 65 detail)]
-      [(linker/ArtifactEnvelopeDecodedV1 artifact)
-       (let [derived-semantic-content-id String?
+      [(linker/ArtifactEnvelopeDecodedV1 validated)
+       (let [artifact linker/TargetArtifactV1
+             (linker/validatedtargetartifactv1-artifact validated)
+             derived-semantic-content-id String?
              (artifact-semantic-content-id artifact)]
          (cond
            (not= "c17" (linker/targetartifactv1-target artifact))
@@ -113,7 +115,7 @@
            :else
            (->NativeRebuildBundleDecodedV1
              (->NativeRebuildBundleV1
-               semantic-content-id materialization-content-id artifact))))])))
+               semantic-content-id materialization-content-id validated))))])))
 
 (defn decode-rebuild-bundle
   [payload String] NativeRebuildBundleDecodeV1
@@ -261,7 +263,7 @@
                      (bootstrap/nativeartifactlayoutv1-executable-path layout)
                      "cc"
                      "")]
-               (match (linker/write-and-link
+               (match (linker/write-validated-and-link
                         config (nativerebuildbundlev1-artifact bundle))
                  [(linker/ArtifactLinkErrorV1 code detail)
                   (->NativeRebuildRejectedV1 code detail)]

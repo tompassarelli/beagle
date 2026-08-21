@@ -14,6 +14,9 @@
    encoding String
    digest String])
 
+(defrecord ValidatedTargetArtifactV1
+  [artifact TargetArtifactV1])
+
 (defrecord ArtifactLinkConfigV1
   [artifact-directory String
    executable-path String
@@ -47,7 +50,7 @@
   (ArtifactEnvelopeErrorV1 [detail String]))
 
 (defunion ArtifactEnvelopeDecodeResultV1
-  (ArtifactEnvelopeDecodedV1 [artifact TargetArtifactV1])
+  (ArtifactEnvelopeDecodedV1 [artifact ValidatedTargetArtifactV1])
   (ArtifactEnvelopeDecodeErrorV1 [detail String]))
 
 (defunion ArtifactEnvelopePartV1
@@ -229,7 +232,8 @@
                     (let [artifact TargetArtifactV1
                           (->TargetArtifactV1 target files encoding digest)]
                       (if (artifact-valid? artifact)
-                        (->ArtifactEnvelopeDecodedV1 artifact)
+                        (->ArtifactEnvelopeDecodedV1
+                          (->ValidatedTargetArtifactV1 artifact))
                         (->ArtifactEnvelopeDecodeErrorV1
                           "artifact envelope target or digest is invalid"))))]))))]))))
 
@@ -272,9 +276,10 @@
        (= (targetartifactv1-digest artifact)
           (content-digest (targetartifactv1-encoding artifact)))))
 
-(defn write-artifact-files
+(defn- write-artifact-files-with-validation
   [config ArtifactLinkConfigV1
-   files (Vec ArtifactFileV1)] ArtifactWriteResult
+   files (Vec ArtifactFileV1)
+   validate-metadata Bool] ArtifactWriteResult
   (loop [index Int 0
          c-sources (Vec String) []
          qbe-sources (Vec String) []]
@@ -282,7 +287,7 @@
       (->ArtifactFilesWritten c-sources qbe-sources)
       (let [file ArtifactFileV1 (nth files index)
             name String (artifactfilev1-name file)]
-        (if (not (artifact-file-valid? file))
+        (if (and validate-metadata (not (artifact-file-valid? file)))
           (->ArtifactFileWriteError
             65
             (str "invalid artifact file metadata: " name))
@@ -306,6 +311,16 @@
                     (if (string-suffix? name ".ssa")
                       (conj qbe-sources path)
                       qbe-sources))])])))))))
+
+(defn write-artifact-files
+  [config ArtifactLinkConfigV1
+   files (Vec ArtifactFileV1)] ArtifactWriteResult
+  (write-artifact-files-with-validation config files true))
+
+(defn- write-validated-artifact-files
+  [config ArtifactLinkConfigV1
+   files (Vec ArtifactFileV1)] ArtifactWriteResult
+  (write-artifact-files-with-validation config files false))
 
 (defn assembly-path [source-path String] String
   (str (subs source-path 0 (- (count source-path) 4)) ".s"))
@@ -384,9 +399,10 @@
          [(ToolInputsReady paths)
           (run-c-compiler config paths)]))]))
 
-(defn write-and-link
+(defn- write-and-link-artifact
   [config ArtifactLinkConfigV1
-   artifact TargetArtifactV1] ArtifactLinkResultV1
+   artifact TargetArtifactV1
+   validate-files Bool] ArtifactLinkResultV1
   (cond
     (or (= (artifactlinkconfigv1-artifact-directory config) "")
         (= (artifactlinkconfigv1-executable-path config) "")
@@ -404,4 +420,18 @@
     (link-written-artifact
       config
       (targetartifactv1-target artifact)
-      (write-artifact-files config (targetartifactv1-files artifact)))))
+      (if validate-files
+        (write-artifact-files config (targetartifactv1-files artifact))
+        (write-validated-artifact-files
+          config (targetartifactv1-files artifact))))))
+
+(defn write-and-link
+  [config ArtifactLinkConfigV1
+   artifact TargetArtifactV1] ArtifactLinkResultV1
+  (write-and-link-artifact config artifact true))
+
+(defn write-validated-and-link
+  [config ArtifactLinkConfigV1
+   validated ValidatedTargetArtifactV1] ArtifactLinkResultV1
+  (write-and-link-artifact
+    config (validatedtargetartifactv1-artifact validated) false))
