@@ -143,6 +143,59 @@
            (map (fn [value]
                   (format "%02x" (bit-and (int value) 255)))
                 digest))))
+
+(defn- beagle$sha256_utf8_v0 [text]
+  (when-not (string? text)
+    (throw (ex-info "clj/sha256-utf8 requires a String"
+                    {:value text})))
+  (let [raw
+        (if (.canEncode
+             (.newEncoder java.nio.charset.StandardCharsets/UTF_8)
+             ^CharSequence text)
+          (.getBytes ^String text java.nio.charset.StandardCharsets/UTF_8)
+          (let [units (vec text)
+                size (count units)]
+            (byte-array
+             (persistent!
+              (loop [index 0
+                     bytes (transient [])]
+                (if (>= index size)
+                  bytes
+                  (let [unit (int (nth units index))
+                        paired (and (>= unit 55296) (< unit 56320)
+                                    (< (+ index 1) size))
+                        point (if paired
+                                (+ 65536
+                                   (+ (* (- unit 55296) 1024)
+                                      (- (int (nth units (+ index 1))) 56320)))
+                                unit)
+                        next-index (+ index (if paired 2 1))]
+                    (cond
+                      (< point 128)
+                      (recur next-index (conj! bytes (unchecked-byte point)))
+                      (< point 2048)
+                      (recur next-index
+                             (conj! (conj! bytes
+                                          (unchecked-byte (+ 192 (quot point 64))))
+                                    (unchecked-byte (+ 128 (mod point 64)))))
+                      (< point 65536)
+                      (recur next-index
+                             (conj! (conj! (conj! bytes
+                                                 (unchecked-byte (+ 224 (quot point 4096))))
+                                          (unchecked-byte (+ 128 (mod (quot point 64) 64))))
+                                    (unchecked-byte (+ 128 (mod point 64)))))
+                      :else
+                      (recur next-index
+                             (conj! (conj! (conj! (conj! bytes
+                                                        (unchecked-byte (+ 240 (quot point 262144))))
+                                                 (unchecked-byte (+ 128 (mod (quot point 4096) 64))))
+                                          (unchecked-byte (+ 128 (mod (quot point 64) 64))))
+                                    (unchecked-byte (+ 128 (mod point 64)))))))))))))
+        digest (.digest (java.security.MessageDigest/getInstance "SHA-256") raw)]
+    (apply str
+           (map (fn [value]
+                  (format "%02x" (bit-and (int value) 255)))
+                digest))))
 CLJ
   )
 
@@ -389,7 +442,8 @@ CLJ
     (define needs-clj-string?
       (regexp-match? #rx"[( \t\n]str/" body))
     (define needs-sha256-runtime?
-      (string-contains? body "beagle$sha256_bytes_v0"))
+      (or (string-contains? body "beagle$sha256_bytes_v0")
+          (string-contains? body "beagle$sha256_utf8_v0")))
     (string-append
      (emit-ns prog #:needs-clj-string? needs-clj-string?)
      "\n\n"
@@ -1027,6 +1081,10 @@ CLJ
              (= 1 (length (call-form-args e)))
              (not (set-member? (current-emit-local-names) fn-ref)))
         (format "(beagle$sha256_bytes_v0 ~a)"
+                (emit-expr (car (call-form-args e))))]
+       [(and (qualified-reference=? fn-ref 'clj 'sha256-utf8)
+             (= 1 (length (call-form-args e))))
+        (format "(beagle$sha256_utf8_v0 ~a)"
                 (emit-expr (car (call-form-args e))))]
        [(and (eq? fn-ref 'monotonic-nanoseconds)
              (= 0 (length (call-form-args e)))

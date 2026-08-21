@@ -119,8 +119,8 @@
 (defn encode-id [id core/NativeId] String
   (canonical-record "id" [(core/nativeid-value id)]))
 
-;; stdlib utf8-encode has no hosted clj lowering, so the digest encodes its own
-;; bytes; a surrogate pair recombines into one code point first.
+;; Byte-count and codec callers need the explicit octets; a surrogate pair
+;; recombines into one code point first.
 (defn utf8-bytes [text String] (Vec Int)
   (let [units (Vec Any) (vec text)
         size Int (count units)
@@ -160,7 +160,7 @@
 ;; Every encoding handed here is already tagged by its own canonical record, so
 ;; the digest needs no separate domain prefix.
 (defn content-digest [encoding String] String
-  (str "sha256:" (sha256-bytes (utf8-bytes encoding))))
+  (str "sha256:" (clj/sha256-utf8 encoding)))
 
 (defn lowercase-hex-digit? [character Any] Bool
   (some? (some (fn [allowed Any] Bool (= allowed character))
