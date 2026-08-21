@@ -57,7 +57,7 @@ repair delimiters; never count them by hand.
 |---|---|
 | parse or pointed repair | `beagle syntax FILE` (`--ledger`, `--repair --emit-patch`) |
 | type check | `beagle check --agent FILE...` |
-| canonical formatting | `beagle fmt --check PATH...`; `beagle fmt --write PATH...` |
+| canonical formatting | repair with `beagle fmt --write PATH...`, then prove with `beagle fmt --check PATH...` |
 | signature or fields | `beagle sig NAME FILE...`; `beagle fields RECORD FILE...` |
 | exports, callers, impact | `beagle provides FILE`; `beagle callers NAME FILE...`; `beagle impact NAME FILE...` |
 | expansion | `beagle expand FILE` |
@@ -83,6 +83,9 @@ repair glue. If the upstream repair is blocked, checkpoint the exact blocker.
 - Write typed binding/type pairs and explicit return types. Use `Any` only for
   a deliberate dynamic boundary whose real shape cannot be expressed. Query
   the compiler for the current grammar and run `beagle fmt` for layout.
+- A grouped `(declare-extern [name ...] Type)` is intentional current syntax:
+  it declares one shared type once. Let `beagle fmt --write` lay out long
+  batches as pairwise name rows, then run `beagle fmt --check`.
 - Do not add escape hatches, raw passthrough, hosted semantic projectors, or
   compatibility for hypothetical consumers.
 

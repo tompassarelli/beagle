@@ -693,6 +693,12 @@ if [[ "${BEAGLE_TEST_SYNTHETIC_TIMEOUT:-0}" == 1 ]]; then
     exit 0
 fi
 
+# Canonical physical source is a precondition for every ordinary release or
+# changed-input verdict. Check exactly the Beagle files changed from main; the
+# formatter itself owns parsing, comment safety, and the nonzero drift status.
+source "$BEAGLE_ROOT/bin/_beagle-canonical-format-check"
+beagle_canonical_format_check "$BEAGLE_ROOT" "$BEAGLE_ROOT/bin/beagle-fmt" || exit $?
+
 # --changed narrows the run to what the change can affect. The selection can
 # still come back "full", and then this path runs exactly the sweep below.
 if [[ "$BEAGLE_TEST_SELECT_CHANGED" == 1 ]]; then

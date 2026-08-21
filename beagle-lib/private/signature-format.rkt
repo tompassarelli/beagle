@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Canonical physical layout for function parameters and typed fields. Parsing
+;; Canonical physical layout for typed signatures and declarations. Parsing
 ;; accepts every whitespace layout; this module owns the deterministic source
 ;; rewrite used by `beagle fmt`.
 
@@ -78,7 +78,7 @@
   (file-format path formatted edits))
 
 (define (print-edit edit)
-  (eprintf "~a:~a:~a: signature layout: ~a~a\n"
+  (eprintf "~a:~a:~a: canonical layout: ~a~a\n"
            (layout-edit-path edit)
            (or (layout-edit-line edit) 1)
            (add1 (or (layout-edit-col edit) 0))
@@ -89,7 +89,7 @@
                " (refinement-not-implemented: automatic rewrite refused; "
                "legacy binding constraints remain accepted until refinement semantics land)")]
              [(comment-reach)
-              " (automatic rewrite refused: line comment reach could change)"]
+              " (automatic rewrite refused: comment reach could change)"]
              [else ""])))
 
 (define (atomic-write-string path content)

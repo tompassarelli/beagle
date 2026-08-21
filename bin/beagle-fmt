@@ -9,8 +9,8 @@ usage() {
     cat >&2 <<'EOF'
 Usage: beagle fmt --check|--write PATH...
 
-  --check  Report noncanonical Beagle signatures and exit nonzero on drift.
-  --write  Rewrite noncanonical signatures atomically.
+  --check  Report noncanonical Beagle source layout and exit nonzero on drift.
+  --write  Rewrite noncanonical source layout atomically.
 
 Directory operands discover tracked Beagle source recursively. Explicit files
 are always considered, including fixtures excluded from directory discovery.

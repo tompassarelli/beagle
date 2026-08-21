@@ -2,6 +2,7 @@
 
 (require rackunit
          racket/file
+         racket/string
          beagle/private/parse
          beagle/private/signature-format)
 
@@ -27,6 +28,114 @@
   (define-values (actual edits) (formatted source))
   (check-equal? actual source)
   (check-equal? edits '()))
+
+(test-case "short declare-extern batch stays inline with one shared type"
+  (define source "(declare-extern [window document] Any)\n")
+  (define-values (actual edits) (formatted source))
+  (check-equal? actual source)
+  (check-equal? edits '()))
+
+(test-case "long declare-extern batch uses pairwise rows and one shared type"
+  (define source
+    (string-append
+     "(declare-extern [globalThis process TextDecoder Error String Number Set "
+     "Intl setInterval clearInterval] Any)\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal?
+   actual
+   (string-append
+    "(declare-extern\n"
+    "  [globalThis process\n"
+    "   TextDecoder Error\n"
+    "   String Number\n"
+    "   Set Intl\n"
+    "   setInterval clearInterval] Any)\n"))
+  (check-equal? (length edits) 1)
+  (check-equal? (length (regexp-match* #rx"Any" actual)) 1))
+
+(test-case "odd declare-extern batch keeps the closing vector and type together"
+  (define source
+    (string-append
+     "(declare-extern [first-very-long-host-name second-very-long-host-name "
+     "third-very-long-host-name] (Fn [String] Any))\n"))
+  (define-values (actual edits) (formatted source))
+  (check-equal?
+   actual
+   (string-append
+    "(declare-extern\n"
+    "  [first-very-long-host-name second-very-long-host-name\n"
+    "   third-very-long-host-name] (Fn [String] Any))\n"))
+  (check-equal? (length edits) 1))
+
+(test-case "declare-extern write reaches the canonical fixed point"
+  (define source
+    (string-append
+     "(declare-extern [globalThis process TextDecoder Error String Number Set "
+     "Intl setInterval clearInterval] Any)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'check (list path)) 3)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0))))
+
+(test-case "declare-extern comments make a noncanonical rewrite diagnostic-only"
+  (define source
+    (string-append
+     "(declare-extern [globalThis process ; runtime roots\n"
+     " TextDecoder Error String Number Set Intl setInterval clearInterval] Any)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (define edits (signature-layout-edits path))
+     (check-equal? (length edits) 1)
+     (check-false (layout-edit-safe? (car edits)))
+     (check-equal? (layout-edit-refusal (car edits)) 'comment-reach)
+     (check-equal? (format-signature-files 'write (list path)) 2)
+     (check-equal? (file->string path) source))))
+
+(test-case "CST spacing normalizes signatures, member calls, and property access"
+  (define source
+    (string-append
+     "(defn bridge-sample []  String\n"
+     "  (do\n"
+     "    (.push kept  segment)\n"
+     "    (.-env process )))\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'check (list path)) 3)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(defn bridge-sample [] String\n"
+       "  (do\n"
+       "    (.push kept segment)\n"
+       "    (.-env process)))\n"))
+     (check-equal? (format-signature-files 'check (list path)) 0))))
+
+(test-case "CST spacing preserves strings, comments, and vertical layout"
+  (define source
+    (string-append
+     "(defn bridge-sample [] String\n"
+     "  (do\n"
+     "    (str \"two  spaces )\"  value )\n"
+     "    ; keep  comment spacing )\n"
+     "    (.push kept  segment)))\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(defn bridge-sample [] String\n"
+       "  (do\n"
+       "    (str \"two  spaces )\" value)\n"
+       "    ; keep  comment spacing )\n"
+       "    (.push kept segment)))\n"))
+     (check-equal? (format-signature-files 'check (list path)) 0))))
 
 (test-case "legacy grouped pair canonicalizes inline"
   (define-values (actual edits)
@@ -241,7 +350,7 @@
   (check-equal? actual source)
   (check-equal? edits '()))
 
-(test-case "line-comment reach makes a rewrite diagnostic-only"
+(test-case "line-comment reach is preserved by a signature rewrite"
   (define source
     "(defn f ; owner comment\n  [x Int y Int] Int x)\n")
   (with-source
@@ -249,11 +358,30 @@
    (lambda (path)
      (define edits (signature-layout-edits path))
      (check-equal? (length edits) 1)
-     (check-false (layout-edit-safe? (car edits)))
-     (check-exn exn:fail?
-                (lambda () (apply-signature-layout-edits source edits)))
-     (check-equal? (format-signature-files 'write (list path)) 2)
-     (check-equal? (file->string path) source))))
+     (check-true (layout-edit-safe? (car edits)))
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(defn f ; owner comment\n"
+       "  [x Int\n"
+       "   y Int] Int\n"
+       "  x)\n"))
+     (check-equal? (format-signature-files 'check (list path)) 0))))
+
+(test-case "comments nested in a let initializer survive canonical layout"
+  (define source
+    (string-append
+     "(let [runtime (Map Keyword Any) {:x 1\n"
+     "                                ;; keep runtime ownership\n"
+     "                                :y 2} value Int 3] value)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-true
+      (string-contains? (file->string path) ";; keep runtime ownership"))
+     (check-equal? (format-signature-files 'check (list path)) 0))))
 
 (test-case "one write reaches the canonical fixed point"
   (define source "(defn add [(x Int) (y Int)] Int (+ x y))\n")

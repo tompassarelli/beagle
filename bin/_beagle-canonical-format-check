@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+# Changed-source canonical formatting admission for bin/beagle-test. Kept as a
+# sourced function so its Git selection and formatter verdict can be exercised
+# without launching the rest of the release gate.
+
+beagle_canonical_format_check() {
+    local beagle_canonical_root="$1"
+    local beagle_canonical_formatter="$2"
+    local beagle_canonical_tool_root
+    local beagle_canonical_changed=""
+    local beagle_canonical_path beagle_canonical_extension beagle_canonical_target
+    local -a beagle_canonical_files=()
+    local -A beagle_canonical_extensions=()
+
+    beagle_canonical_tool_root="$(cd "$(dirname "$beagle_canonical_formatter")/.." && pwd)"
+    source "$beagle_canonical_tool_root/bin/_beagle-test-selection"
+    source "$beagle_canonical_tool_root/share/targets.sh"
+
+    if ! beagle_canonical_changed="$(
+        beagle_selection_changed_paths "$beagle_canonical_root"
+    )"; then
+        echo "beagle-test: canonical format check could not resolve changed paths" >&2
+        return 2
+    fi
+
+    for beagle_canonical_target in "${BEAGLE_TARGET_IDS[@]}"; do
+        beagle_canonical_extensions[".${BEAGLE_TARGET_SRC_EXT[$beagle_canonical_target]}"]=1
+    done
+
+    while IFS= read -r beagle_canonical_path; do
+        [[ -n "$beagle_canonical_path" ]] || continue
+        beagle_canonical_extension=".${beagle_canonical_path##*.}"
+        [[ -n "${beagle_canonical_extensions[$beagle_canonical_extension]:-}" ]] || continue
+        [[ -f "$beagle_canonical_root/$beagle_canonical_path" ]] || continue
+        beagle_canonical_files+=("$beagle_canonical_root/$beagle_canonical_path")
+    done <<<"$beagle_canonical_changed"
+
+    if ((${#beagle_canonical_files[@]} == 0)); then
+        echo "beagle-test: canonical format check: no changed Beagle source"
+        return 0
+    fi
+
+    echo "beagle-test: canonical format check: ${#beagle_canonical_files[@]} changed Beagle source file(s)"
+    "$beagle_canonical_formatter" --check "${beagle_canonical_files[@]}"
+}

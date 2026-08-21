@@ -692,6 +692,13 @@
   (check-equal? (hash-count (program-externs p)) 1)
   (check-true (hash-has-key? (program-externs p) 'foo)))
 
+(test-case "grouped declare-extern registers every name with one shared type"
+  (define p
+    (parse-prog `(declare-extern ,(br 'window 'document 'console) Any)))
+  (check-equal? (hash-count (program-externs p)) 3)
+  (for ([name (in-list '(window document console))])
+    (check-true (hash-has-key? (program-externs p) name))))
+
 (parse-err "duplicate declare-extern errors"
   `(declare-extern foo ,(fn-ty '(Int) 'Int))
   `(declare-extern foo ,(fn-ty '(String) 'String)))

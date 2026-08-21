@@ -671,17 +671,23 @@
                                 (<= (token-end tok) end)))
            (token-text tok))))
 
-(define (line-comment-in-range? tokens start end)
-  (for/or ([tok (in-list tokens)])
-    (and (eq? (token-type tok) 'line-comment)
-         (>= (token-offset tok) start)
-         (<= (token-end tok) end))))
-
 (define (comment-in-range? tokens start end)
   (for/or ([tok (in-list tokens)])
     (and (memq (token-type tok) '(line-comment block-comment))
          (>= (token-offset tok) start)
          (<= (token-end tok) end))))
+
+(define (comment-texts-in-range tokens start end)
+  (for/list ([tok (in-list tokens)]
+             #:when (and (memq (token-type tok) '(line-comment block-comment))
+                         (>= (token-offset tok) start)
+                         (<= (token-end tok) end)))
+    (token-text tok)))
+
+(define (comments-preserved? tokens start end replacement)
+  (equal? (comment-texts-in-range tokens start end)
+          (comment-texts-in-range
+           (tokenize replacement) 0 (string-length replacement))))
 
 (define (next-significant-token tokens offset)
   (for/first ([tok (in-list tokens)]
@@ -1001,7 +1007,9 @@
         (for/or ([entry (in-list entries)])
           (legacy-constrained-entry? entry)))
       (define comment-reach?
-        (line-comment-in-range? tokens region-start region-end))
+        (and (comment-in-range? tokens region-start region-end)
+             (not (comments-preserved?
+                   tokens region-start region-end replacement))))
       (current-layout-edits
        (cons (layout-edit path
                           (physical-syntax-line vector-stx tokens)
@@ -1082,13 +1090,137 @@
            (check-layout-vector! source tokens clause clause (car clause-subs) 'clause
                                  "multi-arity parameter" #t)))])))
 
+(define (pairwise rows)
+  (let loop ([remaining rows] [out '()])
+    (cond
+      [(null? remaining) (reverse out)]
+      [(null? (cdr remaining)) (reverse (cons remaining out))]
+      [else (loop (cddr remaining) (cons (take remaining 2) out))])))
+
+(define (inspect-declare-extern-layout! source tokens form-stx)
+  (define subs (stx-subs form-stx))
+  (when (and subs (= (length subs) 3))
+    (define names-stx (cadr subs))
+    (define type-stx (caddr subs))
+    (define names-subs (and (vector-stx? names-stx) (stx-subs names-stx)))
+    (define names (and names-subs (cdr names-subs)))
+    (when (and names
+               (pair? names)
+               (andmap (lambda (name) (symbol? (->datum name))) names))
+      (define start (syntax-start-offset form-stx))
+      (define end (and start (syntax-end-offset form-stx tokens)))
+      (when end
+        (define name-texts
+          (for/list ([name (in-list names)])
+            (fragment->inline tokens
+                              (syntax-start-offset name)
+                              (syntax-end-offset name tokens))))
+        (define type-text
+          (fragment->inline tokens
+                            (syntax-start-offset type-stx)
+                            (syntax-end-offset type-stx tokens)))
+        (define inline
+          (format "(declare-extern [~a] ~a)"
+                  (string-join name-texts " ") type-text))
+        (define form-col (or (physical-syntax-column form-stx tokens) 0))
+        (define replacement
+          (if (<= (+ form-col (string-length inline)) SIGNATURE-LINE-WIDTH)
+              inline
+              (let* ([rows (map (lambda (row) (string-join row " "))
+                                (pairwise name-texts))]
+                     [vector-pad (make-string (+ form-col 2) #\space)]
+                     [row-pad (make-string (+ form-col 3) #\space)])
+                (string-append
+                 "(declare-extern\n"
+                 vector-pad "[" (car rows)
+                 (apply string-append
+                        (for/list ([row (in-list (cdr rows))])
+                          (string-append "\n" row-pad row)))
+                 "] " type-text ")"))))
+        (define before (substring source start end))
+        (unless (string=? before replacement)
+          (define path
+            (let ([src (syntax-source form-stx)])
+              (if (path? src) (path->string src) src)))
+          (define comment-reach?
+            (and (comment-in-range? tokens start end)
+                 (not (comments-preserved? tokens start end replacement))))
+          (current-layout-edits
+           (cons (layout-edit path
+                              (physical-syntax-line form-stx tokens)
+                              (physical-syntax-column form-stx tokens)
+                              "declare-extern batch" start before replacement
+                              (not comment-reach?)
+                              (and comment-reach? 'comment-reach))
+                 (current-layout-edits))))))))
+
+(define (horizontal-trivia? text)
+  (regexp-match? #px"^[\t ]*$" text))
+
+(define (record-horizontal-spacing-edit! source tokens form-stx start end replacement)
+  (when (and start end (<= start end))
+    (define before (substring source start end))
+    (when (and (horizontal-trivia? before)
+               (not (string=? before replacement)))
+      (define path
+        (let ([src (syntax-source form-stx)])
+          (if (path? src) (path->string src) src)))
+      (current-layout-edits
+       (cons (layout-edit path
+                          (physical-syntax-line form-stx tokens)
+                          (physical-syntax-column form-stx tokens)
+                          "horizontal list spacing" start before replacement
+                          #t #f)
+             (current-layout-edits))))))
+
+(define (inspect-horizontal-list-spacing! source tokens form-stx)
+  ;; Work from immediate CST children rather than token regexes. A horizontal
+  ;; child gap has no comment or newline reach, so it is safe to canonicalize;
+  ;; nested forms are visited separately by inspect-layout-form!.
+  (define start-token (syntax-start-token form-stx tokens))
+  (define close
+    (and start-token
+         (eq? (token-type start-token) 'open-paren)
+         (matching-token tokens start-token)))
+  (define children (and close (stx-subs form-stx)))
+  (when (and children
+             (andmap (lambda (child)
+                       (and (syntax-start-offset child)
+                            (syntax-end-offset child tokens)))
+                     children))
+    (cond
+      [(null? children)
+       (record-horizontal-spacing-edit!
+        source tokens form-stx (token-end start-token) (token-offset close) "")]
+      [else
+       (record-horizontal-spacing-edit!
+        source tokens form-stx
+        (token-end start-token)
+        (syntax-start-offset (car children))
+        "")
+       (for ([left (in-list children)]
+             [right (in-list (cdr children))])
+         (record-horizontal-spacing-edit!
+          source tokens form-stx
+          (syntax-end-offset left tokens)
+          (syntax-start-offset right)
+          " "))
+       (record-horizontal-spacing-edit!
+        source tokens form-stx
+        (syntax-end-offset (last children) tokens)
+        (token-offset close)
+        "")])))
+
 (define (inspect-layout-form! source tokens form-stx)
   (define subs (stx-subs form-stx))
   (when (and subs (pair? subs))
     (define head (->datum (car subs)))
+    (unless (memq head '(quote quasiquote defmacro comment))
+      (inspect-horizontal-list-spacing! source tokens form-stx))
     (case head
       [(defn defn-) (inspect-defn-layout! source tokens form-stx)]
       [(fn) (inspect-fn-layout! source tokens form-stx)]
+      [(declare-extern) (inspect-declare-extern-layout! source tokens form-stx)]
       [(let) (inspect-local-binding-layout! source tokens form-stx "let binding")]
       [(loop) (inspect-local-binding-layout! source tokens form-stx "loop binding")]
       [(defrecord) (inspect-named-form-vector! source tokens form-stx 2 1 "typed field")]
