@@ -691,7 +691,7 @@ cp -- "$SEMANTIC_READ_STORE" "$SEMANTIC_READ_BLOB_STORE" \
     "$semantic_read_classpath_root/native-core/bin/"
 cp -- "$SEMANTIC_READ_DATABASE" "$SEMANTIC_READ_WRITER_AUTHORITY" \
     "$semantic_read_classpath_root/store/"
-cp -a -- "$BEAGLE_DIR/store/out" "$semantic_read_classpath_root/store/out"
+cp -a --no-preserve=mode -- "$BEAGLE_DIR/store/out" "$semantic_read_classpath_root/store/out"
 semantic_read_classpath="$semantic_read_classpath_root/store/out:$semantic_read_classpath_root/native-core/bin"
 
 facts="$work/source-facts.manifest"
