@@ -674,7 +674,14 @@ cleanup() {
     fi
     return "$rc"
 }
-interrupted() { exit 143; }
+publish_interrupted_progress() {
+    local progress_path="${BEAGLE_CORE_REPORT:-}"
+    if [[ -n "$progress_path" && -f "$progress_path" ]]; then
+        echo "beagle build: interrupted Core progress" >&2
+        cat -- "$progress_path" >&2
+    fi
+}
+interrupted() { publish_interrupted_progress; exit 143; }
 trap cleanup EXIT
 trap interrupted HUP INT TERM
 mkdir -p "$work/artifacts"

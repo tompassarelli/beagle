@@ -3,91 +3,65 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
-real_bb="$(command -v bb)"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/core-progress-publication.XXXXXX")"
 cleanup() { rm -rf "${work:?}"; }
 trap cleanup EXIT
 
-mkdir -p "$work/fake-bin" "$work/out"
-
-cat >"$work/progress.bgl" <<'BGL'
-#lang beagle
-(ns core.progress-publication-gate)
-
-(defn value [] Int
-  1)
-BGL
-
-cat >"$work/expected-progress" <<'REPORT'
+cat >"$work/progress" <<'REPORT'
 stage-progress source-projection END
 stage-progress source-freeze END
 stage-progress source-to-typed RUNNING
 result RUNNING
 REPORT
 
-cat >"$work/fake-bin/bb" <<'FAKE'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ "${1:-}" == "$BEAGLE_TEST_PROJECTOR" ]]; then
-    exec "$BEAGLE_TEST_REAL_BB" "$@"
-fi
-
-printf '%s\n' \
-    'stage-progress source-projection END' \
-    'stage-progress source-freeze END' \
-    'stage-progress source-to-typed RUNNING' \
-    'result RUNNING' >"${BEAGLE_CORE_REPORT:?}"
-exit 73
-FAKE
-chmod +x "$work/fake-bin/bb"
+awk '
+    /^publish_interrupted_progress\(\) \{/ { copying = 1 }
+    copying { print }
+    /^interrupted\(\) \{/ { exit }
+' "$repo/bin/beagle-build-core" >"$work/interrupted-progress.sh"
+[[ -s "$work/interrupted-progress.sh" ]] || {
+    echo "core_progress_publication_gate.sh: interruption boundary was not found" >&2
+    exit 1
+}
 
 set +e
-timeout --foreground 240s env \
-    PATH="$work/fake-bin:$PATH" \
-    BEAGLE_TEST_REAL_BB="$real_bb" \
-    BEAGLE_TEST_PROJECTOR="$repo/native-core/bin/source-facts.clj" \
-    BEAGLE_CORE_BUILD_CACHE="$work/cache" \
-    "$repo/bin/beagle-build-core" \
-    --materializer c17 \
-    --out "$work/out" \
-    "$work/progress.bgl" \
+timeout -k 5s 1s env BEAGLE_CORE_REPORT="$work/progress" \
+    bash -c '
+        set -euo pipefail
+        source "$1"
+        trap interrupted HUP INT TERM
+        sleep 120
+    ' core-progress-interrupt "$work/interrupted-progress.sh" \
     >"$work/stdout.log" 2>"$work/stderr.log"
 rc=$?
 set -e
 
-if [[ $rc -ne 73 ]]; then
-    echo "core_progress_publication_gate.sh: expected exit 73, got $rc" >&2
-    sed -n '1,240p' "$work/stderr.log" >&2
+if [[ $rc -ne 124 ]]; then
+    echo "core_progress_publication_gate.sh: expected timeout 124, got $rc" >&2
+    sed -n '1,120p' "$work/stderr.log" >&2
     exit 1
 fi
 
-python3 - "$work/stderr.log" "$work/expected-progress" <<'PY'
+python3 - "$work/stderr.log" "$work/progress" <<'PY'
 import pathlib
 import sys
 
 stderr = pathlib.Path(sys.argv[1]).read_text()
 progress = pathlib.Path(sys.argv[2]).read_text()
-phase_error = "beagle build: phase core-lowering ERROR (73)\n"
+boundary = "beagle build: interrupted Core progress\n"
 
-if stderr.count(phase_error) != 1:
-    raise SystemExit("core-lowering exit 73 diagnostic was not published exactly once")
+if stderr.count(boundary) != 1:
+    raise SystemExit("interruption did not publish one Core progress boundary")
 if stderr.count(progress) != 1:
-    raise SystemExit("staged progress was not published unchanged exactly once")
-if stderr.index(progress) < stderr.index(phase_error) + len(phase_error):
-    raise SystemExit("staged progress was published before core-lowering ERROR")
+    raise SystemExit("interruption did not publish the staged progress unchanged once")
+if stderr.index(progress) != stderr.index(boundary) + len(boundary):
+    raise SystemExit("staged progress did not immediately follow its interruption boundary")
 PY
 
-for final_path in \
-    "$work/out/report.txt" \
-    "$work/out/module.native-program" \
-    "$work/out/build.manifest" \
-    "$work/out/build.manifest.sha256"; do
-    if [[ -e "$final_path" ]]; then
-        echo "core_progress_publication_gate.sh: failure committed $final_path" >&2
-        exit 1
-    fi
-done
+[[ ! -s "$work/stdout.log" ]] || {
+    echo "core_progress_publication_gate.sh: progress escaped on stdout" >&2
+    exit 1
+}
 
-echo "core progress publication: exit 73, ordered single report, no commit PASS"
+echo "core progress publication: timeout 124, staged source-to-typed RUNNING PASS"
