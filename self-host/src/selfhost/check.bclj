@@ -784,14 +784,14 @@
 (defn infer-literal-type [e Any] Any
   (let [kind (get e "kind")]
     (cond
-      (= kind "string")  (make-prim "String")
-      (= kind "bool")    (make-prim "Bool")
-      (= kind "number")  (make-prim "Int")
-      (= kind "float")   (make-prim "Float")
-      (= kind "nil")     (make-prim "Nil")
+      (= kind "string") (make-prim "String")
+      (= kind "bool") (make-prim "Bool")
+      (= kind "number") (make-prim "Int")
+      (= kind "float") (make-prim "Float")
+      (= kind "nil") (make-prim "Nil")
       (= kind "keyword") (make-prim "Keyword")
-      (= kind "symbol")  (make-prim "Symbol")
-      (= kind "char")    (make-prim "Char")
+      (= kind "symbol") (make-prim "Symbol")
+      (= kind "char") (make-prim "Char")
       :else nil)))
 
 ;; A 2-arg `(if c t)` (and the when/when-let/when-some/some-> lowerings) stores
@@ -1920,9 +1920,9 @@
    pattern Any
    owner Any] Any
   (let [out Any (reduce (fn
-                      [acc Any
-                       name String] Any
-                      (binder-env-assoc acc owner name ANY))
+                          [acc Any
+                           name String] Any
+                          (binder-env-assoc acc owner name ANY))
               env (destructure-bound-names pattern))]
     (doseq [default (destructure-default-exprs pattern)]
       (infer-expr! default out))
@@ -2411,9 +2411,9 @@
   (cond
     (map? value)
       (let [nested Any (reduce (fn
-                             [found Any
-                              child Any] Any
-                             (merge found (unstable-binding-keys child)))
+                                 [found Any
+                                  child Any] Any
+                                 (merge found (unstable-binding-keys child)))
                     {} (vals value))
             target Any (if (= (get value "node") "set!")
                      (get value "target") nil)]
@@ -2548,8 +2548,7 @@
     (cond
       (= (get pat "type") "record")
         (let [written-name Any (get pat "name")
-              canonical-name Any
-                (canonical-union-member-name written-name target-type)
+              canonical-name Any (canonical-union-member-name written-name target-type)
               rec-name Any (if (nil? canonical-name) written-name canonical-name)
               bindings Any (get pat "bindings")
               field-map Any (get-in (deref STATE) ["record-fields" rec-name])
@@ -2598,9 +2597,9 @@
                         nil)]
     (when (not (nil? union-members))
       (let [matched-types Any (reduce (fn
-                                    [acc Any
-                                     c Any] Any
-                                    (let [pat (get c "pattern")]
+                                        [acc Any
+                                         c Any] Any
+                                        (let [pat (get c "pattern")]
                                       (if (= (get pat "type") "record")
                                         (let [written Any (get pat "name")
                                               canonical Any (canonical-union-member-name
@@ -2793,8 +2792,7 @@
         rest-t Any (get fn-t "rest")
         n-fixed Int (count fixed)
         n-args Int (count args)
-        argument-indices (Vec Int)
-          (vec (range (if (nil? rest-t)
+        argument-indices (Vec Int) (vec (range (if (nil? rest-t)
                        (if (< n-fixed n-args) n-fixed n-args)
                        n-args)))
         fn-display String (reference->string fn-name)
@@ -3477,15 +3475,15 @@
 
     (= (get e "node") "letfn")
       (let [body-env Any (reduce (fn
-                               [be Any
-                                f Any] Any
-                               (let [rp (opt-field (get f "rest"))
-                                     p-types (mapv param-type-or-any (get f "params"))
-                                     rtype (if (not (nil? rp))
+                                   [be Any
+                                    f Any] Any
+                                   (let [rp (opt-field (get f "rest"))
+                                         p-types (mapv param-type-or-any (get f "params"))
+                                         rtype (if (not (nil? rp))
                                              (rest-param-call-element-type rp)
                                              nil)
-                                     ret (if (not (nil? (get f "ret"))) (get f "ret") ANY)]
-                                 (binder-env-assoc be f (get f "name")
+                                         ret (if (not (nil? (get f "ret"))) (get f "ret") ANY)]
+                                     (binder-env-assoc be f (get f "name")
                                    (make-fn p-types rtype ret))))
                              env (get e "fns"))]
         (doseq [f (get e "fns")]
@@ -4362,7 +4360,7 @@
 (defn infer-value-definition-types!
   [prog Any
    initial-env Any] Any
-      (let [pending Any (reduce
+  (let [pending Any (reduce
             (fn
               [out Any
                raw-form Any] Any
@@ -4764,9 +4762,9 @@
                              m1)))
                        {"str" true} (get prog "requires"))
             refs Any (reduce (fn
-                           [a Any
-                            f Any] Any
-                           (collect-references f a))
+                               [a Any
+                                f Any] Any
+                               (collect-references f a))
                    [] (get prog "forms"))
             seen Any (atom {})
             bad Any (atom [])]
@@ -4988,15 +4986,15 @@
                        "dead")))
                  {} (ordered-keys origin-ids))
         max-id Int (reduce (fn
-                         [current Int
-                          state Any] Int
-                         (let [candidate (get state "next-id")]
+                             [current Int
+                              state Any] Int
+                             (let [candidate (get state "next-id")]
                            (if (> candidate current) candidate current)))
                        (get base "next-id") states)
         all-markers Any (reduce (fn
-                              [markers Any
-                               state Any] Any
-                              (reduce marker-add markers (get state "markers")))
+                                  [markers Any
+                                   state Any] Any
+                                  (reduce marker-add markers (get state "markers")))
                             (get base "markers") states)]
     (assoc (assoc (assoc base "owners" owners) "next-id" max-id)
            "markers" all-markers)))
@@ -5375,8 +5373,7 @@
                                  prior Any (if (nil? binding)
                                                {}
                                                (get binding "origins"))
-                                 prior-still-live Any
-                                   (reduce
+                                 prior-still-live Any (reduce
                                      (fn
                                        [live Any
                                         origin Any] Any
@@ -5385,29 +5382,24 @@
                                          live
                                          (assoc live origin true)))
                                      {} (ordered-keys prior))
-                                 disjoint Bool
-                                   (every?
+                                 disjoint Bool (every?
                                      (fn [origin Any] Bool
                                        (not (contains? seen origin)))
                                      (ordered-keys origins))
-                                 exact-target Bool
-                                   (and (= (get arg "node") "ref")
+                                 exact-target Bool (and (= (get arg "node") "ref")
                                         (= (get arg "name") target))
-                                 safe-transfer Bool
-                                   (and (not (nil? binding))
+                                 safe-transfer Bool (and (not (nil? binding))
                                         (> (count prior) 0)
                                         (or exact-target
                                             (purity-binding-acquires-owner?
                                               target arg state))
                                         disjoint)
-                                 without-abandoned Any
-                                   (if (or (= 0 (count prior-still-live))
+                                 without-abandoned Any (if (or (= 0 (count prior-still-live))
                                            (= prior origins))
                                      next
                                      (purity-escape-origins
                                        next prior-still-live value))
-                                 checked Any
-                                   (if (or (= 0 (count origins)) safe-transfer)
+                                 checked Any (if (or (= 0 (count origins)) safe-transfer)
                                      without-abandoned
                                      (purity-escape-origins
                                        without-abandoned origins value))
@@ -5516,8 +5508,7 @@
                               (fn
                                 [next Any
                                  fn-def Any] Any
-                                (let [lambda-depth Int
-                                        (get next "lambda-depth")
+                                (let [lambda-depth Int (get next "lambda-depth")
                                       nested Any (assoc next "lambda-depth"
                                                (+ lambda-depth 1))
                                       bound Any (purity-bind-params nested
@@ -5810,9 +5801,9 @@
 
 (defn purity-global-bindings [prog Any] Any
   (let [externs Any (reduce (fn
-                          [names Any
-                           entry Any] Any
-                          (assoc names (get entry "name") true))
+                              [names Any
+                               entry Any] Any
+                              (assoc names (get entry "name") true))
                         {} (get prog "externs"))]
     (reduce
       (fn
@@ -5849,9 +5840,9 @@
    globals Any] Any
   (loop [known {}]
     (let [next Any (reduce (fn
-                         [acc Any
-                          definition Any] Any
-                         (if (> (count (definition-effect-markers
+                             [acc Any
+                              definition Any] Any
+                             (if (> (count (definition-effect-markers
                                         definition known globals)) 0)
                            (assoc acc (get definition "name") true)
                            acc))
@@ -6049,9 +6040,9 @@
           (get t "members")))
     (poly-type? t)
       (let [nested Any (reduce (fn
-                             [out Any
-                              name String] Any
-                             (dissoc out name))
+                                 [out Any
+                                  name String] Any
+                                 (dissoc out name))
               replacements (get t "vars"))]
         (make-poly
           (get t "vars")
@@ -6062,9 +6053,9 @@
 (defn- freshen-contract-implementation! [scheme Any] Any
   (if (poly-type? scheme)
     (let [replacements Any (reduce (fn
-                                 [out Any
-                                  name String] Any
-                                 (assoc out name (fresh-inference-var!)))
+                                     [out Any
+                                      name String] Any
+                                     (assoc out name (fresh-inference-var!)))
             {} (get scheme "vars"))
           raw-bounds Any (get scheme "bounds")
           bounds Any (if (map? raw-bounds)

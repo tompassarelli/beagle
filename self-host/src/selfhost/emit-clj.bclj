@@ -454,8 +454,8 @@
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
         predicate-bindings (Vec String) (loop [index Int 0
-                                  acc (Vec String) []]
-                             (if (>= index (count all))
+                                               acc (Vec String) []]
+                                          (if (>= index (count all))
               acc
               (let [binding (nth all index)]
                 (recur (+ index 1)
@@ -556,10 +556,9 @@
 (defn emit-dynamic-binding-chain!
   [bindings Any
    body-str String] String
-  (let [capture-bindings (Vec String)
-          (loop [index Int 0
-                 acc (Vec String) []]
-            (if (>= index (count bindings))
+  (let [capture-bindings (Vec String) (loop [index Int 0
+                                             acc (Vec String) []]
+                                        (if (>= index (count bindings))
               acc
               (let [binding (nth bindings index)
                     raw-name (str "$beagle$constraint$raw-dynamic$" index)
@@ -575,8 +574,7 @@
                            (emit-guarded-binding-value binding predicate-name raw-name))])))
                   (recur (+ index 1) base)))))
         dynamic-indices (Vec Int) (vec (range (count bindings)))
-        dynamic-bindings (Vec String)
-          (mapv (fn [index Int] String
+        dynamic-bindings (Vec String) (mapv (fn [index Int] String
                   (let [binding (nth bindings index)]
                     (str (emit-binding-target! (get binding "name")) " "
                       (if (constraint-present? binding)
@@ -627,14 +625,12 @@
       (str "(loop [" (emit-let-bindings! bindings) "]\n  "
            (emit-body-with-loop-context! (get e "body") "  " nil) ")")
       (let [loop-indices (Vec Int) (vec (range (count bindings)))
-            raw-names (Vec String)
-              (mapv (fn [index Int] String
+            raw-names (Vec String) (mapv (fn [index Int] String
                       (str "$beagle$constraint$raw-loop$" index))
                 loop-indices)
-            init-bindings (Vec String)
-              (loop [index Int 0
-                     acc (Vec String) []]
-                (if (>= index (count bindings))
+            init-bindings (Vec String) (loop [index Int 0
+                                              acc (Vec String) []]
+                                         (if (>= index (count bindings))
                   acc
                   (let [binding (nth bindings index)
                         raw (nth raw-names index)
@@ -651,8 +647,7 @@
                                (emit-guarded-binding-value
                                  binding predicate-name raw))])))
                       (recur (+ index 1) (conj base (str target " " raw)))))))
-            iteration-bindings (Vec String)
-              (mapv (fn [index Int] String
+            iteration-bindings (Vec String) (mapv (fn [index Int] String
                       (let [binding (nth bindings index)
                             raw (nth raw-names index)
                             target (emit-binding-target! (get binding "name"))]
@@ -666,8 +661,7 @@
                                  "))")
                             raw))))
                 loop-indices)
-            loop-bindings (Vec String)
-              (mapv (fn [index Int] String
+            loop-bindings (Vec String) (mapv (fn [index Int] String
                       (str (nth raw-names index)
                            " (nth $beagle$constraint$initial-values " index ")"))
                 loop-indices)
@@ -800,8 +794,7 @@
   [name String
    fields Any] Any
   (let [field-indices (Vec Int) (vec (range (count fields)))
-        constrained (Vec Any)
-          (filterv (fn [entry Any] Bool
+        constrained (Vec Any) (filterv (fn [entry Any] Bool
                      (constraint-present? (nth entry 1)))
             (mapv (fn [index Int] Any [index (nth fields index)])
               field-indices))]
@@ -935,14 +928,12 @@
         raw-names (Vec String) (mapv (fn [index Int] String
                           (callable-raw-name index fixed-count))
                     all-indices)
-        rest-normalization (Vec String)
-          (if (or (nil? rest-p) (false? rest-p))
+        rest-normalization (Vec String) (if (or (nil? rest-p) (false? rest-p))
             []
             [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
-        predicate-bindings (Vec String)
-          (loop [index Int 0
-                 acc (Vec String) []]
-            (if (>= index (count all))
+        predicate-bindings (Vec String) (loop [index Int 0
+                                               acc (Vec String) []]
+                                          (if (>= index (count all))
               acc
               (let [param (nth all index)]
                 (recur (+ index 1)
@@ -954,8 +945,7 @@
         checked-names (Vec String) (mapv (fn [index Int] String
                               (str "$beagle$constraint$checked-param$" index))
                         all-indices)
-        checked-bindings (Vec String)
-          (mapv (fn [index Int] String
+        checked-bindings (Vec String) (mapv (fn [index Int] String
                   (let [param (nth all index)
                         raw (nth raw-names index)]
                     (str (nth checked-names index) " "
@@ -1006,7 +996,7 @@
                               fixed
                               (into fixed ["&" "$beagle$constraint$raw-rest"]))]
                     (str "(" (protocol-raw-method-name protocol-name (get method "name"))
-                         " [" (str/join " " all) "])") ))
+                         " [" (str/join " " all) "])")))
             methods)]
     (str "(defprotocol " protocol-name "\n  " (str/join "\n  " raw-sigs) ")\n\n"
          (str/join "\n\n"
@@ -1192,11 +1182,10 @@
                 (str "ambiguous imported record pattern: " rec-name) {})))
           (if (or (= 0 (count bindings)) (nil? fields))
             (str test " " body-str)
-            (let [field-vector (Vec Any)
-                  (vec fields)
+            (let [field-vector (Vec Any) (vec fields)
                   pairs (Vec String) (loop [i Int 0
-                               acc (Vec String) []]
-                          (if (or (>= i (count bindings))
+                                            acc (Vec String) []]
+                                       (if (or (>= i (count bindings))
                                   (>= i (count field-vector)))
                             acc
                             (recur (+ i 1)
@@ -1300,11 +1289,11 @@
 (defn emit-char-lit [n Int] String
   (cond
     (= n 32) "\\space"
-    (= n 9)  "\\tab"
+    (= n 9) "\\tab"
     (= n 10) "\\newline"
     (= n 13) "\\return"
     (= n 12) "\\formfeed"
-    (= n 8)  "\\backspace"
+    (= n 8) "\\backspace"
     (and (>= n 33) (<= n 126))
       (str "\\" (str (char n)))
     :else
@@ -2022,7 +2011,7 @@
                "ret" {"kind" "prim" "name" "Int"}
                "body" [{"node" "ref" "name" "value"}]
                "private" false
-               "doc" false} )]
+               "doc" false})]
       (and (str/includes? output
              "[$beagle$constraint$raw-param$0]")
         (str/includes? output
