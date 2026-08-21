@@ -1,0 +1,337 @@
+#lang beagle
+(ns native.relation-surface-v1-translator
+  (:require [beagle.datum-reader :as reader]))
+
+(def max-source-bytes Int 4096)
+
+(defrecord SourceProjectionV1
+  [logical-path String
+   raw-source String
+   source-content-id String
+   projection-id String])
+
+(defrecord SurfaceTranslationV1
+  [canonical-expression String
+   canonical-core String
+   semantic-id String
+   canonical-module-id String
+   receipt String])
+
+(defunion SurfaceTranslationResultV1
+  (SurfaceAcceptedV1 [translation SurfaceTranslationV1])
+  (SurfaceRejectedV1
+    [code Keyword
+     detail String]))
+
+(defn canonical-part [value String] String
+  (str (count (utf8-encode value)) ":" value))
+
+(defn content-id
+  [domain String
+   parts (Vec String)] String
+  (let [encoding String (loop [index Int 0
+                               current String (str "beagle/relation-surface-identity/v1"
+                    (canonical-part domain))]
+                          (if (= index (count parts))
+            current
+            (recur (inc index)
+                   (str current (canonical-part (nth parts index))))))]
+    (str "sha256:" (sha256-bytes (utf8-encode encoding)))))
+
+(defn source-projection
+  [logical-path String
+   raw-source String] SourceProjectionV1
+  (->SourceProjectionV1
+    logical-path
+    raw-source
+    (content-id "source-content" [raw-source])
+    (content-id "source-projection" [logical-path raw-source])))
+
+(defn character-at
+  [value String
+   index Int] String
+  (subs value index (inc index)))
+
+(defn decimal-digit? [character String] Bool
+  (or (= character "0")
+      (= character "1")
+      (= character "2")
+      (= character "3")
+      (= character "4")
+      (= character "5")
+      (= character "6")
+      (= character "7")
+      (= character "8")
+      (= character "9")))
+
+(defn nonzero-decimal-digit? [character String] Bool
+  (and (decimal-digit? character) (not= character "0")))
+
+(defn decimal-tail?
+  [value String
+   start Int] Bool
+  (loop [index Int start]
+    (if (= index (count value))
+      true
+      (if (decimal-digit? (character-at value index))
+        (recur (inc index))
+        false))))
+
+(defn decimal-digit-value [character String] Int
+  (cond
+    (= character "0") 0
+    (= character "1") 1
+    (= character "2") 2
+    (= character "3") 3
+    (= character "4") 4
+    (= character "5") 5
+    (= character "6") 6
+    (= character "7") 7
+    (= character "8") 8
+    :else 9))
+
+(defn decimal-at-most?
+  [digits String
+   limit String] Bool
+  (if (< (count digits) (count limit))
+    true
+    (if (> (count digits) (count limit))
+      false
+      (loop [index Int 0]
+        (if (= index (count digits))
+          true
+          (let [digit Int (decimal-digit-value (character-at digits index))
+                limit-digit Int (decimal-digit-value (character-at limit index))]
+            (cond
+              (< digit limit-digit) true
+              (> digit limit-digit) false
+              :else (recur (inc index)))))))))
+
+(defn signed-int64-lexeme? [value String] Bool
+  (let [negative Bool (= "-" (character-at value 0))
+        digits String (if negative (subs value 1 (count value)) value)]
+    (decimal-at-most?
+      digits
+      (if negative "9223372036854775808" "9223372036854775807"))))
+
+(defn canonical-decimal-lexeme? [value String] Bool
+  (if (= 0 (count value))
+    false
+    (let [negative Bool (= "-" (character-at value 0))
+          start Int (if negative 1 0)]
+      (if (= start (count value))
+        false
+        (let [first-digit String (character-at value start)
+              width Int (- (count value) start)]
+          (and
+            (if (= first-digit "0")
+              (and (not negative) (= width 1))
+              (nonzero-decimal-digit? first-digit))
+            (decimal-tail? value (inc start))
+            (signed-int64-lexeme? value)))))))
+
+(defn symbol-event? [event reader/ReaderEvent] Bool
+  (= :symbol (reader/readerevent-kind event)))
+
+(defn open-variable-event? [event reader/ReaderEvent] Bool
+  (let [value String (reader/readerevent-value event)]
+    (and (symbol-event? event)
+         (> (count value) 0)
+         (= "?" (character-at value 0)))))
+
+(defn reserved-semantic-word? [value String] Bool
+  (or (= value "query")
+      (= value "solve")
+      (= value "assert")
+      (= value "fact")
+      (= value "law")
+      (= value "rule")
+      (= value "goal")))
+
+(defn semantic-rejection-code
+  [events (Vec reader/ReaderEvent)] Keyword?
+  (loop [index Int 0]
+    (if (= index (count events))
+      nil
+      (let [event reader/ReaderEvent (nth events index)]
+        (cond
+          (open-variable-event? event) :surface/open-variable
+          (and (symbol-event? event)
+               (reserved-semantic-word?
+                 (reader/readerevent-value event)))
+          :surface/reserved-semantic-form
+          :else (recur (inc index)))))))
+
+(defn event-is?
+  [event reader/ReaderEvent
+   kind Keyword
+   value String
+   depth Int] Bool
+  (and (= kind (reader/readerevent-kind event))
+       (= value (reader/readerevent-value event))
+       (= depth (reader/readerevent-depth event))))
+
+(defn operator-alias?
+  [event reader/ReaderEvent
+   symbolic String
+   word String
+   depth Int] Bool
+  (and (symbol-event? event)
+       (= depth (reader/readerevent-depth event))
+       (let [value String (reader/readerevent-value event)]
+         (or (= value symbolic) (= value word)))))
+
+(defn decimal-event-at-depth?
+  [event reader/ReaderEvent
+   depth Int] Bool
+  (and (symbol-event? event)
+       (= depth (reader/readerevent-depth event))
+       (canonical-decimal-lexeme? (reader/readerevent-value event))))
+
+(defn relation-shape? [events (Vec reader/ReaderEvent)] Bool
+  (and (= 7 (count events))
+       (event-is? (nth events 0) :list/open "" 0)
+       (decimal-event-at-depth? (nth events 1) 1)
+       (operator-alias? (nth events 2) "+" "plus" 1)
+       (decimal-event-at-depth? (nth events 3) 1)
+       (event-is? (nth events 4) :list/close "" 0)
+       (operator-alias? (nth events 5) "=" "equals" 0)
+       (decimal-event-at-depth? (nth events 6) 0)))
+
+(defn integer-position-shape? [events (Vec reader/ReaderEvent)] Bool
+  (and (= 7 (count events))
+       (event-is? (nth events 0) :list/open "" 0)
+       (symbol-event? (nth events 1))
+       (= 1 (reader/readerevent-depth (nth events 1)))
+       (operator-alias? (nth events 2) "+" "plus" 1)
+       (symbol-event? (nth events 3))
+       (= 1 (reader/readerevent-depth (nth events 3)))
+       (event-is? (nth events 4) :list/close "" 0)
+       (operator-alias? (nth events 5) "=" "equals" 0)
+       (symbol-event? (nth events 6))
+       (= 0 (reader/readerevent-depth (nth events 6)))))
+
+(defn canonical-expression [events (Vec reader/ReaderEvent)] String
+  (str "(= (+ "
+       (reader/readerevent-value (nth events 1))
+       " "
+       (reader/readerevent-value (nth events 3))
+       ") "
+       (reader/readerevent-value (nth events 6))
+       ")"))
+
+(defn canonical-module [expression String] String
+  (str "#lang beagle\n"
+       "(ns native.relation-surface-v1-generated)\n\n"
+       "(defn expression [] Bool\n"
+       "  " expression ")\n\n"
+       "(defn main [] Int\n"
+       "  (if (expression) 0 1))\n"))
+
+(defn projection-receipt
+  [projection SourceProjectionV1
+   expression String
+   semantic-id String
+   canonical-module-id String] String
+  (str "relation-surface-projection-v1\n"
+       "source-path "
+       (sourceprojectionv1-logical-path projection)
+       "\nsource-content-id "
+       (sourceprojectionv1-source-content-id projection)
+       "\nprojection-id "
+       (sourceprojectionv1-projection-id projection)
+       "\nsemantic-id " semantic-id
+       "\ncanonical-module-id " canonical-module-id
+       "\ncanonical-expression " expression
+       "\n"))
+
+(defn accepted-translation
+  [projection SourceProjectionV1
+   events (Vec reader/ReaderEvent)] SurfaceTranslationResultV1
+  (let [expression String (canonical-expression events)
+        core String (canonical-module expression)
+        semantic-id String (content-id "ordinary-core-expression" [expression])
+        module-id String (content-id "canonical-core-module" [core])]
+    (->SurfaceAcceptedV1
+      (->SurfaceTranslationV1
+        expression
+        core
+        semantic-id
+        module-id
+        (projection-receipt projection expression semantic-id module-id)))))
+
+(defn translate-projection [projection SourceProjectionV1] SurfaceTranslationResultV1
+  (let [read reader/DatumRead (reader/read-events (sourceprojectionv1-raw-source projection))]
+    (if (not (reader/read-ok? read))
+      (->SurfaceRejectedV1
+        :surface/malformed-reader
+        (let [error String? (reader/datumread-error read)]
+          (if (nil? error) "reader rejected source" error)))
+      (let [events (Vec reader/ReaderEvent) (reader/datumread-events read)
+            semantic-rejection Keyword? (semantic-rejection-code events)]
+        (cond
+          (some? semantic-rejection)
+          (->SurfaceRejectedV1
+            semantic-rejection
+            "semantic forms require an explicit future profile")
+
+          (relation-shape? events)
+          (accepted-translation projection events)
+
+          (integer-position-shape? events)
+          (->SurfaceRejectedV1
+            :surface/invalid-integer
+            "integer positions require canonical signed 64-bit decimal lexemes")
+
+          :else
+          (->SurfaceRejectedV1
+            :surface/unsupported-shape
+            "only (INT + INT) = INT and word aliases are admitted"))))))
+
+(defn write-text
+  [path String
+   value String] Bool
+  (match (host.fs/write-text-atomic path value)
+    [(host.fs/WriteTextAtomicOk) true]
+    [(host.fs/WriteTextAtomicError errno) false]))
+
+(defn translate-file
+  [physical-path String
+   logical-path String
+   core-output-path String
+   receipt-output-path String] Int
+  (match (host.fs/read-text-bounded physical-path max-source-bytes)
+    [(host.fs/ReadTextBoundedError errno)
+     (do
+       (println (str "relation-surface-v1: source read failed: " errno))
+       74)]
+    [(host.fs/ReadTextBoundedOk raw-source)
+     (match (translate-projection (source-projection logical-path raw-source))
+       [(SurfaceRejectedV1 code detail)
+        (do
+          (println (str "relation-surface-v1: rejected " code))
+          65)]
+       [(SurfaceAcceptedV1 translation)
+        (if (and
+              (write-text
+                core-output-path
+                (surfacetranslationv1-canonical-core translation))
+              (write-text
+                receipt-output-path
+                (surfacetranslationv1-receipt translation)))
+          0
+          (do
+            (println "relation-surface-v1: output write failed")
+            74))])]))
+
+(defn main [args (Vec String)] Int
+  (if (= 4 (count args))
+    (translate-file
+      (nth args 0)
+      (nth args 1)
+      (nth args 2)
+      (nth args 3))
+    (do
+      (println
+        "usage: relation-surface-v1 PHYSICAL_SOURCE LOGICAL_PATH CORE_OUT RECEIPT_OUT")
+      64)))
