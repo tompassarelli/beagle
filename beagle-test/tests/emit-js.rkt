@@ -80,8 +80,8 @@
      "_tag: \"Point\""
      '(defrecord Point [(x Int) (y Int)]))
 
-   (check-js-contains "defrecord -> Object.freeze"
-     "Object.freeze"
+   (check-js-contains "defrecord -> record value"
+     "$$bc$record_value("
      '(defrecord Point [(x Int) (y Int)]))
 
    (check-js-contains "defrecord -> accessor functions"
@@ -193,7 +193,9 @@
               '(defn read-pointer [(gesture PointerGesture)] Float
                  (pointergesture-pointer-id gesture)))))
      (check-true (string-contains? result
-                                   "export function pointergesture_pointer_id(r)"))
+                                   "function pointergesture_pointer_id(r)"))
+     (check-true (string-contains? result
+                                   "export { pointergesture_pointer_id as \"pointergesture-pointer-id\" };"))
      (check-true (string-contains? result
                                    "return pointergesture_pointer_id(gesture);"))
      (check-false (string-contains? result "pointer_gesture_pointer_id")))
@@ -259,10 +261,10 @@
 
    (check-js-contains "let in return position -> inlined const"
      "const x = 1;"
-     '(defn f [] Int (let [x 1] (+ x 1))))
+     '(defn f [] Int (let [x Int 1] (+ x 1))))
 
-   (check-js-contains "str -> concat"
-     "concat"
+   (check-js-contains "str -> core runtime"
+     "$$bc$str(\"hello \", x)"
      '(defn f [(x String)] String (str "hello " x)))
 
    (check-js-contains "println -> console.log"
@@ -317,8 +319,8 @@
      "[1, 2, 3]"
      `(def xs (Vec Int) ,(br 1 2 3)))
 
-   (check-js-contains "map literal -> object"
-     "a: 1"
+   (check-js-contains "map literal -> native object with value-semantic keys"
+     "[$$bc$property_key($$bc$keyword(\"a\"))]: 1"
      `(def m Any ,(mt ':a 1 ':b 2)))
 
    (check-js-contains "set literal -> new Set"
@@ -327,7 +329,7 @@
 
    (check-js-contains "module header with import"
      "import * as"
-     '(require inventory :as inv)
+     (list 'require (br 'inventory ':as 'inv))
      '(def x Int (inv/count-items)))
 
    (test-case "unresolved qualified alias stops before JS emission"
@@ -372,8 +374,8 @@
      ".length"
      '(defn f [(xs (Vec Int))] Int (count xs)))
 
-   (check-js-contains "first -> [0]"
-     "[0]"
+   (check-js-contains "first -> core runtime"
+     "$$bc$first(xs)"
      '(defn f [(xs (Vec Int))] Int (first xs)))
 
    (check-js-contains "await -> await keyword"
@@ -412,13 +414,16 @@
          '(declare-extern state Any)
          '(js/export
            (defn (#%meta :async check!) [] (Promise Any)
-             (let [parsed (.parse JSON
+             (let [parsed Any (.parse JSON
                             (await (read-file "gjoa.json" "utf8")))]
                (set! (.-versions state) (await (fetch-versions)))
                parsed))))))
      (check-true
-      (string-contains? result "export async function check_bang()")
+      (string-contains? result "async function check_bang()")
       (format "expected exported async check_bang in:\n~a" result))
+     (check-true
+      (string-contains? result "export { check_bang as \"check!\" };")
+      (format "expected explicit public export name in:\n~a" result))
      (check-true
       (string-contains? result
                         "JSON.parse(await read_file(\"gjoa.json\", \"utf8\"))")
@@ -437,65 +442,65 @@
    (check-js-contains "loop/recur -> while"
      "while (true)"
      '(defn countdown [(n Int)] Int
-       (loop [i n]
+       (loop [i Int n]
          (if (= i 0) i (recur (- i 1))))))
 
    (check-js-contains "recur -> reassign + continue"
      "continue"
      '(defn countdown [(n Int)] Int
-       (loop [i n]
+       (loop [i Int n]
          (if (= i 0) i (recur (- i 1))))))
 
    (check-js-contains "loop with let containing recur -> const, not IIFE"
      "const c ="
      '(defn scan [(s String) (n Int)] Int
-       (loop [i 0]
-         (let [c (.charCodeAt s i)]
+       (loop [i Int 0]
+         (let [c Int (.charCodeAt s i)]
            (if (= c n) i (recur (+ i 1)))))))
 
    (check-js-contains "loop with let + recur has continue at correct level"
      "continue;"
      '(defn scan [(s String) (n Int)] Int
-       (loop [i 0]
-         (let [c (.charCodeAt s i)]
+       (loop [i Int 0]
+         (let [c Int (.charCodeAt s i)]
            (if (= c n) i (recur (+ i 1)))))))
 
    (check-js-contains "async loop/recur -> async IIFE with while"
      "async () =>"
      `(declare-extern read-next ,(fn-ty '(Any) '(Promise Any)))
      '(defn (#%meta :async read-all) [(r Any)] (Promise Any)
-       (loop [buf nil]
-         (let [v (await (read-next r))]
+       (loop [buf Any nil]
+         (let [v Any (await (read-next r))]
            (if (nil? v) buf (recur v))))))
 
    (check-js-contains "async loop/recur -> await inside while body"
      "await read_next"
      `(declare-extern read-next ,(fn-ty '(Any) '(Promise Any)))
      '(defn (#%meta :async read-all) [(r Any)] (Promise Any)
-       (loop [buf nil]
-         (let [v (await (read-next r))]
+       (loop [buf Any nil]
+         (let [v Any (await (read-next r))]
            (if (nil? v) buf (recur v))))))
 
    (check-js-contains "sync loop -> no async prefix"
      "(() => {"
      '(defn countdown [(n Int)] Int
-       (loop [i n]
+       (loop [i Int n]
          (if (= i 0) i (recur (- i 1))))))
 
    (check-js-contains "loop with do + recur emits side effects before continue"
      "console.log"
      '(defn count-up [(n Int)] Int
-       (loop [i 0]
+       (loop [i Int 0]
          (if (= i n) i
            (do (println (str "i=" i)) (recur (+ i 1)))))))
 
    (check-js-contains "try/catch -> try block"
      "try {"
      '(defn safe [(x Int)] Int
-       (try x (catch (e Exception) 0))))
+       (try x (catch js/Error e 0))))
 
    (check-js-contains "do in return position -> inlined stmts"
-     "console.log(\"a\");\n  return console.log(\"b\");"
+     "console.log($$bc$print_str(\"a\"));\n  return console.log($$bc$print_str(\"b\"));"
      '(defn f [] Nil (do (println "a") (println "b"))))
 
    (check-js-contains "if (no else) in return position -> if statement"
@@ -574,14 +579,14 @@
 
    (check-js-contains "nested let -> nested IIFE"
      "const y"
-     '(defn f [] Int (let [x 1] (let [y 2] (+ x y)))))
+     '(defn f [] Int (let [x Int 1] (let [y Int 2] (+ x y)))))
 
    (check-js-contains "await in nested let propagates async"
      "async"
      `(declare-extern fetch-data ,(fn-ty '(String) '(Promise String)))
      '(defn (#%meta :async f) [(url String)] (Promise String)
-       (let [x "prefix"]
-         (let [result (await (fetch-data url))]
+       (let [x String "prefix"]
+         (let [result String (await (fetch-data url))]
            (str x result)))))
 
    (check-js-contains "multi-arity with await -> async dispatch"
@@ -590,7 +595,7 @@
      `(defn (#%meta :async load)
        (,(br '(url String)) (Promise String) (await (fetch-data url)))
        (,(br '(url String) '(fallback String)) (Promise String)
-         (let [r (await (fetch-data url))] (if (nil? r) fallback r)))))
+         (let [r String (await (fetch-data url))] (if (nil? r) fallback r)))))
 
    (check-js-contains "record field access chains"
      ".x"
@@ -621,7 +626,7 @@
    (check-js-contains "for nested in let"
      ".map("
      '(defn f [(xs (Vec Int))] (Vec Int)
-       (let [offset 10]
+       (let [offset Int 10]
          (for [x xs] (+ x offset)))))
 
    (check-js-contains "cond with multiple branches -> chained ternary"
@@ -660,7 +665,7 @@
 
    (check-js-contains "bare npm import -> no ./ prefix"
      "import * as ds from 'datascript';"
-     '(require datascript :as ds)
+     (list 'require (br 'datascript ':as 'ds))
      '(defn f [] Any (ds/create-conn)))
 
    ;; Regression: validate-module-path! (ast.rkt) rejected `@scope/pkg` npm
@@ -668,12 +673,12 @@
    ;; `@`-prefixed namespace and passes it through verbatim.
    (check-js-contains "scoped npm import (@scope/pkg) -> passes through verbatim"
      "import * as sdk from '@anthropic-ai/claude-agent-sdk';"
-     '(require @anthropic-ai/claude-agent-sdk :as sdk)
+     (list 'require (br '@anthropic-ai/claude-agent-sdk ':as 'sdk))
      '(defn f [] Any (sdk/query)))
 
    (check-js-contains "dotted npm subpath -> passes through verbatim"
      "import * as loader from 'three/addons/loaders/GLTFLoader.js';"
-     '(require three/addons/loaders/GLTFLoader.js :as loader)
+     (list 'require (br 'three/addons/loaders/GLTFLoader.js ':as 'loader))
      '(defn f [] Any loader/GLTFLoader))
 
    ;; importer test.app lives at test/app.js, so a root-level sibling module
@@ -698,10 +703,10 @@
          #:source-id "inventory/core.bjs")))
      (define result
        (js-emit
-        '((ns test.app)
-          (define-target js)
-          (require inventory.core)
-          (defn f [] Int (core/init)))
+       (list '(ns test.app)
+             '(define-target js)
+             (list 'require (br 'inventory.core))
+             '(defn f [] Int (core/init)))
         #:module-resolver
         (lambda (namespace _importer-source)
           (and (eq? namespace 'inventory.core) provider-source))))
@@ -713,7 +718,7 @@
    ;; An alias-qualified class is a value imported from the namespace object.
    (check-js-contains "alias-qualified constructor -> new alias.Class()"
      "new THREE.Scene()"
-     '(require three :as THREE)
+     (list 'require (br 'three ':as 'THREE))
      '(defn f [] Any (new THREE/Scene)))
 
    ;; --- additional stdlib translations ----------------------------------------
@@ -723,22 +728,22 @@
      '(declare-extern xs Any)
      '(defn f [(xs Any)] Any (take-last 3 xs)))
 
-   (check-js-contains "pr-str -> JSON.stringify"
-     "JSON.stringify"
+   (check-js-contains "pr-str -> core runtime"
+     "$$bc$pr_str(x)"
      '(defn f [(x Any)] String (pr-str x)))
 
    (check-js-contains "static call Module/->Ctor strips -> prefix"
      "ir.IrProgram("
-     '(require ir :as ir)
+     (list 'require (br 'ir ':as 'ir))
      '(defn f [] Any (ir/->IrProgram "test")))
 
-   (check-js-contains "to-array -> Array.from"
-     "Array.from("
+   (check-js-contains "to-array -> host runtime"
+     "$$bh$to_array(xs)"
      '(declare-extern xs Any)
      '(defn f [(xs Any)] Any (to-array xs)))
 
-   (check-js-contains "aget -> array access"
-     "["
+   (check-js-contains "aget -> host runtime"
+     "$$bh$aget(arr, 0)"
      '(declare-extern arr Any)
      '(defn f [(arr Any)] Any (aget arr 0)))
 
@@ -747,8 +752,8 @@
      '(declare-extern xs Any)
      '(defn f [(xs Any)] Bool (sequential? xs)))
 
-   (check-js-contains "seq -> length check"
-     ".length > 0"
+   (check-js-contains "seq -> core runtime"
+     "$$bc$seq(xs)"
      '(declare-extern xs Any)
      '(defn f [(xs Any)] Any (seq xs)))
 
@@ -927,7 +932,7 @@
    (test-case "param name shadows stdlib wrapper"
      (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn greet [(name String)] String (str "Hello " name)))))
-     (check-true (string-contains? result "(\"\".concat(\"Hello \", name))")
+     (check-true (string-contains? result "$$bc$str(\"Hello \", name)")
                  (format "param 'name' should use mangled name, got:\n~a" result))
      (check-false (string-contains? result "(_x) => String(_x)")
                   "should NOT emit stdlib wrapper for param named 'name'"))
@@ -935,7 +940,7 @@
    (test-case "let binding shadows stdlib wrapper"
      (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(defn f [] Any
-                                      (let [identity 42] identity)))))
+                                      (let [identity Int 42] identity)))))
      (check-false (string-contains? result "(_x) => _x")
                   "let-bound identity should not get wrapper"))
 
@@ -958,7 +963,7 @@
    (test-case "direct property access does not emit a method call"
      (define result (js-emit (list '(ns test.app) '(define-target js)
                                    '(declare-extern obj Any)
-                                   '(defn f [(obj Any)] Any (.name obj)))))
+                                   '(defn f [(obj Any)] Any (.-name obj)))))
      (check-true (string-contains? result "obj.name")
                  (format "expected property access, got:\n~a" result))
      (check-false (string-contains? result "obj.name(")
@@ -989,8 +994,8 @@
      "const x = \"hello\";"
      '(def x String "hello"))
 
-   (check-js-contains "str with interpolation -> concat"
-     "\"\".concat(\"hello \", name)"
+   (check-js-contains "str with interpolation -> core runtime"
+     "$$bc$str(\"hello \", name)"
      '(def name String "world")
      '(def x String (str "hello " name)))
 
@@ -1040,13 +1045,13 @@
    (check-js-contains "direct property access keeps a static selector byte-exact"
      "obj[\"my-prop\"]"
      '(declare-extern obj Any)
-     '(defn f [(obj Any)] Any (.my-prop obj)))
+     '(defn f [(obj Any)] Any (.-my-prop obj)))
 
    (test-case "selector bytes and map underscores stay literal"
      (define result
        (js-emit
         (list '(ns test.app) '(define-target js)
-              '(defn read-wall [(obj Any)] Any (.wall_s obj))
+              '(defn read-wall [(obj Any)] Any (.-wall_s obj))
               '(defn call-context [(obj Any)] Any (.ctx_str obj))
               '(defn write-total! [(obj Any) (v Any)] Any
                  (set! (.-total_str obj) v))
@@ -1055,7 +1060,9 @@
      (for ([expected (in-list '("obj.wall_s"
                                 "obj.ctx_str()"
                                 "(obj.total_str = v)"
-                                "{wall_s: 1, ctx_str: 2, total_str: 3}"
+                                "[$$bc$property_key($$bc$keyword(\"wall_s\"))]: 1"
+                                "[$$bc$property_key($$bc$keyword(\"ctx_str\"))]: 2"
+                                "[$$bc$property_key($$bc$keyword(\"total_str\"))]: 3"
                                 "wall_s: wall__s"
                                 "ctx_str: ctx__str"
                                 "total_str: total__str"
@@ -1073,11 +1080,11 @@
      (define result
        (js-emit
         (list '(ns test.app) '(define-target js)
-              '(defn underscore [(obj Any)] Any (._private obj))
-              '(defn hyphen [(obj Any)] Any (.dash-name obj))
-              '(defn question [(obj Any)] Any (.ready? obj))
-              '(defn bang [(obj Any)] Any (.save! obj))
-              '(defn reserved [(obj Any)] Any (.delete obj)))))
+              '(defn underscore [(obj Any)] Any (.-_private obj))
+              '(defn hyphen [(obj Any)] Any (.-dash-name obj))
+              '(defn question [(obj Any)] Any (.-ready? obj))
+              '(defn bang [(obj Any)] Any (.-save! obj))
+              '(defn reserved [(obj Any)] Any (.-delete obj)))))
      (for ([expected (in-list '("obj._private"
                                 "obj[\"dash-name\"]"
                                 "obj[\"ready?\"]"
@@ -1091,19 +1098,19 @@
    ;; at runtime. (`f!` is bang-named so the purity check is satisfied.)
    (check-js-contains "set! on a let-binding emits `let`, not const"
      "let acc = 0;"
-     '(defn f! [(n Any)] Any (let [acc 0] (set! acc n) acc)))
+     '(defn f! [(n Any)] Any (let [acc Any 0] (set! acc n) acc)))
 
    (check-js-contains "set! in a later initializer makes the earlier binding mutable"
      "let acc = 0;"
      '(defn f! [] Int
-        (let [acc 0
-              next (do (set! acc 1) acc)]
+        (let [acc Int 0
+              next Int (do (set! acc 1) acc)]
           (+ acc next))))
 
    ;; …but a let-binding that is NOT set!-mutated still emits `const` (no over-broadening).
    (check-js-contains "an unmutated let-binding stays `const`"
      "const total = "
-     '(defn g [(a Int) (b Int)] Int (let [total (+ a b)] total)))
+     '(defn g [(a Int) (b Int)] Int (let [total Int (+ a b)] total)))
 
    ;; --- map destructuring: :as whole-binding across all three let positions,
    ;;     plus :or defaults and single-evaluation. Regression net for the
@@ -1183,7 +1190,8 @@
      (define result
        (js-emit (list '(ns test.app) '(define-target js)
                       `(def m Any ,(mt ':a 1)))))
-     (check-true (string-contains? result "{a: 1}")
+     (check-true (string-contains? result
+                                   "{[$$bc$property_key($$bc$keyword(\"a\"))]: 1}")
                  (format "expected native object literal in:\n~a" result))
      (check-false (string-contains? result "hamtMap")
                   (format "scalar-key map must NOT route to HAMT:\n~a" result)))
@@ -1225,7 +1233,7 @@
      (define result
        (js-emit (list '(ns test.app) '(define-target js)
                       '(def c true)
-                      '(let (x 1) (if c (println "a") (println "b"))))))
+                      '(let [x Int 1] (if c (println "a") (println "b"))))))
      (check-true (string-contains? result "if (((_truthy)")
                  (format "expected nested if-stmt in let body in:\n~a" result))
      (check-false (string-contains? result "? console.log")
