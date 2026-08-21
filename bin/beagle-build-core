@@ -2632,22 +2632,30 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
        (some? (re-matches #"[fa][0-9]+" (slice/slicefactv0-predicate row)))))
 
 (defn replacement-sequence-rows [rows definition-sequences selected]
-  (vec
-   (mapcat
-    (fn [sequence-name]
-      (map-indexed
-       (fn [position definition-name]
-         (slice/->SliceFactV0 sequence-name (str "f" position) "n" definition-name))
-       (for [row rows
-             :when (and (= sequence-name (slice/slicefactv0-subject row))
-                        (some? (re-matches #"[fa][0-9]+"
-                                           (slice/slicefactv0-predicate row)))
-                        (= "n" (slice/slicefactv0-kind row))
-                        (contains? selected
-                                   (id-value
-                                    (slice/node-id (slice/slicefactv0-object row)))))]
-         (slice/slicefactv0-object row))))
-    (sort definition-sequences))))
+  (let [rows-by-sequence
+        (reduce
+         (fn [buckets row]
+           (let [sequence-name (slice/slicefactv0-subject row)]
+             (if (and (contains? definition-sequences sequence-name)
+                      (some? (re-matches #"[fa][0-9]+"
+                                         (slice/slicefactv0-predicate row)))
+                      (= "n" (slice/slicefactv0-kind row)))
+               (update buckets sequence-name (fnil conj []) row)
+               buckets)))
+         {}
+         rows)]
+    (vec
+     (mapcat
+      (fn [sequence-name]
+        (map-indexed
+         (fn [position definition-name]
+           (slice/->SliceFactV0 sequence-name (str "f" position) "n" definition-name))
+         (for [row (get rows-by-sequence sequence-name [])
+               :when (contains? selected
+                                (id-value
+                                 (slice/node-id (slice/slicefactv0-object row))))]
+           (slice/slicefactv0-object row))))
+      (sort definition-sequences)))))
 
 (defn reachable-node-names [rows]
   (let [children
