@@ -213,6 +213,7 @@
     "profile-rule-epoch"
     ["first-order-unification"
      "occurs-check"
+     "variable-ordinal-is-arena-position"
      "fifo-small-step"
      "canonical-answer-dedup"
      "separate-proof-occurrences"
@@ -343,7 +344,7 @@
         true
         (match (arena-node arena index)
           [(VariableNodeV1 sort-id ordinal)
-           (and (>= ordinal 0)
+           (and (= ordinal index)
                 (some? (sort-for-id sorts sort-id))
                 (recur (+ index 1)))]
           [(AtomNodeV1 sort-id semantic-id)
@@ -1687,6 +1688,12 @@
      (->VariableNodeV1 symbol-sort-id 31)]
     64))
 
+(def duplicate-variable-ordinal-arena TermArenaV1
+  (->TermArenaV1
+    [(->VariableNodeV1 symbol-sort-id 0)
+     (->VariableNodeV1 symbol-sort-id 0)]
+    2))
+
 (def append-relation RelationV1
   (->RelationV1
     append-relation-id
@@ -2052,6 +2059,11 @@
     [(NotUnifiedV1 code) (= :occurs-check code)]
     [(UnifiedV1 bindings) false]))
 
+(defn duplicate-variable-ordinal-rejected-case [] Bool
+  (not
+    (arena-valid?
+      fixture-sorts fixture-shapes duplicate-variable-ordinal-arena)))
+
 (defn unsupported-mode-case [] Bool
   (match (execute-query base-world append-unsupported-query)
     [(QueryInvalidV1 problem) (= :unsupported-mode (problemv1-code problem))]
@@ -2253,6 +2265,7 @@
       (source-projections-case)
       (dependency-invalidation-case)
       (occurs-check-case)
+      (duplicate-variable-ordinal-rejected-case)
       (unsupported-mode-case)
       (loop-truncation-case)
       (fair-sibling-case)

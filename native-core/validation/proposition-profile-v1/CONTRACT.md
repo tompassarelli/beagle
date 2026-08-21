@@ -35,9 +35,11 @@ realization  authorization, attempt, receipt, and observation (out of scope)
   must point to earlier nodes, so recursive host values and `Any` are absent.
 - The fixed constructors are `nil : SymbolList` and
   `cons : Symbol × SymbolList -> SymbolList`.
-- A variable is `(query-local scope, arena ordinal)`. Preferred names are
-  source-projection data and never participate in unification or answer
-  identity. Every clause invocation receives a fresh scope.
+- A variable is `(query-local scope, arena ordinal)`. Its stored ordinal must
+  equal its node position, so two runtime-distinct nodes cannot canonicalize as
+  one variable. Preferred names are source-projection data and never
+  participate in unification or answer identity. Every clause invocation
+  receives a fresh scope.
 - Equality is first-order unification with full substitution walking and a
   mandatory occurs-check. Rational trees are excluded.
 - A clause body is a left-to-right conjunction of equality and relation-call
@@ -116,10 +118,11 @@ unnoticed earlier answer.
    world, query, answer, and strategy-selection identities.
 5. A relevant `calls` fact change remints the result; an unrelated relation
    change remints only the world audit identity.
-6. Occurs-check rejection, unsupported-mode rejection, explicit recursive-loop
-   truncation, answer deduplication with separate proofs, and exact repeated-run
-   determinism are observed canaries. Repeat determinism compares both the
-   complete typed result value and its canonical UTF-8 result-receipt bytes.
+6. Duplicate variable-ordinal rejection, occurs-check rejection,
+   unsupported-mode rejection, explicit recursive-loop truncation, answer
+   deduplication with separate proofs, and exact repeated-run determinism are
+   observed canaries. Repeat determinism compares both the complete typed result
+   value and its canonical UTF-8 result-receipt bytes.
 
 ## Validation execution boundary
 
