@@ -1,57 +1,84 @@
 (ns native.checked-program
   (:require [cheshire.core :as json])
   (:import [java.math BigInteger]
-           [java.security MessageDigest]
-           [java.util Locale]))
+           [java.security MessageDigest]))
 
 (def schema-version 4)
 
-(defn- canonical-value [value]
-  (cond
-    (map? value)
-    (into (sorted-map)
-      (map (fn [[key child]] [key (canonical-value child)]) value))
+(def ^:private escaped-json-character #"[\x00-\x1f\"\\]")
 
-    (sequential? value)
-    (mapv canonical-value value)
-
-    :else value))
-
-(defn- canonical-json [value]
-  ;; Racket's canonical JSON writer emits lowercase hexadecimal digits in
-  ;; active \u escapes; Jackson emits uppercase. Walk JSON escape tokens rather
-  ;; than replacing text so a literal string such as "\\u000B" is unchanged.
-  (let [encoded (json/generate-string (canonical-value value))
-        length (.length encoded)
-        output (StringBuilder.)]
-    (loop [index 0]
-      (if (>= index length)
-        (.toString output)
-        (let [current (.charAt encoded index)]
-          (if (and (= current \\)
-                (< (+ index 5) length)
-                (= (.charAt encoded (+ index 1)) (char 117)))
+(defn- append-json-string! [^StringBuilder output ^String value]
+  (.append output \" )
+  (if-not (re-find escaped-json-character value)
+    (.append output value)
+    (doseq [character value]
+      (case character
+        \" (.append output "\\\"")
+        \\ (.append output "\\\\")
+        \backspace (.append output "\\b")
+        \tab (.append output "\\t")
+        \newline (.append output "\\n")
+        \formfeed (.append output "\\f")
+        \return (.append output "\\r")
+        (let [point (int character)]
+          (if (< point 32)
             (do
               (.append output "\\u")
-              (.append output
-                (.toLowerCase
-                  (.substring encoded (+ index 2) (+ index 6))
-                  Locale/ROOT))
-              (recur (+ index 6)))
-            (if (and (= current \\) (< (+ index 1) length))
-              (do
-                (.append output current)
-                (.append output (.charAt encoded (+ index 1)))
-                (recur (+ index 2)))
-              (do
-                (.append output current)
-                (recur (+ index 1))))))))))
+              (.append output (format "%04x" point)))
+            (.append output character))))))
+  (.append output \" )
+  output)
+
+(defn- canonical-number [value]
+  (cond
+    (integer? value) (str value)
+    (instance? java.math.BigDecimal value) (str value)
+    (instance? Double value)
+    (if (Double/isFinite value) (str value) (json/generate-string value))
+    (instance? Float value)
+    (if (Float/isFinite value) (str value) (json/generate-string value))
+    :else (json/generate-string value)))
+
+(defn- append-canonical-json! [^StringBuilder output value]
+  (cond
+    (map? value)
+    (do
+      (.append output \{)
+      (loop [remaining (seq (sort (keys value))) first? true]
+        (when-let [key (first remaining)]
+          (when-not first? (.append output \,))
+          (append-json-string! output key)
+          (.append output \:)
+          (append-canonical-json! output (get value key))
+          (recur (next remaining) false)))
+      (.append output \}))
+
+    (sequential? value)
+    (do
+      (.append output \[)
+      (loop [remaining (seq value) first? true]
+        (when-let [children remaining]
+          (when-not first? (.append output \,))
+          (append-canonical-json! output (first children))
+          (recur (next children) false)))
+      (.append output \]))
+
+    (string? value) (append-json-string! output value)
+    (nil? value) (.append output "null")
+    (true? value) (.append output "true")
+    (false? value) (.append output "false")
+    (number? value) (.append output (canonical-number value))
+    :else
+    (throw
+      (ex-info "checked-program canonical JSON contains a non-JSON value"
+        {:value value :type (type value)})))
+  output)
 
 (defn projection-digest [ast]
   (let [payload (dissoc ast "projectionSha256")
-        canonical-json (canonical-json payload)
+        canonical-json (append-canonical-json! (StringBuilder.) payload)
         digest (MessageDigest/getInstance "SHA-256")]
-    (.update digest (.getBytes canonical-json "UTF-8"))
+    (.update digest (.getBytes (.toString canonical-json) "UTF-8"))
     (str "sha256:" (format "%064x" (BigInteger. 1 (.digest digest))))))
 
 (defn with-projection-digest [ast]

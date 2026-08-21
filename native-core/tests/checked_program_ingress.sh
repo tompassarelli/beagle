@@ -17,6 +17,10 @@ bb -e '
         escape-digest (checked/projection-digest escape-payload)
         literal-lower-digest
         (checked/projection-digest (assoc escape-payload "literal" "\\u000b"))
+        canonical-payload
+        {"z" [nil true false 0 -1 1.0 -0.0 1.25 1.0e20]
+         "a" "\u0000\b\t\n\u000b\f\r\u001bλ—😀\\\""}
+        canonical-digest (checked/projection-digest canonical-payload)
         base {"kind" "beagle.checked-program"
               "schemaVersion" 4
               "phase" "checked"
@@ -63,6 +67,10 @@ bb -e '
                {:actual escape-digest})))
     (when (= escape-digest literal-lower-digest)
       (throw (ex-info "literal backslash-u payload was normalized" {})))
+    (when-not (= "sha256:3cce060896f60956e2f713f565510f8424ca8583e5e176ba4559a84720484c00"
+                canonical-digest)
+      (throw (ex-info "canonical JSON scalar encoding drifted"
+               {:actual canonical-digest})))
     (checked/require-checked-program! authentic "authentic" "test ingress")
     (try
       (checked/require-checked-program! tampered "tampered" "test ingress")
