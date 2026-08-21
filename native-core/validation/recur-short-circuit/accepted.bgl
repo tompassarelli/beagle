@@ -1,0 +1,15 @@
+#lang beagle
+(ns native.recur-short-circuit)
+
+(defn and-final [] Bool
+  (loop [continue Bool true]
+    (and continue (recur false))))
+
+(defn or-final [] Bool
+  (loop [done Bool false]
+    (or done (recur true))))
+
+(defn main [] Int
+  (if (and-final)
+    1
+    (if (or-final) 0 1)))

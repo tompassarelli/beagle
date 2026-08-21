@@ -1,0 +1,16 @@
+#lang beagle
+(ns native.recur-short-circuit-refusals)
+
+(defn and-earlier [] Int
+  (if
+    (loop [continue Bool true]
+      (and (recur false) continue))
+    0
+    1))
+
+(defn or-earlier [] Int
+  (if
+    (loop [done Bool false]
+      (or (recur true) done))
+    0
+    1))

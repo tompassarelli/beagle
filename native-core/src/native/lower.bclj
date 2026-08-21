@@ -5312,6 +5312,20 @@
                   (recur (+ position 1))
                   false)))))
 
+        (and (= "call" kind)
+          (or (= "and" (source-callee-name index node))
+            (= "or" (source-callee-name index node))))
+        (let [args-node (U core/NativeId Nil) (index-first-object index node "args")
+              args (Vec core/NativeId) (if (nil? args-node) []
+                (index-sequence-items index args-node))]
+          (loop [position Int 0]
+            (if (>= position (count args))
+              true
+              (if (recur-tail-only? index (nth args position)
+                    (and tail (= (+ position 1) (count args))) (- fuel 1))
+                (recur (+ position 1))
+                false))))
+
         (= "loop" kind)
         (let [bindings-node (U core/NativeId Nil) (index-first-object index node "bindings")
               items (Vec core/NativeId) (if (nil? bindings-node) [] (index-sequence-items index bindings-node))]
