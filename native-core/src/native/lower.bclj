@@ -159,6 +159,8 @@
    (first-texts (Map String String))
    (form-ids (Map String (Vec core/NativeId)))
    (callee-names (Map String Bool))
+   (call-targets (Map String core/NativeId))
+   (calls-by-function (Map String (Vec core/NativeId)))
    (child-nodes (Map String (Vec core/NativeId)))
    (parent-nodes (Map String core/NativeId))
    (definition-roots (Map String core/NativeId))
@@ -302,13 +304,7 @@
     (if (nil? reference) "" (source-reference-spelling index reference))))
 
 (defn index-has-callee? [(index SourceIndexV0) (expected String)] Bool
-  (let [calls (Vec core/NativeId)
-        (vec (concat (index-form-ids index "call")
-               (index-form-ids index "static-call")))]
-    (some?
-      (some (fn [source core/NativeId] Bool
-              (= expected (source-callee-name index source)))
-        calls))))
+  (= true (get (sourceindexv0-callee-names index) expected)))
 
 (defn module-root-named
   [(index SourceIndexV0) (module-name String)] (U core/NativeId Nil)
@@ -381,6 +377,8 @@
             [:form-ids
              (assoc (sourceindexv0-form-ids seeded) "module-root" listed)]))))))
 
+(declare index-prelude-calls)
+
 (defn build-source-index
   [(graph stages/TermGraphV0)
    (modules (Vec stages/SourceModuleV1))]
@@ -392,13 +390,12 @@
                first-objects (Map String core/NativeId) {}
                first-texts (Map String String) {}
                form-ids (Map String (Vec core/NativeId)) {}
-               callee-names (Map String Bool) {}
                child-nodes (Map String (Vec core/NativeId)) {}
                parent-nodes (Map String core/NativeId) {}
                inferred-types (Vec core/NativeId) []]
           (if (>= position (count facts))
             (->SourceIndexV0 (count facts) first-objects first-texts form-ids
-              callee-names child-nodes parent-nodes {} {} [] inferred-types)
+              {} {} {} child-nodes parent-nodes {} {} [] inferred-types)
             (let [fact SourceFactV0 (nth facts position)
                   subject core/NativeId (sourcefactv0-subject fact)
                   object core/NativeId (sourcefactv0-object fact)
@@ -427,9 +424,6 @@
                 (if (= "form-kind" predicate)
                   (assoc form-ids object-text (conj forms subject))
                   form-ids)
-                (if (= "callee" predicate)
-                  (assoc callee-names object-text true)
-                  callee-names)
                 (assoc child-nodes subject-key (conj children object))
                 (if (nil? (get parent-nodes object-key))
                   (assoc parent-nodes object-key subject)
@@ -462,7 +456,7 @@
                                collected)))
                   collected
                   (conj collected key))))))]
-    (with indexed [:record-keys keys])))
+    (index-prelude-calls (with indexed [:record-keys keys]))))
 
 (defn source-module-identity-index
   [(modules (Vec stages/SourceModuleV1))] (Map String Bool)
@@ -747,6 +741,102 @@
     (str (resolvedsourcenamev0-module-name resolved) "/"
       (resolvedsourcenamev0-local-name resolved))
     ""))
+
+(defrecord FunctionTargetV0
+  [(ordinal Int) (source core/NativeId)])
+
+(defrecord FunctionTargetTablesV0
+  [(bindings (Map String FunctionTargetV0))
+   (qualified-names (Map String FunctionTargetV0))])
+
+(defn qualified-function-key [(module-name String) (name String)] String
+  (str (count module-name) ":" module-name (count name) ":" name))
+
+(defn function-target-tables
+  [(index SourceIndexV0)] FunctionTargetTablesV0
+  (let [functions (Vec core/NativeId) (index-form-ids index "defn")]
+    (loop [position Int 0
+           bindings (Map String FunctionTargetV0) {}
+           qualified-names (Map String FunctionTargetV0) {}]
+      (if (>= position (count functions))
+        (->FunctionTargetTablesV0 bindings qualified-names)
+        (let [function core/NativeId (nth functions position)
+              binding-id String (fact-text index function "binding-id")
+              qualified-key String
+              (qualified-function-key (source-module-name index function)
+                (fact-text index function "name"))
+              target FunctionTargetV0 (->FunctionTargetV0 position function)]
+          (recur (+ position 1)
+            (if (or (= "" binding-id) (some? (get bindings binding-id)))
+              bindings
+              (assoc bindings binding-id target))
+            (if (some? (get qualified-names qualified-key))
+              qualified-names
+              (assoc qualified-names qualified-key target))))))))
+
+(defn earlier-function-target
+  [(binding-target (U FunctionTargetV0 Nil))
+   (qualified-target (U FunctionTargetV0 Nil))]
+  (U FunctionTargetV0 Nil)
+  (cond
+    (nil? binding-target) qualified-target
+    (nil? qualified-target) binding-target
+    (<= (functiontargetv0-ordinal binding-target)
+      (functiontargetv0-ordinal qualified-target)) binding-target
+    :else qualified-target))
+
+(defn index-prelude-calls [(index SourceIndexV0)] SourceIndexV0
+  (let [tables FunctionTargetTablesV0 (function-target-tables index)
+        calls (Vec core/NativeId)
+        (vec (concat (index-form-ids index "call")
+               (index-form-ids index "static-call")))]
+    (loop [position Int 0
+           callee-names (Map String Bool) {}
+           call-targets (Map String core/NativeId) {}
+           calls-by-function (Map String (Vec core/NativeId)) {}]
+      (if (>= position (count calls))
+        (with
+          (with
+            (with index [:callee-names callee-names])
+            [:call-targets call-targets])
+          [:calls-by-function calls-by-function])
+        (let [call core/NativeId (nth calls position)
+              callee-name String (source-callee-name index call)
+              callee (U core/NativeId Nil) (index-first-object index call "callee")
+              binding-id String
+              (if (nil? callee) "" (fact-text index callee "binding-id"))
+              binding-target (U FunctionTargetV0 Nil)
+              (if (= "" binding-id)
+                nil
+                (get (functiontargettablesv0-bindings tables) binding-id))
+              resolved ResolvedSourceNameV0
+              (resolve-source-name index (source-module-name index call) callee-name)
+              qualified-target (U FunctionTargetV0 Nil)
+              (if (resolvedsourcenamev0-visible resolved)
+                (get (functiontargettablesv0-qualified-names tables)
+                  (qualified-function-key
+                    (resolvedsourcenamev0-module-name resolved)
+                    (resolvedsourcenamev0-local-name resolved)))
+                nil)
+              target (U FunctionTargetV0 Nil)
+              (earlier-function-target binding-target qualified-target)
+              target-source (U core/NativeId Nil)
+              (if (nil? target) nil (functiontargetv0-source target))
+              target-key String
+              (if (nil? target-source) "" (id-value target-source))
+              prior-calls (U (Vec core/NativeId) Nil)
+              (if (nil? target-source)
+                nil
+                (get calls-by-function target-key))]
+          (recur (+ position 1)
+            (assoc callee-names callee-name true)
+            (if (nil? target-source)
+              call-targets
+              (assoc call-targets (id-value call) target-source))
+            (if (nil? target-source)
+              calls-by-function
+              (assoc calls-by-function target-key
+                (conj (if (nil? prior-calls) [] prior-calls) call)))))))))
 
 (defn type-id [(name String)] core/NativeId
   (lower-id "type" [(unqualified-name name)]))
@@ -2346,27 +2436,7 @@
 
 (defn source-call-function
   [(index SourceIndexV0) (call core/NativeId)] (U core/NativeId Nil)
-  (let [callee (U core/NativeId Nil) (index-first-object index call "callee")
-        binding-id String
-        (if (nil? callee) "" (fact-text index callee "binding-id"))
-        resolved ResolvedSourceNameV0
-        (resolve-source-name index (source-module-name index call)
-          (source-callee-name index call))
-        functions (Vec core/NativeId) (index-form-ids index "defn")]
-    (loop [position Int 0]
-      (if (>= position (count functions))
-        nil
-        (let [function core/NativeId (nth functions position)
-              function-binding String (fact-text index function "binding-id")]
-          (if (or
-                (and (not (= "" binding-id)) (= binding-id function-binding))
-                (and (resolvedsourcenamev0-visible resolved)
-                  (= (resolvedsourcenamev0-module-name resolved)
-                    (source-module-name index function))
-                  (= (resolvedsourcenamev0-local-name resolved)
-                    (fact-text index function "name"))))
-            function
-            (recur (+ position 1))))))))
+  (get (sourceindexv0-call-targets index) (id-value call)))
 
 (defn carrier-resolution? [(resolution TypeResolutionV0)] Bool
   (let [target core/NativeId (typeresolutionv0-type-id resolution)
@@ -2520,10 +2590,11 @@
    (source-function core/NativeId)
    (position Int)]
   (U TypeResolutionV0 Nil)
-  ;; Module-level calls are indexed as static calls; both forms are evidence.
   (let [calls (Vec core/NativeId)
-        (vec (concat (index-form-ids index "call")
-               (index-form-ids index "static-call")))]
+        (let [found (U (Vec core/NativeId) Nil)
+              (get (sourceindexv0-calls-by-function index)
+                (id-value source-function))]
+          (if (nil? found) [] found))]
     (loop [scan Int 0
            chosen (U TypeResolutionV0 Nil) nil
            conflict Bool false]
@@ -2536,8 +2607,7 @@
               (if (nil? arguments-node)
                 []
                 (index-sequence-items index arguments-node))]
-          (if (or (not (call-targets-function? index call source-function))
-                (>= position (count arguments)))
+          (if (>= position (count arguments))
             (recur (+ scan 1) chosen false)
             (let [candidate (U TypeResolutionV0 Nil)
                   (source-expression-carrier-resolution index
@@ -27479,7 +27549,7 @@
        (source-index-key empty-context-vector-annotation "name") "Vec"
        (source-index-key int-annotation "form-kind") "type-prim"
        (source-index-key int-annotation "name") "Int"}
-      {} {} {} {} {} {} [] [])))
+      {} {} {} {} {} {} {} {} [] [])))
 
 (def empty-context-types (Vec core/TypeDef)
   [(i64-type) (text-type) (keyword-type) (lower-failure-type)
