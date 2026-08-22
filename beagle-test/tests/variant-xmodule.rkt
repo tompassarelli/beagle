@@ -10,7 +10,8 @@
          beagle/private/module-overlay-check
          beagle/private/module-source-root
          beagle/private/parse
-         beagle/private/check)
+         beagle/private/check
+         beagle/private/types)
 
 (define-runtime-path fixtures-dir "fixtures/variant-xmodule")
 
@@ -63,6 +64,26 @@
 (test-case "qualified match patterns remain printable in checker diagnostics"
   (check-not-exn
    (lambda () (check-file "ok-qualified-pattern-diagnostic.bclj"))))
+
+(test-case "qualified core variants resolve to nominal checker types"
+  (define checker-namespace (module->namespace 'beagle/private/check))
+  (define reference-hash-ref/internal
+    (parameterize ([current-namespace checker-namespace])
+      (namespace-variable-value 'reference-hash-ref)))
+  (define member-view-type/internal
+    (parameterize ([current-namespace checker-namespace])
+      (namespace-variable-value 'member-view-type)))
+  (define variant
+    (qualified-ref 'host.fs 'ReadByteSourceBoundedOk #f))
+  (define fields (hasheq ':source (type-prim 'ByteSource)))
+  (check-eq?
+   fields
+   (reference-hash-ref/internal
+    (hasheq 'host.fs/ReadByteSourceBoundedOk fields)
+    variant))
+  (check-equal?
+   (type-prim 'host.fs/ReadByteSourceBoundedOk)
+   (member-view-type/internal variant (type-prim 'Any))))
 
 ;; A bare member NAMES a sibling record rather than declaring a nullary variant;
 ;; the import must not overwrite that record's ctor arity or field map.

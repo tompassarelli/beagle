@@ -53,6 +53,7 @@
       (hash-ref table ref #f)
       (and structural
            (or (hash-ref table structural #f)
+               (hash-ref table (structural-name->symbol structural) #f)
                (reference-hash-qualified-ref
                 table structural (structural-name-provider-id structural))))
       (and structural
@@ -98,6 +99,10 @@
     [(resolved-ref? ref) (structural-name-leaf (resolved-ref-name ref))]
     [(qualified-ref? ref) (qualified-ref-name ref)]
     [else ref]))
+
+(define (reference-nominal-name ref)
+  (define structural (reference-structural-name ref))
+  (if structural (structural-name->symbol structural) ref))
 
 (define (binder-env-set! table binder name value)
   (hash-set! table name value)
@@ -5283,10 +5288,11 @@
 ;; both read the substitution back out of that shape.
 (define (member-view-type member-name target-type)
   (define pdef (parametric-def-for-app target-type))
+  (define nominal-name (reference-nominal-name member-name))
   (cond
     [(and pdef (memq member-name (hash-ref pdef 'members '())))
-     (type-app member-name (type-app-args target-type))]
-    [else (type-prim member-name)]))
+     (type-app nominal-name (type-app-args target-type))]
+    [else (type-prim nominal-name)]))
 
 ;; The scrutinee a match may refine: a bare lexical name that is stable for its
 ;; whole lifetime. `set!` anywhere in the form makes it unstable; a dynamic var
@@ -5309,6 +5315,8 @@
      (define rec-name
        (or (canonical-union-member-name written-name target-type)
            written-name))
+     (define nominal-rec-name (reference-nominal-name rec-name))
+     (define field-map (reference-hash-ref RECORD-FIELDS rec-name #f))
      (define bindings (pat-record-bindings pat))
      (define arm-env (mut-copy env))
      ;; Scrutinee first: a pattern binder of the same name legitimately shadows
@@ -5316,9 +5324,9 @@
      (when scrutinee
        (hash-set! arm-env scrutinee (member-view-type rec-name target-type)))
      (cond
-       [(hash-has-key? RECORD-FIELDS rec-name)
-        (define field-map (hash-ref RECORD-FIELDS rec-name))
-        (define field-order (hash-ref RECORD-FIELD-ORDER rec-name '()))
+       [field-map
+        (define field-order
+          (reference-hash-ref RECORD-FIELD-ORDER rec-name '()))
         (for ([b (in-list bindings)]
               [kw (in-list field-order)])
         (define raw-type (hash-ref field-map kw ANY))
@@ -5326,7 +5334,8 @@
            arm-env pat b
            (resolve-parametric-field-type raw-type target-type)))]
        [(= (length bindings) 1)
-        (binder-env-set! arm-env pat (car bindings) (type-prim rec-name))])
+        (binder-env-set!
+         arm-env pat (car bindings) (type-prim nominal-rec-name))])
      arm-env]
     ;; G4-emit — map pattern {:k x}: narrow each VAR entry to its field type. Sound
     ;; now that emit binds the var (emit-clj/emit-js), and the arm is gated on
