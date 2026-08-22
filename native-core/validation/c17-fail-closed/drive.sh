@@ -42,5 +42,6 @@ bb -cp "$scratch/out" -e '
             :optional native.c17-fail-closed/malformed-optional-rejected?
             :map-get native.c17-fail-closed/malformed-map-get-rejected?
             :checked-layout native.c17-fail-closed/malformed-checked-result-rejected?
-            :checked-operation native.c17-fail-closed/checked-bounds-rejected?})))
+            :checked-operation native.c17-fail-closed/checked-bounds-rejected?
+            :f64-literals native.c17-fail-closed/f64-literals-preserved?})))
 (print native.c17-fail-closed/report)'

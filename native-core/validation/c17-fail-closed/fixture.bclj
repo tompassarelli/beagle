@@ -2,6 +2,7 @@
 
 (ns native.c17-fail-closed)
 
+(require [clojure.string :as str])
 (require [native.body-c17 :as body])
 (require [native.core :as core])
 (require [native.obligations :as obligations])
@@ -181,6 +182,63 @@
   (with obligations/valid-program
     [:functions [checked-bounds-function obligations/fixture-token-function]]))
 
+(def f64-literal-function core/FunctionDef
+  (core/->FunctionDef
+    (obligations/obligation-id "function-f64-literals")
+    "f64-literals"
+    []
+    [(core/->BasicBlock
+       (obligations/obligation-id "block-f64-literals")
+       []
+       [(core/->AtomInstruction
+          (core/->SsaValueV0
+            (obligations/obligation-id "ssa-positive-infinity")
+            (corpus/corpus-id "type-f64"))
+          (core/->F64Atom
+            (Double/longBitsToDouble 9218868437227405312)))
+        (core/->AtomInstruction
+          (core/->SsaValueV0
+            (obligations/obligation-id "ssa-negative-infinity")
+            (corpus/corpus-id "type-f64"))
+          (core/->F64Atom
+            (Double/longBitsToDouble -4503599627370496)))
+        (core/->AtomInstruction
+          (core/->SsaValueV0
+            (obligations/obligation-id "ssa-nan-payload")
+            (corpus/corpus-id "type-f64"))
+          (core/->F64Atom
+            (Double/longBitsToDouble 9221120237041090626)))
+        (core/->AtomInstruction
+          (core/->SsaValueV0
+            (obligations/obligation-id "ssa-negative-zero")
+            (corpus/corpus-id "type-f64"))
+          (core/->F64Atom
+            (Double/longBitsToDouble -9223372036854775808)))]
+       [(core/->ReturnTerminator
+          (obligations/obligation-id "ssa-negative-zero"))])]
+    (obligations/obligation-id "block-f64-literals")
+    (corpus/corpus-id "type-f64")
+    []
+    []
+    []))
+
+(def f64-literal-program core/NativeCoreProgram
+  (core/->NativeCoreProgram
+    (obligations/obligation-id "program-f64-literals")
+    nil
+    "c17-fail-closed-v0"
+    [corpus/corpus-f64-type]
+    []
+    []
+    []
+    [corpus/corpus-f64-layout]
+    [f64-literal-function]
+    []
+    []
+    []
+    []
+    []))
+
 (def supported-result body/BodyMaterializationV0
   (body/materialize-program-for-abi corpus/record-assoc-program 0 "lp64"))
 
@@ -198,6 +256,9 @@
 
 (def checked-bounds-result body/BodyMaterializationV0
   (body/materialize-program-for-abi checked-bounds-program 0 "lp64"))
+
+(def f64-literal-result body/BodyMaterializationV0
+  (body/materialize-program-for-abi f64-literal-program 0 "lp64"))
 
 (defn empty-artifact? [artifact body/BodyArtifactV0] Bool
   (and (= "" (body/bodyartifactv0-header-name artifact))
@@ -245,6 +306,23 @@
     checked-bounds-result
     (body/->CheckedOperationGapV0 true)))
 
+(def f64-literals-preserved? Bool
+  (and (body/materialization-ok? f64-literal-result)
+    (let [source String
+          (body/bodyartifactv0-source-text
+            (body/materialization-artifact f64-literal-result))]
+      (and
+        (str/includes? source
+          "native_float_from_bits(INT64_C(9218868437227405312))")
+        (and
+          (str/includes? source
+            "native_float_from_bits(INT64_C(-4503599627370496))")
+          (and
+            (str/includes? source
+              "native_float_from_bits(INT64_C(9221120237041090626))")
+            (str/includes? source
+              "native_float_from_bits(INT64_MIN)")))))))
+
 (def all-cases-pass? Bool
   (every?
     (fn [passed Bool] Bool passed)
@@ -253,7 +331,8 @@
      malformed-optional-rejected?
      malformed-map-get-rejected?
      malformed-checked-result-rejected?
-     checked-bounds-rejected?]))
+     checked-bounds-rejected?
+     f64-literals-preserved?]))
 
 (def report String
   (str
@@ -263,4 +342,5 @@
     "malformed-map-get MapGetResultLayoutGapV0\n"
     "malformed-checked CheckedResultLayoutGapV0\n"
     "unsupported-checked CheckedOperationGapV0\n"
+    "f64-literals exact-bits\n"
     "rejections artifact-free\n"))

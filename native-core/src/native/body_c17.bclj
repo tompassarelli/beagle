@@ -855,7 +855,8 @@
     (if (core/boolatom-value atom) "true" "false")
     (instance? native.core.I64Atom atom)
     (c17/emit-i64-literal (core/i64atom-value atom))
-    (instance? native.core.F64Atom atom) (str (core/f64atom-value atom))
+    (instance? native.core.F64Atom atom)
+    (c17/emit-f64-literal (core/f64atom-value atom))
     (instance? native.core.TextAtom atom)
     (str "(uint64_t)(uintptr_t)&"
       (text-symbol module-index
