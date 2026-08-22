@@ -1,0 +1,175 @@
+#lang beagle
+
+(ns beagle.semantic-identity-fixture
+  (:require [beagle.semantic-identity :as identity]))
+
+(def domain-a identity/IdentityDomain
+  (identity/clause-content-domain))
+
+(def domain-b identity/IdentityDomain
+  (identity/goal-content-domain))
+
+(defn repeated-octets
+  [value Int
+   amount Int] (Vec Int)
+  (loop [index Int 0
+         result (Vec Int) []]
+    (if (>= index amount)
+      result
+      (recur (+ index 1) (conj result value)))))
+
+(def digest-a identity/Digest256
+  (identity/->Digest256 (repeated-octets 17 32)))
+
+(def digest-b identity/Digest256
+  (identity/->Digest256 (repeated-octets 34 32)))
+
+(defn different-digests?
+  [left identity/MerkleResult
+   right identity/MerkleResult] Bool
+  (match (identity/merkleresult-outcome left)
+    [(identity/MerkleRejected problem) false]
+    [(identity/MerkleHashed left-digest left-bytes)
+     (match (identity/merkleresult-outcome right)
+       [(identity/MerkleRejected problem) false]
+       [(identity/MerkleHashed right-digest right-bytes)
+        (not (identity/digest= left-digest right-digest))])]))
+
+(defn same-digest?
+  [left identity/MerkleResult
+   right identity/MerkleResult] Bool
+  (match (identity/merkleresult-outcome left)
+    [(identity/MerkleRejected problem) false]
+    [(identity/MerkleHashed left-digest left-bytes)
+     (match (identity/merkleresult-outcome right)
+       [(identity/MerkleRejected problem) false]
+       [(identity/MerkleHashed right-digest right-bytes)
+        (identity/digest= left-digest right-digest)])]))
+
+(defn rejected-as?
+  [result identity/MerkleResult
+   code Keyword] Bool
+  (match (identity/merkleresult-outcome result)
+    [(identity/MerkleHashed digest bytes) false]
+    [(identity/MerkleRejected problem)
+     (= code (identity/identityproblem-code problem))]))
+
+(defn digest-rejected-as?
+  [result identity/DigestAdmission
+   code Keyword] Bool
+  (match result
+    [(identity/DigestAccepted digest) false]
+    [(identity/DigestRejected problem)
+     (= code (identity/identityproblem-code problem))]))
+
+(defn byte-content-rejected-as?
+  [result identity/ByteContentAdmission
+   code Keyword] Bool
+  (match result
+    [(identity/ByteContentAccepted accepted) false]
+    [(identity/ByteContentRejected problem)
+     (= code (identity/identityproblem-code problem))]))
+
+(defn framing-case [] Bool
+  (let [split-a identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->Utf8Field 1 "a")
+           (identity/->Utf8Field 2 "bc")])
+        split-b identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->Utf8Field 1 "ab")
+           (identity/->Utf8Field 2 "c")])
+        other-domain identity/MerkleResult (identity/hash-merkle-node domain-b
+          [(identity/->Utf8Field 1 "a")
+           (identity/->Utf8Field 2 "bc")])
+        other-kind identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->BytesField 1 [97])
+           (identity/->Utf8Field 2 "bc")])]
+    (and
+      (different-digests? split-a split-b)
+      (different-digests? split-a other-domain)
+      (different-digests? split-a other-kind))))
+
+(defn set-case [] Bool
+  (let [forward identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->SetDigestsField 1 [digest-a digest-b])])
+        reverse identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->SetDigestsField 1 [digest-b digest-a])])
+        duplicate identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->SetDigestsField 1 [digest-a digest-a])])
+        ordered-forward identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->OrderedDigestsField 1 [digest-a digest-b])])
+        ordered-reverse identity/MerkleResult (identity/hash-merkle-node domain-a
+          [(identity/->OrderedDigestsField 1 [digest-b digest-a])])]
+    (and
+      (same-digest? forward reverse)
+      (rejected-as? duplicate :identity/duplicate-set-member)
+      (different-digests? ordered-forward ordered-reverse))))
+
+(defn rejection-case [] Bool
+  (and
+    (rejected-as?
+      (identity/hash-merkle-node domain-a
+        [(identity/->BytesField 1 [0 256])])
+      :identity/invalid-octet)
+    (rejected-as?
+      (identity/hash-merkle-node domain-a
+        [(identity/->DigestField 1
+           (identity/->Digest256 (repeated-octets 0 31)))])
+      :identity/invalid-digest)
+    (rejected-as?
+      (identity/hash-merkle-node domain-a
+        [(identity/->Utf8Field 2 "later")
+         (identity/->Utf8Field 1 "earlier")])
+      :identity/noncanonical-field-order)
+    (rejected-as?
+      (identity/hash-merkle-node domain-a
+        [(identity/->Utf8Field 1 "first")
+         (identity/->NaturalField 1 1)])
+      :identity/noncanonical-field-order)
+    (rejected-as?
+      (identity/hash-merkle-node domain-a
+        [(identity/->NaturalField 1 -1)])
+      :identity/negative-natural)
+    (digest-rejected-as?
+      (identity/admit-digest (repeated-octets 0 31))
+      :identity/digest-length)
+    (digest-rejected-as?
+      (identity/admit-digest (repeated-octets -1 32))
+      :identity/invalid-octet)))
+
+(defn byte-content-case [] Bool
+  (let [first-result identity/ByteContentAdmission (identity/byte-content-id [0 1 2 255])
+        second-result identity/ByteContentAdmission (identity/byte-content-id [0 1 2 255])]
+    (and
+      (match first-result
+        [(identity/ByteContentRejected problem) false]
+        [(identity/ByteContentAccepted first-id)
+         (match second-result
+           [(identity/ByteContentRejected problem) false]
+           [(identity/ByteContentAccepted second-id)
+            (identity/digest=
+              (identity/bytecontentid-digest first-id)
+              (identity/bytecontentid-digest second-id))])])
+      (byte-content-rejected-as?
+        (identity/byte-content-id [0 -1])
+        :identity/invalid-octet))))
+
+(defn header-case [] Bool
+  (match (identity/merkleresult-outcome
+           (identity/hash-merkle-node domain-a
+             [(identity/->Utf8Field 1 "value")]))
+    [(identity/MerkleRejected problem) false]
+    [(identity/MerkleHashed digest bytes)
+     (and
+       (identity/digest-valid? digest)
+       (= [66 71 76 73 0 1 0 15 0 0 0 1]
+          (subvec bytes 0 12)))]))
+
+(defn main [] Int
+  (if (and
+        (framing-case)
+        (set-case)
+        (rejection-case)
+        (byte-content-case)
+        (header-case))
+    0
+    1))
