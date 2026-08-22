@@ -1555,14 +1555,14 @@
                (answerbindingv1-term binding))))
       (answerv1-bindings answer))))
 
-;; Concrete RacketCon vertical. The world is semantic data consumed by the
+;; Concrete semantic-execution vertical. The world is semantic data consumed by the
 ;; evaluator. The two source projections below are replaceable renderings of
 ;; these identities; neither projection participates in query execution.
 
 (defn fixture-id
   [domain String
    name String] String
-  (semantic-id-v1 domain ["racketcon-v1" name]))
+  (semantic-id-v1 domain ["semantic-execution-v1" name]))
 
 (def append-relation-id String (fixture-id "relation" "append"))
 (def calls-relation-id String (fixture-id "relation" "calls-defn"))

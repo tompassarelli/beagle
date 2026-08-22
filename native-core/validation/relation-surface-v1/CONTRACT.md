@@ -79,10 +79,10 @@ logical authored path + ReaderRequestV1 + accepted ReaderProductV1
 
 `ReaderProductV1` alone does not retain the logical path, raw trivia, or all
 source authority. The request binds the exact payload and provenance; the path
-keeps the authored file first-class for the RacketCon prototype. Before
-projection, the bridge recomputes the path-and-payload projection identity and
-requires it to equal the request's provenance identity. A product/request from
-path A cannot be relabeled as path B.
+keeps the authored file first-class for this bounded relation-surface
+experiment. Before projection, the bridge recomputes the path-and-payload
+projection identity and requires it to equal the request's provenance identity.
+A product/request from path A cannot be relabeled as path B.
 
 The identities intentionally answer different questions:
 
