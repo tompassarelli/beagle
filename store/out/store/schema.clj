@@ -1,6 +1,7 @@
 (ns store.schema
   (:require [store.types :as t]
             [store.rotation :as rot]
+            [store.store :as store]
             [store.txn :as txn]))
 
 (defrecord OrderedResultSnapshot [space version lower-exclusive])
@@ -109,9 +110,11 @@
   s))
 
 (defn- ^Session commit! [^Session s builder]
-  (do
-  (txn/commit! (store-of s) builder)
-  (refresh! s)))
+  (let [match__0 (txn/commit! (store-of s) builder)]
+  (cond
+    (instance? store.store.CommitSuccess match__0) (let [_ (:coordinate match__0)] (refresh! s))
+    (instance? store.store.CommitStale match__0) (let [expected (:expected-sequence match__0) observed (:observed-sequence match__0)] (throw (ex-info "store: the store advanced under this schema mutation" {:type :transaction-sequence-drift :expected expected :observed observed})))
+    (instance? store.store.CommitRejected match__0) (let [code (:code match__0) detail (:detail match__0)] (throw (ex-info detail {:type code}))))))
 
 (defn predicate-ids [^Session s ^String spelling]
   (vec (distinct (concat (rot/subjects (rot/by-t23 (view s) predicate-name-predicate spelling)) (rot/subjects (rot/by-t23 (view s) predicate-alias-predicate spelling))))))

@@ -60,15 +60,19 @@
 
 (defn ^LeaseParts lease-decode [^String v]
   (let [cut1 (str/index-of v "|")]
-  (if (nil? cut1) (lease-invalid) (let [holder (subs v 0 cut1)
-   tail (subs v (+ cut1 1))
+  (if (nil? cut1) (lease-invalid) (let [cut1-position cut1
+   holder (subs v 0 cut1-position)
+   tail (subs v (+ cut1-position 1))
    cut2 (str/index-of tail "|")]
-  (if (nil? cut2) (lease-invalid) (let [exp-s (subs tail 0 cut2)
-   epoch-s (subs tail (+ cut2 1))
+  (if (nil? cut2) (lease-invalid) (let [cut2-position cut2
+   exp-s (subs tail 0 cut2-position)
+   epoch-s (subs tail (+ cut2-position 1))
    extra (str/index-of epoch-s "|")]
   (if (some? extra) (lease-invalid) (let [exp (parse-long exp-s)
    epoch (parse-long epoch-s)]
-  (if (nil? exp) (lease-invalid) (if (nil? epoch) (lease-invalid) (->LeaseParts holder exp epoch true)))))))))))
+  (if (nil? exp) (lease-invalid) (if (nil? epoch) (lease-invalid) (let [present-exp exp
+   present-epoch epoch]
+  (->LeaseParts holder present-exp present-epoch true))))))))))))
 
 (def lease-schema-lines ["@lease cardinality single" "@lease value_kind literal"])
 

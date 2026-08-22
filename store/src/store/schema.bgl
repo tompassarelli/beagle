@@ -37,6 +37,8 @@
 
 (require [store.rotation :as rot])
 
+(require [store.store :as store])
+
 (require [store.txn :as txn])
 
 (defrecord OrderedResultSnapshot
