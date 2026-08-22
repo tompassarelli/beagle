@@ -276,22 +276,19 @@
        (= (targetartifactv1-digest artifact)
           (content-digest (targetartifactv1-encoding artifact)))))
 
-(defn- write-artifact-files-with-validation
+(defn write-artifact-files
   [config ArtifactLinkConfigV1
-   files (Vec ArtifactFileV1)
-   validate-metadata Bool] ArtifactWriteResult
-  (loop [index Int 0
-         c-sources (Vec String) []
-         qbe-sources (Vec String) []]
-    (if (>= index (count files))
-      (->ArtifactFilesWritten c-sources qbe-sources)
-      (let [file ArtifactFileV1 (nth files index)
-            name String (artifactfilev1-name file)]
-        (if (and validate-metadata (not (artifact-file-valid? file)))
-          (->ArtifactFileWriteError
-            65
-            (str "invalid artifact file metadata: " name))
-          (let [path String (artifact-path config name)]
+   files (Vec ArtifactFileV1)] ArtifactWriteResult
+  (loop [validation-index Int 0]
+    (if (>= validation-index (count files))
+      (loop [write-index Int 0
+             c-sources (Vec String) []
+             qbe-sources (Vec String) []]
+        (if (>= write-index (count files))
+          (->ArtifactFilesWritten c-sources qbe-sources)
+          (let [file ArtifactFileV1 (nth files write-index)
+                name String (artifactfilev1-name file)
+                path String (artifact-path config name)]
             (match (host.fs/make-parent-directories path)
               [(host.fs/MakeParentDirectoriesError errno)
                (->ArtifactFileWriteError
@@ -304,23 +301,20 @@
                     errno (str "artifact write failed: " path))]
                  [(host.fs/WriteTextAtomicOk)
                   (recur
-                    (+ index 1)
+                    (+ write-index 1)
                     (if (string-suffix? name ".c")
                       (conj c-sources path)
                       c-sources)
                     (if (string-suffix? name ".ssa")
                       (conj qbe-sources path)
-                      qbe-sources))])])))))))
-
-(defn write-artifact-files
-  [config ArtifactLinkConfigV1
-   files (Vec ArtifactFileV1)] ArtifactWriteResult
-  (write-artifact-files-with-validation config files true))
-
-(defn- write-validated-artifact-files
-  [config ArtifactLinkConfigV1
-   files (Vec ArtifactFileV1)] ArtifactWriteResult
-  (write-artifact-files-with-validation config files false))
+                      qbe-sources))])])))))
+      (let [file ArtifactFileV1 (nth files validation-index)
+            name String (artifactfilev1-name file)]
+        (if (artifact-file-valid? file)
+          (recur (+ validation-index 1))
+          (->ArtifactFileWriteError
+            65
+            (str "invalid artifact file metadata: " name))))))
 
 (defn assembly-path [source-path String] String
   (str (subs source-path 0 (- (count source-path) 4)) ".s"))
@@ -401,8 +395,7 @@
 
 (defn- write-and-link-artifact
   [config ArtifactLinkConfigV1
-   artifact TargetArtifactV1
-   validate-files Bool] ArtifactLinkResultV1
+   artifact TargetArtifactV1] ArtifactLinkResultV1
   (cond
     (or (= (artifactlinkconfigv1-artifact-directory config) "")
         (= (artifactlinkconfigv1-executable-path config) "")
@@ -420,18 +413,15 @@
     (link-written-artifact
       config
       (targetartifactv1-target artifact)
-      (if validate-files
-        (write-artifact-files config (targetartifactv1-files artifact))
-        (write-validated-artifact-files
-          config (targetartifactv1-files artifact))))))
+      (write-artifact-files config (targetartifactv1-files artifact)))))
 
 (defn write-and-link
   [config ArtifactLinkConfigV1
    artifact TargetArtifactV1] ArtifactLinkResultV1
-  (write-and-link-artifact config artifact true))
+  (write-and-link-artifact config artifact))
 
 (defn write-validated-and-link
   [config ArtifactLinkConfigV1
    validated ValidatedTargetArtifactV1] ArtifactLinkResultV1
   (write-and-link-artifact
-    config (validatedtargetartifactv1-artifact validated) false))
+    config (validatedtargetartifactv1-artifact validated)))

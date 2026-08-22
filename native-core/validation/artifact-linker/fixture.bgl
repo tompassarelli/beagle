@@ -1,0 +1,54 @@
+#lang beagle
+
+(ns native.artifact-linker-fixture
+  (:require [beagle.artifact-linker :as linker]))
+
+(def payload String
+  "int main(void) { return 0; }\n")
+
+(def payload-digest String
+  (linker/content-digest payload))
+
+(def encoding String
+  "forged-public-validated-wrapper")
+
+(def forged-file linker/ArtifactFileV1
+  (linker/->ArtifactFileV1
+    "../escaped.c"
+    payload
+    payload-digest
+    (count (utf8-encode payload))
+    payload-digest))
+
+(def valid-prefix-file linker/ArtifactFileV1
+  (linker/->ArtifactFileV1
+    "written-before-invalid.c"
+    payload
+    payload-digest
+    (count (utf8-encode payload))
+    payload-digest))
+
+(def forged-artifact linker/TargetArtifactV1
+  (linker/->TargetArtifactV1
+    "c17"
+    [valid-prefix-file forged-file]
+    encoding
+    (linker/content-digest encoding)))
+
+(def forged-validated-artifact linker/ValidatedTargetArtifactV1
+  (linker/->ValidatedTargetArtifactV1 forged-artifact))
+
+(defn probe [args (Vec String)] Int
+  (if (not= (count args) 2)
+    64
+    (let [config linker/ArtifactLinkConfigV1
+          (linker/->ArtifactLinkConfigV1
+            (nth args 0)
+            (nth args 1)
+            "cc"
+            "")]
+      (match (linker/write-validated-and-link
+               config forged-validated-artifact)
+        [(linker/ArtifactLinkedV1 executable-path) 1]
+        [(linker/ArtifactLinkErrorV1 code detail)
+         (if (= code 65) 0 2)]))))
