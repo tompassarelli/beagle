@@ -301,6 +301,13 @@
      (list 'host.fs/ReadTextBoundedError
            (list (cons ':errno (p 'Int))))))
    (list
+    'host.fs/ReadByteSourceBoundedResult
+    (list
+     (list 'host.fs/ReadByteSourceBoundedOk
+           (list (cons ':source (p 'ByteSource))))
+     (list 'host.fs/ReadByteSourceBoundedError
+           (list (cons ':errno (p 'Int))))))
+   (list
     'host.stdin/ReadTextBoundedResult
     (list
      (list 'host.stdin/ReadTextBoundedOk

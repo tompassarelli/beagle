@@ -1,0 +1,9 @@
+#lang beagle
+
+(defn accepts-byte-source? [source ByteSource] Bool
+  true)
+
+(defn bounded-source? [result host.fs/ReadByteSourceBoundedResult] Bool
+  (match result
+    [(host.fs/ReadByteSourceBoundedOk source) (accepts-byte-source? source)]
+    [(host.fs/ReadByteSourceBoundedError errno) false]))

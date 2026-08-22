@@ -85,6 +85,9 @@
    (type-prim 'host.fs/ReadByteSourceBoundedOk)
    (member-view-type/internal variant (type-prim 'Any))))
 
+(test-case "a built-in qualified byte-source variant pattern binds its payload"
+  (check-not-exn (lambda () (check-file "core-byte-source.bgl"))))
+
 ;; A bare member NAMES a sibling record rather than declaring a nullary variant;
 ;; the import must not overwrite that record's ctor arity or field map.
 (test-case "imported union over bare record names keeps each member's arity"
