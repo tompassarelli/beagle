@@ -12849,6 +12849,234 @@
             (exprresultv0-value-id collection)
             (exprresultv0-type-id collection) false))))))
 
+(defn lower-sort-by-key
+  [env BodyEnvV0
+   owner core/NativeId
+   state BodyStateV0
+   callback-body (U core/NativeId Nil)
+   callback-source-parameters (Vec core/NativeId)
+   callback-accessor AccessorHitV0
+   callback-signature (U TypedFunctionV0 Nil)
+   callback-return core/NativeId
+   element-type core/NativeId
+   item-id core/NativeId] ExprResultV0
+  (let [outer-locals (Vec LocalBindingV0) (bodystatev0-locals state)
+        outer-loop-states (Vec LoopStateV0) (bodystatev0-loop-states state)
+        outer-refinements (Vec KeywordFlowRefinementV0) (bodystatev0-keyword-refinements state)
+        outer-values (Vec ValueFlowRefinementV0) (bodystatev0-value-refinements state)
+        isolated BodyStateV0 (state-enter-inline-callback state)
+        keyed ExprResultV0 (if (some? callback-signature)
+          (lower-static-callback-call isolated owner callback-signature [item-id]
+            "sort-by-callback-call")
+          (if (accessorhitv0-found callback-accessor)
+            (let [result-id core/NativeId (state-id isolated owner "sort-by-accessor")]
+              (->ExprResultV0
+                (state-emit (state-bump isolated)
+                  (core/->FieldInstruction
+                    (core/->SsaValueV0 result-id callback-return)
+                    item-id (accessorhitv0-field-id callback-accessor)))
+                result-id callback-return false))
+            (if (or (nil? callback-body)
+                    (= 0 (count callback-source-parameters)))
+              (fail-result isolated
+                "TODO-NATIVE-SORT-BY-CALLBACK: sort-by has no statically known key function")
+              (let [callback-state BodyStateV0 (bind-source-parameter-value env owner isolated
+                    (nth callback-source-parameters 0) 0 item-id element-type)]
+                (lower-contextual-boundary env owner callback-state callback-body
+                  callback-return callback-return)))))
+        restored BodyStateV0 (with
+          (state-with-flow-context (exprresultv0-state keyed)
+            outer-locals outer-refinements outer-values)
+          [:loop-states outer-loop-states])]
+    (cond
+      (state-blocked? restored) (dead-result restored)
+      (exprresultv0-terminated keyed)
+      (fail-result restored
+        "TODO-NATIVE-SORT-BY-CALLBACK-DIVERGES: sort-by key function does not produce a value")
+      (not (same-id? callback-return (exprresultv0-type-id keyed)))
+      (fail-result restored
+        "TODO-NATIVE-SORT-BY-CALLBACK-RESULT: sort-by key function does not produce its declared type")
+      :else
+      (->ExprResultV0 restored (exprresultv0-value-id keyed) callback-return false))))
+
+;; Native Core keeps only ordinary closed values at this boundary.  `sort-by`
+;; therefore lowers its already-pure key function into the two loop sites that
+;; need it, and uses descriptor-backed comparison to insert the source item
+;; after equal keys.  The latter is the stable-order rule: source order wins
+;; ties without smuggling a runtime callback or target-specific comparator into
+;; the plan.
+(defn lower-eager-vector-sort-by
+  [env BodyEnvV0
+   owner core/NativeId
+   state BodyStateV0
+   callback-body (U core/NativeId Nil)
+   callback-source-parameters (Vec core/NativeId)
+   callback-accessor AccessorHitV0
+   callback-signature (U TypedFunctionV0 Nil)
+   callback-return core/NativeId
+   element-type core/NativeId
+   collection-id core/NativeId
+   collection-type core/NativeId] ExprResultV0
+  (let [types (Vec core/TypeDef) (bodyenvv0-types env)]
+    (if (not (comparable-type? types callback-return))
+      (fail-result state
+        "TODO-NATIVE-SORT-BY-KEY: sort-by key function needs sealed comparable values")
+      (let [length-id core/NativeId (state-id state owner "sort-by-length")
+            zero-id core/NativeId (state-id state owner "sort-by-zero")
+            one-id core/NativeId (state-id state owner "sort-by-one")
+            empty-id core/NativeId (state-id state owner "sort-by-empty")
+            outer-header-id core/NativeId (state-id state owner "sort-by-header")
+            outer-body-id core/NativeId (state-id state owner "sort-by-body")
+            outer-advance-id core/NativeId (state-id state owner "sort-by-advance")
+            outer-exit-id core/NativeId (state-id state owner "sort-by-exit")
+            inner-header-id core/NativeId (state-id state owner "sort-by-scan-header")
+            inner-body-id core/NativeId (state-id state owner "sort-by-scan-body")
+            inner-advance-id core/NativeId (state-id state owner "sort-by-scan-advance")
+            insert-id core/NativeId (state-id state owner "sort-by-insert")
+            append-id core/NativeId (state-id state owner "sort-by-append")
+            outer-index core/NativeId (state-id state owner "sort-by-index")
+            outer-output core/NativeId (state-id state owner "sort-by-output")
+            advanced-output core/NativeId (state-id state owner "sort-by-advanced-output")
+            inner-index core/NativeId (state-id state owner "sort-by-scan-index")
+            prepared BodyStateV0 (state-emit
+              (state-emit
+                (state-emit
+                  (state-emit (state-bump state)
+                    (core/->VecLengthInstruction
+                      (core/->SsaValueV0 length-id (int-type-id)) collection-id))
+                  (core/->AtomInstruction
+                    (core/->SsaValueV0 zero-id (int-type-id))
+                    (core/->I64Atom 0)))
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 one-id (int-type-id))
+                  (core/->I64Atom 1)))
+              (core/->VecEmptyInstruction
+                (core/->SsaValueV0 empty-id collection-type)
+                length-id (arena-value-id owner)))
+            entered BodyStateV0 (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator outer-header-id [zero-id empty-id]))
+              outer-header-id
+              [(core/->Parameter outer-index (int-type-id))
+               (core/->Parameter outer-output collection-type)])
+            has-source-item core/NativeId (state-id entered owner "sort-by-has-item")
+            outer-compared BodyStateV0 (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-source-item (bool-type-id))
+                (core/->CompareLtI64V0 true) outer-index length-id))
+            outer-body BodyStateV0 (state-open-block
+              (state-close outer-compared
+                (core/->BranchTerminator has-source-item outer-body-id outer-exit-id))
+              outer-body-id [])
+            item-id core/NativeId (state-id outer-body owner "sort-by-item")
+            with-item BodyStateV0 (state-emit (state-bump outer-body)
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 item-id element-type)
+                collection-id outer-index))
+            candidate-key ExprResultV0 (lower-sort-by-key env owner with-item
+              callback-body callback-source-parameters callback-accessor callback-signature
+              callback-return element-type item-id)
+            candidate-state BodyStateV0 (exprresultv0-state candidate-key)]
+        (if (state-blocked? candidate-state)
+          (dead-result candidate-state)
+          (let [output-length-id core/NativeId (state-id candidate-state owner "sort-by-output-length")
+                with-output-length BodyStateV0 (state-emit (state-bump candidate-state)
+                  (core/->VecLengthInstruction
+                    (core/->SsaValueV0 output-length-id (int-type-id)) outer-output))
+                inner-entered BodyStateV0 (state-open-block
+                  (state-close (state-bump with-output-length)
+                    (core/->JumpTerminator inner-header-id [zero-id]))
+                  inner-header-id
+                  [(core/->Parameter inner-index (int-type-id))])
+                has-output-item core/NativeId (state-id inner-entered owner "sort-by-scan-has-item")
+                inner-compared BodyStateV0 (state-emit (state-bump inner-entered)
+                  (core/->CompareInstruction
+                    (core/->SsaValueV0 has-output-item (bool-type-id))
+                    (core/->CompareLtI64V0 true) inner-index output-length-id))
+                inner-body BodyStateV0 (state-open-block
+                  (state-close inner-compared
+                    (core/->BranchTerminator has-output-item inner-body-id append-id))
+                  inner-body-id [])
+                existing-item-id core/NativeId (state-id inner-body owner "sort-by-existing-item")
+                with-existing-item BodyStateV0 (state-emit (state-bump inner-body)
+                  (core/->VecGetInstruction
+                    (core/->SsaValueV0 existing-item-id element-type)
+                    outer-output inner-index))
+                existing-key ExprResultV0 (lower-sort-by-key env owner with-existing-item
+                  callback-body callback-source-parameters callback-accessor callback-signature
+                  callback-return element-type existing-item-id)
+                existing-state BodyStateV0 (exprresultv0-state existing-key)]
+            (if (state-blocked? existing-state)
+              (dead-result existing-state)
+              (let [comparison-id core/NativeId (state-id existing-state owner "sort-by-key-compare")
+                    with-comparison BodyStateV0 (state-emit (state-bump existing-state)
+                      (core/->ValueSemanticsInstruction
+                        (core/->SsaValueV0 comparison-id (int-type-id))
+                        (value-compare-operation callback-return
+                          (exprresultv0-value-id candidate-key)
+                          (exprresultv0-value-id existing-key)
+                          false)))
+                    insert-before-id core/NativeId (state-id with-comparison owner "sort-by-insert-before")
+                    selected BodyStateV0 (state-close
+                      (state-emit (state-bump with-comparison)
+                        (core/->CompareInstruction
+                          (core/->SsaValueV0 insert-before-id (bool-type-id))
+                          (core/->CompareLtI64V0 true) comparison-id zero-id))
+                      (core/->BranchTerminator insert-before-id insert-id inner-advance-id))
+                    prefix-id core/NativeId (state-id selected owner "sort-by-prefix")
+                    prefix BodyStateV0 (state-emit
+                      (state-open-block selected insert-id [])
+                      (core/->VecSliceInstructionV0
+                        (core/->SsaValueV0 prefix-id collection-type)
+                        outer-output zero-id inner-index (arena-value-id owner)))
+                    prefixed-id core/NativeId (state-id prefix owner "sort-by-prefixed")
+                    with-prefixed BodyStateV0 (state-emit (state-bump prefix)
+                      (core/->VecPushInstruction
+                        (core/->SsaValueV0 prefixed-id collection-type)
+                        prefix-id item-id (arena-value-id owner)))
+                    suffix-id core/NativeId (state-id with-prefixed owner "sort-by-suffix")
+                    with-suffix BodyStateV0 (state-emit (state-bump with-prefixed)
+                      (core/->VecSliceInstructionV0
+                        (core/->SsaValueV0 suffix-id collection-type)
+                        outer-output inner-index output-length-id (arena-value-id owner)))
+                    inserted-id core/NativeId (state-id with-suffix owner "sort-by-inserted")
+                    inserted BodyStateV0 (state-close
+                      (state-emit (state-bump with-suffix)
+                        (core/->VecConcatInstruction
+                          (core/->SsaValueV0 inserted-id collection-type)
+                          prefixed-id suffix-id (arena-value-id owner)))
+                      (core/->JumpTerminator outer-advance-id [inserted-id]))
+                    inner-advance BodyStateV0 (state-open-block inserted inner-advance-id [])
+                    next-inner ExprResultV0 (lower-checked-arith inner-advance owner "+"
+                      inner-index one-id)
+                    inner-advanced BodyStateV0 (exprresultv0-state next-inner)]
+                (if (state-blocked? inner-advanced)
+                  (dead-result inner-advanced)
+                  (let [scanned BodyStateV0 (state-close inner-advanced
+                          (core/->JumpTerminator inner-header-id
+                            [(exprresultv0-value-id next-inner)]))
+                        appended-id core/NativeId (state-id scanned owner "sort-by-appended")
+                        appended BodyStateV0 (state-close
+                          (state-emit (state-open-block scanned append-id [])
+                            (core/->VecPushInstruction
+                              (core/->SsaValueV0 appended-id collection-type)
+                              outer-output item-id (arena-value-id owner)))
+                          (core/->JumpTerminator outer-advance-id [appended-id]))
+                        advanced BodyStateV0 (state-open-block appended outer-advance-id
+                          [(core/->Parameter advanced-output collection-type)])
+                        next-outer ExprResultV0 (lower-checked-arith advanced owner "+"
+                          outer-index one-id)
+                        outer-advanced BodyStateV0 (exprresultv0-state next-outer)]
+                    (if (state-blocked? outer-advanced)
+                      (dead-result outer-advanced)
+                      (->ExprResultV0
+                        (state-open-block
+                          (state-close outer-advanced
+                            (core/->JumpTerminator outer-header-id
+                              [(exprresultv0-value-id next-outer) advanced-output]))
+                          outer-exit-id [])
+                        outer-output collection-type false))))))))))))
+
 (defn lower-eager-vector-hof
   [env BodyEnvV0
    owner core/NativeId
@@ -12891,7 +13119,8 @@
               (resolve-parameters index callback-node callback-owner))
             callback-parameters (Vec core/Parameter) (parameterresolutionv0-parameters callback-resolution)]
         (cond
-          (accessorhitv0-found callback-accessor)
+          (and (accessorhitv0-found callback-accessor)
+            (not (= "sort-by" callee)))
           (lower-eager-vector-accessor-map env owner state callee
             (nth args 1) callback-accessor)
 
@@ -12994,6 +13223,15 @@
                         element-type (exprresultv0-value-id collection)
                         (exprresultv0-type-id collection)
                         (= "map-indexed" callee))
+
+                      (= "sort-by" callee)
+                      (lower-eager-vector-sort-by env owner collection-state
+                        callback-body
+                        (if (= "fn" callback-kind)
+                          callback-source-parameters [])
+                        callback-accessor callback-signature callback-return
+                        element-type (exprresultv0-value-id collection)
+                        (exprresultv0-type-id collection))
 
                       :else
                       (lower-eager-vector-predicate env owner collection-state callee
@@ -16677,7 +16915,7 @@
               (source-call-arguments index (nth args 0)))
 
             (or (= "mapv" callee) (= "map-indexed" callee) (= "filterv" callee)
-                (= "every?" callee) (= "some" callee))
+                (= "every?" callee) (= "some" callee) (= "sort-by" callee))
             (lower-eager-vector-hof env owner state callee args)
 
             (= "reduce-kv" callee)

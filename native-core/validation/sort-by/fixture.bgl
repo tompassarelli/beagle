@@ -1,0 +1,43 @@
+#lang beagle
+(ns native.sort-by)
+
+(defn text-key [value String] String
+  value)
+
+(defn length-key [value String] Int
+  (count value))
+
+(defn sort-texts [values (Vec String)] (Vec String)
+  (sort-by text-key values))
+
+(defn sort-inline-texts [values (Vec String)] (Vec String)
+  (sort-by (fn [value String] String value) values))
+
+(defn sort-by-length [values (Vec String)] (Vec String)
+  (sort-by (fn [value String] Int (count value)) values))
+
+(defn empty-case [] Bool
+  (= (count (sort-texts [])) 0))
+
+(defn already-sorted-case [] Bool
+  (= (sort-inline-texts ["a" "b" "c"])
+     ["a" "b" "c"]))
+
+(defn reverse-case [] Bool
+  (= (sort-inline-texts ["c" "b" "a"])
+     ["a" "b" "c"]))
+
+(defn equal-key-stability-case [] Bool
+  (let [result (Vec String) (sort-by-length ["aa" "bb" "c"])]
+    (and (= (count result) 3)
+         (= (nth result 0) "c")
+         (= (nth result 1) "aa")
+         (= (nth result 2) "bb"))))
+
+(defn main [] Int
+  (if (and (empty-case)
+           (already-sorted-case)
+           (reverse-case)
+           (equal-key-stability-case))
+    0
+    1))
