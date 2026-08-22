@@ -17,7 +17,7 @@ die() {
   exit 1
 }
 
-for command in bb gcc jq rg sha256sum; do
+for command in bb jq rg sha256sum; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is unavailable: $command"
 done
@@ -102,10 +102,8 @@ for line in \
   'stage typed-to-native PENDING' \
   'source-modules 3' \
   'source-imports 3' \
-  'host-program-functions 4' \
-  'host-program-abis 6' \
-  'materialize OK module_0.h module_0.c' \
-  'qbe REFUSED QBE monotonic clock extern ABI is unsupported: host clock reads have no QBE call representation'; do
+  'materialize REFUSED native lowering incomplete' \
+  'qbe REFUSED native lowering incomplete'; do
   if ! rg -Fx "$line" "$report" >/dev/null; then
     cat "$report" >&2
     die "report is missing: $line"
@@ -113,35 +111,14 @@ for line in \
 done
 for function in getenv getenv-present? getenv-length monotonic-now; do
   rg -n "^lowered fn_[0-9]+ ${function//\?/\\?} " "$report" >/dev/null \
-    || die "host function did not lower: $function"
+    || die "host function is absent from the lowering frontier: $function"
 done
-obligations=(valid-ssa exhaustive-matches closed-layouts checked-arithmetic legal-abi discharged-tokens bounded-effects epoch-soundness leak-freedom)
-for obligation in "${obligations[@]}"; do
-  rg -Fx "obligation-host PASS $obligation" "$report" >/dev/null \
-    || die "validator did not pass: $obligation"
+for artifact in module_0.h module_0.c function_map.h; do
+  [[ ! -e "$scratch/generated/$artifact" ]] \
+    || die "pending Native lowering emitted $artifact"
 done
-[[ "$(rg -c '^obligation-host PASS ' "$report")" -eq 10 ]] \
-  || die "report did not contain exactly ten passing validators"
 
-map="$scratch/generated/function_map.h"
-printf '%s\n' \
-  '#ifndef NATIVE_HOST_CAPABILITY_FUNCTION_MAP_H' \
-  '#define NATIVE_HOST_CAPABILITY_FUNCTION_MAP_H' \
-  '' >"$map"
-while IFS='|' read -r macro function_name; do
-  index="$(awk -v name="$function_name" \
-    '$1 == "lowered" && $3 == name { sub(/^fn_/, "", $2); print $2 }' "$report")"
-  [[ "$index" =~ ^[0-9]+$ ]] || die "missing or duplicate lowered function: $function_name"
-  printf '#define %s native_m0_fn_%s\n' "$macro" "$index" >>"$map"
-done <<'FUNCTIONS'
-HOST_GETENV|getenv
-HOST_GETENV_PRESENT|getenv-present?
-HOST_GETENV_LENGTH|getenv-length
-HOST_MONOTONIC_NOW|monotonic-now
-FUNCTIONS
-printf '\n#endif\n' >>"$map"
-
-generated_names=(kernel_capability.facts source.sha256 report.txt function_map.h module_0.h module_0.c)
+generated_names=(kernel_capability.facts source.sha256 report.txt)
 for name in "${generated_names[@]}"; do
   [[ -f "$scratch/generated/$name" ]] || die "materializer omitted $name"
 done
@@ -155,29 +132,5 @@ publish_results() {
 }
 
 cat "$report"
-if [[ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]]; then
-  publish_results
-  exit 0
-fi
-
-build="$scratch/c"
-mkdir -p "$build"
-cp "$scratch/generated/module_0.h" "$scratch/generated/module_0.c" \
-  "$scratch/generated/function_map.h" "$here/main.c" "$build/"
-cp "$repo/native-core/shim/native_shim.c" \
-  "$repo/native-core/shim/native_shim.h" "$repo/native-core/shim/native_unicode15_data.h" "$build/"
-
-strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
-(cd "$build" && gcc "${strict[@]}" -o probe_gcc \
-  module_0.c native_shim.c main.c)
-(cd "$build" && BEAGLE_NATIVE_HOST_TEST=capability-value ./probe_gcc)
-echo "slice-kernel-capability: gcc $(gcc -dumpversion) strict compile + run ok"
-
-if command -v clang >/dev/null 2>&1; then
-  (cd "$build" && clang "${strict[@]}" -o probe_clang \
-    module_0.c native_shim.c main.c)
-  (cd "$build" && BEAGLE_NATIVE_HOST_TEST=capability-value ./probe_clang)
-  echo "slice-kernel-capability: clang $(clang -dumpversion | head -1) compile + run ok"
-fi
-
 publish_results
+echo "slice-kernel-capability: pending lowering refused without artifacts"

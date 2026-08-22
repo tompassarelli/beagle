@@ -21240,14 +21240,29 @@
 
 (defn encode-atom-kind [kind core/AtomKind] String
   (cond
-    (instance? native.core.BoolKind kind) "bool"
-    (instance? native.core.I64Kind kind) "i64"
-    (instance? native.core.F64Kind kind) "f64"
-    (instance? native.core.TextKind kind) "text"
-    (instance? native.core.BytesKind kind) "bytes"
-    (instance? native.core.KeywordKind kind) "keyword"
-    :else (stages/canonical-record "reference-kind"
-            [(id-value (core/refkind-target kind))])))
+    (instance? native.core.BoolKind kind)
+    (stages/canonical-record "bool-kind-v0"
+      [(stages/encode-bool (core/boolkind-token kind))])
+    (instance? native.core.I64Kind kind)
+    (stages/canonical-record "i64-kind-v0"
+      [(stages/encode-bool (core/i64kind-token kind))])
+    (instance? native.core.F64Kind kind)
+    (stages/canonical-record "f64-kind-v0"
+      [(stages/encode-bool (core/f64kind-token kind))])
+    (instance? native.core.TextKind kind)
+    (stages/canonical-record "text-kind-v0"
+      [(stages/encode-bool (core/textkind-token kind))])
+    (instance? native.core.BytesKind kind)
+    (stages/canonical-record "bytes-kind-v0"
+      [(stages/encode-bool (core/byteskind-token kind))])
+    (instance? native.core.KeywordKind kind)
+    (stages/canonical-record "keyword-kind-v0"
+      [(stages/encode-bool (core/keywordkind-token kind))])
+    (instance? native.core.RefKind kind)
+    (stages/canonical-record "reference-kind"
+      [(id-value (core/refkind-target kind))])
+    :else
+    (throw (ex-info "unsupported Native atom kind encoding" {}))))
 
 (defn encode-type-field [field core/TypeField] String
   (stages/canonical-record "field"
@@ -21260,7 +21275,13 @@
     (stages/canonical-record "variant"
       [(id-value (core/typevariant-id variant))
        (core/typevariant-name variant)
-       (if (nil? payload) "unit" (id-value payload))])))
+       (stages/encode-optional-id payload)])))
+
+(defn encode-collection-order [order core/CollectionOrderV0] String
+  (match order
+    [(InsertionOrderV0 token)
+     (stages/canonical-record "insertion-order-v0"
+       [(stages/encode-bool token)])]))
 
 (defn encode-type-shape [shape core/TypeShape] String
   (cond
@@ -21292,12 +21313,14 @@
     (stages/canonical-record "map-v0"
       [(id-value (core/maptypev0-key-type shape))
        (id-value (core/maptypev0-value-type shape))
-       "insertion-order-v0"])
+       (encode-collection-order
+         (core/maptypev0-iteration-order shape))])
 
     (instance? native.core.SetTypeV0 shape)
     (stages/canonical-record "set-v0"
       [(id-value (core/settypev0-element-type shape))
-       "insertion-order-v0"])
+       (encode-collection-order
+         (core/settypev0-iteration-order shape))])
 
     (instance? native.core.ReferenceType shape)
     (stages/canonical-record "reference"
@@ -21310,7 +21333,7 @@
            (fn [parameter core/NativeId] String (id-value parameter))
            (core/functiontype-parameter-types shape)))
        (let [rest-type (U core/NativeId Nil) (core/functiontype-rest-type shape)]
-         (if (nil? rest-type) "fixed" (id-value rest-type)))
+         (stages/encode-optional-id rest-type))
        (id-value (core/functiontype-return-type shape))])
 
     (instance? native.core.AtomCellTypeV0 shape)
@@ -21322,7 +21345,8 @@
       [(id-value (core/outcometype-value-type shape))
        (id-value (core/outcometype-failure-type shape))])
 
-    :else "invalid-type-shape"))
+    :else
+    (throw (ex-info "unsupported Native type shape encoding" {}))))
 
 (defn encode-type-def [definition core/TypeDef] String
   (stages/canonical-record "closed-type-v0"
@@ -21333,7 +21357,9 @@
 (defn encode-effect [effect core/EffectDef] String
   (let [kind core/EffectKind (core/effectdef-kind effect)
         kind-encoding String (cond
-          (instance? native.core.PureEffect kind) "pure"
+          (instance? native.core.PureEffect kind)
+          (stages/canonical-record "pure-v0"
+            [(stages/encode-bool (core/pureeffect-token kind))])
           (instance? native.core.AllocateEffect kind)
           (stages/canonical-record "allocate"
             [(id-value (core/allocateeffect-region kind))])
@@ -21355,10 +21381,12 @@
           (instance? native.core.ClockEffect kind)
           (stages/canonical-record "clock"
             [(id-value (core/clockeffect-capability kind))])
-          :else
+          (instance? native.core.AtomicEffect kind)
           (stages/canonical-record "atomic"
             [(id-value (core/atomiceffect-region kind))
-             (id-value (core/atomiceffect-capability kind))]))]
+             (id-value (core/atomiceffect-capability kind))])
+          :else
+          (throw (ex-info "unsupported Native effect encoding" {})))]
     (stages/canonical-record "effect-v0"
       [(id-value (core/effectdef-id effect)) kind-encoding])))
 
@@ -21502,6 +21530,12 @@
    roots (Vec core/NativeId)] String
   (stages/canonical-set tag
     (mapv (fn [id core/NativeId] String (id-value id)) roots)))
+
+(defn encode-id-sequence
+  [tag String
+   ids (Vec core/NativeId)] String
+  (stages/canonical-record tag
+    (mapv (fn [id core/NativeId] String (id-value id)) ids)))
 
 (defn function-todo-obligations
   [functions (Vec TypedFunctionV0)
@@ -21745,14 +21779,36 @@
    closed Bool
    detail String])
 
+(defrecord NativeFunctionFrontierV0
+  [id core/NativeId
+   name String
+   block-count Int])
+
 (defunion NativeLoweringResultV0
   (NativeLoweringCompleteV0
     [frozen stages/FrozenNativeStageV0
      receipt core/PassReceiptV0])
   (NativeLoweringPendingV0
-    [frozen stages/FrozenNativeStageV0
-     receipt core/PassReceiptV0
-     obligations (Vec core/ReceiptObligationV0)]))
+    [receipt core/PassReceiptV0
+     obligations (Vec core/ReceiptObligationV0)
+     function-frontier (Vec NativeFunctionFrontierV0)]))
+
+;; The source-derived route is an explicit compatibility input. Validation
+;; keeps this frozen component internally authenticated, but does not prove its
+;; pairing with prepared Native content, make it a model-native plan, or grant
+;; it planner provenance.
+(defn frozen-typed-stage-valid?
+  [frozen stages/FrozenTypedStageV0] Bool
+  (and
+    (= (stages/frozentypedstagev0-encoding frozen)
+      (stages/encode-typed-stage (stages/frozentypedstagev0-stage frozen)))
+    (stages/sha256-digest? (stages/frozentypedstagev0-digest frozen))
+    (= (stages/frozentypedstagev0-digest frozen)
+      (stages/content-digest (stages/frozentypedstagev0-encoding frozen)))))
+
+(defn typed-compatibility-input-identity
+  [frozen stages/FrozenTypedStageV0] core/NativeId
+  (lower-id "typed-stage" [(stages/frozentypedstagev0-digest frozen)]))
 
 (defn align-up
   [offset Int
@@ -23273,9 +23329,31 @@
     (instance? native.core.UnsignedIntReprV0 representation)
     (stages/canonical-record "unsigned-int"
       [(str (core/unsignedintreprv0-bit-width representation))])
-    :else
+    (instance? native.core.FloatReprV0 representation)
     (stages/canonical-record "float"
-      [(str (core/floatreprv0-bit-width representation))])))
+      [(str (core/floatreprv0-bit-width representation))])
+    :else
+    (throw (ex-info "unsupported Native scalar representation encoding" {}))))
+
+(defn encode-region-kind [kind core/RegionKind] String
+  (cond
+    (instance? native.core.StackRegion kind)
+    (stages/canonical-record "region-stack-v0"
+      [(stages/encode-bool (core/stackregion-token kind))])
+    (instance? native.core.ArenaRegion kind)
+    (stages/canonical-record "region-arena-v0"
+      [(stages/encode-bool (core/arenaregion-token kind))])
+    (instance? native.core.ExternalRegion kind)
+    (stages/canonical-record "region-external-v0"
+      [(stages/encode-bool (core/externalregion-token kind))])
+    :else
+    (throw (ex-info "unsupported Native region encoding" {}))))
+
+(defn encode-region [region core/RegionDef] String
+  (stages/canonical-record "region-def-v0"
+    [(id-value (core/regiondef-id region))
+     (encode-region-kind (core/regiondef-kind region))
+     (stages/encode-optional-id (core/regiondef-parent region))]))
 
 (defn encode-field-layout [field core/FieldLayoutV0] String
   (stages/canonical-record "field-layout-v0"
@@ -23289,7 +23367,7 @@
     (stages/canonical-record "variant-layout-v0"
       [(id-value (core/unionvariantlayoutv0-variant-id variant))
        (str (core/unionvariantlayoutv0-tag variant))
-       (if (nil? payload) "unit" (id-value payload))
+       (stages/encode-optional-id payload)
        (str (core/unionvariantlayoutv0-payload-offset-bytes variant))])))
 
 (defn encode-layout-shape [shape core/LayoutShapeV0] String
@@ -23299,7 +23377,8 @@
       [(encode-scalar-repr (core/scalarshapev0-representation shape))])
 
     (instance? native.core.BytesShapeV0 shape)
-    "native-bytes-layout-v0"
+    (stages/canonical-record "native-bytes-layout-v0"
+      [(stages/encode-bool (core/bytesshapev0-token shape))])
 
     (instance? native.core.RecordShapeV0 shape)
     (stages/canonical-record "record-layout"
@@ -23337,14 +23416,16 @@
        (id-value (core/mapshapev0-value-type shape))
        (str (core/mapshapev0-value-stride-bytes shape))
        (str (core/mapshapev0-value-align-bytes shape))
-       "insertion-order-v0"])
+       (encode-collection-order
+         (core/mapshapev0-iteration-order shape))])
 
     (instance? native.core.SetShapeV0 shape)
     (stages/canonical-record "set-layout-v0"
       [(id-value (core/setshapev0-element-type shape))
        (str (core/setshapev0-stride-bytes shape))
        (str (core/setshapev0-align-bytes shape))
-       "insertion-order-v0"])
+       (encode-collection-order
+         (core/setshapev0-iteration-order shape))])
 
     (instance? native.core.AtomCellShapeV0 shape)
     (stages/canonical-record "atom-cell-layout"
@@ -23352,11 +23433,15 @@
 
     (instance? native.core.ClosureShapeV0 shape)
     (stages/canonical-record "closure-layout-v0"
-      ["invoke-pointer" "arena-owned-environment-pointer"])
+      [(stages/encode-bool (core/closureshapev0-token shape))
+       "invoke-pointer" "arena-owned-environment-pointer"])
+
+    (instance? native.core.ReferenceShapeV0 shape)
+    (stages/canonical-record "reference-layout"
+      [(id-value (core/referenceshapev0-target-type shape))])
 
     :else
-    (stages/canonical-record "reference-layout"
-      [(id-value (core/referenceshapev0-target-type shape))])))
+    (throw (ex-info "unsupported Native layout shape encoding" {}))))
 
 (defn encode-layout-def [layout core/LayoutDef] String
   (stages/canonical-record "exact-layout-v0"
@@ -23436,26 +23521,40 @@
       [(id-value (core/textjoinv0-arena-id operation))
        (id-value (core/textjoinv0-separator-id operation))
        (id-value (core/textjoinv0-source-id operation))])
-    :else
+    (instance? native.core.TextRepeatV0 operation)
     (stages/canonical-record "text-repeat"
       [(id-value (core/textrepeatv0-arena-id operation))
        (id-value (core/textrepeatv0-source-id operation))
-       (id-value (core/textrepeatv0-count-id operation))])))
+       (id-value (core/textrepeatv0-count-id operation))])
+    :else
+    (throw (ex-info "unsupported Native text operation encoding" {}))))
 
 (defn encode-concrete-equality [equality core/ConcreteEqualityV0] String
   (cond
-    (instance? native.core.BoolEqualityV0 equality) "bool-equality-v0"
-    (instance? native.core.I64EqualityV0 equality) "i64-equality-v0"
-    (instance? native.core.F64EqualityV0 equality) "f64-equality-v0"
-    (instance? native.core.TextEqualityV0 equality) "text-equality-v0"
-    (instance? native.core.KeywordEqualityV0 equality) "keyword-equality-v0"
+    (instance? native.core.BoolEqualityV0 equality)
+    (stages/canonical-record "bool-equality-v0"
+      [(stages/encode-bool (core/boolequalityv0-token equality))])
+    (instance? native.core.I64EqualityV0 equality)
+    (stages/canonical-record "i64-equality-v0"
+      [(stages/encode-bool (core/i64equalityv0-token equality))])
+    (instance? native.core.F64EqualityV0 equality)
+    (stages/canonical-record "f64-equality-v0"
+      [(stages/encode-bool (core/f64equalityv0-token equality))])
+    (instance? native.core.TextEqualityV0 equality)
+    (stages/canonical-record "text-equality-v0"
+      [(stages/encode-bool (core/textequalityv0-token equality))])
+    (instance? native.core.KeywordEqualityV0 equality)
+    (stages/canonical-record "keyword-equality-v0"
+      [(stages/encode-bool (core/keywordequalityv0-token equality))])
     (instance? native.core.StructuralEqualityV0 equality)
     (stages/canonical-record "structural-equality-v0"
       [(id-value (core/structuralequalityv0-domain-type equality))])
-    :else
+    (instance? native.core.DynamicStructuralEqualityV0 equality)
     (stages/canonical-record "dynamic-structural-equality-v0"
       [(id-value
-         (core/dynamicstructuralequalityv0-domain-type equality))])))
+         (core/dynamicstructuralequalityv0-domain-type equality))])
+    :else
+    (throw (ex-info "unsupported Native equality encoding" {}))))
 
 (defn encode-value-semantics-operation [operation core/ValueSemanticsOpV0] String
   (match operation
@@ -23541,6 +23640,106 @@
     [(RefAtom target)
      (stages/canonical-record "native-atom-ref-v0"
        [(stages/encode-id target)])]))
+
+(defn encode-resource-token-kind [kind core/ResourceTokenKindV0] String
+  (match kind
+    [(RegionTokenV0 region)
+     (stages/canonical-record "region-token-v0" [(id-value region)])]
+    [(CapabilityTokenV0 capability)
+     (stages/canonical-record "capability-token-v0"
+       [(id-value capability)])]))
+
+(defn encode-resource-token [token core/ResourceTokenV0] String
+  (stages/canonical-record "resource-token-v0"
+    [(id-value (core/resourcetokenv0-id token))
+     (encode-resource-token-kind (core/resourcetokenv0-kind token))]))
+
+(defn encode-token-flow [flow core/TokenFlowV0] String
+  (stages/canonical-record "token-flow-v0"
+    [(encode-id-roots "consumed" (core/tokenflowv0-consumed flow))
+     (stages/canonical-set "produced"
+       (mapv (fn [token core/ResourceTokenV0] String
+               (encode-resource-token token))
+         (core/tokenflowv0-produced flow)))]))
+
+(defn encode-store-operation [operation core/StoreOp] String
+  (match operation
+    [(StoreBool address value region capability)
+     (stages/canonical-record "store-bool-v0"
+       [(id-value address) (id-value value) (id-value region)
+        (id-value capability)])]
+    [(StoreI64 address value region capability)
+     (stages/canonical-record "store-i64-v0"
+       [(id-value address) (id-value value) (id-value region)
+        (id-value capability)])]
+    [(StoreF64 address value region capability)
+     (stages/canonical-record "store-f64-v0"
+       [(id-value address) (id-value value) (id-value region)
+        (id-value capability)])]
+    [(StoreText address value region capability)
+     (stages/canonical-record "store-text-v0"
+       [(id-value address) (id-value value) (id-value region)
+        (id-value capability)])]
+    [(StoreRef address value region capability)
+     (stages/canonical-record "store-ref-v0"
+       [(id-value address) (id-value value) (id-value region)
+        (id-value capability)])]))
+
+(defn encode-parallel-boundary [boundary core/ParallelBoundaryV0] String
+  (match boundary
+    [(ParallelBoundedV0 token)
+     (stages/canonical-record "parallel-bounded-v0"
+       [(stages/encode-bool token)])]
+    [(ParallelPeriodicV0 token)
+     (stages/canonical-record "parallel-periodic-v0"
+       [(stages/encode-bool token)])]))
+
+(defn encode-parallel-reduction-policy
+  [policy core/ParallelReductionPolicyV0] String
+  (match policy
+    [(F64AdjacentPairwiseV0 token)
+     (stages/canonical-record "f64-adjacent-pairwise-v0"
+       [(stages/encode-bool token)])]))
+
+(defn encode-comparison [comparison core/CompareOpV0] String
+  (cond
+    (instance? native.core.CompareEqI64V0 comparison)
+    (stages/canonical-record "compare-eq-i64-v0"
+      [(stages/encode-bool (core/compareeqi64v0-token comparison))])
+    (instance? native.core.CompareLtI64V0 comparison)
+    (stages/canonical-record "compare-lt-i64-v0"
+      [(stages/encode-bool (core/comparelti64v0-token comparison))])
+    (instance? native.core.CompareLeI64V0 comparison)
+    (stages/canonical-record "compare-le-i64-v0"
+      [(stages/encode-bool (core/comparelei64v0-token comparison))])
+    (instance? native.core.CompareEqF64V0 comparison)
+    (stages/canonical-record "compare-eq-f64-v0"
+      [(stages/encode-bool (core/compareeqf64v0-token comparison))])
+    (instance? native.core.CompareLtF64V0 comparison)
+    (stages/canonical-record "compare-lt-f64-v0"
+      [(stages/encode-bool (core/compareltf64v0-token comparison))])
+    (instance? native.core.CompareLeF64V0 comparison)
+    (stages/canonical-record "compare-le-f64-v0"
+      [(stages/encode-bool (core/comparelef64v0-token comparison))])
+    (instance? native.core.CompareEqBoolV0 comparison)
+    (stages/canonical-record "compare-eq-bool-v0"
+      [(stages/encode-bool (core/compareeqboolv0-token comparison))])
+    (instance? native.core.CompareEqTextV0 comparison)
+    (stages/canonical-record "compare-eq-text-v0"
+      [(stages/encode-bool (core/compareeqtextv0-token comparison))])
+    :else
+    (throw (ex-info "unsupported Native comparison encoding" {}))))
+
+(defn encode-value-text-mode [mode core/ValueTextModeV0] String
+  (cond
+    (instance? native.core.ValueStrV0 mode)
+    (stages/canonical-record "value-str-v0"
+      [(stages/encode-bool (core/valuestrv0-token mode))])
+    (instance? native.core.ValuePrStrV0 mode)
+    (stages/canonical-record "value-pr-str-v0"
+      [(stages/encode-bool (core/valueprstrv0-token mode))])
+    :else
+    (throw (ex-info "unsupported Native value-to-text mode encoding" {}))))
 
 (defn encode-instruction [instruction core/Instruction] String
   (cond
@@ -23628,11 +23827,14 @@
            (id-value (core/checkedmodi64v0-left-id operation))
            (id-value (core/checkedmodi64v0-right-id operation))])
 
-        :else
+        (instance? native.core.CheckedBoundsV0 operation)
         (stages/canonical-record "checked-bounds-instruction"
           [result
            (id-value (core/checkedboundsv0-index-id operation))
-           (id-value (core/checkedboundsv0-length-id operation))])))
+           (id-value (core/checkedboundsv0-length-id operation))])
+
+        :else
+        (throw (ex-info "unsupported Native checked operation encoding" {}))))
 
     (instance? native.core.BitwiseInstructionV0 instruction)
     (stages/canonical-record "bitwise-instruction-v0"
@@ -23641,20 +23843,11 @@
          (core/bitwiseinstructionv0-operation instruction))])
 
     (instance? native.core.CompareInstruction instruction)
-    (let [comparison core/CompareOpV0 (core/compareinstruction-comparison instruction)
-          label String (cond
-            (instance? native.core.CompareEqI64V0 comparison) "compare-eq-i64-instruction"
-            (instance? native.core.CompareLtI64V0 comparison) "compare-lt-i64-instruction"
-            (instance? native.core.CompareLeI64V0 comparison) "compare-le-i64-instruction"
-            (instance? native.core.CompareEqF64V0 comparison) "compare-eq-f64-instruction"
-            (instance? native.core.CompareLtF64V0 comparison) "compare-lt-f64-instruction"
-            (instance? native.core.CompareLeF64V0 comparison) "compare-le-f64-instruction"
-            (instance? native.core.CompareEqBoolV0 comparison) "compare-eq-bool-instruction"
-            :else "compare-eq-text-instruction")]
-      (stages/canonical-record label
-        [(encode-ssa-value (core/compareinstruction-result instruction))
-         (id-value (core/compareinstruction-left-id instruction))
-         (id-value (core/compareinstruction-right-id instruction))]))
+    (stages/canonical-record "compare-instruction-v0"
+      [(encode-ssa-value (core/compareinstruction-result instruction))
+       (encode-comparison (core/compareinstruction-comparison instruction))
+       (id-value (core/compareinstruction-left-id instruction))
+       (id-value (core/compareinstruction-right-id instruction))])
 
     (instance? native.core.FieldInstruction instruction)
     (stages/canonical-record "field-instruction"
@@ -23671,7 +23864,8 @@
     (instance? native.core.RecordInstruction instruction)
     (stages/canonical-record "record-instruction"
       [(encode-ssa-value (core/recordinstruction-result instruction))
-       (encode-id-roots "fields" (core/recordinstruction-field-ids instruction))])
+       (encode-id-sequence "fields"
+         (core/recordinstruction-field-ids instruction))])
 
     (instance? native.core.RecordAssocInstructionV0 instruction)
     (stages/canonical-record "record-assoc-instruction-v0"
@@ -23699,7 +23893,7 @@
       (stages/canonical-record "union-construct-instruction"
         [(encode-ssa-value (core/unionconstructinstruction-result instruction))
          (id-value (core/unionconstructinstruction-variant-id instruction))
-         (if (nil? payload) "unit" (id-value payload))]))
+         (stages/encode-optional-id payload)]))
 
     (instance? native.core.UnionExtractInstruction instruction)
     (stages/canonical-record "union-extract-instruction"
@@ -23709,13 +23903,17 @@
 
     (instance? native.core.StoreInstruction instruction)
     (stages/canonical-record "store-instruction"
-      [(encode-ssa-value (core/storeinstruction-result instruction))])
+      [(encode-ssa-value (core/storeinstruction-result instruction))
+       (encode-store-operation (core/storeinstruction-store instruction))
+       (encode-token-flow (core/storeinstruction-tokens instruction))])
 
     (instance? native.core.AllocateInstruction instruction)
     (stages/canonical-record "allocate-instruction"
       [(encode-ssa-value (core/allocateinstruction-result instruction))
        (id-value (core/allocateinstruction-region instruction))
-       (id-value (core/allocateinstruction-capability instruction))])
+       (id-value (core/allocateinstruction-capability instruction))
+       (id-value (core/allocateinstruction-byte-count-id instruction))
+       (encode-token-flow (core/allocateinstruction-tokens instruction))])
 
     (instance? native.core.VecLengthInstruction instruction)
     (stages/canonical-record "vec-length-instruction"
@@ -23833,9 +24031,8 @@
        (str (core/tiledstepf64instructionv0-tile-width instruction))
        (str (core/tiledstepf64instructionv0-left-halo instruction))
        (str (core/tiledstepf64instructionv0-right-halo instruction))
-       (if (instance? native.core.ParallelPeriodicV0
-             (core/tiledstepf64instructionv0-boundary instruction))
-         "periodic" "bounded")
+       (encode-parallel-boundary
+         (core/tiledstepf64instructionv0-boundary instruction))
        (id-value (core/tiledstepf64instructionv0-kernel-id instruction))
        (id-value (core/tiledstepf64instructionv0-region instruction))
        (id-value
@@ -23848,7 +24045,8 @@
       [(encode-ssa-value (core/f64buffersuminstructionv0-result instruction))
        (id-value (core/f64buffersuminstructionv0-source-id instruction))
        (str (core/f64buffersuminstructionv0-tile-width instruction))
-       "f64-adjacent-pairwise-v0"
+       (encode-parallel-reduction-policy
+         (core/f64buffersuminstructionv0-policy instruction))
        (id-value (core/f64buffersuminstructionv0-region instruction))
        (id-value
          (core/f64buffersuminstructionv0-read-capability instruction))])
@@ -23863,9 +24061,9 @@
     (instance? native.core.MapLiteralInstructionV0 instruction)
     (stages/canonical-record "map-literal-instruction-v0"
       [(encode-ssa-value (core/mapliteralinstructionv0-result instruction))
-       (encode-id-roots "keys"
+       (encode-id-sequence "keys"
          (core/mapliteralinstructionv0-key-ids instruction))
-       (encode-id-roots "values"
+       (encode-id-sequence "values"
          (core/mapliteralinstructionv0-value-ids instruction))
        (id-value (core/mapliteralinstructionv0-arena-id instruction))
        (encode-concrete-equality
@@ -23874,7 +24072,7 @@
     (instance? native.core.SetLiteralInstructionV0 instruction)
     (stages/canonical-record "set-literal-instruction-v0"
       [(encode-ssa-value (core/setliteralinstructionv0-result instruction))
-       (encode-id-roots "values"
+       (encode-id-sequence "values"
          (core/setliteralinstructionv0-value-ids instruction))
        (id-value (core/setliteralinstructionv0-arena-id instruction))
        (encode-concrete-equality
@@ -23891,7 +24089,7 @@
         [(encode-ssa-value (core/mapgetinstructionv0-result instruction))
          (id-value (core/mapgetinstructionv0-source-id instruction))
          (id-value (core/mapgetinstructionv0-key-id instruction))
-         (if (nil? default) "absent-v0" (id-value default))
+         (stages/encode-optional-id default)
          (encode-concrete-equality
            (core/mapgetinstructionv0-key-equality instruction))]))
 
@@ -24026,12 +24224,14 @@
     (stages/canonical-record "arena-instruction"
       [(encode-ssa-value (core/arenainstruction-result instruction))
        (id-value (core/arenainstruction-region instruction))
-       (id-value (core/arenainstruction-capability instruction))])
+       (id-value (core/arenainstruction-capability instruction))
+       (encode-token-flow (core/arenainstruction-tokens instruction))])
 
     (instance? native.core.ArenaCloseInstructionV0 instruction)
     (stages/canonical-record "arena-close-instruction-v0"
       [(encode-ssa-value (core/arenacloseinstructionv0-result instruction))
-       (id-value (core/arenacloseinstructionv0-source-id instruction))])
+       (id-value (core/arenacloseinstructionv0-source-id instruction))
+       (encode-token-flow (core/arenacloseinstructionv0-tokens instruction))])
 
     (instance? native.core.PromoteInstructionV0 instruction)
     (stages/canonical-record "promote-instruction-v0"
@@ -24044,7 +24244,8 @@
     (stages/canonical-record "atom-state-instruction"
       [(encode-ssa-value (core/atomstateinstruction-result instruction))
        (id-value (core/atomstateinstruction-region instruction))
-       (id-value (core/atomstateinstruction-capability instruction))])
+       (id-value (core/atomstateinstruction-capability instruction))
+       (encode-token-flow (core/atomstateinstruction-tokens instruction))])
 
     (instance? native.core.AtomCreateInstruction instruction)
     (stages/canonical-record "atom-create-instruction"
@@ -24082,7 +24283,7 @@
        (id-value (core/atomswapinstruction-cell-id instruction))
        (id-value (core/atomswapinstruction-state-id instruction))
        (id-value (core/atomswapinstruction-updater-id instruction))
-       (encode-id-roots "arguments"
+       (encode-id-sequence "arguments"
          (core/atomswapinstruction-arguments instruction))])
 
     (instance? native.core.TextLengthInstruction instruction)
@@ -24124,7 +24325,7 @@
     (stages/canonical-record "text-concat-instruction"
       [(encode-ssa-value (core/textconcatinstruction-result instruction))
        (id-value (core/textconcatinstruction-arena-id instruction))
-       (encode-id-roots "operands"
+       (encode-id-sequence "operands"
          (core/textconcatinstruction-operand-ids instruction))])
 
     (instance? native.core.TextBuiltinInstruction instruction)
@@ -24144,10 +24345,8 @@
     (stages/canonical-record "value-to-text-instruction-v0"
       [(encode-ssa-value
          (core/valuetotextinstructionv0-result instruction))
-       (if (instance? native.core.ValuePrStrV0
-             (core/valuetotextinstructionv0-mode instruction))
-         "pr-str"
-         "str")
+       (encode-value-text-mode
+         (core/valuetotextinstructionv0-mode instruction))
        (id-value (core/valuetotextinstructionv0-domain-type instruction))
        (id-value (core/valuetotextinstructionv0-value-id instruction))
        (id-value (core/valuetotextinstructionv0-arena-id instruction))])
@@ -24169,41 +24368,53 @@
     (stages/canonical-record "closure-call-instruction-v0"
       [(encode-ssa-value (core/closurecallinstructionv0-result instruction))
        (id-value (core/closurecallinstructionv0-closure-id instruction))
-       (encode-id-roots "arguments"
+       (encode-id-sequence "arguments"
          (core/closurecallinstructionv0-arguments instruction))
-       (id-value (core/closurecallinstructionv0-arena-id instruction))])
+       (id-value (core/closurecallinstructionv0-arena-id instruction))
+       (encode-token-flow (core/closurecallinstructionv0-tokens instruction))])
 
     (instance? native.core.CallInstruction instruction)
     (let [arena (U core/NativeId Nil) (core/callinstruction-arena-id instruction)]
       (stages/canonical-record "call-instruction"
         [(encode-ssa-value (core/callinstruction-result instruction))
          (id-value (core/callinstruction-function-id instruction))
-         (encode-id-roots "arguments"
+         (encode-id-sequence "arguments"
            (core/callinstruction-arguments instruction))
-         (if (nil? arena) "no-arena" (id-value arena))]))
+         (stages/encode-optional-id arena)
+         (encode-token-flow (core/callinstruction-tokens instruction))]))
 
     (instance? native.core.ExternCallInstruction instruction)
     (let [arena (U core/NativeId Nil) (core/externcallinstruction-arena-id instruction)]
       (stages/canonical-record "extern-call-instruction"
         [(encode-ssa-value (core/externcallinstruction-result instruction))
          (id-value (core/externcallinstruction-abi-id instruction))
-         (encode-id-roots "arguments"
+         (encode-id-sequence "arguments"
            (core/externcallinstruction-arguments instruction))
-         (if (nil? arena) "no-arena" (id-value arena))]))
+         (stages/encode-optional-id arena)
+         (encode-token-flow (core/externcallinstruction-tokens instruction))]))
 
-    :else ""))
+    :else
+    (throw (ex-info "unsupported Native instruction encoding" {}))))
+
+(defn encode-switch-case [switch-case core/SwitchCaseV0] String
+  (stages/canonical-record "switch-case-v0"
+    [(id-value (core/switchcasev0-variant-id switch-case))
+     (id-value (core/switchcasev0-block-id switch-case))
+     (encode-id-sequence "arguments"
+       (core/switchcasev0-arguments switch-case))]))
 
 (defn encode-terminator [terminator core/Terminator] String
   (cond
     (instance? native.core.ReturnTerminator terminator)
     (let [value (U core/NativeId Nil) (core/returnterminator-value terminator)]
       (stages/canonical-record "return"
-        [(if (nil? value) "unit" (id-value value))]))
+        [(stages/encode-optional-id value)]))
 
     (instance? native.core.JumpTerminator terminator)
     (stages/canonical-record "jump"
       [(id-value (core/jumpterminator-block-id terminator))
-       (encode-id-roots "arguments" (core/jumpterminator-arguments terminator))])
+       (encode-id-sequence "arguments"
+         (core/jumpterminator-arguments terminator))])
 
     (instance? native.core.BranchTerminator terminator)
     (stages/canonical-record "branch"
@@ -24213,11 +24424,18 @@
 
     (instance? native.core.SwitchTerminator terminator)
     (stages/canonical-record "switch"
-      [(id-value (core/switchterminator-value-id terminator))])
+      [(id-value (core/switchterminator-value-id terminator))
+       (stages/canonical-record "cases"
+         (mapv (fn [switch-case core/SwitchCaseV0] String
+                 (encode-switch-case switch-case))
+           (core/switchterminator-cases terminator)))])
+
+    (instance? native.core.TrapTerminator terminator)
+    (stages/canonical-record "trap"
+      [(id-value (core/trapterminator-failure-id terminator))])
 
     :else
-    (stages/canonical-record "trap"
-      [(id-value (core/trapterminator-failure-id terminator))])))
+    (throw (ex-info "unsupported Native terminator encoding" {}))))
 
 (defn encode-basic-block [block core/BasicBlock] String
   (stages/canonical-record "basic-block-v0"
@@ -24251,74 +24469,445 @@
          (core/functiondef-blocks function)))
      (id-value (core/functiondef-entry-block function))
      (let [result (U core/NativeId Nil) (core/functiondef-return-type function)]
-       (if (nil? result) "unit" (id-value result)))
+       (stages/encode-optional-id result))
      (encode-id-roots "effects" (core/functiondef-effects function))
      (encode-id-roots "regions" (core/functiondef-regions function))
      (encode-id-roots "capabilities" (core/functiondef-capabilities function))]))
 
-(defn encode-abi-value [value core/AbiValueV0] String
-  (stages/canonical-record "abi-value-v0"
-    [(core/abivaluev0-name value)
-     (id-value (core/abivaluev0-type-id value))]))
-
 (defn encode-ownership [ownership core/OwnershipRuleV0] String
   (cond
-    (instance? native.core.BorrowedV0 ownership) "borrowed"
-    (instance? native.core.OwnedV0 ownership) "owned"
-    :else
+    (instance? native.core.BorrowedV0 ownership)
+    (stages/canonical-record "borrowed-v0"
+      [(stages/encode-bool (core/borrowedv0-token ownership))])
+    (instance? native.core.OwnedV0 ownership)
+    (stages/canonical-record "owned-v0"
+      [(stages/encode-bool (core/ownedv0-token ownership))])
+    (instance? native.core.ArenaOwnedV0 ownership)
     (stages/canonical-record "arena-owned"
-      [(id-value (core/arenaownedv0-region ownership))])))
+      [(id-value (core/arenaownedv0-region ownership))])
+    :else
+    (throw (ex-info "unsupported Native ownership encoding" {}))))
 
-(defn encode-import-abi-value [value core/AbiValueV0] String
+(defn encode-abi-value [value core/AbiValueV0] String
   (let [lifetime (U core/NativeId Nil) (core/abivaluev0-lifetime-region value)]
-    (stages/canonical-record "import-abi-value-v0"
+    (stages/canonical-record "abi-value-v0"
       [(core/abivaluev0-name value)
        (id-value (core/abivaluev0-type-id value))
        (encode-ownership (core/abivaluev0-ownership value))
-       (if (nil? lifetime) "no-lifetime" (id-value lifetime))])))
+       (stages/encode-optional-id lifetime)])))
+
+(defn encode-import-abi-value [value core/AbiValueV0] String
+  (encode-abi-value value))
+
+(defn encode-abi-direction [direction core/AbiDirectionV0] String
+  (match direction
+    [(AbiImportV0 token)
+     (stages/canonical-record "abi-import-v0" [(stages/encode-bool token)])]
+    [(AbiExportV0 token)
+     (stages/canonical-record "abi-export-v0" [(stages/encode-bool token)])]))
+
+(defn encode-abi-convention [convention core/AbiConventionV0] String
+  (match convention
+    [(RestrictedCAbiV0 token)
+     (stages/canonical-record "restricted-c-v0"
+       [(stages/encode-bool token)])]
+    [(RestrictedCOptionalOutAbiV0 token)
+     (stages/canonical-record "restricted-c-optional-out-v0"
+       [(stages/encode-bool token)])]
+    [(RestrictedCOutcomeOutAbiV0 token)
+     (stages/canonical-record "restricted-c-outcome-out-v0"
+       [(stages/encode-bool token)])]))
 
 (defn encode-abi [abi core/AbiDeclV0] String
   (let [result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
-    (if (instance? native.core.AbiImportV0 (core/abideclv0-direction abi))
-      (stages/canonical-record "abi-import-declaration-v0"
-        [(id-value (core/abideclv0-id abi))
-         (id-value (core/abideclv0-function-id abi))
-         (core/abideclv0-symbol abi)
-         (cond
-           (instance? native.core.RestrictedCOptionalOutAbiV0
-             (core/abideclv0-convention abi))
-           "restricted-c-optional-out-v0"
-           (instance? native.core.RestrictedCOutcomeOutAbiV0
-             (core/abideclv0-convention abi))
-           "restricted-c-outcome-out-v0"
-           :else "restricted-c-v0")
-         (stages/canonical-record "parameters"
-           (mapv
-             (fn [value core/AbiValueV0] String
-               (encode-import-abi-value value))
-             (core/abideclv0-parameters abi)))
-         (if (nil? result) "unit" (encode-import-abi-value result))
-         (id-value (core/abideclv0-failure-type abi))
-         (encode-id-roots "effects" (core/abideclv0-required-effects abi))
-         (encode-id-roots "capabilities"
-           (core/abideclv0-required-capabilities abi))
-         (core/abideclv0-version abi)
-         (core/abideclv0-layout-digest abi)])
-      (stages/canonical-record "abi-declaration-v0"
-        [(id-value (core/abideclv0-id abi))
-         (id-value (core/abideclv0-function-id abi))
-         (core/abideclv0-symbol abi)
-         (stages/canonical-record "parameters"
-           (mapv
-             (fn [value core/AbiValueV0] String (encode-abi-value value))
-             (core/abideclv0-parameters abi)))
-         (if (nil? result) "unit" (encode-abi-value result))
-         (id-value (core/abideclv0-failure-type abi))
-         (encode-id-roots "effects" (core/abideclv0-required-effects abi))
-         (encode-id-roots "capabilities"
-           (core/abideclv0-required-capabilities abi))
-         (core/abideclv0-version abi)
-         (core/abideclv0-layout-digest abi)]))))
+    (stages/canonical-record "abi-declaration-v0"
+      [(id-value (core/abideclv0-id abi))
+       (id-value (core/abideclv0-function-id abi))
+       (core/abideclv0-symbol abi)
+       (encode-abi-direction (core/abideclv0-direction abi))
+       (encode-abi-convention (core/abideclv0-convention abi))
+       (stages/canonical-record "parameters"
+         (mapv (fn [value core/AbiValueV0] String (encode-abi-value value))
+           (core/abideclv0-parameters abi)))
+       (if (nil? result) "unit" (encode-abi-value result))
+       (id-value (core/abideclv0-failure-type abi))
+       (encode-id-roots "effects" (core/abideclv0-required-effects abi))
+       (encode-id-roots "capabilities"
+         (core/abideclv0-required-capabilities abi))
+       (core/abideclv0-version abi)
+       (core/abideclv0-layout-digest abi)])))
+
+(defn encode-capability-kind [kind core/CapabilityKind] String
+  (cond
+    (instance? native.core.ReadCapability kind)
+    (stages/canonical-record "read-capability-v0"
+      [(stages/encode-bool (core/readcapability-token kind))])
+
+    (instance? native.core.WriteCapability kind)
+    (stages/canonical-record "write-capability-v0"
+      [(stages/encode-bool (core/writecapability-token kind))])
+
+    (instance? native.core.AllocateCapability kind)
+    (stages/canonical-record "allocate-capability-v0"
+      [(stages/encode-bool (core/allocatecapability-token kind))])
+
+    (instance? native.core.HostCapability kind)
+    (stages/canonical-record "host-capability-v0"
+      [(stages/encode-bool (core/hostcapability-token kind))])
+
+    :else
+    (throw (ex-info "unsupported Native capability encoding" {}))))
+
+(defn encode-capability [capability core/CapabilityDef] String
+  (stages/canonical-record "capability-def-v0"
+    [(id-value (core/capabilitydef-id capability))
+     (encode-capability-kind (core/capabilitydef-kind capability))
+     (stages/encode-optional-id (core/capabilitydef-region capability))
+     (stages/encode-bool (core/capabilitydef-affine capability))]))
+
+(defn encode-observation [observation core/ExternalObservation] String
+  (match observation
+    [(Fri2Observation artifact-id digest byte-count)
+     (stages/canonical-record "fri2-observation-v0"
+       [(id-value artifact-id)
+        (stages/encode-string digest)
+        (stages/encode-int byte-count)])]))
+
+(defn canonical-type-defs [definitions (Vec core/TypeDef)] (Vec core/TypeDef)
+  (vec (sort-by
+    (fn [definition core/TypeDef] String
+      (id-value (core/typedef-id definition)))
+    definitions)))
+
+(defn canonical-effect-defs [definitions (Vec core/EffectDef)] (Vec core/EffectDef)
+  (vec (sort-by
+    (fn [definition core/EffectDef] String
+      (id-value (core/effectdef-id definition)))
+    definitions)))
+
+(defn canonical-region-defs [definitions (Vec core/RegionDef)] (Vec core/RegionDef)
+  (vec (sort-by
+    (fn [definition core/RegionDef] String
+      (id-value (core/regiondef-id definition)))
+    definitions)))
+
+(defn canonical-capability-defs
+  [definitions (Vec core/CapabilityDef)] (Vec core/CapabilityDef)
+  (vec (sort-by
+    (fn [definition core/CapabilityDef] String
+      (id-value (core/capabilitydef-id definition)))
+    definitions)))
+
+(defn canonical-layout-defs [definitions (Vec core/LayoutDef)] (Vec core/LayoutDef)
+  (vec (sort-by
+    (fn [definition core/LayoutDef] String
+      (id-value (core/layoutdef-id definition)))
+    definitions)))
+
+(defn canonical-typed-functions [functions (Vec TypedFunctionV0)] (Vec TypedFunctionV0)
+  (vec (sort-by
+    (fn [function TypedFunctionV0] String
+      (id-value (typedfunctionv0-id function)))
+    functions)))
+
+(defn canonical-native-functions
+  [functions (Vec core/FunctionDef)] (Vec core/FunctionDef)
+  (vec (sort-by
+    (fn [function core/FunctionDef] String
+      (id-value (core/functiondef-id function)))
+    functions)))
+
+(defn canonical-abis [abis (Vec core/AbiDeclV0)] (Vec core/AbiDeclV0)
+  (vec (sort-by
+    (fn [abi core/AbiDeclV0] String
+      (id-value (core/abideclv0-id abi)))
+    abis)))
+
+(defn canonical-native-ids
+  [identities (Vec core/NativeId)] (Vec core/NativeId)
+  (vec (sort-by
+    (fn [identity core/NativeId] String (id-value identity))
+    identities)))
+
+(defn strictly-increasing-native-ids?
+  [identities (Vec core/NativeId)] Bool
+  (loop [index Int 1]
+    (if (>= index (count identities))
+      true
+      (if (< (compare
+               (id-value (nth identities (- index 1)))
+               (id-value (nth identities index)))
+            0)
+        (recur (+ index 1))
+        false))))
+
+;; Prepared content is the exact normalized NativeCoreProgram payload, except
+;; for the program's self identity, parent, and compiler-pass fields. Keyed
+;; top-level declarations are emitted in NativeId order; positional vectors
+;; within a declaration retain their authored operational order.
+(defrecord PreparedNativeSliceV0
+  [abi core/AbiProfileV0
+   types (Vec core/TypeDef)
+   effects (Vec core/EffectDef)
+   regions (Vec core/RegionDef)
+   capabilities (Vec core/CapabilityDef)
+   layouts (Vec core/LayoutDef)
+   typed-functions (Vec TypedFunctionV0)
+   functions (Vec core/FunctionDef)
+   abis (Vec core/AbiDeclV0)
+   allowed-effects (Vec core/NativeId)
+   allowed-regions (Vec core/NativeId)
+   allowed-capabilities (Vec core/NativeId)
+   observations (Vec core/ExternalObservation)
+   executable-encoding String
+   executable-digest String])
+
+(defn encode-native-executable-slice
+  [types (Vec core/TypeDef)
+   effects (Vec core/EffectDef)
+   regions (Vec core/RegionDef)
+   capabilities (Vec core/CapabilityDef)
+   layouts (Vec core/LayoutDef)
+   functions (Vec core/FunctionDef)
+   allowed-effects (Vec core/NativeId)
+   allowed-regions (Vec core/NativeId)
+   allowed-capabilities (Vec core/NativeId)
+   abis (Vec core/AbiDeclV0)
+   observations (Vec core/ExternalObservation)] String
+  (stages/canonical-record "native-executable-slice-v0"
+    [(stages/canonical-record "types"
+       (mapv (fn [definition core/TypeDef] String
+               (encode-type-def definition))
+         types))
+     (stages/canonical-record "effects"
+       (mapv (fn [effect core/EffectDef] String (encode-effect effect))
+         effects))
+     (stages/canonical-record "regions"
+       (mapv (fn [region core/RegionDef] String (encode-region region))
+         regions))
+     (stages/canonical-record "capabilities"
+       (mapv (fn [capability core/CapabilityDef] String
+               (encode-capability capability))
+         capabilities))
+     (stages/canonical-record "layouts"
+       (mapv (fn [layout core/LayoutDef] String (encode-layout-def layout))
+         layouts))
+     (stages/canonical-record "functions"
+       (mapv (fn [function core/FunctionDef] String
+               (encode-native-function function))
+         functions))
+     (encode-id-sequence "allowed-effects" allowed-effects)
+     (encode-id-sequence "allowed-regions" allowed-regions)
+     (encode-id-sequence "allowed-capabilities" allowed-capabilities)
+     (stages/canonical-record "abis"
+       (mapv (fn [abi core/AbiDeclV0] String (encode-abi abi)) abis))
+     (stages/canonical-set "observations"
+       (mapv (fn [observation core/ExternalObservation] String
+               (encode-observation observation))
+         observations))]))
+
+(defn native-program-executable-encoding
+  [program core/NativeCoreProgram] String
+  (encode-native-executable-slice
+    (core/nativecoreprogram-types program)
+    (core/nativecoreprogram-effects program)
+    (core/nativecoreprogram-regions program)
+    (core/nativecoreprogram-capabilities program)
+    (core/nativecoreprogram-layouts program)
+    (core/nativecoreprogram-functions program)
+    (core/nativecoreprogram-allowed-effects program)
+    (core/nativecoreprogram-allowed-regions program)
+    (core/nativecoreprogram-allowed-capabilities program)
+    (core/nativecoreprogram-abis program)
+    (core/nativecoreprogram-observations program)))
+
+(defn native-program-keyed-order-valid?
+  [program core/NativeCoreProgram] Bool
+  (and
+    (strictly-increasing-native-ids?
+      (core/type-ids (core/nativecoreprogram-types program)))
+    (strictly-increasing-native-ids?
+      (core/effect-ids (core/nativecoreprogram-effects program)))
+    (strictly-increasing-native-ids?
+      (core/region-ids (core/nativecoreprogram-regions program)))
+    (strictly-increasing-native-ids?
+      (core/capability-ids (core/nativecoreprogram-capabilities program)))
+    (strictly-increasing-native-ids?
+      (core/layout-ids (core/nativecoreprogram-layouts program)))
+    (strictly-increasing-native-ids?
+      (core/function-ids (core/nativecoreprogram-functions program)))
+    (strictly-increasing-native-ids?
+      (core/abi-ids (core/nativecoreprogram-abis program)))
+    (strictly-increasing-native-ids?
+      (core/nativecoreprogram-allowed-effects program))
+    (strictly-increasing-native-ids?
+      (core/nativecoreprogram-allowed-regions program))
+    (strictly-increasing-native-ids?
+      (core/nativecoreprogram-allowed-capabilities program))))
+
+(defn canonical-native-program-keyed-content
+  [program core/NativeCoreProgram] core/NativeCoreProgram
+  (with program
+    [:types (canonical-type-defs (core/nativecoreprogram-types program))]
+    [:effects (canonical-effect-defs (core/nativecoreprogram-effects program))]
+    [:regions (canonical-region-defs (core/nativecoreprogram-regions program))]
+    [:capabilities
+     (canonical-capability-defs (core/nativecoreprogram-capabilities program))]
+    [:layouts (canonical-layout-defs (core/nativecoreprogram-layouts program))]
+    [:functions
+     (canonical-native-functions (core/nativecoreprogram-functions program))]
+    [:abis (canonical-abis (core/nativecoreprogram-abis program))]
+    [:allowed-effects
+     (canonical-native-ids (core/nativecoreprogram-allowed-effects program))]
+    [:allowed-regions
+     (canonical-native-ids (core/nativecoreprogram-allowed-regions program))]
+    [:allowed-capabilities
+     (canonical-native-ids
+       (core/nativecoreprogram-allowed-capabilities program))]))
+
+;; A derived program identity binds both its immediate input and every byte of
+;; executable content. It records no semantic-plan provenance; the production
+;; checked-theory-to-plan join owns that separate proof.
+(defn derived-native-program-id
+  [parent core/NativeId
+   compiler-pass String
+   program core/NativeCoreProgram] core/NativeId
+  (lower-id "derived-native-program-v0"
+    [(id-value parent)
+     compiler-pass
+     (stages/content-digest (native-program-executable-encoding program))]))
+
+(defn remint-derived-native-program
+  [program core/NativeCoreProgram
+   parent core/NativeId
+   compiler-pass String] core/NativeCoreProgram
+  (let [normalized core/NativeCoreProgram (canonical-native-program-keyed-content program)
+        candidate core/NativeCoreProgram (with normalized
+          [:parent parent]
+          [:compiler-pass compiler-pass])]
+    (if (not (native-program-keyed-order-valid? candidate))
+      (throw (ex-info
+        "derived Native program keyed declarations failed canonicalization" {}))
+      (with candidate
+        [:id (derived-native-program-id parent compiler-pass candidate)]))))
+
+(defn native-function-frontier
+  [functions (Vec core/FunctionDef)] (Vec NativeFunctionFrontierV0)
+  (mapv
+    (fn [function core/FunctionDef] NativeFunctionFrontierV0
+      (->NativeFunctionFrontierV0
+        (core/functiondef-id function)
+        (core/functiondef-name function)
+        (count (core/functiondef-blocks function))))
+    functions))
+
+(defn prepared-native-slice-valid? [prepared PreparedNativeSliceV0] Bool
+  (let [types (Vec core/TypeDef) (preparednativeslicev0-types prepared)
+        typed-functions (Vec TypedFunctionV0) (preparednativeslicev0-typed-functions prepared)
+        expected-layouts (Vec core/LayoutDef) (canonical-layout-defs
+          (collect-layouts
+            (resolve-layouts types (preparednativeslicev0-abi prepared))))
+        expected-functions (Vec core/FunctionDef) (canonical-native-functions
+          (lower-ready-functions typed-functions))
+        expected-abis (Vec core/AbiDeclV0) (canonical-abis
+          (slice-abis typed-functions expected-functions types
+            expected-layouts))
+        layouts (Vec core/LayoutDef) (preparednativeslicev0-layouts prepared)
+        functions (Vec core/FunctionDef) (preparednativeslicev0-functions prepared)
+        abis (Vec core/AbiDeclV0) (preparednativeslicev0-abis prepared)
+        encoding String (encode-native-executable-slice types
+          (preparednativeslicev0-effects prepared)
+          (preparednativeslicev0-regions prepared)
+          (preparednativeslicev0-capabilities prepared)
+          layouts
+          functions
+          (preparednativeslicev0-allowed-effects prepared)
+          (preparednativeslicev0-allowed-regions prepared)
+          (preparednativeslicev0-allowed-capabilities prepared)
+          abis
+          (preparednativeslicev0-observations prepared))]
+    (and
+      (strictly-increasing-native-ids? (core/type-ids types))
+      (strictly-increasing-native-ids?
+        (core/effect-ids (preparednativeslicev0-effects prepared)))
+      (strictly-increasing-native-ids?
+        (core/region-ids (preparednativeslicev0-regions prepared)))
+      (strictly-increasing-native-ids?
+        (core/capability-ids
+          (preparednativeslicev0-capabilities prepared)))
+      (strictly-increasing-native-ids? (core/layout-ids layouts))
+      (strictly-increasing-native-ids? (core/function-ids functions))
+      (strictly-increasing-native-ids? (core/abi-ids abis))
+      (strictly-increasing-native-ids?
+        (preparednativeslicev0-allowed-effects prepared))
+      (strictly-increasing-native-ids?
+        (preparednativeslicev0-allowed-regions prepared))
+      (strictly-increasing-native-ids?
+        (preparednativeslicev0-allowed-capabilities prepared))
+      (= (stages/canonical-record "layouts"
+           (mapv (fn [layout core/LayoutDef] String
+                   (encode-layout-def layout)) expected-layouts))
+        (stages/canonical-record "layouts"
+          (mapv (fn [layout core/LayoutDef] String
+                  (encode-layout-def layout)) layouts)))
+      (= (stages/canonical-record "functions"
+           (mapv (fn [function core/FunctionDef] String
+                   (encode-native-function function)) expected-functions))
+        (stages/canonical-record "functions"
+          (mapv (fn [function core/FunctionDef] String
+                  (encode-native-function function)) functions)))
+      (= (stages/canonical-record "abis"
+           (mapv (fn [abi core/AbiDeclV0] String (encode-abi abi))
+             expected-abis))
+        (stages/canonical-record "abis"
+          (mapv (fn [abi core/AbiDeclV0] String (encode-abi abi)) abis)))
+      (= encoding (preparednativeslicev0-executable-encoding prepared))
+      (= (stages/content-digest encoding)
+        (preparednativeslicev0-executable-digest prepared)))))
+
+(defn encode-typed-compatibility-native-content
+  [frozen stages/FrozenTypedStageV0
+   executable-encoding String] String
+  (if (not (frozen-typed-stage-valid? frozen))
+    (throw (ex-info
+      "typed compatibility stage is not authenticated for Native lowering" {}))
+    (stages/canonical-record "typed-compatibility-native-input-v1"
+      [(stages/encode-id (typed-compatibility-input-identity frozen))
+       (stages/encode-string (stages/frozentypedstagev0-digest frozen))
+       executable-encoding])))
+
+(defn encode-typed-compatibility-native-input
+  [frozen stages/FrozenTypedStageV0
+   prepared PreparedNativeSliceV0] String
+  (if (not (prepared-native-slice-valid? prepared))
+    (throw (ex-info
+      "typed compatibility input is not authenticated for Native lowering" {}))
+    (encode-typed-compatibility-native-content frozen
+      (preparednativeslicev0-executable-encoding prepared))))
+
+(defn typed-compatibility-native-content-digest
+  [frozen stages/FrozenTypedStageV0
+   executable-encoding String] String
+  (stages/content-digest
+    (encode-typed-compatibility-native-content frozen executable-encoding)))
+
+(defn typed-compatibility-native-program-id-for-content
+  [frozen stages/FrozenTypedStageV0
+   executable-encoding String] core/NativeId
+  (lower-id "native-program"
+    [(typed-compatibility-native-content-digest frozen executable-encoding)]))
+
+(defn typed-compatibility-native-input-digest
+  [frozen stages/FrozenTypedStageV0
+   prepared PreparedNativeSliceV0] String
+  (stages/content-digest
+    (encode-typed-compatibility-native-input frozen prepared)))
+
+(defn typed-compatibility-native-program-id
+  [frozen stages/FrozenTypedStageV0
+   prepared PreparedNativeSliceV0] core/NativeId
+  (lower-id "native-program"
+    [(typed-compatibility-native-input-digest frozen prepared)]))
 
 (defn native-term-nodes
   [types (Vec core/TypeDef)
@@ -24588,26 +25177,64 @@
 ;; Typed-to-native emits the degenerate two-root region set and no epoch
 ;; instructions, so obligations 8/9 hold by construction; this is the witness
 ;; of that construction, not a re-derivation.
-(defn lower-native-stage
-  [frozen-typed stages/FrozenTypedStageV0
-   slice TypedSliceV0
-   compiler-commit String
-   configuration (Vec String)
-   abi core/AbiProfileV0] NativeLoweringResultV0
-  (let [typed-digest String (stages/frozentypedstagev0-digest frozen-typed)
-        types (Vec core/TypeDef) (append-type-def (typedslicev0-types slice) (union-tag-type))
+(defn prepare-native-slice
+  [slice TypedSliceV0
+   abi core/AbiProfileV0] PreparedNativeSliceV0
+  (let [types (Vec core/TypeDef) (canonical-type-defs
+          (append-type-def (typedslicev0-types slice) (union-tag-type)))
         layout-resolutions (Vec LayoutResolutionV0) (resolve-layouts types abi)
-        layouts (Vec core/LayoutDef) (collect-layouts layout-resolutions)
-        typed-functions (Vec TypedFunctionV0) (typedslicev0-functions slice)
-        functions (Vec core/FunctionDef) (lower-ready-functions typed-functions)
-        abis (Vec core/AbiDeclV0) (slice-abis typed-functions functions types layouts)
-        effects (Vec core/EffectDef) (typedslicev0-effects slice)
-        regions (Vec core/RegionDef) (typedslicev0-regions slice)
-        capabilities (Vec core/CapabilityDef) (typedslicev0-capabilities slice)
-        program-id core/NativeId (lower-id "native-program" [typed-digest])
+        layouts (Vec core/LayoutDef) (canonical-layout-defs
+          (collect-layouts layout-resolutions))
+        typed-functions (Vec TypedFunctionV0) (canonical-typed-functions
+          (typedslicev0-functions slice))
+        functions (Vec core/FunctionDef) (canonical-native-functions
+          (lower-ready-functions typed-functions))
+        abis (Vec core/AbiDeclV0) (canonical-abis
+          (slice-abis typed-functions functions types layouts))
+        effects (Vec core/EffectDef) (canonical-effect-defs
+          (typedslicev0-effects slice))
+        regions (Vec core/RegionDef) (canonical-region-defs
+          (typedslicev0-regions slice))
+        capabilities (Vec core/CapabilityDef) (canonical-capability-defs
+          (typedslicev0-capabilities slice))
+        allowed-effects (Vec core/NativeId) (core/effect-ids effects)
+        allowed-regions (Vec core/NativeId) (core/region-ids regions)
+        allowed-capabilities (Vec core/NativeId) (core/capability-ids capabilities)
+        observations (Vec core/ExternalObservation) []
+        executable-encoding String (encode-native-executable-slice types
+          effects regions capabilities layouts functions allowed-effects
+          allowed-regions allowed-capabilities abis observations)
+        executable-digest String (stages/content-digest executable-encoding)]
+    (->PreparedNativeSliceV0 abi types effects regions capabilities layouts
+      typed-functions functions abis allowed-effects
+      allowed-regions allowed-capabilities observations executable-encoding
+      executable-digest)))
+
+(defn require-prepared-native-slice [prepared PreparedNativeSliceV0] PreparedNativeSliceV0
+  (if (prepared-native-slice-valid? prepared)
+    prepared
+    (throw (ex-info "prepared Native slice content is not canonical" {}))))
+
+(defn lower-prepared-native-slice
+  [frozen-typed stages/FrozenTypedStageV0
+   prepared-input PreparedNativeSliceV0
+   compiler-commit String
+   configuration (Vec String)] NativeLoweringResultV0
+  (let [prepared PreparedNativeSliceV0 (require-prepared-native-slice prepared-input)
+        types (Vec core/TypeDef) (preparednativeslicev0-types prepared)
+        layout-resolutions (Vec LayoutResolutionV0) (resolve-layouts types (preparednativeslicev0-abi prepared))
+        layouts (Vec core/LayoutDef) (preparednativeslicev0-layouts prepared)
+        typed-functions (Vec TypedFunctionV0) (preparednativeslicev0-typed-functions prepared)
+        functions (Vec core/FunctionDef) (preparednativeslicev0-functions prepared)
+        abis (Vec core/AbiDeclV0) (preparednativeslicev0-abis prepared)
+        effects (Vec core/EffectDef) (preparednativeslicev0-effects prepared)
+        regions (Vec core/RegionDef) (preparednativeslicev0-regions prepared)
+        capabilities (Vec core/CapabilityDef) (preparednativeslicev0-capabilities prepared)
+        input-digest String (typed-compatibility-native-input-digest frozen-typed prepared)
+        program-id core/NativeId (typed-compatibility-native-program-id frozen-typed prepared)
         program core/NativeCoreProgram (core/->NativeCoreProgram
           program-id
-          (lower-id "typed-stage" [typed-digest])
+          (typed-compatibility-input-identity frozen-typed)
           "typed-to-native-v0"
           types
           effects
@@ -24615,14 +25242,11 @@
           capabilities
           layouts
           functions
-          (mapv (fn [effect core/EffectDef] core/NativeId
-                  (core/effectdef-id effect)) effects)
-          (mapv (fn [region core/RegionDef] core/NativeId
-                  (core/regiondef-id region)) regions)
-          (mapv (fn [capability core/CapabilityDef] core/NativeId
-                  (core/capabilitydef-id capability)) capabilities)
+          (preparednativeslicev0-allowed-effects prepared)
+          (preparednativeslicev0-allowed-regions prepared)
+          (preparednativeslicev0-allowed-capabilities prepared)
           abis
-          [])
+          (preparednativeslicev0-observations prepared))
         validation core/ValidationReport (core/validate-program program)
         core-valid Bool (core/validationreport-passed validation)
         closed-layouts Bool (layouts-closed? layout-resolutions)
@@ -24678,7 +25302,7 @@
         obligation-results (Vec core/ObligationResult) (native-obligation-results core-valid true closed-layouts true legal-abi
           tokens-discharged core-valid epoch-inert epoch-inert
           parallel-deterministic)
-        root core/NativeId (lower-id "native-terms" [typed-digest])
+        root core/NativeId (lower-id "native-terms" [input-digest])
         obligation-roots (Vec core/NativeId) (mapv
           (fn [result core/ObligationResult] core/NativeId
             (lower-id "obligation" [(core/obligationresult-detail result)]))
@@ -24690,7 +25314,7 @@
             (stages/->TermNodeV0 root
               (stages/->TextTermV0 "native-stage-v0"))))
         clean Bool (term-graph-clean? terms)
-        stage stages/NativeStageV0 (stages/->NativeStageV0 terms typed-digest program obligation-roots)
+        stage stages/NativeStageV0 (stages/->NativeStageV0 terms input-digest program obligation-roots)
         encoding String (stages/encode-native-stage stage)
         digest String (stages/content-digest encoding)
         frozen stages/FrozenNativeStageV0 (stages/->FrozenNativeStageV0 stage encoding digest)
@@ -24703,14 +25327,33 @@
                pending-layouts
                pending-functions))
         diagnostics (Vec core/DiagnosticV0) (native-diagnostics closed-layouts legal-abi functions-ready)
-        receipt core/PassReceiptV0 (make-receipt typed-digest compiler-commit "typed-to-native"
-          configuration diagnostics obligations digest)
         complete Bool (and core-valid closed-layouts functions-ready legal-abi
-          tokens-discharged clean parallel-deterministic)]
+          tokens-discharged clean parallel-deterministic)
+        receipt core/PassReceiptV0 (make-receipt input-digest compiler-commit
+          "typed-to-native"
+          configuration diagnostics obligations (if complete digest ""))]
     (if complete
       (->NativeLoweringCompleteV0 frozen receipt)
-      (->NativeLoweringPendingV0 frozen receipt
-        (vec (concat pending-layouts pending-functions))))))
+      (->NativeLoweringPendingV0 receipt
+        (vec (concat pending-layouts pending-functions))
+        (native-function-frontier functions)))))
+
+(defn lower-native-slice
+  [frozen-typed stages/FrozenTypedStageV0
+   slice TypedSliceV0
+   compiler-commit String
+   configuration (Vec String)
+   abi core/AbiProfileV0] NativeLoweringResultV0
+  (lower-prepared-native-slice frozen-typed (prepare-native-slice slice abi)
+    compiler-commit configuration))
+
+(defn lower-native-stage
+  [frozen-typed stages/FrozenTypedStageV0
+   slice TypedSliceV0
+   compiler-commit String
+   configuration (Vec String)
+   abi core/AbiProfileV0] NativeLoweringResultV0
+  (lower-native-slice frozen-typed slice compiler-commit configuration abi))
 
 (defn native-program-host-erased? [frozen stages/FrozenNativeStageV0] Bool
   (term-graph-clean?
@@ -25680,7 +26323,9 @@
             (recur (+ position 1)
               (vec (concat collected
                      (epochrewritev0-regions (nth rewrites position)))))))
-        all-regions (Vec core/RegionDef) (vec (concat (core/nativecoreprogram-regions program) minted-regions))
+        all-regions (Vec core/RegionDef) (canonical-region-defs
+          (vec (concat (core/nativecoreprogram-regions program)
+                 minted-regions)))
         collapsed (Vec core/FunctionDef) (mapv
           (fn [function core/FunctionDef] core/FunctionDef
             (epoch-collapse-promotes all-regions
@@ -25693,6 +26338,19 @@
             (recur (+ position 1)
               (vec (concat collected
                      (epochrewritev0-effects (nth rewrites position)))))))
+        all-effects (Vec core/EffectDef) (canonical-effect-defs
+          (vec (concat (core/nativecoreprogram-effects program)
+                 minted-effects)))
+        all-allowed-regions (Vec core/NativeId) (canonical-native-ids
+          (vec (concat (core/nativecoreprogram-allowed-regions program)
+                 (mapv (fn [region core/RegionDef] core/NativeId
+                         (core/regiondef-id region))
+                   minted-regions))))
+        all-allowed-effects (Vec core/NativeId) (canonical-native-ids
+          (vec (concat (core/nativecoreprogram-allowed-effects program)
+                 (mapv (fn [effect core/EffectDef] core/NativeId
+                         (core/effectdef-id effect))
+                   minted-effects))))
         pendings (Vec String) (loop [position Int 0
                                      collected (Vec String) []]
                                 (if (>= position (count rewrites))
@@ -25700,24 +26358,15 @@
             (recur (+ position 1)
               (vec (concat collected
                      (epochrewritev0-pendings (nth rewrites position)))))))
-        rewritten core/NativeCoreProgram (with program
-          [:id (lower-id "epoch-program" [input-digest])]
-          [:parent (core/nativecoreprogram-id program)]
-          [:compiler-pass "native-to-epoch-v0"]
-          [:functions collapsed]
+        rewritten-content core/NativeCoreProgram (with program
+          [:functions (canonical-native-functions collapsed)]
           [:regions all-regions]
-          [:effects (vec (concat (core/nativecoreprogram-effects program)
-                           minted-effects))]
-          [:allowed-regions
-           (vec (concat (core/nativecoreprogram-allowed-regions program)
-                  (mapv (fn [region core/RegionDef] core/NativeId
-                          (core/regiondef-id region))
-                    minted-regions)))]
-          [:allowed-effects
-           (vec (concat (core/nativecoreprogram-allowed-effects program)
-                  (mapv (fn [effect core/EffectDef] core/NativeId
-                          (core/effectdef-id effect))
-                    minted-effects)))])
+          [:effects all-effects]
+          [:allowed-regions all-allowed-regions]
+          [:allowed-effects all-allowed-effects])
+        rewritten core/NativeCoreProgram (remint-derived-native-program
+          rewritten-content (core/nativecoreprogram-id program)
+          "native-to-epoch-v0")
         verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program rewritten abi)
         nine-pass Bool (every? obligations/obligation-passed? verdicts)
         next-stage stages/NativeStageV0 (stages/->NativeStageV0
@@ -25872,29 +26521,41 @@
 (defn epoch-derived-program-to-identity [program core/NativeCoreProgram] core/NativeCoreProgram
   (let [functions (Vec core/FunctionDef) (core/nativecoreprogram-functions program)
         region-ids (Map String Bool) (epoch-generated-region-ids functions)
-        effect-ids (Map String Bool) (epoch-generated-effect-ids functions)]
-    (with program
-      [:functions (mapv epoch-derived-function-to-identity functions)]
-      [:regions
-       (filterv
-         (fn [region core/RegionDef] Bool
-           (not (= true (get region-ids (id-value (core/regiondef-id region))))))
-         (core/nativecoreprogram-regions program))]
-      [:effects
-       (filterv
-         (fn [effect core/EffectDef] Bool
-           (not (= true (get effect-ids (id-value (core/effectdef-id effect))))))
-         (core/nativecoreprogram-effects program))]
-      [:allowed-regions
-       (filterv
-         (fn [region-id core/NativeId] Bool
-           (not (= true (get region-ids (id-value region-id)))))
-         (core/nativecoreprogram-allowed-regions program))]
-      [:allowed-effects
-       (filterv
-         (fn [effect-id core/NativeId] Bool
-           (not (= true (get effect-ids (id-value effect-id)))))
-         (core/nativecoreprogram-allowed-effects program))])))
+        effect-ids (Map String Bool) (epoch-generated-effect-ids functions)
+        parent (U core/NativeId Nil) (core/nativecoreprogram-parent program)
+        restored core/NativeCoreProgram (with program
+          [:functions (canonical-native-functions
+            (mapv epoch-derived-function-to-identity functions))]
+          [:regions
+           (canonical-region-defs
+             (filterv
+               (fn [region core/RegionDef] Bool
+                 (not (= true
+                   (get region-ids (id-value (core/regiondef-id region))))))
+               (core/nativecoreprogram-regions program)))]
+          [:effects
+           (canonical-effect-defs
+             (filterv
+               (fn [effect core/EffectDef] Bool
+                 (not (= true
+                   (get effect-ids (id-value (core/effectdef-id effect))))))
+               (core/nativecoreprogram-effects program)))]
+          [:allowed-regions
+           (canonical-native-ids
+             (filterv
+               (fn [region-id core/NativeId] Bool
+                 (not (= true (get region-ids (id-value region-id)))))
+               (core/nativecoreprogram-allowed-regions program)))]
+          [:allowed-effects
+           (canonical-native-ids
+             (filterv
+               (fn [effect-id core/NativeId] Bool
+                 (not (= true (get effect-ids (id-value effect-id)))))
+               (core/nativecoreprogram-allowed-effects program)))])]
+    (if (nil? parent)
+      (throw (ex-info "derived epoch program has no input identity" {}))
+      (remint-derived-native-program restored parent
+        (core/nativecoreprogram-compiler-pass program)))))
 
 (defn epoch-derived-frozen-to-identity [derived stages/FrozenNativeStageV0] stages/FrozenNativeStageV0
   (let [stage stages/NativeStageV0 (stages/frozennativestagev0-stage derived)
@@ -26335,7 +26996,7 @@
             (let [native-result NativeLoweringResultV0 (lower-native-stage frozen-typed slice compiler-commit
                     configuration (core/abi-profile-lp64))]
               (match native-result
-                [(NativeLoweringPendingV0 frozen receipt obligations)
+                [(NativeLoweringPendingV0 receipt obligations function-frontier)
                  (->FixturePipelineFailedV0 "typed-to-native"
                    "fixture retained a named native obligation")]
                 [(NativeLoweringCompleteV0 frozen receipt)

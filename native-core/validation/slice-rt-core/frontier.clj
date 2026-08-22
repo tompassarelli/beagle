@@ -10,11 +10,14 @@
         report-lines (str/split-lines (slurp report-path))
         functions (mapv #(subs % (count "function "))
                     (filter #(str/starts-with? % "function ") inventory-lines))
+        complete? (some #(= "stage typed-to-native COMPLETE" %) report-lines)
         lowered (into {}
                   (keep (fn [line]
                           (when-let [[_ symbol name blocks]
                                      (re-matches #"^lowered (fn_[0-9]+) ([^ ]+) ([0-9]+) blocks$" line)]
-                            [name {:state "LOWERED" :symbol symbol :detail (str blocks " blocks")}]))
+                            [name {:state (if complete? "LOWERED" "LOWERED-NONEXECUTABLE")
+                                   :symbol symbol
+                                   :detail (str blocks " blocks")}]))
                     report-lines))
         pending (into {}
                   (keep (fn [line]
@@ -30,9 +33,9 @@
       (fail! "functions are both lowered and pending" {:functions overlap}))
     (when (seq unreported)
       (fail! "functions are absent from the native frontier" {:functions unreported}))
-    (when-not (= 10 (count obligation-lines))
-      (fail! "native report does not contain exactly ten obligations"
-        {:actual (count obligation-lines)}))
+    (when-not (= (if complete? 10 0) (count obligation-lines))
+      (fail! "native report obligation count disagrees with lowering status"
+        {:complete complete? :actual (count obligation-lines)}))
     (spit output-path
       (str
         "source-functions " (count functions) "\n"

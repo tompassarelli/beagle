@@ -20,7 +20,7 @@
                      (core/abi-profile-lp64))
       frozen-native (lower/epoch-result-frozen
                       (lower/epoch-identity-stage
-                        (slice/native-frozen native-result)
+                        (slice/require-native-complete native-result)
                         compiler-commit configuration
                         (core/abi-profile-lp64)))
       program (stages/nativestagev0-program

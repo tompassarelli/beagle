@@ -23,23 +23,26 @@
                 typed-slice (lower/typingacceptedv0-slice typing-result)
                 native-result (lower/lower-native-stage
                                 frozen-typed typed-slice compiler-commit configuration
-                                abi)
-                frozen-native (lower/epoch-result-frozen
-                                (lower/epoch-identity-stage
-                                  (slice/native-frozen native-result)
-                                  compiler-commit configuration abi))
-                program (stages/nativestagev0-program
-                          (stages/frozennativestagev0-stage frozen-native))
-                projected (body-slice/projected-program program)
-                result (qbe/materialize-program projected 0 (core/abiprofilev0-id abi))]
-            (if (instance? native.qbe.QbeSuccess result)
-              (let [artifact (qbe/qbesuccess-artifact result)
-                    name (qbe/qbeartifact-module-name artifact)]
-                (spit (str artifacts-dir "/" name)
-                  (qbe/qbeartifact-module-text artifact))
-                (str "qbe-materialize OK " name "\n"))
-              (str "qbe-materialize REFUSED "
-                (qbe/qbefailure-detail result) "\n"))))))))
+                                abi)]
+            (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
+              "qbe-materialize REFUSED native lowering incomplete\n"
+              (let [frozen-native (lower/epoch-result-frozen
+                                    (lower/epoch-identity-stage
+                                      (slice/require-native-complete native-result)
+                                      compiler-commit configuration abi))
+                    program (stages/nativestagev0-program
+                              (stages/frozennativestagev0-stage frozen-native))
+                    projected (body-slice/projected-program program)
+                    result (qbe/materialize-program projected 0
+                             (core/abiprofilev0-id abi))]
+                (if (instance? native.qbe.QbeSuccess result)
+                  (let [artifact (qbe/qbesuccess-artifact result)
+                        name (qbe/qbeartifact-module-name artifact)]
+                    (spit (str artifacts-dir "/" name)
+                      (qbe/qbeartifact-module-text artifact))
+                    (str "qbe-materialize OK " name "\n"))
+                  (str "qbe-materialize REFUSED "
+                    (qbe/qbefailure-detail result) "\n"))))))))))
 
 (let [[facts-path source-id artifacts-dir compiler-commit report-path]
       *command-line-args*]

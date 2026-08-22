@@ -179,8 +179,8 @@
           (recur (+ round 1) grown))))))
 
 (defn projected-program [program core/NativeCoreProgram] core/NativeCoreProgram
-  (let [kept (Vec core/NativeId) (reachable-type-ids program)]
-    (core/->NativeCoreProgram
+  (let [kept (Vec core/NativeId) (reachable-type-ids program)
+        candidate core/NativeCoreProgram (core/->NativeCoreProgram
       (core/nativecoreprogram-id program)
       (core/nativecoreprogram-parent program)
       (core/nativecoreprogram-compiler-pass program)
@@ -198,7 +198,10 @@
       (core/nativecoreprogram-allowed-regions program)
       (core/nativecoreprogram-allowed-capabilities program)
       (core/nativecoreprogram-abis program)
-      (core/nativecoreprogram-observations program))))
+      (core/nativecoreprogram-observations program))]
+    (lower/remint-derived-native-program candidate
+      (core/nativecoreprogram-id program)
+      "body-c17-reachable-types-projection-v0")))
 
 (defn id-text [candidate Any] String (str (get candidate :value "")))
 
@@ -253,6 +256,22 @@
             (str (count (core/functiondef-blocks (nth ordered position))))
             " blocks\n"))))))
 
+(defn pending-function-frontier-report
+  [result lower/NativeLoweringResultV0] String
+  (if (not (instance? native.lower.NativeLoweringPendingV0 result))
+    ""
+    (let [frontier (Vec lower/NativeFunctionFrontierV0) (lower/nativeloweringpendingv0-function-frontier result)]
+      (loop [position Int 0
+             report String ""]
+        (if (>= position (count frontier))
+          report
+          (let [item lower/NativeFunctionFrontierV0 (nth frontier position)]
+            (recur (+ position 1)
+              (str report "lowered fn_" position " "
+                (lower/nativefunctionfrontierv0-name item) " "
+                (lower/nativefunctionfrontierv0-block-count item)
+                " blocks\n"))))))))
+
 (defn functions-named
   [functions (Vec core/FunctionDef)
    name String] (Vec core/FunctionDef)
@@ -263,8 +282,8 @@
 (defn single-function-program
   [program core/NativeCoreProgram
    function core/FunctionDef] core/NativeCoreProgram
-  (let [function-id core/NativeId (core/functiondef-id function)]
-    (core/->NativeCoreProgram
+  (let [function-id core/NativeId (core/functiondef-id function)
+        candidate core/NativeCoreProgram (core/->NativeCoreProgram
       (core/nativecoreprogram-id program)
       (core/nativecoreprogram-parent program)
       (core/nativecoreprogram-compiler-pass program)
@@ -280,7 +299,10 @@
       (filterv (fn [abi core/AbiDeclV0] Bool
                  (core/native-id= function-id (core/abideclv0-function-id abi)))
         (core/nativecoreprogram-abis program))
-      (core/nativecoreprogram-observations program))))
+      (core/nativecoreprogram-observations program))]
+    (lower/remint-derived-native-program candidate
+      (core/nativecoreprogram-id program)
+      "single-function-projection-v0")))
 
 (defn obligations-pass? [verdicts (Vec obligations/ObligationVerdictV0)] Bool
   (every? obligations/obligation-passed?
@@ -348,56 +370,67 @@
             typing-result lower/TypingResultV0 (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           (typing-rejection-report typing-result)
-          ;; QBE materializes epoch-0 only, so it is handed the identity
-          ;; program rather than the derived one it would refuse.
           (let [frozen-typed stages/FrozenTypedStageV0 (lower/typingacceptedv0-frozen typing-result)
                 typed-slice lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
                 native-result lower/NativeLoweringResultV0 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
-                  configuration abi)
-                epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage (slice/native-frozen native-result)
-                  compiler-commit configuration abi)
-                frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
-                program core/NativeCoreProgram (stages/nativestagev0-program
-                  (stages/frozennativestagev0-stage frozen-native))
-                projected core/NativeCoreProgram (projected-program program)
-                result body/BodyMaterializationV0 (body/materialize-program projected 0)
-                verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program projected abi)
-                head String (str "stage source-freeze ACCEPTED\n"
-                  "stage source-to-typed ACCEPTED\n"
-                  "stage typed-to-native "
-                  (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
-                    "COMPLETE" "PENDING")
-                  "\n"
-                  "stage native-to-epoch "
-                  (if (lower/epoch-result-complete? epoch-result)
-                    "COMPLETE" "PENDING")
-                  "\n"
-                  "source-modules "
-                  (str (count (stages/sourcestagev1-modules source))) "\n"
-                  "source-imports "
-                  (str (count (stages/sourcestagev1-imports source))) "\n"
-                  "program-types " (str (count (core/nativecoreprogram-types program))) "\n"
-                  "program-functions "
-                  (str (count (core/nativecoreprogram-functions program))) "\n"
-                  "program-abis " (str (count (core/nativecoreprogram-abis program))) "\n"
-                  "projected-types "
-                  (str (count (core/nativecoreprogram-types projected))) "\n"
-                  (function-report (core/nativecoreprogram-functions projected))
-                  (obligation-report "obligation-projection" verdicts)
-                  (failing-obligation-verdicts verdicts)
-                  (slice/pending-reports (slice/native-pending native-result)))]
-            (if (not (body/materialization-ok? result))
-              (str head "materialize REFUSED "
-                (body/materialization-detail result) "\n")
-              (let [artifact body/BodyArtifactV0 (body/materialization-artifact result)]
-                (do
-                 (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
-                   (body/bodyartifactv0-header-text artifact))
-                 (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
-                   (body/bodyartifactv0-source-text artifact))
-                  (str head "materialize OK "
-                    (body/bodyartifactv0-header-name artifact) " "
-                    (body/bodyartifactv0-source-name artifact) "\n"))))))))))
+                  configuration abi)]
+            (if (not (instance? native.lower.NativeLoweringCompleteV0 native-result))
+              (str "stage source-freeze ACCEPTED\n"
+                "stage source-to-typed ACCEPTED\n"
+                "stage typed-to-native PENDING\n"
+                "source-modules "
+                (count (stages/sourcestagev1-modules source)) "\n"
+                "source-imports "
+                (count (stages/sourcestagev1-imports source)) "\n"
+                (pending-function-frontier-report native-result)
+                (slice/pending-reports (slice/native-pending native-result))
+                "materialize REFUSED native lowering incomplete\n")
+              (let [epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage
+                      (slice/require-native-complete native-result)
+                      compiler-commit configuration abi)
+                    frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
+                    program core/NativeCoreProgram (stages/nativestagev0-program
+                      (stages/frozennativestagev0-stage frozen-native))
+                    projected core/NativeCoreProgram (projected-program program)
+                    result body/BodyMaterializationV0 (body/materialize-program projected 0)
+                    verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program projected abi)
+                    head String (str "stage source-freeze ACCEPTED\n"
+                      "stage source-to-typed ACCEPTED\n"
+                      "stage typed-to-native COMPLETE\n"
+                      "stage native-to-epoch "
+                      (if (lower/epoch-result-complete? epoch-result)
+                        "COMPLETE" "PENDING")
+                      "\n"
+                      "source-modules "
+                      (count (stages/sourcestagev1-modules source)) "\n"
+                      "source-imports "
+                      (count (stages/sourcestagev1-imports source)) "\n"
+                      "program-types "
+                      (count (core/nativecoreprogram-types program)) "\n"
+                      "program-functions "
+                      (count (core/nativecoreprogram-functions program)) "\n"
+                      "program-abis "
+                      (count (core/nativecoreprogram-abis program)) "\n"
+                      "projected-types "
+                      (count (core/nativecoreprogram-types projected)) "\n"
+                      (function-report (core/nativecoreprogram-functions projected))
+                      (obligation-report "obligation-projection" verdicts)
+                      (failing-obligation-verdicts verdicts))]
+                (if (not (body/materialization-ok? result))
+                  (str head "materialize REFUSED "
+                    (body/materialization-detail result) "\n")
+                  (let [artifact body/BodyArtifactV0 (body/materialization-artifact result)]
+                    (do
+                      (spit (str artifacts-dir "/"
+                              (body/bodyartifactv0-header-name artifact))
+                        (body/bodyartifactv0-header-text artifact))
+                      (spit (str artifacts-dir "/"
+                              (body/bodyartifactv0-source-name artifact))
+                        (body/bodyartifactv0-source-text artifact))
+                      (str head "materialize OK "
+                        (body/bodyartifactv0-header-name artifact) " "
+                        (body/bodyartifactv0-source-name artifact)
+                        "\n"))))))))))))
 
 (defn emit-slice-for-abi!
   [facts-path String
@@ -467,60 +500,72 @@
           (let [frozen-typed stages/FrozenTypedStageV0 (lower/typingacceptedv0-frozen typing-result)
                 typed-slice lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
                 native-result lower/NativeLoweringResultV0 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
-                  configuration abi)
-                epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage (slice/native-frozen native-result)
-                  compiler-commit configuration abi)
-                frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
-                program core/NativeCoreProgram (stages/nativestagev0-program
-                  (stages/frozennativestagev0-stage frozen-native))
-                qbe-program core/NativeCoreProgram (lower/epoch-identity-program (slice/native-frozen native-result)
-                  compiler-commit configuration abi)
-                projected core/NativeCoreProgram (projected-program program)
-                result body/BodyMaterializationV0 (body/materialize-program projected 0)
-                verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program projected abi)
-                complete Bool (instance? native.lower.NativeLoweringCompleteV0 native-result)
-                qbe-report String (if complete
-                  (str "qbe-stage typed-to-native COMPLETE\n"
-                    (emit-qbe-function! qbe-program qbe-function-name
-                      artifacts-dir qbe-module-index abi))
-                  (str "qbe-stage typed-to-native PENDING\n"
-                    "qbe-materialize REFUSED native lowering incomplete\n"))
-                head String (str "stage source-freeze ACCEPTED\n"
-                  "stage source-to-typed ACCEPTED\n"
-                  "stage typed-to-native " (if complete "COMPLETE" "PENDING") "\n"
-                  "stage native-to-epoch "
-                  (if (lower/epoch-result-complete? epoch-result)
-                    "COMPLETE" "PENDING")
-                  "\n"
-                  "source-modules "
-                  (count (stages/sourcestagev1-modules source)) "\n"
-                  "source-imports "
-                  (count (stages/sourcestagev1-imports source)) "\n"
-                  "program-types " (count (core/nativecoreprogram-types program)) "\n"
-                  "program-functions "
-                  (count (core/nativecoreprogram-functions program)) "\n"
-                  "program-abis " (count (core/nativecoreprogram-abis program)) "\n"
-                  "projected-types "
-                  (count (core/nativecoreprogram-types projected)) "\n"
-                  (function-report (core/nativecoreprogram-functions projected))
-                  (obligation-report "obligation-projection" verdicts)
-                  (failing-obligation-verdicts verdicts)
-                  (slice/pending-reports (slice/native-pending native-result)))]
-            (if (not (body/materialization-ok? result))
-              (str head "materialize REFUSED "
-                (body/materialization-detail result) "\n" qbe-report)
-              (let [artifact body/BodyArtifactV0 (body/materialization-artifact result)]
-                (do
-                  (spit (str artifacts-dir "/"
-                          (body/bodyartifactv0-header-name artifact))
-                    (body/bodyartifactv0-header-text artifact))
-                  (spit (str artifacts-dir "/"
-                          (body/bodyartifactv0-source-name artifact))
-                    (body/bodyartifactv0-source-text artifact))
-                  (str head "materialize OK "
-                    (body/bodyartifactv0-header-name artifact) " "
-                    (body/bodyartifactv0-source-name artifact) "\n"
-                    qbe-report))))))))))
+                  configuration abi)]
+            (if (not (instance? native.lower.NativeLoweringCompleteV0 native-result))
+              (str "stage source-freeze ACCEPTED\n"
+                "stage source-to-typed ACCEPTED\n"
+                "stage typed-to-native PENDING\n"
+                "source-modules "
+                (count (stages/sourcestagev1-modules source)) "\n"
+                "source-imports "
+                (count (stages/sourcestagev1-imports source)) "\n"
+                (pending-function-frontier-report native-result)
+                (slice/pending-reports (slice/native-pending native-result))
+                "materialize REFUSED native lowering incomplete\n"
+                "qbe-stage typed-to-native PENDING\n"
+                "qbe-materialize REFUSED native lowering incomplete\n")
+              (let [epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage
+                      (slice/require-native-complete native-result)
+                      compiler-commit configuration abi)
+                    frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
+                    program core/NativeCoreProgram (stages/nativestagev0-program
+                      (stages/frozennativestagev0-stage frozen-native))
+                    qbe-program core/NativeCoreProgram (lower/epoch-identity-program
+                      (slice/require-native-complete native-result)
+                      compiler-commit configuration abi)
+                    projected core/NativeCoreProgram (projected-program program)
+                    result body/BodyMaterializationV0 (body/materialize-program projected 0)
+                    verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program projected abi)
+                    qbe-report String (str "qbe-stage typed-to-native COMPLETE\n"
+                      (emit-qbe-function! qbe-program qbe-function-name
+                        artifacts-dir qbe-module-index abi))
+                    head String (str "stage source-freeze ACCEPTED\n"
+                      "stage source-to-typed ACCEPTED\n"
+                      "stage typed-to-native COMPLETE\n"
+                      "stage native-to-epoch "
+                      (if (lower/epoch-result-complete? epoch-result)
+                        "COMPLETE" "PENDING")
+                      "\n"
+                      "source-modules "
+                      (count (stages/sourcestagev1-modules source)) "\n"
+                      "source-imports "
+                      (count (stages/sourcestagev1-imports source)) "\n"
+                      "program-types "
+                      (count (core/nativecoreprogram-types program)) "\n"
+                      "program-functions "
+                      (count (core/nativecoreprogram-functions program)) "\n"
+                      "program-abis "
+                      (count (core/nativecoreprogram-abis program)) "\n"
+                      "projected-types "
+                      (count (core/nativecoreprogram-types projected)) "\n"
+                      (function-report (core/nativecoreprogram-functions projected))
+                      (obligation-report "obligation-projection" verdicts)
+                      (failing-obligation-verdicts verdicts))]
+                (if (not (body/materialization-ok? result))
+                  (str head "materialize REFUSED "
+                    (body/materialization-detail result) "\n" qbe-report)
+                  (let [artifact body/BodyArtifactV0 (body/materialization-artifact result)]
+                    (do
+                      (spit (str artifacts-dir "/"
+                              (body/bodyartifactv0-header-name artifact))
+                        (body/bodyartifactv0-header-text artifact))
+                      (spit (str artifacts-dir "/"
+                              (body/bodyartifactv0-source-name artifact))
+                        (body/bodyartifactv0-source-text artifact))
+                      (str head "materialize OK "
+                        (body/bodyartifactv0-header-name artifact) " "
+                        (body/bodyartifactv0-source-name artifact) "\n"
+                        qbe-report))))))))))))
 
 (defn emit-dual-slice!
   [facts-path String

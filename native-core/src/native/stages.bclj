@@ -65,8 +65,9 @@
    capability-token-roots (Vec core/NativeId)
    refinement-roots (Vec core/NativeId)])
 
-;; Core NativeCoreProgram is the typed view; the canonical term graph owns its
-;; content identity.
+;; Core NativeCoreProgram is the executable typed view. Frozen Native stages
+;; bind its complete canonical program wire, including exact F64 payload bits;
+;; the term graph remains a distinct explanatory projection.
 (defrecord NativeStageV0
   [terms TermGraphV0
    typed-digest String
@@ -289,30 +290,6 @@
        (encode-string (core/fri2observation-digest observation))
        (encode-int (core/fri2observation-byte-count observation))])
     (canonical-record "observation-unknown-v0" [])))
-
-(defn encode-native-core-program [program core/NativeCoreProgram] String
-  (canonical-record "native-core-program-v0"
-    [(encode-id (core/nativecoreprogram-id program))
-     (encode-optional-id (core/nativecoreprogram-parent program))
-     (encode-string (core/nativecoreprogram-compiler-pass program))
-     (encode-ids "allowed-effects" (core/nativecoreprogram-allowed-effects program))
-     (encode-ids "allowed-regions" (core/nativecoreprogram-allowed-regions program))
-     (encode-ids "allowed-capabilities"
-       (core/nativecoreprogram-allowed-capabilities program))
-     (canonical-set "regions"
-       (mapv (fn [region core/RegionDef] String (encode-region region))
-         (core/nativecoreprogram-regions program)))
-     (canonical-set "observations"
-       (mapv (fn [observation core/ExternalObservation] String
-               (encode-observation observation))
-         (core/nativecoreprogram-observations program)))]))
-
-(defn encode-native-stage [stage NativeStageV0] String
-  (canonical-record "native-stage-v0"
-    [(encode-term-graph (nativestagev0-terms stage))
-     (encode-string (nativestagev0-typed-digest stage))
-     (encode-native-core-program (nativestagev0-program stage))
-     (encode-ids "obligation-roots" (nativestagev0-obligation-roots stage))]))
 
 (defn configuration-digest [configuration (Vec String)] String
   (content-digest
@@ -638,6 +615,22 @@
 (defn encode-native-program-f64-atoms [program core/NativeCoreProgram] String
   (canonical-vector "native-program-f64-atoms-v1"
     (native-program-f64-atom-bit-rows program)))
+
+;; The frozen-stage digest must bind the entire executable payload. The
+;; normalized non-evaluating rendering already owns the canonical Native wire;
+;; the side table preserves exact IEEE-754 payload bits that printing alone
+;; cannot distinguish.
+(defn encode-native-core-program [program core/NativeCoreProgram] String
+  (canonical-record "native-core-program-v1"
+    [(native-wire-pr-str program)
+     (encode-native-program-f64-atoms program)]))
+
+(defn encode-native-stage [stage NativeStageV0] String
+  (canonical-record "native-stage-v1"
+    [(encode-term-graph (nativestagev0-terms stage))
+     (encode-string (nativestagev0-typed-digest stage))
+     (encode-native-core-program (nativestagev0-program stage))
+     (encode-ids "obligation-roots" (nativestagev0-obligation-roots stage))]))
 
 (defn decode-f64-atom-bits-wire-v1 [encoding String] (U F64AtomBitsWireV1 Nil)
   (let [record (U NativeWireRecordV1 Nil) (required-native-wire-record encoding "f64-atom-bits-v1" 2)]

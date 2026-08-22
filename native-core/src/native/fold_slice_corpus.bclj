@@ -460,7 +460,7 @@
 (defn native-frozen [result lower/NativeLoweringResultV0] stages/FrozenNativeStageV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-frozen result)
-    (lower/nativeloweringpendingv0-frozen result)))
+    (throw (ex-info "store.fold Native lowering remained pending" {}))))
 
 (defn native-receipt [result lower/NativeLoweringResultV0] core/PassReceiptV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
