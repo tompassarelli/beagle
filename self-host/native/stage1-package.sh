@@ -94,6 +94,7 @@ driver_names=(
     bin/beagle-build
     bin/beagle-build-all
     bin/beagle-build-core
+    bin/_beagle-compiler-provenance
     bin/beagle-native-exe
     bin/beagle-self-compiler-core
     bin/beagle-materialize-wasm

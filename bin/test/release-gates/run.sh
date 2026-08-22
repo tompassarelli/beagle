@@ -14,6 +14,9 @@ repo_root="$(cd "$script_dir/../../.." && pwd)"
 notes_gate="$repo_root/scripts/check-release-notes.sh"
 version_gate="$repo_root/scripts/check-release-version.sh"
 workflow="$repo_root/.github/workflows/native.yml"
+provenance_helper="$repo_root/bin/_beagle-compiler-provenance"
+core_builder="$repo_root/bin/beagle-build-core"
+flake="$repo_root/flake.nix"
 
 test_root="$(mktemp -d)"
 trap 'rm -rf "${test_root:?}"' EXIT
@@ -81,6 +84,15 @@ expect_failure() {
     fail "$label: expected exit 2, got $status"
   [[ "$output" == *"$expected"* ]] ||
     fail "$label: missing diagnostic '$expected': $output"
+}
+
+expect_output() {
+  local label="$1" expected="$2"
+  shift 2
+  local output
+  output="$("$@")" || fail "expected success: $label"
+  [[ "$output" == "$expected" ]] ||
+    fail "$label: expected '$expected', got '$output'"
 }
 
 # ---------------------------------------------------------------------------
@@ -198,6 +210,63 @@ printf '#lang info\n(define collection "beagle")\n' \
 expect_failure "version literal missing" \
   "no version literal found in: beagle-lib/info.rkt" \
   bash "$literal_absent/scripts/check-release-version.sh" v0.22.0
+
+# ---------------------------------------------------------------------------
+# Packaged compiler provenance
+# ---------------------------------------------------------------------------
+
+checkout="$test_root/provenance-checkout"
+mkdir -p "$checkout"
+git init -q -b main "$checkout"
+git -C "$checkout" -c user.name=Beagle -c user.email=beagle.invalid \
+  commit -q --allow-empty -m initial
+checkout_commit="$(git -C "$checkout" rev-parse HEAD)"
+other_commit="0000000000000000000000000000000000000000"
+
+expect_output "checkout HEAD is authoritative" "$checkout_commit" \
+  env -u BEAGLE_PACKAGED_COMPILER_COMMIT \
+  bash -c 'source "$1"; beagle_resolve_compiler_commit "$2"' \
+  resolve-compiler-commit "$provenance_helper" "$checkout"
+expect_output "matching packaged revision is accepted in a checkout" "$checkout_commit" \
+  env BEAGLE_PACKAGED_COMPILER_COMMIT="$checkout_commit" \
+  bash -c 'source "$1"; beagle_resolve_compiler_commit "$2"' \
+  resolve-compiler-commit "$provenance_helper" "$checkout"
+expect_failure "malformed packaged revision" "must be 40 lowercase hexadecimal characters" \
+  env BEAGLE_PACKAGED_COMPILER_COMMIT=NOT-A-COMMIT \
+  bash -c 'source "$1"; beagle_resolve_compiler_commit "$2"' \
+  resolve-compiler-commit "$provenance_helper" "$checkout"
+expect_failure "conflicting checkout and package provenance" "conflicts with checkout HEAD" \
+  env BEAGLE_PACKAGED_COMPILER_COMMIT="$other_commit" \
+  bash -c 'source "$1"; beagle_resolve_compiler_commit "$2"' \
+  resolve-compiler-commit "$provenance_helper" "$checkout"
+
+package_root="$test_root/provenance-package"
+mkdir -p "$package_root"
+expect_output "package revision replaces absent Git metadata" "$checkout_commit" \
+  env BEAGLE_PACKAGED_COMPILER_COMMIT="$checkout_commit" \
+  bash -c 'source "$1"; beagle_resolve_compiler_commit "$2"' \
+  resolve-compiler-commit "$provenance_helper" "$package_root"
+expect_failure "package without revision" "Git metadata is absent and BEAGLE_PACKAGED_COMPILER_COMMIT is unset" \
+  env -u BEAGLE_PACKAGED_COMPILER_COMMIT \
+  bash -c 'source "$1"; beagle_resolve_compiler_commit "$2"' \
+  resolve-compiler-commit "$provenance_helper" "$package_root"
+printf 'broken worktree pointer\n' > "$package_root/.git"
+expect_failure "broken checkout metadata cannot fall back to package provenance" \
+  "Git metadata is present but checkout HEAD is unavailable" \
+  env BEAGLE_PACKAGED_COMPILER_COMMIT="$checkout_commit" \
+  bash -c 'source "$1"; beagle_resolve_compiler_commit "$2"' \
+  resolve-compiler-commit "$provenance_helper" "$package_root"
+
+grep -Fq 'source "$BIN/_beagle-compiler-provenance"' "$core_builder" ||
+  fail "beagle-build-core does not load the compiler provenance resolver"
+grep -Fq 'beagle_resolve_compiler_commit "$BEAGLE_DIR"' "$core_builder" ||
+  fail "beagle-build-core does not use the compiler provenance resolver"
+grep -Fq 'BEAGLE_PACKAGED_COMPILER_COMMIT = self.rev or "";' "$flake" ||
+  fail "the package does not capture the exact flake revision"
+grep -Fq -- '--set BEAGLE_PACKAGED_COMPILER_COMMIT "$BEAGLE_PACKAGED_COMPILER_COMMIT"' "$flake" ||
+  fail "the package wrapper does not expose its captured compiler revision"
+grep -Fq 'pkgs.ripgrep' "$flake" ||
+  fail "the packaged runtime does not contain ripgrep"
 
 # ---------------------------------------------------------------------------
 # The real tree, and the wiring that makes these gates run at all

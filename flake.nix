@@ -63,7 +63,7 @@
         # Runtime tools the bin/* scripts shell out to. Kept minimal but
         # complete for the core CLIs (build/validate/syntax/doctor): racket for
         # the compiler, babashka for the .bb scripts, python3 + coreutils/grep/
-        # sed/awk/find for the bash glue (beagle-doctor parses JSON with python3).
+        # sed/awk/find/rg for the bash glue (beagle-doctor parses JSON with python3).
         runtimeDeps = [
           racket
           pkgs.babashka
@@ -78,13 +78,19 @@
           pkgs.gawk
           pkgs.findutils
           pkgs.util-linux
+          pkgs.ripgrep
         ];
         runtimePath = pkgs.lib.makeBinPath runtimeDeps;
 
         beagle = pkgs.stdenv.mkDerivation {
           pname = "beagle";
-          version = "0.25.0";
+          version = "0.25.1";
           src = ./.;
+
+          # A Nix source has no .git directory at runtime. Preserve the exact
+          # flake revision as physical package provenance; build-core verifies
+          # it before admitting it into compiler receipts.
+          BEAGLE_PACKAGED_COMPILER_COMMIT = self.rev or "";
 
           nativeBuildInputs = [ pkgs.makeWrapper racket ];
 
@@ -100,6 +106,11 @@
 
             export HOME="$TMPDIR/beagle-home"
             mkdir -p "$HOME"
+
+            if [[ ! "$BEAGLE_PACKAGED_COMPILER_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "beagle: package source requires an exact 40-character Git revision" >&2
+              exit 2
+            fi
 
             # Mirror the repo into $out (scripts compute BEAGLE_ROOT=$out and
             # reference $out/beagle-lib, $out/bin, $out/share at runtime).
@@ -193,6 +204,7 @@
                 --set BEAGLE_STORE_BIN "$out/store/bin" \
                 --set BEAGLE_STORE_OUT "$out/store/out" \
                 --set BEAGLE_STORE_JAVA "${pkgs.jdk}/bin/java" \
+                --set BEAGLE_PACKAGED_COMPILER_COMMIT "$BEAGLE_PACKAGED_COMPILER_COMMIT" \
                 --prefix PATH : "${runtimePath}"
             done
 
