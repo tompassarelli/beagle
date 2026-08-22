@@ -262,6 +262,11 @@ grep -Fq 'source "$BIN/_beagle-compiler-provenance"' "$core_builder" ||
   fail "beagle-build-core does not load the compiler provenance resolver"
 grep -Fq 'beagle_resolve_compiler_commit "$BEAGLE_DIR"' "$core_builder" ||
   fail "beagle-build-core does not use the compiler provenance resolver"
+grep -Fq 'current_compiler_commit="$(beagle_resolve_compiler_commit "$BEAGLE_DIR")" ||' "$core_builder" ||
+  fail "beagle-build-core does not re-resolve compiler provenance after a lock wait"
+if grep -Fq 'git -C "$BEAGLE_DIR" rev-parse --verify HEAD' "$core_builder"; then
+  fail "beagle-build-core bypasses compiler provenance during closure revalidation"
+fi
 grep -Fq 'BEAGLE_PACKAGED_COMPILER_COMMIT = self.rev or "";' "$flake" ||
   fail "the package does not capture the exact flake revision"
 grep -Fq -- '--set BEAGLE_PACKAGED_COMPILER_COMMIT "$BEAGLE_PACKAGED_COMPILER_COMMIT"' "$flake" ||

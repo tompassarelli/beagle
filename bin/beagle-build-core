@@ -971,15 +971,16 @@ write_core_checkpoint_identity() {
 # answer proves nothing, and each caller runs it on the far side of a lock wait
 # that another build could have used to change the tree.
 validate_identity_closure_prefix() {
-    local source_index current_digest
+    local source_index current_digest current_compiler_commit
     for source_index in "${!source_snapshot_paths[@]}"; do
         current_digest="$(sha256sum "${source_snapshot_paths[$source_index]}" |
             awk '{print $1}')"
         [[ "$current_digest" == "${source_snapshot_digests[$source_index]}" ]] ||
             return 1
     done
-    [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
-       "$compiler_commit" ]] || return 1
+    current_compiler_commit="$(beagle_resolve_compiler_commit "$BEAGLE_DIR")" ||
+        return 1
+    [[ "$current_compiler_commit" == "$compiler_commit" ]] || return 1
     [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
        "$compiler_source_digest" ]]
 }
