@@ -8189,6 +8189,22 @@
                 (recur (+ position 1) candidate))
               (recur (+ position 1) found))))))))
 
+;; A builtin receiver entry names a carrier kind. Resolve that placeholder
+;; through the checker's exact expression type before it becomes a literal
+;; context; an empty or ambiguous receiver deliberately keeps the canonical
+;; dynamic carrier until ordinary boundary checking can decide it.
+(defn builtin-receiver-argument-type
+  [types (Vec core/TypeDef)
+   env BodyEnvV0
+   state BodyStateV0
+   expression core/NativeId
+   canonical core/NativeId] core/NativeId
+  (let [checked (U core/NativeId Nil) (checked-expression-type env state expression)
+        selected (U core/NativeId Nil) (if (nil? checked)
+          nil
+          (builtin-boundary-target types checked canonical))]
+    (if (nil? selected) canonical selected)))
+
 (defn preserved-collection-argument-type
   [types (Vec core/TypeDef)
    callee String
@@ -17352,8 +17368,13 @@
                       (let [argument-node core/NativeId (nth args position)
                             declared-expected (U core/NativeId Nil) (contextual-argument-type constructor signature
                               (count args) position)
-                            receiver-expected (U core/NativeId Nil) (expected-builtin-argument-type
+                            receiver-kind (U core/NativeId Nil) (expected-builtin-argument-type
                               types callee position value-types)
+                            receiver-expected (U core/NativeId Nil) (if (or
+                                  (nil? receiver-kind) (not (= position 0)))
+                              receiver-kind
+                              (builtin-receiver-argument-type types env current
+                                argument-node receiver-kind))
                             preserved-expected (U core/NativeId Nil) (preserved-collection-argument-type types bare-callee
                               (count args) position expected)
                             equality-expected (U core/NativeId Nil) (equality-empty-argument-type types index env current

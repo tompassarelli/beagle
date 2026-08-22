@@ -106,7 +106,7 @@ for function in \
   unguarded-vector unguarded-text unguarded-str unguarded-map-tail \
   unguarded-vector-tail unguarded-set-tail unguarded-text-tail \
   unguarded-regex carrier-vector carrier-count reduce-dynamic-texts \
-  step-counter! main!; do
+  exact-int-tail exact-vector-into empty-dynamic-into step-counter! main!; do
   rg -q "^lowered fn_[0-9]+ ${function} " "$report" \
     || die "lowered function is missing: $function"
 done
