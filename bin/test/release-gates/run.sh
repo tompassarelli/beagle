@@ -16,6 +16,7 @@ version_gate="$repo_root/scripts/check-release-version.sh"
 workflow="$repo_root/.github/workflows/native.yml"
 provenance_helper="$repo_root/bin/_beagle-compiler-provenance"
 core_builder="$repo_root/bin/beagle-build-core"
+ast_cli="$repo_root/bin/beagle-ast"
 flake="$repo_root/flake.nix"
 
 test_root="$(mktemp -d)"
@@ -267,6 +268,11 @@ grep -Fq -- '--set BEAGLE_PACKAGED_COMPILER_COMMIT "$BEAGLE_PACKAGED_COMPILER_CO
   fail "the package wrapper does not expose its captured compiler revision"
 grep -Fq 'pkgs.ripgrep' "$flake" ||
   fail "the packaged runtime does not contain ripgrep"
+grep -Fq 'BEAGLE_CHECKED_AST_CACHE:-${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}/beagle/checked-ast' "$ast_cli" ||
+  fail "checked AST reuse is not rooted in the writable user cache"
+if grep -Fq 'BEAGLE_ROOT/.beagle/checked-ast' "$ast_cli"; then
+  fail "checked AST reuse still writes below the immutable package root"
+fi
 
 # ---------------------------------------------------------------------------
 # The real tree, and the wiring that makes these gates run at all
