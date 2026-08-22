@@ -375,7 +375,17 @@
      (let [builder (Atom txn/Builder) (txn/open root)]
        (do
         (doseq [row (fact-triples admitted)] (txn/assert! builder row))
-        (->FactPersisted admitted (txn/commit! root builder))))]
+        (match (txn/commit! root builder)
+          [(store/CommitSuccess coordinate)
+           (->FactPersisted admitted coordinate)]
+          [(store/CommitStale expected observed)
+           (->FactNotPersisted
+            (->FactRejected
+             :store/commit-stale
+             (str "store advanced from expected sequence " expected
+                  " to " observed)))]
+          [(store/CommitRejected code detail)
+           (->FactNotPersisted (->FactRejected code detail))])))]
     [(FactRejected code detail) (->FactNotPersisted (->FactRejected code detail))]))
 
 (defn property-values

@@ -9,6 +9,11 @@
     nil
     (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
 
+(defn committed-coordinate [result]
+  (if (instance? store.store.CommitSuccess result)
+    (store/commitsuccess-coordinate result)
+    (throw (ex-info "test setup commit failed" {:result result}))))
+
 (def proposition (t/triple "Alice" :contactable_at "alice@example.com"))
 (def nested-proposition
   (t/triple (t/triple "Alice" :account "primary")
@@ -20,9 +25,10 @@
 ;; Equal content may occur more than once. The transaction-local ordinals, not
 ;; the shared private content handle, distinguish the two assertions.
 (def tx1
-  (store/commit-transaction!
-   ctx [(store/assert-operation proposition)
-        (store/assert-operation proposition)]))
+  (committed-coordinate
+   (store/commit-transaction!
+    ctx [(store/assert-operation proposition)
+         (store/assert-operation proposition)])))
 (def assertions-after-tx1 (store/live-occurrences ctx))
 (def first-assertion (nth assertions-after-tx1 0))
 (def second-assertion (nth assertions-after-tx1 1))
@@ -30,21 +36,25 @@
 (def second-coordinate (t/operationoccurrence-coordinate second-assertion))
 
 ;; Retractions withdraw the most recent live occurrence of equal content.
-(def tx2 (store/commit-transaction! ctx [(store/retract-operation proposition)]))
+(def tx2 (committed-coordinate
+          (store/commit-transaction! ctx [(store/retract-operation proposition)])))
 (def live-after-first-retract (store/live-occurrences ctx))
 (def withdrawals-after-first-retract (store/withdrawals ctx))
 
-(def tx3 (store/commit-transaction! ctx [(store/retract-operation proposition)]))
+(def tx3 (committed-coordinate
+          (store/commit-transaction! ctx [(store/retract-operation proposition)])))
 (def live-after-second-retract (store/live-occurrences ctx))
 (def withdrawals-after-second-retract (store/withdrawals ctx))
 
 ;; A retraction with no live target remains an exact history occurrence but
 ;; does not invent a withdrawal edge.
-(def tx4 (store/commit-transaction! ctx [(store/retract-operation proposition)]))
+(def tx4 (committed-coordinate
+          (store/commit-transaction! ctx [(store/retract-operation proposition)])))
 (def occurrences-after-noop (store/occurrences ctx))
 (def withdrawals-after-noop (store/withdrawals ctx))
 
-(def tx5 (store/commit-transaction! ctx [(store/assert-operation nested-proposition)]))
+(def tx5 (committed-coordinate
+          (store/commit-transaction! ctx [(store/assert-operation nested-proposition)])))
 (def dump (store/dump-term-store ctx))
 (def occurrences (store/occurrences ctx))
 (def withdrawals (store/withdrawals ctx))

@@ -41,6 +41,15 @@
     [code Keyword
      detail String]))
 
+(defunion CommitResult
+  (CommitSuccess [coordinate t/Triple])
+  (CommitStale
+    [expected-sequence Int
+     observed-sequence Int])
+  (CommitRejected
+    [code Keyword
+     detail String]))
+
 ;; A slot table doubles once its indexed vector holds more than this many rows
 ;; per slot. Every lookup still checks the complete physical row for collision.
 (def initial-slots Int 64)
@@ -713,9 +722,9 @@
           (t/transaction-coordinate
            (t/termstore-space-id final-store) sequence))))))
 
-(defn- canonical-validate-commit!
+(defn- canonical-validated-metadata
   [operations (Vec t/CommitOperation)
-   metadata t/CommitMetadata] t/CommitMetadata
+   metadata t/CommitMetadata] t/CommitMetadata?
   (let [attestation t/CommitValidationAttestation (t/commitmetadata-validation-attestation metadata)]
     (if (and (valid-operations? operations)
              (t/commit-metadata? metadata)
@@ -735,24 +744,41 @@
         canonical-validator
         :accepted
         canonical-validator))
-      (throw (ex-info "store: canonical commit validation rejected the write"
-                      {:type :canonical-commit-rejected})))))
+      nil)))
 
 (defn commit-boundary!
   [ctx (Atom t/TermStore)
+   expected-sequence Int
    operations (Vec t/CommitOperation)
-   metadata t/CommitMetadata] t/Triple
-  (let [validated (canonical-validate-commit! operations metadata)]
-    ;; `validated` is deliberately produced at the sole boundary before the
-    ;; private append. The raw primitive is never part of the Store surface.
-    (append-transaction!
-     ctx (store-next-sequence (deref ctx)) operations validated)))
+   metadata t/CommitMetadata] CommitResult
+  (let [observed-sequence Int (store-next-sequence (deref ctx))
+        validated t/CommitMetadata? (canonical-validated-metadata operations metadata)]
+    (cond
+      [(or (< expected-sequence 1)
+           (> expected-sequence max-transaction-sequence))
+       (->CommitRejected
+        :invalid-transaction-sequence
+        "store: expected transaction sequence is outside the appendable range")]
+      [(nil? validated)
+       (->CommitRejected
+        :canonical-commit-rejected
+        "store: canonical commit validation rejected the write")]
+      [(not= expected-sequence observed-sequence)
+       (->CommitStale expected-sequence observed-sequence)]
+      [:else
+       ;; A TermStore has one writer. This comparison and append are therefore
+       ;; one Store boundary, not a claim of a host-level atomic primitive.
+       (let [accepted t/CommitMetadata validated]
+         (->CommitSuccess
+          (append-transaction! ctx expected-sequence operations accepted)))])))
 
 (defn commit-transaction!
   [ctx (Atom t/TermStore)
-   operations (Vec t/CommitOperation)] t/Triple
+   operations (Vec t/CommitOperation)] CommitResult
+  ;; This convenience samples the sole writer's present sequence. Callers that
+  ;; pin work before this call use commit-boundary! with that explicit sequence.
   (commit-boundary!
-   ctx operations
+   ctx (next-sequence ctx) operations
    (commit-metadata "store.txn/v1" canonical-shape-schema-id
                     "store-schema-v1")))
 

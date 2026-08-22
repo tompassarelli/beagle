@@ -137,6 +137,31 @@
          (conj operations (t/->CommitOperation t/assert-action proposition)))))
    [] facts))
 
+(defn compiler-committed-result!
+  [prior StoreResult
+   store-value Store
+   session schema/Session
+   root (Atom t/TermStore)
+   before Int
+   query fact-profile/AdmittedQueryClosure?
+   result fact-profile/AdmittedResultClosure?] CompileDirectResult
+  (do
+    (schema/refresh! session)
+    (let [encoded (log/encode-store-append! root before)]
+      (if (= status-ok (log/bytesresult-status encoded))
+        (let [append (log/bytesresult-bytes encoded)
+              next (->StoreResult status-ok
+                     (->Store (store-canonical-log-path store-value) session
+                              (+ (store-log-byte-count store-value)
+                                 (count append)))
+                     nil (storeresult-valid-log-bytes prior)
+                     empty-bytes "")]
+          (->CompileDirectResult status-ok nil next append true query result))
+        (->CompileDirectResult status-fatal
+                               (error-or (log/bytesresult-error encoded)
+                                         "compiler fact log encoding failed")
+                               prior empty-bytes false query result)))))
+
 (defn compiler-commit!
   [prior StoreResult
    facts (Vec fact-profile/CompileQueryFact)
@@ -151,28 +176,28 @@
             session schema/Session (schema/fork-session (store-session store-value))
             root (Atom t/TermStore) (schema/store-of session)
             before Int (term-store/current-sequence root)
+            expected-sequence Int (term-store/next-sequence root)
             operations (Vec t/CommitOperation) (compiler-fact-operations root facts)]
         (if (empty? operations)
           (->CompileDirectResult status-ok nil prior empty-bytes false query result)
-          (do
+          (match
             (term-store/commit-boundary!
-             root operations
+             root expected-sequence operations
              (term-store/commit-metadata "store.compiler" "fact-profile" nil))
-            (schema/refresh! session)
-            (let [encoded (log/encode-store-append! root before)]
-              (if (= status-ok (log/bytesresult-status encoded))
-                (let [append (log/bytesresult-bytes encoded)
-                      next (->StoreResult status-ok
-                               (->Store (store-canonical-log-path store-value) session
-                                        (+ (store-log-byte-count store-value)
-                                           (count append)))
-                               nil (storeresult-valid-log-bytes prior)
-                               empty-bytes "")]
-                  (->CompileDirectResult status-ok nil next append true query result))
-                (->CompileDirectResult status-fatal
-                                       (error-or (log/bytesresult-error encoded)
-                                                 "compiler fact log encoding failed")
-                                       prior empty-bytes false query result)))))))))
+            [(term-store/CommitSuccess _)
+             (compiler-committed-result!
+              prior store-value session root before query result)]
+            [(term-store/CommitStale expected observed)
+             (->CompileDirectResult
+              status-fatal
+              (str "compiler Store commit expected transaction sequence "
+                   expected " but observed " observed)
+              prior empty-bytes false query result)]
+            [(term-store/CommitRejected code detail)
+             (->CompileDirectResult
+              status-fatal
+              (str detail " (" code ")")
+              prior empty-bytes false query result)]))))))
 
 (defn payload-content-id [payload String] String
   (str "sha256:" (sha256-bytes (utf8-encode payload))))

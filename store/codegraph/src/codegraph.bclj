@@ -31,6 +31,19 @@
    (gn Int)
    (in Int)])
 
+;; This command owns one Store writer and has a fail-fast CLI contract. Store
+;; still returns typed OCC data before this command translates failure.
+(defn require-commit! [result c/CommitResult] t/Triple
+  (match result
+    [(c/CommitSuccess coordinate) coordinate]
+    [(c/CommitStale expected observed)
+     (throw (ex-info "store advanced under the codegraph command"
+                     {:type :transaction-sequence-drift
+                      :expected expected
+                      :observed observed}))]
+    [(c/CommitRejected code detail)
+     (throw (ex-info detail {:type code}))]))
+
 ;; ---- fact parsing + the scope-correct call graph: RENTED from callgraph.clj ----
 ;; parse-corpus! / derive-block / build-graph live there ONCE (the shared Layer-2
 ;; engine); this harness and beagle's CLI both rent it. build-graph returns
@@ -169,11 +182,12 @@
                              (t/triple (node-term (nth e 0)) edge-pred (node-term (nth e 1)))))
                      edges)
         _load (when (pos? (count operations))
-                (c/commit-boundary!
-                 ctx operations
-                 (c/commit-metadata "store.codegraph/closure-v1"
-                                    "store/CommitOperationV1"
-                                    "codegraph-v1")))
+                (require-commit!
+                 (c/commit-boundary!
+                  ctx (c/next-sequence ctx) operations
+                  (c/commit-metadata "store.codegraph/closure-v1"
+                                     "store/CommitOperationV1"
+                                     "codegraph-v1"))))
         t0 (System/currentTimeMillis)
         db (d/run-rules! (c/live-propositions ctx)
              [(d/rule "reaches"

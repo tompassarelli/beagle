@@ -20,6 +20,19 @@
 
 (def space-id String "codegraph")
 
+;; This command owns one Store writer and has a fail-fast CLI contract. Store
+;; still returns typed OCC data before this command translates failure.
+(defn require-commit! [result c/CommitResult] t/Triple
+  (match result
+    [(c/CommitSuccess coordinate) coordinate]
+    [(c/CommitStale expected observed)
+     (throw (ex-info "store advanced under the codegraph command"
+                     {:type :transaction-sequence-drift
+                      :expected expected
+                      :observed observed}))]
+    [(c/CommitRejected code detail)
+     (throw (ex-info detail {:type code}))]))
+
 ;; The fact stream's own ids are the store's node terms: the kernel accepts any
 ;; Atom, so a line becomes a proposition with nothing minted or remapped.
 (defn line->operation [(line String)] Any
@@ -84,24 +97,26 @@
                                 (filterv (fn [(line String)] Bool (str/starts-with? line "["))
                                   lines))
         (_load Any) (when (pos? (count operations))
-                      (c/commit-boundary!
-                       ctx operations
-                       (c/commit-metadata "store.codegraph/supersession-load-v1"
-                                          "store/CommitOperationV1"
-                                          "codegraph-v1")))
+                      (require-commit!
+                       (c/commit-boundary!
+                        ctx (c/next-sequence ctx) operations
+                        (c/commit-metadata "store.codegraph/supersession-load-v1"
+                                           "store/CommitOperationV1"
+                                           "codegraph-v1"))))
         (old-proposition Any) (first-sym-value-proposition ctx "red")
         (node Any) (t/triple-t1 old-proposition)
         (new-proposition Any) (t/triple node "v" "crimson")
         (occurrences-before (Vec Any)) (c/occurrences ctx)
         (old-occurrence Any)
         (assertion-occurrence-of occurrences-before old-proposition)
-        (_edit Any) (c/commit-boundary!
-                     ctx
-                     [(c/retract-operation old-proposition)
-                      (c/assert-operation new-proposition)]
-                     (c/commit-metadata "store.codegraph/supersession-v1"
-                                        "store/CommitOperationV1"
-                                        "codegraph-v1"))
+        (_edit Any) (require-commit!
+                     (c/commit-boundary!
+                      ctx (c/next-sequence ctx)
+                      [(c/retract-operation old-proposition)
+                       (c/assert-operation new-proposition)]
+                      (c/commit-metadata "store.codegraph/supersession-v1"
+                                         "store/CommitOperationV1"
+                                         "codegraph-v1")))
         (occurrences (Vec Any)) (c/occurrences ctx)
         (new-occurrence Any) (assertion-occurrence-of occurrences new-proposition)
         (withdrawal Any) (withdrawal-of ctx old-occurrence)]

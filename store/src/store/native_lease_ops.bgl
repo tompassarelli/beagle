@@ -122,6 +122,29 @@
    (native-wire/response-encode-error-code encode-error) false
    "lease response exceeds Store RPC v2 encode limits"))
 
+(defn commit-response!
+  [session schema/Session
+   request t/RpcRequest
+   candidate t/RpcResponse
+   result store/CommitResult] t/RpcResponse
+  (match result
+    [(store/CommitSuccess _)
+     (do
+       (schema/refresh! session)
+       candidate)]
+    [(store/CommitStale expected observed)
+     (error-response
+      request
+      (store/current-sequence (schema/store-of session))
+      :rpc/conflict true
+      (str "expected transaction sequence " expected
+           " but observed " observed))]
+    [(store/CommitRejected code detail)
+     (error-response
+      request
+      (store/current-sequence (schema/store-of session))
+      code false detail)]))
+
 (defn expected-version-matches?
   [served-version Int
    expected-version Int?] Bool
@@ -251,38 +274,34 @@
    prior LeaseState?
    resource Any
    holder Any
-   expires-ms Int] Int
+   expires-ms Int
+   expected-sequence Int] store/CommitResult
   (let [root (Atom t/TermStore) (schema/store-of session)
         proposition t/Triple (lease-proposition resource holder expires-ms)
         operations (Vec t/CommitOperation) (if (nil? prior)
           [(store/assert-operation proposition)]
           [(store/retract-operation (leasestate-proposition prior))
            (store/assert-operation proposition)])]
-    (do
-      (store/commit-boundary!
-       root
-       operations
-       (store/commit-metadata "store.lease/v1"
-                              "store/CommitOperationV1"
-                              "lease-v1"))
-      (schema/refresh! session)
-      (store/current-sequence root))))
+    (store/commit-boundary!
+     root
+     expected-sequence
+     operations
+     (store/commit-metadata "store.lease/v1"
+                            "store/CommitOperationV1"
+                            "lease-v1"))))
 
 (defn retract-lease!
   [session schema/Session
-   lease LeaseState?] Int
+   lease LeaseState
+   expected-sequence Int] store/CommitResult
   (let [root (schema/store-of session)]
-    (if (nil? lease)
-      (store/current-sequence root)
-      (do
-        (store/commit-boundary!
-         root
-         [(store/retract-operation (leasestate-proposition lease))]
-         (store/commit-metadata "store.lease/v1"
-                                "store/CommitOperationV1"
-                                "lease-v1"))
-        (schema/refresh! session)
-        (store/current-sequence root)))))
+    (store/commit-boundary!
+     root
+     expected-sequence
+     [(store/retract-operation (leasestate-proposition lease))]
+     (store/commit-metadata "store.lease/v1"
+                            "store/CommitOperationV1"
+                            "lease-v1"))))
 
 (defn matching-expiry
   [lease LeaseState?
@@ -324,9 +343,10 @@
                     encode-error String? (response-encode-error! candidate)]
                 (if encode-error
                   (response-preflight-error request served-version encode-error)
-                  (do
-                    (replace-lease! session prior resource holder expires-ms)
-                    candidate))))))))))
+                  (commit-response!
+                   session request candidate
+                   (replace-lease!
+                    session prior resource holder expires-ms epoch)))))))))))
 
 (defn renew-response!
   [session schema/Session
@@ -367,13 +387,13 @@
                     encode-error String? (response-encode-error! candidate)]
                 (if encode-error
                   (response-preflight-error request served-version encode-error)
-                  (do
-                    (replace-lease!
-                     session prior
-                     (fenceresult-resource fence)
-                     (fenceresult-holder fence)
-                     expires-ms)
-                    candidate))))))))))
+                  (commit-response!
+                   session request candidate
+                   (replace-lease!
+                    session prior
+                    (fenceresult-resource fence)
+                    (fenceresult-holder fence)
+                    expires-ms epoch)))))))))))
 
 (defn release-response!
   [session schema/Session
@@ -385,17 +405,18 @@
                       (or (fenceresult-message fence)
                           "lease release fence is malformed"))
       (let [prior LeaseState? (current-lease session (fenceresult-resource fence))]
-        (if (not (matching-fence? prior fence))
+        (if (or (nil? prior) (not (matching-fence? prior fence)))
           (response request served-version (released-record false))
-          (let [root (Atom t/TermStore) (schema/store-of session)
+          (let [present LeaseState prior
+                root (Atom t/TermStore) (schema/store-of session)
                 predicted-version Int (store/next-sequence root)
                 candidate t/RpcResponse (response request predicted-version (released-record true))
                 encode-error String? (response-encode-error! candidate)]
             (if encode-error
               (response-preflight-error request served-version encode-error)
-              (do
-                (retract-lease! session prior)
-                candidate))))))))
+              (commit-response!
+               session request candidate
+               (retract-lease! session present predicted-version)))))))))
 
 (defn check-response
   [session schema/Session

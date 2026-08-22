@@ -685,15 +685,30 @@
            (native-wire/response-encode-error-code encode-error) false
            "mutation response exceeds Store RPC v2 encode limits")
           (if changed
-            (do
+            (match
               (store/commit-boundary!
                root
+               predicted-version
                operations
                (store/commit-metadata "store.rpc/v2"
                                       "store/CommitOperationV1"
                                       "store-rpc-v2"))
-              (schema/refresh! session)
-              candidate)
+              [(store/CommitSuccess _)
+               (do
+                 (schema/refresh! session)
+                 candidate)]
+              [(store/CommitStale expected observed)
+               (error-response
+                request
+                (store/current-sequence root)
+                :rpc/conflict true
+                (str "expected transaction sequence " expected
+                     " but observed " observed))]
+              [(store/CommitRejected code detail)
+               (error-response
+                request
+                (store/current-sequence root)
+                code false detail)])
             candidate))))))
 
 (defn execute-actions!

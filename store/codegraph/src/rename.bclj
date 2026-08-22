@@ -25,6 +25,19 @@
 
 (def space-id String "codegraph")
 
+;; This command owns one Store writer and has a fail-fast CLI contract. Store
+;; still returns typed OCC data before this command translates failure.
+(defn require-commit! [result c/CommitResult] t/Triple
+  (match result
+    [(c/CommitSuccess coordinate) coordinate]
+    [(c/CommitStale expected observed)
+     (throw (ex-info "store advanced under the codegraph command"
+                     {:type :transaction-sequence-drift
+                      :expected expected
+                      :observed observed}))]
+    [(c/CommitRejected code detail)
+     (throw (ex-info detail {:type code}))]))
+
 (def value-pred String "v")
 
 (def kind-pred String "kind")
@@ -77,12 +90,13 @@
     (swap! file->nodes assoc src (vec (get loaded :nodes)))
     (reset! next-offset (inc (int (get loaded :top))))
     (when (pos? (count (vec (get loaded :operations))))
-      (c/commit-boundary!
-       ctx
-       (vec (get loaded :operations))
-       (c/commit-metadata "store.codegraph/rename-load-v1"
-                          "store/CommitOperationV1"
-                          "codegraph-v1")))
+      (require-commit!
+       (c/commit-boundary!
+        ctx (c/next-sequence ctx)
+        (vec (get loaded :operations))
+        (c/commit-metadata "store.codegraph/rename-load-v1"
+                           "store/CommitOperationV1"
+                           "codegraph-v1"))))
     src))
 
 ;; A snapshot of the live view, keyed by subject; every read below goes through
@@ -210,11 +224,12 @@
                                           (symbol-leaf? index node))))
                              targets))
           _edit (when (pos? (count operations))
-                  (c/commit-boundary!
-                   ctx operations
-                   (c/commit-metadata "store.codegraph/rename-v1"
-                                      "store/CommitOperationV1"
-                                      "codegraph-v1")))
+                  (require-commit!
+                   (c/commit-boundary!
+                    ctx (c/next-sequence ctx) operations
+                    (c/commit-metadata "store.codegraph/rename-v1"
+                                       "store/CommitOperationV1"
+                                       "codegraph-v1"))))
           projected (live-index ctx)
           outs (mapv (fn [(s String)] String (out-path s)) srcs)]
       (doseq [i (range (count srcs))]

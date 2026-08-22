@@ -35,7 +35,8 @@
 ;; ============================================================================
 (ns resolve-read
   (:require [store.types :as t] [resolve-ident :as ri] [resolve-core :as rc]
-            [store.rotation :as rot] [store.txn :as txn]))
+            [store.rotation :as rot] [store.store :as store]
+            [store.txn :as txn]))
 
 
 (def SEG-RE Any (re-pattern "seg\\d+"))
@@ -344,14 +345,25 @@
     (do (resync! context) occurrence)))
 
 ;; Commit reopens the builder in place against the advanced sequence, so the
-;; context stays the caller's single durable handle across transactions.
+;; context stays the caller's single durable handle across transactions. This
+;; authoring command promises a transaction coordinate and is intentionally
+;; fail-fast; Store's expected drift remains typed until this API translates
+;; it, after the boundary has appended nothing.
 (defn commit! [context ri/Graph] t/Triple
   (let [store (Atom t/TermStore) (ri/store-of context)
-        cell (Atom txn/Builder) (builder context)
-        coordinate t/Triple (txn/commit! store cell)]
-    (do (reset! cell (deref (txn/open store)))
-        (resync! context)
-        coordinate)))
+        cell (Atom txn/Builder) (builder context)]
+    (match (txn/commit! store cell)
+      [(store/CommitSuccess coordinate)
+       (do (reset! cell (deref (txn/open store)))
+           (resync! context)
+           coordinate)]
+      [(store/CommitStale expected observed)
+       (throw (ex-info "store: the store advanced under this authoring context"
+                       {:type :transaction-sequence-drift
+                        :expected expected
+                        :observed observed}))]
+      [(store/CommitRejected code detail)
+       (throw (ex-info detail {:type code}))])))
 
 (defn events-by-subject
   [context ri/Graph

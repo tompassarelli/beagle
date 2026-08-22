@@ -28,26 +28,38 @@
       metadata (store/commit-metadata "test.boundary/v1"
                                      "store/CommitOperationV1"
                                      nil)
-      before (store/operation-count ctx)
-      coordinate (store/commit-boundary!
-                  ctx
-                  [(store/assert-operation proposition)]
-                  metadata)]
-  (check! "public writes land through the boundary"
-          (and (= 1 (store/operation-count ctx))
-               (= 1 (store/transaction-count ctx))
-               (t/transaction-coordinate? coordinate)))
-  (check! "a rejected metadata envelope writes nothing"
-          (= :canonical-commit-rejected
-             (try
-               (store/commit-boundary!
-                ctx
-                [(store/assert-operation (t/triple "s2" "p" "v2"))]
-                (assoc metadata :producer ""))
-               nil
-               (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))
-  (check! "rejection leaves the operation count unchanged"
-          (= (inc before) (store/operation-count ctx))))
+      expected (store/next-sequence ctx)
+      success (store/commit-boundary!
+               ctx expected
+               [(store/assert-operation proposition)]
+               metadata)
+      after-success (store/dump-term-store ctx)
+      stale (store/commit-boundary!
+             ctx expected
+             [(store/assert-operation (t/triple "stale" "p" "v"))]
+             metadata)
+      after-stale (store/dump-term-store ctx)
+      invalid (store/commit-boundary!
+               ctx (store/next-sequence ctx)
+               [(store/assert-operation (t/triple "invalid" "p" "v"))]
+               (assoc metadata :producer ""))
+      after-invalid (store/dump-term-store ctx)]
+  (check! "matching expected sequence appends exactly once"
+          (and (instance? store.store.CommitSuccess success)
+               (= (t/transaction-coordinate "commit-chokepoint" expected)
+                  (store/commitsuccess-coordinate success))
+               (= 1 (store/operation-count ctx))
+               (= 1 (store/transaction-count ctx))))
+  (check! "stale expected sequence returns observed drift and appends nothing"
+          (and (instance? store.store.CommitStale stale)
+               (= expected (store/commitstale-expected-sequence stale))
+               (= (inc expected) (store/commitstale-observed-sequence stale))
+               (= after-success after-stale)))
+  (check! "invalid metadata returns rejection and appends nothing"
+          (and (instance? store.store.CommitRejected invalid)
+               (= :canonical-commit-rejected
+                  (store/commitrejected-code invalid))
+               (= after-stale after-invalid))))
 
 (let [ctx (store/new-term-store "commit-seam")
       seen (atom [])
@@ -55,14 +67,15 @@
       builder (txn/open ctx)]
   (txn/assert! builder (t/triple "seam" "p" "v"))
   (with-redefs [store/commit-boundary!
-                (fn [root operations metadata]
-                  (swap! seen conj metadata)
-                  (original root operations metadata))]
+                (fn [root expected operations metadata]
+                  (swap! seen conj [expected metadata])
+                  (original root expected operations metadata))]
     (txn/commit! ctx builder))
-  (let [metadata (first @seen)
+  (let [[expected metadata] (first @seen)
         attestation (t/commitmetadata-validation-attestation metadata)]
     (check! "transaction builder cannot bypass the boundary"
             (and (= 1 (count @seen))
+                 (= 1 expected)
                  (t/commit-metadata? metadata)
                  (= "store.txn/v1" (t/commitmetadata-producer metadata))
                  (= :pending (t/commitvalidationattestation-result attestation))))))

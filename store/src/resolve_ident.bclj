@@ -203,12 +203,23 @@
   (let [p Any (proposition-at g occurrence)]
     (if (nil? p) nil (txn/retract! b p))))
 
+;; Graph mutation verbs are fail-fast commands returning Graph. They preserve
+;; that contract by translating the Store result here, after a no-append OCC
+;; outcome has already been represented as typed data.
 (defn commit!
   [g Graph
    b (Atom txn/Builder)] Graph
-  (do
-    (when (pos? (txn/operation-count b)) (txn/commit! (graph-store g) b))
-    (refresh! g)))
+  (if (not (pos? (txn/operation-count b)))
+    (refresh! g)
+    (match (txn/commit! (graph-store g) b)
+      [(c/CommitSuccess _) (refresh! g)]
+      [(c/CommitStale expected observed)
+       (throw (ex-info "store: the store advanced under this graph mutation"
+                       {:type :transaction-sequence-drift
+                        :expected expected
+                        :observed observed}))]
+      [(c/CommitRejected code detail)
+       (throw (ex-info detail {:type code}))])))
 
 (defn assert!
   [g Graph
