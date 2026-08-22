@@ -1,0 +1,33 @@
+#lang beagle
+(ns native.distinct)
+
+(defn distinct-values [values (Vec Any)] (Vec Any)
+  (distinct values))
+
+(defn empty-case [] Bool
+  (let [values (Vec Any) []]
+    (= (count (distinct-values values)) 0)))
+
+(defn already-distinct-case [] Bool
+  (let [values (Vec Any) ["alpha" 7 true]]
+    (= (distinct-values values) values)))
+
+(defn duplicate-removal-case [] Bool
+  (let [values (Vec Any) ["alpha" "alpha" 7 7 true true]]
+    (= (count (distinct-values values)) 3)))
+
+(defn first-occurrence-order-case [] Bool
+  (let [values (Vec Any) ["second" "first" "second" "third" "first"]
+        result (Vec Any) (distinct-values values)]
+    (and (= (count result) 3)
+         (= (nth result 0) "second")
+         (= (nth result 1) "first")
+         (= (nth result 2) "third"))))
+
+(defn main [] Int
+  (if (and (empty-case)
+           (already-distinct-case)
+           (duplicate-removal-case)
+           (first-occurrence-order-case))
+    0
+    1))

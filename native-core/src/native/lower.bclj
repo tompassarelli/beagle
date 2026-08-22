@@ -11327,6 +11327,139 @@
                 (exprresultv0-value-id equal) false-id))
             result-id (bool-type-id) false))))))
 
+(defn lower-vector-distinct
+  [types (Vec core/TypeDef)
+   owner core/NativeId
+   state BodyStateV0
+   values (Vec core/NativeId)
+   value-types (Vec core/NativeId)] ExprResultV0
+  (if (not (and (= 1 (count values))
+             (vector-type? types (nth value-types 0))))
+    (fail-result state
+      "TODO-NATIVE-DISTINCT-OPERAND: distinct takes one closed native vector")
+    (let [source-id core/NativeId (nth values 0)
+          vector-type core/NativeId (nth value-types 0)
+          element-type core/NativeId (vector-element-of types vector-type)
+          length-id core/NativeId (state-id state owner "distinct-length")
+          with-length BodyStateV0 (state-emit (state-bump state)
+            (core/->VecLengthInstruction
+              (core/->SsaValueV0 length-id (int-type-id)) source-id))
+          zero-id core/NativeId (state-id with-length owner "distinct-zero")
+          with-zero BodyStateV0 (state-emit (state-bump with-length)
+            (core/->AtomInstruction
+              (core/->SsaValueV0 zero-id (int-type-id))
+              (core/->I64Atom 0)))
+          one-id core/NativeId (state-id with-zero owner "distinct-one")
+          with-one BodyStateV0 (state-emit (state-bump with-zero)
+            (core/->AtomInstruction
+              (core/->SsaValueV0 one-id (int-type-id))
+              (core/->I64Atom 1)))
+          empty-id core/NativeId (state-id with-one owner "distinct-empty")
+          prepared BodyStateV0 (state-emit (state-bump with-one)
+            (core/->VecEmptyInstruction
+              (core/->SsaValueV0 empty-id vector-type)
+              length-id (arena-value-id owner)))
+          outer-header-id core/NativeId (state-id prepared owner "distinct-header")
+          outer-body-id core/NativeId (state-id prepared owner "distinct-body")
+          outer-exit-id core/NativeId (state-id prepared owner "distinct-exit")
+          inner-header-id core/NativeId (state-id prepared owner "distinct-scan-header")
+          inner-body-id core/NativeId (state-id prepared owner "distinct-scan-body")
+          inner-advance-id core/NativeId (state-id prepared owner "distinct-scan-advance")
+          duplicate-id core/NativeId (state-id prepared owner "distinct-duplicate")
+          unique-id core/NativeId (state-id prepared owner "distinct-unique")
+          outer-advance-id core/NativeId (state-id prepared owner "distinct-advance")
+          outer-index core/NativeId (state-id prepared owner "distinct-index")
+          outer-output core/NativeId (state-id prepared owner "distinct-output")
+          inner-index core/NativeId (state-id prepared owner "distinct-scan-index")
+          advanced-output core/NativeId (state-id prepared owner "distinct-advanced-output")
+          entered BodyStateV0 (state-open-block
+            (state-close (state-bump prepared)
+              (core/->JumpTerminator outer-header-id [zero-id empty-id]))
+            outer-header-id
+            [(core/->Parameter outer-index (int-type-id))
+             (core/->Parameter outer-output vector-type)])
+          has-source-item core/NativeId (state-id entered owner "distinct-has-item")
+          outer-compared BodyStateV0 (state-emit (state-bump entered)
+            (core/->CompareInstruction
+              (core/->SsaValueV0 has-source-item (bool-type-id))
+              (core/->CompareLtI64V0 true) outer-index length-id))
+          outer-body BodyStateV0 (state-open-block
+            (state-close outer-compared
+              (core/->BranchTerminator has-source-item outer-body-id outer-exit-id))
+            outer-body-id [])
+          item-id core/NativeId (state-id outer-body owner "distinct-item")
+          with-item BodyStateV0 (state-emit (state-bump outer-body)
+            (core/->VecGetInstruction
+              (core/->SsaValueV0 item-id element-type)
+              source-id outer-index))
+          output-length-id core/NativeId (state-id with-item owner "distinct-output-length")
+          with-output-length BodyStateV0 (state-emit (state-bump with-item)
+            (core/->VecLengthInstruction
+              (core/->SsaValueV0 output-length-id (int-type-id))
+              outer-output))
+          inner-entered BodyStateV0 (state-open-block
+            (state-close (state-bump with-output-length)
+              (core/->JumpTerminator inner-header-id [zero-id]))
+            inner-header-id
+            [(core/->Parameter inner-index (int-type-id))])
+          has-output-item core/NativeId (state-id inner-entered owner "distinct-scan-has-item")
+          inner-compared BodyStateV0 (state-emit (state-bump inner-entered)
+            (core/->CompareInstruction
+              (core/->SsaValueV0 has-output-item (bool-type-id))
+              (core/->CompareLtI64V0 true) inner-index output-length-id))
+          inner-body BodyStateV0 (state-open-block
+            (state-close inner-compared
+              (core/->BranchTerminator has-output-item inner-body-id unique-id))
+            inner-body-id [])
+          candidate-id core/NativeId (state-id inner-body owner "distinct-candidate")
+          with-candidate BodyStateV0 (state-emit (state-bump inner-body)
+            (core/->VecGetInstruction
+              (core/->SsaValueV0 candidate-id element-type)
+              outer-output inner-index))
+          equal ExprResultV0 (lower-native-equality types owner with-candidate
+            candidate-id element-type item-id element-type)
+          equal-state BodyStateV0 (exprresultv0-state equal)]
+      (if (state-blocked? equal-state)
+        (dead-result equal-state)
+        (let [selected BodyStateV0 (state-close (state-bump equal-state)
+                (core/->BranchTerminator
+                  (exprresultv0-value-id equal)
+                  duplicate-id inner-advance-id))
+              inner-advance BodyStateV0 (state-open-block selected inner-advance-id [])
+              next-inner ExprResultV0 (lower-checked-arith inner-advance owner "+"
+                inner-index one-id)
+              inner-advanced BodyStateV0 (exprresultv0-state next-inner)]
+          (if (state-blocked? inner-advanced)
+            (dead-result inner-advanced)
+            (let [scanned BodyStateV0 (state-close inner-advanced
+                    (core/->JumpTerminator inner-header-id
+                      [(exprresultv0-value-id next-inner)]))
+                  duplicate BodyStateV0 (state-close
+                    (state-open-block scanned duplicate-id [])
+                    (core/->JumpTerminator outer-advance-id [outer-output]))
+                  unique-open BodyStateV0 (state-open-block duplicate unique-id [])
+                  pushed-id core/NativeId (state-id unique-open owner "distinct-push")
+                  pushed BodyStateV0 (state-emit (state-bump unique-open)
+                    (core/->VecPushInstruction
+                      (core/->SsaValueV0 pushed-id vector-type)
+                      outer-output item-id (arena-value-id owner)))
+                  unique BodyStateV0 (state-close pushed
+                    (core/->JumpTerminator outer-advance-id [pushed-id]))
+                  outer-advance BodyStateV0 (state-open-block unique outer-advance-id
+                    [(core/->Parameter advanced-output vector-type)])
+                  next-outer ExprResultV0 (lower-checked-arith outer-advance owner "+"
+                    outer-index one-id)
+                  outer-advanced BodyStateV0 (exprresultv0-state next-outer)]
+              (if (state-blocked? outer-advanced)
+                (dead-result outer-advanced)
+                (->ExprResultV0
+                  (state-open-block
+                    (state-close outer-advanced
+                      (core/->JumpTerminator outer-header-id
+                        [(exprresultv0-value-id next-outer) advanced-output]))
+                    outer-exit-id [])
+                  outer-output vector-type false)))))))))
+
 (defn lower-native-count
   [types (Vec core/TypeDef)
    owner core/NativeId
@@ -18675,6 +18808,9 @@
 
                 (= "sort" callee)
                 (lower-vector-sort types owner current values value-types)
+
+                (= "distinct" callee)
+                (lower-vector-distinct types owner current values value-types)
 
                 (and (= "into" callee) (= 2 (count values))
                   (same-id? (nth value-types 0) (nth value-types 1))
