@@ -1,0 +1,195 @@
+#lang beagle
+
+(ns store.revision-identity
+  (:require [beagle.semantic-identity :as identity]
+            [store.log-codec :as log]
+            [store.types :as t]))
+
+
+(defrecord BranchSpaceId [value String])
+
+(defrecord CommittedHistoryDigest [digest identity/Digest256])
+
+(defrecord BranchRevisionId [digest identity/Digest256])
+
+(defrecord BranchRevisionIdCandidate [digest identity/Digest256])
+
+(defrecord BranchRevision
+  [identity BranchRevisionId
+   space-id BranchSpaceId
+   committed-history CommittedHistoryDigest
+   head-sequence Int])
+
+(defunion CommittedHistoryResult
+  (CommittedHistoryHashed
+    [digest CommittedHistoryDigest
+     head-sequence Int])
+  (CommittedHistoryRejected
+    [code Keyword
+     detail String]))
+
+(defunion BranchRevisionResult
+  (BranchRevisionAccepted [revision BranchRevision])
+  (BranchRevisionRejected
+    [code Keyword
+     detail String]))
+
+(defunion BranchRevisionIdCandidateResult
+  (BranchRevisionIdCandidateValue [candidate BranchRevisionIdCandidate])
+  (BranchRevisionIdCandidateRejected
+    [code Keyword
+     detail String]))
+
+(defn- history-rejected
+  [code Keyword
+   detail String] CommittedHistoryResult
+  (->CommittedHistoryRejected code detail))
+
+(defn- revision-rejected
+  [code Keyword
+   detail String] BranchRevisionResult
+  (->BranchRevisionRejected code detail))
+
+;; A committed-history digest covers only the exact canonical transaction
+;; record bytes, in transaction order. Physical headers and segment boundaries
+;; are acquisition evidence and never enter this logical history identity.
+(defn committed-history-digest!
+  [records (Vec t/TransactionRecord)] CommittedHistoryResult
+  (loop [position Int 0
+         expected-sequence Int 1
+         canonical-bytes (Vec Int) []]
+    (if (>= position (count records))
+      (match (identity/digest-from-hex (sha256-bytes canonical-bytes))
+        [(identity/DigestError problem)
+         (history-rejected
+          :branch-revision/history-digest-failed
+          (identity/identityproblem-message problem))]
+        [(identity/DigestValue digest)
+         (->CommittedHistoryHashed
+          (->CommittedHistoryDigest digest)
+          (- expected-sequence 1))])
+      (let [record t/TransactionRecord (nth records position)
+            sequence Int (t/transactionrecord-sequence record)]
+        (if (not= sequence expected-sequence)
+          (history-rejected
+           :branch-revision/noncontiguous-history
+           "BranchRevision requires every committed transaction from sequence one through its exact head")
+          (let [encoded log/BytesResult (log/append-record-bytes! record)]
+            (if (not= log/status-ok (log/bytesresult-status encoded))
+              (history-rejected
+               :branch-revision/noncanonical-record
+               (or (log/bytesresult-error encoded)
+                   "BranchRevision could not encode a canonical committed transaction record"))
+              (recur (+ position 1)
+                     (+ expected-sequence 1)
+                     (into canonical-bytes
+                           (log/bytesresult-bytes encoded))))))))))
+
+(defn- branch-revision-from-digest
+  [space-id String
+   committed-history CommittedHistoryDigest
+   head-sequence Int] BranchRevisionResult
+  (if (= "" space-id)
+    (revision-rejected
+     :branch-revision/space-unbound
+     "BranchRevision requires a nonempty SpaceId")
+    (match
+      (identity/merkleresult-outcome
+       (identity/hash-merkle-node
+        (identity/branch-revision-domain)
+        [(identity/->Utf8Field 1 space-id)
+         (identity/->DigestField
+          2 (committedhistorydigest-digest committed-history))
+         (identity/->NaturalField 3 head-sequence)]))
+      [(identity/MerkleRejected problem)
+       (revision-rejected
+        :branch-revision/identity-failed
+        (identity/identityproblem-message problem))]
+      [(identity/MerkleHashed digest canonical-bytes)
+       (->BranchRevisionAccepted
+        (->BranchRevision
+         (->BranchRevisionId digest)
+         (->BranchSpaceId space-id)
+         committed-history
+         head-sequence))])))
+
+(defn mint-branch-revision!
+  [space-id String
+   records (Vec t/TransactionRecord)] BranchRevisionResult
+  (if (= "" space-id)
+    (revision-rejected
+     :branch-revision/space-unbound
+     "BranchRevision requires a nonempty SpaceId")
+    (match (committed-history-digest! records)
+      [(CommittedHistoryRejected code detail)
+       (revision-rejected code detail)]
+      [(CommittedHistoryHashed digest head-sequence)
+       (branch-revision-from-digest space-id digest head-sequence)])))
+
+(defn branch-revision=
+  [left BranchRevision
+   right BranchRevision] Bool
+  (and
+   (identity/digest=
+    (branchrevisionid-digest (branchrevision-identity left))
+    (branchrevisionid-digest (branchrevision-identity right)))
+   (and
+    (= (branchspaceid-value (branchrevision-space-id left))
+       (branchspaceid-value (branchrevision-space-id right)))
+    (and
+     (identity/digest=
+      (committedhistorydigest-digest
+       (branchrevision-committed-history left))
+      (committedhistorydigest-digest
+       (branchrevision-committed-history right)))
+     (= (branchrevision-head-sequence left)
+        (branchrevision-head-sequence right))))))
+
+(defn branch-revision-id-candidate [identity BranchRevisionId] BranchRevisionIdCandidate
+  (->BranchRevisionIdCandidate (branchrevisionid-digest identity)))
+
+(defn decode-branch-revision-id-scalar [value String] BranchRevisionIdCandidateResult
+  (match (identity/decode-digest-scalar value)
+    [(identity/DigestError problem)
+     (->BranchRevisionIdCandidateRejected
+      :branch-revision/noncanonical-id
+      (identity/identityproblem-message problem))]
+    [(identity/DigestValue digest)
+     (->BranchRevisionIdCandidateValue
+      (->BranchRevisionIdCandidate digest))]))
+
+(defn project-branch-revision-id-scalar [value BranchRevisionId] identity/EncodingResult
+  (identity/project-digest-scalar (branchrevisionid-digest value)))
+
+(defn verify-branch-revision-id!
+  [expected BranchRevisionIdCandidate
+   space-id String
+   records (Vec t/TransactionRecord)] BranchRevisionResult
+  (match (mint-branch-revision! space-id records)
+    [(BranchRevisionRejected code detail)
+     (revision-rejected code detail)]
+    [(BranchRevisionAccepted recomputed)
+     (if (identity/digest=
+          (branchrevisionidcandidate-digest expected)
+          (branchrevisionid-digest
+           (branchrevision-identity recomputed)))
+       (->BranchRevisionAccepted recomputed)
+       (revision-rejected
+        :branch-revision/mismatch
+        "Selected BranchRevisionId does not name the exact ordered committed history"))]))
+
+;; Public wrapper constructors convey no authority. Verification returns the
+;; locally recomputed value, never the caller's constructible record.
+(defn verify-branch-revision!
+  [expected BranchRevision
+   space-id String
+   records (Vec t/TransactionRecord)] BranchRevisionResult
+  (match (mint-branch-revision! space-id records)
+    [(BranchRevisionRejected code detail)
+     (revision-rejected code detail)]
+    [(BranchRevisionAccepted recomputed)
+     (if (branch-revision= expected recomputed)
+       (->BranchRevisionAccepted recomputed)
+       (revision-rejected
+        :branch-revision/mismatch
+        "Expected BranchRevision does not name the exact ordered committed history"))]))
