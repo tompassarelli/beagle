@@ -57,11 +57,6 @@ protocol. Desired state and deployment plans may be derived purely; desired
 state cannot satisfy observed state, and a receipt does not replace a later
 observation.
 
-The current Store admission carrier serializes desired state, attempts, and
-receipts beside origins in `EpistemicProvenance`. That carrier representation
-does not make knowledge origin and action stage one conceptual taxonomy; the
-protocol split above is the architectural boundary.
-
 Pure artifacts are reproducible projections of sealed ModelRevisions under
 checked goals, plans, targets, and capability envelopes. External reality
 participates in the same typed fact system through
@@ -141,9 +136,6 @@ position — not a desugared intermediate.
 - `beagle-lib/private/targets.rkt` — the canonical source-profile and
   materializer registry; every inventory in this repo is a rendered view of it
   (`bin/beagle langs`).
-- `store/src/store/epistemic_fact.bgl` — the current typed revision and
-  provenance-admission records being migrated to the ModelRevision boundary;
-  Store remains the carrier, not the authority that executes external actions.
 - `native-core/src/native/{unit_reuse,unit_compile}.bclj` — the reusable-result
   receipt/key inputs and the exact semantic, dependency, profile, and
   compiler-rule checks applied before reuse.

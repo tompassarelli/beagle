@@ -5,7 +5,6 @@ src/store/rpc_limits.bgl
 src/store/store.bgl
 src/store/rotation.bgl
 src/store/txn.bgl
-src/store/epistemic_fact.bgl
 src/store/schema.bgl
 src/store/kernel.bgl
 src/store/text_index.bgl
