@@ -6,6 +6,8 @@
 
 (defrecord ByteContentId [digest Digest256])
 
+(defrecord ByteContentIdCandidate [digest Digest256])
+
 (defrecord IdentityProblem
   [code Keyword
    message String
@@ -82,6 +84,10 @@
   (ByteContentIdValue [identity ByteContentId])
   (ByteContentIdError [problem IdentityProblem]))
 
+(defunion ByteContentIdCandidateResult
+  (ByteContentIdCandidateValue [candidate ByteContentIdCandidate])
+  (ByteContentIdCandidateError [problem IdentityProblem]))
+
 (defunion MerkleOutcome
   (MerkleHashed
     [digest Digest256
@@ -112,26 +118,27 @@
     [(TermNodeDomain) 12]
     [(EqualityGoalDomain) 13]
     [(RelationGoalDomain) 14]
-    [(TheoryContentDomain) 15]
-    [(OperationalCatalogDomain) 16]
-    [(CheckedTheoryAuditDomain) 17]
-    [(GoalContentDomain) 18]
-    [(CheckedRequestDomain) 19]
-    [(EvaluationStepDomain) 20]
-    [(OrientedPlanDomain) 21]
-    [(RuntimeTermDomain) 22]
-    [(AnswerContentDomain) 23]
-    [(ProofContentDomain) 24]
-    [(ProofOccurrenceDomain) 25]
-    [(DeterminismCertificationDomain) 26]
-    [(EpistemicFactDomain) 27]
-    [(ModelSealDomain) 28]
-    [(StoreOccurrenceDomain) 29]
-    [(ProjectionEvidenceDomain) 30]
-    [(ProjectionReadReceiptDomain) 31]
-    [(ProjectionWriteReceiptDomain) 32]
-    [(BranchRevisionDomain) 33]
-    [(AnswerBindingDomain) 34]))
+    ;; Codec-v1 tag 15 is unavailable. Domain tags never change meaning.
+    [(TheoryContentDomain) 16]
+    [(OperationalCatalogDomain) 17]
+    [(CheckedTheoryAuditDomain) 18]
+    [(GoalContentDomain) 19]
+    [(CheckedRequestDomain) 20]
+    [(EvaluationStepDomain) 21]
+    [(OrientedPlanDomain) 22]
+    [(RuntimeTermDomain) 23]
+    [(AnswerContentDomain) 24]
+    [(ProofContentDomain) 25]
+    [(ProofOccurrenceDomain) 26]
+    [(DeterminismCertificationDomain) 27]
+    [(EpistemicFactDomain) 28]
+    [(ModelSealDomain) 29]
+    [(StoreOccurrenceDomain) 30]
+    [(ProjectionEvidenceDomain) 31]
+    [(ProjectionReadReceiptDomain) 32]
+    [(ProjectionWriteReceiptDomain) 33]
+    [(BranchRevisionDomain) 34]
+    [(AnswerBindingDomain) 35]))
 
 (defn byte-content-domain [] IdentityDomain (->ByteContentDomain))
 (defn content-reference-domain [] IdentityDomain (->ContentReferenceDomain))
@@ -559,11 +566,13 @@
 (defn byte-content-id-well-formed? [identity ByteContentId] Bool
   (digest-well-formed? (bytecontentid-digest identity)))
 
-(defn decode-byte-content-id-scalar [value String] ByteContentIdResult
+(defn decode-byte-content-id-scalar
+  [value String] ByteContentIdCandidateResult
   (match (decode-digest-scalar value)
-    [(DigestError problem) (->ByteContentIdError problem)]
+    [(DigestError problem) (->ByteContentIdCandidateError problem)]
     [(DigestValue digest)
-     (->ByteContentIdValue (->ByteContentId digest))]))
+     (->ByteContentIdCandidateValue
+       (->ByteContentIdCandidate digest))]))
 
 (defn project-byte-content-id-scalar
   [identity ByteContentId] EncodingResult

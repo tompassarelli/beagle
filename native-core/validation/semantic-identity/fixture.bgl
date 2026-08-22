@@ -70,6 +70,14 @@
     [(identity/ByteContentIdError problem)
      (= code (identity/identityproblem-code problem))]))
 
+(defn byte-content-candidate-rejected-as?
+  [result identity/ByteContentIdCandidateResult
+   code Keyword] Bool
+  (match result
+    [(identity/ByteContentIdCandidateValue candidate) false]
+    [(identity/ByteContentIdCandidateError problem)
+     (= code (identity/identityproblem-code problem))]))
+
 (defn encoding-rejected-as?
   [result identity/EncodingResult
    code Keyword] Bool
@@ -201,14 +209,18 @@
                 [(identity/EncodingAccepted bytes)
                  (match (identity/decode-byte-content-id-scalar
                           (utf8-decode bytes))
-                   [(identity/ByteContentIdError problem) false]
-                   [(identity/ByteContentIdValue decoded)
+                   [(identity/ByteContentIdCandidateError problem) false]
+                   [(identity/ByteContentIdCandidateValue decoded)
                     (identity/digest=
                       (identity/bytecontentid-digest first-id)
-                      (identity/bytecontentid-digest decoded))])]))])])
+                      (identity/bytecontentidcandidate-digest decoded))])]))])])
       (byte-content-rejected-as?
         (identity/byte-content-id [0 -1])
         :identity/invalid-octet)
+      (byte-content-candidate-rejected-as?
+        (identity/decode-byte-content-id-scalar
+          "sha256:111111111111111111111111111111111111111111111111111111111111111A")
+        :identity/noncanonical-digest-scalar)
       (not (identity/byte-content-id-well-formed?
              (identity/->ByteContentId
                (identity/->Digest256 (repeated-octets 0 31))))))))
