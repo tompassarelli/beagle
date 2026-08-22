@@ -2855,10 +2855,16 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
 
 (defn native-provenance-report
   [source-receipt frozen-source typing-result frozen-typed native-result native-frozen
-   epoch-result frozen-native compiler-commit configuration]
+   epoch-result frozen-native compiler-commit configuration abi]
   (let [source-digest (stages/frozensourcestagev1-digest frozen-source)
         typing-receipt (lower/typingacceptedv0-receipt typing-result)
         typed-digest (stages/frozentypedstagev0-digest frozen-typed)
+        prepared-native-slice
+        (lower/prepare-native-slice
+         (lower/typingacceptedv0-slice typing-result) abi)
+        native-input-digest
+        (lower/typed-compatibility-native-input-digest
+         frozen-typed prepared-native-slice)
         native-receipt (lower/nativeloweringcompletev0-receipt native-result)
         native-digest (stages/frozennativestagev0-digest native-frozen)
         epoch-receipt (epoch-result-receipt epoch-result)
@@ -2881,7 +2887,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                       (core/passreceiptv0-input-digest typing-receipt))
                    (= typed-digest
                       (core/passreceiptv0-output-digest typing-receipt))
-                   (= typed-digest
+                   (= native-input-digest
                       (core/passreceiptv0-input-digest native-receipt))
                    (= native-digest
                       (core/passreceiptv0-output-digest native-receipt))
@@ -2892,6 +2898,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
       (throw (ex-info "Native Core provenance receipt chain is broken"
                       {:source source-digest
                        :typed typed-digest
+                       :native-input native-input-digest
                        :native native-digest
                        :epoch epoch-digest})))
     (str "native-provenance-v0 source " source-digest "\n"
@@ -3880,15 +3887,21 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
     (lower/->TypingAcceptedV0 frozen slice receipt)))
 
 (defn dev-native-result
-  [assembly compiler-commit configuration]
-  (let [frozen (unit/unitassemblyv0-native assembly)
+  [assembly compiler-commit configuration abi]
+  (let [frozen-typed (unit/unitassemblyv0-typed assembly)
+        typed-slice (unit/unitassemblyv0-typed-slice assembly)
+        prepared-native-slice (lower/prepare-native-slice typed-slice abi)
+        native-input-digest
+        (lower/typed-compatibility-native-input-digest
+         frozen-typed prepared-native-slice)
+        frozen (unit/unitassemblyv0-native assembly)
         digest (stages/frozennativestagev0-digest frozen)
         stage (stages/frozennativestagev0-stage frozen)
         clean (lower/term-graph-clean?
                (stages/nativestagev0-terms stage))
         receipt
         (lower/make-receipt
-         (stages/nativestagev0-typed-digest stage)
+         native-input-digest
          compiler-commit
          "typed-to-native"
          configuration
@@ -3997,7 +4010,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                          assembly frozen-source compiler-commit configuration)
                         native-stage-result
                         (dev-native-result
-                         assembly compiler-commit configuration)
+                         assembly compiler-commit configuration abi)
                         epoch-result
                         (lower/epoch-derived-stage
                          (unit/unitassemblyv0-native assembly)
@@ -4259,7 +4272,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                               (native-provenance-report
                                source-receipt frozen-source typing-result frozen-typed
                                native-result native-frozen epoch-result frozen-native
-                               compiler-commit configuration))
+                               compiler-commit configuration abi))
                         _write-receipts
                         (write-native-receipts!
                          artifacts-dir source-receipt typing-receipt native-receipt
