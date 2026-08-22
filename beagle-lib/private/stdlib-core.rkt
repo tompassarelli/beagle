@@ -75,11 +75,11 @@
     (list (p 'Any) (p 'Any))
     #f
     (p 'Bool))
-   (q 'host.store 'compile)
+   (q 'host.store 'compile-clj-compatibility)
    (type-fn
-    (list (p 'beagle.compiler-driver/CompileStoreRequest))
+    (list (p 'beagle.compiler-driver/CljCompatibilityCompileStoreRequest))
     #f
-    (p 'beagle.compiler-driver/CompileStoreResponse))
+    (p 'beagle.compiler-driver/CljCompatibilityCompileStoreResponse))
    (q 'host.fs 'path-kind)
    (type-fn
     (list (p 'String))
@@ -168,11 +168,11 @@
     (list (p 'Int))
     #f
     (p 'host.fs/UnlockResult))
-   (q 'host.store 'compile)
+   (q 'host.store 'compile-clj-compatibility)
    (type-fn
-    (list (p 'beagle.compiler-driver/CompileStoreRequest))
+    (list (p 'beagle.compiler-driver/CljCompatibilityCompileStoreRequest))
     #f
-    (p 'beagle.compiler-driver/CompileStoreResponse))
+    (p 'beagle.compiler-driver/CljCompatibilityCompileStoreResponse))
    (q 'host.clock 'wall-nanoseconds)
    (type-fn '() #f (p 'Int))
    (q 'host.clock 'format-iso8601)

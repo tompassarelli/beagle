@@ -357,15 +357,15 @@
       (= symbol "native_host_clock_wall_nanoseconds_v0")
       (= symbol "native_host_time_sleep_milliseconds_v0")))
 
-(defn store-compile-request-type-id [] core/NativeId
+(defn clj-compatibility-store-compile-request-type-id [] core/NativeId
   (core/canonical-id "native-lower-v0/type"
-    ["beagle.compiler-driver/CompileStoreRequest"]))
+    ["beagle.compiler-driver/CljCompatibilityCompileStoreRequest"]))
 
-(defn store-compile-response-type-id [] core/NativeId
+(defn clj-compatibility-store-compile-response-type-id [] core/NativeId
   (core/canonical-id "native-lower-v0/type"
-    ["beagle.compiler-driver/CompileStoreResponse"]))
+    ["beagle.compiler-driver/CljCompatibilityCompileStoreResponse"]))
 
-(defn store-compile-abi
+(defn clj-compatibility-store-compile-abi
   [abis (Vec core/AbiDeclV0)] (U core/AbiDeclV0 Nil)
   (loop [position Int 0]
     (if (>= position (count abis))
@@ -383,14 +383,16 @@
                 (core/abideclv0-convention abi))
               (some? parameter)
               (= "request" (core/abivaluev0-name parameter))
-              (core/native-id= (store-compile-request-type-id)
+              (core/native-id=
+                (clj-compatibility-store-compile-request-type-id)
                 (core/abivaluev0-type-id parameter))
               (instance? native.core.BorrowedV0
                 (core/abivaluev0-ownership parameter))
               (nil? (core/abivaluev0-lifetime-region parameter))
               (some? result)
               (= "response" (core/abivaluev0-name result))
-              (core/native-id= (store-compile-response-type-id)
+              (core/native-id=
+                (clj-compatibility-store-compile-response-type-id)
                 (core/abivaluev0-type-id result))
               (let [ownership core/OwnershipRuleV0
                     (core/abivaluev0-ownership result)
@@ -946,7 +948,7 @@
    abis (Vec core/AbiDeclV0)
    module-index Int] String
   (if (and (not (value-descriptors-used? functions))
-        (nil? (store-compile-abi abis)))
+        (nil? (clj-compatibility-store-compile-abi abis)))
     ""
     (str
       (loop [position Int 0
@@ -3667,15 +3669,17 @@
             result))))))
 
 ;; The Store host is implemented in a separate C translation unit.  Its
-;; request and response types are program-local Native Core types, so expose
-;; stable aliases only after this module's concrete types have been emitted.
+;; request and response types belong only to the file-first Clojure
+;; compatibility compiler, so expose stable physical aliases only after this
+;; module's concrete types have been emitted.
 ;; This keeps the import fully prototyped without making the C host depend on
 ;; dependency-order type indexes.
 (defn emit-store-compile-import
   [types (Vec core/TypeDef)
    abis (Vec core/AbiDeclV0)
    module-index Int] String
-  (let [abi (U core/AbiDeclV0 Nil) (store-compile-abi abis)]
+  (let [abi (U core/AbiDeclV0 Nil)
+        (clj-compatibility-store-compile-abi abis)]
     (if (nil? abi)
       ""
       (let [parameters (Vec core/AbiValueV0) (core/abideclv0-parameters abi)
@@ -3696,7 +3700,7 @@
 
 (defn emit-store-compile-schema-declarations
   [abis (Vec core/AbiDeclV0)] String
-  (if (nil? (store-compile-abi abis))
+  (if (nil? (clj-compatibility-store-compile-abi abis))
     ""
     (str
       "typedef struct native_host_store_named_type_v0 {\n"
@@ -3806,7 +3810,7 @@
    layouts (Vec core/LayoutDef)
    abis (Vec core/AbiDeclV0)
    module-index Int] String
-  (if (nil? (store-compile-abi abis))
+  (if (nil? (clj-compatibility-store-compile-abi abis))
     ""
     (str
       (emit-store-compile-named-types types module-index)

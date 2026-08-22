@@ -1,6 +1,6 @@
 #lang beagle
 
-(ns native.program-compiler-admission-fixture
+(ns native.clj-compatibility-program-compiler-admission-fixture
   (:require [beagle.bootstrap-contract :as bootstrap]
             [beagle.compiler-driver :as driver]
             [beagle.fact-profile :as fact-profile]
@@ -96,17 +96,17 @@
     0
     propositions))
 
-(defn plan-valid? [plan driver/ProgramAdmissionPlan] Bool
+(defn plan-valid? [plan driver/CljCompatibilityProgramAdmissionPlan] Bool
   (let [propositions (Vec t/Triple)
-        (driver/programadmissionplan-propositions plan)
-        seed Any (driver/program-admission-seed-value plan)
-        closure String (driver/programadmissionplan-closure-digest plan)
-        context String (driver/programadmissionplan-compiler-context plan)]
-    (and (= "fixture.store" (driver/programadmissionplan-store-log plan))
-      (and (= "space-a" (driver/programadmissionplan-space-id plan))
+        (driver/cljcompatibilityprogramadmissionplan-propositions plan)
+        seed Any (driver/clj-compatibility-program-admission-seed-value plan)
+        closure String (driver/cljcompatibilityprogramadmissionplan-closure-digest plan)
+        context String (driver/cljcompatibilityprogramadmissionplan-compiler-context plan)]
+    (and (= "fixture.store" (driver/cljcompatibilityprogramadmissionplan-store-log plan))
+      (and (= "space-a" (driver/cljcompatibilityprogramadmissionplan-space-id plan))
         (and (= bootstrap/default-compiler-context-id context)
           (and (= (bootstrap/content-id "fixture-closure") closure)
-            (and (= :program (driver/programadmissionplan-profile plan))
+            (and (= :program (driver/cljcompatibilityprogramadmissionplan-profile plan))
               (and (every? t/triple? propositions)
                 (and
                   (proposition-present?
@@ -130,25 +130,25 @@
                                 propositions :member_of :member_of :relationships))
                             (and
                               (= seed
-                                (driver/initial-program-root-candidate
+                                (driver/initial-clj-compatibility-program-root-candidate
                                   "space-a" context closure first-namespace))
                               (and
                                 (not= seed
-                                  (driver/initial-program-root-candidate
+                                  (driver/initial-clj-compatibility-program-root-candidate
                                     "space-b" context closure first-namespace))
                                 (and
                                   (not= seed
-                                    (driver/initial-program-root-candidate
+                                    (driver/initial-clj-compatibility-program-root-candidate
                                       "space-a" (bootstrap/content-id "other-compiler")
                                       closure first-namespace))
                                   (and
                                     (not= seed
-                                      (driver/initial-program-root-candidate
+                                      (driver/initial-clj-compatibility-program-root-candidate
                                         "space-a" context
                                         (bootstrap/content-id "other-closure")
                                         first-namespace))
                                     (not= seed
-                                      (driver/initial-program-root-candidate
+                                      (driver/initial-clj-compatibility-program-root-candidate
                                         "space-a" context closure
                                         second-namespace))))))))))))))))))))
 
@@ -159,26 +159,26 @@
   nil)
 
 (defn cold-store!
-  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  [request driver/CljCompatibilityCompileStoreRequest] driver/CljCompatibilityCompileStoreResponse
   (match request
-    [(driver/CompileStoreAdmitProgram plan)
+    [(driver/CljCompatibilityCompileStoreAdmitProgram plan)
      (note! :admit)
-     (driver/->CompileStoreProgramAdmitted
-       (driver/programadmissionplan-initial-root-candidate plan) 0)]
-    [(driver/CompileStoreLookup store-log space-id query)
+     (driver/->CljCompatibilityCompileStoreProgramAdmitted
+       (driver/cljcompatibilityprogramadmissionplan-initial-root-candidate plan) 0)]
+    [(driver/CljCompatibilityCompileStoreLookup store-log space-id query)
      (note! :lookup-cold)
-     (driver/->CompileStoreCold)]
-    [(driver/CompileStoreAppend store-log space-id result artifact)
-     (driver/->CompileStoreFailure 70 "unexpected append")]))
+     (driver/->CljCompatibilityCompileStoreCold)]
+    [(driver/CljCompatibilityCompileStoreAppend store-log space-id result artifact)
+     (driver/->CljCompatibilityCompileStoreFailure 70 "unexpected append")]))
 
 (defn warm-store!
-  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  [request driver/CljCompatibilityCompileStoreRequest] driver/CljCompatibilityCompileStoreResponse
   (match request
-    [(driver/CompileStoreAdmitProgram plan)
+    [(driver/CljCompatibilityCompileStoreAdmitProgram plan)
      (note! :admit)
-     (driver/->CompileStoreProgramAdmitted
-       (driver/programadmissionplan-initial-root-candidate plan) 7)]
-    [(driver/CompileStoreLookup store-log space-id query)
+     (driver/->CljCompatibilityCompileStoreProgramAdmitted
+       (driver/cljcompatibilityprogramadmissionplan-initial-root-candidate plan) 7)]
+    [(driver/CljCompatibilityCompileStoreLookup store-log space-id query)
      (note! :lookup-warm)
      (match (fact-profile/admit-and-identify-result
               (fact-profile/->ResultAdmissionRequest
@@ -189,82 +189,82 @@
                 nil
                 (bootstrap/content-id "fixture-warm-rejection")))
        [(fact-profile/ResultRejected code detail)
-        (driver/->CompileStoreFailure 70 detail)]
+        (driver/->CljCompatibilityCompileStoreFailure 70 detail)]
        [(fact-profile/ResultAdmitted result)
-        (driver/->CompileStoreWarmRejected result "fixture warm result")])]
-    [(driver/CompileStoreAppend store-log space-id result artifact)
-     (driver/->CompileStoreFailure 70 "unexpected append")]))
+        (driver/->CljCompatibilityCompileStoreWarmRejected result "fixture warm result")])]
+    [(driver/CljCompatibilityCompileStoreAppend store-log space-id result artifact)
+     (driver/->CljCompatibilityCompileStoreFailure 70 "unexpected append")]))
 
 (defn existing-root-store!
-  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  [request driver/CljCompatibilityCompileStoreRequest] driver/CljCompatibilityCompileStoreResponse
   (match request
-    [(driver/CompileStoreAdmitProgram plan)
+    [(driver/CljCompatibilityCompileStoreAdmitProgram plan)
      (note! :admit)
-     (driver/->CompileStoreProgramAdmitted "existing-program-root" 4)]
-    [(driver/CompileStoreLookup store-log space-id query)
+     (driver/->CljCompatibilityCompileStoreProgramAdmitted "existing-program-root" 4)]
+    [(driver/CljCompatibilityCompileStoreLookup store-log space-id query)
      (note! :lookup-existing)
-     (driver/->CompileStoreCold)]
-    [(driver/CompileStoreAppend store-log space-id result artifact)
-     (driver/->CompileStoreFailure 70 "unexpected append")]))
+     (driver/->CljCompatibilityCompileStoreCold)]
+    [(driver/CljCompatibilityCompileStoreAppend store-log space-id result artifact)
+     (driver/->CljCompatibilityCompileStoreFailure 70 "unexpected append")]))
 
 (defn negative-version-store!
-  [request driver/CompileStoreRequest] driver/CompileStoreResponse
+  [request driver/CljCompatibilityCompileStoreRequest] driver/CljCompatibilityCompileStoreResponse
   (match request
-    [(driver/CompileStoreAdmitProgram plan)
+    [(driver/CljCompatibilityCompileStoreAdmitProgram plan)
      (note! :admit)
-     (driver/->CompileStoreProgramAdmitted
-       (driver/programadmissionplan-initial-root-candidate plan) -1)]
-    [(driver/CompileStoreLookup store-log space-id query)
+     (driver/->CljCompatibilityCompileStoreProgramAdmitted
+       (driver/cljcompatibilityprogramadmissionplan-initial-root-candidate plan) -1)]
+    [(driver/CljCompatibilityCompileStoreLookup store-log space-id query)
      (note! :lookup-should-not-run)
-     (driver/->CompileStoreCold)]
-    [(driver/CompileStoreAppend store-log space-id result artifact)
-     (driver/->CompileStoreFailure 70 "unexpected append")]))
+     (driver/->CljCompatibilityCompileStoreCold)]
+    [(driver/CljCompatibilityCompileStoreAppend store-log space-id result artifact)
+     (driver/->CljCompatibilityCompileStoreFailure 70 "unexpected append")]))
 
-(defn cold? [response driver/CompileStoreResponse] Bool
+(defn cold? [response driver/CljCompatibilityCompileStoreResponse] Bool
   (match response
-    [(driver/CompileStoreCold) true]
-    [(driver/CompileStoreWarm result artifact) false]
-    [(driver/CompileStoreWarmRejected result detail) false]
-    [(driver/CompileStoreProgramAdmitted root-resource root-version) false]
-    [(driver/CompileStorePersisted) false]
-    [(driver/CompileStoreFailure code detail) false]))
+    [(driver/CljCompatibilityCompileStoreCold) true]
+    [(driver/CljCompatibilityCompileStoreWarm result artifact) false]
+    [(driver/CljCompatibilityCompileStoreWarmRejected result detail) false]
+    [(driver/CljCompatibilityCompileStoreProgramAdmitted root-resource root-version) false]
+    [(driver/CljCompatibilityCompileStorePersisted) false]
+    [(driver/CljCompatibilityCompileStoreFailure code detail) false]))
 
-(defn warm-rejected? [response driver/CompileStoreResponse] Bool
+(defn warm-rejected? [response driver/CljCompatibilityCompileStoreResponse] Bool
   (match response
-    [(driver/CompileStoreWarmRejected result detail) true]
-    [(driver/CompileStoreCold) false]
-    [(driver/CompileStoreWarm result artifact) false]
-    [(driver/CompileStoreProgramAdmitted root-resource root-version) false]
-    [(driver/CompileStorePersisted) false]
-    [(driver/CompileStoreFailure code detail) false]))
+    [(driver/CljCompatibilityCompileStoreWarmRejected result detail) true]
+    [(driver/CljCompatibilityCompileStoreCold) false]
+    [(driver/CljCompatibilityCompileStoreWarm result artifact) false]
+    [(driver/CljCompatibilityCompileStoreProgramAdmitted root-resource root-version) false]
+    [(driver/CljCompatibilityCompileStorePersisted) false]
+    [(driver/CljCompatibilityCompileStoreFailure code detail) false]))
 
-(defn failure? [response driver/CompileStoreResponse] Bool
+(defn failure? [response driver/CljCompatibilityCompileStoreResponse] Bool
   (match response
-    [(driver/CompileStoreFailure code detail) true]
-    [(driver/CompileStoreCold) false]
-    [(driver/CompileStoreWarm result artifact) false]
-    [(driver/CompileStoreWarmRejected result detail) false]
-    [(driver/CompileStoreProgramAdmitted root-resource root-version) false]
-    [(driver/CompileStorePersisted) false]))
+    [(driver/CljCompatibilityCompileStoreFailure code detail) true]
+    [(driver/CljCompatibilityCompileStoreCold) false]
+    [(driver/CljCompatibilityCompileStoreWarm result artifact) false]
+    [(driver/CljCompatibilityCompileStoreWarmRejected result detail) false]
+    [(driver/CljCompatibilityCompileStoreProgramAdmitted root-resource root-version) false]
+    [(driver/CljCompatibilityCompileStorePersisted) false]))
 
 (defn lookup-order-valid!
-  [plan driver/ProgramAdmissionPlan
+  [plan driver/CljCompatibilityProgramAdmissionPlan
    query driver/CompileQuery] Bool
   (reset! trace [])
-  (let [cold-response driver/CompileStoreResponse
-        (driver/lookup-admitted-program plan query cold-store!)
+  (let [cold-response driver/CljCompatibilityCompileStoreResponse
+        (driver/lookup-admitted-clj-compatibility-program plan query cold-store!)
         cold-order (Vec Keyword) (deref trace)]
     (reset! trace [])
-    (let [warm-response driver/CompileStoreResponse
-          (driver/lookup-admitted-program plan query warm-store!)
+    (let [warm-response driver/CljCompatibilityCompileStoreResponse
+          (driver/lookup-admitted-clj-compatibility-program plan query warm-store!)
           warm-order (Vec Keyword) (deref trace)]
       (reset! trace [])
-      (let [existing-response driver/CompileStoreResponse
-            (driver/lookup-admitted-program plan query existing-root-store!)
+      (let [existing-response driver/CljCompatibilityCompileStoreResponse
+            (driver/lookup-admitted-clj-compatibility-program plan query existing-root-store!)
             existing-order (Vec Keyword) (deref trace)]
         (reset! trace [])
-        (let [negative-response driver/CompileStoreResponse
-              (driver/lookup-admitted-program plan query negative-version-store!)
+        (let [negative-response driver/CljCompatibilityCompileStoreResponse
+              (driver/lookup-admitted-clj-compatibility-program plan query negative-version-store!)
               negative-order (Vec Keyword) (deref trace)]
           (and (and (cold? cold-response)
                     (= [:admit :lookup-cold] cold-order))
@@ -292,10 +292,10 @@
 (defn evaluate-plan!
   [closure facts/SyntaxFactClosure
    checked driver/CheckedFactClosure] Int
-  (match (driver/plan-program-admission
+  (match (driver/plan-clj-compatibility-program-admission
            (test-config "space-a") checked first-namespace)
-    [(driver/ProgramAdmissionPlanningRejected code detail) 14]
-    [(driver/ProgramAdmissionPlanned plan)
+    [(driver/CljCompatibilityProgramAdmissionPlanningRejected code detail) 14]
+    [(driver/CljCompatibilityProgramAdmissionPlanned plan)
      (match (query-result closure)
        [(driver/CompileQueryAdmissionRejected code detail) 15]
        [(driver/CompileQueryReady query)

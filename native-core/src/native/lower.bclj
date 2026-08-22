@@ -2871,11 +2871,11 @@
 (defn host-store-function-id [] core/NativeId
   (lower-id "extern" ["host-store-compile-v0"]))
 
-(defn compile-store-request-type-id [] core/NativeId
-  (source-type-id "beagle.compiler-driver/CompileStoreRequest"))
+(defn clj-compatibility-compile-store-request-type-id [] core/NativeId
+  (source-type-id "beagle.compiler-driver/CljCompatibilityCompileStoreRequest"))
 
-(defn compile-store-response-type-id [] core/NativeId
-  (source-type-id "beagle.compiler-driver/CompileStoreResponse"))
+(defn clj-compatibility-compile-store-response-type-id [] core/NativeId
+  (source-type-id "beagle.compiler-driver/CljCompatibilityCompileStoreResponse"))
 
 (defn host-whole-input-abi-id [operation String] core/NativeId
   (lower-id "abi" [(str "host-whole-input-" operation "-v0")]))
@@ -10768,19 +10768,20 @@
    value-types (Vec core/NativeId)] ExprResultV0
   (if (not (and (= 1 (count value-types))
                 (same-id? (nth value-types 0)
-                  (compile-store-request-type-id))))
+                  (clj-compatibility-compile-store-request-type-id))))
     (fail-result state
-      "TODO-NATIVE-HOST-STORE-OPERAND: host.store/compile takes one CompileStoreRequest")
+      "TODO-NATIVE-HOST-STORE-OPERAND: host.store/compile-clj-compatibility takes one CljCompatibilityCompileStoreRequest")
     (let [result-id core/NativeId (state-id state owner "host-store-compile")]
       (->ExprResultV0
         (state-emit (state-bump state)
           (core/->ExternCallInstruction
-            (core/->SsaValueV0 result-id (compile-store-response-type-id))
+            (core/->SsaValueV0 result-id
+              (clj-compatibility-compile-store-response-type-id))
             (host-store-abi-id)
             values
             (arena-value-id owner)
             (core/->TokenFlowV0 [] [])))
-        result-id (compile-store-response-type-id) false))))
+        result-id (clj-compatibility-compile-store-response-type-id) false))))
 
 (defn lower-whole-input-call
   [env BodyEnvV0
@@ -18377,7 +18378,7 @@
                 (= callee "host.fs/read-byte-source-bounded-or-die")
                 (lower-byte-source-input-call owner current values value-types)
 
-                (= callee "host.store/compile")
+                (= callee "host.store/compile-clj-compatibility")
                 (lower-host-store-call owner current values value-types)
 
                 (= callee "selfhost.rt/read-source-snapshot")
@@ -22766,8 +22767,10 @@
     "native_host_store_compile_v0"
     (core/->AbiImportV0 true)
     (core/->RestrictedCAbiV0 true)
-    [(borrowed-abi-value "request" (compile-store-request-type-id))]
-    (core/->AbiValueV0 "response" (compile-store-response-type-id)
+    [(borrowed-abi-value "request"
+       (clj-compatibility-compile-store-request-type-id))]
+    (core/->AbiValueV0 "response"
+      (clj-compatibility-compile-store-response-type-id)
       (core/->ArenaOwnedV0 (arena-region-id)) (arena-region-id))
     (type-id "LowerFailure")
     [(allocate-effect-id) (host-filesystem-effect-id)]
