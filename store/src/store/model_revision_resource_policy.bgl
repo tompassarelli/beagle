@@ -79,7 +79,41 @@
     [(ModelRevisionLineageEdges ordinal)
      (modelrevisionresourceuse-lineage-edges use)]))
 
-(defn admit-model-revision-resource-use
+(defn- model-revision-resource-policy-valid? [policy ModelRevisionResourcePolicy] Bool
+  (every?
+   (fn [dimension ModelRevisionResourceDimension] Bool
+     (>= (model-revision-resource-maximum policy dimension) 0))
+   (model-revision-resource-dimensions)))
+
+(defn- model-revision-resource-use-valid? [use ModelRevisionResourceUse] Bool
+  (every?
+   (fn [dimension ModelRevisionResourceDimension] Bool
+     (>= (model-revision-resource-required-at-least use dimension) 0))
+   (model-revision-resource-dimensions)))
+
+(defn- first-invalid-policy
+  [policy ModelRevisionResourcePolicy
+   use ModelRevisionResourceUse] ModelRevisionResourceAdmission
+  (loop [remaining (Vec ModelRevisionResourceDimension) (model-revision-resource-dimensions)]
+    (if (empty? remaining)
+      (->ResourcesAdmitted use)
+      (let [dimension ModelRevisionResourceDimension (first remaining)
+            supplied Int (model-revision-resource-maximum policy dimension)]
+        (if (< supplied 0)
+          (->ResourcePolicyInvalid dimension supplied)
+          (recur (rest remaining)))))))
+
+(defn- first-invalid-use [use ModelRevisionResourceUse] ModelRevisionResourceAdmission
+  (loop [remaining (Vec ModelRevisionResourceDimension) (model-revision-resource-dimensions)]
+    (if (empty? remaining)
+      (->ResourcesAdmitted use)
+      (let [dimension ModelRevisionResourceDimension (first remaining)
+            supplied Int (model-revision-resource-required-at-least use dimension)]
+        (if (< supplied 0)
+          (->ResourceUseInvalid dimension supplied)
+          (recur (rest remaining)))))))
+
+(defn- first-exhaustion
   [policy ModelRevisionResourcePolicy
    use ModelRevisionResourceUse] ModelRevisionResourceAdmission
   (loop [remaining (Vec ModelRevisionResourceDimension) (model-revision-resource-dimensions)]
@@ -88,10 +122,16 @@
       (let [dimension ModelRevisionResourceDimension (first remaining)
             allowed Int (model-revision-resource-maximum policy dimension)
             required-at-least Int (model-revision-resource-required-at-least use dimension)]
-        (cond
-          [(< allowed 0) (->ResourcePolicyInvalid dimension allowed)]
-          [(< required-at-least 0)
-           (->ResourceUseInvalid dimension required-at-least)]
-          [(> required-at-least allowed)
-           (->ResourcesExhausted dimension allowed required-at-least)]
-          [:else (recur (rest remaining))])))))
+        (if (> required-at-least allowed)
+          (->ResourcesExhausted dimension allowed required-at-least)
+          (recur (rest remaining)))))))
+
+(defn admit-model-revision-resource-use
+  [policy ModelRevisionResourcePolicy
+   use ModelRevisionResourceUse] ModelRevisionResourceAdmission
+  (cond
+    [(not (model-revision-resource-policy-valid? policy))
+     (first-invalid-policy policy use)]
+    [(not (model-revision-resource-use-valid? use))
+     (first-invalid-use use)]
+    [:else (first-exhaustion policy use)]))

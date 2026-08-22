@@ -126,7 +126,9 @@
    3))
 
 (defn main [] Int
-  (let [dimensions (Vec resource/ModelRevisionResourceDimension) (resource/model-revision-resource-dimensions)]
+  (let [dimensions (Vec resource/ModelRevisionResourceDimension) (resource/model-revision-resource-dimensions)
+        first-dimension resource/ModelRevisionResourceDimension (first dimensions)
+        last-dimension resource/ModelRevisionResourceDimension (last dimensions)]
     (if (and
          (admitted-use?
           (resource/admit-model-revision-resource-use
@@ -140,9 +142,21 @@
          (resource/admit-model-revision-resource-use
            (uniform-policy 0)
            (uniform-use 1))
-          (first dimensions)
+          first-dimension
           0
           1)
+         (policy-invalid-as?
+          (resource/admit-model-revision-resource-use
+           (resource/->ModelRevisionResourcePolicy 0 0 0 0 0 -1)
+           (resource/->ModelRevisionResourceUse 1 0 0 0 0 0))
+          last-dimension
+          -1)
+         (use-invalid-as?
+          (resource/admit-model-revision-resource-use
+           (uniform-policy 0)
+           (resource/->ModelRevisionResourceUse 1 0 0 0 0 -1))
+          last-dimension
+          -1)
          (admitted-use?
           (resource/admit-model-revision-resource-use
            (uniform-policy 2048)
