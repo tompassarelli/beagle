@@ -5,14 +5,22 @@
 **Beagle is a durable programming system driven through semantic
 computation.**
 
-Beagle has five distinct surfaces that share one checked semantic core:
+Beagle has five distinct surfaces that participate in one semantic architecture:
 
-- a typed Lisp authoring surface derived from Clojure;
+- authoring and compatibility surfaces, currently including typed Lisp derived
+  from Clojure;
 - Beagle Store, the durable semantic substrate;
 - a compiler that checks programs and records dependency and provenance;
 - replaceable target materializations with explicit capability envelopes; and
 - an effect and observation boundary between pure computation and external
   reality.
+
+That architectural unity is not a claim that every current surface is one
+representation. The compiler AST, normalized fact projections, and Store Terms
+remain separate checked structures today. Store triples are not compiler
+expressions, and deriving a proposition does not assert it. Beagle is moving
+the shared native boundary downward to checked propositions, relations, goals,
+judgments, and oriented plans without erasing those distinctions.
 
 The system thesis is:
 
@@ -64,13 +72,15 @@ plus bounded identification and authentication overhead, and a warm result
 must equal a clean result. The repository publishes no benchmark claim from
 that invariant alone.
 
-Design principle: "If Clojure already has a form whose semantics are correct
-for Beagle, inherit it. If the semantics differ, name the difference."
+The explicit Clojure profile follows this design principle: "If Clojure already
+has a form whose semantics are correct for that profile, inherit it. If the
+semantics differ, name the difference."
 
-Beagle preserves Clojure where preservation has semantic value. It is one
-source language whose parser, checker, canonicalizer, and repair tools give
-people and agents the same answer: what went wrong, where it occurred, and what
-a valid next edit is.
+Beagle preserves Clojure where preservation has semantic value. It is an
+explicit compatibility and hosted authoring profile whose parser, checker,
+canonicalizer, and repair tools give people and agents the same answer: what
+went wrong, where it occurred, and what a valid next edit is. It does not define
+the ontology of Beagle's native proposition-first path.
 
 Types exist to make that loop reliable. Static type information checks at
 compile time and erases before emit; an explicitly authored binding constraint
@@ -84,7 +94,7 @@ profiles, extensions, form set, and materializers are compiler-owned: query
 `beagle langs`, `beagle syntax`, `beagle sig`, and `beagle fields` instead of
 copying a list that can drift.
 
-## Quickstart
+## Current hosted-profile quickstart
 
 Inside the flake's devshell (`direnv allow`), `bin/beagle` is the `beagle`
 command used below. No database or coordinator is required.
