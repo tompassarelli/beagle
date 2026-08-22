@@ -311,6 +311,23 @@
        "      b (Vec Any) (filterv second? xs)]\n"
        "  a)\n")))))
 
+(test-case "qualified optional local type keeps its complete initializer"
+  (define source
+    (string-append
+     "(let [full history/AuthenticatedHistory? (loaded-history full-result) "
+     "prefix history/AuthenticatedHistory? (loaded-history prefix-result)] full)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [full history/AuthenticatedHistory? (loaded-history full-result)\n"
+       "      prefix history/AuthenticatedHistory? (loaded-history prefix-result)]\n"
+       "  full)\n")))))
+
 (test-case "compound qualified flat local types are not legacy refinements"
   (for ([type-text
          (in-list

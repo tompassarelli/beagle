@@ -599,7 +599,7 @@
   (define (layout-type-expression-datum? datum)
     (define (qualified-type-atom? value)
       (and (symbol? value)
-           (regexp-match? #rx"/[A-Z][A-Za-z0-9_-]*$"
+           (regexp-match? #rx"/[A-Z]"
                           (symbol->string value))))
     (define (probe value)
       (cond
