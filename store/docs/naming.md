@@ -14,35 +14,13 @@ The June ruling named a stored `(subject predicate object)` record **fact**. The
 
 The deciding prior is Datalog: a fact is a proposition present in the evaluated relation. The rejected primitive use is **fact-as-stored-row** — it falsely merges structure, assertion act, and view status.
 
-## world — system term chosen 2026-07-26; service retired 2026-08-07; reconciled 2026-08-20
+## Retired-service predicates — persisted spelling retained 2026-08-07
 
-The old Worlds service is deleted from the tree. `world` and bare `version`
-name no current Store module, wire operation, or kernel primitive. The live
-closed-wire operation `:rpc/version` is unrelated and remains current. Durable
-Store transaction-log data written by the retired service (`evidence.world`,
-`world.record`, `world.version:`) keeps its spelling: respelling stored
-predicates is a data migration, not a rename.
-
-The service retirement did not retire the system-level term **program world**.
-A program world is a durable, versioned semantic explanation: the facts,
-judgments, provenance, and pure plans from which materializations may be
-derived. It may select which propositions a query sees without promising
-consistency or truth. It is above Store's recursive kernel and does not restore
-the deleted service.
-
-Worlds participate in one identity and provenance protocol with named layered
-equivalence relations. They do not impose one universal key: Atom, proposition,
-assertion occurrence, world revision, materialization, and receipt identities
-remain distinct. The possible-worlds prior still decides the term:
-propositions are evaluated at a way things could stand.
-
-Rejected bench:
-
-- **consistent-plane** — promises consistency that rival assertions deliberately violate.
-- **plane** — collides with infrastructure control/data planes.
-- **reality** — claims truth a world need not have.
-- **universe** — claims totality although a version may be partial.
-- **branch** — describes mechanics but not what is branching, and collides with git. **Superseded 2026-08-08** for a different thing: see [branch](#branch--chosen-2026-08-08), where the mechanics are what is being named.
+The deleted service's durable Store transaction-log predicates
+`evidence.world`, `world.record`, and `world.version:` keep their exact bytes.
+Respelling stored predicates is a data migration, not a rename. They are
+isolated compatibility data and define no current Store or Beagle ontology.
+The live closed-wire operation `:rpc/version` is unrelated.
 
 ## codegraph — chosen 2026-07-26
 
@@ -166,12 +144,14 @@ Rejected bench:
 The thing was every remaining `ns/name` family after normalization. An inventory at `a488892` found 26 non-`:kernel/*`/`:rpc/*` families across 692 occurrences and separated them by contract.
 
 - **Semantic fixtures** (`ontology/slot`, `plangrep/*`, `example/*`, `builder/*`, `growth/entry`, `building/id`, `deep/*`, `agent/lane`) became unnamespaced because none exercised membership. The kernel slash probe and ExceptionInfo tag `:test/rejected-plan` remain intentionally namespaced.
-- **Historical code** (`provider/*`, `world/*`, `worlds/*`) retained spelling because rewriting a service awaiting retirement buys no queryable structure.
+- **Historical service code** retained its spelling until deletion because
+  rewriting code awaiting retirement bought no queryable structure.
 - **Closed wire tags** (`authority/*`, `store/*`, `store.defcheck/*`, `lease/*`, `query/*`) retained spelling because a change is wire versioning, not ontology normalization.
 
-The deciding prior is boundary ownership: at that revision no in-scope family was written verbatim to a configured live store, so nine fixtures and zero stores changed. Replan if a configured non-test `worlds/invoke-plan-to!` caller, an external corpus carrying `worlds/*` or `provider/*`, or a Store RPC tag rename appears.
-
-**Discharged 2026-08-07:** the `world/*` and `worlds/*` spelling condition is closed by deletion — the service awaiting retirement was retired, so no shipped module carries those families. The surviving spellings are test fixture labels and durable Store transaction-log predicates, both already out of scope here, so the replan trigger cannot fire.
+The deciding prior is boundary ownership: at that revision no in-scope family
+was written verbatim to a configured live store, so nine fixtures and zero
+stores changed. The service was subsequently deleted. Only the explicitly
+listed durable transaction-log predicates above retain their bytes.
 
 ## positions of the Triple — t1/t2/t3 — chosen 2026-08-04
 
@@ -200,8 +180,6 @@ stays t1/t2/t3.
 
 Rejected bench:
 
-- **world** — names a versioned semantic explanation, not a stored admission
-  contract over one Store space.
 - **schema** — implies stored enforcement types the kernel refuses to own.
 - **dialect** — implies a different language rather than a convention over one.
 - **layer / mode** — generic altitude words, and mode reads as a runtime switch.
@@ -241,9 +219,8 @@ a gate.
   ACCEPTED` and the QBE frontier refusal `native program is not frozen:
   validation obligations failed`, whose ledger class key is
   `program-not-frozen`.
-- **program** and **module-overlay** replaced identifiers belonging to the
-  retired Worlds service, both in that refusal and at the authoring checker;
-  this does not retire the system-level program-world concept:
+- **program** and **module-overlay** replaced identifiers belonging to a
+  retired service, both in that refusal and at the authoring checker:
   `facts-check-overlay.rkt`, receipt key `overlayDigest`, rejection code
   `beagle-overlay-rejected`.
 
@@ -262,23 +239,17 @@ between branches and no merge. It is durable on-disk vocabulary — the
 `store.branch` module, `<log>.refs/` and `<log>.branches/` beside the store, and
 the `revision-ref/v1` and `branch-fork/v1` format tags.
 
-This reverses the
-[world](#world--system-term-chosen-2026-07-26-service-retired-2026-08-07-reconciled-2026-08-20)
-bench,
-which rejected **branch** as describing mechanics rather than what is branching.
-That ruling was about a query-visibility scope. Here the mechanics are the
+An earlier query-visibility naming discussion rejected **branch** because it
+described mechanics rather than semantic content. Here the mechanics are the
 thing, and the git prior — a named ref into one shared immutable history that
-diverges at a point — matches without a correction paragraph, so the former
-collision is the alignment. Sealing a segment keeps store's existing
+diverges at a point — matches without a correction paragraph. Sealing a segment keeps store's existing
 ledger-sealing prior, and **fork** stays the verb for the operation and never
 names its result.
 
 Rejected bench:
 
-- **world**, bare **version** — rejected for this on-disk branch primitive.
-  `world` now names the system-level semantic explanation, while the old
-  service and its bare `version` vocabulary remain retired; the closed-wire
-  `:rpc/version` operation remains live.
+- **bare version** — too weak for an on-disk branch coordinate; the unrelated
+  closed-wire `:rpc/version` operation remains live.
 - **lane** — carries no prior about sharing history with what it came from.
 - **timeline** — imports an ordering across branches that no branch promises.
 - **line** — too weak to carry a module name and a directory name.

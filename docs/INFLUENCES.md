@@ -1,10 +1,13 @@
 # Influences
 
-Beagle is an independent typed Lisp with a Clojure-derived authoring core. It
-compiles one typed representation to idiomatic code in multiple target
-profiles. None of its *ingredients* are new — typed Lisps exist, Lean's error
-machinery exists, Kernel's combiner-uniformity exists. What makes Beagle a
-thing is what those ingredients are pointed at:
+Beagle is a durable programming system moving its native boundary toward
+proposition-first semantics. Its current Clojure-derived, JavaScript, and Nix
+profiles prove that one checked representation can produce useful artifacts
+for sharply different target regimes; those profiles remain explicit current
+surfaces without defining Beagle's native ontology. None of Beagle's
+*ingredients* are new — typed relational languages exist, Lean's error
+machinery exists, and durable stores exist. What makes Beagle a thing is what
+those ingredients are pointed at:
 
 > **The compiler is a feedback engine for an agent, not a translator for a
 > human.** Most languages' errors are designed for a person to read and act on.
@@ -16,18 +19,19 @@ compiler-development feedback loop it enables.
 
 The deeper bet is the Turtles Thesis:
 
-> Pure software artifacts are reproducible projections of durable semantic
-> worlds; external reality is connected through explicit observations and
+> Pure software artifacts are reproducible projections of sealed semantic
+> ModelRevisions; external reality is connected through explicit observations and
 > capability-controlled effects.
 
-A program world is the broad semantic snapshot concept, not a Store branch, a
-universal key, or one physical/security domain. One durable identity,
-explanation, dependency, and provenance model relates distinct content,
-assertion, revision, rule, and artifact identities; content identity is not
-trust. `Declared`, `Derived`, and `Observed` are epistemic origins, while
+A Model is the stable semantic program. A sealed ModelRevision is one immutable
+coherent semantic admission, not a Store branch, universal key, or physical or
+security domain. One durable identity, explanation, dependency, and provenance
+model relates distinct Model, ModelRevision, BranchRevision, content,
+assertion, rule, plan, and artifact identities; content identity is not trust.
+`Declared`, `Derived`, and `Observed` are epistemic origins, while
 `Intent`, `Authorization`, `Attempt`, and `EffectReceipt` form a separate
 action protocol. Pure plans and artifacts can be derived from durable semantic
-branches or worlds; an external effect requires a capability and yields a
+ModelRevisions; an external effect requires a capability and yields a
 receipt plus later observations. External reality thereby participates in the
 same typed fact system without being assumed pure. Target outputs are
 replaceable materializations with explicit capability envelopes.
@@ -333,12 +337,14 @@ fixes that typecheck. That is Beagle's own frontier, not a steal.
 
 ## Current evidence and destination
 
-The bet is that **one typed authoring IR with an authoring loop can target many
-real ecosystems at once** — and that authoring against it beats writing each
-target by hand. The breadth is not a distraction from the pitch; it *is* the
-pitch. A single AST that lowers idiomatically to lazy Nix attrsets *and* eager
-Clojure maps *and* JS is current evidence across different runtime models, not
-a claim that every target, executor, or world-protocol connection has shipped.
+The bet is that **one checked semantic Model with an authoring loop can target
+many real ecosystems at once** — and that authoring against it beats writing
+each target by hand. The breadth is not a distraction from the pitch; it *is*
+the pitch. The current shared AST that lowers to lazy Nix attrsets, eager
+Clojure maps, and JavaScript is evidence across different runtime models. The
+native destination moves authority to sealed ModelRevisions and checked plans;
+it does not claim that every target, executor, or Model-protocol connection has
+shipped, or make a current hosted profile native precedent.
 
 Current shipped evidence includes:
 

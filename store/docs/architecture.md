@@ -4,18 +4,19 @@ This document maps Beagle Store's [shared vocabulary](glossary.md) onto durable 
 
 Store is Beagle's integrated durable identity, provenance, and query subsystem.
 It is not a separate database product and it does not define a second program
-model beside Beagle. One durable identity-and-explanation model can support
-many versioned worlds, materializations, execution domains, and physical
-security boundaries. A world is a selected, versioned view over durable
-occurrences; a materialization is a reproducible projection of that view; an
-execution domain is the authority that may interpret or act on it. Equal Terms
+model beside Beagle. One durable identity-and-explanation protocol can support
+many sealed ModelRevisions, materializations, execution domains, and physical
+security boundaries. A ModelRevision is an immutable coherent semantic
+admission reconstructed from durable occurrences; a materialization is a
+reproducible projection of that revision under a checked plan; an execution
+domain is the authority that may interpret or act on it. Equal Terms
 across those places do not merge their authority, freshness, retention, or
 access policy.
 
 The **current kernel** is the log, occurrence history, liveness, immutable
 query roots, and their local process boundary described below. The broader
 integration direction is to let Beagle tools share this explanation model;
-that direction is not a claim that the kernel currently schedules worlds,
+that direction is not a claim that the kernel currently checks Models,
 executes effects, supplies authorization, or manages every physical boundary.
 
 ## Kernel and history
@@ -50,10 +51,10 @@ replay order. Recorded, valid, and observation time are metadata and never
 proposition identity. See [ontology](ontology.md) for modeling rules.
 
 Store is the current durable assertion and history substrate, not the whole
-program-world protocol. The integration model distinguishes declared inputs,
+Model protocol. The integration model distinguishes declared inputs,
 derived conclusions, observations, and effect records without treating them as
-interchangeable facts. A pure artifact is a reproducible projection from named
-inputs and a versioned world; it is not hidden state. Desired state is not
+interchangeable facts. A pure artifact is a reproducible projection from a
+sealed ModelRevision and checked plan; it is not hidden state. Desired state is not
 observed state. An authorized effect produces an effect receipt; a later
 observation may corroborate, contradict, or fail to find the expected result.
 The current kernel can record these as ordinary Terms and occurrences, but it
@@ -61,8 +62,8 @@ does not execute effects, decide authorization, or promote structural identity
 into trust.
 
 That separation keeps dependency and invalidation concrete. A declaration,
-derivation, observation, receipt, or artifact can name the occurrences and
-world version it depends on. Rebuild only the projection whose named inputs
+derivation, observation, receipt, or artifact can name the occurrences,
+ModelRevision, and plan it depends on. Rebuild only the projection whose named inputs
 changed; a change with no recorded dependency does not justify near-global
 invalidation. Store can preserve the evidence needed for that accounting;
 broader dependency scheduling remains integration work.

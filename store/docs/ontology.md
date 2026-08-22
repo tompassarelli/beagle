@@ -35,22 +35,22 @@ different provenance. Withdrawing one assertion does not mutate either the
 Triple or its Atoms, and Beagle Store records the assertion without certifying its
 truth.
 
-This is a layered identity protocol, not a universal identity key. A program
-world may use Store occurrences as durable evidence while retaining its own
-revision and judgment identity. Matching proposition content establishes
+This is a layered identity protocol, not a universal identity key. A
+ModelRevision may use Store occurrences as durable evidence while retaining
+its own semantic and judgment identity. Matching proposition content establishes
 structural equivalence only; it does not establish the trustworthiness of the
 writer, authorize an effect, or merge physical Store spaces.
 
-## Explanation across worlds
+## Explanation across ModelRevisions
 
 One typed fact system spans declared inputs, derived conclusions, observations,
 and effect records. They are roles carried by propositions and occurrences,
 not incompatible storage systems or a claim that external reality is pure. A
-world is the broad semantic snapshot concept: a versioned choice of evidence,
-rules, judgments, and plans, not a Store branch. A materialization identifies a
-reproducible projection of named branches or that world; an execution domain
-identifies where an interpretation or effect is authorized to run. These roles
-must retain their dependencies and provenance:
+ModelRevision is one immutable coherent admission of evidence, rules,
+judgments, goals, and plans, not a Store branch or BranchRevision. A
+materialization identifies a reproducible projection of that revision under a
+checked plan; an execution domain identifies where an interpretation or effect
+is authorized to run. These roles must retain their dependencies and provenance:
 
 ```text
 declared input -> derived artifact -> desired state
@@ -65,7 +65,7 @@ and `Observed` classify epistemic origin. The action protocol—`Intent`,
 never observed state; a receipt records that an authorized attempt reported
 completion, while a later observation is separate evidence about the external
 world. Pure artifacts are reproducible projections from their named inputs,
-rules, branches or roots, and world version. The current kernel can preserve
+rules, sealed ModelRevision, and checked plan. The current kernel can preserve
 the necessary terms and occurrence provenance; scheduling, authorization, and
 effect execution belong to integrations and are direction rather than current
 kernel behavior.
@@ -76,7 +76,7 @@ derivation. A rule's spelling, compiler implementation, and resulting artifact
 are not silently the same identity. Schema and profile evolution work the same
 way: retain the old profile or schema identity, introduce a new version, and
 state the projection or migration relation explicitly. A consumer can then
-select an old or new world deliberately instead of assuming that a global
+select an old or new ModelRevision deliberately instead of assuming that a global
 reinterpretation is safe.
 
 Structural identity is deliberately weaker than trust. Signatures, issuer

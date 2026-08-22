@@ -5,13 +5,16 @@
 Beagle is one durable programming system, not a language bolted to a database.
 Its architectural spine is:
 
-> Pure software artifacts are reproducible projections of durable semantic
-> worlds; external reality is connected through explicit observations and
+> Pure software artifacts are reproducible projections of sealed semantic
+> ModelRevisions; external reality is connected through explicit observations and
 > capability-controlled effects.
 
-A program world (`WORLD`) is a versioned semantic explanation, not a process,
-database row, deployment, or universal identity. The destination protocol
-relates content, assertion occurrences, world revisions, judgments,
+A `Model` is the stable semantic program. A sealed `ModelRevision` is one
+immutable, coherent admission of that program, not a process, database row,
+deployment, branch coordinate, or universal identity. A `Branch` names a
+coherent recorded line of Model development, and an immutable `BranchRevision`
+authenticates one exact history coordinate. The destination protocol relates
+content, assertion occurrences, ModelRevisions, judgments,
 materializations, executions, and receipts through named equivalence and
 provenance relations. Those layers do not share one key: content identity is
 not assertion identity, artifact identity, or authority, and content identity
@@ -19,7 +22,10 @@ is not trust.
 
 The repository separates five surfaces:
 
-- the typed Lisp/Clojure-derived surface authors code and data;
+- authoring and compatibility surfaces, currently including typed Lisp derived
+  from Clojure; the destination proposition-first surface authors Model
+  transactions and goals without making a current hosted profile native
+  semantic precedent;
 - Beagle Store owns durable terms, occurrences, transaction history, querying,
   indexing, snapshots, and cold persistence;
 - the compiler checks programs and records semantic dependencies and
@@ -29,7 +35,7 @@ The repository separates five surfaces:
 - the effect/observation boundary connects pure plans to external reality.
 
 The compiler's AST and fact projections and Store's Term and occurrence model
-are separate current surfaces. Connecting them through the world protocol is
+are separate current surfaces. Connecting them through the Model protocol is
 the direction, not a claim that every layer already shares one representation.
 Within that direction, facts are view-admitted propositions, judgments select
 or derive conclusions, and target outputs are replaceable materializations.
@@ -37,11 +43,11 @@ One durable identity, explanation, dependency, and provenance model relates
 them without assigning everything one key. Hashes identify records while
 authority, evidence, freshness, and policy determine what they justify.
 
-A program world is the broad semantic snapshot concept: a versioned selection
-of evidence, rules, judgments, and plans. It is not a Store branch. Branches and
-named roots select histories; many branches, roots, physical Stores,
+A ModelRevision selects admitted evidence, rules, judgments, goals, and plans.
+It is not a Store branch or BranchRevision. Branches and named roots record and
+authenticate histories; many revisions, branches, physical Stores,
 materializations, execution domains, trust domains, and failure domains may
-participate in the model without becoming one cluster, transaction boundary,
+participate in the system without becoming one cluster, transaction boundary,
 or access-control domain.
 
 Epistemic origins and the action protocol are orthogonal. `Declared`,
@@ -56,8 +62,9 @@ receipts beside origins in `EpistemicProvenance`. That carrier representation
 does not make knowledge origin and action stage one conceptual taxonomy; the
 protocol split above is the architectural boundary.
 
-Pure artifacts are reproducible projections of named semantic branches or
-worlds. External reality participates in the same typed fact system through
+Pure artifacts are reproducible projections of sealed ModelRevisions under
+checked goals, plans, targets, and capability envelopes. External reality
+participates in the same typed fact system through
 observations and receipts, but is not assumed pure. A host executes an effect
 only when it holds the target's declared capability, then returns a receipt and
 subsequent observations as new semantic records. Planning, scheduling,
@@ -134,9 +141,9 @@ position — not a desugared intermediate.
 - `beagle-lib/private/targets.rkt` — the canonical source-profile and
   materializer registry; every inventory in this repo is a rendered view of it
   (`bin/beagle langs`).
-- `store/src/store/epistemic_fact.bgl` — the current typed world-root and
-  provenance-admission records; Store remains the carrier, not the authority
-  that executes external actions.
+- `store/src/store/epistemic_fact.bgl` — the current typed revision and
+  provenance-admission records being migrated to the ModelRevision boundary;
+  Store remains the carrier, not the authority that executes external actions.
 - `native-core/src/native/{unit_reuse,unit_compile}.bclj` — the reusable-result
   receipt/key inputs and the exact semantic, dependency, profile, and
   compiler-rule checks applied before reuse.

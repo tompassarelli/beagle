@@ -35,9 +35,10 @@ Assertion identity    occurrence coordinate
 ```
 
 These identities are Store's current contribution to Beagle's broader identity
-and provenance protocol; they are not one universal key. A program world is a
-versioned semantic explanation above this kernel, not a Store primitive or the
-retired Worlds service. Store can durably record proposition content,
+and provenance protocol; they are not one universal key. A Model is the stable
+semantic program above this kernel, and a sealed ModelRevision is one immutable
+coherent admission of it. Neither is a Store primitive or service. Store can
+durably record proposition content,
 assertions, judgments, observations, materialization provenance, and execution
 receipts when a profile models them as ordinary Terms and occurrences. It does
 not decide truth, grant trust from matching content, execute effects, or erase
