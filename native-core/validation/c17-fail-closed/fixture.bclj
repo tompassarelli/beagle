@@ -1,0 +1,266 @@
+#lang beagle/clj
+
+(ns native.c17-fail-closed)
+
+(require [native.body-c17 :as body])
+(require [native.core :as core])
+(require [native.obligations :as obligations])
+(require [native.validation-corpus :as corpus])
+
+(def unsupported-symbol-abi core/AbiDeclV0
+  (core/->AbiDeclV0
+    (obligations/obligation-id "abi-unsupported-symbol")
+    (obligations/obligation-id "function-import")
+    "native_host_unknown_v0"
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    []
+    nil
+    (obligations/obligation-id "type-choice")
+    []
+    []
+    "v0"
+    "sha256:unsupported-symbol"))
+
+(def unsupported-symbol-program core/NativeCoreProgram
+  (core/->NativeCoreProgram
+    (obligations/obligation-id "program-unsupported-symbol")
+    nil
+    "c17-fail-closed-v0"
+    [obligations/fixture-i64-type
+     obligations/fixture-union-type
+     obligations/fixture-outcome-type]
+    []
+    [obligations/fixture-region]
+    []
+    [obligations/fixture-i64-layout
+     obligations/fixture-union-layout
+     obligations/fixture-outcome-layout]
+    []
+    []
+    [(obligations/obligation-id "region-fixture")]
+    []
+    [unsupported-symbol-abi]
+    []))
+
+(def malformed-optional-result core/AbiValueV0
+  (core/->AbiValueV0
+    "result"
+    (obligations/obligation-id "type-checked-i64")
+    (core/->ArenaOwnedV0 (obligations/obligation-id "region-fixture"))
+    nil))
+
+(def malformed-optional-abi core/AbiDeclV0
+  (core/->AbiDeclV0
+    (obligations/obligation-id "abi-malformed-optional")
+    (obligations/obligation-id "function-import")
+    "native_host_environment_lookup_v0"
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCOptionalOutAbiV0 true)
+    []
+    malformed-optional-result
+    (obligations/obligation-id "type-choice")
+    []
+    []
+    "v0"
+    "sha256:malformed-optional"))
+
+(def malformed-optional-program core/NativeCoreProgram
+  (core/->NativeCoreProgram
+    (obligations/obligation-id "program-malformed-optional")
+    nil
+    "c17-fail-closed-v0"
+    [obligations/fixture-i64-type
+     obligations/fixture-union-type
+     obligations/fixture-outcome-type]
+    []
+    [obligations/fixture-region]
+    []
+    [obligations/fixture-i64-layout
+     obligations/fixture-union-layout
+     obligations/fixture-outcome-layout]
+    []
+    []
+    [(obligations/obligation-id "region-fixture")]
+    []
+    [malformed-optional-abi]
+    []))
+
+(def map-type core/TypeDef
+  (core/->TypeDef
+    (obligations/obligation-id "type-map-i64-i64")
+    "MapI64I64"
+    (core/->MapTypeV0
+      (obligations/obligation-id "type-i64")
+      (obligations/obligation-id "type-i64")
+      (core/->InsertionOrderV0 true))))
+
+(def map-layout core/LayoutDef
+  (core/->LayoutDef
+    (obligations/obligation-id "layout-map-i64-i64")
+    (obligations/obligation-id "type-map-i64-i64")
+    8
+    8
+    (core/->MapShapeV0
+      (obligations/obligation-id "type-i64")
+      8
+      8
+      (obligations/obligation-id "type-i64")
+      8
+      8
+      (core/->InsertionOrderV0 true))))
+
+(def malformed-map-get-instruction core/Instruction
+  (core/->MapGetInstructionV0
+    (core/->SsaValueV0
+      (obligations/obligation-id "ssa-map-result")
+      (obligations/obligation-id "type-i64"))
+    (obligations/obligation-id "ssa-map")
+    (obligations/obligation-id "ssa-key")
+    nil
+    (core/->I64EqualityV0 true)))
+
+(def malformed-map-get-function core/FunctionDef
+  (core/->FunctionDef
+    (obligations/obligation-id "function-map-get")
+    "map-get"
+    [(core/->Parameter
+       (obligations/obligation-id "ssa-map")
+       (obligations/obligation-id "type-map-i64-i64"))
+     (core/->Parameter
+       (obligations/obligation-id "ssa-key")
+       (obligations/obligation-id "type-i64"))]
+    [(core/->BasicBlock
+       (obligations/obligation-id "block-map-get")
+       []
+       [malformed-map-get-instruction]
+       [(core/->ReturnTerminator
+          (obligations/obligation-id "ssa-map-result"))])]
+    (obligations/obligation-id "block-map-get")
+    (obligations/obligation-id "type-i64")
+    []
+    []
+    []))
+
+(def malformed-map-get-program core/NativeCoreProgram
+  (core/->NativeCoreProgram
+    (obligations/obligation-id "program-map-get")
+    nil
+    "c17-fail-closed-v0"
+    [obligations/fixture-i64-type map-type]
+    []
+    []
+    []
+    [obligations/fixture-i64-layout map-layout]
+    [malformed-map-get-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def checked-bounds-block core/BasicBlock
+  (with (nth (core/functiondef-blocks obligations/fixture-function) 0)
+    [:instructions
+     [(core/->CheckedInstruction
+        (core/->SsaValueV0
+          (obligations/obligation-id "ssa-result")
+          (obligations/obligation-id "type-checked-i64"))
+        (core/->CheckedBoundsV0
+          (obligations/obligation-id "ssa-input")
+          (obligations/obligation-id "ssa-input")))]]))
+
+(def checked-bounds-function core/FunctionDef
+  (with obligations/fixture-function
+    [:blocks
+     [checked-bounds-block
+      (nth (core/functiondef-blocks obligations/fixture-function) 1)
+      (nth (core/functiondef-blocks obligations/fixture-function) 2)]]))
+
+(def checked-bounds-program core/NativeCoreProgram
+  (with obligations/valid-program
+    [:functions [checked-bounds-function obligations/fixture-token-function]]))
+
+(def supported-result body/BodyMaterializationV0
+  (body/materialize-program-for-abi corpus/record-assoc-program 0 "lp64"))
+
+(def unsupported-symbol-result body/BodyMaterializationV0
+  (body/materialize-program-for-abi unsupported-symbol-program 0 "lp64"))
+
+(def malformed-optional-result-result body/BodyMaterializationV0
+  (body/materialize-program-for-abi malformed-optional-program 0 "lp64"))
+
+(def malformed-map-get-result body/BodyMaterializationV0
+  (body/materialize-program-for-abi malformed-map-get-program 0 "lp64"))
+
+(def malformed-checked-result body/BodyMaterializationV0
+  (body/materialize-program-for-abi obligations/valid-program 0 "lp64"))
+
+(def checked-bounds-result body/BodyMaterializationV0
+  (body/materialize-program-for-abi checked-bounds-program 0 "lp64"))
+
+(defn empty-artifact? [artifact body/BodyArtifactV0] Bool
+  (and (= "" (body/bodyartifactv0-header-name artifact))
+    (and (= "" (body/bodyartifactv0-header-text artifact))
+      (and (= "" (body/bodyartifactv0-source-name artifact))
+        (= "" (body/bodyartifactv0-source-text artifact))))))
+
+(defn rejected-with-gap?
+  [result body/BodyMaterializationV0
+   expected body/C17CapabilityGapV0] Bool
+  (and (not (body/materialization-ok? result))
+    (and (body/materialization-target-rejected? result)
+      (and (= expected (body/materialization-capability-gap result))
+        (empty-artifact? (body/materialization-artifact result))))))
+
+(def supported-program-succeeds? Bool
+  (and (body/materialization-ok? supported-result)
+    (let [artifact body/BodyArtifactV0 (body/materialization-artifact supported-result)]
+      (and (not= "" (body/bodyartifactv0-header-text artifact))
+        (not= "" (body/bodyartifactv0-source-text artifact))))))
+
+(def unsupported-symbol-rejected? Bool
+  (rejected-with-gap?
+    unsupported-symbol-result
+    (body/->AbiSymbolGapV0
+      (obligations/obligation-id "abi-unsupported-symbol"))))
+
+(def malformed-optional-rejected? Bool
+  (rejected-with-gap?
+    malformed-optional-result-result
+    (body/->OptionalResultLayoutGapV0 true)))
+
+(def malformed-map-get-rejected? Bool
+  (rejected-with-gap?
+    malformed-map-get-result
+    (body/->MapGetResultLayoutGapV0 true)))
+
+(def malformed-checked-result-rejected? Bool
+  (rejected-with-gap?
+    malformed-checked-result
+    (body/->CheckedResultLayoutGapV0 true)))
+
+(def checked-bounds-rejected? Bool
+  (rejected-with-gap?
+    checked-bounds-result
+    (body/->CheckedOperationGapV0 true)))
+
+(def all-cases-pass? Bool
+  (every?
+    (fn [passed Bool] Bool passed)
+    [supported-program-succeeds?
+     unsupported-symbol-rejected?
+     malformed-optional-rejected?
+     malformed-map-get-rejected?
+     malformed-checked-result-rejected?
+     checked-bounds-rejected?]))
+
+(def report String
+  (str
+    "supported-program BodySuccessV0\n"
+    "unsupported-abi AbiSymbolGapV0\n"
+    "malformed-optional OptionalResultLayoutGapV0\n"
+    "malformed-map-get MapGetResultLayoutGapV0\n"
+    "malformed-checked CheckedResultLayoutGapV0\n"
+    "unsupported-checked CheckedOperationGapV0\n"
+    "rejections artifact-free\n"))

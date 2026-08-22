@@ -7,6 +7,7 @@
 
 (require [native.core :as core])
 (require [native.fold-c17 :as c17])
+(require [native.obligations :as obligations])
 (require [native.simd :as simd])
 (require [native.stages :as stages])
 
@@ -16,9 +17,47 @@
    source-name String
    source-text String])
 
+(defunion C17CapabilityGapV0
+  (UnsupportedAbiProfileGapV0 [abi-id String])
+  (SimdAbiGapV0 [abi-id String])
+  (TypeOrLayoutGapV0 [token Bool])
+  (NativeAtomGapV0 [token Bool])
+  (CheckedOperationGapV0 [token Bool])
+  (BitwiseOperationGapV0 [token Bool])
+  (CompareOperationGapV0 [token Bool])
+  (TextBuiltinOperationGapV0 [token Bool])
+  (ValueSemanticsOperationGapV0 [token Bool])
+  (ValueTextModeGapV0 [token Bool])
+  (CodecPrimitiveOperationGapV0 [token Bool])
+  (ConcreteEqualityGapV0 [token Bool])
+  (ParallelBoundaryGapV0 [token Bool])
+  (ParallelReductionPolicyGapV0 [token Bool])
+  (AbiDirectionGapV0 [abi-id core/NativeId])
+  (AbiConventionGapV0 [abi-id core/NativeId])
+  (AbiSymbolGapV0 [abi-id core/NativeId])
+  (OptionalResultLayoutGapV0 [token Bool])
+  (OutcomeResultLayoutGapV0 [token Bool])
+  (MapGetResultLayoutGapV0 [token Bool])
+  (CheckedResultLayoutGapV0 [token Bool])
+  (InstructionGapV0 [token Bool])
+  (TerminatorGapV0 [token Bool]))
+
+(defunion C17CapabilityV0
+  (C17CapabilityAcceptedV0 [token Bool])
+  (C17CapabilityRejectedV0 [gap C17CapabilityGapV0]))
+
+(defunion BodyRejectionV0
+  (InvalidMaterializationRequestV0 [detail String])
+  (NativeObligationRejectionV0
+    [verdict obligations/ObligationVerdictV0])
+  (TargetCapabilityRejectionV0
+    [gap C17CapabilityGapV0
+     detail String])
+  (LiteralEncodingRejectionV0 [detail String]))
+
 (defunion BodyMaterializationV0
   (BodySuccessV0 [artifact BodyArtifactV0])
-  (BodyFailureV0 [detail String]))
+  (BodyFailureV0 [rejection BodyRejectionV0]))
 
 (defrecord BodyFunctionFragmentV0
   [function-index Int
@@ -26,7 +65,7 @@
 
 (defunion BodyFunctionBatchV0
   (BodyFunctionBatchSuccessV0 [fragments (Vec BodyFunctionFragmentV0)])
-  (BodyFunctionBatchFailureV0 [detail String]))
+  (BodyFunctionBatchFailureV0 [rejection BodyRejectionV0]))
 
 (defrecord ValueSlotV0
   [id core/NativeId
@@ -147,17 +186,102 @@
 (defn materialization-ok? [result BodyMaterializationV0] Bool
   (match result
     [(BodySuccessV0 artifact) true]
-    [(BodyFailureV0 detail) false]))
+    [(BodyFailureV0 rejection) false]))
+
+(defn rejection-detail [rejection BodyRejectionV0] String
+  (match rejection
+    [(InvalidMaterializationRequestV0 detail) detail]
+    [(NativeObligationRejectionV0 verdict)
+     (str "native obligation failed: " (obligations/verdict-tag verdict))]
+    [(TargetCapabilityRejectionV0 gap detail) detail]
+    [(LiteralEncodingRejectionV0 detail) detail]))
+
+(defn capability-gap-detail [gap C17CapabilityGapV0] String
+  (match gap
+    [(UnsupportedAbiProfileGapV0 abi-id)
+     (str "restricted C17 does not support ABI profile " abi-id)]
+    [(SimdAbiGapV0 abi-id)
+     (str "restricted C17 SIMD does not support ABI profile " abi-id)]
+    [(TypeOrLayoutGapV0 token)
+     "native program uses a type or layout outside the restricted C17 body slice"]
+    [(NativeAtomGapV0 token)
+     "native program uses an atom outside the restricted C17 body slice"]
+    [(CheckedOperationGapV0 token)
+     "native program uses a checked operation outside the restricted C17 body slice"]
+    [(BitwiseOperationGapV0 token)
+     "native program uses a bitwise operation outside the restricted C17 body slice"]
+    [(CompareOperationGapV0 token)
+     "native program uses a comparison outside the restricted C17 body slice"]
+    [(TextBuiltinOperationGapV0 token)
+     "native program uses a text builtin outside the restricted C17 body slice"]
+    [(ValueSemanticsOperationGapV0 token)
+     "native program uses a value-semantics operation outside the restricted C17 body slice"]
+    [(ValueTextModeGapV0 token)
+     "native program uses a value-text mode outside the restricted C17 body slice"]
+    [(CodecPrimitiveOperationGapV0 token)
+     "native program uses a codec primitive outside the restricted C17 body slice"]
+    [(ConcreteEqualityGapV0 token)
+     "native program uses a collection equality outside the restricted C17 body slice"]
+    [(ParallelBoundaryGapV0 token)
+     "native program uses a parallel boundary outside the restricted C17 body slice"]
+    [(ParallelReductionPolicyGapV0 token)
+     "native program uses a parallel reduction policy outside the restricted C17 body slice"]
+    [(AbiDirectionGapV0 abi-id)
+     "native program uses an ABI direction outside the restricted C17 body slice"]
+    [(AbiConventionGapV0 abi-id)
+     "native program uses an ABI convention outside the restricted C17 body slice"]
+    [(AbiSymbolGapV0 abi-id)
+     "native program uses an ABI symbol outside the restricted C17 body slice"]
+    [(OptionalResultLayoutGapV0 token)
+     "native program uses an optional result layout the restricted C17 emitter cannot realize"]
+    [(OutcomeResultLayoutGapV0 token)
+     "native program uses an outcome result layout the restricted C17 emitter cannot realize"]
+    [(MapGetResultLayoutGapV0 token)
+     "native program uses a map lookup result layout the restricted C17 emitter cannot realize"]
+    [(CheckedResultLayoutGapV0 token)
+     "native program uses a checked result layout the restricted C17 emitter cannot realize"]
+    [(InstructionGapV0 token)
+     "native program uses an instruction outside the restricted C17 body slice"]
+    [(TerminatorGapV0 token)
+     "native program uses a terminator outside the restricted C17 body slice"]))
+
+(defn target-capability-rejection [capability C17CapabilityV0] BodyRejectionV0
+  (match capability
+    [(C17CapabilityAcceptedV0 token)
+     (->InvalidMaterializationRequestV0
+       "target capability rejection requested for a supported program")]
+    [(C17CapabilityRejectedV0 gap)
+     (->TargetCapabilityRejectionV0 gap (capability-gap-detail gap))]))
 
 (defn materialization-detail [result BodyMaterializationV0] String
   (match result
     [(BodySuccessV0 artifact) ""]
-    [(BodyFailureV0 detail) detail]))
+    [(BodyFailureV0 rejection) (rejection-detail rejection)]))
+
+(defn materialization-target-rejected? [result BodyMaterializationV0] Bool
+  (match result
+    [(BodySuccessV0 artifact) false]
+    [(BodyFailureV0 rejection)
+     (match rejection
+       [(TargetCapabilityRejectionV0 gap detail) true]
+       [(InvalidMaterializationRequestV0 detail) false]
+       [(NativeObligationRejectionV0 verdict) false]
+       [(LiteralEncodingRejectionV0 detail) false])]))
+
+(defn materialization-capability-gap [result BodyMaterializationV0] (U C17CapabilityGapV0 Nil)
+  (match result
+    [(BodySuccessV0 artifact) nil]
+    [(BodyFailureV0 rejection)
+     (match rejection
+       [(TargetCapabilityRejectionV0 gap detail) gap]
+       [(InvalidMaterializationRequestV0 detail) nil]
+       [(NativeObligationRejectionV0 verdict) nil]
+       [(LiteralEncodingRejectionV0 detail) nil])]))
 
 (defn materialization-artifact [result BodyMaterializationV0] BodyArtifactV0
   (match result
     [(BodySuccessV0 artifact) artifact]
-    [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
+    [(BodyFailureV0 rejection) (->BodyArtifactV0 "" "" "" "")]))
 
 (defn artifact-hashes [artifact BodyArtifactV0] (Vec core/ArtifactHashV0)
   [(core/->ArtifactHashV0
@@ -177,6 +301,124 @@
       (instance? native.core.CheckedRemI64V0 operation)
       (instance? native.core.CheckedModI64V0 operation)))
 
+(defn atom-supported? [atom core/NativeAtom] Bool
+  (or (instance? native.core.BoolAtom atom)
+      (instance? native.core.I64Atom atom)
+      (instance? native.core.F64Atom atom)
+      (instance? native.core.TextAtom atom)
+      (instance? native.core.KeywordAtom atom)))
+
+(defn comparison-supported? [comparison core/CompareOpV0] Bool
+  (or (instance? native.core.CompareEqI64V0 comparison)
+      (instance? native.core.CompareLtI64V0 comparison)
+      (instance? native.core.CompareLeI64V0 comparison)
+      (instance? native.core.CompareEqF64V0 comparison)
+      (instance? native.core.CompareLtF64V0 comparison)
+      (instance? native.core.CompareLeF64V0 comparison)
+      (instance? native.core.CompareEqBoolV0 comparison)
+      (instance? native.core.CompareEqTextV0 comparison)))
+
+(defn bitwise-operation-supported? [operation core/BitwiseOperationV0] Bool
+  (or (instance? native.core.BitAndI64V0 operation)
+      (instance? native.core.BitOrI64V0 operation)
+      (instance? native.core.BitXorI64V0 operation)
+      (instance? native.core.BitShiftLeftI64V0 operation)
+      (instance? native.core.UnsignedBitShiftRightI64V0 operation)))
+
+(defn text-builtin-supported? [operation core/TextBuiltinOpV0] Bool
+  (or (instance? native.core.TextCompareV0 operation)
+      (instance? native.core.TextLastIndexOfV0 operation)
+      (instance? native.core.TextEndsWithV0 operation)
+      (instance? native.core.TextTrimV0 operation)
+      (instance? native.core.TextLowerV0 operation)
+      (instance? native.core.TextLetterDecimalRunsV0 operation)
+      (instance? native.core.TextRegexReplaceV0 operation)
+      (instance? native.core.TextRegexMatchesV0 operation)
+      (instance? native.core.TextRegexFindV0 operation)
+      (instance? native.core.TextFormatIntV0 operation)
+      (instance? native.core.TextSplitV0 operation)
+      (instance? native.core.TextVectorTrimV0 operation)
+      (instance? native.core.TextVectorRemoveBlankV0 operation)
+      (instance? native.core.TextJoinV0 operation)
+      (instance? native.core.TextRepeatV0 operation)))
+
+(defn value-semantics-supported? [operation core/ValueSemanticsOpV0] Bool
+  (or (instance? native.core.ValueEqualV0 operation)
+      (instance? native.core.ValueHashV0 operation)
+      (instance? native.core.ValueCompareV0 operation)
+      (instance? native.core.DynamicValueEqualV0 operation)
+      (instance? native.core.DynamicValueHashV0 operation)
+      (instance? native.core.DynamicValueCompareV0 operation)))
+
+(defn value-text-mode-supported? [mode core/ValueTextModeV0] Bool
+  (or (instance? native.core.ValueStrV0 mode)
+      (instance? native.core.ValuePrStrV0 mode)))
+
+(defn codec-primitive-supported? [operation core/CodecPrimitiveOpV0] Bool
+  (or (instance? native.core.CharFromCodepointV0 operation)
+      (instance? native.core.Utf8EncodeV0 operation)
+      (instance? native.core.Utf8DecodeV0 operation)
+      (instance? native.core.Utf8DecodeSourceV0 operation)
+      (instance? native.core.NativeBytesFromIntsBoundedV0 operation)
+      (instance? native.core.Sha256BytesV0 operation)
+      (instance? native.core.FloatToBitsV0 operation)
+      (instance? native.core.FloatFromBitsV0 operation)))
+
+(defn concrete-equality-supported? [equality core/ConcreteEqualityV0] Bool
+  (or (instance? native.core.BoolEqualityV0 equality)
+      (instance? native.core.I64EqualityV0 equality)
+      (instance? native.core.F64EqualityV0 equality)
+      (instance? native.core.TextEqualityV0 equality)
+      (instance? native.core.KeywordEqualityV0 equality)
+      (instance? native.core.StructuralEqualityV0 equality)
+      (instance? native.core.DynamicStructuralEqualityV0 equality)))
+
+(defn parallel-boundary-supported? [boundary core/ParallelBoundaryV0] Bool
+  (or (instance? native.core.ParallelBoundedV0 boundary)
+      (instance? native.core.ParallelPeriodicV0 boundary)))
+
+(defn parallel-reduction-policy-supported?
+  [policy core/ParallelReductionPolicyV0] Bool
+  (instance? native.core.F64AdjacentPairwiseV0 policy))
+
+(defn instruction-concrete-equality-supported?
+  [instruction core/Instruction] Bool
+  (cond
+    (instance? native.core.MapLiteralInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/mapliteralinstructionv0-key-equality instruction))
+    (instance? native.core.SetLiteralInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/setliteralinstructionv0-element-equality instruction))
+    (instance? native.core.MapGetInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/mapgetinstructionv0-key-equality instruction))
+    (instance? native.core.MapContainsInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/mapcontainsinstructionv0-key-equality instruction))
+    (instance? native.core.MapAssocInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/mapassocinstructionv0-key-equality instruction))
+    (instance? native.core.MapDissocInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/mapdissocinstructionv0-key-equality instruction))
+    (instance? native.core.SetContainsInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/setcontainsinstructionv0-element-equality instruction))
+    (instance? native.core.SetConjInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/setconjinstructionv0-element-equality instruction))
+    (instance? native.core.SetDisjInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/setdisjinstructionv0-element-equality instruction))
+    (instance? native.core.TransientMapAssocInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/transientmapassocinstructionv0-key-equality instruction))
+    (instance? native.core.TransientSetConjInstructionV0 instruction)
+    (concrete-equality-supported?
+      (core/transientsetconjinstructionv0-element-equality instruction))
+    :else true))
+
 (defn instruction-supported? [instruction core/Instruction] Bool
   (cond
     (instance? native.core.AtomInstruction instruction)
@@ -193,7 +435,8 @@
     (instance? native.core.DivF64InstructionV0 instruction) true
     (instance? native.core.I64ToF64InstructionV0 instruction) true
     (instance? native.core.F64ToI64InstructionV0 instruction) true
-    (instance? native.core.CompareInstruction instruction) true
+    (instance? native.core.CompareInstruction instruction)
+    (comparison-supported? (core/compareinstruction-comparison instruction))
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
     (instance? native.core.RecordAssocInstructionV0 instruction) true
@@ -206,7 +449,9 @@
     (instance? native.core.VariantValueInstruction instruction) true
     (instance? native.core.CheckedInstruction instruction)
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
-    (instance? native.core.BitwiseInstructionV0 instruction) true
+    (instance? native.core.BitwiseInstructionV0 instruction)
+    (bitwise-operation-supported?
+      (core/bitwiseinstructionv0-operation instruction))
     (instance? native.core.UnionConstructInstruction instruction) true
     (instance? native.core.UnionExtractInstruction instruction) true
     (instance? native.core.VecLengthInstruction instruction) true
@@ -224,28 +469,43 @@
     (instance? native.core.BufferLengthInstructionV0 instruction) true
     (instance? native.core.BufferGetCheckedInstructionV0 instruction) true
     (instance? native.core.BufferSetCheckedInstructionV0 instruction) true
-    (instance? native.core.TiledStepF64InstructionV0 instruction) true
-    (instance? native.core.F64BufferSumInstructionV0 instruction) true
+    (instance? native.core.TiledStepF64InstructionV0 instruction)
+    (parallel-boundary-supported?
+      (core/tiledstepf64instructionv0-boundary instruction))
+    (instance? native.core.F64BufferSumInstructionV0 instruction)
+    (parallel-reduction-policy-supported?
+      (core/f64buffersuminstructionv0-policy instruction))
     (instance? native.core.VecSortInstructionV0 instruction) true
-    (instance? native.core.MapLiteralInstructionV0 instruction) true
-    (instance? native.core.SetLiteralInstructionV0 instruction) true
+    (instance? native.core.MapLiteralInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
+    (instance? native.core.SetLiteralInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
     (instance? native.core.MapCountInstructionV0 instruction) true
-    (instance? native.core.MapGetInstructionV0 instruction) true
-    (instance? native.core.MapContainsInstructionV0 instruction) true
-    (instance? native.core.MapAssocInstructionV0 instruction) true
-    (instance? native.core.MapDissocInstructionV0 instruction) true
+    (instance? native.core.MapGetInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
+    (instance? native.core.MapContainsInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
+    (instance? native.core.MapAssocInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
+    (instance? native.core.MapDissocInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
     (instance? native.core.MapKeysInstructionV0 instruction) true
     (instance? native.core.MapValuesInstructionV0 instruction) true
     (instance? native.core.SetCountInstructionV0 instruction) true
-    (instance? native.core.SetContainsInstructionV0 instruction) true
-    (instance? native.core.SetConjInstructionV0 instruction) true
-    (instance? native.core.SetDisjInstructionV0 instruction) true
+    (instance? native.core.SetContainsInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
+    (instance? native.core.SetConjInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
+    (instance? native.core.SetDisjInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
     (instance? native.core.SetVectorInstructionV0 instruction) true
     (instance? native.core.CollectionTransientOpenInstructionV0 instruction) true
     (instance? native.core.CollectionPersistentCloseInstructionV0 instruction) true
     (instance? native.core.TransientVecPushInstructionV0 instruction) true
-    (instance? native.core.TransientMapAssocInstructionV0 instruction) true
-    (instance? native.core.TransientSetConjInstructionV0 instruction) true
+    (instance? native.core.TransientMapAssocInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
+    (instance? native.core.TransientSetConjInstructionV0 instruction)
+    (instruction-concrete-equality-supported? instruction)
     (instance? native.core.ArenaInstruction instruction) true
     (instance? native.core.ArenaCloseInstructionV0 instruction) true
     (instance? native.core.PromoteInstructionV0 instruction) true
@@ -262,10 +522,18 @@
     (instance? native.core.TextParseF64Instruction instruction) true
     (instance? native.core.TextSliceInstruction instruction) true
     (instance? native.core.TextConcatInstruction instruction) true
-    (instance? native.core.TextBuiltinInstruction instruction) true
-    (instance? native.core.ValueSemanticsInstruction instruction) true
-    (instance? native.core.ValueToTextInstructionV0 instruction) true
-    (instance? native.core.CodecPrimitiveInstructionV0 instruction) true
+    (instance? native.core.TextBuiltinInstruction instruction)
+    (text-builtin-supported?
+      (core/textbuiltininstruction-builtin instruction))
+    (instance? native.core.ValueSemanticsInstruction instruction)
+    (value-semantics-supported?
+      (core/valuesemanticsinstruction-operation instruction))
+    (instance? native.core.ValueToTextInstructionV0 instruction)
+    (value-text-mode-supported?
+      (core/valuetotextinstructionv0-mode instruction))
+    (instance? native.core.CodecPrimitiveInstructionV0 instruction)
+    (codec-primitive-supported?
+      (core/codecprimitiveinstructionv0-operation instruction))
     :else false))
 
 (defn terminator-supported? [terminator core/Terminator] Bool
@@ -373,8 +641,7 @@
       (let [abi core/AbiDeclV0 (nth abis position)
             parameters (Vec core/AbiValueV0) (core/abideclv0-parameters abi)
             result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
-            parameter (U core/AbiValueV0 Nil)
-            (if (= 1 (count parameters)) (nth parameters 0) nil)]
+            parameter (U core/AbiValueV0 Nil) (if (= 1 (count parameters)) (nth parameters 0) nil)]
         (if (and
               (= "native_host_store_compile_v0" (core/abideclv0-symbol abi))
               (instance? native.core.AbiImportV0
@@ -394,11 +661,9 @@
               (core/native-id=
                 (clj-compatibility-store-compile-response-type-id)
                 (core/abivaluev0-type-id result))
-              (let [ownership core/OwnershipRuleV0
-                    (core/abivaluev0-ownership result)
+              (let [ownership core/OwnershipRuleV0 (core/abivaluev0-ownership result)
                     region (U core/NativeId Nil) (get ownership :region nil)
-                    lifetime (U core/NativeId Nil)
-                    (core/abivaluev0-lifetime-region result)]
+                    lifetime (U core/NativeId Nil) (core/abivaluev0-lifetime-region result)]
                 (and
                   (instance? native.core.ArenaOwnedV0 ownership)
                   (some? region)
@@ -409,40 +674,6 @@
               (= "v0" (core/abideclv0-version abi)))
           abi
           (recur (+ position 1)))))))
-
-(defn program-supported? [program core/NativeCoreProgram] Bool
-  (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
-        types (Vec core/TypeDef) (core/nativecoreprogram-types program)]
-    (and (every? (fn [type-def core/TypeDef] Bool
-                   (c17/type-supported? type-def types layouts))
-           types)
-      (c17/types-orderable? types layouts)
-      (every?
-        (fn [abi core/AbiDeclV0] Bool
-          (or
-            (instance? native.core.AbiExportV0
-              (core/abideclv0-direction abi))
-            (and (instance? native.core.RestrictedCOptionalOutAbiV0
-                   (core/abideclv0-convention abi))
-              (= "native_host_environment_lookup_v0"
-                (core/abideclv0-symbol abi)))
-            (and (instance? native.core.RestrictedCAbiV0
-                   (core/abideclv0-convention abi))
-              (or (host-direct-symbol? (core/abideclv0-symbol abi))
-                (host-process-direct-symbol? (core/abideclv0-symbol abi))
-                (host-context-direct-symbol? (core/abideclv0-symbol abi))
-                (host-whole-input-symbol?
-                  (core/abideclv0-symbol abi))))
-            (and (instance? native.core.RestrictedCOutcomeOutAbiV0
-                   (core/abideclv0-convention abi))
-              (or (host-socket-symbol? (core/abideclv0-symbol abi))
-                (host-filesystem-symbol? (core/abideclv0-symbol abi))
-                (host-process-outcome-symbol? (core/abideclv0-symbol abi))
-                (host-context-outcome-symbol? (core/abideclv0-symbol abi))
-                (host-clock-outcome-symbol?
-                  (core/abideclv0-symbol abi))))))
-        (core/nativecoreprogram-abis program))
-      (every? function-supported? (core/nativecoreprogram-functions program)))))
 
 (defn block-index
   [blocks (Vec core/BasicBlock)
@@ -1969,6 +2200,382 @@
 
         :else ""))))
 
+(defn type-variant-with-id
+  [variants (Vec core/TypeVariant)
+   target core/NativeId] (U core/TypeVariant Nil)
+  (loop [position Int 0]
+    (cond
+      (>= position (count variants)) nil
+      (core/native-id= (core/typevariant-id (nth variants position)) target)
+      (nth variants position)
+      :else (recur (+ position 1)))))
+
+(defn closed-optional-result-layout?
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   owner core/NativeId] Bool
+  (let [definition (U core/TypeDef Nil) (type-with-id types owner)]
+    (if (nil? definition)
+      false
+      (let [shape core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.UnionType shape))
+          false
+          (let [variants (Vec core/TypeVariant) (core/uniontype-variants shape)
+                payload (U core/NativeId Nil) (optional-payload-type types owner)]
+            (if (nil? payload)
+              false
+              (let [payload-tag Int (variant-tag-for-payload layouts owner payload)
+                    absent-tag Int (absent-variant-tag types layouts owner)]
+                (and (= 2 (count variants))
+                  (>= payload-tag 0)
+                  (>= absent-tag 0)
+                  (not= payload-tag absent-tag))))))))))
+
+(defn optional-result-layout-for?
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   owner core/NativeId
+   expected-payload core/NativeId] Bool
+  (let [payload (U core/NativeId Nil) (optional-payload-type types owner)]
+    (and (closed-optional-result-layout? types layouts owner)
+      (if (nil? payload)
+        false
+        (core/native-id= payload expected-payload)))))
+
+(defn outcome-variant-name-supported? [variant core/TypeVariant] Bool
+  (or (= "ok" (core/typevariant-name variant))
+      (= "peer-closed" (core/typevariant-name variant))
+      (= "overflow" (core/typevariant-name variant))
+      (= "error" (core/typevariant-name variant))))
+
+(defn outcome-result-layout-supported?
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   owner core/NativeId] Bool
+  (let [definition (U core/TypeDef Nil) (type-with-id types owner)]
+    (if (nil? definition)
+      false
+      (let [shape core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.OutcomeType shape))
+          false
+          (let [variants (Vec core/TypeVariant) (outcome-variants types owner)
+                ok (U core/TypeVariant Nil) (outcome-variant types owner "ok")
+                peer (U core/TypeVariant Nil) (outcome-variant types owner "peer-closed")
+                overflow (U core/TypeVariant Nil) (outcome-variant types owner "overflow")
+                error (U core/TypeVariant Nil) (outcome-variant types owner "error")
+                ok-payload (U core/NativeId Nil) (outcome-variant-payload types owner "ok")
+                error-payload (U core/NativeId Nil) (outcome-variant-payload types owner "error")
+                value-type core/NativeId (core/outcometype-value-type shape)
+                ok-tag Int (outcome-variant-tag types layouts owner "ok")
+                peer-tag Int (outcome-variant-tag types layouts owner "peer-closed")
+                overflow-tag Int (outcome-variant-tag types layouts owner "overflow")
+                error-tag Int (outcome-variant-tag types layouts owner "error")]
+            (and (or (= 2 (count variants)) (= 3 (count variants)))
+              (every? outcome-variant-name-supported? variants)
+              (some? ok)
+              (some? error)
+              (not (and (some? peer) (some? overflow)))
+              (= (= 3 (count variants))
+                (or (some? peer) (some? overflow)))
+              (if (unit-type? types value-type)
+                (nil? ok-payload)
+                (if (nil? ok-payload)
+                  false
+                  (core/native-id= ok-payload value-type)))
+              (if (nil? error-payload)
+                false
+                (core/native-id= error-payload (i64-type-id types)))
+              (if (nil? peer)
+                true
+                (nil? (core/typevariant-payload-type peer)))
+              (if (nil? overflow)
+                true
+                (nil? (core/typevariant-payload-type overflow)))
+              (>= ok-tag 0)
+              (>= error-tag 0)
+              (if (nil? peer) true (>= peer-tag 0))
+              (if (nil? overflow) true (>= overflow-tag 0)))))))))
+
+(defn checked-result-layout-supported?
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   result core/SsaValueV0
+   operation core/CheckedOperationV0] Bool
+  (let [owner core/NativeId (core/ssavaluev0-type-id result)
+        definition (U core/TypeDef Nil) (type-with-id types owner)]
+    (if (nil? definition)
+      false
+      (let [shape core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.OutcomeType shape))
+          false
+          (let [division Bool (checked-division? operation)
+                ok-id core/NativeId (if division
+                  (core/checked-division-ok-variant-id)
+                  (core/checked-ok-variant-id))
+                failure-id core/NativeId (if division
+                  (core/checked-division-zero-variant-id)
+                  (core/checked-overflow-variant-id))
+                variants (Vec core/TypeVariant) (outcome-variants types owner)
+                ok (U core/TypeVariant Nil) (type-variant-with-id variants ok-id)
+                failure (U core/TypeVariant Nil) (type-variant-with-id variants failure-id)
+                value-type core/NativeId (core/outcometype-value-type shape)
+                ok-tag Int (variant-tag layouts owner ok-id)
+                failure-tag Int (variant-tag layouts owner failure-id)]
+            (and (= 2 (count variants))
+              (core/native-id= value-type (i64-type-id types))
+              (if (nil? ok)
+                false
+                (let [payload (U core/NativeId Nil) (core/typevariant-payload-type ok)]
+                  (if (nil? payload)
+                    false
+                    (core/native-id= payload value-type))))
+              (if (nil? failure)
+                false
+                (nil? (core/typevariant-payload-type failure)))
+              (>= ok-tag 0)
+              (>= failure-tag 0)
+              (not= ok-tag failure-tag))))))))
+
+(defn text-optional-result-layout-supported?
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   instruction core/Instruction] Bool
+  (cond
+    (instance? native.core.TextIndexOfInstruction instruction)
+    (optional-result-layout-for? types layouts
+      (core/ssavaluev0-type-id
+        (core/textindexofinstruction-result instruction))
+      (i64-type-id types))
+    (instance? native.core.TextParseI64Instruction instruction)
+    (optional-result-layout-for? types layouts
+      (core/ssavaluev0-type-id
+        (core/textparsei64instruction-result instruction))
+      (i64-type-id types))
+    (instance? native.core.TextParseF64Instruction instruction)
+    (optional-result-layout-for? types layouts
+      (core/ssavaluev0-type-id
+        (core/textparsef64instruction-result instruction))
+      (f64-type-id types))
+    (instance? native.core.TextBuiltinInstruction instruction)
+    (let [operation core/TextBuiltinOpV0 (core/textbuiltininstruction-builtin instruction)]
+      (if (instance? native.core.TextLastIndexOfV0 operation)
+        (optional-result-layout-for? types layouts
+          (core/ssavaluev0-type-id
+            (core/textbuiltininstruction-result instruction))
+          (i64-type-id types))
+        true))
+    :else true))
+
+(defn map-get-result-layout-supported?
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   function core/FunctionDef
+   instruction core/MapGetInstructionV0] Bool
+  (let [result core/SsaValueV0 (core/mapgetinstructionv0-result instruction)
+        result-type core/NativeId (core/ssavaluev0-type-id result)
+        source-type core/NativeId (slot-type function (function-value-slots function)
+          (core/mapgetinstructionv0-source-id instruction))
+        value-type core/NativeId (map-value-type layouts source-type)
+        default (U core/NativeId Nil) (core/mapgetinstructionv0-default-id instruction)]
+    (if (nil? default)
+      (if (core/native-id= result-type value-type)
+        (>= (absent-variant-tag types layouts result-type) 0)
+        (optional-result-layout-for? types layouts result-type value-type))
+      (and (core/native-id= result-type value-type)
+        (core/native-id=
+          (slot-type function (function-value-slots function) default)
+          value-type)))))
+
+(defn abi-capability-gap
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   abi core/AbiDeclV0] (U C17CapabilityGapV0 Nil)
+  (let [direction core/AbiDirectionV0 (core/abideclv0-direction abi)
+        convention core/AbiConventionV0 (core/abideclv0-convention abi)
+        abi-id core/NativeId (core/abideclv0-id abi)
+        symbol String (core/abideclv0-symbol abi)
+        result (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
+    (cond
+      (instance? native.core.AbiExportV0 direction)
+      (if (instance? native.core.RestrictedCAbiV0 convention)
+        nil
+        (->AbiConventionGapV0 abi-id))
+
+      (instance? native.core.AbiImportV0 direction)
+      (cond
+        (instance? native.core.RestrictedCAbiV0 convention)
+        (if (or (host-direct-symbol? symbol)
+              (host-process-direct-symbol? symbol)
+              (host-context-direct-symbol? symbol)
+              (host-whole-input-symbol? symbol))
+          nil
+          (->AbiSymbolGapV0 abi-id))
+
+        (instance? native.core.RestrictedCOptionalOutAbiV0 convention)
+        (if (not (= "native_host_environment_lookup_v0" symbol))
+          (->AbiSymbolGapV0 abi-id)
+          (if (nil? result)
+            (->OptionalResultLayoutGapV0 true)
+            (if (closed-optional-result-layout? types layouts
+                  (core/abivaluev0-type-id result))
+              nil
+              (->OptionalResultLayoutGapV0 true))))
+
+        (instance? native.core.RestrictedCOutcomeOutAbiV0 convention)
+        (if (not (or (host-socket-symbol? symbol)
+                   (host-filesystem-symbol? symbol)
+                   (host-process-outcome-symbol? symbol)
+                   (host-context-outcome-symbol? symbol)
+                   (host-clock-outcome-symbol? symbol)))
+          (->AbiSymbolGapV0 abi-id)
+          (if (nil? result)
+            (->OutcomeResultLayoutGapV0 true)
+            (if (outcome-result-layout-supported? types layouts
+                  (core/abivaluev0-type-id result))
+              nil
+              (->OutcomeResultLayoutGapV0 true))))
+
+        :else (->AbiConventionGapV0 abi-id))
+
+      :else (->AbiDirectionGapV0 abi-id))))
+
+(defn nested-instruction-capability-gap
+  [instruction core/Instruction] (U C17CapabilityGapV0 Nil)
+  (cond
+    (and (instance? native.core.AtomInstruction instruction)
+      (not (atom-supported? (core/atominstruction-atom instruction))))
+    (->NativeAtomGapV0 true)
+    (and (instance? native.core.CheckedInstruction instruction)
+      (not (checked-operation-supported?
+        (core/checkedinstruction-operation instruction))))
+    (->CheckedOperationGapV0 true)
+    (and (instance? native.core.BitwiseInstructionV0 instruction)
+      (not (bitwise-operation-supported?
+        (core/bitwiseinstructionv0-operation instruction))))
+    (->BitwiseOperationGapV0 true)
+    (and (instance? native.core.CompareInstruction instruction)
+      (not (comparison-supported?
+        (core/compareinstruction-comparison instruction))))
+    (->CompareOperationGapV0 true)
+    (and (instance? native.core.TextBuiltinInstruction instruction)
+      (not (text-builtin-supported?
+        (core/textbuiltininstruction-builtin instruction))))
+    (->TextBuiltinOperationGapV0 true)
+    (and (instance? native.core.ValueSemanticsInstruction instruction)
+      (not (value-semantics-supported?
+        (core/valuesemanticsinstruction-operation instruction))))
+    (->ValueSemanticsOperationGapV0 true)
+    (and (instance? native.core.ValueToTextInstructionV0 instruction)
+      (not (value-text-mode-supported?
+        (core/valuetotextinstructionv0-mode instruction))))
+    (->ValueTextModeGapV0 true)
+    (and (instance? native.core.CodecPrimitiveInstructionV0 instruction)
+      (not (codec-primitive-supported?
+        (core/codecprimitiveinstructionv0-operation instruction))))
+    (->CodecPrimitiveOperationGapV0 true)
+    (not (instruction-concrete-equality-supported? instruction))
+    (->ConcreteEqualityGapV0 true)
+    (and (instance? native.core.TiledStepF64InstructionV0 instruction)
+      (not (parallel-boundary-supported?
+        (core/tiledstepf64instructionv0-boundary instruction))))
+    (->ParallelBoundaryGapV0 true)
+    (and (instance? native.core.F64BufferSumInstructionV0 instruction)
+      (not (parallel-reduction-policy-supported?
+        (core/f64buffersuminstructionv0-policy instruction))))
+    (->ParallelReductionPolicyGapV0 true)
+    :else nil))
+
+(defn instruction-capability-gap
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   function core/FunctionDef
+   instruction core/Instruction] (U C17CapabilityGapV0 Nil)
+  (let [nested (U C17CapabilityGapV0 Nil) (nested-instruction-capability-gap instruction)]
+    (if (some? nested)
+      nested
+      (cond
+        (not (instruction-supported? instruction))
+        (->InstructionGapV0 true)
+        (and (instance? native.core.CheckedInstruction instruction)
+          (not (checked-result-layout-supported? types layouts
+            (core/checkedinstruction-result instruction)
+            (core/checkedinstruction-operation instruction))))
+        (->CheckedResultLayoutGapV0 true)
+        (not (text-optional-result-layout-supported? types layouts instruction))
+        (->OptionalResultLayoutGapV0 true)
+        (and (instance? native.core.MapGetInstructionV0 instruction)
+          (not (map-get-result-layout-supported? types layouts function
+            instruction)))
+        (->MapGetResultLayoutGapV0 true)
+        :else nil))))
+
+(defn block-capability-gap
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   function core/FunctionDef
+   block core/BasicBlock] (U C17CapabilityGapV0 Nil)
+  (if (not= 1 (count (core/basicblock-terminators block)))
+    (->TerminatorGapV0 true)
+    (loop [position Int 0
+           instructions (Vec core/Instruction) (core/basicblock-instructions block)]
+      (if (>= position (count instructions))
+        (if (terminator-supported?
+              (nth (core/basicblock-terminators block) 0))
+          nil
+          (->TerminatorGapV0 true))
+        (let [gap (U C17CapabilityGapV0 Nil) (instruction-capability-gap types layouts function
+                (nth instructions position))]
+          (if (nil? gap)
+            (recur (+ position 1) instructions)
+            gap))))))
+
+(defn function-capability-gap
+  [types (Vec core/TypeDef)
+   layouts (Vec core/LayoutDef)
+   function core/FunctionDef] (U C17CapabilityGapV0 Nil)
+  (if (= 0 (count (core/functiondef-blocks function)))
+    (->InstructionGapV0 true)
+    (loop [position Int 0
+           blocks (Vec core/BasicBlock) (core/functiondef-blocks function)]
+      (if (>= position (count blocks))
+        nil
+        (let [gap (U C17CapabilityGapV0 Nil) (block-capability-gap types layouts function
+                (nth blocks position))]
+          (if (nil? gap)
+            (recur (+ position 1) blocks)
+            gap))))))
+
+(defn program-capability [program core/NativeCoreProgram] C17CapabilityV0
+  (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
+        types (Vec core/TypeDef) (core/nativecoreprogram-types program)]
+    (if (or
+          (not (every? (fn [type-def core/TypeDef] Bool
+                         (c17/type-supported? type-def types layouts))
+                 types))
+          (not (c17/types-orderable? types layouts)))
+      (->C17CapabilityRejectedV0 (->TypeOrLayoutGapV0 true))
+      (loop [position Int 0
+             abis (Vec core/AbiDeclV0) (core/nativecoreprogram-abis program)]
+        (if (< position (count abis))
+          (let [gap (U C17CapabilityGapV0 Nil) (abi-capability-gap types layouts (nth abis position))]
+            (if (nil? gap)
+              (recur (+ position 1) abis)
+              (->C17CapabilityRejectedV0 gap)))
+          (loop [function-position Int 0
+                 functions (Vec core/FunctionDef) (core/nativecoreprogram-functions program)]
+            (if (>= function-position (count functions))
+              (->C17CapabilityAcceptedV0 true)
+              (let [gap (U C17CapabilityGapV0 Nil) (function-capability-gap types layouts
+                      (nth functions function-position))]
+                (if (nil? gap)
+                  (recur (+ function-position 1) functions)
+                  (->C17CapabilityRejectedV0 gap))))))))))
+
+(defn program-supported? [program core/NativeCoreProgram] Bool
+  (match (program-capability program)
+    [(C17CapabilityAcceptedV0 token) true]
+    [(C17CapabilityRejectedV0 gap) false]))
+
 (defn value-referenced?
   [function core/FunctionDef
    target core/NativeId] Bool
@@ -2401,8 +3008,7 @@
               (core/nativebytesfromintsboundedv0-max-bytes-id operation))
             ");\n")
           (instance? native.core.Sha256BytesV0 operation)
-          (let [source-id core/NativeId
-                (core/sha256bytesv0-source-id operation)
+          (let [source-id core/NativeId (core/sha256bytesv0-source-id operation)
                 source String (value-name function slots source-id)]
             (if (byte-source-type? types (slot-type function slots source-id))
               (str "  " target " = native_sha256_byte_source((native_arena *)"
@@ -3732,7 +4338,8 @@
    module-index Int] String
   (str
     "const native_host_store_named_type_v0 native_host_store_compile_types_v0[] = {\n"
-    (loop [position Int 0 result String ""]
+    (loop [position Int 0
+           result String ""]
       (if (>= position (count types))
         result
         (let [definition core/TypeDef (nth types position)]
@@ -3749,7 +4356,8 @@
   [types (Vec core/TypeDef)] String
   (str
     "const native_host_store_named_field_v0 native_host_store_compile_fields_v0[] = {\n"
-    (loop [type-position Int 0 result String ""]
+    (loop [type-position Int 0
+           result String ""]
       (if (>= type-position (count types))
         result
         (let [definition core/TypeDef (nth types type-position)
@@ -3778,7 +4386,8 @@
    layouts (Vec core/LayoutDef)] String
   (str
     "const native_host_store_named_variant_v0 native_host_store_compile_variants_v0[] = {\n"
-    (loop [type-position Int 0 result String ""]
+    (loop [type-position Int 0
+           result String ""]
       (if (>= type-position (count types))
         result
         (let [definition core/TypeDef (nth types type-position)
@@ -3929,33 +4538,66 @@
     (emit-functions types layouts regions functions abis module-index pool
       plans)))
 
+(defn first-failed-obligation
+  [verdicts (Vec obligations/ObligationVerdictV0)]
+  (U obligations/ObligationVerdictV0 Nil)
+  (loop [position Int 0]
+    (cond
+      (>= position (count verdicts)) nil
+      (obligations/obligation-passed? (nth verdicts position))
+      (recur (+ position 1))
+      :else (nth verdicts position))))
+
+(defn materialization-preflight-rejection
+  [program core/NativeCoreProgram
+   module-index Int
+   abi-id String] (U BodyRejectionV0 Nil)
+  (if (< module-index 0)
+    (->InvalidMaterializationRequestV0
+      "module index must be nonnegative")
+    (let [abi (U core/AbiProfileV0 Nil) (core/abi-profile-for abi-id)]
+      (if (nil? abi)
+        (let [gap C17CapabilityGapV0 (->UnsupportedAbiProfileGapV0 abi-id)]
+          (->TargetCapabilityRejectionV0 gap (capability-gap-detail gap)))
+        (let [verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program program abi)
+              obligations-passed Bool (every?
+                (fn [verdict obligations/ObligationVerdictV0] Bool
+                  (obligations/obligation-passed? verdict))
+                verdicts)
+              failed (U obligations/ObligationVerdictV0 Nil) (first-failed-obligation verdicts)
+              capability C17CapabilityV0 (program-capability program)]
+          (cond
+            (not obligations-passed)
+            (if (nil? failed)
+              (->InvalidMaterializationRequestV0
+                "native obligation validator reported failure without a verdict")
+              (->NativeObligationRejectionV0 failed))
+
+            (and (not (= abi-id "lp64"))
+              (functions-use-parallel?
+                (core/nativecoreprogram-functions program)))
+            (let [gap C17CapabilityGapV0 (->UnsupportedAbiProfileGapV0 abi-id)]
+              (->TargetCapabilityRejectionV0 gap
+                "shared-memory-worker-host-envelope-unavailable"))
+
+            (not (program-supported? program))
+            (target-capability-rejection capability)
+
+            (not (pool-emittable?
+                   (collect-pool
+                     (core/nativecoreprogram-functions program))))
+            (->LiteralEncodingRejectionV0
+              "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
+
+            :else nil))))))
+
 (defn materialize-program-plans
   [program core/NativeCoreProgram
    module-index Int
    abi-id String
    plans (Vec simd/SimdLoopPlanV0)] BodyMaterializationV0
-  (let [validation core/ValidationReport (core/validate-program program)]
-    (cond
-      (< module-index 0)
-      (->BodyFailureV0 "module index must be nonnegative")
-
-      (and (not (= abi-id "lp64"))
-        (functions-use-parallel? (core/nativecoreprogram-functions program)))
-      (->BodyFailureV0
-        "shared-memory-worker-host-envelope-unavailable")
-
-      (not (core/validationreport-passed validation))
-      (->BodyFailureV0 "native program is not frozen: validation obligations failed")
-
-      (not (program-supported? program))
-      (->BodyFailureV0
-        "native program uses a shape outside the restricted C17 body slice")
-
-      (not (pool-emittable? (collect-pool (core/nativecoreprogram-functions program))))
-      (->BodyFailureV0
-        "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
-
-      :else
+  (let [rejection (U BodyRejectionV0 Nil) (materialization-preflight-rejection program module-index abi-id)]
+    (if (nil? rejection)
       (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
             types (Vec core/TypeDef) (c17/dependency-ordered-types (core/nativecoreprogram-types program) layouts)
             functions (Vec core/FunctionDef) (c17/ordered-functions (core/nativecoreprogram-functions program))
@@ -3968,7 +4610,8 @@
             (emit-public-header types layouts functions abis module-index)
             (str "module_" module-index ".c")
             (emit-source types layouts (core/nativecoreprogram-regions program)
-              functions abis module-index pool header-name plans)))))))
+              functions abis module-index pool header-name plans))))
+      (->BodyFailureV0 rejection))))
 
 (defn materialize-program-plans-with-function-text
   [program core/NativeCoreProgram
@@ -3976,29 +4619,8 @@
    abi-id String
    plans (Vec simd/SimdLoopPlanV0)
    function-text String] BodyMaterializationV0
-  (let [validation core/ValidationReport (core/validate-program program)]
-    (cond
-      (< module-index 0)
-      (->BodyFailureV0 "module index must be nonnegative")
-
-      (and (not (= abi-id "lp64"))
-        (functions-use-parallel? (core/nativecoreprogram-functions program)))
-      (->BodyFailureV0
-        "shared-memory-worker-host-envelope-unavailable")
-
-      (not (core/validationreport-passed validation))
-      (->BodyFailureV0 "native program is not frozen: validation obligations failed")
-
-      (not (program-supported? program))
-      (->BodyFailureV0
-        "native program uses a shape outside the restricted C17 body slice")
-
-      (not (pool-emittable?
-             (collect-pool (core/nativecoreprogram-functions program))))
-      (->BodyFailureV0
-        "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
-
-      :else
+  (let [rejection (U BodyRejectionV0 Nil) (materialization-preflight-rejection program module-index abi-id)]
+    (if (nil? rejection)
       (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
             types (Vec core/TypeDef) (c17/dependency-ordered-types
               (core/nativecoreprogram-types program) layouts)
@@ -4014,7 +4636,8 @@
             (str
               (emit-source-prefix types layouts functions abis module-index pool
                 header-name plans)
-              function-text)))))))
+              function-text))))
+      (->BodyFailureV0 rejection))))
 
 (defn materialize-program-for-abi
   [program core/NativeCoreProgram
@@ -4036,7 +4659,8 @@
   (let [eligible (simd/eligible-loops plan)]
     (if (= 0 (count eligible))
       (->BodyFailureV0
-        "SimdPlanV0 contains no eligible-elementwise-f64-v0 loop")
+        (->InvalidMaterializationRequestV0
+          "SimdPlanV0 contains no eligible-elementwise-f64-v0 loop"))
       (materialize-program-plans program module-index "lp64" eligible))))
 
 ;; A worker batch carries absolute indexes into the canonical function order.
@@ -4059,17 +4683,17 @@
 (defn function-batch-ok? [result BodyFunctionBatchV0] Bool
   (match result
     [(BodyFunctionBatchSuccessV0 fragments) true]
-    [(BodyFunctionBatchFailureV0 detail) false]))
+    [(BodyFunctionBatchFailureV0 rejection) false]))
 
 (defn function-batch-detail [result BodyFunctionBatchV0] String
   (match result
     [(BodyFunctionBatchSuccessV0 fragments) ""]
-    [(BodyFunctionBatchFailureV0 detail) detail]))
+    [(BodyFunctionBatchFailureV0 rejection) (rejection-detail rejection)]))
 
 (defn function-batch-fragments [result BodyFunctionBatchV0] (Vec BodyFunctionFragmentV0)
   (match result
     [(BodyFunctionBatchSuccessV0 fragments) fragments]
-    [(BodyFunctionBatchFailureV0 detail) []]))
+    [(BodyFunctionBatchFailureV0 rejection) []]))
 
 (defn materialize-function-indexes
   [program core/NativeCoreProgram
@@ -4077,30 +4701,8 @@
    abi-id String
    plans (Vec simd/SimdLoopPlanV0)
    function-indexes (Vec Int)] BodyFunctionBatchV0
-  (let [validation core/ValidationReport (core/validate-program program)]
-    (cond
-      (< module-index 0)
-      (->BodyFunctionBatchFailureV0 "module index must be nonnegative")
-
-      (and (not (= abi-id "lp64"))
-        (functions-use-parallel? (core/nativecoreprogram-functions program)))
-      (->BodyFunctionBatchFailureV0
-        "shared-memory-worker-host-envelope-unavailable")
-
-      (not (core/validationreport-passed validation))
-      (->BodyFunctionBatchFailureV0
-        "native program is not frozen: validation obligations failed")
-
-      (not (program-supported? program))
-      (->BodyFunctionBatchFailureV0
-        "native program uses a shape outside the restricted C17 body slice")
-
-      (not (pool-emittable?
-             (collect-pool (core/nativecoreprogram-functions program))))
-      (->BodyFunctionBatchFailureV0
-        "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
-
-      :else
+  (let [rejection (U BodyRejectionV0 Nil) (materialization-preflight-rejection program module-index abi-id)]
+    (if (nil? rejection)
       (let [layouts (Vec core/LayoutDef) (core/nativecoreprogram-layouts program)
             types (Vec core/TypeDef) (c17/dependency-ordered-types
               (core/nativecoreprogram-types program) layouts)
@@ -4110,7 +4712,8 @@
         (if-not (canonical-function-indexes?
                   function-indexes (count functions))
           (->BodyFunctionBatchFailureV0
-            "function indexes must be strictly increasing, unique, and in canonical range")
+            (->InvalidMaterializationRequestV0
+              "function indexes must be strictly increasing, unique, and in canonical range"))
           (->BodyFunctionBatchSuccessV0
             (loop [position Int 0
                    fragments (Vec BodyFunctionFragmentV0) []]
@@ -4123,4 +4726,5 @@
                         (emit-function types layouts
                           (core/nativecoreprogram-regions program)
                           functions abis module-index pool function-index
-                          (nth functions function-index) plans)))))))))))))
+                          (nth functions function-index) plans))))))))))
+      (->BodyFunctionBatchFailureV0 rejection))))

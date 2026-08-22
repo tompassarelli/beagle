@@ -14,6 +14,9 @@ mkdir -p "$scratch/out" "$scratch/c" "$artifacts"
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
+  "$repo/native-core/src/native/stages.bclj" \
+  "$repo/native-core/src/native/obligations.bclj" \
+  "$repo/native-core/src/native/simd.bclj" \
   "$repo/native-core/src/native/fold_c17.bclj" \
   "$repo/native-core/src/native/body_c17.bclj" \
   "$repo/native-core/src/native/qbe.bclj" \
@@ -27,7 +30,7 @@ mkdir -p "$scratch/out" "$scratch/c" "$artifacts"
 # the emitted Clojure target until cross-module match qualification lands.
 core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
   "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for module in fold_c17 body_c17 qbe validation_corpus; do
+for module in stages obligations simd fold_c17 body_c17 qbe validation_corpus; do
   generated="$scratch/out/native/$module.clj"
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
     "$generated"

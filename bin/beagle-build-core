@@ -3227,17 +3227,30 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                            (emission-parallel? projected))
             result (cond
                  parallel?
-                 (let [batch (parallel-function-text
-                              "materialization-c17" "c17" projected abi-id)]
-                   (if (:ok? batch)
-                     (body/materialize-program-plans-with-function-text
-                      projected 0 abi-id [] (:text batch))
-                     (body/->BodyFailureV0 (:detail batch))))
+                 (let [rejection
+                       (body/materialization-preflight-rejection
+                        projected 0 abi-id)]
+                   (if (some? rejection)
+                     (body/->BodyFailureV0 rejection)
+                     (let [batch (parallel-function-text
+                                  "materialization-c17" "c17" projected
+                                  abi-id)]
+                       (if (:ok? batch)
+                         (body/materialize-program-plans-with-function-text
+                          projected 0 abi-id [] (:text batch))
+                         (throw
+                          (ex-info
+                           "C17 worker refused after coordinator preflight passed"
+                           {:backend "c17"
+                            :stage "materialization-c17"
+                            :detail (:detail batch)}))))))
                  (not simd-required?)
                  (body/materialize-program-for-abi projected 0 abi-id)
                  (not= abi-id "lp64")
                  (body/->BodyFailureV0
-                   (simd/demanded-backend-refusal "wasm"))
+                   (body/->TargetCapabilityRejectionV0
+                    (body/->SimdAbiGapV0 abi-id)
+                    (simd/demanded-backend-refusal "wasm")))
                  :else (body/materialize-program-with-simd projected 0 plan))
         ok? (body/materialization-ok? result)
         parallel-wasm-refusal? (and (= abi-id "wasm32")
@@ -3271,13 +3284,23 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
   (start-stage! "materialization-wasm-bootstrap-c17")
   (let [parallel? (emission-parallel? projected)
         result (if parallel?
-                 (let [batch (parallel-function-text
-                              "materialization-wasm-bootstrap-c17"
-                              "c17" projected abi-id)]
-                   (if (:ok? batch)
-                     (body/materialize-program-plans-with-function-text
-                      projected 0 abi-id [] (:text batch))
-                     (body/->BodyFailureV0 (:detail batch))))
+                 (let [rejection
+                       (body/materialization-preflight-rejection
+                        projected 0 abi-id)]
+                   (if (some? rejection)
+                     (body/->BodyFailureV0 rejection)
+                     (let [batch (parallel-function-text
+                                  "materialization-wasm-bootstrap-c17"
+                                  "c17" projected abi-id)]
+                       (if (:ok? batch)
+                         (body/materialize-program-plans-with-function-text
+                          projected 0 abi-id [] (:text batch))
+                         (throw
+                          (ex-info
+                           "C17 worker refused after coordinator preflight passed"
+                           {:backend "c17"
+                            :stage "materialization-wasm-bootstrap-c17"
+                            :detail (:detail batch)}))))))
                  (body/materialize-program-for-abi projected 0 abi-id))
         ok? (body/materialization-ok? result)
         report (str "materialize-wasm-bootstrap-c17 "
