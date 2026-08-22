@@ -1,0 +1,9 @@
+#lang beagle
+
+(ns native.c17-i64-literals)
+
+(defn minimum [] Int
+  -9223372036854775808)
+
+(defn nearby-negative [] Int
+  -7)

@@ -621,7 +621,7 @@
     (instance? native.core.BoolAtom atom)
     (if (core/boolatom-value atom) "true" "false")
     (instance? native.core.I64Atom atom)
-    (str "INT64_C(" (core/i64atom-value atom) ")")
+    (c17/emit-i64-literal (core/i64atom-value atom))
     (instance? native.core.F64Atom atom) (str (core/f64atom-value atom))
     (instance? native.core.TextAtom atom)
     (str "(uint64_t)(uintptr_t)&"

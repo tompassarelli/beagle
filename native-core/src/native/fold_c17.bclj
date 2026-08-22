@@ -806,10 +806,16 @@
         (conj lines
           (emit-function-prototype types module-index index (nth functions index)))))))
 
+(defn emit-i64-literal [value Int] String
+  (if (= value -9223372036854775808)
+    "INT64_MIN"
+    (str "INT64_C(" value ")")))
+
 (defn emit-atom-expression [atom core/NativeAtom] String
   (cond
     (instance? native.core.BoolAtom atom) (if (core/boolatom-value atom) "true" "false")
-    (instance? native.core.I64Atom atom) (str "INT64_C(" (core/i64atom-value atom) ")")
+    (instance? native.core.I64Atom atom)
+    (emit-i64-literal (core/i64atom-value atom))
     (instance? native.core.F64Atom atom) (str (core/f64atom-value atom))
     :else ""))
 
