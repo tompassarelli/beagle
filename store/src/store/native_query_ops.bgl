@@ -930,44 +930,22 @@
 (defn snapshot-root!
   [context ReadContext
    root (Atom t/TermStore)
-   version Int] (Atom t/TermStore)
-  (let [head (store/current-sequence root)]
-    (if (or (< version 0) (> version head))
-      (do
-        (record-read-error!
-         context :query-invalid-snapshot
-         "query snapshot is outside available history")
-        root)
-      (if (= version head)
-        root
-        (let [records-result store/TransactionRecordsResult (store/transaction-records-between-result
-               (deref root) -1 version)
-              records-code Keyword? (store/transactionrecordsresult-code records-result)]
-          (if (not (store/transactionrecordsresult-ok records-result))
-            (do
-              (record-read-error!
-               context
-               (if (some? records-code)
-                 records-code :rpc/native-query-failed)
-               "native read operation failed")
-              root)
-            (let [copy (Atom t/TermStore) (store/new-term-store (store/space-id root))
-                  records (Vec t/TransactionRecord) (store/transactionrecordsresult-records records-result)]
-              (loop [remaining (Vec t/TransactionRecord) records]
-                (if (empty? remaining)
-                  copy
-                  (let [replay-result store/TransactionReplayResult (store/replay-transaction-result!
-                         copy (first remaining))
-                        replay-code Keyword? (store/transactionreplayresult-code replay-result)]
-                    (if (store/transactionreplayresult-ok replay-result)
-                      (recur (rest remaining))
-                      (do
-                        (record-read-error!
-                         context
-                         (if (some? replay-code)
-                           replay-code :rpc/native-query-failed)
-                         "native read operation failed")
-                        root))))))))))))
+   version Int] (U (Atom t/TermStore) Nil)
+  (let [head Int (store/current-sequence root)]
+    (if (and (= version head) (>= version 0))
+      root
+      (match (store/replay-snapshot-at! root version)
+        [(store/SnapshotReplayed snapshot) snapshot]
+        [(store/SnapshotReplayRejected code detail)
+         (do
+           (record-read-error!
+            context
+            (if (or (= code :snapshot-version-outside-history)
+                    (= code :snapshot-version-not-recorded))
+              :query-invalid-snapshot
+              code)
+            detail)
+           nil)]))))
 
 (defn requested-query-bounds!
   [context ReadContext
@@ -1015,18 +993,19 @@
 (defn query-view!
   [context ReadContext
    session schema/Session
-   bounds QueryBounds] QueryView
+   bounds QueryBounds] QueryView?
   (let [root (schema/store-of session)
         head (store/current-sequence root)
         selected-root (snapshot-root! context root (querybounds-version bounds))]
-    (if (read-context-ok? context)
-      (->QueryView selected-root
-                   (if (= head (querybounds-version bounds))
-                     (schema/view session)
-                     (rot/project! selected-root))
-                   (querybounds-version bounds)
-                   (querybounds-lower-exclusive bounds))
-      (->QueryView root (schema/view session) head -1))))
+    (if (nil? selected-root)
+      nil
+      (let [present-root (Atom t/TermStore) selected-root]
+        (->QueryView present-root
+                     (if (= head (querybounds-version bounds))
+                       (schema/view session)
+                       (rot/project! present-root))
+                     (querybounds-version bounds)
+                     (querybounds-lower-exclusive bounds))))))
 
 (defn- rule-uses-any-relation?
   [rule d/Rule
@@ -1368,16 +1347,17 @@
                   (query-rows-response!
                    context request head (querybounds-version bounds) digest
                    cursor (resultcachelookup-query-rows cached))
-                  (let [view QueryView (query-view! context session bounds)]
-                    (if (not (read-context-ok? context))
+                  (let [view QueryView? (query-view! context session bounds)]
+                    (if (nil? view)
                       (placeholder-error-response request head)
-                      (let [execution query/QueryExecutionResult (query-rows! view plan timeout-ms)
+                      (let [present-view QueryView view
+                            execution query/QueryExecutionResult (query-rows! present-view plan timeout-ms)
                             error-value d/QueryEvaluationError? (query/execution-error execution)
                             result query/QueryResult? (query/execution-query-result execution)]
                         (cond
                           [(some? error-value)
                            (query-evaluation-error-response!
-                            context request head (queryview-version view)
+                            context request head (queryview-version present-view)
                             error-value)]
                           [(nil? result)
                            (do
@@ -1390,7 +1370,7 @@
                              (if (not (empty? errors))
                                (let [error query/QueryError (nth errors 0)]
                                  (error-response
-                                  request (queryview-version view)
+                                  request (queryview-version present-view)
                                   (query/error-code error)
                                   (query/error-message error)))
                                (let [rows (Vec d/Tuple) (query/result-rows result)]
@@ -1398,7 +1378,7 @@
                                    (retain-query-result! session key rows)
                                    (query-rows-response!
                                     context request head
-                                    (queryview-version view) digest cursor
+                                    (queryview-version present-view) digest cursor
                                     rows)))))])))))))))))))
 
 (defn occurrence-rows-response!
@@ -1442,23 +1422,25 @@
                     (occurrence-rows-response!
                      context request head version digest cursor
                      (resultcachelookup-triple-rows cached))
-                    (let [snapshot (snapshot-root! context root version)]
-                      (if (not (read-context-ok? context))
+                    (let [snapshot (U (Atom t/TermStore) Nil) (snapshot-root! context root version)]
+                      (if (nil? snapshot)
                         (placeholder-error-response request head)
-                        (let [rows (Vec t/Triple) (rpc-operation-occurrences
-                               (store/occurrences snapshot))]
+                        (let [present-snapshot (Atom t/TermStore) snapshot
+                              rows (Vec t/Triple) (rpc-operation-occurrences
+                               (store/occurrences present-snapshot))]
                           (do
                             (retain-triple-result! session key rows)
                             (occurrence-rows-response!
                              context request head version digest cursor
                              rows)))))))
-                (let [snapshot (snapshot-root! context root version)]
-                  (if (not (read-context-ok? context))
+                (let [snapshot (U (Atom t/TermStore) Nil) (snapshot-root! context root version)]
+                  (if (nil? snapshot)
                     (placeholder-error-response request head)
-                    (occurrence-rows-response!
-                     context request head version digest cursor
-                     (rpc-operation-occurrences
-                      (store/occurrences snapshot)))))))))))))
+                    (let [present-snapshot (Atom t/TermStore) snapshot]
+                      (occurrence-rows-response!
+                       context request head version digest cursor
+                       (rpc-operation-occurrences
+                        (store/occurrences present-snapshot))))))))))))))
 
 (defn validation-payload! [root (Atom t/TermStore)] t/Triple
   (let [snapshot t/TermStore (deref root)

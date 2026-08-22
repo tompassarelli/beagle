@@ -32,6 +32,15 @@
    code Keyword?
    message String?])
 
+;; A replayed snapshot is a detached Store root at one exact transaction
+;; version. Rejection carries no root, so a caller cannot treat live state as
+;; historical authority after reconstruction fails.
+(defunion SnapshotReplay
+  (SnapshotReplayed [root (Atom t/TermStore)])
+  (SnapshotReplayRejected
+    [code Keyword
+     detail String]))
+
 ;; A slot table doubles once its indexed vector holds more than this many rows
 ;; per slot. Every lookup still checks the complete physical row for collision.
 (def initial-slots Int 64)
@@ -1317,6 +1326,48 @@
                      (transaction-records-ok
                       (valid-transaction-records-between
                        store lower-exclusive upper-inclusive)))))))))])))
+
+(defn- snapshot-replay-rejected
+  [code Keyword?
+   detail String?] SnapshotReplay
+  (->SnapshotReplayRejected
+   (if (some? code) code :snapshot-replay-failed)
+   (if (some? detail) detail "store: snapshot replay failed")))
+
+;; Reconstruct one detached, validated Store view. Version zero is the empty
+;; base state. Every positive requested version must be present in history;
+;; replaying only the nearest earlier transaction is not an exact snapshot.
+;; The serialized owner must establish the source's retained-history boundary:
+;; TermStore validates its rows but does not itself carry loader provenance.
+(defn replay-snapshot-at!
+  [source (Atom t/TermStore)
+   version Int] SnapshotReplay
+  (let [head Int (current-sequence source)]
+    (if (or (< version 0) (> version head))
+      (->SnapshotReplayRejected
+       :snapshot-version-outside-history
+       "store: requested snapshot version is outside available history")
+      (let [records-result TransactionRecordsResult (transaction-records-between-result
+             (deref source) -1 version)]
+        (if (not (transactionrecordsresult-ok records-result))
+          (snapshot-replay-rejected
+           (transactionrecordsresult-code records-result)
+           (transactionrecordsresult-message records-result))
+          (let [copy (Atom t/TermStore) (new-term-store (space-id source))
+                records (Vec t/TransactionRecord) (transactionrecordsresult-records records-result)]
+            (loop [remaining (Vec t/TransactionRecord) records]
+              (if (empty? remaining)
+                (if (= version (current-sequence copy))
+                  (->SnapshotReplayed copy)
+                  (->SnapshotReplayRejected
+                   :snapshot-version-not-recorded
+                   "store: requested snapshot version is absent from history"))
+                (let [replay-result TransactionReplayResult (replay-transaction-result! copy (first remaining))]
+                  (if (transactionreplayresult-ok replay-result)
+                    (recur (rest remaining))
+                    (snapshot-replay-rejected
+                     (transactionreplayresult-code replay-result)
+                     (transactionreplayresult-message replay-result))))))))))))
 
 (defn- rebuild-operation-state! [store t/TermStore] t/TermStore
   (let [operations (Vec t/OperationRow) (store-operations store)

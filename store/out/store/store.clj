@@ -50,6 +50,16 @@
 
 (defn transactionrecordsresult-message [r] (:message r))
 
+;; SnapshotReplay = SnapshotReplayed | SnapshotReplayRejected
+(defrecord SnapshotReplayed [root])
+
+(defn snapshotreplayed-root [r] (:root r))
+(defrecord SnapshotReplayRejected [code detail])
+
+(defn snapshotreplayrejected-code [r] (:code r))
+
+(defn snapshotreplayrejected-detail [r] (:detail r))
+
 (def initial-slots 64)
 
 (def slot-load 4)
@@ -710,6 +720,18 @@
   :else (let [handle-error (operation-handle-error store)]
   (if (some? handle-error) handle-error (if (not (valid-atom-rows? atoms)) (transaction-records-error :invalid-term "store: triple contains a value outside Term") (if (not (valid-triple-rows? (count atoms) triples)) (transaction-records-error :invalid-term-handle "store: term handle does not resolve") (let [sequence-error (history-sequence-error transactions)]
   (if (some? sequence-error) sequence-error (if (not (valid-history-rows? transactions operations (count triples) (store-next-sequence store))) (transaction-records-error :invalid-transaction-record "store: invalid transaction record") (transaction-records-ok (valid-transaction-records-between store lower-exclusive upper-inclusive))))))))))))
+
+(defn- snapshot-replay-rejected [code detail]
+  (->SnapshotReplayRejected (if (some? code) code :snapshot-replay-failed) (if (some? detail) detail "store: snapshot replay failed")))
+
+(defn replay-snapshot-at! [source version]
+  (let [head (current-sequence source)]
+  (if (or (< version 0) (> version head)) (->SnapshotReplayRejected :snapshot-version-outside-history "store: requested snapshot version is outside available history") (let [records-result (transaction-records-between-result (deref source) -1 version)]
+  (if (not (transactionrecordsresult-ok records-result)) (snapshot-replay-rejected (transactionrecordsresult-code records-result) (transactionrecordsresult-message records-result)) (let [copy (new-term-store (space-id source))
+   records (transactionrecordsresult-records records-result)]
+  (loop [remaining records]
+  (if (empty? remaining) (if (= version (current-sequence copy)) (->SnapshotReplayed copy) (->SnapshotReplayRejected :snapshot-version-not-recorded "store: requested snapshot version is absent from history")) (let [replay-result (replay-transaction-result! copy (first remaining))]
+  (if (transactionreplayresult-ok replay-result) (recur (rest remaining)) (snapshot-replay-rejected (transactionreplayresult-code replay-result) (transactionreplayresult-message replay-result))))))))))))
 
 (defn- rebuild-operation-state! [store]
   (let [operations (store-operations store)

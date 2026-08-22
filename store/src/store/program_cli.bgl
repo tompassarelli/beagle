@@ -313,16 +313,14 @@
       (->RowsRejected
         (str "Store version " version " is newer than head " head))
       (let [context query-ops/ReadContext (query-ops/new-read-context)
-            view query-ops/QueryView
-            (query-ops/query-view!
-              context session (query-ops/->QueryBounds version -1))]
-        (if (not (query-ops/read-context-ok? context))
+            view query-ops/QueryView? (query-ops/query-view!
+             context session (query-ops/->QueryBounds version -1))]
+        (if (nil? view)
           (->RowsRejected "could not open the requested Store version")
-          (let [execution query/QueryExecutionResult
-                (query-ops/query-rows!
-                  view plan query-ops/default-query-timeout-ms)
-                result query/QueryResult?
-                (query/execution-query-result execution)]
+          (let [present-view query-ops/QueryView view
+                execution query/QueryExecutionResult (query-ops/query-rows!
+                 present-view plan query-ops/default-query-timeout-ms)
+                result query/QueryResult? (query/execution-query-result execution)]
             (if (nil? result)
               (->RowsRejected "native Store query did not produce rows")
               (let [present query/QueryResult result]
