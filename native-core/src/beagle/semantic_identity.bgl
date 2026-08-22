@@ -16,7 +16,7 @@
   ContentReferenceDomain
   NominalSymbolDomain
   StoreSnapshotDomain
-  WorldRevisionDomain
+  ModelRevisionDomain
   StoreReferenceDomain
   SortContractDomain
   ShapeContractDomain
@@ -26,7 +26,6 @@
   TermNodeDomain
   EqualityGoalDomain
   RelationGoalDomain
-  ClauseContentDomain
   TheoryContentDomain
   OperationalCatalogDomain
   CheckedTheoryAuditDomain
@@ -40,8 +39,13 @@
   ProofOccurrenceDomain
   DeterminismCertificationDomain
   EpistemicFactDomain
-  WorldSealDomain
-  StoreOccurrenceDomain)
+  ModelSealDomain
+  StoreOccurrenceDomain
+  ProjectionEvidenceDomain
+  ProjectionReadReceiptDomain
+  ProjectionWriteReceiptDomain
+  BranchRevisionDomain
+  AnswerBindingDomain)
 
 (defunion MerkleField
   (BytesField
@@ -70,13 +74,13 @@
   (EncodingAccepted [bytes (Vec Int)])
   (EncodingRejected [problem IdentityProblem]))
 
-(defunion DigestAdmission
-  (DigestAccepted [digest Digest256])
-  (DigestRejected [problem IdentityProblem]))
+(defunion DigestResult
+  (DigestValue [digest Digest256])
+  (DigestError [problem IdentityProblem]))
 
-(defunion ByteContentAdmission
-  (ByteContentAccepted [identity ByteContentId])
-  (ByteContentRejected [problem IdentityProblem]))
+(defunion ByteContentIdResult
+  (ByteContentIdValue [identity ByteContentId])
+  (ByteContentIdError [problem IdentityProblem]))
 
 (defunion MerkleOutcome
   (MerkleHashed
@@ -98,7 +102,7 @@
     [(ContentReferenceDomain) 2]
     [(NominalSymbolDomain) 3]
     [(StoreSnapshotDomain) 4]
-    [(WorldRevisionDomain) 5]
+    [(ModelRevisionDomain) 5]
     [(StoreReferenceDomain) 6]
     [(SortContractDomain) 7]
     [(ShapeContractDomain) 8]
@@ -108,28 +112,32 @@
     [(TermNodeDomain) 12]
     [(EqualityGoalDomain) 13]
     [(RelationGoalDomain) 14]
-    [(ClauseContentDomain) 15]
-    [(TheoryContentDomain) 16]
-    [(OperationalCatalogDomain) 17]
-    [(CheckedTheoryAuditDomain) 18]
-    [(GoalContentDomain) 19]
-    [(CheckedRequestDomain) 20]
-    [(EvaluationStepDomain) 21]
-    [(OrientedPlanDomain) 22]
-    [(RuntimeTermDomain) 23]
-    [(AnswerContentDomain) 24]
-    [(ProofContentDomain) 25]
-    [(ProofOccurrenceDomain) 26]
-    [(DeterminismCertificationDomain) 27]
-    [(EpistemicFactDomain) 28]
-    [(WorldSealDomain) 29]
-    [(StoreOccurrenceDomain) 30]))
+    [(TheoryContentDomain) 15]
+    [(OperationalCatalogDomain) 16]
+    [(CheckedTheoryAuditDomain) 17]
+    [(GoalContentDomain) 18]
+    [(CheckedRequestDomain) 19]
+    [(EvaluationStepDomain) 20]
+    [(OrientedPlanDomain) 21]
+    [(RuntimeTermDomain) 22]
+    [(AnswerContentDomain) 23]
+    [(ProofContentDomain) 24]
+    [(ProofOccurrenceDomain) 25]
+    [(DeterminismCertificationDomain) 26]
+    [(EpistemicFactDomain) 27]
+    [(ModelSealDomain) 28]
+    [(StoreOccurrenceDomain) 29]
+    [(ProjectionEvidenceDomain) 30]
+    [(ProjectionReadReceiptDomain) 31]
+    [(ProjectionWriteReceiptDomain) 32]
+    [(BranchRevisionDomain) 33]
+    [(AnswerBindingDomain) 34]))
 
 (defn byte-content-domain [] IdentityDomain (->ByteContentDomain))
 (defn content-reference-domain [] IdentityDomain (->ContentReferenceDomain))
 (defn nominal-symbol-domain [] IdentityDomain (->NominalSymbolDomain))
 (defn store-snapshot-domain [] IdentityDomain (->StoreSnapshotDomain))
-(defn world-revision-domain [] IdentityDomain (->WorldRevisionDomain))
+(defn model-revision-domain [] IdentityDomain (->ModelRevisionDomain))
 (defn store-reference-domain [] IdentityDomain (->StoreReferenceDomain))
 (defn sort-contract-domain [] IdentityDomain (->SortContractDomain))
 (defn shape-contract-domain [] IdentityDomain (->ShapeContractDomain))
@@ -139,7 +147,6 @@
 (defn term-node-domain [] IdentityDomain (->TermNodeDomain))
 (defn equality-goal-domain [] IdentityDomain (->EqualityGoalDomain))
 (defn relation-goal-domain [] IdentityDomain (->RelationGoalDomain))
-(defn clause-content-domain [] IdentityDomain (->ClauseContentDomain))
 (defn theory-content-domain [] IdentityDomain (->TheoryContentDomain))
 (defn operational-catalog-domain [] IdentityDomain (->OperationalCatalogDomain))
 (defn checked-theory-audit-domain [] IdentityDomain (->CheckedTheoryAuditDomain))
@@ -154,8 +161,15 @@
 (defn determinism-certification-domain [] IdentityDomain
   (->DeterminismCertificationDomain))
 (defn epistemic-fact-domain [] IdentityDomain (->EpistemicFactDomain))
-(defn world-seal-domain [] IdentityDomain (->WorldSealDomain))
+(defn model-seal-domain [] IdentityDomain (->ModelSealDomain))
 (defn store-occurrence-domain [] IdentityDomain (->StoreOccurrenceDomain))
+(defn projection-evidence-domain [] IdentityDomain (->ProjectionEvidenceDomain))
+(defn projection-read-receipt-domain [] IdentityDomain
+  (->ProjectionReadReceiptDomain))
+(defn projection-write-receipt-domain [] IdentityDomain
+  (->ProjectionWriteReceiptDomain))
+(defn branch-revision-domain [] IdentityDomain (->BranchRevisionDomain))
+(defn answer-binding-domain [] IdentityDomain (->AnswerBindingDomain))
 
 (defn valid-octet? [value Int] Bool
   (and (>= value 0) (<= value 255)))
@@ -168,25 +182,25 @@
         (recur (+ index 1))
         false))))
 
-(defn digest-valid? [digest Digest256] Bool
+(defn digest-well-formed? [digest Digest256] Bool
   (let [octets (Vec Int) (digest256-octets digest)]
     (and (= 32 (count octets)) (valid-octets? octets))))
 
-(defn admit-digest [octets (Vec Int)] DigestAdmission
+(defn digest-from-octets [octets (Vec Int)] DigestResult
   (cond
     [(not (= 32 (count octets)))
-     (->DigestRejected
+     (->DigestError
        (identity-problem
          :identity/digest-length
          "SHA-256 identity requires exactly 32 octets"
          [(str (count octets))]))]
     [(not (valid-octets? octets))
-     (->DigestRejected
+     (->DigestError
        (identity-problem
          :identity/invalid-octet
          "identity octets must be integers from zero through 255"
          []))]
-    [:else (->DigestAccepted (->Digest256 octets))]))
+    [:else (->DigestValue (->Digest256 octets))]))
 
 (defn digest=
   [left Digest256
@@ -256,13 +270,17 @@
       result
       (recur (* width 2) (merge-digest-pass result width)))))
 
-(defn adjacent-duplicate-digest? [sorted (Vec Digest256)] Bool
-  (loop [index Int 1]
+(defn deduplicate-sorted-digests
+  [sorted (Vec Digest256)] (Vec Digest256)
+  (loop [index Int 0
+         result (Vec Digest256) []]
     (if (>= index (count sorted))
-      false
-      (if (digest= (nth sorted (- index 1)) (nth sorted index))
-        true
-        (recur (+ index 1))))))
+      result
+      (let [candidate Digest256 (nth sorted index)]
+        (if (and (> (count result) 0)
+                 (digest= (nth result (- (count result) 1)) candidate))
+          (recur (+ index 1) result)
+          (recur (+ index 1) (conj result candidate)))))))
 
 (defn unsigned-in-range?
   [value Int
@@ -293,33 +311,78 @@
     [(and (>= octet 97) (<= octet 102)) (+ 10 (- octet 97))]
     [:else nil]))
 
-(defn digest-from-hex [hex String] DigestAdmission
-  (let [source (Vec Int) (utf8-encode hex)]
-    (if (not (= 64 (count source)))
-      (->DigestRejected
+(defn lowercase-hex-octet [nibble Int] Int
+  (if (< nibble 10)
+    (+ 48 nibble)
+    (+ 87 nibble)))
+
+(defn digest-hex-octets [digest Digest256] (Vec Int)
+  (loop [index Int 0
+         result (Vec Int) []]
+    (if (>= index (count (digest256-octets digest)))
+      result
+      (let [octet Int (nth (digest256-octets digest) index)]
+        (recur (+ index 1)
+          (conj
+            (conj result
+              (lowercase-hex-octet (unsigned-bit-shift-right octet 4)))
+            (lowercase-hex-octet (bit-and octet 15))))))))
+
+(defn decode-digest-hex
+  [source (Vec Int)
+   code Keyword
+   message String] DigestResult
+  (if (not (= 64 (count source)))
+    (->DigestError
+      (identity-problem code message [(str (count source))]))
+    (loop [index Int 0
+           result (Vec Int) []]
+      (if (>= index (count source))
+        (digest-from-octets result)
+        (let [high Int? (hex-nibble (nth source index))
+              low Int? (hex-nibble (nth source (+ index 1)))]
+          (if (nil? high)
+            (->DigestError
+              (identity-problem code message [(str index)]))
+            (if (nil? low)
+              (->DigestError
+                (identity-problem code message [(str (+ index 1))]))
+              (recur (+ index 2) (conj result (+ (* high 16) low))))))))))
+
+(defn digest-from-hex [hex String] DigestResult
+  (decode-digest-hex
+    (utf8-encode hex)
+    :identity/malformed-sha256-result
+    "SHA-256 implementation returned a noncanonical lowercase digest"))
+
+(defn decode-digest-scalar [value String] DigestResult
+  (let [source (Vec Int) (utf8-encode value)
+        prefix (Vec Int) [115 104 97 50 53 54 58]]
+    (if (or (not (= 71 (count source)))
+            (not (= prefix (subvec source 0 (min 7 (count source))))))
+      (->DigestError
         (identity-problem
-          :identity/malformed-sha256-result
-          "SHA-256 implementation returned a noncanonical digest"
+          :identity/noncanonical-digest-scalar
+          "digest Store scalars require lowercase sha256:<64 hex>"
           [(str (count source))]))
-      (loop [index Int 0
-             result (Vec Int) []]
-        (if (>= index (count source))
-          (admit-digest result)
-          (let [high Int? (hex-nibble (nth source index))
-                low Int? (hex-nibble (nth source (+ index 1)))]
-            (if (nil? high)
-              (->DigestRejected
-                (identity-problem
-                  :identity/malformed-sha256-result
-                  "SHA-256 implementation returned a non-hexadecimal digest"
-                  [(str index)]))
-              (if (nil? low)
-                (->DigestRejected
-                  (identity-problem
-                    :identity/malformed-sha256-result
-                    "SHA-256 implementation returned a non-hexadecimal digest"
-                    [(str (+ index 1))]))
-                (recur (+ index 2) (conj result (+ (* high 16) low)))))))))))
+      (decode-digest-hex
+        (subvec source 7 71)
+        :identity/noncanonical-digest-scalar
+        "digest Store scalars require lowercase sha256:<64 hex>"))))
+
+(defn project-digest-scalar [digest Digest256] EncodingResult
+  (match (digest-from-octets (digest256-octets digest))
+    [(DigestError problem)
+     (->EncodingRejected
+       (identity-problem
+         :identity/invalid-digest
+         "only a well-formed 256-bit digest can be projected to a Store scalar"
+         (identityproblem-evidence problem)))]
+    [(DigestValue well-formed)
+     (let [encoded (Vec Int)
+           (into [115 104 97 50 53 54 58]
+             (digest-hex-octets well-formed))]
+       (->EncodingAccepted encoded))]))
 
 (defn field-tag [field MerkleField] Int
   (match field
@@ -341,11 +404,11 @@
     [(OrderedDigestsField tag values) 6]
     [(SetDigestsField tag values) 7]))
 
-(defn digest-vector-valid? [values (Vec Digest256)] Bool
+(defn digest-vector-well-formed? [values (Vec Digest256)] Bool
   (loop [index Int 0]
     (if (>= index (count values))
       true
-      (if (digest-valid? (nth values index))
+      (if (digest-well-formed? (nth values index))
         (recur (+ index 1))
         false))))
 
@@ -382,7 +445,7 @@
     [(SignedField tag value)
      (->EncodingAccepted (encode-signed value))]
     [(DigestField tag value)
-     (if (digest-valid? value)
+     (if (digest-well-formed? value)
        (->EncodingAccepted (digest256-octets value))
        (->EncodingRejected
          (identity-problem
@@ -390,7 +453,7 @@
            "digest fields require exactly 32 valid octets"
            [(str tag)])))]
     [(OrderedDigestsField tag values)
-     (if (digest-vector-valid? values)
+     (if (digest-vector-well-formed? values)
        (->EncodingAccepted (encode-digest-vector values))
        (->EncodingRejected
          (identity-problem
@@ -398,20 +461,16 @@
            "ordered digest fields contain an invalid digest"
            [(str tag)])))]
     [(SetDigestsField tag values)
-     (if (not (digest-vector-valid? values))
+     (if (not (digest-vector-well-formed? values))
        (->EncodingRejected
          (identity-problem
            :identity/invalid-digest
            "digest set fields contain an invalid digest"
            [(str tag)]))
        (let [sorted (Vec Digest256) (sort-digests values)]
-         (if (adjacent-duplicate-digest? sorted)
-           (->EncodingRejected
-             (identity-problem
-               :identity/duplicate-set-member
-               "digest set fields reject duplicate input members"
-               [(str tag)]))
-           (->EncodingAccepted (encode-digest-vector sorted)))))]))
+         (->EncodingAccepted
+           (encode-digest-vector
+             (deduplicate-sorted-digests sorted)))))]))
 
 (defn encode-field [field MerkleField] EncodingResult
   (let [tag Int (field-tag field)]
@@ -458,8 +517,8 @@
 
 (defn hash-canonical-bytes [canonical-bytes (Vec Int)] MerkleResult
   (match (digest-from-hex (sha256-bytes canonical-bytes))
-    [(DigestRejected problem) (->MerkleResult (->MerkleRejected problem))]
-    [(DigestAccepted digest)
+    [(DigestError problem) (->MerkleResult (->MerkleRejected problem))]
+    [(DigestValue digest)
      (->MerkleResult (->MerkleHashed digest canonical-bytes))]))
 
 (defn merkle-rejection [problem IdentityProblem] MerkleResult
@@ -489,10 +548,23 @@
     (count fields)
     (encode-fields fields)))
 
-(defn byte-content-id [bytes (Vec Int)] ByteContentAdmission
+(defn byte-content-id [bytes (Vec Int)] ByteContentIdResult
   (match (merkleresult-outcome
            (hash-merkle-node (byte-content-domain)
              [(->BytesField 1 bytes)]))
-    [(MerkleRejected problem) (->ByteContentRejected problem)]
+    [(MerkleRejected problem) (->ByteContentIdError problem)]
     [(MerkleHashed digest canonical-bytes)
-     (->ByteContentAccepted (->ByteContentId digest))]))
+     (->ByteContentIdValue (->ByteContentId digest))]))
+
+(defn byte-content-id-well-formed? [identity ByteContentId] Bool
+  (digest-well-formed? (bytecontentid-digest identity)))
+
+(defn decode-byte-content-id-scalar [value String] ByteContentIdResult
+  (match (decode-digest-scalar value)
+    [(DigestError problem) (->ByteContentIdError problem)]
+    [(DigestValue digest)
+     (->ByteContentIdValue (->ByteContentId digest))]))
+
+(defn project-byte-content-id-scalar
+  [identity ByteContentId] EncodingResult
+  (project-digest-scalar (bytecontentid-digest identity)))
