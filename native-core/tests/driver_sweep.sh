@@ -10,6 +10,10 @@
 #   driver_sweep.sh --list         # enumerate driver names
 #   driver_sweep.sh --one NAME     # run one driver directly (the cached unit)
 #
+# Aggregate status is 0 when every driver finishes green, 124 when at least
+# one driver is killed unfinished, and 1 when any driver completes with a
+# product failure. A completed failure outranks a simultaneous diagnostic.
+#
 # Every NATIVE_*_ARTIFACTS variable mentioned by a driver is pointed at its own
 # empty temporary directory, and every NATIVE_*_REPO variable at this repo.
 set -uo pipefail
@@ -101,7 +105,7 @@ mapfile -t names < <(driver_names)
 echo "=== native-core driver sweep: ${#names[@]} drivers, $jobs at a time ==="
 
 sweep_child() {  # NAME -> writes $logs/NAME.log and $logs/NAME.status
-    local name="$1" rc marker
+    local name="$1" rc
     if [[ -x "$repo/bin/_gate-cache-run" ]]; then
         "$repo/bin/_gate-cache-run" --domain driver --id "$name" -- \
             "$self" --one "$name" > "$logs/$name.log" 2>&1
@@ -109,15 +113,19 @@ sweep_child() {  # NAME -> writes $logs/NAME.log and $logs/NAME.status
         "$self" --one "$name" > "$logs/$name.log" 2>&1
     fi
     rc=$?
-    if [[ $rc -ne 0 ]]; then
-        echo "FAIL" > "$logs/$name.status"
-    elif grep -q '^beagle-gate-cache: cached-green ' "$logs/$name.log"; then
-        echo "CACHED" > "$logs/$name.status"
-    elif grep -q '^SKIP' "$logs/$name.log"; then
-        echo "SKIP" > "$logs/$name.status"
-    else
-        echo "PASS" > "$logs/$name.status"
-    fi
+    case "$rc" in
+        0)
+            if grep -q '^beagle-gate-cache: cached-green ' "$logs/$name.log"; then
+                echo "CACHED" > "$logs/$name.status"
+            elif grep -q '^SKIP' "$logs/$name.log"; then
+                echo "SKIP" > "$logs/$name.status"
+            else
+                echo "PASS" > "$logs/$name.status"
+            fi
+            ;;
+        124) echo "DIAGNOSTIC" > "$logs/$name.status" ;;
+        *)   echo "FAIL" > "$logs/$name.status" ;;
+    esac
 }
 
 active=0
@@ -132,13 +140,18 @@ done
 wait || true
 
 failures=0
+diagnostics=0
 cached=0
 for name in "${names[@]}"; do
     status="$(cat "$logs/$name.status" 2>/dev/null || echo FAIL)"
-    printf '%-8s %s\n' "$status" "$name"
+    printf '%-10s %s\n' "$status" "$name"
     case "$status" in
         FAIL)
             failures=$((failures + 1))
+            sed 's/^/    /' "$logs/$name.log" | tail -25
+            ;;
+        DIAGNOSTIC)
+            diagnostics=$((diagnostics + 1))
             sed 's/^/    /' "$logs/$name.log" | tail -25
             ;;
         CACHED) cached=$((cached + 1)) ;;
@@ -147,7 +160,11 @@ done
 
 echo
 if [[ $failures -gt 0 ]]; then
-    echo "driver_sweep: $failures of ${#names[@]} drivers FAILED ($cached cached-green)"
+    echo "driver_sweep: $failures of ${#names[@]} drivers FAILED ($diagnostics diagnostic, $cached cached-green)"
     exit 1
+fi
+if [[ $diagnostics -gt 0 ]]; then
+    echo "driver_sweep: $diagnostics of ${#names[@]} drivers DIAGNOSTIC -- killed unfinished ($cached cached-green)"
+    exit 124
 fi
 echo "driver_sweep: all ${#names[@]} drivers green ($cached cached-green, $(( ${#names[@]} - cached )) ran)"
