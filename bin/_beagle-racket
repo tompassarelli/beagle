@@ -169,7 +169,14 @@ fi
 # transitively, so an unchanged dependent keeps loading bytecode built against
 # an old dependency. `raco make` is the only transitive check (SHA-1 in
 # compiled/*.dep), so it runs here, at the seam every bin/* entrypoint sources.
-# The resolved racket path is part of the stamp: .zo is version-specific too.
+#
+# Production check/build entrypoints cannot load beagle-test. Keep that closure
+# on its own stamp so a fresh checkout does not compile the test suite before it
+# can check one source. Direct sourcing, tests, and unknown entrypoints stay on
+# the complete closure: an unclassified caller may never narrow freshness.
+# The complete closure satisfies production freshness, never the reverse.
+#
+# The resolved racket path is part of each stamp: .zo is version-specific too.
 # Escape hatch: BEAGLE_NO_ZO_GATE=1.
 if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
       && "${BEAGLE_NO_ZO_GATE:-0}" == 0 && "${_BEAGLE_ZO_GATE_PID:-}" != "$$" ]]; then
@@ -178,14 +185,36 @@ if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
     # so this dedupes the exec hop WITHOUT ever skipping a fresh invocation.
     export _BEAGLE_ZO_GATE_PID=$$
 
-    _zo_stamp="$BEAGLE_ROOT/.beagle/zo-fresh"
+    _beagle_zo_profile=complete
+    case "${0##*/}" in
+        beagle)
+            case "${1:-}" in
+                check|build) _beagle_zo_profile=production ;;
+            esac
+            ;;
+        beagle-check|beagle-check-all|beagle-build|beagle-build-all|beagle-build-core|beagle-ast|beagle-ast-bundle)
+            _beagle_zo_profile=production
+            ;;
+    esac
+
+    _zo_complete_stamp="$BEAGLE_ROOT/.beagle/zo-fresh"
+    _zo_production_stamp="$BEAGLE_ROOT/.beagle/zo-fresh-production"
+    if [[ "$_beagle_zo_profile" == production ]]; then
+        _zo_stamp="$_zo_production_stamp"
+    else
+        _zo_stamp="$_zo_complete_stamp"
+    fi
     _zo_lock="$BEAGLE_ROOT/.beagle/zo-gate.lock"
-    # Every tree holding tracked .rkt; a new one must be added here. Not
-    # repo-wide: in-tree scratch output from a test run would trip it constantly.
+    # Every tree loadable by production entrypoints. A new production tree must
+    # be added here. Not repo-wide: in-tree scratch output from a test run would
+    # trip it constantly. Complete callers additionally own beagle-test.
     _zo_scan=()
-    for _d in beagle-lib beagle beagle-test contrib tools; do
+    for _d in beagle-lib beagle contrib tools; do
         [[ -d "$BEAGLE_ROOT/$_d" ]] && _zo_scan+=("$BEAGLE_ROOT/$_d") || true
     done
+    if [[ "$_beagle_zo_profile" == complete && -d "$BEAGLE_ROOT/beagle-test" ]]; then
+        _zo_scan+=("$BEAGLE_ROOT/beagle-test")
+    fi
 
     # Directory mtimes count too: a deleted .rkt leaves a still-loadable orphan
     # .zo. Wrong verdicts here can only cost an extra rebuild, never a skip.
@@ -203,6 +232,12 @@ if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
         local roots=()
         while IFS= read -r -d '' f; do
             [[ "$f" == bin/* ]] && continue              # shebang scripts, no .zo
+            if [[ "$_beagle_zo_profile" == production ]]; then
+                case "$f" in
+                    beagle-lib/*|beagle/*|contrib/*|tools/*) ;;
+                    *) continue ;;
+                esac
+            fi
             [[ -f "$BEAGLE_ROOT/$f" ]] && roots+=("$BEAGLE_ROOT/$f") || true
         done < <(git -C "$BEAGLE_ROOT" ls-files -z -- '*.rkt' 2>/dev/null)
         if [[ ${#roots[@]} -eq 0 ]]; then                # no git / not a checkout
@@ -235,6 +270,10 @@ if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
         fi
         printf '%s' "$_BEAGLE_RACKET" > "$_zo_stamp" || return 1
         touch -r "$ref" "$_zo_stamp" || return 1
+        if [[ "$_beagle_zo_profile" == complete ]]; then
+            printf '%s' "$_BEAGLE_RACKET" > "$_zo_production_stamp" || return 1
+            touch -r "$ref" "$_zo_production_stamp" || return 1
+        fi
         rm -f "$ref"
         if [[ "${BEAGLE_ZO_GATE_QUIET:-0}" != 1 ]]; then
             echo "beagle: bytecode current." >&2
@@ -257,7 +296,8 @@ if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
     fi
 
     unset -f _beagle_zo_stale _beagle_zo_rebuild
-    unset _zo_stamp _zo_lock _zo_scan _d
+    unset _zo_stamp _zo_complete_stamp _zo_production_stamp _zo_lock _zo_scan _d
+    unset _beagle_zo_profile
     if [[ "$_zo_ok" != 1 ]]; then
         unset _zo_ok
         # Never fall through to a broken or stale closure — that is the same

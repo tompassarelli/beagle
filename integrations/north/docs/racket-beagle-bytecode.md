@@ -19,10 +19,16 @@ foo62.1`, a struct field-count mismatch, or an opaque `raco.rkt` death. The fix
 `_beagle-racket` resolves the flake-pinned racket (falling back to the canonical
 `~/code/beagle` pin in a git worktree, which has no allowed `.direnv`), prepends
 it to `PATH`, scopes the `beagle` collection to THIS checkout, and then gates on
-the compiled closure: if any tracked `.rkt` is newer than the last successful
-build, or the resolved racket changed, it runs `raco make` over every tracked
-`.rkt` before the entrypoint proceeds. `raco make` is the only transitive check
-— it compares the SHA-1 recorded in `compiled/*.dep`.
+the compiled closure. Known production check/build entrypoints compile the
+production closure only; they cannot load `beagle-test`. Tests, direct sourcing,
+and unknown entrypoints compile the complete tracked closure. The two closures
+have separate freshness stamps: a complete build also satisfies production
+freshness, while a production build never claims test freshness.
+
+If a source or directory in the selected closure is newer than its last
+successful build, or the resolved racket changed, the gate runs `raco make`
+before the entrypoint proceeds. `raco make` is the only transitive check — it
+compares the SHA-1 recorded in `compiled/*.dep`.
 
 The trigger is a filesystem scan, not an edit event, so a merge, rebase,
 checkout, worktree add, or stash pop is caught the same as an edit. A failed
