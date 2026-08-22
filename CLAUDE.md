@@ -17,7 +17,7 @@ target, form, type, standard-library, health, or test inventories here: use
 
 ## Semantic laws
 
-1. A sealed, admitted semantic world owns native program meaning. Source files,
+1. A sealed, admitted `ModelRevision` owns native program meaning. Source files,
    syntax trees, paths, spans, renderings, and emitted artifacts are optional
    projections or transaction proposals, never native authority.
 2. Native relations, propositions, modes, strategies, goals, judgments, and
@@ -32,8 +32,8 @@ target, form, type, standard-library, health, or test inventories here: use
 
 The current file-first Lisp compiler is transition and bootstrap machinery,
 not the architecture to extend for new native semantics. New native work takes
-the path `admitted world → checked theory → oriented plan → Native Core` and
-keeps content identity, assertion occurrence, world revision, proof, plan,
+the path `admitted model revision → checked theory → oriented plan → Native Core`
+and keeps content identity, assertion occurrence, model revision, proof, plan,
 artifact, and effect receipt distinct.
 
 The eventual bare Beagle surface is reserved for proposition-first native

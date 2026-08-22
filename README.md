@@ -25,7 +25,7 @@ judgments, and oriented plans without erasing those distinctions.
 The system thesis is:
 
 > Pure software artifacts are reproducible projections of durable semantic
-> worlds; external reality is connected through explicit observations and
+> models; external reality is connected through explicit observations and
 > capability-controlled effects.
 
 Beagle has one durable identity, explanation, dependency, and provenance
@@ -36,13 +36,16 @@ domains, trust domains, failure domains, and materializations can participate
 without being collapsed. Matching content establishes identity, not trust,
 authority, co-location, or transaction scope.
 
-A program world (`WORLD`) is the broad semantic snapshot concept: a versioned
-selection of facts, judgments, rules, plans, and provenance. It is not a Store
-branch. A branch or named root selects durable semantic history; several may
-contribute to, or be projected from, a world without becoming the same thing.
-Pure artifacts are reproducible projections of named durable branches or
-worlds. External reality can participate in the same typed fact system through
-observations and receipts, but is never assumed pure.
+A `Model` is the durable semantic program being authored. A mutable `Branch`
+names a coherent, recorded line of that model's development; an immutable
+`BranchRevision` pins that history exactly. A sealed `ModelRevision` selects
+admitted facts, judgments, rules, plans, and provenance at such a pin, while
+`CheckedTheory` is the formal logical content reconstructed from that revision.
+These identities remain distinct: branch coherence means ordered, auditable
+history, while a model revision owns semantic membership and admission. Pure
+artifacts are reproducible projections of admitted model revisions. External
+reality can participate in the same typed fact system through observations and
+receipts, but is never assumed pure.
 
 Beagle keeps two classifications separate. `Declared`, `Derived`, and
 `Observed` are epistemic origins: how a fact entered an explanation. Acting on
