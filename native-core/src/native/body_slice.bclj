@@ -14,15 +14,30 @@
             [native.qbe :as qbe]))
 
 
+(defn failed-typing-obligation-report
+  [receipt core/PassReceiptV0] String
+  (let [obligations (Vec core/ReceiptObligationV0) (core/passreceiptv0-obligations receipt)]
+    (loop [position Int 0
+           report String ""]
+      (if (>= position (count obligations))
+        report
+        (let [obligation core/ReceiptObligationV0 (nth obligations position)]
+          (recur
+           (+ position 1)
+           (if (core/receiptobligationv0-passed obligation)
+             report
+             (str report "typing-obligation "
+                  (core/receiptobligationv0-detail obligation) "\n"))))))))
+
 (defn typing-rejection-report [result lower/TypingResultV0] String
   (if (not (instance? native.lower.TypingRejectedV0 result))
     ""
-    (let [diagnostics (Vec core/DiagnosticV0) (core/passreceiptv0-diagnostics
-            (lower/typingrejectedv0-receipt result))]
+    (let [receipt core/PassReceiptV0 (lower/typingrejectedv0-receipt result)
+          diagnostics (Vec core/DiagnosticV0) (core/passreceiptv0-diagnostics receipt)]
       (loop [position Int 0
              report String "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"]
         (if (>= position (count diagnostics))
-          report
+          (str report (failed-typing-obligation-report receipt))
           (let [diagnostic core/DiagnosticV0 (nth diagnostics position)]
             (recur (+ position 1)
               (str report "typing-diagnostic "
