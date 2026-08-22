@@ -268,7 +268,7 @@ declare -A module_dependencies=(
     [unit_reuse]="core stages obligations lower"
     [unit_compile]="core stages obligations lower unit_reuse"
     [fold_c17]="core"
-    [body_c17]="core stages simd fold_c17"
+    [body_c17]="core stages obligations simd fold_c17"
     [qbe]="core stages simd"
     [body_slice]="core stages obligations simd lower c11 slice fold_c17 body_c17 qbe"
 )
