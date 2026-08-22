@@ -1,0 +1,97 @@
+#lang beagle
+
+(ns store.model-revision-resource-policy)
+
+(defunion ModelRevisionResourceDimension
+  (ModelRevisionProposals [ordinal Int])
+  (ModelRevisionFacts [ordinal Int])
+  (ModelRevisionJudgments [ordinal Int])
+  (ModelRevisionDirectParents [ordinal Int])
+  (ModelRevisionLineageNodes [ordinal Int])
+  (ModelRevisionLineageEdges [ordinal Int]))
+
+(defrecord ModelRevisionResourcePolicy
+  [maximum-proposals Int
+   maximum-facts Int
+   maximum-judgments Int
+   maximum-direct-parents Int
+   maximum-lineage-nodes Int
+   maximum-lineage-edges Int])
+
+(defrecord ModelRevisionResourceUse
+  [proposals Int
+   facts Int
+   judgments Int
+   direct-parents Int
+   lineage-nodes Int
+   lineage-edges Int])
+
+(defunion ModelRevisionResourceAdmission
+  (ResourcesAdmitted [use ModelRevisionResourceUse])
+  (ResourcesExhausted
+    [dimension ModelRevisionResourceDimension
+     allowed Int
+     required-at-least Int])
+  (ResourcePolicyInvalid
+    [dimension ModelRevisionResourceDimension
+     supplied Int])
+  (ResourceUseInvalid
+    [dimension ModelRevisionResourceDimension
+     supplied Int]))
+
+(defn model-revision-resource-dimensions
+  [] (Vec ModelRevisionResourceDimension)
+  [(->ModelRevisionProposals 0)
+   (->ModelRevisionFacts 1)
+   (->ModelRevisionJudgments 2)
+   (->ModelRevisionDirectParents 3)
+   (->ModelRevisionLineageNodes 4)
+   (->ModelRevisionLineageEdges 5)])
+
+(defn model-revision-resource-maximum
+  [policy ModelRevisionResourcePolicy
+   dimension ModelRevisionResourceDimension] Int
+  (match dimension
+    [(ModelRevisionProposals ordinal)
+     (modelrevisionresourcepolicy-maximum-proposals policy)]
+    [(ModelRevisionFacts ordinal)
+     (modelrevisionresourcepolicy-maximum-facts policy)]
+    [(ModelRevisionJudgments ordinal)
+     (modelrevisionresourcepolicy-maximum-judgments policy)]
+    [(ModelRevisionDirectParents ordinal)
+     (modelrevisionresourcepolicy-maximum-direct-parents policy)]
+    [(ModelRevisionLineageNodes ordinal)
+     (modelrevisionresourcepolicy-maximum-lineage-nodes policy)]
+    [(ModelRevisionLineageEdges ordinal)
+     (modelrevisionresourcepolicy-maximum-lineage-edges policy)]))
+
+(defn model-revision-resource-required-at-least
+  [use ModelRevisionResourceUse
+   dimension ModelRevisionResourceDimension] Int
+  (match dimension
+    [(ModelRevisionProposals ordinal) (modelrevisionresourceuse-proposals use)]
+    [(ModelRevisionFacts ordinal) (modelrevisionresourceuse-facts use)]
+    [(ModelRevisionJudgments ordinal) (modelrevisionresourceuse-judgments use)]
+    [(ModelRevisionDirectParents ordinal)
+     (modelrevisionresourceuse-direct-parents use)]
+    [(ModelRevisionLineageNodes ordinal)
+     (modelrevisionresourceuse-lineage-nodes use)]
+    [(ModelRevisionLineageEdges ordinal)
+     (modelrevisionresourceuse-lineage-edges use)]))
+
+(defn admit-model-revision-resource-use
+  [policy ModelRevisionResourcePolicy
+   use ModelRevisionResourceUse] ModelRevisionResourceAdmission
+  (loop [remaining (Vec ModelRevisionResourceDimension) (model-revision-resource-dimensions)]
+    (if (empty? remaining)
+      (->ResourcesAdmitted use)
+      (let [dimension ModelRevisionResourceDimension (first remaining)
+            allowed Int (model-revision-resource-maximum policy dimension)
+            required-at-least Int (model-revision-resource-required-at-least use dimension)]
+        (cond
+          [(< allowed 0) (->ResourcePolicyInvalid dimension allowed)]
+          [(< required-at-least 0)
+           (->ResourceUseInvalid dimension required-at-least)]
+          [(> required-at-least allowed)
+           (->ResourcesExhausted dimension allowed required-at-least)]
+          [:else (recur (rest remaining))])))))
