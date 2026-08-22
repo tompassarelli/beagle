@@ -11,8 +11,10 @@
 #   driver_sweep.sh --one NAME     # run one driver directly (the cached unit)
 #
 # Aggregate status is 0 when every driver finishes green, 124 when at least
-# one driver is killed unfinished, and 1 when any driver completes with a
-# product failure. A completed failure outranks a simultaneous diagnostic.
+# one driver authenticates a deadline, and 1 when any driver fails or emits an
+# invalid verdict. A completed failure outranks a simultaneous diagnostic.
+# A driver authenticates its 124 by validating its supervisor receipt and
+# emitting `beagle-native-driver: DIAGNOSTIC authenticated-timeout-v0` exactly.
 #
 # Every NATIVE_*_ARTIFACTS variable mentioned by a driver is pointed at its own
 # empty temporary directory, and every NATIVE_*_REPO variable at this repo.
@@ -22,6 +24,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 validation="$repo/native-core/validation"
 self="$here/$(basename "${BASH_SOURCE[0]}")"
+diagnostic_marker="beagle-native-driver: DIAGNOSTIC authenticated-timeout-v0"
 
 driver_names() {
     local d
@@ -123,7 +126,18 @@ sweep_child() {  # NAME -> writes $logs/NAME.log and $logs/NAME.status
                 echo "PASS" > "$logs/$name.status"
             fi
             ;;
-        124) echo "DIAGNOSTIC" > "$logs/$name.status" ;;
+        124)
+            # GNU timeout also returns 124 when its child exits 124. The driver
+            # must validate its own supervisor receipt before emitting this
+            # exact marker; a bare status cannot authenticate a deadline.
+            if grep -Fqx "$diagnostic_marker" "$logs/$name.log"; then
+                echo "DIAGNOSTIC" > "$logs/$name.status"
+            else
+                echo "driver_sweep.sh: unauthenticated child status 124" \
+                    >> "$logs/$name.log"
+                echo "FAIL" > "$logs/$name.status"
+            fi
+            ;;
         *)   echo "FAIL" > "$logs/$name.status" ;;
     esac
 }
@@ -139,32 +153,43 @@ for name in "${names[@]}"; do
 done
 wait || true
 
-failures=0
-diagnostics=0
-cached=0
-for name in "${names[@]}"; do
-    status="$(cat "$logs/$name.status" 2>/dev/null || echo FAIL)"
-    printf '%-10s %s\n' "$status" "$name"
-    case "$status" in
-        FAIL)
-            failures=$((failures + 1))
-            sed 's/^/    /' "$logs/$name.log" | tail -25
-            ;;
-        DIAGNOSTIC)
-            diagnostics=$((diagnostics + 1))
-            sed 's/^/    /' "$logs/$name.log" | tail -25
-            ;;
-        CACHED) cached=$((cached + 1)) ;;
-    esac
-done
+summarize_results() {
+    local failures=0 diagnostics=0 cached=0 name status
+    for name in "${names[@]}"; do
+        status="$(cat "$logs/$name.status" 2>/dev/null || true)"
+        case "$status" in
+            PASS|SKIP|CACHED|DIAGNOSTIC|FAIL) ;;
+            *)
+                status="FAIL"
+                echo "driver_sweep.sh: missing or invalid child status for $name" \
+                    >> "$logs/$name.log"
+                ;;
+        esac
+        printf '%-10s %s\n' "$status" "$name"
+        case "$status" in
+            FAIL)
+                failures=$((failures + 1))
+                sed 's/^/    /' "$logs/$name.log" | tail -25
+                ;;
+            DIAGNOSTIC)
+                diagnostics=$((diagnostics + 1))
+                sed 's/^/    /' "$logs/$name.log" | tail -25
+                ;;
+            CACHED) cached=$((cached + 1)) ;;
+        esac
+    done
 
-echo
-if [[ $failures -gt 0 ]]; then
-    echo "driver_sweep: $failures of ${#names[@]} drivers FAILED ($diagnostics diagnostic, $cached cached-green)"
-    exit 1
-fi
-if [[ $diagnostics -gt 0 ]]; then
-    echo "driver_sweep: $diagnostics of ${#names[@]} drivers DIAGNOSTIC -- killed unfinished ($cached cached-green)"
-    exit 124
-fi
-echo "driver_sweep: all ${#names[@]} drivers green ($cached cached-green, $(( ${#names[@]} - cached )) ran)"
+    echo
+    if [[ $failures -gt 0 ]]; then
+        echo "driver_sweep: $failures of ${#names[@]} drivers FAILED ($diagnostics diagnostic, $cached cached-green)"
+        return 1
+    fi
+    if [[ $diagnostics -gt 0 ]]; then
+        echo "driver_sweep: $diagnostics of ${#names[@]} drivers DIAGNOSTIC -- killed unfinished ($cached cached-green)"
+        return 124
+    fi
+    echo "driver_sweep: all ${#names[@]} drivers green ($cached cached-green, $(( ${#names[@]} - cached )) ran)"
+}
+
+summarize_results
+exit $?
