@@ -7,17 +7,17 @@
 ;; bytes depending on what else the process had parsed before it (daemon /
 ;; build-all / standalone). Now: per-program counter.
 
-(defmacro twice [e]
-  `(let [tmp ~e]
-     (+ tmp tmp)))
+(defmacro twice []
+  `(let [tmp Int 1]
+     tmp))
 
-(defn use-macro [(x Int)] Int
-  (twice (+ x 1)))
+(defn use-macro [] Int
+  (twice))
 
-(defn threaded [(x Int)] Int
+(defn threaded [x] Any
   (cond-> x
-    (pos? x) (+ 1)
-    (neg? x) (- 1)))
+    true (str)
+    false (str)))
 
 (defn maybe-chain [m] Any
   (some-> m :a :b))

@@ -54,8 +54,14 @@ fi
 # (fresh-lowered-sym, parameterized in parse-program). Assert: module built ALONE
 # == module built AFTER another module, byte-identical.
 echo "================ build reproducibility — lowering temps content-deterministic ================"
-"$ROOT/bin/beagle-build-all" "$HERE/lowering-fixture.bclj" --out "$W/l1" >/dev/null 2>&1
-"$ROOT/bin/beagle-build-all" "$HERE/context-pad.bclj" "$HERE/lowering-fixture.bclj" --out "$W/l2" >/dev/null 2>&1
+"$ROOT/bin/beagle-build-all" "$HERE/lowering-fixture.bclj" --out "$W/l1" || {
+  echo "  FAIL  lowering fixture standalone build" >&2
+  exit 1
+}
+"$ROOT/bin/beagle-build-all" "$HERE/context-pad.bclj" "$HERE/lowering-fixture.bclj" --out "$W/l2" || {
+  echo "  FAIL  lowering fixture context build" >&2
+  exit 1
+}
 lf="$(find "$W/l1" -name 'lowering_repro.clj' | head -1)"   # output path = ns (demo.lowering-repro)
 if [ -z "$lf" ]; then echo "  FAIL  lowering fixture did not build"; fail=1; else
   echo "  temps emitted: $(grep -oE '[A-Za-z-]+__[0-9]+' "$lf" | sort -u | tr '\n' ' ')(per-program counter, not process gensym)"
