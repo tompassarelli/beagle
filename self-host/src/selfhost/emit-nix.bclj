@@ -1601,7 +1601,7 @@
     (when (not (map-node? attrs))
       (throw (ex-info "(nix/flake ...) requires an attrset literal" {})))
     (let [pairs (vec (map-pairs attrs))]
-      (doseq [req FLAKE-REQUIRED]
+      (doseq [(req Any) FLAKE-REQUIRED]
         (when (not (< 0 (count (filterv (fn [p Any] Bool (= (kw-key-string p) req)) pairs))))
           (throw (ex-info (str "(nix/flake ...): missing required key " req) {}))))
       (doseq [p pairs]
