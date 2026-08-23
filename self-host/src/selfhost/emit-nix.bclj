@@ -1860,14 +1860,14 @@
       (str (record-validator-name name) " (" raw ")")
       raw)))
 
+;; Constructors guard the complete incoming field value before it is
+;; installed. The aggregate validator remains a provider ABI for
+;; checked update/import callers, but a local constructor must not
+;; construct first and validate afterward.
 (defn emit-tagged-type-defs
   [name String
    fields Any
    depth Int] String
-  ;; Constructors guard the complete incoming field value before it is
-  ;; installed. The aggregate validator remains a provider ABI for
-  ;; checked update/import callers, but a local constructor must not
-  ;; construct first and validate afterward.
   (let [ind (indent depth)
         tag (str/lower-case name)
         ctor-name (mangle-name (str "->" name))

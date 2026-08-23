@@ -1082,10 +1082,10 @@
                     field-props)]
     (str/join "\n\n" (into (if (nil? validator) [] [validator]) (into [factory] accessors)))))
 
+;; Params are bindings (suffixed); object keys are properties (no `$`).
 (defn emit-tagged-factory!
   [member-name String
    fields Any] String
-  ;; Params are bindings (suffixed); object keys are properties (no `$`).
   (let [m-str (mangle-name member-name)
         raw-fields (field-names-of fields)
         constrained? (bindings-have-constraints? fields)
@@ -2590,7 +2590,7 @@
                  renames
                  (fn [] Any
                    (str/join "\n  "
-                     (into setup [(emit-body-return* (get f "body") "  ")]))) ) "\n}"))
+                     (into setup [(emit-body-return* (get f "body") "  ")])))) "\n}"))
       (= node "defn-multi")
         (let [name (mangle-name (get f "name"))
               arities (get f "arities")
@@ -3230,7 +3230,7 @@
         (and (appears-once? emitted "incoming()")
              (appears-once? emitted "(positive_p)($beagle$constrained$binding$0)")
              (appears-before? emitted "$beagle$constrained$binding$0 = incoming();"
-               "(positive_p)($beagle$constrained$binding$0)" )
+               "(positive_p)($beagle$constrained$binding$0)")
              (appears-before? emitted "(positive_p)($beagle$constrained$binding$0)"
                "$beagle$constrained$binding$0$x = $beagle$constrained$binding$0;")))))
   (expect! "constraint: for and doseq guard each raw collection item"

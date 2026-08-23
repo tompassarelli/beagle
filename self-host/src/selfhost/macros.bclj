@@ -70,16 +70,13 @@
    name String
    call-syntax Any] Any
   (let [parent-depth Int (get parent "depth")
-        call-span Any
-        (if (ast/beagle-syntax? call-syntax)
+        call-span Any (if (ast/beagle-syntax? call-syntax)
           (ast/beagle-syntax-span call-syntax)
           nil)
-        call-origin Any
-        (if (ast/beagle-syntax? call-syntax)
+        call-origin Any (if (ast/beagle-syntax? call-syntax)
           (ast/beagle-syntax-origin call-syntax)
           nil)
-        parent-origin Any
-        (if (some? call-origin) call-origin (get parent "origin"))
+        parent-origin Any (if (some? call-origin) call-origin (get parent "origin"))
         origin Any (ast/make-expansion-origin! name call-span parent-origin)]
     {"macro-name" name
      "depth" (+ 1 parent-depth)
@@ -204,14 +201,13 @@
           (str "beagle: macro " name
                ": kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)\n"))
         nil)
-      (let [amp-pos Int
-              (or (clojure.core/first (keep-indexed (fn
-                                                      [i Int
-                                                       x String] Any
-                                                      (if (= x "&") i nil)) params)) -1)
-          fixed-params Any (if (> amp-pos -1) (subvec params 0 amp-pos) params)
-          rest-param Any (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
-      (swap! reg assoc name
+      (let [amp-pos Int (or (clojure.core/first (keep-indexed (fn
+                                                                [i Int
+                                                                 x String] Any
+                                                                (if (= x "&") i nil)) params)) -1)
+            fixed-params Any (if (> amp-pos -1) (subvec params 0 amp-pos) params)
+            rest-param Any (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
+        (swap! reg assoc name
         {"kind" kind
          "fixed-params" fixed-params
          "rest-param" rest-param
@@ -1277,16 +1273,16 @@
 
 ;; --- expand-macro! (dispatch) ------------------------------------------------
 
+;; arity errors: record + return an INERT datum (Racket raises + aborts
+;; here). Returning the form unexpanded would keep it a macro-application,
+;; which parse-list-form! re-dispatches into expand-fully! forever (the
+;; depth cap only bounds a single pass, not the outer parse retry).
 (defn expand-template-macro!
   [reg Any
    m Any
    name String
    args (Vec Any)
    ctx Any] Any
-  ;; arity errors: record + return an INERT datum (Racket raises + aborts
-  ;; here). Returning the form unexpanded would keep it a macro-application,
-  ;; which parse-list-form! re-dispatches into expand-fully! forever (the
-  ;; depth cap only bounds a single pass, not the outer parse retry).
   (let [fixed Any (get m "fixed-params")
         rest-name Any (get m "rest-param")
         kind Any (get m "kind")
