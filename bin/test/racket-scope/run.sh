@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export BEAGLE_NO_ZO_GATE=1
 source "$ROOT/bin/_beagle-racket"
+RACKET="$(command -v "$RACKET")"
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-racket-scope.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
