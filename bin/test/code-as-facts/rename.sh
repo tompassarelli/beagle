@@ -78,7 +78,7 @@ consumer="$C/code_as_facts_consumer.bgl"
 cat > "$consumer" <<'EOF'
 #lang beagle
 (ns code-as-facts.consumer)
-(require store.rpc-limits :as limits)
+(require [store.rpc-limits :as limits])
 (def observed-depth Int limits/term-codec-v1-max-depth)
 EOF
 old_name="term-codec-v1-max-depth"
@@ -173,7 +173,7 @@ tu="$("$RACKET" "$RT" --render $RESOLVE_OUT/resolved-tu.bclj.edn 2>/dev/null)"
 chk "defunion variant (Circle r) renamed" "grep -qF '(Disc r)' <<<\"\$tu\" && grep -qF '(Disc [(r Float)])' <<<\"\$tu\" && grep -qF '(Square' <<<\"\$tu\""
 # 6c. cross-module type: consumer's t/Type annotation cascades
 printf '#lang beagle/clj\n(ns tlib)\n(defrecord Widget [(n Int)])\n' > "$W/tlib.bclj"
-printf '#lang beagle/clj\n(ns tcon)\n(require tlib :as t)\n(defn use [(w t/Widget)] Int 1)\n' > "$W/tcon.bclj"
+printf '#lang beagle/clj\n(ns tcon)\n(require [tlib :as t])\n(defn use [(w t/Widget)] Int 1)\n' > "$W/tcon.bclj"
 "$RACKET" "$RT" --emit-edn "$W/tlib.bclj" 2>/dev/null > "$W/tlib.edn"
 "$RACKET" "$RT" --emit-edn "$W/tcon.bclj" 2>/dev/null > "$W/tcon.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename Widget Gadget tlib "$W/tlib.edn" "$W/tcon.edn" 2>/dev/null
@@ -215,8 +215,8 @@ else echo "  PASS  let sequential capture refused"; fi
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename total grand sc "$W/sc.edn" 2>/dev/null
 chk "legitimate sequential rename succeeds (total->grand)" "grep -qF '(* s grand)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-sc.bclj.edn 2>/dev/null)\""
 
-# --- 8. quasiquote templates + bare :refer + import collision --------------------
-echo "--- 8. quasiquote macro templates + bare :refer + import collision ---"
+# --- 8. quasiquote templates + bracketed :refer + import collision ---------------
+echo "--- 8. quasiquote macro templates + bracketed :refer + import collision ---"
 # 8a. a quasiquote template ref keeps its definition-site provider edge and renames
 printf '#lang beagle/clj\n(ns qq)\n(def base Int 1)\n(defmacro add-base [n] (quasiquote (+ base (unquote n))))\n' > "$W/qq.bclj"
 "$RACKET" "$RT" --emit-edn "$W/qq.bclj" 2>/dev/null > "$W/qq.edn"
@@ -228,15 +228,15 @@ printf '#lang beagle/clj\n(ns qh)\n(def base Int 1)\n(defmacro mk [x] (quasiquot
 "$RACKET" "$RT" --emit-edn "$W/qh.bclj" 2>/dev/null > "$W/qh.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename base base2 qh "$W/qh.edn" 2>/dev/null
 chk "template local 'tmp' untouched, base->base2" "grep -qF '\`(let [tmp ~x] (+ tmp base2))' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-qh.bclj.edn 2>/dev/null)\""
-# 8c. bare (require m :refer [x]) cross-module ref renames (parse-require handles bare :refer)
+# 8c. canonical bracketed :refer cross-module refs rename
 printf '#lang beagle/clj\n(ns rlib)\n(defn red [(x Int)] Int x)\n' > "$W/rlib.bclj"
-printf '#lang beagle/clj\n(ns rcon)\n(require rlib :refer [red])\n(defn use [(y Int)] Int (red y))\n' > "$W/rcon.bclj"
+printf '#lang beagle/clj\n(ns rcon)\n(require [rlib :refer [red]])\n(defn use [(y Int)] Int (red y))\n' > "$W/rcon.bclj"
 "$RACKET" "$RT" --emit-edn "$W/rlib.bclj" 2>/dev/null > "$W/rlib.edn"
 "$RACKET" "$RT" --emit-edn "$W/rcon.bclj" 2>/dev/null > "$W/rcon.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename red crimson rlib "$W/rlib.edn" "$W/rcon.edn" 2>/dev/null
-chk "bare :refer'd ref renames cross-module (red->crimson)" "grep -qF '(crimson y)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-rcon.bclj.edn 2>/dev/null)\""
+chk "bracketed :refer'd ref renames cross-module (red->crimson)" "grep -qF '(crimson y)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-rcon.bclj.edn 2>/dev/null)\""
 # 8d. import collision: consumer :refer's old AND already binds new -> refuse
-printf '#lang beagle/clj\n(ns rcon2)\n(require rlib :refer [red])\n(defn blue [(y Int)] Int (red y))\n' > "$W/rcon2.bclj"
+printf '#lang beagle/clj\n(ns rcon2)\n(require [rlib :refer [red]])\n(defn blue [(y Int)] Int (red y))\n' > "$W/rcon2.bclj"
 "$RACKET" "$RT" --emit-edn "$W/rcon2.bclj" 2>/dev/null > "$W/rcon2.edn"
 if bb -cp "$BEAGLE_STORE_OUT" "$RES" rename red blue rlib "$W/rlib.edn" "$W/rcon2.edn" >/dev/null 2>&1; then
   echo "  FAIL  import collision not refused"; fail=1
@@ -347,14 +347,14 @@ chk "map->Point -> map->Vertex"          "grep -qF '(map->Vertex' <<<\"\$fa\""
 echo "--- 13. cross-module field accessor (qualified + :refer'd) cascades ---"
 # 13a. qualified c/point-x
 printf '#lang beagle/clj\n(ns acore)\n(defrecord Point\n  [(x Int)\n   (y Int)])\n' > "$W/acore.bclj"
-printf '#lang beagle/clj\n(ns ause)\n(require acore :as c)\n(defn u [(p c/Point)] Int (c/point-x p))\n' > "$W/ause.bclj"
+printf '#lang beagle/clj\n(ns ause)\n(require [acore :as c])\n(defn u [(p c/Point)] Int (c/point-x p))\n' > "$W/ause.bclj"
 "$RACKET" "$RT" --emit-edn "$W/acore.bclj" 2>/dev/null > "$W/acore.edn"
 "$RACKET" "$RT" --emit-edn "$W/ause.bclj" 2>/dev/null > "$W/ause.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename Point Coord acore "$W/acore.edn" "$W/ause.edn" 2>/dev/null
 chk "qualified accessor c/point-x -> c/coord-x" "grep -qF '(c/coord-x p)' <<<\"\$(\"$RACKET\" \"$RT\" --render $RESOLVE_OUT/resolved-ause.bclj.edn 2>/dev/null)\""
 # 13b. :refer'd point-x (import vector + call site)
 printf '#lang beagle/clj\n(ns rcore)\n(defrecord Point [(x Int)])\n' > "$W/rcore.bclj"
-printf '#lang beagle/clj\n(ns ruse)\n(require rcore :refer [Point point-x])\n(defn u [(p Point)] Int (point-x p))\n' > "$W/ruse.bclj"
+printf '#lang beagle/clj\n(ns ruse)\n(require [rcore :refer [Point point-x]])\n(defn u [(p Point)] Int (point-x p))\n' > "$W/ruse.bclj"
 "$RACKET" "$RT" --emit-edn "$W/rcore.bclj" 2>/dev/null > "$W/rcore.edn"
 "$RACKET" "$RT" --emit-edn "$W/ruse.bclj" 2>/dev/null > "$W/ruse.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename Point Coord rcore "$W/rcore.edn" "$W/ruse.edn" 2>/dev/null
@@ -379,7 +379,7 @@ else echo "  PASS  lowercase type rename refused (type-name shape)"; fi
 # --- 15. defprotocol method names are renameable cross-module --------------------
 echo "--- 15. defprotocol method rename (def + :refer + call) ---"
 printf '#lang beagle/clj\n(ns pp.lib)\n(defprotocol Priced (price [self] Int))\n' > "$W/plib.bclj"
-printf '#lang beagle/clj\n(ns pp.use)\n(require pp.lib :refer [price])\n(defn total [(m Int)] Int (price m))\n' > "$W/puse.bclj"
+printf '#lang beagle/clj\n(ns pp.use)\n(require [pp.lib :refer [price]])\n(defn total [(m Int)] Int (price m))\n' > "$W/puse.bclj"
 "$RACKET" "$RT" --emit-edn "$W/plib.bclj" 2>/dev/null > "$W/plib.edn"
 "$RACKET" "$RT" --emit-edn "$W/puse.bclj" 2>/dev/null > "$W/puse.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename price cost plib "$W/plib.edn" "$W/puse.edn" 2>/dev/null

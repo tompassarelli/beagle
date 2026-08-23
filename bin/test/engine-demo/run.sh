@@ -50,13 +50,13 @@ sed '1s/^#lang beagle$/#lang beagle\/clj/' "$TARGET_FILE" > "$W/slice/rpc_limits
 cat > "$W/slice/store_rpc_consumer.bclj" <<EOF
 #lang beagle/clj
 (ns engine-demo.store.rpc)
-(require store.rpc-limits :as limits)
+(require [store.rpc-limits :as limits])
 (def term-codec-v1-depth-limit Int limits/$TARGET)
 EOF
 cat > "$W/slice/native_wire_consumer.bclj" <<EOF
 #lang beagle/clj
 (ns engine-demo.native-wire-codec)
-(require store.rpc-limits :as limits)
+(require [store.rpc-limits :as limits])
 (def rpc-v2-max-term-depth Int limits/$TARGET)
 EOF
 SOURCES=("$W/slice/rpc_limits.bclj" "$W/slice/store_rpc_consumer.bclj" "$W/slice/native_wire_consumer.bclj")
