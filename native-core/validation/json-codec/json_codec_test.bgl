@@ -2,7 +2,7 @@
 (ns native.json-codec-test
   (:require [native.json :as json]))
 
-(defn decode-event-contract? [(text String)] Bool
+(defn decode-event-contract? [text String] Bool
   (match (json/decode text)
     [(JsonDecoded events)
      (and (= 9 (count events))
@@ -98,7 +98,7 @@
             [(JsonNull offset) false]))]
     [(JsonDecodeError offset message) false]))
 
-(defn roundtrip [(text String)] String
+(defn roundtrip [text String] String
   (match (json/decode text)
     [(JsonDecoded events)
      (match (json/encode events)
@@ -108,14 +108,13 @@
     [(JsonDecodeError offset message)
      (str "decode-error@" offset ":" message)]))
 
-(defn diagnose [(text String)] String
+(defn diagnose [text String] String
   (match (json/decode text)
     [(JsonDecoded events) "ok"]
     [(JsonDecodeError offset message) (str offset ":" message)]))
 
 (defn invalid-encode [] String
-  (let [(events (Vec json/JsonEvent))
-        [(json/->JsonObjectStart 0)
+  (let [events (Vec json/JsonEvent) [(json/->JsonObjectStart 0)
          (json/->JsonKey 1 "missing")
          (json/->JsonObjectEnd 2)]]
     (match (json/encode events)
@@ -123,7 +122,16 @@
       [(JsonEncodeError event-index message)
        (str event-index ":" message)])))
 
-(defn cli-main [(args (Vec String))] Int
+(defn stdin-stress? [] Bool
+  (match (host.stdin/read-text-bounded 1152002)
+    [(host.stdin/ReadTextBoundedOk text)
+     (match (json/decode text)
+       [(JsonDecoded events) (= 768002 (count events))]
+       [(JsonDecodeError offset message) false])]
+    [(host.stdin/ReadTextBoundedOverflow) false]
+    [(host.stdin/ReadTextBoundedError errno) false]))
+
+(defn cli-main [args (Vec String)] Int
   (cond
     (and (= 2 (count args)) (= "roundtrip" (nth args 0)))
     (do (println (roundtrip (nth args 1))) 0)
@@ -136,5 +144,8 @@
 
     (and (= 1 (count args)) (= "invalid-encode" (nth args 0)))
     (do (println (invalid-encode)) 0)
+
+    (and (= 1 (count args)) (= "stdin-stress" (nth args 0)))
+    (if (stdin-stress?) 0 1)
 
     :else 64))

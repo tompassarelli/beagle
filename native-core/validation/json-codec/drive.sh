@@ -50,6 +50,17 @@ second="$($scratch/json-codec-test roundtrip \
   '{"repeat":["same",0,false,null]}')"
 [[ "$first" == "$second" ]]
 
+awk 'BEGIN {
+  printf "["
+  for (i = 0; i < 384000; i += 1) {
+    printf (i == 0 ? "[]" : ",[]")
+  }
+  printf "]"
+}' > "$scratch/stress.json"
+[[ "$(wc -c < "$scratch/stress.json")" -eq 1152001 ]]
+timeout --foreground --kill-after=2s 20s \
+  "$scratch/json-codec-test" stdin-stress < "$scratch/stress.json"
+
 rg -q '^native-exe-c17 PASS ' \
   "$scratch/artifacts/native-exe.report.txt"
 
