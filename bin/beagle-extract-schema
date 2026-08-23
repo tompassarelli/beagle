@@ -141,16 +141,32 @@ NIX_EXPR="${NIX_EXPR//@TARGET@/$TARGET}"
 echo "beagle-extract-schema: evaluating $TARGET ..." >&2
 
 tmpfile="$(mktemp)"
-trap 'rm -f "$tmpfile"' EXIT
+schema_result="$OUT"
+if [[ "$OUT" == "/dev/stdout" ]]; then
+    schema_result="$(mktemp)"
+fi
+
+cleanup() {
+    rm -f "$tmpfile"
+    if [[ "$schema_result" != "$OUT" ]]; then
+        rm -f "$schema_result"
+    fi
+}
+trap cleanup EXIT
 
 echo "$NIX_EXPR" > "$tmpfile"
 
-if ! nix eval --json --file "$tmpfile" > "$OUT"; then
+if ! nix eval --json --file "$tmpfile" > "$schema_result"; then
     echo "beagle-extract-schema: nix eval failed" >&2
-    cat "$OUT" >&2
-    rm -f "$OUT"
+    cat "$schema_result" >&2
+    if [[ "$schema_result" == "$OUT" ]]; then
+        rm -f "$OUT"
+    fi
     exit 1
 fi
 
-count=$(python3 -c "import json; print(len(json.load(open('$OUT'))))" 2>/dev/null || echo "?")
+count=$(python3 -c 'import json, sys; print(len(json.load(open(sys.argv[1]))))' "$schema_result" 2>/dev/null || echo "?")
+if [[ "$schema_result" != "$OUT" ]]; then
+    cat "$schema_result"
+fi
 echo "beagle-extract-schema: wrote $count options to $OUT" >&2
