@@ -1782,19 +1782,32 @@ validate_core_checkpoint_entry() {
 }
 
 validate_core_checkpoint_wire() {
-    local entry="$1" log="$2"
-    run_phase core-checkpoint-wire \
-        "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
-        bb -cp "$compiled" -e '
-          (require (quote [native.stages :as stages]))
-          (doseq [path *command-line-args*]
-            (let [encoding (slurp path)
-                  frozen (stages/decode-frozen-native-stage-wire-v1 encoding)]
-              (when (nil? frozen)
-                (System/exit 1))))' \
-        "$entry/artifacts/frozen-native-stage.wire-v1" \
-        "$entry/artifacts/qbe-frozen-native-stage.wire-v1" \
-        >"$log" 2>&1
+    local entry="$1" log="$2" index path rc
+    local -a labels=(native qbe)
+    local -a paths=(
+        "$entry/artifacts/frozen-native-stage.wire-v1"
+        "$entry/artifacts/qbe-frozen-native-stage.wire-v1"
+    )
+    : >"$log"
+    for index in "${!paths[@]}"; do
+        path="${paths[$index]}"
+        rc=0
+        run_phase "core-checkpoint-wire-${labels[$index]}" \
+            "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+            bb -cp "$compiled" -e '
+              (require (quote [native.stages :as stages]))
+              (let [path (first *command-line-args*)
+                    encoding (slurp path)
+                    frozen (stages/decode-frozen-native-stage-wire-v1 encoding)]
+                (when (nil? frozen)
+                  (System/exit 1)))' \
+            "$path" >>"$log" 2>&1 || rc=$?
+        if [[ "$rc" -ne 0 ]]; then
+            sed -n '1,120p' "$log" >&2
+            return "$rc"
+        fi
+    done
+    sed -n '1,120p' "$log" >&2
 }
 
 validate_core_checkpoint_wire_attestation() {
@@ -4428,9 +4441,10 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
     validate_core_checkpoint_entry "$core_checkpoint_staging" \
         "$core_checkpoint_input" "$core_checkpoint_key" ||
         die "new Core checkpoint failed structural validation"
-    validate_core_checkpoint_wire "$core_checkpoint_staging" \
-        "$work/core-checkpoint-new-wire.log" ||
+    if ! validate_core_checkpoint_wire "$core_checkpoint_staging" \
+        "$work/core-checkpoint-new-wire.log"; then
         die "new Core checkpoint failed wire validation"
+    fi
     sync -f "$core_checkpoint_staging"
     core_checkpoint_entry="$core_checkpoint_root/$core_checkpoint_key"
     # A peer that built the identical checkpoint while this build compiled has
@@ -4442,9 +4456,10 @@ if [[ "$core_result_cache_enabled" == 1 && "$core_checkpoint_eligible" == 1 &&
         validate_core_checkpoint_entry "$core_checkpoint_entry" \
             "$core_checkpoint_input" "$core_checkpoint_key" ||
             die "Core checkpoint appeared under its publication lock and did not validate"
-        validate_core_checkpoint_wire "$core_checkpoint_entry" \
-            "$work/core-checkpoint-peer-wire.log" ||
+        if ! validate_core_checkpoint_wire "$core_checkpoint_entry" \
+            "$work/core-checkpoint-peer-wire.log"; then
             die "Core checkpoint appeared under its publication lock and did not decode"
+        fi
         rm -rf -- "${core_checkpoint_staging:?}"
         core_checkpoint_staging=""
         echo "beagle build: core-checkpoint PUBLISHED-BY-PEER $core_checkpoint_key" >&2

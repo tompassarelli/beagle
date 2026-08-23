@@ -40,7 +40,8 @@ run_build() {
     local output="$1" log="$2"
     shift 2
     timeout --foreground 180s nice -n 19 env \
-        BEAGLE_CORE_BUILD_CACHE="$cache" "$@" \
+        BEAGLE_CORE_BUILD_CACHE="$cache" \
+        BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS=30 "$@" \
         "$repo/bin/beagle-build-core" --materializer c17 \
         --out "$output" "$source_file" >"$log.stdout" 2>"$log.stderr"
 }
@@ -81,6 +82,30 @@ cold_key="$(checkpoint_key "$work/cold")"
     echo "core_checkpoint_cache_gate.sh: cold reference did not publish a checkpoint" >&2
     exit 1
 }
+for wire_phase in native qbe; do
+    wire_phase_log="$work/cold-$wire_phase-phase.log"
+    awk -v start="beagle build: phase core-checkpoint-wire-$wire_phase START" \
+        -v end="beagle build: phase core-checkpoint-wire-$wire_phase END" '
+            $0 == start { within = 1 }
+            within { print }
+            $0 == end { exit }
+        ' "$work/cold.stderr" >"$wire_phase_log"
+    grep -Fqx "beagle build: phase core-checkpoint-wire-$wire_phase START" \
+        "$wire_phase_log" || {
+        echo "core_checkpoint_cache_gate.sh: $wire_phase checkpoint wire did not receive an independent phase" >&2
+        exit 1
+    }
+    grep -Fqx "beagle supervisor: bb START deadline=30s kill-grace=5s" \
+        "$wire_phase_log" || {
+        echo "core_checkpoint_cache_gate.sh: $wire_phase checkpoint wire did not retain the 30-second budget" >&2
+        exit 1
+    }
+    grep -Fqx "beagle build: phase core-checkpoint-wire-$wire_phase END" \
+        "$wire_phase_log" || {
+        echo "core_checkpoint_cache_gate.sh: $wire_phase checkpoint wire phase did not complete" >&2
+        exit 1
+    }
+done
 cold_early_key="$(sed -n \
     's/^beagle build: core-checkpoint-alias MISS \([0-9a-f]\{64\}\)$/\1/p' \
     "$work/cold.stderr")"
