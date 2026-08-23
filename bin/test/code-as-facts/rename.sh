@@ -363,9 +363,9 @@ chk ":refer'd accessor point-x -> coord-x (import + call)" "grep -qF ':refer [Co
 
 # --- 14. fully-qualified module-name refs + type-name-shape guard ----------------
 echo "--- 14. fully-qualified (module-name/Name) refs + Capitalized-type guard ---"
-# 14a. (require acc.prod) with FQ refs acc.prod/Box, acc.prod/box-w, acc.prod/->Box all cascade
+# 14a. (require [acc.prod]) with FQ refs acc.prod/Box, acc.prod/box-w, acc.prod/->Box all cascade
 printf '#lang beagle/clj\n(ns acc.prod)\n(defrecord Box [(w Int)])\n' > "$W/fqp.bclj"
-printf '#lang beagle/clj\n(ns acc.cons)\n(require acc.prod)\n(defn u [(b acc.prod/Box)] Int (acc.prod/box-w b))\n(defn mk [] acc.prod/Box (acc.prod/->Box 1))\n' > "$W/fqc.bclj"
+printf '#lang beagle/clj\n(ns acc.cons)\n(require [acc.prod])\n(defn u [(b acc.prod/Box)] Int (acc.prod/box-w b))\n(defn mk [] acc.prod/Box (acc.prod/->Box 1))\n' > "$W/fqc.bclj"
 "$RACKET" "$RT" --emit-edn "$W/fqp.bclj" 2>/dev/null > "$W/fqp.edn"
 "$RACKET" "$RT" --emit-edn "$W/fqc.bclj" 2>/dev/null > "$W/fqc.edn"
 bb -cp "$BEAGLE_STORE_OUT" "$RES" rename Box Crate fqp "$W/fqp.edn" "$W/fqc.edn" 2>/dev/null

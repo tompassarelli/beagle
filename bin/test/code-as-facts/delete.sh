@@ -173,7 +173,7 @@ EOF
 cat > "$W/fqc.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.fqc)
-(require delcorp.fqp)
+(require [delcorp.fqp])
 (defn u [(b delcorp.fqp/Box)] Int (delcorp.fqp/box-w b))
 EOF
 "$RACKET" "$RT" --emit-edn "$W/fqp.bclj" 2>/dev/null > "$W/fqp.edn"
