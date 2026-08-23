@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SECONDS=0
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export BEAGLE_NO_ZO_GATE=1
 source "$ROOT/bin/_beagle-racket"
 RACKET="$(command -v "$RACKET")"
 
+progress() {
+    printf 'racket-scope: +%ss %s\n' "$SECONDS" "$1" >&2
+}
+progress "pinned Racket resolved"
+
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-racket-scope.XXXXXX")"
-trap 'rm -rf "${scratch:?}"' EXIT
+
+cleanup() {
+    chmod -R u+w "${scratch:?}" 2>/dev/null || true
+    rm -rf "${scratch:?}"
+}
+trap cleanup EXIT
 
 linked="$scratch/linked"
 sibling="$scratch/sibling"
@@ -25,6 +36,7 @@ copy_checkout() {
 
 copy_checkout "$linked"
 copy_checkout "$sibling"
+progress "checkout copies ready"
 
 (
     export PLTUSERHOME="$scratch/racket-home"
@@ -33,6 +45,7 @@ copy_checkout "$sibling"
 
     "$RACO" pkg install --auto --link \
         "$linked/beagle-lib" "$linked/beagle-test" "$linked/beagle" >/dev/null
+    progress "linked packages installed"
 
     test -f "$linked/beagle-test/tests/compiled/checked-bundle_rkt.zo"
 
@@ -58,6 +71,7 @@ copy_checkout "$sibling"
         2>"$quiet_gate_errors"
     [[ ! -s "$quiet_gate_errors" ]]
     test -f "$linked/.beagle/zo-fresh"
+    progress "bytecode freshness paths passed"
 
     export _BEAGLE_RACKET="$RACKET"
     export BEAGLE_NO_ZO_GATE=1
@@ -71,12 +85,15 @@ copy_checkout "$sibling"
     [[ "$(realpath "$("$RACKET" -e \
         '(display (path->string (collection-path "beagle" "tests")))')")" \
         == "$linked/beagle-test/tests" ]]
+    progress "linked collection scope passed"
 
     "$RACO" test "$linked/beagle-test/tests/checked-bundle.rkt" >/dev/null
+    progress "linked checked-bundle passed"
 
     unset PLTCOLLECTS _BEAGLE_SCOPE_ROOT _BEAGLE_ZO_GATE_PID BEAGLE_ROOT
     source "$sibling/bin/_beagle-racket"
     "$RACO" test "$sibling/beagle-test/tests/checked-bundle.rkt" >/dev/null
+    progress "sibling checked-bundle passed"
     rm -rf "$sibling/.beagle"
 
     # A copied checkout can be immutable (as a Nix store checkout is).  Its
@@ -102,6 +119,7 @@ copy_checkout "$sibling"
     first_collects="$PLTCOLLECTS"
     source "$sibling/bin/_beagle-racket"
     [[ "$PLTCOLLECTS" == "$first_collects" ]]
+    progress "immutable sibling scope passed"
 
     chmod -R u+w "$sibling"
 )

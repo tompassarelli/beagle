@@ -125,8 +125,9 @@ BEAGLE_SUITES_CHECKER_FOCUS=(
 # and both are whole-checkout guards. Nothing is bought by reasoning about
 # skipping them.
 #
-# racket-scope is selected. It costs 58-80s and asserts exactly one thing: that
-# bin/_beagle-racket resolves the `beagle` collection to THIS checkout in both
+# racket-scope is selected. Its deliberate fresh-cache path costs 139-180s and
+# asserts exactly one thing: bin/_beagle-racket resolves the `beagle`
+# collection to THIS checkout in both
 # the linked and the sibling layout. Its inputs are the scope machinery itself,
 # the package info files, and the small set of scripts its fixture copies --
 # not the content of any compiler module.

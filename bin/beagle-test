@@ -150,8 +150,10 @@ BEAGLE_TEST_PHASE_RAN=0
 #                                 that changes the source closure pays the slow
 #                                 side.
 declare -A BEAGLE_TEST_PHASE_DEADLINE=(
-    # honest 80s worst (cold bytecode, load 6.7-8.9); 58-65s warm. 2.2x.
-    [racket-scope]=180
+    # Fresh-cache scope work completes around 139-150s and can reach its final
+    # immutable-checkout probe near 180s. 360s keeps the hang detector above 2x
+    # the observed legitimate path.
+    [racket-scope]=360
     # honest 1s. A 30s floor: process startup alone can eat a small budget.
     [checkout-first]=30
     # honest <1s. Same floor reasoning, smaller work.
