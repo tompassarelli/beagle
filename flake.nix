@@ -84,7 +84,7 @@
 
         beagle = pkgs.stdenv.mkDerivation {
           pname = "beagle";
-          version = "0.25.1";
+          version = "0.25.2";
           src = ./.;
 
           # A Nix source has no .git directory at runtime. Preserve the exact

@@ -3,5 +3,5 @@
 (define deps '("beagle-lib"))
 (define build-deps '("beagle-test"))
 (define implies '("beagle-lib"))
-(define version "0.25.1")
+(define version "0.25.2")
 (define license '(Apache-2.0 OR MIT))
