@@ -1,7 +1,7 @@
 name: fuzz-nightly
 
 # Nightly differential-fuzz campaign: a fresh-seed corpus (default 800 cases)
-# run through the dual-compiler harness (Racket oracle vs self-hosted bb seed).
+# run through the dual-compiler harness (Racket oracle vs native self-host).
 # The seed is derived from the UTC date, so each night is fresh AND every run
 # reproduces locally with the one command printed in bin/beagle-fuzz-nightly's
 # banner. The gate (fuzz/harness/gate.clj) is GREEN on today's main and RED on
@@ -51,12 +51,20 @@ jobs:
           raco pkg install --auto --link \
             beagle-lib/ beagle-test/ beagle/
 
-      # babashka — runs the generator, the harness, the gate, AND is the
-      # self-hosted compiler (native binary required in CI).
+      # babashka runs the generator, harness, and gate. The compared compiler
+      # is the native binary built below.
       - name: Install babashka (pinned)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
           babashka-version: '1.12.218'
+
+      - name: Install the pinned Nix build resolver
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+
+      - name: Build the native self-host compiler
+        run: |
+          nix build .#beagle-selfhost
+          test -x result/bin/beagle-selfhost
 
       # _BEAGLE_RACKET pins bin/_beagle-racket to the runner's setup-racket
       # (bytecode built in this job); otherwise it would nix-develop the flake
@@ -67,6 +75,7 @@ jobs:
         env:
           FUZZ_SEED: ${{ github.event.inputs.seed }}
           FUZZ_COUNT: ${{ github.event.inputs.count }}
+          FUZZ_SELFHOST_BIN: ${{ github.workspace }}/result/bin/beagle-selfhost
         run: |
           _BEAGLE_RACKET="$(which racket)" \
             bin/beagle-fuzz-nightly \
