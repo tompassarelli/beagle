@@ -161,20 +161,28 @@
   [ctx (U ri/Graph Nil)
    view Any
    ents (Vec Any)] (Map Keyword Any)
-  (let [fs (forms-of ctx view ents)
+  (let [merge-spec (fn
+                     [acc (Map Keyword Any)
+                      spec Any] (Map Keyword Any)
+                     (if (rb/brackets? ctx view spec)
+                       (let [kids (vec (rest (rr/ordered-children ctx spec)))]
+                         (merge-import-opts ctx view acc
+                           (sv ctx view (nth kids 0 nil))
+                           (vec (rest kids))))
+                       acc))
+        fs (forms-of ctx view ents)
         bare (reduce (fn
                        [acc (Map Keyword Any)
                         f Any] (Map Keyword Any)
-                       (if (= "require" (hd ctx view f)) (let [kids (rr/ordered-children ctx f)] (merge-import-opts ctx view acc (sv ctx view (nth kids 1 nil)) (vec (drop 2 kids)))) acc)) {:refer {} :as {} :rename {}} fs)
+                       (if (= "require" (hd ctx view f))
+                         (reduce merge-spec acc
+                           (vec (rest (rr/ordered-children ctx f))))
+                         acc)) {:refer {} :as {} :rename {}} fs)
         nf (ns-form ctx view ents)
         reqs (if (nil? nf) nil (loop [cs (Vec Any) (rr/ordered-children ctx nf)] (if (empty? cs) nil (let [c (nth cs 0)] (if (and (= "list" (rr/kind-of ctx view c)) (= ":require" (str (sv ctx view (nth (rr/ordered-children ctx c) 0 nil))))) c (recur (vec (rest cs))))))))]
     (if (nil? reqs)
       bare
-      (reduce (fn
-                [acc (Map Keyword Any)
-                 spec Any] (Map Keyword Any)
-                (if (rb/brackets? ctx view spec) (let [kids (vec (rest (rr/ordered-children ctx spec)))] (merge-import-opts ctx view acc (sv ctx view (nth kids 0 nil)) (vec (rest kids)))) acc))
-        bare
+      (reduce merge-spec bare
         (vec (rest (rr/ordered-children ctx reqs)))))))
 
 (defn module-exports

@@ -83,7 +83,7 @@ cat > "$ATT/c/e.bclj" <<'EOF'
 (defrecord Box [(w Int)])
 (defn wrap [(n Int)] Int (+ n 1))
 (defprotocol Show (render [self] Int))
-(extend-type Box Show (render [self] (wrap (box-w self))))
+(extend-type Box Show (render [self] Int (wrap (box-w self))))
 EOF
 capture_callgraph AJ "$ATT/c"
 agot="$(python3 - "$AJ" <<'PY'

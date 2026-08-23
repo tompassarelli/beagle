@@ -75,15 +75,15 @@
   (if (empty? rmap) a2 (assoc a2 :rename (reduce (fn [m p] (assoc m (nth p 1) [modn (nth p 0)])) (:rename a2 {}) rmap)))))
 
 (defn parse-require [ctx view ents]
-  (let [fs (forms-of ctx view ents)
-   bare (reduce (fn [acc f] (if (= "require" (hd ctx view f)) (let [kids (rr/ordered-children ctx f)]
-  (merge-import-opts ctx view acc (sv ctx view (nth kids 1 nil)) (vec (drop 2 kids)))) acc)) {:refer {} :as {} :rename {}} fs)
+  (let [merge-spec (fn [acc spec] (if (rb/brackets? ctx view spec) (let [kids (vec (rest (rr/ordered-children ctx spec)))]
+  (merge-import-opts ctx view acc (sv ctx view (nth kids 0 nil)) (vec (rest kids)))) acc))
+   fs (forms-of ctx view ents)
+   bare (reduce (fn [acc f] (if (= "require" (hd ctx view f)) (reduce merge-spec acc (vec (rest (rr/ordered-children ctx f)))) acc)) {:refer {} :as {} :rename {}} fs)
    nf (ns-form ctx view ents)
    reqs (if (nil? nf) nil (loop [cs (rr/ordered-children ctx nf)]
   (if (empty? cs) nil (let [c (nth cs 0)]
   (if (and (= "list" (rr/kind-of ctx view c)) (= ":require" (str (sv ctx view (nth (rr/ordered-children ctx c) 0 nil))))) c (recur (vec (rest cs))))))))]
-  (if (nil? reqs) bare (reduce (fn [acc spec] (if (rb/brackets? ctx view spec) (let [kids (vec (rest (rr/ordered-children ctx spec)))]
-  (merge-import-opts ctx view acc (sv ctx view (nth kids 0 nil)) (vec (rest kids)))) acc)) bare (vec (rest (rr/ordered-children ctx reqs)))))))
+  (if (nil? reqs) bare (reduce merge-spec bare (vec (rest (rr/ordered-children ctx reqs)))))))
 
 (defn module-exports [ctx view ents]
   (reduce (fn [acc f] (if (= "js/export" (hd ctx view f)) (let [raw (nth (rr/ordered-children ctx f) 1 nil)
