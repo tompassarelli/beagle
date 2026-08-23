@@ -57,12 +57,21 @@ function_index() {
 build_index="$(function_index 'build-ordered!')"
 copy_index="$(function_index 'copy-nonempty!')"
 paired_index="$(function_index 'build-paired!')"
+matched_index="$(function_index 'build-matched!')"
+conditioned_index="$(function_index 'build-conditioned!')"
+branch_canary_index="$(function_index 'branch-ownership-canary!')"
 [[ "$build_index" =~ ^[0-9]+$ ]] \
   || die "build-ordered! function index is unresolved"
 [[ "$copy_index" =~ ^[0-9]+$ ]] \
   || die "copy-nonempty! function index is unresolved"
 [[ "$paired_index" =~ ^[0-9]+$ ]] \
   || die "build-paired! function index is unresolved"
+[[ "$matched_index" =~ ^[0-9]+$ ]] \
+  || die "build-matched! function index is unresolved"
+[[ "$conditioned_index" =~ ^[0-9]+$ ]] \
+  || die "build-conditioned! function index is unresolved"
+[[ "$branch_canary_index" =~ ^[0-9]+$ ]] \
+  || die "branch-ownership-canary! function index is unresolved"
 paired_type="$(sed -nE \
   "s/^(native_m0_type_[0-9]+) native_m0_fn_$paired_index\\(.*/\\1/p" \
   "$artifacts/module_0.h")"
@@ -127,6 +136,38 @@ gcc -std=c17 -pedantic -Wall -Wextra -Werror \
   -I "$artifacts" "$artifacts/module_0.c" "$artifacts/native_shim.c" \
   "$scratch/paired-main.c" -lm -o "$scratch/paired-probe"
 timeout --foreground --kill-after=2s 20s "$scratch/paired-probe"
+
+cat >"$scratch/branch-main.c" <<'C'
+#include "module_0.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifndef BRANCH_OWNERSHIP_CANARY_FN
+#error "BRANCH_OWNERSHIP_CANARY_FN must name the generated branch canary"
+#endif
+
+_Alignas(max_align_t) static uint8_t branch_arena_storage[16384];
+
+int main(void) {
+  native_arena arena;
+  native_capability capability = {UINT64_C(1)};
+  bool passed;
+
+  native_arena_init(&arena, branch_arena_storage,
+                    sizeof(branch_arena_storage));
+  passed = BRANCH_OWNERSHIP_CANARY_FN(&arena, &capability);
+  native_arena_destroy(&arena);
+  return passed ? 0 : 1;
+}
+C
+
+gcc -std=c17 -pedantic -Wall -Wextra -Werror \
+  -DBRANCH_OWNERSHIP_CANARY_FN="native_m0_fn_$branch_canary_index" \
+  -I "$artifacts" "$artifacts/module_0.c" "$artifacts/native_shim.c" \
+  "$scratch/branch-main.c" -lm -o "$scratch/branch-probe"
+timeout --foreground --kill-after=2s 20s "$scratch/branch-probe"
 
 cat >"$negative_fixture" <<'BGL'
 #lang beagle
@@ -197,6 +238,27 @@ cat >"$negative_fixture" <<'BGL'
       (recur (+ index 1)
              (conj! left index)
              (conj! right index)))))
+
+(defunion OwnerChoice
+  (OwnerTaken [token Bool])
+  (OwnerLeft [token Bool]))
+
+(defn cond-missing-else! [enabled Bool] (U (Vec Int) Nil)
+  (loop [(builder (TransientVec Int)) (transient empty-ints)]
+    (cond
+      enabled (persistent! builder))))
+
+(defn match-unconsumed-arm! [choice OwnerChoice] (Vec Int)
+  (loop [(builder (TransientVec Int)) (transient empty-ints)]
+    (match choice
+      [(OwnerTaken token) (persistent! builder)]
+      [(OwnerLeft token) []])))
+
+(defn do-reclose-owner! [] (Vec Int)
+  (loop [(builder (TransientVec Int)) (transient empty-ints)]
+    (do
+      (persistent! builder)
+      (persistent! builder))))
 BGL
 
 set +e
@@ -210,16 +272,23 @@ set -e
 
 for function in \
   alias-owner! \
-  borrow-owner! \
   escape-owner! \
   stale-owner! \
   unconsumed-owner! \
-  double-close-owner!; do
+  double-close-owner! \
+  cond-missing-else! \
+  match-unconsumed-arm! \
+  do-reclose-owner!; do
   rg -e "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP:.*\\[$function\\]" \
     "$negative_log" >/dev/null \
     || { sed -n '1,240p' "$negative_log" >&2
          die "ownership refusal is missing for $function"; }
 done
+rg -F \
+  'TODO-NATIVE-FREE-REFERENCE: transient is not a parameter or local binding [borrow-owner!]' \
+  "$negative_log" >/dev/null \
+  || { sed -n '1,240p' "$negative_log" >&2
+       die "Native TransientVec parameter refusal is missing for borrow-owner!"; }
 for refused_artifact in \
   module.native-program module.native-program.sha256 module_0.h module_0.c; do
   [[ ! -e "$negative_artifacts/$refused_artifact" ]] \

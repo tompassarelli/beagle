@@ -7,6 +7,14 @@
   [left (Vec Int)
    right (Vec Bool)])
 
+(defunion BranchMode
+  (BranchAppend [value Int])
+  (BranchReject [message String]))
+
+(defunion BranchBuild
+  (BranchBuilt [values (Vec Int)])
+  (BranchFailed [message String]))
+
 (defn build-ordered! [] (Vec Int)
   (let [seed (Vec Int) []]
     (persistent!
@@ -31,3 +39,60 @@
         (recur (+ index 1)
                (conj! left index)
                (conj! right (< index 2)))))))
+
+(defn build-matched! [mode BranchMode] BranchBuild
+  (let [seed (Vec Int) []]
+    (loop [index Int 0
+           builder (TransientVec Int) (transient seed)]
+      (match mode
+        [(BranchAppend value)
+         (if (< index 2)
+           (recur (+ index 1) (conj! builder (+ value index)))
+           (->BranchBuilt (persistent! builder)))]
+        [(BranchReject message)
+         (do
+           (persistent! builder)
+           (->BranchFailed message))]))))
+
+(defn build-conditioned! [limit Int] BranchBuild
+  (let [seed (Vec Int) []]
+    (loop [index Int 0
+           builder (TransientVec Int) (transient seed)]
+      (cond
+        (< index limit)
+        (recur (+ index 1) (conj! builder index))
+
+        (< limit 0)
+        (do
+          (persistent! builder)
+          (->BranchFailed "negative limit"))
+
+        :else
+        (->BranchBuilt (persistent! builder))))))
+
+(defn branch-values?
+  [result BranchBuild
+   length Int
+   first-value Int
+   last-value Int] Bool
+  (match result
+    [(BranchBuilt values)
+     (and (= length (count values))
+       (= first-value (nth values 0))
+       (= last-value (nth values (- length 1))))]
+    [(BranchFailed message) false]))
+
+(defn branch-failure?
+  [result BranchBuild
+   expected String] Bool
+  (match result
+    [(BranchBuilt values) false]
+    [(BranchFailed message) (= expected message)]))
+
+(defn branch-ownership-canary! [] Bool
+  (and
+    (branch-values? (build-matched! (->BranchAppend 7)) 2 7 8)
+    (branch-failure? (build-matched! (->BranchReject "rejected"))
+      "rejected")
+    (branch-values? (build-conditioned! 3) 3 0 2)
+    (branch-failure? (build-conditioned! -1) "negative limit")))

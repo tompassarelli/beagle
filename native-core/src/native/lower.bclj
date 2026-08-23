@@ -3552,6 +3552,10 @@
    bindings (Vec core/NativeId)
    transient-owners (Vec TransientLoopOwnerV0)])
 
+(defrecord TransientLoopStateSelectionV0
+  [selected (U (Vec LoopStateV0) Nil)
+   compatible Bool])
+
 ;; One in-flight function body: finished blocks, the open block being filled,
 ;; the lexical environment, and the first refusal that made lowering stop.
 (defrecord BodyStateV0
@@ -3975,6 +3979,30 @@
                       false))))
             (recur (+ state-position 1))
             false))))))
+
+(defn select-transient-loop-states
+  [selection TransientLoopStateSelectionV0
+   candidate (Vec LoopStateV0)] TransientLoopStateSelectionV0
+  (let [selected (U (Vec LoopStateV0) Nil)
+          (transientloopstateselectionv0-selected selection)]
+    (->TransientLoopStateSelectionV0
+      (if (nil? selected) candidate selected)
+      (and (transientloopstateselectionv0-compatible selection)
+        (or (nil? selected)
+          (transient-loop-states-compatible? selected candidate))))))
+
+(defn settle-transient-loop-states
+  [state BodyStateV0
+   selection TransientLoopStateSelectionV0
+   fallback (Vec LoopStateV0)
+   form-name String] BodyStateV0
+  (if (transientloopstateselectionv0-compatible selection)
+    (let [selected (U (Vec LoopStateV0) Nil)
+            (transientloopstateselectionv0-selected selection)]
+      (with state [:loop-states (if (nil? selected) fallback selected)]))
+    (state-fail state
+      (str "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP: live " form-name
+        " arms disagree on transient ownership"))))
 
 (defn transient-loop-owners-closed? [state BodyStateV0] Bool
   (let [loop-state (U LoopStateV0 Nil) (current-loop state)]
@@ -7429,6 +7457,78 @@
 
 (declare transient-loop-tail-owned?)
 
+(defn transient-direct-complete-do-exit?
+  [index SourceIndexV0
+   forms (Vec core/NativeId)
+   owners (Vec TransientLoopOwnerSpecV0)] Bool
+  (loop [position Int 0
+         closed (Vec Bool) (transient-bool-vector (count owners) false)]
+    (if (>= position (count forms))
+      (transient-all-closed? closed)
+      (let [form core/NativeId (nth forms position)]
+        (if (source-call-named? index form "persistent!")
+          (let [args (Vec core/NativeId) (source-call-arguments index form)
+                receiver-position Int (if (= 1 (count args))
+                  (transient-owner-ref-position index (nth args 0) owners)
+                  -1)]
+            (if (or (< receiver-position 0) (nth closed receiver-position))
+              false
+              (recur (+ position 1)
+                (assoc closed receiver-position true))))
+          (if (multi-transient-neutral-expression? index form owners)
+            (recur (+ position 1) closed)
+            false))))))
+
+(defn transient-cond-tail-owned?
+  [index SourceIndexV0
+   node core/NativeId
+   owners (Vec TransientLoopOwnerSpecV0)
+   binding-count Int
+   fuel Int] Bool
+  (let [clauses-node (U core/NativeId Nil) (index-first-object index node "clauses")
+        clauses (Vec core/NativeId) (if (nil? clauses-node) []
+          (index-sequence-items index clauses-node))]
+    (and (> (count clauses) 0)
+      (loop [position Int 0]
+        (if (>= position (count clauses))
+          true
+          (let [clause core/NativeId (nth clauses position)
+                test-node (U core/NativeId Nil) (index-first-object index clause "test")
+                body-node (U core/NativeId Nil) (index-first-object index clause "body")
+                fallback Bool (and (some? test-node)
+                  (= "ref" (fact-text index test-node "form-kind"))
+                  (= "else" (fact-text index test-node "name")))
+                final Bool (= (+ position 1) (count clauses))]
+            (if (and (some? test-node) (some? body-node)
+                  (= fallback final)
+                  (or fallback
+                    (multi-transient-neutral-expression? index test-node owners))
+                  (transient-loop-tail-owned? index body-node owners
+                    binding-count (- fuel 1)))
+              (recur (+ position 1))
+              false)))))))
+
+(defn transient-match-tail-owned?
+  [index SourceIndexV0
+   node core/NativeId
+   owners (Vec TransientLoopOwnerSpecV0)
+   binding-count Int
+   fuel Int] Bool
+  (let [target (U core/NativeId Nil) (index-first-object index node "target")
+        clauses (Vec core/NativeId) (match-clause-items index node)]
+    (and (some? target) (> (count clauses) 0)
+      (multi-transient-neutral-expression? index target owners)
+      (loop [position Int 0]
+        (if (>= position (count clauses))
+          true
+          (let [body-node (U core/NativeId Nil) (index-first-object index
+                  (nth clauses position) "body")]
+            (if (and (some? body-node)
+                  (transient-loop-tail-owned? index body-node owners
+                    binding-count (- fuel 1)))
+              (recur (+ position 1))
+              false)))))))
+
 (defn transient-let-tail-owned?
   [index SourceIndexV0
    node core/NativeId
@@ -7485,15 +7585,16 @@
    fuel Int] Bool
   (let [body-node (U core/NativeId Nil) (index-first-object index node "body")
         forms (Vec core/NativeId) (if (nil? body-node) [] (index-sequence-items index body-node))]
-    (and (> (count forms) 0)
-      (loop [position Int 0]
-        (if (= (+ position 1) (count forms))
-          (transient-loop-tail-owned? index (nth forms position) owners
-            binding-count (- fuel 1))
-          (if (multi-transient-neutral-expression? index
-                (nth forms position) owners)
-            (recur (+ position 1))
-            false))))))
+    (or (transient-direct-complete-do-exit? index forms owners)
+      (and (> (count forms) 0)
+        (loop [position Int 0]
+          (if (= (+ position 1) (count forms))
+            (transient-loop-tail-owned? index (nth forms position) owners
+              binding-count (- fuel 1))
+            (if (multi-transient-neutral-expression? index
+                  (nth forms position) owners)
+              (recur (+ position 1))
+              false)))))))
 
 (defn transient-recur-owned?
   [index SourceIndexV0
@@ -7552,7 +7653,13 @@
         (= "recur" kind)
         (transient-recur-owned? index node owners binding-count)
 
-        (or (= "cond" kind) (= "match" kind) (= "loop" kind))
+        (= "cond" kind)
+        (transient-cond-tail-owned? index node owners binding-count fuel)
+
+        (= "match" kind)
+        (transient-match-tail-owned? index node owners binding-count fuel)
+
+        (= "loop" kind)
         false
 
         :else
@@ -14173,28 +14280,33 @@
                     join-parameter core/NativeId (state-id target-state owner "match-value")
                     outer-locals (Vec LocalBindingV0) (bodystatev0-locals target-state)
                     outer-refinements (Vec KeywordFlowRefinementV0) (bodystatev0-keyword-refinements target-state)
-                    outer-values (Vec ValueFlowRefinementV0) (bodystatev0-value-refinements target-state)]
+                    outer-values (Vec ValueFlowRefinementV0) (bodystatev0-value-refinements target-state)
+                    outer-loop-states (Vec LoopStateV0) (bodystatev0-loop-states target-state)]
                 (loop [position Int 0
                        current BodyStateV0 target-state
                        result-type (U core/NativeId Nil) nil
                        arms (Vec LogicArmV0) []
-                       uniform Bool true]
+                       uniform Bool true
+                       loop-selection TransientLoopStateSelectionV0
+                       (->TransientLoopStateSelectionV0 nil true)]
                   (if (>= position (count clauses))
-                    (cond
-                      (state-blocked? current) (dead-result current)
-                      (nil? result-type)
-                      (->ExprResultV0 current
-                        (lower-id "body" ["match-terminated"])
-                        (type-id "LowerFailure") true)
-                      uniform
-                      (->ExprResultV0
-                        (state-open-block current join-id
-                          [(core/->Parameter join-parameter result-type)])
-                        join-parameter result-type false)
-                      :else
-                      (finish-flow-logic-join types owner current arms
-                        join-id join-parameter
-                        outer-locals outer-refinements outer-values expected))
+                    (let [settled BodyStateV0 (settle-transient-loop-states
+                            current loop-selection outer-loop-states "match")]
+                      (cond
+                        (state-blocked? settled) (dead-result settled)
+                        (nil? result-type)
+                        (->ExprResultV0 settled
+                          (lower-id "body" ["match-terminated"])
+                          (type-id "LowerFailure") true)
+                        uniform
+                        (->ExprResultV0
+                          (state-open-block settled join-id
+                            [(core/->Parameter join-parameter result-type)])
+                          join-parameter result-type false)
+                        :else
+                        (finish-flow-logic-join types owner settled arms
+                          join-id join-parameter
+                          outer-locals outer-refinements outer-values expected)))
                     (let [clause core/NativeId (nth clauses position)
                           pattern (U core/NativeId Nil) (match-clause-pattern index clause)
                           body-node (U core/NativeId Nil) (match-clause-body index clause)
@@ -14230,7 +14342,12 @@
                                 (lower-expr-expected env owner bound body-node
                                   expected))
                               body-state BodyStateV0 (exprresultv0-state body)
-                              body-live Bool (not (exprresultv0-terminated body))]
+                              body-live Bool (not (exprresultv0-terminated body))
+                              next-loop-selection TransientLoopStateSelectionV0
+                              (if body-live
+                                (select-transient-loop-states loop-selection
+                                  (bodystatev0-loop-states body-state))
+                                loop-selection)]
                           (cond
                             (state-blocked? body-state) (dead-result body-state)
 
@@ -14239,12 +14356,14 @@
                               (recur (count clauses)
                                 (state-with-flow-context body-state
                                   outer-locals outer-refinements outer-values)
-                                result-type arms uniform)
+                                result-type arms uniform next-loop-selection)
                               (recur (+ position 1)
-                                (state-with-flow-context
-                                  (state-open-block body-state next-id [])
-                                  outer-locals outer-refinements outer-values)
-                                result-type arms uniform))
+                                (with
+                                  (state-with-flow-context
+                                    (state-open-block body-state next-id [])
+                                    outer-locals outer-refinements outer-values)
+                                  [:loop-states outer-loop-states])
+                                result-type arms uniform next-loop-selection))
 
                             :else
                             (let [closed BodyStateV0 (state-close body-state
@@ -14264,13 +14383,16 @@
                                 (recur (count clauses)
                                   (state-with-flow-context closed
                                     outer-locals outer-refinements outer-values)
-                                  next-result-type live-arms all-uniform)
+                                  next-result-type live-arms all-uniform
+                                  next-loop-selection)
                                 (recur (+ position 1)
-                                  (state-with-flow-context
-                                    (state-open-block closed next-id [])
-                                    outer-locals outer-refinements outer-values)
+                                  (with
+                                    (state-with-flow-context
+                                      (state-open-block closed next-id [])
+                                      outer-locals outer-refinements outer-values)
+                                    [:loop-states outer-loop-states])
                                   next-result-type live-arms
-                                  all-uniform)))))))))))))))))
+                                  all-uniform next-loop-selection)))))))))))))))))
 
 (defn lower-static-update-call
   [env BodyEnvV0
@@ -15802,26 +15924,36 @@
               join-parameter core/NativeId (state-id state owner "cond-value")
               outer-locals (Vec LocalBindingV0) (bodystatev0-locals state)
               outer-keywords (Vec KeywordFlowRefinementV0) (bodystatev0-keyword-refinements state)
-              outer-values (Vec ValueFlowRefinementV0) (bodystatev0-value-refinements state)]
+              outer-values (Vec ValueFlowRefinementV0) (bodystatev0-value-refinements state)
+              outer-loop-states (Vec LoopStateV0) (bodystatev0-loop-states state)]
           (loop [position Int 0
                  current BodyStateV0 state
-                 arms (Vec LogicArmV0) []]
+                 arms (Vec LogicArmV0) []
+                 loop-selection TransientLoopStateSelectionV0
+                 (->TransientLoopStateSelectionV0 nil true)]
             (if (>= position (count clauses))
               (let [arm-start Int (count (bodystatev0-blocks current))
                     implicit ExprResultV0 (nil-constant-result types current owner "cond-nil")
-                    implicit-state BodyStateV0 (exprresultv0-state implicit)]
+                    implicit-state BodyStateV0 (exprresultv0-state implicit)
+                    final-selection TransientLoopStateSelectionV0
+                    (select-transient-loop-states loop-selection
+                      (bodystatev0-loop-states implicit-state))]
                 (if (state-blocked? implicit-state)
                   (dead-result implicit-state)
                   (let [closed BodyStateV0 (state-close implicit-state
                           (core/->JumpTerminator join-id
-                            [(exprresultv0-value-id implicit)]))]
-                    (finish-flow-logic-join types owner closed
-                      (conj arms
-                        (->LogicArmV0 arm-start
-                          (count (bodystatev0-blocks closed))
-                          (exprresultv0-type-id implicit)))
-                      join-id join-parameter
-                      outer-locals outer-keywords outer-values expected))))
+                            [(exprresultv0-value-id implicit)]))
+                        settled BodyStateV0 (settle-transient-loop-states
+                          closed final-selection outer-loop-states "cond")]
+                    (if (state-blocked? settled)
+                      (dead-result settled)
+                      (finish-flow-logic-join types owner settled
+                        (conj arms
+                          (->LogicArmV0 arm-start
+                            (count (bodystatev0-blocks closed))
+                            (exprresultv0-type-id implicit)))
+                        join-id join-parameter
+                        outer-locals outer-keywords outer-values expected)))))
               (let [clause core/NativeId (nth clauses position)
                     test-node (U core/NativeId Nil) (index-first-object index clause "test")
                     body-node (U core/NativeId Nil) (index-first-object index clause "body")
@@ -15840,24 +15972,33 @@
                           (logic-result-type types arms))
                         body ExprResultV0 (lower-expr-expected env owner current body-node
                           body-expected)
-                        body-state BodyStateV0 (exprresultv0-state body)]
-                    (cond
-                      (state-blocked? body-state) (dead-result body-state)
-                      (exprresultv0-terminated body)
-                      (finish-flow-logic-join types owner body-state arms
-                        join-id join-parameter
-                        outer-locals outer-keywords outer-values expected)
-                      :else
-                      (let [closed BodyStateV0 (state-close body-state
-                              (core/->JumpTerminator join-id
-                                [(exprresultv0-value-id body)]))]
-                        (finish-flow-logic-join types owner closed
-                          (conj arms
-                            (->LogicArmV0 arm-start
-                              (count (bodystatev0-blocks closed))
-                              (exprresultv0-type-id body)))
-                          join-id join-parameter
-                          outer-locals outer-keywords outer-values expected))))
+                        body-state BodyStateV0 (exprresultv0-state body)
+                        body-live Bool (not (exprresultv0-terminated body))
+                        final-selection TransientLoopStateSelectionV0
+                        (if body-live
+                          (select-transient-loop-states loop-selection
+                            (bodystatev0-loop-states body-state))
+                          loop-selection)]
+                    (if (state-blocked? body-state)
+                      (dead-result body-state)
+                      (let [closed BodyStateV0 (if body-live
+                              (state-close body-state
+                                (core/->JumpTerminator join-id
+                                  [(exprresultv0-value-id body)]))
+                              body-state)
+                            final-arms (Vec LogicArmV0) (if body-live
+                              (conj arms
+                                (->LogicArmV0 arm-start
+                                  (count (bodystatev0-blocks closed))
+                                  (exprresultv0-type-id body)))
+                              arms)
+                            settled BodyStateV0 (settle-transient-loop-states
+                              closed final-selection outer-loop-states "cond")]
+                        (if (state-blocked? settled)
+                          (dead-result settled)
+                          (finish-flow-logic-join types owner settled final-arms
+                            join-id join-parameter
+                            outer-locals outer-keywords outer-values expected)))))
 
                   :else
                   (let [condition ExprResultV0 (lower-condition env owner current test-node)
@@ -15866,11 +16007,19 @@
                       (state-blocked? condition-state)
                       (dead-result condition-state)
                       (exprresultv0-terminated condition)
-                      (if (= 0 (count arms))
-                        condition
-                        (finish-flow-logic-join types owner condition-state arms
-                          join-id join-parameter
-                          outer-locals outer-keywords outer-values expected))
+                      (let [settled BodyStateV0 (settle-transient-loop-states
+                              condition-state loop-selection outer-loop-states
+                              "cond")]
+                        (cond
+                          (state-blocked? settled) (dead-result settled)
+                          (= 0 (count arms))
+                          (->ExprResultV0 settled
+                            (exprresultv0-value-id condition)
+                            (exprresultv0-type-id condition) true)
+                          :else
+                          (finish-flow-logic-join types owner settled arms
+                            join-id join-parameter
+                            outer-locals outer-keywords outer-values expected)))
                       (not (same-id? (exprresultv0-type-id condition)
                              (bool-type-id)))
                       (fail-result condition-state
@@ -15881,6 +16030,7 @@
                             chain-locals (Vec LocalBindingV0) (bodystatev0-locals condition-state)
                             chain-keywords (Vec KeywordFlowRefinementV0) (bodystatev0-keyword-refinements condition-state)
                             chain-values (Vec ValueFlowRefinementV0) (bodystatev0-value-refinements condition-state)
+                            chain-loop-states (Vec LoopStateV0) (bodystatev0-loop-states condition-state)
                             branched BodyStateV0 (state-refine-for-condition env owner
                               (state-open-block
                                 (state-close (state-bump (state-bump condition-state))
@@ -15908,14 +16058,22 @@
                                   (count (bodystatev0-blocks after-body))
                                   (exprresultv0-type-id body)))
                               arms)
+                            next-loop-selection TransientLoopStateSelectionV0
+                            (if body-live
+                              (select-transient-loop-states loop-selection
+                                (bodystatev0-loop-states body-state))
+                              loop-selection)
                             next-state BodyStateV0 (state-refine-for-condition env owner
-                              (state-with-flow-context
-                                (state-open-block after-body next-id [])
-                                chain-locals chain-keywords chain-values)
+                              (with
+                                (state-with-flow-context
+                                  (state-open-block after-body next-id [])
+                                  chain-locals chain-keywords chain-values)
+                                [:loop-states chain-loop-states])
                               test-node false)]
                         (if (state-blocked? body-state)
                           (dead-result body-state)
-                          (recur (+ position 1) next-state live-arms))))))))))
+                          (recur (+ position 1) next-state live-arms
+                            next-loop-selection))))))))))
 
         (= "loop" kind)
         (let [bindings-node (U core/NativeId Nil) (index-first-object index expr "bindings")
