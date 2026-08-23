@@ -53,7 +53,6 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
           key: racket-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
@@ -91,7 +90,6 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
           key: racket-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
@@ -149,7 +147,6 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
           key: racket-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
@@ -216,7 +213,6 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.local/share/racket
             **/compiled
           key: racket-9.1-${{ hashFiles('**/*.rkt') }}
           restore-keys: |
