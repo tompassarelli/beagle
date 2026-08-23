@@ -71,7 +71,7 @@
            (branch/branch-revision!
             "ref-codec-space" hash-c 14)))
 (check! "the canonical branch revision has its stable v2 digest"
-        (= "sha256:34c985a63c3baffac8de78e908933381f5ef53c10d53f4ea0ae0de3b83fd6881"
+        (= "sha256:4292a05d36508bc89397f8188dd8f3c24cb9832b85c9dfdc26893e239393f5d3"
            (branch/branchrevision-identity revision)))
 (check! "committed history bytes are part of branch revision identity"
         (not= (branch/branchrevision-identity revision)
@@ -188,41 +188,41 @@
                 (member 9 11 128 true "ref-codec-space" false)]
                (member 12 14 96 true "ref-codec-space" false))))
 (check! "a segment from another SpaceId is refused"
-        (= "STORELOG segment belongs to a different SpaceId"
+        (= "Store transaction log segment belongs to a different SpaceId"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 false "other-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a tail from another SpaceId is refused"
-        (= "STORELOG tail belongs to a different SpaceId"
+        (= "Store transaction log tail belongs to a different SpaceId"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "other-space" false))))
 (check! "a segment whose end sequence differs from its record is refused"
-        (= "STORELOG segment does not end at its recorded transaction sequence"
+        (= "Store transaction log segment does not end at its recorded transaction sequence"
            (database/branch-chain-fault
             document
             [(member 1 7 4096 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a segment whose size differs from its record is refused"
-        (= "STORELOG segment size does not match its branch ref record"
+        (= "Store transaction log segment size does not match its branch ref record"
            (database/branch-chain-fault
             document
             [(member 1 8 4095 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a chain the ref does not name is refused"
-        (= "STORELOG branch ref does not name the segments that were read"
+        (= "Store transaction log branch ref does not name the segments that were read"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a segment that does not continue the previous one is refused"
-        (= "STORELOG chain segment does not continue the previous transaction sequence"
+        (= "Store transaction log chain segment does not continue the previous transaction sequence"
            (database/branch-chain-fault
             (branch/->RefDocument
              "ref-codec-space"
@@ -232,35 +232,35 @@
              (member 12 14 128 true "ref-codec-space" false)]
             (member 15 15 96 true "ref-codec-space" false))))
 (check! "a tail that does not continue the sealed chain is refused"
-        (= "STORELOG branch tail does not continue the sealed chain"
+        (= "Store transaction log branch tail does not continue the sealed chain"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 40 41 96 true "ref-codec-space" false))))
 (check! "a torn sealed segment is refused"
-        (= "STORELOG segment ends inside a transaction record"
+        (= "Store transaction log segment ends inside a transaction record"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" true)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a chained segment without the continuation flag is refused"
-        (= "STORELOG chain segment after the base segment must carry the continuation flag"
+        (= "Store transaction log chain segment after the base segment must carry the continuation flag"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
              (member 9 11 128 false "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a base segment carrying the continuation flag is refused"
-        (= "STORELOG base chain segment must not carry the continuation flag"
+        (= "Store transaction log base chain segment must not carry the continuation flag"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 true "ref-codec-space" false)
              (member 9 11 128 true "ref-codec-space" false)]
             (member 12 14 96 true "ref-codec-space" false))))
 (check! "a chained tail without the continuation flag is refused"
-        (= "STORELOG branch tail must carry the continuation flag"
+        (= "Store transaction log branch tail must carry the continuation flag"
            (database/branch-chain-fault
             document
             [(member 1 8 4096 false "ref-codec-space" false)
