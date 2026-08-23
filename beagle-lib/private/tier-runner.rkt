@@ -1095,7 +1095,7 @@
 ;;
 ;; If you find yourself wanting to "run everything locally to be sure",
 ;; that's the workflow analog of "fix the demoted test in-line" — see
-;; CLAUDE.md "Tiering discipline during surface iteration". Trust the
+;; AGENTS.md tiering discipline during surface iteration. Trust the
 ;; tiering; CI will catch demoted regressions on push.
 
 (define (env-set? name)

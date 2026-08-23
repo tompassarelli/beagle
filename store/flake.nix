@@ -362,7 +362,7 @@
                 "HOME"
                 "PATH"
                 "direnv"
-                "project .mcp.json"
+                "project .codex/config.toml"
               ];
               runtimePath = runtimePath;
             };

@@ -13,7 +13,7 @@
 #   JSON and asks: is THIS file graph-upstream? If and only if it is, it RETURNS a
 #   PreToolUse permissionDecision of "deny" with a reason that redirects the agent to
 #   the graph-edit MCP tools. For every other file it returns NOTHING (empty stdout),
-#   which Claude Code treats as "no opinion" — ordinary edits sail through untouched.
+#   which provider harnesses treat as "no opinion" — ordinary edits sail through untouched.
 #
 #   PreToolUse is the ONLY hook event that can REFUSE a call: permissionDecision:deny
 #   short-circuits the tool before it runs. PostToolUse fires AFTER the write — too

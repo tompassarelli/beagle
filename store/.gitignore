@@ -6,8 +6,8 @@
 
 .DS_Store
 
-# Claude Code harness state (worktrees, hooks, local context)
-.claude/
+# Provider-local harness state
+.codex/
 
 # Talk/strategy drafts — kept out of the public repo (anti-cringe)
 private-docs/

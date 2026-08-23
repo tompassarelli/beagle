@@ -72,7 +72,7 @@ print(json.dumps({
 run_hook_raw() {
   local sid="$1" source="$2" cwd="$3"
   event_json "$sid" "$source" "$cwd" |
-    env -u CLAUDE_PROJECT_DIR -u CLAUDE_NO_AUTHORING_HOOKS \
+    env -u AGENT_NO_AUTHORING_HOOKS \
       HOME="$SCRATCH/home" \
       BEAGLE_PATH="$FAKE_BEAGLE" \
       BEAGLE_SESSION_STATE_DIR="$STATE" \
@@ -147,7 +147,7 @@ disabled_payload="$(event_json session-disabled startup "$PROJECT")"
 disabled="$(
   printf '%s' "$disabled_payload" |
     env HOME="$SCRATCH/home" \
-      CLAUDE_NO_AUTHORING_HOOKS=1 \
+      AGENT_NO_AUTHORING_HOOKS=1 \
       BEAGLE_PATH="$FAKE_BEAGLE" \
       BEAGLE_SESSION_STATE_DIR="$STATE" \
       BEAGLE_TEST_TRACE="$TRACE" \
@@ -174,7 +174,7 @@ unset BEAGLE_SWITCHBOARD_ACTIVITY_LIB BEAGLE_TEST_SWITCHBOARD_STATE
 invalid="$(
   cd "$PROJECT" || exit 1
   printf 'not-json' |
-    env -u CLAUDE_PROJECT_DIR -u CLAUDE_NO_AUTHORING_HOOKS \
+    env -u AGENT_NO_AUTHORING_HOOKS \
       HOME="$SCRATCH/home" \
       BEAGLE_PATH="$FAKE_BEAGLE" \
       BEAGLE_SESSION_STATE_DIR="$STATE" \

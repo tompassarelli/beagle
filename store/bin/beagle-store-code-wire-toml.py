@@ -14,11 +14,11 @@ import sys
 
 
 BEGIN_RE = re.compile(
-    rb"(?m)^# >>> beagle-store-code-wire managed mcp_servers\.store separator=([0-2])\n"
+    rb"(?m)^# >>> beagle-store-code-wire managed mcp_servers\.beagle-store separator=([0-2])\n"
 )
 END_MARKER = b"# <<< beagle-store-code-wire managed mcp_servers.beagle-store\n"
 UNMANAGED_BEAGLE_STORE_TABLE_RE = re.compile(
-    rb"(?m)^\[mcp_servers\.store\][ \t]*\r?$"
+    rb"(?m)^\[mcp_servers\.beagle-store\][ \t]*\r?$"
 )
 
 
@@ -34,7 +34,7 @@ def render_toml(server: dict) -> bytes:
     env = server.get("env", {})
     if env:
         lines.append("")
-        lines.append("[mcp_servers.store.env]")
+        lines.append("[mcp_servers.beagle-store.env]")
         for key, value in env.items():
             lines.append(f"{key} = {toml_str(str(value))}")
     return ("\n".join(lines) + "\n").encode("utf-8")

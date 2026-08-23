@@ -26,10 +26,9 @@ health signal explicitly reports degraded functional canaries. A pointed
 syntax or type rejection is source feedback, not loop degradation.
 
 On concrete degradation, diagnose once with `beagle doctor --deep`. Use
-`beagle doctor --revive` only when that diagnosis identifies a daemon failure,
-and `beagle init --hooks` only when the project actually lacks the edit hook it
-needs. A successful relevant compiler command or functional canary restores
-authority; never repeat deep doctor merely to turn status text green.
+`beagle doctor --revive` only when that diagnosis identifies a daemon failure.
+A successful relevant compiler command or functional canary restores authority;
+never repeat deep doctor merely to turn status text green.
 
 ## Ground each question in the checkout
 
@@ -63,7 +62,7 @@ repair delimiters; never count them by hand.
 | expansion | `beagle expand FILE` |
 | active tests or build | `beagle test`; `beagle build FILE [OUT]` |
 
-For compiler or surface work, read `beagle:CLAUDE.md` and query the relevant
+For compiler or surface work, read `beagle:AGENTS.md` and query the relevant
 parser, type, stdlib, or target source only when that question arises. Do not
 copy those inventories into policy.
 

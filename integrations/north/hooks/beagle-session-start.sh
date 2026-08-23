@@ -31,9 +31,7 @@ capture_hook_stdin() {
 capture_hook_stdin
 
 # Codex requirements install the complete reviewed hook envelope once; the
-# agents switchboard controls whether this member is effective. Claude composes
-# only active hooks, so the helper is normally absent there. A pre-switchboard
-# installation also keeps the established behavior when no projection exists.
+# agents switchboard controls whether this member is effective.
 switchboard_activity="${BEAGLE_SWITCHBOARD_ACTIVITY_LIB:-${BASH_SOURCE[0]%/*}/lib/switchboard-activity.sh}"
 if [ -r "$switchboard_activity" ]; then
   # shellcheck disable=SC1090
@@ -44,8 +42,8 @@ fi
 # Clean-room / experiment kill-switch (opt-OUT), owner-local: when guards are
 # OFF this hook no-ops — no authoring context is injected — so
 # a controlled run keeps an identical neutral session surface across all arms.
-# Engaged by env AGENT_NO_AUTHORING_HOOKS (or the CLAUDE_NO_AUTHORING_HOOKS
-# compatibility alias): any value but 0/false = OFF; 0/false forces guards
+# Engaged by env AGENT_NO_AUTHORING_HOOKS: any value but 0/false = OFF;
+# 0/false forces guards
 # LIVE; unset/empty (the default) = normal behavior. This is a self-contained
 # env-only check (no shared state file, no north-config dependency) — the
 # smallest seam that lets a caller inject its own policy: set
@@ -55,7 +53,7 @@ fi
 [ -n "${BEAGLE_AUTHORING_KILLSWITCH_LIB:-}" ] && . "$BEAGLE_AUTHORING_KILLSWITCH_LIB" 2>/dev/null
 if ! type authoring_guards_off >/dev/null 2>&1; then
   authoring_guards_off() {
-    case "${AGENT_NO_AUTHORING_HOOKS:-${CLAUDE_NO_AUTHORING_HOOKS:-}}" in
+    case "${AGENT_NO_AUTHORING_HOOKS:-}" in
       0|false|'') return 1 ;;
       *) return 0 ;;
     esac
@@ -64,8 +62,8 @@ fi
 authoring_guards_off && exit 0
 [ "$payload_oversized" -eq 0 ] || exit 0
 
-# Both Claude Code and Codex pass a SessionStart JSON envelope on stdin. Parse
-# it opportunistically: malformed/missing input must never break startup.
+# Parse the SessionStart JSON envelope opportunistically: malformed or missing
+# input must never break startup.
 event_cwd=""
 session_id=""
 session_source=""
@@ -91,9 +89,8 @@ for key in ("cwd", "session_id", "source"):
 fi
 session_source="${session_source,,}"
 
-# Claude Code sets CLAUDE_PROJECT_DIR. Codex relies on the event cwd. Preserve
-# the Claude override, then fall back through the event and process cwd.
-dir="${CLAUDE_PROJECT_DIR:-${event_cwd:-$PWD}}"
+# Prefer the event cwd, then the process cwd.
+dir="${event_cwd:-$PWD}"
 cd "$dir" 2>/dev/null || exit 0
 dir="$(pwd -P)"
 
@@ -212,7 +209,7 @@ fi
 if [ "$context_mode" = compact ]; then
   ctx="Beagle authoring context restored after compaction. Existing fast health evidence or passing functional canaries authorize editing; trust compiler and PostToolUse repair feedback. Run \`beagle doctor --deep\` only after concrete degraded feedback that would affect the edit loop."
 else
-  ctx="Beagle authoring is active. YOU (the agent) own authoring-loop health, not the user. Existing fast health evidence or passing functional canaries authorize editing; do not add a pre-edit gate. Treat the compiler as source of truth and PostToolUse repair feedback as authoritative. Run \`beagle doctor --deep\` only after concrete degraded feedback affecting this edit loop, use \`beagle doctor --revive\` only when diagnosis identifies daemon failure, and use \`beagle init --hooks\` only when the project actually lacks required feedback. Never repeat doctor merely to turn status text green."
+  ctx="Beagle authoring is active. YOU (the agent) own authoring-loop health, not the user. Existing fast health evidence or passing functional canaries authorize editing; do not add a pre-edit gate. Treat the compiler as source of truth and PostToolUse repair feedback as authoritative. Run \`beagle doctor --deep\` only after concrete degraded feedback affecting this edit loop, and use \`beagle doctor --revive\` only when diagnosis identifies daemon failure. Never repeat doctor merely to turn status text green."
 fi
 # Inject into session context via the SessionStart additionalContext channel.
 python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$ctx"

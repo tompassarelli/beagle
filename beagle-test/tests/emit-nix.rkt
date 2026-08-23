@@ -839,7 +839,7 @@
   (check-true (and out (string-contains? out "\"hello\""))))
 
 ;; --- nix/-prefixed canonical Nix-namespaced forms ---------------------------
-;; Per the "Prefix where meaning diverges from Clojure" rule in beagle/CLAUDE.md,
+;; Per the prefix rule in beagle:AGENTS.md,
 ;; Nix-specific forms whose Clojure namesake means something different get the
 ;; nix/ prefix. `nix/assert` / `nix/with` / `nix/with-cfg` are the ONLY accepted
 ;; spellings; bare `assert` / `with-cfg` / Nix-scope `with` are HARD-REJECTED at

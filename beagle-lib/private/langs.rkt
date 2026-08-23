@@ -16,7 +16,7 @@
 
 ;; --- small helpers ---------------------------------------------------------
 
-;; "a, b, and c" — the Oxford-comma prose join used in README/CLAUDE sentences.
+;; "a, b, and c" — the Oxford-comma prose join used in generated prose.
 (define (prose-join items)
   (cond
     [(null? items) ""]

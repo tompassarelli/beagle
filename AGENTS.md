@@ -107,3 +107,18 @@ compiler.
 - Reader runs at phase 0, parser at phase 1 — shared symbols must be
   phase-stable.
 - `ANY` is `(type-prim 'Any)`.
+
+## Compiler design invariants
+
+- Beagle is Clojure plus types. A divergence from Clojure must be load-bearing
+  for the type system or a backend. When constraints compete, types outrank
+  Clojure idiom, which outranks aesthetic preference.
+- The front end is `parse → check → emit` inside `#%module-begin`. Built-in
+  forms and user macros have separate registries, but both lower to typed IR
+  before any backend runs.
+- The bare namespace is Clojure-only. Target-specific concepts keep a fixed
+  target prefix at every use; a cross-target Beagle-original concept uses
+  `bgl/`. Divergent names never enter bare use.
+- Do not build a runtime operative or fexpr evaluator. Every backend,
+  including Nix, implements semantics from typed IR without runtime `eval` or
+  reified environments.

@@ -70,7 +70,7 @@ Query (the compiler is the source of truth):
                             (--check exits 3 on drift)
 
 Project / loop:
-  init [--hooks] [--target T]  Bootstrap a project (+ portable repair hooks)
+  init [--target T]            Bootstrap a project and its AGENTS.md
   daemon start|status|stop  Watch + cache type results
   promote [REV]             Promote clean checkout HEAD + restart its daemon
   native-exe --out FILE --entry NS/NAME

@@ -157,15 +157,23 @@
   (check! "scratch native server serves the ingested corpus"
           (some? (and server (eventually #(version! port space)))))
   (when server
-    (spit (io/file scratch ".mcp.json")
-          (json/generate-string
-            {:mcpServers
-            {:beagle-store {:command (str (io/file store-root "bin/beagle-store-mcp"))
-                    :args []
-                    :env {:BEAGLE_STORE_SPACE_ID space :BEAGLE_STORE_SERVER_PORT (str port)
-                          :BEAGLE_STORE_LOG code-log}}
-             :beagle-store-graph-control {:command runtime :args ["mcp"]
-                                  :env launch-env}}}))
+    (.mkdirs (io/file scratch ".codex"))
+    (spit (io/file scratch ".codex/config.toml")
+          (str
+            "[mcp_servers.beagle-store]\n"
+            "command = " (pr-str (str (io/file store-root "bin/beagle-store-mcp"))) "\n"
+            "args = []\n\n"
+            "[mcp_servers.beagle-store.env]\n"
+            "BEAGLE_STORE_SPACE_ID = " (pr-str space) "\n"
+            "BEAGLE_STORE_SERVER_PORT = " (pr-str (str port)) "\n"
+            "BEAGLE_STORE_LOG = " (pr-str code-log) "\n\n"
+            "[mcp_servers.beagle-store-graph-control]\n"
+            "command = " (pr-str runtime) "\n"
+            "args = [\"mcp\"]\n\n"
+            "[mcp_servers.beagle-store-graph-control.env]\n"
+            (apply str
+              (for [[name value] (sort-by key launch-env)]
+                (str name " = " (pr-str value) "\n")))))
     (let [status (shell/sh (str (io/file store-root "bin/beagle-store-code-status"))
                            checkout-root
                            :env (assoc (into {} (System/getenv))

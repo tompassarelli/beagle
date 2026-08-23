@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # beagle-store-code-off <dir> — stop the native code server serving this dir's
-# code.log + unwire the Beagle Store MCP entry from BOTH Claude Code
-# (.mcp.json) and Codex (.codex/config.toml). Inverse of beagle-store-code-on.
-# Only the store wiring is touched — unrelated mcpServers/[mcp_servers.*]/
-# [projects.*] entries in either file are left byte-identical.
+# code.log + unwire the Beagle Store MCP entry from Codex's config.toml.
+# Inverse of beagle-store-code-on. Unrelated [mcp_servers.*]/[projects.*]
+# entries are left byte-identical.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="${1:?usage: beagle-store-code-off <dir>}"; DIR="$(cd "$DIR" && pwd)"
@@ -11,4 +10,4 @@ CODE_LOG="$DIR/.store/code.log"
 # Stop the server that serves THIS code.log (matched precisely, not by port).
 pkill -f "server.clj serve [0-9]+ $CODE_LOG( |$)" 2>/dev/null && echo "server stopped" || echo "no server running for $CODE_LOG"
 "$HERE/bin/beagle-store-code-wire" off "$DIR"
-echo "beagle-store-code-off: $DIR — store MCP entry removed from .mcp.json / .codex/config.toml. (code.log kept at $CODE_LOG; delete .store/ to fully reset.)"
+echo "beagle-store-code-off: $DIR — store MCP entry removed from .codex/config.toml. (code.log kept at $CODE_LOG; delete .store/ to fully reset.)"

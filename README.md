@@ -69,8 +69,8 @@ $ bb build/main.clj
 hello from Beagle
 ```
 
-For a new project, `beagle init --hooks --target TARGET DIR` installs the edit
-loop. For Native Core, author `.bgl` with bare `#lang beagle` and choose a
+For a new project, `beagle init --target TARGET DIR` creates an `AGENTS.md` and
+a starter source file. For Native Core, author `.bgl` with bare `#lang beagle` and choose a
 materializer explicitly with `beagle build --materializer ... --out DIR FILE`.
 Use `beagle help` and `beagle langs` for the current command and target
 surfaces.
@@ -99,7 +99,7 @@ artifacts below are the authoritative answers.
 | Stable product boundaries | [`docs/design-rationale.md`](docs/design-rationale.md) |
 | Historical dogfood findings | [`docs/dogfood-codegen-findings.md`](docs/dogfood-codegen-findings.md) |
 | Beagle Store and brownfield capability examples | [`store/README.md`](store/README.md) |
-| Surface policy and contribution anchor | [`CLAUDE.md`](CLAUDE.md) |
+| Surface policy and contribution anchor | [`AGENTS.md`](AGENTS.md) |
 
 ## Status and license
 

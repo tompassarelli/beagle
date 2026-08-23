@@ -3,14 +3,14 @@
 # beagle-store-code-on — build and serve a native code corpus for a directory.
 #   beagle-store-code-on <dir> [port] --space-id <id> [--src <subdir>]
 # --src scopes ingest+corpus to the SOURCE subtree (default: <dir>) while .store/
-# and .mcp.json stay at <dir> — repos whose tree also holds build artifacts /
+# and .codex/config.toml stay at <dir> — repos whose tree also holds build artifacts /
 # vendored copies (gjoa: gitignored engine/ mirrors src/) must not ingest those.
 # Does the whole incantation in one shot:
 #   1. ingest <dir> -> .store/code.log (native Store transaction log)
 #   2. boot the native server on that log
 #   3. wire the public Beagle Store data MCP to that SpaceId
 # Graph-control authoring is a separate sealed service and is not enabled here.
-# Turn OFF: beagle-store-code-off <dir>  (stops the server; remove .mcp.json).
+# Turn OFF: beagle-store-code-off <dir>  (stops the server; removes the Codex MCP entry).
 # ============================================================================
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"          # store repo root
@@ -117,10 +117,9 @@ else
   exit 1
 fi
 
-# 3. write .mcp.json (Claude Code) + .codex/config.toml [mcp_servers.beagle-store] (Codex)
-#    so BOTH pick up the public Beagle Store data MCP for this corpus. MERGE, never clobber —
-#    an existing .mcp.json / config.toml may carry unrelated servers/projects.
-echo "  [3/3] wiring $DIR/.mcp.json + $DIR/.codex/config.toml …"
+# 3. write .codex/config.toml [mcp_servers.beagle-store]. Merge without
+#    clobbering unrelated servers or projects.
+echo "  [3/3] wiring $DIR/.codex/config.toml …"
 BEAGLE_STORE_SERVER_JSON=$(cat <<JSON
 {
   "command": "$HERE/bin/beagle-store-mcp",

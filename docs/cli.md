@@ -62,7 +62,7 @@ beagle doc-fill [--check]   # refill every doc span the table owns; --check
 ## Project and loop
 
 ```sh
-beagle init [--hooks] [--target T] [DIR]  # bootstrap a project (+ repair hooks)
+beagle init [--target T] [DIR]            # bootstrap a project + AGENTS.md
 beagle daemon start|status|stop           # watch + cache type results
 beagle promote [REV]        # promote clean checkout HEAD, restart its daemon
 beagle test [--active-only] # run the test tiers
@@ -74,8 +74,7 @@ beagle lsp | beagle repl    # LSP server / typed REPL
 
 A watch daemon, an on-edit syntax/type hook, and machine-applicable fixes are
 where the type signal becomes applied edits. `beagle doctor` health-checks the
-whole path end to end. `beagle init --hooks` wires the same loop into a project's
-`.claude/` configuration, and is idempotent on an already-initialized repo.
+whole path end to end. `beagle init` scaffolds the project and its `AGENTS.md`.
 
 ## Build output paths
 

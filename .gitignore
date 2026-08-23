@@ -2,7 +2,6 @@ compiled/
 *.dep
 *.zo
 .DS_Store
-.claude/
 .direnv/
 .beagle/
 doc/

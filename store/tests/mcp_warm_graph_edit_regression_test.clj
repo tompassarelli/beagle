@@ -69,7 +69,8 @@
 (def ingest
   (p/shell {:dir root :out :string :err :string :continue true
             :extra-env base-tool-env}
-           "bin/beagle-store-ingest-code" source-file "--root" project "--out" code-log))
+           "bin/beagle-store-ingest-code" source-file "--root" project "--out" code-log
+           "--space-id" "warm-regression"))
 (when-not (zero? (:exit ingest))
   (println "ABORT — fixture ingest failed\n" (:out ingest) (:err ingest))
   (System/exit 1))
@@ -78,11 +79,15 @@
   (with-open [socket (java.net.ServerSocket. 0)] (.getLocalPort socket)))
 
 (def port (free-port))
-(spit (str project "/.mcp.json")
-      (json/generate-string
-       {:mcpServers
-        {:beagle-store {:command (str root "/bin/beagle-store-mcp")
-                :env {:BEAGLE_STORE_CODE_PORT (str port)}}}}))
+(.mkdirs (io/file project ".codex"))
+(spit (str project "/.codex/config.toml")
+      (str "[mcp_servers.beagle-store]\n"
+           "command = " (pr-str (str root "/bin/beagle-store-mcp")) "\n"
+           "args = []\n\n"
+           "[mcp_servers.beagle-store.env]\n"
+           "BEAGLE_STORE_SPACE_ID = \"warm-regression\"\n"
+           "BEAGLE_STORE_SERVER_PORT = " (pr-str (str port)) "\n"
+           "BEAGLE_STORE_LOG = " (pr-str code-log) "\n"))
 ;; The edit gate is launch-sealed: a server started without BEAGLE_STORE_EDIT_VERIFIER
 ;; rejects every graph edit as verification-unavailable.
 (def daemon
@@ -95,7 +100,7 @@
                                  ;; before/after version comparisons need a quiescent log:
                                  ;; post-boot snapshot metadata is a legitimate async writer.
                                  "BEAGLE_STORE_SNAPSHOT_BOOT" "0"})}
-             "bin/beagle-store-server" "serve" (str port) code-log))
+             "bin/beagle-store-server" "serve" (str port) code-log "warm-regression"))
 
 (defn database [req] (rt/database-request-for-log port code-log req))
 ;; Sized for a JVM server boot, not for a quiet machine: readiness is the only
@@ -160,9 +165,9 @@
                         "bin/beagle-store-code-status" project)]
     (check! "status counts the in-band adopted path, not the stale registry row"
             (and (zero? (:exit status))
-                 (str/includes? (:out status) "level=3 ")
+                 (str/includes? (:out status) "level=2 ")
                  (str/includes? (:out status) "mcp=present")
-                 (str/includes? (:out status) "database=alive")
+                 (str/includes? (:out status) "server=alive")
                  (str/includes? (:out status) "canonical=1"))))
 
   (let [event (json/generate-string

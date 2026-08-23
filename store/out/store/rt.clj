@@ -16,12 +16,12 @@
 (defn slurp [path] (clojure.core/slurp path))
 
 (defn list-md
-  "Absolute paths of *.md directly under dir, sorted, excluding CLAUDE.md."
+  "Absolute paths of *.md directly under dir, sorted, excluding AGENTS.md."
   [dir]
   (->> (.listFiles (io/file dir))
        (map #(.getPath ^java.io.File %))
        (filter #(str/ends-with? % ".md"))
-       (remove #(str/ends-with? % "CLAUDE.md"))
+       (remove #(str/ends-with? % "AGENTS.md"))
        sort
        vec))
 

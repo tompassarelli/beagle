@@ -672,8 +672,8 @@
    ;; specifiers even though emit-module-header already special-cases an
    ;; `@`-prefixed namespace and passes it through verbatim.
    (check-js-contains "scoped npm import (@scope/pkg) -> passes through verbatim"
-     "import * as sdk from '@anthropic-ai/claude-agent-sdk';"
-     (list 'require (br '@anthropic-ai/claude-agent-sdk ':as 'sdk))
+     "import * as sdk from '@scope/pkg';"
+     (list 'require (br '@scope/pkg ':as 'sdk))
      '(defn f [] Any (sdk/query)))
 
    (check-js-contains "dotted npm subpath -> passes through verbatim"

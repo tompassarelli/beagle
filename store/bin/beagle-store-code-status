@@ -55,19 +55,35 @@ if [ -f "$CODE_LOG" ] && \
   NATIVE_LOG=true
 fi
 MCP=absent
-# .mcp.json counts only if it actually wires the Beagle Store server.
-[ -f "$DIR/.mcp.json" ] && grep -q '"beagle-store"' "$DIR/.mcp.json" 2>/dev/null && MCP=present
+SPACE_ID="-" PORT="-" SERVER="-"
+CODEX_CONFIG="$DIR/.codex/config.toml"
+if [ -f "$CODEX_CONFIG" ]; then
+  mapfile -t MCP_FIELDS < <(python3 - "$CODEX_CONFIG" <<'PY'
+import sys
+import tomllib
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        server = tomllib.load(handle).get("mcp_servers", {}).get("beagle-store")
+    environment = server.get("env", {}) if isinstance(server, dict) else {}
+    space = environment.get("BEAGLE_STORE_SPACE_ID")
+    port = environment.get("BEAGLE_STORE_SERVER_PORT")
+    if isinstance(space, str) and space and isinstance(port, str) and port.isdigit():
+        print("present")
+        print(space)
+        print(port)
+except Exception:
+    pass
+PY
+  )
+  if [ "${MCP_FIELDS[0]:-}" = present ]; then
+    MCP=present
+    SPACE_ID="${MCP_FIELDS[1]}"
+    PORT="${MCP_FIELDS[2]}"
+  fi
+fi
 
 # --- server port + liveness (probe only; no connection state kept) -------
-SPACE_ID="-" PORT="-" SERVER="-"
-if [ "$MCP" = present ]; then
-  SPACE_ID="$(grep -oE '"BEAGLE_STORE_SPACE_ID"[^\"]*"[^\"]+"' "$DIR/.mcp.json" 2>/dev/null \
-              | sed -E 's/.*"([^\"]+)"$/\1/' | head -1)" || true
-  [ -n "${SPACE_ID:-}" ] || SPACE_ID="-"
-  PORT="$(grep -oE '"BEAGLE_STORE_SERVER_PORT"[^0-9]*[0-9]+' "$DIR/.mcp.json" 2>/dev/null \
-          | grep -oE '[0-9]+$' | head -1)" || true
-  [ -n "${PORT:-}" ] || PORT="-"
-fi
 if [ "$NATIVE_LOG" = true ]; then
   SERVER=dead
   if [ "$PORT" != "-" ] && [ "$SPACE_ID" != "-" ]; then
@@ -88,18 +104,19 @@ fi
 # that it reach this corpus, find every module root, and pass the real checker.
 GRAPH_CONTROL=false
 if [ "$NATIVE_LOG" = true ] && [ "$MCP" = present ] && [ "$SERVER" = alive ] && \
-   [ -f "$DIR/.mcp.json" ]; then
-  if timeout 75 python3 - "$DIR/.mcp.json" "$DIR" "$CODE_LOG" "$PORT" <<'PY'
+   [ -f "$CODEX_CONFIG" ]; then
+  if timeout 75 python3 - "$CODEX_CONFIG" "$DIR" "$CODE_LOG" "$PORT" <<'PY'
 import json
 import os
 import subprocess
 import sys
+import tomllib
 
 config_path, checkout, code_log, port = sys.argv[1:]
 try:
-    with open(config_path, "r", encoding="utf-8") as handle:
-        config = json.load(handle)
-    server = config.get("mcpServers", {}).get("beagle-store-graph-control")
+    with open(config_path, "rb") as handle:
+        config = tomllib.load(handle)
+    server = config.get("mcp_servers", {}).get("beagle-store-graph-control")
     if not isinstance(server, dict):
         raise ValueError("graph-control MCP is absent")
     command = server.get("command")

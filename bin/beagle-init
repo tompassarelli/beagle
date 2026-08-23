@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# beagle-init — scaffold a new beagle project or add Claude Code hooks.
+# beagle-init — scaffold a new Beagle project.
 #
 # Usage:
-#   beagle-init [--hooks] [--target TARGET] [DIRECTORY]
+#   beagle-init [--target TARGET] [DIRECTORY]
 #
 # Options:
-#   --hooks        Also scaffold .claude/ hooks for the repair/check loop
 #   --target T     Default target for the scaffold; `beagle langs` lists them
 #                  all (default: clj)
 #   DIRECTORY      Project directory (default: current directory)
@@ -19,12 +18,10 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/share/targets.sh"
 
 # --- Parse args ---
 TARGET="clj"
-HOOKS=false
 DIR="."
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --hooks)  HOOKS=true; shift ;;
         --target) TARGET="$2"; shift 2 ;;
         -*)       echo "unknown option: $1" >&2; exit 1 ;;
         *)        DIR="$1"; shift ;;
@@ -40,10 +37,6 @@ if [[ -z "$BEAGLE_PATH" ]]; then
     fi
 fi
 
-# Tracked hook-worker templates (copied into scaffolded projects, not inlined).
-BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOOK_TEMPLATES="$BEAGLE_ROOT/share/claude-hooks"
-
 mkdir -p "$DIR"
 cd "$DIR"
 
@@ -58,11 +51,9 @@ BEAGLE_LANG="${BEAGLE_TARGET_LANG[$TARGET]}"
 EXT="${BEAGLE_TARGET_SRC_EXT[$TARGET]}"
 
 # --- Detect an already-initialized project ---
-# `--hooks` on an EXISTING project should ONLY wire the repair hook — never drop
-# starter files (src/main, CLAUDE.md, flake.nix, .envrc) into a populated repo.
-# A genuinely empty/new dir still gets the full scaffold (+ hooks).
+# Never drop starter files into a populated repository.
 SCAFFOLD_PROJECT=true
-if [[ -f "CLAUDE.md" || -f ".claude/settings.json" || -d ".git" \
+if [[ -f "AGENTS.md" || -d ".git" \
       || -f "package.json" || -f "flake.nix" || -f "deno.json" ]] \
    || compgen -G "src/*.b*" >/dev/null 2>&1 \
    || compgen -G "*.b*"     >/dev/null 2>&1; then
@@ -81,26 +72,16 @@ SRCEOF
     echo "  created src/main.$EXT"
 fi
 
-# --- Write CLAUDE.md (new projects only) ---
-if [[ "$SCAFFOLD_PROJECT" == true && ! -f "CLAUDE.md" ]]; then
-    cat > CLAUDE.md << 'CLEOF'
+# --- Write AGENTS.md (new projects only) ---
+if [[ "$SCAFFOLD_PROJECT" == true && ! -f "AGENTS.md" ]]; then
+    cat > AGENTS.md << 'AEOF'
 # Project — beagle
 
 This project uses **beagle**, a typed language that compiles to multiple targets.
 
-## Session start
-
-1. Confirm daemon: `beagle-daemon status` — start with `beagle-daemon start` if not running
-2. The PostToolUse hook auto-starts the daemon on first edit
-
-## After every edit (automatic via hook)
-
-The PostToolUse hook fires on Edit/Write to beagle files. It runs:
-- `beagle-syntax FILE` — structural delimiter check
-- `beagle-daemon query check-enriched FILE` — type errors with fix hints
-
-If it reports a syntax error, fix delimiters first — do not type-check
-or inspect deeper errors until delimiters pass.
+After an edit, run `beagle syntax FILE` before `beagle check --agent FILE`.
+Fix syntax before types and use the compiler's pointed repair; never count
+delimiters by hand.
 
 ## Tools
 
@@ -115,89 +96,11 @@ For the form set, types, and stdlib: read `parse.rkt` and the
 `stdlib-*.rkt` files in the beagle source; for the target list, run
 `beagle langs`. There is no static reference document — it would go
 stale within a day.
-CLEOF
-    echo "  created CLAUDE.md"
+AEOF
+    echo "  created AGENTS.md"
 fi
 
 # --- Hooks ---
-if [[ "$HOOKS" == true ]]; then
-    mkdir -p .claude/hooks
-
-    # settings.json — idempotently MERGE the PostToolUse repair hook into any
-    # existing config instead of only writing when absent. Never clobbers other
-    # settings/hooks; re-running is a safe no-op. This is what makes
-    # `beagle init --hooks` a one-shot "sync" for already-initialized repos.
-    python3 - << 'PYEOF'
-import json, os
-PATH = ".claude/settings.json"
-CMD = ".claude/hooks/post-edit-check.sh"
-MATCHER = "Edit|Write|MultiEdit"
-data = {}
-if os.path.exists(PATH):
-    try:
-        with open(PATH) as f:
-            data = json.load(f) or {}
-    except Exception as e:
-        raise SystemExit(f"  ERROR: {PATH} is not valid JSON ({e}); left untouched")
-if not isinstance(data, dict):
-    raise SystemExit(f"  ERROR: {PATH} is not a JSON object; left untouched")
-hooks = data.setdefault("hooks", {})
-ptu = hooks.setdefault("PostToolUse", [])
-if not isinstance(ptu, list):
-    raise SystemExit(f"  ERROR: hooks.PostToolUse in {PATH} is not a list; left untouched")
-def wired(entry):
-    return isinstance(entry, dict) and any(
-        isinstance(h, dict) and h.get("command") == CMD
-        for h in entry.get("hooks", []))
-if any(wired(e) for e in ptu):
-    print("  .claude/settings.json — repair hook already wired (no change)")
-else:
-    ptu.append({
-        "matcher": MATCHER,
-        "hooks": [{"type": "command", "command": CMD, "timeout": 10}],
-    })
-    with open(PATH, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-    print(f"  wired PostToolUse repair hook into {PATH}")
-PYEOF
-
-    # Shell wrapper — inject BEAGLE_PATH discovered at init time
-    cat > .claude/hooks/post-edit-check.sh << HEOF
-#!/usr/bin/env bash
-set -euo pipefail
-export BEAGLE_PATH="\${BEAGLE_PATH:-${BEAGLE_PATH}}"
-HOOK_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-MODE="simple"
-PROJECT_DIR="\$(cd "\$HOOK_DIR/../.." && pwd)"
-POOL_CFG="\$PROJECT_DIR/.beagle/pool.json"
-if [[ -f "\$POOL_CFG" ]]; then
-    _mode=\$(python3 -c "import json,sys; print(json.load(open('\$POOL_CFG')).get('mode','simple'))" 2>/dev/null || true)
-    [[ -n "\$_mode" ]] && MODE="\$_mode"
-fi
-INPUT=\$(cat)
-if [[ "\$MODE" == "pool" && -f "\$HOOK_DIR/post_edit_check_pool.py" ]]; then
-    exec python3 "\$HOOK_DIR/post_edit_check_pool.py" "\$INPUT"
-else
-    exec python3 "\$HOOK_DIR/post_edit_check_simple.py" "\$INPUT"
-fi
-HEOF
-    chmod +x .claude/hooks/post-edit-check.sh
-
-    # Simple mode worker
-    # Hook workers — copied from the tracked templates (canonical, portable
-    # find_tool resolution), not inlined. Install BOTH so `mode: pool` works.
-    if [[ -d "$HOOK_TEMPLATES" ]]; then
-        cp "$HOOK_TEMPLATES/post_edit_check_simple.py" .claude/hooks/
-        cp "$HOOK_TEMPLATES/post_edit_check_pool.py"   .claude/hooks/
-        chmod +x .claude/hooks/post_edit_check_simple.py .claude/hooks/post_edit_check_pool.py
-        echo "  installed hook workers (simple + pool)"
-    else
-        echo "  WARNING: hook templates missing at $HOOK_TEMPLATES" >&2
-    fi
-
-    echo "  created .claude/hooks/ (simple mode)"
-fi
 
 # --- Write flake.nix (new projects only; follows beagle's nixpkgs) ---
 if [[ "$SCAFFOLD_PROJECT" == true && ! -f "flake.nix" && -n "$BEAGLE_PATH" ]]; then
@@ -233,10 +136,4 @@ if [[ "$SCAFFOLD_PROJECT" == true ]]; then
     echo "beagle project initialized (target: $TARGET)"
 else
     echo "existing project detected — left source/config untouched"
-fi
-if [[ "$HOOKS" == true ]]; then
-    echo "Claude Code repair hook wired — syntax + type errors (and deterministic"
-    echo "paren auto-balancing) run on every edit. Restart the session (or rely on"
-    echo "settings hot-reload) to activate it."
-    echo "To switch to pool mode: echo '{\"mode\":\"pool\"}' > .beagle/pool.json"
 fi

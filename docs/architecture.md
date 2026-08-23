@@ -84,7 +84,7 @@ position — not a desugared intermediate.
   seed and parity harnesses.
 - `contrib/docfill/sites.rktd` — the registry of committed files whose
   target-dependent spans the compiler owns.
-- `CLAUDE.md` — the operating discipline; its three-statement generative spec
+- `AGENTS.md` — the operating discipline; its compiler design invariants
   (Clojure + types / load-bearing divergence / idiomatic per target) is the
   canonical anchor for any surface question.
 - `docs/` — distilled, rot-resistant artifacts: `INFLUENCES.md` (lineage +

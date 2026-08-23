@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# store_code_wire_test.sh — focused test for the dual Claude/Codex MCP wiring
+# store_code_wire_test.sh — focused test for Codex MCP wiring
 # shared by beagle-store-code-on/off (bin/beagle-store-code-wire, beagle-store-code-wire-toml.py) and
 # for bin/beagle-store-code-status's canonical= registry read. No server boot, no
 # Beagle ingest — exercises only the merge/unwire/status-read logic so it
@@ -23,14 +23,7 @@ trap 'rm -rf "${TMP:?}"' EXIT
 DIR="$TMP/repo"
 mkdir -p "$DIR/.codex"
 
-# --- pre-existing unrelated wiring in both files ----------------------------
-cat >"$DIR/.mcp.json" <<'JSON'
-{
-  "mcpServers": {
-    "other-tool": { "command": "/bin/other", "args": [], "env": {} }
-  }
-}
-JSON
+# --- pre-existing unrelated wiring ------------------------------------------
 cat >"$DIR/.codex/config.toml" <<'TOML'
 [projects.unrelated]
 trust_level = "trusted"
@@ -120,16 +113,6 @@ assert "beagle-store-code-on corpus selection excludes tests/fixtures sources" \
 # --- wire ON: merge, preserve unrelated keys --------------------------------
 "$HERE/bin/beagle-store-code-wire" on "$DIR" "$SERVER_JSON"
 
-assert "mcp.json gains mcpServers.store" \
-  '[ "$(jq -r ".mcpServers.store.command" "$DIR/.mcp.json")" = "/fake/beagle-store-mcp" ]'
-assert "mcp.json preserves stable SpaceId" \
-  '[ "$(jq -r ".mcpServers.store.env.BEAGLE_STORE_SPACE_ID" "$DIR/.mcp.json")" = "wire-test-space" ]'
-assert "mcp.json preserves native server port" \
-  '[ "$(jq -r ".mcpServers.store.env.BEAGLE_STORE_SERVER_PORT" "$DIR/.mcp.json")" = "31337" ]'
-assert "mcp.json preserves native STORELOG" \
-  '[ "$(jq -r ".mcpServers.store.env.BEAGLE_STORE_LOG" "$DIR/.mcp.json")" = "/canonical/store/.store/code.log" ]'
-assert "mcp.json keeps unrelated mcpServers.other-tool" \
-  '[ "$(jq -r ".mcpServers[\"other-tool\"].command" "$DIR/.mcp.json")" = "/bin/other" ]'
 assert "config.toml gains [mcp_servers.beagle-store]" \
   'grep -q "^\[mcp_servers.beagle-store\]$" "$DIR/.codex/config.toml"'
 assert "config.toml store command matches" \
@@ -147,11 +130,9 @@ assert "config.toml keeps unrelated [mcp_servers.other]" \
 
 # --- idempotency: re-run ON must not duplicate -------------------------------
 "$HERE/bin/beagle-store-code-wire" on "$DIR" "$SERVER_JSON"
-BEAGLE_STORE_HEADER_COUNT="$(grep -c '^\[mcp_servers\.store\]$' "$DIR/.codex/config.toml")"
+BEAGLE_STORE_HEADER_COUNT="$(grep -c '^\[mcp_servers\.beagle-store\]$' "$DIR/.codex/config.toml")"
 assert "re-running wire on: exactly one [mcp_servers.beagle-store] block" \
   '[ "$BEAGLE_STORE_HEADER_COUNT" = "1" ]'
-assert "re-running wire on: exactly one mcpServers.store key" \
-  '[ "$(jq ".mcpServers | keys | map(select(. == \"store\")) | length" "$DIR/.mcp.json")" = "1" ]'
 
 # --- beagle-store-code-status reports the guard's registry contract -----------------
 REG="$TMP/graph-upstream-files"
@@ -190,10 +171,6 @@ assert "bin/beagle-store-code-status never references graph-owned-files" \
 # --- wire OFF: remove only the store section, byte-identical unrelated toml --
 "$HERE/bin/beagle-store-code-wire" off "$DIR"
 
-assert "mcp.json loses mcpServers.store" \
-  '! jq -e ".mcpServers.store" "$DIR/.mcp.json" >/dev/null 2>&1'
-assert "mcp.json keeps unrelated mcpServers.other-tool after off" \
-  '[ "$(jq -r ".mcpServers[\"other-tool\"].command" "$DIR/.mcp.json")" = "/bin/other" ]'
 assert "config.toml loses [mcp_servers.beagle-store]" \
   '! grep -q "^\[mcp_servers.beagle-store\]$" "$DIR/.codex/config.toml"'
 assert "config.toml unrelated sections still present after off" \
@@ -210,8 +187,8 @@ roundtrip_toml() {
   cp "$repo/.codex/config.toml" "$repo/config.toml.orig"
   "$HERE/bin/beagle-store-code-wire" on "$repo" "$SERVER_JSON"
   "$HERE/bin/beagle-store-code-wire" on "$repo" "$SERVER_JSON"
-  if [ "$(grep -c '^# >>> beagle-store-code-wire managed mcp_servers\.store ' "$repo/.codex/config.toml")" = "1" ] &&
-     [ "$(grep -c '^# <<< beagle-store-code-wire managed mcp_servers\.store$' "$repo/.codex/config.toml")" = "1" ]; then
+  if [ "$(grep -c '^# >>> beagle-store-code-wire managed mcp_servers\.beagle-store ' "$repo/.codex/config.toml")" = "1" ] &&
+     [ "$(grep -c '^# <<< beagle-store-code-wire managed mcp_servers\.beagle-store$' "$repo/.codex/config.toml")" = "1" ]; then
     echo "ok - $name has one owned marker pair after repeated on"
   else
     echo "FAIL - $name has one owned marker pair after repeated on"
@@ -240,33 +217,15 @@ roundtrip_toml "one blank line" "$ROUNDTRIP_ROOT/one-blank-line"
 roundtrip_toml "multiple blank lines" "$ROUNDTRIP_ROOT/multiple-blank-lines"
 roundtrip_toml "no final newline" "$ROUNDTRIP_ROOT/no-final-newline"
 
-# --- store-only .mcp.json is removed entirely on off -------------------------
+# --- store-only config is removed entirely on off ---------------------------
 DIR2="$TMP/repo2"
 mkdir -p "$DIR2"
 "$HERE/bin/beagle-store-code-wire" on "$DIR2" "$SERVER_JSON"
-assert "store-only .mcp.json created" '[ -f "$DIR2/.mcp.json" ]'
 assert "store-only config.toml created" '[ -f "$DIR2/.codex/config.toml" ]'
 assert "store-only config.toml has owned marker" \
-  'grep -q "^# >>> beagle-store-code-wire managed mcp_servers\.store separator=0$" "$DIR2/.codex/config.toml"'
+  'grep -q "^# >>> beagle-store-code-wire managed mcp_servers\.beagle-store separator=0$" "$DIR2/.codex/config.toml"'
 "$HERE/bin/beagle-store-code-wire" off "$DIR2"
-assert "store-only .mcp.json removed on off" '[ ! -f "$DIR2/.mcp.json" ]'
 assert "store-only config.toml removed on off" '[ ! -f "$DIR2/.codex/config.toml" ]'
-
-# --- mcp.json: unrelated ROOT key (not just mcpServers) survives off, and
-#     an emptied mcpServers is dropped entirely rather than left as {} -------
-DIR3="$TMP/repo3"
-mkdir -p "$DIR3"
-cat >"$DIR3/.mcp.json" <<'JSON'
-{
-  "$schema": "https://example.com/mcp.schema.json"
-}
-JSON
-"$HERE/bin/beagle-store-code-wire" on "$DIR3" "$SERVER_JSON"
-"$HERE/bin/beagle-store-code-wire" off "$DIR3"
-assert "mcp.json keeps unrelated root key after off" \
-  '[ "$(jq -r ".\"\$schema\"" "$DIR3/.mcp.json")" = "https://example.com/mcp.schema.json" ]'
-assert "mcp.json drops mcpServers key entirely (not empty {}) when emptied" \
-  '[ "$(jq "has(\"mcpServers\")" "$DIR3/.mcp.json")" = "false" ]'
 
 if [ "$FAIL" = 0 ]; then
   echo "store_code_wire_test.sh: all assertions passed"

@@ -196,5 +196,5 @@
             ;; (The quarantined "operative" checker/evaluator prototype was
             ;; deleted 2026-06-15 — it never ran on the live build path. The
             ;; operative *vision* is realized as the compile-time combiner layer
-            ;; in the live compiler; see CLAUDE.md "Architecture" + thread
+            ;; in the live compiler; see AGENTS.md compiler invariants + thread
             ;; 20260615034227.)
