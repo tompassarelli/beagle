@@ -29,9 +29,8 @@
 ;; source-ext : authoring extension, with the dot
 ;; lang       : the `#lang` path an authored file opens with
 ;; out-ext    : emitted file extension, with the dot
-;; status     : 'live — the only status any target currently holds. The field
-;;              exists so beagle-doctor classifies from the table instead of
-;;              probing for a dormant/ directory that no longer exists.
+;; status     : support tier shown by the registry and beagle-doctor. Hosted
+;;              targets are 'live; Core is an explicit 'experimental route.
 ;; emitter    : emitter module, relative to beagle-lib/private/
 ;; note       : how this target is held correct (what backs the `live` status)
 ;; idiom      : comma-free phrase — how this target renders the shared surface
@@ -53,16 +52,16 @@
    (materializer 'wasm "WebAssembly (C17/WASI bootstrap)" ".wasm" "module_0.wasm" '(wasm32)
                  "bootstrap projection through Restricted C17 and wasi-clang; not a direct Wasm emitter")))
 
-;; Bare `#lang beagle` is the canonical Core language. Its build product is a
-;; frozen native program; MATERIALIZERS names the separate projections available
-;; after that program has passed the native obligations.
+;; Bare `#lang beagle` remains the explicit experimental Core language. Its
+;; build product is a frozen native program; MATERIALIZERS names the separate
+;; projections available after that program has passed the native obligations.
 (struct core-profile (id name source-ext lang status note domain materializers)
   #:transparent)
 
 (define CORE-PROFILE
   (core-profile
-   'core "Beagle Native Core" ".bgl" "beagle" 'live
-   "native pipeline: frozen native program; select C17, QBE, or Wasm bootstrap materializer"
+   'core "Beagle Native Core" ".bgl" "beagle" 'experimental
+   "experimental native pipeline: frozen native program; select C17, QBE, or Wasm bootstrap materializer explicitly"
    "Native system-layer programs lowered through typed effects, regions, layouts, capabilities, control flow, and ABI semantics."
    MATERIALIZERS))
 
@@ -95,7 +94,10 @@
 (define (target-count) (length TARGETS))
 
 (define (source-profile-ids)
-  (cons (core-profile-id CORE-PROFILE) (target-ids)))
+  ;; Ordinary profile inventory leads with the hosted authoring routes. Core is
+  ;; still supported by every parser and extension lookup below, but requires
+  ;; an explicit `.bgl` / bare-`#lang beagle` choice.
+  (append (target-ids) (list (core-profile-id CORE-PROFILE))))
 
 (define (source-profile-count)
   (+ 1 (target-count)))

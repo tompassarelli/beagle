@@ -184,7 +184,7 @@
   (contains? known sha256) (fail (str "branch ref lists the same segment twice: " sha256) :invalid-branch-ref)
   :else (let [start (parse-count (nth fields 2) "segment start sequence")
    end (parse-count (nth fields 3) "segment end sequence")]
-  (if (or (< end start) (not= (zero? start) (zero? end))) (fail (str "branch ref segment has an invalid transaction range: " sha256) :invalid-branch-ref) (->SegmentRecord sha256 start end (parse-count (nth fields 4) "segment byte count")))))))))
+  (if (< end start) (fail (str "branch ref segment ends before it begins: " sha256) :invalid-branch-ref) (->SegmentRecord sha256 start end (parse-count (nth fields 4) "segment byte count")))))))))
 
 (defn ^RefDocument parse-ref [^String text]
   (let [lines (vec (str/split-lines text))]

@@ -32,24 +32,6 @@
    code Keyword?
    message String?])
 
-;; A replayed snapshot is a detached Store root at one exact transaction
-;; version. Rejection carries no root, so a caller cannot treat live state as
-;; historical authority after reconstruction fails.
-(defunion SnapshotReplay
-  (SnapshotReplayed [root (Atom t/TermStore)])
-  (SnapshotReplayRejected
-    [code Keyword
-     detail String]))
-
-(defunion CommitResult
-  (CommitSuccess [coordinate t/Triple])
-  (CommitStale
-    [expected-sequence Int
-     observed-sequence Int])
-  (CommitRejected
-    [code Keyword
-     detail String]))
-
 ;; A slot table doubles once its indexed vector holds more than this many rows
 ;; per slot. Every lookup still checks the complete physical row for collision.
 (def initial-slots Int 64)
@@ -722,9 +704,9 @@
           (t/transaction-coordinate
            (t/termstore-space-id final-store) sequence))))))
 
-(defn- canonical-validated-metadata
+(defn- canonical-validate-commit!
   [operations (Vec t/CommitOperation)
-   metadata t/CommitMetadata] t/CommitMetadata?
+   metadata t/CommitMetadata] t/CommitMetadata
   (let [attestation t/CommitValidationAttestation (t/commitmetadata-validation-attestation metadata)]
     (if (and (valid-operations? operations)
              (t/commit-metadata? metadata)
@@ -744,41 +726,24 @@
         canonical-validator
         :accepted
         canonical-validator))
-      nil)))
+      (throw (ex-info "store: canonical commit validation rejected the write"
+                      {:type :canonical-commit-rejected})))))
 
 (defn commit-boundary!
   [ctx (Atom t/TermStore)
-   expected-sequence Int
    operations (Vec t/CommitOperation)
-   metadata t/CommitMetadata] CommitResult
-  (let [observed-sequence Int (store-next-sequence (deref ctx))
-        validated t/CommitMetadata? (canonical-validated-metadata operations metadata)]
-    (cond
-      [(or (< expected-sequence 1)
-           (> expected-sequence max-transaction-sequence))
-       (->CommitRejected
-        :invalid-transaction-sequence
-        "store: expected transaction sequence is outside the appendable range")]
-      [(nil? validated)
-       (->CommitRejected
-        :canonical-commit-rejected
-        "store: canonical commit validation rejected the write")]
-      [(not= expected-sequence observed-sequence)
-       (->CommitStale expected-sequence observed-sequence)]
-      [:else
-       ;; A TermStore has one writer. This comparison and append are therefore
-       ;; one Store boundary, not a claim of a host-level atomic primitive.
-       (let [accepted t/CommitMetadata validated]
-         (->CommitSuccess
-          (append-transaction! ctx expected-sequence operations accepted)))])))
+   metadata t/CommitMetadata] t/Triple
+  (let [validated (canonical-validate-commit! operations metadata)]
+    ;; `validated` is deliberately produced at the sole boundary before the
+    ;; private append. The raw primitive is never part of the Store surface.
+    (append-transaction!
+     ctx (store-next-sequence (deref ctx)) operations validated)))
 
 (defn commit-transaction!
   [ctx (Atom t/TermStore)
-   operations (Vec t/CommitOperation)] CommitResult
-  ;; This convenience samples the sole writer's present sequence. Callers that
-  ;; pin work before this call use commit-boundary! with that explicit sequence.
+   operations (Vec t/CommitOperation)] t/Triple
   (commit-boundary!
-   ctx (next-sequence ctx) operations
+   ctx operations
    (commit-metadata "store.txn/v1" canonical-shape-schema-id
                     "store-schema-v1")))
 
@@ -1352,48 +1317,6 @@
                      (transaction-records-ok
                       (valid-transaction-records-between
                        store lower-exclusive upper-inclusive)))))))))])))
-
-(defn- snapshot-replay-rejected
-  [code Keyword?
-   detail String?] SnapshotReplay
-  (->SnapshotReplayRejected
-   (if (some? code) code :snapshot-replay-failed)
-   (if (some? detail) detail "store: snapshot replay failed")))
-
-;; Reconstruct one detached, validated Store view. Version zero is the empty
-;; base state. Every positive requested version must be present in history;
-;; replaying only the nearest earlier transaction is not an exact snapshot.
-;; The serialized owner must establish the source's retained-history boundary:
-;; TermStore validates its rows but does not itself carry loader provenance.
-(defn replay-snapshot-at!
-  [source (Atom t/TermStore)
-   version Int] SnapshotReplay
-  (let [head Int (current-sequence source)]
-    (if (or (< version 0) (> version head))
-      (->SnapshotReplayRejected
-       :snapshot-version-outside-history
-       "store: requested snapshot version is outside available history")
-      (let [records-result TransactionRecordsResult (transaction-records-between-result
-             (deref source) -1 version)]
-        (if (not (transactionrecordsresult-ok records-result))
-          (snapshot-replay-rejected
-           (transactionrecordsresult-code records-result)
-           (transactionrecordsresult-message records-result))
-          (let [copy (Atom t/TermStore) (new-term-store (space-id source))
-                records (Vec t/TransactionRecord) (transactionrecordsresult-records records-result)]
-            (loop [remaining (Vec t/TransactionRecord) records]
-              (if (empty? remaining)
-                (if (= version (current-sequence copy))
-                  (->SnapshotReplayed copy)
-                  (->SnapshotReplayRejected
-                   :snapshot-version-not-recorded
-                   "store: requested snapshot version is absent from history"))
-                (let [replay-result TransactionReplayResult (replay-transaction-result! copy (first remaining))]
-                  (if (transactionreplayresult-ok replay-result)
-                    (recur (rest remaining))
-                    (snapshot-replay-rejected
-                     (transactionreplayresult-code replay-result)
-                     (transactionreplayresult-message replay-result))))))))))))
 
 (defn- rebuild-operation-state! [store t/TermStore] t/TermStore
   (let [operations (Vec t/OperationRow) (store-operations store)

@@ -113,16 +113,15 @@
 
 (defn commit!
   [ctx (Atom t/TermStore)
-   builder (Atom Builder)] store/CommitResult
+   builder (Atom Builder)] t/Triple
   (let [current Builder (deref builder)
         pinned t/Triple (builder-coordinate current)]
     (if (not (= (t/triple-t1 pinned) (store/space-id ctx)))
-      (store/->CommitRejected
-       :transaction-space-mismatch
-       "store: transaction belongs to a different space")
-      (store/commit-boundary!
-       ctx
-       (t/triple-t3 pinned)
-       (builder-operations current)
-       (store/commit-metadata "store.txn/v1" "store/CommitOperationV1"
-                              "store-schema-v1")))))
+      (throw (ex-info "store: transaction belongs to a different space" {:type :transaction-space-mismatch}))
+      (if (not (= (t/triple-t3 pinned) (store/next-sequence ctx)))
+        (throw (ex-info "store: the store advanced under this transaction" {:type :transaction-sequence-drift :pinned (t/triple-t3 pinned) :observed (store/next-sequence ctx)}))
+        (store/commit-boundary!
+         ctx
+         (builder-operations current)
+         (store/commit-metadata "store.txn/v1" "store/CommitOperationV1"
+                                "store-schema-v1"))))))

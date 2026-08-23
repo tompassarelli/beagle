@@ -16,11 +16,11 @@ serves both:
    and retention belong to typed facts and explicit branch roots, not to the
    incidental graph of native addresses used to materialize them.
 
-This is one allocation boundary inside the broader Model protocol, not a claim
-that Store itself is every semantic revision or executor. Store is the
-assertion/history substrate; a sealed ModelRevision is the immutable semantic
-admission that relates those assertions, judgments, goals, plans, and
-materializations. Its identities are layered rather than universal:
+This is one allocation boundary inside a broader program-world protocol, not a
+claim that the Store itself already is every durable world or executor. The
+current Store is the assertion/history substrate; a program world is the
+durable semantic explanation that can relate those assertions, judgments,
+plans, and materializations. Its identities are layered rather than universal:
 content, occurrence, revision, and artifact are distinct, and content identity
 is not trust. The logical relation does not merge physical storage, deployment,
 execution, or security domains.

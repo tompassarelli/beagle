@@ -15,34 +15,25 @@ target, form, type, standard-library, health, or test inventories here: use
 - Facts, Triples, relations, vocabularies, and persisted semantic models use
   `fact-modeling`.
 
-## Semantic laws
+## Compiler laws
 
-1. A sealed, admitted `ModelRevision` owns native program meaning. Source files,
-   syntax trees, paths, spans, renderings, and emitted artifacts are optional
-   projections or transaction proposals, never native authority.
-2. Native relations, propositions, modes, strategies, goals, judgments, and
-   provenance remain explicit until a checked planner selects an operational
-   orientation. Do not erase them into a Lisp application AST first.
-3. An oriented executable plan lowers to validated Native Core. Materializers
-   execute that typed plan under explicit target and capability constraints;
-   they do not reconstruct or redefine meaning.
-4. Clojure-derived behavior belongs to an explicit hosted or compatibility
-   profile. It may remain useful, but it must not constrain the native semantic
-   model, planner, identity rules, or execution protocol.
+1. Beagle is Clojure plus types.
+2. A divergence from Clojure must be load-bearing for the type system or a
+   backend, or it does not belong in the language.
+3. Every target renders the same surface idiomatically; target idiom is not
+   surface divergence.
 
-The current file-first Lisp compiler is transition and bootstrap machinery,
-not the architecture to extend for new native semantics. New native work takes
-the path `admitted model revision → checked theory → oriented plan → Native Core`
-and keeps content identity, assertion occurrence, model revision, proof, plan,
-artifact, and effect receipt distinct.
+When those constraints compete, types outrank Clojure idiom, which outranks
+aesthetic preference.
 
-The eventual bare Beagle surface is reserved for proposition-first native
-semantics. Until that default flips, existing bare `.bgl` implementation source
-remains supported bootstrap material and must not be treated as semantic design
-precedent. Target-specific concepts keep a fixed target prefix; compatibility
-profiles remain explicit.
+The front end is `parse → check → emit` inside `#%module-begin`. Built-in forms
+and user macros have separate registries, but both lower to typed IR before any
+backend runs.
 
-Do not build an uncontrolled logic runtime, runtime operative, or fexpr
-evaluator. Search is bounded, modes and determinism are checked, strategy
-selection is explained, and every backend implements semantics from typed plans
-without runtime `eval` or reified environments.
+The bare namespace is Clojure-only. Target-specific concepts keep a fixed
+target prefix at every use; a cross-target Beagle-original concept uses
+`bgl/`. Divergent names are never referred into bare use.
+
+Do not build a runtime operative or fexpr evaluator. Every backend, including
+Nix, must implement semantics from typed IR without runtime `eval` or reified
+environments.

@@ -47,12 +47,12 @@ judgment in it. *(Prior art: OODA; the agentic loop.)*
 **task loop** — project scale: many reasoning loops under one goal. Above it
 sits the program.
 
-**Model / ModelRevision** — a Model is the stable semantic program. A sealed
-ModelRevision is one immutable coherent admission of its declared and derived
-facts, judgments, goals, plans, materializations, and provenance. Neither is a
-universal key: content, assertion, revision, plan, and artifact have distinct
-identities, and content identity is not trust. Logical relation does not merge
-the physical, execution, or security domains that hold those things.
+**program world (`WORLD`)** — the durable semantic explanation in which a
+program's declared and derived facts, judgments, plans, materializations, and
+provenance can be related. It is not one universal key: content, assertion,
+revision, and artifact have distinct identities, and content identity is not
+trust. Logical relation does not merge the physical, execution, or security
+domains that hold those things.
 
 **epistemic origin** — `Declared`, `Derived`, or `Observed`: how a fact entered
 an explanation, not a cosmetic label.

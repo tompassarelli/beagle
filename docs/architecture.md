@@ -1,97 +1,26 @@
 # Architecture
 
-## One semantic substrate
+## Source and checked AST
 
-Beagle is one durable programming system, not a language bolted to a database.
-Its architectural spine is:
+Beagle's source language, parser, checker, and checked AST are the authoritative
+semantic path. Clojure, JavaScript, and Nix are hosted profiles that consume
+that checked input and emit idiomatic source for their declared runtimes.
 
-> Pure software artifacts are reproducible projections of sealed semantic
-> ModelRevisions; external reality is connected through explicit observations and
-> capability-controlled effects.
+Bare `.bgl` selects the experimental Native Core path. It freezes one checked
+native program, then applies an explicitly selected C17, QBE, or C17/WASI Wasm
+bootstrap materializer. The frozen program is the boundary between checking
+and native emission; the materializers are projections, not source profiles.
 
-A `Model` is the stable semantic program. A sealed `ModelRevision` is one
-immutable, coherent admission of that program, not a process, database row,
-deployment, branch coordinate, or universal identity. A `Branch` names a
-coherent recorded line of Model development, and an immutable `BranchRevision`
-authenticates one exact history coordinate. The destination protocol relates
-content, assertion occurrences, ModelRevisions, judgments,
-materializations, executions, and receipts through named equivalence and
-provenance relations. Those layers do not share one key: content identity is
-not assertion identity, artifact identity, or authority, and content identity
-is not trust.
+Beagle Store is optional in this architecture. It provides recursive Terms and
+Triples, durable occurrence history, query and index facilities, provenance
+records, and cache tooling. Store can be consumed through an embedding or RPC
+boundary without the language frontend, and it does not define Beagle syntax,
+types, or checked-program meaning.
 
-The repository separates five surfaces:
-
-- authoring and compatibility surfaces, currently including typed Lisp derived
-  from Clojure; the destination proposition-first surface authors Model
-  transactions and goals without making a current hosted profile native
-  semantic precedent;
-- Beagle Store owns durable terms, occurrences, transaction history, querying,
-  indexing, snapshots, and cold persistence;
-- the compiler checks programs and records semantic dependencies and
-  provenance;
-- targets materialize the shared checked core under explicit capability
-  envelopes; and
-- the effect/observation boundary connects pure plans to external reality.
-
-The compiler's AST and fact projections and Store's Term and occurrence model
-are separate current surfaces. Connecting them through the Model protocol is
-the direction, not a claim that every layer already shares one representation.
-Within that direction, facts are view-admitted propositions, judgments select
-or derive conclusions, and target outputs are replaceable materializations.
-One durable identity, explanation, dependency, and provenance model relates
-them without assigning everything one key. Hashes identify records while
-authority, evidence, freshness, and policy determine what they justify.
-
-A ModelRevision selects admitted evidence, rules, judgments, goals, and plans.
-It is not a Store branch or BranchRevision. Branches and named roots record and
-authenticate histories; many revisions, branches, physical Stores,
-materializations, execution domains, trust domains, and failure domains may
-participate in the system without becoming one cluster, transaction boundary,
-or access-control domain.
-
-Epistemic origins and the action protocol are orthogonal. `Declared`,
-`Derived`, and `Observed` say how a fact entered an explanation. `Intent`,
-`Authorization`, `Attempt`, and `EffectReceipt` define the external action
-protocol. Desired state and deployment plans may be derived purely; desired
-state cannot satisfy observed state, and a receipt does not replace a later
-observation.
-
-Pure artifacts are reproducible projections of sealed ModelRevisions under
-checked goals, plans, targets, and capability envelopes. External reality
-participates in the same typed fact system through
-observations and receipts, but is not assumed pure. A host executes an effect
-only when it holds the target's declared capability, then returns a receipt and
-subsequent observations as new semantic records. Planning, scheduling,
-reconciliation, and effect semantics remain part of the system even when native
-execution removes steady-state host scripts.
-
-The external boundary is a capability boundary, not an ownership boundary.
-Adapters may select transport, deployment, retention, and materialization
-policy, but may not define operations, identities, transaction behavior, query
-rules, or encoding. A brownfield application can therefore use Store without
-shipping the language frontend or Racket, while the engine remains built,
-versioned, and tested in this repository.
-
-Logical or type unification does not collapse physical or security domains.
-Separate Store spaces, processes, deployments, transaction boundaries, access
-controls, trust domains, and failure domains can agree on content while
-retaining different authority, retention, availability, and execution policy.
-
-Store may present a database-, storage-, or cache-shaped boundary to a
-brownfield system. Its defining role inside Beagle remains the cohesive durable
-semantic substrate, not a separately designed database product.
-
-Incremental materialization is accountable to five reusable-result-key
-properties: completeness, narrowness, identification cost, stability, and
-compiler-rule identity. Warm work must be proportional to the invalidated
-semantic region plus bounded identification and authentication overhead, and a
-warm result must equal a clean result. This is a correctness and work-bound
-invariant, not a published throughput claim.
-
-The detailed contracts and runnable storage-only examples live in
-[`store/README.md`](../store/README.md#storage-only-capability) and
-[`store/docs/isolation-and-deployment.md`](../store/docs/isolation-and-deployment.md#capability-profiles).
+The compiler's AST and Store's Term/occurrence model therefore remain separate
+interfaces. Store records and queries durable data; the compiler owns source
+semantics and target admission. Any integration between them is an explicit
+adapter rather than a second semantic authority.
 
 ## How it compiles
 

@@ -36,8 +36,12 @@
 (define (id-str t) (symbol->string (target-id t)))
 (define (core-id-str) (symbol->string (core-profile-id CORE-PROFILE)))
 (define (materializer-id-str m) (symbol->string (materializer-id m)))
+(define (core-display-name)
+  (format "~a (~a)"
+          (core-profile-name CORE-PROFILE)
+          (core-profile-status CORE-PROFILE)))
 (define (profile-names)
-  (cons (core-profile-name CORE-PROFILE) (map target-name TARGETS)))
+  (append (map target-name TARGETS) (list (core-display-name))))
 
 ;; --- views -----------------------------------------------------------------
 ;; A single-line view splices INLINE inside a marker; a multi-line view is a
@@ -55,11 +59,11 @@
 ;; "Nix lazy attrsets, Clojure eager persistent maps, …" — the
 ;; idiomatic-per-target clause.
 (define (view-idioms)
-  (string-join (cons
-                (string-append (core-profile-name CORE-PROFILE)
-                               " frozen native program")
+  (string-join (append
                 (for/list ([t (in-list TARGETS)])
-                  (string-append (target-name t) " " (target-idiom t))))
+                  (string-append (target-name t) " " (target-idiom t)))
+                (list (string-append (core-display-name)
+                                     " frozen native program")))
                ", "))
 
 ;; `beagle-lib/private/emit-{…}.rkt` — the live target emitters.
@@ -88,6 +92,13 @@
    (append
     (list (md-row "target" "language" "source" "`#lang`" "output" "status")
           "|---|---|---|---|---|---|")
+    (for/list ([t (in-list TARGETS)])
+      (md-row (string-append "`" (id-str t) "`")
+              (target-name t)
+              (string-append "`" (target-source-ext t) "`")
+              (string-append "`#lang " (target-lang t) "`")
+              (string-append "`" (target-out-ext t) "`")
+              (format "~a — ~a" (target-status t) (target-note t))))
     (list
      (md-row (string-append "`" (core-id-str) "`")
              (core-profile-name CORE-PROFILE)
@@ -97,13 +108,6 @@
              (format "~a — ~a"
                      (core-profile-status CORE-PROFILE)
                      (core-profile-note CORE-PROFILE))))
-    (for/list ([t (in-list TARGETS)])
-      (md-row (string-append "`" (id-str t) "`")
-              (target-name t)
-              (string-append "`" (target-source-ext t) "`")
-              (string-append "`#lang " (target-lang t) "`")
-              (string-append "`" (target-out-ext t) "`")
-              (format "~a — ~a" (target-status t) (target-note t))))
     (list ""
           (string-append
            (string-titlecase (number-word (source-profile-count)))
@@ -121,26 +125,28 @@
   (string-join
    (append
     (list (md-row "extension" "target") "|---|---|")
-    (list
-     (md-row (string-append "`" (core-profile-source-ext CORE-PROFILE) "`")
-             (string-append "`" (core-id-str) "` (`#lang "
-                            (core-profile-lang CORE-PROFILE) "`)")))
     (for/list ([t (in-list TARGETS)])
       (md-row (string-append "`" (target-source-ext t) "`")
-              (string-append "`" (id-str t) "` (`#lang " (target-lang t) "`)"))))
+              (string-append "`" (id-str t) "` (`#lang " (target-lang t) "`)")))
+    (list
+     (md-row (string-append "`" (core-profile-source-ext CORE-PROFILE) "`")
+             (string-append "`" (core-id-str) "` ("
+                            (symbol->string (core-profile-status CORE-PROFILE))
+                            "; `#lang " (core-profile-lang CORE-PROFILE) "`)"))))
    "\n"))
 
 (define (view-domains)
   (string-join
-   (cons
-    (format "- **~a** (`~a`, `~a`) — ~a"
-            (core-profile-name CORE-PROFILE)
-            (core-id-str)
-            (core-profile-source-ext CORE-PROFILE)
-            (core-profile-domain CORE-PROFILE))
+   (append
     (for/list ([t (in-list TARGETS)])
       (format "- **~a** (`~a`, `~a`) — ~a"
-              (target-name t) (id-str t) (target-source-ext t) (target-domain t))))
+              (target-name t) (id-str t) (target-source-ext t) (target-domain t)))
+    (list
+     (format "- **~a** (`~a`, `~a`; explicit) — ~a"
+             (core-display-name)
+             (core-id-str)
+             (core-profile-source-ext CORE-PROFILE)
+             (core-profile-domain CORE-PROFILE))))
    "\n"))
 
 ;; The `parse → check → emit` diagram, fence included: markdown comments cannot

@@ -2,102 +2,46 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
 
-**Beagle is a durable programming system driven through semantic
-computation.**
+**Beagle is an independent statically typed Lisp derived from Clojure.**
 
-Beagle has five distinct surfaces that participate in one semantic architecture:
+Derived: Clojure's vocabulary and structural authoring model — its form
+library, s-expressions, data literals, `defn`/`let`/destructuring/threading
+ergonomics. Independent: types, effects, execution, and memory/data model.
+Beagle's source and the checked AST are authoritative; Store is optional
+durable tooling, not a second language authority.
 
-- authoring and compatibility surfaces, currently including typed Lisp derived
-  from Clojure;
-- Beagle Store, the durable semantic substrate;
-- a compiler that checks programs and records dependency and provenance;
-- replaceable target materializations with explicit capability envelopes; and
-- an effect and observation boundary between pure computation and external
-  reality.
+The primary hosted profiles are Clojure, JavaScript, and Nix. They share one
+parser, checker, canonicalizer, and diagnostic path and emit idiomatic source
+for their declared runtime. Native Core is an experimental system-layer path:
+bare `.bgl` freezes a checked native program before an explicitly selected C17,
+QBE, or C17/WASI Wasm bootstrap materializer. It is not a hosted profile.
 
-That architectural unity is not a claim that every current surface is one
-representation. The compiler AST, normalized fact projections, and Store Terms
-remain separate checked structures today. Store triples are not compiler
-expressions, and deriving a proposition does not assert it. Beagle is moving
-the shared native boundary downward to checked propositions, relations, goals,
-judgments, and oriented plans without erasing those distinctions.
+Beagle Store is an optional in-repo engine for recursive Terms and Triples,
+durable occurrence history, queries and indexes, provenance records, and cache
+tooling. Applications may consume those storage capabilities without adopting
+the Beagle frontend; Store does not define Beagle's syntax, types, or program
+semantics.
 
-The system thesis is:
+Design principle: "If Clojure already has a form whose semantics are correct
+for Beagle, inherit it. If the semantics differ, name the difference."
 
-> Pure software artifacts are reproducible projections of durable semantic
-> models; external reality is connected through explicit observations and
-> capability-controlled effects.
-
-Beagle has one durable identity, explanation, dependency, and provenance
-model. That does not mean one key or one machine. Content, assertion
-occurrences, semantic revisions, compiler rules, and artifacts keep distinct
-identities. Many versioned branches and roots, physical Stores, execution
-domains, trust domains, failure domains, and materializations can participate
-without being collapsed. Matching content establishes identity, not trust,
-authority, co-location, or transaction scope.
-
-A `Model` is the durable semantic program being authored. A mutable `Branch`
-names a coherent, recorded line of that model's development; an immutable
-`BranchRevision` pins that history exactly. A sealed `ModelRevision` selects
-admitted facts, judgments, rules, plans, and provenance at such a pin, while
-`CheckedTheory` is the formal logical content reconstructed from that revision.
-These identities remain distinct: branch coherence means ordered, auditable
-history, while a model revision owns semantic membership and admission. Pure
-artifacts are reproducible projections of admitted model revisions. External
-reality can participate in the same typed fact system through observations and
-receipts, but is never assumed pure.
-
-Beagle keeps two classifications separate. `Declared`, `Derived`, and
-`Observed` are epistemic origins: how a fact entered an explanation. Acting on
-the outside world follows an action protocol of `Intent`, `Authorization`,
-`Attempt`, and `EffectReceipt`. Desired deployment state and plans may be
-derived purely; execution requires a capability, and produces receipts and
-later observations rather than retroactively making the plan an observation.
-
-**Beagle Store** supplies durable terms, assertion occurrences, transaction
-history, identity, provenance, and query. Inside Beagle it is the cohesive
-semantic substrate, not a bolted-on database product. Existing systems may
-still consume it through database-, storage-, or cache-shaped capability
-interfaces without adopting the language frontend; see the
-[brownfield capability guide](store/docs/isolation-and-deployment.md#capability-profiles).
-
-Targets are replaceable materializations of the shared checked core, with
-target-specific capabilities explicit. Bare `.bgl` lowers deliberately to
-Native Core rather than JVM Clojure semantics. A `.bclj` capsule targets the
-Java/Clojure runtime and may use JVM Clojure features admitted by that profile;
-Native Core's constraints are not a categorical statement about every Beagle
-profile.
-
-Incremental reuse has a measurable invariant. A reusable-result key is judged
-by completeness, narrowness, identification cost, stability, and compiler-rule
-identity. Warm work must be proportional to the invalidated semantic region
-plus bounded identification and authentication overhead, and a warm result
-must equal a clean result. The repository publishes no benchmark claim from
-that invariant alone.
-
-The explicit Clojure profile follows this design principle: "If Clojure already
-has a form whose semantics are correct for that profile, inherit it. If the
-semantics differ, name the difference."
-
-Beagle preserves Clojure where preservation has semantic value. It is an
-explicit compatibility and hosted authoring profile whose parser, checker,
+Beagle preserves Clojure where preservation has semantic value, never for
+compatibility's sake. It is one source language whose parser, checker,
 canonicalizer, and repair tools give people and agents the same answer: what
-went wrong, where it occurred, and what a valid next edit is. It does not define
-the ontology of Beagle's native proposition-first path.
+went wrong, where it occurred, and what a valid next edit is.
 
 Types exist to make that loop reliable. Static type information checks at
 compile time and erases before emit; an explicitly authored binding constraint
 is an ordinary predicate that remains as a local runtime guard. The deeper
-thesis is recorded in [`docs/INFLUENCES.md`](docs/INFLUENCES.md): Beagle's proven portable
-semantic core targets admitted ecosystems with idiomatic output within each profile envelope;
-regime-bound code is accepted only by its declared profile and is never cross-emitted.
+thesis is recorded in [`docs/INFLUENCES.md`](docs/INFLUENCES.md): one typed
+authoring IR can target real ecosystems while preserving idiomatic output.
 
 Beagle has a Native Core path and explicit hosted source profiles. The live
 profiles, extensions, form set, and materializers are compiler-owned: query
 `beagle langs`, `beagle syntax`, `beagle sig`, and `beagle fields` instead of
 copying a list that can drift.
 
-## Current hosted-profile quickstart
+## Quickstart
 
 Inside the flake's devshell (`direnv allow`), `bin/beagle` is the `beagle`
 command used below. No database or coordinator is required.
@@ -139,7 +83,7 @@ artifacts below are the authoritative answers.
 | Need | Go to |
 |---|---|
 | Full command list and current flags | `beagle help` |
-| Current source profiles, extensions, domains, and pipeline | <!-- beagle:langs names -->Beagle Native Core, Clojure, JavaScript, and Nix<!-- /beagle:langs -->; query `beagle langs` (or `beagle langs --json`) |
+| Current source profiles, extensions, domains, and pipeline | <!-- beagle:langs names -->Clojure, JavaScript, Nix, and Beagle Native Core (experimental)<!-- /beagle:langs -->; query `beagle langs` (or `beagle langs --json`) |
 | Parse, form, and syntax questions | `beagle syntax FILE`; [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) |
 | A function's signature or a record's fields | `beagle sig NAME FILE...`; `beagle fields RECORD FILE` |
 | Callers, exports, and change impact | `beagle callers FN FILE...`; `beagle provides FILE`; `beagle impact FN FILE...` |

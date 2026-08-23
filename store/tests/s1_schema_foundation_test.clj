@@ -145,13 +145,10 @@
 (txn/assert! interloper (t/triple "n" "other-pred" "landed"))
 (txn/commit! upd-ctx interloper)
 (def operations-at-drift (c/operation-count upd-ctx))
-(def stale-result (txn/commit! upd-ctx stale))
 (check! "a transaction pinned to a superseded sequence refuses to commit"
-        (and (instance? store.store.CommitStale stale-result)
-             (= (txn/sequence-of stale)
-                (c/commitstale-expected-sequence stale-result))
-             (= (c/next-sequence upd-ctx)
-                (c/commitstale-observed-sequence stale-result))))
+        (= :transaction-sequence-drift
+           (try (txn/commit! upd-ctx stale) nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))
 (check! "the refused transaction wrote nothing"
         (= operations-at-drift (c/operation-count upd-ctx)))
 

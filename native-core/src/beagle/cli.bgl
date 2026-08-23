@@ -116,7 +116,7 @@
    source-id String
    output String
    roots (Vec resolver/ModuleSourceRootV1)
-   store driver/CljCompatibilityCompileStore] Int
+   store driver/CompileStore] Int
   (match (resolver/read-entry-source roots source-id source)
     [(resolver/ResolvedSourceReadRejectedV1 code detail)
      (do
@@ -147,7 +147,7 @@
 
 (defn compile-command!
   [args (Vec String)
-   store driver/CljCompatibilityCompileStore] Int
+   store driver/CompileStore] Int
   (if (and (>= (count args) 8)
            (= "--source-id" (nth args 1))
            (= "--out" (nth args 3))
@@ -166,7 +166,7 @@
 
 (defn main-with-store!
   [args (Vec String)
-   store driver/CljCompatibilityCompileStore] Int
+   store driver/CompileStore] Int
   (if (empty? args)
     (do (write-usage) 64)
     (let [command String (first args)
@@ -206,4 +206,4 @@
   (native-main! args))
 
 (defn -main [args (Vec String)] Int
-  (main-with-store! args host.store/compile-clj-compatibility))
+  (main-with-store! args host.store/compile))

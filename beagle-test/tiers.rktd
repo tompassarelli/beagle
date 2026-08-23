@@ -1,11 +1,12 @@
 ;; Beagle test tier manifest.
 ;;
-;; Three tiers:
+;; Four tiers:
 ;;
 ;;   active  — blocks iteration. Active failures fail the build.
 ;;   demoted — runs continuously but advisory only; doesn't block.
 ;;   gated   — opt-in only via env var (BEAGLE_ORACLE=1, etc). Runner
 ;;             treats as "not run this session" rather than pass/fail.
+;;   native  — explicit Native Core evidence; it blocks only `--include-native`.
 ;;
 ;; --- structural-floor rule ---
 ;;
@@ -60,8 +61,6 @@
              "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from facts)
              "cheatsheet.rkt"           ; capability cheatsheet — every example must parse+check
              "docfill.rkt"              ; every compiler-owned doc span vs beagle-lib/private/targets.rkt (fix: bin/beagle doc-fill)
-             "wasm-materializer.rkt"    ; registered bootstrap artifact/digest/report + visible tool failures
-             "native-simd.rkt"          ; deterministic SIMD plan + scalar tail/refusal execution
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "facts-cli.rkt"          ; explicit inputs emit; module-root dependencies only resolve
              "gate-fact-maintainer.rkt" ; shadow-only gate fact envelopes, miss-before-fallback, cold coverage
@@ -175,6 +174,9 @@
              "emit-js-behavioral.rkt")) ; requires bun
 
   (demoted . ("native-c17-parallel.rkt")) ; v0.24.0 seal-only diagnostic; requalify before promotion
+
+  (native . ("wasm-materializer.rkt" ; explicit Native materializer evidence
+             "native-simd.rkt"))     ; explicit SIMD plan/tail/refusal evidence
 
   (gated . (;; Non-Nix target tests parked behind BEAGLE_ALL_TARGETS=1.
             ;; SQL emitter is dormant (its schema-typing in check.rkt is live).

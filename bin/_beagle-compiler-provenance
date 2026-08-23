@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+# Resolve the compiler revision without letting an ambient environment replace
+# checkout authority. Packaged trees have no Git metadata, so their immutable
+# wrapper supplies the revision captured by the flake instead.
+beagle_resolve_compiler_commit() {
+    local root="$1"
+    local packaged_commit=""
+    local packaged_commit_set=0
+    local checkout_commit=""
+
+    if [[ "${BEAGLE_PACKAGED_COMPILER_COMMIT+x}" == x ]]; then
+        packaged_commit_set=1
+        packaged_commit="$BEAGLE_PACKAGED_COMPILER_COMMIT"
+        if [[ ! "$packaged_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "beagle compiler provenance: BEAGLE_PACKAGED_COMPILER_COMMIT must be 40 lowercase hexadecimal characters" >&2
+            return 2
+        fi
+    fi
+
+    if [[ -e "$root/.git" || -L "$root/.git" ]]; then
+        if ! checkout_commit="$(
+            env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
+                -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+                git -C "$root" rev-parse --verify HEAD 2>/dev/null
+        )"; then
+            echo "beagle compiler provenance: Git metadata is present but checkout HEAD is unavailable" >&2
+            return 2
+        fi
+        if [[ ! "$checkout_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "beagle compiler provenance: checkout HEAD is not a 40-character lowercase hexadecimal commit" >&2
+            return 2
+        fi
+        if [[ "$packaged_commit_set" == 1 &&
+              "$packaged_commit" != "$checkout_commit" ]]; then
+            echo "beagle compiler provenance: BEAGLE_PACKAGED_COMPILER_COMMIT conflicts with checkout HEAD" >&2
+            return 2
+        fi
+        printf '%s\n' "$checkout_commit"
+        return 0
+    fi
+
+    if [[ "$packaged_commit_set" != 1 ]]; then
+        echo "beagle compiler provenance: Git metadata is absent and BEAGLE_PACKAGED_COMPILER_COMMIT is unset" >&2
+        return 2
+    fi
+    printf '%s\n' "$packaged_commit"
+}

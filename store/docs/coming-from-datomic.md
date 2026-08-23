@@ -63,7 +63,7 @@ the newest live equal occurrence, so older duplicates may remain; the
 
 These are layered identities, not one universal key. Structural equality says
 that proposition content matches; it does not say that two assertion acts, two
-ModelRevisions, or two trust domains are the same. Hashes can identify
+world revisions, or two trust domains are the same. Hashes can identify
 records, while authority, evidence, freshness, and policy determine what those
 records justify.
 

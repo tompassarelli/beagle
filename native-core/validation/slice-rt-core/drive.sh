@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Accounts for every store.rt-core function at the Native lowering frontier.
-# A pending whole-module result may report lowered functions, but it owns no
-# executable and emits no artifact. A separate complete fixture proves C17
-# execution without turning that frontier into a partial-program authority.
+# Accounts for every store.rt-core function at the native projection boundary.
+# The real Beagle Store source stays authoritative: 24 supported functions must lower,
+# while server-status-response remains the one named semantic frontier. A
+# separate Beagle-owned fixture proves the supported C17 execution path without
+# pretending to be a complete Beagle Store module.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -173,20 +174,18 @@ frontier_pending='function server-status-response PENDING - TODO-NATIVE-FUNCTION
 for line in \
   'projection-scope supported-functions-only' \
   'stage typed-to-native PENDING' \
+  'program-functions 24' \
+  'program-abis 24' \
   "$pending" \
-  'materialize REFUSED native lowering incomplete' \
-  'qbe-materialize REFUSED native lowering incomplete'; do
+  'materialize OK module_0.h module_0.c' \
+  'qbe-materialize REFUSED unsupported native value-semantics op: equal'; do
   rg -Fx "$line" "$generated/report.txt" >/dev/null \
     || die "projection report is missing: $line"
 done
 [[ "$(rg -c '^pending ' "$generated/report.txt")" -eq 1 ]] \
   || die "projection report did not retain exactly one pending function"
-[[ "$(rg -c '^obligation-projection ' "$generated/report.txt" || true)" -eq 0 ]] \
-  || die "pending lowering claimed executable projection obligations"
-for artifact in module_0.h module_0.c module_0.ssa; do
-  [[ ! -e "$generated/$artifact" ]] \
-    || die "pending Native lowering emitted $artifact"
-done
+[[ "$(rg -c '^obligation-projection PASS ' "$generated/report.txt")" -eq 10 ]] \
+  || die "projection report did not contain exactly ten passing validators"
 for line in \
   'source-functions 25' \
   'lowered-functions 24' \
@@ -196,8 +195,8 @@ for line in \
   rg -Fx "$line" "$generated/frontier.txt" >/dev/null \
     || die "frontier report is missing: $line"
 done
-[[ "$(rg -c '^function .* LOWERED-NONEXECUTABLE ' "$generated/frontier.txt")" -eq 24 ]] \
-  || die "frontier did not account for exactly 24 lowered non-executable functions"
+[[ "$(rg -c '^function .* LOWERED ' "$generated/frontier.txt")" -eq 24 ]] \
+  || die "frontier did not account for exactly 24 supported functions"
 [[ "$(awk -F '\t' '{ print $2 }' "$generated/lowered-managed.out" \
       | sort -u | wc -l | tr -d ' ')" -eq 24 ]] \
   || die "managed execution did not cover exactly the supported 24-function set"

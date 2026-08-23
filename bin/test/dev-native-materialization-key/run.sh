@@ -27,7 +27,7 @@ rg -q '\(unit/assemble-unit-payloads .* compiler-commit configuration abi\)' \
     echo "dev-native-materialization-key: compiler commit left final assembly provenance" >&2
     exit 1
 }
-rg -q '\(dev-native-result[[:space:]]+assembly[[:space:]]+compiler-commit[[:space:]]+configuration[[:space:]]+abi\)' \
+rg -q '\(dev-native-result[[:space:]]+assembly[[:space:]]+compiler-commit[[:space:]]+configuration\)' \
     <<<"$compact_attempt" || {
     echo "dev-native-materialization-key: compiler commit left native receipt provenance" >&2
     exit 1
@@ -160,29 +160,15 @@ cat >"$scratch/assertions.clj" <<'EOF'
    (stages/->NativeStageV0 graph "fixture-typed-digest" nil [])
    "fixture-native-encoding"
    "fixture-native-digest"))
-(def frozen-typed
-  (unit/make-frozen-typed
-   (stages/content-digest "fixture-source") [payload-i64] [] [] [] []))
-(def typed-slice
-  (lower/->TypedSliceV0
-   [payload-i64] [] [] [] [] [(lower/type-id "LowerFailure")]))
-(def assembly
-  (unit/->UnitAssemblyV0 frozen-typed typed-slice frozen-native nil []))
+(def assembly (unit/->UnitAssemblyV0 nil nil frozen-native nil []))
 (def compiler-commit "fixture-compiler-commit")
 (def native-result
-  (seam/dev-native-result
-   assembly compiler-commit ["profile=3" "abi=lp64"] abi))
+  (seam/dev-native-result assembly compiler-commit ["profile=3" "abi=lp64"]))
 (def native-receipt (lower/nativeloweringcompletev0-receipt native-result))
-(def native-input-digest
-  (lower/typed-compatibility-native-input-digest
-   frozen-typed (lower/prepare-native-slice typed-slice abi)))
 
 (check (= compiler-commit
           (core/passreceiptv0-compiler-commit native-receipt))
        "compiler commit is absent from the native receipt")
-(check (= native-input-digest
-          (core/passreceiptv0-input-digest native-receipt))
-       "native receipt input is not the independently prepared typed composite")
 
 (println "dev-native-materialization-key: PASS")
 EOF

@@ -830,11 +830,11 @@
 (define print-worker-count? (make-parameter #f))
 (define fact-claim-output-path (make-parameter #f))
 
-(struct worker-output (index count active-only? include-gated?
-                             active demoted gated)
+(struct worker-output (index count active-only? include-gated? include-native?
+                             active demoted gated native)
   #:transparent)
 
-(define worker-result-version 'beagle-tier-worker-v1)
+(define worker-result-version 'beagle-tier-worker-v2)
 
 (define (unit-result->datum r)
   (list (unit-result-label r)
@@ -906,7 +906,7 @@
      (unit-result label status passed total lines cached? wall-seconds)]
     [_ (raise-user-error 'beagle-test "malformed worker result in ~a: ~s" path d)]))
 
-(define (write-worker-output path active demoted gated)
+(define (write-worker-output path active demoted gated native)
   (define spec (worker-shard))
   (unless spec
     (raise-user-error 'beagle-test "--worker-result requires --worker-shard"))
@@ -914,10 +914,11 @@
     (lambda (out)
       (write
        (list worker-result-version
-             (car spec) (cdr spec) (active-only?) (include-gated?)
+             (car spec) (cdr spec) (active-only?) (include-gated?) (include-native?)
              (map unit-result->datum active)
              (map unit-result->datum demoted)
-             (map unit-result->datum gated))
+             (map unit-result->datum gated)
+             (map unit-result->datum native))
        out)
       (newline out))))
 
@@ -936,18 +937,21 @@
            (? exact-positive-integer? count)
            (? boolean? active-only-value)
            (? boolean? include-gated-value)
+           (? boolean? include-native-value)
            (and active (list active-datum ...))
            (and demoted (list demoted-datum ...))
-           (and gated (list gated-datum ...)))
+           (and gated (list gated-datum ...))
+           (and native (list native-datum ...)))
      (unless (< index count)
        (raise-user-error 'beagle-test
                          "worker result has invalid shard ~a/~a: ~a"
                          index count path))
      (worker-output
-      index count active-only-value include-gated-value
+      index count active-only-value include-gated-value include-native-value
       (map (lambda (d) (datum->unit-result d path)) active)
       (map (lambda (d) (datum->unit-result d path)) demoted)
-      (map (lambda (d) (datum->unit-result d path)) gated))]
+      (map (lambda (d) (datum->unit-result d path)) gated)
+      (map (lambda (d) (datum->unit-result d path)) native))]
     [_ (raise-user-error 'beagle-test
                          "unrecognized worker result envelope: ~a" path)]))
 
@@ -979,7 +983,8 @@
     (unless (and (= (worker-output-index output) i)
                  (= (worker-output-count output) count)
                  (equal? (worker-output-active-only? output) (active-only?))
-                 (equal? (worker-output-include-gated? output) (include-gated?)))
+                 (equal? (worker-output-include-gated? output) (include-gated?))
+                 (equal? (worker-output-include-native? output) (include-native?)))
       (raise-user-error
        'beagle-test
        "worker result contract mismatch for shard ~a/~a" i count)))
@@ -1102,6 +1107,7 @@
 
 (define active-only? (make-parameter (not full-suite-env?)))
 (define include-gated? (make-parameter #f))
+(define include-native? (make-parameter #f))
 
 ;; Reap every child process group, THEN delete the runner-owned temp root.
 ;; Idempotent and break-masked, so it runs exactly once and cannot be aborted
@@ -1138,9 +1144,9 @@
                    [subprocess-group-enabled #t])
       (run-body))))
 
-(struct tier-plan (active-files demoted-files gated-files
-                                all-active-units all-demoted-units all-gated-units
-                                active-units demoted-units gated-units)
+(struct tier-plan (active-files demoted-files gated-files native-files
+                                all-active-units all-demoted-units all-gated-units all-native-units
+                                active-units demoted-units gated-units native-units)
   #:transparent)
 
 (define (load-tier-plan)
@@ -1148,10 +1154,12 @@
   (define active-files  (files-in 'active classification))
   (define demoted-files (files-in 'demoted classification))
   (define gated-files   (files-in 'gated classification))
+  (define native-files  (files-in 'native classification))
   (define-values (all-active-units active-refusals) (expand-units active-files))
   (define-values (all-demoted-units demoted-refusals) (expand-units demoted-files))
   (define-values (all-gated-units gated-refusals) (expand-units gated-files))
-  (define refusals (append active-refusals demoted-refusals gated-refusals))
+  (define-values (all-native-units native-refusals) (expand-units native-files))
+  (define refusals (append active-refusals demoted-refusals gated-refusals native-refusals))
   (unless (null? refusals)
     (printf "=== SHARD COVERAGE REFUSED ===\n\n")
     (for ([r (in-list refusals)]) (printf "  ~a\n" r))
@@ -1160,9 +1168,10 @@
   (define active-units  (units-for-shard all-active-units (ci-shard)))
   (define demoted-units (units-for-shard all-demoted-units (ci-shard)))
   (define gated-units   (units-for-shard all-gated-units (ci-shard)))
-  (tier-plan active-files demoted-files gated-files
-             all-active-units all-demoted-units all-gated-units
-             active-units demoted-units gated-units))
+  (define native-units  (units-for-shard all-native-units (ci-shard)))
+  (tier-plan active-files demoted-files gated-files native-files
+             all-active-units all-demoted-units all-gated-units all-native-units
+             active-units demoted-units gated-units native-units))
 
 (define (unit->fact-claim u)
   (vector (unit-label u) (unit-file u) (unit-phase u)))
@@ -1194,15 +1203,17 @@
   (when (ci-shard)
     (printf "CI shard ~a of ~a — launch position p runs here when (p mod n) = i.\n"
             (car (ci-shard)) (cdr (ci-shard)))
-    (printf "  active ~a/~a units, demoted ~a/~a, gated ~a/~a\n\n"
+    (printf "  active ~a/~a units, demoted ~a/~a, gated ~a/~a, native ~a/~a\n\n"
             (length (tier-plan-active-units plan))
             (length (tier-plan-all-active-units plan))
             (length (tier-plan-demoted-units plan))
             (length (tier-plan-all-demoted-units plan))
             (length (tier-plan-gated-units plan))
-            (length (tier-plan-all-gated-units plan)))))
+            (length (tier-plan-all-gated-units plan))
+            (length (tier-plan-native-units plan))
+            (length (tier-plan-all-native-units plan)))))
 
-(define (report-results plan active-results demoted-results gated-results)
+(define (report-results plan active-results demoted-results gated-results native-results)
   (write-fact-unit-observations
    plan active-results demoted-results gated-results)
   (print-plan-header plan)
@@ -1220,9 +1231,20 @@
      (for ([f (in-list (tier-plan-gated-files plan))])
        (printf "  · ~a\n" f))
      (newline)])
+  (cond
+    [(include-native?)
+     (print-tier-section "NATIVE TIER (explicit, blocks --include-native)" native-results)]
+    [else
+     (printf "NATIVE TIER: skipped (use --include-native to run explicit Native Core evidence)\n")
+     (for ([f (in-list (tier-plan-native-files plan))])
+       (printf "  · ~a\n" f))
+     (newline)])
 
+  (define gating-results (append active-results native-results))
   (define active-failures (filter (status-is? 'fail) active-results))
   (define active-diagnostics (filter (status-is? 'diagnostic) active-results))
+  (define native-failures (filter (status-is? 'fail) native-results))
+  (define native-diagnostics (filter (status-is? 'diagnostic) native-results))
   (define demoted-failures (filter (status-is? 'fail) demoted-results))
 
   ;; Debt visibility: surface BOTH this-run new failures AND total accumulated.
@@ -1241,6 +1263,9 @@
     [(positive? (length active-failures))
      (printf "=== ACTIVE FAILURE DETAIL ===\n\n")
      (print-unit-detail active-failures)])
+  (when (positive? (length native-failures))
+    (printf "=== NATIVE FAILURE DETAIL ===\n\n")
+    (print-unit-detail native-failures))
 
   ;; Breach detail is printed in its own section, under its own heading, so a
   ;; reader who scrolled past everything else cannot mistake it for a defect.
@@ -1251,31 +1276,34 @@
      (printf "UNPROVEN, not disproven: this run is not evidence of a defect in\n")
      (printf "them, and it is not a pass either.\n\n")
      (print-unit-detail active-diagnostics)])
+  (when (positive? (length native-diagnostics))
+    (printf "=== NATIVE DIAGNOSTIC DETAIL -- NOT PRODUCT FAILURES ===\n\n")
+    (print-unit-detail native-diagnostics))
 
-  (print-slow-tests active-results)
+  (print-slow-tests gating-results)
 
-  (define verdict (active-verdict active-results))
+  (define verdict (active-verdict gating-results))
   (case verdict
     [(1)
      (printf "BUILD FAILED — ~a active failure~a~a\n"
-             (length active-failures)
-             (if (= 1 (length active-failures)) "" "s")
-             (if (null? active-diagnostics)
+             (+ (length active-failures) (length native-failures))
+             (if (= 1 (+ (length active-failures) (length native-failures))) "" "s")
+             (if (null? (append active-diagnostics native-diagnostics))
                  ""
                  (format " (~a deadline breach~a also reported, not gating)"
-                         (length active-diagnostics)
-                         (if (= 1 (length active-diagnostics)) "" "es"))))]
+                         (+ (length active-diagnostics) (length native-diagnostics))
+                         (if (= 1 (+ (length active-diagnostics) (length native-diagnostics))) "" "es"))))]
     [(0)
-     (printf "BUILD OK — all active tests passing.\n")]
+     (printf "BUILD OK — all selected blocking tests passing.\n")]
     [else
-     (printf "BUILD DIAGNOSTIC — ~a active unit~a exceeded a deadline; none failed.\n"
-             (length active-diagnostics)
-             (if (= 1 (length active-diagnostics)) "" "s"))
+     (printf "BUILD DIAGNOSTIC — ~a selected blocking unit~a exceeded a deadline; none failed.\n"
+             (+ (length active-diagnostics) (length native-diagnostics))
+             (if (= 1 (+ (length active-diagnostics) (length native-diagnostics))) "" "s"))
      (printf "Exit ~a is DIAGNOSTIC, not gating. Nothing here says the code is broken.\n"
              verdict)])
   (exit verdict))
 
-(define (units-for-worker-tiers active-units demoted-units gated-units spec)
+(define (units-for-worker-tiers active-units demoted-units gated-units native-units spec)
   ;; One supervisor owns the complete sequential worker lane, so tier-local
   ;; partitioning is unsound: independent heavy units from different tiers can
   ;; otherwise land on the same worker and make an advisory tier block by
@@ -1283,11 +1311,12 @@
   ;; recover the tier buckets for reporting and exit-status semantics.
   (define assigned
     (units-for-worker-shard
-     (append active-units demoted-units gated-units)
+     (append active-units demoted-units gated-units native-units)
      spec))
   (values (filter (lambda (u) (memq u active-units)) assigned)
           (filter (lambda (u) (memq u demoted-units)) assigned)
-          (filter (lambda (u) (memq u gated-units)) assigned)))
+          (filter (lambda (u) (memq u gated-units)) assigned)
+          (filter (lambda (u) (memq u native-units)) assigned)))
 
 (define (run-worker plan)
   (define spec (worker-shard))
@@ -1301,14 +1330,17 @@
     (if (active-only?) '() (tier-plan-demoted-units plan)))
   (define selected-gated
     (if (include-gated?) (tier-plan-gated-units plan) '()))
-  (define-values (active-units demoted-units gated-units)
+  (define selected-native
+    (if (include-native?) (tier-plan-native-units plan) '()))
+  (define-values (active-units demoted-units gated-units native-units)
     (units-for-worker-tiers
-     (tier-plan-active-units plan) selected-demoted selected-gated spec))
+     (tier-plan-active-units plan) selected-demoted selected-gated selected-native spec))
   (define active-results (map run-test-unit active-units))
   (define demoted-results (map run-test-unit demoted-units))
   (define gated-results (map run-test-unit gated-units))
+  (define native-results (map run-test-unit native-units))
   (write-worker-output
-   (worker-result-path) active-results demoted-results gated-results)
+   (worker-result-path) active-results demoted-results gated-results native-results)
   ;; Only a COMPLETED failure is reported through this process's exit status.
   ;;
   ;; A breached unit does not make its worker exit 124, and that is deliberate,
@@ -1319,7 +1351,7 @@
   ;; evidence the gate actually obtained, the exact inversion cd07b761 forbids.
   ;; The breach travels in the worker result instead, and report-results applies
   ;; the ordering rule once, over every shard, where it can see all of them.
-  (exit (if (= 1 (active-verdict active-results)) 1 0)))
+  (exit (if (= 1 (active-verdict (append active-results native-results))) 1 0)))
 
 (define (merge-workers plan)
   (define count (resolve-jobs))
@@ -1337,7 +1369,12 @@
         (merge-tier-results (tier-plan-gated-units plan)
                             outputs worker-output-gated "gated")
         '()))
-  (report-results plan active-results demoted-results gated-results))
+  (define native-results
+    (if (include-native?)
+        (merge-tier-results (tier-plan-native-units plan)
+                            outputs worker-output-native "native")
+        '()))
+  (report-results plan active-results demoted-results gated-results native-results))
 
 (define (run-body)
   (define plan (load-tier-plan))
@@ -1354,7 +1391,11 @@
        (if (include-gated?)
            (run-test-units (tier-plan-gated-units plan))
            '()))
-     (report-results plan active-results demoted-results gated-results)]))
+     (define native-results
+       (if (include-native?)
+           (run-test-units (tier-plan-native-units plan))
+           '()))
+     (report-results plan active-results demoted-results gated-results native-results)]))
 
 ;; CLI entry lives in `main` so `raco test` (which runs the `test` submodule
 ;; below) does NOT fire the runner; `racket tier-runner.rkt` still runs it.
@@ -1378,6 +1419,8 @@
     (ci-shard (parse-shard-spec spec))]
    [("--include-gated") "Also run gated tier (requires env vars)"
                         (include-gated? #t)]
+   [("--include-native") "Also run blocking Native Core tier"
+                        (include-native? #t)]
    [("--worker-shard") spec
     "Internal: run local process shard i/n"
     (worker-shard (parse-shard-spec spec))]

@@ -59,18 +59,11 @@ semantics.
 **judgment** — A reasoned selection or conclusion over propositions and their
 provenance. System-level vocabulary, not a Store kernel type.
 
-**Model** — the stable semantic program. It is not a Store space, branch, root,
-process, deployment, or universal identity key.
-
-**ModelRevision** — one sealed, immutable, coherent admission of a Model's
-propositions, judgments, laws, goals, and provenance. Store may hold the
-occurrences from which it is reconstructed, but the revision retains its own
-semantic identity.
-
-**Branch** — a named, coherent recorded line of Model development.
-
-**BranchRevision** — one exact authenticated coordinate in a Branch's ordered
-history. It is a history identity, not a ModelRevision.
+**program world (`WORLD`)** — Beagle's system-level durable, versioned semantic
+explanation from which materializations may be derived. It is not a Store
+primitive, the retired Worlds service, or a universal identity key. Store may
+hold evidence used by a world while the world retains its own revision and
+provenance identity.
 
 **epistemic origin** — `Declared`, `Derived`, or `Observed`: how a fact entered
 an explanation. These are system-level roles that a Store profile may model

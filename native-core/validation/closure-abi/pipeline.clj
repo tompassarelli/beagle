@@ -50,43 +50,38 @@
                 (lower/lower-native-stage
                   (lower/typingacceptedv0-frozen typing)
                   (lower/typingacceptedv0-slice typing)
-                  "native-closure-abi-v0" configuration abi)]
-            (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
+                  "native-closure-abi-v0" configuration abi)
+                epoch
+                (lower/epoch-derived-stage (slice/native-frozen native-result)
+                  "native-closure-abi-v0" configuration abi)
+                program
+                (stages/nativestagev0-program
+                  (stages/frozennativestagev0-stage
+                    (lower/epoch-result-frozen epoch)))
+                verdicts (obligations/validate-native-core-program program abi)
+                materialized (body/materialize-program program 0)
+                complete
+                (instance? native.lower.NativeLoweringCompleteV0 native-result)]
+            (if (or (not complete) (not (verdicts-pass? verdicts))
+                  (not (body/materialization-ok? materialized)))
               (str "stage source-freeze ACCEPTED\n"
                 "stage source-to-typed ACCEPTED\n"
-                "stage typed-to-native PENDING\n"
-                (slice/pending-reports (slice/native-pending native-result))
-                "materialize REFUSED native lowering incomplete\n")
-              (let [epoch
-                    (lower/epoch-derived-stage
-                      (slice/require-native-complete native-result)
-                      "native-closure-abi-v0" configuration abi)
-                    program
-                    (stages/nativestagev0-program
-                      (stages/frozennativestagev0-stage
-                        (lower/epoch-result-frozen epoch)))
-                    verdicts (obligations/validate-native-core-program program abi)
-                    materialized (body/materialize-program program 0)]
-                (if (or (not (verdicts-pass? verdicts))
-                      (not (body/materialization-ok? materialized)))
-                  (str "stage source-freeze ACCEPTED\n"
-                    "stage source-to-typed ACCEPTED\n"
-                    "stage typed-to-native COMPLETE\n"
-                    "obligations " (if (verdicts-pass? verdicts) "PASS" "FAIL") "\n"
-                    (failing-verdict-report verdicts)
-                    "materialize "
-                    (if (body/materialization-ok? materialized) "OK" "REFUSED") "\n"
-                    (body/materialization-detail materialized) "\n")
-                  (let [artifact (body/materialization-artifact materialized)]
-                    (spit (str artifacts-dir "/"
-                            (body/bodyartifactv0-header-name artifact))
-                      (body/bodyartifactv0-header-text artifact))
-                    (spit (str artifacts-dir "/"
-                            (body/bodyartifactv0-source-name artifact))
-                      (body/bodyartifactv0-source-text artifact))
-                    (str "stage source-freeze ACCEPTED\n"
-                      "stage source-to-typed ACCEPTED\n"
-                      "stage typed-to-native COMPLETE\n"
-                      "obligations PASS\n"
-                      (function-report (core/nativecoreprogram-functions program))
-                      "materialize OK module_0.h module_0.c\n")))))))))))
+                "stage typed-to-native " (if complete "COMPLETE" "PENDING") "\n"
+                "obligations " (if (verdicts-pass? verdicts) "PASS" "FAIL") "\n"
+                (failing-verdict-report verdicts)
+                "materialize "
+                (if (body/materialization-ok? materialized) "OK" "REFUSED") "\n"
+                (body/materialization-detail materialized) "\n")
+              (let [artifact (body/materialization-artifact materialized)]
+                (spit (str artifacts-dir "/"
+                        (body/bodyartifactv0-header-name artifact))
+                  (body/bodyartifactv0-header-text artifact))
+                (spit (str artifacts-dir "/"
+                        (body/bodyartifactv0-source-name artifact))
+                  (body/bodyartifactv0-source-text artifact))
+                (str "stage source-freeze ACCEPTED\n"
+                  "stage source-to-typed ACCEPTED\n"
+                  "stage typed-to-native COMPLETE\n"
+                  "obligations PASS\n"
+                  (function-report (core/nativecoreprogram-functions program))
+                  "materialize OK module_0.h module_0.c\n")))))))))

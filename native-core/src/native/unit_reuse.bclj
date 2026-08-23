@@ -3380,7 +3380,7 @@
       (stages/content-digest encoding))))
 
 (defn make-native-program
-  [frozen-typed stages/FrozenTypedStageV0
+  [typed-digest String
    types (Vec core/TypeDef)
    effects (Vec core/EffectDef)
    regions (Vec core/RegionDef)
@@ -3388,30 +3388,21 @@
    layouts (Vec core/LayoutDef)
    functions (Vec core/FunctionDef)
    abis (Vec core/AbiDeclV0)] core/NativeCoreProgram
-  (let [allowed-effects (Vec core/NativeId) (core/effect-ids effects)
-        allowed-regions (Vec core/NativeId) (core/region-ids regions)
-        allowed-capabilities (Vec core/NativeId) (core/capability-ids capabilities)
-        observations (Vec core/ExternalObservation) []
-        executable-encoding String (lower/encode-native-executable-slice
-          types effects regions capabilities layouts functions
-          allowed-effects allowed-regions allowed-capabilities abis
-          observations)]
-    (core/->NativeCoreProgram
-      (lower/typed-compatibility-native-program-id-for-content frozen-typed
-        executable-encoding)
-      (lower/typed-compatibility-input-identity frozen-typed)
-      "typed-to-native-v0"
-      types
-      effects
-      regions
-      capabilities
-      layouts
-      functions
-      allowed-effects
-      allowed-regions
-      allowed-capabilities
-      abis
-      observations)))
+  (core/->NativeCoreProgram
+    (lower/lower-id "native-program" [typed-digest])
+    (lower/lower-id "typed-stage" [typed-digest])
+    "typed-to-native-v0"
+    types
+    effects
+    regions
+    capabilities
+    layouts
+    functions
+    (core/effect-ids effects)
+    (core/region-ids regions)
+    (core/capability-ids capabilities)
+    abis
+    []))
 
 (defn verdict-results [verdicts (Vec obligations/ObligationVerdictV0)] (Vec core/ObligationResult)
   (lower/native-obligation-results
@@ -3524,7 +3515,7 @@
                 typed-slice lower/TypedSliceV0 (lower/->TypedSliceV0 types typed-functions effects regions
                   capabilities [(lower/type-id "LowerFailure")])
                 program core/NativeCoreProgram (make-native-program
-                  frozen-typed
+                  (stages/frozentypedstagev0-digest frozen-typed)
                   native-types effects regions capabilities layouts
                   native-functions abis)
                 verdicts (Vec obligations/ObligationVerdictV0) (obligations/validate-native-core-program program abi)

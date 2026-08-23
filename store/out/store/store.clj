@@ -50,31 +50,6 @@
 
 (defn transactionrecordsresult-message [r] (:message r))
 
-;; SnapshotReplay = SnapshotReplayed | SnapshotReplayRejected
-(defrecord SnapshotReplayed [root])
-
-(defn snapshotreplayed-root [r] (:root r))
-(defrecord SnapshotReplayRejected [code detail])
-
-(defn snapshotreplayrejected-code [r] (:code r))
-
-(defn snapshotreplayrejected-detail [r] (:detail r))
-
-;; CommitResult = CommitSuccess | CommitStale | CommitRejected
-(defrecord CommitSuccess [coordinate])
-
-(defn commitsuccess-coordinate [r] (:coordinate r))
-(defrecord CommitStale [expected-sequence observed-sequence])
-
-(defn commitstale-expected-sequence [r] (:expected-sequence r))
-
-(defn commitstale-observed-sequence [r] (:observed-sequence r))
-(defrecord CommitRejected [code detail])
-
-(defn commitrejected-code [r] (:code r))
-
-(defn commitrejected-detail [r] (:detail r))
-
 (def initial-slots 64)
 
 (def slot-load 4)
@@ -473,22 +448,16 @@
   (if (not (and (valid-operations? operations) (t/commit-metadata? metadata))) (throw (ex-info "store: transaction requires at least one valid operation" {:type :invalid-transaction-record})) (if (< sequence (store-next-sequence before)) (throw (ex-info "store: transaction sequence must advance within its space" {:type :nonmonotonic-transaction-sequence})) (let [final-store (append-valid-transaction! ctx sequence operations)]
   (t/transaction-coordinate (t/termstore-space-id final-store) sequence))))))
 
-(defn- canonical-validated-metadata [operations metadata]
+(defn- canonical-validate-commit! [operations metadata]
   (let [attestation (t/commitmetadata-validation-attestation metadata)]
-  (if (and (valid-operations? operations) (t/commit-metadata? metadata) (string? (t/commitmetadata-producer metadata)) (pos? (count (t/commitmetadata-producer metadata))) (string? (t/commitmetadata-shape-schema-id metadata)) (pos? (count (t/commitmetadata-shape-schema-id metadata))) (or (nil? (t/commitmetadata-profile metadata)) (and (string? (t/commitmetadata-profile metadata)) (pos? (count (t/commitmetadata-profile metadata))))) (t/commit-validation-attestation? attestation)) (t/->CommitMetadata (t/commitmetadata-producer metadata) (t/commitmetadata-shape-schema-id metadata) (t/commitmetadata-profile metadata) (t/->CommitValidationAttestation canonical-validator :accepted canonical-validator)) nil)))
+  (if (and (valid-operations? operations) (t/commit-metadata? metadata) (string? (t/commitmetadata-producer metadata)) (pos? (count (t/commitmetadata-producer metadata))) (string? (t/commitmetadata-shape-schema-id metadata)) (pos? (count (t/commitmetadata-shape-schema-id metadata))) (or (nil? (t/commitmetadata-profile metadata)) (and (string? (t/commitmetadata-profile metadata)) (pos? (count (t/commitmetadata-profile metadata))))) (t/commit-validation-attestation? attestation)) (t/->CommitMetadata (t/commitmetadata-producer metadata) (t/commitmetadata-shape-schema-id metadata) (t/commitmetadata-profile metadata) (t/->CommitValidationAttestation canonical-validator :accepted canonical-validator)) (throw (ex-info "store: canonical commit validation rejected the write" {:type :canonical-commit-rejected})))))
 
-(defn commit-boundary! [ctx expected-sequence operations metadata]
-  (let [observed-sequence (store-next-sequence (deref ctx))
-   validated (canonical-validated-metadata operations metadata)]
-  (cond
-  (or (< expected-sequence 1) (> expected-sequence max-transaction-sequence)) (->CommitRejected :invalid-transaction-sequence "store: expected transaction sequence is outside the appendable range")
-  (nil? validated) (->CommitRejected :canonical-commit-rejected "store: canonical commit validation rejected the write")
-  (not= expected-sequence observed-sequence) (->CommitStale expected-sequence observed-sequence)
-  :else (let [accepted validated]
-  (->CommitSuccess (append-transaction! ctx expected-sequence operations accepted))))))
+(defn commit-boundary! [ctx operations metadata]
+  (let [validated (canonical-validate-commit! operations metadata)]
+  (append-transaction! ctx (store-next-sequence (deref ctx)) operations validated)))
 
 (defn commit-transaction! [ctx operations]
-  (commit-boundary! ctx (next-sequence ctx) operations (commit-metadata "store.txn/v1" canonical-shape-schema-id "store-schema-v1")))
+  (commit-boundary! ctx operations (commit-metadata "store.txn/v1" canonical-shape-schema-id "store-schema-v1")))
 
 (defn ^TransactionReplayResult replay-transaction-result! [ctx record]
   (if (and (t/transaction-record? record) (and (>= (t/transactionrecord-sequence record) 0) (valid-operations? (t/transactionrecord-operations record)))) (append-transaction-result! ctx (t/transactionrecord-sequence record) (t/transactionrecord-operations record)) (transaction-replay-error :invalid-transaction-record "store: invalid transaction record")))
@@ -741,18 +710,6 @@
   :else (let [handle-error (operation-handle-error store)]
   (if (some? handle-error) handle-error (if (not (valid-atom-rows? atoms)) (transaction-records-error :invalid-term "store: triple contains a value outside Term") (if (not (valid-triple-rows? (count atoms) triples)) (transaction-records-error :invalid-term-handle "store: term handle does not resolve") (let [sequence-error (history-sequence-error transactions)]
   (if (some? sequence-error) sequence-error (if (not (valid-history-rows? transactions operations (count triples) (store-next-sequence store))) (transaction-records-error :invalid-transaction-record "store: invalid transaction record") (transaction-records-ok (valid-transaction-records-between store lower-exclusive upper-inclusive))))))))))))
-
-(defn- snapshot-replay-rejected [code detail]
-  (->SnapshotReplayRejected (if (some? code) code :snapshot-replay-failed) (if (some? detail) detail "store: snapshot replay failed")))
-
-(defn replay-snapshot-at! [source version]
-  (let [head (current-sequence source)]
-  (if (or (< version 0) (> version head)) (->SnapshotReplayRejected :snapshot-version-outside-history "store: requested snapshot version is outside available history") (let [records-result (transaction-records-between-result (deref source) -1 version)]
-  (if (not (transactionrecordsresult-ok records-result)) (snapshot-replay-rejected (transactionrecordsresult-code records-result) (transactionrecordsresult-message records-result)) (let [copy (new-term-store (space-id source))
-   records (transactionrecordsresult-records records-result)]
-  (loop [remaining records]
-  (if (empty? remaining) (if (= version (current-sequence copy)) (->SnapshotReplayed copy) (->SnapshotReplayRejected :snapshot-version-not-recorded "store: requested snapshot version is absent from history")) (let [replay-result (replay-transaction-result! copy (first remaining))]
-  (if (transactionreplayresult-ok replay-result) (recur (rest remaining)) (snapshot-replay-rejected (transactionreplayresult-code replay-result) (transactionreplayresult-message replay-result))))))))))))
 
 (defn- rebuild-operation-state! [store]
   (let [operations (store-operations store)

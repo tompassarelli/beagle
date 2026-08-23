@@ -2,13 +2,14 @@
 # beagle-test: tiered test runner for beagle.
 #
 # Replaces direct `raco test beagle-test/tests/`. Reads tier classifications
-# from beagle-test/tiers.rktd; runs active + demoted tiers; blocks build
-# on active failures only. Demoted failures are advisory.
+# from beagle-test/tiers.rktd; ordinary runs use hosted active + demoted tiers.
+# Native Core evidence is an explicit blocking `--include-native` route.
 #
 # Usage:
 #   bin/beagle-test                         # active tier only (fast loop)
 #   bin/beagle-test --full                  # active + demoted tiers
 #   bin/beagle-test --include-gated         # also run gated tier (needs env vars)
+#   bin/beagle-test --include-native        # also run blocking Native Core tier
 #   bin/beagle-test --changed               # only what the change can affect
 #   bin/beagle-test --explain-selection     # print that selection, run nothing
 #
@@ -75,10 +76,14 @@ BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # --changed is consumed here; everything else is forwarded to the tier runner
 # untouched, so the runner keeps seeing exactly the argv it always saw.
 BEAGLE_TEST_SELECT_CHANGED=0
+BEAGLE_TEST_INCLUDE_NATIVE=0
 beagle_test_forward_args=()
 for beagle_test_arg in "$@"; do
     if [[ "$beagle_test_arg" == "--changed" ]]; then
         BEAGLE_TEST_SELECT_CHANGED=1
+    elif [[ "$beagle_test_arg" == "--include-native" ]]; then
+        BEAGLE_TEST_INCLUDE_NATIVE=1
+        beagle_test_forward_args+=("$beagle_test_arg")
     else
         beagle_test_forward_args+=("$beagle_test_arg")
     fi
@@ -499,7 +504,7 @@ run_beagle_test_shards() {
     started_seconds=$SECONDS
     echo "beagle-test: phase tier-runner START deadline=${deadline}s workers=$workers load=${load_start}/${BEAGLE_TEST_CORES}" >&2
 
-    # The Wasm suite's phases are separate processes that all start at once and
+    # The explicit Native tier's Wasm phases are separate processes that all start at once and
     # all need the same canonical fixtures. Cold, they used to race: one built
     # while the rest sat on the exclusive fixture lock, and a waiter that
     # outlasted the lock's delay failed with "timed out acquiring shared base
@@ -508,15 +513,17 @@ run_beagle_test_shards() {
     # preparation, not a check: it asserts nothing, and a failure is left for
     # the phases themselves to report against their own assertions rather than
     # being reclassified into a gate verdict here.
-    local prepare_log="$BEAGLE_TEST_LOG_ROOT/tier-fixtures.log"
-    local prepare_started=$SECONDS
-    if BEAGLE_WASM_TEST_PREPARE_FIXTURES=1 \
-        "$RACKET" "$BEAGLE_ROOT/beagle-test/tests/wasm-materializer.rkt" \
-        >"$prepare_log" 2>&1; then
-        echo "beagle-test: tier-runner shared fixtures prepared wall=$((SECONDS - prepare_started))s load=$(beagle_test_load)/${BEAGLE_TEST_CORES}" >&2
-    else
-        echo "beagle-test: tier-runner shared fixture preparation did not complete (status=$?); phases will build their own. log=$prepare_log" >&2
-        BEAGLE_TEST_KEEP_LOGS=1
+    if [[ "$BEAGLE_TEST_INCLUDE_NATIVE" == 1 ]]; then
+        local prepare_log="$BEAGLE_TEST_LOG_ROOT/tier-fixtures.log"
+        local prepare_started=$SECONDS
+        if BEAGLE_WASM_TEST_PREPARE_FIXTURES=1 \
+            "$RACKET" "$BEAGLE_ROOT/beagle-test/tests/wasm-materializer.rkt" \
+            >"$prepare_log" 2>&1; then
+            echo "beagle-test: tier-runner shared Native fixtures prepared wall=$((SECONDS - prepare_started))s load=$(beagle_test_load)/${BEAGLE_TEST_CORES}" >&2
+        else
+            echo "beagle-test: tier-runner shared Native fixture preparation did not complete (status=$?); phases will build their own. log=$prepare_log" >&2
+            BEAGLE_TEST_KEEP_LOGS=1
+        fi
     fi
     for ((i = 0; i < workers; i++)); do
         local log="$worker_root/worker-$i.log"

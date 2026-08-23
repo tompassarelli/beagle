@@ -4517,7 +4517,7 @@
             (= head "define-target")
             (do
               (when (deref target-set) (err! "duplicate define-target"))
-              ;; Mirrors targets.rkt source-profile-ids: core + every target id.
+              ;; Mirrors targets.rkt source-profile-ids: hosted targets + core.
               ;; `core` is what reader/lang-target yields for bare `#lang beagle`,
               ;; so omitting it rejects every .bgl module an importer resolves.
               (if (has-item? ["core" "clj" "js" "nix" "py" "rkt"] (nth d 1))

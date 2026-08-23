@@ -160,10 +160,10 @@
    c-compiler String
    qbe-compiler String])
 
-;; This wire belongs only to the file-first Clojure compatibility compiler. It
-;; admits source-projected propositions for that profile's ProgramRoot and
-;; cannot feed native ModelRevision -> CheckedTheory compilation.
-(defrecord CljCompatibilityProgramAdmissionPlan
+;; This plan crosses the compiler/Store authority boundary only long enough for
+;; the Store host to admit a durable ProgramRoot. Its program content is still
+;; canonical recursive Triples, never a stored compiler-specific row.
+(defrecord ProgramAdmissionPlan
   [store-log String
    space-id String
    compiler-context String
@@ -172,42 +172,38 @@
    initial-root-candidate t/Term
    propositions (Vec t/Triple)])
 
-(defunion CljCompatibilityProgramAdmissionPlanResult
-  (CljCompatibilityProgramAdmissionPlanned
-    [plan CljCompatibilityProgramAdmissionPlan])
-  (CljCompatibilityProgramAdmissionPlanningRejected
-    [code Int detail String]))
+(defunion ProgramAdmissionPlanResult
+  (ProgramAdmissionPlanned [plan ProgramAdmissionPlan])
+  (ProgramAdmissionPlanningRejected [code Int detail String]))
 
-(defunion CljCompatibilityCompileStoreRequest
-  (CljCompatibilityCompileStoreAdmitProgram
-    [plan CljCompatibilityProgramAdmissionPlan])
-  (CljCompatibilityCompileStoreLookup
+(defunion CompileStoreRequest
+  (CompileStoreAdmitProgram [plan ProgramAdmissionPlan])
+  (CompileStoreLookup
     [store-log String
      space-id String
      query profile/AdmittedQueryClosure])
-  (CljCompatibilityCompileStoreAppend
+  (CompileStoreAppend
     [store-log String
      space-id String
      result profile/AdmittedResultClosure
      artifact linker/TargetArtifactV1]))
 
-(defunion CljCompatibilityCompileStoreResponse
-  CljCompatibilityCompileStoreCold
-  (CljCompatibilityCompileStoreWarm
+(defunion CompileStoreResponse
+  CompileStoreCold
+  (CompileStoreWarm
     [result profile/AdmittedResultClosure
      artifact linker/TargetArtifactV1])
-  (CljCompatibilityCompileStoreWarmRejected
+  (CompileStoreWarmRejected
     [result profile/AdmittedResultClosure
      detail String])
-  (CljCompatibilityCompileStoreProgramAdmitted
+  (CompileStoreProgramAdmitted
     [root-resource t/Term
      root-version Int])
-  CljCompatibilityCompileStorePersisted
-  (CljCompatibilityCompileStoreFailure [code Int detail String]))
+  CompileStorePersisted
+  (CompileStoreFailure [code Int detail String]))
 
-(defalias CljCompatibilityCompileStore
-  (Fn [CljCompatibilityCompileStoreRequest]
-    CljCompatibilityCompileStoreResponse))
+(defalias CompileStore
+  (Fn [CompileStoreRequest] CompileStoreResponse))
 
 (defn compile-query
   [request CompileBundleRequest] CompileQueryAdmissionResult
@@ -637,34 +633,30 @@
                   (checker/checkrejection-subject rejection) ": "
                   (checker/checkrejection-detail rejection)))])))))
 
-(def clj-compatibility-program-profile Keyword :program)
-(def clj-compatibility-program-root-domain String
-  "beagle-clj-compatibility-program-root/v1")
+(def program-profile Keyword :program)
+(def program-root-domain String "beagle-program-root/v1")
 
 (defn length-framed [value String] String
   (str (count (utf8-encode value)) ":" value))
 
-(defn initial-clj-compatibility-program-root-candidate
+(defn initial-program-root-candidate
   [space-id String
    compiler-context String
    closure-digest String
    entry-namespace String] String
   (bootstrap/content-id
-    (str clj-compatibility-program-root-domain
+    (str program-root-domain
          (length-framed space-id)
          (length-framed compiler-context)
          (length-framed closure-digest)
          (length-framed entry-namespace))))
 
-(defn clj-compatibility-program-admission-seed-value
-  [plan CljCompatibilityProgramAdmissionPlan] Any
-  (cljcompatibilityprogramadmissionplan-initial-root-candidate plan))
+(defn program-admission-seed-value [plan ProgramAdmissionPlan] Any
+  (programadmissionplan-initial-root-candidate plan))
 
-(defn clj-compatibility-program-term-value
-  [value t/Term] Any
-  value)
+(defn program-term-value [value t/Term] Any value)
 
-(defn append-unique-clj-compatibility-program-proposition
+(defn append-unique-program-proposition
   [propositions (Vec t/Triple)
    proposition t/Triple] (Vec t/Triple)
   (if (some?
@@ -675,16 +667,15 @@
     propositions
     (conj propositions proposition)))
 
-(defn merge-clj-compatibility-program-propositions
+(defn merge-program-propositions
   [propositions (Vec t/Triple)
    projected (Vec t/Triple)] (Vec t/Triple)
-  (reduce append-unique-clj-compatibility-program-proposition
-    propositions projected))
+  (reduce append-unique-program-proposition propositions projected))
 
-(defn plan-clj-compatibility-program-admission
+(defn plan-program-admission
   [config CompileSourceConfig
    checked CheckedFactClosure
-   entry-namespace String] CljCompatibilityProgramAdmissionPlanResult
+   entry-namespace String] ProgramAdmissionPlanResult
   (loop [remaining (Vec CheckedModuleFacts)
          (checkedfactclosure-modules checked)
          propositions (Vec t/Triple) []]
@@ -695,14 +686,14 @@
             compiler-context String bootstrap/default-compiler-context-id
             closure-digest String
             (facts/syntaxfactclosure-closure-digest syntax)]
-        (->CljCompatibilityProgramAdmissionPlanned
-          (->CljCompatibilityProgramAdmissionPlan
+        (->ProgramAdmissionPlanned
+          (->ProgramAdmissionPlan
             (compilesourceconfig-store-log config)
             space-id
             compiler-context
             closure-digest
-            clj-compatibility-program-profile
-            (initial-clj-compatibility-program-root-candidate
+            program-profile
+            (initial-program-root-candidate
               space-id compiler-context closure-digest entry-namespace)
             propositions)))
       (let [module CheckedModuleFacts (first remaining)
@@ -710,17 +701,17 @@
             (checkedmodulefacts-syntax module)
             namespace String? (facts/syntaxfactbundle-namespace normalized)]
         (if (nil? namespace)
-          (->CljCompatibilityProgramAdmissionPlanningRejected 65
+          (->ProgramAdmissionPlanningRejected 65
             "checked module does not declare a namespace")
           (match (program-projection/project-module
                    namespace
                    (checkedmodulefacts-raw module))
             [(program-projection/ProgramProjectionRejected code detail)
-             (->CljCompatibilityProgramAdmissionPlanningRejected 65 detail)]
+             (->ProgramAdmissionPlanningRejected 65 detail)]
             [(program-projection/ProgramProjected projected)
              (recur
                (vec (rest remaining))
-               (merge-clj-compatibility-program-propositions
+               (merge-program-propositions
                  propositions
                  (program-projection/programmoduleprojection-propositions
                    projected)))]))))))
@@ -893,33 +884,31 @@
    result profile/AdmittedResultClosure
    artifact linker/TargetArtifactV1
    config linker/ArtifactLinkConfigV1
-   store CljCompatibilityCompileStore] CompileBundleResult
+   store CompileStore] CompileBundleResult
   (match (store
-           (->CljCompatibilityCompileStoreAppend
+           (->CompileStoreAppend
              (compilebundlerequest-store-log (compilequery-request query))
              (compilebundlerequest-space-id (compilequery-request query))
              result
              artifact))
-    [(CljCompatibilityCompileStorePersisted)
-     (link-query-artifact query config artifact)]
-    [(CljCompatibilityCompileStoreFailure code detail)
-     (->CompileBundleError code detail)]
-    [(CljCompatibilityCompileStoreCold)
+    [(CompileStorePersisted) (link-query-artifact query config artifact)]
+    [(CompileStoreFailure code detail) (->CompileBundleError code detail)]
+    [(CompileStoreCold)
      (->CompileBundleError 74
        "Store did not acknowledge the compile result append")]
-    [(CljCompatibilityCompileStoreWarm warm-result warm-artifact)
+    [(CompileStoreWarm warm-result warm-artifact)
      (->CompileBundleError 74 "Store returned a warm result during append")]
-    [(CljCompatibilityCompileStoreWarmRejected rejected detail)
+    [(CompileStoreWarmRejected rejected detail)
      (->CompileBundleError 74 "Store returned a rejection during result append")]
-    [(CljCompatibilityCompileStoreProgramAdmitted root-resource root-version)
+    [(CompileStoreProgramAdmitted root-resource root-version)
      (->CompileBundleError 74
-       "Store returned a Clojure compatibility ProgramRoot admission during result append")]))
+       "Store returned a program admission during result append")]))
 
 (defn compile-admitted-artifact
   [query CompileQuery
    artifact linker/TargetArtifactV1
    config linker/ArtifactLinkConfigV1
-   store CljCompatibilityCompileStore] CompileBundleResult
+   store CompileStore] CompileBundleResult
   (match (linker/encode-artifact-envelope artifact)
     [(linker/ArtifactEnvelopeErrorV1 detail)
      (->CompileBundleError 65 detail)]
@@ -942,7 +931,7 @@
    entry-namespace String
    entry-definition String
    config linker/ArtifactLinkConfigV1
-   store CljCompatibilityCompileStore] CompileBundleResult
+   store CompileStore] CompileBundleResult
   (match (materialize-query query checked entry-namespace entry-definition)
     [(CompileArtifactRejected code detail) (->CompileBundleError code detail)]
     [(CompileArtifactReady artifact)
@@ -952,52 +941,50 @@
        [(CompileQueryEvaluationReady)
         (compile-admitted-artifact query artifact config store)])]))
 
-(defn lookup-admitted-clj-compatibility-program
-  [plan CljCompatibilityProgramAdmissionPlan
+(defn lookup-admitted-program
+  [plan ProgramAdmissionPlan
    query CompileQuery
-   store CljCompatibilityCompileStore] CljCompatibilityCompileStoreResponse
-  (match (store (->CljCompatibilityCompileStoreAdmitProgram plan))
-    [(CljCompatibilityCompileStoreFailure code detail)
-     (->CljCompatibilityCompileStoreFailure code detail)]
-    [(CljCompatibilityCompileStoreProgramAdmitted root-resource root-version)
-     (if (and (t/term? (clj-compatibility-program-term-value root-resource))
+   store CompileStore] CompileStoreResponse
+  (match (store (->CompileStoreAdmitProgram plan))
+    [(CompileStoreFailure code detail) (->CompileStoreFailure code detail)]
+    [(CompileStoreProgramAdmitted root-resource root-version)
+     (if (and (t/term? (program-term-value root-resource))
               (>= root-version 0))
        (store
-         (->CljCompatibilityCompileStoreLookup
-           (cljcompatibilityprogramadmissionplan-store-log plan)
-           (cljcompatibilityprogramadmissionplan-space-id plan)
+         (->CompileStoreLookup
+           (programadmissionplan-store-log plan)
+           (programadmissionplan-space-id plan)
            (compilequery-admitted query)))
-       (->CljCompatibilityCompileStoreFailure 74
-         "Store returned an invalid Clojure compatibility ProgramRoot or a negative version"))]
-    [(CljCompatibilityCompileStoreCold)
-     (->CljCompatibilityCompileStoreFailure 74
-       "Store omitted Clojure compatibility ProgramRoot admission before compile lookup")]
-    [(CljCompatibilityCompileStoreWarm result artifact)
-     (->CljCompatibilityCompileStoreFailure 74
-       "Store returned a warm compile result during Clojure compatibility ProgramRoot admission")]
-    [(CljCompatibilityCompileStoreWarmRejected result detail)
-     (->CljCompatibilityCompileStoreFailure 74
-       "Store returned a compile rejection during Clojure compatibility ProgramRoot admission")]
-    [(CljCompatibilityCompileStorePersisted)
-     (->CljCompatibilityCompileStoreFailure 74
-       "Store returned a persistence receipt during Clojure compatibility ProgramRoot admission")]))
+       (->CompileStoreFailure 74
+         "Store returned an invalid ProgramRoot or a negative version"))]
+    [(CompileStoreCold)
+     (->CompileStoreFailure 74
+       "Store omitted ProgramRoot admission before compile lookup")]
+    [(CompileStoreWarm result artifact)
+     (->CompileStoreFailure 74
+       "Store returned a warm compile result during ProgramRoot admission")]
+    [(CompileStoreWarmRejected result detail)
+     (->CompileStoreFailure 74
+       "Store returned a compile rejection during ProgramRoot admission")]
+    [(CompileStorePersisted)
+     (->CompileStoreFailure 74
+       "Store returned a persistence receipt during ProgramRoot admission")]))
 
-(defn compile-stored-clj-compatibility-query
+(defn compile-stored-query
   [query CompileQuery
    checked CheckedFactClosure
    entry-namespace String
    entry-definition String
    config linker/ArtifactLinkConfigV1
-   program-plan CljCompatibilityProgramAdmissionPlan
-   store CljCompatibilityCompileStore] CompileBundleResult
-  (match (lookup-admitted-clj-compatibility-program program-plan query store)
-    [(CljCompatibilityCompileStoreFailure code detail)
-     (->CompileBundleError code detail)]
-    [(CljCompatibilityCompileStoreWarm result artifact)
+   program-plan ProgramAdmissionPlan
+   store CompileStore] CompileBundleResult
+  (match (lookup-admitted-program program-plan query store)
+    [(CompileStoreFailure code detail) (->CompileBundleError code detail)]
+    [(CompileStoreWarm result artifact)
      (if (warm-result-valid? query result artifact)
        (link-warm-query-artifact query config artifact)
        (->CompileBundleError 65 "Store returned a noncanonical warm result"))]
-    [(CljCompatibilityCompileStoreWarmRejected result detail)
+    [(CompileStoreWarmRejected result detail)
      (match (profile/admit-canonical-result result)
        [(profile/ResultRejected code invalid-detail)
         (->CompileBundleError 65 invalid-detail)]
@@ -1006,15 +993,15 @@
           (->CompileBundleError 65 detail)
           (->CompileBundleError 65
             "Store returned a non-rejected result as a rejection"))])]
-    [(CljCompatibilityCompileStoreCold)
+    [(CompileStoreCold)
      (compile-cold-query query checked entry-namespace entry-definition
        config store)]
-    [(CljCompatibilityCompileStorePersisted)
+    [(CompileStorePersisted)
      (->CompileBundleError 74
        "Store returned an append acknowledgment during lookup")]
-    [(CljCompatibilityCompileStoreProgramAdmitted root-resource root-version)
+    [(CompileStoreProgramAdmitted root-resource root-version)
      (->CompileBundleError 74
-       "Store returned a second Clojure compatibility ProgramRoot admission during lookup")]))
+       "Store returned a second ProgramRoot admission during lookup")]))
 
 (defn entry-namespace [closure facts/SyntaxFactClosure] String?
   (let [entry-path String (facts/syntaxfactclosure-entry-path closure)]
@@ -1091,11 +1078,11 @@
    syntax facts/SyntaxFactClosure
    checked CheckedFactClosure
    namespace String
-   store CljCompatibilityCompileStore] CompileBundleResult
-  (match (plan-clj-compatibility-program-admission config checked namespace)
-    [(CljCompatibilityProgramAdmissionPlanningRejected code detail)
+   store CompileStore] CompileBundleResult
+  (match (plan-program-admission config checked namespace)
+    [(ProgramAdmissionPlanningRejected code detail)
      (->CompileBundleError code detail)]
-    [(CljCompatibilityProgramAdmissionPlanned program-plan)
+    [(ProgramAdmissionPlanned program-plan)
      (let [request CompileBundleRequest
            (->CompileBundleRequest
              (compilesourceconfig-store-log config)
@@ -1122,14 +1109,14 @@
                   (compilesourceconfig-qbe-compiler config))]
             (complete-compile-output!
               (compilesourceconfig-output-directory config)
-              (compile-stored-clj-compatibility-query
-                query checked namespace "main" link-config program-plan store)))]))]))
+              (compile-stored-query query checked namespace "main"
+                link-config program-plan store)))]))]))
 
 (defn compile-closed-source!
   [config CompileSourceConfig
    syntax facts/SyntaxFactClosure
    raw-modules (Vec facts/SyntaxFactBundle)
-   store CljCompatibilityCompileStore] CompileBundleResult
+   store CompileStore] CompileBundleResult
   (match (check-fact-closure syntax raw-modules)
     [(FactClosureRejected code detail) (->CompileBundleError code detail)]
     [(FactClosureChecked checked)
@@ -1142,7 +1129,7 @@
   [config CompileSourceConfig
    entry ResolvedSourceFactsV1
    resolver ImportResolverV1
-   store CljCompatibilityCompileStore] CompileBundleResult
+   store CompileStore] CompileBundleResult
   (let [entry-path String
         (facts/syntaxfactbundle-path (resolvedsourcefactsv1-normalized entry))]
     (if (not= entry-path (compilesourceconfig-source-path config))

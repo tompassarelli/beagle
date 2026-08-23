@@ -20,19 +20,6 @@
 
 (def space-id String "codegraph")
 
-;; This command owns one Store writer and has a fail-fast CLI contract. Store
-;; still returns typed OCC data before this command translates failure.
-(defn require-commit! [result c/CommitResult] t/Triple
-  (match result
-    [(c/CommitSuccess coordinate) coordinate]
-    [(c/CommitStale expected observed)
-     (throw (ex-info "store advanced under the codegraph command"
-                     {:type :transaction-sequence-drift
-                      :expected expected
-                      :observed observed}))]
-    [(c/CommitRejected code detail)
-     (throw (ex-info detail {:type code}))]))
-
 ;; The fact stream's own node ids are the store's node terms: the kernel accepts
 ;; any Atom, so nothing is minted and no id map stands between a projected line
 ;; and the node it names. An integer object is a node reference, anything else a
@@ -57,12 +44,11 @@
                                 (filterv (fn [(line String)] Bool (str/starts-with? line "["))
                                   lines))]
     (when (pos? (count operations))
-      (require-commit!
-       (c/commit-boundary!
-        ctx (c/next-sequence ctx) operations
-        (c/commit-metadata "store.codegraph/roundtrip-v1"
-                           "store/CommitOperationV1"
-                           "codegraph-v1"))))
+      (c/commit-boundary!
+       ctx operations
+       (c/commit-metadata "store.codegraph/roundtrip-v1"
+                          "store/CommitOperationV1"
+                          "codegraph-v1")))
     (binding [*out* *err*]
       (println "loaded" (count (c/live-propositions ctx)) "facts into a Beagle Store store"))
     (doseq [proposition (c/live-propositions ctx)]

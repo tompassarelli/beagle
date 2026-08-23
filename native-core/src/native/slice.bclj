@@ -150,7 +150,8 @@
                 (throw (ex-info "source facts manifest contains an empty segment path" {})))
               (if (not (safe-relative-segment-path? relative-path))
                 (throw (ex-info "source facts manifest contains an unsafe segment path" {}))
-                (let [segment-path String (str (path-directory manifest-path) "/" relative-path)
+                (let [segment-path String
+                      (str (path-directory manifest-path) "/" relative-path)
                       segment-text String (slurp segment-path)
                       expected-digest String (segment-content-digest relative-path)]
                   (if (or (= "" expected-digest)
@@ -564,24 +565,21 @@
 (defn projected-program
   [program core/NativeCoreProgram
    projection SliceProjectionV0] core/NativeCoreProgram
-  (let [candidate core/NativeCoreProgram (core/->NativeCoreProgram
-          (core/nativecoreprogram-id program)
-          (core/nativecoreprogram-parent program)
-          (core/nativecoreprogram-compiler-pass program)
-          (sliceprojectionv0-types projection)
-          (core/nativecoreprogram-effects program)
-          (core/nativecoreprogram-regions program)
-          (core/nativecoreprogram-capabilities program)
-          (sliceprojectionv0-layouts projection)
-          (core/nativecoreprogram-functions program)
-          (core/nativecoreprogram-allowed-effects program)
-          (core/nativecoreprogram-allowed-regions program)
-          (core/nativecoreprogram-allowed-capabilities program)
-          (core/nativecoreprogram-abis program)
-          (core/nativecoreprogram-observations program))]
-    (lower/remint-derived-native-program candidate
-      (core/nativecoreprogram-id program)
-      "c17-reference-projection-v0")))
+  (core/->NativeCoreProgram
+    (core/nativecoreprogram-id program)
+    (core/nativecoreprogram-parent program)
+    (core/nativecoreprogram-compiler-pass program)
+    (sliceprojectionv0-types projection)
+    (core/nativecoreprogram-effects program)
+    (core/nativecoreprogram-regions program)
+    (core/nativecoreprogram-capabilities program)
+    (sliceprojectionv0-layouts projection)
+    (core/nativecoreprogram-functions program)
+    (core/nativecoreprogram-allowed-effects program)
+    (core/nativecoreprogram-allowed-regions program)
+    (core/nativecoreprogram-allowed-capabilities program)
+    (core/nativecoreprogram-abis program)
+    (core/nativecoreprogram-observations program)))
 
 (defunion SliceMaterializationV0
   (SliceMaterializedV0 [artifact c11/C11Artifact])
@@ -648,11 +646,10 @@
       report
       (recur (+ index 1) (str report (pending-report (nth items index)))))))
 
-(defn require-native-complete
-  [result lower/NativeLoweringResultV0] stages/FrozenNativeStageV0
+(defn native-frozen [result lower/NativeLoweringResultV0] stages/FrozenNativeStageV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-frozen result)
-    (throw (ex-info "Native lowering is incomplete; no executable exists" {}))))
+    (lower/nativeloweringpendingv0-frozen result)))
 
 (defn native-pending [result lower/NativeLoweringResultV0] (Vec core/ReceiptObligationV0)
   (if (instance? native.lower.NativeLoweringPendingV0 result)
@@ -681,58 +678,46 @@
           (let [frozen-typed stages/FrozenTypedStageV0 (lower/typingacceptedv0-frozen typing-result)
                 slice lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
                 native-result lower/NativeLoweringResultV0 (lower/lower-native-stage frozen-typed slice compiler-commit
-                  configuration abi)]
-            (if (not (instance? native.lower.NativeLoweringCompleteV0 native-result))
-              (str "stage source-freeze ACCEPTED\n"
-                "stage source-to-typed ACCEPTED\n"
-                "stage typed-to-native PENDING\n"
-                (pending-reports (native-pending native-result))
-                "materialize REFUSED native lowering incomplete\n")
-              (let [epoch-result lower/EpochLoweringResultV0 (lower/epoch-identity-stage
-                      (require-native-complete native-result)
-                      compiler-commit configuration abi)
-                    frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
-                    program core/NativeCoreProgram (stages/nativestagev0-program
-                      (stages/frozennativestagev0-stage frozen-native))
-                    projection SliceProjectionV0 (c17-projection (core/nativecoreprogram-types program)
-                      (core/nativecoreprogram-layouts program))
-                    projected core/NativeCoreProgram (projected-program program projection)
-                    result SliceMaterializationV0 (materialize projected 0)
-                    head String (str "stage source-freeze ACCEPTED\n"
-                      "stage source-to-typed ACCEPTED\n"
-                      "stage typed-to-native COMPLETE\n"
-                      "stage native-to-epoch "
-                      (if (lower/epoch-result-complete? epoch-result)
-                        "COMPLETE" "PENDING")
-                      "\n"
-                      "program-types "
-                      (count (core/nativecoreprogram-types program)) "\n"
-                      "program-layouts "
-                      (count (core/nativecoreprogram-layouts program)) "\n"
-                      "program-functions "
-                      (count (core/nativecoreprogram-functions program)) "\n"
-                      "program-abis "
-                      (count (core/nativecoreprogram-abis program)) "\n"
-                      "projected-types "
-                      (count (sliceprojectionv0-types projection)) "\n"
-                      (type-names (sliceprojectionv0-types projection))
-                      (obligation-report "obligation-program" program abi)
-                      (obligation-report "obligation-projection" projected abi))]
-                (match result
-                  [(SliceRefusedV0 detail)
-                   (str head "materialize REFUSED " detail "\n")]
-                  [(SliceMaterializedV0 artifact)
-                   (do
-                     (spit (str artifacts-dir "/"
-                             (c11/c11artifact-header-name artifact))
-                       (c11/c11artifact-header-text artifact))
-                     (spit (str artifacts-dir "/"
-                             (c11/c11artifact-source-name artifact))
-                       (c11/c11artifact-source-text artifact))
-                     (str head "materialize OK "
-                       (c11/c11artifact-header-name artifact) " "
-                       (c11/c11artifact-source-name artifact)
-                       "\n"))])))))))))
+                  configuration abi)
+                epoch-result lower/EpochLoweringResultV0 (lower/epoch-identity-stage (native-frozen native-result)
+                  compiler-commit configuration abi)
+                frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
+                program core/NativeCoreProgram (stages/nativestagev0-program
+                  (stages/frozennativestagev0-stage frozen-native))
+                projection SliceProjectionV0 (c17-projection (core/nativecoreprogram-types program)
+                  (core/nativecoreprogram-layouts program))
+                projected core/NativeCoreProgram (projected-program program projection)
+                result SliceMaterializationV0 (materialize projected 0)
+                head String (str "stage source-freeze ACCEPTED\n"
+                  "stage source-to-typed ACCEPTED\n"
+                  "stage typed-to-native "
+                  (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
+                    "COMPLETE" "PENDING")
+                  "\n"
+                  "stage native-to-epoch "
+                  (if (lower/epoch-result-complete? epoch-result)
+                    "COMPLETE" "PENDING")
+                  "\n"
+                  "program-types " (str (count (core/nativecoreprogram-types program))) "\n"
+                  "program-layouts " (str (count (core/nativecoreprogram-layouts program))) "\n"
+                  "program-functions " (str (count (core/nativecoreprogram-functions program))) "\n"
+                  "program-abis " (str (count (core/nativecoreprogram-abis program))) "\n"
+                  "projected-types " (str (count (sliceprojectionv0-types projection))) "\n"
+                  (type-names (sliceprojectionv0-types projection))
+                  (obligation-report "obligation-program" program abi)
+                  (obligation-report "obligation-projection" projected abi)
+                  (pending-reports (native-pending native-result)))]
+            (match result
+              [(SliceRefusedV0 detail) (str head "materialize REFUSED " detail "\n")]
+              [(SliceMaterializedV0 artifact)
+               (do
+                 (spit (str artifacts-dir "/" (c11/c11artifact-header-name artifact))
+                   (c11/c11artifact-header-text artifact))
+                 (spit (str artifacts-dir "/" (c11/c11artifact-source-name artifact))
+                   (c11/c11artifact-source-text artifact))
+                 (str head "materialize OK "
+                   (c11/c11artifact-header-name artifact) " "
+                   (c11/c11artifact-source-name artifact) "\n"))])))))))
 
 (defn emit-slice!
   [facts-path String

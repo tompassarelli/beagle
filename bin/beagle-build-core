@@ -30,6 +30,7 @@ MODULE_SOURCE_ROOT_CLI="$BEAGLE_DIR/beagle-lib/private/module-source-root-cli.rk
 original_args=("$@")
 source "$BIN/_beagle-racket"
 source "$BIN/_beagle-source-id"
+source "$BIN/_beagle-compiler-provenance"
 
 core_kill_grace="${BEAGLE_CORE_KILL_GRACE_SECONDS:-5}"
 [[ "$core_kill_grace" =~ ^[1-9][0-9]*$ ]] || {
@@ -782,6 +783,7 @@ cache_key_material() {
                 bin/beagle-build
                 bin/_beagle-racket
                 bin/_beagle-source-id
+                bin/_beagle-compiler-provenance
                 bin/_beagle-rust-supervisor
                 native-core/bin/emit-workers
                 native-core/validation/build-finalize.clj
@@ -849,7 +851,7 @@ if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]]; then
     native_compiler_digest="$(sha256sum "$native_compiler_bin" | awk '{print $1}')"
 fi
 compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
-compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
+compiler_commit="$(beagle_resolve_compiler_commit "$BEAGLE_DIR")" || exit $?
 if [[ -n "$compiled_override" ]]; then
     [[ -d "$compiled_override" ]] ||
         die "native Core compiler projection is unavailable: $compiled_override"
@@ -861,9 +863,6 @@ core_result_cache_bypass_reason="untrusted-compiler"
 # A dirty worktree is cacheable: `cache_key_material` closes over every input
 # by content, so a modified file misses on its own digest. The commit still
 # gates because it is embedded in the artifact through BEAGLE_CORE_COMMIT.
-if [[ ! "$compiler_commit" =~ ^[0-9a-f]{40}$ ]]; then
-    core_result_cache_enabled=0
-fi
 if [[ "$dev_fact_reuse" == 1 ]]; then
     # A development fact run must reach the per-unit read path instead of
     # disappearing behind the older whole-result cache.
@@ -972,15 +971,16 @@ write_core_checkpoint_identity() {
 # answer proves nothing, and each caller runs it on the far side of a lock wait
 # that another build could have used to change the tree.
 validate_identity_closure_prefix() {
-    local source_index current_digest
+    local source_index current_digest current_compiler_commit
     for source_index in "${!source_snapshot_paths[@]}"; do
         current_digest="$(sha256sum "${source_snapshot_paths[$source_index]}" |
             awk '{print $1}')"
         [[ "$current_digest" == "${source_snapshot_digests[$source_index]}" ]] ||
             return 1
     done
-    [[ "$(git -C "$BEAGLE_DIR" rev-parse --verify HEAD 2>/dev/null || true)" == \
-       "$compiler_commit" ]] || return 1
+    current_compiler_commit="$(beagle_resolve_compiler_commit "$BEAGLE_DIR")" ||
+        return 1
+    [[ "$current_compiler_commit" == "$compiler_commit" ]] || return 1
     [[ "$(cache_key_material | sha256sum | awk '{print $1}')" == \
        "$compiler_source_digest" ]]
 }
@@ -2855,16 +2855,10 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
 
 (defn native-provenance-report
   [source-receipt frozen-source typing-result frozen-typed native-result native-frozen
-   epoch-result frozen-native compiler-commit configuration abi]
+   epoch-result frozen-native compiler-commit configuration]
   (let [source-digest (stages/frozensourcestagev1-digest frozen-source)
         typing-receipt (lower/typingacceptedv0-receipt typing-result)
         typed-digest (stages/frozentypedstagev0-digest frozen-typed)
-        prepared-native-slice
-        (lower/prepare-native-slice
-         (lower/typingacceptedv0-slice typing-result) abi)
-        native-input-digest
-        (lower/typed-compatibility-native-input-digest
-         frozen-typed prepared-native-slice)
         native-receipt (lower/nativeloweringcompletev0-receipt native-result)
         native-digest (stages/frozennativestagev0-digest native-frozen)
         epoch-receipt (epoch-result-receipt epoch-result)
@@ -2887,7 +2881,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                       (core/passreceiptv0-input-digest typing-receipt))
                    (= typed-digest
                       (core/passreceiptv0-output-digest typing-receipt))
-                   (= native-input-digest
+                   (= typed-digest
                       (core/passreceiptv0-input-digest native-receipt))
                    (= native-digest
                       (core/passreceiptv0-output-digest native-receipt))
@@ -2898,7 +2892,6 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
       (throw (ex-info "Native Core provenance receipt chain is broken"
                       {:source source-digest
                        :typed typed-digest
-                       :native-input native-input-digest
                        :native native-digest
                        :epoch epoch-digest})))
     (str "native-provenance-v0 source " source-digest "\n"
@@ -3887,21 +3880,15 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
     (lower/->TypingAcceptedV0 frozen slice receipt)))
 
 (defn dev-native-result
-  [assembly compiler-commit configuration abi]
-  (let [frozen-typed (unit/unitassemblyv0-typed assembly)
-        typed-slice (unit/unitassemblyv0-typed-slice assembly)
-        prepared-native-slice (lower/prepare-native-slice typed-slice abi)
-        native-input-digest
-        (lower/typed-compatibility-native-input-digest
-         frozen-typed prepared-native-slice)
-        frozen (unit/unitassemblyv0-native assembly)
+  [assembly compiler-commit configuration]
+  (let [frozen (unit/unitassemblyv0-native assembly)
         digest (stages/frozennativestagev0-digest frozen)
         stage (stages/frozennativestagev0-stage frozen)
         clean (lower/term-graph-clean?
                (stages/nativestagev0-terms stage))
         receipt
         (lower/make-receipt
-         native-input-digest
+         (stages/nativestagev0-typed-digest stage)
          compiler-commit
          "typed-to-native"
          configuration
@@ -4010,7 +3997,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                          assembly frozen-source compiler-commit configuration)
                         native-stage-result
                         (dev-native-result
-                         assembly compiler-commit configuration abi)
+                         assembly compiler-commit configuration)
                         epoch-result
                         (lower/epoch-derived-stage
                          (unit/unitassemblyv0-native assembly)
@@ -4272,7 +4259,7 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                               (native-provenance-report
                                source-receipt frozen-source typing-result frozen-typed
                                native-result native-frozen epoch-result frozen-native
-                               compiler-commit configuration abi))
+                               compiler-commit configuration))
                         _write-receipts
                         (write-native-receipts!
                          artifacts-dir source-receipt typing-receipt native-receipt

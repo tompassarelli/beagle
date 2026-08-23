@@ -37,8 +37,6 @@
 
 (require [store.rotation :as rot])
 
-(require [store.store :as store])
-
 (require [store.txn :as txn])
 
 (defrecord OrderedResultSnapshot
@@ -128,20 +126,10 @@
 (defn refresh! [s Session] Session
   (do (reset! (session-view s) (rot/refresh! (view s) (store-of s))) s))
 
-;; Schema mutation verbs are fail-fast commands returning Session. They
-;; translate Store's typed OCC result at this intentional throwing boundary.
 (defn- commit!
   [s Session
    builder (Atom txn/Builder)] Session
-  (match (txn/commit! (store-of s) builder)
-    [(store/CommitSuccess _) (refresh! s)]
-    [(store/CommitStale expected observed)
-     (throw (ex-info "store: the store advanced under this schema mutation"
-                     {:type :transaction-sequence-drift
-                      :expected expected
-                      :observed observed}))]
-    [(store/CommitRejected code detail)
-     (throw (ex-info detail {:type code}))]))
+  (do (txn/commit! (store-of s) builder) (refresh! s)))
 
 (defn predicate-ids
   [s Session

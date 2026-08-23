@@ -91,7 +91,7 @@ runtime paths. With no `--entry`, the reactor is classified as a non-executable
 projection and exports only `_initialize` and `memory`. No materializer is
 implicit, and hosted `.bclj` is not accepted by the Core build path.
 
-These files are materializations, not the sealed ModelRevision itself: a later
+These files are materializations, not the durable program world itself: a later
 materializer can replace them without changing what the checked program means.
 Building records an artifact; it does not grant the authority to perform an
 external effect.

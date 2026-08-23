@@ -146,7 +146,8 @@ if [[ "$reuse" == 1 ]]; then
     done
     cat "$source_hashes" >>"$key_input"
     result_key="sha256:$(sha256sum "$key_input" | awk '{print $1}')"
-    ast_store="${BEAGLE_CHECKED_AST_STORE:-$BEAGLE_ROOT/.beagle/checked-ast/${result_key#sha256:}.storelog}"
+    checked_ast_cache_root="${BEAGLE_CHECKED_AST_CACHE:-${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}/beagle/checked-ast}"
+    ast_store="${BEAGLE_CHECKED_AST_STORE:-$checked_ast_cache_root/${result_key#sha256:}.storelog}"
     mkdir -p "$(dirname "$ast_store")"
     if run_checked_ast_store query "$ast_store" "$result_key" "$compiler_context" "$ast_profile" "$ast_unit" >"$tmp_dir/hit" 2>/dev/null; then
         cat "$tmp_dir/hit"

@@ -11,84 +11,94 @@
 (require [native.body-c17 :as body])
 (require [native.qbe :as qbe])
 
-(defn qbe-report [result qbe/QbeMaterialization] String
+(defn qbe-report [(result qbe/QbeMaterialization)] String
   (if (instance? native.qbe.QbeSuccess result)
     "qbe UNEXPECTED-SUCCESS\n"
     (str "qbe REFUSED " (qbe/qbefailure-detail result) "\n")))
 
 (defn emit-slice!
-  [facts-path String
-   artifacts-dir String
-   compiler-commit String] String
-  (let [rows (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
-        configuration (Vec String) ["profile=3"]
-        source stages/SourceStageV1 (slice/source-program rows "store.main"
+  [(facts-path String)
+   (artifacts-dir String)
+   (compiler-commit String)] String
+  (let [(rows (Vec slice/SliceFactV0)) (slice/parse-facts (slurp facts-path))
+        (configuration (Vec String)) ["profile=3"]
+        (source stages/SourceStageV1)
+        (slice/source-program rows "store.main"
           "native-core/validation/slice-main-capability/main_fixture.bgl")
-        freeze-result lower/SourceFreezeResultV0 (lower/freeze-source-stage source compiler-commit configuration)]
+        (freeze-result lower/SourceFreezeResultV0)
+        (lower/freeze-source-stage source compiler-commit configuration)]
     (if (not (instance? native.lower.SourceFreezeAcceptedV0 freeze-result))
       "stage source-freeze REJECTED\n"
-      (let [frozen-source stages/FrozenSourceStageV1 (lower/sourcefreezeacceptedv0-frozen freeze-result)
-            typing-result lower/TypingResultV0 (lower/lower-typed-stage frozen-source compiler-commit configuration)]
+      (let [(frozen-source stages/FrozenSourceStageV1)
+            (lower/sourcefreezeacceptedv0-frozen freeze-result)
+            (typing-result lower/TypingResultV0)
+            (lower/lower-typed-stage frozen-source compiler-commit configuration)]
         (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
           "stage source-freeze ACCEPTED\nstage source-to-typed REJECTED\n"
-          (let [frozen-typed stages/FrozenTypedStageV0 (lower/typingacceptedv0-frozen typing-result)
-                typed-slice lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
-                native-result lower/NativeLoweringResultV0 (lower/lower-native-stage frozen-typed typed-slice compiler-commit
-                  configuration (core/abi-profile-lp64))]
-            (if (not (instance? native.lower.NativeLoweringCompleteV0 native-result))
-              (str "stage source-freeze ACCEPTED\n"
-                "stage source-to-typed ACCEPTED\n"
-                "stage typed-to-native PENDING\n"
-                (body-slice/pending-function-frontier-report native-result)
-                (slice/pending-reports (slice/native-pending native-result))
-                "materialize REFUSED native lowering incomplete\n"
-                "qbe REFUSED native lowering incomplete\n")
-              (let [epoch-result lower/EpochLoweringResultV0 (lower/epoch-derived-stage
-                      (slice/require-native-complete native-result)
-                      compiler-commit configuration (core/abi-profile-lp64))
-                    frozen-native stages/FrozenNativeStageV0 (lower/epoch-result-frozen epoch-result)
-                    full core/NativeCoreProgram (stages/nativestagev0-program
-                      (stages/frozennativestagev0-stage frozen-native))
-                    selected core/NativeCoreProgram (body-slice/projected-program full)
-                    qbe-selected core/NativeCoreProgram (body-slice/projected-program
-                      (lower/epoch-identity-program
-                        (slice/require-native-complete native-result)
-                        compiler-commit configuration (core/abi-profile-lp64)))
-                    c-result body/BodyMaterializationV0 (body/materialize-program selected 0)
-                    qbe-result qbe/QbeMaterialization (qbe/materialize-program qbe-selected 0 "lp64")
-                    head String (str "stage source-freeze ACCEPTED\n"
-                      "stage source-to-typed ACCEPTED\n"
-                      "stage typed-to-native COMPLETE\n"
-                      "stage native-to-epoch "
-                      (if (lower/epoch-result-complete? epoch-result)
-                        "COMPLETE" "PENDING") "\n"
-                      "source-modules "
-                      (count (stages/sourcestagev1-modules source)) "\n"
-                      "source-imports "
-                      (count (stages/sourcestagev1-imports source)) "\n"
-                      "program-functions "
-                      (count (core/nativecoreprogram-functions selected)) "\n"
-                      "program-abis "
-                      (count (core/nativecoreprogram-abis selected)) "\n"
-                      (body-slice/function-report
-                        (core/nativecoreprogram-functions selected))
-                      (slice/obligation-report "obligation-main" selected
-                        (core/abi-profile-lp64))
-                      (body-slice/failing-obligations selected
-                        (core/abi-profile-lp64)))]
-                (if (not (body/materialization-ok? c-result))
-                  (str head "materialize REFUSED "
-                    (body/materialization-detail c-result) "\n"
-                    (qbe-report qbe-result))
-                  (let [artifact body/BodyArtifactV0 (body/materialization-artifact c-result)]
-                    (do
-                      (spit (str artifacts-dir "/"
-                              (body/bodyartifactv0-header-name artifact))
-                        (body/bodyartifactv0-header-text artifact))
-                      (spit (str artifacts-dir "/"
-                              (body/bodyartifactv0-source-name artifact))
-                        (body/bodyartifactv0-source-text artifact))
-                      (str head "materialize OK "
-                        (body/bodyartifactv0-header-name artifact) " "
-                        (body/bodyartifactv0-source-name artifact) "\n"
-                        (qbe-report qbe-result)))))))))))))
+          (let [(frozen-typed stages/FrozenTypedStageV0)
+                (lower/typingacceptedv0-frozen typing-result)
+                (typed-slice lower/TypedSliceV0)
+                (lower/typingacceptedv0-slice typing-result)
+                (native-result lower/NativeLoweringResultV0)
+                (lower/lower-native-stage frozen-typed typed-slice compiler-commit
+                  configuration (core/abi-profile-lp64))
+                (epoch-result lower/EpochLoweringResultV0)
+                (lower/epoch-derived-stage (slice/native-frozen native-result)
+                  compiler-commit configuration (core/abi-profile-lp64))
+                (frozen-native stages/FrozenNativeStageV0)
+                (lower/epoch-result-frozen epoch-result)
+                (full core/NativeCoreProgram)
+                (stages/nativestagev0-program
+                  (stages/frozennativestagev0-stage frozen-native))
+                (selected core/NativeCoreProgram) (body-slice/projected-program full)
+                ;; QBE materializes epoch-0 only: it reads the identity
+                ;; program, not the derived one it would refuse.
+                (qbe-selected core/NativeCoreProgram)
+                (body-slice/projected-program
+                  (lower/epoch-identity-program
+                    (slice/native-frozen native-result) compiler-commit
+                    configuration (core/abi-profile-lp64)))
+                (c-result body/BodyMaterializationV0)
+                (body/materialize-program selected 0)
+                (qbe-result qbe/QbeMaterialization)
+                (qbe/materialize-program qbe-selected 0 "lp64")
+                (head String)
+                (str "stage source-freeze ACCEPTED\n"
+                  "stage source-to-typed ACCEPTED\n"
+                  "stage typed-to-native "
+                  (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
+                    "COMPLETE" "PENDING") "\n"
+                  "stage native-to-epoch "
+                  (if (lower/epoch-result-complete? epoch-result)
+                    "COMPLETE" "PENDING") "\n"
+                  "source-modules "
+                  (str (count (stages/sourcestagev1-modules source))) "\n"
+                  "source-imports "
+                  (str (count (stages/sourcestagev1-imports source))) "\n"
+                  "program-functions "
+                  (str (count (core/nativecoreprogram-functions selected))) "\n"
+                  "program-abis "
+                  (str (count (core/nativecoreprogram-abis selected))) "\n"
+                  (body-slice/function-report
+                    (core/nativecoreprogram-functions selected))
+                  (slice/obligation-report "obligation-main" selected
+                    (core/abi-profile-lp64))
+                  (body-slice/failing-obligations selected (core/abi-profile-lp64))
+                  (slice/pending-reports (slice/native-pending native-result)))]
+            (if (not (body/materialization-ok? c-result))
+              (str head "materialize REFUSED "
+                (body/materialization-detail c-result) "\n"
+                (qbe-report qbe-result))
+              (let [(artifact body/BodyArtifactV0)
+                    (body/materialization-artifact c-result)]
+                (do
+                  (spit (str artifacts-dir "/"
+                          (body/bodyartifactv0-header-name artifact))
+                    (body/bodyartifactv0-header-text artifact))
+                  (spit (str artifacts-dir "/"
+                          (body/bodyartifactv0-source-name artifact))
+                    (body/bodyartifactv0-source-text artifact))
+                  (str head "materialize OK "
+                    (body/bodyartifactv0-header-name artifact) " "
+                    (body/bodyartifactv0-source-name artifact) "\n"
+                    (qbe-report qbe-result)))))))))))

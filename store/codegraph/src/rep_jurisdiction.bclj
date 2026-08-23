@@ -43,19 +43,6 @@
 
 (def space-id String "codegraph")
 
-;; This command owns one Store writer and has a fail-fast CLI contract. Store
-;; still returns typed OCC data before this command translates failure.
-(defn require-commit! [result c/CommitResult] t/Triple
-  (match result
-    [(c/CommitSuccess coordinate) coordinate]
-    [(c/CommitStale expected observed)
-     (throw (ex-info "store advanced under the codegraph command"
-                     {:type :transaction-sequence-drift
-                      :expected expected
-                      :observed observed}))]
-    [(c/CommitRejected code detail)
-     (throw (ex-info detail {:type code}))]))
-
 (def regime-pred String "rep-regime")
 
 (def calls-pred String "calls")
@@ -131,12 +118,11 @@
                                                (t/triple nm hamt-pred hamt-mark)))
                                        (vec hamt-names))))
         (_load Any) (when (pos? (count operations))
-                      (require-commit!
-                       (c/commit-boundary!
-                        gctx (c/next-sequence gctx) operations
-                        (c/commit-metadata "store.codegraph/jurisdiction-load-v1"
-                                           "store/CommitOperationV1"
-                                           "codegraph-v1"))))
+                      (c/commit-boundary!
+                       gctx operations
+                       (c/commit-metadata "store.codegraph/jurisdiction-load-v1"
+                                          "store/CommitOperationV1"
+                                          "codegraph-v1")))
         (db Any) (d/run-rules! (c/live-propositions gctx)
                   [(d/rule "forces"
                      [(d/variable "x")]
@@ -176,12 +162,11 @@
     (let [(ctx Any) (c/new-term-store space-id)
           (operations (Vec Any)) (regime-operations rep-defs)
           (_load Any) (when (pos? (count operations))
-                        (require-commit!
-                         (c/commit-boundary!
-                          ctx (c/next-sequence ctx) operations
-                          (c/commit-metadata "store.codegraph/jurisdiction-load-v1"
-                                             "store/CommitOperationV1"
-                                             "codegraph-v1"))))]
+                        (c/commit-boundary!
+                         ctx operations
+                         (c/commit-metadata "store.codegraph/jurisdiction-load-v1"
+                                            "store/CommitOperationV1"
+                                            "codegraph-v1")))]
       (println "\n---- Q1. defs that SHIP THE HAMT (pull persistent runtime) ----")
       (doseq [nm (defs-with-regime ctx "hamt")]
         (println "  HAMT  " nm))

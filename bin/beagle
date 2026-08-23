@@ -77,7 +77,8 @@ Project / loop:
              [--module-root LOGICAL=PHYSICAL]... PATH...
                             Link a native C17 executable; entry accepts [] or
                             one typed (Vec String) process-argument parameter
-  test [--active-only]      Run the test tiers
+  test [--full] [--include-native]
+                            Run hosted default evidence; Native is explicit
   rejection-stats DIR       Diagnostics by cause-class
   lsp | repl                LSP server / typed REPL
 

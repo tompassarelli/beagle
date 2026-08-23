@@ -9,11 +9,6 @@
     nil
     (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
 
-(defn committed-coordinate [result]
-  (if (instance? store.store.CommitSuccess result)
-    (store/commitsuccess-coordinate result)
-    (throw (ex-info "test setup commit failed" {:result result}))))
-
 (def proposition (t/triple "Alice" :contactable_at "alice@example.com"))
 (def nested-proposition
   (t/triple (t/triple "Alice" :account "primary")
@@ -25,10 +20,9 @@
 ;; Equal content may occur more than once. The transaction-local ordinals, not
 ;; the shared private content handle, distinguish the two assertions.
 (def tx1
-  (committed-coordinate
-   (store/commit-transaction!
-    ctx [(store/assert-operation proposition)
-         (store/assert-operation proposition)])))
+  (store/commit-transaction!
+   ctx [(store/assert-operation proposition)
+        (store/assert-operation proposition)]))
 (def assertions-after-tx1 (store/live-occurrences ctx))
 (def first-assertion (nth assertions-after-tx1 0))
 (def second-assertion (nth assertions-after-tx1 1))
@@ -36,25 +30,21 @@
 (def second-coordinate (t/operationoccurrence-coordinate second-assertion))
 
 ;; Retractions withdraw the most recent live occurrence of equal content.
-(def tx2 (committed-coordinate
-          (store/commit-transaction! ctx [(store/retract-operation proposition)])))
+(def tx2 (store/commit-transaction! ctx [(store/retract-operation proposition)]))
 (def live-after-first-retract (store/live-occurrences ctx))
 (def withdrawals-after-first-retract (store/withdrawals ctx))
 
-(def tx3 (committed-coordinate
-          (store/commit-transaction! ctx [(store/retract-operation proposition)])))
+(def tx3 (store/commit-transaction! ctx [(store/retract-operation proposition)]))
 (def live-after-second-retract (store/live-occurrences ctx))
 (def withdrawals-after-second-retract (store/withdrawals ctx))
 
 ;; A retraction with no live target remains an exact history occurrence but
 ;; does not invent a withdrawal edge.
-(def tx4 (committed-coordinate
-          (store/commit-transaction! ctx [(store/retract-operation proposition)])))
+(def tx4 (store/commit-transaction! ctx [(store/retract-operation proposition)]))
 (def occurrences-after-noop (store/occurrences ctx))
 (def withdrawals-after-noop (store/withdrawals ctx))
 
-(def tx5 (committed-coordinate
-          (store/commit-transaction! ctx [(store/assert-operation nested-proposition)])))
+(def tx5 (store/commit-transaction! ctx [(store/assert-operation nested-proposition)]))
 (def dump (store/dump-term-store ctx))
 (def occurrences (store/occurrences ctx))
 (def withdrawals (store/withdrawals ctx))
@@ -86,65 +76,6 @@
                              :action :invalid)))))
 (def corrupt-history-records
   (store/transaction-records-between-result corrupt-history-store -1 5))
-
-(def snapshot-empty-source (store/new-term-store "snapshot-empty-space"))
-(def snapshot-empty (store/replay-snapshot-at! snapshot-empty-source 0))
-(def snapshot-source (store/new-term-store "snapshot-space"))
-(store/commit-transaction!
- snapshot-source
- [(store/assert-operation proposition)])
-(def snapshot-gap-replay
-  (store/replay-transaction-result!
-   snapshot-source
-   (store/transaction-record
-    3
-    [(store/assert-operation nested-proposition)])))
-(def snapshot-at-one (store/replay-snapshot-at! snapshot-source 1))
-(def snapshot-at-three (store/replay-snapshot-at! snapshot-source 3))
-(def snapshot-at-gap (store/replay-snapshot-at! snapshot-source 2))
-(def snapshot-negative (store/replay-snapshot-at! snapshot-source -1))
-(def snapshot-before-rejections (store/dump-term-store snapshot-source))
-(def snapshot-corrupt-operation
-  (store/replay-snapshot-at! (atom corrupt-operation-store) 5))
-(def snapshot-corrupt-triple
-  (store/replay-snapshot-at! (atom corrupt-triple-store) 5))
-(def snapshot-corrupt-source (atom corrupt-history-store))
-(def snapshot-corrupt-before
-  (store/dump-term-store snapshot-corrupt-source))
-(def snapshot-corrupt
-  (store/replay-snapshot-at! snapshot-corrupt-source 5))
-(def snapshot-corrupt-after
-  (store/dump-term-store snapshot-corrupt-source))
-(def snapshot-after-rejections (store/dump-term-store snapshot-source))
-(def snapshot-one-root (store/snapshotreplayed-root snapshot-at-one))
-(def snapshot-three-root (store/snapshotreplayed-root snapshot-at-three))
-(def snapshot-one-before-source-advance
-  (store/dump-term-store snapshot-one-root))
-(store/commit-transaction!
- snapshot-source
- [(store/assert-operation
-   (t/triple "future" :visible-at 4))])
-(def snapshot-before-future-rejection
-  (store/dump-term-store snapshot-source))
-(def snapshot-future (store/replay-snapshot-at! snapshot-source 5))
-(def snapshot-after-future-rejection
-  (store/dump-term-store snapshot-source))
-(def snapshot-source-state (deref snapshot-source))
-(def snapshot-source-operations
-  (deref (t/termstore-operations snapshot-source-state)))
-(def snapshot-last-operation (peek snapshot-source-operations))
-(def snapshot-corrupt-after-boundary-source
-  (atom
-   (assoc snapshot-source-state
-          :operations
-          (atom
-           (assoc snapshot-source-operations
-                  (dec (count snapshot-source-operations))
-                  (assoc snapshot-last-operation :action :invalid))))))
-(def snapshot-corrupt-after-boundary
-  (store/replay-snapshot-at! snapshot-corrupt-after-boundary-source 1))
-(def snapshot-one-after-source-advance
-  (store/dump-term-store snapshot-one-root))
 
 (def replay-outcome-context (store/new-term-store "replay-outcome-space"))
 (def successful-replay
@@ -287,55 +218,6 @@
             (store/transactionrecordsresult-code corrupt-triple-records))
          (= :invalid-transaction-record
             (store/transactionrecordsresult-code corrupt-history-records)))]
-   ["exact snapshot replay preserves space and reconstructs detached roots"
-    (and (store/transactionreplayresult-ok snapshot-gap-replay)
-         (instance? store.store.SnapshotReplayed snapshot-empty)
-         (= 0 (store/current-sequence
-               (store/snapshotreplayed-root snapshot-empty)))
-         (= "snapshot-empty-space"
-            (store/space-id (store/snapshotreplayed-root snapshot-empty)))
-         (instance? store.store.SnapshotReplayed snapshot-at-one)
-         (instance? store.store.SnapshotReplayed snapshot-at-three)
-         (= "snapshot-space" (store/space-id snapshot-one-root))
-         (= 1 (store/current-sequence snapshot-one-root))
-         (= 3 (store/current-sequence snapshot-three-root))
-         (not (identical? snapshot-source snapshot-one-root)))]
-   ["snapshot replay rejects absent and outside versions without a root"
-    (and (instance? store.store.SnapshotReplayRejected snapshot-at-gap)
-         (= :snapshot-version-not-recorded
-            (store/snapshotreplayrejected-code snapshot-at-gap))
-         (not (contains? snapshot-at-gap :root))
-         (instance? store.store.SnapshotReplayRejected snapshot-negative)
-         (= :snapshot-version-outside-history
-            (store/snapshotreplayrejected-code snapshot-negative))
-         (instance? store.store.SnapshotReplayRejected snapshot-future)
-         (= :snapshot-version-outside-history
-            (store/snapshotreplayrejected-code snapshot-future))
-         (not (contains? snapshot-future :root)))]
-   ["snapshot replay rejects corrupt history and never mutates its source"
-    (and (instance? store.store.SnapshotReplayRejected
-                    snapshot-corrupt-operation)
-         (= :invalid-operation-handle
-            (store/snapshotreplayrejected-code
-             snapshot-corrupt-operation))
-         (instance? store.store.SnapshotReplayRejected snapshot-corrupt-triple)
-         (= :invalid-term-handle
-            (store/snapshotreplayrejected-code snapshot-corrupt-triple))
-         (instance? store.store.SnapshotReplayRejected snapshot-corrupt)
-         (= :invalid-transaction-record
-            (store/snapshotreplayrejected-code snapshot-corrupt))
-         (instance? store.store.SnapshotReplayRejected
-                    snapshot-corrupt-after-boundary)
-         (= :invalid-transaction-record
-            (store/snapshotreplayrejected-code
-             snapshot-corrupt-after-boundary))
-         (= snapshot-corrupt-before snapshot-corrupt-after)
-         (= snapshot-before-rejections snapshot-after-rejections)
-         (= snapshot-before-future-rejection
-            snapshot-after-future-rejection))]
-   ["a detached snapshot cannot advance with its source"
-    (= snapshot-one-before-source-advance
-       snapshot-one-after-source-advance)]
    ["typed replay outcomes validate before mutation and preserve errors"
     (and (store/transactionreplayresult-ok successful-replay)
          (= 3 (store/current-sequence replay-outcome-context))
