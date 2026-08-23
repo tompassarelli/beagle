@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Engine demo — ONE engine answers REASON and REPAIR consistently, on REAL code.
 #
-# The agent-facing loop, end-to-end on a current real Beagle Store owner and the exact
-# qualified consumer forms shipped in two real Beagle Store modules:
+# The agent-facing loop, end-to-end on a current real Beagle Store owner and the
+# exact qualified reference expression shipped in two real Beagle Store modules:
 #   NL: "what breaks if I change the term codec depth limit?" -> REASON
 #   NL: "rename term-codec-v1-max-depth"                     -> REPAIR
 # Both answers come from the SAME converged refers_to resolver. Loading the full
 # consumer modules makes cold corpus-table construction exceed the fleet's gate
-# ceiling, so this gate first proves the two current source forms still exist,
-# then mirrors those exact forms into minimal hosted modules around a profile-only
+# ceiling, so this gate first proves both current modules still use that reference,
+# then mirrors it into minimal hosted modules around a profile-only
 # mirror of the real Core owner. The owner forms are unchanged; only its #lang is
 # selected explicitly so the repaired overlay can compile against the full,
 # unchanged Beagle Store module root. Gate 3 separately proves full-corpus identity.
@@ -31,19 +31,24 @@ REPLACEMENT=engine-demo-max-depth
 TARGET_MODULE=store.rpc-limits
 TARGET_SCOPE=rpc_limits
 TARGET_FILE="$SRC/store/rpc_limits.bgl"
+TARGET_REF="limits/$TARGET"
+STORE_RPC_FILE="$SRC/store/rpc.bclj"
+NATIVE_WIRE_FILE="$SRC/store/native_wire_codec.bgl"
 
 echo "================ engine demo — one engine: REASON + REPAIR on real code ================"
 [ -d "$BEAGLE_STORE_OUT" ] || { echo "  (need BEAGLE_STORE_OUT)"; exit 3; }
 RES="$(find_store_resolver)" || exit 3
 [ -d "$SRC" ] || { echo "  (need store/src)"; exit 3; }
 [ -f "$TARGET_FILE" ] || { echo "  FAIL  missing real target: $TARGET_FILE"; exit 1; }
+[ -f "$STORE_RPC_FILE" ] || { echo "  FAIL  missing real Store RPC consumer: $STORE_RPC_FILE"; exit 1; }
+[ -f "$NATIVE_WIRE_FILE" ] || { echo "  FAIL  missing real Native wire consumer: $NATIVE_WIRE_FILE"; exit 1; }
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
 W="$(mktemp -d)"; trap 'rm -rf "${W:?}" "${RESOLVE_OUT:?}"' EXIT
 
 chk "current target exists exactly once and replacement is absent" \
     "[ \"\$(grep -hF '(def $TARGET' '$TARGET_FILE' | wc -l)\" -eq 1 ] && ! grep -Rqw '$REPLACEMENT' '$SRC'"
-chk "two current real Beagle Store modules consume the target with these exact forms" \
-    "grep -Fq '(def term-codec-v1-depth-limit Int limits/$TARGET)' '$SRC/store_rpc.bclj' && grep -Fq '(def rpc-v2-max-term-depth Int limits/$TARGET)' '$SRC/store/native_wire_codec.bgl'"
+chk "current Store RPC and Native wire modules contain every qualified target reference" \
+    "[ \"\$(grep -Fo '$TARGET_REF' '$STORE_RPC_FILE' | wc -l)\" -eq 2 ] && [ \"\$(grep -Fo '$TARGET_REF' '$NATIVE_WIRE_FILE' | wc -l)\" -eq 4 ]"
 
 mkdir -p "$W/slice"
 sed '1s/^#lang beagle$/#lang beagle\/clj/' "$TARGET_FILE" > "$W/slice/rpc_limits.bclj"
@@ -51,13 +56,13 @@ cat > "$W/slice/store_rpc_consumer.bclj" <<EOF
 #lang beagle/clj
 (ns engine-demo.store.rpc)
 (require [store.rpc-limits :as limits])
-(def term-codec-v1-depth-limit Int limits/$TARGET)
+(def store-rpc-depth-limit Int limits/$TARGET)
 EOF
 cat > "$W/slice/native_wire_consumer.bclj" <<EOF
 #lang beagle/clj
 (ns engine-demo.native-wire-codec)
 (require [store.rpc-limits :as limits])
-(def rpc-v2-max-term-depth Int limits/$TARGET)
+(def native-wire-depth-limit Int limits/$TARGET)
 EOF
 SOURCES=("$W/slice/rpc_limits.bclj" "$W/slice/store_rpc_consumer.bclj" "$W/slice/native_wire_consumer.bclj")
 EXPECTED="engine-demo.store.rpc engine-demo.native-wire-codec"
