@@ -1152,17 +1152,21 @@
                   (let [variants (Vec core/TypeVariant) (core/uniontype-variants failure-shape)
                         ok (U core/TypeVariant Nil) (named-variant variants "ok")
                         peer (U core/TypeVariant Nil) (named-variant variants "peer-closed")
+                        overflow (U core/TypeVariant Nil) (named-variant variants "overflow")
+                        terminal (U core/TypeVariant Nil) (if (some? peer)
+                          peer overflow)
                         error (U core/TypeVariant Nil) (named-variant variants "error")]
                     (and (or (= 2 (count variants)) (= 3 (count variants)))
                       (not (nil? ok)) (not (nil? error))
-                      (= (= 3 (count variants)) (not (nil? peer)))
+                      (not (and (some? peer) (some? overflow)))
+                      (= (= 3 (count variants)) (some? terminal))
                       (or (and (unit-type? types value-type)
                             (nil? (core/typevariant-payload-type ok)))
                         (dynamic-id= value-type
                           (core/typevariant-payload-type ok)))
-                      (if (nil? peer)
+                      (if (nil? terminal)
                         true
-                        (nil? (core/typevariant-payload-type peer)))
+                        (nil? (core/typevariant-payload-type terminal)))
                       (optional-i64-type? types
                         (core/typevariant-payload-type error)))))))))))))
 
