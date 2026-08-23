@@ -105,7 +105,7 @@
   (if (.exists file) nil (database/create-triple-log! path space-id))
   (database/open-database! path space-id)))
 
-(defn- ^String revision-identity [^String path]
+(defn- ^String revision-identity! [^String path]
   (let [revision (database/branch-revision! path)
    identity (:identity revision)]
   (if (string? identity) identity (fail "Store returned no branch revision identity" :dev-compile-facts/revision-unresolved))))
@@ -130,7 +130,7 @@
   (try
   (let [database (create-or-open! path)
    counts (append-entries! database entries)]
-  ["store.dev-compile-facts/append-response-v1" "ok" (revision-identity path) (appendcounts-appended counts) (appendcounts-retained counts)])
+  ["store.dev-compile-facts/append-response-v1" "ok" (revision-identity! path) (appendcounts-appended counts) (appendcounts-retained counts)])
   (finally
     (writer-authority/release! authority)))))
 
@@ -147,7 +147,7 @@
   (let [file (File. path)]
   (if (.isFile file) (let [database (database/open-database! path space-id)
    facts (all-facts database)]
-  ["store.dev-compile-facts/query-response-v1" "ONLINE" (revision-identity path) requests (query-rows facts requests)]) ["store.dev-compile-facts/query-response-v1" "COLD" "" requests []])))
+  ["store.dev-compile-facts/query-response-v1" "ONLINE" (revision-identity! path) requests (query-rows facts requests)]) ["store.dev-compile-facts/query-response-v1" "COLD" "" requests []])))
 
 (defn- request-vector [^String expected-tag]
   (let [line (read-line)

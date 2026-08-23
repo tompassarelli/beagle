@@ -3294,12 +3294,12 @@
                          "name" "await" "providerId" nil "args" []}}
           "$raw")
         false)
-      (catch (problem Exception)
+      (catch Exception problem
         (str/includes? (ex-message problem) "synchronous unary predicate"))))
   (expect! "protocol forms are rejected by the JS target"
     (try
       (do (emit-form! {"node" "defprotocol" "name" "P" "methods" []}) false)
-      (catch (problem Exception)
+      (catch Exception problem
         (str/includes? (ex-message problem) "not supported for JS target"))))
 
   (doseq [f (deref failures)] (println (str "  FAIL: " f)))

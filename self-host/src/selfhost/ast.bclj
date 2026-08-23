@@ -1196,7 +1196,7 @@
     (try
       (make-syntax-ident! "not-structural" nil EMPTY-SCOPE-SET nil {})
       false
-      (catch (problem Exception)
+      (catch Exception problem
         (str/includes? (ex-message problem) "structural name"))))
 
   (reset-scope-counter!)

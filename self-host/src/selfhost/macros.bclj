@@ -1325,7 +1325,7 @@
                              env)]
               (try
                 (macro-eval! template env+rest)
-                (catch (problem Exception)
+                (catch Exception problem
                   (let [chain (if (nil? ctx)
                                 ""
                                 (str "\n" (format-expansion-chain ctx)))]
@@ -1636,7 +1636,7 @@
             (macro-syntax-error-at!
               [collection syntax-index [STRING-TAG "Invalid field declaration"]])
             false
-            (catch (problem Exception)
+            (catch Exception problem
               (let [data (ex-data problem)]
                 (and (= (ex-message problem) "Invalid field declaration")
                      (= (get data "collection") collection)

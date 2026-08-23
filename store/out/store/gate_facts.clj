@@ -159,24 +159,24 @@
   (append-propositions! database (mapv (fn [^FactEntry entry] (fact-proposition (factroute-candidate-root selected) entry)) new-entries))
   (->AppendCounts (count new-entries) (- (count entries) (count new-entries)))))
 
-(defn- ^String revision-identity [^FactRoute selected]
+(defn- ^String revision-identity! [^FactRoute selected]
   (let [revision (database/branch-revision! (factroute-path selected))
    identity (:identity revision)]
   (if (string? identity) identity (fail "Store returned no durable branch revision identity" :gate-facts/revision-unresolved))))
 
-(defn- response-for [database ^FactRoute selected]
+(defn- response-for! [database ^FactRoute selected]
   (let [entries (facts-for database selected)
    links (links-for database selected)
    receipts (filterv (fn [^FactEntry entry] (= "GateMaintenanceReceiptV1" (factentry-kind entry))) entries)]
-  ["store.gate-facts/response-v1" "ok" (factroute-candidate-root selected) (revision-identity selected) (mapv (fn [^FactEntry entry] [(factentry-id entry) (factentry-kind entry) (factentry-envelope entry)]) entries) (mapv (fn [^FallbackLink link] [(fallbacklink-miss-id link) (fallbacklink-observation-id link)]) links) (mapv factentry-id receipts)]))
+  ["store.gate-facts/response-v1" "ok" (factroute-candidate-root selected) (revision-identity! selected) (mapv (fn [^FactEntry entry] [(factentry-id entry) (factentry-kind entry) (factentry-envelope entry)]) entries) (mapv (fn [^FallbackLink link] [(fallbacklink-miss-id link) (fallbacklink-observation-id link)]) links) (mapv factentry-id receipts)]))
 
 (defn import-facts! [^FactRoute selected entries]
   (with-writer! selected (fn [database] (let [counts (append-entries! database selected entries)]
-  (response-for database selected)))))
+  (response-for! database selected)))))
 
 (defn record-miss! [^FactRoute selected ^FactEntry entry]
   (if (not= "FactMissEventV1" (factentry-kind entry)) (fail "record-miss accepts only FactMissEventV1" :gate-facts/not-a-miss) (with-writer! selected (fn [database] (let [counts (append-entries! database selected [entry])]
-  (response-for database selected))))))
+  (response-for! database selected))))))
 
 (defn record-observation! [^FactRoute selected ^FactEntry entry miss-id]
   (if (not= "GatePhaseObservationV1" (factentry-kind entry)) (fail "record-observation accepts only GatePhaseObservationV1" :gate-facts/not-an-observation) (with-writer! selected (fn [database] (let [known (facts-for database selected)
@@ -194,7 +194,7 @@
   (and (nil? prior-entry) (nil? prior-link)) (append-propositions! database [(fact-proposition (factroute-candidate-root selected) entry) (fallback-proposition (factroute-candidate-root selected) (required-link link))])
   (and (some? prior-entry) (some? prior-link)) nil
   :else (fail "observation and fallback link are not one durable result" :gate-facts/partial-fallback-result))
-  (response-for database selected))))))
+  (response-for! database selected))))))
 
 (defn- ^FallbackLink requested-link [value]
   (if (and (vector? value) (= 2 (count value)) (nonempty-string? (nth value 0)) (nonempty-string? (nth value 1))) (->FallbackLink (nth value 0) (nth value 1)) (fail "finalize miss link must be [miss-id observation-id]" :gate-facts/invalid-fallback-link)))
@@ -218,13 +218,13 @@
    observation (entry-with-id known (fallbacklink-observation-id link))]
   (if (or (nil? miss) (not= "FactMissEventV1" (factentry-kind miss)) (nil? observation) (not= "GatePhaseObservationV1" (factentry-kind observation)) (not (exact-link-present? durable-links link))) (fail "maintenance receipt names an unproved miss fallback link" :gate-facts/unproved-fallback-link) nil)))
   (let [counts (append-entries! database selected [verdict receipt])]
-  (response-for database selected))))))
+  (response-for! database selected))))))
 
 (defn cold-query! [^FactRoute selected expected-ids]
   (let [database (cold-open! selected)
    entries (facts-for database selected)
    candidate-present (some? (some (fn [^FactEntry entry] (= "GateCandidateV1" (factentry-kind entry))) entries))]
-  (if candidate-present (response-for database selected) (fail "exact candidate root was not admitted in the opened Store" :gate-facts/candidate-root-unresolved))))
+  (if candidate-present (response-for! database selected) (fail "exact candidate root was not admitted in the opened Store" :gate-facts/candidate-root-unresolved))))
 
 (defn- request-vector [^String expected-tag expected-count]
   (let [line (read-line)

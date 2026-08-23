@@ -202,7 +202,7 @@
       (database/create-triple-log! path space-id))
     (database/open-database! path space-id)))
 
-(defn- revision-identity [path String] String
+(defn- revision-identity! [path String] String
   (let [revision Any (database/branch-revision! path)
         identity Any (get revision :identity)]
     (if (string? identity)
@@ -272,7 +272,7 @@
             counts AppendCounts (append-entries! database entries)]
         ["store.dev-compile-facts/append-response-v1"
          "ok"
-         (revision-identity path)
+         (revision-identity! path)
          (appendcounts-appended counts)
          (appendcounts-retained counts)])
       (finally (writer-authority/release! authority)))))
@@ -323,7 +323,7 @@
             facts (Vec CompileFact) (all-facts database)]
         ["store.dev-compile-facts/query-response-v1"
          "ONLINE"
-         (revision-identity path)
+         (revision-identity! path)
          requests
          (query-rows facts requests)]))))
 

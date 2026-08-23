@@ -2522,7 +2522,7 @@
                         "default" false}
                        0)
                      false
-                     (catch (problem Exception)
+                     (catch Exception problem
                        (str/includes? (ex-message problem)
                          "recordFieldAccess")))]
         (reset! nix-checked-program-ref false)
@@ -2649,7 +2649,7 @@
          "ann" {"kind" "app" "name" "Map" "args" []}}
         0)
       false
-      (catch (problem Exception)
+      (catch Exception problem
         (str/includes? (ex-message problem) "require :or defaults for every key"))))
   (expect! "nominal record authority does not leak between programs"
     (let [record-prog {"forms" [{"node" "record" "name" "Point" "fields" []}]
@@ -2665,7 +2665,7 @@
       (try
         (emit-program! alias-prog)
         false
-        (catch (problem Exception)
+        (catch Exception problem
           (str/includes? (ex-message problem) "require :or defaults for every key")))))
   (expect! "typed sequential param keeps pointed nix rejection"
     (try
@@ -2675,7 +2675,7 @@
          "ann" {"kind" "app" "name" "Vec" "args" []}}
         0)
       false
-      (catch (problem Exception)
+      (catch Exception problem
         (str/includes? (ex-message problem) "nix functions destructure attrsets only"))))
   (do
     (let [constraint {"node" "ref" "name" "positive?"}
@@ -2742,7 +2742,7 @@
                        "x"
                        0)
                      false
-                     (catch (problem Exception)
+                     (catch Exception problem
                        (str/includes? (ex-message problem)
                          "constraintSynchronous")))]
         (reset! nix-checked-program-ref false)
@@ -2864,7 +2864,7 @@
                         "updates" []}
                        0)
                      false
-                     (catch (problem Exception)
+                     (catch Exception problem
                        (str/includes? (ex-message problem)
                          "recordUpdate semantic contract")))]
         (reset! nix-record-types-ref {})
@@ -2874,7 +2874,7 @@
     (try
       (emit-top-def {"node" "defprotocol" "name" "Shape"} 1)
       false
-      (catch (problem Exception)
+      (catch Exception problem
         (str/includes? (ex-message problem)
           "protocol declarations are not supported"))))
   (doseq [f (deref failures)] (println (str "  FAIL: " f)))

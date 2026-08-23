@@ -325,7 +325,7 @@
     (->AppendCounts (count new-entries)
                     (- (count entries) (count new-entries)))))
 
-(defn- revision-identity [selected FactRoute] String
+(defn- revision-identity! [selected FactRoute] String
   (let [revision Any (database/branch-revision! (factroute-path selected))
         identity Any (get revision :identity)]
     (if (string? identity)
@@ -333,7 +333,7 @@
       (fail "Store returned no durable branch revision identity"
             :gate-facts/revision-unresolved))))
 
-(defn- response-for
+(defn- response-for!
   [database Any
    selected FactRoute] (Vec Any)
   (let [entries (Vec FactEntry) (facts-for database selected)
@@ -345,7 +345,7 @@
     ["store.gate-facts/response-v1"
      "ok"
      (factroute-candidate-root selected)
-     (revision-identity selected)
+     (revision-identity! selected)
      (mapv
       (fn [entry FactEntry] (Vec String)
         [(factentry-id entry)
@@ -366,7 +366,7 @@
    selected
    (fn [database Any] (Vec Any)
      (let [counts AppendCounts (append-entries! database selected entries)]
-       (response-for database selected)))))
+       (response-for! database selected)))))
 
 (defn record-miss!
   [selected FactRoute
@@ -378,7 +378,7 @@
      selected
      (fn [database Any] (Vec Any)
        (let [counts AppendCounts (append-entries! database selected [entry])]
-         (response-for database selected))))))
+         (response-for! database selected))))))
 
 (defn record-observation!
   [selected FactRoute
@@ -431,7 +431,7 @@
            [:else
             (fail "observation and fallback link are not one durable result"
                   :gate-facts/partial-fallback-result)])
-         (response-for database selected))))))
+         (response-for! database selected))))))
 
 (defn- requested-link [value Any] FallbackLink
   (if (and (vector? value)
@@ -507,7 +507,7 @@
                    :gate-facts/unproved-fallback-link)
              nil)))
        (let [counts AppendCounts (append-entries! database selected [verdict receipt])]
-         (response-for database selected))))))
+         (response-for! database selected))))))
 
 (defn cold-query!
   [selected FactRoute
@@ -520,7 +520,7 @@
             (= "GateCandidateV1" (factentry-kind entry)))
           entries))]
     (if candidate-present
-      (response-for database selected)
+      (response-for! database selected)
       (fail "exact candidate root was not admitted in the opened Store"
             :gate-facts/candidate-root-unresolved))))
 

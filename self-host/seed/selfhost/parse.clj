@@ -1106,7 +1106,7 @@
   (has-item? ["when-let" "if-let" "when-some" "if-some"] head) (scope-walk-conditional-binding! value table path ctx)
   (= head "fn") (scope-walk-function! value table path ctx nil)
   (has-item? ["defn" "defn-"] head) (scope-walk-function! value table path ctx 1)
-  (= head "catch") (scope-walk-single-binder! value table path ctx 1 2 "catch")
+  (= head "catch") (scope-walk-single-binder! value table path ctx 2 3 "catch")
   (and (= head "rescue") (= (count raw) 4)) (scope-walk-single-binder! value table path ctx 2 3 "rescue")
   (and (= head "as->") (>= (count raw) 3)) (scope-walk-as-thread! value table path ctx)
   (and (has-item? ["->" "->>" "cond->" "cond->>" "some->" "some->>"] head) (>= (count raw) 2)) (scope-walk-thread! value table path ctx)
@@ -1475,12 +1475,11 @@
    finally-body nil]
   (if (>= i n) (make-try body catches finally-body) (let [item (nth rest-items i)]
   (cond
-  (catch-clause? item) (if (and (>= (count item) 3) (structured-binding? (nth item 1)) (= (count (nth item 1)) 2)) (let [binding (parse-structured-binding! (nth item 1) "catch binding")]
-  (if (string? (get binding "name")) (let [catch-owner (decorate-binder-identities! {"type" (nth (nth item 1) 1) "name" (get binding "name") "body" (mapv parse-expr* (subvec item 2))} (get binding "name"))]
-  (recur (+ i 1) body (conj catches catch-owner) finally-body)) (do
-  (err! "catch binding must bind one name, not a destructuring pattern")
-  (recur (+ i 1) body catches finally-body)))) (do
-  (err! (str "catch clause needs (catch (name ExType) body...), got: " (binding-datum->src item)))
+  (catch-clause? item) (if (and (>= (count item) 4) (string? (nth item 1)) (string? (nth item 2))) (do
+  (parse-type* (nth item 1))
+  (let [catch-owner (decorate-binder-identities! {"type" (nth item 1) "name" (nth item 2) "body" (mapv parse-expr* (subvec item 3))} (nth item 2))]
+  (recur (+ i 1) body (conj catches catch-owner) finally-body))) (do
+  (err! (str "catch clause needs (catch ExType name body...), got: " (binding-datum->src item)))
   (recur (+ i 1) body catches finally-body)))
   (finally-clause? item) (recur (+ i 1) body catches (mapv parse-expr* (subvec item 1)))
   (and (= (count catches) 0) (nil? finally-body)) (recur (+ i 1) (conj body (parse-expr* item)) catches finally-body)
@@ -2694,15 +2693,15 @@
   (expect! "qualified record pattern keeps structural type name" (let [node (parse-expr* ["match" "value" [BRACKET-TAG ["models/Widget" "item"] "item"]])
    pattern (get (nth (get node "clauses") 0) "pattern")]
   (and (= (get pattern "type") "record") (= (get pattern "qualifier") "models") (= (get pattern "name") "Widget") (nil? (get pattern "providerId")))))
-  (expect! "try with catch" (let [node (parse-expr* ["try" ["foo"] ["catch" ["e" "Exception"] ["bar" "e"]]])]
+  (expect! "try with catch" (let [node (parse-expr* ["try" ["foo"] ["catch" "Exception" "e" ["bar" "e"]]])]
   (and (= (get node "node") "try") (= (count (get node "body")) 1) (= (count (get node "catches")) 1) (= (get (nth (get node "catches") 0) "name") "e") (= (get node "finally") false))))
   (expect! "catch destructuring is rejected" (do
   (reset-errors!)
-  (parse-expr* ["try" ["foo"] ["catch" [[MAP-TAG ":keys" [BRACKET-TAG "message"]] "Exception"] "message"]])
+  (parse-expr* ["try" ["foo"] ["catch" "Exception" [MAP-TAG ":keys" [BRACKET-TAG "message"]] "message"]])
   (> (count (parse-errors)) 0)))
-  (expect! "catch binding rejects a constraint and retains exact arity two" (do
+  (expect! "legacy grouped catch is rejected" (do
   (reset-errors!)
-  (parse-expr* ["try" ["foo"] ["catch" ["e" "Exception" "recoverable?"] "e"]])
+  (parse-expr* ["try" ["foo"] ["catch" ["e" "Exception"] "e"]])
   (> (count (parse-errors)) 0)))
   (expect! "defrecord structural fields" (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG ["tx" "Int"] ["op" "String"]]])]
   (and (= (get node "node") "record") (= (get node "name") "Assertion") (= (count (get node "fields")) 2) (= (nth (get node "fields") 0) {"name" "tx" "ann" {"kind" "prim" "name" "Int"} "constraint" nil}) (nil? (get node "private")))))

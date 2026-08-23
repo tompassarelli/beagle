@@ -2400,7 +2400,7 @@
             (has-item? ["defn" "defn-"] head)
               (scope-walk-function! value table path ctx 1)
             (= head "catch")
-              (scope-walk-single-binder! value table path ctx 1 2 "catch")
+              (scope-walk-single-binder! value table path ctx 2 3 "catch")
             (and (= head "rescue") (= (count raw) 4))
               (scope-walk-single-binder! value table path ctx 2 3 "rescue")
             (and (= head "as->") (>= (count raw) 3))
@@ -3058,23 +3058,20 @@
         (let [item (nth rest-items i)]
           (cond
             (catch-clause? item)
-            (if (and (>= (count item) 3)
-                  (structured-binding? (nth item 1))
-                  (= (count (nth item 1)) 2))
-              (let [binding (parse-structured-binding! (nth item 1) "catch binding")]
-                (if (string? (get binding "name"))
-                  (let [catch-owner (decorate-binder-identities!
-                          {"type" (nth (nth item 1) 1)
-                           "name" (get binding "name")
-                           "body" (mapv parse-expr* (subvec item 2))}
-                          (get binding "name"))]
-                    (recur (+ i 1)
-                      body (conj catches catch-owner) finally-body))
-                  (do
-                    (err! "catch binding must bind one name, not a destructuring pattern")
-                    (recur (+ i 1) body catches finally-body))))
+            (if (and (>= (count item) 4)
+                (string? (nth item 1))
+                (string? (nth item 2)))
               (do
-                (err! (str "catch clause needs (catch (name ExType) body...), got: "
+                (parse-type* (nth item 1))
+                (let [catch-owner (decorate-binder-identities!
+                        {"type" (nth item 1)
+                         "name" (nth item 2)
+                         "body" (mapv parse-expr* (subvec item 3))}
+                        (nth item 2))]
+                  (recur (+ i 1)
+                    body (conj catches catch-owner) finally-body)))
+              (do
+                (err! (str "catch clause needs (catch ExType name body...), got: "
                         (binding-datum->src item)))
                 (recur (+ i 1) body catches finally-body)))
             (finally-clause? item)
@@ -5591,7 +5588,7 @@
         (= (get pattern "name") "Widget")
         (nil? (get pattern "providerId")))))
   (expect! "try with catch"
-    (let [node (parse-expr* ["try" ["foo"] ["catch" ["e" "Exception"] ["bar" "e"]]])]
+    (let [node (parse-expr* ["try" ["foo"] ["catch" "Exception" "e" ["bar" "e"]]])]
       (and (= (get node "node") "try")
         (= (count (get node "body")) 1)
         (= (count (get node "catches")) 1)
@@ -5602,15 +5599,15 @@
       (reset-errors!)
       (parse-expr*
         ["try" ["foo"]
-         ["catch" [[MAP-TAG ":keys" [BRACKET-TAG "message"]] "Exception"]
+         ["catch" "Exception" [MAP-TAG ":keys" [BRACKET-TAG "message"]]
           "message"]])
       (> (count (parse-errors)) 0)))
-  (expect! "catch binding rejects a constraint and retains exact arity two"
+  (expect! "legacy grouped catch is rejected"
     (do
       (reset-errors!)
       (parse-expr*
         ["try" ["foo"]
-         ["catch" ["e" "Exception" "recoverable?"] "e"]])
+         ["catch" ["e" "Exception"] "e"]])
       (> (count (parse-errors)) 0)))
   (expect! "defrecord structural fields"
     (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG ["tx" "Int"] ["op" "String"]]])]
