@@ -9199,7 +9199,8 @@
               (define safe-transfer?
                 (and binding
                      (not (set-empty? prior))
-                     (or (and (symbol? arg) (eq? arg target))
+                     (or (and (local-reference? arg)
+                              (eq? (reference-leaf arg) target))
                          (binding-acquires-owner? target arg state))
                      (set-empty? (set-intersect seen origins))))
               (define without-abandoned

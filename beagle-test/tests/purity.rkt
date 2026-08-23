@@ -278,6 +278,18 @@
                     (conj! left index)
                     (conj! right index))))))
    '())
+  ;; A tail recur may keep the exact owner in its current loop slot without
+  ;; forcing a mutation merely to make the ownership transfer visible.
+  (check-equal?
+   (violations
+    '(defn loop-carries-unchanged-owner [xs] Any
+       (loop [index Int 0
+              owner Any (transient xs)]
+         (cond
+           (= index 3) (persistent! owner)
+           (= index 1) (recur (+ index 1) owner)
+           :else (recur (+ index 1) (conj! owner index))))))
+   '())
   ;; Borrowed receivers remain effects even beside a valid local owner.
   (check-equal?
    (violations
