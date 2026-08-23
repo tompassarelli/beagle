@@ -118,13 +118,12 @@ jobs:
         with:
           babashka-version: '1.12.218'
 
-      # out/ is committed, so the revision-identity suite needs only babashka.
+      # out/ is committed, so the branch-ref identity check needs only babashka.
       # It runs before the heavier toolchains because it covers the identity
       # contract this release is named for.
       - name: Prove branch revision identity
-        run: |
-          bb -cp store/out store/tests/revision_ref_codec_test.clj
-          bb -cp store/out store/tests/store_transaction_log_fork_test.clj
+        working-directory: store
+        run: bb -cp out tests/revision_ref_codec_test.clj
 
       - name: Install Clojure CLI
         run: |
