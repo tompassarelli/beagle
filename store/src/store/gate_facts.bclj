@@ -615,7 +615,7 @@
       (println (pr-str (dispatch! (first args))))
       (fail "gate facts expects exactly one command argument"
             :gate-facts/invalid-command-line))
-    (catch (error Exception)
+    (catch Exception error
       (println
        (pr-str
         ["store.gate-facts/error-v1"

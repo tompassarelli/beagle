@@ -383,7 +383,7 @@
       (println (pr-str (dispatch! (first args))))
       (fail "development compile facts expects one command argument"
             :dev-compile-facts/invalid-command-line))
-    (catch (error Exception)
+    (catch Exception error
       (println
        (pr-str
         ["store.dev-compile-facts/error-v1"

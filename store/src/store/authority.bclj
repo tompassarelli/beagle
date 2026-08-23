@@ -63,7 +63,7 @@
 
 (defn decode-json-no-number-no-null! [raw Any] Any
   (if (string? raw)
-    (let [parsed (try (authority-json/decode-strict raw) (catch (_ Throwable) (authority-fail! "invalid-json" "$" "raw JSON is malformed or contains a duplicate object name")))]
+    (let [parsed (try (authority-json/decode-strict raw) (catch Throwable _ (authority-fail! "invalid-json" "$" "raw JSON is malformed or contains a duplicate object name")))]
       (if (json-subset-value? parsed)
         parsed
         (authority-fail! "json-domain"
