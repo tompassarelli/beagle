@@ -10,8 +10,10 @@
 ;; emission happen only against that coherent overlay, and emitted bytes are
 ;; returned only when every module succeeds.
 
-(require racket/file
+(require openssl/sha1
+         racket/file
          racket/list
+         racket/port
          racket/string
          "check.rkt"
          "emit.rkt"
@@ -27,6 +29,47 @@
 (struct overlay-check-result
   (ok? modules diagnostics overlay-digest)
   #:transparent)
+
+;; This identity belongs only to the module checker and its interface
+;; publication rule.  It is deliberately not a whole-compiler revision: a
+;; backend or unrelated parser rule must not invalidate checked modules.
+(define MODULE-CHECK-RULE-IDENTITY-V1
+  "beagle/module-check/interface-publication-v1")
+
+(struct module-check-reuse-key
+  (source-id source-digest imported-interface-digests profile checker-identity)
+  #:transparent)
+(struct incremental-module-check-cache (by-key latest-by-source) #:transparent)
+(struct incremental-check-counters (hits misses rechecks) #:transparent)
+(struct incremental-overlay-check-result
+  (check-result cache counters model-revision provenance)
+  #:transparent)
+
+(define (make-incremental-module-check-cache)
+  (incremental-module-check-cache (hash) (hash)))
+
+(define (immutable-hash-copy table)
+  (for/hash ([(key value) (in-hash table)])
+    (values key value)))
+
+(define (overlay-datum-digest datum)
+  (define bytes
+    (call-with-output-bytes
+     (lambda (out)
+       (parameterize ([current-output-port out])
+         (write datum)))))
+  (string-append "sha256:" (bytes->hex-string (sha256-bytes bytes))))
+
+(define (source-bytes-digest bytes)
+  (string-append "sha256:" (bytes->hex-string (sha256-bytes bytes))))
+
+;; Source identity is independent of imports, ModelRevision, provenance, and
+;; checker identity. Imported public contracts are separate key participants.
+(define (module-source-content-digest source)
+  (overlay-datum-digest
+   `(module-source-v1
+     ,@(for/list ([stx (in-list (module-source-stxs source))])
+         (syntax->datum stx)))))
 
 (define (edn-source-id edn-path)
   (or
@@ -611,6 +654,342 @@
                (lambda () (emit-program prog)))))))
     (overlay-check-result #t modules '() overlay-digest)))
 
+;; Check an acyclic module overlay one module at a time, reusing a prior checked
+;; result only when the module's own source, every directly imported public
+;; interface, the checking profile, and this checker's local rule identity all
+;; agree. ModelRevision and provenance travel with the result but never
+;; participate in semantic reuse identity.
+(define (check-module-overlay/incremental
+         input-sources
+         cache
+         #:model-revision model-revision
+         #:provenance provenance
+         #:check-profile [check-profile 2]
+         #:capture-types? [capture-types? #f]
+         #:checker-identity
+         [checker-identity MODULE-CHECK-RULE-IDENTITY-V1]
+         #:closed? [closed? #f]
+         #:source-digest [source-digest* module-source-content-digest]
+         #:diagnostic-sink [diagnostic-sink void]
+         #:parse-source [parse-source* parse-source])
+  (unless (incremental-module-check-cache? cache)
+    (raise-argument-error
+     'check-module-overlay/incremental
+     "incremental-module-check-cache?"
+     cache))
+  (let/ec abort
+    (define hits 0)
+    (define misses 0)
+    (define rechecks 0)
+    (define (counters)
+      (incremental-check-counters hits misses rechecks))
+    (define (abort-result result)
+      ;; Cache publication is overlay-atomic. Modules checked before a failing
+      ;; sibling remain local work and do not enter the returned cache.
+      (abort
+       (incremental-overlay-check-result
+        result cache (counters) model-revision provenance)))
+    (define (fail source phase value)
+      (diagnostic-sink source phase value #f)
+      (abort-result (failed-result source phase value)))
+    (define (guard source phase thunk)
+      (with-handlers ([(lambda (_value) #t)
+                       (lambda (value) (fail source phase value))])
+        (thunk)))
+    (define (parse-current source resolver)
+      (parameterize ([current-module-resolution-closed? closed?])
+        (parse-source* source resolver)))
+    (define sources
+      (sort input-sources string<? #:key module-source-id-string))
+    (when (null? sources)
+      (fail
+       #f
+       'read
+       (make-exn:fail
+        "check-module-overlay/incremental: expected at least one module source"
+        (current-continuation-marks))))
+    (define source-digests
+      (for/hash ([source (in-list sources)])
+        (define source-id (module-source-id-string source))
+        (define digest
+          (guard
+           source-id
+           'source-digest
+           (lambda () (source-digest* source))))
+        (unless (string? digest)
+          (fail
+           source-id
+           'source-digest
+           (make-exn:fail
+            (format "source digest must be a string, got ~v" digest)
+            (current-continuation-marks))))
+        (values
+         source-id
+         digest)))
+
+    ;; Prior checked interfaces are parse hints only. The current run remints a
+    ;; provisional interface from every current source before any key is
+    ;; accepted, so a stale prior entry cannot become authority.
+    (define prior-by-source
+      (incremental-module-check-cache-latest-by-source cache))
+    (define seeded-sources
+      (for/list ([source (in-list sources)])
+        (define prior
+          (hash-ref prior-by-source (module-source-id-string source) #f))
+        (if prior
+            (struct-copy
+             module-source
+             source
+             [interface (checked-overlay-module-interface prior)])
+            source)))
+    (define seeded-overlay
+      (guard #f 'index (lambda () (source-overlay seeded-sources))))
+    (define seeded-resolver
+      (overlay-resolver seeded-overlay #:closed? closed?))
+    (define bootstrap-programs
+      (for/list ([source (in-list seeded-sources)])
+        (cons
+         source
+         (guard
+          (module-source-source-id source)
+          'parse
+          (lambda () (parse-current source seeded-resolver))))))
+    (guard
+     #f
+     'interface
+     (lambda ()
+       (reject-inferred-interface-cycles! bootstrap-programs seeded-overlay)))
+    (define bootstrap-sources
+      (for/list ([entry (in-list bootstrap-programs)])
+        (define source (car entry))
+        (define prog (cdr entry))
+        (struct-copy
+         module-source
+         source
+         [interface
+          (guard
+           (module-source-source-id source)
+           'interface
+           (lambda ()
+             (program->module-interface
+              prog
+              #:source-id (module-source-source-id source)
+              #:provisional? #t
+              #:capture-types? capture-types?)))])))
+    (define max-rounds (add1 (length sources)))
+    (define-values (provisional-sources provisional-programs)
+      (let stabilize-provisional ([current-sources bootstrap-sources]
+                                  [round 1])
+        (when (> round max-rounds)
+          (fail
+           #f
+           'interface
+           (make-exn:fail
+            (format
+             "check-module-overlay/incremental: provisional interfaces did not converge after ~a rounds"
+             max-rounds)
+            (current-continuation-marks))))
+        (define current-overlay
+          (guard #f 'index (lambda () (source-overlay current-sources))))
+        (define current-resolver
+          (overlay-resolver current-overlay #:closed? closed?))
+        (define round-programs
+          (for/list ([source (in-list current-sources)])
+            (cons
+             source
+             (guard
+              (module-source-source-id source)
+              'parse
+              (lambda () (parse-current source current-resolver))))))
+        (define next-sources
+          (for/list ([entry (in-list round-programs)])
+            (define source (car entry))
+            (define prog (cdr entry))
+            (struct-copy
+             module-source
+             source
+             [interface
+              (guard
+               (module-source-source-id source)
+               'interface
+               (lambda ()
+                 (program->module-interface
+                  prog
+                  #:source-id (module-source-source-id source)
+                  #:provisional? #t
+                  #:capture-types? capture-types?)))])))
+        (if (interfaces-stable? current-sources next-sources)
+            (values next-sources round-programs)
+            (stabilize-provisional next-sources (add1 round)))))
+    (define provisional-overlay
+      (guard #f 'index (lambda () (source-overlay provisional-sources))))
+    (define-values (components edges provisional-program-by-source)
+      (candidate-source-sccs provisional-programs provisional-overlay))
+
+    ;; This first vertical deliberately gives cycles a pointed boundary rather
+    ;; than silently falling back to whole-overlay rechecking. A future SCC
+    ;; cache can add cyclic reuse without weakening these module keys.
+    (for ([component (in-list components)])
+      (define cyclic?
+        (or
+         (pair? (cdr component))
+         (member (car component) (hash-ref edges (car component)))))
+      (when cyclic?
+        (fail
+         (car component)
+         'scc
+         (make-exn:fail
+          (format
+           "check-module-overlay/incremental: cyclic module component requires an SCC checker: ~a"
+           (string-join component ", "))
+          (current-continuation-marks)))))
+
+    (define visited (make-hash))
+    (define reverse-order '())
+    (define (visit! source-id)
+      (unless (hash-ref visited source-id #f)
+        (hash-set! visited source-id #t)
+        (for ([provider-id (in-list (hash-ref edges source-id))])
+          (visit! provider-id))
+        (set! reverse-order (cons source-id reverse-order))))
+    (for ([source-id
+           (in-list
+            (sort (map module-source-id-string provisional-sources) string<?))])
+      (visit! source-id))
+    (define check-order (reverse reverse-order))
+    (define source-by-id
+      (for/hash ([source (in-list provisional-sources)])
+        (values (module-source-id-string source) source)))
+    (define checked-interface-by-source (make-hash))
+    (define checked-module-by-source (make-hash))
+    (define next-by-key
+      (hash-copy (incremental-module-check-cache-by-key cache)))
+    (define next-latest-by-source
+      (hash-copy
+       (incremental-module-check-cache-latest-by-source cache)))
+
+    (define (current-overlay-resolver)
+      (define current-sources
+        (for/list ([source (in-list provisional-sources)])
+          (define source-id (module-source-id-string source))
+          (struct-copy
+           module-source
+           source
+           [interface
+            (hash-ref
+             checked-interface-by-source
+             source-id
+             (module-source-interface source))])))
+      (overlay-resolver
+       (guard #f 'index (lambda () (source-overlay current-sources)))
+       #:closed? closed?))
+
+    (for ([source-id (in-list check-order)])
+      (define source (hash-ref source-by-id source-id))
+      (define provider-ids (hash-ref edges source-id))
+      (define imported-interface-digests
+        (for/list ([provider-id (in-list provider-ids)])
+          (define provider-interface
+            (hash-ref checked-interface-by-source provider-id))
+          (list provider-id
+                (module-interface-digest provider-interface))))
+      (define provisional-program
+        (hash-ref provisional-program-by-source source-id))
+      (define profile
+        (vector
+         (semantic-profile-for-target (program-target provisional-program))
+         check-profile
+         capture-types?))
+      (define key
+        (module-check-reuse-key
+         source-id
+         (hash-ref source-digests source-id)
+         imported-interface-digests
+         profile
+         checker-identity))
+      (define reusable (hash-ref next-by-key key #f))
+      (cond
+        [reusable
+         (set! hits (add1 hits))
+         (hash-set! checked-module-by-source source-id reusable)
+         (hash-set!
+          checked-interface-by-source
+          source-id
+          (checked-overlay-module-interface reusable))]
+        [else
+         (set! misses (add1 misses))
+         (define prog
+           (guard
+            source-id
+            'parse
+            (lambda ()
+              (parse-current source (current-overlay-resolver)))))
+         (define diagnostics '())
+         (set! rechecks (add1 rechecks))
+         (parameterize ([current-check-profile check-profile])
+           (type-check-with-locs!
+            prog
+            (lambda (error location)
+              (diagnostic-sink source-id 'check error location)
+              (set!
+               diagnostics
+               (cons
+                (overlay-diagnostic
+                 source-id
+                 'check
+                 (if (exn? error)
+                     (exn-message error)
+                     (format "~a" error)))
+                diagnostics)))
+            #:capture-types? capture-types?))
+         (when (pair? diagnostics)
+           (abort-result
+            (overlay-check-result
+             #f
+             '()
+             (reverse diagnostics)
+             #f)))
+         (define interface
+           (guard
+            source-id
+            'interface
+            (lambda ()
+              (program->module-interface
+               prog
+               #:source-id (module-source-source-id source)
+               #:capture-types? capture-types?))))
+         (define checked
+           (checked-overlay-module
+            (module-source-namespace source)
+            (module-source-source-id source)
+            prog
+            interface
+            #f))
+         (hash-set! checked-module-by-source source-id checked)
+         (hash-set! checked-interface-by-source source-id interface)
+         (hash-set! next-by-key key checked)])
+      (hash-set!
+       next-latest-by-source
+       source-id
+       (hash-ref checked-module-by-source source-id)))
+
+    (define modules
+      (for/list ([source (in-list provisional-sources)])
+        (hash-ref checked-module-by-source (module-source-id-string source))))
+    (define interfaces
+      (map checked-overlay-module-interface modules))
+    (define result
+      (overlay-check-result
+       #t modules '() (module-interfaces-overlay-digest interfaces)))
+    (incremental-overlay-check-result
+     result
+     (incremental-module-check-cache
+      (immutable-hash-copy next-by-key)
+      (immutable-hash-copy next-latest-by-source))
+     (counters)
+     model-revision
+     provenance)))
+
 (define (check-module-source-closure closure
                                      #:check-profile [check-profile 2]
                                      #:check-namespaces [check-namespaces #f]
@@ -628,6 +1007,37 @@
    #:capture-types? capture-types?
    #:shadow-facts? shadow-facts?
    #:closed? #t
+   #:diagnostic-sink diagnostic-sink
+   #:parse-source
+   (lambda (source resolver)
+     (module-source-closure-parse-source closure source resolver))))
+
+(define (check-module-source-closure/incremental
+         closure
+         cache
+         #:model-revision model-revision
+         #:provenance provenance
+         #:check-profile [check-profile 2]
+         #:capture-types? [capture-types? #f]
+         #:checker-identity
+         [checker-identity MODULE-CHECK-RULE-IDENTITY-V1]
+         #:diagnostic-sink [diagnostic-sink void])
+  (check-module-overlay/incremental
+   (module-source-closure-sources closure)
+   cache
+   #:model-revision model-revision
+   #:provenance provenance
+   #:check-profile check-profile
+   #:capture-types? capture-types?
+   #:checker-identity checker-identity
+   #:closed? #t
+   #:source-digest
+   (lambda (source)
+     (source-bytes-digest
+      (module-source-snapshot-bytes
+       (module-source-closure-snapshot-ref
+        closure
+        (module-source-source-id source)))))
    #:diagnostic-sink diagnostic-sink
    #:parse-source
    (lambda (source resolver)
@@ -664,10 +1074,19 @@
      #:shadow-facts? shadow-facts?)))
 
 (provide
+ MODULE-CHECK-RULE-IDENTITY-V1
  check-edn-overlay
  check-module-overlay
+ check-module-overlay/incremental
  check-module-source-closure
+ check-module-source-closure/incremental
+ make-incremental-module-check-cache
+ module-source-content-digest
  stxs->module-source
  (struct-out overlay-diagnostic)
  (struct-out checked-overlay-module)
- (struct-out overlay-check-result))
+ (struct-out overlay-check-result)
+ (struct-out module-check-reuse-key)
+ (struct-out incremental-module-check-cache)
+ (struct-out incremental-check-counters)
+ (struct-out incremental-overlay-check-result))

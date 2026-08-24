@@ -27,6 +27,18 @@
 (define ALLOWED-AUTHORITIES '("package" "trusted"))
 
 (struct bundle-source (source-id bytes authority stxs namespace) #:transparent)
+(struct checked-bundle-check-observation
+  (mode counters model-revision provenance)
+  #:transparent)
+(struct checked-bundle-session (lock cache last-observation) #:mutable)
+
+(define (make-checked-bundle-session)
+  (checked-bundle-session
+   (make-semaphore 1)
+   (make-incremental-module-check-cache)
+   #f))
+
+(define WARM-CHECKED-BUNDLE-SESSION (make-checked-bundle-session))
 
 (define (fail fmt . args)
   (apply error 'beagle-ast-bundle fmt args))
@@ -299,7 +311,90 @@
           (fail "trusted source ~a cannot require package source ~a"
                 source-id provider-id))))))
 
-(define (build-checked-bundle request)
+(define (incremental-scc-failure? result)
+  (and
+   (not (overlay-check-result-ok? result))
+   (pair? (overlay-check-result-diagnostics result))
+   (for/and
+       ([diagnostic (in-list (overlay-check-result-diagnostics result))])
+     (eq? (overlay-diagnostic-phase diagnostic) 'scc))))
+
+(define (check-bundle-in-session!
+         session
+         module-sources
+         source-index
+         parse-exact
+         model-revision
+         provenance)
+  (call-with-semaphore
+   (checked-bundle-session-lock session)
+   (lambda ()
+     (define incremental
+       (check-module-overlay/incremental
+        module-sources
+        (checked-bundle-session-cache session)
+        #:model-revision model-revision
+        #:provenance provenance
+        #:capture-types? #t
+        #:closed? #t
+        #:source-digest
+        (lambda (source)
+          (define source-id (format "~a" (module-source-source-id source)))
+          (sha256-prefixed
+           (bundle-source-bytes
+            (hash-ref
+             source-index
+             source-id
+             (lambda ()
+               (fail "internal source lookup failed for ~a" source-id))))))
+        #:parse-source parse-exact))
+     (define incremental-result
+       (incremental-overlay-check-result-check-result incremental))
+     (cond
+       [(overlay-check-result-ok? incremental-result)
+        (set-checked-bundle-session-cache!
+         session
+         (incremental-overlay-check-result-cache incremental))
+        (set-checked-bundle-session-last-observation!
+         session
+         (checked-bundle-check-observation
+          'incremental
+          (incremental-overlay-check-result-counters incremental)
+          model-revision
+          provenance))
+        incremental-result]
+       [else
+        ;; Preserve the established coherent checker's complete diagnostic and
+        ;; cyclic-SCC behavior. Failed incremental work never changes the warm
+        ;; cache; only successful acyclic overlays publish reusable results.
+        (define fallback-mode
+          (if (incremental-scc-failure? incremental-result)
+              'cold-scc-fallback
+              'cold-diagnostic-fallback))
+        (define cold
+          (check-module-overlay
+           module-sources
+           #:emit? #f
+           #:capture-types? #t
+           #:closed? #t
+           #:parse-source parse-exact))
+        (set-checked-bundle-session-last-observation!
+         session
+         (checked-bundle-check-observation
+          fallback-mode
+          (incremental-overlay-check-result-counters incremental)
+          model-revision
+          provenance))
+        cold]))))
+
+(define (build-checked-bundle/session
+         session
+         request
+         #:model-revision model-revision
+         #:provenance provenance)
+  (unless (checked-bundle-session? session)
+    (raise-argument-error
+     'build-checked-bundle/session "checked-bundle-session?" session))
   (define-values
     (entry-source-id sources source-index namespace-index)
     (decode-request request))
@@ -324,12 +419,13 @@
   (define result
     (parameterize ([current-security-guard
                     (closed-source-security-guard)])
-      (check-module-overlay
+      (check-bundle-in-session!
+       session
        module-sources
-       #:emit? #f
-       #:capture-types? #t
-       #:closed? #t
-       #:parse-source parse-exact)))
+       source-index
+       parse-exact
+       model-revision
+       provenance)))
   (unless (overlay-check-result-ok? result)
     (define diagnostics (overlay-check-result-diagnostics result))
     (if (pair? diagnostics)
@@ -397,6 +493,24 @@
    'checkedBundleSha256
    (sha256-prefixed (canonical-json-bytes response-with-closure))))
 
+(define (build-checked-bundle request)
+  (define request-identity
+    (sha256-prefixed (canonical-json-bytes request)))
+  (build-checked-bundle/session
+   WARM-CHECKED-BUNDLE-SESSION
+   request
+   #:model-revision
+   (vector "CheckedBundleRequestV4" request-identity)
+   #:provenance
+   (hasheq
+    'kind "checked-bundle-request"
+    'requestDigest request-identity)))
+
 (provide
  CHECKED-BUNDLE-SCHEMA-VERSION
- build-checked-bundle)
+ build-checked-bundle
+ build-checked-bundle/session
+ make-checked-bundle-session
+ checked-bundle-session?
+ checked-bundle-session-last-observation
+ (struct-out checked-bundle-check-observation))

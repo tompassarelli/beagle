@@ -77,7 +77,9 @@
              "scrutinee-narrowing.rkt"  ; match/instance? narrow a stable scrutinee to the proven member; binders still bind fields
              "module-source-root.rkt"   ; explicit exact-path source roots + closed immutable transitive closure
              "module-overlay-check.rkt"  ; coherent multi-EDN candidate overlay + cross-module interfaces
+             "module-incremental-check.rkt" ; source/interface-keyed module checking + cold parity
              "checked-bundle.rkt"       ; exact-byte closed module closure + checked projection
+             "checked-bundle-incremental.rkt" ; warm request cache + cold diagnostic/SCC parity
              "defmacro.rkt"
              "diagnostic-kind.rkt"
              "structured-diagnostics.rkt" ; BeagleDiagnosticV2 type-mismatch slice across all targets
