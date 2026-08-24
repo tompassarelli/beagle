@@ -178,6 +178,7 @@
             # never try to rebuild bytecode inside the read-only Nix store.
             mkdir -p "$out/.beagle"
             printf '%s' "${racket}/bin/racket" > "$out/.beagle/zo-fresh"
+            printf '%s' "${racket}/bin/racket" > "$out/.beagle/zo-fresh-production"
 
             runHook postBuild
           '';
