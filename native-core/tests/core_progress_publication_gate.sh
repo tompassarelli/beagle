@@ -72,6 +72,7 @@ cat >"$work/progress-gate.clj" <<'CLJ'
     ((deref (ns-resolve core-ns (quote ids-in?))) shape known-types)))
 (intern core-ns (quote types-refs-closed?)
   (fn [definitions]
+    (called! :types-refs-closed)
     (let [known-types ((deref (ns-resolve core-ns (quote type-ids))) definitions)]
       (every?
        #((deref (ns-resolve core-ns (quote type-shape-refs-closed?)))
@@ -104,6 +105,17 @@ cat >"$work/progress-gate.clj" <<'CLJ'
             ((deref (ns-resolve lower-ns (quote attach-body)))
              env resolution source))
           (map vector body-resolutions body-sources))))
+(intern lower-ns (quote typed-term-nodes)
+  (fn [_types _functions _effects
+       _include-environment _include-context _include-stdout
+       _include-stderr _include-filesystem _include-process
+       _include-socket _include-clock]
+    (called! :typed-term-nodes)
+    :nodes))
+(intern lower-ns (quote type-closure-obligations)
+  (fn [_digest _closed _clean]
+    (called! :type-closure-obligations)
+    :obligations))
 (intern lower-ns (quote lower-typed-stage)
   (fn [source _compiler-commit configuration]
     (called! :lower-typed-stage)
@@ -111,7 +123,11 @@ cat >"$work/progress-gate.clj" <<'CLJ'
      source configuration)
     ((deref (ns-resolve lower-ns (quote attach-bodies)))
      :env @resolutions @sources)
-    ((deref (ns-resolve core-ns (quote types-refs-closed?))) @types)
+    ((deref (ns-resolve lower-ns (quote typed-term-nodes)))
+     @types [] [] false false false false false false false false)
+    (let [closed ((deref (ns-resolve core-ns (quote types-refs-closed?))) @types)]
+      ((deref (ns-resolve lower-ns (quote type-closure-obligations)))
+       "digest" closed true))
     @typing-result))
 
 (load-file (System/getenv "PROGRESS_DEFINITIONS"))
@@ -171,7 +187,10 @@ cat >"$work/progress-gate.clj" <<'CLJ'
 (require! (= {:lower-typed-stage 1
               :prelude 1
               :attach-bodies 1
-              :attach-body 70}
+              :attach-body 70
+              :typed-term-nodes 1
+              :types-refs-closed 1
+              :type-closure-obligations 1}
              @calls)
           (str "typing observer call count changed: " @calls))
 (require! (= [1 32 64 70]

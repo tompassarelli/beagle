@@ -2395,10 +2395,13 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
   (let [original-prelude lower/prepare-typing-prelude
         original-attach-bodies lower/attach-bodies
         original-attach-body lower/attach-body
-        original-types-refs-closed? core/types-refs-closed?
+        original-typed-term-nodes lower/typed-term-nodes
+        original-type-closure-obligations lower/type-closure-obligations
         original-id-in? core/id-in?
         completed (atom 0)
-        body-total (atom 0)]
+        body-total (atom 0)
+        final-types (atom nil)
+        types-closed (atom nil)]
     (publish-stage-work!
      "source-to-typed" "typing-prelude" "RUNNING" 0 1)
     (let [result
@@ -2429,14 +2432,25 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                      (publish-stage-work!
                       "source-to-typed" "function-bodies" "RUNNING"
                       done total)))))
-             core/types-refs-closed?
-             (fn [types]
-               (let [closed? (original-types-refs-closed? types)]
-                 (when-not closed?
-                   (report-type-closure-failure! types original-id-in?))
-                 closed?))]
+             lower/typed-term-nodes
+             (fn [types functions effects
+                  include-environment include-context include-stdout
+                  include-stderr include-filesystem include-process
+                  include-socket include-clock]
+               (reset! final-types types)
+               (original-typed-term-nodes
+                types functions effects
+                include-environment include-context include-stdout
+                include-stderr include-filesystem include-process
+                include-socket include-clock))
+             lower/type-closure-obligations
+             (fn [digest closed clean]
+               (reset! types-closed closed)
+               (original-type-closure-obligations digest closed clean))]
             (lower/lower-typed-stage
              frozen-source compiler-commit configuration))]
+      (when (false? @types-closed)
+        (report-type-closure-failure! @final-types original-id-in?))
       (publish-stage-work!
        "source-to-typed" "typing-finalization" "ACCEPTED" 1 1)
       result)))
