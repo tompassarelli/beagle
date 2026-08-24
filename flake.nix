@@ -150,6 +150,15 @@
             echo "beagle: compiling core roots under racket $(${racket}/bin/racket --version)"
             "$raco" make "''${core_roots[@]}"
 
+            # Hosted compiler CLIs are package entrypoints, so their bytecode
+            # must be present in the immutable package rather than compiled on
+            # first use at runtime.
+            hosted_cli_roots=(
+              "$out/beagle-lib/private/project-compiler-session-cli.rkt"
+              "$out/beagle-lib/private/ts-externs.rkt"
+            )
+            "$raco" make "''${hosted_cli_roots[@]}"
+
             # Directly-exec'd helper modules + bin/*.rkt scripts: compile if
             # present, but tolerate per-file failures (peripheral/dev tooling
             # must not break the core package). They still run under the pinned
@@ -160,7 +169,7 @@
               private/emit.rkt private/rewrite-cli.rkt private/error-explanation.rkt \
               private/type-view.rkt private/cheatsheet.rkt private/tier-runner.rkt \
               private/daemon.rkt private/facts-roundtrip.rkt \
-              private/facts-check-overlay.rkt private/project-compiler-session-cli.rkt; do
+              private/facts-check-overlay.rkt; do
               [ -f "$out/beagle-lib/$f" ] && extra+=("$out/beagle-lib/$f")
             done
             for f in "$out"/bin/beagle*.rkt; do [ -f "$f" ] && extra+=("$f"); done
