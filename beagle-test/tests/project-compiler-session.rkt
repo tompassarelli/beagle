@@ -97,6 +97,15 @@
   (project-compile-observation-v1-counters
    (project-compile-result-observation result)))
 
+(define (check-rechecked-source-ids result expected)
+  (define observation (project-compile-result-observation result))
+  (define actual
+    (project-compile-observation-v1-rechecked-source-ids observation))
+  (check-equal? actual (sort expected string<?))
+  (check-equal?
+   (project-compile-counters-v1-rechecks (counters result))
+   (length actual)))
+
 (define (module-by-id result source-id)
   (for/first ([module (in-list (project-compile-result-modules result))]
               #:when
@@ -149,6 +158,9 @@
  (check-equal? (project-compile-counters-v1-cache-hits (counters initial)) 0)
  (check-equal? (project-compile-counters-v1-cache-misses (counters initial)) 2)
  (check-equal? (project-compile-counters-v1-rechecks (counters initial)) 2)
+ (check-rechecked-source-ids
+  initial
+  (list "warm/consumer.bjs" "warm/provider.bjs"))
  (check-equal? (project-compile-counters-v1-emits (counters initial)) 2)
  (check-equal?
   (sort
@@ -181,6 +193,7 @@
    (project-compile-result-observation exact))
   'exact-hit)
  (check-true (zero-work? exact))
+ (check-rechecked-source-ids exact '())
  (check-equal? (artifact-signature exact) (artifact-signature initial))
 
  ;; A private provider edit rechecks only that source. The consumer retains
@@ -191,6 +204,7 @@
  (check-equal? (project-compile-counters-v1-cache-hits (counters private)) 1)
  (check-equal? (project-compile-counters-v1-cache-misses (counters private)) 1)
  (check-equal? (project-compile-counters-v1-rechecks (counters private)) 1)
+ (check-rechecked-source-ids private (list "warm/provider.bjs"))
  (check-true
   (eq?
    (checked-overlay-module-program
@@ -218,6 +232,9 @@
  (check-equal? (project-compile-counters-v1-cache-hits (counters interface)) 0)
  (check-equal? (project-compile-counters-v1-cache-misses (counters interface)) 2)
  (check-equal? (project-compile-counters-v1-rechecks (counters interface)) 2)
+ (check-rechecked-source-ids
+  interface
+  (list "warm/consumer.bjs" "warm/provider.bjs"))
  (check-false
   (eq?
    (checked-overlay-module-program
@@ -430,6 +447,12 @@
  (check-equal?
   (hash-ref (hash-ref (caddr responses) 'counters) 'jsonDecodes)
   0)
+ (check-equal?
+  (hash-ref (hash-ref (cadr responses) 'counters) 'recheckedSourceIds)
+  (list "warm/consumer.bjs" "warm/provider.bjs"))
+ (check-equal?
+  (hash-ref (hash-ref (caddr responses) 'counters) 'recheckedSourceIds)
+  '())
  (check-equal?
   (hash-ref (cadr responses) 'artifacts)
   (hash-ref (caddr responses) 'artifacts)))

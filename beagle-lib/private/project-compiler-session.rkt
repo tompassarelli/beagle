@@ -36,7 +36,9 @@
   (json-decodes source-decodes source-reads parses
                 cache-hits cache-misses rechecks emits)
   #:transparent)
-(struct project-compile-observation-v1 (mode counters) #:transparent)
+(struct project-compile-observation-v1
+  (mode counters rechecked-source-ids)
+  #:transparent)
 (struct project-compile-result
   (ok? snapshot-digest modules artifacts diagnostics observation)
   #:transparent)
@@ -389,6 +391,7 @@
     (define source-decodes 0)
     (define source-reads 0)
     (define parses 0)
+    (define rechecked-source-ids (mutable-set))
     (define cache-counters (incremental-check-counters 0 0 0))
     (define emits 0)
     (define (current-counters)
@@ -402,7 +405,10 @@
        (incremental-check-counters-rechecks cache-counters)
        emits))
     (define (observe mode)
-      (project-compile-observation-v1 mode (current-counters)))
+      (project-compile-observation-v1
+       mode
+       (current-counters)
+       (sort (set->list rechecked-source-ids) string<?)))
     (define (finish-failure diagnostics [mode 'failed])
       (define observation (observe mode))
       (set-project-compiler-session-last-observation! session observation)
@@ -423,7 +429,8 @@
       (define exact-observation
         (project-compile-observation-v1
          'exact-hit
-         (project-compile-counters-v1 0 0 0 0 0 0 0 0)))
+         (project-compile-counters-v1 0 0 0 0 0 0 0 0)
+         '()))
       (set-project-compiler-session-last-observation!
        session exact-observation)
       (abort
@@ -497,7 +504,12 @@
                source-index
                (source-id-string (module-source-source-id source)))))
            #:diagnostic-sink diagnostic-sink
-           #:parse-source parse-exact))))
+           #:parse-source parse-exact
+           #:recheck-source
+           (lambda (source)
+             (set-add!
+              rechecked-source-ids
+              (source-id-string (module-source-source-id source))))))))
     (set!
      cache-counters
      (incremental-overlay-check-result-counters incremental))

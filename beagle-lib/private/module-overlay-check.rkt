@@ -668,7 +668,8 @@
          #:closed? [closed? #f]
          #:source-digest [source-digest* module-source-content-digest]
          #:diagnostic-sink [diagnostic-sink void]
-         #:parse-source [parse-source* parse-source])
+         #:parse-source [parse-source* parse-source]
+         #:recheck-source [recheck-source void])
   (unless (incremental-module-check-cache? cache)
     (raise-argument-error
      'check-module-overlay/incremental
@@ -921,6 +922,7 @@
             'parse
             (lambda ()
               (parse-current source (current-overlay-resolver)))))
+         (recheck-source source)
          (define diagnostics '())
          (set! rechecks (add1 rechecks))
          (parameterize ([current-check-profile check-profile])

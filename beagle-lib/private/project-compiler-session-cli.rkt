@@ -202,6 +202,8 @@
    'cacheHits (project-compile-counters-v1-cache-hits counters)
    'cacheMisses (project-compile-counters-v1-cache-misses counters)
    'rechecks (project-compile-counters-v1-rechecks counters)
+   'recheckedSourceIds
+   (project-compile-observation-v1-rechecked-source-ids observation)
    'emits (project-compile-counters-v1-emits counters)))
 
 (define (result->json result)
