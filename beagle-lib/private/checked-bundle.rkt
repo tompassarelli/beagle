@@ -28,7 +28,7 @@
 
 (struct bundle-source (source-id bytes authority stxs namespace) #:transparent)
 (struct checked-bundle-check-observation
-  (mode counters model-revision provenance)
+  (mode counters)
   #:transparent)
 (struct checked-bundle-session (lock cache last-observation) #:mutable)
 
@@ -323,9 +323,7 @@
          session
          module-sources
          source-index
-         parse-exact
-         model-revision
-         provenance)
+         parse-exact)
   (call-with-semaphore
    (checked-bundle-session-lock session)
    (lambda ()
@@ -333,8 +331,6 @@
        (check-module-overlay/incremental
         module-sources
         (checked-bundle-session-cache session)
-        #:model-revision model-revision
-        #:provenance provenance
         #:capture-types? #t
         #:closed? #t
         #:source-digest
@@ -359,9 +355,7 @@
          session
          (checked-bundle-check-observation
           'incremental
-          (incremental-overlay-check-result-counters incremental)
-          model-revision
-          provenance))
+          (incremental-overlay-check-result-counters incremental)))
         incremental-result]
        [else
         ;; Preserve the established coherent checker's complete diagnostic and
@@ -382,16 +376,12 @@
          session
          (checked-bundle-check-observation
           fallback-mode
-          (incremental-overlay-check-result-counters incremental)
-          model-revision
-          provenance))
+          (incremental-overlay-check-result-counters incremental)))
         cold]))))
 
 (define (build-checked-bundle/session
          session
-         request
-         #:model-revision model-revision
-         #:provenance provenance)
+         request)
   (unless (checked-bundle-session? session)
     (raise-argument-error
      'build-checked-bundle/session "checked-bundle-session?" session))
@@ -423,9 +413,7 @@
        session
        module-sources
        source-index
-       parse-exact
-       model-revision
-       provenance)))
+       parse-exact)))
   (unless (overlay-check-result-ok? result)
     (define diagnostics (overlay-check-result-diagnostics result))
     (if (pair? diagnostics)
@@ -494,17 +482,9 @@
    (sha256-prefixed (canonical-json-bytes response-with-closure))))
 
 (define (build-checked-bundle request)
-  (define request-identity
-    (sha256-prefixed (canonical-json-bytes request)))
   (build-checked-bundle/session
    WARM-CHECKED-BUNDLE-SESSION
-   request
-   #:model-revision
-   (vector "CheckedBundleRequestV4" request-identity)
-   #:provenance
-   (hasheq
-    'kind "checked-bundle-request"
-    'requestDigest request-identity)))
+   request))
 
 (provide
  CHECKED-BUNDLE-SCHEMA-VERSION

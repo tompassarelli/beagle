@@ -75,9 +75,7 @@
     (define cold-1
       (check-module-overlay/incremental
        (sources (provider-source 1))
-       (make-incremental-module-check-cache)
-       #:model-revision 'model-revision-1
-       #:provenance 'proposal-1))
+       (make-incremental-module-check-cache)))
     (check-true
      (overlay-check-result-ok?
       (incremental-overlay-check-result-check-result cold-1)))
@@ -89,22 +87,14 @@
 
     ;; A private implementation edit changes A's source key, but not the
     ;; interface digest imported by B. A rechecks and B reuses its checked
-    ;; Program object even across a distinct ModelRevision/provenance pair.
+    ;; Program object.
     (define warm-private
       (check-module-overlay/incremental
        (sources (provider-source 2))
-       (incremental-overlay-check-result-cache cold-1)
-       #:model-revision 'model-revision-2
-       #:provenance 'proposal-2))
+       (incremental-overlay-check-result-cache cold-1)))
     (check-equal?
      (incremental-overlay-check-result-counters warm-private)
      (incremental-check-counters 1 1 1))
-    (check-equal?
-     (incremental-overlay-check-result-model-revision warm-private)
-     'model-revision-2)
-    (check-equal?
-     (incremental-overlay-check-result-provenance warm-private)
-     'proposal-2)
     (define provider-private
       (module-by-namespace warm-private 'incremental.provider))
     (define consumer-private
@@ -127,9 +117,7 @@
     (define cold-private
       (check-module-overlay/incremental
        (sources (provider-source 2))
-       (make-incremental-module-check-cache)
-       #:model-revision 'cold-private
-       #:provenance 'cold-proof))
+       (make-incremental-module-check-cache)))
     (check-equal? (semantic-fingerprint warm-private)
                   (semantic-fingerprint cold-private))
 
@@ -138,9 +126,7 @@
     (define warm-interface
       (check-module-overlay/incremental
        (sources (provider-source 2 #:extra-public? #t))
-       (incremental-overlay-check-result-cache warm-private)
-       #:model-revision 'model-revision-3
-       #:provenance 'proposal-3))
+       (incremental-overlay-check-result-cache warm-private)))
     (check-equal?
      (incremental-overlay-check-result-counters warm-interface)
      (incremental-check-counters 0 2 2))
@@ -152,9 +138,7 @@
     (define cold-interface
       (check-module-overlay/incremental
        (sources (provider-source 2 #:extra-public? #t))
-       (make-incremental-module-check-cache)
-       #:model-revision 'cold-interface
-       #:provenance 'cold-proof))
+       (make-incremental-module-check-cache)))
     (check-equal? (semantic-fingerprint warm-interface)
                   (semantic-fingerprint cold-interface))
 
@@ -164,8 +148,6 @@
       (check-module-overlay/incremental
        (sources (provider-source 2 #:extra-public? #t))
        (incremental-overlay-check-result-cache warm-interface)
-       #:model-revision 'model-revision-4
-       #:provenance 'proposal-4
        #:checker-identity "beagle/module-check/interface-publication-v2"))
     (check-equal?
      (incremental-overlay-check-result-counters changed-checker)

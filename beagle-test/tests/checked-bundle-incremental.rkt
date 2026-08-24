@@ -77,12 +77,10 @@
               #:when (equal? source-id (hash-ref module 'sourceId)))
     module))
 
-(define (build session request-value revision provenance)
+(define (build session request-value)
   (build-checked-bundle/session
    session
-   request-value
-   #:model-revision revision
-   #:provenance provenance))
+   request-value))
 
 (define (exception-message thunk)
   (with-handlers ([exn:fail? exn-message])
@@ -94,7 +92,7 @@
  (define warm-session (make-checked-bundle-session))
  (define request-1 (warm-request (provider-source "one")))
  (define response-1
-   (build warm-session request-1 'model-revision-1 'proposal-1))
+   (build warm-session request-1))
  (define observation-1
    (checked-bundle-session-last-observation warm-session))
  (check-equal?
@@ -108,18 +106,12 @@
  ;; interface. The provider rechecks and the consumer reuses.
  (define request-private (warm-request (provider-source "two")))
  (define response-private
-   (build warm-session request-private 'model-revision-2 'proposal-2))
+   (build warm-session request-private))
  (define observation-private
    (checked-bundle-session-last-observation warm-session))
  (check-equal?
   (checked-bundle-check-observation-counters observation-private)
   (incremental-check-counters 1 1 1))
- (check-equal?
-  (checked-bundle-check-observation-model-revision observation-private)
-  'model-revision-2)
- (check-equal?
-  (checked-bundle-check-observation-provenance observation-private)
-  'proposal-2)
  (define provider-1 (module-by-id response-1 "warm/provider.bjs"))
  (define provider-private
    (module-by-id response-private "warm/provider.bjs"))
@@ -131,15 +123,13 @@
   response-private
   (build
    (make-checked-bundle-session)
-   request-private
-   'cold-private
-   'cold-proof))
+   request-private))
 
  ;; A public interface edit invalidates the consumer as well.
  (define request-interface
    (warm-request (provider-source "two" #:extra-public? #t)))
  (define response-interface
-   (build warm-session request-interface 'model-revision-3 'proposal-3))
+   (build warm-session request-interface))
  (define observation-interface
    (checked-bundle-session-last-observation warm-session))
  (check-equal?
@@ -154,9 +144,7 @@
   response-interface
   (build
    (make-checked-bundle-session)
-   request-interface
-   'cold-interface
-   'cold-proof))
+   request-interface))
 
  ;; Invalid acyclic requests use the established checker for diagnostics and
  ;; never publish partial cache state.
@@ -166,8 +154,8 @@
     bad-consumer-source))
  (define warm-error
    (exception-message
-    (lambda ()
-      (build warm-session invalid-request 'model-revision-bad 'proposal-bad))))
+   (lambda ()
+      (build warm-session invalid-request))))
  (check-not-false warm-error)
  (check-equal?
   (checked-bundle-check-observation-mode
@@ -178,15 +166,12 @@
   (exception-message
    (lambda ()
      (build
-      (make-checked-bundle-session)
-      invalid-request
-      'cold-bad
-      'cold-proof))))
+     (make-checked-bundle-session)
+      invalid-request))))
 
  ;; Cyclic requests keep the established SCC semantics through an explicit
  ;; cold fallback. The prior acyclic cache remains usable afterward.
- (define cycle-response
-   (build warm-session cycle-request 'model-revision-cycle 'proposal-cycle))
+ (define cycle-response (build warm-session cycle-request))
  (check-equal?
   (checked-bundle-check-observation-mode
    (checked-bundle-session-last-observation warm-session))
@@ -195,12 +180,10 @@
   cycle-response
   (build
    (make-checked-bundle-session)
-   cycle-request
-   'cold-cycle
-   'cold-proof))
+   cycle-request))
  (check-equal?
-  response-interface
-  (build warm-session request-interface 'model-revision-4 'proposal-4))
+ response-interface
+  (build warm-session request-interface))
  (check-equal?
   (checked-bundle-check-observation-counters
    (checked-bundle-session-last-observation warm-session))

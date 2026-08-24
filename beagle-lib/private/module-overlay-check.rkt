@@ -42,7 +42,7 @@
 (struct incremental-module-check-cache (by-key latest-by-source) #:transparent)
 (struct incremental-check-counters (hits misses rechecks) #:transparent)
 (struct incremental-overlay-check-result
-  (check-result cache counters model-revision provenance)
+  (check-result cache counters)
   #:transparent)
 
 (define (make-incremental-module-check-cache)
@@ -63,8 +63,8 @@
 (define (source-bytes-digest bytes)
   (string-append "sha256:" (bytes->hex-string (sha256-bytes bytes))))
 
-;; Source identity is independent of imports, ModelRevision, provenance, and
-;; checker identity. Imported public contracts are separate key participants.
+;; Source identity is independent of imports and checker identity. Imported
+;; public contracts are separate key participants.
 (define (module-source-content-digest source)
   (overlay-datum-digest
    `(module-source-v1
@@ -657,13 +657,10 @@
 ;; Check an acyclic module overlay one module at a time, reusing a prior checked
 ;; result only when the module's own source, every directly imported public
 ;; interface, the checking profile, and this checker's local rule identity all
-;; agree. ModelRevision and provenance travel with the result but never
-;; participate in semantic reuse identity.
+;; agree.
 (define (check-module-overlay/incremental
          input-sources
          cache
-         #:model-revision model-revision
-         #:provenance provenance
          #:check-profile [check-profile 2]
          #:capture-types? [capture-types? #f]
          #:checker-identity
@@ -688,7 +685,7 @@
       ;; sibling remain local work and do not enter the returned cache.
       (abort
        (incremental-overlay-check-result
-        result cache (counters) model-revision provenance)))
+        result cache (counters))))
     (define (fail source phase value)
       (diagnostic-sink source phase value #f)
       (abort-result (failed-result source phase value)))
@@ -986,9 +983,7 @@
      (incremental-module-check-cache
       (immutable-hash-copy next-by-key)
       (immutable-hash-copy next-latest-by-source))
-     (counters)
-     model-revision
-     provenance)))
+     (counters))))
 
 (define (check-module-source-closure closure
                                      #:check-profile [check-profile 2]
@@ -1015,8 +1010,6 @@
 (define (check-module-source-closure/incremental
          closure
          cache
-         #:model-revision model-revision
-         #:provenance provenance
          #:check-profile [check-profile 2]
          #:capture-types? [capture-types? #f]
          #:checker-identity
@@ -1025,8 +1018,6 @@
   (check-module-overlay/incremental
    (module-source-closure-sources closure)
    cache
-   #:model-revision model-revision
-   #:provenance provenance
    #:check-profile check-profile
    #:capture-types? capture-types?
    #:checker-identity checker-identity
