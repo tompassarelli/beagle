@@ -818,7 +818,7 @@
 ;; `iife`/loop output, so this never over-awaits an inline-await call like
 ;; `f(await g())` (which does not start with `(async () => `).
 (define (await-async-iife s)
-  (if (string-prefix? s "(async () => ")
+  (if (string-prefix? (js-render-shape s) "(async () => ")
     (string-append "await " s)
     s))
 
@@ -2059,6 +2059,16 @@
             (loop (add1 cursor) (cons (string-ref text cursor) digits))]
            [else #f]))))
 
+;; Source-map markers are presentation-only. Rendering decisions may inspect
+;; emitted prefixes, but must inspect the JavaScript shape that remains after
+;; annotation is removed.
+(define (js-render-shape text)
+  (let loop ([cursor 0])
+    (define marker (marker-id-at text cursor))
+    (if marker
+        (loop (cdr marker))
+        (substring text cursor))))
+
 (define (strip-source-map-markers annotated markers source-content)
   (define output (open-output-string))
   (define seen-generated-positions (make-hash))
@@ -2908,7 +2918,8 @@
                  ;; parenthesized: `=> {…}` is a JS block (a labeled-statement parse),
                  ;; whereas `=> ({…})` returns the object. Any expression that emits
                  ;; starting with `{` is an object literal in this position, so wrap it.
-                 (if (regexp-match? #rx"^[ \t\r\n]*[{]" body-str)
+                 (if (regexp-match? #rx"^[ \t\r\n]*[{]"
+                                    (js-render-shape body-str))
                    (format "~a(~a) => (~a)" prefix params body-str)
                    (format "~a(~a) => ~a" prefix params body-str)))
                (format "~a(~a) => { ~a }"

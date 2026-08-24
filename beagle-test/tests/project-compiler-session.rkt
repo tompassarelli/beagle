@@ -278,7 +278,41 @@
  (check-equal?
   (overlay-diagnostic-phase
    (car (project-compile-result-diagnostics mismatched-core-target)))
-  'validate))
+  'validate)
+
+ ;; Source-map annotation prefixes an authored map expression with a marker.
+ ;; Shape-sensitive emission must still recognize an anonymous function's map
+ ;; body as an object literal and preserve the ordinary `=> ({...})` bytes.
+ (define source-map-source-id "warm/source-map-shape.bjs")
+ (define source-map-result
+   (compile
+    (make-project-compiler-session)
+    (hash-set
+     (single-source-request
+      source-map-source-id
+      (string-append
+       "#lang beagle\n"
+       "(ns warm.source-map-shape)\n"
+       "(defn pairs [xs Any] Any\n"
+       "  (.map xs (fn [brick Any] Any {:revision 1 :bytes brick})))\n")
+      "js")
+     'emitSourceIds
+     (list source-map-source-id))))
+ (check-true (project-compile-result-ok? source-map-result))
+ (define source-map-js
+   (for/first
+       ([artifact (in-list (project-compile-result-artifacts source-map-result))]
+        #:when
+        (string=?
+         "warm/source-map-shape.js"
+         (project-artifact-v1-relative-path artifact)))
+     artifact))
+ (check-not-false source-map-js)
+ (when source-map-js
+   (check-true
+    (string-contains?
+     (bytes->string/utf-8 (project-artifact-v1-bytes source-map-js))
+     "=> ({"))))
 
 (test-case
  "emitter failure publishes neither candidate artifacts nor candidate cache"
