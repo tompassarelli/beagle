@@ -284,20 +284,21 @@
  ;; Shape-sensitive emission must still recognize an anonymous function's map
  ;; body as an object literal and preserve the ordinary `=> ({...})` bytes.
  (define source-map-source-id "warm/source-map-shape.bjs")
+ (define source-map-request
+   (hash-set
+    (single-source-request
+     source-map-source-id
+     (string-append
+      "#lang beagle\n"
+      "(ns warm.source-map-shape)\n"
+      "(defn pairs [xs Any] Any\n"
+      "  (.map xs (fn [brick Any] Any {:revision 1 :bytes brick})))\n")
+     "js")
+    'emitSourceIds
+    (list source-map-source-id)))
+ (define source-map-session (make-project-compiler-session))
  (define source-map-result
-   (compile
-    (make-project-compiler-session)
-    (hash-set
-     (single-source-request
-      source-map-source-id
-      (string-append
-       "#lang beagle\n"
-       "(ns warm.source-map-shape)\n"
-       "(defn pairs [xs Any] Any\n"
-       "  (.map xs (fn [brick Any] Any {:revision 1 :bytes brick})))\n")
-      "js")
-     'emitSourceIds
-     (list source-map-source-id))))
+   (compile source-map-session source-map-request))
  (check-true (project-compile-result-ok? source-map-result))
  (define source-map-js
    (for/first
@@ -312,7 +313,55 @@
    (check-true
     (string-contains?
      (bytes->string/utf-8 (project-artifact-v1-bytes source-map-js))
-     "=> ({"))))
+     "=> ({")))
+
+ (define source-map-warm
+   (compile
+    source-map-session
+    source-map-request
+    (lambda (_bytes) (error 'test "source-map exact hit decoded"))))
+ (check-equal?
+  (project-compile-observation-v1-mode
+   (project-compile-result-observation source-map-warm))
+  'exact-hit)
+ (check-equal?
+  (artifact-signature source-map-warm)
+  (artifact-signature source-map-result))
+
+ ;; An await-containing inner `let` renders as an async IIFE. Its source-map
+ ;; marker must be transparent to the outer binding's await-prefix decision.
+ (define await-source-id "warm/source-map-await.bjs")
+ (define await-result
+   (compile
+    (make-project-compiler-session)
+    (hash-set
+     (single-source-request
+      await-source-id
+      (string-append
+       "#lang beagle\n"
+       "(ns warm.source-map-await)\n"
+       "(declare-extern fetch-value (Fn [Int] (Promise Int)))\n"
+       "(defn ^:async nested [n Int] (Promise Int)\n"
+       "  (let [result (let [value (await (fetch-value n))] value)]\n"
+       "    result))\n")
+      "js")
+     'emitSourceIds
+     (list await-source-id))))
+ (check-true (project-compile-result-ok? await-result))
+ (define await-js
+   (for/first
+       ([artifact (in-list (project-compile-result-artifacts await-result))]
+        #:when
+        (string=?
+         "warm/source-map-await.js"
+         (project-artifact-v1-relative-path artifact)))
+     artifact))
+ (check-not-false await-js)
+ (when await-js
+   (check-true
+    (string-contains?
+     (bytes->string/utf-8 (project-artifact-v1-bytes await-js))
+     "await (async () =>"))))
 
 (test-case
  "emitter failure publishes neither candidate artifacts nor candidate cache"
