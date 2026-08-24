@@ -61,6 +61,7 @@ Query (the compiler is the source of truth):
   expand <file>             Macro-expanded source
   ast <file>                Versioned checked-program JSON (no execution)
   ast-bundle                Closed exact-byte checked projection (JSON stdin)
+  project-session           Resident exact-byte check/emit session (JSONL stdin)
   explain <CODE>            Diagnostic explanation (E001, …)
   explain-type <file>       Inferred types as a view
   facts-roundtrip MODE FILE Lossless source/fact projection (--emit-edn|--render)
@@ -298,6 +299,9 @@ case "$cmd" in
         ;;
     ast-bundle)
         exec "$BIN/beagle-ast-bundle" "$@"
+        ;;
+    project-session)
+        exec "$BIN/beagle-project-session" "$@"
         ;;
     expand)
         exec "$BIN/beagle-expand" "$@"

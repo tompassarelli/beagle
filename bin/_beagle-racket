@@ -192,7 +192,7 @@ if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" \
                 check|build) _beagle_zo_profile=production ;;
             esac
             ;;
-        beagle-check|beagle-check-all|beagle-build|beagle-build-all|beagle-build-core|beagle-ast|beagle-ast-bundle)
+        beagle-check|beagle-check-all|beagle-build|beagle-build-all|beagle-build-core|beagle-ast|beagle-ast-bundle|beagle-project-session)
             _beagle_zo_profile=production
             ;;
     esac

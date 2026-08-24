@@ -78,6 +78,7 @@
              "module-source-root.rkt"   ; explicit exact-path source roots + closed immutable transitive closure
              "module-overlay-check.rkt"  ; coherent multi-EDN candidate overlay + cross-module interfaces
              "module-incremental-check.rkt" ; source/interface-keyed module checking + cold parity
+             "project-compiler-session.rkt" ; transactional exact-byte retained-Program check/emit session
              "checked-bundle.rkt"       ; exact-byte closed module closure + checked projection
              "checked-bundle-incremental.rkt" ; warm request cache + cold diagnostic/SCC parity
              "defmacro.rkt"

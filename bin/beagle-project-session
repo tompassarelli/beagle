@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Persistent exact-byte project compiler session over JSON lines.
+
+set -euo pipefail
+export BEAGLE_ZO_GATE_QUIET=1
+source "$(dirname "$0")/_beagle-racket"
+
+BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/project-compiler-session-cli.rkt" "$@"
