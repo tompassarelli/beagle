@@ -1,0 +1,4 @@
+#lang beagle
+(ns native.type-closure-provider)
+
+(defrecord External [(value Int)])

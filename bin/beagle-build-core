@@ -2322,47 +2322,6 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
       (= completed total)
       (= 0 (mod completed body-progress-cadence))))
 
-(defn missing-type-ref-values [definition known-types original-id-in?]
-  (let [missing (atom [])
-        observe-id!
-        (fn [allowed target]
-          (when-not (original-id-in? allowed target)
-            (swap! missing conj (core/nativeid-value target)))
-          true)]
-    (with-redefs
-      [core/id-in? observe-id!
-       core/ids-in?
-       (fn [ids allowed]
-         (doseq [id ids] (observe-id! allowed id))
-         true)
-       core/optional-id-in?
-       (fn [candidate allowed]
-         (when (some? candidate) (observe-id! allowed candidate))
-         true)]
-      (core/type-shape-refs-closed?
-       (core/typedef-shape definition) known-types))
-    (vec (sort (distinct @missing)))))
-
-(defn report-type-closure-failure! [types original-id-in?]
-  (let [known-types (core/type-ids types)
-        offending
-        (sort-by #(core/nativeid-value (core/typedef-id %))
-                 (remove
-                  #(core/type-shape-refs-closed?
-                    (core/typedef-shape %) known-types)
-                  types))]
-    (binding [*out* *err*]
-      (doseq [definition offending]
-        (println
-         (str "beagle build: type-closure TypeDef REJECTED"
-              " id=" (pr-str (core/nativeid-value (core/typedef-id definition)))
-              " name=" (pr-str (core/typedef-name definition))
-              " missing-type-ids="
-              (pr-str
-               (missing-type-ref-values
-                definition known-types original-id-in?))
-              " shape=" (pr-str (core/typedef-shape definition))))))))
-
 (defn observed-source-program [rows module-name relative-path]
   (publish-stage-work!
    "source-freeze" "source-reconstruction" "RUNNING" 0 1)
@@ -2395,13 +2354,8 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
   (let [original-prelude lower/prepare-typing-prelude
         original-attach-bodies lower/attach-bodies
         original-attach-body lower/attach-body
-        original-typed-term-nodes lower/typed-term-nodes
-        original-type-closure-obligations lower/type-closure-obligations
-        original-id-in? core/id-in?
         completed (atom 0)
-        body-total (atom 0)
-        final-types (atom nil)
-        types-closed (atom nil)]
+        body-total (atom 0)]
     (publish-stage-work!
      "source-to-typed" "typing-prelude" "RUNNING" 0 1)
     (let [result
@@ -2431,26 +2385,9 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
                    (when (body-progress-boundary? done total)
                      (publish-stage-work!
                       "source-to-typed" "function-bodies" "RUNNING"
-                      done total)))))
-             lower/typed-term-nodes
-             (fn [types functions effects
-                  include-environment include-context include-stdout
-                  include-stderr include-filesystem include-process
-                  include-socket include-clock]
-               (reset! final-types types)
-               (original-typed-term-nodes
-                types functions effects
-                include-environment include-context include-stdout
-                include-stderr include-filesystem include-process
-                include-socket include-clock))
-             lower/type-closure-obligations
-             (fn [digest closed clean]
-               (reset! types-closed closed)
-               (original-type-closure-obligations digest closed clean))]
+                      done total)))))]
             (lower/lower-typed-stage
              frozen-source compiler-commit configuration))]
-      (when (false? @types-closed)
-        (report-type-closure-failure! @final-types original-id-in?))
       (publish-stage-work!
        "source-to-typed" "typing-finalization" "ACCEPTED" 1 1)
       result)))

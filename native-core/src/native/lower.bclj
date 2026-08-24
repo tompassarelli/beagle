@@ -21487,6 +21487,49 @@
      (core/typedef-name definition)
      (encode-type-shape (core/typedef-shape definition))]))
 
+(defn type-reference-witnesses
+  [types (Vec core/TypeDef)
+   known-types (Vec core/NativeId)] (Vec core/TypeShapeReferenceWitnessV0)
+  (mapv
+    (fn [definition core/TypeDef] core/TypeShapeReferenceWitnessV0
+      (core/type-shape-reference-witness
+        (core/typedef-shape definition) known-types))
+    types))
+
+(defn type-reference-witnesses-closed?
+  [witnesses (Vec core/TypeShapeReferenceWitnessV0)] Bool
+  (every?
+    (fn [witness core/TypeShapeReferenceWitnessV0] Bool
+      (core/typeshapereferencewitnessv0-closed witness))
+    witnesses))
+
+(defn encode-missing-type-ids
+  [missing (Vec core/NativeId)] String
+  (stages/canonical-set "missing-type-ids"
+    (mapv (fn [id core/NativeId] String (id-value id)) missing)))
+
+(defn type-closure-diagnostics
+  [types (Vec core/TypeDef)
+   witnesses (Vec core/TypeShapeReferenceWitnessV0)] (Vec core/DiagnosticV0)
+  (loop [position Int 0
+         diagnostics (Vec core/DiagnosticV0) []]
+    (if (or (>= position (count types))
+          (>= position (count witnesses)))
+      diagnostics
+      (let [definition core/TypeDef (nth types position)
+            witness core/TypeShapeReferenceWitnessV0 (nth witnesses position)]
+        (recur (+ position 1)
+          (if (core/typeshapereferencewitnessv0-closed witness)
+            diagnostics
+            (conj diagnostics
+              (core/->DiagnosticV0
+                "LOWER-TYPE-CLOSURE"
+                (stages/canonical-record "lower-type-closure-v0"
+                  [(encode-type-def definition)
+                   (encode-missing-type-ids
+                     (core/typeshapereferencewitnessv0-missing-ids
+                       witness))])))))))))
+
 (defn encode-effect [effect core/EffectDef] String
   (let [kind core/EffectKind (core/effectdef-kind effect)
         kind-encoding String (cond
@@ -21871,10 +21914,15 @@
         encoding String (stages/encode-typed-stage typed-stage)
         digest String (stages/content-digest encoding)
         resolutions-valid Bool (typing-resolutions-valid? record-resolutions function-resolutions)
-        types-closed Bool (core/types-refs-closed? types)
+        known-types (Vec core/NativeId) (core/type-ids types)
+        type-witnesses (Vec core/TypeShapeReferenceWitnessV0)
+        (type-reference-witnesses types known-types)
+        types-closed Bool (type-reference-witnesses-closed? type-witnesses)
         clean Bool (term-graph-clean? terms)
         valid Bool (and resolutions-valid types-closed clean)
-        diagnostics (Vec core/DiagnosticV0) (collect-typing-diagnostics record-resolutions function-resolutions)
+        diagnostics (Vec core/DiagnosticV0) (append-diagnostics
+          (collect-typing-diagnostics record-resolutions function-resolutions)
+          (type-closure-diagnostics types type-witnesses))
         obligations (Vec core/ReceiptObligationV0) (vec (concat (type-closure-obligations digest types-closed clean)
                (function-todo-obligations functions digest)))]
     (if valid

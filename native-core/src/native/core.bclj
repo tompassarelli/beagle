@@ -1920,50 +1920,78 @@
         (append-ids ids
           (type-shape-owned-ids (typedef-shape (nth types index))))))))
 
-(defn atom-kind-refs-closed?
-  [kind AtomKind
-   known-types (Vec NativeId)] Bool
-  (match kind
-    [(BoolKind value) true]
-    [(I64Kind value) true]
-    [(F64Kind value) true]
-    [(TextKind value) true]
-    [(BytesKind value) true]
-    [(KeywordKind value) true]
-    [(RefKind target) (id-in? known-types target)]))
+(defrecord TypeShapeReferenceWitnessV0
+  [referenced-ids (Vec NativeId)
+   missing-ids (Vec NativeId)
+   closed Bool])
 
-(defn type-fields-refs-closed?
-  [fields (Vec TypeField)
-   known-types (Vec NativeId)] Bool
-  (every? (fn [field TypeField] Bool (id-in? known-types (typefield-type-id field)))
-    fields))
+(defn missing-type-reference-ids
+  [referenced-ids (Vec NativeId)
+   known-types (Vec NativeId)] (Vec NativeId)
+  (loop [position Int 0
+         missing (Vec NativeId) []
+         seen (Map String Bool) {}]
+    (if (>= position (count referenced-ids))
+      missing
+      (let [reference NativeId (nth referenced-ids position)
+            key String (nativeid-value reference)]
+        (if (or (id-in? known-types reference) (= true (get seen key)))
+          (recur (+ position 1) missing seen)
+          (recur (+ position 1) (conj missing reference)
+            (assoc seen key true)))))))
 
-(defn type-variants-refs-closed?
-  [variants (Vec TypeVariant)
-   known-types (Vec NativeId)] Bool
-  (every? (fn [variant TypeVariant] Bool (optional-id-in? (typevariant-payload-type variant) known-types))
-    variants))
+(defn type-shape-reference-witness
+  [shape TypeShape
+   known-types (Vec NativeId)] TypeShapeReferenceWitnessV0
+  (let [referenced-ids (Vec NativeId) (match shape
+          [(AtomType kind)
+           (match kind
+             [(BoolKind value) []]
+             [(I64Kind value) []]
+             [(F64Kind value) []]
+             [(TextKind value) []]
+             [(BytesKind value) []]
+             [(KeywordKind value) []]
+             [(RefKind target) [target]])]
+          [(RecordType fields)
+           (mapv
+             (fn [field TypeField] NativeId (typefield-type-id field))
+             fields)]
+          ;; Union tags are implicit body-slice reachability, not TypeShape
+          ;; references. Only an explicit payload type closes this relation.
+          [(UnionType variants)
+           (loop [position Int 0
+                  references (Vec NativeId) []]
+             (if (>= position (count variants))
+               references
+               (let [payload (U NativeId Nil)
+                     (typevariant-payload-type (nth variants position))]
+                 (recur (+ position 1)
+                   (if (nil? payload) references
+                     (conj references payload))))))]
+          [(VectorType element-type) [element-type]]
+          [(BufferTypeV0 element-type) [element-type]]
+          [(MapTypeV0 key-type value-type iteration-order)
+           [key-type value-type]]
+          [(SetTypeV0 element-type iteration-order) [element-type]]
+          [(ReferenceType target-type) [target-type]]
+          [(AtomCellTypeV0 content-type) [content-type]]
+          [(FunctionType parameter-types rest-type return-type)
+           (vec (concat parameter-types
+                  (if (nil? rest-type) [] [rest-type])
+                  [return-type]))]
+          [(OutcomeType value-type failure-type)
+           [value-type failure-type]])
+        missing-ids (Vec NativeId)
+        (missing-type-reference-ids referenced-ids known-types)]
+    (->TypeShapeReferenceWitnessV0 referenced-ids missing-ids
+      (= 0 (count missing-ids)))))
 
 (defn type-shape-refs-closed?
   [shape TypeShape
    known-types (Vec NativeId)] Bool
-  (match shape
-    [(AtomType kind) (atom-kind-refs-closed? kind known-types)]
-    [(RecordType fields) (type-fields-refs-closed? fields known-types)]
-    [(UnionType variants) (type-variants-refs-closed? variants known-types)]
-    [(VectorType element-type) (id-in? known-types element-type)]
-    [(BufferTypeV0 element-type) (id-in? known-types element-type)]
-    [(MapTypeV0 key-type value-type iteration-order)
-     (and (id-in? known-types key-type) (id-in? known-types value-type))]
-    [(SetTypeV0 element-type iteration-order) (id-in? known-types element-type)]
-    [(ReferenceType target-type) (id-in? known-types target-type)]
-    [(AtomCellTypeV0 content-type) (id-in? known-types content-type)]
-    [(FunctionType parameter-types rest-type return-type)
-     (and (ids-in? parameter-types known-types)
-       (optional-id-in? rest-type known-types)
-       (id-in? known-types return-type))]
-    [(OutcomeType value-type failure-type)
-     (and (id-in? known-types value-type) (id-in? known-types failure-type))]))
+  (typeshapereferencewitnessv0-closed
+    (type-shape-reference-witness shape known-types)))
 
 (defn types-refs-closed? [types (Vec TypeDef)] Bool
   (let [known-types (Vec NativeId) (type-ids types)]

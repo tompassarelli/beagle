@@ -1,0 +1,5 @@
+#lang beagle
+(ns native.type-closure-consumer
+  (:require [native.type-closure-provider :as provider]))
+
+(defrecord Consumer [(foreign provider/External)])
