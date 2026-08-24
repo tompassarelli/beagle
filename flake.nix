@@ -160,7 +160,7 @@
               private/emit.rkt private/rewrite-cli.rkt private/error-explanation.rkt \
               private/type-view.rkt private/cheatsheet.rkt private/tier-runner.rkt \
               private/daemon.rkt private/facts-roundtrip.rkt \
-              private/facts-check-overlay.rkt; do
+              private/facts-check-overlay.rkt private/project-compiler-session-cli.rkt; do
               [ -f "$out/beagle-lib/$f" ] && extra+=("$out/beagle-lib/$f")
             done
             for f in "$out"/bin/beagle*.rkt; do [ -f "$f" ] && extra+=("$f"); done
