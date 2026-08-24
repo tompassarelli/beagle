@@ -28,6 +28,7 @@ cat >"$work/progress-gate.clj" <<'CLJ'
 (def calls (atom {}))
 (def resolutions (atom []))
 (def sources (atom []))
+(def types (atom [{:id "known" :name "Known" :shape []}]))
 (def source-result (atom (Object.)))
 (def freeze-result (atom (Object.)))
 (def typing-result (atom (Object.)))
@@ -42,14 +43,40 @@ cat >"$work/progress-gate.clj" <<'CLJ'
   (swap! events conj [stage work status completed total]))
 
 (def stages-ns (create-ns (quote progress.fake.stages)))
+(def core-ns (create-ns (quote progress.fake.core)))
 (def lower-ns (create-ns (quote progress.fake.lower)))
 (def slice-ns (create-ns (quote progress.fake.slice)))
 (alias (quote stages) (quote progress.fake.stages))
+(alias (quote core) (quote progress.fake.core))
 (alias (quote lower) (quote progress.fake.lower))
 (alias (quote slice) (quote progress.fake.slice))
 
 (intern stages-ns (quote encode-source-stage)
   (fn [_stage] (called! :encode) :encoded))
+(intern core-ns (quote nativeid-value) identity)
+(intern core-ns (quote typedef-id) :id)
+(intern core-ns (quote typedef-name) :name)
+(intern core-ns (quote typedef-shape) :shape)
+(intern core-ns (quote type-ids) #(mapv :id %))
+(intern core-ns (quote id-in?)
+  (fn [ids target] (boolean (some #(= target %) ids))))
+(intern core-ns (quote ids-in?)
+  (fn [ids allowed]
+    (every? #((deref (ns-resolve core-ns (quote id-in?))) allowed %) ids)))
+(intern core-ns (quote optional-id-in?)
+  (fn [candidate allowed]
+    (or (nil? candidate)
+        ((deref (ns-resolve core-ns (quote id-in?))) allowed candidate))))
+(intern core-ns (quote type-shape-refs-closed?)
+  (fn [shape known-types]
+    ((deref (ns-resolve core-ns (quote ids-in?))) shape known-types)))
+(intern core-ns (quote types-refs-closed?)
+  (fn [definitions]
+    (let [known-types ((deref (ns-resolve core-ns (quote type-ids))) definitions)]
+      (every?
+       #((deref (ns-resolve core-ns (quote type-shape-refs-closed?)))
+         (:shape %) known-types)
+       definitions))))
 (intern lower-ns (quote source-stage-valid?)
   (fn [_stage] (called! :valid) true))
 (intern lower-ns (quote freeze-source-stage)
@@ -84,6 +111,7 @@ cat >"$work/progress-gate.clj" <<'CLJ'
      source configuration)
     ((deref (ns-resolve lower-ns (quote attach-bodies)))
      :env @resolutions @sources)
+    ((deref (ns-resolve core-ns (quote types-refs-closed?))) @types)
     @typing-result))
 
 (load-file (System/getenv "PROGRESS_DEFINITIONS"))
@@ -133,9 +161,13 @@ cat >"$work/progress-gate.clj" <<'CLJ'
 (reset! sources (vec (range 70)))
 (reset! calls {})
 (reset! events [])
-(let [result (observed-lower-typed-stage :source "commit" [])]
+(let [diagnostic (java.io.StringWriter.)
+      result (binding [*err* diagnostic]
+               (observed-lower-typed-stage :source "commit" []))]
   (require! (identical? result @typing-result)
-            "typing observer changed the returned value"))
+            "typing observer changed the returned value")
+  (require! (= "" (str diagnostic))
+            (str "successful typing emitted a closure diagnostic: " diagnostic)))
 (require! (= {:lower-typed-stage 1
               :prelude 1
               :attach-bodies 1
@@ -151,6 +183,25 @@ cat >"$work/progress-gate.clj" <<'CLJ'
 (require! (= ["source-to-typed" "typing-finalization" "ACCEPTED" 1 1]
              (last @events))
           (str "typing final receipt changed: " (last @events)))
+
+(reset! types [{:id "type-b" :name "TypeB" :shape ["missing-z" "missing-a"]}
+               {:id "type-a" :name "TypeA" :shape ["missing-a"]}])
+(reset! calls {})
+(reset! events [])
+(let [diagnostic (java.io.StringWriter.)]
+  (binding [*err* diagnostic]
+    (observed-lower-typed-stage :source "commit" []))
+  (require!
+   (= (str "beagle build: type-closure TypeDef REJECTED"
+           " id=\"type-a\" name=\"TypeA\""
+           " missing-type-ids=[\"missing-a\"] shape=[\"missing-a\"]\n"
+           "beagle build: type-closure TypeDef REJECTED"
+           " id=\"type-b\" name=\"TypeB\""
+           " missing-type-ids=[\"missing-a\" \"missing-z\"]"
+           " shape=[\"missing-z\" \"missing-a\"]\n")
+      (str diagnostic))
+   (str "typing closure diagnostic changed: " diagnostic)))
+(reset! types [{:id "known" :name "Known" :shape []}])
 
 (let [expected (ex-info "body failed" {:expected true})
       caught (atom nil)]
