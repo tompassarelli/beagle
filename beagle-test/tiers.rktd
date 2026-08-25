@@ -135,6 +135,7 @@
              "validate-nix.rkt"
              "check-all-nix.rkt"
              "build-all-nix-reader.rkt" ; Nix build/read dispatch regression coverage
+             "build-profile-parity.rkt" ; explicit checker-profile parity across check/build
              ;; Clojure — promoted Phase D (2026-05).
              ;; emit.rkt is the clj structural suite; emit-clj-behavioral.rkt
              ;; runs the emitted clj via bb (Babashka).

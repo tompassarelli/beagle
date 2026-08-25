@@ -308,7 +308,8 @@
            (parse-program (read-beagle-syntax f) #:source-path f)]))))
   (programs->export-plan (filter values programs)))
 
-(define (build-text-overlay files roots out-dir json? in-place? shadow-output)
+(define (build-text-overlay files roots out-dir json? in-place? shadow-output
+                            check-profile)
   (define captured '())
   (define source->file (make-hash))
   (define source->profile-path (make-hash))
@@ -360,6 +361,7 @@
          (null? captured)
          (check-module-source-closure
           closure
+          #:check-profile check-profile
           #:capture-types? #t
           #:shadow-facts? (and shadow-output #t)
           #:emit? #f
@@ -447,6 +449,7 @@
   (define build-edn? #f)   ; #33: treat file-args as --emit-edn triple dumps
   (define target-override #f)   ; --target: force every file through this target
   (define nix-project-manifest #f)
+  (define check-profile (current-check-profile))
   (define file-args '())
 
   (define-values (roots args-without-roots)
@@ -473,6 +476,18 @@
       [(string=? (car rest) "--warn")
        (set! warn? #t)
        (loop (cdr rest))]
+      [(string=? (car rest) "--profile")
+       (when (null? (cdr rest))
+         (eprintf "beagle-build-all: --profile requires 0, 1, 2, or 3\n")
+         (exit 2))
+       (let ([parsed-profile (string->number (cadr rest))])
+         (unless (and parsed-profile
+                      (exact-integer? parsed-profile)
+                      (<= 0 parsed-profile 3))
+           (eprintf "beagle-build-all: --profile must be 0, 1, 2, or 3\n")
+           (exit 2))
+         (set! check-profile parsed-profile))
+       (loop (cddr rest))]
       [(string=? (car rest) "--in-place")
        (set! in-place? #t)
        (loop (cdr rest))]
@@ -526,7 +541,7 @@
 
   (when (and (null? file-args) (not nix-project-manifest))
     (eprintf
-     "usage: beagle-build-all <file-or-dir> ... [--module-root LOGICAL=PHYSICAL]... [--out <dir>] [--in-place] [--warn]\n       beagle-build-all --nix-project PROJECT.bnix --in-place\n")
+     "usage: beagle-build-all <file-or-dir> ... [--profile 0|1|2|3] [--module-root LOGICAL=PHYSICAL]... [--out <dir>] [--in-place] [--warn]\n       beagle-build-all --nix-project PROJECT.bnix --in-place\n")
     (exit 2))
 
   ;; --build-edn args are triple dumps (any extension), not .b* source — take
@@ -552,13 +567,14 @@
   (define errors 0)
 
   (parameterize
-      ([current-nix-module-omit-attrs
+      ([current-check-profile check-profile]
+       [current-nix-module-omit-attrs
         (if project (nix-project-omit-module-attrs project) '())])
     (cond
       [(and (not build-edn?) (not target-override) (not warn?))
        (define-values (overlay-built overlay-errors)
          (build-text-overlay
-          files roots out-dir json? in-place? shadow-output))
+          files roots out-dir json? in-place? shadow-output check-profile))
        (set! built overlay-built)
        (set! errors overlay-errors)]
       [else

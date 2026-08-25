@@ -2,8 +2,8 @@
 # beagle-build-all: compile multiple hosted Beagle sources in one process.
 #
 # Usage:
-#   bin/beagle-build-all <file-or-dir> ... [--out <dir>] [--shadow-facts PATH]
-#                          [--warn]
+#   bin/beagle-build-all <file-or-dir> ... [--profile 0|1|2|3]
+#                          [--out <dir>] [--shadow-facts PATH] [--warn]
 #
 # Directories are expanded to their Beagle source contents. Output goes to a directory:
 # --out names it; --in-place writes beside each source. With neither, output
