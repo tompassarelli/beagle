@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fact Modeling Distilled"
+  short_description: "Model and admit persistent semantic facts"
+  default_prompt: "Use $fact-modeling-distilled to design and validate this fact-oriented model before admission."
