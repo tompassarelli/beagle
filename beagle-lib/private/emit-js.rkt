@@ -3670,15 +3670,18 @@
      (format "~a === ~v" tmp (kw->prop val))]
     [else (format "~a === ~a" tmp val)]))
 
-(define (emit-match-arm clause tmp)
+(define (emit-match-arm clause tmp
+                        [emit-body
+                         (lambda (body)
+                           (if (= (length body) 1)
+                               (format "return ~a;" (emit-expr (car body)))
+                               (emit-body-return body "")))])
   (define pat (match-clause-pattern clause))
   (define body (match-clause-body clause))
   (define (make-body-str [extra-bound '()])
     (with-bindings extra-bound
       (lambda ()
-        (if (= (length body) 1)
-          (format "return ~a;" (emit-expr (car body)))
-          (emit-body-return body "")))))
+        (emit-body body))))
   (cond
     [(pat-wildcard? pat)
      (format "{ ~a }" (make-body-str))]
@@ -4525,6 +4528,9 @@
     [(cond-form? e)
      (for/or ([c (in-list (cond-form-clauses e))])
        (body-contains-recur? (cond-clause-body c)))]
+    [(match-form? e)
+     (for/or ([c (in-list (match-form-clauses e))])
+       (body-contains-recur? (match-clause-body c)))]
     [(when-let-form? e)
      (body-contains-recur? (when-let-form-body e))]
     [(when-form? e)
@@ -4773,6 +4779,24 @@
      (string-append (string-join parts " else ")
                     (if has-else? ""
                         (format " else { ~a }" (emit-value "null"))))]
+    [(and (match-form? e) (expr-contains-recur? e))
+     (define target-str (emit-expr (match-form-target e)))
+     (define tmp (format "_match_~a" (next-match-id!)))
+     (define clauses (match-form-clauses e))
+     (define arms
+       (for/list ([c (in-list clauses)])
+         (emit-match-arm
+          c tmp
+          (lambda (body) (emit-loop-body-seq body)))))
+     (define needs-fallback?
+       (and (pair? clauses)
+            (let ([last-pat (match-clause-pattern (last clauses))])
+              (not (or (pat-wildcard? last-pat) (pat-var? last-pat))))))
+     (format "{ const ~a = ~a; ~a~a }"
+             tmp target-str (string-join arms " ")
+             (if needs-fallback?
+                 (format " { ~a }" (emit-value "null"))
+                 ""))]
     [(and (do-form? e) (body-contains-recur? (do-form-body e)))
      (define exprs (do-form-body e))
      (define stmts (drop-right exprs 1))

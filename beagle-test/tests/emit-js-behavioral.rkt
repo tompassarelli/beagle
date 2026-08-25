@@ -780,6 +780,17 @@ console.log(JSON.stringify(snapshot()));"
      "console.log(sum_to(5));"
      "15")
 
+   (check-js-output "loop/recur from match record branch"
+     (list '(defrecord Step [value Int])
+           '(defrecord Done [value Int])
+           '(defn finish [(state (U Step Done))] Int
+              (loop [current state acc 0]
+                (match current
+                  [(Step value) (recur (->Done value) (+ acc value))]
+                  [(Done value) (+ acc value)]))))
+     "console.log(finish(Step(4)));"
+     "8")
+
    ;; --- for / map / filter --------------------------------------------------
 
    (check-js-output "for -> map"
