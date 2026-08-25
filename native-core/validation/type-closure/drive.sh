@@ -194,7 +194,8 @@ bb -cp "$compiled" -e '
         (throw (ex-info "declared-duplicate union did not remain structural"
                  {:resolution resolution})))))' "$declared_duplicate_facts"
 
-# This fixture is fact-only; its structural result must not enter lower-typed-stage.
+# Native Core has no standalone TypeDefs for payloadless tags in structural
+# subsets, so this checked/fact-only fixture must not enter lower-typed-stage.
 bb -cp "$compiled" -e '
   (require (quote [native.core :as core])
            (quote [native.lower :as lower])
