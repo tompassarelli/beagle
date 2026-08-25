@@ -247,6 +247,9 @@
   (check-regexp-match #rx"function pos_x\\(" js)
   (check-regexp-match #rx"function pos_z\\(" js)
   (check-regexp-match #rx"export \\{ Pos as \"->Pos\" \\};" js)
+  ;; Generated cross-module consumers call the runtime factory name, while
+  ;; authored Beagle consumers retain the constructor spelling.
+  (check-regexp-match #rx"export \\{ Pos as \"Pos\" \\};" js)
   (check-regexp-match #rx"export \\{ pos_x as \"pos-x\" \\};" js)
   (check-regexp-match #rx"export \\{ pos_z as \"pos-z\" \\};" js)
   ;; The constructor is called by the name it is defined under.

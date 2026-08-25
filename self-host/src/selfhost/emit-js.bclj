@@ -1082,6 +1082,43 @@
                     field-props)]
     (str/join "\n\n" (into (if (nil? validator) [] [validator]) (into [factory] accessors)))))
 
+(defn emit-record-public-esm-exports! [f Any] String
+  (let [name (get f "name")
+        factory (mangle-name name)
+        accessors (mapv
+                    (fn [field Any] String
+                      (let [authored (str (str/lower-case name) "-" (get field "name"))]
+                        (str "export { " (mangle-str authored) " as "
+                          (js-string-lit authored) " };")))
+                    (get f "fields"))]
+    (str/join "\n"
+      (into [(str "export { " factory " as " (js-string-lit (str "->" name)) " };")
+             (str "export { " factory " as " (js-string-lit name) " };")]
+            accessors))))
+
+(defn emit-member-public-esm-exports! [members Any] String
+  (str/join "\n"
+    (vec
+      (apply concat
+        (mapv
+          (fn [member String] Any
+            (let [factory (mangle-name member)]
+              [(str "export { " factory " as " (js-string-lit (str "->" member)) " };")
+               (str "export { " factory " as " (js-string-lit member) " };")]))
+          members)))))
+
+(defn emit-public-esm-form! [f Any] String
+  (let [node (get f "node")
+        emitted (emit-form* f)]
+    (cond
+      (= node "record")
+        (str emitted "\n\n" (emit-record-public-esm-exports! f))
+      (and (= node "defunion") (not (absent? (get f "member-fields"))))
+        (str emitted "\n" (emit-member-public-esm-exports! (get f "members")))
+      (= node "deferror")
+        (str emitted "\n" (emit-member-public-esm-exports! (get f "members")))
+      :else (str "export " emitted))))
+
 ;; Params are bindings (suffixed); object keys are properties (no `$`).
 (defn emit-tagged-factory!
   [member-name String
@@ -2650,7 +2687,7 @@
       (= node "defprotocol") (throw (ex-info "protocol-form is not supported for JS target" {}))
       (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
       (and (= node "static-call") (qualified-reference=? f "js" "export"))
-        (str "export " (emit-form! (nth (get f "args") 0)))
+        (emit-public-esm-form! (nth (get f "args") 0))
       ;; Top-level effect-position forms: route ctrl-flow through the statement
       ;; lowering; emit-stmt-inline! falls back to emit-expr-stmt! for plain exprs.
       :else (emit-stmt-inline! f ""))))
@@ -3053,6 +3090,11 @@
   (expect! "record factory + accessors"
     (= (emit-record! {"name" "Pt" "fields" [{"name" "x"} {"name" "y"}]})
        "function Pt(x, y) {\n  return Object.freeze({_tag: \"Pt\", x, y});\n}\n\nfunction pt_x(r) { return r.x; }\n\nfunction pt_y(r) { return r.y; }"))
+  (expect! "exported record preserves authored and callable constructor names"
+    (let [emitted (emit-public-esm-form!
+                    {"node" "record" "name" "ReceiptEntityRef" "fields" []})]
+      (and (str/includes? emitted "export { ReceiptEntityRef as \"->ReceiptEntityRef\" };")
+           (str/includes? emitted "export { ReceiptEntityRef as \"ReceiptEntityRef\" };"))))
   (expect! "def -> const"
     (= (emit-form! {"node" "def" "name" "tax-rate" "value" {"node" "literal" "kind" "float" "value" 0.08}})
        "const tax_rate = 0.08;"))

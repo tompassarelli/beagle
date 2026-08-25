@@ -1866,10 +1866,23 @@
 
 (define (emit-public-esm-exports interface public-esm-exports)
   (string-join
-   (for/list ([name (in-list (sort (hash-keys public-esm-exports) symbol<?))])
-     (format "export { ~a as ~v };"
-             (mangle-name (public-esm-runtime-name interface name))
-             (hash-ref public-esm-exports name)))
+   (append-map
+    (lambda (name)
+      (define runtime-name (public-esm-runtime-name interface name))
+      (define public-name (hash-ref public-esm-exports name))
+      (define binding (module-interface-binding-ref interface name #f))
+      (append
+       (list (format "export { ~a as ~v };"
+                     (mangle-name runtime-name)
+                     public-name))
+       (if (and binding
+                (record-constructor-kind? (interface-binding-kind binding))
+                (not (equal? (symbol->string runtime-name) public-name)))
+           (list (format "export { ~a as ~v };"
+                         (mangle-name runtime-name)
+                         (symbol->string runtime-name)))
+           '())))
+    (sort (hash-keys public-esm-exports) symbol<?))
    "\n"))
 
 ;; Base path for beagle's JS runtime modules. The emit imports 'beagle/core.js'
