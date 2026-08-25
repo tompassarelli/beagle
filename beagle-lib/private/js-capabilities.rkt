@@ -27,7 +27,8 @@
   (set 'str 'println 'print 'pr 'prn
        'nil? 'some? 'true? 'false? 'zero? 'pos? 'neg? 'even? 'odd?
        'count 'empty? 'first 'second 'last 'rest 'nth
-       'conj 'cons 'assoc 'inc 'dec 'abs 'max 'min 'rand 'rand-int
+       'conj 'cons 'assoc 'transient 'conj! 'persistent!
+       'inc 'dec 'abs 'max 'min 'rand 'rand-int
        'vec 'set 'contains? 'keys 'vals
        'map 'filter 'reduce 'reverse 'sort 'into 'concat
        'apply 'identity 'boolean

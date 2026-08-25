@@ -180,6 +180,26 @@
       "[true,true,true,true,true,true,true,true,true,true,true,true,true,true]\n"
       "[true,true]"))
 
+   (check-js-output "transient vectors preserve ownership and aliasing semantics"
+     (list
+      '(defn append-range! [(seed (Vec Int)) (limit Int)] (Vec Int)
+         (loop [index Int 0
+                owner (TransientVec Int) (transient seed)]
+           (if (= index limit)
+             (persistent! owner)
+             (recur (+ index 1) (conj! owner (+ 10 index)))))))
+     (string-append
+      "const seed = [1, 2];\n"
+      "const built = append_range_bang(seed, 3);\n"
+      "const owner = $$bc$transient_vec(seed);\n"
+      "const successor = $$bc$transient_vec_push(owner, 20);\n"
+      "const frozen = $$bc$transient_vec_freeze(successor);\n"
+      "let pushRejected = false, freezeRejected = false;\n"
+      "try { $$bc$transient_vec_push(owner, 30); } catch (error) { pushRejected = error instanceof TypeError; }\n"
+      "try { $$bc$transient_vec_freeze(owner); } catch (error) { freezeRejected = error instanceof TypeError; }\n"
+      "console.log(JSON.stringify([seed, built, built !== seed, successor === owner, frozen, pushRejected, freezeRejected]));")
+     "[[1,2],[1,2,10,11,12],true,true,[1,2,20],true,true]")
+
    (check-js-behavior "keyword, symbol, nil, and declared scalar identity"
      (list
       `(def literal-keyword Keyword :alpha/item)

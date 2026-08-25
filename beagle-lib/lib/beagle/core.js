@@ -2,6 +2,7 @@ const keywordValues = new Map();
 const listValues = new WeakSet();
 const eagerSeqValues = new WeakSet();
 const recordTypeValues = new WeakMap();
+const transientVectorStates = new WeakMap();
 const NOT_FOUND = Symbol("beagle/not-found");
 
 function protocolIdentity(kind, value) {
@@ -860,6 +861,39 @@ export function conj_value(coll, ...items) {
     throw new TypeError("conj on a HAMT requires the emitter-selected HAMT operation");
   }
   throw new TypeError("conj expects a collection");
+}
+
+function transientVectorState(owner, operation) {
+  const state = transientVectorStates.get(owner);
+  if (state === undefined) {
+    throw new TypeError(`${operation} requires a TransientVec`);
+  }
+  if (!state.live) {
+    throw new TypeError(`${operation} cannot use a consumed TransientVec`);
+  }
+  return state;
+}
+
+export function transient_vec(source) {
+  if (!Array.isArray(source)
+      || listValues.has(source)
+      || eagerSeqValues.has(source)) {
+    throw new TypeError("transient requires a Vec");
+  }
+  const owner = Object.freeze({});
+  transientVectorStates.set(owner, { values: source.slice(), live: true });
+  return owner;
+}
+
+export function transient_vec_push(owner, value) {
+  transientVectorState(owner, "conj!").values.push(value);
+  return owner;
+}
+
+export function transient_vec_freeze(owner) {
+  const state = transientVectorState(owner, "persistent!");
+  state.live = false;
+  return state.values;
 }
 
 export function into_value(target, source) {

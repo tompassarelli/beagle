@@ -250,6 +250,9 @@
               [else
                (tally-rep! 'native)
                (runtime-call "conj_value" args)])]
+    [(transient) (if (= n 1) (runtime-call "transient_vec" args) #f)]
+    [(conj!) (if (= n 2) (runtime-call "transient_vec_push" args) #f)]
+    [(persistent!) (if (= n 1) (runtime-call "transient_vec_freeze" args) #f)]
     [(assoc) (cond
                [(not (and (>= n 3) (odd? n))) #f]
                ;; compound-keyed -> fold hamtMapAssoc (coerce a native coll input)
