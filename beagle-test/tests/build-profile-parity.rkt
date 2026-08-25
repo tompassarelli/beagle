@@ -9,7 +9,8 @@
          racket/system)
 
 (define-runtime-path repo-root "../..")
-(define beagle (build-path repo-root "bin" "beagle"))
+(define beagle-build-all (build-path repo-root "bin" "beagle-build-all"))
+(define beagle-check (build-path repo-root "bin" "beagle-check"))
 
 (define profile-sensitive-async-source
   (string-append
@@ -22,14 +23,14 @@
    "  (Promise String)\n"
    "  (await (check result)))\n"))
 
-(define (run-beagle . arguments)
+(define (run-beagle command . arguments)
   (define stdout (open-output-string))
   (define stderr (open-output-string))
   (define exit-code
     (parameterize ([current-directory repo-root]
                    [current-output-port stdout]
                    [current-error-port stderr])
-      (apply system*/exit-code beagle arguments)))
+      (apply system*/exit-code command arguments)))
   (values exit-code (get-output-string stdout) (get-output-string stderr)))
 
 (define failures
@@ -50,7 +51,7 @@
            (lambda (out) (display profile-sensitive-async-source out)))
 
          (define-values (profile-2-code _profile-2-out profile-2-err)
-           (run-beagle "build" "--profile" "2"
+           (run-beagle beagle-build-all "--profile" "2"
                        (path->string source)
                        "--out" (path->string profile-2-out)))
          (check-equal? profile-2-code 1)
@@ -61,11 +62,11 @@
           (file-exists? (build-path profile-2-out "profile" "parity.js")))
 
          (define-values (check-code _check-out check-err)
-           (run-beagle "check" "--profile" "3" (path->string source)))
+           (run-beagle beagle-check "--profile" "3" (path->string source)))
          (check-equal? check-code 0 check-err)
 
          (define-values (build-code _build-out build-err)
-           (run-beagle "build" "--profile" "3"
+           (run-beagle beagle-build-all "--profile" "3"
                        (path->string source)
                        "--out" (path->string profile-3-out)))
          (check-equal? build-code 0 build-err)
