@@ -1,9 +1,9 @@
 ---
-name: beagle-store-modeling-reference
+name: store-modeling-reference
 description: >-
   Detailed Beagle Store RPC commands, recursive Term and occurrence semantics,
   paging limits, query relations, generated-source authority, and executable
-  examples. Load when beagle-store-modeling-distilled routes here or the user
+  examples. Load when store-modeling-distilled routes here or the user
   explicitly requests those details.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: beagle-store-modeling-distilled
+name: store-modeling-distilled
 description: >-
   Use when BUILDING a program, app, or tool on the Beagle Store engine after its
   semantic model is settled: write and query recursive Terms/Triples through
@@ -32,4 +32,4 @@ the relation through the public structured query contract.
 Generated-source declarations and the exceptions ledger decide source
 authority. For exact commands, recursive Term definitions, history behavior,
 paging limits, JVM route differences, query relations, and executable examples,
-resolve and read `agents path beagle-store-modeling-reference`.
+resolve and read `agents path store-modeling-reference`.
