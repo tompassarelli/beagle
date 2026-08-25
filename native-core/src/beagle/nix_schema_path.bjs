@@ -271,19 +271,20 @@
       (scan-option-path-events
         document ignored-roots (reader/datumread-events read))))))
 
-(defn occurrences-for-path
-  [path String
-   occurrences (Vec OptionPathOccurrence)] (Vec OptionPathOccurrence)
-  (loop [remaining (Vec OptionPathOccurrence) occurrences
-         matches (Vec OptionPathOccurrence) []]
-    (if (empty? remaining)
-      matches
-      (let [occurrence OptionPathOccurrence (first remaining)]
-        (recur
-          (rest remaining)
-          (if (= path (optionpathoccurrence-path occurrence))
-            (conj matches occurrence)
-            matches))))))
+(js/export
+  (defn occurrences-for-path
+    [path String
+     occurrences (Vec OptionPathOccurrence)] (Vec OptionPathOccurrence)
+    (loop [remaining (Vec OptionPathOccurrence) occurrences
+           matches (Vec OptionPathOccurrence) []]
+      (if (empty? remaining)
+        matches
+        (let [occurrence OptionPathOccurrence (first remaining)]
+          (recur
+            (rest remaining)
+            (if (= path (optionpathoccurrence-path occurrence))
+              (conj matches occurrence)
+              matches)))))))
 
 (js/export
   (defn removed-path-uses
