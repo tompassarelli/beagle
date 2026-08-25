@@ -5,9 +5,16 @@
   `(def ~name Box
      (->Box (normalize ~value))))
 
+(defmacro recover-message [body]
+  `(try ~body
+     (catch ExceptionInfo caught
+       (ex-message caught))))
+
 ;; The exported macro expands to these references in the consumer, so they
 ;; must cross the js module boundary with it.
 (js/export (defrecord Box [value String]))
+
+(js/export (def caught String "provider"))
 
 (js/export
   (defn normalize [value String] String

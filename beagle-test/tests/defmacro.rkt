@@ -573,3 +573,26 @@
     '(define-box referred "provider"))
    'macro-definition-site
    'referred))
+
+(test-case "cross-file defmacro: canonical catch keeps its binder local"
+  (define prog
+    (parse-program
+     (map
+      (lambda (form) (datum->syntax #f form))
+      (list
+       '(define-target js)
+       (list 'ns 'test-consumer
+             (list ':require (br 'macro-definition-site ':as 'provider)))
+       '(def recovered String (provider/recover-message "ok"))))
+     #:source-path "test-consumer.bjs"
+     #:module-resolver
+     (lambda (namespace _importer)
+       (and (eq? namespace 'macro-definition-site)
+            macro-definition-site-provider))))
+  (define generated (last (program-forms prog)))
+  (define recovered (def-form-value generated))
+  (define clause (car (try-form-catches recovered)))
+  (define message-call (car (catch-clause-body clause)))
+  (check-eq? (catch-clause-name clause) 'caught)
+  (check-eq? (car (call-form-args message-call)) 'caught)
+  (check-not-exn (lambda () (type-check! prog))))

@@ -1091,15 +1091,16 @@
 
   (define (walk-catch datum env)
     (cond
-      [(and (>= (length datum) 3)
-            (typed-binding-form? (cadr datum)))
-       (define-values (binding local-renames _names)
-         (transform-declaration (cadr datum) env))
+      [(and (>= (length datum) 4)
+            (symbol? (caddr datum)))
+       (define-values (name local-renames _names)
+         (transform-declaration (caddr datum) env))
        (define body-env (scope-extend env local-renames))
        (cons 'catch
-             (cons binding
-                   (for/list ([form (in-list (cddr datum))])
-                     (walk form body-env))))]
+             (cons (protect-type (cadr datum))
+                   (cons name
+                         (for/list ([form (in-list (cdddr datum))])
+                           (walk form body-env)))))]
       [else
        (cons 'catch
              (for/list ([form (in-list (cdr datum))]) (walk form env)))]))
