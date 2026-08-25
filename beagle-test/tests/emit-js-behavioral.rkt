@@ -807,6 +807,20 @@ console.log(JSON.stringify(snapshot()));"
      "console.log(finish(Step(4)));"
      "8")
 
+   (check-js-output "loop/recur from catch do preserves finally"
+     (list `(defn retry [] Int
+              (loop [attempt Int 0]
+                (try
+                  (if (= attempt 0)
+                    (throw (ex-info "retry" ,(mt)))
+                    attempt)
+                  (catch ExceptionInfo error
+                    (do (println "catch") (recur (+ attempt 1))))
+                  (finally (println "finally")))
+                (+ attempt 10))))
+     "console.log(retry());"
+     "catch\nfinally\nfinally\n11")
+
    ;; --- for / map / filter --------------------------------------------------
 
    (check-js-output "for -> map"

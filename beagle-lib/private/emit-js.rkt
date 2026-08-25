@@ -3048,7 +3048,9 @@
                         [current-rename-env loop-rename-env]
                         [current-loop-binding-slots recur-binding-contexts])
            (define body-str
-             (string-join (map (lambda (e) (emit-loop-stmt e bind-names)) body) "\n    "))
+             (emit-loop-body-sequence
+              body bind-names
+              (lambda (value-str) (format "return ~a;" value-str))))
            (define prefix (if has-await "async " ""))
            (format "(~a() => { ~a while (true) {\n    ~a~a~a\n  } })()"
                    prefix
@@ -3225,58 +3227,12 @@
        (error 'beagle "target-case: no branch for target ~a" target))
      (emit-expr branch)]
     [(try-form? e)
-     (define body-str (emit-body-return (try-form-body e) "  "))
-     (define catches (try-form-catches e))
-     (define catch-str
-       (if (null? catches)
-           ""
-           (let* ([caught-name (format "_catch_~a" (next-catch-id!))]
-                  [catch-type
-                   (lambda (c)
-                     (define exception-type (catch-clause-exception-type c))
-                     (cond
-                       [(eq? exception-type ':default) "$$bd$default_catch"]
-                       [(eq? exception-type 'ExceptionInfo) "$$be$ExceptionInfo"]
-                       [(and (symbol? exception-type)
-                             (string-prefix? (symbol->string exception-type) "js/"))
-                        (mangle-str (substring (symbol->string exception-type) 3))]
-                       [(symbol? exception-type) (mangle-name exception-type)]
-                       [else
-                        (error 'beagle-js
-                               "unsupported JavaScript catch type: ~v"
-                               exception-type)]))]
-                  [type-list
-                   (string-join (map catch-type catches) ", ")]
-                  [case-strs
-                   (for/list ([c (in-list catches)] [index (in-naturals)])
-                     (with-bindings (list (catch-clause-name c))
-                       (lambda ()
-                         (define authored-name (catch-clause-name c))
-                         (define name
-                           (mangle-name (binder-output-symbol c authored-name)))
-                         (parameterize
-                             ([current-rename-env
-                               (rename-env-set-binder
-                                (current-rename-env) c authored-name name)])
-                           (format
-                            "case ~a: {\n        const ~a = ~a;\n        ~a\n      }"
-                            index name caught-name
-                            (emit-body-return (catch-clause-body c) "        "))))))])
-             (format
-              " catch (~a) {\n    switch ($$bd$catch_dispatch(~a, [~a])) {\n      ~a\n    }\n  }"
-              caught-name caught-name type-list
-              (string-join case-strs "\n      ")))))
-     (define finally-str
-       (if (try-form-finally-body e)
-         (format " finally {\n    ~a\n  }"
-                 (emit-body-stmts (try-form-finally-body e) "    "))
-         ""))
      (define has-await (or (contains-await? (try-form-body e))
                             (for/or ([c (try-form-catches e)])
                               (contains-await? (catch-clause-body c)))
                             (and (try-form-finally-body e)
                                  (contains-await? (try-form-finally-body e)))))
-     (iife (format "try {\n    ~a\n  }~a~a" body-str catch-str finally-str)
+     (iife (emit-js-try-statement e emit-body-return)
            #:async? has-await)]
 
     [(doseq-form? e)
@@ -4639,6 +4595,59 @@
               seen*)))
   (values strs rep-env type-env rename-env))
 
+;; Render try/catch/finally as statements while letting the caller choose how
+;; each semantically returned body is lowered. Ordinary expression emission
+;; returns values; a loop tail instead lowers recur to assignments + continue.
+(define (emit-js-try-statement e emit-tail-body)
+  (define body-str (emit-tail-body (try-form-body e) "  "))
+  (define catches (try-form-catches e))
+  (define catch-str
+    (if (null? catches)
+        ""
+        (let* ([caught-name (format "_catch_~a" (next-catch-id!))]
+               [catch-type
+                (lambda (c)
+                  (define exception-type (catch-clause-exception-type c))
+                  (cond
+                    [(eq? exception-type ':default) "$$bd$default_catch"]
+                    [(eq? exception-type 'ExceptionInfo) "$$be$ExceptionInfo"]
+                    [(and (symbol? exception-type)
+                          (string-prefix? (symbol->string exception-type) "js/"))
+                     (mangle-str (substring (symbol->string exception-type) 3))]
+                    [(symbol? exception-type) (mangle-name exception-type)]
+                    [else
+                     (error 'beagle-js
+                            "unsupported JavaScript catch type: ~v"
+                            exception-type)]))]
+               [type-list
+                (string-join (map catch-type catches) ", ")]
+               [case-strs
+                (for/list ([c (in-list catches)] [index (in-naturals)])
+                  (with-bindings (list (catch-clause-name c))
+                    (lambda ()
+                      (define authored-name (catch-clause-name c))
+                      (define name
+                        (mangle-name (binder-output-symbol c authored-name)))
+                      (parameterize
+                          ([current-rename-env
+                            (rename-env-set-binder
+                             (current-rename-env) c authored-name name)])
+                        (format
+                         "case ~a: {\n        const ~a = ~a;\n        ~a\n      }"
+                         index name caught-name
+                         (emit-tail-body
+                          (catch-clause-body c) "        "))))))])
+          (format
+           " catch (~a) {\n    switch ($$bd$catch_dispatch(~a, [~a])) {\n      ~a\n    }\n  }"
+           caught-name caught-name type-list
+           (string-join case-strs "\n      ")))))
+  (define finally-str
+    (if (try-form-finally-body e)
+        (format " finally {\n    ~a\n  }"
+                (emit-body-stmts (try-form-finally-body e) "    "))
+        ""))
+  (format "try {\n    ~a\n  }~a~a" body-str catch-str finally-str))
+
 (define (expr-contains-recur? e)
   (cond
     [(recur-form? e) #t]
@@ -4658,6 +4667,10 @@
     [(match-form? e)
      (for/or ([c (in-list (match-form-clauses e))])
        (body-contains-recur? (match-clause-body c)))]
+    [(try-form? e)
+     (or (body-contains-recur? (try-form-body e))
+         (for/or ([c (in-list (try-form-catches e))])
+           (body-contains-recur? (catch-clause-body c))))]
     [(when-let-form? e)
      (body-contains-recur? (when-let-form-body e))]
     [(when-form? e)
@@ -4793,14 +4806,29 @@
                       temp value-str truthy short-str next-str))))]))
   (walk (call-form-args e)))
 
+(define (emit-loop-body-sequence forms bind-names emit-value)
+  (cond
+    [(null? forms) (emit-value "null")]
+    [(null? (cdr forms))
+     (emit-loop-stmt (car forms) bind-names emit-value)]
+    [(expr-contains-recur? (car forms))
+     (emit-loop-stmt
+      (car forms) bind-names
+      (lambda (value-str)
+        (format "~a; ~a" value-str
+                (emit-loop-body-sequence
+                 (cdr forms) bind-names emit-value))))]
+    [else
+     (format "~a ~a"
+             (emit-expr-stmt (car forms))
+             (emit-loop-body-sequence
+              (cdr forms) bind-names emit-value))]))
+
 (define (emit-loop-stmt e bind-names
                         [emit-value (lambda (value-str)
                                       (format "return ~a;" value-str))])
   (define (emit-loop-body-seq forms)
-    (string-append
-     (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
-     (if (> (length forms) 1) " " "")
-     (emit-loop-stmt (last forms) bind-names emit-value)))
+    (emit-loop-body-sequence forms bind-names emit-value))
   (cond
     [(logical-call? e)
      (emit-logical-loop-stmt e bind-names emit-value)]
@@ -4928,13 +4956,12 @@
              (if needs-fallback?
                  (format " { ~a }" (emit-value "null"))
                  ""))]
+    [(and (try-form? e) (expr-contains-recur? e))
+     (emit-js-try-statement
+      e
+      (lambda (body _indent) (emit-loop-body-seq body)))]
     [(and (do-form? e) (body-contains-recur? (do-form-body e)))
-     (define exprs (do-form-body e))
-     (define stmts (drop-right exprs 1))
-     (define last-e (last exprs))
-     (define side-strs (map emit-expr-stmt stmts))
-     (format "~a ~a" (string-join side-strs " ")
-             (emit-loop-stmt last-e bind-names emit-value))]
+     (emit-loop-body-seq (do-form-body e))]
     [(recur-form? e)
      (emit-recur-stmts e bind-names)]
     [else
