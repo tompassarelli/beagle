@@ -20,6 +20,7 @@
 
 (define STDLIB-JS
   (hash
+   'instance?                 (fn-of '(Any Any) 'Bool)
    ;; --- JSON ------------------------------------------------------------------
    (q 'JSON 'parse)        (fn-of '(String) 'Any #:rest 'Any)
    (q 'JSON 'stringify)    (fn-of '(Any) 'String #:rest 'Any)

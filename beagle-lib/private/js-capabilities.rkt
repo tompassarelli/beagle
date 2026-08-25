@@ -33,7 +33,7 @@
        'map 'filter 'reduce 'reverse 'sort 'into 'concat
        'apply 'identity 'boolean
        'string? 'number? 'keyword? 'symbol? 'fn? 'integer? 'boolean? 'any? 'list? 'infinite?
-       'and 'or
+       'and 'or 'instance?
        'throw 'ex-info 'ex-message 'ex-data
        'name 'keyword 'subs 're-find 're-pattern 're-matches 're-seq 're-groups
        'utf8-encode 'utf8-decode 'sha256-bytes

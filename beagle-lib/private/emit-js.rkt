@@ -208,6 +208,13 @@
     [(neg?) (if (= n 1) (format "(~a < 0)" (emit-expr (car args))) #f)]
     [(even?) (if (= n 1) (format "(~a % 2 === 0)" (emit-expr (car args))) #f)]
     [(odd?) (if (= n 1) (format "(~a % 2 !== 0)" (emit-expr (car args))) #f)]
+    [(instance?)
+     (and (= n 2)
+          (or (symbol? (car args)) (qualified-ref? (car args)))
+          (runtime-render-call
+           "record_instance_p"
+           (list (format "~v" (normalized-js-identity (car args) #:record? #t))
+                 (emit-expr (cadr args)))))]
     [(count)
      (if (= n 1)
        (let ([coll (car args)])

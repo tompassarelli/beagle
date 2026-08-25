@@ -1143,6 +1143,18 @@ console.assert(my_x === 1, 'my-x should be 1, got ' + my_x);
 console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
 ")
 
+   (check-js-output "instance? matches exact nominal record identity"
+     (list '(defrecord Point [(x Int)])
+           `(defunion Shape
+              (Circle ,(br '(radius Int)))
+              (Square ,(br '(side Int))))
+           '(defn point-instance? [(value Any)] Bool (instance? Point value))
+           '(defn circle-instance? [(value Any)] Bool (instance? Circle value))
+           '(defn square-instance? [(value Any)] Bool (instance? Square value)))
+     "const classify = value => [point_instance_p(value), circle_instance_p(value), square_instance_p(value)];
+      console.log(JSON.stringify([classify(Point(1)), classify(Circle(2)), classify({}), classify(null)]));"
+     "[[true,false,false],[false,true,false],[false,false,false],[false,false,false]]")
+
    ;; --- edge cases ----------------------------------------------------------
 
    (check-js-output "inc and dec"

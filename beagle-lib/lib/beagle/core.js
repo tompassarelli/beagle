@@ -29,6 +29,13 @@ export function record_type(value) {
   return type;
 }
 
+export function record_instance_p(typeValue, value) {
+  const type = protocolIdentity("record type", typeValue);
+  return value !== null
+    && typeof value === "object"
+    && recordTypeValues.get(value) === type;
+}
+
 export function protocol_registry(entries) {
   const protocols = new Map();
   for (const [protocolValue, typeValue, methodValues] of entries) {
