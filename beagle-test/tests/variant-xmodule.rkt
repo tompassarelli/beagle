@@ -11,6 +11,7 @@
          beagle/private/module-source-root
          beagle/private/parse
          beagle/private/check
+         beagle/private/emit
          beagle/private/types)
 
 (define-runtime-path fixtures-dir "fixtures/variant-xmodule")
@@ -43,6 +44,10 @@
 
 (test-case ":refer of a fielded union's members imports instead of crashing"
   (check-not-exn (lambda () (check-file "ok-refer.bclj"))))
+
+(test-case "JS match projects an imported variant's payload field"
+  (define js (emit-program (fixture-program "jsmatch/consumer.bjs")))
+  (check-regexp-match #rx"const action = _match_[0-9]+[.]action;" js))
 
 (test-case "exhaustiveness reaches an imported union named by its alias"
   (check-exn #rx"not exhaustive; missing cases: prov/Rect"

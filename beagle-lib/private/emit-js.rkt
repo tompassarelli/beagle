@@ -1589,6 +1589,20 @@
         (hash-set next record-name fields)
         next)))
 
+(define (record-namespace-ref name)
+  (define namespaces (current-js-record-ns))
+  (or (hash-ref namespaces name #f)
+      (and (qualified-ref? name)
+           (for/first ([(candidate namespace) (in-hash namespaces)]
+                       #:when
+                       (qualified-ref-same-binding? candidate name))
+             namespace))))
+
+(define (record-reference-leaf name)
+  (if (qualified-ref? name)
+      (qualified-ref-name name)
+      (unqualify-type-name name)))
+
 (define (record-fields-ref table name [fallback #f])
   (or (hash-ref table name #f)
       (and (qualified-ref? name)
@@ -1596,6 +1610,24 @@
                        #:when
                        (qualified-ref-same-binding? candidate name))
              fields))
+      (and
+       (symbol? name)
+       (let* ([provider (record-namespace-ref name)]
+              [candidates
+               (remove-duplicates
+                (for/list ([(candidate fields) (in-hash table)]
+                           #:do [(define candidate-provider
+                                   (record-namespace-ref candidate))]
+                           #:when
+                           (and candidate-provider
+                                (eq? (record-reference-leaf candidate) name)
+                                (or (not provider)
+                                    (eq? candidate-provider provider))))
+                  (cons candidate-provider fields))
+                equal?)])
+         (when (> (length candidates) 1)
+           (error 'beagle-js "ambiguous imported record pattern: ~a" name))
+         (and (pair? candidates) (cdar candidates))))
       fallback))
 
 (define (build-record-field-binding-table prog)

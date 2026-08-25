@@ -1,0 +1,8 @@
+#lang beagle/js
+
+(ns jsmatch.prov)
+
+(js/export
+  (defunion InventoryParseResult
+    (ParsedInventory [(action String)])
+    (InventoryHelp)))

@@ -1,0 +1,10 @@
+#lang beagle/js
+
+(ns jsmatch.consumer
+  (:require [jsmatch.prov :as inventory]))
+
+(js/export
+  (defn action-of [result inventory/InventoryParseResult] String
+    (match result
+      [(ParsedInventory action) action]
+      [(InventoryHelp) "help"])))
