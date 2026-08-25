@@ -8,7 +8,9 @@
          racket/string)
 
 (define-runtime-path repo-root "../..")
-(define beagle (path->string (build-path repo-root "bin" "beagle")))
+(define beagle-check (path->string (build-path repo-root "bin" "beagle-check")))
+(define beagle-check-all
+  (path->string (build-path repo-root "bin" "beagle-check-all")))
 
 (define (write-json-file path value)
   (call-with-output-file path
@@ -49,8 +51,9 @@
   path)
 
 (define (check-agent . files)
+  (define checker (if (= (length files) 1) beagle-check beagle-check-all))
   (define-values (process stdout stdin stderr)
-    (apply subprocess #f #f #f beagle "check" "--agent"
+    (apply subprocess #f #f #f checker "--agent"
            (map path->string files)))
   (close-output-port stdin)
   (define output (port->string stdout))
