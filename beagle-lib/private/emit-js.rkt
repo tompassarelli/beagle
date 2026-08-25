@@ -872,6 +872,7 @@
 (define current-js-context (make-parameter 'stmt))
 (define current-js-inline-scope (make-parameter (set)))
 (define current-js-record-fields (make-parameter (hasheq)))
+(define current-js-union-members (make-parameter (hasheq)))
 (define current-js-record-field-bindings (make-parameter (hasheq)))
 (define current-js-record-ns (make-parameter (hasheq)))
 (define current-js-record-validator-refs (make-parameter (hasheq)))
@@ -1540,6 +1541,24 @@
 
 ;; --- entry point -----------------------------------------------------------
 
+(define (build-union-member-table prog)
+  (define imported
+    (for/hasheq ([(name members)
+                  (in-hash (program-imported-union-members prog))])
+      (values name members)))
+  (for/fold ([table imported]) ([raw (in-list (program-forms prog))])
+    (define form (unwrap-definition-form raw))
+    (cond
+      [(defunion-form? form)
+       (hash-set table
+                 (defunion-form-name form)
+                 (defunion-form-members form))]
+      [(deferror-form? form)
+       (hash-set table
+                 (deferror-form-name form)
+                 (deferror-form-members form))]
+      [else table])))
+
 (define (build-record-field-table prog)
   (define local
     (for/fold ([h (hasheq)]) ([raw (in-list (program-forms prog))])
@@ -1599,9 +1618,57 @@
              namespace))))
 
 (define (record-reference-leaf name)
-  (if (qualified-ref? name)
-      (qualified-ref-name name)
-      (unqualify-type-name name)))
+  (cond
+    [(qualified-ref? name) (qualified-ref-name name)]
+    [(symbol? name)
+     (define spelling (symbol->string name))
+     (define separator
+       (for/fold ([best -1]) ([char (in-string spelling)]
+                              [index (in-naturals)])
+         (if (or (char=? char #\.) (char=? char #\/)) index best)))
+     (if (negative? separator)
+         (unqualify-type-name name)
+         (string->symbol (substring spelling (add1 separator))))]
+    [else name]))
+
+;; Resolve a record pattern only inside the checked scrutinee's closed union.
+;; Imported member names carry the provider-qualified identity needed to select
+;; the right field layout when multiple providers export the same leaf.
+(define (closed-js-union-members type)
+  (define table (current-js-union-members))
+  (define (member-name? name)
+    (for/or ([members (in-hash-values table)])
+      (memq name members)))
+  (cond
+    [(and (type-prim? type)
+          (hash-ref table (type-prim-name type) #f))
+     => values]
+    [(and (type-prim? type)
+          (member-name? (type-prim-name type)))
+     (list (type-prim-name type))]
+    [(and (type-app? type)
+          (hash-ref table (type-app-ctor type) #f))
+     => values]
+    [(and (type-app? type)
+          (member-name? (type-app-ctor type)))
+     (list (type-app-ctor type))]
+    [(type-union? type)
+     (append-map closed-js-union-members (type-union-alts type))]
+    [else '()]))
+
+(define (canonical-js-union-member-name written target-type)
+  (define members (closed-js-union-members target-type))
+  (cond
+    [(memq written members) written]
+    [else
+     (define leaf (record-reference-leaf written))
+     (define matches
+       (remove-duplicates
+        (filter (lambda (member)
+                  (eq? leaf (record-reference-leaf member)))
+                members)
+        eq?))
+     (and (= (length matches) 1) (car matches))]))
 
 (define (record-fields-ref table name [fallback #f])
   (or (hash-ref table name #f)
@@ -1995,6 +2062,7 @@
                  [constrained-binding-counter (box 0)]
                  [catch-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
+                 [current-js-union-members (build-union-member-table prog)]
                  [current-js-record-field-bindings
                   (build-record-field-binding-table prog)]
                  [current-js-record-ns (program-imported-record-ns prog)]
@@ -3679,12 +3747,16 @@
 ;; --- match -----------------------------------------------------------------
 
 (define (emit-match e)
-  (define target-str (emit-expr (match-form-target e)))
+  (define target (match-form-target e))
+  (define target-str (emit-expr target))
+  (define target-type
+    (or (node-type target)
+        (and (symbol? target) (type-of-binding target))))
   (define tmp (format "_match_~a" (next-match-id!)))
   (define clauses (match-form-clauses e))
   (define arms
     (for/list ([c (in-list clauses)])
-      (emit-match-arm c tmp)))
+      (emit-match-arm c tmp target-type)))
   (define async? (or (expr-has-await? (match-form-target e))
                      (for/or ([c (match-form-clauses e)])
                        (contains-await? (match-clause-body c)))))
@@ -3711,7 +3783,7 @@
      (format "~a === ~v" tmp (kw->prop val))]
     [else (format "~a === ~a" tmp val)]))
 
-(define (emit-match-arm clause tmp
+(define (emit-match-arm clause tmp target-type
                         [emit-body
                          (lambda (body)
                            (if (= (length body) 1)
@@ -3747,14 +3819,14 @@
              (string-join tests " || ")
              (make-body-str))]
     [(pat-record? pat)
-     (define rec-name (pat-record-type-name pat))
+     (define written-name (pat-record-type-name pat))
+     (define rec-name
+       (or (canonical-js-union-member-name written-name target-type)
+           written-name))
      (define bindings (pat-record-bindings pat))
      (define fields
        (record-fields-ref (current-js-record-fields) rec-name))
-     (define tag-name
-       (if (qualified-ref? rec-name)
-           (qualified-ref-name rec-name)
-           rec-name))
+     (define tag-name (record-reference-leaf rec-name))
      (define test (format "~a._tag === ~v" tmp (symbol->string tag-name)))
      (cond
        [(or (null? bindings) (not fields))
@@ -4821,13 +4893,17 @@
                     (if has-else? ""
                         (format " else { ~a }" (emit-value "null"))))]
     [(and (match-form? e) (expr-contains-recur? e))
-     (define target-str (emit-expr (match-form-target e)))
+     (define target (match-form-target e))
+     (define target-str (emit-expr target))
+     (define target-type
+       (or (node-type target)
+           (and (symbol? target) (type-of-binding target))))
      (define tmp (format "_match_~a" (next-match-id!)))
      (define clauses (match-form-clauses e))
      (define arms
        (for/list ([c (in-list clauses)])
          (emit-match-arm
-          c tmp
+          c tmp target-type
           (lambda (body) (emit-loop-body-seq body)))))
      (define needs-fallback?
        (and (pair? clauses)

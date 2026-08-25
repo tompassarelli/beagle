@@ -1,0 +1,7 @@
+#lang beagle/js
+
+(ns jsmatch.collision-b)
+
+(js/export
+  (defunion ResultB
+    (DirectoryNamesRejected [(errno Int)])))

@@ -1,0 +1,10 @@
+#lang beagle/js
+
+(ns jsmatch.collision-consumer
+  (:require [jsmatch.collision-a :as a]
+            [jsmatch.collision-b :as b]))
+
+(js/export
+  (defn rejection-reason [result a/ResultA] String
+    (match result
+      [(DirectoryNamesRejected reason) reason])))

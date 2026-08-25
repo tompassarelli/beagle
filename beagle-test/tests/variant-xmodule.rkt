@@ -26,7 +26,8 @@
      (list (module-source-input source-id (build-path fixtures-dir name)))
      (list fixture-root)))
   (define checked
-    (check-module-source-closure closure #:check-profile 3 #:emit? #f))
+    (check-module-source-closure
+     closure #:check-profile 3 #:emit? #f #:capture-types? #t))
   (unless (overlay-check-result-ok? checked)
     (error 'beagle "~a"
            (overlay-diagnostic-message
@@ -48,6 +49,10 @@
 (test-case "JS match projects an imported variant's payload field"
   (define js (emit-program (fixture-program "jsmatch/consumer.bjs")))
   (check-regexp-match #rx"const action = _match_[0-9]+[.]action;" js))
+
+(test-case "JS match selects the scrutinee union when variant leaves collide"
+  (define js (emit-program (fixture-program "jsmatch/collision_consumer.bjs")))
+  (check-regexp-match #rx"const reason = _match_[0-9]+[.]reason;" js))
 
 (test-case "exhaustiveness reaches an imported union named by its alias"
   (check-exn #rx"not exhaustive; missing cases: prov/Rect"

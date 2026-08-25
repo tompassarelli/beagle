@@ -1,0 +1,7 @@
+#lang beagle/js
+
+(ns jsmatch.collision-a)
+
+(js/export
+  (defunion ResultA
+    (DirectoryNamesRejected [(reason String)])))
