@@ -16,6 +16,7 @@ record_with_source="$repo/bin/test/native-exe-smoke/entry_record_with.bgl"
 record_with_unknown_field="$repo/bin/test/native-exe-smoke/entry_record_with_unknown_field.bgl"
 record_with_wrong_type="$repo/bin/test/native-exe-smoke/entry_record_with_wrong_type.bgl"
 cli_source="$repo/bin/test/native-exe-smoke/entry_cli.bgl"
+duplicate_root="$repo/bin/test/native-exe-smoke/duplicate"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-native-exe-smoke.XXXXXX")"
 cleanup() { rm -rf "${scratch:?}"; }
 trap cleanup EXIT
@@ -105,6 +106,23 @@ set -e
 [[ $cli_match_rc -eq 0 ]]
 [[ $cli_empty_rc -eq 17 ]]
 printf 'native-exe smoke: typed process argv enters as (Vec String)\n'
+
+duplicate_stage="$scratch/duplicate-entry"
+duplicate_executable="$duplicate_stage/bin/duplicate-entry"
+mkdir -p "$duplicate_stage/bin"
+"$repo/bin/beagle" native-exe \
+    --out "$duplicate_executable" \
+    --entry duplicate.entry/-main \
+    --module-root "duplicate=$duplicate_root" \
+    --cc "$gcc_bin" \
+    --artifacts "$duplicate_stage" \
+    "$duplicate_root/entry.bgl" "$duplicate_root/helper.bgl" \
+    >"$duplicate_stage/build.log"
+env -i "$duplicate_executable"
+grep -Fq \
+    'native-exe-entry PASS name=duplicate.entry/-main symbol=native_m0_fn_' \
+    "$duplicate_stage/native-exe.report.txt"
+printf 'native-exe smoke: qualified entry survives duplicate lowered basenames\n'
 
 projection_c17="$scratch/projection-c17"
 "$repo/bin/beagle" build --materializer c17 \

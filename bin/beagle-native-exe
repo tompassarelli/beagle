@@ -38,6 +38,7 @@ cc="${CC:-cc}"
 static_link=0
 sources=()
 module_root_args=()
+module_root_specs=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -91,10 +92,12 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] ||
                 die "--module-root needs LOGICAL_PREFIX=PHYSICAL_DIRECTORY"
             module_root_args+=(--module-root "$2")
+            module_root_specs+=("$2")
             shift 2
             ;;
         --module-root=*)
             module_root_args+=(--module-root "${1#*=}")
+            module_root_specs+=("${1#*=}")
             shift
             ;;
         --help|-h)
@@ -288,7 +291,7 @@ for source in "${sources[@]}"; do
     [[ -f "$source" ]] || die "source file not found: $source"
     source="$(realpath "$source")"
     normalized_sources+=("$source")
-    source_ids+=("$(beagle_source_id "$source")")
+    source_ids+=("$(beagle_source_id "$source" "${module_root_specs[@]}")")
 done
 
 closure_arguments=("${module_root_args[@]}")
@@ -554,17 +557,88 @@ lowered_count="$(grep -c '^lowered fn_[0-9][0-9]* ' "$report" || true)"
 [[ "$lowered_count" == "${program_counts[0]}" ]] ||
     die "C17 projection is incomplete: lowered $lowered_count/${program_counts[0]} functions"
 
-mapfile -t entry_rows < <(
-    awk -v name="$entry_name" \
-        '$1 == "lowered" && $2 ~ /^fn_[0-9]+$/ && $3 == name { print $2 }' "$report"
-)
-if [[ ${#entry_rows[@]} -eq 0 ]]; then
-    die "exported entry was not lowered: $entry"
-fi
-if [[ ${#entry_rows[@]} -ne 1 ]]; then
-    die "lowered entry name is ambiguous across modules: $entry"
-fi
-function_index="${entry_rows[0]#fn_}"
+set +e
+function_index="$(python3 - "$entry_namespace" "$entry_name" \
+    "$module_dir/source.facts" "$module_dir/module.native-program" \
+    "${program_counts[0]}" <<'PY'
+import pathlib
+import sys
+
+
+def fail(message):
+    print(f"beagle native-exe: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+namespace, name, facts_path, program_path, expected_count_text = sys.argv[1:]
+subjects = {}
+for line in pathlib.Path(facts_path).read_text(encoding="utf-8").splitlines():
+    fields = line.split("\t")
+    if len(fields) != 4:
+        continue
+    subject, predicate, kind, value = fields
+    if kind == "t" and predicate in {
+        "form-kind", "semantic-unit-module", "semantic-unit-name"
+    }:
+        subjects.setdefault(subject, {})[predicate] = value
+
+matches = [
+    subject
+    for subject, fields in subjects.items()
+    if fields.get("form-kind") == "defn"
+    and fields.get("semantic-unit-module") == namespace
+    and fields.get("semantic-unit-name") == name
+]
+if len(matches) != 1:
+    fail(f"entry source identity is not unique: {namespace}/{name}")
+
+
+def canonical_id(domain, parts):
+    encoded = "".join(f"{len(part)}:{part}" for part in parts)
+    return f"native-id-v0:{len(domain)}:{domain}:{encoded}"
+
+
+source_id = canonical_id("native-slice-v0/node", matches)
+target_id = canonical_id("native-lower-v0/function", [source_id, name])
+encoding = pathlib.Path(program_path).read_text(encoding="utf-8")
+marker = "18:native-function-v0:"
+function_ids = []
+position = 0
+while True:
+    marker_position = encoding.find(marker, position)
+    if marker_position < 0:
+        break
+    length_start = marker_position + len(marker)
+    length_end = encoding.find(":", length_start)
+    if length_end < 0 or not encoding[length_start:length_end].isdigit():
+        fail("frozen Native program has a malformed function identity")
+    value_start = length_end + 1
+    value_end = value_start + int(encoding[length_start:length_end])
+    function_ids.append(encoding[value_start:value_end])
+    position = value_end
+
+expected_count = int(expected_count_text)
+if len(function_ids) != expected_count or len(set(function_ids)) != expected_count:
+    fail(
+        "frozen Native program function identities do not match its report: "
+        f"{len(function_ids)}/{expected_count}"
+    )
+ordered_ids = sorted(function_ids)
+if target_id not in ordered_ids:
+    fail(f"exported entry was not lowered: {namespace}/{name}")
+print(ordered_ids.index(target_id))
+PY
+)"
+function_index_rc=$?
+set -e
+[[ $function_index_rc -eq 0 ]] || exit "$function_index_rc"
+[[ "$function_index" =~ ^[0-9]+$ ]] ||
+    die "lowered entry index is malformed: $entry"
+entry_row_count="$(awk -v symbol="fn_$function_index" -v name="$entry_name" \
+    '$1 == "lowered" && $2 == symbol && $3 == name { count++ } END { print count + 0 }' \
+    "$report")"
+[[ "$entry_row_count" == 1 ]] ||
+    die "lowered entry identity disagrees with the Core report: $entry"
 symbol="native_m0_fn_$function_index"
 
 mapfile -t prototypes < <(grep -E "^[A-Za-z_][A-Za-z0-9_]* ${symbol}\\(.*\\);$" \

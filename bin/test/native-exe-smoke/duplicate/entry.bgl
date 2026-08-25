@@ -1,0 +1,6 @@
+#lang beagle
+(ns duplicate.entry
+  (:require [duplicate.helper :as helper]))
+
+(defn -main [] Int
+  (helper/-main))

@@ -1,0 +1,5 @@
+#lang beagle
+(ns duplicate.helper)
+
+(defn -main [] Int
+  0)
