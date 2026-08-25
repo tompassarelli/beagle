@@ -4,6 +4,7 @@
          racket/path
          racket/file
          racket/list
+         racket/runtime-path
          racket/set
          racket/string
          "parse.rkt"
@@ -26,6 +27,8 @@
          "nix-project.rkt"
          ;; #33 datum-IR: build straight from fact triples, skipping the text trip
          (only-in "facts-roundtrip.rkt" edn-triples->syntax read-edn-triples))
+
+(define-runtime-path canonical-js-runtime-root "../lib")
 
 (define (extension-for-target target)
   (case target
@@ -76,6 +79,17 @@
       (write-json document port)
       (newline port))))
 
+(define (materialize-js-runtime-requires! prog out-dir)
+  (when out-dir
+    (for ([entry (in-list (program-requires prog))])
+      (define relative-path (ns->path (require-entry-ns entry) 'js))
+      (define runtime-source
+        (build-path canonical-js-runtime-root relative-path))
+      (when (file-exists? runtime-source)
+        (define runtime-output (build-path out-dir relative-path))
+        (make-parent-directory* runtime-output)
+        (copy-file runtime-source runtime-output #t)))))
+
 (define (emit-checked-program prog path out-dir in-place? export-plan
                               #:warning-count [warning-count 0]
                               #:artifact-sink
@@ -120,7 +134,9 @@
     (make-directory* out-dir-part))
 
   (if (eq? target 'js)
-      (write-js-artifacts prog path out-path source)
+      (begin
+        (write-js-artifacts prog path out-path source)
+        (materialize-js-runtime-requires! prog out-dir))
       (with-output-to-file out-path #:exists 'replace
         (lambda () (display source))))
 
