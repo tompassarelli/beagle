@@ -366,6 +366,7 @@
           buildInputs = [
             racket
             pkgs.babashka
+            pkgs.python3
             pkgs.clojure
             pkgs.bun
             pkgs.qbe
