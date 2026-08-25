@@ -48,6 +48,20 @@
         # instantiated for this system's pkgs.
         cljpkgs = clj-nix.packages.${system};
 
+        # The canonical hosted compiler artifact.
+        beagleSelfhost = cljpkgs.mkGraalBin {
+          cljDrv = cljpkgs.mkCljBin {
+            projectSrc = ./self-host;
+            name = "beagle/beagle-selfhost";
+            main-ns = "selfhost.main";
+          };
+          graalvm = pkgs.graalvmPackages.graalvm-ce;
+          extraNativeImageBuildArgs = [
+            "--no-fallback"
+            "--features=clj_easy.graal_build_time.InitClojureClasses"
+            "--initialize-at-build-time=com.fasterxml.jackson"
+          ];
+        };
         # --- THE PIN ---------------------------------------------------------
         # Racket is pinned through this flake's locked nixpkgs. The whole point
         # of packaging beagle is that its .zo bytecode is version-specific:
@@ -119,15 +133,17 @@
             cp -r bin "$out/bin"
             cp -r native-core "$out/native-core"
             cp -r store "$out/store"
-            mkdir -p "$out/self-host"
+            mkdir -p "$out/self-host/native"
             cp -r self-host/seed "$out/self-host/seed"
+            cp self-host/native/stage0-select.sh \
+              "$out/self-host/native/stage0-select.sh"
             # bin/test/ is the test-harness DIRECTORY, not an executable — if it
             # lands on PATH it shadows POSIX `test` system-wide (root shell-outs
             # exec a directory -> EACCES; broke nixos-rebuild 2026-07-09).
             rm -rf "$out/bin/test"
             if [ -d share ]; then cp -r share "$out/share"; fi
             chmod -R u+w "$out/beagle-lib" "$out/bin" "$out/native-core" \
-              "$out/store" "$out/self-host/seed"
+              "$out/store" "$out/self-host/seed" "$out/self-host/native"
 
             # Collection link: racket resolves a collection by directory NAME on
             # the search path. The collection is named "beagle" but the dir is
@@ -215,6 +231,9 @@
                 --set BEAGLE_STORE_OUT "$out/store/out" \
                 --set BEAGLE_STORE_JAVA "${pkgs.jdk}/bin/java" \
                 --set BEAGLE_PACKAGED_COMPILER_COMMIT "$BEAGLE_PACKAGED_COMPILER_COMMIT" \
+                --set BEAGLE_NATIVE_BIN "${beagleSelfhost}/bin/beagle-selfhost" \
+                --set _BEAGLE_SELFHOST_EXACT_NATIVE_BIN \
+                  "${beagleSelfhost}/bin/beagle-selfhost" \
                 --prefix PATH : "${runtimePath}"
             done
 
@@ -239,6 +258,12 @@
         mkApp = name: {
           type = "app";
           program = "${beagle}/bin/${name}";
+        };
+        mkBeagleCommandApp = command: {
+          type = "app";
+          program = "${pkgs.writeShellScript "beagle-${command}-app" ''
+            exec ${beagle}/bin/beagle ${command} "$@"
+          ''}";
         };
 
         # --- STAGE1 FULL NATIVE COMPILER ------------------------------------
@@ -309,28 +334,16 @@
         # the sandbox (native/deps.edn's "../seed" would escape it). Regenerate
         # deps-lock.json with `nix run github:jlesquembre/clj-nix#deps-lock` in
         # self-host/ whenever self-host/deps.edn changes.
-        packages.beagle-selfhost = cljpkgs.mkGraalBin {
-          cljDrv = cljpkgs.mkCljBin {
-            projectSrc = ./self-host;
-            name = "beagle/beagle-selfhost";
-            main-ns = "selfhost.main";
-          };
-          graalvm = pkgs.graalvmPackages.graalvm-ce;
-          extraNativeImageBuildArgs = [
-            "--no-fallback"
-            "--features=clj_easy.graal_build_time.InitClojureClasses"
-            "--initialize-at-build-time=com.fasterxml.jackson"
-          ];
-        };
+        packages.beagle-selfhost = beagleSelfhost;
 
         apps = {
           default = mkApp "beagle";
           beagle = mkApp "beagle";
           beagle-doctor = mkApp "beagle-doctor";
-          beagle-build = mkApp "beagle-build";
+          beagle-build = mkBeagleCommandApp "build";
           beagle-validate = mkApp "beagle-validate";
           beagle-syntax = mkApp "beagle-syntax";
-          beagle-check = mkApp "beagle-check";
+          beagle-check = mkBeagleCommandApp "check";
           beagle-schema = mkApp "beagle-schema";
           store = {
             type = "app";

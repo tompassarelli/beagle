@@ -8,10 +8,10 @@ toolchain.
 compiler is a self-contained GraalVM native-image
 (`native/beagle-selfhost`), built reproducibly with `nix build
 .#beagle-selfhost`. Running the seed under [babashka](https://babashka.org)
-(`bb -cp seed …`) is a **dev convenience** and the substrate the remint
-fixpoint loop bootstraps from — the seed `.clj` *is* the native binary's
-source, held byte-identical to it. So: native binary = the runtime compiler
-artifact; the bb seed is only a build-time bootstrap boundary. The parity harness (`verify-selfhost.sh`)
+(`bb -cp seed …`) is the substrate the remint fixpoint loop bootstraps from —
+the seed `.clj` *is* the native binary's source, held byte-identical to it. So:
+native binary = the runtime compiler artifact; the bb seed is only a remint and
+bootstrap boundary. The parity harness (`verify-selfhost.sh`)
 prefers a checkout-local native only when its `.seed-nar-hash` sidecar matches
 the exact seed; a missing or stale sidecar fails visibly. Override the native
 runtime path deliberately with `BEAGLE_NATIVE_BIN`; an empty path fails.
@@ -68,7 +68,7 @@ self-host/native/beagle-selfhost check FILE.bclj
 self-host/native/beagle-selfhost ast   FILE.bclj   # typed-AST JSON
 ```
 
-Dev fallback (bb-run seed — no build step, always available):
+Explicit remint/bootstrap substrate (not a normal compiler route):
 
 ```sh
 bb -cp self-host/seed -m selfhost.main emit  FILE.bclj   # compile to stdout
@@ -185,7 +185,8 @@ absolute checkout paths and remain byte-stable across machines.
 
 `native/` builds a self-contained GraalVM native-image of the seed compiler
 (the same emitted `.clj` babashka runs — the seed is also real JVM Clojure).
-This binary is the canonical stage0 compiler; bb is the dev fallback.
+This binary is the canonical stage0 compiler; bb is only the remint/bootstrap
+substrate.
 
 Reproducible build (preferred — pure clj-nix, pinned toolchain):
 

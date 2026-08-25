@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# Normal hosted compiler seam. Sourced by bin/beagle before any Racket setup.
+# A hosted invocation selected here is final: native diagnostics and failures
+# are never retried through Racket or Babashka.
+
+BEAGLE_HOSTED_NOT_APPLICABLE=200
+
+_beagle_hosted_error() {
+    printf 'beagle: %s\n' "$*" >&2
+    return 2
+}
+
+_beagle_hosted_target_for_source() {
+    local source="$1" target
+    for target in "${BEAGLE_HOSTED_TARGET_IDS[@]}"; do
+        if [[ "$source" == *".${BEAGLE_TARGET_SRC_EXT[$target]}" ]]; then
+            printf '%s\n' "$target"
+            return 0
+        fi
+    done
+    return 1
+}
+
+_beagle_hosted_prepare_native() {
+    local selector="$BEAGLE_DIR/self-host/native/stage0-select.sh"
+    local explicit=0 candidate_real expected_real expected_output
+    local sidecar recorded_hash current_hash
+
+    [[ "${BEAGLE_NATIVE_BIN+x}" == x ]] && explicit=1
+
+    [[ -r "$selector" ]] ||
+        _beagle_hosted_error "native hosted compiler selector is unavailable: $selector" || return
+    # shellcheck source=../self-host/native/stage0-select.sh
+    source "$selector"
+    beagle_select_stage0 \
+        "$BEAGLE_DIR/self-host/seed" \
+        "$BEAGLE_DIR/self-host/native/beagle-selfhost" || return $?
+    [[ "$STAGE0" == native && -n "$NATIVE_BIN" ]] ||
+        _beagle_hosted_error "native hosted compiler selection returned no executable" || return
+
+    candidate_real="$(realpath "$NATIVE_BIN")" ||
+        _beagle_hosted_error "cannot resolve selected native hosted compiler: $NATIVE_BIN" || return
+    if [[ -n "${_BEAGLE_SELFHOST_EXACT_NATIVE_BIN:-}" ]]; then
+        expected_real="$(realpath "$_BEAGLE_SELFHOST_EXACT_NATIVE_BIN")" ||
+            _beagle_hosted_error "cannot resolve packaged native hosted compiler: $_BEAGLE_SELFHOST_EXACT_NATIVE_BIN" || return
+        [[ "$candidate_real" == "$expected_real" ]] ||
+            _beagle_hosted_error "selected native hosted compiler mismatch: $candidate_real != $expected_real" || return
+    elif [[ $explicit -eq 1 && "$candidate_real" == /nix/store/* ]]; then
+        command -v nix >/dev/null 2>&1 ||
+            _beagle_hosted_error "cannot verify selected native hosted compiler identity (nix unavailable)" || return
+        expected_output="$(nix path-info "$BEAGLE_DIR#beagle-selfhost")" ||
+            _beagle_hosted_error "cannot resolve the exact .#beagle-selfhost artifact; build it first" || return
+        expected_real="$(realpath "$expected_output/bin/beagle-selfhost")" ||
+            _beagle_hosted_error "exact .#beagle-selfhost artifact is unavailable: $expected_output/bin/beagle-selfhost" || return
+        [[ "$candidate_real" == "$expected_real" ]] ||
+            _beagle_hosted_error "selected native hosted compiler mismatch: $candidate_real != $expected_real" || return
+    elif [[ $explicit -eq 1 ]]; then
+        sidecar="${candidate_real}.seed-nar-hash"
+        [[ -r "$sidecar" ]] ||
+            _beagle_hosted_error "selected checkout-local native hosted compiler lacks seed provenance: $sidecar" || return
+        command -v nix >/dev/null 2>&1 ||
+            _beagle_hosted_error "cannot verify selected native hosted compiler provenance (nix unavailable)" || return
+        recorded_hash="$(tr -d '\r\n' < "$sidecar")"
+        current_hash="$(nix hash path "$BEAGLE_DIR/self-host/seed")" ||
+            _beagle_hosted_error "cannot hash hosted compiler seed: $BEAGLE_DIR/self-host/seed" || return
+        [[ -n "$recorded_hash" && "$recorded_hash" == "$current_hash" ]] ||
+            _beagle_hosted_error "selected native hosted compiler seed mismatch: artifact ${recorded_hash:-missing}, checkout $current_hash" || return
+    fi
+
+    BEAGLE_HOSTED_NATIVE="$candidate_real"
+}
+
+_beagle_hosted_parse_single_source() {
+    BEAGLE_HOSTED_MODULE_ROOTS=()
+    BEAGLE_HOSTED_SOURCE=""
+    local command="$1"
+    shift
+    local after_double_dash=false arg oracle
+    if [[ "$command" == check ]]; then
+        oracle=bin/beagle-check-all
+    else
+        oracle=bin/beagle-ast
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        arg="$1"
+        shift
+        if $after_double_dash; then
+            [[ -z "$BEAGLE_HOSTED_SOURCE" ]] ||
+                _beagle_hosted_error "$command accepts exactly one hosted source; use $oracle as the explicit Racket oracle" || return
+            BEAGLE_HOSTED_SOURCE="$arg"
+            continue
+        fi
+        case "$arg" in
+            --module-root)
+                [[ $# -gt 0 ]] ||
+                    _beagle_hosted_error "$command: --module-root requires LOGICAL_PREFIX=PHYSICAL_DIRECTORY" || return
+                BEAGLE_HOSTED_MODULE_ROOTS+=(--module-root "$1")
+                shift
+                ;;
+            --module-root=*)
+                BEAGLE_HOSTED_MODULE_ROOTS+=(--module-root "${arg#*=}")
+                ;;
+            --)
+                after_double_dash=true
+                ;;
+            --*)
+                _beagle_hosted_error "$command option is not supported by the normal native hosted compiler: $arg; invoke bin/beagle-$command directly for the Racket oracle" || return
+                ;;
+            *)
+                [[ -z "$BEAGLE_HOSTED_SOURCE" ]] ||
+                    _beagle_hosted_error "$command accepts exactly one hosted source; use $oracle as the explicit Racket oracle" || return
+                BEAGLE_HOSTED_SOURCE="$arg"
+                ;;
+        esac
+    done
+    [[ -n "$BEAGLE_HOSTED_SOURCE" ]] ||
+        _beagle_hosted_error "$command requires one hosted source" || return
+}
+
+_beagle_hosted_check_or_ast() {
+    local command="$1"
+    shift
+    _beagle_hosted_parse_single_source "$command" "$@" || return $?
+
+    local target
+    target="$(_beagle_hosted_target_for_source "$BEAGLE_HOSTED_SOURCE")" || {
+        [[ "$BEAGLE_HOSTED_SOURCE" == *".${BEAGLE_TARGET_SRC_EXT[core]}" ]] &&
+            return "$BEAGLE_HOSTED_NOT_APPLICABLE"
+        _beagle_hosted_error "$command requires a hosted source (${BEAGLE_HOSTED_TARGET_IDS[*]})"
+        return
+    }
+    [[ -f "$BEAGLE_HOSTED_SOURCE" ]] ||
+        _beagle_hosted_error "$command source file not found: $BEAGLE_HOSTED_SOURCE" || return
+
+    _beagle_hosted_prepare_native || return $?
+    exec "$BEAGLE_HOSTED_NATIVE" "$command" --target "$target" \
+        "${BEAGLE_HOSTED_MODULE_ROOTS[@]}" "$BEAGLE_HOSTED_SOURCE"
+}
+
+_beagle_hosted_build() {
+    local explicit_target="" target_seen=false after_double_dash=false
+    local arg source source_profile target output_extension namespace relative out
+    local -a module_roots=() positionals=()
+
+    for arg in "$@"; do
+        case "$arg" in
+            --materializer|--materializer=*)
+                return "$BEAGLE_HOSTED_NOT_APPLICABLE"
+                ;;
+        esac
+    done
+
+    while [[ $# -gt 0 ]]; do
+        arg="$1"
+        shift
+        if $after_double_dash; then
+            positionals+=("$arg")
+            continue
+        fi
+        case "$arg" in
+            --target)
+                [[ $# -gt 0 ]] ||
+                    _beagle_hosted_error "build: --target requires a target" || return
+                ! $target_seen ||
+                    _beagle_hosted_error "build: --target may be specified only once" || return
+                target_seen=true
+                explicit_target="$1"
+                shift
+                ;;
+            --target=*)
+                ! $target_seen ||
+                    _beagle_hosted_error "build: --target may be specified only once" || return
+                target_seen=true
+                explicit_target="${arg#*=}"
+                ;;
+            --module-root)
+                [[ $# -gt 0 ]] ||
+                    _beagle_hosted_error "build: --module-root requires LOGICAL_PREFIX=PHYSICAL_DIRECTORY" || return
+                module_roots+=(--module-root "$1")
+                shift
+                ;;
+            --module-root=*)
+                module_roots+=(--module-root "${arg#*=}")
+                ;;
+            --)
+                after_double_dash=true
+                ;;
+            --*)
+                _beagle_hosted_error "build option is not supported by the normal native hosted compiler: $arg; invoke bin/beagle-build-all directly for the Racket oracle" || return
+                ;;
+            *)
+                positionals+=("$arg")
+                ;;
+        esac
+    done
+
+    [[ ${#positionals[@]} -ge 1 && ${#positionals[@]} -le 2 ]] ||
+        _beagle_hosted_error "build accepts one hosted source and an optional output; invoke bin/beagle-build-all directly for the Racket oracle" || return
+    source="${positionals[0]}"
+    source_profile="$(_beagle_hosted_target_for_source "$source")" || {
+        [[ "$source" == *".${BEAGLE_TARGET_SRC_EXT[core]}" ]] &&
+            return "$BEAGLE_HOSTED_NOT_APPLICABLE"
+        _beagle_hosted_error "build requires a hosted source (run: beagle langs --view extensions)"
+        return
+    }
+    [[ -f "$source" ]] ||
+        _beagle_hosted_error "build source file not found: $source" || return
+
+    target="${explicit_target:-$source_profile}"
+    beagle_known_hosted_target "$target" ||
+        _beagle_hosted_error "unsupported hosted --target '$target' (${BEAGLE_HOSTED_TARGET_IDS[*]})" || return
+    output_extension="${BEAGLE_TARGET_OUT_EXT[$target]}"
+
+    if [[ ${#positionals[@]} -eq 2 ]]; then
+        out="${positionals[1]}"
+    else
+        namespace="$(sed -nE 's/^[[:space:]]*\(ns[[:space:]]+([A-Za-z0-9._-]+).*/\1/p' "$source" | head -1 | tr -d '[:space:]')"
+        [[ -n "$namespace" ]] || namespace=beagle.user
+        if [[ "$output_extension" == clj ]]; then
+            relative="$(printf '%s\n' "$namespace" | tr '.-' '/_')"
+        else
+            relative="${namespace//./\/}"
+        fi
+        out="${BEAGLE_OUT:-$BEAGLE_DIR/.beagle-out}/$relative.$output_extension"
+    fi
+
+    _beagle_hosted_prepare_native || return $?
+    mkdir -p "$(dirname "$out")"
+    local tmp status
+    tmp="$(mktemp "${out}.XXXXXX")"
+    if "$BEAGLE_HOSTED_NATIVE" emit --target "$target" \
+        "${module_roots[@]}" "$(realpath "$source")" > "$tmp"; then
+        mv "$tmp" "$out"
+    else
+        status=$?
+        rm -f "$tmp"
+        return "$status"
+    fi
+    printf '%s -> %s\n' "$source" "$out" >&2
+
+    if [[ "$output_extension" == nix && "${BEAGLE_NIX_EVAL_CHECK:-0}" == 1 ]]; then
+        if command -v nix-instantiate >/dev/null 2>&1; then
+            nix-instantiate --parse "$out" >/dev/null
+        else
+            _beagle_hosted_error "BEAGLE_NIX_EVAL_CHECK=1 but nix-instantiate is unavailable"
+        fi
+    fi
+}
+
+_beagle_hosted_facts_roundtrip() {
+    _beagle_hosted_prepare_native || return $?
+    exec "$BEAGLE_HOSTED_NATIVE" facts-roundtrip "$@"
+}
+
+beagle_try_hosted_dispatch() {
+    local command="${1:-}"
+    [[ $# -gt 0 ]] && shift
+    case "$command" in
+        build) _beagle_hosted_build "$@" ;;
+        check) _beagle_hosted_check_or_ast check "$@" ;;
+        ast) _beagle_hosted_check_or_ast ast "$@" ;;
+        facts-roundtrip) _beagle_hosted_facts_roundtrip "$@" ;;
+        *) return "$BEAGLE_HOSTED_NOT_APPLICABLE" ;;
+    esac
+}

@@ -1,47 +1,73 @@
 #!/usr/bin/env bash
+# Focused normal-hosted cutover check. The caller supplies the exact realized
+# .#beagle-selfhost artifact; one exec trace proves that every supported public
+# route selects those bytes and never starts Racket or Babashka.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-selfhost-daily.XXXXXX")"
+: "${BEAGLE_NATIVE_BIN:?set BEAGLE_NATIVE_BIN to the realized .#beagle-selfhost binary}"
+command -v strace >/dev/null 2>&1 || {
+    echo "hosted selfhost normal: strace is required for descendant evidence" >&2
+    exit 2
+}
+
+native="$(realpath "$BEAGLE_NATIVE_BIN")"
+[[ -x "$native" ]] || {
+    echo "hosted selfhost normal: native artifact is not executable: $native" >&2
+    exit 2
+}
+
+expected_hash="$(nix hash path "$ROOT/self-host/seed")"
+
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-hosted-selfhost-normal.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
-fake="$scratch/beagle"
-mkdir -p "$fake/bin" "$fake/self-host/native" "$fake/self-host/seed" \
-    "$fake/share" "$scratch/work" "$scratch/inbox"
-cp "$ROOT/bin/beagle-dev" "$fake/bin/beagle-dev"
-cp "$ROOT/share/targets.sh" "$fake/share/targets.sh"
-cp "$ROOT/self-host/native/stage0-select.sh" \
-    "$fake/self-host/native/stage0-select.sh"
 
-cat > "$fake/bin/beagle" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "${FAKE_LEGACY_LOG:?}"
-EOF
-cat > "$fake/bin/beagle-build" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "${FAKE_RACKET_LOG:?}"
-out="${!#}"
-printf '%s\n' "${FAKE_RACKET_TEXT:?}" > "$out"
-EOF
-cat > "$scratch/beagle-selfhost" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "${FAKE_NATIVE_LOG:?}"
-printf '%s\n' "${FAKE_NATIVE_TEXT:?}"
-EOF
-chmod +x "$fake/bin/beagle" "$fake/bin/beagle-build" \
-    "$fake/bin/beagle-dev" "$scratch/beagle-selfhost"
-
-known="$scratch/work/known.bclj"
-cat > "$known" <<'EOF'
+cat > "$scratch/known.bclj" <<'EOF'
 #lang beagle/clj
-(ns daily.known)
+(ns hosted.known)
 (def answer Int 42)
 EOF
+cat > "$scratch/known.bjs" <<'EOF'
+#lang beagle/js
+(ns hosted.known-js)
+(def answer Int 42)
+EOF
+cat > "$scratch/known.bnix" <<'EOF'
+#lang beagle/nix
+(ns hosted.known-nix)
+(def answer Int 42)
+EOF
+cat > "$scratch/invalid.bclj" <<'EOF'
+#lang beagle/clj
+(ns hosted.invalid)
+(def answer Int "wrong")
+EOF
 
-export FAKE_LEGACY_LOG="$scratch/legacy.log"
-export FAKE_NATIVE_LOG="$scratch/native.log"
-export FAKE_RACKET_LOG="$scratch/racket.log"
-export BEAGLE_NATIVE_BIN="$scratch/beagle-selfhost"
-export BEAGLE_SELFHOST_DIVERGENCE_DIR="$scratch/inbox"
+export ROOT scratch
+export BEAGLE_NATIVE_BIN="$native"
+export _BEAGLE_SELFHOST_EXACT_NATIVE_BIN="$native"
+
+trace="$scratch/exec.trace"
+strace -f -qq -e trace=execve -o "$trace" \
+    bash -c '
+        set -euo pipefail
+        "$ROOT/bin/beagle" build "$scratch/known.bclj" "$scratch/out.clj"
+        "$ROOT/bin/beagle" build "$scratch/known.bjs" "$scratch/out.js"
+        "$ROOT/bin/beagle" build "$scratch/known.bnix" "$scratch/out.nix"
+        "$ROOT/bin/beagle" check "$scratch/known.bclj" \
+            >"$scratch/check.out" 2>"$scratch/check.err"
+        "$ROOT/bin/beagle" ast "$scratch/known.bclj" \
+            >"$scratch/ast.json" 2>"$scratch/ast.err"
+        "$ROOT/bin/beagle" facts-roundtrip --emit-edn "$scratch/known.bclj" \
+            >"$scratch/module.edn" 2>"$scratch/facts.err"
+        "$ROOT/bin/beagle" facts-roundtrip --render "$scratch/module.edn" \
+            >"$scratch/rendered.bclj" 2>"$scratch/render.err"
+        if "$ROOT/bin/beagle" check "$scratch/invalid.bclj" \
+            >"$scratch/invalid.out" 2>"$scratch/invalid.err"; then
+            echo "hosted selfhost normal: invalid source unexpectedly passed" >&2
+            exit 1
+        fi
+    '
 
 passes=0
 check() {
@@ -56,42 +82,23 @@ check() {
     fi
 }
 
-BEAGLE_SELFHOST_DEV=0 "$fake/bin/beagle-dev" build "$known"
-check "flag off delegates to the Racket dispatcher" \
-    grep -Fq "build $known" "$FAKE_LEGACY_LOG"
-check "flag off never invokes native stage0" test ! -e "$FAKE_NATIVE_LOG"
+check "Clojure build used native output" test -s "$scratch/out.clj"
+check "JavaScript build used native output" test -s "$scratch/out.js"
+check "Nix build used native output" test -s "$scratch/out.nix"
+check "plain hosted check completed" grep -Fxq "ok" "$scratch/check.err"
+check "plain hosted AST is checked-program v4" \
+    grep -Fq '"kind":"beagle.checked-program"' "$scratch/ast.json"
+check "facts projection completed" test -s "$scratch/module.edn"
+check "facts render completed" test -s "$scratch/rendered.bclj"
+check "native diagnostic was final" grep -Fq 'beagle [check]:' "$scratch/invalid.err"
+check "exact realized Graal artifact executed" \
+    grep -Fq "execve(\"$native\"" "$trace"
+check "no Racket or Babashka descendant executed" \
+    test -z "$(grep -E 'execve\("([^"]*/)?(racket|raco|bb|babashka)"' "$trace" || true)"
 
-out="$scratch/work/native.clj"
-FAKE_NATIVE_TEXT="daily output" \
-BEAGLE_SELFHOST_DEV=1 BEAGLE_SELFHOST_SHADOW_PERCENT=0 \
-    "$fake/bin/beagle-dev" build "$known" "$out"
-check "flag on dispatches a hosted build to native stage0" \
-    grep -Fq "emit --target clj" "$FAKE_NATIVE_LOG"
-check "native stage0 output is the development artifact" \
-    grep -Fxq "daily output" "$out"
-check "zero-percent shadow does not invoke Racket" test ! -e "$FAKE_RACKET_LOG"
+native_execs="$(grep -Fc "execve(\"$native\"" "$trace")"
+check "all eight hosted decisions selected the Graal artifact" \
+    test "$native_execs" -eq 8
 
-FAKE_NATIVE_TEXT="same output" FAKE_RACKET_TEXT="same output" \
-BEAGLE_SELFHOST_DEV=1 BEAGLE_SELFHOST_SHADOW_PERCENT=100 \
-    "$fake/bin/beagle-dev" build "$known" "$out"
-check "sampled matching compile invokes the Racket oracle" \
-    test -s "$FAKE_RACKET_LOG"
-check "matching canonical outputs create no divergence" \
-    test -z "$(find "$scratch/inbox" -mindepth 1 -maxdepth 1 -type d -print -quit)"
-
-FAKE_NATIVE_TEXT="native divergence" FAKE_RACKET_TEXT="racket divergence" \
-BEAGLE_SELFHOST_DEV=1 BEAGLE_SELFHOST_SHADOW_PERCENT=100 \
-    "$fake/bin/beagle-dev" build "$known" "$out"
-entry="$(find "$scratch/inbox" -mindepth 1 -maxdepth 1 -type d -print -quit)"
-check "known-input divergence appends one inbox candidate" test -n "$entry"
-check "candidate retains the known input" cmp -s "$known" "$entry/input.source"
-check "candidate retains native canonical output" \
-    grep -Fxq "native divergence" "$entry/selfhost.output"
-check "candidate retains Racket canonical output" \
-    grep -Fxq "racket divergence" "$entry/racket.output"
-check "candidate records the input hash and both output digests" \
-    test "$(grep -c -- '-sha256 ' "$entry/manifest.txt")" -eq 3
-check "shadow observation never replaces the native development artifact" \
-    grep -Fxq "native divergence" "$out"
-
-printf 'selfhost daily wrapper: %d passed, 0 failed\n' "$passes"
+printf 'hosted selfhost normal: %d passed, 0 failed; native=%s seed=%s\n' \
+    "$passes" "$native" "$expected_hash"

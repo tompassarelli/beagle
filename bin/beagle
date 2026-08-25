@@ -5,13 +5,6 @@ BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 STORE_DIR="${BEAGLE_STORE_HOME:-$BEAGLE_DIR/store}"
 
-# Pin racket for the whole dispatch tree (incl. bare-shebang racket scripts like
-# beagle-syntax) so `beagle <cmd>` is robust outside the direnv shell.
-if [[ "${1:-}" == "ast-bundle" ]]; then
-    export BEAGLE_ZO_GATE_QUIET=1
-fi
-source "$BIN/_beagle-racket"
-
 # Generated target projection of beagle-lib/private/targets.rkt (the canonical
 # table). Regenerate with `bin/beagle doc-fill`; drift fails the test suite.
 # Guarded: a partial copy of bin/ (the checkout-first gate builds one) must
@@ -23,6 +16,30 @@ else
     BEAGLE_TARGET_NAMES="<share/targets.sh missing — run: beagle doc-fill>"
     BEAGLE_TARGET_COUNT="?"
 fi
+
+# The self-hosted Graal artifact is the normal compiler for every public hosted
+# surface it implements. This selection runs before Racket setup, and a native
+# diagnostic is final: there is no failure-driven Racket or Babashka fallback.
+if [[ -f "$BIN/_beagle-hosted-dispatch" &&
+      -f "$BEAGLE_DIR/share/targets.sh" ]]; then
+    source "$BIN/_beagle-hosted-dispatch"
+    if beagle_try_hosted_dispatch "$@"; then
+        exit 0
+    else
+        _hosted_status=$?
+        if [[ $_hosted_status -ne $BEAGLE_HOSTED_NOT_APPLICABLE ]]; then
+            exit "$_hosted_status"
+        fi
+        unset _hosted_status
+    fi
+fi
+
+# Racket remains the explicit oracle/recovery implementation for surfaces the
+# self-host does not implement and for direct bin/beagle-* oracle commands.
+if [[ "${1:-}" == "ast-bundle" ]]; then
+    export BEAGLE_ZO_GATE_QUIET=1
+fi
+source "$BIN/_beagle-racket"
 
 usage() {
     cat >&2 <<EOF
@@ -40,9 +57,8 @@ Author:
                             Emit an explicit hosted target
   build --shadow-facts PATH <file-or-dir> ...
                             Emit the shadow-only canonical fact graph
-  build [--profile N] [--module-root LOGICAL=PHYSICAL]...
-        <file-or-dir>... [--out DIR]
-                            Emit hosted source-profile targets with a closed module graph
+  build [--module-root LOGICAL=PHYSICAL]... PATH [OUT]
+                            Emit a hosted source-profile target with a closed module graph
   build --materializer M... [--module-root LOGICAL=PHYSICAL]...
         --out DIR [--entry NS/NAME]... PATH.bgl...
                             Freeze Core once, then project each selected materializer
@@ -327,8 +343,8 @@ case "$cmd" in
     langs)           exec "$BIN/beagle-langs" "$@" ;;
     doc-fill)        exec "$BIN/beagle-doc-fill" "$@" ;;
     facts-roundtrip)
-        exec bb -cp "$BEAGLE_DIR/self-host/seed" \
-            -m selfhost.main facts-roundtrip "$@"
+        echo "beagle: native hosted dispatcher is unavailable for facts-roundtrip" >&2
+        exit 2
         ;;
     daemon)          exec "$BIN/beagle-daemon" "$@" ;;
     promote)         exec "$BIN/beagle-promote" "$@" ;;

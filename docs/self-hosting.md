@@ -29,42 +29,41 @@ with a shrunk repro attached.
 The canonical self-hosted compiler ships as a self-contained GraalVM
 native-image (`self-host/native/beagle-selfhost`), built reproducibly with `nix
 build .#beagle-selfhost`. Running the seed under babashka (`bb -cp
-self-host/seed …`) is a dev convenience and the substrate for the remint fixpoint
-loop — the two are held byte-identical, so the native binary is the distribution
-artifact; Babashka remains a build-time bootstrap boundary only.
+self-host/seed …`) is the substrate for the remint fixpoint loop — the two are
+held byte-identical, so the native binary is the distribution artifact;
+Babashka remains a remint/bootstrap boundary only.
 
 The parity harness (`self-host/verify-selfhost.sh`) prefers a checkout-local
 native binary only when its `.seed-nar-hash` sidecar matches the exact seed; a
 missing or stale sidecar fails visibly. Override the path deliberately with
 `BEAGLE_NATIVE_BIN`; an empty or unavailable native path fails.
 
-## Opt-in development route
+## Normal hosted route
 
-`bin/beagle-dev` makes native stage0 the compiler for single-file hosted
-development builds while leaving the public, release, and gate routes alone:
+`bin/beagle` selects native stage0 before any Racket setup for the public
+self-host surfaces: single-source `build`, plain single-source `check`, plain
+single-source `ast`, and `facts-roundtrip`. All three hosted targets (`clj`,
+`js`, and `nix`) use the same Graal artifact:
 
 ```sh
 nix build .#beagle-selfhost
 export BEAGLE_NATIVE_BIN="$PWD/result/bin/beagle-selfhost"
-export BEAGLE_SELFHOST_DEV=1
-bin/beagle-dev build example.bclj
+bin/beagle build example.bclj
 ```
 
-Set `BEAGLE_SELFHOST_SHADOW_PERCENT` to an integer from 0 through 100 to run a
-deterministic sample of those inputs through the pinned-Racket compiler too.
-Byte or exit-status differences append a candidate directory containing the
-input, both outputs, both digests, stderr, and the input digest under
-`docs/private/selfhost-divergences/`. Override that ignored inbox with
-`BEAGLE_SELFHOST_DIVERGENCE_DIR`.
+The selected binary must be the exact realized `.#beagle-selfhost` artifact;
+missing or mismatched store paths fail before compilation. A checkout-local
+ad-hoc binary retains the existing matching `.seed-nar-hash` requirement.
+Native diagnostics and nonzero exits are final and never trigger Racket or
+Babashka. The packaged `beagle` launcher binds `BEAGLE_NATIVE_BIN` to the exact
+`packages.beagle-selfhost` store artifact from the same flake evaluation.
 
-The one-line revert is:
-
-```sh
-unset BEAGLE_SELFHOST_DEV
-```
-
-With the flag absent, and for batch, Core, materializer, query, release, and
-gate commands, the wrapper delegates to the unchanged public Racket route.
+The self-host does not yet implement syntax-only validation, batch output,
+checked bundles, interface-digest output, project sessions, or Native Core
+materialization. Those surfaces are deliberately outside this cutover. Direct
+`bin/beagle-build`, `bin/beagle-build-all`, `bin/beagle-check`,
+`bin/beagle-check-all`, and `bin/beagle-ast` invocations remain explicit pinned-
+Racket oracle/recovery routes.
 
 ## What this does and does not claim
 
